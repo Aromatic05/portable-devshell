@@ -1,6 +1,7 @@
 export interface CommandResult {
-    exitCode: number;
+    exitCode: number | null;
     signal?: string;
     stderr: string;
     stdout: string;
+    timedOut?: boolean;
 }
