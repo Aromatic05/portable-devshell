@@ -1,9 +1,9 @@
 import type {
     ConnectionState,
     DaemonState,
+    InstanceName,
     InstanceSnapshot as SharedInstanceSnapshot
-} from "../../../../shared/dist/dto/InstanceSnapshot.js";
-import type { InstanceName } from "../../../../shared/dist/types/InstanceName.js";
+} from "@portable-devshell/shared";
 
 import { deriveRuntimeStatus, isReadyState } from "./InstanceRuntimeState.js";
 

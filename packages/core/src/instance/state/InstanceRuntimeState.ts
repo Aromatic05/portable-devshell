@@ -1,8 +1,4 @@
-import type {
-    ConnectionState,
-    DaemonState,
-    RuntimeStatus
-} from "../../../../shared/dist/dto/InstanceSnapshot.js";
+import type { ConnectionState, DaemonState, RuntimeStatus } from "@portable-devshell/shared";
 
 export interface InstanceRuntimeState {
     connectionState: ConnectionState;

@@ -1,6 +1,4 @@
-import { FrameReader } from "../../../../shared/dist/protocol/FrameReader.js";
-import { FrameWriter } from "../../../../shared/dist/protocol/FrameWriter.js";
-import type { JsonValue } from "../../../../shared/dist/types/JsonValue.js";
+import { FrameReader, FrameWriter, type JsonValue } from "@portable-devshell/shared";
 
 import type { WorkerCommandTransport } from "../../provider/command/WorkerCommandTransport.js";
 import type { WorkerRpcOptions } from "../../provider/command/WorkerCommandOptions.js";

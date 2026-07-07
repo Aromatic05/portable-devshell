@@ -1,7 +1,7 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
 
-import type { InstanceName } from "../../../../shared/dist/types/InstanceName.js";
+import type { InstanceName } from "@portable-devshell/shared";
 
 export class InstancePaths {
     readonly instanceRootDir: string;

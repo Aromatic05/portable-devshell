@@ -13,6 +13,8 @@ export * from "./errors/ErrorCodes.js";
 export * from "./protocol/ControlEnvelope.js";
 export * from "./protocol/ControlMethods.js";
 export * from "./protocol/ControlTarget.js";
+export * from "./protocol/FrameReader.js";
+export * from "./protocol/FrameWriter.js";
 export * from "./protocol/StreamTypes.js";
 export * from "./schemas/configSchema.js";
 export * from "./schemas/envelopeSchema.js";
