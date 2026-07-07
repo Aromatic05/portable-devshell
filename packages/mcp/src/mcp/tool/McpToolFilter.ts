@@ -4,14 +4,16 @@ interface ToolDefinition {
 
 export class McpToolFilter {
     readonly #allowlist: ReadonlySet<string>;
+    readonly #allowlistEnabled: boolean;
 
     constructor(allowlist: readonly string[]) {
         this.#allowlist = new Set(allowlist);
+        this.#allowlistEnabled = allowlist.length > 0;
     }
 
     filter(tools: readonly ToolDefinition[]): ToolDefinition[] {
-        if (this.#allowlist.size === 0) {
-            return [...tools];
+        if (!this.#allowlistEnabled) {
+            return [];
         }
 
         return tools.filter((tool) => this.#allowlist.has(tool.name));
