@@ -1,0 +1,3 @@
+[workspace]
+members = ["crates/devshell-worker"]
+resolver = "2"

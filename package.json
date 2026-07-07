@@ -1,0 +1,29 @@
+{
+    "name": "portable-devshell",
+    "version": "0.2.0",
+    "private": true,
+    "packageManager": "pnpm@10.13.1",
+    "workspaces": [
+        "packages/*"
+    ],
+    "scripts": {
+        "build": "cargo build --workspace && node scripts/build-worker.mjs --copy-only && tsc -b --force",
+        "build:worker": "node scripts/build-worker.mjs",
+        "dev": "node scripts/dev.mjs",
+        "demo:shell": "node scripts/demo-shell.mjs",
+        "format": "prettier --write . && cargo fmt --all",
+        "format:check": "prettier --check . && cargo fmt --all -- --check",
+        "lint": "eslint . && cargo clippy --workspace --all-targets -- -D warnings",
+        "lint:fix": "eslint . --fix",
+        "test": "cargo test --workspace && pnpm --filter @portable-devshell/core test && pnpm --filter @portable-devshell/control test && pnpm --filter @portable-devshell/mcp test && pnpm --filter @portable-devshell/cli test && pnpm --filter @portable-devshell/tui test",
+        "test:e2e": "node tests/e2e/mcp.e2e.test.mjs",
+        "typecheck": "pnpm --filter @portable-devshell/core typecheck && pnpm --filter @portable-devshell/control typecheck && pnpm --filter @portable-devshell/mcp typecheck && pnpm --filter @portable-devshell/cli typecheck && pnpm --filter @portable-devshell/tui typecheck"
+    },
+    "devDependencies": {
+        "@eslint/js": "^9.31.0",
+        "eslint": "^9.31.0",
+        "globals": "^16.3.0",
+        "prettier": "^3.6.2",
+        "typescript-eslint": "^8.37.0"
+    }
+}

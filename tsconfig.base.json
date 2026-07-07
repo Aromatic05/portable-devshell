@@ -1,0 +1,19 @@
+{
+    "compilerOptions": {
+        "target": "ES2022",
+        "module": "NodeNext",
+        "moduleResolution": "NodeNext",
+        "baseUrl": ".",
+        "paths": {
+            "@portable-devshell/core": ["./packages/core/src/index.ts"],
+            "@portable-devshell/control": ["./packages/control/src/index.ts"],
+            "@portable-devshell/mcp": ["./packages/mcp/src/index.ts"],
+            "@portable-devshell/tui": ["./packages/tui/src/index.ts"]
+        },
+        "strict": true,
+        "declaration": true,
+        "esModuleInterop": true,
+        "forceConsistentCasingInFileNames": true,
+        "skipLibCheck": true
+    }
+}
