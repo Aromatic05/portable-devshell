@@ -14,9 +14,14 @@
     "files": [
         "dist"
     ],
+    "dependencies": {
+        "@portable-devshell/core": "workspace:*",
+        "@portable-devshell/mcp": "workspace:*",
+        "@portable-devshell/shared": "workspace:*"
+    },
     "scripts": {
-        "build": "tsc -b",
+        "build": "tsc -b --force",
         "typecheck": "tsc --noEmit -p tsconfig.json",
-        "test": "node --test"
+        "test": "tsc -b --force && node --import ../mcp/test/RegisterWorkspacePackages.mjs --test test/unit/*.test.ts"
     }
 }
