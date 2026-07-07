@@ -1,0 +1,11 @@
+[
+    { "argv": [], "expected": { "kind": "control.status" } },
+    { "argv": ["start"], "expected": { "kind": "control.start" } },
+    { "argv": ["instance", "list"], "expected": { "kind": "instance.list" } },
+    { "argv": ["instance", "status", "demo-local"], "expected": { "instance": "demo-local", "kind": "instance.status" } },
+    { "argv": ["instance", "logs", "demo-local", "-f"], "expected": { "follow": true, "instance": "demo-local", "kind": "instance.logs" } },
+    {
+        "argv": ["instance", "call", "demo-local", "bash_run", "{\"command\":\"pwd\"}"],
+        "expected": { "input": { "command": "pwd" }, "instance": "demo-local", "kind": "instance.call", "toolName": "bash_run" }
+    }
+]
