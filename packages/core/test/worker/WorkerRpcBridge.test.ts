@@ -10,14 +10,14 @@ import { fileURLToPath } from "node:url";
 import { FrameReader } from "../../../shared/dist/protocol/FrameReader.js";
 import { FrameWriter } from "../../../shared/dist/protocol/FrameWriter.js";
 
-import { WorkerBinary } from "../provider/command/WorkerBinary.js";
-import type { WorkerCommandResult, WorkerCommandTransport } from "../provider/command/WorkerCommandTransport.js";
-import { LocalWorkerTransport } from "../provider/transports/LocalWorkerTransport.js";
-import { workerRpcDisconnectedErrorCode, WorkerRpcError } from "../protocol/WorkerRpcError.js";
-import type { WorkerRpcResponseEnvelope } from "../protocol/WorkerRpcEnvelope.js";
-import { WorkerProtocolClient } from "./WorkerProtocolClient.js";
-import { WorkerRpcBridge } from "./WorkerRpcBridge.js";
-import { WorkerRpcClient } from "./WorkerRpcClient.js";
+import { WorkerBinary } from "../../dist/provider/command/WorkerBinary.js";
+import type { WorkerCommandResult, WorkerCommandTransport } from "../../dist/provider/command/WorkerCommandTransport.js";
+import { LocalWorkerTransport } from "../../dist/provider/transports/LocalWorkerTransport.js";
+import { workerRpcDisconnectedErrorCode, WorkerRpcError } from "../../dist/protocol/worker-rpc/WorkerRpcError.js";
+import type { WorkerRpcResponseEnvelope } from "../../dist/protocol/worker-rpc/WorkerRpcEnvelope.js";
+import { WorkerProtocolClient } from "../../dist/worker/protocol/WorkerProtocolClient.js";
+import { WorkerRpcBridge } from "../../dist/worker/rpc/WorkerRpcBridge.js";
+import { WorkerRpcClient } from "../../dist/worker/rpc/WorkerRpcClient.js";
 
 test("WorkerRpcBridge reuses one spawned rpc process across multiple calls", async () => {
     const harness = createRpcHarness();
