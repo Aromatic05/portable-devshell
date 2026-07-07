@@ -1,7 +1,4 @@
-import { errorCodes } from "../../../../shared/dist/errors/ErrorCodes.js";
-import type { CommandResult } from "../../../../shared/dist/dto/CommandResult.js";
-import type { ToolCallRecord } from "../../../../shared/dist/dto/ToolCallRecord.js";
-import type { InstanceName } from "../../../../shared/dist/types/InstanceName.js";
+import { errorCodes, type CommandResult, type InstanceName, type ToolCallRecord } from "@portable-devshell/shared";
 
 import { JsonlStore } from "./JsonlStore.js";
 import type { LogQuery } from "../query/LogQuery.js";

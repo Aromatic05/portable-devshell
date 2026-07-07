@@ -1,7 +1,4 @@
-import { errorCodes } from "../../../../shared/dist/errors/ErrorCodes.js";
-import type { InstanceEvent } from "../../../../shared/dist/dto/InstanceEvent.js";
-import type { InstanceName } from "../../../../shared/dist/types/InstanceName.js";
-import type { JsonValue } from "../../../../shared/dist/types/JsonValue.js";
+import { errorCodes, type InstanceEvent, type InstanceName, type JsonValue } from "@portable-devshell/shared";
 
 import { JsonlStore } from "../store/JsonlStore.js";
 

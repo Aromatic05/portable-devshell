@@ -1,4 +1,4 @@
-import type { InstanceName } from "../../../../shared/dist/types/InstanceName.js";
+import type { InstanceName } from "@portable-devshell/shared";
 
 import type { LogQuery } from "../query/LogQuery.js";
 import { JsonlStore } from "./JsonlStore.js";

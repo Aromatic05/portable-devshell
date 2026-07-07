@@ -1,8 +1,4 @@
-import type {
-    ConnectionState,
-    DaemonState
-} from "../../../../shared/dist/dto/InstanceSnapshot.js";
-import type { InstanceName } from "../../../../shared/dist/types/InstanceName.js";
+import type { ConnectionState, DaemonState, InstanceName } from "@portable-devshell/shared";
 
 import { createInstanceSnapshot, type InstanceSnapshot } from "./InstanceSnapshot.js";
 import { type InstanceRuntimeState, deriveRuntimeStatus, isReadyState } from "./InstanceRuntimeState.js";
@@ -34,13 +30,17 @@ export class InstanceStateMachine {
         const daemonState = update.daemonState ?? this.#state.daemonState;
         const connectionState = update.connectionState ?? this.#state.connectionState;
         const lastSeq = update.lastSeq ?? this.#state.lastSeq;
+        const pid = Object.prototype.hasOwnProperty.call(update, "pid") ? update.pid : this.#state.pid;
+        const lastErrorCode = Object.prototype.hasOwnProperty.call(update, "lastErrorCode")
+            ? update.lastErrorCode
+            : this.#state.lastErrorCode;
 
         this.#state = {
             connectionState,
             daemonState,
-            lastErrorCode: update.lastErrorCode ?? this.#state.lastErrorCode,
+            lastErrorCode,
             lastSeq,
-            pid: update.pid ?? this.#state.pid,
+            pid,
             ready: isReadyState(daemonState, connectionState),
             status: deriveRuntimeStatus(daemonState, connectionState)
         };
