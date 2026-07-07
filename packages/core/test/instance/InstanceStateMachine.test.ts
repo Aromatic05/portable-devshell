@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { asInstanceName } from "../../../shared/dist/types/InstanceName.js";
+import { asInstanceName } from "@portable-devshell/shared";
 
 import { InstancePaths } from "../../dist/instance/paths/InstancePaths.js";
 import { InstanceStateMachine } from "../../dist/instance/state/InstanceStateMachine.js";

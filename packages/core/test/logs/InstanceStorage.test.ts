@@ -4,9 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import type { InstanceEvent } from "../../../shared/dist/dto/InstanceEvent.js";
-import { errorCodes } from "../../../shared/dist/errors/ErrorCodes.js";
-import { asInstanceName } from "../../../shared/dist/types/InstanceName.js";
+import { errorCodes, asInstanceName, type InstanceEvent } from "@portable-devshell/shared";
 
 import { InstancePaths } from "../../dist/instance/paths/InstancePaths.js";
 import { InstanceEventBuffer } from "../../dist/logs/buffer/InstanceEventBuffer.js";

@@ -7,8 +7,7 @@ import { PassThrough } from "node:stream";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { FrameReader } from "../../../shared/dist/protocol/FrameReader.js";
-import { FrameWriter } from "../../../shared/dist/protocol/FrameWriter.js";
+import { FrameReader, FrameWriter } from "@portable-devshell/shared";
 
 import { WorkerBinary } from "../../dist/provider/command/WorkerBinary.js";
 import type { WorkerCommandResult, WorkerCommandTransport } from "../../dist/provider/command/WorkerCommandTransport.js";
@@ -172,7 +171,7 @@ function createRpcHarness(options?: { slowMethods?: Set<string> }): {
                 continue;
             }
 
-            void writer.write(createResponse(frame.method, frame.id) as unknown as import("../../../shared/dist/types/JsonValue.js").JsonValue);
+            void writer.write(createResponse(frame.method, frame.id) as unknown as import("@portable-devshell/shared").JsonValue);
         }
     });
 
