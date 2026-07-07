@@ -1,0 +1,22 @@
+version = 1
+
+[control]
+logLevel = "info"
+
+[mcp]
+enabled = true
+listenHost = "0.0.0.0"
+listenPort = 17890
+publicBaseUrl = "https://devshell.example.com"
+
+[mcp.auth]
+mode = "none"
+
+[[instances]]
+name = "demo-local"
+enabled = true
+provider = "local"
+
+[instances.mcp]
+enabled = true
+allowTools = ["bash_run"]

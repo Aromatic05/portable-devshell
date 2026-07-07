@@ -1,0 +1,30 @@
+version = 1
+
+[control]
+logLevel = "info"
+
+[mcp]
+enabled = true
+listenHost = "127.0.0.1"
+listenPort = 17890
+publicBaseUrl = "http://127.0.0.1:17890"
+
+[mcp.auth]
+mode = "token"
+
+[[instances]]
+name = "demo-local"
+enabled = true
+provider = "local"
+defaultWorkspace = "/tmp/demo"
+workerBinaryPath = "/usr/local/bin/devshell-worker"
+
+[instances.env]
+DEMO = "1"
+
+[instances.mcp]
+enabled = true
+allowTools = ["bash_run"]
+
+[instances.logs]
+eventBufferSize = 50

@@ -1,0 +1,13 @@
+version = 1
+
+[control]
+logLevel = "info"
+
+[mcp]
+enabled = true
+listenHost = "127.0.0.1"
+listenPort = "bad"
+publicBaseUrl = "http://127.0.0.1:17890"
+
+[mcp.auth]
+mode = "token"
