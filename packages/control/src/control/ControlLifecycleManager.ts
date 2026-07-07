@@ -139,6 +139,27 @@ class SocketControlLifecycleRpcClient implements ControlLifecycleRpcClient {
         const socket = createConnection(this.#socketPath);
         const reader = new FrameReader();
         const writer = new FrameWriter(socket);
+        let settled = false;
+
+        const resolveOnce = (resolve: (value: JsonValue) => void, value: JsonValue): void => {
+            if (settled) {
+                return;
+            }
+
+            settled = true;
+            socket.end();
+            resolve(value);
+        };
+
+        const rejectOnce = (reject: (reason?: unknown) => void, error: unknown): void => {
+            if (settled) {
+                return;
+            }
+
+            settled = true;
+            socket.destroy();
+            reject(error);
+        };
 
         await new Promise<void>((resolve, reject) => {
             socket.once("connect", resolve);
@@ -152,10 +173,9 @@ class SocketControlLifecycleRpcClient implements ControlLifecycleRpcClient {
                         continue;
                     }
 
-                    socket.destroy();
-
                     if (frame.ok !== true) {
-                        reject(
+                        rejectOnce(
+                            reject,
                             new Error(
                                 isJsonRecord(frame.error) && typeof frame.error.message === "string"
                                     ? frame.error.message
@@ -165,22 +185,36 @@ class SocketControlLifecycleRpcClient implements ControlLifecycleRpcClient {
                         return;
                     }
 
-                    resolve((frame.result ?? null) as JsonValue);
+                    resolveOnce(resolve, (frame.result ?? null) as JsonValue);
                 }
             });
-            socket.once("error", reject);
+            socket.once("error", (error) => {
+                rejectOnce(reject, error);
+            });
         });
 
-        await writer.write({
-            id: `${method}-${Date.now()}`,
-            issuedAt: new Date().toISOString(),
-            method,
-            params,
-            target: { kind: "control" },
-            type: "request"
-        } as unknown as JsonValue);
+        try {
+            await writer.write({
+                id: `${method}-${Date.now()}`,
+                issuedAt: new Date().toISOString(),
+                method,
+                params,
+                target: { kind: "control" },
+                type: "request"
+            } as unknown as JsonValue);
+        } catch (error) {
+            rejectOnce(
+                () => undefined,
+                error
+            );
+            throw error;
+        }
 
-        return await response;
+        try {
+            return await response;
+        } finally {
+            socket.destroy();
+        }
     }
 }
 
