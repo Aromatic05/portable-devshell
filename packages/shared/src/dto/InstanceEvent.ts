@@ -11,5 +11,6 @@ export interface InstanceEvent {
     at: string;
     data?: JsonValue;
     instanceName: InstanceName;
+    seq: number;
     type: InstanceEventType;
 }
