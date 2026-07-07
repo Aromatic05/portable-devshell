@@ -5,13 +5,16 @@
         "moduleResolution": "NodeNext",
         "baseUrl": ".",
         "paths": {
+            "@portable-devshell/shared": ["./packages/shared/src/index.ts"],
             "@portable-devshell/core": ["./packages/core/src/index.ts"],
             "@portable-devshell/control": ["./packages/control/src/index.ts"],
             "@portable-devshell/mcp": ["./packages/mcp/src/index.ts"],
-            "@portable-devshell/tui": ["./packages/tui/src/index.ts"]
+            "@portable-devshell/cli": ["./packages/cli/src/index.ts"]
         },
         "strict": true,
         "declaration": true,
+        "declarationMap": true,
+        "composite": true,
         "esModuleInterop": true,
         "forceConsistentCasingInFileNames": true,
         "skipLibCheck": true
