@@ -3,10 +3,10 @@ import type {
     ControlEventEnvelope,
     ControlRequestEnvelope,
     ControlResponseEnvelope
-} from "../protocol/ControlEnvelope.js";
-import type { ControlMethod } from "../protocol/ControlMethods.js";
-import type { ControlTarget } from "../protocol/ControlTarget.js";
-import { asInstanceName } from "../types/InstanceName.js";
+} from "../protocol/envelope/ProtocolEnvelopeControl.js";
+import type { ControlMethod } from "../protocol/method/ProtocolMethodControl.js";
+import type { ControlTarget } from "../protocol/envelope/ProtocolEnvelopeTarget.js";
+import { asInstanceName } from "../type/identity/TypeIdentityInstanceName.js";
 
 type ParseSuccess<T> = {
     data: T;

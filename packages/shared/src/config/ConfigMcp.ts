@@ -1,4 +1,4 @@
-import type { AuthConfig } from "./AuthConfig.js";
+import type { AuthConfig } from "./ConfigAuth.js";
 
 export interface McpConfig {
     enabled: boolean;

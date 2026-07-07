@@ -1,7 +1,7 @@
-import type { ErrorCode } from "../errors/ErrorCodes.js";
-import { createError } from "../errors/createError.js";
-import type { JsonValue } from "../types/JsonValue.js";
-import { FRAME_HEADER_SIZE, MAX_FRAME_SIZE } from "./ProtocolLimits.js";
+import type { ErrorCode } from "../../error/ErrorCodeCatalog.js";
+import { createError } from "../../error/ErrorFactoryCreate.js";
+import type { JsonValue } from "../../type/TypeJsonValue.js";
+import { FRAME_HEADER_SIZE, MAX_FRAME_SIZE } from "./ProtocolFrameLimits.js";
 
 const protocolErrorCodes = {
     frameTooLarge: "protocol.frameTooLarge",

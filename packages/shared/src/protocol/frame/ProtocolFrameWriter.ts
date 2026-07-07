@@ -1,7 +1,7 @@
 import type { Writable } from "node:stream";
 
-import type { JsonValue } from "../types/JsonValue.js";
-import { FrameCodec } from "./FrameCodec.js";
+import type { JsonValue } from "../../type/TypeJsonValue.js";
+import { FrameCodec } from "./ProtocolFrameCodec.js";
 
 export class FrameWriter {
     readonly #writable: Writable;

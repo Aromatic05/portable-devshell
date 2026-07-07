@@ -1,5 +1,5 @@
-import type { ToolDefinition } from "../dto/ToolDefinition.js";
-import type { JsonValue } from "../types/JsonValue.js";
+import type { ToolDefinition } from "../dto/tool/DtoToolDefinition.js";
+import type { JsonValue } from "../type/TypeJsonValue.js";
 
 type ParseSuccess<T> = {
     data: T;

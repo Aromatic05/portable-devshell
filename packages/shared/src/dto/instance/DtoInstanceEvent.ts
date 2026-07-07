@@ -1,5 +1,5 @@
-import type { JsonValue } from "../types/JsonValue.js";
-import type { InstanceName } from "../types/InstanceName.js";
+import type { JsonValue } from "../../type/TypeJsonValue.js";
+import type { InstanceName } from "../../type/identity/TypeIdentityInstanceName.js";
 
 export type InstanceEventType =
     | "instance.started"

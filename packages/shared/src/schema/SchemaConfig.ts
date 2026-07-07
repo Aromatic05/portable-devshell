@@ -1,9 +1,9 @@
-import type { AuthConfig } from "../dto/AuthConfig.js";
-import type { ControllerConfig } from "../dto/ControllerConfig.js";
-import type { InstanceConfig } from "../dto/InstanceConfig.js";
-import type { McpConfig } from "../dto/McpConfig.js";
-import { asInstanceName } from "../types/InstanceName.js";
-import { asWorkspacePath } from "../types/WorkspacePath.js";
+import type { AuthConfig } from "../config/ConfigAuth.js";
+import type { ControllerConfig } from "../config/ConfigController.js";
+import type { InstanceConfig } from "../config/ConfigInstance.js";
+import type { McpConfig } from "../config/ConfigMcp.js";
+import { asInstanceName } from "../type/identity/TypeIdentityInstanceName.js";
+import { asWorkspacePath } from "../type/identity/TypeIdentityWorkspacePath.js";
 
 type ParseSuccess<T> = {
     data: T;

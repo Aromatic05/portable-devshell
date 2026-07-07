@@ -1,23 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-const isDistTest = import.meta.url.includes("/dist/");
-const moduleBaseUrl = isDistTest
-    ? new URL("./", import.meta.url)
-    : new URL("../../dist/protocol/", import.meta.url);
-const errorBaseUrl = isDistTest
-    ? new URL("../errors/", import.meta.url)
-    : new URL("../../dist/errors/", import.meta.url);
-
-const { ControlError } = await import(
-    new URL("ControlError.js", errorBaseUrl).href
-);
-const { FrameCodec } = await import(
-    new URL("FrameCodec.js", moduleBaseUrl).href
-);
-const { MAX_FRAME_SIZE } = await import(
-    new URL("ProtocolLimits.js", moduleBaseUrl).href
-);
+const { ControlError, FrameCodec, MAX_FRAME_SIZE } = await import("@portable-devshell/shared");
 
 function readErrorCode(error: unknown): string | undefined {
     if (typeof error !== "object" || error === null || !("code" in error)) {

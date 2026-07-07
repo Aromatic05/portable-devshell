@@ -1,5 +1,5 @@
-import type { InstanceName } from "../types/InstanceName.js";
-import type { CommandResult } from "./CommandResult.js";
+import type { InstanceName } from "../../type/identity/TypeIdentityInstanceName.js";
+import type { CommandResult } from "../DtoCommandResult.js";
 
 export type ToolCallStatus = "started" | "completed" | "failed";
 

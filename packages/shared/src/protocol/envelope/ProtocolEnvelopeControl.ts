@@ -1,7 +1,7 @@
-import type { ControlErrorBody } from "../errors/ControlError.js";
-import type { JsonValue } from "../types/JsonValue.js";
-import type { ControlMethod } from "./ControlMethods.js";
-import type { ControlTarget } from "./ControlTarget.js";
+import type { ControlErrorBody } from "../../error/ErrorBodyControl.js";
+import type { JsonValue } from "../../type/TypeJsonValue.js";
+import type { ControlMethod } from "../method/ProtocolMethodControl.js";
+import type { ControlTarget } from "./ProtocolEnvelopeTarget.js";
 
 interface ControlEnvelopeBase {
     id: string;

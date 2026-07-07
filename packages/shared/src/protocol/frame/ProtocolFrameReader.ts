@@ -1,6 +1,6 @@
-import type { JsonValue } from "../types/JsonValue.js";
-import { FrameCodec } from "./FrameCodec.js";
-import { FRAME_HEADER_SIZE } from "./ProtocolLimits.js";
+import type { JsonValue } from "../../type/TypeJsonValue.js";
+import { FrameCodec } from "./ProtocolFrameCodec.js";
+import { FRAME_HEADER_SIZE } from "./ProtocolFrameLimits.js";
 
 export class FrameReader {
     #buffer: Uint8Array = Buffer.alloc(0);

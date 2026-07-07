@@ -1,5 +1,5 @@
-import type { JsonValue } from "../types/JsonValue.js";
-import type { ErrorCode } from "./ErrorCodes.js";
+import type { JsonValue } from "../type/TypeJsonValue.js";
+import type { ErrorCode } from "./ErrorCodeCatalog.js";
 
 export interface ControlErrorBody {
     code: ErrorCode;

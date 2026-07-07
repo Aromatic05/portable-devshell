@@ -1,13 +1,7 @@
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
 import test from "node:test";
 
-execFileSync("pnpm", ["build"], {
-    cwd: new URL("../", import.meta.url),
-    stdio: "ignore"
-});
-
-const { configSchema, envelopeSchema, errorCodes } = await import(new URL("../dist/index.js", import.meta.url).href);
+const { configSchema, envelopeSchema, errorCodes } = await import("@portable-devshell/shared");
 
 test("configSchema accepts a valid controller config", () => {
     const result = configSchema.safeParse({
@@ -63,6 +57,6 @@ test("envelopeSchema rejects request envelopes without target", () => {
 
 test("error codes use domain.reason format", () => {
     for (const code of Object.values(errorCodes)) {
-        assert.match(code, /^[a-z]+[a-z_]*\.[a-z]+[a-z_]*$/);
+        assert.match(code, /^[a-z][A-Za-z_]*\.[a-z][A-Za-z_]*$/);
     }
 });

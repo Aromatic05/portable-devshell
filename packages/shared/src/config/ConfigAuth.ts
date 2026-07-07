@@ -1,4 +1,4 @@
-import type { ProviderType } from "../types/ProviderType.js";
+import type { ProviderType } from "../type/TypeProviderKind.js";
 
 export interface AuthConfig {
     enabled: boolean;

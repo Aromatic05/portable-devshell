@@ -1,4 +1,4 @@
-import type { InstanceName } from "../types/InstanceName.js";
+import type { InstanceName } from "../../type/identity/TypeIdentityInstanceName.js";
 
 export type DaemonState = "running" | "starting" | "stopped" | "stopping";
 
