@@ -1,0 +1,25 @@
+{
+    "name": "@portable-devshell/cli",
+    "version": "0.0.0",
+    "private": true,
+    "type": "module",
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts",
+    "bin": {
+        "portable-devshell": "./dist/main.js"
+    },
+    "exports": {
+        ".": {
+            "types": "./dist/index.d.ts",
+            "default": "./dist/index.js"
+        }
+    },
+    "files": [
+        "dist"
+    ],
+    "scripts": {
+        "build": "tsc -b",
+        "typecheck": "tsc --noEmit -p tsconfig.json",
+        "test": "node --test"
+    }
+}
