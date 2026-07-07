@@ -1,10 +1,10 @@
 {
     "files": [],
     "references": [
+        { "path": "./packages/shared" },
         { "path": "./packages/core" },
         { "path": "./packages/control" },
         { "path": "./packages/mcp" },
-        { "path": "./packages/cli" },
-        { "path": "./packages/tui" }
+        { "path": "./packages/cli" }
     ]
 }
