@@ -1,11 +1,14 @@
-import { FrameReader } from "../../../shared/dist/protocol/FrameReader.js";
-import { FrameWriter } from "../../../shared/dist/protocol/FrameWriter.js";
-import type { JsonValue } from "../../../shared/dist/types/JsonValue.js";
+import { FrameReader } from "../../../../shared/dist/protocol/FrameReader.js";
+import { FrameWriter } from "../../../../shared/dist/protocol/FrameWriter.js";
+import type { JsonValue } from "../../../../shared/dist/types/JsonValue.js";
 
-import type { WorkerCommandTransport } from "../provider/command/WorkerCommandTransport.js";
-import type { WorkerRpcOptions } from "../provider/command/WorkerCommandOptions.js";
-import { WorkerRpcError } from "../protocol/WorkerRpcError.js";
-import type { WorkerRpcRequestEnvelope, WorkerRpcResponseEnvelope } from "../protocol/WorkerRpcEnvelope.js";
+import type { WorkerCommandTransport } from "../../provider/command/WorkerCommandTransport.js";
+import type { WorkerRpcOptions } from "../../provider/command/WorkerCommandOptions.js";
+import { WorkerRpcError } from "../../protocol/worker-rpc/WorkerRpcError.js";
+import type {
+    WorkerRpcRequestEnvelope,
+    WorkerRpcResponseEnvelope
+} from "../../protocol/worker-rpc/WorkerRpcEnvelope.js";
 import { WorkerRpcProcessAdapter } from "./WorkerRpcProcessAdapter.js";
 
 interface PendingResponse {

@@ -1,4 +1,4 @@
-import type { JsonValue } from "../../../shared/dist/types/JsonValue.js";
+import type { JsonValue } from "../../../../shared/dist/types/JsonValue.js";
 
 import type { WorkerRpcErrorBody } from "./WorkerRpcEnvelope.js";
 

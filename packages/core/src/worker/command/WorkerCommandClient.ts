@@ -1,4 +1,4 @@
-import type { WorkerCommandTransport, WorkerCommandResult } from "../provider/command/WorkerCommandTransport.js";
+import type { WorkerCommandTransport, WorkerCommandResult } from "../../provider/command/WorkerCommandTransport.js";
 
 export class WorkerCommandClient {
     readonly #transport: WorkerCommandTransport;

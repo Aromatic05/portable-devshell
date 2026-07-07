@@ -1,8 +1,8 @@
 import type { Readable, Writable } from "node:stream";
 
-import type { WorkerCommandTransport } from "../provider/command/WorkerCommandTransport.js";
-import type { WorkerRpcOptions } from "../provider/command/WorkerCommandOptions.js";
-import type { WorkerRpcProcess } from "../provider/process/WorkerProcess.js";
+import type { WorkerCommandTransport } from "../../provider/command/WorkerCommandTransport.js";
+import type { WorkerRpcOptions } from "../../provider/command/WorkerCommandOptions.js";
+import type { WorkerRpcProcess } from "../../provider/process/WorkerProcess.js";
 
 export class WorkerRpcProcessAdapter {
     readonly #process: WorkerRpcProcess;

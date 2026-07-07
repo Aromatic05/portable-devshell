@@ -1,7 +1,7 @@
-import type { JsonValue } from "../../../shared/dist/types/JsonValue.js";
+import type { JsonValue } from "../../../../shared/dist/types/JsonValue.js";
 
-import { WorkerRpcError } from "../protocol/WorkerRpcError.js";
-import type { WorkerRpcRequestEnvelope } from "../protocol/WorkerRpcEnvelope.js";
+import { WorkerRpcError } from "../../protocol/worker-rpc/WorkerRpcError.js";
+import type { WorkerRpcRequestEnvelope } from "../../protocol/worker-rpc/WorkerRpcEnvelope.js";
 import { WorkerRpcBridge } from "./WorkerRpcBridge.js";
 
 export class WorkerRpcClient {

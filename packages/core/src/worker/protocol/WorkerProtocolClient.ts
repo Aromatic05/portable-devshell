@@ -1,6 +1,6 @@
-import type { JsonValue } from "../../../shared/dist/types/JsonValue.js";
+import type { JsonValue } from "../../../../shared/dist/types/JsonValue.js";
 
-import { WorkerRpcClient } from "./WorkerRpcClient.js";
+import { WorkerRpcClient } from "../rpc/WorkerRpcClient.js";
 
 export interface WorkerHandshakeParams {
     minProtocolVersion: number;
