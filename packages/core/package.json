@@ -17,6 +17,6 @@
     "scripts": {
         "build": "tsc -b",
         "typecheck": "tsc --noEmit -p tsconfig.json",
-        "test": "node --test"
+        "test": "tsc -b && node --test test/WorkerTransports.test.ts"
     }
 }
