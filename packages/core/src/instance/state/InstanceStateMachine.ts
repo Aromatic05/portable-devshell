@@ -1,7 +1,7 @@
 import type { ConnectionState, DaemonState, InstanceName } from "@portable-devshell/shared";
 
-import { createInstanceSnapshot, type InstanceSnapshot } from "./InstanceSnapshot.js";
-import { type InstanceRuntimeState, deriveRuntimeStatus, isReadyState } from "./InstanceRuntimeState.js";
+import { createInstanceSnapshot, type InstanceSnapshot } from "./InstanceStateSnapshot.js";
+import { type InstanceRuntimeState, deriveRuntimeStatus, isReadyState } from "./InstanceStateRuntime.js";
 
 export interface InstanceStateUpdate {
     connectionState?: ConnectionState;

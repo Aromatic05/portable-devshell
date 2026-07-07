@@ -20,6 +20,6 @@
     "scripts": {
         "build": "tsc -b",
         "typecheck": "tsc --noEmit -p tsconfig.json",
-        "test": "tsc -b && node --test test/*.test.ts test/instance/*.test.ts test/instance/*/*.test.ts test/logs/*.test.ts test/worker/*.test.ts test/tools/*/*.test.ts"
+        "test": "tsc -b && node --import ./test/RegisterWorkspacePackages.mjs --test test/unit/*.test.ts test/integration/*.test.ts"
     }
 }

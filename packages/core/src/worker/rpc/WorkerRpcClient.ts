@@ -1,7 +1,7 @@
 import type { JsonValue } from "@portable-devshell/shared";
 
-import { WorkerRpcError } from "../../protocol/worker-rpc/WorkerRpcError.js";
-import type { WorkerRpcRequestEnvelope } from "../../protocol/worker-rpc/WorkerRpcEnvelope.js";
+import { WorkerRpcError } from "./WorkerRpcError.js";
+import type { WorkerRpcRequestEnvelope } from "./WorkerRpcEnvelope.js";
 import { WorkerRpcBridge } from "./WorkerRpcBridge.js";
 
 export class WorkerRpcClient {

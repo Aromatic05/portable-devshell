@@ -1,12 +1,12 @@
 import { FrameReader, FrameWriter, type JsonValue } from "@portable-devshell/shared";
 
-import type { WorkerCommandTransport } from "../../provider/command/WorkerCommandTransport.js";
-import type { WorkerRpcOptions } from "../../provider/command/WorkerCommandOptions.js";
-import { WorkerRpcError } from "../../protocol/worker-rpc/WorkerRpcError.js";
+import type { WorkerCommandTransport } from "../command/WorkerCommandTransport.js";
+import type { WorkerRpcOptions } from "../command/WorkerCommandOptions.js";
+import { WorkerRpcError } from "./WorkerRpcError.js";
 import type {
     WorkerRpcRequestEnvelope,
     WorkerRpcResponseEnvelope
-} from "../../protocol/worker-rpc/WorkerRpcEnvelope.js";
+} from "./WorkerRpcEnvelope.js";
 import { WorkerRpcProcessAdapter } from "./WorkerRpcProcessAdapter.js";
 
 interface PendingResponse {
