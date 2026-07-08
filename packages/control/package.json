@@ -22,6 +22,6 @@
     "scripts": {
         "build": "tsc -b --force",
         "typecheck": "tsc --noEmit -p tsconfig.json",
-        "test": "tsc -b --force && node --import ../mcp/test/RegisterWorkspacePackages.mjs --test test/unit/*.test.ts"
+        "test": "tsc -b --force && node --import ../mcp/test/RegisterWorkspacePackages.mjs --test test/unit/*.test.ts test/integration/*.test.ts"
     }
 }
