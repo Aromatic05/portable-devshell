@@ -3,7 +3,6 @@
         "target": "ES2022",
         "module": "NodeNext",
         "moduleResolution": "NodeNext",
-        "baseUrl": ".",
         "paths": {
             "@portable-devshell/shared": ["./packages/shared/dist/index.d.ts"],
             "@portable-devshell/core": ["./packages/core/src/index.ts"],
@@ -11,6 +10,7 @@
             "@portable-devshell/mcp": ["./packages/mcp/src/index.ts"],
             "@portable-devshell/cli": ["./packages/cli/src/index.ts"]
         },
+        "types": ["node"],
         "strict": true,
         "declaration": true,
         "declarationMap": true,

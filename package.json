@@ -4,6 +4,7 @@
     "private": true,
     "packageManager": "pnpm@10.13.1",
     "scripts": {
+        "dev": "tsx packages/cli/src/cli/CliMain.ts",
         "build": "tsc -b",
         "lint": "eslint .",
         "lint:fix": "eslint . --fix",
@@ -11,13 +12,13 @@
         "typecheck": "pnpm -r --filter './packages/*' typecheck"
     },
     "devDependencies": {
+        "@types/node": "^24.0.0",
         "@eslint/js": "^9.31.0",
         "eslint": "^9.31.0",
         "globals": "^16.3.0",
         "prettier": "^3.6.2",
+        "tsx": "^4.8.1",
         "typescript": "^5.9.2",
         "typescript-eslint": "^8.37.0"
     }
 }
-        "dev": "tsx packages/cli/src/cli/CliMain.ts",
-        "tsx": "^4.8.1",
