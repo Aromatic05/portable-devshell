@@ -4,16 +4,13 @@ import type { InstanceRegistry } from "../../instance/registry/InstanceRegistry.
 
 export interface RouteHandlerControlOptions {
     instanceRegistry: InstanceRegistry;
-    shutdown?: () => Promise<void> | void;
 }
 
 export class RouteHandlerControl {
     readonly #instanceRegistry: InstanceRegistry;
-    readonly #shutdown?: () => Promise<void> | void;
 
     constructor(options: RouteHandlerControlOptions) {
         this.#instanceRegistry = options.instanceRegistry;
-        this.#shutdown = options.shutdown;
     }
 
     async handle(method: string): Promise<JsonValue> {

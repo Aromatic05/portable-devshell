@@ -14,11 +14,13 @@ import { ControlRpcConnection, type RpcRequestEnvelope } from "./ControlRpcConne
 
 export interface ControlRpcServerOptions {
     instanceRegistry: InstanceRegistry;
+    shutdown?: () => Promise<void> | void;
     socketPath: string;
 }
 
 export class ControlRpcServer {
     readonly #instanceRegistry: InstanceRegistry;
+    readonly #shutdown?: () => Promise<void> | void;
     readonly #socketPath: string;
     readonly #methodRegistry = new RouteMethodRegistry();
     readonly #subscriptionManager = new StreamSubscriptionManager();
@@ -29,13 +31,11 @@ export class ControlRpcServer {
 
     constructor(options: ControlRpcServerOptions) {
         this.#instanceRegistry = options.instanceRegistry;
+        this.#shutdown = options.shutdown;
         this.#socketPath = options.socketPath;
         this.#controlRouter = new RouteRouterControl(
             new RouteHandlerControl({
                 instanceRegistry: this.#instanceRegistry,
-                shutdown: async () => {
-                    await this.stop();
-                }
             })
         );
         this.#instanceRouter = new RouteRouterInstance(
@@ -130,7 +130,7 @@ export class ControlRpcServer {
 
             if (request.method === "control.shutdown") {
                 queueMicrotask(() => {
-                    void this.stop();
+                    void (this.#shutdown?.() ?? this.stop());
                 });
             }
         } catch (error) {

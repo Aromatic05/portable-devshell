@@ -4,13 +4,13 @@ import { join } from "node:path";
 import { ControlPathHome } from "./path/ControlPathHome.js";
 
 export class ControlLogger {
-    readonly #controlHomeDir: string;
+    readonly #logsDir: string;
     readonly path: string;
 
     constructor(homeDirectory?: string) {
         const paths = new ControlPathHome(homeDirectory);
-        this.#controlHomeDir = paths.controlHomeDir;
-        this.path = join(paths.controlHomeDir, "control.log");
+        this.#logsDir = join(paths.controlHomeDir, "logs");
+        this.path = join(this.#logsDir, "control.log");
     }
 
     async info(message: string): Promise<void> {
@@ -35,7 +35,7 @@ export class ControlLogger {
 
     async write(level: string, message: string): Promise<void> {
         const entry = `[${new Date().toISOString()}] ${level} ${message}\n`;
-        await mkdir(this.#controlHomeDir, { recursive: true });
+        await mkdir(this.#logsDir, { recursive: true });
         await appendFile(this.path, entry, "utf8");
     }
 }

@@ -71,7 +71,11 @@ export class ControlLifecycleManager {
         const current = await this.status();
 
         if (current.running) {
-            await this.#rpcClient.request("control.shutdown");
+            try {
+                await this.#rpcClient.request("control.shutdown");
+            } catch {
+                // The daemon may close the socket before the client observes the response.
+            }
             await this.#waitFor(async () => {
                 const next = await this.status();
                 return next.running ? undefined : next;

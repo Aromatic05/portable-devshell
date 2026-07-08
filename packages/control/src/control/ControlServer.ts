@@ -51,14 +51,19 @@ export class ControlServer {
         this.#mcpHost = this.#mcpWiringService.wire(config, registry);
         this.#rpcServer = new ControlRpcServer({
             instanceRegistry: registry,
+            shutdown: async () => {
+                await this.stop();
+            },
             socketPath: this.#socketFile.path
         });
 
+        await this.#mcpHost?.start();
         await this.#rpcServer.start();
     }
 
     async stop(): Promise<void> {
         await this.#rpcServer?.stop();
+        await this.#mcpHost?.stop();
         this.#rpcServer = undefined;
         this.#mcpHost = undefined;
     }
