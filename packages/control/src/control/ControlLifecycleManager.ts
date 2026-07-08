@@ -144,25 +144,27 @@ class SocketControlLifecycleRpcClient implements ControlLifecycleRpcClient {
         const reader = new FrameReader();
         const writer = new FrameWriter(socket);
         let settled = false;
+        let resolveResponse: (value: JsonValue) => void = () => undefined;
+        let rejectResponse: (reason?: unknown) => void = () => undefined;
 
-        const resolveOnce = (resolve: (value: JsonValue) => void, value: JsonValue): void => {
+        const resolveOnce = (value: JsonValue): void => {
             if (settled) {
                 return;
             }
 
             settled = true;
             socket.end();
-            resolve(value);
+            resolveResponse(value);
         };
 
-        const rejectOnce = (reject: (reason?: unknown) => void, error: unknown): void => {
+        const rejectOnce = (error: unknown): void => {
             if (settled) {
                 return;
             }
 
             settled = true;
             socket.destroy();
-            reject(error);
+            rejectResponse(error);
         };
 
         await new Promise<void>((resolve, reject) => {
@@ -171,6 +173,9 @@ class SocketControlLifecycleRpcClient implements ControlLifecycleRpcClient {
         });
 
         const response = new Promise<JsonValue>((resolve, reject) => {
+            resolveResponse = resolve;
+            rejectResponse = reject;
+
             socket.on("data", (chunk: Uint8Array) => {
                 for (const frame of reader.push(chunk)) {
                     if (!isJsonRecord(frame) || frame.type !== "response") {
@@ -179,7 +184,6 @@ class SocketControlLifecycleRpcClient implements ControlLifecycleRpcClient {
 
                     if (frame.ok !== true) {
                         rejectOnce(
-                            reject,
                             new Error(
                                 isJsonRecord(frame.error) && typeof frame.error.message === "string"
                                     ? frame.error.message
@@ -189,11 +193,14 @@ class SocketControlLifecycleRpcClient implements ControlLifecycleRpcClient {
                         return;
                     }
 
-                    resolveOnce(resolve, (frame.result ?? null) as JsonValue);
+                    resolveOnce((frame.result ?? null) as JsonValue);
                 }
             });
             socket.once("error", (error) => {
-                rejectOnce(reject, error);
+                rejectOnce(error);
+            });
+            socket.once("close", () => {
+                rejectOnce(new Error("control connection closed"));
             });
         });
 
@@ -207,11 +214,7 @@ class SocketControlLifecycleRpcClient implements ControlLifecycleRpcClient {
                 type: "request"
             } as unknown as JsonValue);
         } catch (error) {
-            rejectOnce(
-                () => undefined,
-                error
-            );
-            throw error;
+            rejectOnce(error);
         }
 
         try {

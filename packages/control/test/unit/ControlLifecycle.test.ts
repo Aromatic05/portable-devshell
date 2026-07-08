@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { access, copyFile, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
-import { createConnection } from "node:net";
+import { createConnection, createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -109,6 +109,74 @@ test("stop sends control.shutdown over rpc", async () => {
     const stopped = await manager.stop();
 
     assert.deepEqual(methods, ["control.status", "control.shutdown", "control.status", "control.status"]);
+    assert.equal(stopped.running, false);
+});
+
+test("stop tolerates shutdown socket races in the real lifecycle rpc client", async (t) => {
+    const runtimeRoot = await mkdtemp(join(tmpdir(), "portable-devshell-control-stop-race-"));
+    const runtimePaths = new ControlPathRuntime(runtimeRoot);
+    let shutdownRequested = false;
+    const server = createServer((socket) => {
+        if (shutdownRequested) {
+            socket.destroy();
+            return;
+        }
+
+        const reader = new FrameReader();
+        const writer = new FrameWriter(socket);
+
+        socket.on("data", (chunk: Uint8Array) => {
+            for (const frame of reader.push(chunk)) {
+                const envelope = frame as Record<string, any>;
+
+                if (envelope.method === "control.status") {
+                    void writer.write({
+                        id: envelope.id,
+                        ok: true,
+                        result: { instanceCount: 1 },
+                        type: "response"
+                    } as unknown as JsonValue);
+                    continue;
+                }
+
+                if (envelope.method === "control.shutdown") {
+                    shutdownRequested = true;
+                    socket.destroy();
+                }
+            }
+        });
+    });
+
+    await mkdir(runtimePaths.runtimeDir, { recursive: true });
+    await new Promise<void>((resolve, reject) => {
+        server.once("error", reject);
+        server.listen(runtimePaths.socketFile, resolve);
+    });
+
+    t.after(async () => {
+        server.close();
+        await rm(runtimeRoot, { force: true, recursive: true });
+    });
+
+    const manager = new ControlLifecycleManager({
+        pidFile: {
+            read: async () => 123,
+            remove: async () => undefined,
+            write: async () => undefined,
+            path: "/tmp/control.pid"
+        },
+        socketFile: {
+            ensureRuntimeDir: async () => undefined,
+            path: runtimePaths.socketFile,
+            remove: async () => undefined,
+            runtimeDir: runtimePaths.runtimeDir
+        },
+        waitTimeoutMs: 500
+    });
+
+    const stopped = await manager.stop();
+
+    assert.equal(shutdownRequested, true);
     assert.equal(stopped.running, false);
 });
 
