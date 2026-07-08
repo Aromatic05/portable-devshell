@@ -1,12 +1,18 @@
 import type { ChildProcess, SpawnOptions } from "node:child_process";
 
+import { createError, errorCodes, type CommandDiagnostic, type CommandResult, type ControlError, type JsonValue } from "@portable-devshell/shared";
+
 import type { WorkerRpcProcess } from "../WorkerProcess.js";
 import type { WorkerCommandName, WorkerCommandOptions, WorkerRpcOptions } from "./WorkerCommandOptions.js";
 
-export interface WorkerCommandResult {
-    stdout: string;
-    stderr: string;
-    exitCode: number;
+export type WorkerCommandResult = CommandResult;
+
+export interface ProviderCommandContext extends CommandDiagnostic {
+    command: string[];
+    commandDisplay: string;
+    instance?: string;
+    operation: string;
+    provider: string;
 }
 
 export interface WorkerCommandTransport {
@@ -17,11 +23,16 @@ export interface WorkerCommandTransport {
 
 export type SpawnFunction = (command: string, args: readonly string[], options: SpawnOptions) => ChildProcess;
 export const providerFailedErrorCode = "core.providerFailed";
+const COMMAND_OUTPUT_TAIL_LIMIT = 4000;
 
 export async function waitForCommandResult(
     child: ChildProcess,
-    createError: (operation: string, cause: unknown) => Error,
-    operation: string
+    createProviderError: (
+        context: ProviderCommandContext,
+        cause: unknown,
+        options?: { errorCode?: string; result?: Partial<CommandResult> }
+    ) => ControlError,
+    context: ProviderCommandContext
 ): Promise<WorkerCommandResult> {
     let stdout = "";
     let stderr = "";
@@ -37,23 +48,103 @@ export async function waitForCommandResult(
 
     return await new Promise<WorkerCommandResult>((resolve, reject) => {
         child.once("error", (error) => {
-            reject(createError(operation, error));
+            reject(createProviderError(context, error, { result: { stderr, stdout } }));
         });
-        child.once("close", (code) => {
-            resolve({ stdout, stderr, exitCode: code ?? 1 });
+        child.once("close", (code, signal) => {
+            resolve({
+                details: buildCommandDiagnostic(context, {
+                    exitCode: code,
+                    signal: signal ?? undefined,
+                    stderr,
+                    stdout
+                }),
+                exitCode: code,
+                signal: signal ?? undefined,
+                stderr,
+                stdout
+            });
         });
     });
 }
 
-export function createProviderError(provider: string, operation: string, cause: unknown, details: Record<string, string>): Error {
-    const detailMessage = cause instanceof Error ? cause.message : String(cause);
-    const error = new Error(`${provider} provider failed to ${operation}`);
+export function createProviderError(
+    context: ProviderCommandContext,
+    cause: unknown,
+    options: { errorCode?: string; result?: Partial<CommandResult> } = {}
+): ControlError {
+    const details = buildCommandDiagnostic(context, options.result, cause);
 
-    Object.assign(error, {
-        code: providerFailedErrorCode,
-        details: { provider, cause: detailMessage, ...details },
+    return createError({
+        code: options.errorCode ?? errorCodes.coreProviderFailed,
+        cause,
+        details: toJsonDetails(details),
+        message: `${context.provider} provider failed to ${context.operation}.`,
         retryable: false
     });
+}
 
-    return error;
+export function createCommandContext(input: {
+    provider: string;
+    operation: string;
+    command: readonly string[];
+    cwd?: string;
+    instance?: string;
+}): ProviderCommandContext {
+    return {
+        command: [...input.command],
+        commandDisplay: formatCommandDisplay(input.command),
+        cwd: input.cwd,
+        instance: input.instance,
+        operation: input.operation,
+        provider: input.provider
+    };
+}
+
+function buildCommandDiagnostic(
+    context: ProviderCommandContext,
+    result: Partial<CommandResult> = {},
+    cause?: unknown
+): CommandDiagnostic {
+    return {
+        ...(readCauseCode(cause) === undefined ? {} : { causeCode: readCauseCode(cause) }),
+        ...(readCauseMessage(cause) === undefined ? {} : { causeMessage: readCauseMessage(cause) }),
+        command: [...context.command],
+        commandDisplay: context.commandDisplay,
+        ...(context.cwd === undefined ? {} : { cwd: context.cwd }),
+        ...(context.instance === undefined ? {} : { instance: context.instance }),
+        operation: context.operation,
+        provider: context.provider,
+        ...(typeof result.signal === "string" ? { signal: result.signal } : {}),
+        ...(typeof result.stderr === "string" && result.stderr.length > 0 ? { stderrTail: tail(result.stderr) } : {}),
+        ...(typeof result.stdout === "string" && result.stdout.length > 0 ? { stdoutTail: tail(result.stdout) } : {}),
+        ...(typeof result.exitCode === "number" || result.exitCode === null ? { exitCode: result.exitCode } : {})
+    };
+}
+
+function formatCommandDisplay(command: readonly string[]): string {
+    return command
+        .map((segment) => (/^[A-Za-z0-9_./:@=-]+$/u.test(segment) ? segment : JSON.stringify(segment)))
+        .join(" ");
+}
+
+function readCauseCode(error: unknown): string | undefined {
+    return typeof error === "object" && error !== null && "code" in error && typeof error.code === "string" ? error.code : undefined;
+}
+
+function readCauseMessage(error: unknown): string | undefined {
+    if (error instanceof Error) {
+        return error.message;
+    }
+
+    return typeof error === "object" && error !== null && "message" in error && typeof error.message === "string"
+        ? error.message
+        : undefined;
+}
+
+function tail(value: string): string {
+    return value.length <= COMMAND_OUTPUT_TAIL_LIMIT ? value : value.slice(-COMMAND_OUTPUT_TAIL_LIMIT);
+}
+
+function toJsonDetails(details: CommandDiagnostic): JsonValue {
+    return Object.fromEntries(Object.entries(details).filter(([, value]) => value !== undefined)) as JsonValue;
 }

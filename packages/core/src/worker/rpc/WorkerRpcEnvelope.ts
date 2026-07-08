@@ -1,4 +1,4 @@
-import type { JsonValue } from "@portable-devshell/shared";
+import type { ControlErrorBody, JsonValue } from "@portable-devshell/shared";
 
 export interface WorkerRpcRequestEnvelope {
     type: "request";
@@ -7,12 +7,7 @@ export interface WorkerRpcRequestEnvelope {
     params: JsonValue;
 }
 
-export interface WorkerRpcErrorBody {
-    code: string;
-    message: string;
-    retryable: boolean;
-    details?: JsonValue;
-}
+export type WorkerRpcErrorBody = ControlErrorBody;
 
 export interface WorkerRpcSuccessEnvelope {
     type: "response";

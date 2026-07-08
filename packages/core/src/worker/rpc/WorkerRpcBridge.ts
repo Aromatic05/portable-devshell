@@ -180,11 +180,14 @@ export class WorkerRpcBridge {
     }
 
     #createDisconnectError(cause: unknown): WorkerRpcError {
-        const message = cause instanceof Error ? cause.message : String(cause);
-        return WorkerRpcError.disconnected({
-            instanceName: this.#rpcOptions.instanceName,
-            cause: message
-        });
+        return WorkerRpcError.disconnected(
+            {
+                causeCode: typeof cause === "object" && cause !== null && "code" in cause && typeof cause.code === "string" ? cause.code : undefined,
+                causeMessage: cause instanceof Error ? cause.message : String(cause),
+                instanceName: this.#rpcOptions.instanceName
+            } as JsonValue,
+            cause
+        );
     }
 }
 

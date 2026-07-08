@@ -65,6 +65,80 @@ test("local transport runs installWorker probe", async () => {
     });
 });
 
+test("provider installWorker failures keep diagnostic details across local ssh docker and podman", async () => {
+    const cases = [
+        {
+            build: (spawnFunction: SpawnFunctionLike) =>
+                new LocalWorkerTransport({
+                    workerBinary: new WorkerBinary("/worker/bin"),
+                    spawnFunction
+                }),
+            expectedCommandPart: "/worker/bin",
+            provider: "local"
+        },
+        {
+            build: (spawnFunction: SpawnFunctionLike) =>
+                new SshWorkerTransport({
+                    host: "devbox",
+                    sshBinary: "ssh-bin",
+                    workerBinary: new WorkerBinary("/usr/local/bin/devshell-worker"),
+                    spawnFunction
+                }),
+            expectedCommandPart: "ssh-bin",
+            provider: "ssh"
+        },
+        {
+            build: (spawnFunction: SpawnFunctionLike) =>
+                new DockerWorkerTransport({
+                    container: "worker-container",
+                    dockerBinary: "docker-bin",
+                    workerBinary: new WorkerBinary("/usr/local/bin/devshell-worker"),
+                    spawnFunction
+                }),
+            expectedCommandPart: "docker-bin",
+            provider: "docker"
+        },
+        {
+            build: (spawnFunction: SpawnFunctionLike) =>
+                new PodmanWorkerTransport({
+                    container: "worker-container",
+                    podmanBinary: "podman-bin",
+                    workerBinary: new WorkerBinary("/usr/local/bin/devshell-worker"),
+                    spawnFunction
+                }),
+            expectedCommandPart: "podman-bin",
+            provider: "podman"
+        }
+    ] as const;
+
+    for (const testCase of cases) {
+        const recorder = createSpawnRecorder((_call, child) => {
+            closeRecordedChild(child, {
+                code: 23,
+                stderr: "fatal stderr\n",
+                stdout: "fatal stdout\n"
+            });
+            return true;
+        });
+        const transport = testCase.build(recorder.spawn);
+
+        await assert.rejects(transport.installWorker(), (error: unknown) => {
+            assert.ok(typeof error === "object" && error !== null);
+            assert.equal((error as { code?: string }).code, "core.workerProvisionFailed");
+
+            const details = (error as { details?: Record<string, unknown> }).details;
+            assert.equal(details?.provider, testCase.provider);
+            assert.equal(details?.operation, "installWorker");
+            assert.equal(details?.exitCode, 23);
+            assert.equal(details?.stderrTail, "fatal stderr\n");
+            assert.equal(details?.stdoutTail, "fatal stdout\n");
+            assert.equal(details?.causeMessage, "fatal stderr\n");
+            assert.match(String(details?.commandDisplay ?? ""), new RegExp(testCase.expectedCommandPart.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"), "u"));
+            return true;
+        });
+    }
+});
+
 test("local transport preserves base process env when instance env is provided", async () => {
     const recorder = createSpawnRecorder();
     const transport = new LocalWorkerTransport({
@@ -129,6 +203,15 @@ test("ssh transport includes remote cwd in command", async () => {
             "cd '/srv/workspaces/task 3' && '/usr/local/bin/devshell-worker' 'status' '--instance' 'task-3-ssh'"
         ],
         options: { cwd: undefined, env: undefined, stdio: ["ignore", "pipe", "pipe"] }
+    });
+    assert.deepEqual(result.details, {
+        command: ["ssh-bin", "devbox", "--", "sh", "-lc", "cd '/srv/workspaces/task 3' && '/usr/local/bin/devshell-worker' 'status' '--instance' 'task-3-ssh'"],
+        commandDisplay: `ssh-bin devbox -- sh -lc ${JSON.stringify("cd '/srv/workspaces/task 3' && '/usr/local/bin/devshell-worker' 'status' '--instance' 'task-3-ssh'")}`,
+        cwd: "/srv/workspaces/task 3",
+        exitCode: 0,
+        instance: "task-3-ssh",
+        operation: "status",
+        provider: "ssh"
     });
 });
 
@@ -450,6 +533,8 @@ interface RecordedCall {
     args: string[];
     options: { cwd?: string; env?: NodeJS.ProcessEnv; stdio: readonly string[] };
 }
+
+type SpawnFunctionLike = (command: string, args: readonly string[], options: SpawnOptions) => ChildProcess;
 
 interface RecordedChild extends ChildProcess {
     stdin: PassThrough;

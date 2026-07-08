@@ -1,11 +1,15 @@
 import { spawn } from "node:child_process";
 
+import { errorCodes } from "@portable-devshell/shared";
+
 import { WorkerAssetResolver } from "../../WorkerAssetResolver.js";
 import { WorkerBinary } from "../../WorkerBinary.js";
 import {
+    createCommandContext,
     createProviderError,
     type SpawnFunction,
     waitForCommandResult,
+    type ProviderCommandContext,
     type WorkerCommandTransport
 } from "../../command/WorkerCommandTransport.js";
 import type { WorkerCommandName, WorkerCommandOptions, WorkerRpcOptions } from "../../command/WorkerCommandOptions.js";
@@ -34,13 +38,17 @@ export class LocalWorkerTransport implements WorkerCommandTransport {
 
     async installWorker(): Promise<void> {
         const installCommand = new WorkerBinary(await this.#resolveExecutable()).buildInstallCommand();
-        const child = this.#spawnCommand(installCommand.command, installCommand.args, {
+        const context = this.#createCommandContext("installWorker", [installCommand.command, ...installCommand.args]);
+        const child = this.#spawnCommand(context, {
             stdio: ["ignore", "pipe", "pipe"]
         });
 
-        const result = await waitForCommandResult(child, this.#createProviderError, "installWorker");
+        const result = await waitForCommandResult(child, this.#createProviderError, context);
         if (result.exitCode !== 0) {
-            throw this.#createProviderError("installWorker", new Error(result.stderr || result.stdout || "worker install check failed"));
+            throw this.#createProviderError(context, new Error(result.stderr || result.stdout || "worker install check failed"), {
+                errorCode: errorCodes.coreWorkerProvisionFailed,
+                result
+            });
         }
     }
 
@@ -50,21 +58,32 @@ export class LocalWorkerTransport implements WorkerCommandTransport {
             options.instanceName,
             options.extraArgs
         );
-        const child = this.#spawnCommand(workerCommand.command, workerCommand.args, {
+        const context = this.#createCommandContext(command, [workerCommand.command, ...workerCommand.args], {
             cwd: command === "start" ? options.workspacePath : undefined,
+            instance: options.instanceName
+        });
+        const child = this.#spawnCommand(context, {
+            cwd: context.cwd,
             env: this.#mergeEnv(options.env),
             stdio: ["ignore", "pipe", "pipe"]
         });
 
-        return await waitForCommandResult(child, this.#createProviderError, "runWorkerCommand");
+        return await waitForCommandResult(child, this.#createProviderError, context);
     }
 
     async spawnWorkerRpc(options: WorkerRpcOptions): Promise<WorkerRpcProcess> {
-        const command = new WorkerBinary(await this.#resolveExecutable(options.env)).buildCommand("rpc", options.instanceName);
-        const child = this.#spawnCommand(command.command, command.args, {
-            env: this.#mergeEnv(options.env),
-            stdio: ["pipe", "pipe", "pipe"]
+        const workerCommand = new WorkerBinary(await this.#resolveExecutable(options.env)).buildCommand("rpc", options.instanceName);
+        const context = this.#createCommandContext("spawnWorkerRpc", [workerCommand.command, ...workerCommand.args], {
+            instance: options.instanceName
         });
+        const child = this.#spawnCommand(
+            context,
+            {
+                env: this.#mergeEnv(options.env),
+                stdio: ["pipe", "pipe", "pipe"]
+            },
+            errorCodes.coreWorkerRpcSpawnFailed
+        );
         return createWorkerRpcProcess(child);
     }
 
@@ -76,15 +95,20 @@ export class LocalWorkerTransport implements WorkerCommandTransport {
         const homeDirectory = env?.HOME ?? process.env.HOME;
 
         if (homeDirectory === undefined || homeDirectory.length === 0) {
-            throw this.#createProviderError("resolveExecutable", new Error("HOME is required to install the local worker"));
+            throw this.#createProviderError(
+                this.#createCommandContext("resolveExecutable", ["devshell-worker"]),
+                new Error("HOME is required to install the local worker")
+            );
         }
 
         const asset = await this.#resolver.resolve().catch((error) => {
-            throw this.#createProviderError("resolveExecutable", error);
+            throw this.#createProviderError(this.#createCommandContext("resolveExecutable", ["devshell-worker"]), error);
         });
 
         return await this.#installer.ensure(homeDirectory, asset).catch((error) => {
-            throw this.#createProviderError("resolveExecutable", error);
+            throw this.#createProviderError(this.#createCommandContext("resolveExecutable", ["devshell-worker"]), error, {
+                errorCode: errorCodes.coreWorkerProvisionFailed
+            });
         });
     }
 
@@ -95,14 +119,37 @@ export class LocalWorkerTransport implements WorkerCommandTransport {
         };
     }
 
-    #spawnCommand(command: string, args: readonly string[], options: Parameters<SpawnFunction>[2]) {
+    #spawnCommand(
+        context: ProviderCommandContext,
+        options: Parameters<SpawnFunction>[2],
+        errorCode: string = errorCodes.coreProviderFailed
+    ) {
+        const [command, ...args] = context.command;
+
         try {
             return this.#spawn(command, args, options);
         } catch (error) {
-            throw this.#createProviderError("spawnCommand", error);
+            throw this.#createProviderError(context, error, { errorCode });
         }
     }
 
-    readonly #createProviderError = (operation: string, cause: unknown): Error =>
-        createProviderError("local", operation, cause, {});
+    #createCommandContext(
+        operation: string,
+        command: readonly string[],
+        options: { cwd?: string; instance?: string } = {}
+    ): ProviderCommandContext {
+        return createCommandContext({
+            command,
+            cwd: options.cwd,
+            instance: options.instance,
+            operation,
+            provider: "local"
+        });
+    }
+
+    readonly #createProviderError = (
+        context: ProviderCommandContext,
+        cause: unknown,
+        options?: { errorCode?: string; result?: { exitCode?: number | null; signal?: string; stderr?: string; stdout?: string } }
+    ) => createProviderError(context, cause, options);
 }

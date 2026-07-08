@@ -4,19 +4,10 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { CallToolRequestSchema, ErrorCode, isInitializeRequest, ListToolsRequestSchema, McpError } from "@modelcontextprotocol/sdk/types.js";
-import type { ToolCallContext } from "@portable-devshell/shared";
+import { toControlErrorBody, type CommandResult, type ControlErrorBody, type JsonValue, type ToolCallContext } from "@portable-devshell/shared";
 
 import { McpToolSchemaUnavailableError } from "../tool/McpToolSchemaAdapter.js";
 import { McpEndpointWorker } from "./McpEndpointWorker.js";
-
-type JsonValue = boolean | number | null | string | JsonValue[] | { [key: string]: JsonValue };
-
-interface CommandResult {
-    exitCode: number | null;
-    stderr: string;
-    stdout: string;
-    timedOut?: boolean;
-}
 
 interface McpEndpointSession {
     nextToolCallContext?: ToolCallContext;
@@ -199,8 +190,19 @@ function toMcpError(error: unknown): McpError {
         return new McpError(-32002, error.message, { code: error.code });
     }
 
-    if (typeof error === "object" && error !== null && "code" in error && error.code === "core.instanceNotReady") {
-        return new McpError(-32001, "Instance not ready.", { code: "mcp.instanceNotReady" });
+    const body = toControlErrorBody(error);
+
+    if (body?.code === "core.instanceNotReady") {
+        const sanitized = sanitizeErrorBody(body);
+
+        return new McpError(-32001, "Instance not ready.", {
+            ...sanitized,
+            code: "mcp.instanceNotReady"
+        });
+    }
+
+    if (body !== undefined) {
+        return new McpError(ErrorCode.InternalError, body.message, sanitizeErrorBody(body));
     }
 
     if (error instanceof Error) {
@@ -208,4 +210,31 @@ function toMcpError(error: unknown): McpError {
     }
 
     return new McpError(ErrorCode.ConnectionClosed, "Unknown MCP error.");
+}
+
+function sanitizeErrorBody(body: ControlErrorBody): Record<string, JsonValue> {
+    return {
+        code: body.code,
+        ...(body.cause === undefined ? {} : { cause: sanitizeErrorBody(body.cause) }),
+        ...(body.details === undefined ? {} : { details: sanitizeDetails(body.details) }),
+        message: body.message,
+        retryable: body.retryable
+    };
+}
+
+function sanitizeDetails(details: JsonValue): JsonValue {
+    if (Array.isArray(details)) {
+        return details.map((entry) => sanitizeDetails(entry)) as JsonValue;
+    }
+
+    if (typeof details !== "object" || details === null) {
+        return details;
+    }
+
+    const candidate = details as Record<string, JsonValue>;
+    const filtered = Object.entries(candidate).filter(([key]) => {
+        return key !== "command" && key !== "commandDisplay" && key !== "cwd" && key !== "stderrTail" && key !== "stdoutTail";
+    });
+
+    return Object.fromEntries(filtered.map(([key, value]) => [key, sanitizeDetails(value)])) as JsonValue;
 }

@@ -1,3 +1,4 @@
+import type { CommandResult, JsonValue } from "@portable-devshell/shared";
 import { McpAuthPublicExposureGuard, type McpExposureConfig } from "../auth/public/McpAuthPublicExposureGuard.js";
 import { McpEndpointBinding } from "../endpoint/McpEndpointBinding.js";
 import { McpEndpointWorker } from "../endpoint/McpEndpointWorker.js";
@@ -5,19 +6,10 @@ import { McpHostHttpServer } from "./McpHostHttpServer.js";
 import { McpHostRouteMatcher } from "./route/McpHostRouteMatcher.js";
 import { McpHostRouteRegistry } from "./route/McpHostRouteRegistry.js";
 
-type JsonValue = boolean | number | null | string | JsonValue[] | { [key: string]: JsonValue };
-
 interface ToolDefinition {
     description?: string;
     inputSchema?: JsonValue;
     name: string;
-}
-
-interface CommandResult {
-    exitCode: number | null;
-    stderr: string;
-    stdout: string;
-    timedOut?: boolean;
 }
 
 interface WorkerInstanceLike {

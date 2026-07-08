@@ -1,22 +1,13 @@
-import type { ToolCallContext } from "@portable-devshell/shared";
+import { createError, errorCodes, type CommandResult, type JsonValue, type ToolCallContext } from "@portable-devshell/shared";
 
 import { McpToolDescriptionEnhancer } from "../tool/McpToolDescriptionEnhancer.js";
 import { McpToolFilter } from "../tool/McpToolFilter.js";
 import { McpToolSchemaAdapter, McpToolSchemaUnavailableError, type McpTool } from "../tool/McpToolSchemaAdapter.js";
 
-type JsonValue = boolean | number | null | string | JsonValue[] | { [key: string]: JsonValue };
-
 interface ToolDefinition {
     description?: string;
     inputSchema?: JsonValue;
     name: string;
-}
-
-interface CommandResult {
-    exitCode: number | null;
-    stderr: string;
-    stdout: string;
-    timedOut?: boolean;
 }
 
 interface WorkerInstanceLike {
@@ -47,13 +38,12 @@ export class McpEndpointWorker {
 
     assertReady(): void {
         if (!this.#worker.snapshot().ready) {
-            const error = new Error(`Instance ${this.#instanceName} is not ready.`);
-            Object.assign(error, {
-                code: "core.instanceNotReady",
-                details: { instanceName: this.#instanceName },
+            throw createError({
+                code: errorCodes.coreInstanceNotReady,
+                details: { instance: this.#instanceName },
+                message: `Instance ${this.#instanceName} is not ready.`,
                 retryable: false
             });
-            throw error;
         }
     }
 
@@ -74,7 +64,12 @@ export class McpEndpointWorker {
         const tool = this.getTool(toolName);
 
         if (tool === undefined) {
-            throw new Error(`Tool ${toolName} is not exposed by MCP.`);
+            throw createError({
+                code: errorCodes.coreToolSchemaUnavailable,
+                details: { instance: this.#instanceName, toolName },
+                message: `Tool ${toolName} is not exposed by MCP.`,
+                retryable: false
+            });
         }
 
         this.#adaptTool(tool);

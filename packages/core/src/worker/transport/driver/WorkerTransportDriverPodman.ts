@@ -1,11 +1,15 @@
 import { spawn } from "node:child_process";
 
+import { errorCodes } from "@portable-devshell/shared";
+
 import { WorkerBinary } from "../../WorkerBinary.js";
 import { RemoteWorkerInstaller } from "../../install/RemoteWorkerInstaller.js";
 import {
+    createCommandContext,
     createProviderError,
     type SpawnFunction,
     waitForCommandResult,
+    type ProviderCommandContext,
     type WorkerCommandTransport
 } from "../../command/WorkerCommandTransport.js";
 import type { WorkerCommandName, WorkerCommandOptions, WorkerRpcOptions } from "../../command/WorkerCommandOptions.js";
@@ -34,18 +38,23 @@ export class PodmanWorkerTransport implements WorkerCommandTransport {
         this.#workerBinary = options.workerBinary ?? new WorkerBinary();
         this.#spawn = options.spawnFunction ?? spawn;
         this.#installer = new RemoteWorkerInstaller({
-            spawnShell: (commandLine, stdio) => this.#spawnShell(commandLine, stdio),
+            createContext: (operation, command) => this.#createShellContext(operation, command),
+            spawnShell: (commandLine, stdio, context) => this.#spawnShell(commandLine, stdio, context),
             createProviderError: this.#createProviderError
         });
     }
 
     async installWorker(): Promise<void> {
         const installCommand = new WorkerBinary(await this.#resolveExecutable()).buildInstallCommand();
-        const child = this.#spawnExec(installCommand.command, installCommand.args, ["ignore", "pipe", "pipe"]);
-        const result = await waitForCommandResult(child, this.#createProviderError, "installWorker");
+        const context = this.#createExecContext("installWorker", [installCommand.command, ...installCommand.args]);
+        const child = this.#spawnExec(context, ["ignore", "pipe", "pipe"]);
+        const result = await waitForCommandResult(child, this.#createProviderError, context);
 
         if (result.exitCode !== 0) {
-            throw this.#createProviderError("installWorker", new Error(result.stderr || result.stdout || "worker install check failed"));
+            throw this.#createProviderError(context, new Error(result.stderr || result.stdout || "worker install check failed"), {
+                errorCode: errorCodes.coreWorkerProvisionFailed,
+                result
+            });
         }
     }
 
@@ -55,22 +64,33 @@ export class PodmanWorkerTransport implements WorkerCommandTransport {
             options.instanceName,
             options.extraArgs
         );
-        const child = this.#spawnExec(workerCommand.command, workerCommand.args, ["ignore", "pipe", "pipe"], options.env);
+        const context = this.#createExecContext(command, [workerCommand.command, ...workerCommand.args], {
+            instance: options.instanceName
+        });
+        const child = this.#spawnExec(context, ["ignore", "pipe", "pipe"], options.env);
 
-        return await waitForCommandResult(child, this.#createProviderError, "runWorkerCommand");
+        return await waitForCommandResult(child, this.#createProviderError, context);
     }
 
     async spawnWorkerRpc(options: WorkerRpcOptions): Promise<WorkerRpcProcess> {
         const workerCommand = new WorkerBinary(await this.#resolveExecutable()).buildCommand("rpc", options.instanceName);
-        return createWorkerRpcProcess(this.#spawnExec(workerCommand.command, workerCommand.args, ["pipe", "pipe", "pipe"], options.env));
+        const context = this.#createExecContext("spawnWorkerRpc", [workerCommand.command, ...workerCommand.args], {
+            instance: options.instanceName
+        });
+        return createWorkerRpcProcess(this.#spawnExec(context, ["pipe", "pipe", "pipe"], options.env, errorCodes.coreWorkerRpcSpawnFailed));
     }
 
     async #resolveExecutable(): Promise<string> {
         return await this.#installer.ensure(this.#workerBinary.executable);
     }
 
-    #spawnExec(command: string, args: readonly string[], stdio: ["ignore" | "pipe", "pipe", "pipe"], env?: NodeJS.ProcessEnv) {
-        const execArgs = ["exec", ...this.#workingDirectoryArgs(), "-i", this.#container, command, ...args];
+    #spawnExec(
+        context: ProviderCommandContext,
+        stdio: ["ignore" | "pipe", "pipe", "pipe"],
+        env?: NodeJS.ProcessEnv,
+        errorCode: string = errorCodes.coreProviderFailed
+    ) {
+        const execArgs = ["exec", ...this.#workingDirectoryArgs(), "-i", this.#container, ...context.command];
 
         try {
             return this.#spawn(this.#podmanBinary, execArgs, {
@@ -78,17 +98,17 @@ export class PodmanWorkerTransport implements WorkerCommandTransport {
                 stdio
             });
         } catch (error) {
-            throw this.#createProviderError("spawnExec", error);
+            throw this.#createProviderError(context, error, { errorCode });
         }
     }
 
-    #spawnShell(commandLine: string, stdio: ["ignore" | "pipe", "pipe", "pipe"]) {
+    #spawnShell(commandLine: string, stdio: ["ignore" | "pipe", "pipe", "pipe"], context: ProviderCommandContext) {
         try {
             return this.#spawn(this.#podmanBinary, ["exec", "-i", this.#container, "sh", "-lc", commandLine], {
                 stdio
             });
         } catch (error) {
-            throw this.#createProviderError("spawnShell", error);
+            throw this.#createProviderError(context, error);
         }
     }
 
@@ -96,6 +116,28 @@ export class PodmanWorkerTransport implements WorkerCommandTransport {
         return this.#remoteCwd ? ["-w", this.#remoteCwd] : [];
     }
 
-    readonly #createProviderError = (operation: string, cause: unknown): Error =>
-        createProviderError("podman", operation, cause, { container: this.#container });
+    #createExecContext(operation: string, command: readonly string[], options: { instance?: string } = {}): ProviderCommandContext {
+        return createCommandContext({
+            command,
+            cwd: this.#remoteCwd,
+            instance: options.instance,
+            operation,
+            provider: "podman"
+        });
+    }
+
+    #createShellContext(operation: string, command: readonly string[]): ProviderCommandContext {
+        return createCommandContext({
+            command: [this.#podmanBinary, "exec", "-i", this.#container, ...command],
+            instance: undefined,
+            operation,
+            provider: "podman"
+        });
+    }
+
+    readonly #createProviderError = (
+        context: ProviderCommandContext,
+        cause: unknown,
+        options?: { errorCode?: string; result?: { exitCode?: number | null; signal?: string; stderr?: string; stdout?: string } }
+    ) => createProviderError(context, cause, options);
 }

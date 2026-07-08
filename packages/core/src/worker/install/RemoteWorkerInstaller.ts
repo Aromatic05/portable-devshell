@@ -1,25 +1,39 @@
 import type { ChildProcess } from "node:child_process";
 import { readFile } from "node:fs/promises";
 
+import { errorCodes, type ControlError } from "@portable-devshell/shared";
+
+import type { ProviderCommandContext } from "../command/WorkerCommandTransport.js";
 import { waitForCommandResult } from "../command/WorkerCommandTransport.js";
 import { WorkerAssetResolver } from "../WorkerAssetResolver.js";
 
 export interface RemoteWorkerInstallerOptions {
     resolver?: WorkerAssetResolver;
-    spawnShell: (commandLine: string, stdio: ["ignore" | "pipe", "pipe", "pipe"]) => ChildProcess;
-    createProviderError: (operation: string, cause: unknown) => Error;
+    spawnShell: (
+        commandLine: string,
+        stdio: ["ignore" | "pipe", "pipe", "pipe"],
+        context: ProviderCommandContext
+    ) => ChildProcess;
+    createProviderError: (
+        context: ProviderCommandContext,
+        cause: unknown,
+        options?: { errorCode?: string; result?: { exitCode?: number | null; signal?: string; stderr?: string; stdout?: string } }
+    ) => ControlError;
+    createContext: (operation: string, command: readonly string[]) => ProviderCommandContext;
 }
 
 export class RemoteWorkerInstaller {
     readonly #resolver: WorkerAssetResolver;
     readonly #spawnShell: RemoteWorkerInstallerOptions["spawnShell"];
     readonly #createProviderError: RemoteWorkerInstallerOptions["createProviderError"];
+    readonly #createContext: RemoteWorkerInstallerOptions["createContext"];
     #installPromise?: Promise<string>;
 
     constructor(options: RemoteWorkerInstallerOptions) {
         this.#resolver = options.resolver ?? new WorkerAssetResolver();
         this.#spawnShell = options.spawnShell;
         this.#createProviderError = options.createProviderError;
+        this.#createContext = options.createContext;
     }
 
     async ensure(executable: string): Promise<string> {
@@ -39,35 +53,42 @@ export class RemoteWorkerInstaller {
 
     async #installDefaultWorker(): Promise<string> {
         const asset = await this.#resolver.resolve().catch((error) => {
-            throw this.#createProviderError("resolveExecutable", error);
+            throw this.#createProviderError(this.#createContext("resolveExecutable", ["devshell-worker"]), error);
         });
         const homeDirectory = await this.#resolveHomeDirectory();
         const binary = await readFile(asset.binaryPath).catch((error) => {
-            throw this.#createProviderError("resolveExecutable", error);
+            throw this.#createProviderError(this.#createContext("resolveExecutable", ["devshell-worker"]), error);
         });
-        const child = this.#spawnShell(buildInstallScript(homeDirectory, asset.sha256), ["pipe", "pipe", "pipe"]);
+        const commandLine = buildInstallScript(homeDirectory, asset.sha256);
+        const context = this.#createContext("installWorker", ["sh", "-lc", commandLine]);
+        const child = this.#spawnShell(commandLine, ["pipe", "pipe", "pipe"], context);
 
-        await writeToChildStdin(child, binary, this.#createProviderError, "installWorker");
+        await writeToChildStdin(child, binary, this.#createProviderError, context);
 
-        const result = await waitForCommandResult(child, this.#createProviderError, "installWorker");
+        const result = await waitForCommandResult(child, this.#createProviderError, context);
         if (result.exitCode !== 0) {
-            throw this.#createProviderError("installWorker", new Error(result.stderr || result.stdout || "worker install failed"));
+            throw this.#createProviderError(context, new Error(result.stderr || result.stdout || "worker install failed"), {
+                errorCode: errorCodes.coreWorkerProvisionFailed,
+                result
+            });
         }
 
         return buildRemoteExecutablePath(homeDirectory);
     }
 
     async #resolveHomeDirectory(): Promise<string> {
-        const child = this.#spawnShell('printf %s "${HOME:?HOME is required to install the worker}"', ["ignore", "pipe", "pipe"]);
-        const result = await waitForCommandResult(child, this.#createProviderError, "resolveExecutable");
+        const commandLine = 'printf %s "${HOME:?HOME is required to install the worker}"';
+        const context = this.#createContext("resolveExecutable", ["sh", "-lc", commandLine]);
+        const child = this.#spawnShell(commandLine, ["ignore", "pipe", "pipe"], context);
+        const result = await waitForCommandResult(child, this.#createProviderError, context);
 
         if (result.exitCode !== 0) {
-            throw this.#createProviderError("resolveExecutable", new Error(result.stderr || result.stdout || "failed to resolve HOME"));
+            throw this.#createProviderError(context, new Error(result.stderr || result.stdout || "failed to resolve HOME"), { result });
         }
 
         const homeDirectory = result.stdout.trim();
         if (homeDirectory.length === 0) {
-            throw this.#createProviderError("resolveExecutable", new Error("HOME is required to install the worker"));
+            throw this.#createProviderError(context, new Error("HOME is required to install the worker"), { result });
         }
 
         return homeDirectory;
@@ -118,19 +139,25 @@ function shellEscape(value: string): string {
 async function writeToChildStdin(
     child: ChildProcess,
     bytes: Buffer,
-    createError: (operation: string, cause: unknown) => Error,
-    operation: string
+    createError: (
+        context: ProviderCommandContext,
+        cause: unknown,
+        options?: { errorCode?: string; result?: { exitCode?: number | null; signal?: string; stderr?: string; stdout?: string } }
+    ) => Error,
+    context: ProviderCommandContext
 ): Promise<void> {
     const stdin = child.stdin;
 
     if (stdin === null) {
-        throw createError(operation, new Error("worker install stdin is unavailable"));
+        throw createError(context, new Error("worker install stdin is unavailable"), {
+            errorCode: errorCodes.coreWorkerProvisionFailed
+        });
     }
 
     await new Promise<void>((resolve, reject) => {
         const onError = (error: Error) => {
             stdin.off("finish", onFinish);
-            reject(createError(operation, error));
+            reject(createError(context, error, { errorCode: errorCodes.coreWorkerProvisionFailed }));
         };
         const onFinish = () => {
             stdin.off("error", onError);

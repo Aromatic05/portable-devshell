@@ -76,6 +76,28 @@ test("WorkerRpcBridge rejects pending calls when the rpc bridge disconnects", as
     assert.deepEqual(disconnects, [workerRpcDisconnectedErrorCode]);
 });
 
+test("WorkerRpcBridge surfaces spawn failures as structured rpc spawn errors", async () => {
+    const bridge = new WorkerRpcBridge({
+        transport: {
+            async installWorker() {},
+            async runWorkerCommand(): Promise<WorkerCommandResult> {
+                throw new Error("unused");
+            },
+            async spawnWorkerRpc() {
+                throw new Error("spawn denied");
+            }
+        },
+        rpcOptions: { instanceName: "task-4-spawn" }
+    });
+
+    await assert.rejects(bridge.connect(), (error: unknown) => {
+        assert.ok(typeof error === "object" && error !== null);
+        assert.equal((error as { code?: string }).code, "core.workerRpcSpawnFailed");
+        assert.equal((error as { details?: Record<string, unknown> }).details?.instance, "task-4-spawn");
+        return true;
+    });
+});
+
 test("WorkerProtocolClient performs ping, handshake, and tools.list against frozen devshell-worker", async (t) => {
     const workspacePath = await mkdtemp(join(tmpdir(), "portable-devshell-core-rpc-"));
     const homeDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-core-rpc-home-"));

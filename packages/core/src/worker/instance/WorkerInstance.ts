@@ -4,6 +4,7 @@ import {
     asWorkspacePath,
     createError,
     errorCodes,
+    type CommandDiagnostic,
     type CommandResult,
     type JsonValue,
     type ToolCallContext,
@@ -110,12 +111,7 @@ export class WorkerInstance {
                     code: errorCodes.coreWorkerStartFailed,
                     message: `Worker start failed for instance ${this.#config.name}.`,
                     retryable: false,
-                    details: {
-                        exitCode: startResult.exitCode,
-                        instanceName: this.#config.name,
-                        stderr: startResult.stderr,
-                        stdout: startResult.stdout
-                    }
+                    details: toJsonDetails(withInstanceDetails(startResult.details, this.#config.name))
                 });
             }
         } catch (error) {
@@ -163,12 +159,10 @@ export class WorkerInstance {
 
             throw createError({
                 code: errorCodes.coreWorkerHandshakeFailed,
+                cause: error,
                 message: `Worker handshake failed for instance ${this.#config.name}.`,
                 retryable: false,
-                details: {
-                    instanceName: this.#config.name,
-                    reason: error instanceof Error ? error.message : String(error)
-                }
+                details: { instance: this.#config.name }
             });
         }
     }
@@ -184,12 +178,7 @@ export class WorkerInstance {
                     code: errorCodes.coreWorkerStopFailed,
                     message: `Worker stop failed for instance ${this.#config.name}.`,
                     retryable: false,
-                    details: {
-                        exitCode: result.exitCode,
-                        instanceName: this.#config.name,
-                        stderr: result.stderr,
-                        stdout: result.stdout
-                    }
+                    details: toJsonDetails(withInstanceDetails(result.details, this.#config.name))
                 });
             }
         } catch (error) {
@@ -417,12 +406,10 @@ export class WorkerInstance {
 
             throw createError({
                 code: errorCodes.coreWorkerHandshakeFailed,
+                cause: error,
                 message: `Worker handshake failed for instance ${this.#config.name}.`,
                 retryable: false,
-                details: {
-                    instanceName: this.#config.name,
-                    reason: error instanceof Error ? error.message : String(error)
-                }
+                details: { instance: this.#config.name }
             });
         }
     }
@@ -450,12 +437,7 @@ export class WorkerInstance {
                 code: errorCodes.coreWorkerStatusFailed,
                 message: `Worker status failed for instance ${this.#config.name}.`,
                 retryable: false,
-                details: {
-                    exitCode: result.exitCode,
-                    instanceName: this.#config.name,
-                    stderr: result.stderr,
-                    stdout: result.stdout
-                }
+                details: toJsonDetails(withInstanceDetails(result.details, this.#config.name))
             });
             this.#stateMachine.apply({
                 connectionState: "failed",
@@ -547,18 +529,32 @@ function asCommandResult(error: unknown): CommandResult | undefined {
     const candidate = error as Record<string, unknown>;
 
     if (
-        typeof candidate.stdout !== "string" ||
-        typeof candidate.stderr !== "string" ||
-        (typeof candidate.exitCode !== "number" && candidate.exitCode !== null)
+        typeof candidate.stdout === "string" &&
+        typeof candidate.stderr === "string" &&
+        (typeof candidate.exitCode === "number" || candidate.exitCode === null)
     ) {
+        return {
+            details: readCommandDiagnostic(candidate.details),
+            exitCode: candidate.exitCode as number | null,
+            signal: typeof candidate.signal === "string" ? candidate.signal : undefined,
+            stderr: candidate.stderr,
+            stdout: candidate.stdout,
+            timedOut: candidate.timedOut === true
+        };
+    }
+
+    const details = readCommandDiagnostic(candidate.details);
+
+    if (details === undefined || (typeof details.exitCode !== "number" && details.exitCode !== null)) {
         return undefined;
     }
 
     return {
-        exitCode: candidate.exitCode as number | null,
-        signal: typeof candidate.signal === "string" ? candidate.signal : undefined,
-        stderr: candidate.stderr,
-        stdout: candidate.stdout,
+        details,
+        exitCode: details.exitCode ?? null,
+        signal: details.signal,
+        stderr: "",
+        stdout: "",
         timedOut: candidate.timedOut === true
     };
 }
@@ -589,13 +585,32 @@ function parseWorkerStatus(
     pid?: number;
     workspacePath?: string;
 } {
-    const parsed = JSON.parse(stdout) as unknown;
+    let parsed: unknown;
+
+    try {
+        parsed = JSON.parse(stdout) as unknown;
+    } catch (error) {
+        throw createError({
+            code: errorCodes.coreWorkerStatusFailed,
+            cause: error,
+            message: `Worker status returned an invalid payload for instance ${instanceName}.`,
+            retryable: false,
+            details: {
+                instance: instanceName,
+                stdoutTail: stdout.length <= 4000 ? stdout : stdout.slice(-4000)
+            }
+        });
+    }
 
     if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
         throw createError({
             code: errorCodes.coreWorkerStatusFailed,
             message: `Worker status returned an invalid payload for instance ${instanceName}.`,
-            retryable: false
+            retryable: false,
+            details: {
+                instance: instanceName,
+                stdoutTail: stdout.length <= 4000 ? stdout : stdout.slice(-4000)
+            }
         });
     }
 
@@ -607,7 +622,11 @@ function parseWorkerStatus(
             code: errorCodes.coreWorkerStatusFailed,
             message: `Worker status returned an unknown state for instance ${instanceName}.`,
             retryable: false,
-            details: { state: String(state) }
+            details: {
+                instance: instanceName,
+                state: String(state),
+                stdoutTail: stdout.length <= 4000 ? stdout : stdout.slice(-4000)
+            }
         });
     }
 
@@ -615,5 +634,39 @@ function parseWorkerStatus(
         daemonState: state,
         pid: typeof candidate.pid === "number" ? candidate.pid : undefined,
         workspacePath: typeof candidate.workspace === "string" ? candidate.workspace : undefined
+    };
+}
+
+function withInstanceDetails(details: CommandDiagnostic | undefined, instance: string): CommandDiagnostic {
+    return {
+        ...(details ?? {}),
+        instance
+    };
+}
+
+function toJsonDetails(details: CommandDiagnostic): JsonValue {
+    return Object.fromEntries(Object.entries(details).filter(([, value]) => value !== undefined)) as JsonValue;
+}
+
+function readCommandDiagnostic(value: unknown): CommandDiagnostic | undefined {
+    if (typeof value !== "object" || value === null || Array.isArray(value)) {
+        return undefined;
+    }
+
+    const candidate = value as Record<string, unknown>;
+
+    return {
+        ...(typeof candidate.causeCode === "string" ? { causeCode: candidate.causeCode } : {}),
+        ...(typeof candidate.causeMessage === "string" ? { causeMessage: candidate.causeMessage } : {}),
+        ...(Array.isArray(candidate.command) ? { command: candidate.command.filter((entry): entry is string => typeof entry === "string") } : {}),
+        ...(typeof candidate.commandDisplay === "string" ? { commandDisplay: candidate.commandDisplay } : {}),
+        ...(typeof candidate.cwd === "string" ? { cwd: candidate.cwd } : {}),
+        ...(typeof candidate.exitCode === "number" || candidate.exitCode === null ? { exitCode: candidate.exitCode as number | null } : {}),
+        ...(typeof candidate.instance === "string" ? { instance: candidate.instance } : {}),
+        ...(typeof candidate.operation === "string" ? { operation: candidate.operation } : {}),
+        ...(typeof candidate.provider === "string" ? { provider: candidate.provider } : {}),
+        ...(typeof candidate.signal === "string" ? { signal: candidate.signal } : {}),
+        ...(typeof candidate.stderrTail === "string" ? { stderrTail: candidate.stderrTail } : {}),
+        ...(typeof candidate.stdoutTail === "string" ? { stdoutTail: candidate.stdoutTail } : {})
     };
 }
