@@ -166,6 +166,79 @@ test("CliMain renders structured remote errors in verbose mode", async () => {
     assert.equal(stdout.flush(), "");
 });
 
+test("CliMain routes interactive instance.start relay output to stderr", async () => {
+    const stdout = createBuffer();
+    const stderr = createBuffer();
+    const client = {
+        async callTool() {
+            throw new Error("unused");
+        },
+        async createInstance() {
+            throw new Error("unused");
+        },
+        async getInstanceCreateSchema() {
+            throw new Error("unused");
+        },
+        async getSnapshot() {
+            throw new Error("unused");
+        },
+        async listInstances() {
+            return [];
+        },
+        async readLogs() {
+            return [];
+        },
+        async refreshStatus() {
+            throw new Error("unused");
+        },
+        async startInstance(_instance: string, relay?: { output: { write(chunk: string): void } }) {
+            relay?.output.write("Password: ");
+            return {
+                connectionState: "connected",
+                daemonState: "running",
+                lastSeq: 1,
+                name: "demo-ssh",
+                ready: true,
+                status: "ready"
+            };
+        },
+        async stopInstance() {
+            throw new Error("unused");
+        },
+        async subscribe() {
+            throw new Error("unused");
+        },
+        async validateInstanceCreateDraft() {
+            throw new Error("unused");
+        }
+    };
+
+    const cli = new CliMain({
+        createClient: () => client,
+        createLifecycleManager: async () => ({
+            async logs() {
+                return "";
+            },
+            async start() {
+                return { instanceCount: 0, running: true };
+            },
+            async status() {
+                return { instanceCount: 0, running: true };
+            },
+            async stop() {
+                return { instanceCount: 0, running: false };
+            }
+        }),
+        stdin: Readable.from(["secret\n"]),
+        stderr,
+        stdout
+    });
+
+    assert.equal(await cli.run(["instance", "start", "demo-ssh"]), 0);
+    assert.equal(stderr.flush(), "Password: ");
+    assert.match(stdout.flush(), /instance: demo-ssh/u);
+});
+
 test("CliMain handles instance logs follow and tool call through injected client", async () => {
     const stdout = createBuffer();
     const stderr = createBuffer();

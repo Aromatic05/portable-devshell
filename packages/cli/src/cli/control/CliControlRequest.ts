@@ -37,6 +37,19 @@ export interface CliControlEventEnvelope {
     type: "event";
 }
 
+export interface CliControlRelayInputEnvelope {
+    data?: string;
+    eof?: boolean;
+    id: string;
+    type: "relay.input";
+}
+
+export interface CliControlRelayOutputEnvelope {
+    data: string;
+    id: string;
+    type: "relay.output";
+}
+
 export function createControlTarget(): CliControlTarget {
     return { kind: "control" };
 }

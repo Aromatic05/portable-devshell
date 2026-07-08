@@ -14,6 +14,11 @@ import {
     type CliInstanceSnapshotEnvelope
 } from "./CliControlStream.js";
 
+export interface CliControlTerminalRelay {
+    input: NodeJS.ReadableStream;
+    output: { write(chunk: string): void };
+}
+
 export interface CliControlClientLike {
     callTool(instance: string, toolName: string, input: JsonValue): Promise<CliCommandResult>;
     createInstance(draft: InstanceCreateDraft): Promise<InstanceCreateResult>;
@@ -22,7 +27,7 @@ export interface CliControlClientLike {
     listInstances(): Promise<CliInstanceListEntry[]>;
     readLogs(instance: string, query?: { fromSeq?: number; limit?: number }): Promise<CliInstanceLogEntry[]>;
     refreshStatus(instance: string): Promise<CliInstanceSnapshotEnvelope>;
-    startInstance(instance: string): Promise<CliInstanceSnapshotEnvelope["snapshot"]>;
+    startInstance(instance: string, relay?: CliControlTerminalRelay): Promise<CliInstanceSnapshotEnvelope["snapshot"]>;
     stopInstance(instance: string): Promise<CliInstanceSnapshotEnvelope["snapshot"]>;
     subscribe(instance: string, fromSeq: number): Promise<CliControlStream>;
     validateInstanceCreateDraft(draft: InstanceCreateDraft): Promise<InstanceCreateSummary>;
@@ -59,8 +64,30 @@ export class CliControlClient implements CliControlClientLike {
         return asInstanceSnapshotEnvelope(await this.#request("instance.refreshStatus", createInstanceTarget(instance)));
     }
 
-    async startInstance(instance: string): Promise<CliInstanceSnapshotEnvelope["snapshot"]> {
-        return (await this.#request("instance.start", createInstanceTarget(instance))) as unknown as CliInstanceSnapshotEnvelope["snapshot"];
+    async startInstance(instance: string, relay?: CliControlTerminalRelay): Promise<CliInstanceSnapshotEnvelope["snapshot"]> {
+        if (relay === undefined) {
+            return (await this.#request("instance.start", createInstanceTarget(instance))) as unknown as CliInstanceSnapshotEnvelope["snapshot"];
+        }
+
+        const connection = new CliControlConnection(this.#connectionOptions);
+        const restoreTerminal = enableRawRelayMode(relay.input);
+        let requestId: string | undefined;
+        const cleanup = attachRelayInput(relay.input, connection, () => requestId);
+
+        try {
+            return (await connection.requestWithRelay("instance.start", createInstanceTarget(instance), {
+                onOutput: (chunk) => {
+                    relay.output.write(chunk);
+                },
+                onRequestId: (value) => {
+                    requestId = value;
+                }
+            })) as unknown as CliInstanceSnapshotEnvelope["snapshot"];
+        } finally {
+            cleanup();
+            restoreTerminal();
+            connection.close();
+        }
     }
 
     async stopInstance(instance: string): Promise<CliInstanceSnapshotEnvelope["snapshot"]> {
@@ -99,4 +126,54 @@ export class CliControlClient implements CliControlClientLike {
             connection.close();
         }
     }
+}
+
+function attachRelayInput(
+    input: NodeJS.ReadableStream,
+    connection: CliControlConnection,
+    getRequestId: () => string | undefined
+): () => void {
+    const onData = (chunk: string | Buffer) => {
+        const requestId = getRequestId();
+        if (requestId === undefined) {
+            return;
+        }
+
+        void connection.sendRelayInput(requestId, Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    };
+    const onEnd = () => {
+        const requestId = getRequestId();
+        if (requestId === undefined) {
+            return;
+        }
+
+        void connection.sendRelayEof(requestId);
+    };
+
+    input.on("data", onData);
+    input.once("end", onEnd);
+
+    return () => {
+        input.off("data", onData);
+        input.off("end", onEnd);
+    };
+}
+
+function enableRawRelayMode(input: NodeJS.ReadableStream): () => void {
+    if (!isRawModeCapable(input) || input.isTTY !== true) {
+        return () => undefined;
+    }
+
+    const previous = input.isRaw;
+    input.setRawMode(true);
+
+    return () => {
+        input.setRawMode(previous === true);
+    };
+}
+
+function isRawModeCapable(
+    input: NodeJS.ReadableStream
+): input is NodeJS.ReadableStream & { isRaw?: boolean; isTTY?: boolean; setRawMode(mode: boolean): void } {
+    return typeof input === "object" && input !== null && "setRawMode" in input && typeof input.setRawMode === "function";
 }

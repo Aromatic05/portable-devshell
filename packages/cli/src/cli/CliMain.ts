@@ -112,7 +112,14 @@ export class CliMain {
                 );
                 return;
             case "instance.start":
-                this.#stdout.write(renderInstanceSnapshot(await new CliCommandInstanceStart().execute(this.#createClient(), command.instance)));
+                this.#stdout.write(
+                    renderInstanceSnapshot(
+                        await new CliCommandInstanceStart().execute(this.#createClient(), command.instance, {
+                            input: this.#stdin,
+                            output: this.#stderr
+                        })
+                    )
+                );
                 return;
             case "instance.stop":
                 this.#stdout.write(renderInstanceSnapshot(await new CliCommandInstanceStop().execute(this.#createClient(), command.instance)));

@@ -5,7 +5,6 @@ import { FrameReader, FrameWriter, type JsonValue } from "@portable-devshell/sha
 
 import type {
     CliControlEventEnvelope,
-    CliControlRequestEnvelope,
     CliControlResponseEnvelope,
     CliControlTarget
 } from "./CliControlRequest.js";
@@ -22,6 +21,7 @@ export class CliControlConnection {
     readonly #socketFactory: (path: string) => Socket;
     readonly #socketPath: string;
     readonly #pending = new Map<string, { reject: (error: unknown) => void; resolve: (value: JsonValue) => void }>();
+    readonly #relayOutputs = new Map<string, (chunk: string) => void>();
     readonly #events: CliControlEventEnvelope[] = [];
     readonly #eventWaiters: Array<{ reject: (error: unknown) => void; resolve: (value: CliControlEventEnvelope) => void }> = [];
     #connected = false;
@@ -35,22 +35,67 @@ export class CliControlConnection {
     }
 
     async request(method: string, target: CliControlTarget, params?: JsonValue): Promise<JsonValue> {
+        return await this.#request(method, target, params);
+    }
+
+    async requestWithRelay(
+        method: string,
+        target: CliControlTarget,
+        relay: { onOutput(chunk: string): void; onRequestId?(requestId: string): void },
+        params?: JsonValue
+    ): Promise<JsonValue> {
+        return await this.#request(method, target, params, relay.onOutput, relay.onRequestId);
+    }
+
+    async sendRelayInput(requestId: string, chunk: Uint8Array): Promise<void> {
+        await this.connect();
+        await this.#writer?.write({
+            data: Buffer.from(chunk).toString("base64"),
+            id: requestId,
+            type: "relay.input"
+        } as unknown as JsonValue);
+    }
+
+    async sendRelayEof(requestId: string): Promise<void> {
+        await this.connect();
+        await this.#writer?.write({
+            eof: true,
+            id: requestId,
+            type: "relay.input"
+        } as unknown as JsonValue);
+    }
+
+    async #request(
+        method: string,
+        target: CliControlTarget,
+        params?: JsonValue,
+        onRelayOutput?: (chunk: string) => void,
+        onRequestId?: (requestId: string) => void
+    ): Promise<JsonValue> {
         await this.connect();
         const id = `cli-${++this.#counter}`;
         const response = new Promise<JsonValue>((resolve, reject) => {
             this.#pending.set(id, { reject, resolve });
         });
+        if (onRelayOutput !== undefined) {
+            this.#relayOutputs.set(id, onRelayOutput);
+        }
+        onRequestId?.(id);
 
-        await this.#writer?.write({
-            id,
-            issuedAt: new Date().toISOString(),
-            method,
-            params,
-            target,
-            type: "request"
-        } as unknown as JsonValue);
+        try {
+            await this.#writer?.write({
+                id,
+                issuedAt: new Date().toISOString(),
+                method,
+                params,
+                target,
+                type: "request"
+            } as unknown as JsonValue);
 
-        return await response;
+            return await response;
+        } finally {
+            this.#relayOutputs.delete(id);
+        }
     }
 
     async nextEvent(): Promise<CliControlEventEnvelope> {
@@ -127,6 +172,11 @@ export class CliControlConnection {
             return;
         }
 
+        if (frame.type === "relay.output" && typeof frame.id === "string" && typeof frame.data === "string") {
+            this.#relayOutputs.get(frame.id)?.(frame.data);
+            return;
+        }
+
         if (
             frame.type === "event" &&
             typeof frame.event === "string" &&
@@ -157,6 +207,8 @@ export class CliControlConnection {
         for (const waiter of this.#eventWaiters.splice(0)) {
             waiter.reject(error);
         }
+
+        this.#relayOutputs.clear();
     }
 }
 
