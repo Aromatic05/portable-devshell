@@ -1,8 +1,4 @@
-type TomlPrimitive = boolean | number | string;
-interface TomlRecord {
-    [key: string]: TomlValue;
-}
-type TomlValue = TomlPrimitive | TomlPrimitive[] | TomlRecord | TomlRecord[];
+import { parse, stringify, type TomlTableWithoutBigInt } from "smol-toml";
 
 export type ControlProviderKind = "docker" | "local" | "podman" | "ssh";
 export type ControlMcpAuthMode = "none" | "oauth2" | "token";
@@ -57,112 +53,50 @@ export interface ControlConfig {
     version: number;
 }
 
+type TomlRecord = TomlTableWithoutBigInt;
+
 export class ControlConfigTomlCodec {
     decode(source: string): ControlConfig {
-        return this.#fromTomlDocument(parseTomlDocument(source));
+        return this.#fromTomlDocument(parse(source) as TomlTableWithoutBigInt);
     }
 
     encode(config: ControlConfig): string {
-        const lines: string[] = [];
-        lines.push(`version = ${config.version}`);
-        lines.push("");
-        lines.push("[control]");
-        lines.push(`logLevel = ${formatTomlString(config.control.logLevel)}`);
-        lines.push("");
-        lines.push("[mcp]");
-        lines.push(`enabled = ${formatTomlBoolean(config.mcp.enabled)}`);
-        lines.push(`listenHost = ${formatTomlString(config.mcp.listenHost)}`);
-        lines.push(`listenPort = ${config.mcp.listenPort}`);
-
-        if (config.mcp.publicBaseUrl !== undefined) {
-            lines.push(`publicBaseUrl = ${formatTomlString(config.mcp.publicBaseUrl)}`);
-        }
-
-        lines.push("");
-        lines.push("[mcp.auth]");
-        lines.push(`mode = ${formatTomlString(config.mcp.auth.mode)}`);
-
-        for (const instance of config.instances) {
-            lines.push("");
-            lines.push("[[instances]]");
-            lines.push(`name = ${formatTomlString(instance.name)}`);
-            lines.push(`enabled = ${formatTomlBoolean(instance.enabled)}`);
-            lines.push(`provider = ${formatTomlString(instance.provider)}`);
-
-            if (instance.defaultWorkspace !== undefined) {
-                lines.push(`defaultWorkspace = ${formatTomlString(instance.defaultWorkspace)}`);
-            }
-
-            if (instance.workerBinaryPath !== undefined) {
-                lines.push(`workerBinaryPath = ${formatTomlString(instance.workerBinaryPath)}`);
-            }
-
-            if (instance.host !== undefined) {
-                lines.push(`host = ${formatTomlString(instance.host)}`);
-            }
-
-            if (instance.remoteCwd !== undefined) {
-                lines.push(`remoteCwd = ${formatTomlString(instance.remoteCwd)}`);
-            }
-
-            if (instance.container !== undefined) {
-                lines.push(`container = ${formatTomlString(instance.container)}`);
-            }
-
-            if (instance.sshBinary !== undefined) {
-                lines.push(`sshBinary = ${formatTomlString(instance.sshBinary)}`);
-            }
-
-            if (instance.dockerBinary !== undefined) {
-                lines.push(`dockerBinary = ${formatTomlString(instance.dockerBinary)}`);
-            }
-
-            if (instance.podmanBinary !== undefined) {
-                lines.push(`podmanBinary = ${formatTomlString(instance.podmanBinary)}`);
-            }
-
-            if (instance.env !== undefined && Object.keys(instance.env).length > 0) {
-                lines.push("");
-                lines.push("[instances.env]");
-                for (const [key, value] of Object.entries(instance.env)) {
-                    lines.push(`${key} = ${formatTomlString(value)}`);
+        return stringify({
+            version: config.version,
+            control: {
+                logLevel: config.control.logLevel
+            },
+            mcp: {
+                enabled: config.mcp.enabled,
+                listenHost: config.mcp.listenHost,
+                listenPort: config.mcp.listenPort,
+                ...(config.mcp.publicBaseUrl === undefined ? {} : { publicBaseUrl: config.mcp.publicBaseUrl }),
+                auth: {
+                    mode: config.mcp.auth.mode
                 }
-            }
-
-            lines.push("");
-            lines.push("[instances.mcp]");
-            lines.push(`enabled = ${formatTomlBoolean(instance.mcp.enabled)}`);
-            lines.push(`allowTools = ${formatTomlStringArray(instance.mcp.allowTools)}`);
-
-            if (instance.mcp.path !== undefined) {
-                lines.push(`path = ${formatTomlString(instance.mcp.path)}`);
-            }
-
-            if (instance.logs !== undefined) {
-                lines.push("");
-                lines.push("[instances.logs]");
-
-                if (instance.logs.eventBufferSize !== undefined) {
-                    lines.push(`eventBufferSize = ${instance.logs.eventBufferSize}`);
-                }
-
-                if (instance.logs.retentionDays !== undefined) {
-                    lines.push(`retentionDays = ${instance.logs.retentionDays}`);
-                }
-            }
-
-            if (instance.security !== undefined) {
-                lines.push("");
-                lines.push("[instances.security]");
-
-                if (instance.security.mode !== undefined) {
-                    lines.push(`mode = ${formatTomlString(instance.security.mode)}`);
-                }
-            }
-        }
-
-        lines.push("");
-        return lines.join("\n");
+            },
+            instances: config.instances.map((instance) => ({
+                name: instance.name,
+                enabled: instance.enabled,
+                provider: instance.provider,
+                ...(instance.defaultWorkspace === undefined ? {} : { defaultWorkspace: instance.defaultWorkspace }),
+                ...(instance.workerBinaryPath === undefined ? {} : { workerBinaryPath: instance.workerBinaryPath }),
+                ...(instance.host === undefined ? {} : { host: instance.host }),
+                ...(instance.remoteCwd === undefined ? {} : { remoteCwd: instance.remoteCwd }),
+                ...(instance.container === undefined ? {} : { container: instance.container }),
+                ...(instance.sshBinary === undefined ? {} : { sshBinary: instance.sshBinary }),
+                ...(instance.dockerBinary === undefined ? {} : { dockerBinary: instance.dockerBinary }),
+                ...(instance.podmanBinary === undefined ? {} : { podmanBinary: instance.podmanBinary }),
+                ...(instance.env === undefined || Object.keys(instance.env).length === 0 ? {} : { env: instance.env }),
+                mcp: {
+                    enabled: instance.mcp.enabled,
+                    allowTools: [...instance.mcp.allowTools],
+                    ...(instance.mcp.path === undefined ? {} : { path: instance.mcp.path })
+                },
+                ...(instance.logs === undefined ? {} : { logs: withoutUndefined(instance.logs) }),
+                ...(instance.security === undefined ? {} : { security: withoutUndefined(instance.security) })
+            }))
+        });
     }
 
     #fromTomlDocument(document: TomlRecord): ControlConfig {
@@ -229,163 +163,8 @@ export class ControlConfigTomlCodec {
     }
 }
 
-function parseTomlDocument(source: string): TomlRecord {
-    const document: TomlRecord = {};
-    let currentRecord = document;
-    let currentInstance: TomlRecord | undefined;
-
-    for (const rawLine of source.split(/\r?\n/u)) {
-        const line = stripComment(rawLine).trim();
-
-        if (line.length === 0) {
-            continue;
-        }
-
-        if (line.startsWith("[[") && line.endsWith("]]")) {
-            const path = line.slice(2, -2).trim();
-            if (path !== "instances") {
-                throw new Error(`unsupported array table: ${path}`);
-            }
-
-            const instances = (document.instances ??= []) as TomlRecord[];
-            currentInstance = {};
-            instances.push(currentInstance);
-            currentRecord = currentInstance;
-            continue;
-        }
-
-        if (line.startsWith("[") && line.endsWith("]")) {
-            const path = line.slice(1, -1).trim();
-            currentRecord = resolveTable(document, path, currentInstance);
-            continue;
-        }
-
-        const separatorIndex = line.indexOf("=");
-        if (separatorIndex === -1) {
-            throw new Error(`invalid TOML line: ${line}`);
-        }
-
-        const key = line.slice(0, separatorIndex).trim();
-        const rawValue = line.slice(separatorIndex + 1).trim();
-        currentRecord[key] = parseTomlValue(rawValue);
-    }
-
-    return document;
-}
-
-function resolveTable(document: TomlRecord, path: string, currentInstance: TomlRecord | undefined): TomlRecord {
-    if (path === "control" || path === "mcp" || path === "mcp.auth") {
-        return ensureTable(document, path.split("."));
-    }
-
-    if (path === "instances.env" || path === "instances.logs" || path === "instances.mcp" || path === "instances.security") {
-        if (currentInstance === undefined) {
-            throw new Error(`${path} requires an [[instances]] table`);
-        }
-
-        return ensureTable(currentInstance, path.split(".").slice(1));
-    }
-
-    throw new Error(`unsupported table: ${path}`);
-}
-
-function ensureTable(root: TomlRecord, path: string[]): TomlRecord {
-    let current = root;
-
-    for (const segment of path) {
-        const next = current[segment];
-
-        if (next === undefined) {
-            const created: TomlRecord = {};
-            current[segment] = created;
-            current = created;
-            continue;
-        }
-
-        if (!isRecord(next)) {
-            throw new Error(`${path.join(".")} must be a table`);
-        }
-
-        current = next;
-    }
-
-    return current;
-}
-
-function parseTomlValue(value: string): TomlPrimitive | TomlPrimitive[] {
-    if (value === "true" || value === "false") {
-        return value === "true";
-    }
-
-    if (value.startsWith("\"") && value.endsWith("\"")) {
-        return value.slice(1, -1).replaceAll("\\\"", "\"").replaceAll("\\\\", "\\");
-    }
-
-    if (value.startsWith("[") && value.endsWith("]")) {
-        const inner = value.slice(1, -1).trim();
-        if (inner.length === 0) {
-            return [];
-        }
-
-        return splitTomlArray(inner).map((entry) => {
-            const parsed = parseTomlValue(entry);
-            if (Array.isArray(parsed) || typeof parsed === "boolean" || typeof parsed === "number") {
-                throw new Error("only string arrays are supported");
-            }
-
-            return parsed;
-        });
-    }
-
-    if (/^-?\d+$/u.test(value)) {
-        return Number.parseInt(value, 10);
-    }
-
-    throw new Error(`unsupported TOML value: ${value}`);
-}
-
-function splitTomlArray(value: string): string[] {
-    const entries: string[] = [];
-    let current = "";
-    let inString = false;
-
-    for (const character of value) {
-        if (character === "\"" && !current.endsWith("\\")) {
-            inString = !inString;
-        }
-
-        if (character === "," && !inString) {
-            entries.push(current.trim());
-            current = "";
-            continue;
-        }
-
-        current += character;
-    }
-
-    if (current.trim().length > 0) {
-        entries.push(current.trim());
-    }
-
-    return entries;
-}
-
-function stripComment(line: string): string {
-    let inString = false;
-
-    for (let index = 0; index < line.length; index += 1) {
-        const character = line[index];
-
-        if (character === "\"" && line[index - 1] !== "\\") {
-            inString = !inString;
-        }
-
-        if (character === "#" && !inString) {
-            return line.slice(0, index);
-        }
-    }
-
-    return line;
+function withoutUndefined<T extends object>(record: T): Partial<T> {
+    return Object.fromEntries(Object.entries(record).filter(([, value]) => value !== undefined)) as Partial<T>;
 }
 
 function isRecord(value: unknown): value is TomlRecord {
@@ -485,16 +264,4 @@ function asAuthMode(value: string): ControlMcpAuthMode {
     }
 
     throw new Error(`unsupported mcp.auth.mode: ${value}`);
-}
-
-function formatTomlBoolean(value: boolean): string {
-    return value ? "true" : "false";
-}
-
-function formatTomlString(value: string): string {
-    return `"${value.replaceAll("\\", "\\\\").replaceAll("\"", "\\\"")}"`;
-}
-
-function formatTomlStringArray(values: readonly string[]): string {
-    return `[${values.map((value) => formatTomlString(value)).join(", ")}]`;
 }

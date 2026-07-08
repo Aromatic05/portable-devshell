@@ -17,7 +17,8 @@
     "dependencies": {
         "@portable-devshell/core": "workspace:*",
         "@portable-devshell/mcp": "workspace:*",
-        "@portable-devshell/shared": "workspace:*"
+        "@portable-devshell/shared": "workspace:*",
+        "smol-toml": "1.7.0"
     },
     "scripts": {
         "build": "tsc -b --force",
