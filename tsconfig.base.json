@@ -5,10 +5,10 @@
         "moduleResolution": "NodeNext",
         "paths": {
             "@portable-devshell/shared": ["./packages/shared/dist/index.d.ts"],
-            "@portable-devshell/core": ["./packages/core/src/index.ts"],
-            "@portable-devshell/control": ["./packages/control/src/index.ts"],
-            "@portable-devshell/mcp": ["./packages/mcp/src/index.ts"],
-            "@portable-devshell/cli": ["./packages/cli/src/index.ts"]
+            "@portable-devshell/core": ["./packages/core/dist/index.d.ts"],
+            "@portable-devshell/control": ["./packages/control/dist/index.d.ts"],
+            "@portable-devshell/mcp": ["./packages/mcp/dist/index.d.ts"],
+            "@portable-devshell/cli": ["./packages/cli/dist/index.d.ts"]
         },
         "types": ["node"],
         "strict": true,
