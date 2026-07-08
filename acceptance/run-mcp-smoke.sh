@@ -8,7 +8,12 @@ fixture_config="$repo_root/acceptance/fixtures/config.local.toml"
 fixture_workspace="$repo_root/acceptance/fixtures/workspace"
 
 if [ ! -x "$worker_binary" ]; then
-    echo "missing worker binary: $worker_binary" >&2
+    echo "building worker binary: $worker_binary" >&2
+    cargo build -p devshell-worker --manifest-path "$repo_root/Cargo.toml"
+fi
+
+if [ ! -x "$worker_binary" ]; then
+    echo "missing worker binary after build: $worker_binary" >&2
     exit 1
 fi
 
