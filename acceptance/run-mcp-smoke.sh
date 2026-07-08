@@ -67,10 +67,28 @@ MCP_ENDPOINT="http://127.0.0.1:17890/aromatic-pc/mcp" WORKSPACE_PATH="$tmp_works
 const endpoint = process.env.MCP_ENDPOINT;
 const workspacePath = process.env.WORKSPACE_PATH;
 
-async function post(body) {
+async function post(body, headers = {}) {
   const response = await fetch(endpoint, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: {
+      accept: "application/json, text/event-stream",
+      "content-type": "application/json",
+      ...headers
+    },
+    body: JSON.stringify(body)
+  });
+
+  return response;
+}
+
+async function postJson(body, headers = {}) {
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers: {
+      accept: "application/json, text/event-stream",
+      "content-type": "application/json",
+      ...headers
+    },
     body: JSON.stringify(body)
   });
 
@@ -78,31 +96,59 @@ async function post(body) {
     throw new Error(`unexpected status ${response.status}`);
   }
 
-  return await response.json();
+  return {
+    headers: response.headers,
+    ...(await response.json())
+  };
 }
 
-const initialize = await post({
+const initialize = await postJson({
   jsonrpc: "2.0",
   id: "req-init",
   method: "initialize",
-  params: { clientInfo: { name: "acceptance", version: "0.0.0" } }
+  params: {
+    protocolVersion: "2025-03-26",
+    capabilities: {},
+    clientInfo: { name: "acceptance", version: "0.0.0" }
+  }
 });
 
-if (typeof initialize.result?.sessionId !== "string") {
-  throw new Error("initialize did not return a sessionId");
+const sessionId = initialize.headers.get("mcp-session-id");
+const protocolVersion = String(initialize.result?.protocolVersion ?? "");
+
+if (typeof sessionId !== "string" || sessionId.length === 0) {
+  throw new Error("initialize did not return mcp-session-id response header");
 }
 
-const toolsList = await post({
+if (protocolVersion.length === 0) {
+  throw new Error("initialize did not return protocolVersion");
+}
+
+const sessionHeaders = {
+  "mcp-protocol-version": protocolVersion,
+  "mcp-session-id": sessionId
+};
+
+const initialized = await post({
+  jsonrpc: "2.0",
+  method: "notifications/initialized"
+}, sessionHeaders);
+
+if (initialized.status !== 202) {
+  throw new Error(`notifications/initialized returned ${initialized.status}`);
+}
+
+const toolsList = await postJson({
   jsonrpc: "2.0",
   id: "req-tools-list",
   method: "tools/list"
-});
+}, sessionHeaders);
 
 if (toolsList.result?.tools?.[0]?.name !== "bash_run") {
   throw new Error("tools/list did not expose bash_run");
 }
 
-const toolsCall = await post({
+const toolsCall = await postJson({
   jsonrpc: "2.0",
   id: "req-tools-call",
   method: "tools/call",
@@ -112,7 +158,7 @@ const toolsCall = await post({
       command: "pwd"
     }
   }
-});
+}, sessionHeaders);
 
 const text = String(toolsCall.result?.content?.[0]?.text ?? "");
 
