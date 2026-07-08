@@ -32,7 +32,7 @@ export class WorkerToolInvoker {
 function asCommandResult(value: JsonValue): CommandResult {
     if (!isRecord(value)) {
         throw createError({
-            code: errorCodes.toolSchemaInvalid,
+            code: errorCodes.coreToolSchemaUnavailable,
             message: "Tool result must be an object.",
             retryable: false,
             details: { result: value }
@@ -70,7 +70,7 @@ function validateAgainstSchema(schema: JsonValue, value: JsonValue, toolName: st
         for (const key of required) {
             if (!(key in value)) {
                 throw createError({
-                    code: errorCodes.toolSchemaInvalid,
+                    code: errorCodes.coreToolSchemaUnavailable,
                     message: `Tool ${toolName} input is missing required field ${path}.${key}.`,
                     retryable: false,
                     details: { path: `${path}.${key}`, toolName }
@@ -107,7 +107,7 @@ function assertMatchesType(expectedType: string, value: JsonValue, toolName: str
     }
 
     throw createError({
-        code: errorCodes.toolSchemaInvalid,
+        code: errorCodes.coreToolSchemaUnavailable,
         message: `Tool ${toolName} input field ${path} must be ${expectedType}.`,
         retryable: false,
         details: { expectedType, path, toolName }

@@ -56,6 +56,10 @@ test("WorkerRpcBridge rejects pending calls when the rpc bridge disconnects", as
         transport: harness.transport,
         rpcOptions: { instanceName: "task-4-disconnect" }
     });
+    const disconnects: string[] = [];
+    bridge.onDisconnect((error) => {
+        disconnects.push(error.code);
+    });
     const rpcClient = new WorkerRpcClient(bridge);
     const protocolClient = new WorkerProtocolClient(rpcClient);
 
@@ -69,6 +73,7 @@ test("WorkerRpcBridge rejects pending calls when the rpc bridge disconnects", as
         return true;
     });
     assert.equal(harness.spawnCount, 1);
+    assert.deepEqual(disconnects, [workerRpcDisconnectedErrorCode]);
 });
 
 test("WorkerProtocolClient performs ping, handshake, and tools.list against frozen devshell-worker", async (t) => {

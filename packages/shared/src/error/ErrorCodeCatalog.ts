@@ -1,5 +1,5 @@
 export const errorCodes = {
-    authConfigInvalid: "config.auth_invalid",
+    authConfigInvalid: "control.configInvalid",
     coreInstanceBusy: "core.instanceBusy",
     coreInstanceNotReady: "core.instanceNotReady",
     coreProviderFailed: "core.providerFailed",
@@ -9,12 +9,13 @@ export const errorCodes = {
     coreWorkerStartFailed: "core.workerStartFailed",
     coreWorkerStatusFailed: "core.workerStatusFailed",
     coreWorkerStopFailed: "core.workerStopFailed",
-    envelopeInvalid: "protocol.envelope_invalid",
+    envelopeInvalid: "control.methodNotFound",
     instanceConflict: "instance.conflict",
-    instanceMissing: "instance.missing",
+    instanceMissing: "control.instanceNotFound",
+    mcpPublicAuthRequired: "mcp.publicAuthRequired",
     streamGap: "stream.gap",
-    targetInvalid: "protocol.target_invalid",
-    toolSchemaInvalid: "tool.schema_invalid"
+    targetInvalid: "control.invalidTarget",
+    toolSchemaInvalid: "core.toolSchemaUnavailable"
 } as const;
 
 export type ErrorCode = (typeof errorCodes)[keyof typeof errorCodes];

@@ -21,7 +21,8 @@ interface CommandResult {
 }
 
 interface WorkerInstanceLike {
-    callTool(toolName: string, input: JsonValue): Promise<CommandResult>;
+    callTool(toolName: string, input: JsonValue, context: { requestId?: string; sessionId?: string; source: "mcp" }): Promise<CommandResult>;
+    hasToolSchemaCache?(): boolean;
     listTools(): ToolDefinition[];
     snapshot(): { ready?: boolean };
 }

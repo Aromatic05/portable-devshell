@@ -4,6 +4,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { CallToolRequestSchema, ErrorCode, isInitializeRequest, ListToolsRequestSchema, McpError } from "@modelcontextprotocol/sdk/types.js";
+import type { ToolCallContext } from "@portable-devshell/shared";
 
 import { McpToolSchemaUnavailableError } from "../tool/McpToolSchemaAdapter.js";
 import { McpEndpointWorker } from "./McpEndpointWorker.js";
@@ -18,6 +19,7 @@ interface CommandResult {
 }
 
 interface McpEndpointSession {
+    nextToolCallContext?: ToolCallContext;
     server: Server;
     transport: StreamableHTTPServerTransport;
 }
@@ -49,6 +51,14 @@ export class McpEndpointBinding {
             if (session === undefined) {
                 writeJsonRpcError(response, 404, -32001, "Session not found");
                 return;
+            }
+
+            if (isToolsCallBody(body)) {
+                session.nextToolCallContext = {
+                    requestId: toRequestId(getRequestId(body)),
+                    sessionId,
+                    source: "mcp"
+                };
             }
 
             await session.transport.handleRequest(request, response, body);
@@ -88,12 +98,12 @@ export class McpEndpointBinding {
         });
         const session: McpEndpointSession = { server, transport };
 
-        this.#registerHandlers(server);
+        this.#registerHandlers(server, session);
         await server.connect(transport);
         return session;
     }
 
-    #registerHandlers(server: Server): void {
+    #registerHandlers(server: Server, session: McpEndpointSession): void {
         server.setRequestHandler(ListToolsRequestSchema, async () => {
             try {
                 return {
@@ -106,9 +116,12 @@ export class McpEndpointBinding {
 
         server.setRequestHandler(CallToolRequestSchema, async (request) => {
             try {
-                const result = await this.#worker.callTool(request.params.name, (request.params.arguments ?? {}) as JsonValue);
+                const context = session.nextToolCallContext ?? { source: "mcp" as const };
+                session.nextToolCallContext = undefined;
+                const result = await this.#worker.callTool(request.params.name, (request.params.arguments ?? {}) as JsonValue, context);
                 return toCallToolResult(result);
             } catch (error) {
+                session.nextToolCallContext = undefined;
                 throw toMcpError(error);
             }
         });
@@ -125,6 +138,22 @@ function asHeaderValue(value: string | string[] | undefined): string | undefined
     }
 
     return undefined;
+}
+
+function toRequestId(value: unknown): string | undefined {
+    if (typeof value === "string") {
+        return value;
+    }
+
+    if (typeof value === "number") {
+        return String(value);
+    }
+
+    return undefined;
+}
+
+function isToolsCallBody(value: JsonValue): value is { id?: string | number; method: "tools/call" } {
+    return typeof value === "object" && value !== null && !Array.isArray(value) && value.method === "tools/call";
 }
 
 function getRequestId(body: JsonValue): string | number | null {

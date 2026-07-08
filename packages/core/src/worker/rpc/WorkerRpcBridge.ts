@@ -25,6 +25,7 @@ export class WorkerRpcBridge {
     readonly #transport: WorkerCommandTransport;
     readonly #rpcOptions: WorkerRpcOptions;
     readonly #reader = new FrameReader();
+    readonly #disconnectListeners = new Set<(error: WorkerRpcError) => void>();
     #process?: WorkerRpcProcessAdapter;
     #writer?: FrameWriter;
     #spawnPromise?: Promise<WorkerRpcProcessAdapter>;
@@ -38,6 +39,13 @@ export class WorkerRpcBridge {
 
     async connect(): Promise<void> {
         await this.#ensureProcess();
+    }
+
+    onDisconnect(listener: (error: WorkerRpcError) => void): () => void {
+        this.#disconnectListeners.add(listener);
+        return () => {
+            this.#disconnectListeners.delete(listener);
+        };
     }
 
     async request(request: WorkerRpcRequestEnvelope): Promise<WorkerRpcResponseEnvelope> {
@@ -164,6 +172,10 @@ export class WorkerRpcBridge {
         for (const [requestId, pending] of this.#pending) {
             this.#pending.delete(requestId);
             pending.reject(error);
+        }
+
+        for (const listener of this.#disconnectListeners) {
+            listener(error);
         }
     }
 

@@ -65,6 +65,9 @@ test("ControlRpcServer serves Task 9 rpc methods over reused unix socket connect
         { input: { command: "pwd" }, toolName: "bash_run" }
     );
     assert.equal(toolCall.result.exitCode, 0);
+    assert.equal(worker.lastToolCall?.source, "cli");
+    assert.match(String(worker.lastToolCall?.requestId ?? ""), /^req-\d+$/u);
+    assert.equal(typeof worker.lastToolCall?.sessionId, "string");
 
     const subscribed = await client.request(
         "instance.subscribe",
@@ -74,7 +77,7 @@ test("ControlRpcServer serves Task 9 rpc methods over reused unix socket connect
     assert.equal(subscribed.result.lastSeq, 2);
     assert.equal(subscribed.result.events.length, 2);
 
-    worker.emit("instance.toolCalled", { toolName: "bash_run" });
+    worker.emit("toolCall.completed", { toolName: "bash_run" });
     const streamed = await client.nextEvent();
     assert.equal(streamed.seq, 3);
     assert.equal(streamed.target.instance, "alpha");
@@ -84,14 +87,14 @@ test("ControlRpcServer serves Task 9 rpc methods over reused unix socket connect
 
     const invalidTarget = await client.request("control.ping", { kind: "invalid" });
     assert.equal(invalidTarget.ok, false);
-    assert.equal(invalidTarget.error.code, "protocol.target_invalid");
+    assert.equal(invalidTarget.error.code, "control.invalidTarget");
 
     const unknownMethod = await client.request("control.missing", { kind: "control" });
     assert.equal(unknownMethod.ok, false);
 
     const missingInstance = await client.request("instance.getSnapshot", { instance: "missing", kind: "instance" });
     assert.equal(missingInstance.ok, false);
-    assert.equal(missingInstance.error.code, "instance.missing");
+    assert.equal(missingInstance.error.code, "control.instanceNotFound");
 
     worker.dropBefore(3);
     const gap = await client.request("instance.subscribe", { instance: "alpha", kind: "instance" }, { fromSeq: 1 });
@@ -246,6 +249,7 @@ async function waitFor(factory: () => boolean, timeoutMs = 1_000): Promise<void>
 class FakeWorker {
     readonly #name: string;
     #refreshCount = 0;
+    #lastToolCall?: { requestId?: string; sessionId?: string; source: string };
     #events: Array<{ at: string; data?: unknown; instanceName: string; seq: number; type: string }> = [];
     #lastSeq = 0;
     #logs = [
@@ -282,6 +286,10 @@ class FakeWorker {
         return this.#refreshCount;
     }
 
+    get lastToolCall() {
+        return this.#lastToolCall;
+    }
+
     async start(_workspacePath?: string) {
         this.emit("instance.started", { workspacePath: "/tmp/ws" });
         this.#snapshot = {
@@ -316,8 +324,13 @@ class FakeWorker {
         return this.#logs.filter((entry) => entry.seq >= (query.fromSeq ?? 1));
     }
 
-    async callTool(_toolName: string, _input: JsonValue) {
-        this.emit("instance.toolCalled", { toolName: "bash_run" });
+    async callTool(
+        _toolName: string,
+        _input: JsonValue,
+        context: { requestId?: string; sessionId?: string; source: string }
+    ) {
+        this.#lastToolCall = context;
+        this.emit("toolCall.completed", { source: context.source, toolName: "bash_run" });
         return {
             exitCode: 0,
             signal: undefined,

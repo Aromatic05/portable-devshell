@@ -182,13 +182,13 @@ function createInstanceHarness(): { attach: (socket: Socket) => void } {
                             void respond(writer, envelope.id, { events: [], lastSeq: 1 }).then(() => {
                                 setTimeout(() => {
                                     void writer.write({
-                                        event: "instance.toolCalled",
+                                        event: "toolCall.completed",
                                         payload: {
                                             at: "",
                                             data: { toolName: "bash_run" },
                                             instanceName: "demo-local",
                                             seq: 2,
-                                            type: "instance.toolCalled"
+                                            type: "toolCall.completed"
                                         },
                                         seq: 2,
                                         target: { instance: "demo-local", kind: "instance" },
@@ -202,7 +202,7 @@ function createInstanceHarness(): { attach: (socket: Socket) => void } {
                             break;
                         default:
                             void writer.write({
-                                error: { code: "protocol.envelope_invalid", message: `unknown method ${envelope.method}`, retryable: false },
+                                error: { code: "control.methodNotFound", message: `unknown method ${envelope.method}`, retryable: false },
                                 id: envelope.id,
                                 ok: false,
                                 type: "response"

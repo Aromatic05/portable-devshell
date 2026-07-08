@@ -25,6 +25,7 @@ export class RouteHandlerInstance {
     async handle(
         connection: ControlRpcConnection,
         method: string,
+        requestId: string,
         instanceName: string,
         params?: JsonValue
     ): Promise<JsonValue> {
@@ -67,7 +68,13 @@ export class RouteHandlerInstance {
                 );
             case "instance.callTool": {
                 const { input, toolName } = readToolCall(params);
-                return (await descriptor.worker.callTool(toolName, input)) as unknown as JsonValue;
+                return (
+                    await descriptor.worker.callTool(toolName, input, {
+                        requestId,
+                        sessionId: connection.id,
+                        source: "cli"
+                    })
+                ) as unknown as JsonValue;
             }
             default:
                 throw createError({
@@ -101,7 +108,7 @@ function readLogQuery(params?: JsonValue): { fromSeq?: number; limit?: number } 
 function readFromSeq(params?: JsonValue): number {
     if (!isRecord(params) || typeof params.fromSeq !== "number") {
         throw createError({
-            code: errorCodes.envelopeInvalid,
+            code: errorCodes.targetInvalid,
             message: "instance.subscribe requires numeric fromSeq.",
             retryable: false
         });
@@ -113,7 +120,7 @@ function readFromSeq(params?: JsonValue): number {
 function readToolCall(params?: JsonValue): { input: JsonValue; toolName: string } {
     if (!isRecord(params) || typeof params.toolName !== "string") {
         throw createError({
-            code: errorCodes.envelopeInvalid,
+            code: errorCodes.targetInvalid,
             message: "instance.callTool requires toolName.",
             retryable: false
         });

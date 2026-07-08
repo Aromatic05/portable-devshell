@@ -34,11 +34,11 @@ test("StreamSubscriptionManager returns snapshot lastSeq and pushes sequenced ev
     assert.equal(snapshot.lastSeq, 1);
     assert.equal(snapshot.events[0]?.seq, 1);
 
-    worker.emit("instance.toolCalled", { toolName: "bash_run" });
+    worker.emit("toolCall.completed", { toolName: "bash_run" });
     await waitFor(() => sentEvents.length === 1);
 
     assert.equal(sentEvents[0]?.seq, 2);
-    assert.equal(sentEvents[0]?.event, "instance.toolCalled");
+    assert.equal(sentEvents[0]?.event, "toolCall.completed");
     assert.equal((sentEvents[0]?.payload as { seq?: number }).seq, 2);
     manager.unsubscribeConnection("conn-1");
 });
@@ -47,7 +47,7 @@ test("StreamSubscriptionManager returns stream.gap when fromSeq is unavailable",
     const manager = new StreamSubscriptionManager(5);
     const worker = new FakeWorker("alpha");
     await worker.start("/tmp/ws");
-    worker.emit("instance.toolCalled", { toolName: "bash_run" });
+    worker.emit("toolCall.completed", { toolName: "bash_run" });
     worker.dropBefore(2);
 
     await assert.rejects(

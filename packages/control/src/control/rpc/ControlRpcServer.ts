@@ -1,7 +1,7 @@
 import { unlink } from "node:fs/promises";
 import { createServer, type Server, type Socket } from "node:net";
 
-import type { ControlErrorBody } from "@portable-devshell/shared";
+import { errorCodes, type ControlErrorBody } from "@portable-devshell/shared";
 
 import type { InstanceRegistry } from "../../instance/registry/InstanceRegistry.js";
 import { RouteMethodRegistry } from "../../route/RouteMethodRegistry.js";
@@ -107,7 +107,7 @@ export class ControlRpcServer {
 
         if (scope === undefined) {
             await connection.sendResponse({
-                error: this.#errorBody("protocol.envelope_invalid", `Method ${request.method} was not found.`, false),
+                error: this.#errorBody(errorCodes.envelopeInvalid, `Method ${request.method} was not found.`, false),
                 id: request.id,
                 ok: false,
                 type: "response"
@@ -158,7 +158,7 @@ export class ControlRpcServer {
             return error as ControlErrorBody;
         }
 
-        return this.#errorBody("protocol.envelope_invalid", error instanceof Error ? error.message : String(error), false);
+        return this.#errorBody(errorCodes.envelopeInvalid, error instanceof Error ? error.message : String(error), false);
     }
 
     #errorBody(code: string, message: string, retryable: boolean): ControlErrorBody {

@@ -7,7 +7,7 @@ export class CliExitMapper {
         switch (code) {
             case "control.notRunning":
                 return cliExitCodes.controlNotRunning;
-            case "instance.missing":
+            case "control.instanceNotFound":
                 return cliExitCodes.instanceNotFound;
             case "cli.usage":
                 return cliExitCodes.usage;

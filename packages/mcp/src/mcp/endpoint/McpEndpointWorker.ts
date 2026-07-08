@@ -1,6 +1,8 @@
+import type { ToolCallContext } from "@portable-devshell/shared";
+
 import { McpToolDescriptionEnhancer } from "../tool/McpToolDescriptionEnhancer.js";
 import { McpToolFilter } from "../tool/McpToolFilter.js";
-import { McpToolSchemaAdapter, type McpTool } from "../tool/McpToolSchemaAdapter.js";
+import { McpToolSchemaAdapter, McpToolSchemaUnavailableError, type McpTool } from "../tool/McpToolSchemaAdapter.js";
 
 type JsonValue = boolean | number | null | string | JsonValue[] | { [key: string]: JsonValue };
 
@@ -18,7 +20,8 @@ interface CommandResult {
 }
 
 interface WorkerInstanceLike {
-    callTool(toolName: string, input: JsonValue): Promise<CommandResult>;
+    callTool(toolName: string, input: JsonValue, context: ToolCallContext): Promise<CommandResult>;
+    hasToolSchemaCache?(): boolean;
     listTools(): ToolDefinition[];
     snapshot(): { ready?: boolean };
 }
@@ -55,16 +58,18 @@ export class McpEndpointWorker {
     }
 
     listTools(): McpTool[] {
-        this.assertReady();
+        if (!this.#worker.snapshot().ready && this.#worker.hasToolSchemaCache?.() !== true) {
+            throw new McpToolSchemaUnavailableError(this.#instanceName);
+        }
+
         return this.#filter.filter(this.#worker.listTools()).map((tool) => this.#adaptTool(tool));
     }
 
     getTool(toolName: string): ToolDefinition | undefined {
-        this.assertReady();
         return this.#filter.filter(this.#worker.listTools()).find((tool) => tool.name === toolName);
     }
 
-    async callTool(toolName: string, input: JsonValue) {
+    async callTool(toolName: string, input: JsonValue, context: ToolCallContext) {
         this.assertReady();
         const tool = this.getTool(toolName);
 
@@ -73,7 +78,7 @@ export class McpEndpointWorker {
         }
 
         this.#adaptTool(tool);
-        return await this.#worker.callTool(toolName, input);
+        return await this.#worker.callTool(toolName, input, context);
     }
 
     #adaptTool(tool: ToolDefinition): McpTool {

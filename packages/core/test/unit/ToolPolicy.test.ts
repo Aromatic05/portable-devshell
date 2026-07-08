@@ -46,7 +46,7 @@ test("WorkerToolCatalog rejects invalid tool schema from tools.list", () => {
                 }
             ]),
         (error: unknown) => {
-            assert.equal((error as { code?: string }).code, errorCodes.toolSchemaInvalid);
+            assert.equal((error as { code?: string }).code, errorCodes.coreToolSchemaUnavailable);
             return true;
         }
     );

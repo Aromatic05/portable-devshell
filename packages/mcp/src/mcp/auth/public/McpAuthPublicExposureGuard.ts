@@ -20,7 +20,7 @@ export class McpAuthPublicExposureGuard {
         if (!authEnabled && (hostIsPublic || baseUrlIsPublic)) {
             const error = new Error("Public MCP exposure requires authentication.");
             Object.assign(error, {
-                code: "config.auth_invalid",
+                code: "mcp.publicAuthRequired",
                 details: {
                     listenHost: config.listenHost,
                     publicBaseUrl: config.publicBaseUrl

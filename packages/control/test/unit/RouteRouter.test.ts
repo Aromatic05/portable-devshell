@@ -21,7 +21,7 @@ test("RouteMethodRegistry resolves Task 9 methods only", () => {
     assert.equal(registry.resolve("control.getGlobalLogs"), undefined);
 });
 
-test("RouteRouterControl rejects instance targets with protocol.target_invalid", async () => {
+test("RouteRouterControl rejects instance targets with control.invalidTarget", async () => {
     const instanceRegistry = new InstanceRegistry([]);
     const controlRouter = new RouteRouterControl(
         new RouteHandlerControl({
@@ -37,7 +37,7 @@ test("RouteRouterControl rejects instance targets with protocol.target_invalid",
             type: "request"
         }),
         (error: unknown) => {
-            assert.equal((error as { code?: string }).code, "protocol.target_invalid");
+            assert.equal((error as { code?: string }).code, "control.invalidTarget");
             return true;
         }
     );
@@ -80,7 +80,7 @@ test("Route routers dispatch by target and return instance not found / invalid t
             }
         ),
         (error: unknown) => {
-            assert.equal((error as { code?: string }).code, "protocol.target_invalid");
+            assert.equal((error as { code?: string }).code, "control.invalidTarget");
             return true;
         }
     );
@@ -99,7 +99,7 @@ test("Route routers dispatch by target and return instance not found / invalid t
             }
         ),
         (error: unknown) => {
-            assert.equal((error as { code?: string }).code, "instance.missing");
+            assert.equal((error as { code?: string }).code, "control.instanceNotFound");
             return true;
         }
     );

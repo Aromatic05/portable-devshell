@@ -23,6 +23,6 @@ export class RouteRouterInstance {
             });
         }
 
-        return await this.#handler.handle(connection, request.method, target.instance, request.params);
+        return await this.#handler.handle(connection, request.method, request.id, target.instance, request.params);
     }
 }

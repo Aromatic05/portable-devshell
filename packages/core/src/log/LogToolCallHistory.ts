@@ -1,4 +1,10 @@
-import { errorCodes, type CommandResult, type InstanceName, type ToolCallRecord } from "@portable-devshell/shared";
+import {
+    errorCodes,
+    type CommandResult,
+    type InstanceName,
+    type ToolCallContext,
+    type ToolCallRecord
+} from "@portable-devshell/shared";
 
 import { JsonlStore } from "./store/LogStoreJsonl.js";
 import type { LogQuery } from "./LogQuery.js";
@@ -14,7 +20,15 @@ export class InstanceBusyError extends Error {
 export class ToolCallHistory {
     readonly #instanceName: InstanceName;
     readonly #store: JsonlStore<ToolCallRecord>;
-    #activeCallId?: string;
+    #activeCall?: {
+        args: string[];
+        callId: string;
+        requestId?: string;
+        sessionId?: string;
+        source: ToolCallContext["source"];
+        startedAt: string;
+        toolName: string;
+    };
     #initialized = false;
 
     constructor(instanceName: InstanceName, store: JsonlStore<ToolCallRecord>) {
@@ -22,41 +36,44 @@ export class ToolCallHistory {
         this.#store = store;
     }
 
-    async started(callId: string, toolName: string, args: string[], startedAt: string): Promise<ToolCallRecord> {
+    async started(
+        callId: string,
+        toolName: string,
+        args: string[],
+        context: ToolCallContext,
+        startedAt: string
+    ): Promise<void> {
         await this.#initialize();
 
-        if (this.#activeCallId !== undefined) {
+        if (this.#activeCall !== undefined) {
             throw new InstanceBusyError(this.#instanceName);
         }
 
-        this.#activeCallId = callId;
-
-        const record: ToolCallRecord = {
+        this.#activeCall = {
             args,
             callId,
-            instanceName: this.#instanceName,
+            requestId: context.requestId,
+            sessionId: context.sessionId,
+            source: context.source,
             startedAt,
-            status: "started",
             toolName
         };
-
-        await this.#store.append(record);
-        return record;
     }
 
     async completed(callId: string, result: CommandResult, finishedAt: string): Promise<ToolCallRecord> {
         await this.#initialize();
         this.#assertActiveCall(callId);
 
-        const startedRecord = await this.#latestStarted(callId);
+        const startedRecord = this.#readActiveCall(callId);
         const record: ToolCallRecord = {
             ...startedRecord,
+            instanceName: this.#instanceName,
             finishedAt,
             result,
             status: "completed"
         };
 
-        this.#activeCallId = undefined;
+        this.#activeCall = undefined;
         await this.#store.append(record);
         return record;
     }
@@ -65,16 +82,17 @@ export class ToolCallHistory {
         await this.#initialize();
         this.#assertActiveCall(callId);
 
-        const startedRecord = await this.#latestStarted(callId);
+        const startedRecord = this.#readActiveCall(callId);
         const record: ToolCallRecord = {
             ...startedRecord,
             errorCode,
             finishedAt,
+            instanceName: this.#instanceName,
             result,
             status: "failed"
         };
 
-        this.#activeCallId = undefined;
+        this.#activeCall = undefined;
         await this.#store.append(record);
         return record;
     }
@@ -96,37 +114,21 @@ export class ToolCallHistory {
         if (this.#initialized) {
             return;
         }
-
-        const records = await this.#store.readAll();
-        const startedRecords = new Map<string, ToolCallRecord>();
-
-        for (const record of records) {
-            if (record.status === "started") {
-                startedRecords.set(record.callId, record);
-                continue;
-            }
-
-            startedRecords.delete(record.callId);
-        }
-
-        this.#activeCallId = startedRecords.size === 1 ? [...startedRecords.keys()][0] : undefined;
         this.#initialized = true;
     }
 
     #assertActiveCall(callId: string): void {
-        if (this.#activeCallId !== callId) {
+        if (this.#activeCall?.callId !== callId) {
             throw new Error(`Active tool call ${callId} was not found.`);
         }
     }
 
-    async #latestStarted(callId: string): Promise<ToolCallRecord> {
-        const records = await this.#store.readAll();
-        const match = [...records].reverse().find((record) => record.callId === callId && record.status === "started");
-
-        if (match === undefined) {
-            throw new Error(`Started tool call ${callId} was not found.`);
+    #readActiveCall(callId: string) {
+        this.#assertActiveCall(callId);
+        if (this.#activeCall === undefined) {
+            throw new Error(`Active tool call ${callId} was not found.`);
         }
 
-        return match;
+        return this.#activeCall;
     }
 }

@@ -26,7 +26,7 @@ test("route registry resolves per-instance binding", () => {
                 listTools() {
                     return [{ name: "bash_run", description: "Run shell", inputSchema: { type: "object" } }];
                 },
-                async callTool() {
+                async callTool(_toolName: string, _input: unknown, _context: { source: "mcp" }) {
                     return { exitCode: 0, stderr: "", stdout: "" };
                 }
             } as never

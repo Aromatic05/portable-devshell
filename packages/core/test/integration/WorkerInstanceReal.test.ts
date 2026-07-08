@@ -24,6 +24,8 @@ import {
     type WorkerRpcResponseEnvelope
 } from "@portable-devshell/core";
 
+const cliToolCallContext = { source: "cli" } as const;
+
 test("WorkerInstance completes lifecycle against frozen devshell-worker", async (t) => {
     const workspacePath = await mkdtemp(join(tmpdir(), "portable-devshell-instance-"));
     const homeDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-instance-home-"));
@@ -79,7 +81,7 @@ test("WorkerInstance rejects not-ready and concurrent tool calls while persistin
     });
 
     try {
-        await assert.rejects(instance.callTool("bash_run", { command: "pwd" }), (error: unknown) => {
+        await assert.rejects(instance.callTool("bash_run", { command: "pwd" }, cliToolCallContext), (error: unknown) => {
             assert.equal((error as { code?: string }).code, errorCodes.coreInstanceNotReady);
             return true;
         });
@@ -87,10 +89,10 @@ test("WorkerInstance rejects not-ready and concurrent tool calls while persistin
         const started = await instance.start("/tmp/workspace");
         assert.equal(started.ready, true);
 
-        const firstCall = instance.callTool("bash_run", { command: "pwd" });
+        const firstCall = instance.callTool("bash_run", { command: "pwd" }, cliToolCallContext);
         await harness.waitForMethod("bash_run");
 
-        await assert.rejects(instance.callTool("bash_run", { command: "ls" }), (error: unknown) => {
+        await assert.rejects(instance.callTool("bash_run", { command: "ls" }, cliToolCallContext), (error: unknown) => {
             assert.equal((error as { code?: string }).code, errorCodes.coreInstanceBusy);
             return true;
         });
@@ -104,15 +106,16 @@ test("WorkerInstance rejects not-ready and concurrent tool calls while persistin
         const result = await firstCall;
         assert.equal(result.stdout, "/tmp/workspace\n");
 
-        const invalidCall = instance.callTool("bash_run", { bad: true } as JsonValue);
+        const invalidCall = instance.callTool("bash_run", { bad: true } as JsonValue, cliToolCallContext);
         await assert.rejects(invalidCall, (error: unknown) => {
-            assert.equal((error as { code?: string }).code, errorCodes.toolSchemaInvalid);
+            assert.equal((error as { code?: string }).code, errorCodes.coreToolSchemaUnavailable);
             return true;
         });
 
         const records = await instance.readToolCalls();
-        assert.deepEqual(records.map((record) => record.status), ["started", "completed", "started", "failed"]);
-        assert.equal(records[3]?.errorCode, errorCodes.toolSchemaInvalid);
+        assert.deepEqual(records.map((record) => record.status), ["completed", "failed"]);
+        assert.equal(records[0]?.source, "cli");
+        assert.equal(records[1]?.errorCode, errorCodes.coreToolSchemaUnavailable);
 
         const logs = await instance.readLogs();
         assert.equal(logs.length, 1);
@@ -123,12 +126,11 @@ test("WorkerInstance rejects not-ready and concurrent tool calls while persistin
         assert.equal(replay.kind, "events");
         assert.deepEqual(
             replay.events.map((event) => event.type),
-            ["instance.started", "instance.toolCalled", "instance.toolCalled"]
+            ["instance.started", "toolCall.started", "toolCall.completed", "toolCall.started", "toolCall.failed"]
         );
 
         await instance.stop();
     } finally {
-        instance.close();
         await rm(homeDirectory, { force: true, recursive: true });
     }
 });
@@ -166,23 +168,72 @@ test("WorkerInstance refreshStatus updates snapshot from worker status without a
     }
 });
 
+test("WorkerInstance reconnectRpc refreshes schema after an rpc disconnect", async () => {
+    const homeDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-instance-reconnect-"));
+    const harness = createWorkerInstanceHarness();
+    const instance = new WorkerInstanceFactory().create({
+        homeDirectory,
+        name: asInstanceName("task-6-reconnect"),
+        transport: harness.transport
+    });
+
+    try {
+        await instance.start("/tmp/workspace");
+        assert.deepEqual(instance.listTools()[0]?.inputSchema, toolSchemaFor("command"));
+
+        harness.setTools([
+            {
+                description: "Run a shell command.",
+                inputSchema: toolSchemaFor("cwd"),
+                name: "bash_run"
+            }
+        ]);
+        harness.disconnect();
+        await harness.waitForMethodCount("tools.list", 2);
+
+        assert.equal(instance.snapshot().connectionState, "connected");
+        assert.deepEqual(instance.listTools()[0]?.inputSchema, toolSchemaFor("cwd"));
+
+        const replay = instance.subscribe(1);
+        assert.equal(replay.kind, "events");
+        assert.deepEqual(
+            replay.events.map((event) => event.type),
+            ["instance.started", "worker.rpcDisconnected", "worker.rpcConnected", "worker.schemaRefreshed"]
+        );
+    } finally {
+        instance.close();
+        await rm(homeDirectory, { force: true, recursive: true });
+    }
+});
+
 function createWorkerInstanceHarness(): {
+    disconnect: () => void;
+    setTools: (tools: Array<{ description: string; inputSchema: JsonValue; name: string }>) => void;
     transport: WorkerCommandTransport;
     requestedMethods: () => number;
     respond: (method: string, result: Record<string, JsonValue>) => void;
     setStatus: (status: "running" | "stale" | "stopped") => void;
     waitForMethod: (method: string) => Promise<void>;
+    waitForMethodCount: (method: string, count: number) => Promise<void>;
 } {
-    const stdout = new PassThrough();
-    const stdin = new PassThrough();
-    const stderr = new PassThrough();
-    const reader = new FrameReader();
-    const writer = new FrameWriter(stdout);
     const pending = new Map<string, string>();
     const requestMethods: string[] = [];
     const methodWaiters = new Map<string, Array<() => void>>();
     let commandStatus: "running" | "stale" | "stopped" = "stopped";
-    let exitResolve: ((value: { code: number | null; signal: NodeJS.Signals | null }) => void) | undefined;
+    let tools = [
+        {
+            description: "Run a shell command.",
+            inputSchema: toolSchemaFor("command"),
+            name: "bash_run"
+        }
+    ];
+    let activeProcess:
+        | {
+              exitResolve?: (value: { code: number | null; signal: NodeJS.Signals | null }) => void;
+              stdout: PassThrough;
+              writer: FrameWriter;
+          }
+        | undefined;
 
     const transport: WorkerCommandTransport = {
         async runWorkerCommand(command): Promise<WorkerCommandResult> {
@@ -211,6 +262,32 @@ function createWorkerInstanceHarness(): {
             };
         },
         async spawnWorkerRpc() {
+            const stdout = new PassThrough();
+            const stdin = new PassThrough();
+            const stderr = new PassThrough();
+            const reader = new FrameReader();
+            const writer = new FrameWriter(stdout);
+            let exitResolve: ((value: { code: number | null; signal: NodeJS.Signals | null }) => void) | undefined;
+
+            stdin.on("data", (chunk: Uint8Array) => {
+                const frames = reader.push(chunk);
+
+                for (const frame of frames) {
+                    if (!isRequestFrame(frame)) {
+                        continue;
+                    }
+
+                    pending.set(frame.method, frame.id);
+                    requestMethods.push(frame.method);
+                    methodWaiters.get(frame.method)?.splice(0).forEach((resolve) => resolve());
+
+                    if (frame.method === "worker.ping" || frame.method === "worker.handshake" || frame.method === "tools.list") {
+                        void writer.write(createLifecycleResponse(frame.method, frame.id, tools) as unknown as JsonValue);
+                    }
+                }
+            });
+
+            activeProcess = { stdout, writer };
             return {
                 stdin,
                 stdout,
@@ -222,31 +299,23 @@ function createWorkerInstanceHarness(): {
                 },
                 exit: new Promise((resolve) => {
                     exitResolve = resolve;
+                    if (activeProcess !== undefined) {
+                        activeProcess.exitResolve = resolve;
+                    }
                 })
             };
         },
         async installWorker(): Promise<void> {}
     };
 
-    stdin.on("data", (chunk: Uint8Array) => {
-        const frames = reader.push(chunk);
-
-        for (const frame of frames) {
-            if (!isRequestFrame(frame)) {
-                continue;
-            }
-
-            pending.set(frame.method, frame.id);
-            requestMethods.push(frame.method);
-            methodWaiters.get(frame.method)?.splice(0).forEach((resolve) => resolve());
-
-            if (frame.method === "worker.ping" || frame.method === "worker.handshake" || frame.method === "tools.list") {
-                void writer.write(createLifecycleResponse(frame.method, frame.id) as unknown as JsonValue);
-            }
-        }
-    });
-
     return {
+        disconnect() {
+            activeProcess?.stdout.end();
+            activeProcess?.exitResolve?.({ code: 1, signal: null });
+        },
+        setTools(nextTools) {
+            tools = nextTools;
+        },
         transport,
         requestedMethods() {
             return requestMethods.length;
@@ -259,7 +328,7 @@ function createWorkerInstanceHarness(): {
             }
 
             pending.delete(method);
-            void writer.write({
+            void activeProcess?.writer.write({
                 id: requestId,
                 ok: true,
                 result,
@@ -279,6 +348,24 @@ function createWorkerInstanceHarness(): {
                 waiters.push(resolve);
                 methodWaiters.set(method, waiters);
             });
+        },
+        waitForMethodCount(method, count) {
+            if (requestMethods.filter((value) => value === method).length >= count) {
+                return Promise.resolve();
+            }
+
+            return new Promise<void>((resolve) => {
+                const poll = () => {
+                    if (requestMethods.filter((value) => value === method).length >= count) {
+                        resolve();
+                        return;
+                    }
+
+                    setTimeout(poll, 10);
+                };
+
+                poll();
+            });
         }
     };
 }
@@ -292,7 +379,11 @@ function isRequestFrame(value: unknown): value is { id: string; method: string }
     return candidate.type === "request" && typeof candidate.id === "string" && typeof candidate.method === "string";
 }
 
-function createLifecycleResponse(method: string, id: string): WorkerRpcResponseEnvelope {
+function createLifecycleResponse(
+    method: string,
+    id: string,
+    tools: Array<{ description: string; inputSchema: JsonValue; name: string }>
+): WorkerRpcResponseEnvelope {
     if (method === "worker.ping") {
         return {
             id,
@@ -322,20 +413,18 @@ function createLifecycleResponse(method: string, id: string): WorkerRpcResponseE
         id,
         ok: true,
         result: {
-            tools: [
-                {
-                    description: "Run a shell command.",
-                    inputSchema: {
-                        properties: {
-                            command: { type: "string" }
-                        },
-                        required: ["command"],
-                        type: "object"
-                    },
-                    name: "bash_run"
-                }
-            ]
+            tools
         },
         type: "response"
+    };
+}
+
+function toolSchemaFor(field: string): JsonValue {
+    return {
+        properties: {
+            [field]: { type: "string" }
+        },
+        required: [field],
+        type: "object"
     };
 }

@@ -6,6 +6,7 @@ import {
     errorCodes,
     type CommandResult,
     type JsonValue,
+    type ToolCallContext,
     type ToolCallRecord,
     type WorkspacePath
 } from "@portable-devshell/shared";
@@ -50,6 +51,8 @@ export class WorkerInstance {
     readonly #toolCallHistory: ToolCallHistory;
     readonly #toolInvoker: WorkerToolInvoker;
     #handshake?: WorkerHandshakeResult;
+    #intentionalRpcCloseDepth = 0;
+    #reconnectPromise?: Promise<InstanceSnapshot>;
     #workspacePath?: WorkspacePath;
 
     constructor(dependencies: WorkerInstanceDependencies) {
@@ -63,6 +66,9 @@ export class WorkerInstance {
         this.#stateMachine = dependencies.stateMachine;
         this.#toolCallHistory = dependencies.toolCallHistory;
         this.#toolInvoker = dependencies.toolInvoker;
+        this.#rpcBridge.onDisconnect((error) => {
+            void this.#handleRpcDisconnect(error);
+        });
     }
 
     snapshot(): InstanceSnapshot {
@@ -71,6 +77,10 @@ export class WorkerInstance {
 
     listTools() {
         return this.#catalog.listTools();
+    }
+
+    hasToolSchemaCache(): boolean {
+        return this.#catalog.hasSchema();
     }
 
     async start(workspacePath?: WorkspacePath | string): Promise<InstanceSnapshot> {
@@ -140,8 +150,7 @@ export class WorkerInstance {
                 lastSeq: startedEvent.seq
             });
         } catch (error) {
-            this.#rpcBridge.close();
-            this.#catalog.clear();
+            this.#closeRpcBridge();
             this.#stateMachine.apply({
                 connectionState: "disconnected",
                 daemonState: "running",
@@ -192,8 +201,7 @@ export class WorkerInstance {
             });
             throw error;
         } finally {
-            this.#rpcBridge.close();
-            this.#catalog.clear();
+            this.#closeRpcBridge();
             this.#handshake = undefined;
         }
 
@@ -220,8 +228,7 @@ export class WorkerInstance {
         switch (status.daemonState) {
             case "stopped":
             case "stale":
-                this.#rpcBridge.close();
-                this.#catalog.clear();
+                this.#closeRpcBridge();
                 this.#handshake = undefined;
                 return this.#stateMachine.apply({
                     connectionState: "disconnected",
@@ -241,7 +248,7 @@ export class WorkerInstance {
         }
     }
 
-    async callTool(toolName: string, input: JsonValue): Promise<CommandResult> {
+    async callTool(toolName: string, input: JsonValue, context: ToolCallContext): Promise<CommandResult> {
         if (!this.snapshot().ready) {
             throw createError({
                 code: errorCodes.coreInstanceNotReady,
@@ -255,7 +262,7 @@ export class WorkerInstance {
         const startedAt = new Date().toISOString();
 
         try {
-            await this.#toolCallHistory.started(callId, toolName, toHistoryArgs(input), startedAt);
+            await this.#toolCallHistory.started(callId, toolName, toHistoryArgs(input), context, startedAt);
         } catch (error) {
             if (error instanceof InstanceBusyError) {
                 throw createError({
@@ -269,15 +276,32 @@ export class WorkerInstance {
             throw error;
         }
 
+        await this.#appendEvent(
+            "toolCall.started",
+            toEventData({
+                callId,
+                requestId: context.requestId,
+                sessionId: context.sessionId,
+                source: context.source,
+                toolName
+            })
+        );
+
         try {
             const result = await this.#toolInvoker.invoke(toolName, input);
             await this.#appendToolLogs(result);
             await this.#toolCallHistory.completed(callId, result, new Date().toISOString());
-            await this.#appendEvent("instance.toolCalled", {
-                callId,
-                exitCode: result.exitCode,
-                toolName
-            });
+            await this.#appendEvent(
+                "toolCall.completed",
+                toEventData({
+                    callId,
+                    exitCode: result.exitCode,
+                    requestId: context.requestId,
+                    sessionId: context.sessionId,
+                    source: context.source,
+                    toolName
+                })
+            );
             return result;
         } catch (error) {
             const finishedAt = new Date().toISOString();
@@ -285,11 +309,17 @@ export class WorkerInstance {
             const result = asCommandResult(error);
 
             await this.#toolCallHistory.failed(callId, errorCode, finishedAt, result);
-            await this.#appendEvent("instance.toolCalled", {
-                callId,
-                errorCode,
-                toolName
-            });
+            await this.#appendEvent(
+                "toolCall.failed",
+                toEventData({
+                    callId,
+                    errorCode,
+                    requestId: context.requestId,
+                    sessionId: context.sessionId,
+                    source: context.source,
+                    toolName
+                })
+            );
             throw error;
         }
     }
@@ -307,8 +337,7 @@ export class WorkerInstance {
     }
 
     close(): void {
-        this.#rpcBridge.close();
-        this.#catalog.clear();
+        this.#closeRpcBridge();
         this.#handshake = undefined;
         this.#stateMachine.apply({
             connectionState: "disconnected",
@@ -324,9 +353,24 @@ export class WorkerInstance {
         return this.#workspacePath;
     }
 
-    async #refreshRunningStatus(pid?: number): Promise<InstanceSnapshot> {
+    async reconnectRpc(): Promise<InstanceSnapshot> {
+        if (this.#reconnectPromise !== undefined) {
+            return await this.#reconnectPromise;
+        }
+
+        this.#reconnectPromise = this.#refreshRunningStatus(this.snapshot().pid, "reconnecting", true).finally(() => {
+            this.#reconnectPromise = undefined;
+        });
+        return await this.#reconnectPromise;
+    }
+
+    async #refreshRunningStatus(
+        pid?: number,
+        connectionState: "connecting" | "reconnecting" = this.snapshot().connectionState === "disconnected" ? "connecting" : "reconnecting",
+        emitReconnectEvents = false
+    ): Promise<InstanceSnapshot> {
         this.#stateMachine.apply({
-            connectionState: this.snapshot().connectionState === "disconnected" ? "connecting" : "reconnecting",
+            connectionState,
             daemonState: "running",
             lastErrorCode: undefined,
             pid
@@ -337,17 +381,28 @@ export class WorkerInstance {
             await this.#protocolClient.ping();
             this.#handshake = await this.#protocolClient.handshake(this.#config.handshake);
             const tools = await this.#protocolClient.listTools();
-            this.#catalog.refresh(tools.tools);
+            const refreshedTools = this.#catalog.refresh(tools.tools);
             this.#workspacePath = asWorkspacePath(this.#handshake.workspace);
+            let lastSeq = this.snapshot().lastSeq;
+
+            if (emitReconnectEvents) {
+                const connectedEvent = await this.#appendEvent("worker.rpcConnected");
+                const schemaEvent = await this.#appendEvent(
+                    "worker.schemaRefreshed",
+                    toEventData({ toolCount: refreshedTools.length })
+                );
+                lastSeq = Math.max(connectedEvent.seq, schemaEvent.seq);
+            }
+
             return this.#stateMachine.apply({
                 connectionState: "connected",
                 daemonState: "running",
                 lastErrorCode: undefined,
+                lastSeq,
                 pid
             });
         } catch (error) {
-            this.#rpcBridge.close();
-            this.#catalog.clear();
+            this.#closeRpcBridge();
             this.#handshake = undefined;
             this.#stateMachine.apply({
                 connectionState: "failed",
@@ -411,6 +466,44 @@ export class WorkerInstance {
         }
 
         return parseWorkerStatus(result.stdout, this.#config.name);
+    }
+
+    async #handleRpcDisconnect(error: unknown): Promise<void> {
+        if (this.#intentionalRpcCloseDepth > 0) {
+            return;
+        }
+
+        const daemonState = this.snapshot().daemonState;
+        const disconnectedEvent = await this.#appendEvent(
+            "worker.rpcDisconnected",
+            toEventData({ errorCode: getErrorCode(error, errorCodes.coreWorkerRpcDisconnected) })
+        );
+
+        this.#handshake = undefined;
+        this.#stateMachine.apply({
+            connectionState: daemonState === "running" ? "reconnecting" : "disconnected",
+            daemonState,
+            lastErrorCode: getErrorCode(error, errorCodes.coreWorkerRpcDisconnected),
+            lastSeq: disconnectedEvent.seq
+        });
+
+        if (daemonState !== "running") {
+            return;
+        }
+
+        try {
+            await this.reconnectRpc();
+        } catch {}
+    }
+
+    #closeRpcBridge(): void {
+        this.#intentionalRpcCloseDepth += 1;
+
+        try {
+            this.#rpcBridge.close();
+        } finally {
+            this.#intentionalRpcCloseDepth -= 1;
+        }
     }
 
     async #appendEvent(type: InstanceEventInput["type"], data?: JsonValue) {
@@ -480,6 +573,12 @@ function getErrorCode(error: unknown, fallback: string): string {
 
 function isKnownErrorCode(error: unknown): boolean {
     return typeof error === "object" && error !== null && "code" in error && typeof error.code === "string";
+}
+
+function toEventData(
+    record: Record<string, JsonValue | undefined>
+): Record<string, JsonValue> {
+    return Object.fromEntries(Object.entries(record).filter(([, value]) => value !== undefined)) as Record<string, JsonValue>;
 }
 
 function parseWorkerStatus(

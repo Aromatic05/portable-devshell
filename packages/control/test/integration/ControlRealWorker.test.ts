@@ -77,7 +77,7 @@ test("control lifecycle smoke drives the frozen worker and persists Task 12 arti
     assert.equal(instanceStopped.ready, false);
 
     assert.match(await readFile(join(homeDirectory, ".devshell", "aromatic-pc", "control-worker", "tool-calls.jsonl"), "utf8"), /bash_run/u);
-    assert.match(await readFile(join(homeDirectory, ".devshell", "aromatic-pc", "control-worker", "events.jsonl"), "utf8"), /instance\.toolCalled/u);
+    assert.match(await readFile(join(homeDirectory, ".devshell", "aromatic-pc", "control-worker", "events.jsonl"), "utf8"), /toolCall\.completed/u);
     assert.match(await readFile(join(homeDirectory, ".devshell", "aromatic-pc", "control-worker", "logs.jsonl"), "utf8"), /portable-devshell-control/u);
     assert.match(await readFile(join(homeDirectory, ".devshell", "control", "logs", "control.log"), "utf8"), /control server started/u);
 

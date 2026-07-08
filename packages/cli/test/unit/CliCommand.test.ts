@@ -48,7 +48,7 @@ test("CliMain handles control lifecycle commands and exit code mapping", async (
                 throw new Error("unused");
             },
             async getSnapshot() {
-                throw { code: "instance.missing", message: "missing" };
+                throw { code: "control.instanceNotFound", message: "missing" };
             },
             async listInstances() {
                 return [];
@@ -83,7 +83,7 @@ test("CliMain handles instance logs follow and tool call through injected client
     const stderr = createBuffer();
     const stream = {
         async nextEvent() {
-            return { event: "instance.toolCalled", seq: 2, target: { instance: "demo-local", kind: "instance" }, type: "event" };
+            return { event: "toolCall.completed", seq: 2, target: { instance: "demo-local", kind: "instance" }, type: "event" };
         },
         close() {}
     };
@@ -171,7 +171,7 @@ test("CliMain follows instance logs without skipping events between initial pull
             }
 
             this.delivered = true;
-            return { event: "instance.toolCalled", seq: 2, target: { instance: "demo-local", kind: "instance" }, type: "event" };
+            return { event: "toolCall.completed", seq: 2, target: { instance: "demo-local", kind: "instance" }, type: "event" };
         }
     };
     let initialLogsRead = false;
@@ -250,7 +250,7 @@ test("CliMain recovers instance log follow when subscribe returns stream.gap", a
     const stream = {
         close() {},
         async nextEvent() {
-            return { event: "instance.toolCalled", seq: 4, target: { instance: "demo-local", kind: "instance" }, type: "event" };
+            return { event: "toolCall.completed", seq: 4, target: { instance: "demo-local", kind: "instance" }, type: "event" };
         }
     };
     let snapshotCount = 0;
@@ -345,7 +345,7 @@ test("CliMain recovers watch status when subscribe returns stream.gap", async ()
     const stream = {
         close() {},
         async nextEvent() {
-            return { event: "instance.toolCalled", seq: 4, target: { instance: "demo-local", kind: "instance" }, type: "event" };
+            return { event: "toolCall.completed", seq: 4, target: { instance: "demo-local", kind: "instance" }, type: "event" };
         }
     };
     let snapshotCount = 0;

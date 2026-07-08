@@ -66,7 +66,12 @@ test("tools/call delegates to WorkerInstance.callTool", async () => {
         const response = await postJson(server.url, await readFixture("mcp-tools-call.json"), session.headers);
 
         assert.equal(response.status, 200);
-        assert.deepEqual(harness.calls, [{ toolName: "bash_run", input: { command: "pwd" } }]);
+        assert.equal(harness.calls.length, 1);
+        assert.deepEqual(harness.calls[0]?.input, { command: "pwd" });
+        assert.equal(harness.calls[0]?.requestId, "req-tools-call");
+        assert.equal(harness.calls[0]?.sessionId, session.headers["mcp-session-id"]);
+        assert.equal(harness.calls[0]?.source, "mcp");
+        assert.equal(harness.calls[0]?.toolName, "bash_run");
         assert.equal(response.body.result?.isError, false);
     } finally {
         await server.close();
@@ -74,7 +79,7 @@ test("tools/call delegates to WorkerInstance.callTool", async () => {
     }
 });
 
-test("not ready maps to mcp.instanceNotReady", async () => {
+test("tools/list returns cached schema while the instance is not ready", async () => {
     const binding = createBinding(createWorkerHarness({ ready: false }));
     const server = await createBindingServer(binding);
 
@@ -83,17 +88,15 @@ test("not ready maps to mcp.instanceNotReady", async () => {
         const response = await postJson(server.url, await readFixture("mcp-tools-list.json"), session.headers);
 
         assert.equal(response.status, 200);
-        assert.equal(response.body.error?.data?.code, "mcp.instanceNotReady");
+        assert.deepEqual(response.body.result?.tools.map((tool: { name: string }) => tool.name), ["bash_run"]);
     } finally {
         await server.close();
         await binding.close();
     }
 });
 
-test("schema unavailable returns mcp.toolSchemaUnavailable", async () => {
-    const harness = createWorkerHarness({
-        tools: [{ name: "bash_run", description: "Run shell", inputSchema: undefined }]
-    });
+test("tools/list without schema cache returns mcp.toolSchemaUnavailable", async () => {
+    const harness = createWorkerHarness({ hasToolSchemaCache: false, ready: false, tools: [] });
     const binding = createBinding(harness);
     const server = await createBindingServer(binding);
 
@@ -103,6 +106,22 @@ test("schema unavailable returns mcp.toolSchemaUnavailable", async () => {
 
         assert.equal(response.status, 200);
         assert.equal(response.body.error?.data?.code, "mcp.toolSchemaUnavailable");
+    } finally {
+        await server.close();
+        await binding.close();
+    }
+});
+
+test("tools/call still maps not ready to mcp.instanceNotReady", async () => {
+    const binding = createBinding(createWorkerHarness({ ready: false }));
+    const server = await createBindingServer(binding);
+
+    try {
+        const session = await initialize(server.url);
+        const response = await postJson(server.url, await readFixture("mcp-tools-call.json"), session.headers);
+
+        assert.equal(response.status, 200);
+        assert.equal(response.body.error?.data?.code, "mcp.instanceNotReady");
     } finally {
         await server.close();
         await binding.close();
@@ -215,25 +234,40 @@ async function readFixture(name: string): Promise<JsonValue> {
     return JSON.parse(await readFile(resolve(fixturesDirectory, name), "utf8")) as JsonValue;
 }
 
-function createWorkerHarness(options?: { ready?: boolean; result?: CommandResult; tools?: ToolDefinition[] }) {
+function createWorkerHarness(options?: {
+    hasToolSchemaCache?: boolean;
+    ready?: boolean;
+    result?: CommandResult;
+    tools?: ToolDefinition[];
+}) {
     const calls: Array<{ input: JsonValue; toolName: string }> = [];
     const tools = options?.tools ?? [
         { name: "bash_run", description: "Run shell", inputSchema: { type: "object", properties: { command: { type: "string" } } } },
         { name: "read_logs", description: "Read logs", inputSchema: { type: "object" } }
     ];
+    const hasToolSchemaCache = options?.hasToolSchemaCache ?? true;
     const ready = options?.ready ?? true;
     const result = options?.result ?? { exitCode: 0, stderr: "", stdout: "/workspace\n" };
 
     return {
-        calls,
+        calls: calls as Array<{
+            input: JsonValue;
+            requestId?: string;
+            sessionId?: string;
+            source?: string;
+            toolName: string;
+        }>,
         worker: {
+            hasToolSchemaCache() {
+                return hasToolSchemaCache;
+            },
             snapshot() {
                 return { ready };
             },
             listTools() {
                 return tools;
             },
-            async callTool(toolName: string, input: JsonValue) {
+            async callTool(toolName: string, input: JsonValue, context: { requestId?: string; sessionId?: string; source: string }) {
                 if (!ready) {
                     const error = new Error("not ready");
                     Object.assign(error, {
@@ -244,7 +278,7 @@ function createWorkerHarness(options?: { ready?: boolean; result?: CommandResult
                     throw error;
                 }
 
-                calls.push({ toolName, input });
+                calls.push({ toolName, input, ...context });
                 return result;
             }
         }

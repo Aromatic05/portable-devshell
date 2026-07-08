@@ -40,7 +40,7 @@ test("InstanceEventBuffer replays from fromSeq and reports stream.gap", async ()
 
         await buffer.append({ at: "2026-07-07T00:00:00.000Z", type: "instance.started" });
         await buffer.append({ at: "2026-07-07T00:00:01.000Z", type: "instance.statusChanged" });
-        await buffer.append({ at: "2026-07-07T00:00:02.000Z", type: "instance.toolCalled" });
+        await buffer.append({ at: "2026-07-07T00:00:02.000Z", type: "toolCall.completed" });
 
         const replay = buffer.readFrom(2);
         assert.equal(replay.kind, "events");
@@ -73,11 +73,10 @@ test("InstanceLogStore and ToolCallHistory persist per-instance records", async 
         assert.equal(logEntry.seq, 1);
         assert.deepEqual(await logStore.read({ fromSeq: 1 }), [logEntry]);
 
-        const started = await history.started("call-1", "bash_run", ["pwd"], "2026-07-07T00:00:01.000Z");
-        assert.equal(started.status, "started");
+        await history.started("call-1", "bash_run", ["pwd"], { source: "cli" }, "2026-07-07T00:00:01.000Z");
 
         await assert.rejects(
-            history.started("call-2", "bash_run", ["ls"], "2026-07-07T00:00:02.000Z"),
+            history.started("call-2", "bash_run", ["ls"], { source: "cli" }, "2026-07-07T00:00:02.000Z"),
             (error: unknown) => {
                 assert.ok(error instanceof InstanceBusyError);
                 assert.equal(error.code, errorCodes.coreInstanceBusy);
@@ -92,9 +91,9 @@ test("InstanceLogStore and ToolCallHistory persist per-instance records", async 
         );
         assert.equal(completed.status, "completed");
         assert.equal(completed.result?.stdout, "ok");
+        assert.equal(completed.source, "cli");
 
-        const failedStarted = await history.started("call-3", "bash_run", ["false"], "2026-07-07T00:00:04.000Z");
-        assert.equal(failedStarted.status, "started");
+        await history.started("call-3", "bash_run", ["false"], { requestId: "req-3", source: "mcp" }, "2026-07-07T00:00:04.000Z");
 
         const failed = await history.failed(
             "call-3",
@@ -104,9 +103,11 @@ test("InstanceLogStore and ToolCallHistory persist per-instance records", async 
         );
         assert.equal(failed.status, "failed");
         assert.equal(failed.errorCode, "worker.command_failed");
+        assert.equal(failed.requestId, "req-3");
+        assert.equal(failed.source, "mcp");
 
         const records = await history.read();
-        assert.deepEqual(records.map((record) => record.status), ["started", "completed", "started", "failed"]);
+        assert.deepEqual(records.map((record) => record.status), ["completed", "failed"]);
     } finally {
         await rm(root, { recursive: true, force: true });
     }

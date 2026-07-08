@@ -5,6 +5,7 @@ import { ToolAllowlist } from "../../tool/ToolAllowlist.js";
 
 export class WorkerToolCatalog {
     readonly #allowlist: ToolAllowlist;
+    #hasSchema = false;
     #tools = new Map<string, ToolDefinition>();
 
     constructor(allowlist: ToolAllowlist) {
@@ -20,7 +21,7 @@ export class WorkerToolCatalog {
 
             if (!parsed.success) {
                 throw createError({
-                    code: errorCodes.toolSchemaInvalid,
+                    code: errorCodes.coreToolSchemaUnavailable,
                     message: `Tool schema for ${tool.name} is invalid.`,
                     retryable: false,
                     details: {
@@ -34,11 +35,17 @@ export class WorkerToolCatalog {
         }
 
         this.#tools = nextTools;
+        this.#hasSchema = true;
         return this.listTools();
     }
 
     clear(): void {
         this.#tools.clear();
+        this.#hasSchema = false;
+    }
+
+    hasSchema(): boolean {
+        return this.#hasSchema;
     }
 
     listTools(): ToolDefinition[] {
