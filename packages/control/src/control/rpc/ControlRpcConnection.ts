@@ -174,7 +174,11 @@ export class ControlRpcConnection {
                 return;
             }
 
-            await this.#writer.write(value);
+            try {
+                await this.#writer.write(value);
+            } catch {
+                this.close();
+            }
         });
     }
 }

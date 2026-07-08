@@ -101,6 +101,46 @@ test("ControlRpcServer serves Task 9 rpc methods over reused unix socket connect
     assert.equal(shutdown.result.accepted, true);
 });
 
+test("ControlRpcServer tolerates client disconnect during control.shutdown response", async (t) => {
+    const runtimeDir = await mkdtemp(join(tmpdir(), "portable-devshell-control-"));
+    const socketPath = join(runtimeDir, "control.sock");
+    let shutdownRequested = false;
+    const server = new ControlRpcServer({
+        instanceRegistry: new InstanceRegistry([]),
+        shutdown() {
+            shutdownRequested = true;
+        },
+        socketPath
+    });
+
+    await server.start();
+
+    t.after(async () => {
+        await server.stop().catch(() => undefined);
+        await rm(runtimeDir, { force: true, recursive: true });
+    });
+
+    const socket = createConnection(socketPath);
+    const writer = new FrameWriter(socket);
+
+    await new Promise<void>((resolve, reject) => {
+        socket.once("connect", resolve);
+        socket.once("error", reject);
+    });
+
+    await writer.write({
+        id: "req-shutdown",
+        issuedAt: new Date().toISOString(),
+        method: "control.shutdown",
+        target: { kind: "control" },
+        type: "request"
+    } as unknown as JsonValue);
+    socket.destroy();
+
+    await waitFor(() => shutdownRequested);
+    assert.equal(shutdownRequested, true);
+});
+
 class RpcClient {
     readonly #reader = new FrameReader();
     readonly #pending = new Map<string, (value: Record<string, any>) => void>();
@@ -186,6 +226,20 @@ class RpcClient {
             this.#events.push(frame);
         }
     }
+}
+
+async function waitFor(factory: () => boolean, timeoutMs = 1_000): Promise<void> {
+    const deadline = Date.now() + timeoutMs;
+
+    while (Date.now() < deadline) {
+        if (factory()) {
+            return;
+        }
+
+        await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+
+    throw new Error("Timed out waiting for condition.");
 }
 
 class FakeWorker {
