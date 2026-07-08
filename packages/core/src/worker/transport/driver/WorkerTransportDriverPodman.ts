@@ -1,143 +1,64 @@
-import { spawn } from "node:child_process";
+import type { InstanceContainerConfig } from "@portable-devshell/shared";
 
-import { errorCodes } from "@portable-devshell/shared";
-
+import type { SpawnFunction } from "../../command/WorkerCommandTransport.js";
 import { WorkerBinary } from "../../WorkerBinary.js";
-import { RemoteWorkerInstaller } from "../../install/RemoteWorkerInstaller.js";
-import {
-    createCommandContext,
-    createProviderError,
-    type SpawnFunction,
-    waitForCommandResult,
-    type ProviderCommandContext,
-    type WorkerCommandTransport
-} from "../../command/WorkerCommandTransport.js";
-import type { WorkerCommandName, WorkerCommandOptions, WorkerRpcOptions } from "../../command/WorkerCommandOptions.js";
-import { createWorkerRpcProcess, type WorkerRpcProcess } from "../../WorkerProcess.js";
+import { ContainerWorkerTransportBase, renderContainerMount } from "./WorkerTransportDriverContainerBase.js";
 
 export interface PodmanWorkerTransportOptions {
-    container: string;
+    container: InstanceContainerConfig;
     podmanBinary?: string;
     remoteCwd?: string;
-    workerBinary?: WorkerBinary;
     spawnFunction?: SpawnFunction;
+    workerBinary?: WorkerBinary;
 }
 
-export class PodmanWorkerTransport implements WorkerCommandTransport {
-    readonly #container: string;
-    readonly #podmanBinary: string;
-    readonly #remoteCwd?: string;
-    readonly #workerBinary: WorkerBinary;
-    readonly #installer: RemoteWorkerInstaller;
-    readonly #spawn: SpawnFunction;
-
+export class PodmanWorkerTransport extends ContainerWorkerTransportBase {
     constructor(options: PodmanWorkerTransportOptions) {
-        this.#container = options.container;
-        this.#podmanBinary = options.podmanBinary ?? "podman";
-        this.#remoteCwd = options.remoteCwd;
-        this.#workerBinary = options.workerBinary ?? new WorkerBinary();
-        this.#spawn = options.spawnFunction ?? spawn;
-        this.#installer = new RemoteWorkerInstaller({
-            createContext: (operation, command) => this.#createShellContext(operation, command),
-            spawnShell: (commandLine, stdio, context) => this.#spawnShell(commandLine, stdio, context),
-            createProviderError: this.#createProviderError
+        super({
+            binary: options.podmanBinary ?? "podman",
+            container: options.container,
+            provider: "podman",
+            remoteCwd: options.remoteCwd,
+            spawnFunction: options.spawnFunction,
+            workerBinary: options.workerBinary
         });
     }
 
-    async installWorker(): Promise<void> {
-        const installCommand = new WorkerBinary(await this.#resolveExecutable()).buildInstallCommand();
-        const context = this.#createExecContext("installWorker", [installCommand.command, ...installCommand.args]);
-        const child = this.#spawnExec(context, ["ignore", "pipe", "pipe"]);
-        const result = await waitForCommandResult(child, this.#createProviderError, context);
-
-        if (result.exitCode !== 0) {
-            throw this.#createProviderError(context, new Error(result.stderr || result.stdout || "worker install check failed"), {
-                errorCode: errorCodes.coreWorkerProvisionFailed,
-                result
-            });
+    protected buildComposeArgs(args: readonly string[]): string[] {
+        if (this.containerConfig.mode !== "compose") {
+            throw new Error("compose args are only available for compose mode");
         }
+
+        const compose = this.containerConfig.compose;
+        return [
+            "compose",
+            "-f",
+            compose.file,
+            ...(compose.projectName === undefined ? [] : ["-p", compose.projectName]),
+            ...args
+        ];
     }
 
-    async runWorkerCommand(command: WorkerCommandName, options: WorkerCommandOptions) {
-        const workerCommand = new WorkerBinary(await this.#resolveExecutable()).buildCommand(
-            command,
-            options.instanceName,
-            options.extraArgs
-        );
-        const context = this.#createExecContext(command, [workerCommand.command, ...workerCommand.args], {
-            instance: options.instanceName
-        });
-        const child = this.#spawnExec(context, ["ignore", "pipe", "pipe"], options.env);
+    protected buildManagedContainerCreateArgs(image: string, containerName: string): string[] {
+        const container = this.containerConfig;
 
-        return await waitForCommandResult(child, this.#createProviderError, context);
-    }
-
-    async spawnWorkerRpc(options: WorkerRpcOptions): Promise<WorkerRpcProcess> {
-        const workerCommand = new WorkerBinary(await this.#resolveExecutable()).buildCommand("rpc", options.instanceName);
-        const context = this.#createExecContext("spawnWorkerRpc", [workerCommand.command, ...workerCommand.args], {
-            instance: options.instanceName
-        });
-        return createWorkerRpcProcess(this.#spawnExec(context, ["pipe", "pipe", "pipe"], options.env, errorCodes.coreWorkerRpcSpawnFailed));
-    }
-
-    async #resolveExecutable(): Promise<string> {
-        return await this.#installer.ensure(this.#workerBinary.executable);
-    }
-
-    #spawnExec(
-        context: ProviderCommandContext,
-        stdio: ["ignore" | "pipe", "pipe", "pipe"],
-        env?: NodeJS.ProcessEnv,
-        errorCode: string = errorCodes.coreProviderFailed
-    ) {
-        const execArgs = ["exec", ...this.#workingDirectoryArgs(), "-i", this.#container, ...context.command];
-
-        try {
-            return this.#spawn(this.#podmanBinary, execArgs, {
-                env,
-                stdio
-            });
-        } catch (error) {
-            throw this.#createProviderError(context, error, { errorCode });
+        if (container.mode !== "preset" && container.mode !== "dockerfile" && container.mode !== "existingImage") {
+            throw new Error("managed create args are only available for managed container modes");
         }
-    }
 
-    #spawnShell(commandLine: string, stdio: ["ignore" | "pipe", "pipe", "pipe"], context: ProviderCommandContext) {
-        try {
-            return this.#spawn(this.#podmanBinary, ["exec", "-i", this.#container, "sh", "-lc", commandLine], {
-                stdio
-            });
-        } catch (error) {
-            throw this.#createProviderError(context, error);
-        }
+        return [
+            "create",
+            "--name",
+            containerName,
+            "--userns=keep-id",
+            ...(container.user === undefined ? [] : ["--user", container.user]),
+            ...(container.network === undefined ? [] : ["--network", container.network]),
+            ...Object.entries(container.env ?? {}).flatMap(([key, value]) => ["-e", `${key}=${value}`]),
+            ...(container.mounts ?? []).flatMap((mount) => ["-v", renderContainerMount(mount)]),
+            image,
+            "sh",
+            "-lc",
+            "trap 'exit 0' TERM INT; while :; do sleep 2147483647; done"
+        ];
     }
-
-    #workingDirectoryArgs(): string[] {
-        return this.#remoteCwd ? ["-w", this.#remoteCwd] : [];
-    }
-
-    #createExecContext(operation: string, command: readonly string[], options: { instance?: string } = {}): ProviderCommandContext {
-        return createCommandContext({
-            command,
-            cwd: this.#remoteCwd,
-            instance: options.instance,
-            operation,
-            provider: "podman"
-        });
-    }
-
-    #createShellContext(operation: string, command: readonly string[]): ProviderCommandContext {
-        return createCommandContext({
-            command: [this.#podmanBinary, "exec", "-i", this.#container, ...command],
-            instance: undefined,
-            operation,
-            provider: "podman"
-        });
-    }
-
-    readonly #createProviderError = (
-        context: ProviderCommandContext,
-        cause: unknown,
-        options?: { errorCode?: string; result?: { exitCode?: number | null; signal?: string; stderr?: string; stdout?: string } }
-    ) => createProviderError(context, cause, options);
 }

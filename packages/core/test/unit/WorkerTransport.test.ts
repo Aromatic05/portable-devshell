@@ -89,7 +89,7 @@ test("provider installWorker failures keep diagnostic details across local ssh d
         {
             build: (spawnFunction: SpawnFunctionLike) =>
                 new DockerWorkerTransport({
-                    container: "worker-container",
+                    container: createManagedContainerConfig(),
                     dockerBinary: "docker-bin",
                     workerBinary: new WorkerBinary("/usr/local/bin/devshell-worker"),
                     spawnFunction
@@ -100,7 +100,7 @@ test("provider installWorker failures keep diagnostic details across local ssh d
         {
             build: (spawnFunction: SpawnFunctionLike) =>
                 new PodmanWorkerTransport({
-                    container: "worker-container",
+                    container: createManagedContainerConfig(),
                     podmanBinary: "podman-bin",
                     workerBinary: new WorkerBinary("/usr/local/bin/devshell-worker"),
                     spawnFunction
@@ -111,7 +111,12 @@ test("provider installWorker failures keep diagnostic details across local ssh d
     ] as const;
 
     for (const testCase of cases) {
-        const recorder = createSpawnRecorder((_call, child) => {
+        const recorder = createSpawnRecorder((_call, child, callIndex) => {
+            if ((testCase.provider === "docker" || testCase.provider === "podman") && callIndex === 0) {
+                closeRecordedChild(child, { stdout: "running\n" });
+                return true;
+            }
+
             closeRecordedChild(child, {
                 code: 23,
                 stderr: "fatal stderr\n",
@@ -269,12 +274,17 @@ test("ssh transport installs default worker into remote home before probing", as
 
     const recorder = createSpawnRecorder((call, child, callIndex) => {
         if (callIndex === 0) {
-            closeRecordedChild(child, { stdout: "/home/dev" });
+            closeRecordedChild(child, { stdout: "running\n" });
             return true;
         }
 
         if (callIndex === 1) {
-            child.stdin.once("end", () => {
+            closeRecordedChild(child, { stdout: "/home/dev" });
+            return true;
+        }
+
+        if (callIndex === 2) {
+            child.stdin.once("finish", () => {
                 closeRecordedChild(child);
             });
             return true;
@@ -348,9 +358,16 @@ test("ssh transport appends interactive-auth hint when batch mode authentication
 });
 
 test("docker transport builds exec command", async () => {
-    const recorder = createSpawnRecorder();
+    const recorder = createSpawnRecorder((call, child, callIndex) => {
+        if (callIndex === 0) {
+            closeRecordedChild(child, { stdout: "running\n" });
+            return true;
+        }
+
+        return false;
+    });
     const transport = new DockerWorkerTransport({
-        container: "worker-container",
+        container: createManagedContainerConfig(),
         dockerBinary: "docker-bin",
         remoteCwd: "/workspace",
         workerBinary: new WorkerBinary("/usr/local/bin/devshell-worker"),
@@ -362,15 +379,27 @@ test("docker transport builds exec command", async () => {
     assert.equal(result.exitCode, 0);
     assert.deepEqual(recorder.calls[0], {
         command: "docker-bin",
+        args: ["inspect", "--type", "container", "--format", "{{.State.Status}}", "worker-container"],
+        options: { cwd: undefined, env: undefined, stdio: ["ignore", "pipe", "pipe"] }
+    });
+    assert.deepEqual(recorder.calls[1], {
+        command: "docker-bin",
         args: ["exec", "-w", "/workspace", "-i", "worker-container", "/usr/local/bin/devshell-worker", "logs", "--instance", "task-3-docker"],
         options: { cwd: undefined, env: undefined, stdio: ["ignore", "pipe", "pipe"] }
     });
 });
 
 test("docker transport runs installWorker probe via exec", async () => {
-    const recorder = createSpawnRecorder();
+    const recorder = createSpawnRecorder((call, child, callIndex) => {
+        if (callIndex === 0) {
+            closeRecordedChild(child, { stdout: "running\n" });
+            return true;
+        }
+
+        return false;
+    });
     const transport = new DockerWorkerTransport({
-        container: "worker-container",
+        container: createManagedContainerConfig(),
         dockerBinary: "docker-bin",
         remoteCwd: "/workspace",
         workerBinary: new WorkerBinary("/usr/local/bin/devshell-worker"),
@@ -380,6 +409,11 @@ test("docker transport runs installWorker probe via exec", async () => {
     await transport.installWorker();
 
     assert.deepEqual(recorder.calls[0], {
+        command: "docker-bin",
+        args: ["inspect", "--type", "container", "--format", "{{.State.Status}}", "worker-container"],
+        options: { cwd: undefined, env: undefined, stdio: ["ignore", "pipe", "pipe"] }
+    });
+    assert.deepEqual(recorder.calls[1], {
         command: "docker-bin",
         args: ["exec", "-w", "/workspace", "-i", "worker-container", "/usr/local/bin/devshell-worker", "--version"],
         options: { cwd: undefined, env: undefined, stdio: ["ignore", "pipe", "pipe"] }
@@ -397,12 +431,17 @@ test("docker transport installs default worker before exec command", async (t) =
 
     const recorder = createSpawnRecorder((call, child, callIndex) => {
         if (callIndex === 0) {
-            closeRecordedChild(child, { stdout: "/home/dev" });
+            closeRecordedChild(child, { stdout: "running\n" });
             return true;
         }
 
         if (callIndex === 1) {
-            child.stdin.once("end", () => {
+            closeRecordedChild(child, { stdout: "/home/dev" });
+            return true;
+        }
+
+        if (callIndex === 2) {
+            child.stdin.once("finish", () => {
                 closeRecordedChild(child);
             });
             return true;
@@ -411,7 +450,7 @@ test("docker transport installs default worker before exec command", async (t) =
         return false;
     });
     const transport = new DockerWorkerTransport({
-        container: "worker-container",
+        container: createManagedContainerConfig(),
         dockerBinary: "docker-bin",
         remoteCwd: "/workspace",
         spawnFunction: recorder.spawn
@@ -422,11 +461,16 @@ test("docker transport installs default worker before exec command", async (t) =
     assert.equal(result.exitCode, 0);
     assert.deepEqual(recorder.calls[0], {
         command: "docker-bin",
+        args: ["inspect", "--type", "container", "--format", "{{.State.Status}}", "worker-container"],
+        options: { cwd: undefined, env: undefined, stdio: ["ignore", "pipe", "pipe"] }
+    });
+    assert.deepEqual(recorder.calls[1], {
+        command: "docker-bin",
         args: ["exec", "-i", "worker-container", "sh", "-lc", 'printf %s "${HOME:?HOME is required to install the worker}"'],
         options: { cwd: undefined, env: undefined, stdio: ["ignore", "pipe", "pipe"] }
     });
-    assert.equal(recorder.calls[1]?.args[5]?.includes("/home/dev/.devshell/workers/"), true);
-    assert.deepEqual(recorder.calls[2], {
+    assert.equal(recorder.calls[2]?.args[5]?.includes("/home/dev/.devshell/workers/"), true);
+    assert.deepEqual(recorder.calls[3], {
         command: "docker-bin",
         args: [
             "exec",
@@ -441,13 +485,20 @@ test("docker transport installs default worker before exec command", async (t) =
         ],
         options: { cwd: undefined, env: undefined, stdio: ["ignore", "pipe", "pipe"] }
     });
-    assert.deepEqual(Buffer.concat(recorder.children[1]?.stdinChunks ?? []), worker.contents);
+    assert.deepEqual(Buffer.concat(recorder.children[2]?.stdinChunks ?? []), worker.contents);
 });
 
 test("podman transport builds exec command", async () => {
-    const recorder = createSpawnRecorder();
+    const recorder = createSpawnRecorder((call, child, callIndex) => {
+        if (callIndex === 0) {
+            closeRecordedChild(child, { stdout: "running\n" });
+            return true;
+        }
+
+        return false;
+    });
     const transport = new PodmanWorkerTransport({
-        container: "worker-container",
+        container: createManagedContainerConfig(),
         podmanBinary: "podman-bin",
         remoteCwd: "/workspace",
         workerBinary: new WorkerBinary("/usr/local/bin/devshell-worker"),
@@ -459,15 +510,32 @@ test("podman transport builds exec command", async () => {
     assert.equal(result.exitCode, 0);
     assert.deepEqual(recorder.calls[0], {
         command: "podman-bin",
+        args: ["inspect", "--type", "container", "--format", "{{.State.Status}}", "worker-container"],
+        options: { cwd: undefined, env: undefined, stdio: ["ignore", "pipe", "pipe"] }
+    });
+    assert.deepEqual(recorder.calls[1], {
+        command: "podman-bin",
         args: ["exec", "-w", "/workspace", "-i", "worker-container", "/usr/local/bin/devshell-worker", "stop", "--instance", "task-3-podman"],
+        options: { cwd: undefined, env: undefined, stdio: ["ignore", "pipe", "pipe"] }
+    });
+    assert.deepEqual(recorder.calls[2], {
+        command: "podman-bin",
+        args: ["stop", "worker-container"],
         options: { cwd: undefined, env: undefined, stdio: ["ignore", "pipe", "pipe"] }
     });
 });
 
 test("podman transport runs installWorker probe via exec", async () => {
-    const recorder = createSpawnRecorder();
+    const recorder = createSpawnRecorder((call, child, callIndex) => {
+        if (callIndex === 0) {
+            closeRecordedChild(child, { stdout: "running\n" });
+            return true;
+        }
+
+        return false;
+    });
     const transport = new PodmanWorkerTransport({
-        container: "worker-container",
+        container: createManagedContainerConfig(),
         podmanBinary: "podman-bin",
         remoteCwd: "/workspace",
         workerBinary: new WorkerBinary("/usr/local/bin/devshell-worker"),
@@ -477,6 +545,11 @@ test("podman transport runs installWorker probe via exec", async () => {
     await transport.installWorker();
 
     assert.deepEqual(recorder.calls[0], {
+        command: "podman-bin",
+        args: ["inspect", "--type", "container", "--format", "{{.State.Status}}", "worker-container"],
+        options: { cwd: undefined, env: undefined, stdio: ["ignore", "pipe", "pipe"] }
+    });
+    assert.deepEqual(recorder.calls[1], {
         command: "podman-bin",
         args: ["exec", "-w", "/workspace", "-i", "worker-container", "/usr/local/bin/devshell-worker", "--version"],
         options: { cwd: undefined, env: undefined, stdio: ["ignore", "pipe", "pipe"] }
@@ -508,24 +581,32 @@ test("podman transport installs default worker before spawning rpc", async (t) =
         return false;
     });
     const transport = new PodmanWorkerTransport({
-        container: "worker-container",
+        container: createManagedContainerConfig(),
         podmanBinary: "podman-bin",
         remoteCwd: "/workspace",
         spawnFunction: recorder.spawn
     });
 
     const rpcProcess = await transport.spawnWorkerRpc({ instanceName: "task-3-podman" });
+    t.after(() => {
+        rpcProcess.kill("SIGTERM");
+    });
 
-    assert.equal(rpcProcess.stdin, recorder.children[2]?.stdin);
-    assert.equal(rpcProcess.stdout, recorder.children[2]?.stdout);
-    assert.equal(rpcProcess.stderr, recorder.children[2]?.stderr);
+    assert.equal(rpcProcess.stdin, recorder.children[3]?.stdin);
+    assert.equal(rpcProcess.stdout, recorder.children[3]?.stdout);
+    assert.equal(rpcProcess.stderr, recorder.children[3]?.stderr);
     assert.deepEqual(recorder.calls[0], {
+        command: "podman-bin",
+        args: ["inspect", "--type", "container", "--format", "{{.State.Status}}", "worker-container"],
+        options: { cwd: undefined, env: undefined, stdio: ["ignore", "pipe", "pipe"] }
+    });
+    assert.deepEqual(recorder.calls[1], {
         command: "podman-bin",
         args: ["exec", "-i", "worker-container", "sh", "-lc", 'printf %s "${HOME:?HOME is required to install the worker}"'],
         options: { cwd: undefined, env: undefined, stdio: ["ignore", "pipe", "pipe"] }
     });
-    assert.equal(recorder.calls[1]?.args[5]?.includes("/home/dev/.devshell/workers/"), true);
-    assert.deepEqual(recorder.calls[2], {
+    assert.equal(recorder.calls[2]?.args[5]?.includes("/home/dev/.devshell/workers/"), true);
+    assert.deepEqual(recorder.calls[3], {
         command: "podman-bin",
         args: [
             "exec",
@@ -540,9 +621,80 @@ test("podman transport installs default worker before spawning rpc", async (t) =
         ],
         options: { cwd: undefined, env: undefined, stdio: ["pipe", "pipe", "pipe"] }
     });
-    assert.deepEqual(Buffer.concat(recorder.children[1]?.stdinChunks ?? []), worker.contents);
+    assert.deepEqual(Buffer.concat(recorder.children[2]?.stdinChunks ?? []), worker.contents);
     assert.equal(rpcProcess.kill("SIGTERM"), true);
     assert.deepEqual(await rpcProcess.exit, { code: null, signal: "SIGTERM" });
+});
+
+test("docker transport creates and starts managed containers before starting the worker", async () => {
+    const recorder = createSpawnRecorder((call, child, callIndex) => {
+        if (callIndex === 0) {
+            closeRecordedChild(child, { stderr: "No such container\n", code: 1 });
+            return true;
+        }
+
+        return false;
+    });
+    const transport = new DockerWorkerTransport({
+        container: {
+            containerName: "worker-container",
+            image: "archlinux:latest",
+            mode: "preset",
+            preset: "arch"
+        },
+        dockerBinary: "docker-bin",
+        remoteCwd: "/workspace",
+        workerBinary: new WorkerBinary("/usr/local/bin/devshell-worker"),
+        spawnFunction: recorder.spawn
+    });
+
+    const result = await transport.runWorkerCommand("start", {
+        instanceName: "task-3-docker",
+        workspacePath: "/workspace"
+    });
+
+    assert.equal(result.exitCode, 0);
+    assert.deepEqual(recorder.calls[0]?.args, ["inspect", "--type", "container", "--format", "{{.State.Status}}", "worker-container"]);
+    assert.deepEqual(recorder.calls[1]?.args.slice(0, 4), ["create", "--name", "worker-container", "archlinux:latest"]);
+    assert.deepEqual(recorder.calls[2]?.args, ["start", "worker-container"]);
+    assert.deepEqual(recorder.calls[3]?.args, [
+        "exec",
+        "-w",
+        "/workspace",
+        "-i",
+        "worker-container",
+        "/usr/local/bin/devshell-worker",
+        "start",
+        "--instance",
+        "task-3-docker"
+    ]);
+});
+
+test("podman transport rejects already running existing stopped containers", async () => {
+    const recorder = createSpawnRecorder((call, child, callIndex) => {
+        if (callIndex === 0) {
+            closeRecordedChild(child, { stdout: "running\n" });
+            return true;
+        }
+
+        return false;
+    });
+    const transport = new PodmanWorkerTransport({
+        container: {
+            adoptLifecycle: true,
+            containerName: "worker-container",
+            mode: "existingStoppedContainer"
+        },
+        podmanBinary: "podman-bin",
+        remoteCwd: "/workspace",
+        workerBinary: new WorkerBinary("/usr/local/bin/devshell-worker"),
+        spawnFunction: recorder.spawn
+    });
+
+    await assert.rejects(
+        transport.runWorkerCommand("start", { instanceName: "task-3-podman", workspacePath: "/workspace" }),
+        /Running container attach is not a supported instance mode/u
+    );
 });
 
 test("local transport executes frozen devshell-worker start status logs stop rpc", async (t) => {
@@ -609,6 +761,14 @@ function restoreEnv(name: keyof NodeJS.ProcessEnv, value: string | undefined): v
     }
 
     process.env[name] = value;
+}
+
+function createManagedContainerConfig() {
+    return {
+        containerName: "worker-container",
+        image: "worker-image:latest",
+        mode: "existingImage" as const
+    };
 }
 
 function createSpawnRecorder(
