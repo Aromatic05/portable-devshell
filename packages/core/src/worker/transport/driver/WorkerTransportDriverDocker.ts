@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 
 import { WorkerBinary } from "../../WorkerBinary.js";
+import { RemoteWorkerInstaller } from "../../install/RemoteWorkerInstaller.js";
 import {
     createProviderError,
     type SpawnFunction,
@@ -23,6 +24,7 @@ export class DockerWorkerTransport implements WorkerCommandTransport {
     readonly #dockerBinary: string;
     readonly #remoteCwd?: string;
     readonly #workerBinary: WorkerBinary;
+    readonly #installer: RemoteWorkerInstaller;
     readonly #spawn: SpawnFunction;
 
     constructor(options: DockerWorkerTransportOptions) {
@@ -31,10 +33,14 @@ export class DockerWorkerTransport implements WorkerCommandTransport {
         this.#remoteCwd = options.remoteCwd;
         this.#workerBinary = options.workerBinary ?? new WorkerBinary();
         this.#spawn = options.spawnFunction ?? spawn;
+        this.#installer = new RemoteWorkerInstaller({
+            spawnShell: (commandLine, stdio) => this.#spawnShell(commandLine, stdio),
+            createProviderError: this.#createProviderError
+        });
     }
 
     async installWorker(): Promise<void> {
-        const installCommand = this.#workerBinary.buildInstallCommand();
+        const installCommand = new WorkerBinary(await this.#resolveExecutable()).buildInstallCommand();
         const child = this.#spawnExec(installCommand.command, installCommand.args, ["ignore", "pipe", "pipe"]);
         const result = await waitForCommandResult(child, this.#createProviderError, "installWorker");
 
@@ -44,15 +50,23 @@ export class DockerWorkerTransport implements WorkerCommandTransport {
     }
 
     async runWorkerCommand(command: WorkerCommandName, options: WorkerCommandOptions) {
-        const workerCommand = this.#workerBinary.buildCommand(command, options.instanceName, options.extraArgs);
+        const workerCommand = new WorkerBinary(await this.#resolveExecutable()).buildCommand(
+            command,
+            options.instanceName,
+            options.extraArgs
+        );
         const child = this.#spawnExec(workerCommand.command, workerCommand.args, ["ignore", "pipe", "pipe"], options.env);
 
         return await waitForCommandResult(child, this.#createProviderError, "runWorkerCommand");
     }
 
     async spawnWorkerRpc(options: WorkerRpcOptions): Promise<WorkerRpcProcess> {
-        const workerCommand = this.#workerBinary.buildCommand("rpc", options.instanceName);
+        const workerCommand = new WorkerBinary(await this.#resolveExecutable()).buildCommand("rpc", options.instanceName);
         return createWorkerRpcProcess(this.#spawnExec(workerCommand.command, workerCommand.args, ["pipe", "pipe", "pipe"], options.env));
+    }
+
+    async #resolveExecutable(): Promise<string> {
+        return await this.#installer.ensure(this.#workerBinary.executable);
     }
 
     #spawnExec(command: string, args: readonly string[], stdio: ["ignore" | "pipe", "pipe", "pipe"], env?: NodeJS.ProcessEnv) {
@@ -65,6 +79,16 @@ export class DockerWorkerTransport implements WorkerCommandTransport {
             });
         } catch (error) {
             throw this.#createProviderError("spawnExec", error);
+        }
+    }
+
+    #spawnShell(commandLine: string, stdio: ["ignore" | "pipe", "pipe", "pipe"]) {
+        try {
+            return this.#spawn(this.#dockerBinary, ["exec", "-i", this.#container, "sh", "-lc", commandLine], {
+                stdio
+            });
+        } catch (error) {
+            throw this.#createProviderError("spawnShell", error);
         }
     }
 

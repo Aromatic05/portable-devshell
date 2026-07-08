@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 
 import { WorkerBinary } from "../../WorkerBinary.js";
+import { RemoteWorkerInstaller } from "../../install/RemoteWorkerInstaller.js";
 import {
     createProviderError,
     type SpawnFunction,
@@ -23,6 +24,7 @@ export class SshWorkerTransport implements WorkerCommandTransport {
     readonly #remoteCwd?: string;
     readonly #sshBinary: string;
     readonly #workerBinary: WorkerBinary;
+    readonly #installer: RemoteWorkerInstaller;
     readonly #spawn: SpawnFunction;
 
     constructor(options: SshWorkerTransportOptions) {
@@ -31,10 +33,14 @@ export class SshWorkerTransport implements WorkerCommandTransport {
         this.#sshBinary = options.sshBinary ?? "ssh";
         this.#workerBinary = options.workerBinary ?? new WorkerBinary();
         this.#spawn = options.spawnFunction ?? spawn;
+        this.#installer = new RemoteWorkerInstaller({
+            spawnShell: (commandLine, stdio) => this.#spawnRemoteShell(commandLine, stdio),
+            createProviderError: this.#createProviderError
+        });
     }
 
     async installWorker(): Promise<void> {
-        const installCommand = this.#workerBinary.buildInstallCommand();
+        const installCommand = new WorkerBinary(await this.#resolveExecutable()).buildInstallCommand();
         const child = this.#spawnRemoteShell(
             [installCommand.command, ...installCommand.args].map(shellEscape).join(" "),
             ["ignore", "pipe", "pipe"]
@@ -47,7 +53,11 @@ export class SshWorkerTransport implements WorkerCommandTransport {
     }
 
     async runWorkerCommand(command: WorkerCommandName, options: WorkerCommandOptions) {
-        const workerCommand = this.#workerBinary.buildCommand(command, options.instanceName, options.extraArgs);
+        const workerCommand = new WorkerBinary(await this.#resolveExecutable()).buildCommand(
+            command,
+            options.instanceName,
+            options.extraArgs
+        );
         const child = this.#spawnRemoteShell(
             [workerCommand.command, ...workerCommand.args].map(shellEscape).join(" "),
             ["ignore", "pipe", "pipe"],
@@ -58,13 +68,17 @@ export class SshWorkerTransport implements WorkerCommandTransport {
     }
 
     async spawnWorkerRpc(options: WorkerRpcOptions): Promise<WorkerRpcProcess> {
-        const workerCommand = this.#workerBinary.buildCommand("rpc", options.instanceName);
+        const workerCommand = new WorkerBinary(await this.#resolveExecutable()).buildCommand("rpc", options.instanceName);
         const child = this.#spawnRemoteShell(
             [workerCommand.command, ...workerCommand.args].map(shellEscape).join(" "),
             ["pipe", "pipe", "pipe"],
             options.env
         );
         return createWorkerRpcProcess(child);
+    }
+
+    async #resolveExecutable(): Promise<string> {
+        return await this.#installer.ensure(this.#workerBinary.executable);
     }
 
     #spawnRemoteShell(commandLine: string, stdio: ["ignore" | "pipe", "pipe", "pipe"], env?: NodeJS.ProcessEnv) {
