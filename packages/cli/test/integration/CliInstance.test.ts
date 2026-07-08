@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, rm } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer, type Socket } from "node:net";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 
 import { FrameReader, FrameWriter, type JsonValue } from "@portable-devshell/shared";
 
@@ -61,6 +62,78 @@ test("CliMain covers Task 11 instance commands through control rpc", async (t) =
     assert.match(callOutput, /tool: bash_run/u);
     assert.match(callOutput, /stdout:\n\/tmp\/ws/u);
     assert.equal(stderr.flush(), "");
+});
+
+test("CliMain runs Task 12 real worker smoke through control lifecycle", async (t) => {
+    const homeDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-cli-real-home-"));
+    const xdgRuntimeDir = await mkdtemp(join(tmpdir(), "portable-devshell-cli-real-runtime-"));
+    const workspacePath = await mkdtemp(join(tmpdir(), "portable-devshell-cli-real-workspace-"));
+    const workerBinaryPath = resolve(fileURLToPath(new URL("../../../../", import.meta.url)), "target/debug/devshell-worker");
+    const stdout = createBuffer();
+    const stderr = createBuffer();
+    let controlStopped = false;
+    const cli = new CliMain({
+        homeDirectory,
+        stderr,
+        stdout,
+        xdgRuntimeDir
+    });
+
+    await mkdir(join(homeDirectory, ".devshell", "control"), { recursive: true });
+    await writeFile(
+        join(homeDirectory, ".devshell", "control", "config.toml"),
+        createRealConfig(workspacePath, workerBinaryPath),
+        "utf8"
+    );
+
+    t.after(async () => {
+        if (!controlStopped) {
+            await cli.run(["stop"]).catch(() => undefined);
+        }
+        await rm(homeDirectory, { force: true, recursive: true });
+        await rm(xdgRuntimeDir, { force: true, recursive: true });
+        await rm(workspacePath, { force: true, recursive: true });
+    });
+
+    assert.equal(await cli.run(["start"]), 0);
+    assert.match(stdout.flush(), /control: running/u);
+
+    assert.equal(await cli.run(["status"]), 0);
+    assert.match(stdout.flush(), /instances: 1/u);
+
+    assert.equal(await cli.run(["instance", "list"]), 0);
+    assert.match(stdout.flush(), /aromatic-pc\tstopped/u);
+
+    assert.equal(await cli.run(["instance", "status", "aromatic-pc"]), 0);
+    assert.match(stdout.flush(), /status: stopped/u);
+
+    assert.equal(await cli.run(["instance", "start", "aromatic-pc"]), 0);
+    assert.match(stdout.flush(), /status: ready/u);
+
+    assert.equal(await cli.run(["instance", "status", "aromatic-pc"]), 0);
+    assert.match(stdout.flush(), /ready: true/u);
+
+    assert.equal(await cli.run(["instance", "call", "aromatic-pc", "bash_run", "{\"command\":\"pwd\"}"]), 0);
+    const pwdOutput = stdout.flush();
+    assert.match(pwdOutput, new RegExp(workspacePath.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"), "u"));
+
+    assert.equal(
+        await cli.run(["instance", "call", "aromatic-pc", "bash_run", "{\"command\":\"echo portable-devshell\"}"]),
+        0
+    );
+    assert.match(stdout.flush(), /portable-devshell/u);
+
+    assert.equal(await cli.run(["instance", "logs", "aromatic-pc"]), 0);
+    const logsOutput = stdout.flush();
+    assert.match(logsOutput, /portable-devshell/u);
+    assert.match(logsOutput, new RegExp(workspacePath.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"), "u"));
+
+    assert.equal(await cli.run(["stop"]), 0);
+    controlStopped = true;
+    assert.equal(stdout.flush(), "control: stopped\n");
+    assert.equal(stderr.flush(), "");
+
+    assert.match(await readFile(join(homeDirectory, ".devshell", "aromatic-pc", "control-worker", "tool-calls.jsonl"), "utf8"), /bash_run/u);
 });
 
 function createInstanceHarness(): { attach: (socket: Socket) => void } {
@@ -185,4 +258,36 @@ function createBuffer(): { flush: () => string; write: (chunk: string) => void }
             chunks.push(chunk);
         }
     };
+}
+
+function createRealConfig(workspacePath: string, workerBinaryPath: string): string {
+    return [
+        "version = 1",
+        "",
+        "[control]",
+        'logLevel = "info"',
+        "",
+        "[mcp]",
+        "enabled = false",
+        'listenHost = "127.0.0.1"',
+        "listenPort = 17890",
+        "",
+        "[mcp.auth]",
+        'mode = "none"',
+        "",
+        "[[instances]]",
+        'name = "aromatic-pc"',
+        "enabled = true",
+        'provider = "local"',
+        `defaultWorkspace = ${JSON.stringify(workspacePath)}`,
+        `workerBinaryPath = ${JSON.stringify(workerBinaryPath)}`,
+        "",
+        "[instances.mcp]",
+        "enabled = false",
+        'allowTools = ["bash_run"]',
+        "",
+        "[instances.logs]",
+        "eventBufferSize = 50",
+        ""
+    ].join("\n");
 }
