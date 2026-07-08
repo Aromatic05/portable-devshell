@@ -789,12 +789,20 @@ function createSpawnRecorder(
             const stdout = new PassThrough();
             const stderr = new PassThrough();
             const stdinChunks: Buffer[] = [];
+            const originalEnd = stdin.end.bind(stdin);
             const child = new EventEmitter() as RecordedChild;
 
             child.stdin = stdin;
             child.stdout = stdout;
             child.stderr = stderr;
             child.stdinChunks = stdinChunks;
+            stdin.end = ((...args: Parameters<PassThrough["end"]>) => {
+                const result = originalEnd(...args);
+                setImmediate(() => {
+                    stdin.emit("finish");
+                });
+                return result;
+            }) as PassThrough["end"];
             child.kill = (signal?: NodeJS.Signals | number) => {
                 setImmediate(() => {
                     stdin.end();
