@@ -19,3 +19,5 @@
         "typescript-eslint": "^8.37.0"
     }
 }
+        "dev": "tsx packages/cli/src/cli/CliMain.ts",
+        "tsx": "^4.8.1",
