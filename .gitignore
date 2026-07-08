@@ -6,3 +6,4 @@ coverage/
 *.log
 *.tsbuildinfo
 .codegraph/
+packages/core/assets/devshell-worker

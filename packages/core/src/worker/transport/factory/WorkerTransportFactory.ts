@@ -7,27 +7,23 @@ import { SshWorkerTransport, type SshWorkerTransportOptions } from "../driver/Wo
 
 export interface LocalWorkerTransportFactoryOptions extends Omit<LocalWorkerTransportOptions, "workerBinary" | "spawnFunction"> {
     type: "local";
-    workerBinaryPath?: string;
     spawnFunction?: SpawnFunction;
 }
 
 export interface SshWorkerTransportFactoryOptions extends Omit<SshWorkerTransportOptions, "workerBinary" | "spawnFunction"> {
     type: "ssh";
-    workerBinaryPath?: string;
     spawnFunction?: SpawnFunction;
 }
 
 export interface DockerWorkerTransportFactoryOptions
     extends Omit<DockerWorkerTransportOptions, "workerBinary" | "spawnFunction"> {
     type: "docker";
-    workerBinaryPath?: string;
     spawnFunction?: SpawnFunction;
 }
 
 export interface PodmanWorkerTransportFactoryOptions
     extends Omit<PodmanWorkerTransportOptions, "workerBinary" | "spawnFunction"> {
     type: "podman";
-    workerBinaryPath?: string;
     spawnFunction?: SpawnFunction;
 }
 
@@ -39,7 +35,7 @@ export type WorkerTransportFactoryOptions =
 
 export class WorkerTransportFactory {
     static create(options: WorkerTransportFactoryOptions): WorkerCommandTransport {
-        const workerBinary = new WorkerBinary(options.workerBinaryPath);
+        const workerBinary = new WorkerBinary();
 
         switch (options.type) {
             case "local":

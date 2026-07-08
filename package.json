@@ -4,8 +4,8 @@
     "private": true,
     "packageManager": "pnpm@10.13.1",
     "scripts": {
-        "dev": "tsx packages/cli/src/cli/CliMain.ts",
-        "build": "tsc -b",
+        "dev": "node ./scripts/dev.mjs",
+        "build": "cargo build -p devshell-worker --manifest-path ./Cargo.toml && node ./scripts/build-worker.mjs --copy-only && tsc -b",
         "lint": "eslint .",
         "lint:fix": "eslint . --fix",
         "test": "pnpm -r --filter './packages/*' test",

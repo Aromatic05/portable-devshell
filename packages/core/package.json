@@ -12,7 +12,8 @@
         }
     },
     "files": [
-        "dist"
+        "dist",
+        "assets"
     ],
     "dependencies": {
         "@portable-devshell/shared": "workspace:*"
