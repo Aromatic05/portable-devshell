@@ -53,38 +53,24 @@ export class InstanceCreateWizard {
         const provider = await this.#provider(lines, schema);
         const defaultWorkspace = await this.#optional(lines, "default workspace", process.cwd());
 
-        this.#output.write("Worker\n");
-        const workerBinaryPath = await this.#optional(lines, "worker binary path", "");
-
         const providerFields = await this.#providerFields(lines, provider);
 
         this.#output.write("MCP\n");
         const mcpEnabled = await this.#confirm(lines, "MCP enabled", schema.defaultMcpEnabled);
         const allowTools = await this.#allowTools(lines, schema.defaultAllowTools);
 
-        this.#output.write("Logs and Security\n");
-        const eventBufferSize = await this.#integer(lines, "event buffer size", schema.defaultEventBufferSize);
-        const retentionDays = await this.#integer(lines, "retention days", schema.defaultRetentionDays);
+        this.#output.write("Security\n");
         const securityMode = await this.#optional(lines, "security mode", schema.defaultSecurityMode);
-
-        this.#output.write("Environment\n");
-        const env = await this.#envEntries(lines);
 
         return {
             ...(defaultWorkspace.length === 0 ? {} : { defaultWorkspace }),
-            ...(workerBinaryPath.length === 0 ? {} : { workerBinaryPath }),
             ...(providerFields.container === undefined ? {} : { container: providerFields.container }),
             ...(providerFields.dockerBinary === undefined ? {} : { dockerBinary: providerFields.dockerBinary }),
             ...(providerFields.host === undefined ? {} : { host: providerFields.host }),
             ...(providerFields.podmanBinary === undefined ? {} : { podmanBinary: providerFields.podmanBinary }),
             ...(providerFields.remoteCwd === undefined ? {} : { remoteCwd: providerFields.remoteCwd }),
             ...(providerFields.sshBinary === undefined ? {} : { sshBinary: providerFields.sshBinary }),
-            ...(env === undefined ? {} : { env }),
             enabled,
-            logs: {
-                eventBufferSize,
-                retentionDays
-            },
             mcp: {
                 allowTools,
                 enabled: mcpEnabled
@@ -156,31 +142,6 @@ export class InstanceCreateWizard {
         return [...new Set(raw.split(/[,\s]+/u).map((entry) => entry.trim()).filter((entry) => entry.length > 0))];
     }
 
-    async #envEntries(lines: AsyncIterator<string>): Promise<Record<string, string> | undefined> {
-        this.#output.write("Enter KEY=VALUE pairs, one per line. Submit an empty line to finish.\n");
-        const env: Record<string, string> = {};
-
-        while (true) {
-            const line = await this.#ask(lines, "env> ");
-            const trimmed = line.trim();
-
-            if (trimmed.length === 0) {
-                break;
-            }
-
-            const separator = trimmed.indexOf("=");
-
-            if (separator <= 0) {
-                this.#output.write("env entry must use KEY=VALUE format.\n");
-                continue;
-            }
-
-            env[trimmed.slice(0, separator)] = trimmed.slice(separator + 1);
-        }
-
-        return Object.keys(env).length === 0 ? undefined : env;
-    }
-
     async #confirm(lines: AsyncIterator<string>, label: string, defaultValue: boolean): Promise<boolean> {
         const suffix = defaultValue ? "[Y/n]" : "[y/N]";
 
@@ -226,26 +187,12 @@ export class InstanceCreateWizard {
         return value.length === 0 ? undefined : value;
     }
 
-    async #integer(lines: AsyncIterator<string>, label: string, defaultValue: number): Promise<number> {
-        while (true) {
-            const answer = await this.#optional(lines, label, String(defaultValue));
-            const parsed = Number(answer);
-
-            if (Number.isInteger(parsed) && parsed >= 0) {
-                return parsed;
-            }
-
-            this.#output.write(`${label} must be a non-negative integer.\n`);
-        }
-    }
-
     #renderSummary(summary: InstanceCreateSummary): void {
         this.#output.write("Summary\n");
         this.#output.write(`name: ${summary.name}\n`);
         this.#output.write(`enabled: ${summary.enabled}\n`);
         this.#output.write(`provider: ${summary.provider}\n`);
         this.#output.write(`default workspace: ${summary.defaultWorkspace ?? ""}\n`);
-        this.#output.write(`worker binary path: ${summary.workerBinaryPath ?? ""}\n`);
 
         if (summary.host !== undefined) {
             this.#output.write(`host: ${summary.host}\n`);
@@ -274,10 +221,7 @@ export class InstanceCreateWizard {
         this.#output.write(`mcp enabled: ${summary.mcp.enabled}\n`);
         this.#output.write(`mcp path: ${summary.mcp.path}\n`);
         this.#output.write(`allowed tools: ${summary.mcp.allowTools.join(",")}\n`);
-        this.#output.write(`event buffer size: ${summary.logs.eventBufferSize}\n`);
-        this.#output.write(`retention days: ${summary.logs.retentionDays}\n`);
         this.#output.write(`security mode: ${summary.security.mode}\n`);
-        this.#output.write(`env entries: ${Object.keys(summary.env ?? {}).length}\n`);
     }
 
     async #ask(lines: AsyncIterator<string>, prompt: string): Promise<string> {

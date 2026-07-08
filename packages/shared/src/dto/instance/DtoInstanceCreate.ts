@@ -6,8 +6,6 @@ export interface InstanceCreateSchema {
     defaultEnabled: boolean;
     defaultMcpEnabled: boolean;
     defaultAllowTools: readonly string[];
-    defaultEventBufferSize: number;
-    defaultRetentionDays: number;
     defaultSecurityMode: string;
 }
 
@@ -16,12 +14,7 @@ export interface InstanceCreateDraft {
     defaultWorkspace?: string;
     dockerBinary?: string;
     enabled?: boolean;
-    env?: Record<string, string>;
     host?: string;
-    logs?: {
-        eventBufferSize?: number;
-        retentionDays?: number;
-    };
     mcp?: {
         allowTools?: string[];
         enabled?: boolean;
@@ -34,7 +27,6 @@ export interface InstanceCreateDraft {
         mode?: string;
     };
     sshBinary?: string;
-    workerBinaryPath?: string;
 }
 
 export interface InstanceCreateSummary {
@@ -42,12 +34,7 @@ export interface InstanceCreateSummary {
     defaultWorkspace?: string;
     dockerBinary?: string;
     enabled: boolean;
-    env?: Record<string, string>;
     host?: string;
-    logs: {
-        eventBufferSize: number;
-        retentionDays: number;
-    };
     mcp: {
         allowTools: string[];
         enabled: boolean;
@@ -61,7 +48,6 @@ export interface InstanceCreateSummary {
         mode: string;
     };
     sshBinary?: string;
-    workerBinaryPath?: string;
 }
 
 export interface InstanceCreateResult {

@@ -496,7 +496,7 @@ test("CliMain runs interactive instance create through control rpc", async () =>
             calls.push("create");
             assert.equal(draft.name, "demo-local");
             assert.equal(draft.provider, "local");
-            assert.equal(draft.workerBinaryPath, "/worker/bin");
+            assert.equal("workerBinaryPath" in draft, false);
             return {
                 enabled: true,
                 mcpPath: "/demo-local/mcp",
@@ -516,10 +516,8 @@ test("CliMain runs interactive instance create through control rpc", async () =>
             return {
                 defaultAllowTools: ["bash_run"],
                 defaultEnabled: true,
-                defaultEventBufferSize: 1000,
                 defaultMcpEnabled: true,
                 defaultProvider: "local",
-                defaultRetentionDays: 7,
                 defaultSecurityMode: "disabled",
                 providers: ["local", "ssh", "docker", "podman"] as const
             };
@@ -551,10 +549,6 @@ test("CliMain runs interactive instance create through control rpc", async () =>
             return {
                 defaultWorkspace: "/tmp/workspace",
                 enabled: true,
-                logs: {
-                    eventBufferSize: 1000,
-                    retentionDays: 7
-                },
                 mcp: {
                     allowTools: ["bash_run"],
                     enabled: true,
@@ -564,8 +558,7 @@ test("CliMain runs interactive instance create through control rpc", async () =>
                 provider: "local",
                 security: {
                     mode: "disabled"
-                },
-                workerBinaryPath: "/worker/bin"
+                }
             };
         }
     };
@@ -591,10 +584,6 @@ test("CliMain runs interactive instance create through control rpc", async () =>
             "\n",
             "\n",
             "/tmp/workspace\n",
-            "/worker/bin\n",
-            "\n",
-            "\n",
-            "\n",
             "\n",
             "\n",
             "\n",
@@ -609,6 +598,10 @@ test("CliMain runs interactive instance create through control rpc", async () =>
     const output = stdout.flush();
     assert.match(output, /Summary\n/u);
     assert.match(output, /instance created: demo-local/u);
+    assert.doesNotMatch(output, /worker binary path:/u);
+    assert.doesNotMatch(output, /event buffer size:/u);
+    assert.doesNotMatch(output, /retention days:/u);
+    assert.doesNotMatch(output, /env entries:/u);
     assert.equal(stderr.flush(), "");
 });
 

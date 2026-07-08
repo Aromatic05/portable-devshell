@@ -72,6 +72,7 @@ test("CliMain runs Task 12 real worker smoke through control lifecycle", async (
     const workerBinaryPath = resolve(fileURLToPath(new URL("../../../../", import.meta.url)), "target/debug/devshell-worker");
     const stdout = createBuffer();
     const stderr = createBuffer();
+    const previousWorkerPath = process.env.PORTABLE_DEVSHELL_WORKER_PATH;
     let controlStopped = false;
     const cli = new CliMain({
         homeDirectory,
@@ -80,10 +81,12 @@ test("CliMain runs Task 12 real worker smoke through control lifecycle", async (
         xdgRuntimeDir
     });
 
+    process.env.PORTABLE_DEVSHELL_WORKER_PATH = workerBinaryPath;
+
     await mkdir(join(homeDirectory, ".devshell", "control"), { recursive: true });
     await writeFile(
         join(homeDirectory, ".devshell", "control", "config.toml"),
-        createRealConfig(workspacePath, workerBinaryPath),
+        createRealConfig(workspacePath),
         "utf8"
     );
 
@@ -91,6 +94,7 @@ test("CliMain runs Task 12 real worker smoke through control lifecycle", async (
         if (!controlStopped) {
             await cli.run(["stop"]).catch(() => undefined);
         }
+        restoreEnv("PORTABLE_DEVSHELL_WORKER_PATH", previousWorkerPath);
         await rm(homeDirectory, { force: true, recursive: true });
         await rm(xdgRuntimeDir, { force: true, recursive: true });
         await rm(workspacePath, { force: true, recursive: true });
@@ -144,6 +148,7 @@ test("CliMain creates an instance interactively and uses it through the real con
     const workerBinaryPath = resolve(fileURLToPath(new URL("../../../../", import.meta.url)), "target/debug/devshell-worker");
     const stdout = createBuffer();
     const stderr = createBuffer();
+    const previousWorkerPath = process.env.PORTABLE_DEVSHELL_WORKER_PATH;
     let controlStopped = false;
     const cli = new CliMain({
         homeDirectory,
@@ -153,10 +158,6 @@ test("CliMain creates an instance interactively and uses it through the real con
             "\n",
             "\n",
             `${workspacePath}\n`,
-            `${workerBinaryPath}\n`,
-            "\n",
-            "\n",
-            "\n",
             "\n",
             "\n",
             "\n",
@@ -166,6 +167,8 @@ test("CliMain creates an instance interactively and uses it through the real con
         xdgRuntimeDir
     });
 
+    process.env.PORTABLE_DEVSHELL_WORKER_PATH = workerBinaryPath;
+
     await mkdir(join(homeDirectory, ".devshell", "control"), { recursive: true });
     await writeFile(join(homeDirectory, ".devshell", "control", "config.toml"), createCreateConfig(), "utf8");
 
@@ -173,6 +176,7 @@ test("CliMain creates an instance interactively and uses it through the real con
         if (!controlStopped) {
             await cli.run(["stop"]).catch(() => undefined);
         }
+        restoreEnv("PORTABLE_DEVSHELL_WORKER_PATH", previousWorkerPath);
         await rm(homeDirectory, { force: true, recursive: true });
         await rm(xdgRuntimeDir, { force: true, recursive: true });
         await rm(workspacePath, { force: true, recursive: true });
@@ -185,6 +189,7 @@ test("CliMain creates an instance interactively and uses it through the real con
     const createOutput = stdout.flush();
     assert.match(createOutput, /Summary/u);
     assert.match(createOutput, /instance created: aromatic-pc/u);
+    assert.doesNotMatch(createOutput, /worker binary path:/u);
 
     assert.equal(await cli.run(["instance", "list"]), 0);
     assert.match(stdout.flush(), /aromatic-pc\tstopped/u);
@@ -197,6 +202,7 @@ test("CliMain creates an instance interactively and uses it through the real con
 
     assert.match(await readFile(join(homeDirectory, ".devshell", "control", "config.toml"), "utf8"), /\[\[instances\]\]/u);
     assert.match(await readFile(join(homeDirectory, ".devshell", "control", "config.toml"), "utf8"), /name = "aromatic-pc"/u);
+    assert.doesNotMatch(await readFile(join(homeDirectory, ".devshell", "control", "config.toml"), "utf8"), /workerBinaryPath/u);
 
     assert.equal(await cli.run(["stop"]), 0);
     controlStopped = true;
@@ -328,7 +334,7 @@ function createBuffer(): { flush: () => string; write: (chunk: string) => void }
     };
 }
 
-function createRealConfig(workspacePath: string, workerBinaryPath: string): string {
+function createRealConfig(workspacePath: string): string {
     return [
         "version = 1",
         "",
@@ -348,7 +354,6 @@ function createRealConfig(workspacePath: string, workerBinaryPath: string): stri
         "enabled = true",
         'provider = "local"',
         `defaultWorkspace = ${JSON.stringify(workspacePath)}`,
-        `workerBinaryPath = ${JSON.stringify(workerBinaryPath)}`,
         "",
         "[instances.mcp]",
         "enabled = false",
@@ -377,4 +382,13 @@ function createCreateConfig(): string {
         'mode = "none"',
         ""
     ].join("\n");
+}
+
+function restoreEnv(name: keyof NodeJS.ProcessEnv, value: string | undefined): void {
+    if (value === undefined) {
+        delete process.env[name];
+        return;
+    }
+
+    process.env[name] = value;
 }

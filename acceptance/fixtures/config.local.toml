@@ -17,7 +17,6 @@ name = "aromatic-pc"
 enabled = true
 provider = "local"
 defaultWorkspace = "__WORKSPACE__"
-workerBinaryPath = "__WORKER_BINARY__"
 
 [instances.mcp]
 enabled = true

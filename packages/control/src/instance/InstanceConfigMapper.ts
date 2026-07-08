@@ -40,32 +40,28 @@ export class InstanceConfigMapper {
         switch (instance.provider) {
             case "local":
                 return {
-                    type: "local",
-                    workerBinaryPath: instance.workerBinaryPath
+                    type: "local"
                 };
             case "ssh":
                 return {
                     host: instance.host ?? fail(`ssh instance ${instance.name} requires host`),
                     remoteCwd: instance.remoteCwd,
                     sshBinary: instance.sshBinary,
-                    type: "ssh",
-                    workerBinaryPath: instance.workerBinaryPath
+                    type: "ssh"
                 };
             case "docker":
                 return {
                     container: instance.container ?? fail(`docker instance ${instance.name} requires container`),
                     dockerBinary: instance.dockerBinary,
                     remoteCwd: instance.remoteCwd,
-                    type: "docker",
-                    workerBinaryPath: instance.workerBinaryPath
+                    type: "docker"
                 };
             case "podman":
                 return {
                     container: instance.container ?? fail(`podman instance ${instance.name} requires container`),
                     podmanBinary: instance.podmanBinary,
                     remoteCwd: instance.remoteCwd,
-                    type: "podman",
-                    workerBinaryPath: instance.workerBinaryPath
+                    type: "podman"
                 };
         }
     }

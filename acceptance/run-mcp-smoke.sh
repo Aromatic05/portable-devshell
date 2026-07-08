@@ -38,14 +38,12 @@ trap cleanup EXIT INT TERM
 cp "$fixture_workspace/README.md" "$tmp_workspace/README.md"
 mkdir -p "$tmp_home/.devshell/control"
 
-WORKER_BINARY="$worker_binary" WORKSPACE_PATH="$tmp_workspace" FIXTURE_CONFIG="$fixture_config" OUTPUT_CONFIG="$tmp_home/.devshell/control/config.toml" node <<'EOF'
+WORKSPACE_PATH="$tmp_workspace" FIXTURE_CONFIG="$fixture_config" OUTPUT_CONFIG="$tmp_home/.devshell/control/config.toml" node <<'EOF'
 const { readFileSync, writeFileSync } = require("node:fs");
 const fixture = readFileSync(process.env.FIXTURE_CONFIG, "utf8");
 writeFileSync(
   process.env.OUTPUT_CONFIG,
-  fixture
-    .replace("__WORKSPACE__", process.env.WORKSPACE_PATH)
-    .replace("__WORKER_BINARY__", process.env.WORKER_BINARY),
+  fixture.replace("__WORKSPACE__", process.env.WORKSPACE_PATH),
   "utf8"
 );
 EOF

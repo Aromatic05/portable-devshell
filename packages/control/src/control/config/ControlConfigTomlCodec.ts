@@ -33,7 +33,6 @@ export interface ControlInstanceConfig {
     remoteCwd?: string;
     security?: ControlInstanceSecurityConfig;
     sshBinary?: string;
-    workerBinaryPath?: string;
 }
 
 export interface ControlConfig {
@@ -80,7 +79,6 @@ export class ControlConfigTomlCodec {
                 enabled: instance.enabled,
                 provider: instance.provider,
                 ...(instance.defaultWorkspace === undefined ? {} : { defaultWorkspace: instance.defaultWorkspace }),
-                ...(instance.workerBinaryPath === undefined ? {} : { workerBinaryPath: instance.workerBinaryPath }),
                 ...(instance.host === undefined ? {} : { host: instance.host }),
                 ...(instance.remoteCwd === undefined ? {} : { remoteCwd: instance.remoteCwd }),
                 ...(instance.container === undefined ? {} : { container: instance.container }),
@@ -133,6 +131,10 @@ export class ControlConfigTomlCodec {
         const logs = asOptionalRecord(instance.logs, `instances[${index}].logs`);
         const security = asOptionalRecord(instance.security, `instances[${index}].security`);
 
+        if (instance.workerBinaryPath !== undefined) {
+            throw new Error(`instances[${index}].workerBinaryPath is not supported`);
+        }
+
         return {
             container: asOptionalString(instance.container, `instances[${index}].container`),
             defaultWorkspace: asOptionalString(instance.defaultWorkspace, `instances[${index}].defaultWorkspace`),
@@ -157,8 +159,7 @@ export class ControlConfigTomlCodec {
             provider: asProviderKind(asString(instance.provider, `instances[${index}].provider`)),
             remoteCwd: asOptionalString(instance.remoteCwd, `instances[${index}].remoteCwd`),
             security: security === undefined ? undefined : { mode: asOptionalString(security.mode, `instances[${index}].security.mode`) },
-            sshBinary: asOptionalString(instance.sshBinary, `instances[${index}].sshBinary`),
-            workerBinaryPath: asOptionalString(instance.workerBinaryPath, `instances[${index}].workerBinaryPath`)
+            sshBinary: asOptionalString(instance.sshBinary, `instances[${index}].sshBinary`)
         };
     }
 }

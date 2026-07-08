@@ -18,6 +18,7 @@ test("control lifecycle smoke drives the frozen worker and persists Task 12 arti
     const xdgRuntimeDir = await mkdtemp(join(tmpdir(), "portable-devshell-control-real-runtime-"));
     const workspacePath = await mkdtemp(join(tmpdir(), "portable-devshell-control-real-workspace-"));
     const workerBinaryPath = resolve(fileURLToPath(new URL("../../../../", import.meta.url)), "target/debug/devshell-worker");
+    const previousWorkerPath = process.env.PORTABLE_DEVSHELL_WORKER_PATH;
     const homePaths = new ControlPathHome(homeDirectory);
     const runtimePaths = new ControlPathRuntime(xdgRuntimeDir);
     const manager = new ControlLifecycleManager({
@@ -26,11 +27,14 @@ test("control lifecycle smoke drives the frozen worker and persists Task 12 arti
         waitTimeoutMs: 10_000
     });
 
+    process.env.PORTABLE_DEVSHELL_WORKER_PATH = workerBinaryPath;
+
     await mkdir(homePaths.controlHomeDir, { recursive: true });
-    await writeFile(homePaths.configFile, new ControlConfigTomlCodec().encode(createConfig(workspacePath, workerBinaryPath)), "utf8");
+    await writeFile(homePaths.configFile, new ControlConfigTomlCodec().encode(createConfig(workspacePath)), "utf8");
 
     t.after(async () => {
         await manager.stop().catch(() => undefined);
+        restoreEnv("PORTABLE_DEVSHELL_WORKER_PATH", previousWorkerPath);
         await rm(homeDirectory, { force: true, recursive: true });
         await rm(xdgRuntimeDir, { force: true, recursive: true });
         await rm(workspacePath, { force: true, recursive: true });
@@ -85,7 +89,7 @@ test("control lifecycle smoke drives the frozen worker and persists Task 12 arti
     assert.equal(stopped.running, false);
 });
 
-function createConfig(workspacePath: string, workerBinaryPath: string) {
+function createConfig(workspacePath: string) {
     return {
         control: {
             logLevel: "info"
@@ -102,8 +106,7 @@ function createConfig(workspacePath: string, workerBinaryPath: string) {
                     enabled: true
                 },
                 name: "aromatic-pc",
-                provider: "local" as const,
-                workerBinaryPath
+                provider: "local" as const
             }
         ],
         mcp: {
@@ -116,6 +119,15 @@ function createConfig(workspacePath: string, workerBinaryPath: string) {
         },
         version: 1
     };
+}
+
+function restoreEnv(name: keyof NodeJS.ProcessEnv, value: string | undefined): void {
+    if (value === undefined) {
+        delete process.env[name];
+        return;
+    }
+
+    process.env[name] = value;
 }
 
 async function request(

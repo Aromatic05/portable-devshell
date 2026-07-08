@@ -20,8 +20,7 @@ test("disabled instances are skipped and registry does not auto start workers", 
                 enabled: true
             },
             name: "demo-local",
-            provider: "local",
-            workerBinaryPath: "/missing/devshell-worker"
+            provider: "local"
         },
         {
             enabled: false,

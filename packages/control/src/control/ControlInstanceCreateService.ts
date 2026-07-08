@@ -11,10 +11,8 @@ import { ControlConfigValidator } from "./config/ControlConfigValidator.js";
 const instanceCreateSchema: InstanceCreateSchema = {
     defaultAllowTools: ["bash_run"],
     defaultEnabled: true,
-    defaultEventBufferSize: 1_000,
     defaultMcpEnabled: true,
     defaultProvider: "local",
-    defaultRetentionDays: 7,
     defaultSecurityMode: "disabled",
     providers: ["local", "ssh", "docker", "podman"]
 };
@@ -127,9 +125,7 @@ export class ControlInstanceCreateService {
             defaultWorkspace: readOptionalString(draft.defaultWorkspace, "defaultWorkspace"),
             dockerBinary: readOptionalString(draft.dockerBinary, "dockerBinary"),
             enabled: readBoolean(draft.enabled, instanceCreateSchema.defaultEnabled, "enabled"),
-            env: readEnv(draft.env),
             host: readOptionalString(draft.host, "host"),
-            logs: readLogs(draft.logs),
             mcp: {
                 allowTools: readAllowTools(draft.mcp),
                 enabled: readNestedBoolean(draft.mcp, "enabled", instanceCreateSchema.defaultMcpEnabled),
@@ -142,8 +138,7 @@ export class ControlInstanceCreateService {
             security: {
                 mode: readSecurityMode(draft.security)
             },
-            sshBinary: readOptionalString(draft.sshBinary, "sshBinary"),
-            workerBinaryPath: readOptionalString(draft.workerBinaryPath, "workerBinaryPath")
+            sshBinary: readOptionalString(draft.sshBinary, "sshBinary")
         };
 
         switch (provider) {
@@ -245,55 +240,9 @@ function readAllowTools(recordValue: JsonValue | undefined): string[] {
     return [...new Set(value.filter((entry): entry is string => typeof entry === "string").map((entry) => entry.trim()))];
 }
 
-function readLogs(value: JsonValue | undefined): ControlInstanceConfig["logs"] {
-    const logs = value === undefined ? undefined : asOptionalRecord(value, "logs");
-
-    return {
-        eventBufferSize: readInteger(logs?.eventBufferSize, instanceCreateSchema.defaultEventBufferSize, "logs.eventBufferSize"),
-        retentionDays: readInteger(logs?.retentionDays, instanceCreateSchema.defaultRetentionDays, "logs.retentionDays")
-    };
-}
-
 function readSecurityMode(value: JsonValue | undefined): string {
     const security = value === undefined ? undefined : asOptionalRecord(value, "security");
     return readOptionalString(security?.mode, "security.mode") ?? instanceCreateSchema.defaultSecurityMode;
-}
-
-function readEnv(value: JsonValue | undefined): Record<string, string> | undefined {
-    if (value === undefined) {
-        return undefined;
-    }
-
-    const record = asOptionalRecord(value, "env");
-    const entries = Object.entries(record);
-
-    if (entries.length === 0) {
-        return undefined;
-    }
-
-    const env: Record<string, string> = {};
-
-    for (const [key, entryValue] of entries) {
-        if (typeof entryValue !== "string") {
-            throw invalidDraft(`env.${key} must be a string.`);
-        }
-
-        env[key] = entryValue;
-    }
-
-    return env;
-}
-
-function readInteger(value: JsonValue | undefined, fallback: number, fieldName: string): number {
-    if (value === undefined) {
-        return fallback;
-    }
-
-    if (typeof value !== "number" || !Number.isInteger(value) || value < 0) {
-        throw invalidDraft(`${fieldName} must be a non-negative integer.`);
-    }
-
-    return value;
 }
 
 function asOptionalRecord(value: JsonValue, fieldName: string): Record<string, JsonValue> {
@@ -325,17 +274,11 @@ function toSummary(instance: ControlInstanceConfig): InstanceCreateSummary {
         ...(instance.container === undefined ? {} : { container: instance.container }),
         ...(instance.defaultWorkspace === undefined ? {} : { defaultWorkspace: instance.defaultWorkspace }),
         ...(instance.dockerBinary === undefined ? {} : { dockerBinary: instance.dockerBinary }),
-        ...(instance.env === undefined ? {} : { env: instance.env }),
         ...(instance.host === undefined ? {} : { host: instance.host }),
         ...(instance.podmanBinary === undefined ? {} : { podmanBinary: instance.podmanBinary }),
         ...(instance.remoteCwd === undefined ? {} : { remoteCwd: instance.remoteCwd }),
         ...(instance.sshBinary === undefined ? {} : { sshBinary: instance.sshBinary }),
-        ...(instance.workerBinaryPath === undefined ? {} : { workerBinaryPath: instance.workerBinaryPath }),
         enabled: instance.enabled,
-        logs: {
-            eventBufferSize: instance.logs?.eventBufferSize ?? instanceCreateSchema.defaultEventBufferSize,
-            retentionDays: instance.logs?.retentionDays ?? instanceCreateSchema.defaultRetentionDays
-        },
         mcp: {
             allowTools: [...instance.mcp.allowTools],
             enabled: instance.mcp.enabled,

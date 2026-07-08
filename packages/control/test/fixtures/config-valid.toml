@@ -17,7 +17,6 @@ name = "demo-local"
 enabled = true
 provider = "local"
 defaultWorkspace = "/tmp/demo"
-workerBinaryPath = "/usr/local/bin/devshell-worker"
 
 [instances.env]
 DEMO = "1"
