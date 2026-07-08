@@ -8,11 +8,10 @@ export class CliCommandWatchLogs {
         onEntries: (entries: CliInstanceLogEntry[]) => Promise<void> | void,
         maxEvents?: number
     ): Promise<void> {
+        const snapshot = await client.getSnapshot(instance);
         const initialLogs = await client.readLogs(instance);
         let nextLogSeq = (initialLogs.at(-1)?.seq ?? 0) + 1;
         await onEntries(initialLogs);
-
-        const snapshot = await client.getSnapshot(instance);
         const stream = await client.subscribe(instance, snapshot.lastSeq + 1);
 
         try {

@@ -159,6 +159,91 @@ test("CliMain handles instance logs follow and tool call through injected client
     assert.equal(stderr.flush(), "");
 });
 
+test("CliMain follows instance logs without skipping events between initial pull and subscribe", async () => {
+    const stdout = createBuffer();
+    const stderr = createBuffer();
+    const stream = {
+        delivered: false,
+        close() {},
+        async nextEvent() {
+            if (this.delivered) {
+                throw new Error("unexpected extra event");
+            }
+
+            this.delivered = true;
+            return { event: "instance.toolCalled", seq: 2, target: { instance: "demo-local", kind: "instance" }, type: "event" };
+        }
+    };
+    let initialLogsRead = false;
+    const client = {
+        async callTool() {
+            throw new Error("unused");
+        },
+        async getSnapshot() {
+            return {
+                lastSeq: initialLogsRead ? 2 : 1,
+                snapshot: {
+                    connectionState: "connected",
+                    daemonState: "running",
+                    lastSeq: initialLogsRead ? 2 : 1,
+                    name: "demo-local",
+                    ready: true,
+                    status: "ready"
+                }
+            };
+        },
+        async listInstances() {
+            return [];
+        },
+        async readLogs(_: string, query?: { fromSeq?: number; limit?: number }) {
+            if (query?.fromSeq === 2) {
+                return [{ at: "", instanceName: "demo-local", message: "after\n", seq: 2, stream: "stdout" as const }];
+            }
+
+            initialLogsRead = true;
+            return [{ at: "", instanceName: "demo-local", message: "before\n", seq: 1, stream: "stdout" as const }];
+        },
+        async refreshStatus() {
+            throw new Error("unused");
+        },
+        async startInstance() {
+            throw new Error("unused");
+        },
+        async stopInstance() {
+            throw new Error("unused");
+        },
+        async subscribe(_: string, fromSeq: number) {
+            assert.equal(fromSeq, 2);
+            return stream;
+        }
+    };
+
+    const cli = new CliMain({
+        createClient: () => client,
+        createLifecycleManager: async () => ({
+            async logs() {
+                return "";
+            },
+            async start() {
+                return { instanceCount: 0, running: true };
+            },
+            async status() {
+                return { instanceCount: 0, running: true };
+            },
+            async stop() {
+                return { instanceCount: 0, running: false };
+            }
+        }),
+        followEventLimit: 1,
+        stderr,
+        stdout
+    });
+
+    assert.equal(await cli.run(["instance", "logs", "demo-local", "-f"]), 0);
+    assert.equal(stdout.flush(), "[1] stdout before\n[2] stdout after\n");
+    assert.equal(stderr.flush(), "");
+});
+
 function createBuffer(): { flush: () => string; write: (chunk: string) => void } {
     const chunks: string[] = [];
 
