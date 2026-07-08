@@ -36,7 +36,7 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 cp "$fixture_workspace/README.md" "$tmp_workspace/README.md"
-mkdir -p "$tmp_home/.devshell/control"
+mkdir -p "$tmp_home/.devshell/control/instances"
 
 WORKSPACE_PATH="$tmp_workspace" FIXTURE_CONFIG="$fixture_config" OUTPUT_CONFIG="$tmp_home/.devshell/control/config.toml" node <<'EOF'
 const { readFileSync, writeFileSync } = require("node:fs");
@@ -44,6 +44,29 @@ const fixture = readFileSync(process.env.FIXTURE_CONFIG, "utf8");
 writeFileSync(
   process.env.OUTPUT_CONFIG,
   fixture.replace("__WORKSPACE__", process.env.WORKSPACE_PATH),
+  "utf8"
+);
+EOF
+
+WORKSPACE_PATH="$tmp_workspace" OUTPUT_INSTANCE_CONFIG="$tmp_home/.devshell/control/instances/aromatic-pc.toml" node <<'EOF'
+const { writeFileSync } = require("node:fs");
+writeFileSync(
+  process.env.OUTPUT_INSTANCE_CONFIG,
+  [
+    "version = 1",
+    'name = "aromatic-pc"',
+    "enabled = true",
+    'provider = "local"',
+    `workspace = ${JSON.stringify(process.env.WORKSPACE_PATH)}`,
+    "",
+    "[mcp]",
+    "enabled = true",
+    'allowTools = ["bash_run"]',
+    "",
+    "[logs]",
+    "eventBufferSize = 50",
+    ""
+  ].join("\n"),
   "utf8"
 );
 EOF

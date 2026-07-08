@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 
 import {
     ControlConfigStore,
+    ControlInstanceTomlCodec,
     ControlConfigTomlCodec,
     ControlConfigValidator,
     ControlPathHome,
@@ -44,12 +45,17 @@ test("valid config fixture is loaded", async () => {
         const paths = new ControlPathHome(homeDirectory);
 
         await writeFileWithParents(paths.configFile, fixture);
+        await writeFileWithParents(
+            paths.instanceConfigFile("demo-local"),
+            new ControlInstanceTomlCodec().encode(createInstanceConfig("/tmp/demo"))
+        );
 
         const config = await new ControlConfigStore().readOrCreate(homeDirectory);
 
         assert.equal(config.instances[0]?.name, "demo-local");
         assert.equal(config.instances[0]?.mcp.allowTools[0], "bash_run");
         assert.equal(config.instances[0]?.logs?.eventBufferSize, 50);
+        assert.equal(config.instances[0]?.workspace, "/tmp/demo");
     } finally {
         await rm(homeDirectory, { force: true, recursive: true });
     }
@@ -92,9 +98,8 @@ test("public MCP without auth is rejected", async () => {
 });
 
 test("instance name without dash is rejected", () => {
-    const codec = new ControlConfigTomlCodec();
     const validator = new ControlConfigValidator();
-    const config = codec.decode(codec.encode(createDefaultControlConfig()));
+    const config = createDefaultControlConfig();
 
     config.instances.push({
         enabled: true,
@@ -103,7 +108,8 @@ test("instance name without dash is rejected", () => {
             enabled: true
         },
         name: "invalidname",
-        provider: "local"
+        provider: "local",
+        workspace: "/tmp/demo"
     });
 
     assert.throws(
@@ -129,4 +135,23 @@ async function writeFileWithParents(path: string, source: string): Promise<void>
     const { mkdir } = await import("node:fs/promises");
     await mkdir(dirname(path), { recursive: true });
     await writeFile(path, source, "utf8");
+}
+
+function createInstanceConfig(workspace: string) {
+    return {
+        enabled: true,
+        env: {
+            DEMO: "1"
+        },
+        logs: {
+            eventBufferSize: 50
+        },
+        mcp: {
+            allowTools: ["bash_run"],
+            enabled: true
+        },
+        name: "demo-local",
+        provider: "local" as const,
+        workspace
+    };
 }

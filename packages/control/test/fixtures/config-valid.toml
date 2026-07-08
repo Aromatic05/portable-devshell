@@ -11,19 +11,3 @@ publicBaseUrl = "http://127.0.0.1:17890"
 
 [mcp.auth]
 mode = "token"
-
-[[instances]]
-name = "demo-local"
-enabled = true
-provider = "local"
-defaultWorkspace = "/tmp/demo"
-
-[instances.env]
-DEMO = "1"
-
-[instances.mcp]
-enabled = true
-allowTools = ["bash_run"]
-
-[instances.logs]
-eventBufferSize = 50

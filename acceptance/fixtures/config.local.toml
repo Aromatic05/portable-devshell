@@ -11,16 +11,3 @@ publicBaseUrl = "http://127.0.0.1:17890"
 
 [mcp.auth]
 mode = "none"
-
-[[instances]]
-name = "aromatic-pc"
-enabled = true
-provider = "local"
-defaultWorkspace = "__WORKSPACE__"
-
-[instances.mcp]
-enabled = true
-allowTools = ["bash_run"]
-
-[instances.logs]
-eventBufferSize = 50

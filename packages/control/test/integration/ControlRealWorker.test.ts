@@ -9,6 +9,7 @@ import { fileURLToPath } from "node:url";
 import { FrameReader, FrameWriter, type JsonValue } from "@portable-devshell/shared";
 
 import { ControlLifecycleManager } from "../../dist/control/ControlLifecycleManager.js";
+import { ControlInstanceTomlCodec } from "../../dist/control/config/ControlConfigTomlCodec.js";
 import { ControlConfigTomlCodec } from "../../dist/control/config/ControlConfigTomlCodec.js";
 import { ControlPathHome } from "../../dist/control/path/ControlPathHome.js";
 import { ControlPathRuntime } from "../../dist/control/path/ControlPathRuntime.js";
@@ -30,7 +31,13 @@ test("control lifecycle smoke drives the frozen worker and persists Task 12 arti
     process.env.PORTABLE_DEVSHELL_WORKER_PATH = workerBinaryPath;
 
     await mkdir(homePaths.controlHomeDir, { recursive: true });
-    await writeFile(homePaths.configFile, new ControlConfigTomlCodec().encode(createConfig(workspacePath)), "utf8");
+    await mkdir(homePaths.instancesDir, { recursive: true });
+    await writeFile(homePaths.configFile, new ControlConfigTomlCodec().encode(createGlobalConfig()), "utf8");
+    await writeFile(
+        homePaths.instanceConfigFile("aromatic-pc"),
+        new ControlInstanceTomlCodec().encode(createInstanceConfig(workspacePath)),
+        "utf8"
+    );
 
     t.after(async () => {
         await manager.stop().catch(() => undefined);
@@ -89,26 +96,12 @@ test("control lifecycle smoke drives the frozen worker and persists Task 12 arti
     assert.equal(stopped.running, false);
 });
 
-function createConfig(workspacePath: string) {
+function createGlobalConfig() {
     return {
         control: {
             logLevel: "info"
         },
-        instances: [
-            {
-                defaultWorkspace: workspacePath,
-                enabled: true,
-                logs: {
-                    eventBufferSize: 50
-                },
-                mcp: {
-                    allowTools: ["bash_run"],
-                    enabled: true
-                },
-                name: "aromatic-pc",
-                provider: "local" as const
-            }
-        ],
+        instances: [],
         mcp: {
             auth: {
                 mode: "none" as const
@@ -118,6 +111,22 @@ function createConfig(workspacePath: string) {
             listenPort: 0
         },
         version: 1
+    };
+}
+
+function createInstanceConfig(workspacePath: string) {
+    return {
+        enabled: true,
+        logs: {
+            eventBufferSize: 50
+        },
+        mcp: {
+            allowTools: ["bash_run"],
+            enabled: true
+        },
+        name: "aromatic-pc",
+        provider: "local" as const,
+        workspace: workspacePath
     };
 }
 

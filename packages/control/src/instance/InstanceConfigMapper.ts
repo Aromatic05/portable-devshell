@@ -26,8 +26,7 @@ export class InstanceConfigMapper {
     #toWorkerConfig(instance: ControlInstanceConfig): WorkerInstanceConfig {
         return {
             allowTools: instance.mcp.allowTools,
-            defaultWorkspace:
-                instance.defaultWorkspace === undefined ? undefined : asWorkspacePath(instance.defaultWorkspace),
+            defaultWorkspace: instance.workspace === undefined ? undefined : asWorkspacePath(instance.workspace),
             env: instance.env,
             eventBufferSize: instance.logs?.eventBufferSize,
             homeDirectory: process.env.HOME,

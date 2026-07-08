@@ -56,6 +56,10 @@ export class ControlConfigValidator {
             throw new Error(`instance name must include '-': ${instance.name}`);
         }
 
+        if (instance.workspace === undefined) {
+            throw new Error(`workspace is required for instance ${instance.name}`);
+        }
+
         const expectedPath = `/${instance.name}/mcp`;
         if (instance.mcp.path !== undefined && instance.mcp.path !== expectedPath) {
             throw new Error(`instance.mcp.path must be ${expectedPath}`);

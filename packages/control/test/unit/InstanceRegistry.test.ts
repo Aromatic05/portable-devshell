@@ -1,16 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import {
-    ControlConfigTomlCodec,
-    InstanceRegistryBuilder,
-    McpEndpointConfigMapper,
-    McpWiringService,
-    createDefaultControlConfig
-} from "../../dist/index.js";
+import { InstanceRegistryBuilder, McpEndpointConfigMapper, McpWiringService, createDefaultControlConfig } from "../../dist/index.js";
 
 test("disabled instances are skipped and registry does not auto start workers", () => {
-    const config = new ControlConfigTomlCodec().decode(new ControlConfigTomlCodec().encode(createDefaultControlConfig()));
+    const config = createDefaultControlConfig();
 
     config.instances.push(
         {
@@ -20,7 +14,8 @@ test("disabled instances are skipped and registry does not auto start workers", 
                 enabled: true
             },
             name: "demo-local",
-            provider: "local"
+            provider: "local",
+            workspace: "/tmp/demo"
         },
         {
             enabled: false,
@@ -29,7 +24,8 @@ test("disabled instances are skipped and registry does not auto start workers", 
                 enabled: true
             },
             name: "demo-disabled",
-            provider: "local"
+            provider: "local",
+            workspace: "/tmp/disabled"
         }
     );
     config.mcp.enabled = true;
@@ -42,7 +38,7 @@ test("disabled instances are skipped and registry does not auto start workers", 
 });
 
 test("mcp endpoint path is generated and wiring only builds host configuration", () => {
-    const config = new ControlConfigTomlCodec().decode(new ControlConfigTomlCodec().encode(createDefaultControlConfig()));
+    const config = createDefaultControlConfig();
     config.mcp.enabled = true;
     config.instances.push({
         enabled: true,
@@ -51,7 +47,8 @@ test("mcp endpoint path is generated and wiring only builds host configuration",
             enabled: true
         },
         name: "demo-local",
-        provider: "local"
+        provider: "local",
+        workspace: "/tmp/demo"
     });
 
     const registry = new InstanceRegistryBuilder().build(config);

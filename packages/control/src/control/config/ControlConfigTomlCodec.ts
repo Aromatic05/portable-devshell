@@ -21,7 +21,6 @@ export interface ControlInstanceSecurityConfig {
 
 export interface ControlInstanceConfig {
     container?: string;
-    defaultWorkspace?: string;
     dockerBinary?: string;
     enabled: boolean;
     env?: Record<string, string>;
@@ -34,13 +33,13 @@ export interface ControlInstanceConfig {
     remoteCwd?: string;
     security?: ControlInstanceSecurityConfig;
     sshBinary?: string;
+    workspace?: string;
 }
 
-export interface ControlConfig {
+export interface ControlGlobalConfig {
     control: {
         logLevel: string;
     };
-    instances: ControlInstanceConfig[];
     mcp: {
         auth: {
             mode: ControlMcpAuthMode;
@@ -53,10 +52,14 @@ export interface ControlConfig {
     version: number;
 }
 
+export interface ControlConfig extends ControlGlobalConfig {
+    instances: ControlInstanceConfig[];
+}
+
 type TomlRecord = TomlTableWithoutBigInt;
 
 export class ControlConfigTomlCodec {
-    decode(source: string): ControlConfig {
+    decode(source: string): ControlGlobalConfig {
         try {
             return this.#fromTomlDocument(parse(source) as TomlTableWithoutBigInt);
         } catch (error) {
@@ -93,45 +96,30 @@ export class ControlConfigTomlCodec {
                 auth: {
                     mode: config.mcp.auth.mode
                 }
-            },
-            instances: config.instances.map((instance) => ({
-                name: instance.name,
-                enabled: instance.enabled,
-                provider: instance.provider,
-                ...(instance.defaultWorkspace === undefined ? {} : { defaultWorkspace: instance.defaultWorkspace }),
-                ...(instance.host === undefined ? {} : { host: instance.host }),
-                ...(instance.remoteCwd === undefined ? {} : { remoteCwd: instance.remoteCwd }),
-                ...(instance.container === undefined ? {} : { container: instance.container }),
-                ...(instance.sshBinary === undefined ? {} : { sshBinary: instance.sshBinary }),
-                ...(instance.dockerBinary === undefined ? {} : { dockerBinary: instance.dockerBinary }),
-                ...(instance.podmanBinary === undefined ? {} : { podmanBinary: instance.podmanBinary }),
-                ...(instance.env === undefined || Object.keys(instance.env).length === 0 ? {} : { env: instance.env }),
-                mcp: {
-                    enabled: instance.mcp.enabled,
-                    allowTools: [...instance.mcp.allowTools],
-                    ...(instance.mcp.path === undefined ? {} : { path: instance.mcp.path })
-                },
-                ...(instance.logs === undefined ? {} : { logs: withoutUndefined(instance.logs) }),
-                ...(instance.security === undefined ? {} : { security: withoutUndefined(instance.security) })
-            }))
+            }
         });
     }
 
-    #fromTomlDocument(document: TomlRecord): ControlConfig {
+    #fromTomlDocument(document: TomlRecord): ControlGlobalConfig {
         const control = asRecord(document.control, "control");
         const mcp = asRecord(document.mcp, "mcp");
         const auth = asRecord(mcp.auth, "mcp.auth");
-        const instances = document.instances;
-
-        if (instances !== undefined && !Array.isArray(instances)) {
-            throw new Error("instances must be an array of tables");
+        if (document.instances !== undefined) {
+            throw createError({
+                code: errorCodes.controlConfigValidationFailed,
+                details: {
+                    fieldPath: "instances",
+                    phase: "decode"
+                },
+                message: "Legacy [[instances]] entries are not supported. Move them into ~/.devshell/control/instances/*.toml.",
+                retryable: false
+            });
         }
 
         return {
             control: {
                 logLevel: asString(control.logLevel, "control.logLevel")
             },
-            instances: (instances as TomlRecord[] | undefined)?.map((instance, index) => this.#parseInstance(instance, index)) ?? [],
             mcp: {
                 auth: {
                     mode: asAuthMode(asString(auth.mode, "mcp.auth.mode"))
@@ -144,44 +132,97 @@ export class ControlConfigTomlCodec {
             version: asInteger(document.version, "version")
         };
     }
+}
 
-    #parseInstance(instance: TomlRecord, index: number): ControlInstanceConfig {
-        const env = asOptionalRecord(instance.env, `instances[${index}].env`);
-        const mcp = asRecord(instance.mcp, `instances[${index}].mcp`);
-        const logs = asOptionalRecord(instance.logs, `instances[${index}].logs`);
-        const security = asOptionalRecord(instance.security, `instances[${index}].security`);
+export class ControlInstanceTomlCodec {
+    decode(source: string): ControlInstanceConfig {
+        try {
+            return parseInstanceDocument(parse(source) as TomlTableWithoutBigInt);
+        } catch (error) {
+            if (isStructuredConfigError(error)) {
+                throw error;
+            }
 
-        if (instance.workerBinaryPath !== undefined) {
-            throw new Error(`instances[${index}].workerBinaryPath is not supported`);
+            const message = error instanceof Error ? error.message : String(error);
+            const fieldPath = readFieldPath(message);
+            throw createError({
+                code: errorCodes.controlConfigParseFailed,
+                cause: error,
+                details: {
+                    ...(fieldPath === undefined ? {} : { fieldPath }),
+                    phase: "decode"
+                },
+                message,
+                retryable: false
+            });
         }
-
-        return {
-            container: asOptionalString(instance.container, `instances[${index}].container`),
-            defaultWorkspace: asOptionalString(instance.defaultWorkspace, `instances[${index}].defaultWorkspace`),
-            dockerBinary: asOptionalString(instance.dockerBinary, `instances[${index}].dockerBinary`),
-            enabled: asBoolean(instance.enabled, `instances[${index}].enabled`),
-            env: env === undefined ? undefined : asStringRecord(env, `instances[${index}].env`),
-            host: asOptionalString(instance.host, `instances[${index}].host`),
-            logs:
-                logs === undefined
-                    ? undefined
-                    : {
-                          eventBufferSize: asOptionalInteger(logs.eventBufferSize, `instances[${index}].logs.eventBufferSize`),
-                          retentionDays: asOptionalInteger(logs.retentionDays, `instances[${index}].logs.retentionDays`)
-                      },
-            mcp: {
-                allowTools: asStringArray(mcp.allowTools, `instances[${index}].mcp.allowTools`),
-                enabled: asBoolean(mcp.enabled, `instances[${index}].mcp.enabled`),
-                path: asOptionalString(mcp.path, `instances[${index}].mcp.path`)
-            },
-            name: asString(instance.name, `instances[${index}].name`),
-            podmanBinary: asOptionalString(instance.podmanBinary, `instances[${index}].podmanBinary`),
-            provider: asProviderKind(asString(instance.provider, `instances[${index}].provider`)),
-            remoteCwd: asOptionalString(instance.remoteCwd, `instances[${index}].remoteCwd`),
-            security: security === undefined ? undefined : { mode: asOptionalString(security.mode, `instances[${index}].security.mode`) },
-            sshBinary: asOptionalString(instance.sshBinary, `instances[${index}].sshBinary`)
-        };
     }
+
+    encode(instance: ControlInstanceConfig): string {
+        return stringify({
+            version: 1,
+            name: instance.name,
+            enabled: instance.enabled,
+            provider: instance.provider,
+            ...(instance.workspace === undefined ? {} : { workspace: instance.workspace }),
+            ...(instance.host === undefined ? {} : { host: instance.host }),
+            ...(instance.remoteCwd === undefined ? {} : { remoteCwd: instance.remoteCwd }),
+            ...(instance.container === undefined ? {} : { container: instance.container }),
+            ...(instance.sshBinary === undefined ? {} : { sshBinary: instance.sshBinary }),
+            ...(instance.dockerBinary === undefined ? {} : { dockerBinary: instance.dockerBinary }),
+            ...(instance.podmanBinary === undefined ? {} : { podmanBinary: instance.podmanBinary }),
+            ...(instance.env === undefined || Object.keys(instance.env).length === 0 ? {} : { env: instance.env }),
+            mcp: {
+                enabled: instance.mcp.enabled,
+                allowTools: [...instance.mcp.allowTools],
+                ...(instance.mcp.path === undefined ? {} : { path: instance.mcp.path })
+            },
+            ...(instance.logs === undefined ? {} : { logs: withoutUndefined(instance.logs) }),
+            ...(instance.security === undefined ? {} : { security: withoutUndefined(instance.security) })
+        });
+    }
+}
+
+function parseInstanceDocument(document: TomlRecord): ControlInstanceConfig {
+    const env = asOptionalRecord(document.env, "env");
+    const mcp = asRecord(document.mcp, "mcp");
+    const logs = asOptionalRecord(document.logs, "logs");
+    const security = asOptionalRecord(document.security, "security");
+
+    if (document.workerBinaryPath !== undefined) {
+        throw new Error("workerBinaryPath is not supported");
+    }
+
+    if (asInteger(document.version, "version") !== 1) {
+        throw new Error("version must be 1");
+    }
+
+    return {
+        container: asOptionalString(document.container, "container"),
+        dockerBinary: asOptionalString(document.dockerBinary, "dockerBinary"),
+        enabled: asBoolean(document.enabled, "enabled"),
+        env: env === undefined ? undefined : asStringRecord(env, "env"),
+        host: asOptionalString(document.host, "host"),
+        logs:
+            logs === undefined
+                ? undefined
+                : {
+                      eventBufferSize: asOptionalInteger(logs.eventBufferSize, "logs.eventBufferSize"),
+                      retentionDays: asOptionalInteger(logs.retentionDays, "logs.retentionDays")
+                  },
+        mcp: {
+            allowTools: asStringArray(mcp.allowTools, "mcp.allowTools"),
+            enabled: asBoolean(mcp.enabled, "mcp.enabled"),
+            path: asOptionalString(mcp.path, "mcp.path")
+        },
+        name: asString(document.name, "name"),
+        podmanBinary: asOptionalString(document.podmanBinary, "podmanBinary"),
+        provider: asProviderKind(asString(document.provider, "provider")),
+        remoteCwd: asOptionalString(document.remoteCwd, "remoteCwd"),
+        security: security === undefined ? undefined : { mode: asOptionalString(security.mode, "security.mode") },
+        sshBinary: asOptionalString(document.sshBinary, "sshBinary"),
+        workspace: asOptionalString(document.workspace, "workspace")
+    };
 }
 
 function withoutUndefined<T extends object>(record: T): Partial<T> {

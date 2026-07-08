@@ -9,6 +9,7 @@ import { fileURLToPath } from "node:url";
 import { FrameReader, FrameWriter, type JsonValue } from "@portable-devshell/shared";
 
 import { ControlLifecycleManager } from "../../dist/control/ControlLifecycleManager.js";
+import { ControlConfigTomlCodec, ControlInstanceTomlCodec } from "../../dist/control/config/ControlConfigTomlCodec.js";
 import { ControlPathHome } from "../../dist/control/path/ControlPathHome.js";
 import { ControlPathRuntime } from "../../dist/control/path/ControlPathRuntime.js";
 
@@ -199,6 +200,21 @@ test("start keeps real worker config registered and does not auto-start worker",
         (await readFile(fixturePath, "utf8")).replace('listenPort = 17890', `listenPort = ${listenPort}`),
         "utf8"
     );
+    await mkdir(homePaths.instancesDir, { recursive: true });
+    await writeFile(
+        homePaths.instanceConfigFile("demo-local"),
+        new ControlInstanceTomlCodec().encode({
+            enabled: true,
+            mcp: {
+                allowTools: ["bash_run"],
+                enabled: true
+            },
+            name: "demo-local",
+            provider: "local",
+            workspace: "/tmp/demo"
+        }),
+        "utf8"
+    );
 
     t.after(async () => {
         await manager.stop().catch(() => undefined);
@@ -231,6 +247,28 @@ async function createHarness(): Promise<{
     });
     const homePaths = new ControlPathHome(homeDirectory);
     const runtimePaths = new ControlPathRuntime(xdgRuntimeDir);
+    const listenPort = await reserveTcpPort();
+
+    await mkdir(homePaths.controlHomeDir, { recursive: true });
+    await writeFile(
+        homePaths.configFile,
+        new ControlConfigTomlCodec().encode({
+            control: {
+                logLevel: "info"
+            },
+            instances: [],
+            mcp: {
+                auth: {
+                    mode: "none"
+                },
+                enabled: false,
+                listenHost: "127.0.0.1",
+                listenPort
+            },
+            version: 1
+        }),
+        "utf8"
+    );
 
     return {
         async cleanup() {

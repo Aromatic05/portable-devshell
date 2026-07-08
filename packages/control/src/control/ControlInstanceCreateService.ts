@@ -122,7 +122,6 @@ export class ControlInstanceCreateService {
         const provider = readProvider(draft.provider);
 
         const normalized: ControlInstanceConfig = {
-            defaultWorkspace: readOptionalString(draft.defaultWorkspace, "defaultWorkspace"),
             dockerBinary: readOptionalString(draft.dockerBinary, "dockerBinary"),
             enabled: readBoolean(draft.enabled, instanceCreateSchema.defaultEnabled, "enabled"),
             host: readOptionalString(draft.host, "host"),
@@ -138,7 +137,8 @@ export class ControlInstanceCreateService {
             security: {
                 mode: readSecurityMode(draft.security)
             },
-            sshBinary: readOptionalString(draft.sshBinary, "sshBinary")
+            sshBinary: readOptionalString(draft.sshBinary, "sshBinary"),
+            workspace: readRequiredString(draft.workspace, "workspace")
         };
 
         switch (provider) {
@@ -272,7 +272,6 @@ function toConfigInvalidError(error: unknown) {
 function toSummary(instance: ControlInstanceConfig): InstanceCreateSummary {
     return {
         ...(instance.container === undefined ? {} : { container: instance.container }),
-        ...(instance.defaultWorkspace === undefined ? {} : { defaultWorkspace: instance.defaultWorkspace }),
         ...(instance.dockerBinary === undefined ? {} : { dockerBinary: instance.dockerBinary }),
         ...(instance.host === undefined ? {} : { host: instance.host }),
         ...(instance.podmanBinary === undefined ? {} : { podmanBinary: instance.podmanBinary }),
@@ -288,6 +287,7 @@ function toSummary(instance: ControlInstanceConfig): InstanceCreateSummary {
         provider: instance.provider,
         security: {
             mode: instance.security?.mode ?? instanceCreateSchema.defaultSecurityMode
-        }
+        },
+        ...(instance.workspace === undefined ? {} : { workspace: instance.workspace })
     };
 }

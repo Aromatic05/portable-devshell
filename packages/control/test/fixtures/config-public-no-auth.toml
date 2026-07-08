@@ -11,12 +11,3 @@ publicBaseUrl = "https://devshell.example.com"
 
 [mcp.auth]
 mode = "none"
-
-[[instances]]
-name = "demo-local"
-enabled = true
-provider = "local"
-
-[instances.mcp]
-enabled = true
-allowTools = ["bash_run"]

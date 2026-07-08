@@ -51,7 +51,7 @@ export class InstanceCreateWizard {
         const name = await this.#required(lines, "instance name");
         const enabled = await this.#confirm(lines, "enabled", schema.defaultEnabled);
         const provider = await this.#provider(lines, schema);
-        const defaultWorkspace = await this.#optional(lines, "default workspace", process.cwd());
+        const workspace = await this.#optional(lines, "workspace", process.cwd());
 
         const providerFields = await this.#providerFields(lines, provider);
 
@@ -63,7 +63,7 @@ export class InstanceCreateWizard {
         const securityMode = await this.#optional(lines, "security mode", schema.defaultSecurityMode);
 
         return {
-            ...(defaultWorkspace.length === 0 ? {} : { defaultWorkspace }),
+            ...(workspace.length === 0 ? {} : { workspace }),
             ...(providerFields.container === undefined ? {} : { container: providerFields.container }),
             ...(providerFields.dockerBinary === undefined ? {} : { dockerBinary: providerFields.dockerBinary }),
             ...(providerFields.host === undefined ? {} : { host: providerFields.host }),
@@ -188,11 +188,14 @@ export class InstanceCreateWizard {
     }
 
     #renderSummary(summary: InstanceCreateSummary): void {
+        const workspace =
+            "workspace" in (summary as object) ? (summary as InstanceCreateSummary & { workspace?: string }).workspace : undefined;
+
         this.#output.write("Summary\n");
         this.#output.write(`name: ${summary.name}\n`);
         this.#output.write(`enabled: ${summary.enabled}\n`);
         this.#output.write(`provider: ${summary.provider}\n`);
-        this.#output.write(`default workspace: ${summary.defaultWorkspace ?? ""}\n`);
+        this.#output.write(`workspace: ${workspace ?? ""}\n`);
 
         if (summary.host !== undefined) {
             this.#output.write(`host: ${summary.host}\n`);

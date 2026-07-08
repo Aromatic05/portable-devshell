@@ -11,7 +11,6 @@ export interface InstanceCreateSchema {
 
 export interface InstanceCreateDraft {
     container?: string;
-    defaultWorkspace?: string;
     dockerBinary?: string;
     enabled?: boolean;
     host?: string;
@@ -27,11 +26,11 @@ export interface InstanceCreateDraft {
         mode?: string;
     };
     sshBinary?: string;
+    workspace?: string;
 }
 
 export interface InstanceCreateSummary {
     container?: string;
-    defaultWorkspace?: string;
     dockerBinary?: string;
     enabled: boolean;
     host?: string;
@@ -48,6 +47,7 @@ export interface InstanceCreateSummary {
         mode: string;
     };
     sshBinary?: string;
+    workspace?: string;
 }
 
 export interface InstanceCreateResult {

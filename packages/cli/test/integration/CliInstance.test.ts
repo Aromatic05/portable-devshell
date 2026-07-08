@@ -84,9 +84,15 @@ test("CliMain runs Task 12 real worker smoke through control lifecycle", async (
     process.env.PORTABLE_DEVSHELL_WORKER_PATH = workerBinaryPath;
 
     await mkdir(join(homeDirectory, ".devshell", "control"), { recursive: true });
+    await mkdir(join(homeDirectory, ".devshell", "control", "instances"), { recursive: true });
     await writeFile(
         join(homeDirectory, ".devshell", "control", "config.toml"),
-        createRealConfig(workspacePath),
+        createRealConfig(),
+        "utf8"
+    );
+    await writeFile(
+        join(homeDirectory, ".devshell", "control", "instances", "aromatic-pc.toml"),
+        createLocalInstanceConfig("aromatic-pc", workspacePath),
         "utf8"
     );
 
@@ -170,6 +176,7 @@ test("CliMain creates an instance interactively and uses it through the real con
     process.env.PORTABLE_DEVSHELL_WORKER_PATH = workerBinaryPath;
 
     await mkdir(join(homeDirectory, ".devshell", "control"), { recursive: true });
+    await mkdir(join(homeDirectory, ".devshell", "control", "instances"), { recursive: true });
     await writeFile(join(homeDirectory, ".devshell", "control", "config.toml"), createCreateConfig(), "utf8");
 
     t.after(async () => {
@@ -200,8 +207,11 @@ test("CliMain creates an instance interactively and uses it through the real con
     assert.equal(await cli.run(["instance", "call", "aromatic-pc", "bash_run", "{\"command\":\"pwd\"}"]), 0);
     assert.match(stdout.flush(), new RegExp(workspacePath.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"), "u"));
 
-    assert.match(await readFile(join(homeDirectory, ".devshell", "control", "config.toml"), "utf8"), /\[\[instances\]\]/u);
-    assert.match(await readFile(join(homeDirectory, ".devshell", "control", "config.toml"), "utf8"), /name = "aromatic-pc"/u);
+    assert.doesNotMatch(await readFile(join(homeDirectory, ".devshell", "control", "config.toml"), "utf8"), /\[\[instances\]\]/u);
+    assert.match(
+        await readFile(join(homeDirectory, ".devshell", "control", "instances", "aromatic-pc.toml"), "utf8"),
+        /name = "aromatic-pc"/u
+    );
     assert.doesNotMatch(await readFile(join(homeDirectory, ".devshell", "control", "config.toml"), "utf8"), /workerBinaryPath/u);
 
     assert.equal(await cli.run(["stop"]), 0);
@@ -334,7 +344,7 @@ function createBuffer(): { flush: () => string; write: (chunk: string) => void }
     };
 }
 
-function createRealConfig(workspacePath: string): string {
+function createRealConfig(): string {
     return [
         "version = 1",
         "",
@@ -348,19 +358,6 @@ function createRealConfig(workspacePath: string): string {
         "",
         "[mcp.auth]",
         'mode = "none"',
-        "",
-        "[[instances]]",
-        'name = "aromatic-pc"',
-        "enabled = true",
-        'provider = "local"',
-        `defaultWorkspace = ${JSON.stringify(workspacePath)}`,
-        "",
-        "[instances.mcp]",
-        "enabled = false",
-        'allowTools = ["bash_run"]',
-        "",
-        "[instances.logs]",
-        "eventBufferSize = 50",
         ""
     ].join("\n");
 }
@@ -380,6 +377,24 @@ function createCreateConfig(): string {
         "",
         "[mcp.auth]",
         'mode = "none"',
+        ""
+    ].join("\n");
+}
+
+function createLocalInstanceConfig(name: string, workspacePath: string): string {
+    return [
+        "version = 1",
+        `name = ${JSON.stringify(name)}`,
+        "enabled = true",
+        'provider = "local"',
+        `workspace = ${JSON.stringify(workspacePath)}`,
+        "",
+        "[mcp]",
+        "enabled = false",
+        'allowTools = ["bash_run"]',
+        "",
+        "[logs]",
+        "eventBufferSize = 50",
         ""
     ].join("\n");
 }

@@ -621,24 +621,24 @@ test("CliMain runs interactive instance create through control rpc", async () =>
         async subscribe() {
             throw new Error("unused");
         },
-        async validateInstanceCreateDraft(draft: Record<string, unknown>) {
-            calls.push("validate");
-            assert.equal(draft.name, "demo-local");
-            return {
-                defaultWorkspace: "/tmp/workspace",
-                enabled: true,
-                mcp: {
-                    allowTools: ["bash_run"],
+            async validateInstanceCreateDraft(draft: Record<string, unknown>) {
+                calls.push("validate");
+                assert.equal(draft.name, "demo-local");
+                return {
                     enabled: true,
-                    path: "/demo-local/mcp"
-                },
-                name: "demo-local",
-                provider: "local",
-                security: {
-                    mode: "disabled"
-                }
-            };
-        }
+                    mcp: {
+                        allowTools: ["bash_run"],
+                        enabled: true,
+                        path: "/demo-local/mcp"
+                    },
+                    name: "demo-local",
+                    provider: "local",
+                    security: {
+                        mode: "disabled"
+                    },
+                    workspace: "/tmp/workspace"
+                };
+            }
     };
 
     const cli = new CliMain({
