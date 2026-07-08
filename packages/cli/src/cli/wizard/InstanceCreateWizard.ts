@@ -1,6 +1,13 @@
 import { createInterface, type Interface } from "node:readline/promises";
 
-import type { InstanceCreateDraft, InstanceCreateSchema, InstanceCreateSummary } from "@portable-devshell/shared";
+import type {
+    InstanceContainerConfig,
+    InstanceContainerMountConfig,
+    InstanceContainerPresetSchema,
+    InstanceCreateDraft,
+    InstanceCreateSchema,
+    InstanceCreateSummary
+} from "@portable-devshell/shared";
 
 export interface InstanceCreateWizardOptions {
     input?: NodeJS.ReadableStream;
@@ -26,7 +33,7 @@ export class InstanceCreateWizard {
         const lines = readline[Symbol.asyncIterator]();
 
         try {
-            const draft = await this.#collectDraft(readline, lines, schema);
+            const draft = await this.#collectDraft(lines, schema);
             const summary = await validateDraft(draft);
 
             this.#renderSummary(summary);
@@ -42,18 +49,14 @@ export class InstanceCreateWizard {
         }
     }
 
-    async #collectDraft(
-        readline: Interface,
-        lines: AsyncIterator<string>,
-        schema: InstanceCreateSchema
-    ): Promise<InstanceCreateDraft> {
+    async #collectDraft(lines: AsyncIterator<string>, schema: InstanceCreateSchema): Promise<InstanceCreateDraft> {
         this.#output.write("Basic\n");
         const name = await this.#required(lines, "instance name");
         const enabled = await this.#confirm(lines, "enabled", schema.defaultEnabled);
         const provider = await this.#provider(lines, schema);
         const workspace = await this.#optional(lines, "workspace", process.cwd());
 
-        const providerFields = await this.#providerFields(lines, provider);
+        const providerFields = await this.#providerFields(lines, schema, name, provider);
 
         this.#output.write("MCP\n");
         const mcpEnabled = await this.#confirm(lines, "MCP enabled", schema.defaultMcpEnabled);
@@ -95,9 +98,11 @@ export class InstanceCreateWizard {
 
     async #providerFields(
         lines: AsyncIterator<string>,
+        schema: InstanceCreateSchema,
+        instanceName: string,
         provider: InstanceCreateDraft["provider"]
     ): Promise<{
-        container?: string;
+        container?: InstanceContainerConfig;
         dockerBinary?: string;
         podmanBinary?: string;
         ssh?: {
@@ -117,15 +122,176 @@ export class InstanceCreateWizard {
                 };
             case "docker":
                 return {
-                    container: await this.#required(lines, "docker container"),
+                    container: await this.#containerConfig(lines, schema, instanceName),
                     dockerBinary: await this.#blankAsUndefined(lines, "docker binary")
                 };
             case "podman":
                 return {
-                    container: await this.#required(lines, "podman container"),
+                    container: await this.#containerConfig(lines, schema, instanceName),
                     podmanBinary: await this.#blankAsUndefined(lines, "podman binary")
                 };
         }
+    }
+
+    async #containerConfig(
+        lines: AsyncIterator<string>,
+        schema: InstanceCreateSchema,
+        instanceName: string
+    ): Promise<InstanceContainerConfig> {
+        this.#output.write("Container\n");
+        const mode = await this.#containerMode(lines, schema);
+        const defaultContainerName = `devshell-${instanceName}`;
+
+        switch (mode) {
+            case "preset": {
+                const preset = await this.#preset(lines, schema.container.presets);
+                return {
+                    ...(await this.#managedContainerFields(lines, defaultContainerName)),
+                    image: await this.#optional(lines, "preset image", preset.image),
+                    mode,
+                    preset: preset.preset
+                };
+            }
+            case "dockerfile":
+                return {
+                    ...(await this.#managedContainerFields(lines, defaultContainerName)),
+                    build: {
+                        context: await this.#required(lines, "build context"),
+                        dockerfile: await this.#blankAsUndefined(lines, "dockerfile path"),
+                        tag: (await this.#blankAsUndefined(lines, "build tag")) ?? `devshell-${instanceName}:latest`
+                    },
+                    mode
+                };
+            case "compose":
+                return {
+                    compose: {
+                        file: await this.#required(lines, "compose file"),
+                        projectName: await this.#blankAsUndefined(lines, "compose project name"),
+                        service: await this.#required(lines, "compose service")
+                    },
+                    mode
+                };
+            case "existingImage":
+                return {
+                    ...(await this.#managedContainerFields(lines, defaultContainerName)),
+                    image: await this.#required(lines, "existing image"),
+                    mode
+                };
+            case "existingStoppedContainer":
+                return {
+                    adoptLifecycle: await this.#confirm(lines, "stop adopted container on instance stop", false),
+                    containerName: await this.#required(lines, "existing stopped container name"),
+                    mode
+                };
+        }
+    }
+
+    async #containerMode(lines: AsyncIterator<string>, schema: InstanceCreateSchema): Promise<InstanceContainerConfig["mode"]> {
+        const options = [
+            { label: "Create from distro preset", mode: "preset" },
+            { label: "Build from Dockerfile", mode: "dockerfile" },
+            { label: "Use compose service", mode: "compose" },
+            { label: "Use existing image", mode: "existingImage" },
+            { label: "Adopt existing stopped container", mode: "existingStoppedContainer" }
+        ] as const satisfies ReadonlyArray<{ label: string; mode: InstanceContainerConfig["mode"] }>;
+        const defaultIndex = options.findIndex((entry) => entry.mode === schema.container.defaultMode);
+
+        this.#output.write("container setup\n");
+        for (const [index, option] of options.entries()) {
+            this.#output.write(`${index + 1}. ${option.label}\n`);
+        }
+
+        while (true) {
+            const answer = await this.#optional(lines, "selection", String(defaultIndex + 1));
+            const parsed = Number(answer);
+            const selected = Number.isInteger(parsed) ? options[parsed - 1] : undefined;
+
+            if (selected !== undefined) {
+                return selected.mode;
+            }
+
+            this.#output.write("selection must be 1-5.\n");
+        }
+    }
+
+    async #preset(
+        lines: AsyncIterator<string>,
+        presets: readonly InstanceContainerPresetSchema[]
+    ): Promise<InstanceContainerPresetSchema> {
+        this.#output.write(`presets: ${presets.map((entry) => entry.preset).join(", ")}\n`);
+
+        while (true) {
+            const answer = await this.#optional(lines, "preset", presets[0]?.preset ?? "");
+            const preset = presets.find((entry) => entry.preset === answer);
+
+            if (preset !== undefined) {
+                return preset;
+            }
+
+            this.#output.write("preset must match one of the listed presets.\n");
+        }
+    }
+
+    async #managedContainerFields(
+        lines: AsyncIterator<string>,
+        defaultContainerName: string
+    ): Promise<{
+        containerName: string;
+        env?: Record<string, string>;
+        mounts?: InstanceContainerMountConfig[];
+        network?: string;
+        user?: string;
+    }> {
+        const containerName = await this.#optional(lines, "container name", defaultContainerName);
+        const user = await this.#blankAsUndefined(lines, "container user");
+        const network = await this.#blankAsUndefined(lines, "container network");
+        const mounts = await this.#mounts(lines);
+        const env = await this.#containerEnv(lines);
+
+        return {
+            containerName,
+            ...(env === undefined ? {} : { env }),
+            ...(mounts === undefined ? {} : { mounts }),
+            ...(network === undefined ? {} : { network }),
+            ...(user === undefined ? {} : { user })
+        };
+    }
+
+    async #mounts(lines: AsyncIterator<string>): Promise<InstanceContainerMountConfig[] | undefined> {
+        const mounts: InstanceContainerMountConfig[] = [];
+
+        while (await this.#confirm(lines, "add bind mount", false)) {
+            const source = await this.#required(lines, "mount source");
+            const target = await this.#required(lines, "mount target");
+
+            while (true) {
+                const mode = await this.#optional(lines, "mount mode", "rw");
+                if (mode === "ro" || mode === "rw") {
+                    mounts.push({
+                        mode,
+                        source,
+                        target
+                    });
+                    break;
+                }
+
+                this.#output.write("mount mode must be ro or rw.\n");
+            }
+        }
+
+        return mounts.length === 0 ? undefined : mounts;
+    }
+
+    async #containerEnv(lines: AsyncIterator<string>): Promise<Record<string, string> | undefined> {
+        const env: Record<string, string> = {};
+
+        while (await this.#confirm(lines, "add container env", false)) {
+            const key = await this.#required(lines, "env key");
+            const value = await this.#required(lines, "env value");
+            env[key] = value;
+        }
+
+        return Object.keys(env).length === 0 ? undefined : env;
     }
 
     async #allowTools(lines: AsyncIterator<string>, defaults: readonly string[]): Promise<string[]> {
@@ -184,21 +350,18 @@ export class InstanceCreateWizard {
     }
 
     #renderSummary(summary: InstanceCreateSummary): void {
-        const workspace =
-            "workspace" in (summary as object) ? (summary as InstanceCreateSummary & { workspace?: string }).workspace : undefined;
-
         this.#output.write("Summary\n");
         this.#output.write(`name: ${summary.name}\n`);
         this.#output.write(`enabled: ${summary.enabled}\n`);
         this.#output.write(`provider: ${summary.provider}\n`);
-        this.#output.write(`workspace: ${workspace ?? ""}\n`);
+        this.#output.write(`workspace: ${summary.workspace ?? ""}\n`);
 
         if (summary.ssh?.command !== undefined) {
             this.#output.write(`ssh command: ${summary.ssh.command}\n`);
         }
 
         if (summary.container !== undefined) {
-            this.#output.write(`container: ${summary.container}\n`);
+            this.#renderContainerSummary(summary.container);
         }
 
         if (summary.dockerBinary !== undefined) {
@@ -213,6 +376,66 @@ export class InstanceCreateWizard {
         this.#output.write(`mcp path: ${summary.mcp.path}\n`);
         this.#output.write(`allowed tools: ${summary.mcp.allowTools.join(",")}\n`);
         this.#output.write(`security mode: ${summary.security.mode}\n`);
+    }
+
+    #renderContainerSummary(container: InstanceContainerConfig): void {
+        this.#output.write(`container mode: ${container.mode}\n`);
+
+        switch (container.mode) {
+            case "preset":
+                this.#output.write(`container preset: ${container.preset}\n`);
+                this.#output.write(`container image: ${container.image}\n`);
+                this.#output.write(`container name: ${container.containerName}\n`);
+                this.#renderManagedContainerExtras(container);
+                return;
+            case "dockerfile":
+                this.#output.write(`container name: ${container.containerName}\n`);
+                this.#output.write(`build context: ${container.build.context}\n`);
+                if (container.build.dockerfile !== undefined) {
+                    this.#output.write(`dockerfile path: ${container.build.dockerfile}\n`);
+                }
+                if (container.build.tag !== undefined) {
+                    this.#output.write(`build tag: ${container.build.tag}\n`);
+                }
+                this.#renderManagedContainerExtras(container);
+                return;
+            case "compose":
+                this.#output.write(`compose file: ${container.compose.file}\n`);
+                this.#output.write(`compose service: ${container.compose.service}\n`);
+                if (container.compose.projectName !== undefined) {
+                    this.#output.write(`compose project: ${container.compose.projectName}\n`);
+                }
+                return;
+            case "existingImage":
+                this.#output.write(`container image: ${container.image}\n`);
+                this.#output.write(`container name: ${container.containerName}\n`);
+                this.#renderManagedContainerExtras(container);
+                return;
+            case "existingStoppedContainer":
+                this.#output.write(`container name: ${container.containerName}\n`);
+                this.#output.write(`adopt lifecycle: ${container.adoptLifecycle === true}\n`);
+                return;
+        }
+    }
+
+    #renderManagedContainerExtras(
+        container: Extract<InstanceContainerConfig, { mode: "preset" | "dockerfile" | "existingImage" }>
+    ): void {
+        if (container.user !== undefined) {
+            this.#output.write(`container user: ${container.user}\n`);
+        }
+
+        if (container.network !== undefined) {
+            this.#output.write(`container network: ${container.network}\n`);
+        }
+
+        if ((container.mounts?.length ?? 0) > 0) {
+            this.#output.write(`container mounts: ${container.mounts?.map((mount) => `${mount.source}:${mount.target}:${mount.mode}`).join(", ")}\n`);
+        }
+
+        if (container.env !== undefined && Object.keys(container.env).length > 0) {
+            this.#output.write(`container env: ${Object.entries(container.env).map(([key, value]) => `${key}=${value}`).join(", ")}\n`);
+        }
     }
 
     async #ask(lines: AsyncIterator<string>, prompt: string): Promise<string> {
