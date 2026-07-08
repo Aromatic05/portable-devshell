@@ -99,6 +99,12 @@
 - evidence: `packages/core/test/unit/WorkerRpc.test.ts` test `WorkerProtocolClient performs ping, handshake, and tools.list against frozen devshell-worker`; `packages/core/test/unit/ToolPolicy.test.ts` tests `WorkerToolCatalog filters tools through allowlist and resets on clear` and `WorkerToolCatalog rejects invalid tool schema from tools.list`; `bash acceptance/run-mcp-smoke.sh` returned `toolsList.result.tools[0].name = "bash_run"`.
 - fix commit: none
 
+### 16. worker binary install 按 target 探测与分发
+
+- status: pass
+- evidence: `packages/core/src/worker/target/WorkerTargetProbe.ts` probes local via `process.platform/process.arch` and probes ssh/docker/podman via `uname -s` + `uname -m`; `packages/core/src/worker/WorkerAssetResolver.ts` resolves `packages/core/assets/workers/<targetKey>/devshell-worker` and returns `core.workerAssetUnavailable` when the target asset is missing; `packages/core/src/worker/install/{LocalWorkerInstaller,RemoteWorkerInstaller}.ts` install into `~/.devshell/workers/<targetKey>/<sha256>/devshell-worker`; `packages/core/assets/workers/{linux-x64,linux-arm64,darwin-x64,darwin-arm64}/devshell-worker` are present in the repo snapshot; `packages/core/test/unit/WorkerTargetResolver.test.ts`, `packages/core/test/unit/LocalWorkerInstaller.test.ts`, and `packages/core/test/unit/WorkerTransport.test.ts` cover canonical target mapping, target-aware asset resolution, ssh/container probe ordering, and target-specific remote install paths.
+- fix commit: pending
+
 ## Result
 
 - overall: pass
