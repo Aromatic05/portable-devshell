@@ -62,7 +62,17 @@ test("invalid config fixture is rejected", async () => {
         const paths = new ControlPathHome(homeDirectory);
         await writeFileWithParents(paths.configFile, await readFixture("config-invalid.toml"));
 
-        await assert.rejects(new ControlConfigStore().readOrCreate(homeDirectory), /mcp\.listenPort must be an integer/u);
+        await assert.rejects(new ControlConfigStore().readOrCreate(homeDirectory), (error: unknown) => {
+            assert.equal(typeof error, "object");
+            assert.equal((error as { code?: string }).code, "control.configParseFailed");
+            assert.equal((error as { message?: string }).message, "mcp.listenPort must be an integer");
+            assert.deepEqual((error as { details?: unknown }).details, {
+                configFile: paths.configFile,
+                fieldPath: "mcp.listenPort",
+                phase: "decode"
+            });
+            return true;
+        });
     } finally {
         await rm(homeDirectory, { force: true, recursive: true });
     }
@@ -96,7 +106,19 @@ test("instance name without dash is rejected", () => {
         provider: "local"
     });
 
-    assert.throws(() => validator.validate(config), /instance name must include '-': invalidname/u);
+    assert.throws(
+        () => validator.validate(config),
+        (error: unknown) => {
+            assert.equal(typeof error, "object");
+            assert.equal((error as { code?: string }).code, "control.configValidationFailed");
+            assert.equal((error as { message?: string }).message, "instance name must include '-': invalidname");
+            assert.deepEqual((error as { details?: unknown }).details, {
+                fieldPath: "instance",
+                phase: "validate"
+            });
+            return true;
+        }
+    );
 });
 
 async function readFixture(name: string): Promise<string> {

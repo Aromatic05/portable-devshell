@@ -63,11 +63,13 @@ export class CliMain {
     }
 
     async run(argv: readonly string[]): Promise<number> {
+        const { commandArgs, debug, verbose } = splitGlobalFlags(argv);
+
         try {
-            await this.#execute(this.#parser.parse(argv));
+            await this.#execute(this.#parser.parse(commandArgs));
             return cliExitCodes.success;
         } catch (error) {
-            this.#stderr.write(renderCliError(error));
+            this.#stderr.write(renderCliError(error, { debug, verbose }));
             return this.#exitMapper.map(error);
         }
     }
@@ -180,4 +182,22 @@ export class CliMain {
 if (import.meta.url === new URL(process.argv[1] ?? "", "file://").href) {
     const exitCode = await new CliMain().run(process.argv.slice(2));
     process.exit(exitCode);
+}
+
+function splitGlobalFlags(argv: readonly string[]): { commandArgs: string[]; debug: boolean; verbose: boolean } {
+    const commandArgs = [...argv];
+    let debug = false;
+    let verbose = false;
+
+    while (commandArgs[0] === "--verbose" || commandArgs[0] === "--debug") {
+        if (commandArgs[0] === "--debug") {
+            debug = true;
+            verbose = true;
+        } else {
+            verbose = true;
+        }
+        commandArgs.shift();
+    }
+
+    return { commandArgs, debug, verbose };
 }

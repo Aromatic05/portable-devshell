@@ -1,7 +1,7 @@
 import { unlink } from "node:fs/promises";
 import { createServer, type Server, type Socket } from "node:net";
 
-import { errorCodes, type ControlErrorBody } from "@portable-devshell/shared";
+import { createError, errorCodes, toControlErrorBody, type ControlErrorBody } from "@portable-devshell/shared";
 
 import type { InstanceRegistry } from "../../instance/registry/InstanceRegistry.js";
 import type { ControlInstanceCreateService } from "../ControlInstanceCreateService.js";
@@ -148,35 +148,25 @@ export class ControlRpcServer {
     }
 
     #toErrorBody(error: unknown): ControlErrorBody {
-        if (
-            typeof error === "object" &&
-            error !== null &&
-            "code" in error &&
-            typeof error.code === "string" &&
-            "message" in error &&
-            typeof error.message === "string" &&
-            "retryable" in error &&
-            typeof error.retryable === "boolean"
-        ) {
-            return {
-                code: error.code as ControlErrorBody["code"],
-                details:
-                    "details" in error
-                        ? ((error.details ?? undefined) as ControlErrorBody["details"])
-                        : undefined,
-                message: typeof error.message === "string" ? error.message : "control request failed",
-                retryable: error.retryable
-            };
+        const errorBody = toControlErrorBody(error);
+
+        if (errorBody !== undefined) {
+            return errorBody;
         }
 
-        return this.#errorBody(errorCodes.envelopeInvalid, error instanceof Error ? error.message : String(error), false);
+        return createError({
+            code: errorCodes.envelopeInvalid,
+            cause: error,
+            message: error instanceof Error ? error.message : String(error),
+            retryable: false
+        }).toBody();
     }
 
     #errorBody(code: string, message: string, retryable: boolean): ControlErrorBody {
-        return {
-            code: code as ControlErrorBody["code"],
+        return createError({
+            code,
             message,
             retryable
-        };
+        }).toBody();
     }
 }

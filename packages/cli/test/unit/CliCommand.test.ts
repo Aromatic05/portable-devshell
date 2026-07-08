@@ -88,6 +88,84 @@ test("CliMain handles control lifecycle commands and exit code mapping", async (
     assert.equal(stderr.flush(), "missing\n");
 });
 
+test("CliMain renders structured remote errors in verbose mode", async () => {
+    const stdout = createBuffer();
+    const stderr = createBuffer();
+    const cli = new CliMain({
+        createClient: () => ({
+            async callTool() {
+                throw new Error("unused");
+            },
+            async createInstance() {
+                throw new Error("unused");
+            },
+            async getInstanceCreateSchema() {
+                throw new Error("unused");
+            },
+            async getSnapshot() {
+                throw {
+                    causeBody: {
+                        code: "core.providerFailed",
+                        message: "ssh exited",
+                        retryable: false
+                    },
+                    code: "core.workerStartFailed",
+                    details: {
+                        commandDisplay: "ssh demo -- sh -lc pwd",
+                        exitCode: 255,
+                        operation: "start",
+                        provider: "ssh",
+                        stderrTail: "Permission denied\n"
+                    },
+                    message: "Worker start failed for instance demo-ssh.",
+                    retryable: false
+                };
+            },
+            async listInstances() {
+                return [];
+            },
+            async readLogs() {
+                return [];
+            },
+            async refreshStatus() {
+                throw new Error("unused");
+            },
+            async startInstance() {
+                throw new Error("unused");
+            },
+            async stopInstance() {
+                throw new Error("unused");
+            },
+            async subscribe() {
+                throw new Error("unused");
+            },
+            async validateInstanceCreateDraft() {
+                throw new Error("unused");
+            }
+        }),
+        createLifecycleManager: async () => ({
+            async logs() {
+                return "";
+            },
+            async start() {
+                return { instanceCount: 0, running: true };
+            },
+            async status() {
+                return { instanceCount: 0, running: true };
+            },
+            async stop() {
+                return { instanceCount: 0, running: false };
+            }
+        }),
+        stderr,
+        stdout
+    });
+
+    assert.equal(await cli.run(["--verbose", "instance", "status", "demo-ssh"]), 1);
+    assert.match(stderr.flush(), /command: ssh demo -- sh -lc pwd/u);
+    assert.equal(stdout.flush(), "");
+});
+
 test("CliMain handles instance logs follow and tool call through injected client", async () => {
     const stdout = createBuffer();
     const stderr = createBuffer();

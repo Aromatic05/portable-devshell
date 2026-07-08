@@ -1,3 +1,4 @@
+import { createError, errorCodes } from "@portable-devshell/shared";
 import { McpAuthPublicExposureGuard } from "@portable-devshell/mcp";
 
 import type { ControlConfig, ControlInstanceConfig } from "./ControlConfigTomlCodec.js";
@@ -6,29 +7,48 @@ export class ControlConfigValidator {
     readonly #publicExposureGuard = new McpAuthPublicExposureGuard();
 
     validate(config: ControlConfig): ControlConfig {
-        if (config.version !== 1) {
-            throw new Error("version must be 1");
-        }
-
-        const names = new Set<string>();
-
-        for (const instance of config.instances) {
-            this.#validateInstance(instance);
-
-            if (names.has(instance.name)) {
-                throw new Error(`duplicate instance name: ${instance.name}`);
+        try {
+            if (config.version !== 1) {
+                throw new Error("version must be 1");
             }
 
-            names.add(instance.name);
+            const names = new Set<string>();
+
+            for (const instance of config.instances) {
+                this.#validateInstance(instance);
+
+                if (names.has(instance.name)) {
+                    throw new Error(`duplicate instance name: ${instance.name}`);
+                }
+
+                names.add(instance.name);
+            }
+
+            this.#publicExposureGuard.assertSafe({
+                auth: toMcpGuardAuth(config.mcp.auth.mode),
+                listenHost: config.mcp.listenHost,
+                publicBaseUrl: config.mcp.publicBaseUrl
+            });
+
+            return config;
+        } catch (error) {
+            if (isStructuredConfigError(error)) {
+                throw error;
+            }
+
+            const message = error instanceof Error ? error.message : String(error);
+            const fieldPath = readFieldPath(message);
+            throw createError({
+                code: errorCodes.controlConfigValidationFailed,
+                cause: error,
+                details: {
+                    ...(fieldPath === undefined ? {} : { fieldPath }),
+                    phase: "validate"
+                },
+                message,
+                retryable: false
+            });
         }
-
-        this.#publicExposureGuard.assertSafe({
-            auth: toMcpGuardAuth(config.mcp.auth.mode),
-            listenHost: config.mcp.listenHost,
-            publicBaseUrl: config.mcp.publicBaseUrl
-        });
-
-        return config;
     }
 
     #validateInstance(instance: ControlInstanceConfig): void {
@@ -70,4 +90,13 @@ function toMcpGuardAuth(mode: "none" | "oauth2" | "token"): { enabled: boolean; 
         enabled: true,
         provider: mode
     };
+}
+
+function isStructuredConfigError(error: unknown): error is { code: string } {
+    return typeof error === "object" && error !== null && "code" in error && typeof error.code === "string";
+}
+
+function readFieldPath(message: string): string | undefined {
+    const match = message.match(/^([A-Za-z0-9_.[\]/-]+)\s+/u);
+    return match?.[1];
 }

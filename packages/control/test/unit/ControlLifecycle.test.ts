@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { access, copyFile, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createConnection, createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -191,9 +191,14 @@ test("start keeps real worker config registered and does not auto-start worker",
         waitTimeoutMs: 10_000
     });
     const fixturePath = fileURLToPath(new URL("../fixtures/config-valid.toml", import.meta.url));
+    const listenPort = await reserveTcpPort();
 
     await mkdir(homePaths.controlHomeDir, { recursive: true });
-    await copyFile(fixturePath, homePaths.configFile);
+    await writeFile(
+        homePaths.configFile,
+        (await readFile(fixturePath, "utf8")).replace('listenPort = 17890', `listenPort = ${listenPort}`),
+        "utf8"
+    );
 
     t.after(async () => {
         await manager.stop().catch(() => undefined);
@@ -266,6 +271,34 @@ async function waitFor<T>(factory: () => Promise<T | undefined>, timeoutMs = 10_
     }
 
     throw new Error("Timed out waiting for condition.");
+}
+
+async function reserveTcpPort(): Promise<number> {
+    const server = createServer();
+
+    await new Promise<void>((resolve, reject) => {
+        server.once("error", reject);
+        server.listen(0, "127.0.0.1", () => resolve());
+    });
+
+    const address = server.address();
+
+    await new Promise<void>((resolve, reject) => {
+        server.close((error) => {
+            if (error === undefined) {
+                resolve();
+                return;
+            }
+
+            reject(error);
+        });
+    });
+
+    if (address === null || typeof address !== "object") {
+        throw new Error("Failed to reserve TCP port.");
+    }
+
+    return address.port;
 }
 
 async function request(socketPath: string, method: string, params?: JsonValue): Promise<any> {

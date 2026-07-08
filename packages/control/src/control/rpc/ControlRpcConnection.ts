@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { Socket } from "node:net";
 
-import { FrameReader, FrameWriter, createError, errorCodes, type ControlErrorBody, type JsonValue } from "@portable-devshell/shared";
+import { FrameReader, FrameWriter, createError, errorCodes, toControlErrorBody, type ControlErrorBody, type JsonValue } from "@portable-devshell/shared";
 
 import { StreamBackpressure } from "../../stream/StreamBackpressure.js";
 import { parseRouteTarget, type RouteTarget } from "../../route/RouteTarget.js";
@@ -144,20 +144,17 @@ export class ControlRpcConnection {
     }
 
     async #sendInvalidRequest(id: string | undefined, message: string, error?: unknown): Promise<void> {
+        const errorBody = toControlErrorBody(error);
+
         await this.sendResponse({
             error:
-                typeof error === "object" &&
-                error !== null &&
-                "code" in error &&
-                typeof error.code === "string" &&
-                "retryable" in error &&
-                typeof error.retryable === "boolean"
-                    ? (error as ControlErrorBody)
-                    : createError({
-                          code: errorCodes.envelopeInvalid,
-                          message,
-                          retryable: false
-                      }),
+                errorBody ??
+                createError({
+                    code: errorCodes.envelopeInvalid,
+                    cause: error,
+                    message,
+                    retryable: false
+                }).toBody(),
             id: id ?? randomUUID(),
             ok: false,
             type: "response"

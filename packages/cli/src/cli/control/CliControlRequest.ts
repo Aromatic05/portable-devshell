@@ -1,4 +1,4 @@
-import type { JsonValue } from "@portable-devshell/shared";
+import type { ControlErrorBody, JsonValue } from "@portable-devshell/shared";
 
 export type CliControlTarget =
     | {
@@ -19,12 +19,7 @@ export interface CliControlRequestEnvelope {
 }
 
 export interface CliControlResponseEnvelope {
-    error?: {
-        code: string;
-        details?: JsonValue;
-        message: string;
-        retryable: boolean;
-    };
+    error?: ControlErrorBody;
     id: string;
     ok: boolean;
     result?: JsonValue;

@@ -43,3 +43,30 @@ test("renderCliError suggests starting control when it is not running", () => {
         "control server is not running.\nRun: devshell start\n"
     );
 });
+
+test("renderCliError includes diagnostic summary and verbose cause chain", () => {
+    const error = {
+        causeBody: {
+            code: "core.providerFailed",
+            message: "ssh exited",
+            retryable: false
+        },
+        code: "core.workerStartFailed",
+        details: {
+            commandDisplay: "ssh demo -- sh -lc pwd",
+            cwd: "/missing/workspace",
+            exitCode: 255,
+            operation: "start",
+            provider: "ssh",
+            stderrTail: "No such file or directory\n"
+        },
+        message: "Worker start failed for instance demo-ssh."
+    };
+
+    assert.equal(
+        renderCliError(error),
+        "Worker start failed for instance demo-ssh.\nprovider: ssh\noperation: start\ncommand: ssh demo -- sh -lc pwd\ncwd: /missing/workspace\nexitCode: 255\nstderr:\nNo such file or directory\n"
+    );
+    assert.match(renderCliError(error, { verbose: true }), /details: \{/u);
+    assert.match(renderCliError(error, { verbose: true }), /cause: \{/u);
+});

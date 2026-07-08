@@ -185,5 +185,9 @@ function mapConnectionError(error: unknown): CliRenderError {
 }
 
 function toRemoteError(response: CliControlResponseEnvelope): CliRenderError {
-    return new CliRenderError(response.error?.code ?? "control.requestFailed", response.error?.message ?? "control request failed");
+    return new CliRenderError(response.error?.code ?? "control.requestFailed", response.error?.message ?? "control request failed", {
+        cause: response.error?.cause,
+        details: response.error?.details,
+        retryable: response.error?.retryable
+    });
 }

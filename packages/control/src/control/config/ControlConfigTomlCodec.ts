@@ -1,3 +1,4 @@
+import { createError, errorCodes } from "@portable-devshell/shared";
 import { parse, stringify, type TomlTableWithoutBigInt } from "smol-toml";
 
 export type ControlProviderKind = "docker" | "local" | "podman" | "ssh";
@@ -56,7 +57,26 @@ type TomlRecord = TomlTableWithoutBigInt;
 
 export class ControlConfigTomlCodec {
     decode(source: string): ControlConfig {
-        return this.#fromTomlDocument(parse(source) as TomlTableWithoutBigInt);
+        try {
+            return this.#fromTomlDocument(parse(source) as TomlTableWithoutBigInt);
+        } catch (error) {
+            if (isStructuredConfigError(error)) {
+                throw error;
+            }
+
+            const message = error instanceof Error ? error.message : String(error);
+            const fieldPath = readFieldPath(message);
+            throw createError({
+                code: errorCodes.controlConfigParseFailed,
+                cause: error,
+                details: {
+                    ...(fieldPath === undefined ? {} : { fieldPath }),
+                    phase: "decode"
+                },
+                message,
+                retryable: false
+            });
+        }
     }
 
     encode(config: ControlConfig): string {
@@ -265,4 +285,13 @@ function asAuthMode(value: string): ControlMcpAuthMode {
     }
 
     throw new Error(`unsupported mcp.auth.mode: ${value}`);
+}
+
+function isStructuredConfigError(error: unknown): error is { code: string } {
+    return typeof error === "object" && error !== null && "code" in error && typeof error.code === "string";
+}
+
+function readFieldPath(message: string): string | undefined {
+    const match = message.match(/^([A-Za-z0-9_.[\]]+)\s+/u);
+    return match?.[1];
 }

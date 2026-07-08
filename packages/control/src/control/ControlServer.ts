@@ -1,3 +1,4 @@
+import { createError, errorCodes } from "@portable-devshell/shared";
 import type { McpHost } from "@portable-devshell/mcp";
 
 import { ControlInstanceCreateService } from "./ControlInstanceCreateService.js";
@@ -89,6 +90,10 @@ export class ControlServer {
             return this.#config;
         }
 
-        throw new Error("Control config is not loaded.");
+        throw createError({
+            code: errorCodes.controlConfigLoadFailed,
+            message: "Control config is not loaded.",
+            retryable: false
+        });
     }
 }
