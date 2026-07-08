@@ -1,6 +1,8 @@
 node_modules/
 dist/
 target/
+!packages/core/src/worker/target/
+!packages/core/src/worker/target/**
 .DS_Store
 coverage/
 *.log

@@ -5,7 +5,7 @@
     "packageManager": "pnpm@10.13.1",
     "scripts": {
         "dev": "node ./scripts/dev.mjs",
-        "build": "cargo build -p devshell-worker --manifest-path ./Cargo.toml && node ./scripts/build-worker.mjs --copy-only && tsc -b",
+        "build": "node ./scripts/build-worker.mjs && tsc -b",
         "lint": "eslint .",
         "lint:fix": "eslint . --fix",
         "test": "pnpm -r --filter './packages/*' test",
