@@ -54,6 +54,7 @@ test("ControlRpcServer serves Task 9 rpc methods over reused unix socket connect
 
     const refreshed = await client.request("instance.refreshStatus", { instance: "alpha", kind: "instance" });
     assert.equal(refreshed.result.snapshot.status, "ready");
+    assert.equal(worker.refreshCount, 1);
 
     const logs = await client.request("instance.readLogs", { instance: "alpha", kind: "instance" }, { fromSeq: 1 });
     assert.equal(logs.result.length, 1);
@@ -244,6 +245,7 @@ async function waitFor(factory: () => boolean, timeoutMs = 1_000): Promise<void>
 
 class FakeWorker {
     readonly #name: string;
+    #refreshCount = 0;
     #events: Array<{ at: string; data?: unknown; instanceName: string; seq: number; type: string }> = [];
     #lastSeq = 0;
     #logs = [
@@ -276,6 +278,10 @@ class FakeWorker {
         return this.#snapshot;
     }
 
+    get refreshCount() {
+        return this.#refreshCount;
+    }
+
     async start(_workspacePath?: string) {
         this.emit("instance.started", { workspacePath: "/tmp/ws" });
         this.#snapshot = {
@@ -298,6 +304,11 @@ class FakeWorker {
             ready: false,
             status: "stopped"
         };
+        return this.snapshot();
+    }
+
+    async refreshStatus() {
+        this.#refreshCount += 1;
         return this.snapshot();
     }
 

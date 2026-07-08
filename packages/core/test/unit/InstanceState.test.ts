@@ -4,7 +4,7 @@ import test from "node:test";
 import { asInstanceName } from "@portable-devshell/shared";
 import { InstancePaths, InstanceStateMachine } from "@portable-devshell/core";
 
-test("InstanceStateMachine derives ready running stale and stopped snapshots", () => {
+test("InstanceStateMachine derives ready running stale failed and stopped snapshots", () => {
     const stateMachine = new InstanceStateMachine(asInstanceName("task-5-state"));
 
     assert.equal(stateMachine.snapshot().ready, false);
@@ -28,13 +28,27 @@ test("InstanceStateMachine derives ready running stale and stopped snapshots", (
     assert.equal(ready.lastSeq, 4);
     assert.equal(ready.pid, 1234);
 
+    const reconnecting = stateMachine.apply({
+        connectionState: "reconnecting"
+    });
+    assert.equal(reconnecting.ready, false);
+    assert.equal(reconnecting.status, "running");
+
     const stale = stateMachine.apply({
-        connectionState: "disconnected"
+        daemonState: "stale"
     });
     assert.equal(stale.ready, false);
     assert.equal(stale.status, "stale");
 
+    const failed = stateMachine.apply({
+        connectionState: "failed",
+        daemonState: "running"
+    });
+    assert.equal(failed.ready, false);
+    assert.equal(failed.status, "failed");
+
     const stopped = stateMachine.apply({
+        connectionState: "disconnected",
         daemonState: "stopped"
     });
     assert.equal(stopped.ready, false);

@@ -133,9 +133,44 @@ test("WorkerInstance rejects not-ready and concurrent tool calls while persistin
     }
 });
 
+test("WorkerInstance refreshStatus updates snapshot from worker status without auto start", async () => {
+    const homeDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-instance-refresh-"));
+    const harness = createWorkerInstanceHarness();
+    const instance = new WorkerInstanceFactory().create({
+        homeDirectory,
+        name: asInstanceName("task-6-refresh"),
+        transport: harness.transport
+    });
+
+    try {
+        const stopped = await instance.refreshStatus();
+        assert.equal(stopped.daemonState, "stopped");
+        assert.equal(stopped.connectionState, "disconnected");
+        assert.equal(harness.requestedMethods(), 0);
+
+        harness.setStatus("running");
+        const running = await instance.refreshStatus();
+        assert.equal(running.daemonState, "running");
+        assert.equal(running.connectionState, "connected");
+        assert.equal(running.ready, true);
+        assert.equal(instance.listTools()[0]?.name, "bash_run");
+
+        harness.setStatus("stale");
+        const stale = await instance.refreshStatus();
+        assert.equal(stale.daemonState, "stale");
+        assert.equal(stale.connectionState, "disconnected");
+        assert.equal(stale.ready, false);
+    } finally {
+        instance.close();
+        await rm(homeDirectory, { force: true, recursive: true });
+    }
+});
+
 function createWorkerInstanceHarness(): {
     transport: WorkerCommandTransport;
+    requestedMethods: () => number;
     respond: (method: string, result: Record<string, JsonValue>) => void;
+    setStatus: (status: "running" | "stale" | "stopped") => void;
     waitForMethod: (method: string) => Promise<void>;
 } {
     const stdout = new PassThrough();
@@ -146,10 +181,26 @@ function createWorkerInstanceHarness(): {
     const pending = new Map<string, string>();
     const requestMethods: string[] = [];
     const methodWaiters = new Map<string, Array<() => void>>();
+    let commandStatus: "running" | "stale" | "stopped" = "stopped";
     let exitResolve: ((value: { code: number | null; signal: NodeJS.Signals | null }) => void) | undefined;
 
     const transport: WorkerCommandTransport = {
         async runWorkerCommand(command): Promise<WorkerCommandResult> {
+            if (command === "status") {
+                return {
+                    exitCode: 0,
+                    stderr: "",
+                    stdout: JSON.stringify({
+                        instance: "task-6-harness",
+                        ok: true,
+                        pid: commandStatus === "stopped" ? null : 4321,
+                        running: commandStatus === "running",
+                        state: commandStatus,
+                        workspace: commandStatus === "running" ? "/tmp/workspace" : null
+                    })
+                };
+            }
+
             return {
                 exitCode: 0,
                 stderr: "",
@@ -197,6 +248,9 @@ function createWorkerInstanceHarness(): {
 
     return {
         transport,
+        requestedMethods() {
+            return requestMethods.length;
+        },
         respond(method, result) {
             const requestId = pending.get(method);
 
@@ -211,6 +265,9 @@ function createWorkerInstanceHarness(): {
                 result,
                 type: "response"
             } as unknown as JsonValue);
+        },
+        setStatus(status) {
+            commandStatus = status;
         },
         waitForMethod(method) {
             if (requestMethods.includes(method)) {

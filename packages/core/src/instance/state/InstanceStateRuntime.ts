@@ -14,16 +14,20 @@ export function deriveRuntimeStatus(
     daemonState: DaemonState,
     connectionState: ConnectionState
 ): RuntimeStatus {
+    if (daemonState === "failed" || connectionState === "failed") {
+        return "failed";
+    }
+
+    if (daemonState === "stale") {
+        return "stale";
+    }
+
     if (daemonState === "stopped" || daemonState === "stopping") {
         return "stopped";
     }
 
     if (daemonState === "running" && connectionState === "connected") {
         return "ready";
-    }
-
-    if (daemonState === "running" && connectionState === "disconnected") {
-        return "stale";
     }
 
     return "running";

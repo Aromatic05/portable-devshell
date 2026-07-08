@@ -210,6 +210,37 @@ export class WorkerInstance {
         });
     }
 
+    async refreshStatus(): Promise<InstanceSnapshot> {
+        const status = await this.#readWorkerStatus();
+
+        if (status.workspacePath !== undefined) {
+            this.#workspacePath = asWorkspacePath(status.workspacePath);
+        }
+
+        switch (status.daemonState) {
+            case "stopped":
+            case "stale":
+                this.#rpcBridge.close();
+                this.#catalog.clear();
+                this.#handshake = undefined;
+                return this.#stateMachine.apply({
+                    connectionState: "disconnected",
+                    daemonState: status.daemonState,
+                    lastErrorCode: undefined,
+                    pid: status.pid
+                });
+            case "running":
+                return await this.#refreshRunningStatus(status.pid);
+            default:
+                return this.#stateMachine.apply({
+                    connectionState: "failed",
+                    daemonState: "failed",
+                    lastErrorCode: errorCodes.coreWorkerStatusFailed,
+                    pid: status.pid
+                });
+        }
+    }
+
     async callTool(toolName: string, input: JsonValue): Promise<CommandResult> {
         if (!this.snapshot().ready) {
             throw createError({
@@ -293,6 +324,95 @@ export class WorkerInstance {
         return this.#workspacePath;
     }
 
+    async #refreshRunningStatus(pid?: number): Promise<InstanceSnapshot> {
+        this.#stateMachine.apply({
+            connectionState: this.snapshot().connectionState === "disconnected" ? "connecting" : "reconnecting",
+            daemonState: "running",
+            lastErrorCode: undefined,
+            pid
+        });
+
+        try {
+            await this.#rpcBridge.connect();
+            await this.#protocolClient.ping();
+            this.#handshake = await this.#protocolClient.handshake(this.#config.handshake);
+            const tools = await this.#protocolClient.listTools();
+            this.#catalog.refresh(tools.tools);
+            this.#workspacePath = asWorkspacePath(this.#handshake.workspace);
+            return this.#stateMachine.apply({
+                connectionState: "connected",
+                daemonState: "running",
+                lastErrorCode: undefined,
+                pid
+            });
+        } catch (error) {
+            this.#rpcBridge.close();
+            this.#catalog.clear();
+            this.#handshake = undefined;
+            this.#stateMachine.apply({
+                connectionState: "failed",
+                daemonState: "running",
+                lastErrorCode: getErrorCode(error, errorCodes.coreWorkerHandshakeFailed),
+                pid
+            });
+
+            if (isKnownErrorCode(error)) {
+                throw error;
+            }
+
+            throw createError({
+                code: errorCodes.coreWorkerHandshakeFailed,
+                message: `Worker handshake failed for instance ${this.#config.name}.`,
+                retryable: false,
+                details: {
+                    instanceName: this.#config.name,
+                    reason: error instanceof Error ? error.message : String(error)
+                }
+            });
+        }
+    }
+
+    async #readWorkerStatus(): Promise<{
+        daemonState: "running" | "stale" | "stopped";
+        pid?: number;
+        workspacePath?: string;
+    }> {
+        let result: Awaited<ReturnType<WorkerCommandClient["status"]>>;
+
+        try {
+            result = await this.#commandClient.status();
+        } catch (error) {
+            this.#stateMachine.apply({
+                connectionState: "failed",
+                daemonState: "failed",
+                lastErrorCode: getErrorCode(error, errorCodes.coreWorkerStatusFailed)
+            });
+            throw error;
+        }
+
+        if (result.exitCode !== 0) {
+            const error = createError({
+                code: errorCodes.coreWorkerStatusFailed,
+                message: `Worker status failed for instance ${this.#config.name}.`,
+                retryable: false,
+                details: {
+                    exitCode: result.exitCode,
+                    instanceName: this.#config.name,
+                    stderr: result.stderr,
+                    stdout: result.stdout
+                }
+            });
+            this.#stateMachine.apply({
+                connectionState: "failed",
+                daemonState: "failed",
+                lastErrorCode: error.code
+            });
+            throw error;
+        }
+
+        return parseWorkerStatus(result.stdout, this.#config.name);
+    }
+
     async #appendEvent(type: InstanceEventInput["type"], data?: JsonValue) {
         return await this.#eventBuffer.append({
             at: new Date().toISOString(),
@@ -360,4 +480,41 @@ function getErrorCode(error: unknown, fallback: string): string {
 
 function isKnownErrorCode(error: unknown): boolean {
     return typeof error === "object" && error !== null && "code" in error && typeof error.code === "string";
+}
+
+function parseWorkerStatus(
+    stdout: string,
+    instanceName: string
+): {
+    daemonState: "running" | "stale" | "stopped";
+    pid?: number;
+    workspacePath?: string;
+} {
+    const parsed = JSON.parse(stdout) as unknown;
+
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+        throw createError({
+            code: errorCodes.coreWorkerStatusFailed,
+            message: `Worker status returned an invalid payload for instance ${instanceName}.`,
+            retryable: false
+        });
+    }
+
+    const candidate = parsed as Record<string, unknown>;
+    const state = candidate.state;
+
+    if (state !== "running" && state !== "stale" && state !== "stopped") {
+        throw createError({
+            code: errorCodes.coreWorkerStatusFailed,
+            message: `Worker status returned an unknown state for instance ${instanceName}.`,
+            retryable: false,
+            details: { state: String(state) }
+        });
+    }
+
+    return {
+        daemonState: state,
+        pid: typeof candidate.pid === "number" ? candidate.pid : undefined,
+        workspacePath: typeof candidate.workspace === "string" ? candidate.workspace : undefined
+    };
 }

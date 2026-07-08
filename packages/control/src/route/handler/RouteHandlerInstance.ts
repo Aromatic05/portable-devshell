@@ -41,11 +41,17 @@ export class RouteHandlerInstance {
 
         switch (method) {
             case "instance.getSnapshot":
-            case "instance.refreshStatus":
                 return {
                     lastSeq: descriptor.worker.snapshot().lastSeq,
                     snapshot: descriptor.worker.snapshot()
                 } as unknown as JsonValue;
+            case "instance.refreshStatus": {
+                const snapshot = await descriptor.worker.refreshStatus();
+                return {
+                    lastSeq: snapshot.lastSeq,
+                    snapshot
+                } as unknown as JsonValue;
+            }
             case "instance.start":
                 return (await descriptor.worker.start(readWorkspacePath(params))) as unknown as JsonValue;
             case "instance.stop":
