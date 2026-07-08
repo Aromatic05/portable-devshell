@@ -244,6 +244,200 @@ test("CliMain follows instance logs without skipping events between initial pull
     assert.equal(stderr.flush(), "");
 });
 
+test("CliMain recovers instance log follow when subscribe returns stream.gap", async () => {
+    const stdout = createBuffer();
+    const stderr = createBuffer();
+    const stream = {
+        close() {},
+        async nextEvent() {
+            return { event: "instance.toolCalled", seq: 4, target: { instance: "demo-local", kind: "instance" }, type: "event" };
+        }
+    };
+    let snapshotCount = 0;
+    let subscribeCount = 0;
+    const client = {
+        async callTool() {
+            throw new Error("unused");
+        },
+        async getSnapshot() {
+            snapshotCount += 1;
+
+            return {
+                lastSeq: snapshotCount === 1 ? 1 : 3,
+                snapshot: {
+                    connectionState: "connected",
+                    daemonState: "running",
+                    lastSeq: snapshotCount === 1 ? 1 : 3,
+                    name: "demo-local",
+                    ready: true,
+                    status: "ready"
+                }
+            };
+        },
+        async listInstances() {
+            return [];
+        },
+        async readLogs(_: string, query?: { fromSeq?: number; limit?: number }) {
+            if (query?.fromSeq === 2) {
+                return [
+                    { at: "", instanceName: "demo-local", message: "gap-a\n", seq: 2, stream: "stdout" as const },
+                    { at: "", instanceName: "demo-local", message: "gap-b\n", seq: 3, stream: "stdout" as const }
+                ];
+            }
+
+            if (query?.fromSeq === 4) {
+                return [{ at: "", instanceName: "demo-local", message: "after\n", seq: 4, stream: "stdout" as const }];
+            }
+
+            return [{ at: "", instanceName: "demo-local", message: "before\n", seq: 1, stream: "stdout" as const }];
+        },
+        async refreshStatus() {
+            throw new Error("unused");
+        },
+        async startInstance() {
+            throw new Error("unused");
+        },
+        async stopInstance() {
+            throw new Error("unused");
+        },
+        async subscribe(_: string, fromSeq: number) {
+            subscribeCount += 1;
+
+            if (subscribeCount === 1) {
+                assert.equal(fromSeq, 2);
+                throw { code: "stream.gap", message: "gap" };
+            }
+
+            assert.equal(fromSeq, 4);
+            return stream;
+        }
+    };
+
+    const cli = new CliMain({
+        createClient: () => client,
+        createLifecycleManager: async () => ({
+            async logs() {
+                return "";
+            },
+            async start() {
+                return { instanceCount: 0, running: true };
+            },
+            async status() {
+                return { instanceCount: 0, running: true };
+            },
+            async stop() {
+                return { instanceCount: 0, running: false };
+            }
+        }),
+        followEventLimit: 1,
+        stderr,
+        stdout
+    });
+
+    assert.equal(await cli.run(["instance", "logs", "demo-local", "-f"]), 0);
+    assert.equal(stdout.flush(), "[1] stdout before\n[2] stdout gap-a\n[3] stdout gap-b\n[4] stdout after\n");
+    assert.equal(stderr.flush(), "");
+});
+
+test("CliMain recovers watch status when subscribe returns stream.gap", async () => {
+    const stdout = createBuffer();
+    const stderr = createBuffer();
+    const stream = {
+        close() {},
+        async nextEvent() {
+            return { event: "instance.toolCalled", seq: 4, target: { instance: "demo-local", kind: "instance" }, type: "event" };
+        }
+    };
+    let snapshotCount = 0;
+    let subscribeCount = 0;
+    const client = {
+        async callTool() {
+            throw new Error("unused");
+        },
+        async getSnapshot() {
+            snapshotCount += 1;
+
+            return {
+                lastSeq: snapshotCount === 1 ? 1 : 3,
+                snapshot: {
+                    connectionState: snapshotCount === 1 ? "disconnected" : "connected",
+                    daemonState: snapshotCount === 1 ? "stopped" : "running",
+                    lastSeq: snapshotCount === 1 ? 1 : 3,
+                    name: "demo-local",
+                    ready: snapshotCount !== 1,
+                    status: snapshotCount === 1 ? "stopped" : "ready"
+                }
+            };
+        },
+        async listInstances() {
+            return [];
+        },
+        async readLogs() {
+            return [];
+        },
+        async refreshStatus() {
+            return {
+                lastSeq: 4,
+                snapshot: {
+                    connectionState: "connected",
+                    daemonState: "running",
+                    lastSeq: 4,
+                    name: "demo-local",
+                    ready: true,
+                    status: "ready"
+                }
+            };
+        },
+        async startInstance() {
+            throw new Error("unused");
+        },
+        async stopInstance() {
+            throw new Error("unused");
+        },
+        async subscribe(_: string, fromSeq: number) {
+            subscribeCount += 1;
+
+            if (subscribeCount === 1) {
+                assert.equal(fromSeq, 2);
+                throw { code: "stream.gap", message: "gap" };
+            }
+
+            assert.equal(fromSeq, 4);
+            return stream;
+        }
+    };
+
+    const cli = new CliMain({
+        createClient: () => client,
+        createLifecycleManager: async () => ({
+            async logs() {
+                return "";
+            },
+            async start() {
+                return { instanceCount: 0, running: true };
+            },
+            async status() {
+                return { instanceCount: 0, running: true };
+            },
+            async stop() {
+                return { instanceCount: 0, running: false };
+            }
+        }),
+        followEventLimit: 1,
+        stderr,
+        stdout
+    });
+
+    assert.equal(await cli.run(["watch", "status", "demo-local"]), 0);
+    assert.equal(
+        stdout.flush(),
+        "instance: demo-local\nstatus: stopped\nready: false\ndaemonState: stopped\nconnectionState: disconnected\nlastSeq: 1\n" +
+            "instance: demo-local\nstatus: ready\nready: true\ndaemonState: running\nconnectionState: connected\nlastSeq: 3\n" +
+            "instance: demo-local\nstatus: ready\nready: true\ndaemonState: running\nconnectionState: connected\nlastSeq: 4\n"
+    );
+    assert.equal(stderr.flush(), "");
+});
+
 function createBuffer(): { flush: () => string; write: (chunk: string) => void } {
     const chunks: string[] = [];
 

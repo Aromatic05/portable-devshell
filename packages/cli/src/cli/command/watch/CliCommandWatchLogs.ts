@@ -8,17 +8,49 @@ export class CliCommandWatchLogs {
         onEntries: (entries: CliInstanceLogEntry[]) => Promise<void> | void,
         maxEvents?: number
     ): Promise<void> {
-        const snapshot = await client.getSnapshot(instance);
-        const initialLogs = await client.readLogs(instance);
-        let nextLogSeq = (initialLogs.at(-1)?.seq ?? 0) + 1;
-        await onEntries(initialLogs);
-        const stream = await client.subscribe(instance, snapshot.lastSeq + 1);
+        let handled = 0;
+        let nextLogSeq = 1;
+        let stream: CliControlStream | undefined;
 
         try {
-            let handled = 0;
+            while (true) {
+                if (stream === undefined) {
+                    const snapshot = await client.getSnapshot(instance);
+                    const initialLogs = await client.readLogs(instance, { fromSeq: nextLogSeq });
 
-            while (maxEvents === undefined || handled < maxEvents) {
-                await stream.nextEvent();
+                    if (initialLogs.length > 0) {
+                        nextLogSeq = initialLogs.at(-1)!.seq + 1;
+                        await onEntries(initialLogs);
+                    }
+
+                    try {
+                        stream = await client.subscribe(instance, snapshot.lastSeq + 1);
+                    } catch (error) {
+                        if (readErrorCode(error) === "stream.gap") {
+                            continue;
+                        }
+
+                        throw error;
+                    }
+                }
+
+                if (maxEvents !== undefined && handled >= maxEvents) {
+                    return;
+                }
+
+                try {
+                    await stream.nextEvent();
+                } catch (error) {
+                    stream.close();
+                    stream = undefined;
+
+                    if (readErrorCode(error) === "stream.gap") {
+                        continue;
+                    }
+
+                    throw error;
+                }
+
                 handled += 1;
                 const entries = await client.readLogs(instance, { fromSeq: nextLogSeq });
 
@@ -28,7 +60,13 @@ export class CliCommandWatchLogs {
                 }
             }
         } finally {
-            stream.close();
+            stream?.close();
         }
     }
+}
+
+function readErrorCode(error: unknown): string | undefined {
+    return typeof error === "object" && error !== null && "code" in error && typeof error.code === "string"
+        ? error.code
+        : undefined;
 }
