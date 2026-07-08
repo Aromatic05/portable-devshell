@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { Readable } from "node:stream";
 import test from "node:test";
 
 import { CliMain } from "../../dist/cli/CliMain.js";
@@ -47,6 +48,12 @@ test("CliMain handles control lifecycle commands and exit code mapping", async (
             async callTool() {
                 throw new Error("unused");
             },
+            async createInstance() {
+                throw new Error("unused");
+            },
+            async getInstanceCreateSchema() {
+                throw new Error("unused");
+            },
             async getSnapshot() {
                 throw { code: "control.instanceNotFound", message: "missing" };
             },
@@ -66,6 +73,9 @@ test("CliMain handles control lifecycle commands and exit code mapping", async (
                 throw new Error("unused");
             },
             async subscribe() {
+                throw new Error("unused");
+            },
+            async validateInstanceCreateDraft() {
                 throw new Error("unused");
             }
         }),
@@ -91,6 +101,12 @@ test("CliMain handles instance logs follow and tool call through injected client
     const client = {
         async callTool() {
             return { exitCode: 0, stderr: "", stdout: "/tmp/ws\n" };
+        },
+        async createInstance() {
+            throw new Error("unused");
+        },
+        async getInstanceCreateSchema() {
+            throw new Error("unused");
         },
         async getSnapshot() {
             return {
@@ -125,6 +141,9 @@ test("CliMain handles instance logs follow and tool call through injected client
         },
         async subscribe() {
             return stream;
+        },
+        async validateInstanceCreateDraft() {
+            throw new Error("unused");
         }
     };
 
@@ -179,6 +198,12 @@ test("CliMain follows instance logs without skipping events between initial pull
         async callTool() {
             throw new Error("unused");
         },
+        async createInstance() {
+            throw new Error("unused");
+        },
+        async getInstanceCreateSchema() {
+            throw new Error("unused");
+        },
         async getSnapshot() {
             return {
                 lastSeq: initialLogsRead ? 2 : 1,
@@ -215,6 +240,9 @@ test("CliMain follows instance logs without skipping events between initial pull
         async subscribe(_: string, fromSeq: number) {
             assert.equal(fromSeq, 2);
             return stream;
+        },
+        async validateInstanceCreateDraft() {
+            throw new Error("unused");
         }
     };
 
@@ -257,6 +285,12 @@ test("CliMain recovers instance log follow when subscribe returns stream.gap", a
     let subscribeCount = 0;
     const client = {
         async callTool() {
+            throw new Error("unused");
+        },
+        async createInstance() {
+            throw new Error("unused");
+        },
+        async getInstanceCreateSchema() {
             throw new Error("unused");
         },
         async getSnapshot() {
@@ -310,6 +344,9 @@ test("CliMain recovers instance log follow when subscribe returns stream.gap", a
 
             assert.equal(fromSeq, 4);
             return stream;
+        },
+        async validateInstanceCreateDraft() {
+            throw new Error("unused");
         }
     };
 
@@ -352,6 +389,12 @@ test("CliMain recovers watch status when subscribe returns stream.gap", async ()
     let subscribeCount = 0;
     const client = {
         async callTool() {
+            throw new Error("unused");
+        },
+        async createInstance() {
+            throw new Error("unused");
+        },
+        async getInstanceCreateSchema() {
             throw new Error("unused");
         },
         async getSnapshot() {
@@ -404,6 +447,9 @@ test("CliMain recovers watch status when subscribe returns stream.gap", async ()
 
             assert.equal(fromSeq, 4);
             return stream;
+        },
+        async validateInstanceCreateDraft() {
+            throw new Error("unused");
         }
     };
 
@@ -435,6 +481,134 @@ test("CliMain recovers watch status when subscribe returns stream.gap", async ()
             "instance: demo-local\nstatus: ready\nready: true\ndaemonState: running\nconnectionState: connected\nlastSeq: 3\n" +
             "instance: demo-local\nstatus: ready\nready: true\ndaemonState: running\nconnectionState: connected\nlastSeq: 4\n"
     );
+    assert.equal(stderr.flush(), "");
+});
+
+test("CliMain runs interactive instance create through control rpc", async () => {
+    const stdout = createBuffer();
+    const stderr = createBuffer();
+    const calls: string[] = [];
+    const client = {
+        async callTool() {
+            throw new Error("unused");
+        },
+        async createInstance(draft: Record<string, unknown>) {
+            calls.push("create");
+            assert.equal(draft.name, "demo-local");
+            assert.equal(draft.provider, "local");
+            assert.equal(draft.workerBinaryPath, "/worker/bin");
+            return {
+                enabled: true,
+                mcpPath: "/demo-local/mcp",
+                name: "demo-local",
+                snapshot: {
+                    connectionState: "disconnected",
+                    daemonState: "stopped",
+                    lastSeq: 0,
+                    name: "demo-local",
+                    ready: false,
+                    status: "stopped"
+                }
+            };
+        },
+        async getInstanceCreateSchema() {
+            calls.push("schema");
+            return {
+                defaultAllowTools: ["bash_run"],
+                defaultEnabled: true,
+                defaultEventBufferSize: 1000,
+                defaultMcpEnabled: true,
+                defaultProvider: "local",
+                defaultRetentionDays: 7,
+                defaultSecurityMode: "disabled",
+                providers: ["local", "ssh", "docker", "podman"] as const
+            };
+        },
+        async getSnapshot() {
+            throw new Error("unused");
+        },
+        async listInstances() {
+            return [];
+        },
+        async readLogs() {
+            return [];
+        },
+        async refreshStatus() {
+            throw new Error("unused");
+        },
+        async startInstance() {
+            throw new Error("unused");
+        },
+        async stopInstance() {
+            throw new Error("unused");
+        },
+        async subscribe() {
+            throw new Error("unused");
+        },
+        async validateInstanceCreateDraft(draft: Record<string, unknown>) {
+            calls.push("validate");
+            assert.equal(draft.name, "demo-local");
+            return {
+                defaultWorkspace: "/tmp/workspace",
+                enabled: true,
+                logs: {
+                    eventBufferSize: 1000,
+                    retentionDays: 7
+                },
+                mcp: {
+                    allowTools: ["bash_run"],
+                    enabled: true,
+                    path: "/demo-local/mcp"
+                },
+                name: "demo-local",
+                provider: "local",
+                security: {
+                    mode: "disabled"
+                },
+                workerBinaryPath: "/worker/bin"
+            };
+        }
+    };
+
+    const cli = new CliMain({
+        createClient: () => client,
+        createLifecycleManager: async () => ({
+            async logs() {
+                return "";
+            },
+            async start() {
+                return { instanceCount: 0, running: true };
+            },
+            async status() {
+                return { instanceCount: 0, running: true };
+            },
+            async stop() {
+                return { instanceCount: 0, running: false };
+            }
+        }),
+        stdin: Readable.from([
+            "demo-local\n",
+            "\n",
+            "\n",
+            "/tmp/workspace\n",
+            "/worker/bin\n",
+            "\n",
+            "\n",
+            "\n",
+            "\n",
+            "\n",
+            "\n",
+            "\n"
+        ]),
+        stderr,
+        stdout
+    });
+
+    assert.equal(await cli.run(["instance", "create"]), 0);
+    assert.deepEqual(calls, ["schema", "validate", "create"]);
+    const output = stdout.flush();
+    assert.match(output, /Summary\n/u);
+    assert.match(output, /instance created: demo-local/u);
     assert.equal(stderr.flush(), "");
 });
 

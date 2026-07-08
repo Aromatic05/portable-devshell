@@ -22,6 +22,7 @@ test("CliParser rejects invalid command shapes", () => {
     const parser = new CliParser();
 
     assert.throws(() => parser.parse(["instance", "call", "demo-local", "bash_run", "{bad"]), /valid JSON/u);
+    assert.throws(() => parser.parse(["instance", "create", "demo-local"]), /Unexpected arguments/u);
     assert.throws(() => parser.parse(["instance", "logs", "demo-local", "--bad"]), /\[-f\]/u);
     assert.throws(() => parser.parse(["watch", "status"]), /requires <instance>/u);
 });

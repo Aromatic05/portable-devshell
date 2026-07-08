@@ -8,6 +8,7 @@ export type CliParsedCommand =
     | { kind: "control.status" }
     | { kind: "control.stop" }
     | { input: JsonValue; instance: string; kind: "instance.call"; toolName: string }
+    | { kind: "instance.create" }
     | { kind: "instance.list" }
     | { follow: boolean; instance: string; kind: "instance.logs" }
     | { instance: string; kind: "instance.start" }
@@ -42,6 +43,8 @@ export class CliParser {
 
     #parseInstance(argv: readonly string[]): CliParsedCommand {
         switch (argv[0]) {
+            case "create":
+                return this.#expectNoExtra(argv, { kind: "instance.create" });
             case "list":
                 return this.#expectNoExtra(argv, { kind: "instance.list" });
             case "status":

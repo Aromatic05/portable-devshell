@@ -7,6 +7,7 @@ import { CliCommandControlStart, type CliLifecycleManagerLike } from "./command/
 import { CliCommandControlStatus } from "./command/control/CliCommandControlStatus.js";
 import { CliCommandControlStop } from "./command/control/CliCommandControlStop.js";
 import { CliCommandInstanceCall } from "./command/instance/CliCommandInstanceCall.js";
+import { CliCommandInstanceCreate } from "./command/instance/CliCommandInstanceCreate.js";
 import { CliCommandInstanceList } from "./command/instance/CliCommandInstanceList.js";
 import { CliCommandInstanceLogs } from "./command/instance/CliCommandInstanceLogs.js";
 import { CliCommandInstanceStart } from "./command/instance/CliCommandInstanceStart.js";
@@ -20,16 +21,19 @@ import { renderCliError } from "./render/CliRenderError.js";
 import { renderControlLogs } from "./render/control/CliRenderControlLogs.js";
 import { renderControlStatus } from "./render/control/CliRenderControlStatus.js";
 import { renderInstanceList } from "./render/instance/CliRenderInstanceList.js";
+import { renderInstanceCreateResult } from "./render/instance/CliRenderInstanceCreate.js";
 import { renderInstanceLogs } from "./render/instance/CliRenderInstanceLogs.js";
 import { renderInstanceSnapshot } from "./render/instance/CliRenderInstanceSnapshot.js";
 import { renderToolCall } from "./render/tool/CliRenderToolCall.js";
 import { renderToolResult } from "./render/tool/CliRenderToolResult.js";
+import { InstanceCreateWizard } from "./wizard/InstanceCreateWizard.js";
 
 export interface CliMainOptions {
     createClient?: () => CliControlClientLike;
     createLifecycleManager?: () => Promise<CliLifecycleManagerLike>;
     followEventLimit?: number;
     homeDirectory?: string;
+    stdin?: NodeJS.ReadableStream;
     stderr?: { write(chunk: string): void };
     stdout?: { write(chunk: string): void };
     xdgRuntimeDir?: string;
@@ -41,6 +45,7 @@ export class CliMain {
     readonly #exitMapper = new CliExitMapper();
     readonly #followEventLimit?: number;
     readonly #parser = new CliParser();
+    readonly #stdin: NodeJS.ReadableStream;
     readonly #stderr: { write(chunk: string): void };
     readonly #stdout: { write(chunk: string): void };
     readonly #homeDirectory?: string;
@@ -50,6 +55,7 @@ export class CliMain {
         this.#createClient = options.createClient ?? (() => new CliControlClient({ xdgRuntimeDir: this.#xdgRuntimeDir }));
         this.#createLifecycleManager = options.createLifecycleManager;
         this.#followEventLimit = options.followEventLimit;
+        this.#stdin = options.stdin ?? process.stdin;
         this.#stderr = options.stderr ?? process.stderr;
         this.#stdout = options.stdout ?? process.stdout;
         this.#homeDirectory = options.homeDirectory;
@@ -83,6 +89,21 @@ export class CliMain {
             case "instance.list":
                 this.#stdout.write(renderInstanceList(await new CliCommandInstanceList().execute(this.#createClient())));
                 return;
+            case "instance.create": {
+                const result = await new CliCommandInstanceCreate().execute(
+                    this.#createClient(),
+                    new InstanceCreateWizard({
+                        input: this.#stdin,
+                        output: this.#stdout
+                    })
+                );
+
+                if (result !== undefined) {
+                    this.#stdout.write(renderInstanceCreateResult(result));
+                }
+
+                return;
+            }
             case "instance.status":
                 this.#stdout.write(
                     renderInstanceSnapshot((await new CliCommandInstanceStatus().execute(this.#createClient(), command.instance)).snapshot)

@@ -3,6 +3,7 @@ import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer, type Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { Readable } from "node:stream";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
@@ -134,6 +135,73 @@ test("CliMain runs Task 12 real worker smoke through control lifecycle", async (
     assert.equal(stderr.flush(), "");
 
     assert.match(await readFile(join(homeDirectory, ".devshell", "aromatic-pc", "control-worker", "tool-calls.jsonl"), "utf8"), /bash_run/u);
+});
+
+test("CliMain creates an instance interactively and uses it through the real control lifecycle", async (t) => {
+    const homeDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-cli-create-home-"));
+    const xdgRuntimeDir = await mkdtemp(join(tmpdir(), "portable-devshell-cli-create-runtime-"));
+    const workspacePath = await mkdtemp(join(tmpdir(), "portable-devshell-cli-create-workspace-"));
+    const workerBinaryPath = resolve(fileURLToPath(new URL("../../../../", import.meta.url)), "target/debug/devshell-worker");
+    const stdout = createBuffer();
+    const stderr = createBuffer();
+    let controlStopped = false;
+    const cli = new CliMain({
+        homeDirectory,
+        stderr,
+        stdin: Readable.from([
+            "aromatic-pc\n",
+            "\n",
+            "\n",
+            `${workspacePath}\n`,
+            `${workerBinaryPath}\n`,
+            "\n",
+            "\n",
+            "\n",
+            "\n",
+            "\n",
+            "\n",
+            "\n"
+        ]),
+        stdout,
+        xdgRuntimeDir
+    });
+
+    await mkdir(join(homeDirectory, ".devshell", "control"), { recursive: true });
+    await writeFile(join(homeDirectory, ".devshell", "control", "config.toml"), createCreateConfig(), "utf8");
+
+    t.after(async () => {
+        if (!controlStopped) {
+            await cli.run(["stop"]).catch(() => undefined);
+        }
+        await rm(homeDirectory, { force: true, recursive: true });
+        await rm(xdgRuntimeDir, { force: true, recursive: true });
+        await rm(workspacePath, { force: true, recursive: true });
+    });
+
+    assert.equal(await cli.run(["start"]), 0);
+    assert.match(stdout.flush(), /control: running/u);
+
+    assert.equal(await cli.run(["instance", "create"]), 0);
+    const createOutput = stdout.flush();
+    assert.match(createOutput, /Summary/u);
+    assert.match(createOutput, /instance created: aromatic-pc/u);
+
+    assert.equal(await cli.run(["instance", "list"]), 0);
+    assert.match(stdout.flush(), /aromatic-pc\tstopped/u);
+
+    assert.equal(await cli.run(["instance", "start", "aromatic-pc"]), 0);
+    assert.match(stdout.flush(), /status: ready/u);
+
+    assert.equal(await cli.run(["instance", "call", "aromatic-pc", "bash_run", "{\"command\":\"pwd\"}"]), 0);
+    assert.match(stdout.flush(), new RegExp(workspacePath.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"), "u"));
+
+    assert.match(await readFile(join(homeDirectory, ".devshell", "control", "config.toml"), "utf8"), /\[\[instances\]\]/u);
+    assert.match(await readFile(join(homeDirectory, ".devshell", "control", "config.toml"), "utf8"), /name = "aromatic-pc"/u);
+
+    assert.equal(await cli.run(["stop"]), 0);
+    controlStopped = true;
+    assert.equal(stdout.flush(), "control: stopped\n");
+    assert.equal(stderr.flush(), "");
 });
 
 function createInstanceHarness(): { attach: (socket: Socket) => void } {
@@ -288,6 +356,25 @@ function createRealConfig(workspacePath: string, workerBinaryPath: string): stri
         "",
         "[instances.logs]",
         "eventBufferSize = 50",
+        ""
+    ].join("\n");
+}
+
+function createCreateConfig(): string {
+    return [
+        "version = 1",
+        "",
+        "[control]",
+        'logLevel = "info"',
+        "",
+        "[mcp]",
+        "enabled = false",
+        'listenHost = "127.0.0.1"',
+        "listenPort = 17890",
+        'publicBaseUrl = "http://127.0.0.1:17890"',
+        "",
+        "[mcp.auth]",
+        'mode = "none"',
         ""
     ].join("\n");
 }

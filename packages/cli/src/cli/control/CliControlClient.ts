@@ -1,4 +1,4 @@
-import type { JsonValue } from "@portable-devshell/shared";
+import type { InstanceCreateDraft, InstanceCreateResult, InstanceCreateSchema, InstanceCreateSummary, JsonValue } from "@portable-devshell/shared";
 
 import { CliControlConnection, type CliControlConnectionOptions } from "./CliControlConnection.js";
 import { createControlTarget, createInstanceTarget, type CliControlEventEnvelope } from "./CliControlRequest.js";
@@ -16,6 +16,8 @@ import {
 
 export interface CliControlClientLike {
     callTool(instance: string, toolName: string, input: JsonValue): Promise<CliCommandResult>;
+    createInstance(draft: InstanceCreateDraft): Promise<InstanceCreateResult>;
+    getInstanceCreateSchema(): Promise<InstanceCreateSchema>;
     getSnapshot(instance: string): Promise<CliInstanceSnapshotEnvelope>;
     listInstances(): Promise<CliInstanceListEntry[]>;
     readLogs(instance: string, query?: { fromSeq?: number; limit?: number }): Promise<CliInstanceLogEntry[]>;
@@ -23,6 +25,7 @@ export interface CliControlClientLike {
     startInstance(instance: string): Promise<CliInstanceSnapshotEnvelope["snapshot"]>;
     stopInstance(instance: string): Promise<CliInstanceSnapshotEnvelope["snapshot"]>;
     subscribe(instance: string, fromSeq: number): Promise<CliControlStream>;
+    validateInstanceCreateDraft(draft: InstanceCreateDraft): Promise<InstanceCreateSummary>;
 }
 
 export class CliControlClient implements CliControlClientLike {
@@ -34,6 +37,18 @@ export class CliControlClient implements CliControlClientLike {
 
     async listInstances(): Promise<CliInstanceListEntry[]> {
         return asInstanceList(await this.#request("control.listInstances", createControlTarget()));
+    }
+
+    async getInstanceCreateSchema(): Promise<InstanceCreateSchema> {
+        return (await this.#request("control.getInstanceCreateSchema", createControlTarget())) as unknown as InstanceCreateSchema;
+    }
+
+    async validateInstanceCreateDraft(draft: InstanceCreateDraft): Promise<InstanceCreateSummary> {
+        return (await this.#request("control.validateInstanceCreateDraft", createControlTarget(), draft as unknown as JsonValue)) as unknown as InstanceCreateSummary;
+    }
+
+    async createInstance(draft: InstanceCreateDraft): Promise<InstanceCreateResult> {
+        return (await this.#request("control.createInstance", createControlTarget(), draft as unknown as JsonValue)) as unknown as InstanceCreateResult;
     }
 
     async getSnapshot(instance: string): Promise<CliInstanceSnapshotEnvelope> {
