@@ -263,29 +263,34 @@ test("ssh transport runs installWorker probe via remote shell", async () => {
     });
 });
 
-test("ssh transport installs default worker into remote home before probing", async (t) => {
+test("ssh transport probes remote target before installing default worker", async (t) => {
     const worker = await createDummyWorkerBinary();
     t.after(worker.cleanup);
-    const previousWorkerPath = process.env.PORTABLE_DEVSHELL_WORKER_PATH;
-    process.env.PORTABLE_DEVSHELL_WORKER_PATH = worker.path;
+    const previousWorkerPath = process.env.PORTABLE_DEVSHELL_WORKER_DARWIN_ARM64_PATH;
+    process.env.PORTABLE_DEVSHELL_WORKER_DARWIN_ARM64_PATH = worker.path;
     t.after(() => {
-        restoreEnv("PORTABLE_DEVSHELL_WORKER_PATH", previousWorkerPath);
+        restoreEnv("PORTABLE_DEVSHELL_WORKER_DARWIN_ARM64_PATH", previousWorkerPath);
     });
 
     const recorder = createSpawnRecorder((call, child, callIndex) => {
         if (callIndex === 0) {
-            closeRecordedChild(child, { stdout: "/home/dev" });
+            closeRecordedChild(child, { stdout: "Darwin\narm64\n" });
             return true;
         }
 
         if (callIndex === 1) {
+            closeRecordedChild(child, { stdout: "/home/dev" });
+            return true;
+        }
+
+        if (callIndex === 2) {
             child.stdin.once("finish", () => {
                 closeRecordedChild(child);
             });
             return true;
         }
 
-        if (callIndex === 2) {
+        if (callIndex === 3) {
             closeRecordedChild(child, { stdout: "running\n" });
             return true;
         }
@@ -310,14 +315,29 @@ test("ssh transport installs default worker into remote home before probing", as
             "--",
             "sh",
             "-lc",
+            `printf '%s\n%s\n' "$(uname -s)" "$(uname -m)"`
+        ],
+        options: { cwd: undefined, env: undefined, stdio: ["ignore", "pipe", "pipe"] }
+    });
+    assert.deepEqual(recorder.calls[1], {
+        command: "ssh-bin",
+        args: [
+            "-oBatchMode=yes",
+            "-oNumberOfPasswordPrompts=0",
+            "-oKbdInteractiveAuthentication=no",
+            "-oPasswordAuthentication=no",
+            "devbox",
+            "--",
+            "sh",
+            "-lc",
             'printf %s "${HOME:?HOME is required to install the worker}"'
         ],
         options: { cwd: undefined, env: undefined, stdio: ["ignore", "pipe", "pipe"] }
     });
-    assert.equal(recorder.calls[1]?.command, "ssh-bin");
-    assert.equal(recorder.calls[1]?.args[8]?.includes("/home/dev/.devshell/workers/"), true);
-    assert.equal(recorder.calls[1]?.args[8]?.includes('ln -snf "$symlink_target" "$symlink_path"'), true);
-    assert.deepEqual(recorder.calls[2], {
+    assert.equal(recorder.calls[2]?.command, "ssh-bin");
+    assert.equal(recorder.calls[2]?.args[8]?.includes("/home/dev/.devshell/workers/darwin-arm64/"), true);
+    assert.equal(recorder.calls[2]?.args[8]?.includes('ln -snf "$symlink_target" "$symlink_path"'), true);
+    assert.deepEqual(recorder.calls[3], {
         command: "ssh-bin",
         args: [
             "-oBatchMode=yes",
@@ -332,7 +352,29 @@ test("ssh transport installs default worker into remote home before probing", as
         ],
         options: { cwd: undefined, env: undefined, stdio: ["ignore", "pipe", "pipe"] }
     });
-    assert.deepEqual(Buffer.concat(recorder.children[1]?.stdinChunks ?? []), worker.contents);
+    assert.deepEqual(Buffer.concat(recorder.children[2]?.stdinChunks ?? []), worker.contents);
+});
+
+test("ssh transport surfaces missing target-specific asset as structured error", async () => {
+    const recorder = createSpawnRecorder((_call, child, callIndex) => {
+        if (callIndex === 0) {
+            closeRecordedChild(child, { stdout: "Darwin\narm64\n" });
+            return true;
+        }
+
+        return false;
+    });
+    const transport = new SshWorkerTransport({
+        command: "ssh-bin devbox",
+        spawnFunction: recorder.spawn
+    });
+
+    await assert.rejects(transport.installWorker(), (error: unknown) => {
+        assert.ok(typeof error === "object" && error !== null);
+        assert.equal((error as { code?: string }).code, "core.workerAssetUnavailable");
+        assert.equal((error as { details?: Record<string, unknown> }).details?.targetKey, "darwin-arm64");
+        return true;
+    });
 });
 
 test("ssh transport appends interactive-auth hint when batch mode authentication fails", async () => {
@@ -503,10 +545,10 @@ test("docker transport runs installWorker probe via exec", async () => {
 test("docker transport installs default worker before exec command", async (t) => {
     const worker = await createDummyWorkerBinary();
     t.after(worker.cleanup);
-    const previousWorkerPath = process.env.PORTABLE_DEVSHELL_WORKER_PATH;
-    process.env.PORTABLE_DEVSHELL_WORKER_PATH = worker.path;
+    const previousWorkerPath = process.env.PORTABLE_DEVSHELL_WORKER_LINUX_ARM64_PATH;
+    process.env.PORTABLE_DEVSHELL_WORKER_LINUX_ARM64_PATH = worker.path;
     t.after(() => {
-        restoreEnv("PORTABLE_DEVSHELL_WORKER_PATH", previousWorkerPath);
+        restoreEnv("PORTABLE_DEVSHELL_WORKER_LINUX_ARM64_PATH", previousWorkerPath);
     });
 
     const recorder = createSpawnRecorder((call, child, callIndex) => {
@@ -516,11 +558,16 @@ test("docker transport installs default worker before exec command", async (t) =
         }
 
         if (callIndex === 1) {
-            closeRecordedChild(child, { stdout: "/home/dev" });
+            closeRecordedChild(child, { stdout: "Linux\naarch64\n" });
             return true;
         }
 
         if (callIndex === 2) {
+            closeRecordedChild(child, { stdout: "/home/dev" });
+            return true;
+        }
+
+        if (callIndex === 3) {
             child.stdin.once("finish", () => {
                 closeRecordedChild(child);
             });
@@ -546,11 +593,16 @@ test("docker transport installs default worker before exec command", async (t) =
     });
     assert.deepEqual(recorder.calls[1], {
         command: "docker-bin",
+        args: ["exec", "-i", "worker-container", "sh", "-lc", `printf '%s\n%s\n' "$(uname -s)" "$(uname -m)"`],
+        options: { cwd: undefined, env: undefined, stdio: ["ignore", "pipe", "pipe"] }
+    });
+    assert.deepEqual(recorder.calls[2], {
+        command: "docker-bin",
         args: ["exec", "-i", "worker-container", "sh", "-lc", 'printf %s "${HOME:?HOME is required to install the worker}"'],
         options: { cwd: undefined, env: undefined, stdio: ["ignore", "pipe", "pipe"] }
     });
-    assert.equal(recorder.calls[2]?.args[5]?.includes("/home/dev/.devshell/workers/"), true);
-    assert.deepEqual(recorder.calls[3], {
+    assert.equal(recorder.calls[3]?.args[5]?.includes("/home/dev/.devshell/workers/linux-arm64/"), true);
+    assert.deepEqual(recorder.calls[4], {
         command: "docker-bin",
         args: [
             "exec",
@@ -565,7 +617,7 @@ test("docker transport installs default worker before exec command", async (t) =
         ],
         options: { cwd: undefined, env: undefined, stdio: ["ignore", "pipe", "pipe"] }
     });
-    assert.deepEqual(Buffer.concat(recorder.children[2]?.stdinChunks ?? []), worker.contents);
+    assert.deepEqual(Buffer.concat(recorder.children[3]?.stdinChunks ?? []), worker.contents);
 });
 
 test("podman transport builds exec command", async () => {
@@ -639,19 +691,29 @@ test("podman transport runs installWorker probe via exec", async () => {
 test("podman transport installs default worker before spawning rpc", async (t) => {
     const worker = await createDummyWorkerBinary();
     t.after(worker.cleanup);
-    const previousWorkerPath = process.env.PORTABLE_DEVSHELL_WORKER_PATH;
-    process.env.PORTABLE_DEVSHELL_WORKER_PATH = worker.path;
+    const previousWorkerPath = process.env.PORTABLE_DEVSHELL_WORKER_LINUX_ARM64_PATH;
+    process.env.PORTABLE_DEVSHELL_WORKER_LINUX_ARM64_PATH = worker.path;
     t.after(() => {
-        restoreEnv("PORTABLE_DEVSHELL_WORKER_PATH", previousWorkerPath);
+        restoreEnv("PORTABLE_DEVSHELL_WORKER_LINUX_ARM64_PATH", previousWorkerPath);
     });
 
     const recorder = createSpawnRecorder((call, child, callIndex) => {
         if (callIndex === 0) {
-            closeRecordedChild(child, { stdout: "/home/dev" });
+            closeRecordedChild(child, { stdout: "running\n" });
             return true;
         }
 
         if (callIndex === 1) {
+            closeRecordedChild(child, { stdout: "Linux\naarch64\n" });
+            return true;
+        }
+
+        if (callIndex === 2) {
+            closeRecordedChild(child, { stdout: "/home/dev" });
+            return true;
+        }
+
+        if (callIndex === 3) {
             child.stdin.once("end", () => {
                 closeRecordedChild(child);
             });
@@ -672,9 +734,9 @@ test("podman transport installs default worker before spawning rpc", async (t) =
         rpcProcess.kill("SIGTERM");
     });
 
-    assert.equal(rpcProcess.stdin, recorder.children[3]?.stdin);
-    assert.equal(rpcProcess.stdout, recorder.children[3]?.stdout);
-    assert.equal(rpcProcess.stderr, recorder.children[3]?.stderr);
+    assert.equal(rpcProcess.stdin, recorder.children[4]?.stdin);
+    assert.equal(rpcProcess.stdout, recorder.children[4]?.stdout);
+    assert.equal(rpcProcess.stderr, recorder.children[4]?.stderr);
     assert.deepEqual(recorder.calls[0], {
         command: "podman-bin",
         args: ["inspect", "--type", "container", "--format", "{{.State.Status}}", "worker-container"],
@@ -682,11 +744,16 @@ test("podman transport installs default worker before spawning rpc", async (t) =
     });
     assert.deepEqual(recorder.calls[1], {
         command: "podman-bin",
+        args: ["exec", "-i", "worker-container", "sh", "-lc", `printf '%s\n%s\n' "$(uname -s)" "$(uname -m)"`],
+        options: { cwd: undefined, env: undefined, stdio: ["ignore", "pipe", "pipe"] }
+    });
+    assert.deepEqual(recorder.calls[2], {
+        command: "podman-bin",
         args: ["exec", "-i", "worker-container", "sh", "-lc", 'printf %s "${HOME:?HOME is required to install the worker}"'],
         options: { cwd: undefined, env: undefined, stdio: ["ignore", "pipe", "pipe"] }
     });
-    assert.equal(recorder.calls[2]?.args[5]?.includes("/home/dev/.devshell/workers/"), true);
-    assert.deepEqual(recorder.calls[3], {
+    assert.equal(recorder.calls[3]?.args[5]?.includes("/home/dev/.devshell/workers/linux-arm64/"), true);
+    assert.deepEqual(recorder.calls[4], {
         command: "podman-bin",
         args: [
             "exec",
@@ -701,7 +768,7 @@ test("podman transport installs default worker before spawning rpc", async (t) =
         ],
         options: { cwd: undefined, env: undefined, stdio: ["pipe", "pipe", "pipe"] }
     });
-    assert.deepEqual(Buffer.concat(recorder.children[2]?.stdinChunks ?? []), worker.contents);
+    assert.deepEqual(Buffer.concat(recorder.children[3]?.stdinChunks ?? []), worker.contents);
     assert.equal(rpcProcess.kill("SIGTERM"), true);
     assert.deepEqual(await rpcProcess.exit, { code: null, signal: "SIGTERM" });
 });
