@@ -19,6 +19,6 @@ export class RouteRouterControl {
             });
         }
 
-        return await this.#handler.handle(request.method);
+        return await this.#handler.handle(request.method, request.params);
     }
 }

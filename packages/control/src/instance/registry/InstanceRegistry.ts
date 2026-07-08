@@ -13,6 +13,10 @@ export class InstanceRegistry {
         return this.#descriptors.get(name);
     }
 
+    add(descriptor: InstanceDescriptor): void {
+        this.#descriptors.set(descriptor.name, descriptor);
+    }
+
     list(): readonly InstanceDescriptor[] {
         return [...this.#descriptors.values()];
     }

@@ -3,6 +3,7 @@ export * from "./config/ConfigController.js";
 export * from "./config/ConfigInstance.js";
 export * from "./config/ConfigMcp.js";
 export * from "./dto/DtoCommandResult.js";
+export * from "./dto/instance/DtoInstanceCreate.js";
 export * from "./dto/instance/DtoInstanceEvent.js";
 export * from "./dto/instance/DtoInstanceSnapshot.js";
 export * from "./dto/tool/DtoToolCallRecord.js";

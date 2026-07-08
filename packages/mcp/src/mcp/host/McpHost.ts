@@ -48,15 +48,7 @@ export class McpHost {
         this.#config = config;
 
         for (const instance of config.instances) {
-            this.#registry.register(
-                new McpEndpointBinding(
-                    new McpEndpointWorker({
-                        allowlist: instance.allowlist,
-                        instanceName: instance.name,
-                        worker: instance.worker
-                    })
-                )
-            );
+            this.registerInstance(instance);
         }
 
         this.#httpServer = new McpHostHttpServer({
@@ -76,6 +68,18 @@ export class McpHost {
     async stop(): Promise<void> {
         await this.#httpServer.stop();
         await Promise.all(this.#registry.list().map(async (binding) => await binding.close()));
+    }
+
+    registerInstance(instance: McpHostInstanceConfig): void {
+        this.#registry.register(
+            new McpEndpointBinding(
+                new McpEndpointWorker({
+                    allowlist: instance.allowlist,
+                    instanceName: instance.name,
+                    worker: instance.worker
+                })
+            )
+        );
     }
 
     get server(): McpHostHttpServer {

@@ -4,6 +4,7 @@ import { createServer, type Server, type Socket } from "node:net";
 import { errorCodes, type ControlErrorBody } from "@portable-devshell/shared";
 
 import type { InstanceRegistry } from "../../instance/registry/InstanceRegistry.js";
+import type { ControlInstanceCreateService } from "../ControlInstanceCreateService.js";
 import { RouteMethodRegistry } from "../../route/RouteMethodRegistry.js";
 import { RouteHandlerControl } from "../../route/handler/RouteHandlerControl.js";
 import { RouteHandlerInstance } from "../../route/handler/RouteHandlerInstance.js";
@@ -13,6 +14,7 @@ import { StreamSubscriptionManager } from "../../stream/StreamSubscriptionManage
 import { ControlRpcConnection, type RpcRequestEnvelope } from "./ControlRpcConnection.js";
 
 export interface ControlRpcServerOptions {
+    instanceCreateService?: ControlInstanceCreateService;
     instanceRegistry: InstanceRegistry;
     shutdown?: () => Promise<void> | void;
     socketPath: string;
@@ -36,6 +38,7 @@ export class ControlRpcServer {
         this.#controlRouter = new RouteRouterControl(
             new RouteHandlerControl({
                 instanceRegistry: this.#instanceRegistry,
+                instanceCreateService: options.instanceCreateService
             })
         );
         this.#instanceRouter = new RouteRouterInstance(

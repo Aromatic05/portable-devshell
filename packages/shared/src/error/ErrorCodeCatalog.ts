@@ -11,6 +11,7 @@ export const errorCodes = {
     coreWorkerStopFailed: "core.workerStopFailed",
     envelopeInvalid: "control.methodNotFound",
     instanceConflict: "instance.conflict",
+    instanceAlreadyExists: "control.instanceAlreadyExists",
     instanceMissing: "control.instanceNotFound",
     mcpPublicAuthRequired: "mcp.publicAuthRequired",
     streamGap: "stream.gap",

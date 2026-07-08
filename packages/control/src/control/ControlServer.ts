@@ -1,7 +1,9 @@
 import type { McpHost } from "@portable-devshell/mcp";
 
+import { ControlInstanceCreateService } from "./ControlInstanceCreateService.js";
 import { ControlConfigStore } from "./config/ControlConfigStore.js";
 import type { ControlConfig } from "./config/ControlConfigTomlCodec.js";
+import { InstanceRegistry } from "../instance/registry/InstanceRegistry.js";
 import { InstanceRegistryBuilder } from "../instance/registry/InstanceRegistryBuilder.js";
 import { McpWiringService } from "../mcp/McpWiringService.js";
 import { ControlRpcServer } from "./rpc/ControlRpcServer.js";
@@ -22,6 +24,7 @@ export class ControlServer {
     readonly #mcpWiringService: McpWiringService;
     readonly #socketFile: ControlSocketFile;
     #config?: ControlConfig;
+    #instanceRegistry = new InstanceRegistry([]);
     #mcpHost?: McpHost;
     #rpcServer?: ControlRpcServer;
 
@@ -48,9 +51,20 @@ export class ControlServer {
         await this.#socketFile.ensureRuntimeDir();
 
         this.#config = config;
+        this.#instanceRegistry = registry;
         this.#mcpHost = this.#mcpWiringService.wire(config, registry);
         this.#rpcServer = new ControlRpcServer({
-            instanceRegistry: registry,
+            instanceCreateService: new ControlInstanceCreateService({
+                configStore: this.#configStore,
+                getConfig: () => this.#requireConfig(),
+                getMcpHost: () => this.#mcpHost,
+                homeDirectory: this.#homeDirectory,
+                instanceRegistry: this.#instanceRegistry,
+                setConfig: (nextConfig) => {
+                    this.#config = nextConfig;
+                }
+            }),
+            instanceRegistry: this.#instanceRegistry,
             shutdown: async () => {
                 await this.stop();
             },
@@ -64,7 +78,17 @@ export class ControlServer {
     async stop(): Promise<void> {
         await this.#rpcServer?.stop();
         await this.#mcpHost?.stop();
+        this.#config = undefined;
+        this.#instanceRegistry = new InstanceRegistry([]);
         this.#rpcServer = undefined;
         this.#mcpHost = undefined;
+    }
+
+    #requireConfig(): ControlConfig {
+        if (this.#config !== undefined) {
+            return this.#config;
+        }
+
+        throw new Error("Control config is not loaded.");
     }
 }
