@@ -13,7 +13,6 @@ export interface InstanceCreateDraft {
     container?: string;
     dockerBinary?: string;
     enabled?: boolean;
-    host?: string;
     mcp?: {
         allowTools?: string[];
         enabled?: boolean;
@@ -21,11 +20,12 @@ export interface InstanceCreateDraft {
     name: string;
     podmanBinary?: string;
     provider: "local" | "ssh" | "docker" | "podman";
-    remoteCwd?: string;
     security?: {
         mode?: string;
     };
-    sshBinary?: string;
+    ssh?: {
+        command?: string;
+    };
     workspace?: string;
 }
 
@@ -33,7 +33,6 @@ export interface InstanceCreateSummary {
     container?: string;
     dockerBinary?: string;
     enabled: boolean;
-    host?: string;
     mcp: {
         allowTools: string[];
         enabled: boolean;
@@ -42,11 +41,12 @@ export interface InstanceCreateSummary {
     name: string;
     podmanBinary?: string;
     provider: "local" | "ssh" | "docker" | "podman";
-    remoteCwd?: string;
     security: {
         mode: string;
     };
-    sshBinary?: string;
+    ssh?: {
+        command?: string;
+    };
     workspace?: string;
 }
 

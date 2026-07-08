@@ -66,10 +66,8 @@ export class InstanceCreateWizard {
             ...(workspace.length === 0 ? {} : { workspace }),
             ...(providerFields.container === undefined ? {} : { container: providerFields.container }),
             ...(providerFields.dockerBinary === undefined ? {} : { dockerBinary: providerFields.dockerBinary }),
-            ...(providerFields.host === undefined ? {} : { host: providerFields.host }),
             ...(providerFields.podmanBinary === undefined ? {} : { podmanBinary: providerFields.podmanBinary }),
-            ...(providerFields.remoteCwd === undefined ? {} : { remoteCwd: providerFields.remoteCwd }),
-            ...(providerFields.sshBinary === undefined ? {} : { sshBinary: providerFields.sshBinary }),
+            ...(providerFields.ssh === undefined ? {} : { ssh: providerFields.ssh }),
             enabled,
             mcp: {
                 allowTools,
@@ -101,10 +99,10 @@ export class InstanceCreateWizard {
     ): Promise<{
         container?: string;
         dockerBinary?: string;
-        host?: string;
         podmanBinary?: string;
-        remoteCwd?: string;
-        sshBinary?: string;
+        ssh?: {
+            command?: string;
+        };
     }> {
         this.#output.write("Provider\n");
 
@@ -113,21 +111,19 @@ export class InstanceCreateWizard {
                 return {};
             case "ssh":
                 return {
-                    host: await this.#required(lines, "ssh host"),
-                    remoteCwd: await this.#blankAsUndefined(lines, "ssh remote cwd"),
-                    sshBinary: await this.#blankAsUndefined(lines, "ssh binary")
+                    ssh: {
+                        command: await this.#required(lines, "ssh command")
+                    }
                 };
             case "docker":
                 return {
                     container: await this.#required(lines, "docker container"),
-                    dockerBinary: await this.#blankAsUndefined(lines, "docker binary"),
-                    remoteCwd: await this.#blankAsUndefined(lines, "docker remote cwd")
+                    dockerBinary: await this.#blankAsUndefined(lines, "docker binary")
                 };
             case "podman":
                 return {
                     container: await this.#required(lines, "podman container"),
-                    podmanBinary: await this.#blankAsUndefined(lines, "podman binary"),
-                    remoteCwd: await this.#blankAsUndefined(lines, "podman remote cwd")
+                    podmanBinary: await this.#blankAsUndefined(lines, "podman binary")
                 };
         }
     }
@@ -197,20 +193,12 @@ export class InstanceCreateWizard {
         this.#output.write(`provider: ${summary.provider}\n`);
         this.#output.write(`workspace: ${workspace ?? ""}\n`);
 
-        if (summary.host !== undefined) {
-            this.#output.write(`host: ${summary.host}\n`);
+        if (summary.ssh?.command !== undefined) {
+            this.#output.write(`ssh command: ${summary.ssh.command}\n`);
         }
 
         if (summary.container !== undefined) {
             this.#output.write(`container: ${summary.container}\n`);
-        }
-
-        if (summary.remoteCwd !== undefined) {
-            this.#output.write(`remote cwd: ${summary.remoteCwd}\n`);
-        }
-
-        if (summary.sshBinary !== undefined) {
-            this.#output.write(`ssh binary: ${summary.sshBinary}\n`);
         }
 
         if (summary.dockerBinary !== undefined) {

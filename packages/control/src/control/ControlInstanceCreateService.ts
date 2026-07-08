@@ -124,7 +124,6 @@ export class ControlInstanceCreateService {
         const normalized: ControlInstanceConfig = {
             dockerBinary: readOptionalString(draft.dockerBinary, "dockerBinary"),
             enabled: readBoolean(draft.enabled, instanceCreateSchema.defaultEnabled, "enabled"),
-            host: readOptionalString(draft.host, "host"),
             mcp: {
                 allowTools: readAllowTools(draft.mcp),
                 enabled: readNestedBoolean(draft.mcp, "enabled", instanceCreateSchema.defaultMcpEnabled),
@@ -133,11 +132,10 @@ export class ControlInstanceCreateService {
             name,
             podmanBinary: readOptionalString(draft.podmanBinary, "podmanBinary"),
             provider,
-            remoteCwd: readOptionalString(draft.remoteCwd, "remoteCwd"),
             security: {
                 mode: readSecurityMode(draft.security)
             },
-            sshBinary: readOptionalString(draft.sshBinary, "sshBinary"),
+            ssh: readSshDraft(draft.ssh),
             workspace: readRequiredString(draft.workspace, "workspace")
         };
 
@@ -145,7 +143,9 @@ export class ControlInstanceCreateService {
             case "local":
                 break;
             case "ssh":
-                normalized.host = readRequiredString(draft.host, "host");
+                normalized.ssh = {
+                    command: readRequiredString(normalized.ssh?.command, "ssh.command")
+                };
                 break;
             case "docker":
             case "podman":
@@ -245,6 +245,17 @@ function readSecurityMode(value: JsonValue | undefined): string {
     return readOptionalString(security?.mode, "security.mode") ?? instanceCreateSchema.defaultSecurityMode;
 }
 
+function readSshDraft(value: JsonValue | undefined): ControlInstanceConfig["ssh"] {
+    if (value === undefined) {
+        return undefined;
+    }
+
+    const ssh = asOptionalRecord(value, "ssh");
+    return {
+        command: readOptionalString(ssh.command, "ssh.command")
+    };
+}
+
 function asOptionalRecord(value: JsonValue, fieldName: string): Record<string, JsonValue> {
     if (typeof value !== "object" || value === null || Array.isArray(value)) {
         throw invalidDraft(`${fieldName} must be an object.`);
@@ -273,10 +284,7 @@ function toSummary(instance: ControlInstanceConfig): InstanceCreateSummary {
     return {
         ...(instance.container === undefined ? {} : { container: instance.container }),
         ...(instance.dockerBinary === undefined ? {} : { dockerBinary: instance.dockerBinary }),
-        ...(instance.host === undefined ? {} : { host: instance.host }),
         ...(instance.podmanBinary === undefined ? {} : { podmanBinary: instance.podmanBinary }),
-        ...(instance.remoteCwd === undefined ? {} : { remoteCwd: instance.remoteCwd }),
-        ...(instance.sshBinary === undefined ? {} : { sshBinary: instance.sshBinary }),
         enabled: instance.enabled,
         mcp: {
             allowTools: [...instance.mcp.allowTools],
@@ -288,6 +296,7 @@ function toSummary(instance: ControlInstanceConfig): InstanceCreateSummary {
         security: {
             mode: instance.security?.mode ?? instanceCreateSchema.defaultSecurityMode
         },
+        ...(instance.ssh === undefined ? {} : { ssh: { ...instance.ssh } }),
         ...(instance.workspace === undefined ? {} : { workspace: instance.workspace })
     };
 }

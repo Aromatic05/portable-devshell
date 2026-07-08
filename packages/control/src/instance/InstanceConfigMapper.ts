@@ -43,23 +43,22 @@ export class InstanceConfigMapper {
                 };
             case "ssh":
                 return {
-                    host: instance.host ?? fail(`ssh instance ${instance.name} requires host`),
-                    remoteCwd: instance.remoteCwd,
-                    sshBinary: instance.sshBinary,
+                    command: instance.ssh?.command ?? fail(`ssh instance ${instance.name} requires ssh.command`),
+                    workspace: instance.workspace,
                     type: "ssh"
                 };
             case "docker":
                 return {
                     container: instance.container ?? fail(`docker instance ${instance.name} requires container`),
                     dockerBinary: instance.dockerBinary,
-                    remoteCwd: instance.remoteCwd,
+                    remoteCwd: instance.workspace,
                     type: "docker"
                 };
             case "podman":
                 return {
                     container: instance.container ?? fail(`podman instance ${instance.name} requires container`),
                     podmanBinary: instance.podmanBinary,
-                    remoteCwd: instance.remoteCwd,
+                    remoteCwd: instance.workspace,
                     type: "podman"
                 };
         }

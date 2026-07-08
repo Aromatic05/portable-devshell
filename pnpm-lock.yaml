@@ -62,6 +62,9 @@ importers:
       '@portable-devshell/shared':
         specifier: workspace:*
         version: link:../shared
+      string-argv:
+        specifier: ^0.3.2
+        version: 0.3.2
 
   packages/mcp:
     dependencies:
@@ -971,6 +974,10 @@ packages:
   statuses@2.0.2:
     resolution: {integrity: sha512-DvEy55V3DB7uknRo+4iOGT5fP1slR8wQohVdknigZPMpMstaKJQWhwiYBACJE3Ul2pTnATihhBYnRhZQHGBiRw==}
     engines: {node: '>= 0.8'}
+
+  string-argv@0.3.2:
+    resolution: {integrity: sha512-aqD2Q0144Z+/RqG52NeHEkZauTAUWJO8c6yTftGJKO3Tja5tUgIfmIl6kExvhtxSDP7fXB6DvzkfMpCd/F3G+Q==}
+    engines: {node: '>=0.6.19'}
 
   strip-json-comments@3.1.1:
     resolution: {integrity: sha512-6fPc+R4ihwqP6N/aIv2f1gMH8lOVtWQHoqC4yK6oSDVVocumAsfCqjkXnqiYMhmMwS/mEHLp7Vehlt3ql6lEig==}
@@ -1941,6 +1948,8 @@ snapshots:
   smol-toml@1.7.0: {}
 
   statuses@2.0.2: {}
+
+  string-argv@0.3.2: {}
 
   strip-json-comments@3.1.1: {}
 

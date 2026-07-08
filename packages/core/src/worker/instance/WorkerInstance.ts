@@ -115,12 +115,18 @@ export class WorkerInstance {
                 });
             }
         } catch (error) {
+            const wrappedError = wrapWorkerCommandError(
+                error,
+                errorCodes.coreWorkerStartFailed,
+                `Worker start failed for instance ${this.#config.name}.`,
+                this.#config.name
+            );
             this.#stateMachine.apply({
                 connectionState: "disconnected",
                 daemonState: "stopped",
-                lastErrorCode: getErrorCode(error, errorCodes.coreWorkerStartFailed)
+                lastErrorCode: getErrorCode(wrappedError, errorCodes.coreWorkerStartFailed)
             });
-            throw error;
+            throw wrappedError;
         }
 
         this.#stateMachine.apply({ connectionState: "connecting" });
@@ -146,12 +152,22 @@ export class WorkerInstance {
                 lastSeq: startedEvent.seq
             });
         } catch (error) {
+            const wrappedError = wrapWorkerCommandError(
+                error,
+                errorCodes.coreWorkerHandshakeFailed,
+                `Worker handshake failed for instance ${this.#config.name}.`,
+                this.#config.name
+            );
             this.#closeRpcBridge();
             this.#stateMachine.apply({
                 connectionState: "disconnected",
                 daemonState: "running",
-                lastErrorCode: getErrorCode(error, errorCodes.coreWorkerHandshakeFailed)
+                lastErrorCode: getErrorCode(wrappedError, errorCodes.coreWorkerHandshakeFailed)
             });
+
+            if (wrappedError !== error) {
+                throw wrappedError;
+            }
 
             if (isKnownErrorCode(error)) {
                 throw error;
@@ -182,13 +198,19 @@ export class WorkerInstance {
                 });
             }
         } catch (error) {
+            const wrappedError = wrapWorkerCommandError(
+                error,
+                errorCodes.coreWorkerStopFailed,
+                `Worker stop failed for instance ${this.#config.name}.`,
+                this.#config.name
+            );
             stopErrorCode = getErrorCode(error, errorCodes.coreWorkerStopFailed);
             this.#stateMachine.apply({
                 connectionState: "disconnected",
                 daemonState: "stopping",
-                lastErrorCode: stopErrorCode
+                lastErrorCode: getErrorCode(wrappedError, errorCodes.coreWorkerStopFailed)
             });
-            throw error;
+            throw wrappedError;
         } finally {
             this.#closeRpcBridge();
             this.#handshake = undefined;
@@ -391,14 +413,24 @@ export class WorkerInstance {
                 pid
             });
         } catch (error) {
+            const wrappedError = wrapWorkerCommandError(
+                error,
+                errorCodes.coreWorkerHandshakeFailed,
+                `Worker handshake failed for instance ${this.#config.name}.`,
+                this.#config.name
+            );
             this.#closeRpcBridge();
             this.#handshake = undefined;
             this.#stateMachine.apply({
                 connectionState: "failed",
                 daemonState: "running",
-                lastErrorCode: getErrorCode(error, errorCodes.coreWorkerHandshakeFailed),
+                lastErrorCode: getErrorCode(wrappedError, errorCodes.coreWorkerHandshakeFailed),
                 pid
             });
+
+            if (wrappedError !== error) {
+                throw wrappedError;
+            }
 
             if (isKnownErrorCode(error)) {
                 throw error;
@@ -424,12 +456,18 @@ export class WorkerInstance {
         try {
             result = await this.#commandClient.status();
         } catch (error) {
+            const wrappedError = wrapWorkerCommandError(
+                error,
+                errorCodes.coreWorkerStatusFailed,
+                `Worker status failed for instance ${this.#config.name}.`,
+                this.#config.name
+            );
             this.#stateMachine.apply({
                 connectionState: "failed",
                 daemonState: "failed",
-                lastErrorCode: getErrorCode(error, errorCodes.coreWorkerStatusFailed)
+                lastErrorCode: getErrorCode(wrappedError, errorCodes.coreWorkerStatusFailed)
             });
-            throw error;
+            throw wrappedError;
         }
 
         if (result.exitCode !== 0) {
@@ -642,6 +680,20 @@ function withInstanceDetails(details: CommandDiagnostic | undefined, instance: s
         ...(details ?? {}),
         instance
     };
+}
+
+function wrapWorkerCommandError(error: unknown, code: string, message: string, instance: string): unknown {
+    if (!isKnownErrorCode(error) || getErrorCode(error, code) === code) {
+        return error;
+    }
+
+    return createError({
+        code,
+        cause: error,
+        message,
+        retryable: false,
+        details: toJsonDetails(withInstanceDetails(readCommandDiagnostic((error as { details?: unknown }).details), instance))
+    });
 }
 
 function toJsonDetails(details: CommandDiagnostic): JsonValue {

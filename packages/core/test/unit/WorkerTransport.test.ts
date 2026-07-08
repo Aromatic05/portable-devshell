@@ -79,8 +79,7 @@ test("provider installWorker failures keep diagnostic details across local ssh d
         {
             build: (spawnFunction: SpawnFunctionLike) =>
                 new SshWorkerTransport({
-                    host: "devbox",
-                    sshBinary: "ssh-bin",
+                    command: "ssh-bin devbox",
                     workerBinary: new WorkerBinary("/usr/local/bin/devshell-worker"),
                     spawnFunction
                 }),
@@ -95,7 +94,7 @@ test("provider installWorker failures keep diagnostic details across local ssh d
                     workerBinary: new WorkerBinary("/usr/local/bin/devshell-worker"),
                     spawnFunction
                 }),
-            expectedCommandPart: "docker-bin",
+            expectedCommandPart: "/usr/local/bin/devshell-worker",
             provider: "docker"
         },
         {
@@ -106,7 +105,7 @@ test("provider installWorker failures keep diagnostic details across local ssh d
                     workerBinary: new WorkerBinary("/usr/local/bin/devshell-worker"),
                     spawnFunction
                 }),
-            expectedCommandPart: "podman-bin",
+            expectedCommandPart: "/usr/local/bin/devshell-worker",
             provider: "podman"
         }
     ] as const;
@@ -183,9 +182,8 @@ test("local transport preserves base process env when instance env is provided",
 test("ssh transport includes remote cwd in command", async () => {
     const recorder = createSpawnRecorder();
     const transport = new SshWorkerTransport({
-        host: "devbox",
-        remoteCwd: "/srv/workspaces/task 3",
-        sshBinary: "ssh-bin",
+        command: "ssh-bin devbox",
+        workspace: "/srv/workspaces/task 3",
         workerBinary: new WorkerBinary("/usr/local/bin/devshell-worker"),
         spawnFunction: recorder.spawn
     });
@@ -196,6 +194,10 @@ test("ssh transport includes remote cwd in command", async () => {
     assert.deepEqual(recorder.calls[0], {
         command: "ssh-bin",
         args: [
+            "-oBatchMode=yes",
+            "-oNumberOfPasswordPrompts=0",
+            "-oKbdInteractiveAuthentication=no",
+            "-oPasswordAuthentication=no",
             "devbox",
             "--",
             "sh",
@@ -205,8 +207,21 @@ test("ssh transport includes remote cwd in command", async () => {
         options: { cwd: undefined, env: undefined, stdio: ["ignore", "pipe", "pipe"] }
     });
     assert.deepEqual(result.details, {
-        command: ["ssh-bin", "devbox", "--", "sh", "-lc", "cd '/srv/workspaces/task 3' && '/usr/local/bin/devshell-worker' 'status' '--instance' 'task-3-ssh'"],
-        commandDisplay: `ssh-bin devbox -- sh -lc ${JSON.stringify("cd '/srv/workspaces/task 3' && '/usr/local/bin/devshell-worker' 'status' '--instance' 'task-3-ssh'")}`,
+        command: [
+            "ssh-bin",
+            "-oBatchMode=yes",
+            "-oNumberOfPasswordPrompts=0",
+            "-oKbdInteractiveAuthentication=no",
+            "-oPasswordAuthentication=no",
+            "devbox",
+            "--",
+            "sh",
+            "-lc",
+            "cd '/srv/workspaces/task 3' && '/usr/local/bin/devshell-worker' 'status' '--instance' 'task-3-ssh'"
+        ],
+        commandDisplay:
+            `ssh-bin -oBatchMode=yes -oNumberOfPasswordPrompts=0 -oKbdInteractiveAuthentication=no -oPasswordAuthentication=no devbox -- sh -lc ` +
+            JSON.stringify("cd '/srv/workspaces/task 3' && '/usr/local/bin/devshell-worker' 'status' '--instance' 'task-3-ssh'"),
         cwd: "/srv/workspaces/task 3",
         exitCode: 0,
         instance: "task-3-ssh",
@@ -218,9 +233,8 @@ test("ssh transport includes remote cwd in command", async () => {
 test("ssh transport runs installWorker probe via remote shell", async () => {
     const recorder = createSpawnRecorder();
     const transport = new SshWorkerTransport({
-        host: "devbox",
-        remoteCwd: "/srv/workspaces/task 3",
-        sshBinary: "ssh-bin",
+        command: "ssh-bin devbox",
+        workspace: "/srv/workspaces/task 3",
         workerBinary: new WorkerBinary("/usr/local/bin/devshell-worker"),
         spawnFunction: recorder.spawn
     });
@@ -230,6 +244,10 @@ test("ssh transport runs installWorker probe via remote shell", async () => {
     assert.deepEqual(recorder.calls[0], {
         command: "ssh-bin",
         args: [
+            "-oBatchMode=yes",
+            "-oNumberOfPasswordPrompts=0",
+            "-oKbdInteractiveAuthentication=no",
+            "-oPasswordAuthentication=no",
             "devbox",
             "--",
             "sh",
@@ -265,8 +283,7 @@ test("ssh transport installs default worker into remote home before probing", as
         return false;
     });
     const transport = new SshWorkerTransport({
-        host: "devbox",
-        sshBinary: "ssh-bin",
+        command: "ssh-bin devbox",
         spawnFunction: recorder.spawn
     });
 
@@ -274,18 +291,60 @@ test("ssh transport installs default worker into remote home before probing", as
 
     assert.deepEqual(recorder.calls[0], {
         command: "ssh-bin",
-        args: ["devbox", "--", "sh", "-lc", 'printf %s "${HOME:?HOME is required to install the worker}"'],
+        args: [
+            "-oBatchMode=yes",
+            "-oNumberOfPasswordPrompts=0",
+            "-oKbdInteractiveAuthentication=no",
+            "-oPasswordAuthentication=no",
+            "devbox",
+            "--",
+            "sh",
+            "-lc",
+            'printf %s "${HOME:?HOME is required to install the worker}"'
+        ],
         options: { cwd: undefined, env: undefined, stdio: ["ignore", "pipe", "pipe"] }
     });
     assert.equal(recorder.calls[1]?.command, "ssh-bin");
-    assert.equal(recorder.calls[1]?.args[4]?.includes("/home/dev/.devshell/workers/"), true);
-    assert.equal(recorder.calls[1]?.args[4]?.includes('ln -snf "$symlink_target" "$symlink_path"'), true);
+    assert.equal(recorder.calls[1]?.args[8]?.includes("/home/dev/.devshell/workers/"), true);
+    assert.equal(recorder.calls[1]?.args[8]?.includes('ln -snf "$symlink_target" "$symlink_path"'), true);
     assert.deepEqual(recorder.calls[2], {
         command: "ssh-bin",
-        args: ["devbox", "--", "sh", "-lc", "'/home/dev/.devshell/bin/devshell-worker' '--version'"],
+        args: [
+            "-oBatchMode=yes",
+            "-oNumberOfPasswordPrompts=0",
+            "-oKbdInteractiveAuthentication=no",
+            "-oPasswordAuthentication=no",
+            "devbox",
+            "--",
+            "sh",
+            "-lc",
+            "'/home/dev/.devshell/bin/devshell-worker' '--version'"
+        ],
         options: { cwd: undefined, env: undefined, stdio: ["ignore", "pipe", "pipe"] }
     });
     assert.deepEqual(Buffer.concat(recorder.children[1]?.stdinChunks ?? []), worker.contents);
+});
+
+test("ssh transport appends interactive-auth hint when batch mode authentication fails", async () => {
+    const recorder = createSpawnRecorder((_call, child) => {
+        closeRecordedChild(child, {
+            code: 255,
+            stderr: "Permission denied (publickey,password).\n"
+        });
+        return true;
+    });
+    const transport = new SshWorkerTransport({
+        command: "ssh demo",
+        workspace: "/workspace",
+        workerBinary: new WorkerBinary("/usr/local/bin/devshell-worker"),
+        spawnFunction: recorder.spawn
+    });
+
+    const result = await transport.runWorkerCommand("status", { instanceName: "demo-ssh" });
+
+    assert.equal(result.exitCode, 255);
+    assert.match(result.stderr, /requires interactive authentication or host confirmation/u);
+    assert.equal(result.details?.stderrTail?.includes("requires interactive authentication or host confirmation"), true);
 });
 
 test("docker transport builds exec command", async () => {

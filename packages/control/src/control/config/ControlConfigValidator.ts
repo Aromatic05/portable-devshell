@@ -69,8 +69,8 @@ export class ControlConfigValidator {
             case "local":
                 return;
             case "ssh":
-                if (instance.host === undefined) {
-                    throw new Error(`ssh instance ${instance.name} requires host`);
+                if (instance.ssh?.command === undefined) {
+                    throw new Error(`ssh instance ${instance.name} requires ssh.command`);
                 }
                 return;
             case "docker":

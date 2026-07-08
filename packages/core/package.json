@@ -16,7 +16,8 @@
         "assets"
     ],
     "dependencies": {
-        "@portable-devshell/shared": "workspace:*"
+        "@portable-devshell/shared": "workspace:*",
+        "string-argv": "^0.3.2"
     },
     "scripts": {
         "build": "tsc -b",

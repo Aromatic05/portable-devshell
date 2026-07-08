@@ -127,6 +127,50 @@ test("instance name without dash is rejected", () => {
     );
 });
 
+test("ssh instance config requires ssh.command and rejects legacy host fields", () => {
+    const validator = new ControlConfigValidator();
+
+    assert.throws(
+        () =>
+            validator.validate({
+                ...createDefaultControlConfig(),
+                instances: [
+                    {
+                        enabled: true,
+                        mcp: {
+                            allowTools: ["bash_run"],
+                            enabled: true
+                        },
+                        name: "demo-ssh",
+                        provider: "ssh",
+                        workspace: "/srv/workspace"
+                    }
+                ]
+            }),
+        /requires ssh\.command/u
+    );
+
+    assert.throws(
+        () =>
+            new ControlInstanceTomlCodec().decode(
+                [
+                    "version = 1",
+                    'name = "demo-ssh"',
+                    "enabled = true",
+                    'provider = "ssh"',
+                    'workspace = "/srv/workspace"',
+                    'host = "demo"',
+                    "",
+                    "[mcp]",
+                    "enabled = true",
+                    'allowTools = ["bash_run"]',
+                    ""
+                ].join("\n")
+            ),
+        /host is not supported; use ssh\.command/u
+    );
+});
+
 async function readFixture(name: string): Promise<string> {
     return await readFile(join(fixturesDir, name), "utf8");
 }

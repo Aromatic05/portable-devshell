@@ -19,20 +19,22 @@ export interface ControlInstanceSecurityConfig {
     mode?: string;
 }
 
+export interface ControlInstanceSshConfig {
+    command?: string;
+}
+
 export interface ControlInstanceConfig {
     container?: string;
     dockerBinary?: string;
     enabled: boolean;
     env?: Record<string, string>;
-    host?: string;
     logs?: ControlInstanceLogsConfig;
     mcp: ControlInstanceMcpConfig;
     name: string;
     podmanBinary?: string;
     provider: ControlProviderKind;
-    remoteCwd?: string;
     security?: ControlInstanceSecurityConfig;
-    sshBinary?: string;
+    ssh?: ControlInstanceSshConfig;
     workspace?: string;
 }
 
@@ -165,10 +167,8 @@ export class ControlInstanceTomlCodec {
             enabled: instance.enabled,
             provider: instance.provider,
             ...(instance.workspace === undefined ? {} : { workspace: instance.workspace }),
-            ...(instance.host === undefined ? {} : { host: instance.host }),
-            ...(instance.remoteCwd === undefined ? {} : { remoteCwd: instance.remoteCwd }),
             ...(instance.container === undefined ? {} : { container: instance.container }),
-            ...(instance.sshBinary === undefined ? {} : { sshBinary: instance.sshBinary }),
+            ...(instance.ssh === undefined ? {} : { ssh: withoutUndefined(instance.ssh) }),
             ...(instance.dockerBinary === undefined ? {} : { dockerBinary: instance.dockerBinary }),
             ...(instance.podmanBinary === undefined ? {} : { podmanBinary: instance.podmanBinary }),
             ...(instance.env === undefined || Object.keys(instance.env).length === 0 ? {} : { env: instance.env }),
@@ -188,9 +188,22 @@ function parseInstanceDocument(document: TomlRecord): ControlInstanceConfig {
     const mcp = asRecord(document.mcp, "mcp");
     const logs = asOptionalRecord(document.logs, "logs");
     const security = asOptionalRecord(document.security, "security");
+    const ssh = asOptionalRecord(document.ssh, "ssh");
 
     if (document.workerBinaryPath !== undefined) {
         throw new Error("workerBinaryPath is not supported");
+    }
+
+    if (document.host !== undefined) {
+        throw new Error("host is not supported; use ssh.command");
+    }
+
+    if (document.remoteCwd !== undefined) {
+        throw new Error("remoteCwd is not supported; use workspace");
+    }
+
+    if (document.sshBinary !== undefined) {
+        throw new Error("sshBinary is not supported; use ssh.command");
     }
 
     if (asInteger(document.version, "version") !== 1) {
@@ -202,7 +215,6 @@ function parseInstanceDocument(document: TomlRecord): ControlInstanceConfig {
         dockerBinary: asOptionalString(document.dockerBinary, "dockerBinary"),
         enabled: asBoolean(document.enabled, "enabled"),
         env: env === undefined ? undefined : asStringRecord(env, "env"),
-        host: asOptionalString(document.host, "host"),
         logs:
             logs === undefined
                 ? undefined
@@ -218,9 +230,8 @@ function parseInstanceDocument(document: TomlRecord): ControlInstanceConfig {
         name: asString(document.name, "name"),
         podmanBinary: asOptionalString(document.podmanBinary, "podmanBinary"),
         provider: asProviderKind(asString(document.provider, "provider")),
-        remoteCwd: asOptionalString(document.remoteCwd, "remoteCwd"),
         security: security === undefined ? undefined : { mode: asOptionalString(security.mode, "security.mode") },
-        sshBinary: asOptionalString(document.sshBinary, "sshBinary"),
+        ssh: ssh === undefined ? undefined : { command: asOptionalString(ssh.command, "ssh.command") },
         workspace: asOptionalString(document.workspace, "workspace")
     };
 }
