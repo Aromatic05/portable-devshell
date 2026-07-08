@@ -6,7 +6,10 @@
     "main": "./dist/index.js",
     "types": "./dist/index.d.ts",
     "bin": {
-        "portable-devshell": "./dist/cli/CliMain.js"
+        "devshell": "./dist/cli/CliMain.js"
+    },
+    "dependencies": {
+        "@portable-devshell/shared": "workspace:*"
     },
     "exports": {
         ".": {
