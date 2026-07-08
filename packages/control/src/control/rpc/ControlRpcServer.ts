@@ -158,7 +158,15 @@ export class ControlRpcServer {
             "retryable" in error &&
             typeof error.retryable === "boolean"
         ) {
-            return error as ControlErrorBody;
+            return {
+                code: error.code as ControlErrorBody["code"],
+                details:
+                    "details" in error
+                        ? ((error.details ?? undefined) as ControlErrorBody["details"])
+                        : undefined,
+                message: typeof error.message === "string" ? error.message : "control request failed",
+                retryable: error.retryable
+            };
         }
 
         return this.#errorBody(errorCodes.envelopeInvalid, error instanceof Error ? error.message : String(error), false);
