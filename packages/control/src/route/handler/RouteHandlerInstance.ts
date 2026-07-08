@@ -2,7 +2,7 @@ import { createError, errorCodes, type JsonValue } from "@portable-devshell/shar
 
 import type { InstanceRegistry } from "../../instance/registry/InstanceRegistry.js";
 import type { StreamSubscriptionManager } from "../../stream/StreamSubscriptionManager.js";
-import type { ControlRpcConnection } from "../../control/rpc/ControlRpcConnection.js";
+import type { ControlRpcConnection, ControlRpcRelaySession } from "../../control/rpc/ControlRpcConnection.js";
 
 function isRecord(value: JsonValue | undefined): value is Record<string, JsonValue> {
     return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -54,7 +54,19 @@ export class RouteHandlerInstance {
                 } as unknown as JsonValue;
             }
             case "instance.start":
-                return (await descriptor.worker.start(readWorkspacePath(params))) as unknown as JsonValue;
+                return (
+                    await this.#startInteractive(
+                        connection,
+                        requestId,
+                        descriptor.worker as unknown as {
+                            startInteractive(
+                                workspacePath?: string,
+                                interactiveSession?: ControlStartInteractiveSession
+                            ): Promise<unknown>;
+                        },
+                        readWorkspacePath(params)
+                    )
+                ) as unknown as JsonValue;
             case "instance.stop":
                 return (await descriptor.worker.stop()) as unknown as JsonValue;
             case "instance.readLogs":
@@ -82,6 +94,89 @@ export class RouteHandlerInstance {
                     message: `Method ${method} was not found.`,
                     retryable: false
                 });
+        }
+    }
+
+    async #startInteractive(
+        connection: ControlRpcConnection,
+        requestId: string,
+        worker: { startInteractive(workspacePath?: string, interactiveSession?: ControlStartInteractiveSession): Promise<unknown> },
+        workspacePath?: string
+    ): Promise<unknown> {
+        const relay = new ControlStartRelaySession(connection, requestId);
+        connection.registerRelaySession(requestId, relay);
+
+        try {
+            return await worker.startInteractive(workspacePath, relay);
+        } finally {
+            connection.unregisterRelaySession(requestId);
+            relay.closeInput();
+        }
+    }
+}
+
+interface ControlStartInteractiveSession {
+    readInput(): Promise<Buffer | undefined>;
+    writeOutput(chunk: string): Promise<void>;
+}
+
+class ControlStartRelaySession implements ControlRpcRelaySession, ControlStartInteractiveSession {
+    readonly #connection: ControlRpcConnection;
+    readonly #requestId: string;
+    readonly #queue: Buffer[] = [];
+    readonly #waiters: Array<(chunk: Buffer | undefined) => void> = [];
+    #closed = false;
+
+    constructor(connection: ControlRpcConnection, requestId: string) {
+        this.#connection = connection;
+        this.#requestId = requestId;
+    }
+
+    async readInput(): Promise<Buffer | undefined> {
+        const chunk = this.#queue.shift();
+        if (chunk !== undefined) {
+            return chunk;
+        }
+
+        if (this.#closed) {
+            return undefined;
+        }
+
+        return await new Promise<Buffer | undefined>((resolve) => {
+            this.#waiters.push(resolve);
+        });
+    }
+
+    async writeOutput(chunk: string): Promise<void> {
+        if (chunk.length === 0) {
+            return;
+        }
+
+        await this.#connection.sendRelayOutput(this.#requestId, chunk);
+    }
+
+    writeInput(chunk: Buffer): void {
+        if (this.#closed) {
+            return;
+        }
+
+        const waiter = this.#waiters.shift();
+        if (waiter !== undefined) {
+            waiter(chunk);
+            return;
+        }
+
+        this.#queue.push(chunk);
+    }
+
+    closeInput(): void {
+        if (this.#closed) {
+            return;
+        }
+
+        this.#closed = true;
+        for (const waiter of this.#waiters.splice(0)) {
+            waiter(undefined);
         }
     }
 }

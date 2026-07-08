@@ -30,6 +30,24 @@ interface RpcEventEnvelope {
     type: "event";
 }
 
+interface RpcRelayInputEnvelope {
+    data?: string;
+    eof?: boolean;
+    id: string;
+    type: "relay.input";
+}
+
+interface RpcRelayOutputEnvelope {
+    data: string;
+    id: string;
+    type: "relay.output";
+}
+
+export interface ControlRpcRelaySession {
+    closeInput(): void;
+    writeInput(chunk: Buffer): void;
+}
+
 function isRecord(value: unknown): value is Record<string, JsonValue> {
     return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -40,6 +58,7 @@ export class ControlRpcConnection {
     readonly #reader = new FrameReader();
     readonly #writer: FrameWriter;
     readonly #backpressure = new StreamBackpressure();
+    readonly #relaySessions = new Map<string, ControlRpcRelaySession>();
     #closed = false;
 
     constructor(socket: Socket) {
@@ -56,6 +75,10 @@ export class ControlRpcConnection {
             void this.#handleChunk(chunk, onRequest);
         });
         this.#socket.once("close", () => {
+            for (const session of this.#relaySessions.values()) {
+                session.closeInput();
+            }
+            this.#relaySessions.clear();
             this.#closed = true;
             onClose();
         });
@@ -75,11 +98,31 @@ export class ControlRpcConnection {
         await this.#write(event as unknown as JsonValue);
     }
 
+    async sendRelayOutput(id: string, chunk: string): Promise<void> {
+        await this.#write({
+            data: chunk,
+            id,
+            type: "relay.output"
+        } as unknown as JsonValue);
+    }
+
+    registerRelaySession(id: string, session: ControlRpcRelaySession): void {
+        this.#relaySessions.set(id, session);
+    }
+
+    unregisterRelaySession(id: string): void {
+        this.#relaySessions.delete(id);
+    }
+
     close(): void {
         if (this.#closed) {
             return;
         }
 
+        for (const session of this.#relaySessions.values()) {
+            session.closeInput();
+        }
+        this.#relaySessions.clear();
         this.#closed = true;
         this.#socket.destroy();
     }
@@ -96,10 +139,25 @@ export class ControlRpcConnection {
         }
 
         for (const frame of frames) {
-            const parsed = this.#parseRequest(frame);
+            const parsed = this.#parseFrame(frame);
 
             if ("error" in parsed) {
                 await this.#sendInvalidRequest(parsed.id, parsed.error.message, parsed.error);
+                continue;
+            }
+
+            if ("relayInput" in parsed) {
+                const session = this.#relaySessions.get(parsed.relayInput.id);
+                if (session === undefined) {
+                    continue;
+                }
+
+                if (parsed.relayInput.eof === true) {
+                    session.closeInput();
+                    continue;
+                }
+
+                session.writeInput(Buffer.from(parsed.relayInput.data ?? "", "base64"));
                 continue;
             }
 
@@ -107,9 +165,12 @@ export class ControlRpcConnection {
         }
     }
 
-    #parseRequest(frame: JsonValue):
+    #parseFrame(frame: JsonValue):
         | {
               request: RpcRequestEnvelope;
+          }
+        | {
+              relayInput: RpcRelayInputEnvelope;
           }
         | {
               error: Error;
@@ -120,6 +181,34 @@ export class ControlRpcConnection {
         }
 
         const id = typeof frame.id === "string" ? frame.id : undefined;
+
+        if (frame.type === "relay.input") {
+            if (id === undefined) {
+                return { error: new Error("Relay input requires an id.") };
+            }
+
+            if (frame.eof === true) {
+                return {
+                    relayInput: {
+                        eof: true,
+                        id,
+                        type: "relay.input"
+                    }
+                };
+            }
+
+            if (typeof frame.data !== "string") {
+                return { error: new Error("Relay input requires base64 data or eof."), id };
+            }
+
+            return {
+                relayInput: {
+                    data: frame.data,
+                    id,
+                    type: "relay.input"
+                }
+            };
+        }
 
         if (frame.type !== "request" || typeof frame.method !== "string" || id === undefined) {
             return { error: new Error("Envelope must be a request."), id };
@@ -180,4 +269,4 @@ export class ControlRpcConnection {
     }
 }
 
-export type { RpcEventEnvelope, RpcRequestEnvelope, RpcResponseEnvelope };
+export type { RpcEventEnvelope, RpcRelayOutputEnvelope, RpcRequestEnvelope, RpcResponseEnvelope };

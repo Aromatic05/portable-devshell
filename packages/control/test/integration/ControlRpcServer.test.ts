@@ -145,11 +145,51 @@ test("ControlRpcServer tolerates client disconnect during control.shutdown respo
     assert.equal(shutdownRequested, true);
 });
 
+test("ControlRpcServer relays interactive instance.start traffic over the request connection", async (t) => {
+    const runtimeDir = await mkdtemp(join(tmpdir(), "portable-devshell-control-"));
+    const socketPath = join(runtimeDir, "control.sock");
+    const worker = new FakeWorker("alpha");
+    const server = new ControlRpcServer({
+        instanceRegistry: new InstanceRegistry([
+            {
+                allowTools: [],
+                mcpEnabled: false,
+                mcpPath: "",
+                name: "alpha",
+                worker: worker as unknown as WorkerInstance
+            }
+        ]),
+        socketPath
+    });
+
+    await server.start();
+    const client = await RpcClient.connect(socketPath);
+
+    t.after(async () => {
+        client.close();
+        await server.stop().catch(() => undefined);
+        await rm(runtimeDir, { force: true, recursive: true });
+    });
+
+    const startedPromise = client.request("instance.start", { instance: "alpha", kind: "instance" }, { workspacePath: "/tmp/ws" });
+    const prompt = await client.nextRelayOutput();
+    assert.equal(prompt.id, "req-1");
+    assert.equal(prompt.data, "Password: ");
+
+    await client.sendRelayInput(prompt.id, Buffer.from("secret\n"));
+
+    const started = await startedPromise;
+    assert.equal(started.result.ready, true);
+    assert.equal(worker.lastInteractiveInput, "secret\n");
+});
+
 class RpcClient {
     readonly #reader = new FrameReader();
     readonly #pending = new Map<string, (value: Record<string, any>) => void>();
     readonly #events: Array<Record<string, any>> = [];
     readonly #eventWaiters: Array<(event: Record<string, any>) => void> = [];
+    readonly #relayOutputs: Array<Record<string, any>> = [];
+    readonly #relayWaiters: Array<(event: Record<string, any>) => void> = [];
     readonly #socket;
     readonly #writer: FrameWriter;
     #counter = 0;
@@ -203,6 +243,26 @@ class RpcClient {
         });
     }
 
+    async nextRelayOutput(): Promise<Record<string, any>> {
+        const existing = this.#relayOutputs.shift();
+
+        if (existing !== undefined) {
+            return existing;
+        }
+
+        return await new Promise<Record<string, any>>((resolve) => {
+            this.#relayWaiters.push(resolve);
+        });
+    }
+
+    async sendRelayInput(id: string, input: Buffer): Promise<void> {
+        await this.#writer.write({
+            data: input.toString("base64"),
+            id,
+            type: "relay.input"
+        } as unknown as JsonValue);
+    }
+
     close(): void {
         this.#socket.destroy();
     }
@@ -228,6 +288,18 @@ class RpcClient {
             }
 
             this.#events.push(frame);
+            return;
+        }
+
+        if (frame.type === "relay.output") {
+            const waiter = this.#relayWaiters.shift();
+
+            if (waiter !== undefined) {
+                waiter(frame);
+                return;
+            }
+
+            this.#relayOutputs.push(frame);
         }
     }
 }
@@ -249,6 +321,7 @@ async function waitFor(factory: () => boolean, timeoutMs = 1_000): Promise<void>
 class FakeWorker {
     readonly #name: string;
     #refreshCount = 0;
+    #lastInteractiveInput?: string;
     #lastToolCall?: { requestId?: string; sessionId?: string; source: string };
     #events: Array<{ at: string; data?: unknown; instanceName: string; seq: number; type: string }> = [];
     #lastSeq = 0;
@@ -290,6 +363,10 @@ class FakeWorker {
         return this.#lastToolCall;
     }
 
+    get lastInteractiveInput() {
+        return this.#lastInteractiveInput;
+    }
+
     async start(_workspacePath?: string) {
         this.emit("instance.started", { workspacePath: "/tmp/ws" });
         this.#snapshot = {
@@ -301,6 +378,22 @@ class FakeWorker {
             status: "ready"
         };
         return this.snapshot();
+    }
+
+    async startInteractive(
+        workspacePath?: string,
+        interactiveSession?: {
+            readInput(): Promise<Buffer | undefined>;
+            writeOutput(chunk: string): Promise<void>;
+        }
+    ) {
+        if (interactiveSession === undefined) {
+            return await this.start(workspacePath);
+        }
+
+        await interactiveSession.writeOutput("Password: ");
+        this.#lastInteractiveInput = (await interactiveSession.readInput())?.toString("utf8");
+        return await this.start(workspacePath);
     }
 
     async stop() {
