@@ -4,7 +4,7 @@ import { once } from "node:events";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { errorCodes } from "@portable-devshell/shared";
+import { ControlError, errorCodes } from "@portable-devshell/shared";
 import { parseArgsStringToArgv } from "string-argv";
 
 import { WorkerBinary } from "../../WorkerBinary.js";
@@ -20,6 +20,11 @@ import {
 } from "../../command/WorkerCommandTransport.js";
 import type { WorkerCommandName, WorkerCommandOptions, WorkerRpcOptions } from "../../command/WorkerCommandOptions.js";
 import { createWorkerRpcProcess, type WorkerRpcProcess } from "../../WorkerProcess.js";
+import {
+    createWorkerTargetProbeFailedError,
+    parseWorkerTargetProbeOutput,
+    workerTargetProbeCommandLine
+} from "../../target/WorkerTargetProbe.js";
 
 const SSH_NON_INTERACTIVE_ARGS = [
     "-oBatchMode=yes",
@@ -53,6 +58,7 @@ export class SshWorkerTransport implements WorkerCommandTransport {
         this.#spawn = options.spawnFunction ?? spawn;
         this.#installer = new RemoteWorkerInstaller({
             createContext: (operation, command) => this.#createShellContext(operation, command),
+            probeTarget: () => this.#probeTarget(),
             spawnShell: (commandLine, stdio, context) => this.#spawnRemoteShell(commandLine, stdio, context),
             createProviderError: this.#createProviderError
         });
@@ -126,6 +132,27 @@ export class SshWorkerTransport implements WorkerCommandTransport {
         }
 
         return await this.#installer.ensure(this.#workerBinary.executable);
+    }
+
+    async #probeTarget() {
+        const context = this.#createRemoteShellContext("probeTarget", workerTargetProbeCommandLine);
+        const child = this.#spawnRemoteShell(workerTargetProbeCommandLine, ["ignore", "pipe", "pipe"], context);
+
+        try {
+            const result = this.#decorateCommandResult(await waitForCommandResult(child, this.#createProviderError, context));
+
+            if (result.exitCode !== 0) {
+                throw createWorkerTargetProbeFailedError(context, { result });
+            }
+
+            return parseWorkerTargetProbeOutput(context, result.stdout);
+        } catch (error) {
+            if (error instanceof ControlError) {
+                throw error;
+            }
+
+            throw createWorkerTargetProbeFailedError(context, { cause: error });
+        }
     }
 
     #spawnRemoteShell(

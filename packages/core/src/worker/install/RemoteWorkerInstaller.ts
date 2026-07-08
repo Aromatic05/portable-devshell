@@ -1,14 +1,16 @@
 import type { ChildProcess } from "node:child_process";
 import { readFile } from "node:fs/promises";
 
-import { errorCodes, type ControlError } from "@portable-devshell/shared";
+import { ControlError, errorCodes, type ControlError as ControlErrorType } from "@portable-devshell/shared";
 
 import type { ProviderCommandContext } from "../command/WorkerCommandTransport.js";
 import { waitForCommandResult } from "../command/WorkerCommandTransport.js";
 import { WorkerAssetResolver } from "../WorkerAssetResolver.js";
+import type { WorkerTarget } from "../target/WorkerTarget.js";
 
 export interface RemoteWorkerInstallerOptions {
     resolver?: WorkerAssetResolver;
+    probeTarget: () => Promise<WorkerTarget>;
     spawnShell: (
         commandLine: string,
         stdio: ["ignore" | "pipe", "pipe", "pipe"],
@@ -18,12 +20,13 @@ export interface RemoteWorkerInstallerOptions {
         context: ProviderCommandContext,
         cause: unknown,
         options?: { errorCode?: string; result?: { exitCode?: number | null; signal?: string; stderr?: string; stdout?: string } }
-    ) => ControlError;
+    ) => ControlErrorType;
     createContext: (operation: string, command: readonly string[]) => ProviderCommandContext;
 }
 
 export class RemoteWorkerInstaller {
     readonly #resolver: WorkerAssetResolver;
+    readonly #probeTarget: RemoteWorkerInstallerOptions["probeTarget"];
     readonly #spawnShell: RemoteWorkerInstallerOptions["spawnShell"];
     readonly #createProviderError: RemoteWorkerInstallerOptions["createProviderError"];
     readonly #createContext: RemoteWorkerInstallerOptions["createContext"];
@@ -31,6 +34,7 @@ export class RemoteWorkerInstaller {
 
     constructor(options: RemoteWorkerInstallerOptions) {
         this.#resolver = options.resolver ?? new WorkerAssetResolver();
+        this.#probeTarget = options.probeTarget;
         this.#spawnShell = options.spawnShell;
         this.#createProviderError = options.createProviderError;
         this.#createContext = options.createContext;
@@ -52,14 +56,19 @@ export class RemoteWorkerInstaller {
     }
 
     async #installDefaultWorker(): Promise<string> {
-        const asset = await this.#resolver.resolve().catch((error) => {
+        const target = await this.#probeTarget();
+        const asset = await this.#resolver.resolve(target).catch((error) => {
+            if (error instanceof ControlError) {
+                throw error;
+            }
+
             throw this.#createProviderError(this.#createContext("resolveExecutable", ["devshell-worker"]), error);
         });
         const homeDirectory = await this.#resolveHomeDirectory();
         const binary = await readFile(asset.binaryPath).catch((error) => {
             throw this.#createProviderError(this.#createContext("resolveExecutable", ["devshell-worker"]), error);
         });
-        const commandLine = buildInstallScript(homeDirectory, asset.sha256);
+        const commandLine = buildInstallScript(homeDirectory, target.key, asset.sha256);
         const context = this.#createContext("installWorker", ["sh", "-lc", commandLine]);
         const child = this.#spawnShell(commandLine, ["pipe", "pipe", "pipe"], context);
 
@@ -95,12 +104,12 @@ export class RemoteWorkerInstaller {
     }
 }
 
-function buildInstallScript(homeDirectory: string, sha256: string): string {
-    const installDirectory = `${homeDirectory}/.devshell/workers/${sha256}`;
+function buildInstallScript(homeDirectory: string, targetKey: string, sha256: string): string {
+    const installDirectory = `${homeDirectory}/.devshell/workers/${targetKey}/${sha256}`;
     const binaryPath = `${installDirectory}/devshell-worker`;
     const shaPath = `${installDirectory}/devshell-worker.sha256`;
     const symlinkPath = buildRemoteExecutablePath(homeDirectory);
-    const symlinkTarget = `../workers/${sha256}/devshell-worker`;
+    const symlinkTarget = `../workers/${targetKey}/${sha256}/devshell-worker`;
 
     return [
         "set -eu",

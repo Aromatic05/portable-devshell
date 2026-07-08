@@ -2,12 +2,26 @@ import { createHash } from "node:crypto";
 import { chmod, mkdir, readFile, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 
+import { createError, errorCodes } from "@portable-devshell/shared";
+
 import type { WorkerAsset } from "../WorkerAssetResolver.js";
+import type { WorkerTarget } from "../target/WorkerTarget.js";
 
 export class LocalWorkerInstaller {
-    async ensure(homeDirectory: string, asset: WorkerAsset): Promise<string> {
-        const targetTriple = detectTargetTriple();
-        const installDir = resolve(homeDirectory, ".devshell", "workers", targetTriple, asset.sha256);
+    async ensure(homeDirectory: string, asset: WorkerAsset, target: WorkerTarget): Promise<string> {
+        if (asset.target.key !== target.key) {
+            throw createError({
+                code: errorCodes.coreWorkerProvisionFailed,
+                details: {
+                    assetTargetKey: asset.target.key,
+                    targetKey: target.key
+                },
+                message: "Resolved worker asset target does not match install target.",
+                retryable: false
+            });
+        }
+
+        const installDir = resolve(homeDirectory, ".devshell", "workers", target.key, asset.sha256);
         const binDir = resolve(homeDirectory, ".devshell", "bin");
         const binaryPath = resolve(installDir, "devshell-worker");
         const shaPath = resolve(installDir, "devshell-worker.sha256");
@@ -18,7 +32,7 @@ export class LocalWorkerInstaller {
 
         const installedSha = await readInstalledSha(binaryPath, shaPath);
         if (installedSha === asset.sha256) {
-            await this.#refreshSymlink(symlinkPath, targetTriple, asset.sha256);
+            await this.#refreshSymlink(symlinkPath, target.key, asset.sha256);
             return symlinkPath;
         }
 
@@ -31,14 +45,14 @@ export class LocalWorkerInstaller {
         await writeFile(tmpShaPath, `${asset.sha256}\n`, { mode: 0o600 });
         await rename(tmpBinaryPath, binaryPath);
         await rename(tmpShaPath, shaPath);
-        await this.#refreshSymlink(symlinkPath, targetTriple, asset.sha256);
+        await this.#refreshSymlink(symlinkPath, target.key, asset.sha256);
 
         return symlinkPath;
     }
 
-    async #refreshSymlink(symlinkPath: string, targetTriple: string, sha256: string): Promise<void> {
+    async #refreshSymlink(symlinkPath: string, targetKey: string, sha256: string): Promise<void> {
         await rm(symlinkPath, { force: true });
-        await symlink(`../workers/${targetTriple}/${sha256}/devshell-worker`, symlinkPath);
+        await symlink(`../workers/${targetKey}/${sha256}/devshell-worker`, symlinkPath);
     }
 }
 
@@ -51,15 +65,4 @@ async function readInstalledSha(binaryPath: string, shaPath: string): Promise<st
     } catch {
         return undefined;
     }
-}
-
-function detectTargetTriple(): string {
-    const arch =
-        process.arch === "x64"
-            ? "x86_64"
-            : process.arch === "arm64"
-              ? "aarch64"
-              : process.arch;
-
-    return `${process.platform}-${arch}`;
 }

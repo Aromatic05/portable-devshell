@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 
-import { errorCodes } from "@portable-devshell/shared";
+import { ControlError, errorCodes } from "@portable-devshell/shared";
 
 import { WorkerAssetResolver } from "../../WorkerAssetResolver.js";
 import { WorkerBinary } from "../../WorkerBinary.js";
@@ -15,6 +15,7 @@ import {
 import type { WorkerCommandName, WorkerCommandOptions, WorkerRpcOptions } from "../../command/WorkerCommandOptions.js";
 import { createWorkerRpcProcess, type WorkerRpcProcess } from "../../WorkerProcess.js";
 import { LocalWorkerInstaller } from "../../install/LocalWorkerInstaller.js";
+import { probeLocalWorkerTarget } from "../../target/WorkerTargetProbe.js";
 
 export interface LocalWorkerTransportOptions {
     installer?: LocalWorkerInstaller;
@@ -101,11 +102,16 @@ export class LocalWorkerTransport implements WorkerCommandTransport {
             );
         }
 
-        const asset = await this.#resolver.resolve().catch((error) => {
+        const target = probeLocalWorkerTarget("local", "resolveExecutable");
+        const asset = await this.#resolver.resolve(target).catch((error) => {
+            if (error instanceof ControlError) {
+                throw error;
+            }
+
             throw this.#createProviderError(this.#createCommandContext("resolveExecutable", ["devshell-worker"]), error);
         });
 
-        return await this.#installer.ensure(homeDirectory, asset).catch((error) => {
+        return await this.#installer.ensure(homeDirectory, asset, target).catch((error) => {
             throw this.#createProviderError(this.#createCommandContext("resolveExecutable", ["devshell-worker"]), error, {
                 errorCode: errorCodes.coreWorkerProvisionFailed
             });

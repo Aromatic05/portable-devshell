@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 
-import { createError, errorCodes, type InstanceContainerConfig, type InstanceContainerMountConfig } from "@portable-devshell/shared";
+import { ControlError, createError, errorCodes, type InstanceContainerConfig, type InstanceContainerMountConfig } from "@portable-devshell/shared";
 
 import { WorkerBinary } from "../../WorkerBinary.js";
 import { RemoteWorkerInstaller } from "../../install/RemoteWorkerInstaller.js";
@@ -15,6 +15,11 @@ import {
 } from "../../command/WorkerCommandTransport.js";
 import type { WorkerCommandName, WorkerCommandOptions, WorkerRpcOptions } from "../../command/WorkerCommandOptions.js";
 import { createWorkerRpcProcess, type WorkerRpcProcess } from "../../WorkerProcess.js";
+import {
+    createWorkerTargetProbeFailedError,
+    parseWorkerTargetProbeOutput,
+    workerTargetProbeCommandLine
+} from "../../target/WorkerTargetProbe.js";
 
 type ContainerLifecycleStatus = "missing" | "running" | "stopped";
 
@@ -47,6 +52,7 @@ export abstract class ContainerWorkerTransportBase implements WorkerCommandTrans
         this.#installer = new RemoteWorkerInstaller({
             createContext: (operation, command) => this.#createShellContext(operation, command),
             createProviderError: this.#createProviderError,
+            probeTarget: () => this.#probeTarget(),
             spawnShell: (commandLine, stdio, context) => this.#spawnShell(commandLine, stdio, context)
         });
     }
@@ -147,6 +153,33 @@ export abstract class ContainerWorkerTransportBase implements WorkerCommandTrans
 
     async #resolveExecutable(): Promise<string> {
         return await this.#installer.ensure(this.#workerBinary.executable);
+    }
+
+    async #probeTarget() {
+        const args = this.#buildShellExecArgs(workerTargetProbeCommandLine);
+        const context = createCommandContext({
+            command: [this.#binary, ...args],
+            cwd: this.#remoteCwd,
+            operation: "probeTarget",
+            provider: this.#provider
+        });
+        const child = this.#spawnShell(workerTargetProbeCommandLine, ["ignore", "pipe", "pipe"], context);
+
+        try {
+            const result = await waitForCommandResult(child, this.#createProviderError, context);
+
+            if (result.exitCode !== 0) {
+                throw createWorkerTargetProbeFailedError(context, { result });
+            }
+
+            return parseWorkerTargetProbeOutput(context, result.stdout);
+        } catch (error) {
+            if (error instanceof ControlError) {
+                throw error;
+            }
+
+            throw createWorkerTargetProbeFailedError(context, { cause: error });
+        }
     }
 
     async #ensureRuntimeReady(operation: string): Promise<void> {
@@ -373,7 +406,9 @@ export abstract class ContainerWorkerTransportBase implements WorkerCommandTrans
     }
 
     #createShellContext(operation: string, command: readonly string[]): ProviderCommandContext {
-        const args = this.#buildShellExecArgs(command.join(" "));
+        const commandLine =
+            command[0] === "sh" && command[1] === "-lc" && typeof command[2] === "string" ? command[2] : command.join(" ");
+        const args = this.#buildShellExecArgs(commandLine);
         return createCommandContext({
             command: [this.#binary, ...args],
             cwd: this.#remoteCwd,

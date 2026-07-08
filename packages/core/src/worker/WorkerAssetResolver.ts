@@ -4,12 +4,22 @@ import { readFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { createError, errorCodes } from "@portable-devshell/shared";
+
+import type { WorkerTarget } from "./target/WorkerTarget.js";
+import { supportedWorkerTargetKeys } from "./target/WorkerTarget.js";
+import { probeLocalWorkerTarget } from "./target/WorkerTargetProbe.js";
+
 export interface WorkerAsset {
+    target: WorkerTarget;
     binaryPath: string;
     sha256: string;
+    source: "env" | "package" | "dev";
+    searchedPaths: string[];
 }
 
-const bundledWorkerRelativePath = "../../assets/devshell-worker";
+const bundledWorkerRelativePath = "../../assets/workers";
+const legacyBundledWorkerRelativePath = "../../assets/devshell-worker";
 
 export class WorkerAssetResolver {
     readonly #moduleDir: string;
@@ -18,40 +28,106 @@ export class WorkerAssetResolver {
         this.#moduleDir = dirname(fileURLToPath(moduleUrl));
     }
 
-    async resolve(): Promise<WorkerAsset> {
-        const checkedPaths: string[] = [];
+    async resolve(target: WorkerTarget): Promise<WorkerAsset> {
+        const searchedPaths: string[] = [];
 
-        for (const binaryPath of this.#candidatePaths()) {
-            checkedPaths.push(binaryPath);
+        for (const candidate of this.#candidatePaths(target)) {
+            const binaryPath = candidate.binaryPath;
+            searchedPaths.push(binaryPath);
 
             if (!isReadableFile(binaryPath)) {
                 continue;
             }
 
             return {
+                target,
                 binaryPath,
-                sha256: createHash("sha256").update(await readFile(binaryPath)).digest("hex")
+                searchedPaths: [...searchedPaths],
+                sha256: createHash("sha256").update(await readFile(binaryPath)).digest("hex"),
+                source: candidate.source
             };
         }
 
-        throw new Error(`worker binary could not be resolved; checked: ${checkedPaths.join(", ")}`);
+        throw createError({
+            code: errorCodes.coreWorkerAssetUnavailable,
+            details: {
+                envVarNames: this.#supportedEnvVarNames(target),
+                searchedPaths,
+                supportedTargets: Array.from(supportedWorkerTargetKeys),
+                targetArch: target.arch,
+                targetKey: target.key,
+                targetOs: target.os
+            },
+            message: `Worker asset is unavailable for target ${target.key}.`,
+            retryable: false
+        });
     }
 
-    *#candidatePaths(): Iterable<string> {
-        const envPath = process.env.PORTABLE_DEVSHELL_WORKER_PATH;
+    *#candidatePaths(target: WorkerTarget): Iterable<{ binaryPath: string; source: WorkerAsset["source"] }> {
+        const hostTarget = probeLocalWorkerTarget("local", "resolveExecutable");
+        const hostTargetMatches = hostTarget.key === target.key;
+        const targetEnvVarName = toTargetEnvVarName(target);
+        const targetEnvPath = process.env[targetEnvVarName];
 
-        if (envPath !== undefined && envPath.length > 0) {
-            yield envPath;
+        if (targetEnvPath !== undefined && targetEnvPath.length > 0) {
+            yield {
+                binaryPath: targetEnvPath,
+                source: "env"
+            };
         }
 
-        yield resolve(this.#moduleDir, bundledWorkerRelativePath);
+        yield {
+            binaryPath: resolve(this.#moduleDir, bundledWorkerRelativePath, target.key, "devshell-worker"),
+            source: "package"
+        };
+
+        if (!hostTargetMatches) {
+            return;
+        }
+
+        const legacyEnvPath = process.env.PORTABLE_DEVSHELL_WORKER_PATH;
+        if (legacyEnvPath !== undefined && legacyEnvPath.length > 0) {
+            yield {
+                binaryPath: legacyEnvPath,
+                source: "env"
+            };
+        }
+
+        if (target.os !== "linux") {
+            yield {
+                binaryPath: resolve(this.#moduleDir, legacyBundledWorkerRelativePath),
+                source: "dev"
+            };
+        }
 
         let probeDir = this.#moduleDir;
         for (let depth = 0; depth < 6; depth += 1) {
-            yield resolve(probeDir, "target/debug/devshell-worker");
-            yield resolve(probeDir, "target/release/devshell-worker");
+            yield {
+                binaryPath: resolve(probeDir, "target", target.rustTarget, "debug", "devshell-worker"),
+                source: "dev"
+            };
+            yield {
+                binaryPath: resolve(probeDir, "target", target.rustTarget, "release", "devshell-worker"),
+                source: "dev"
+            };
+            if (target.os !== "linux") {
+                yield {
+                    binaryPath: resolve(probeDir, "target/debug/devshell-worker"),
+                    source: "dev"
+                };
+                yield {
+                    binaryPath: resolve(probeDir, "target/release/devshell-worker"),
+                    source: "dev"
+                };
+            }
             probeDir = resolve(probeDir, "..");
         }
+    }
+
+    #supportedEnvVarNames(target: WorkerTarget): string[] {
+        return probeLocalWorkerTarget("local", "resolveExecutable").key === target.key
+            ? [toTargetEnvVarName(target), "PORTABLE_DEVSHELL_WORKER_PATH"]
+            : [toTargetEnvVarName(target)];
     }
 }
 
@@ -62,4 +138,8 @@ function isReadableFile(path: string): boolean {
     } catch {
         return false;
     }
+}
+
+function toTargetEnvVarName(target: WorkerTarget): string {
+    return `PORTABLE_DEVSHELL_WORKER_${target.key.replaceAll("-", "_").toUpperCase()}_PATH`;
 }
