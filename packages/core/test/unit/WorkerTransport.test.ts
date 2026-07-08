@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawn as nodeSpawn, type ChildProcess, type SpawnOptions } from "node:child_process";
 import { EventEmitter } from "node:events";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { PassThrough } from "node:stream";
@@ -157,13 +157,61 @@ test("ssh transport runs installWorker probe via remote shell", async () => {
     });
 });
 
+test("ssh transport installs default worker into remote home before probing", async (t) => {
+    const worker = await createDummyWorkerBinary();
+    t.after(worker.cleanup);
+    const previousWorkerPath = process.env.PORTABLE_DEVSHELL_WORKER_PATH;
+    process.env.PORTABLE_DEVSHELL_WORKER_PATH = worker.path;
+    t.after(() => {
+        restoreEnv("PORTABLE_DEVSHELL_WORKER_PATH", previousWorkerPath);
+    });
+
+    const recorder = createSpawnRecorder((call, child, callIndex) => {
+        if (callIndex === 0) {
+            closeRecordedChild(child, { stdout: "/home/dev" });
+            return true;
+        }
+
+        if (callIndex === 1) {
+            child.stdin.once("end", () => {
+                closeRecordedChild(child);
+            });
+            return true;
+        }
+
+        return false;
+    });
+    const transport = new SshWorkerTransport({
+        host: "devbox",
+        sshBinary: "ssh-bin",
+        spawnFunction: recorder.spawn
+    });
+
+    await transport.installWorker();
+
+    assert.deepEqual(recorder.calls[0], {
+        command: "ssh-bin",
+        args: ["devbox", "--", "sh", "-lc", 'printf %s "${HOME:?HOME is required to install the worker}"'],
+        options: { cwd: undefined, env: undefined, stdio: ["ignore", "pipe", "pipe"] }
+    });
+    assert.equal(recorder.calls[1]?.command, "ssh-bin");
+    assert.equal(recorder.calls[1]?.args[4]?.includes("/home/dev/.devshell/workers/"), true);
+    assert.equal(recorder.calls[1]?.args[4]?.includes('ln -snf "$symlink_target" "$symlink_path"'), true);
+    assert.deepEqual(recorder.calls[2], {
+        command: "ssh-bin",
+        args: ["devbox", "--", "sh", "-lc", "'/home/dev/.devshell/bin/devshell-worker' '--version'"],
+        options: { cwd: undefined, env: undefined, stdio: ["ignore", "pipe", "pipe"] }
+    });
+    assert.deepEqual(Buffer.concat(recorder.children[1]?.stdinChunks ?? []), worker.contents);
+});
+
 test("docker transport builds exec command", async () => {
     const recorder = createSpawnRecorder();
     const transport = new DockerWorkerTransport({
         container: "worker-container",
         dockerBinary: "docker-bin",
         remoteCwd: "/workspace",
-        workerBinary: new WorkerBinary("devshell-worker"),
+        workerBinary: new WorkerBinary("/usr/local/bin/devshell-worker"),
         spawnFunction: recorder.spawn
     });
 
@@ -172,7 +220,7 @@ test("docker transport builds exec command", async () => {
     assert.equal(result.exitCode, 0);
     assert.deepEqual(recorder.calls[0], {
         command: "docker-bin",
-        args: ["exec", "-w", "/workspace", "-i", "worker-container", "devshell-worker", "logs", "--instance", "task-3-docker"],
+        args: ["exec", "-w", "/workspace", "-i", "worker-container", "/usr/local/bin/devshell-worker", "logs", "--instance", "task-3-docker"],
         options: { cwd: undefined, env: undefined, stdio: ["ignore", "pipe", "pipe"] }
     });
 });
@@ -183,7 +231,7 @@ test("docker transport runs installWorker probe via exec", async () => {
         container: "worker-container",
         dockerBinary: "docker-bin",
         remoteCwd: "/workspace",
-        workerBinary: new WorkerBinary("devshell-worker"),
+        workerBinary: new WorkerBinary("/usr/local/bin/devshell-worker"),
         spawnFunction: recorder.spawn
     });
 
@@ -191,9 +239,67 @@ test("docker transport runs installWorker probe via exec", async () => {
 
     assert.deepEqual(recorder.calls[0], {
         command: "docker-bin",
-        args: ["exec", "-w", "/workspace", "-i", "worker-container", "devshell-worker", "--version"],
+        args: ["exec", "-w", "/workspace", "-i", "worker-container", "/usr/local/bin/devshell-worker", "--version"],
         options: { cwd: undefined, env: undefined, stdio: ["ignore", "pipe", "pipe"] }
     });
+});
+
+test("docker transport installs default worker before exec command", async (t) => {
+    const worker = await createDummyWorkerBinary();
+    t.after(worker.cleanup);
+    const previousWorkerPath = process.env.PORTABLE_DEVSHELL_WORKER_PATH;
+    process.env.PORTABLE_DEVSHELL_WORKER_PATH = worker.path;
+    t.after(() => {
+        restoreEnv("PORTABLE_DEVSHELL_WORKER_PATH", previousWorkerPath);
+    });
+
+    const recorder = createSpawnRecorder((call, child, callIndex) => {
+        if (callIndex === 0) {
+            closeRecordedChild(child, { stdout: "/home/dev" });
+            return true;
+        }
+
+        if (callIndex === 1) {
+            child.stdin.once("end", () => {
+                closeRecordedChild(child);
+            });
+            return true;
+        }
+
+        return false;
+    });
+    const transport = new DockerWorkerTransport({
+        container: "worker-container",
+        dockerBinary: "docker-bin",
+        remoteCwd: "/workspace",
+        spawnFunction: recorder.spawn
+    });
+
+    const result = await transport.runWorkerCommand("logs", { instanceName: "task-3-docker" });
+
+    assert.equal(result.exitCode, 0);
+    assert.deepEqual(recorder.calls[0], {
+        command: "docker-bin",
+        args: ["exec", "-i", "worker-container", "sh", "-lc", 'printf %s "${HOME:?HOME is required to install the worker}"'],
+        options: { cwd: undefined, env: undefined, stdio: ["ignore", "pipe", "pipe"] }
+    });
+    assert.equal(recorder.calls[1]?.args[5]?.includes("/home/dev/.devshell/workers/"), true);
+    assert.deepEqual(recorder.calls[2], {
+        command: "docker-bin",
+        args: [
+            "exec",
+            "-w",
+            "/workspace",
+            "-i",
+            "worker-container",
+            "/home/dev/.devshell/bin/devshell-worker",
+            "logs",
+            "--instance",
+            "task-3-docker"
+        ],
+        options: { cwd: undefined, env: undefined, stdio: ["ignore", "pipe", "pipe"] }
+    });
+    assert.deepEqual(Buffer.concat(recorder.children[1]?.stdinChunks ?? []), worker.contents);
 });
 
 test("podman transport builds exec command", async () => {
@@ -202,7 +308,7 @@ test("podman transport builds exec command", async () => {
         container: "worker-container",
         podmanBinary: "podman-bin",
         remoteCwd: "/workspace",
-        workerBinary: new WorkerBinary("devshell-worker"),
+        workerBinary: new WorkerBinary("/usr/local/bin/devshell-worker"),
         spawnFunction: recorder.spawn
     });
 
@@ -211,7 +317,7 @@ test("podman transport builds exec command", async () => {
     assert.equal(result.exitCode, 0);
     assert.deepEqual(recorder.calls[0], {
         command: "podman-bin",
-        args: ["exec", "-w", "/workspace", "-i", "worker-container", "devshell-worker", "stop", "--instance", "task-3-podman"],
+        args: ["exec", "-w", "/workspace", "-i", "worker-container", "/usr/local/bin/devshell-worker", "stop", "--instance", "task-3-podman"],
         options: { cwd: undefined, env: undefined, stdio: ["ignore", "pipe", "pipe"] }
     });
 });
@@ -222,7 +328,7 @@ test("podman transport runs installWorker probe via exec", async () => {
         container: "worker-container",
         podmanBinary: "podman-bin",
         remoteCwd: "/workspace",
-        workerBinary: new WorkerBinary("devshell-worker"),
+        workerBinary: new WorkerBinary("/usr/local/bin/devshell-worker"),
         spawnFunction: recorder.spawn
     });
 
@@ -230,9 +336,71 @@ test("podman transport runs installWorker probe via exec", async () => {
 
     assert.deepEqual(recorder.calls[0], {
         command: "podman-bin",
-        args: ["exec", "-w", "/workspace", "-i", "worker-container", "devshell-worker", "--version"],
+        args: ["exec", "-w", "/workspace", "-i", "worker-container", "/usr/local/bin/devshell-worker", "--version"],
         options: { cwd: undefined, env: undefined, stdio: ["ignore", "pipe", "pipe"] }
     });
+});
+
+test("podman transport installs default worker before spawning rpc", async (t) => {
+    const worker = await createDummyWorkerBinary();
+    t.after(worker.cleanup);
+    const previousWorkerPath = process.env.PORTABLE_DEVSHELL_WORKER_PATH;
+    process.env.PORTABLE_DEVSHELL_WORKER_PATH = worker.path;
+    t.after(() => {
+        restoreEnv("PORTABLE_DEVSHELL_WORKER_PATH", previousWorkerPath);
+    });
+
+    const recorder = createSpawnRecorder((call, child, callIndex) => {
+        if (callIndex === 0) {
+            closeRecordedChild(child, { stdout: "/home/dev" });
+            return true;
+        }
+
+        if (callIndex === 1) {
+            child.stdin.once("end", () => {
+                closeRecordedChild(child);
+            });
+            return true;
+        }
+
+        return false;
+    });
+    const transport = new PodmanWorkerTransport({
+        container: "worker-container",
+        podmanBinary: "podman-bin",
+        remoteCwd: "/workspace",
+        spawnFunction: recorder.spawn
+    });
+
+    const rpcProcess = await transport.spawnWorkerRpc({ instanceName: "task-3-podman" });
+
+    assert.equal(rpcProcess.stdin, recorder.children[2]?.stdin);
+    assert.equal(rpcProcess.stdout, recorder.children[2]?.stdout);
+    assert.equal(rpcProcess.stderr, recorder.children[2]?.stderr);
+    assert.deepEqual(recorder.calls[0], {
+        command: "podman-bin",
+        args: ["exec", "-i", "worker-container", "sh", "-lc", 'printf %s "${HOME:?HOME is required to install the worker}"'],
+        options: { cwd: undefined, env: undefined, stdio: ["ignore", "pipe", "pipe"] }
+    });
+    assert.equal(recorder.calls[1]?.args[5]?.includes("/home/dev/.devshell/workers/"), true);
+    assert.deepEqual(recorder.calls[2], {
+        command: "podman-bin",
+        args: [
+            "exec",
+            "-w",
+            "/workspace",
+            "-i",
+            "worker-container",
+            "/home/dev/.devshell/bin/devshell-worker",
+            "rpc",
+            "--instance",
+            "task-3-podman"
+        ],
+        options: { cwd: undefined, env: undefined, stdio: ["pipe", "pipe", "pipe"] }
+    });
+    assert.deepEqual(Buffer.concat(recorder.children[1]?.stdinChunks ?? []), worker.contents);
+    assert.equal(rpcProcess.kill("SIGTERM"), true);
+    assert.deepEqual(await rpcProcess.exit, { code: null, signal: "SIGTERM" });
 });
 
 test("local transport executes frozen devshell-worker start status logs stop rpc", async (t) => {
@@ -283,6 +451,13 @@ interface RecordedCall {
     options: { cwd?: string; env?: NodeJS.ProcessEnv; stdio: readonly string[] };
 }
 
+interface RecordedChild extends ChildProcess {
+    stdin: PassThrough;
+    stdout: PassThrough;
+    stderr: PassThrough;
+    stdinChunks: Buffer[];
+}
+
 function restoreEnv(name: keyof NodeJS.ProcessEnv, value: string | undefined): void {
     if (value === undefined) {
         delete process.env[name];
@@ -292,13 +467,15 @@ function restoreEnv(name: keyof NodeJS.ProcessEnv, value: string | undefined): v
     process.env[name] = value;
 }
 
-function createSpawnRecorder(): {
+function createSpawnRecorder(
+    onSpawn?: (call: RecordedCall, child: RecordedChild, callIndex: number) => boolean
+): {
     calls: RecordedCall[];
-    children: Array<ChildProcess & { stdin: PassThrough; stdout: PassThrough; stderr: PassThrough }>;
+    children: RecordedChild[];
     spawn: (command: string, args: readonly string[], options: SpawnOptions) => ChildProcess;
 } {
     const calls: RecordedCall[] = [];
-    const children: Array<ChildProcess & { stdin: PassThrough; stdout: PassThrough; stderr: PassThrough }> = [];
+    const children: RecordedChild[] = [];
 
     return {
         calls,
@@ -307,15 +484,13 @@ function createSpawnRecorder(): {
             const stdin = new PassThrough();
             const stdout = new PassThrough();
             const stderr = new PassThrough();
-            const child = new EventEmitter() as ChildProcess & {
-                stdin: PassThrough;
-                stdout: PassThrough;
-                stderr: PassThrough;
-            };
+            const stdinChunks: Buffer[] = [];
+            const child = new EventEmitter() as RecordedChild;
 
             child.stdin = stdin;
             child.stdout = stdout;
             child.stderr = stderr;
+            child.stdinChunks = stdinChunks;
             child.kill = (signal?: NodeJS.Signals | number) => {
                 setImmediate(() => {
                     stdin.end();
@@ -336,9 +511,14 @@ function createSpawnRecorder(): {
                     stdio: Array.isArray(options.stdio) ? options.stdio.map((item) => String(item)) : []
                 }
             });
+            stdin.on("data", (chunk) => {
+                stdinChunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+            });
             children.push(child);
 
-            if (options.stdio?.[0] === "ignore") {
+            const handled = onSpawn?.(calls[calls.length - 1]!, child, calls.length - 1) ?? false;
+
+            if (!handled && options.stdio?.[0] === "ignore") {
                 setImmediate(() => {
                     stdin.end();
                     stdout.end();
@@ -351,4 +531,50 @@ function createSpawnRecorder(): {
             return child;
         }
     };
+}
+
+async function createDummyWorkerBinary(): Promise<{
+    path: string;
+    contents: Buffer;
+    cleanup: () => Promise<void>;
+}> {
+    const directory = await mkdtemp(join(tmpdir(), "portable-devshell-core-worker-"));
+    const path = join(directory, "devshell-worker");
+    const contents = Buffer.from("#!/bin/sh\necho remote worker\n", "utf8");
+
+    await writeFile(path, contents, { mode: 0o755 });
+
+    return {
+        path,
+        contents,
+        cleanup: async () => {
+            await rm(directory, { recursive: true, force: true });
+        }
+    };
+}
+
+function closeRecordedChild(
+    child: RecordedChild,
+    options: {
+        stdout?: string;
+        stderr?: string;
+        code?: number;
+        signal?: NodeJS.Signals | null;
+    } = {}
+): void {
+    const code = options.code ?? 0;
+    const signal = options.signal ?? null;
+
+    setImmediate(() => {
+        if (options.stdout !== undefined) {
+            child.stdout.write(options.stdout);
+        }
+        if (options.stderr !== undefined) {
+            child.stderr.write(options.stderr);
+        }
+        child.stdout.end();
+        child.stderr.end();
+        child.emit("exit", code, signal);
+        child.emit("close", code, signal);
+    });
 }
