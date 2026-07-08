@@ -10,4 +10,8 @@ export class McpHostRouteRegistry {
     resolve(instanceName: string): McpEndpointBinding | undefined {
         return this.#bindings.get(instanceName);
     }
+
+    list(): McpEndpointBinding[] {
+        return [...this.#bindings.values()];
+    }
 }

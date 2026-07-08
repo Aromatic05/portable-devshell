@@ -1,61 +1,112 @@
 import assert from "node:assert/strict";
+import { createServer } from "node:http";
+import type { IncomingMessage, ServerResponse } from "node:http";
 import { readFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { McpEndpointBinding, McpEndpointRequestHandler, McpEndpointWorker } from "@portable-devshell/mcp";
+import { McpEndpointBinding, McpEndpointWorker } from "@portable-devshell/mcp";
 
 const fixturesDirectory = resolve(dirname(fileURLToPath(import.meta.url)), "../fixtures");
 type JsonValue = boolean | number | null | string | JsonValue[] | { [key: string]: JsonValue };
+
 interface CommandResult {
     exitCode: number | null;
     stderr: string;
     stdout: string;
 }
+
 interface ToolDefinition {
     description?: string;
     inputSchema?: JsonValue;
     name: string;
 }
 
-test("initialize succeeds", async () => {
-    const response = await createHandler().handle(createBinding(), await readFixture("mcp-initialize.json"));
+test("initialize succeeds over SDK transport", async () => {
+    const binding = createBinding();
+    const server = await createBindingServer(binding);
 
-    assert.equal(response.error, undefined);
-    assert.equal(response.result?.protocolVersion, "2026-07-07");
-    assert.equal(typeof response.result?.sessionId, "string");
+    try {
+        const response = await postJson(server.url, await readFixture("mcp-initialize.json"));
+
+        assert.equal(response.status, 200);
+        assert.equal(typeof response.body.result?.protocolVersion, "string");
+        assert.equal(response.body.result?.serverInfo?.name, "portable-devshell-mcp");
+        assert.equal(typeof response.headers.get("mcp-session-id"), "string");
+    } finally {
+        await server.close();
+        await binding.close();
+    }
 });
 
 test("tools/list uses allowlist filtering", async () => {
-    const response = await createHandler().handle(createBinding(), await readFixture("mcp-tools-list.json"));
-    const result = response.result as { tools: Array<{ name: string }> };
+    const binding = createBinding();
+    const server = await createBindingServer(binding);
 
-    assert.deepEqual(result.tools.map((tool) => tool.name), ["bash_run"]);
+    try {
+        const session = await initialize(server.url);
+        const response = await postJson(server.url, await readFixture("mcp-tools-list.json"), session.headers);
+
+        assert.equal(response.status, 200);
+        assert.deepEqual(response.body.result?.tools.map((tool: { name: string }) => tool.name), ["bash_run"]);
+    } finally {
+        await server.close();
+        await binding.close();
+    }
 });
 
 test("tools/call delegates to WorkerInstance.callTool", async () => {
     const harness = createWorkerHarness();
-    const response = await createHandler().handle(createBinding(harness), await readFixture("mcp-tools-call.json"));
+    const binding = createBinding(harness);
+    const server = await createBindingServer(binding);
 
-    assert.equal(response.error, undefined);
-    assert.deepEqual(harness.calls, [{ toolName: "bash_run", input: { command: "pwd" } }]);
-    assert.equal(response.result?.isError, false);
+    try {
+        const session = await initialize(server.url);
+        const response = await postJson(server.url, await readFixture("mcp-tools-call.json"), session.headers);
+
+        assert.equal(response.status, 200);
+        assert.deepEqual(harness.calls, [{ toolName: "bash_run", input: { command: "pwd" } }]);
+        assert.equal(response.body.result?.isError, false);
+    } finally {
+        await server.close();
+        await binding.close();
+    }
 });
 
 test("not ready maps to mcp.instanceNotReady", async () => {
-    const response = await createHandler().handle(createBinding(createWorkerHarness({ ready: false })), await readFixture("mcp-tools-list.json"));
+    const binding = createBinding(createWorkerHarness({ ready: false }));
+    const server = await createBindingServer(binding);
 
-    assert.equal(response.error?.data?.code, "mcp.instanceNotReady");
+    try {
+        const session = await initialize(server.url);
+        const response = await postJson(server.url, await readFixture("mcp-tools-list.json"), session.headers);
+
+        assert.equal(response.status, 200);
+        assert.equal(response.body.error?.data?.code, "mcp.instanceNotReady");
+    } finally {
+        await server.close();
+        await binding.close();
+    }
 });
 
 test("schema unavailable returns mcp.toolSchemaUnavailable", async () => {
     const harness = createWorkerHarness({
         tools: [{ name: "bash_run", description: "Run shell", inputSchema: undefined }]
     });
-    const response = await createHandler().handle(createBinding(harness), await readFixture("mcp-tools-list.json"));
+    const binding = createBinding(harness);
+    const server = await createBindingServer(binding);
 
-    assert.equal(response.error?.data?.code, "mcp.toolSchemaUnavailable");
+    try {
+        const session = await initialize(server.url);
+        const response = await postJson(server.url, await readFixture("mcp-tools-list.json"), session.headers);
+
+        assert.equal(response.status, 200);
+        assert.equal(response.body.error?.data?.code, "mcp.toolSchemaUnavailable");
+    } finally {
+        await server.close();
+        await binding.close();
+    }
 });
 
 function createBinding(harness = createWorkerHarness()): McpEndpointBinding {
@@ -68,8 +119,96 @@ function createBinding(harness = createWorkerHarness()): McpEndpointBinding {
     );
 }
 
-function createHandler(): McpEndpointRequestHandler {
-    return new McpEndpointRequestHandler();
+async function createBindingServer(binding: McpEndpointBinding) {
+    const server = createServer((request, response) => {
+        void handleRequest(binding, request, response);
+    });
+
+    await new Promise<void>((resolve) => {
+        server.listen(0, "127.0.0.1", () => resolve());
+    });
+
+    const address = server.address();
+    assert.notEqual(address, null);
+    assert.equal(typeof address, "object");
+
+    return {
+        close: async () => {
+            await new Promise<void>((resolve, reject) => {
+                server.close((error) => {
+                    if (error) {
+                        reject(error);
+                        return;
+                    }
+
+                    resolve();
+                });
+            });
+        },
+        url: `http://127.0.0.1:${address.port}/mcp`
+    };
+}
+
+async function handleRequest(binding: McpEndpointBinding, request: IncomingMessage, response: ServerResponse) {
+    const chunks: Buffer[] = [];
+
+    for await (const chunk of request) {
+        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    }
+
+    const body = chunks.length === 0 ? {} : (JSON.parse(Buffer.concat(chunks).toString("utf8")) as JsonValue);
+    await binding.handleRequest(request, response, body);
+}
+
+async function initialize(url: string): Promise<{ headers: Record<string, string> }> {
+    const response = await postJson(url, await readFixture("mcp-initialize.json"));
+    assert.equal(response.status, 200);
+    const sessionId = response.headers.get("mcp-session-id");
+    assert.equal(typeof sessionId, "string");
+
+    const headers = {
+        "mcp-protocol-version": String(response.body.result?.protocolVersion ?? ""),
+        "mcp-session-id": sessionId
+    };
+    const initialized = await postRawJson(
+        url,
+        {
+            jsonrpc: "2.0",
+            method: "notifications/initialized"
+        },
+        headers
+    );
+
+    assert.equal(initialized.status, 202);
+    return { headers };
+}
+
+async function postJson(url: string, body: JsonValue, extraHeaders?: Record<string, string>) {
+    const response = await postRawJson(url, body, extraHeaders);
+
+    return {
+        body: JSON.parse(response.text) as Record<string, any>,
+        headers: response.headers,
+        status: response.status
+    };
+}
+
+async function postRawJson(url: string, body: JsonValue, extraHeaders?: Record<string, string>) {
+    const response = await fetch(url, {
+        body: JSON.stringify(body),
+        headers: {
+            accept: "application/json, text/event-stream",
+            "content-type": "application/json",
+            ...extraHeaders
+        },
+        method: "POST"
+    });
+
+    return {
+        headers: response.headers,
+        text: await response.text(),
+        status: response.status
+    };
 }
 
 async function readFixture(name: string): Promise<JsonValue> {

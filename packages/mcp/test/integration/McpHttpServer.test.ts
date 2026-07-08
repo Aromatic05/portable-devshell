@@ -20,7 +20,10 @@ test("missing instance returns 404", async () => {
 
         const response = await fetch(`http://127.0.0.1:${address.port}/missing/mcp`, {
             method: "POST",
-            headers: { "content-type": "application/json" },
+            headers: {
+                accept: "application/json, text/event-stream",
+                "content-type": "application/json"
+            },
             body: JSON.stringify(await readFixture("mcp-initialize.json"))
         });
 
@@ -41,13 +44,17 @@ test("initialize succeeds over HTTP", async () => {
 
         const response = await fetch(`http://127.0.0.1:${address.port}/demo/mcp`, {
             method: "POST",
-            headers: { "content-type": "application/json" },
+            headers: {
+                accept: "application/json, text/event-stream",
+                "content-type": "application/json"
+            },
             body: JSON.stringify(await readFixture("mcp-initialize.json"))
         });
-        const payload = await response.json() as { result?: { sessionId?: string } };
+        const payload = await response.json() as { result?: { protocolVersion?: string } };
 
         assert.equal(response.status, 200);
-        assert.equal(typeof payload.result?.sessionId, "string");
+        assert.equal(typeof payload.result?.protocolVersion, "string");
+        assert.equal(typeof response.headers.get("mcp-session-id"), "string");
     } finally {
         await host.stop();
     }

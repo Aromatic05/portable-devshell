@@ -1,7 +1,6 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 
 import { McpAuthMiddleware, type McpAuthConfig } from "../auth/McpAuthMiddleware.js";
-import type { McpEndpointRequestHandler } from "../endpoint/McpEndpointRequestHandler.js";
 import type { McpHostRouteMatcher } from "./route/McpHostRouteMatcher.js";
 import type { McpHostRouteRegistry } from "./route/McpHostRouteRegistry.js";
 
@@ -9,7 +8,6 @@ type JsonValue = boolean | number | null | string | JsonValue[] | { [key: string
 
 interface McpHostHttpServerOptions {
     auth?: McpAuthConfig;
-    handler: McpEndpointRequestHandler;
     listenHost: string;
     listenPort: number;
     matcher: McpHostRouteMatcher;
@@ -23,7 +21,6 @@ function isRecord(value: unknown): value is Record<string, JsonValue> {
 export class McpHostHttpServer {
     readonly #auth?: McpAuthConfig;
     readonly #authMiddleware = new McpAuthMiddleware();
-    readonly #handler: McpEndpointRequestHandler;
     readonly #listenHost: string;
     readonly #listenPort: number;
     readonly #matcher: McpHostRouteMatcher;
@@ -32,7 +29,6 @@ export class McpHostHttpServer {
 
     constructor(options: McpHostHttpServerOptions) {
         this.#auth = options.auth;
-        this.#handler = options.handler;
         this.#listenHost = options.listenHost;
         this.#listenPort = options.listenPort;
         this.#matcher = options.matcher;
@@ -100,9 +96,7 @@ export class McpHostHttpServer {
         }
 
         const body = await this.#readJsonBody(request);
-        const result = await this.#handler.handle(binding, body);
-        response.writeHead(result.error === undefined ? 200 : 400, { "content-type": "application/json" });
-        response.end(JSON.stringify(result));
+        await binding.handleRequest(request, response, body);
     }
 
     async #readJsonBody(request: IncomingMessage): Promise<JsonValue> {

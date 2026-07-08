@@ -62,18 +62,29 @@ test("MCP initialize tools/list and tools/call succeed against the frozen worker
 
     const initialize = await postJson(endpoint, await readFixture("mcp-initialize.json"));
     assert.equal(initialize.error, undefined);
-    assert.equal(typeof initialize.result?.sessionId, "string");
+    assert.equal(typeof initialize.result?.protocolVersion, "string");
+    const sessionHeaders = {
+        "mcp-protocol-version": String(initialize.result?.protocolVersion ?? ""),
+        "mcp-session-id": String(initialize.headers.get("mcp-session-id") ?? "")
+    };
+    assert.notEqual(sessionHeaders["mcp-session-id"], "");
+
+    const initialized = await postRawJson(endpoint, {
+        jsonrpc: "2.0",
+        method: "notifications/initialized"
+    }, sessionHeaders);
+    assert.equal(initialized.status, 202);
 
     const list = await postJson(endpoint, {
         id: "req-tools-list",
         jsonrpc: "2.0",
         method: "tools/list"
-    });
+    }, sessionHeaders);
     assert.equal(list.error, undefined);
     assert.deepEqual(list.result?.tools.map((tool: { name: string }) => tool.name), ["bash_run"]);
     assert.deepEqual(list.result?.tools[0]?.inputSchema, instance.listTools()[0]?.inputSchema);
 
-    const call = await postJson(endpoint, await readFixture("mcp-tools-call.json"));
+    const call = await postJson(endpoint, await readFixture("mcp-tools-call.json"), sessionHeaders);
     assert.equal(call.error, undefined);
     assert.equal(call.result?.isError, false);
     assert.match(String(call.result?.content?.[0]?.text ?? ""), new RegExp(workspacePath.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"), "u"));
@@ -83,17 +94,32 @@ test("MCP initialize tools/list and tools/call succeed against the frozen worker
     assert.match(await readFile(join(homeDirectory, ".devshell", "aromatic-pc", "control-worker", "tool-calls.jsonl"), "utf8"), /bash_run/u);
 });
 
-async function postJson(url: string, body: JsonValue): Promise<any> {
+async function postJson(url: string, body: JsonValue, extraHeaders?: Record<string, string>): Promise<any> {
+    const response = await postRawJson(url, body, extraHeaders);
+
+    assert.equal(response.status, 200);
+    return {
+        headers: response.headers,
+        ...(JSON.parse(response.text) as Record<string, any>)
+    };
+}
+
+async function postRawJson(url: string, body: JsonValue, extraHeaders?: Record<string, string>) {
     const response = await fetch(url, {
         body: JSON.stringify(body),
         headers: {
-            "content-type": "application/json"
+            accept: "application/json, text/event-stream",
+            "content-type": "application/json",
+            ...extraHeaders
         },
         method: "POST"
     });
 
-    assert.equal(response.status, 200);
-    return await response.json();
+    return {
+        headers: response.headers,
+        status: response.status,
+        text: await response.text()
+    };
 }
 
 async function readFixture(name: string): Promise<JsonValue> {

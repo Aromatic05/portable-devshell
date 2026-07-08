@@ -1,6 +1,5 @@
 import { McpAuthPublicExposureGuard, type McpExposureConfig } from "../auth/public/McpAuthPublicExposureGuard.js";
 import { McpEndpointBinding } from "../endpoint/McpEndpointBinding.js";
-import { McpEndpointRequestHandler } from "../endpoint/McpEndpointRequestHandler.js";
 import { McpEndpointWorker } from "../endpoint/McpEndpointWorker.js";
 import { McpHostHttpServer } from "./McpHostHttpServer.js";
 import { McpHostRouteMatcher } from "./route/McpHostRouteMatcher.js";
@@ -61,7 +60,6 @@ export class McpHost {
 
         this.#httpServer = new McpHostHttpServer({
             auth: config.auth,
-            handler: new McpEndpointRequestHandler(),
             listenHost: config.listenHost,
             listenPort: config.listenPort,
             matcher: new McpHostRouteMatcher(),
@@ -76,6 +74,7 @@ export class McpHost {
 
     async stop(): Promise<void> {
         await this.#httpServer.stop();
+        await Promise.all(this.#registry.list().map(async (binding) => await binding.close()));
     }
 
     get server(): McpHostHttpServer {
