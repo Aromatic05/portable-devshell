@@ -40,7 +40,7 @@ export class LocalWorkerTransport implements WorkerCommandTransport {
         const workerCommand = this.#workerBinary.buildCommand(command, options.instanceName, options.extraArgs);
         const child = this.#spawnCommand(workerCommand.command, workerCommand.args, {
             cwd: command === "start" ? options.workspacePath : undefined,
-            env: options.env,
+            env: this.#mergeEnv(options.env),
             stdio: ["ignore", "pipe", "pipe"]
         });
 
@@ -50,10 +50,17 @@ export class LocalWorkerTransport implements WorkerCommandTransport {
     async spawnWorkerRpc(options: WorkerRpcOptions): Promise<WorkerRpcProcess> {
         const command = this.#workerBinary.buildCommand("rpc", options.instanceName);
         const child = this.#spawnCommand(command.command, command.args, {
-            env: options.env,
+            env: this.#mergeEnv(options.env),
             stdio: ["pipe", "pipe", "pipe"]
         });
         return createWorkerRpcProcess(child);
+    }
+
+    #mergeEnv(env: NodeJS.ProcessEnv | undefined): NodeJS.ProcessEnv {
+        return {
+            ...process.env,
+            ...env
+        };
     }
 
     #spawnCommand(command: string, args: readonly string[], options: Parameters<SpawnFunction>[2]) {

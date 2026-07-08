@@ -29,11 +29,11 @@ test("local transport builds start command and rpc bridge", async () => {
     });
 
     assert.equal(startResult.exitCode, 0);
-    assert.deepEqual(recorder.calls[0], {
-        command: "/worker/bin",
-        args: ["start", "--instance", "task-3-local"],
-        options: { cwd: "/tmp/workspace", env: undefined, stdio: ["ignore", "pipe", "pipe"] }
-    });
+    assert.equal(recorder.calls[0]?.command, "/worker/bin");
+    assert.deepEqual(recorder.calls[0]?.args, ["start", "--instance", "task-3-local"]);
+    assert.equal(recorder.calls[0]?.options.cwd, "/tmp/workspace");
+    assert.deepEqual(recorder.calls[0]?.options.env, { ...process.env });
+    assert.deepEqual(recorder.calls[0]?.options.stdio, ["ignore", "pipe", "pipe"]);
 
     const rpcProcess = await transport.spawnWorkerRpc({ instanceName: "task-3-local" });
 
@@ -42,11 +42,11 @@ test("local transport builds start command and rpc bridge", async () => {
     assert.equal(rpcProcess.stderr, recorder.children[1].stderr);
     assert.equal(rpcProcess.kill("SIGTERM"), true);
     assert.deepEqual(await rpcProcess.exit, { code: null, signal: "SIGTERM" });
-    assert.deepEqual(recorder.calls[1], {
-        command: "/worker/bin",
-        args: ["rpc", "--instance", "task-3-local"],
-        options: { cwd: undefined, env: undefined, stdio: ["pipe", "pipe", "pipe"] }
-    });
+    assert.equal(recorder.calls[1]?.command, "/worker/bin");
+    assert.deepEqual(recorder.calls[1]?.args, ["rpc", "--instance", "task-3-local"]);
+    assert.equal(recorder.calls[1]?.options.cwd, undefined);
+    assert.deepEqual(recorder.calls[1]?.options.env, { ...process.env });
+    assert.deepEqual(recorder.calls[1]?.options.stdio, ["pipe", "pipe", "pipe"]);
 });
 
 test("local transport runs installWorker probe", async () => {
@@ -62,6 +62,47 @@ test("local transport runs installWorker probe", async () => {
         command: "/worker/bin",
         args: ["--version"],
         options: { cwd: undefined, env: undefined, stdio: ["ignore", "pipe", "pipe"] }
+    });
+});
+
+test("local transport preserves base process env when instance env is provided", async () => {
+    const recorder = createSpawnRecorder();
+    const transport = new LocalWorkerTransport({
+        workerBinary: new WorkerBinary("/worker/bin"),
+        spawnFunction: recorder.spawn
+    });
+    const previousPath = process.env.PATH;
+    const previousHome = process.env.HOME;
+    const previousXdgRuntimeDir = process.env.XDG_RUNTIME_DIR;
+
+    process.env.PATH = "/base/path";
+    process.env.HOME = "/base/home";
+    process.env.XDG_RUNTIME_DIR = "/base/runtime";
+    const expectedEnv = {
+        ...process.env,
+        FOO: "bar"
+    };
+
+    try {
+        await transport.runWorkerCommand("start", {
+            env: { FOO: "bar" },
+            instanceName: "task-3-local",
+            workspacePath: "/tmp/workspace"
+        });
+    } finally {
+        restoreEnv("PATH", previousPath);
+        restoreEnv("HOME", previousHome);
+        restoreEnv("XDG_RUNTIME_DIR", previousXdgRuntimeDir);
+    }
+
+    assert.deepEqual(recorder.calls[0], {
+        command: "/worker/bin",
+        args: ["start", "--instance", "task-3-local"],
+        options: {
+            cwd: "/tmp/workspace",
+            env: expectedEnv,
+            stdio: ["ignore", "pipe", "pipe"]
+        }
     });
 });
 
@@ -240,6 +281,15 @@ interface RecordedCall {
     command: string;
     args: string[];
     options: { cwd?: string; env?: NodeJS.ProcessEnv; stdio: readonly string[] };
+}
+
+function restoreEnv(name: keyof NodeJS.ProcessEnv, value: string | undefined): void {
+    if (value === undefined) {
+        delete process.env[name];
+        return;
+    }
+
+    process.env[name] = value;
 }
 
 function createSpawnRecorder(): {
