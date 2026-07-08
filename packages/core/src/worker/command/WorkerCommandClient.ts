@@ -1,4 +1,4 @@
-import type { WorkerCommandTransport, WorkerCommandResult } from "./WorkerCommandTransport.js";
+import type { WorkerCommandInteractiveSession, WorkerCommandTransport, WorkerCommandResult } from "./WorkerCommandTransport.js";
 
 export class WorkerCommandClient {
     readonly #transport: WorkerCommandTransport;
@@ -11,12 +11,16 @@ export class WorkerCommandClient {
         this.#env = env;
     }
 
-    start(workspacePath: string): Promise<WorkerCommandResult> {
-        return this.#transport.runWorkerCommand("start", {
-            instanceName: this.#instanceName,
-            workspacePath,
-            env: this.#env
-        });
+    start(workspacePath: string, interactiveSession?: WorkerCommandInteractiveSession): Promise<WorkerCommandResult> {
+        return this.#transport.runWorkerCommand(
+            "start",
+            {
+                instanceName: this.#instanceName,
+                workspacePath,
+                env: this.#env
+            },
+            interactiveSession
+        );
     }
 
     status(): Promise<WorkerCommandResult> {

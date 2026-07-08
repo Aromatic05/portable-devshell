@@ -7,6 +7,11 @@ import type { WorkerCommandName, WorkerCommandOptions, WorkerRpcOptions } from "
 
 export type WorkerCommandResult = CommandResult;
 
+export interface WorkerCommandInteractiveSession {
+    readInput(): Promise<Buffer | undefined>;
+    writeOutput(chunk: string): Promise<void> | void;
+}
+
 export interface ProviderCommandContext extends CommandDiagnostic {
     command: string[];
     commandDisplay: string;
@@ -16,9 +21,13 @@ export interface ProviderCommandContext extends CommandDiagnostic {
 }
 
 export interface WorkerCommandTransport {
-    runWorkerCommand(command: WorkerCommandName, options: WorkerCommandOptions): Promise<WorkerCommandResult>;
+    runWorkerCommand(
+        command: WorkerCommandName,
+        options: WorkerCommandOptions,
+        interactiveSession?: WorkerCommandInteractiveSession
+    ): Promise<WorkerCommandResult>;
     spawnWorkerRpc(options: WorkerRpcOptions): Promise<WorkerRpcProcess>;
-    installWorker(): Promise<void>;
+    installWorker(interactiveSession?: WorkerCommandInteractiveSession): Promise<void>;
 }
 
 export type SpawnFunction = (command: string, args: readonly string[], options: SpawnOptions) => ChildProcess;

@@ -274,19 +274,19 @@ test("ssh transport installs default worker into remote home before probing", as
 
     const recorder = createSpawnRecorder((call, child, callIndex) => {
         if (callIndex === 0) {
-            closeRecordedChild(child, { stdout: "running\n" });
-            return true;
-        }
-
-        if (callIndex === 1) {
             closeRecordedChild(child, { stdout: "/home/dev" });
             return true;
         }
 
-        if (callIndex === 2) {
+        if (callIndex === 1) {
             child.stdin.once("finish", () => {
                 closeRecordedChild(child);
             });
+            return true;
+        }
+
+        if (callIndex === 2) {
+            closeRecordedChild(child, { stdout: "running\n" });
             return true;
         }
 
@@ -355,6 +355,86 @@ test("ssh transport appends interactive-auth hint when batch mode authentication
     assert.equal(result.exitCode, 255);
     assert.match(result.stderr, /requires interactive authentication or host confirmation/u);
     assert.equal(result.details?.stderrTail?.includes("requires interactive authentication or host confirmation"), true);
+});
+
+test("ssh transport interactive start establishes a reusable control socket", async () => {
+    const outputs: string[] = [];
+    const recorder = createSpawnRecorder((_call, child, callIndex) => {
+        if (callIndex === 0) {
+            closeRecordedChild(child, { stdout: "Password: " });
+            return true;
+        }
+
+        closeRecordedChild(child);
+        return true;
+    });
+    const transport = new SshWorkerTransport({
+        command: "ssh-bin devbox",
+        workerBinary: new WorkerBinary("/usr/local/bin/devshell-worker"),
+        spawnFunction: recorder.spawn
+    });
+
+    const startResult = await transport.runWorkerCommand(
+        "start",
+        { instanceName: "demo-ssh" },
+        {
+            async readInput() {
+                return undefined;
+            },
+            async writeOutput(chunk: string) {
+                outputs.push(chunk);
+            }
+        }
+    );
+    const rpcProcess = await transport.spawnWorkerRpc({ instanceName: "demo-ssh" });
+    rpcProcess.kill("SIGTERM");
+    await rpcProcess.exit;
+
+    assert.equal(startResult.exitCode, 0);
+    assert.equal(outputs.join(""), "Password: ");
+    assert.equal(recorder.calls[0]?.command, "script");
+    assert.equal(recorder.calls[0]?.args[0], "-qefc");
+    assert.match(String(recorder.calls[0]?.args[1] ?? ""), /-oControlMaster=auto/u);
+    assert.match(String(recorder.calls[0]?.args[1] ?? ""), /-oControlPersist=600/u);
+
+    const controlPath = String(recorder.calls[1]?.args.find((arg) => arg.startsWith("-oControlPath=")) ?? "").slice("-oControlPath=".length);
+    assert.match(controlPath, /pds-ssh-/u);
+    assert.deepEqual(recorder.calls[1], {
+        command: "ssh-bin",
+        args: [
+            "-oBatchMode=yes",
+            "-oNumberOfPasswordPrompts=0",
+            "-oKbdInteractiveAuthentication=no",
+            "-oPasswordAuthentication=no",
+            `-oControlPath=${controlPath}`,
+            "-oControlMaster=auto",
+            "-oControlPersist=600",
+            "devbox",
+            "--",
+            "sh",
+            "-lc",
+            "'/usr/local/bin/devshell-worker' 'start' '--instance' 'demo-ssh'"
+        ],
+        options: { cwd: undefined, env: undefined, stdio: ["ignore", "pipe", "pipe"] }
+    });
+    assert.deepEqual(recorder.calls[2], {
+        command: "ssh-bin",
+        args: [
+            "-oBatchMode=yes",
+            "-oNumberOfPasswordPrompts=0",
+            "-oKbdInteractiveAuthentication=no",
+            "-oPasswordAuthentication=no",
+            `-oControlPath=${controlPath}`,
+            "-oControlMaster=auto",
+            "-oControlPersist=600",
+            "devbox",
+            "--",
+            "sh",
+            "-lc",
+            "'/usr/local/bin/devshell-worker' 'rpc' '--instance' 'demo-ssh'"
+        ],
+        options: { cwd: undefined, env: undefined, stdio: ["pipe", "pipe", "pipe"] }
+    });
 });
 
 test("docker transport builds exec command", async () => {

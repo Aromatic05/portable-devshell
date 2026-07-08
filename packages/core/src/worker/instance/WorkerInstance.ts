@@ -19,6 +19,7 @@ import type { InstanceLogEntry } from "../../log/store/LogStoreInstance.js";
 import { InstanceLogStore } from "../../log/store/LogStoreInstance.js";
 import { InstanceBusyError, ToolCallHistory } from "../../log/LogToolCallHistory.js";
 import { WorkerCommandClient } from "../../worker/command/WorkerCommandClient.js";
+import type { WorkerCommandInteractiveSession } from "../../worker/command/WorkerCommandTransport.js";
 import { WorkerProtocolClient, type WorkerHandshakeResult } from "../../worker/protocol/WorkerProtocolClient.js";
 import { WorkerRpcBridge } from "../../worker/rpc/WorkerRpcBridge.js";
 import { WorkerToolCatalog } from "../tool/WorkerToolCatalog.js";
@@ -85,6 +86,23 @@ export class WorkerInstance {
     }
 
     async start(workspacePath?: WorkspacePath | string): Promise<InstanceSnapshot> {
+        return await this.#start(workspacePath);
+    }
+
+    async startInteractive(
+        workspacePath: WorkerCommandInteractiveSession | WorkspacePath | string | undefined,
+        interactiveSession?: WorkerCommandInteractiveSession
+    ): Promise<InstanceSnapshot> {
+        return await this.#start(
+            isInteractiveSession(workspacePath) ? undefined : workspacePath,
+            isInteractiveSession(workspacePath) ? workspacePath : interactiveSession
+        );
+    }
+
+    async #start(
+        workspacePath?: WorkspacePath | string,
+        interactiveSession?: WorkerCommandInteractiveSession
+    ): Promise<InstanceSnapshot> {
         const resolvedWorkspacePath = workspacePath ?? this.#config.defaultWorkspace;
 
         if (resolvedWorkspacePath === undefined) {
@@ -104,7 +122,7 @@ export class WorkerInstance {
         });
 
         try {
-            const startResult = await this.#commandClient.start(resolvedWorkspacePath);
+            const startResult = await this.#commandClient.start(resolvedWorkspacePath, interactiveSession);
 
             if (startResult.exitCode !== 0) {
                 throw createError({
@@ -607,6 +625,10 @@ function getErrorCode(error: unknown, fallback: string): string {
 
 function isKnownErrorCode(error: unknown): boolean {
     return typeof error === "object" && error !== null && "code" in error && typeof error.code === "string";
+}
+
+function isInteractiveSession(value: unknown): value is WorkerCommandInteractiveSession {
+    return typeof value === "object" && value !== null && "readInput" in value && "writeOutput" in value;
 }
 
 function toEventData(

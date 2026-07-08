@@ -1,4 +1,8 @@
 import { spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
+import { once } from "node:events";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import { errorCodes } from "@portable-devshell/shared";
 import { parseArgsStringToArgv } from "string-argv";
@@ -8,6 +12,7 @@ import { RemoteWorkerInstaller } from "../../install/RemoteWorkerInstaller.js";
 import {
     createCommandContext,
     createProviderError,
+    type WorkerCommandInteractiveSession,
     type SpawnFunction,
     waitForCommandResult,
     type ProviderCommandContext,
@@ -38,6 +43,8 @@ export class SshWorkerTransport implements WorkerCommandTransport {
     readonly #workerBinary: WorkerBinary;
     readonly #installer: RemoteWorkerInstaller;
     readonly #spawn: SpawnFunction;
+    readonly #controlPath = join(tmpdir(), `pds-ssh-${randomUUID().slice(0, 8)}`);
+    #controlSocketEnabled = false;
 
     constructor(options: SshWorkerTransportOptions) {
         this.#sshCommand = parseSshCommand(options.command);
@@ -51,8 +58,8 @@ export class SshWorkerTransport implements WorkerCommandTransport {
         });
     }
 
-    async installWorker(): Promise<void> {
-        const installCommand = new WorkerBinary(await this.#resolveExecutable()).buildInstallCommand();
+    async installWorker(interactiveSession?: WorkerCommandInteractiveSession): Promise<void> {
+        const installCommand = new WorkerBinary(await this.#resolveExecutable(interactiveSession)).buildInstallCommand();
         const commandLine = [installCommand.command, ...installCommand.args].map(shellEscape).join(" ");
         const context = this.#createRemoteShellContext(
             "installWorker",
@@ -74,8 +81,16 @@ export class SshWorkerTransport implements WorkerCommandTransport {
         }
     }
 
-    async runWorkerCommand(command: WorkerCommandName, options: WorkerCommandOptions) {
-        const workerCommand = new WorkerBinary(await this.#resolveExecutable()).buildCommand(
+    async runWorkerCommand(
+        command: WorkerCommandName,
+        options: WorkerCommandOptions,
+        interactiveSession?: WorkerCommandInteractiveSession
+    ) {
+        if (interactiveSession !== undefined) {
+            await this.#ensureInteractiveControlConnection(command, options.instanceName, interactiveSession, options.env);
+        }
+
+        const workerCommand = new WorkerBinary(await this.#resolveExecutable(interactiveSession)).buildCommand(
             command,
             options.instanceName,
             options.extraArgs
@@ -105,7 +120,11 @@ export class SshWorkerTransport implements WorkerCommandTransport {
         return createWorkerRpcProcess(child);
     }
 
-    async #resolveExecutable(): Promise<string> {
+    async #resolveExecutable(interactiveSession?: WorkerCommandInteractiveSession): Promise<string> {
+        if (interactiveSession !== undefined) {
+            await this.#ensureInteractiveControlConnection("resolveExecutable", undefined, interactiveSession);
+        }
+
         return await this.#installer.ensure(this.#workerBinary.executable);
     }
 
@@ -158,7 +177,16 @@ export class SshWorkerTransport implements WorkerCommandTransport {
     }
 
     #buildRemoteShellCommand(commandLine: string): [string, ...string[]] {
-        return [this.#sshCommand[0], ...SSH_NON_INTERACTIVE_ARGS, ...this.#sshCommand.slice(1), "--", "sh", "-lc", commandLine];
+        return [
+            this.#sshCommand[0],
+            ...SSH_NON_INTERACTIVE_ARGS,
+            ...(this.#controlSocketEnabled ? this.#buildControlSocketArgs() : []),
+            ...this.#sshCommand.slice(1),
+            "--",
+            "sh",
+            "-lc",
+            commandLine
+        ];
     }
 
     #decorateCommandResult<T extends { details?: ProviderCommandContext | Record<string, unknown>; exitCode: number | null; stderr: string; stdout: string }>(
@@ -205,6 +233,119 @@ export class SshWorkerTransport implements WorkerCommandTransport {
         cause: unknown,
         options?: { errorCode?: string; result?: { exitCode?: number | null; signal?: string; stderr?: string; stdout?: string } }
     ) => createProviderError(context, cause, options);
+
+    async #ensureInteractiveControlConnection(
+        operation: string,
+        instance: string | undefined,
+        interactiveSession: WorkerCommandInteractiveSession,
+        env?: NodeJS.ProcessEnv
+    ): Promise<void> {
+        if (this.#controlSocketEnabled) {
+            return;
+        }
+
+        const commandLine = ":";
+        const context = createCommandContext({
+            command: this.#buildInteractiveRemoteShellCommand(commandLine),
+            cwd: this.#workspace,
+            instance,
+            operation,
+            provider: "ssh"
+        });
+        const result = await this.#runInteractiveRemoteShell(commandLine, context, interactiveSession, env);
+
+        if (result.exitCode !== 0) {
+            throw this.#createProviderError(context, new Error(result.stderr || result.stdout || "ssh interactive authentication failed"), {
+                result
+            });
+        }
+
+        this.#controlSocketEnabled = true;
+    }
+
+    #buildControlSocketArgs(): string[] {
+        return [`-oControlPath=${this.#controlPath}`, "-oControlMaster=auto", "-oControlPersist=600"];
+    }
+
+    #buildInteractiveRemoteShellCommand(commandLine: string): [string, ...string[]] {
+        const sshCommand = [
+            this.#sshCommand[0],
+            ...this.#buildControlSocketArgs(),
+            ...this.#sshCommand.slice(1),
+            "--",
+            "sh",
+            "-lc",
+            this.#withRemoteCwd(commandLine)
+        ];
+
+        return ["script", "-qefc", sshCommand.map(shellEscape).join(" "), "/dev/null"];
+    }
+
+    async #runInteractiveRemoteShell(
+        commandLine: string,
+        context: ProviderCommandContext,
+        interactiveSession: WorkerCommandInteractiveSession,
+        env?: NodeJS.ProcessEnv
+    ) {
+        const command = this.#buildInteractiveRemoteShellCommand(commandLine);
+        let child;
+
+        try {
+            child = this.#spawn(command[0], command.slice(1), {
+                env,
+                stdio: ["pipe", "pipe", "pipe"]
+            });
+        } catch (error) {
+            throw this.#createProviderError(context, error);
+        }
+
+        let outputFlush = Promise.resolve();
+        child.stdout?.setEncoding("utf8");
+        child.stdout?.on("data", (chunk: string) => {
+            outputFlush = outputFlush.then(async () => {
+                await interactiveSession.writeOutput(chunk);
+            });
+        });
+        child.stderr?.setEncoding("utf8");
+        child.stderr?.on("data", (chunk: string) => {
+            outputFlush = outputFlush.then(async () => {
+                await interactiveSession.writeOutput(chunk);
+            });
+        });
+
+        const exitSignal = once(child, "close").then(() => undefined);
+        const inputPump = this.#pumpInteractiveInput(child.stdin, interactiveSession, exitSignal);
+        const result = await waitForCommandResult(child, this.#createProviderError, context);
+
+        await inputPump;
+        await outputFlush;
+
+        return result;
+    }
+
+    async #pumpInteractiveInput(
+        stdin: NodeJS.WritableStream | null,
+        interactiveSession: WorkerCommandInteractiveSession,
+        exitSignal: Promise<undefined>
+    ): Promise<void> {
+        if (stdin === null) {
+            return;
+        }
+
+        for (;;) {
+            const chunk = await Promise.race([interactiveSession.readInput(), exitSignal]);
+            if (chunk === undefined) {
+                stdin.end();
+                return;
+            }
+
+            if (stdin.write(chunk)) {
+                continue;
+            }
+
+            await once(stdin, "drain");
+        }
+    }
 }
 
 function parseSshCommand(command: string): [string, ...string[]] {
