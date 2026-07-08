@@ -16,8 +16,10 @@
     ],
     "dependencies": {
         "@modelcontextprotocol/sdk": "1.29.0",
-        "@portable-devshell/core": "workspace:*",
         "@portable-devshell/shared": "workspace:*"
+    },
+    "devDependencies": {
+        "@portable-devshell/core": "workspace:*"
     },
     "scripts": {
         "build": "tsc -b --force",

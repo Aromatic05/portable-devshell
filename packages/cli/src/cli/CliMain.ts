@@ -145,8 +145,7 @@ export class CliMain {
             return await this.#createLifecycleManager();
         }
 
-        const moduleUrl = new URL("../../../control/dist/control/ControlLifecycleManager.js", import.meta.url);
-        const imported = (await import(moduleUrl.href)) as {
+        const imported = (await import("@portable-devshell/control")) as {
             ControlLifecycleManager: new (options?: { homeDirectory?: string; xdgRuntimeDir?: string }) => CliLifecycleManagerLike;
         };
 

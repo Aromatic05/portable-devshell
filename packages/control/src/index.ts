@@ -1,3 +1,4 @@
+export * from "./control/ControlLifecycleManager.js";
 export * from "./control/config/ControlConfigDefaults.js";
 export * from "./control/config/ControlConfigStore.js";
 export * from "./control/config/ControlConfigTomlCodec.js";

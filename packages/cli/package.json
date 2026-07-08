@@ -9,6 +9,7 @@
         "devshell": "./dist/cli/CliMain.js"
     },
     "dependencies": {
+        "@portable-devshell/control": "workspace:*",
         "@portable-devshell/shared": "workspace:*"
     },
     "exports": {
