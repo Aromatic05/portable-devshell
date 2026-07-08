@@ -1,4 +1,4 @@
-import { createError, errorCodes } from "@portable-devshell/shared";
+import { createError, errorCodes, type InstanceContainerConfig, type InstanceContainerMountConfig } from "@portable-devshell/shared";
 import { McpAuthPublicExposureGuard } from "@portable-devshell/mcp";
 
 import type { ControlConfig, ControlInstanceConfig } from "./ControlConfigTomlCodec.js";
@@ -67,10 +67,16 @@ export class ControlConfigValidator {
 
         switch (instance.provider) {
             case "local":
+                if (instance.container !== undefined) {
+                    throw new Error(`local instance ${instance.name} does not support container`);
+                }
                 return;
             case "ssh":
                 if (instance.ssh?.command === undefined) {
                     throw new Error(`ssh instance ${instance.name} requires ssh.command`);
+                }
+                if (instance.container !== undefined) {
+                    throw new Error(`ssh instance ${instance.name} does not support container`);
                 }
                 return;
             case "docker":
@@ -78,6 +84,78 @@ export class ControlConfigValidator {
                 if (instance.container === undefined) {
                     throw new Error(`${instance.provider} instance ${instance.name} requires container`);
                 }
+                this.#validateContainer(instance.name, instance.container);
+                return;
+        }
+    }
+
+    #validateContainer(instanceName: string, container: InstanceContainerConfig): void {
+        switch (container.mode) {
+            case "preset":
+                this.#validateManagedContainer(instanceName, container);
+                if (container.preset.length === 0) {
+                    throw new Error(`container.preset is required for instance ${instanceName}`);
+                }
+                if (container.image.length === 0) {
+                    throw new Error(`container.image is required for instance ${instanceName}`);
+                }
+                return;
+            case "dockerfile":
+                this.#validateManagedContainer(instanceName, container);
+                if (container.build.context.length === 0) {
+                    throw new Error(`container.build.context is required for instance ${instanceName}`);
+                }
+                return;
+            case "compose":
+                if (container.compose.file.length === 0) {
+                    throw new Error(`container.compose.file is required for instance ${instanceName}`);
+                }
+                if (container.compose.service.length === 0) {
+                    throw new Error(`container.compose.service is required for instance ${instanceName}`);
+                }
+                return;
+            case "existingImage":
+                this.#validateManagedContainer(instanceName, container);
+                if (container.image.length === 0) {
+                    throw new Error(`container.image is required for instance ${instanceName}`);
+                }
+                return;
+            case "existingStoppedContainer":
+                if (container.containerName.length === 0) {
+                    throw new Error(`container.containerName is required for instance ${instanceName}`);
+                }
+                return;
+        }
+    }
+
+    #validateManagedContainer(
+        instanceName: string,
+        container: Extract<InstanceContainerConfig, { mode: "preset" | "dockerfile" | "existingImage" }>
+    ): void {
+        if (container.containerName.length === 0) {
+            throw new Error(`container.containerName is required for instance ${instanceName}`);
+        }
+
+        for (const [index, mount] of (container.mounts ?? []).entries()) {
+            this.#validateMount(instanceName, index, mount);
+        }
+
+        if (container.env !== undefined) {
+            for (const [key, value] of Object.entries(container.env)) {
+                if (key.length === 0 || value.length === 0) {
+                    throw new Error(`container.env.${key} must be a non-empty string for instance ${instanceName}`);
+                }
+            }
+        }
+    }
+
+    #validateMount(instanceName: string, index: number, mount: InstanceContainerMountConfig): void {
+        if (mount.source.length === 0) {
+            throw new Error(`container.mounts[${index}].source is required for instance ${instanceName}`);
+        }
+
+        if (mount.target.length === 0) {
+            throw new Error(`container.mounts[${index}].target is required for instance ${instanceName}`);
         }
     }
 }

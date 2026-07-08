@@ -1,4 +1,14 @@
-import { createError, errorCodes, type InstanceCreateResult, type InstanceCreateSchema, type InstanceCreateSummary, type JsonValue } from "@portable-devshell/shared";
+import {
+    createError,
+    errorCodes,
+    type InstanceContainerConfig,
+    type InstanceContainerMountConfig,
+    type InstanceContainerPresetSchema,
+    type InstanceCreateResult,
+    type InstanceCreateSchema,
+    type InstanceCreateSummary,
+    type JsonValue
+} from "@portable-devshell/shared";
 import type { McpHost } from "@portable-devshell/mcp";
 
 import { InstanceConfigMapper } from "../instance/InstanceConfigMapper.js";
@@ -8,7 +18,19 @@ import { ControlConfigStore } from "./config/ControlConfigStore.js";
 import type { ControlConfig, ControlInstanceConfig, ControlProviderKind } from "./config/ControlConfigTomlCodec.js";
 import { ControlConfigValidator } from "./config/ControlConfigValidator.js";
 
+const containerPresets = [
+    { image: "archlinux:latest", preset: "arch" },
+    { image: "ubuntu:24.04", preset: "ubuntu" },
+    { image: "debian:stable", preset: "debian" },
+    { image: "alpine:latest", preset: "alpine" }
+] as const satisfies readonly InstanceContainerPresetSchema[];
+
 const instanceCreateSchema: InstanceCreateSchema = {
+    container: {
+        defaultMode: "preset",
+        modes: ["preset", "dockerfile", "compose", "existingImage", "existingStoppedContainer"],
+        presets: containerPresets
+    },
     defaultAllowTools: ["bash_run"],
     defaultEnabled: true,
     defaultMcpEnabled: true,
@@ -149,7 +171,7 @@ export class ControlInstanceCreateService {
                 break;
             case "docker":
             case "podman":
-                normalized.container = readRequiredString(draft.container, "container");
+                normalized.container = readContainerDraft(draft.container, name);
                 break;
         }
 
@@ -254,6 +276,199 @@ function readSshDraft(value: JsonValue | undefined): ControlInstanceConfig["ssh"
     return {
         command: readOptionalString(ssh.command, "ssh.command")
     };
+}
+
+function readContainerDraft(value: JsonValue | undefined, instanceName: string): InstanceContainerConfig {
+    const container = asRequiredRecord(value, "container");
+    const mode = readContainerMode(readOptionalString(container.mode, "container.mode") ?? instanceCreateSchema.container.defaultMode);
+    const defaultContainerName = `devshell-${instanceName}`;
+
+    switch (mode) {
+        case "preset": {
+            const presetName = readRequiredString(container.preset, "container.preset");
+            const preset = readPresetSchema(presetName);
+            return {
+                ...readManagedContainerDraft(container, "container", defaultContainerName),
+                image: readOptionalString(container.image, "container.image") ?? preset.image,
+                mode,
+                preset: preset.preset
+            };
+        }
+        case "dockerfile":
+            return {
+                ...readManagedContainerDraft(container, "container", defaultContainerName),
+                build: readDockerfileBuildDraft(container.build, "container.build", instanceName),
+                mode
+            };
+        case "compose":
+            return {
+                compose: readComposeDraft(container.compose, "container.compose"),
+                mode
+            };
+        case "existingImage":
+            return {
+                ...readManagedContainerDraft(container, "container", defaultContainerName),
+                image: readRequiredString(container.image, "container.image"),
+                mode
+            };
+        case "existingStoppedContainer":
+            return {
+                adoptLifecycle: readOptionalBoolean(container.adoptLifecycle, "container.adoptLifecycle"),
+                containerName: readRequiredString(container.containerName, "container.containerName"),
+                mode
+            };
+    }
+}
+
+function readManagedContainerDraft(
+    recordValue: JsonValue | undefined,
+    fieldName: string,
+    defaultContainerName: string
+): {
+    containerName: string;
+    env?: Record<string, string>;
+    mounts?: InstanceContainerMountConfig[];
+    network?: string;
+    user?: string;
+} {
+    const record = asRequiredRecord(recordValue, fieldName);
+
+    return {
+        containerName: readOptionalString(record.containerName, `${fieldName}.containerName`) ?? defaultContainerName,
+        env: readOptionalStringRecord(record.env, `${fieldName}.env`),
+        mounts: readOptionalMounts(record.mounts, `${fieldName}.mounts`),
+        network: readOptionalString(record.network, `${fieldName}.network`),
+        user: readOptionalString(record.user, `${fieldName}.user`)
+    };
+}
+
+function readDockerfileBuildDraft(
+    value: JsonValue | undefined,
+    fieldName: string,
+    instanceName: string
+): NonNullable<Extract<InstanceContainerConfig, { mode: "dockerfile" }>["build"]> {
+    const build = asRequiredRecord(value, fieldName);
+
+    return {
+        context: readRequiredString(build.context, `${fieldName}.context`),
+        dockerfile: readOptionalString(build.dockerfile, `${fieldName}.dockerfile`),
+        tag: readOptionalString(build.tag, `${fieldName}.tag`) ?? `devshell-${instanceName}:latest`
+    };
+}
+
+function readComposeDraft(
+    value: JsonValue | undefined,
+    fieldName: string
+): NonNullable<Extract<InstanceContainerConfig, { mode: "compose" }>["compose"]> {
+    const compose = asRequiredRecord(value, fieldName);
+
+    return {
+        file: readRequiredString(compose.file, `${fieldName}.file`),
+        projectName: readOptionalString(compose.projectName, `${fieldName}.projectName`),
+        service: readRequiredString(compose.service, `${fieldName}.service`)
+    };
+}
+
+function readOptionalMounts(value: JsonValue | undefined, fieldName: string): InstanceContainerMountConfig[] | undefined {
+    if (value === undefined) {
+        return undefined;
+    }
+
+    if (!Array.isArray(value)) {
+        throw invalidDraft(`${fieldName} must be an array.`);
+    }
+
+    return value.map((entry, index) => readMountDraft(entry, `${fieldName}[${index}]`));
+}
+
+function readMountDraft(value: JsonValue | undefined, fieldName: string): InstanceContainerMountConfig {
+    const mount = asRequiredRecord(value, fieldName);
+    const mode = readRequiredString(mount.mode, `${fieldName}.mode`);
+
+    return {
+        mode: mode === "ro" || mode === "rw" ? mode : invalidMountMode(mode, `${fieldName}.mode`),
+        selinux: readOptionalMountSelinuxMode(mount.selinux, `${fieldName}.selinux`),
+        source: readRequiredString(mount.source, `${fieldName}.source`),
+        target: readRequiredString(mount.target, `${fieldName}.target`)
+    };
+}
+
+function invalidMountMode(value: string, fieldName: string): never {
+    throw invalidDraft(`${fieldName} must be one of ro, rw. Received: ${value}`);
+}
+
+function readOptionalMountSelinuxMode(
+    value: JsonValue | undefined,
+    fieldName: string
+): InstanceContainerMountConfig["selinux"] {
+    const normalized = readOptionalString(value, fieldName);
+
+    if (normalized === undefined) {
+        return undefined;
+    }
+
+    if (normalized === "private" || normalized === "shared") {
+        return normalized;
+    }
+
+    throw invalidDraft(`${fieldName} must be one of private, shared.`);
+}
+
+function readOptionalStringRecord(value: JsonValue | undefined, fieldName: string): Record<string, string> | undefined {
+    if (value === undefined) {
+        return undefined;
+    }
+
+    const record = asRequiredRecord(value, fieldName);
+    const result: Record<string, string> = {};
+
+    for (const [key, entry] of Object.entries(record)) {
+        if (typeof entry !== "string" || entry.trim().length === 0) {
+            throw invalidDraft(`${fieldName}.${key} must be a non-empty string.`);
+        }
+
+        result[key] = entry.trim();
+    }
+
+    return result;
+}
+
+function readOptionalBoolean(value: JsonValue | undefined, fieldName: string): boolean | undefined {
+    if (value === undefined) {
+        return undefined;
+    }
+
+    if (typeof value !== "boolean") {
+        throw invalidDraft(`${fieldName} must be a boolean.`);
+    }
+
+    return value;
+}
+
+function readContainerMode(value: string): NonNullable<InstanceCreateSchema["container"]>["defaultMode"] {
+    if (value === "preset" || value === "dockerfile" || value === "compose" || value === "existingImage" || value === "existingStoppedContainer") {
+        return value;
+    }
+
+    throw invalidDraft("container.mode must be one of preset, dockerfile, compose, existingImage, existingStoppedContainer.");
+}
+
+function readPresetSchema(preset: string): InstanceContainerPresetSchema {
+    const matched = containerPresets.find((entry) => entry.preset === preset);
+
+    if (matched === undefined) {
+        throw invalidDraft(`container.preset must be one of ${containerPresets.map((entry) => entry.preset).join(", ")}.`);
+    }
+
+    return matched;
+}
+
+function asRequiredRecord(value: JsonValue | undefined, fieldName: string): Record<string, JsonValue> {
+    if (value === undefined) {
+        throw invalidDraft(`${fieldName} is required.`);
+    }
+
+    return asOptionalRecord(value, fieldName);
 }
 
 function asOptionalRecord(value: JsonValue, fieldName: string): Record<string, JsonValue> {

@@ -1,4 +1,14 @@
-import { createError, errorCodes } from "@portable-devshell/shared";
+import {
+    createError,
+    errorCodes,
+    type InstanceContainerComposeConfig,
+    type InstanceContainerConfig,
+    type InstanceContainerDockerfileConfig,
+    type InstanceContainerExistingImageConfig,
+    type InstanceContainerExistingStoppedContainerConfig,
+    type InstanceContainerMountConfig,
+    type InstanceContainerPresetConfig
+} from "@portable-devshell/shared";
 import { parse, stringify, type TomlTableWithoutBigInt } from "smol-toml";
 
 export type ControlProviderKind = "docker" | "local" | "podman" | "ssh";
@@ -24,7 +34,7 @@ export interface ControlInstanceSshConfig {
 }
 
 export interface ControlInstanceConfig {
-    container?: string;
+    container?: InstanceContainerConfig;
     dockerBinary?: string;
     enabled: boolean;
     env?: Record<string, string>;
@@ -167,7 +177,7 @@ export class ControlInstanceTomlCodec {
             enabled: instance.enabled,
             provider: instance.provider,
             ...(instance.workspace === undefined ? {} : { workspace: instance.workspace }),
-            ...(instance.container === undefined ? {} : { container: instance.container }),
+            ...(instance.container === undefined ? {} : { container: encodeContainer(instance.container) }),
             ...(instance.ssh === undefined ? {} : { ssh: withoutUndefined(instance.ssh) }),
             ...(instance.dockerBinary === undefined ? {} : { dockerBinary: instance.dockerBinary }),
             ...(instance.podmanBinary === undefined ? {} : { podmanBinary: instance.podmanBinary }),
@@ -189,6 +199,7 @@ function parseInstanceDocument(document: TomlRecord): ControlInstanceConfig {
     const logs = asOptionalRecord(document.logs, "logs");
     const security = asOptionalRecord(document.security, "security");
     const ssh = asOptionalRecord(document.ssh, "ssh");
+    const container = asOptionalRecord(document.container, "container");
 
     if (document.workerBinaryPath !== undefined) {
         throw new Error("workerBinaryPath is not supported");
@@ -211,7 +222,7 @@ function parseInstanceDocument(document: TomlRecord): ControlInstanceConfig {
     }
 
     return {
-        container: asOptionalString(document.container, "container"),
+        container: container === undefined ? undefined : parseContainerConfig(container),
         dockerBinary: asOptionalString(document.dockerBinary, "dockerBinary"),
         enabled: asBoolean(document.enabled, "enabled"),
         env: env === undefined ? undefined : asStringRecord(env, "env"),
@@ -233,6 +244,152 @@ function parseInstanceDocument(document: TomlRecord): ControlInstanceConfig {
         security: security === undefined ? undefined : { mode: asOptionalString(security.mode, "security.mode") },
         ssh: ssh === undefined ? undefined : { command: asOptionalString(ssh.command, "ssh.command") },
         workspace: asOptionalString(document.workspace, "workspace")
+    };
+}
+
+function encodeContainer(container: InstanceContainerConfig): TomlRecord {
+    switch (container.mode) {
+        case "preset":
+            return {
+                ...encodeManagedContainerFields(container),
+                image: container.image,
+                mode: container.mode,
+                preset: container.preset
+            };
+        case "dockerfile":
+            return {
+                ...encodeManagedContainerFields(container),
+                build: withoutUndefined(container.build),
+                mode: container.mode
+            };
+        case "compose":
+            return {
+                compose: withoutUndefined(container.compose),
+                mode: container.mode,
+            };
+        case "existingImage":
+            return {
+                ...encodeManagedContainerFields(container),
+                image: container.image,
+                mode: container.mode
+            };
+        case "existingStoppedContainer":
+            return {
+                ...(container.adoptLifecycle === undefined ? {} : { adoptLifecycle: container.adoptLifecycle }),
+                containerName: container.containerName,
+                mode: container.mode
+            };
+        default:
+            return assertNever(container);
+    }
+}
+
+function parseContainerConfig(container: TomlRecord): InstanceContainerConfig {
+    const mode = asString(container.mode, "container.mode");
+
+    switch (mode) {
+        case "preset":
+            return {
+                ...parseManagedContainerFields(container, "container"),
+                image: asString((container as TomlRecord).image, "container.image"),
+                mode,
+                preset: asString((container as TomlRecord).preset, "container.preset")
+            };
+        case "dockerfile":
+            return {
+                ...parseManagedContainerFields(container, "container"),
+                build: parseDockerfileBuildConfig(asRecord((container as TomlRecord).build, "container.build"), "container.build"),
+                mode
+            };
+        case "compose":
+            return {
+                compose: parseComposeConfig(asRecord((container as TomlRecord).compose, "container.compose"), "container.compose"),
+                mode,
+            };
+        case "existingImage":
+            return {
+                ...parseManagedContainerFields(container, "container"),
+                image: asString((container as TomlRecord).image, "container.image"),
+                mode
+            };
+        case "existingStoppedContainer":
+            return {
+                adoptLifecycle: asOptionalBoolean(
+                    (container as TomlRecord).adoptLifecycle,
+                    "container.adoptLifecycle"
+                ),
+                containerName: asString(
+                    (container as TomlRecord).containerName,
+                    "container.containerName"
+                ),
+                mode
+            };
+        default:
+            throw new Error("container.mode must be one of preset, dockerfile, compose, existingImage, existingStoppedContainer");
+    }
+}
+
+function encodeManagedContainerFields(
+    container: InstanceContainerPresetConfig | InstanceContainerDockerfileConfig | InstanceContainerExistingImageConfig
+): TomlRecord {
+    return {
+        containerName: container.containerName,
+        ...(container.env === undefined || Object.keys(container.env).length === 0 ? {} : { env: container.env }),
+        ...(container.mounts === undefined || container.mounts.length === 0 ? {} : { mounts: container.mounts.map(encodeMount) }),
+        ...(container.network === undefined ? {} : { network: container.network }),
+        ...(container.user === undefined ? {} : { user: container.user })
+    };
+}
+
+function encodeMount(mount: InstanceContainerMountConfig): TomlRecord {
+    return {
+        mode: mount.mode,
+        ...(mount.selinux === undefined ? {} : { selinux: mount.selinux }),
+        source: mount.source,
+        target: mount.target
+    };
+}
+
+function parseManagedContainerFields(
+    container: TomlRecord,
+    fieldName: string
+): Pick<InstanceContainerPresetConfig, "containerName" | "env" | "mounts" | "network" | "user"> {
+    const env = asOptionalRecord(container.env, `${fieldName}.env`);
+    const mounts = asOptionalArray(container.mounts, `${fieldName}.mounts`);
+
+    return {
+        containerName: asString(container.containerName, `${fieldName}.containerName`),
+        env: env === undefined ? undefined : asStringRecord(env, `${fieldName}.env`),
+        mounts: mounts === undefined ? undefined : mounts.map((entry, index) => parseMount(entry, `${fieldName}.mounts[${index}]`)),
+        network: asOptionalString(container.network, `${fieldName}.network`),
+        user: asOptionalString(container.user, `${fieldName}.user`)
+    };
+}
+
+function parseDockerfileBuildConfig(container: TomlRecord, fieldName: string): InstanceContainerDockerfileConfig["build"] {
+    return {
+        context: asString(container.context, `${fieldName}.context`),
+        dockerfile: asOptionalString(container.dockerfile, `${fieldName}.dockerfile`),
+        tag: asOptionalString(container.tag, `${fieldName}.tag`)
+    };
+}
+
+function parseComposeConfig(container: TomlRecord, fieldName: string): InstanceContainerComposeConfig["compose"] {
+    return {
+        file: asString(container.file, `${fieldName}.file`),
+        projectName: asOptionalString(container.projectName, `${fieldName}.projectName`),
+        service: asString(container.service, `${fieldName}.service`)
+    };
+}
+
+function parseMount(mount: unknown, fieldName: string): InstanceContainerMountConfig {
+    const record = asRecord(mount, fieldName);
+
+    return {
+        mode: asMountMode(asString(record.mode, `${fieldName}.mode`)),
+        selinux: asOptionalMountSelinuxMode(record.selinux, `${fieldName}.selinux`),
+        source: asString(record.source, `${fieldName}.source`),
+        target: asString(record.target, `${fieldName}.target`)
     };
 }
 
@@ -284,6 +441,14 @@ function asBoolean(value: unknown, fieldName: string): boolean {
     return value;
 }
 
+function asOptionalBoolean(value: unknown, fieldName: string): boolean | undefined {
+    if (value === undefined) {
+        return undefined;
+    }
+
+    return asBoolean(value, fieldName);
+}
+
 function asInteger(value: unknown, fieldName: string): number {
     if (typeof value !== "number" || !Number.isInteger(value)) {
         throw new Error(`${fieldName} must be an integer`);
@@ -303,6 +468,18 @@ function asOptionalInteger(value: unknown, fieldName: string): number | undefine
 function asStringArray(value: unknown, fieldName: string): string[] {
     if (!Array.isArray(value) || value.some((entry) => typeof entry !== "string")) {
         throw new Error(`${fieldName} must be a string array`);
+    }
+
+    return [...value];
+}
+
+function asOptionalArray(value: unknown, fieldName: string): unknown[] | undefined {
+    if (value === undefined) {
+        return undefined;
+    }
+
+    if (!Array.isArray(value)) {
+        throw new Error(`${fieldName} must be an array`);
     }
 
     return [...value];
@@ -339,6 +516,27 @@ function asAuthMode(value: string): ControlMcpAuthMode {
     throw new Error(`unsupported mcp.auth.mode: ${value}`);
 }
 
+function asMountMode(value: string): InstanceContainerMountConfig["mode"] {
+    if (value === "ro" || value === "rw") {
+        return value;
+    }
+
+    throw new Error(`unsupported mount mode: ${value}`);
+}
+
+function asOptionalMountSelinuxMode(value: unknown, fieldName: string): InstanceContainerMountConfig["selinux"] {
+    if (value === undefined) {
+        return undefined;
+    }
+
+    const normalized = asString(value, fieldName);
+    if (normalized === "private" || normalized === "shared") {
+        return normalized;
+    }
+
+    throw new Error(`${fieldName} must be one of private, shared`);
+}
+
 function isStructuredConfigError(error: unknown): error is { code: string } {
     return typeof error === "object" && error !== null && "code" in error && typeof error.code === "string";
 }
@@ -346,4 +544,8 @@ function isStructuredConfigError(error: unknown): error is { code: string } {
 function readFieldPath(message: string): string | undefined {
     const match = message.match(/^([A-Za-z0-9_.[\]]+)\s+/u);
     return match?.[1];
+}
+
+function assertNever(value: never): never {
+    throw new Error(`unsupported container mode: ${String(value)}`);
 }
