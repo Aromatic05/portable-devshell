@@ -106,10 +106,11 @@ export class SshWorkerTransport implements WorkerCommandTransport {
             command,
             commandLine,
             {
-                instance: options.instanceName
+                instance: options.instanceName,
+                useWorkspace: command === "start"
             }
         );
-        const child = this.#spawnRemoteShell(commandLine, ["ignore", "pipe", "pipe"], context, options.env);
+        const child = this.#spawnRemoteShell(commandLine, ["ignore", "pipe", "pipe"], context, options.env, command === "start");
 
         return this.#decorateCommandResult(await waitForCommandResult(child, this.#createProviderError, context));
     }
@@ -159,9 +160,10 @@ export class SshWorkerTransport implements WorkerCommandTransport {
         commandLine: string,
         stdio: ["ignore" | "pipe", "pipe", "pipe"],
         context: ProviderCommandContext,
-        env?: NodeJS.ProcessEnv
+        env?: NodeJS.ProcessEnv,
+        useWorkspace: boolean = false
     ) {
-        const command = this.#buildRemoteShellCommand(this.#withRemoteCwd(commandLine));
+        const command = this.#buildRemoteShellCommand(this.#withRemoteCwd(commandLine, useWorkspace));
 
         try {
             return this.#spawn(command[0], command.slice(1), {
@@ -178,13 +180,13 @@ export class SshWorkerTransport implements WorkerCommandTransport {
     #createRemoteShellContext(
         operation: string,
         commandLine: string,
-        options: { instance?: string } = {}
+        options: { cwd?: string; instance?: string; useWorkspace?: boolean } = {}
     ): ProviderCommandContext {
-        const remoteCommand = this.#withRemoteCwd(commandLine);
+        const remoteCommand = this.#withRemoteCwd(commandLine, options.useWorkspace ?? false);
 
         return createCommandContext({
             command: this.#buildRemoteShellCommand(remoteCommand),
-            cwd: this.#workspace,
+            cwd: options.cwd ?? (options.useWorkspace === true ? this.#workspace : undefined),
             instance: options.instance,
             operation,
             provider: "ssh"
@@ -199,8 +201,8 @@ export class SshWorkerTransport implements WorkerCommandTransport {
         return this.#createRemoteShellContext(operation, commandLine);
     }
 
-    #withRemoteCwd(commandLine: string): string {
-        return this.#workspace ? `cd ${shellEscape(this.#workspace)} && ${commandLine}` : commandLine;
+    #withRemoteCwd(commandLine: string, useWorkspace: boolean): string {
+        return useWorkspace && this.#workspace ? `cd ${shellEscape(this.#workspace)} && ${commandLine}` : commandLine;
     }
 
     #buildRemoteShellCommand(commandLine: string): [string, ...string[]] {
@@ -212,7 +214,7 @@ export class SshWorkerTransport implements WorkerCommandTransport {
             "--",
             "sh",
             "-lc",
-            commandLine
+            shellEscape(commandLine)
         ];
     }
 
@@ -302,7 +304,7 @@ export class SshWorkerTransport implements WorkerCommandTransport {
             "--",
             "sh",
             "-lc",
-            this.#withRemoteCwd(commandLine)
+            this.#withRemoteCwd(commandLine, true)
         ];
 
         return ["script", "-qefc", sshCommand.map(shellEscape).join(" "), "/dev/null"];

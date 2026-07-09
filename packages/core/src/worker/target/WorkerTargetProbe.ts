@@ -10,7 +10,7 @@ export interface WorkerTargetProbe {
     probe(): Promise<WorkerTarget>;
 }
 
-export const workerTargetProbeCommandLine = `printf '%s\n%s\n' "$(uname -s)" "$(uname -m)"`;
+export const workerTargetProbeCommandLine = "uname -s && uname -m";
 
 export function probeLocalWorkerTarget(
     provider: string = "local",

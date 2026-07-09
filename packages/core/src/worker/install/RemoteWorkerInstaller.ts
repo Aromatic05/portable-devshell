@@ -46,9 +46,8 @@ export class RemoteWorkerInstaller {
         }
 
         if (this.#installPromise === undefined) {
-            this.#installPromise = this.#installDefaultWorker().catch((error) => {
+            this.#installPromise = this.#installDefaultWorker().finally(() => {
                 this.#installPromise = undefined;
-                throw error;
             });
         }
 

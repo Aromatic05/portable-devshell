@@ -131,9 +131,15 @@ function buildCommandDiagnostic(
 }
 
 function formatCommandDisplay(command: readonly string[]): string {
-    return command
-        .map((segment) => (/^[A-Za-z0-9_./:@=-]+$/u.test(segment) ? segment : JSON.stringify(segment)))
-        .join(" ");
+    return command.map(formatCommandDisplaySegment).join(" ");
+}
+
+function formatCommandDisplaySegment(segment: string): string {
+    if (/^[A-Za-z0-9_./:@=-]+$/u.test(segment)) {
+        return segment;
+    }
+
+    return /^'(?:[^']|'\\'')*'$/u.test(segment) ? segment : `'${segment.replaceAll("'", `'\\''`)}'`;
 }
 
 function readCauseCode(error: unknown): string | undefined {

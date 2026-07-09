@@ -93,7 +93,7 @@ export abstract class ContainerWorkerTransportBase implements WorkerCommandTrans
             options.instanceName,
             options.extraArgs
         );
-        const invocation = this.#createExecInvocation(command, [workerCommand.command, ...workerCommand.args], options.instanceName);
+        const invocation = this.#createExecInvocation(command, [workerCommand.command, ...workerCommand.args], options.instanceName, command === "start");
         const child = this.#spawnCommand(invocation.context, invocation.args, ["ignore", "pipe", "pipe"], options.env);
         return await waitForCommandResult(child, this.#createProviderError, invocation.context);
     }
@@ -382,13 +382,13 @@ export abstract class ContainerWorkerTransportBase implements WorkerCommandTrans
         }
     }
 
-    #createExecInvocation(operation: string, command: readonly string[], instance?: string) {
-        const args = this.#buildExecArgs(command);
+    #createExecInvocation(operation: string, command: readonly string[], instance?: string, useRemoteCwd: boolean = false) {
+        const args = this.#buildExecArgs(command, useRemoteCwd);
         return {
             args,
             context: createCommandContext({
                 command: [this.#binary, ...args],
-                cwd: this.#remoteCwd,
+                cwd: useRemoteCwd ? this.#remoteCwd : undefined,
                 instance,
                 operation,
                 provider: this.#provider
@@ -417,22 +417,22 @@ export abstract class ContainerWorkerTransportBase implements WorkerCommandTrans
         });
     }
 
-    #buildExecArgs(command: readonly string[]): string[] {
+    #buildExecArgs(command: readonly string[], useRemoteCwd: boolean): string[] {
         switch (this.#container.mode) {
             case "compose":
                 return this.buildComposeArgs([
                     "exec",
                     "-T",
-                    ...this.#workingDirectoryArgs(),
+                    ...this.#workingDirectoryArgs(useRemoteCwd),
                     this.#container.compose.service,
                     ...command
                 ]);
             case "preset":
             case "dockerfile":
             case "existingImage":
-                return ["exec", ...this.#workingDirectoryArgs(), "-i", this.#container.containerName, ...command];
+                return ["exec", ...this.#workingDirectoryArgs(useRemoteCwd), "-i", this.#container.containerName, ...command];
             case "existingStoppedContainer":
-                return ["exec", ...this.#workingDirectoryArgs(), "-i", this.#container.containerName, ...command];
+                return ["exec", ...this.#workingDirectoryArgs(useRemoteCwd), "-i", this.#container.containerName, ...command];
         }
     }
 
@@ -449,8 +449,8 @@ export abstract class ContainerWorkerTransportBase implements WorkerCommandTrans
         }
     }
 
-    #workingDirectoryArgs(): string[] {
-        return this.#remoteCwd ? ["-w", this.#remoteCwd] : [];
+    #workingDirectoryArgs(useRemoteCwd: boolean): string[] {
+        return useRemoteCwd && this.#remoteCwd ? ["-w", this.#remoteCwd] : [];
     }
 
     #syntheticResult(operation: string, instance: string, stdout: string): WorkerCommandResult {
