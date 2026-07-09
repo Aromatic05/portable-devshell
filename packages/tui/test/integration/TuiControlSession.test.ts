@@ -117,6 +117,39 @@ test("TuiControlSession recovers when initial subscribe returns stream.gap", asy
     assert.equal(session.store.getToolAudit("alpha")[0]?.callId, "call-1");
 });
 
+test("TuiControlSession backs off when subscribe keeps rejecting", async (t) => {
+    const runtimeDir = await mkdtemp(join(tmpdir(), "portable-devshell-tui-session-subscribe-reject-"));
+    const socketPath = join(runtimeDir, "control.sock");
+    const worker = new FakeWorker("alpha");
+    worker.persistentSubscribeReject = true;
+    const server = createServer(socketPath, worker, () => 1);
+
+    await server.start();
+
+    const session = new TuiControlSession({
+        client: new TuiControlClient({ socketPath }),
+        reconnectDelayMs: 100
+    });
+
+    t.after(async () => {
+        await session.stop();
+        await server.stop().catch(() => undefined);
+        await rm(runtimeDir, { force: true, recursive: true });
+    });
+
+    await session.start();
+    await waitFor(() => session.store.getConnection().state === "connected");
+
+    await sleep(30);
+    assert.equal(worker.subscribeFromSeqs.length, 1);
+    assert.equal(worker.readToolCallsCount, 1);
+    assert.equal(worker.listApprovalsCount, 1);
+
+    await waitFor(() => worker.subscribeFromSeqs.length >= 2, 500);
+    assert.equal(worker.readToolCallsCount >= 2, true);
+    assert.equal(worker.listApprovalsCount >= 2, true);
+});
+
 function createServer(socketPath: string, worker: FakeWorker, getConfigVersion: () => number): ControlRpcServer {
     return new ControlRpcServer({
         configEditorService: {
@@ -154,6 +187,7 @@ class FakeWorker {
     readToolCallsCount = 0;
     listApprovalsCount = 0;
     initialSubscribeGapCount = 0;
+    persistentSubscribeReject = false;
 
     constructor(name: string) {
         this.#name = name;
@@ -210,6 +244,12 @@ class FakeWorker {
 
     subscribe(fromSeq = 1) {
         this.subscribeFromSeqs.push(fromSeq);
+
+        if (this.persistentSubscribeReject) {
+            throw Object.assign(new Error("subscribe rejected"), {
+                code: "stream.gap"
+            });
+        }
 
         if (this.initialSubscribeGapCount > 0) {
             this.initialSubscribeGapCount -= 1;
@@ -275,4 +315,8 @@ async function waitFor(factory: () => boolean, timeoutMs = 2_000): Promise<void>
     }
 
     throw new Error("Timed out waiting for condition.");
+}
+
+async function sleep(ms: number): Promise<void> {
+    await new Promise((resolve) => setTimeout(resolve, ms));
 }

@@ -35,6 +35,7 @@ export class TuiControlSession {
     readonly #reconnectController: TuiReconnectController;
     readonly #store: TuiViewModelStore;
     readonly #reconnectDelayMs: number;
+    readonly #subscriptionRecoveryTimers = new Map<string, NodeJS.Timeout>();
     readonly #subscriptions = new Map<string, TuiInstanceSubscription>();
     #active = false;
     #connectPromise?: Promise<void>;
@@ -69,6 +70,7 @@ export class TuiControlSession {
             clearTimeout(this.#reconnectTimer);
             this.#reconnectTimer = undefined;
         }
+        this.#clearSubscriptionRecoveryTimers();
         this.#closeSubscriptions();
     }
 
@@ -160,7 +162,7 @@ export class TuiControlSession {
                 return;
             }
 
-            await this.#recoverInstance(instance);
+            this.#scheduleSubscriptionRecovery(instance, subscription);
         });
     }
 
@@ -206,6 +208,32 @@ export class TuiControlSession {
         }
 
         this.#subscriptions.clear();
+    }
+
+    #scheduleSubscriptionRecovery(instance: string, subscription: TuiInstanceSubscription): void {
+        if (!this.#active || this.#subscriptionRecoveryTimers.has(instance)) {
+            return;
+        }
+
+        const timer = setTimeout(() => {
+            this.#subscriptionRecoveryTimers.delete(instance);
+
+            if (!this.#active || this.#subscriptions.get(instance) !== subscription) {
+                return;
+            }
+
+            void this.#recoverInstance(instance);
+        }, this.#reconnectDelayMs);
+
+        this.#subscriptionRecoveryTimers.set(instance, timer);
+    }
+
+    #clearSubscriptionRecoveryTimers(): void {
+        for (const timer of this.#subscriptionRecoveryTimers.values()) {
+            clearTimeout(timer);
+        }
+
+        this.#subscriptionRecoveryTimers.clear();
     }
 }
 
