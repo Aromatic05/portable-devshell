@@ -13,6 +13,7 @@ export * from "./error/ErrorBodyControl.js";
 export * from "./error/ErrorCodeCatalog.js";
 export * from "./error/ErrorFactoryCreate.js";
 export * from "./protocol/ProtocolRequestId.js";
+export * from "./protocol/ProtocolControlClientConnection.js";
 export * from "./protocol/envelope/ProtocolEnvelopeControl.js";
 export * from "./protocol/envelope/ProtocolEnvelopeTarget.js";
 export * from "./protocol/frame/ProtocolFrameCodec.js";
