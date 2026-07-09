@@ -30,6 +30,14 @@ test("Prompt 3 urgent fix uses page + instance coordinates with two sidebar sect
 
     assert.equal(harness.store.getState().ui.selectedPage, "instances");
     assert.equal(harness.store.getState().ui.selectedInstance, "alpha");
+    await harness.press("", { tab: true });
+    assert.equal(harness.store.getState().interaction.focusScope, "mainBoxes");
+    assert.deepEqual(
+        selectMainScreenModel(harness.store.getState()).boxes.map((box) => box.title),
+        ["alpha", "beta"]
+    );
+    await harness.press("[", { ctrl: true });
+    assert.equal(harness.store.getState().interaction.focusScope, "sidebarPages");
 
     await harness.press("", { downArrow: true });
     assert.equal(harness.store.getState().ui.selectedPage, "instances");
@@ -48,9 +56,6 @@ test("Prompt 3 urgent fix uses page + instance coordinates with two sidebar sect
 
     await harness.press("", { return: true });
     assert.equal(harness.store.getState().ui.selectedInstance, "beta");
-
-    await harness.press("", { tab: true });
-    assert.equal(harness.store.getState().interaction.focusScope, "mainBoxes");
 });
 
 test("Prompt 3 urgent fix expands stable bordered boxes and preserves state through stream updates", async () => {
@@ -139,12 +144,10 @@ test("Moving focus down advances the shared main viewport to keep the focused bo
     const harness = createHarness();
 
     await harness.press("", { tab: true });
-    await harness.press("", { downArrow: true });
-    await harness.press("", { downArrow: true });
-    await harness.press("", { downArrow: true });
+    await harness.press(" ");
     await harness.press("", { downArrow: true });
 
-    assert.equal(harness.store.getState().ui.mainFocusId, "approvals");
+    assert.equal(harness.store.getState().ui.mainFocusId, "instance-beta");
     assert.equal((harness.store.getState().ui.scrollOffsets["instances:alpha:main"] ?? 0) > 0, true);
 });
 
