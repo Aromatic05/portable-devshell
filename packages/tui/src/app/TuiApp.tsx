@@ -38,6 +38,7 @@ export function TuiApp(props: TuiAppProps) {
     const confirmDialog = selectConfirmDialogModel(state);
     const search = selectSearchModel(state);
     const footer = selectFooterModel(state);
+    const boxInnerWidth = Math.max(32, props.runtime.columns - 28);
 
     useInput((input, key) => {
         void props.runtime.handleInput(input, key);
@@ -52,7 +53,7 @@ export function TuiApp(props: TuiAppProps) {
                 <Box flexDirection="column" flexGrow={1} gap={1}>
                     {errorLines !== undefined ? <ErrorBanner lines={errorLines} /> : undefined}
                     {search.open ? <Text color="cyan">{`/ ${search.query}`}</Text> : undefined}
-                    <ScreenRouter state={state} />
+                    <ScreenRouter boxInnerWidth={boxInnerWidth} state={state} />
                     <ActionMenu items={actionMenu.items} open={actionMenu.open} title={actionMenu.title} />
                     <ConfirmDialog
                         body={confirmDialog.body}

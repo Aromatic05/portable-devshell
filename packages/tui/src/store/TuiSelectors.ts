@@ -1,6 +1,6 @@
 import type { ApprovalRequest, JsonValue, ToolCallRecord } from "@portable-devshell/shared";
 
-import { EXPANDABLE_BOX_INNER_WIDTH, type BoxLine, type BoxModel } from "../component/ExpandableBox.js";
+import type { BoxLine, BoxModel } from "../component/ExpandableBox.js";
 import type { TuiMode } from "../interaction/TuiInteractionTypes.js";
 import type { ActivePage, ExpandableBoxStatus, PageId } from "../model/TuiUiTypes.js";
 import type { TuiAppState, TuiConnectionState, TuiInstanceListEntry, TuiLogEntry } from "./TuiReducers.js";
@@ -554,7 +554,7 @@ function makeBox(
         collapsedLines: summaryLines,
         disabled: input.disabled,
         expanded: state.ui.expandedBoxes[expandedKey] === true,
-        expandedLines: input.detailLines.map((line) => ({ text: truncateLine(line, 58) })),
+        expandedLines: input.detailLines.map((line) => ({ text: line })),
         focused: state.ui.mainFocusId === input.id && (state.interaction.focusScope === "mainBoxes" || state.interaction.focusScope === "boxDetail"),
         id: input.id,
         status: input.status ?? "normal",
@@ -564,7 +564,7 @@ function makeBox(
 
 function normalizeCollapsedLines(lines: string[]): [BoxLine] | [BoxLine, BoxLine] {
     const normalized = lines.slice(0, 2).map((line, index) => ({
-        text: truncateLine(line, EXPANDABLE_BOX_INNER_WIDTH),
+        text: line,
         tone: collapsedToneFor(line, index)
     }));
 
@@ -588,7 +588,7 @@ function truncateLine(text: string, width: number): string {
 }
 
 function formatField(label: string, value: string): string {
-    return truncateLine(`${label.padEnd(14, " ")} ${value}`, EXPANDABLE_BOX_INNER_WIDTH);
+    return `${label.padEnd(14, " ")} ${value}`;
 }
 
 function shortenPath(value: string): string {
@@ -600,7 +600,7 @@ function shortenPath(value: string): string {
 }
 
 function compactSummary(...entries: Array<[string, string]>): string {
-    return truncateLine(entries.map(([key, value]) => `${key}=${value}`).join("  "), EXPANDABLE_BOX_INNER_WIDTH);
+    return entries.map(([key, value]) => `${key}=${value}`).join("  ");
 }
 
 function collapsedToneFor(line: string, index: number): BoxLine["tone"] {

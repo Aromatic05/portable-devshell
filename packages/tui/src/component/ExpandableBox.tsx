@@ -3,8 +3,6 @@ import { Box, Text } from "ink";
 
 import type { ExpandableBoxStatus } from "../model/TuiUiTypes.js";
 
-export const EXPANDABLE_BOX_INNER_WIDTH = 58;
-
 export type BoxLineTone = "normal" | "muted" | "accent" | "success" | "warning" | "danger";
 
 export interface BoxLine {
@@ -25,53 +23,67 @@ export interface BoxModel {
 
 export interface ExpandableBoxProps {
     box: BoxModel;
+    innerWidth: number;
 }
 
 export function ExpandableBox(props: ExpandableBoxProps) {
-    const bodyLines = props.box.expanded ? props.box.expandedLines : props.box.collapsedLines;
-    const frame = props.box.focused
-        ? { bottomLeft: "╰", bottomRight: "╯", horizontal: "─", topLeft: "╭", topRight: "╮" }
-        : { bottomLeft: "└", bottomRight: "┘", horizontal: "─", topLeft: "┌", topRight: "┐" };
-    const borderColor = props.box.focused ? "cyan" : props.box.disabled ? "gray" : "white";
-    const titleColor = props.box.disabled ? "gray" : undefined;
-    const title = `${props.box.title} · ${props.box.status}`;
-    const titleLine = renderTopBorder(title, frame);
-    const bottomBorder = `${frame.bottomLeft}${frame.horizontal.repeat(EXPANDABLE_BOX_INNER_WIDTH + 2)}${frame.bottomRight}`;
-
     return (
         <Box flexDirection="column">
-            <Text color={borderColor}>
-                <Text color={titleColor}>{titleLine.prefix}</Text>
-                <Text bold color={titleColor}>
-                    {titleLine.title}
-                </Text>
-                <Text color={titleColor}>{titleLine.suffix}</Text>
-            </Text>
-            {bodyLines.map((line, index) => (
-                <Text color={lineColor(line.tone)} dimColor={line.tone === "muted"} key={`${props.box.id}-${index}`}>
-                    {renderBodyLine(line.text)}
+            {renderExpandableBoxLines(props.box, props.innerWidth).map((line) => (
+                <Text color={line.color} dimColor={line.dimColor} key={line.key}>
+                    {line.text}
                 </Text>
             ))}
-            <Text color={borderColor}>{bottomBorder}</Text>
         </Box>
     );
 }
 
-function renderTopBorder(title: string, frame: { horizontal: string; topLeft: string; topRight: string }): { prefix: string; suffix: string; title: string } {
-    const normalizedTitle = truncateTitle(title, EXPANDABLE_BOX_INNER_WIDTH);
-    const prefix = `${frame.topLeft}${frame.horizontal} `;
-    const suffixWidth = Math.max(0, EXPANDABLE_BOX_INNER_WIDTH - normalizedTitle.length);
-    const suffix = ` ${frame.horizontal.repeat(suffixWidth)}${frame.topRight}`;
-
-    return {
-        prefix,
-        suffix,
-        title: normalizedTitle
-    };
+export interface ExpandableBoxRenderLine {
+    color?: string;
+    dimColor?: boolean;
+    key: string;
+    text: string;
 }
 
-function renderBodyLine(text: string): string {
-    const normalized = padRight(truncateTitle(text, EXPANDABLE_BOX_INNER_WIDTH), EXPANDABLE_BOX_INNER_WIDTH);
+export function renderExpandableBoxLines(box: BoxModel, requestedInnerWidth: number): ExpandableBoxRenderLine[] {
+    const innerWidth = Math.max(24, requestedInnerWidth);
+    const bodyLines = box.expanded ? box.expandedLines : box.collapsedLines;
+    const frame = box.focused
+        ? { bottomLeft: "╰", bottomRight: "╯", horizontal: "─", topLeft: "╭", topRight: "╮" }
+        : { bottomLeft: "└", bottomRight: "┘", horizontal: "─", topLeft: "┌", topRight: "┐" };
+    const borderColor = box.focused ? "cyan" : box.disabled ? "gray" : "white";
+    const titleLine = renderTopBorder(`${box.title} · ${box.status}`, innerWidth, frame);
+    const bottomBorder = `${frame.bottomLeft}${frame.horizontal.repeat(innerWidth + 2)}${frame.bottomRight}`;
+
+    return [
+        {
+            color: borderColor,
+            key: `${box.id}-top`,
+            text: titleLine
+        },
+        ...bodyLines.map((line, index) => ({
+            color: lineColor(line.tone),
+            dimColor: line.tone === "muted",
+            key: `${box.id}-${index}`,
+            text: renderBodyLine(line.text, innerWidth)
+        })),
+        {
+            color: borderColor,
+            key: `${box.id}-bottom`,
+            text: bottomBorder
+        }
+    ];
+}
+
+function renderTopBorder(title: string, innerWidth: number, frame: { horizontal: string; topLeft: string; topRight: string }): string {
+    const maxTitleWidth = Math.max(1, innerWidth - 1);
+    const normalizedTitle = truncateTitle(title, maxTitleWidth);
+    const suffixWidth = Math.max(0, innerWidth - normalizedTitle.length - 1);
+    return `${frame.topLeft}${frame.horizontal} ${normalizedTitle}${suffixWidth > 0 ? ` ${frame.horizontal.repeat(suffixWidth)}` : ""}${frame.topRight}`;
+}
+
+function renderBodyLine(text: string, innerWidth: number): string {
+    const normalized = padRight(truncateTitle(text, innerWidth), innerWidth);
     return `│ ${normalized} │`;
 }
 

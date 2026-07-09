@@ -11,6 +11,7 @@ import { selectMainBoxIds, selectMainScreenModel } from "../store/TuiSelectors.j
 export const orderedPages: PageId[] = ["instances", "config", "connector", "audit", "logs", "help"];
 
 export interface ScreenRouterProps {
+    boxInnerWidth: number;
     state: TuiAppState;
 }
 
@@ -23,7 +24,7 @@ export function ScreenRouter(props: ScreenRouterProps) {
             {model.emptyState !== undefined ? <Text color="yellow">{model.emptyState}</Text> : undefined}
             {model.boxes.map((box) => (
                 <Box key={box.id} width="100%">
-                    <ExpandableBox box={box} />
+                    <ExpandableBox box={box} innerWidth={props.boxInnerWidth} />
                 </Box>
             ))}
             {model.statusLine !== undefined ? <Text color="yellow">{model.statusLine}</Text> : undefined}
