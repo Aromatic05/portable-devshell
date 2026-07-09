@@ -7,147 +7,150 @@ import {
     KeyDispatcher,
     selectFooterText,
     selectHelpLines,
+    selectMainScreenModel,
+    selectSidebarModel,
     TuiAppStore,
     TuiFocusManager
 } from "../../dist/index.js";
 
-test("Prompt 3 panel routing and instances detail stay read-only", async () => {
+test("Prompt 3 urgent fix uses page + instance coordinates with two sidebar sections", async () => {
     const harness = createHarness();
 
-    await harness.press("1");
-    assert.equal(harness.store.getState().activePanel, "instances");
-    assert.deepEqual(harness.store.getState().interaction.currentFocus, { id: "instances.summary", kind: "card" });
+    const sidebar = selectSidebarModel(harness.store.getState());
+    assert.deepEqual(
+        sidebar.pages.map((item) => item.label),
+        ["overview", "config", "connector", "audit", "logs", "help"]
+    );
+    assert.deepEqual(
+        sidebar.instances.map((item) => item.label),
+        ["alpha", "beta"]
+    );
+    assert.equal(JSON.stringify(sidebar).includes("Pages"), false);
+    assert.equal(JSON.stringify(sidebar).includes("Instance"), false);
 
-    await harness.press("", { downArrow: true });
-    assert.deepEqual(harness.store.getState().interaction.currentFocus, { id: "instances.row.0", kind: "listItem" });
-
-    await harness.press("", { return: true });
-    assert.equal(harness.store.getState().interaction.screenStatusByPanel.instances, "Opened selected instance detail without starting worker.");
-    assert.equal(harness.store.getState().interaction.screenToggleByPanel.instances, true);
-
-    await harness.press(" ");
-    assert.equal(harness.store.getState().interaction.screenToggleByPanel.instances, false);
+    assert.equal(harness.store.getState().ui.selectedPage, "instances");
+    assert.equal(harness.store.getState().ui.selectedInstance, "alpha");
 
     await harness.press("2");
-    assert.equal(harness.store.getState().activePanel, "connector");
+    assert.equal(harness.store.getState().ui.selectedPage, "config");
+    assert.equal(harness.store.getState().ui.selectedInstance, "alpha");
 
-    await harness.press("]");
-    assert.equal(harness.store.getState().activePanel, "audit");
-
-    await harness.press("[");
-    assert.equal(harness.store.getState().activePanel, "connector");
-});
-
-test("Prompt 3 action menu is read-only placeholder and help/footer reflect current mode", async () => {
-    const harness = createHarness();
-
-    assert.match(selectFooterText(harness.store.getState()), /1-6/u);
-
-    await harness.press("a");
-    assert.equal(harness.store.getState().interaction.mode, "actionMenu");
-    assert.equal(harness.store.getState().interaction.actionMenu.open, true);
-    assert.deepEqual(harness.store.getState().interaction.currentFocus, { id: "instances.readonly", kind: "action" });
-
-    await harness.press("", { return: true });
-    assert.equal(harness.store.getState().interaction.mode, "normal");
-    assert.equal(harness.store.getState().interaction.screenStatusByPanel.instances, "Read-only action menu placeholder.");
-
-    await harness.press("6");
-    assert.equal(harness.store.getState().activePanel, "help");
-    assert.equal(selectHelpLines(harness.store.getState()).some((line) => line.includes("Read-only cockpit")), true);
-});
-
-test("Prompt 3 search stays local and approvals cards only expand locally", async () => {
-    const harness = createHarness();
-
-    await harness.press("5");
-    assert.equal(harness.store.getState().activePanel, "approvals");
-
-    await harness.press("/");
-    assert.equal(harness.store.getState().interaction.mode, "search");
-    await harness.press("a");
-    await harness.press("", { return: true });
-    assert.equal(harness.store.getState().interaction.search.query, "a");
-    assert.equal(harness.store.getState().interaction.mode, "normal");
-
+    await harness.press("", { tab: true });
+    assert.equal(harness.store.getState().interaction.focusScope, "sidebarInstances");
     await harness.press("", { downArrow: true });
-    assert.deepEqual(harness.store.getState().interaction.currentFocus, { id: "approvals.row.0", kind: "listItem" });
+    assert.equal(harness.store.getState().ui.selectedInstance, "beta");
+    assert.equal(harness.store.getState().ui.selectedPage, "config");
+});
+
+test("Prompt 3 urgent fix expands stable bordered boxes and preserves state through stream updates", async () => {
+    const harness = createHarness();
+
+    await harness.press("", { tab: true });
+    await harness.press("", { tab: true });
+
+    const firstBoxId = harness.store.getState().ui.mainFocusId;
+    assert.equal(harness.store.getState().interaction.focusScope, "mainBoxes");
+    assert.equal(typeof firstBoxId, "string");
+    assert.match(selectFooterText(harness.store.getState()), /space/u);
 
     await harness.press(" ");
-    assert.equal(harness.store.getState().interaction.expandedByKey["approval.alpha.approval-1"], true);
-    assert.equal(harness.store.getState().interaction.screenStatusByPanel.approvals, "Expanded approvals card.");
+    const expandedKey = `instances:alpha:${firstBoxId}`;
+    assert.equal(harness.store.getState().ui.expandedBoxes[expandedKey], true);
+
+    harness.store.applyEvent({
+        event: "log.appended",
+        payload: {
+            at: "2026-07-09T00:00:21.000Z",
+            data: {
+                bytes: 4,
+                stream: "stdout",
+                tail: "tail"
+            }
+        },
+        seq: 21,
+        target: {
+            instance: "alpha",
+            kind: "instance"
+        },
+        type: "event"
+    } as never);
+
+    assert.equal(harness.store.getState().ui.selectedPage, "instances");
+    assert.equal(harness.store.getState().ui.selectedInstance, "alpha");
+    assert.equal(harness.store.getState().ui.expandedBoxes[expandedKey], true);
+
+    await harness.press("", { return: true });
+    assert.equal(harness.store.getState().interaction.focusScope, "boxDetail");
+    await harness.press("[", { ctrl: true });
+    assert.equal(harness.store.getState().interaction.focusScope, "mainBoxes");
+    await harness.press("[", { ctrl: true });
+    assert.equal(harness.store.getState().interaction.focusScope, "sidebarInstances");
 });
 
-test("Prompt 3 logs page reloads, scrolls, toggles follow, and clear only resets UI buffer", async () => {
+test("Prompt 3 urgent fix keeps connector and logs pages read-only and instance-scoped", async () => {
     const harness = createHarness();
 
-    await harness.press("4");
-    assert.equal(harness.store.getState().activePanel, "logs");
+    await harness.press("3");
+    const connector = selectMainScreenModel(harness.store.getState());
+    assert.deepEqual(
+        connector.boxes.map((box) => box.title),
+        ["MCP Runtime Config", "Endpoint Preview", "Auth Config", "Public Availability Reason"]
+    );
+    assert.equal(
+        connector.boxes.some((box) => box.detailLines.some((line) => line.includes("Runtime readiness: not available in current control API"))),
+        true
+    );
+
+    await harness.press("5");
     assert.equal(harness.logsReloadCount(), 1);
-    assert.equal(harness.store.getState().interaction.screenStatusByPanel.logs, "Logs reloaded from instance.readLogs.");
+    const logs = selectMainScreenModel(harness.store.getState());
+    assert.equal(logs.activePage.page, "logs");
+    assert.equal(logs.activePage.instance, "alpha");
+    assert.equal(logs.boxes[0]?.summaryLines[0], "source instance.readLogs + log.appended");
 
-    await harness.press("", { upArrow: true });
-    assert.equal(harness.store.getState().interaction.logsViewport.follow, false);
-
-    await harness.press("f");
-    assert.equal(harness.store.getState().interaction.logsViewport.follow, true);
-
-    await harness.press("r");
-    assert.equal(harness.logsReloadCount(), 2);
-
-    await harness.press("c");
-    assert.deepEqual(harness.store.getState().logsByInstance, {});
-    assert.equal(harness.store.getState().interaction.screenStatusByPanel.logs, "Cleared local log buffer only.");
+    await harness.press("6");
+    assert.equal(selectHelpLines(harness.store.getState()).some((line) => line.includes("Read-only cockpit")), true);
 });
 
 function createHarness() {
     const store = new TuiAppStore();
     seedPrompt3State(store);
-    let quitRequests = 0;
-    let redrawRequests = 0;
     let logsReloadRequests = 0;
     const focusManager = new TuiFocusManager(store, {
-        currentPanel: () => store.getState().activePanel,
-        graphFor: (panel, mode) =>
+        currentPage: () => store.getState().ui.selectedPage,
+        graphFor: (page, mode) =>
             buildFocusGraphForState({
                 ...store.getState(),
-                activePanel: panel,
                 interaction: {
                     ...store.getState().interaction,
-                    mode
+                    focusScope: mode
+                },
+                ui: {
+                    ...store.getState().ui,
+                    selectedPage: page
                 }
             }),
-        mode: () => store.getState().interaction.mode
+        mode: () => store.getState().interaction.focusScope
     });
     const commandDispatcher = new CommandDispatcher({
         focusManager,
         onLogsReload: async () => {
             logsReloadRequests += 1;
         },
-        onQuit: async () => {
-            quitRequests += 1;
-        },
-        onRedraw: () => {
-            redrawRequests += 1;
-        },
+        onQuit: async () => undefined,
+        onRedraw: () => undefined,
         store
     });
     const keyDispatcher = new KeyDispatcher();
 
-    focusManager.syncPanel(store.getState().activePanel, store.getState().interaction.mode);
+    focusManager.syncPanel(store.getState().ui.selectedPage, store.getState().interaction.focusScope);
 
     return {
         async press(input: string, key: Record<string, boolean> = {}) {
-            await commandDispatcher.dispatchMany(keyDispatcher.dispatch(store.getState().interaction.mode, { input, key }));
+            await commandDispatcher.dispatchMany(keyDispatcher.dispatch(store.getState().interaction.focusScope, { input, key }));
         },
         logsReloadCount() {
             return logsReloadRequests;
-        },
-        quitCount() {
-            return quitRequests;
-        },
-        redrawCount() {
-            return redrawRequests;
         },
         store
     };
@@ -162,6 +165,14 @@ function seedPrompt3State(store: TuiAppStore) {
             mcpPath: "/alpha/mcp",
             name: "alpha",
             provider: "local"
+        },
+        {
+            defaultWorkspace: "/workspace/beta",
+            enabled: true,
+            mcpEnabled: false,
+            mcpPath: "/beta/mcp",
+            name: "beta",
+            provider: "ssh"
         }
     ]);
     store.setConfigView({
@@ -172,6 +183,13 @@ function seedPrompt3State(store: TuiAppStore) {
                 name: "alpha",
                 provider: "local",
                 workspace: "/workspace/alpha"
+            },
+            {
+                enabled: true,
+                mcp: { enabled: false, path: "/beta/mcp" },
+                name: "beta",
+                provider: "ssh",
+                workspace: "/workspace/beta"
             }
         ],
         mcp: {
@@ -184,10 +202,18 @@ function seedPrompt3State(store: TuiAppStore) {
     store.replaceSnapshot({
         connectionState: "connected",
         daemonState: "running",
-        lastSeq: 3,
+        lastSeq: 20,
         name: "alpha",
         ready: true,
         status: "ready"
+    } as never);
+    store.replaceSnapshot({
+        connectionState: "connected",
+        daemonState: "stopped",
+        lastSeq: 12,
+        name: "beta",
+        ready: false,
+        status: "stopped"
     } as never);
     store.replaceToolCalls("alpha", [
         {
@@ -220,10 +246,19 @@ function seedPrompt3State(store: TuiAppStore) {
     store.replaceLogs("alpha", [
         ...Array.from({ length: 20 }, (_, index) => ({
             instance: "alpha",
-            message: `line ${index + 1}`,
+            message: `alpha line ${index + 1}`,
             receivedAt: `2026-07-09T00:00:${String(index).padStart(2, "0")}.000Z`,
             seq: index + 1,
             stream: "stdout" as const
         }))
+    ]);
+    store.replaceLogs("beta", [
+        {
+            instance: "beta",
+            message: "beta line 1",
+            receivedAt: "2026-07-09T00:01:00.000Z",
+            seq: 1,
+            stream: "stderr" as const
+        }
     ]);
 }
