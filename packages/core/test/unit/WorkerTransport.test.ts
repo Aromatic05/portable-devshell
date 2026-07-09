@@ -12,9 +12,14 @@ import {
     DockerWorkerTransport,
     LocalWorkerTransport,
     PodmanWorkerTransport,
+    RemoteWorkerInstaller,
     SshWorkerTransport,
-    WorkerBinary
+    WorkerBinary,
+    getWorkerTargetByKey
 } from "@portable-devshell/core";
+import { createError, errorCodes } from "@portable-devshell/shared";
+
+const shellEscape = (value: string): string => `'${value.replaceAll("'", `'\\''`)}'`;
 
 test("local transport builds start command and rpc bridge", async () => {
     const recorder = createSpawnRecorder();
@@ -184,7 +189,7 @@ test("local transport preserves base process env when instance env is provided",
     });
 });
 
-test("ssh transport includes remote cwd in command", async () => {
+test("ssh transport uses remote cwd only for start command", async () => {
     const recorder = createSpawnRecorder();
     const transport = new SshWorkerTransport({
         command: "ssh-bin devbox",
@@ -193,7 +198,10 @@ test("ssh transport includes remote cwd in command", async () => {
         spawnFunction: recorder.spawn
     });
 
-    const result = await transport.runWorkerCommand("status", { instanceName: "task-3-ssh" });
+    const result = await transport.runWorkerCommand("start", {
+        instanceName: "task-3-ssh",
+        workspacePath: "/srv/workspaces/task 3"
+    });
 
     assert.equal(result.exitCode, 0);
     assert.deepEqual(recorder.calls[0], {
@@ -207,7 +215,7 @@ test("ssh transport includes remote cwd in command", async () => {
             "--",
             "sh",
             "-lc",
-            "cd '/srv/workspaces/task 3' && '/usr/local/bin/devshell-worker' 'status' '--instance' 'task-3-ssh'"
+            shellEscape("cd '/srv/workspaces/task 3' && '/usr/local/bin/devshell-worker' 'start' '--instance' 'task-3-ssh'")
         ],
         options: { cwd: undefined, env: undefined, stdio: ["ignore", "pipe", "pipe"] }
     });
@@ -222,15 +230,15 @@ test("ssh transport includes remote cwd in command", async () => {
             "--",
             "sh",
             "-lc",
-            "cd '/srv/workspaces/task 3' && '/usr/local/bin/devshell-worker' 'status' '--instance' 'task-3-ssh'"
+            shellEscape("cd '/srv/workspaces/task 3' && '/usr/local/bin/devshell-worker' 'start' '--instance' 'task-3-ssh'")
         ],
         commandDisplay:
             `ssh-bin -oBatchMode=yes -oNumberOfPasswordPrompts=0 -oKbdInteractiveAuthentication=no -oPasswordAuthentication=no devbox -- sh -lc ` +
-            JSON.stringify("cd '/srv/workspaces/task 3' && '/usr/local/bin/devshell-worker' 'status' '--instance' 'task-3-ssh'"),
+            shellEscape("cd '/srv/workspaces/task 3' && '/usr/local/bin/devshell-worker' 'start' '--instance' 'task-3-ssh'"),
         cwd: "/srv/workspaces/task 3",
         exitCode: 0,
         instance: "task-3-ssh",
-        operation: "status",
+        operation: "start",
         provider: "ssh"
     });
 });
@@ -257,7 +265,7 @@ test("ssh transport runs installWorker probe via remote shell", async () => {
             "--",
             "sh",
             "-lc",
-            "cd '/srv/workspaces/task 3' && '/usr/local/bin/devshell-worker' '--version'"
+            shellEscape("'/usr/local/bin/devshell-worker' '--version'")
         ],
         options: { cwd: undefined, env: undefined, stdio: ["ignore", "pipe", "pipe"] }
     });
@@ -315,7 +323,7 @@ test("ssh transport probes remote target before installing default worker", asyn
             "--",
             "sh",
             "-lc",
-            `printf '%s\n%s\n' "$(uname -s)" "$(uname -m)"`
+            shellEscape("uname -s && uname -m")
         ],
         options: { cwd: undefined, env: undefined, stdio: ["ignore", "pipe", "pipe"] }
     });
@@ -330,7 +338,7 @@ test("ssh transport probes remote target before installing default worker", asyn
             "--",
             "sh",
             "-lc",
-            'printf %s "${HOME:?HOME is required to install the worker}"'
+            shellEscape('printf %s "${HOME:?HOME is required to install the worker}"')
         ],
         options: { cwd: undefined, env: undefined, stdio: ["ignore", "pipe", "pipe"] }
     });
@@ -348,33 +356,98 @@ test("ssh transport probes remote target before installing default worker", asyn
             "--",
             "sh",
             "-lc",
-            "'/home/dev/.devshell/bin/devshell-worker' '--version'"
+            shellEscape("'/home/dev/.devshell/bin/devshell-worker' '--version'")
         ],
         options: { cwd: undefined, env: undefined, stdio: ["ignore", "pipe", "pipe"] }
     });
     assert.deepEqual(Buffer.concat(recorder.children[2]?.stdinChunks ?? []), worker.contents);
 });
 
-test("ssh transport surfaces missing target-specific asset as structured error", async () => {
+test("remote installer surfaces missing target-specific asset as structured error", async () => {
+    const installer = new RemoteWorkerInstaller({
+        probeTarget: async () => getWorkerTargetByKey("darwin-arm64"),
+        resolver: {
+            async resolve() {
+                throw createError({
+                    code: errorCodes.coreWorkerAssetUnavailable,
+                    details: {
+                        searchedPaths: [],
+                        targetKey: "darwin-arm64"
+                    },
+                    message: "Worker asset is unavailable for target darwin-arm64.",
+                    retryable: false
+                });
+            }
+        } as never,
+        spawnShell() {
+            throw new Error("spawnShell should not be called when resolution fails");
+        },
+        createContext(operation, command) {
+            return {
+                command: [...command],
+                commandDisplay: command.join(" "),
+                operation,
+                provider: "ssh"
+            };
+        },
+        createProviderError(_context, cause) {
+            throw cause;
+        }
+    });
+
+    await assert.rejects(installer.ensure("devshell-worker"), (error: unknown) => {
+        assert.ok(typeof error === "object" && error !== null);
+        assert.equal((error as { code?: string }).code, "core.workerAssetUnavailable");
+        assert.equal((error as { details?: Record<string, unknown> }).details?.targetKey, "darwin-arm64");
+        return true;
+    });
+});
+
+test("ssh transport reinstalls default worker when target asset changes", async (t) => {
+    const firstWorker = await createDummyWorkerBinary("first");
+    const secondWorker = await createDummyWorkerBinary("second");
+    t.after(firstWorker.cleanup);
+    t.after(secondWorker.cleanup);
+
+    const previousWorkerPath = process.env.PORTABLE_DEVSHELL_WORKER_DARWIN_ARM64_PATH;
+    process.env.PORTABLE_DEVSHELL_WORKER_DARWIN_ARM64_PATH = firstWorker.path;
+    t.after(() => {
+        restoreEnv("PORTABLE_DEVSHELL_WORKER_DARWIN_ARM64_PATH", previousWorkerPath);
+    });
+
     const recorder = createSpawnRecorder((_call, child, callIndex) => {
-        if (callIndex === 0) {
+        if (callIndex === 0 || callIndex === 4) {
             closeRecordedChild(child, { stdout: "Darwin\narm64\n" });
             return true;
         }
 
-        return false;
+        if (callIndex === 1 || callIndex === 5) {
+            closeRecordedChild(child, { stdout: "/home/dev" });
+            return true;
+        }
+
+        if (callIndex === 2 || callIndex === 6) {
+            child.stdin.once("finish", () => {
+                closeRecordedChild(child);
+            });
+            return true;
+        }
+
+        closeRecordedChild(child);
+        return true;
     });
     const transport = new SshWorkerTransport({
         command: "ssh-bin devbox",
         spawnFunction: recorder.spawn
     });
 
-    await assert.rejects(transport.installWorker(), (error: unknown) => {
-        assert.ok(typeof error === "object" && error !== null);
-        assert.equal((error as { code?: string }).code, "core.workerAssetUnavailable");
-        assert.equal((error as { details?: Record<string, unknown> }).details?.targetKey, "darwin-arm64");
-        return true;
-    });
+    await transport.installWorker();
+    process.env.PORTABLE_DEVSHELL_WORKER_DARWIN_ARM64_PATH = secondWorker.path;
+    await transport.installWorker();
+
+    assert.equal(Buffer.concat(recorder.children[2]?.stdinChunks ?? []).equals(firstWorker.contents), true);
+    assert.equal(Buffer.concat(recorder.children[6]?.stdinChunks ?? []).equals(secondWorker.contents), true);
+    assert.notEqual(recorder.calls[2]?.args[8], recorder.calls[6]?.args[8]);
 });
 
 test("ssh transport appends interactive-auth hint when batch mode authentication fails", async () => {
@@ -455,7 +528,7 @@ test("ssh transport interactive start establishes a reusable control socket", as
             "--",
             "sh",
             "-lc",
-            "'/usr/local/bin/devshell-worker' 'start' '--instance' 'demo-ssh'"
+            shellEscape("'/usr/local/bin/devshell-worker' 'start' '--instance' 'demo-ssh'")
         ],
         options: { cwd: undefined, env: undefined, stdio: ["ignore", "pipe", "pipe"] }
     });
@@ -473,7 +546,7 @@ test("ssh transport interactive start establishes a reusable control socket", as
             "--",
             "sh",
             "-lc",
-            "'/usr/local/bin/devshell-worker' 'rpc' '--instance' 'demo-ssh'"
+            shellEscape("'/usr/local/bin/devshell-worker' 'rpc' '--instance' 'demo-ssh'")
         ],
         options: { cwd: undefined, env: undefined, stdio: ["pipe", "pipe", "pipe"] }
     });
@@ -506,7 +579,7 @@ test("docker transport builds exec command", async () => {
     });
     assert.deepEqual(recorder.calls[1], {
         command: "docker-bin",
-        args: ["exec", "-w", "/workspace", "-i", "worker-container", "/usr/local/bin/devshell-worker", "logs", "--instance", "task-3-docker"],
+        args: ["exec", "-i", "worker-container", "/usr/local/bin/devshell-worker", "logs", "--instance", "task-3-docker"],
         options: { cwd: undefined, env: undefined, stdio: ["ignore", "pipe", "pipe"] }
     });
 });
@@ -537,7 +610,7 @@ test("docker transport runs installWorker probe via exec", async () => {
     });
     assert.deepEqual(recorder.calls[1], {
         command: "docker-bin",
-        args: ["exec", "-w", "/workspace", "-i", "worker-container", "/usr/local/bin/devshell-worker", "--version"],
+        args: ["exec", "-i", "worker-container", "/usr/local/bin/devshell-worker", "--version"],
         options: { cwd: undefined, env: undefined, stdio: ["ignore", "pipe", "pipe"] }
     });
 });
@@ -593,7 +666,7 @@ test("docker transport installs default worker before exec command", async (t) =
     });
     assert.deepEqual(recorder.calls[1], {
         command: "docker-bin",
-        args: ["exec", "-i", "worker-container", "sh", "-lc", `printf '%s\n%s\n' "$(uname -s)" "$(uname -m)"`],
+        args: ["exec", "-i", "worker-container", "sh", "-lc", "uname -s && uname -m"],
         options: { cwd: undefined, env: undefined, stdio: ["ignore", "pipe", "pipe"] }
     });
     assert.deepEqual(recorder.calls[2], {
@@ -606,8 +679,6 @@ test("docker transport installs default worker before exec command", async (t) =
         command: "docker-bin",
         args: [
             "exec",
-            "-w",
-            "/workspace",
             "-i",
             "worker-container",
             "/home/dev/.devshell/bin/devshell-worker",
@@ -647,7 +718,7 @@ test("podman transport builds exec command", async () => {
     });
     assert.deepEqual(recorder.calls[1], {
         command: "podman-bin",
-        args: ["exec", "-w", "/workspace", "-i", "worker-container", "/usr/local/bin/devshell-worker", "stop", "--instance", "task-3-podman"],
+        args: ["exec", "-i", "worker-container", "/usr/local/bin/devshell-worker", "stop", "--instance", "task-3-podman"],
         options: { cwd: undefined, env: undefined, stdio: ["ignore", "pipe", "pipe"] }
     });
     assert.deepEqual(recorder.calls[2], {
@@ -683,7 +754,7 @@ test("podman transport runs installWorker probe via exec", async () => {
     });
     assert.deepEqual(recorder.calls[1], {
         command: "podman-bin",
-        args: ["exec", "-w", "/workspace", "-i", "worker-container", "/usr/local/bin/devshell-worker", "--version"],
+        args: ["exec", "-i", "worker-container", "/usr/local/bin/devshell-worker", "--version"],
         options: { cwd: undefined, env: undefined, stdio: ["ignore", "pipe", "pipe"] }
     });
 });
@@ -744,7 +815,7 @@ test("podman transport installs default worker before spawning rpc", async (t) =
     });
     assert.deepEqual(recorder.calls[1], {
         command: "podman-bin",
-        args: ["exec", "-i", "worker-container", "sh", "-lc", `printf '%s\n%s\n' "$(uname -s)" "$(uname -m)"`],
+        args: ["exec", "-i", "worker-container", "sh", "-lc", "uname -s && uname -m"],
         options: { cwd: undefined, env: undefined, stdio: ["ignore", "pipe", "pipe"] }
     });
     assert.deepEqual(recorder.calls[2], {
@@ -757,8 +828,6 @@ test("podman transport installs default worker before spawning rpc", async (t) =
         command: "podman-bin",
         args: [
             "exec",
-            "-w",
-            "/workspace",
             "-i",
             "worker-container",
             "/home/dev/.devshell/bin/devshell-worker",
@@ -996,10 +1065,15 @@ async function createDummyWorkerBinary(): Promise<{
     path: string;
     contents: Buffer;
     cleanup: () => Promise<void>;
+}>;
+async function createDummyWorkerBinary(tag: string = "remote"): Promise<{
+    path: string;
+    contents: Buffer;
+    cleanup: () => Promise<void>;
 }> {
     const directory = await mkdtemp(join(tmpdir(), "portable-devshell-core-worker-"));
     const path = join(directory, "devshell-worker");
-    const contents = Buffer.from("#!/bin/sh\necho remote worker\n", "utf8");
+    const contents = Buffer.from(`#!/bin/sh\necho remote worker ${tag}\n`, "utf8");
 
     await writeFile(path, contents, { mode: 0o755 });
 
