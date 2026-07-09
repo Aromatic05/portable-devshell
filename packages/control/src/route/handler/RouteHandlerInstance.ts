@@ -1,4 +1,5 @@
 import {
+    type ApprovalDecision,
     createError,
     errorCodes,
     type JsonValue,
@@ -80,6 +81,17 @@ export class RouteHandlerInstance {
                 return (await descriptor.worker.readLogs(readLogQuery(params))) as unknown as JsonValue;
             case "instance.readToolCalls":
                 return (await descriptor.worker.readToolCalls(readToolCallQuery(params))) as unknown as JsonValue;
+            case "instance.listApprovals":
+                return (await descriptor.worker.listApprovals()) as unknown as JsonValue;
+            case "instance.getApproval":
+                return (await descriptor.worker.getApproval(readApprovalId(params, "instance.getApproval"))) as unknown as JsonValue;
+            case "instance.decideApproval":
+                return (
+                    await descriptor.worker.decideApproval(readApprovalId(params, "instance.decideApproval"), {
+                        ...readApprovalDecision(params),
+                        decidedBy: readApprovalDecisionBy(connection, descriptor.name)
+                    })
+                ) as unknown as JsonValue;
             case "instance.subscribe":
                 return await this.#streamSubscriptionManager.subscribe(
                     connection,
@@ -132,6 +144,22 @@ function readConnectionSource(connection: ControlRpcConnection, instanceName: st
     throw createError({
         code: errorCodes.controlClientIdentityRequired,
         message: `Connection must identify as cli or tui before calling tools for instance ${instanceName}.`,
+        retryable: false,
+        details: {
+            clientKind: connection.clientKind,
+            instance: instanceName
+        }
+    });
+}
+
+function readApprovalDecisionBy(connection: ControlRpcConnection, instanceName: string): ApprovalDecision["decidedBy"] {
+    if (connection.clientKind === "cli" || connection.clientKind === "tui") {
+        return connection.clientKind;
+    }
+
+    throw createError({
+        code: errorCodes.controlClientIdentityRequired,
+        message: `Connection must identify as cli or tui before deciding approvals for instance ${instanceName}.`,
         retryable: false,
         details: {
             clientKind: connection.clientKind,
@@ -252,6 +280,45 @@ function readToolCall(params?: JsonValue): { input: JsonValue; toolName: string 
     };
 }
 
+function readApprovalId(params: JsonValue | undefined, method: string): string {
+    if (!isRecord(params) || typeof params.approvalId !== "string") {
+        throw createError({
+            code: errorCodes.targetInvalid,
+            message: `${method} requires approvalId.`,
+            retryable: false
+        });
+    }
+
+    return params.approvalId;
+}
+
+function readApprovalDecision(
+    params?: JsonValue
+): { decision: ApprovalDecision["decision"]; policyPatch?: JsonValue; reason?: string; remember?: boolean } {
+    if (!isRecord(params) || (params.decision !== "approve" && params.decision !== "deny")) {
+        throw createError({
+            code: errorCodes.targetInvalid,
+            message: "instance.decideApproval requires decision to be approve or deny.",
+            retryable: false
+        });
+    }
+
+    return {
+        decision: params.decision,
+        ...(params.policyPatch === undefined ? {} : { policyPatch: params.policyPatch }),
+        ...(params.reason === undefined
+            ? {}
+            : typeof params.reason === "string"
+              ? { reason: params.reason }
+              : failToolCallQuery("instance.decideApproval requires string reason.")),
+        ...(params.remember === undefined
+            ? {}
+            : typeof params.remember === "boolean"
+              ? { remember: params.remember }
+              : failToolCallQuery("instance.decideApproval requires boolean remember."))
+    };
+}
+
 function readToolCallQuery(params?: JsonValue): ToolCallQuery {
     if (!isRecord(params)) {
         return {};
@@ -292,11 +359,18 @@ function readToolCallSource(value: JsonValue): ToolCallSource {
 }
 
 function readToolCallStatus(value: JsonValue): ToolCallStatus {
-    if (value === "completed" || value === "failed") {
+    if (
+        value === "pendingApproval" ||
+        value === "running" ||
+        value === "completed" ||
+        value === "failed" ||
+        value === "denied" ||
+        value === "expired"
+    ) {
         return value;
     }
 
-    throw invalidToolCallQuery("instance.readToolCalls requires status to be completed or failed.");
+    throw invalidToolCallQuery("instance.readToolCalls requires status to be pendingApproval, running, completed, failed, denied, or expired.");
 }
 
 function invalidToolCallQuery(message: string) {

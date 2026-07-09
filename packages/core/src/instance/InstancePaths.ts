@@ -4,6 +4,7 @@ import { join } from "node:path";
 import type { InstanceName } from "@portable-devshell/shared";
 
 export class InstancePaths {
+    readonly approvalsFile: string;
     readonly instanceRootDir: string;
     readonly controlWorkerDir: string;
     readonly eventsFile: string;
@@ -16,6 +17,7 @@ export class InstancePaths {
     constructor(instanceName: InstanceName, homeDirectory = homedir()) {
         this.instanceRootDir = join(homeDirectory, ".devshell", instanceName);
         this.controlWorkerDir = join(this.instanceRootDir, "control-worker");
+        this.approvalsFile = join(this.controlWorkerDir, "approvals.jsonl");
         this.eventsFile = join(this.controlWorkerDir, "events.jsonl");
         this.toolCallsFile = join(this.controlWorkerDir, "tool-calls.jsonl");
         this.logsFile = join(this.controlWorkerDir, "logs.jsonl");

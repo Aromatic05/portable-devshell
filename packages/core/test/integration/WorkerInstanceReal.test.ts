@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn as nodeSpawn } from "node:child_process";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { PassThrough } from "node:stream";
@@ -175,9 +175,11 @@ test("WorkerInstance rejects not-ready and concurrent tool calls while persistin
                 "instance.connectionChanged",
                 "instance.readyChanged",
                 "toolCall.started",
+                "toolCall.running",
                 "log.appended",
                 "toolCall.completed",
                 "toolCall.started",
+                "toolCall.running",
                 "toolCall.failed"
             ]
         );
@@ -189,6 +191,13 @@ test("WorkerInstance rejects not-ready and concurrent tool calls while persistin
             toolName: "bash_run"
         });
         assert.deepEqual(replay.events[9]?.data, {
+            callId: replay.events[8]?.data?.callId,
+            source: "cli",
+            startedAt: replay.events[8]?.data?.startedAt,
+            status: "running",
+            toolName: "bash_run"
+        });
+        assert.deepEqual(replay.events[10]?.data, {
             bytes: 240,
             callId: replay.events[8]?.data?.callId,
             preview: stdout.slice(0, 160),
@@ -197,11 +206,11 @@ test("WorkerInstance rejects not-ready and concurrent tool calls while persistin
             tail: stdout.slice(-160),
             toolName: "bash_run"
         });
-        assert.equal((replay.events[9]?.data as { preview?: string }).preview, stdout.slice(0, 160));
-        assert.notEqual((replay.events[9]?.data as { preview?: string }).preview, stdout);
-        assert.deepEqual(replay.events[10]?.data, {
+        assert.equal((replay.events[10]?.data as { preview?: string }).preview, stdout.slice(0, 160));
+        assert.notEqual((replay.events[10]?.data as { preview?: string }).preview, stdout);
+        assert.deepEqual(replay.events[11]?.data, {
             callId: replay.events[8]?.data?.callId,
-            completedAt: replay.events[10]?.data?.completedAt,
+            completedAt: replay.events[11]?.data?.completedAt,
             exitCode: 0,
             source: "cli",
             startedAt: replay.events[8]?.data?.startedAt,
@@ -210,9 +219,16 @@ test("WorkerInstance rejects not-ready and concurrent tool calls while persistin
             stdoutBytes: 240,
             toolName: "bash_run"
         });
-        assert.deepEqual(replay.events[12]?.data, {
-            callId: replay.events[12]?.data?.callId,
-            completedAt: replay.events[12]?.data?.completedAt,
+        assert.deepEqual(replay.events[13]?.data, {
+            callId: replay.events[13]?.data?.callId,
+            source: "cli",
+            startedAt: replay.events[13]?.data?.startedAt,
+            status: "running",
+            toolName: "bash_run"
+        });
+        assert.deepEqual(replay.events[14]?.data, {
+            callId: replay.events[14]?.data?.callId,
+            completedAt: replay.events[14]?.data?.completedAt,
             errorCode: errorCodes.coreToolSchemaUnavailable,
             source: "cli",
             startedAt: replay.events[12]?.data?.startedAt,
@@ -221,6 +237,141 @@ test("WorkerInstance rejects not-ready and concurrent tool calls while persistin
         });
 
         await instance.stop();
+    } finally {
+        await instance.close();
+        await rm(homeDirectory, { force: true, recursive: true });
+    }
+});
+
+test("WorkerInstance waits for approval before invoking tools and persists approval records", async () => {
+    const homeDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-instance-approval-"));
+    const harness = createWorkerInstanceHarness();
+    const instance = new WorkerInstanceFactory().create({
+        approvalPolicy: { mode: "ask" },
+        homeDirectory,
+        name: asInstanceName("task-6-approval"),
+        transport: harness.transport
+    });
+
+    try {
+        await instance.start("/tmp/workspace");
+        const beforeInvokeCount = harness.requestedMethods();
+        const callPromise = instance.callTool("bash_run", { command: "pwd" }, cliToolCallContext);
+
+        await new Promise((resolve) => setTimeout(resolve, 25));
+        assert.equal(harness.requestedMethods(), beforeInvokeCount);
+
+        const approvals = await instance.listApprovals();
+        assert.equal(approvals.length, 1);
+        assert.equal(approvals[0]?.status, "pending");
+        assert.equal(approvals[0]?.source, "cli");
+
+        const approvalId = approvals[0]?.approvalId ?? "";
+        assert.notEqual(approvalId, "");
+        assert.equal((await instance.getApproval(approvalId)).status, "pending");
+
+        const pendingReplay = instance.subscribe(1);
+        assert.equal(pendingReplay.kind, "events");
+        assert.equal(pendingReplay.events.some((event) => event.type === "approval.requested"), true);
+        assert.equal(pendingReplay.events.some((event) => event.type === "toolCall.pendingApproval"), true);
+        assert.equal(pendingReplay.events.some((event) => event.type === "toolCall.running"), false);
+
+        await instance.decideApproval(approvalId, {
+            decidedBy: "cli",
+            decision: "approve",
+            reason: "approved in test"
+        });
+        await harness.waitForMethod("bash_run");
+        harness.respond("bash_run", {
+            exitCode: 0,
+            stderr: "",
+            stdout: "/tmp/workspace\n"
+        });
+
+        const result = await callPromise;
+        assert.equal(result.stdout, "/tmp/workspace\n");
+
+        const records = await instance.readToolCalls();
+        assert.equal(records[0]?.status, "completed");
+        assert.equal(records[0]?.decision, "approved");
+        assert.equal(records[0]?.approvalId, approvalId);
+
+        const approved = await instance.getApproval(approvalId);
+        assert.equal(approved.status, "approved");
+        assert.equal(approved.decision?.decision, "approve");
+        assert.equal(approved.decision?.decidedBy, "cli");
+
+        const approvalsFile = await readFile(join(homeDirectory, ".devshell", "task-6-approval", "control-worker", "approvals.jsonl"), "utf8");
+        assert.match(approvalsFile, new RegExp(approvalId, "u"));
+
+        const replay = instance.subscribe(1);
+        assert.equal(replay.kind, "events");
+        const eventTypes = replay.events.map((event) => event.type);
+        assert.equal(eventTypes.includes("approval.requested"), true);
+        assert.equal(eventTypes.includes("approval.approved"), true);
+        assert.equal(eventTypes.includes("toolCall.pendingApproval"), true);
+        assert.equal(eventTypes.includes("toolCall.running"), true);
+        assert.equal(eventTypes.includes("toolCall.completed"), true);
+    } finally {
+        await instance.close();
+        await rm(homeDirectory, { force: true, recursive: true });
+    }
+});
+
+test("WorkerInstance denies and expires approval-gated calls without invoking tools", async () => {
+    const homeDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-instance-approval-fail-"));
+    const harness = createWorkerInstanceHarness();
+    const instance = new WorkerInstanceFactory().create({
+        approvalPolicy: { mode: "ask" },
+        approvalTimeout: { ms: 40 },
+        homeDirectory,
+        name: asInstanceName("task-6-approval-fail"),
+        transport: harness.transport
+    });
+
+    try {
+        await instance.start("/tmp/workspace");
+
+        const beforeDeniedInvokeCount = harness.requestedMethods();
+        const deniedPromise = instance.callTool("bash_run", { command: "pwd" }, { requestId: "req-deny", source: "mcp" });
+        await new Promise((resolve) => setTimeout(resolve, 25));
+        const deniedApprovalId = (await instance.listApprovals())[0]?.approvalId ?? "";
+        await instance.decideApproval(deniedApprovalId, {
+            decidedBy: "cli",
+            decision: "deny",
+            reason: "denied in test"
+        });
+        await assert.rejects(deniedPromise, (error: unknown) => {
+            assert.equal((error as { code?: string }).code, errorCodes.coreApprovalDenied);
+            return true;
+        });
+        assert.equal(harness.requestedMethods(), beforeDeniedInvokeCount);
+
+        const afterDenied = await instance.readToolCalls();
+        assert.equal(afterDenied[0]?.status, "denied");
+        assert.equal(afterDenied[0]?.source, "mcp");
+        assert.equal(afterDenied[0]?.decision, "denied");
+
+        const beforeExpiredInvokeCount = harness.requestedMethods();
+        const expiredPromise = instance.callTool("bash_run", { command: "pwd" }, cliToolCallContext);
+        await assert.rejects(expiredPromise, (error: unknown) => {
+            assert.equal((error as { code?: string }).code, errorCodes.coreApprovalExpired);
+            return true;
+        });
+        assert.equal(harness.requestedMethods(), beforeExpiredInvokeCount);
+
+        const records = await instance.readToolCalls();
+        assert.deepEqual(records.map((record) => record.status), ["denied", "expired"]);
+        assert.deepEqual(records.map((record) => record.decision), ["denied", "expired"]);
+
+        const replay = instance.subscribe(1);
+        assert.equal(replay.kind, "events");
+        const eventTypes = replay.events.map((event) => event.type);
+        assert.equal(eventTypes.includes("approval.denied"), true);
+        assert.equal(eventTypes.includes("approval.expired"), true);
+        assert.equal(eventTypes.includes("toolCall.denied"), true);
+        assert.equal(eventTypes.includes("toolCall.expired"), true);
+        assert.equal(eventTypes.includes("toolCall.running"), false);
     } finally {
         await instance.close();
         await rm(homeDirectory, { force: true, recursive: true });

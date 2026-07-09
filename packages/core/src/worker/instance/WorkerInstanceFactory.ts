@@ -1,6 +1,7 @@
-import type { InstanceEvent, ToolCallRecord } from "@portable-devshell/shared";
+import type { ApprovalRequest, InstanceEvent, ToolCallRecord } from "@portable-devshell/shared";
 import type { InstanceLogEntry } from "../../log/store/LogStoreInstance.js";
 
+import { ApprovalManager, ApprovalStore } from "../../approval/ApprovalInfra.js";
 import { InstanceEventBuffer } from "../../log/LogEventBuffer.js";
 import { JsonlStore } from "../../log/store/LogStoreJsonl.js";
 import { InstanceLogStore } from "../../log/store/LogStoreInstance.js";
@@ -43,6 +44,12 @@ export class WorkerInstanceFactory {
             protocolClient: new WorkerProtocolClient(rpcClient),
             rpcBridge,
             stateMachine: new InstanceStateMachine(resolved.name),
+            approvalManager: new ApprovalManager({
+                instanceName: resolved.name,
+                policy: resolved.approvalPolicy,
+                store: new ApprovalStore(new JsonlStore<ApprovalRequest>(paths.approvalsFile)),
+                timeout: resolved.approvalTimeout
+            }),
             toolCallHistory: new ToolCallHistory(resolved.name, new JsonlStore<ToolCallRecord>(paths.toolCallsFile)),
             toolInvoker: new WorkerToolInvoker(rpcClient, catalog)
         });

@@ -1,4 +1,4 @@
-import type { InstanceName, WorkspacePath } from "@portable-devshell/shared";
+import type { ApprovalPolicy, ApprovalTimeout, InstanceName, WorkspacePath } from "@portable-devshell/shared";
 
 import type { WorkerCommandTransport } from "../command/WorkerCommandTransport.js";
 import type { WorkerHandshakeParams } from "../../worker/protocol/WorkerProtocolClient.js";
@@ -12,6 +12,8 @@ export interface WorkerInstanceConfig {
     env?: NodeJS.ProcessEnv;
     eventBufferSize?: number;
     handshake?: Partial<WorkerHandshakeParams>;
+    approvalPolicy?: ApprovalPolicy;
+    approvalTimeout?: ApprovalTimeout;
 }
 
 export interface ResolvedWorkerInstanceConfig extends WorkerInstanceConfig {

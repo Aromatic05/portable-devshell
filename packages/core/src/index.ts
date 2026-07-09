@@ -1,3 +1,4 @@
+export * from "./approval/ApprovalInfra.js";
 export * from "./instance/InstancePaths.js";
 export * from "./instance/state/InstanceStateMachine.js";
 export * from "./instance/state/InstanceStateRuntime.js";

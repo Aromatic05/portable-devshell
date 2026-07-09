@@ -75,6 +75,27 @@ async function verifyRpcMethodsOverReusedConnection(): Promise<void> {
         ]);
         assert.deepEqual(worker.lastReadToolCallsQuery, { limit: 1 });
 
+        const approvals = await client.request("instance.listApprovals", { instance: "alpha", kind: "instance" });
+        assert.equal(approvals.result.length, 1);
+        assert.equal(approvals.result[0].approvalId, "approval-1");
+
+        const approval = await client.request(
+            "instance.getApproval",
+            { instance: "alpha", kind: "instance" },
+            { approvalId: "approval-1" }
+        );
+        assert.equal(approval.result.status, "pending");
+
+        const decided = await client.request(
+            "instance.decideApproval",
+            { instance: "alpha", kind: "instance" },
+            { approvalId: "approval-1", decision: "approve", reason: "approved in rpc test", remember: true }
+        );
+        assert.equal(decided.result.status, "approved");
+        assert.equal(worker.lastApprovalDecision?.approvalId, "approval-1");
+        assert.equal(worker.lastApprovalDecision?.decision, "approve");
+        assert.equal(worker.lastApprovalDecision?.decidedBy, "cli");
+
         const toolCall = await client.request(
             "instance.callTool",
             { instance: "alpha", kind: "instance" },
@@ -422,7 +443,23 @@ async function waitFor(factory: () => boolean, timeoutMs = 1_000): Promise<void>
 
 class FakeWorker {
     readonly #name: string;
+    #approvals = [
+        {
+            approvalId: "approval-1",
+            callId: "call-approval-1",
+            createdAt: "2026-07-08T00:00:02.000Z",
+            expiresAt: "2026-07-08T00:05:02.000Z",
+            inputSummary: "{\"command\":\"pwd\"}",
+            instance: "alpha",
+            reason: "Approval required before running bash_run.",
+            riskLevel: "medium",
+            source: "cli",
+            status: "pending",
+            toolName: "bash_run"
+        }
+    ];
     #interactiveStartEnabled = false;
+    #lastApprovalDecision?: { approvalId: string; decidedBy: string; decision: string; reason?: string; remember?: boolean };
     #refreshCount = 0;
     #lastReadToolCallsQuery?: Record<string, unknown>;
     #lastInteractiveInput?: string;
@@ -465,6 +502,10 @@ class FakeWorker {
 
     get lastToolCall() {
         return this.#lastToolCall;
+    }
+
+    get lastApprovalDecision() {
+        return this.#lastApprovalDecision;
     }
 
     get lastReadToolCallsQuery() {
@@ -547,6 +588,41 @@ class FakeWorker {
                 toolName: "bash_run"
             }
         ];
+    }
+
+    async listApprovals() {
+        return this.#approvals;
+    }
+
+    async getApproval(approvalId: string) {
+        return this.#approvals.find((approval) => approval.approvalId === approvalId);
+    }
+
+    async decideApproval(
+        approvalId: string,
+        input: { decidedBy: string; decision: string; reason?: string; remember?: boolean }
+    ) {
+        this.#lastApprovalDecision = {
+            approvalId,
+            ...input
+        };
+        this.#approvals = this.#approvals.map((approval) =>
+            approval.approvalId === approvalId
+                ? {
+                      ...approval,
+                      decision: {
+                          approvalId,
+                          decidedAt: "2026-07-08T00:00:03.000Z",
+                          decidedBy: input.decidedBy,
+                          decision: input.decision,
+                          ...(input.reason === undefined ? {} : { reason: input.reason }),
+                          ...(input.remember === undefined ? {} : { remember: input.remember })
+                      },
+                      status: input.decision === "approve" ? "approved" : "denied"
+                  }
+                : approval
+        );
+        return this.#approvals[0];
     }
 
     async callTool(

@@ -15,6 +15,9 @@ const methodScopes = new Map<string, RouteScope>([
     ["instance.refreshStatus", "instance"],
     ["instance.readLogs", "instance"],
     ["instance.readToolCalls", "instance"],
+    ["instance.listApprovals", "instance"],
+    ["instance.getApproval", "instance"],
+    ["instance.decideApproval", "instance"],
     ["instance.subscribe", "instance"],
     ["instance.callTool", "instance"]
 ]);

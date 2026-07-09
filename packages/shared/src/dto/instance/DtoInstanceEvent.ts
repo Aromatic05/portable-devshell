@@ -11,6 +11,7 @@ export type InstanceEventType =
     | "worker.rpcDisconnected"
     | "worker.schemaRefreshed"
     | "toolCall.started"
+    | "toolCall.pendingApproval"
     | "toolCall.running"
     | "toolCall.completed"
     | "toolCall.failed"

@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto";
 
 import {
+    type ApprovalDecision,
+    type ApprovalRequest,
     asWorkspacePath,
     createError,
     errorCodes,
@@ -8,11 +10,13 @@ import {
     type CommandResult,
     type JsonValue,
     type ToolCallContext,
+    type ToolCallApprovalDecision,
     type ToolCallQuery,
     type ToolCallRecord,
     type WorkspacePath
 } from "@portable-devshell/shared";
 
+import type { ApprovalManager } from "../../approval/ApprovalInfra.js";
 import type { EventStreamGap, EventStreamSlice, InstanceEventInput } from "../../log/LogEventBuffer.js";
 import { InstanceEventBuffer } from "../../log/LogEventBuffer.js";
 import type { LogQuery } from "../../log/LogQuery.js";
@@ -30,6 +34,7 @@ import type { InstanceSnapshot } from "../../instance/state/InstanceStateSnapsho
 import type { ResolvedWorkerInstanceConfig } from "./WorkerInstanceConfig.js";
 
 interface WorkerInstanceDependencies {
+    approvalManager: ApprovalManager;
     catalog: WorkerToolCatalog;
     commandClient: WorkerCommandClient;
     config: ResolvedWorkerInstanceConfig;
@@ -43,6 +48,7 @@ interface WorkerInstanceDependencies {
 }
 
 export class WorkerInstance {
+    readonly #approvalManager: ApprovalManager;
     readonly #catalog: WorkerToolCatalog;
     readonly #commandClient: WorkerCommandClient;
     readonly #config: ResolvedWorkerInstanceConfig;
@@ -59,6 +65,7 @@ export class WorkerInstance {
     #workspacePath?: WorkspacePath;
 
     constructor(dependencies: WorkerInstanceDependencies) {
+        this.#approvalManager = dependencies.approvalManager;
         this.#catalog = dependencies.catalog;
         this.#commandClient = dependencies.commandClient;
         this.#config = dependencies.config;
@@ -291,6 +298,7 @@ export class WorkerInstance {
 
         const callId = randomUUID();
         const startedAt = new Date().toISOString();
+        const inputSummary = toInputSummary(input);
         const eventContext = {
             callId,
             requestId: context.requestId,
@@ -300,7 +308,7 @@ export class WorkerInstance {
         } as const;
 
         try {
-            await this.#toolCallHistory.started(callId, toolName, toInputSummary(input), context, startedAt);
+            await this.#toolCallHistory.started(callId, toolName, inputSummary, context, startedAt);
         } catch (error) {
             if (error instanceof InstanceBusyError) {
                 throw createError({
@@ -323,10 +331,26 @@ export class WorkerInstance {
             })
         );
 
+        const approvalState = await this.#prepareToolCallApproval(callId, toolName, inputSummary, context, startedAt);
+        const runningContext = {
+            ...eventContext,
+            ...(approvalState.approvalId === undefined ? {} : { approvalId: approvalState.approvalId })
+        };
+
+        await this.#appendEvent(
+            "toolCall.running",
+            toEventData({
+                ...runningContext,
+                ...(approvalState.decision === undefined ? {} : { decision: approvalState.decision }),
+                startedAt,
+                status: "running"
+            })
+        );
+
         try {
             const result = await this.#toolInvoker.invoke(toolName, input);
             const completedAt = new Date().toISOString();
-            await this.#appendToolLogs(result, eventContext);
+            await this.#appendToolLogs(result, runningContext);
             await this.#toolCallHistory.completed(
                 callId,
                 {
@@ -340,8 +364,9 @@ export class WorkerInstance {
             await this.#appendEvent(
                 "toolCall.completed",
                 toEventData({
-                    ...eventContext,
+                    ...runningContext,
                     completedAt,
+                    ...(approvalState.decision === undefined ? {} : { decision: approvalState.decision }),
                     exitCode: result.exitCode,
                     startedAt,
                     status: "completed",
@@ -357,7 +382,7 @@ export class WorkerInstance {
             const result = asCommandResult(error);
 
             if (result !== undefined) {
-                await this.#appendToolLogs(result, eventContext);
+                await this.#appendToolLogs(result, runningContext);
             }
             await this.#toolCallHistory.failed(
                 callId,
@@ -375,8 +400,9 @@ export class WorkerInstance {
             await this.#appendEvent(
                 "toolCall.failed",
                 toEventData({
-                    ...eventContext,
+                    ...runningContext,
                     completedAt: finishedAt,
+                    ...(approvalState.decision === undefined ? {} : { decision: approvalState.decision }),
                     errorCode,
                     exitCode: result?.exitCode,
                     startedAt,
@@ -388,6 +414,21 @@ export class WorkerInstance {
             );
             throw error;
         }
+    }
+
+    async listApprovals(): Promise<ApprovalRequest[]> {
+        return await this.#approvalManager.listApprovals();
+    }
+
+    async getApproval(approvalId: string): Promise<ApprovalRequest> {
+        return await this.#approvalManager.getApproval(approvalId);
+    }
+
+    async decideApproval(
+        approvalId: string,
+        input: { decision: ApprovalDecision["decision"]; decidedBy: ApprovalDecision["decidedBy"]; policyPatch?: JsonValue; reason?: string; remember?: boolean }
+    ): Promise<ApprovalRequest> {
+        return await this.#approvalManager.decideApproval(approvalId, input);
     }
 
     async readLogs(query: LogQuery = {}): Promise<InstanceLogEntry[]> {
@@ -597,6 +638,170 @@ export class WorkerInstance {
         return event;
     }
 
+    async #prepareToolCallApproval(
+        callId: string,
+        toolName: string,
+        inputSummary: string,
+        context: ToolCallContext,
+        startedAt: string
+    ): Promise<{ approvalId?: string; decision?: ToolCallApprovalDecision }> {
+        let evaluation: Awaited<ReturnType<ApprovalManager["evaluate"]>>;
+
+        try {
+            evaluation = await this.#approvalManager.evaluate({
+                callId,
+                context,
+                inputSummary,
+                toolName
+            });
+        } catch (error) {
+            return await this.#failToolCallBeforeInvoke(callId, toolName, context, startedAt, error);
+        }
+
+        if (evaluation.decision === "allow") {
+            await this.#toolCallHistory.running(callId);
+            return {};
+        }
+
+        if (evaluation.decision === "deny") {
+            return await this.#denyToolCall(callId, toolName, context, startedAt, evaluation.error);
+        }
+
+        await this.#toolCallHistory.pendingApproval(callId, evaluation.request.approvalId);
+        await this.#appendEvent("approval.requested", toApprovalEventData(evaluation.request));
+        await this.#appendEvent(
+            "toolCall.pendingApproval",
+            toEventData({
+                approvalId: evaluation.request.approvalId,
+                callId,
+                createdAt: evaluation.request.createdAt,
+                expiresAt: evaluation.request.expiresAt,
+                inputSummary,
+                reason: evaluation.request.reason,
+                requestId: context.requestId,
+                riskLevel: evaluation.request.riskLevel,
+                sessionId: context.sessionId,
+                source: context.source,
+                startedAt,
+                status: "pendingApproval",
+                toolName
+            })
+        );
+
+        const resolution = await evaluation.awaitDecision;
+
+        if (resolution.status === "approved") {
+            const approvedRequest = await this.#approvalManager.getApproval(evaluation.request.approvalId);
+            await this.#toolCallHistory.running(callId, "approved");
+            await this.#appendEvent("approval.approved", toApprovalEventData(approvedRequest, resolution.decision));
+            return {
+                approvalId: evaluation.request.approvalId,
+                decision: "approved"
+            };
+        }
+
+        if (resolution.status === "denied") {
+            const deniedRequest = await this.#approvalManager.getApproval(evaluation.request.approvalId);
+            await this.#appendEvent("approval.denied", toApprovalEventData(deniedRequest, resolution.decision));
+            return await this.#denyToolCall(callId, toolName, context, startedAt, resolution.error, evaluation.request.approvalId);
+        }
+
+        const expiredRequest = await this.#approvalManager.getApproval(evaluation.request.approvalId);
+        await this.#appendEvent("approval.expired", toApprovalEventData(expiredRequest));
+        return await this.#expireToolCall(callId, toolName, context, startedAt, resolution.error, evaluation.request.approvalId);
+    }
+
+    async #failToolCallBeforeInvoke(
+        callId: string,
+        toolName: string,
+        context: ToolCallContext,
+        startedAt: string,
+        error: unknown
+    ): Promise<never> {
+        const completedAt = new Date().toISOString();
+        const errorCode = getErrorCode(error, errorCodes.coreProviderFailed);
+
+        await this.#toolCallHistory.failed(callId, errorCode, completedAt);
+        await this.#appendEvent(
+            "toolCall.failed",
+            toEventData({
+                callId,
+                completedAt,
+                errorCode,
+                requestId: context.requestId,
+                sessionId: context.sessionId,
+                source: context.source,
+                startedAt,
+                status: "failed",
+                toolName
+            })
+        );
+
+        throw error;
+    }
+
+    async #denyToolCall(
+        callId: string,
+        toolName: string,
+        context: ToolCallContext,
+        startedAt: string,
+        error: unknown,
+        approvalId?: string
+    ): Promise<never> {
+        const completedAt = new Date().toISOString();
+        const errorCode = getErrorCode(error, errorCodes.coreApprovalDenied);
+
+        await this.#toolCallHistory.denied(callId, errorCode, completedAt);
+        await this.#appendEvent(
+            "toolCall.denied",
+            toEventData({
+                ...(approvalId === undefined ? {} : { approvalId }),
+                callId,
+                completedAt,
+                errorCode,
+                requestId: context.requestId,
+                sessionId: context.sessionId,
+                source: context.source,
+                startedAt,
+                status: "denied",
+                toolName
+            })
+        );
+
+        throw error;
+    }
+
+    async #expireToolCall(
+        callId: string,
+        toolName: string,
+        context: ToolCallContext,
+        startedAt: string,
+        error: unknown,
+        approvalId: string
+    ): Promise<never> {
+        const completedAt = new Date().toISOString();
+        const errorCode = getErrorCode(error, errorCodes.coreApprovalExpired);
+
+        await this.#toolCallHistory.expired(callId, errorCode, completedAt);
+        await this.#appendEvent(
+            "toolCall.expired",
+            toEventData({
+                approvalId,
+                callId,
+                completedAt,
+                errorCode,
+                requestId: context.requestId,
+                sessionId: context.sessionId,
+                source: context.source,
+                startedAt,
+                status: "expired",
+                toolName
+            })
+        );
+
+        throw error;
+    }
+
     async #appendToolLogs(
         result: CommandResult,
         context: {
@@ -732,6 +937,27 @@ function toEventData(
     record: Record<string, JsonValue | undefined>
 ): Record<string, JsonValue> {
     return Object.fromEntries(Object.entries(record).filter(([, value]) => value !== undefined)) as Record<string, JsonValue>;
+}
+
+function toApprovalEventData(request: ApprovalRequest, decision?: ApprovalDecision): Record<string, JsonValue> {
+    return toEventData({
+        approvalId: request.approvalId,
+        callId: request.callId,
+        createdAt: request.createdAt,
+        decidedAt: decision?.decidedAt,
+        decidedBy: decision?.decidedBy,
+        decision: decision?.decision,
+        expiresAt: request.expiresAt,
+        inputSummary: request.inputSummary,
+        reason: decision?.reason ?? request.reason,
+        requestId: request.requestId,
+        remember: decision?.remember,
+        riskLevel: request.riskLevel,
+        sessionId: request.sessionId,
+        source: request.source,
+        status: request.status,
+        toolName: request.toolName
+    });
 }
 
 function createStatusChangedEventData(previous: InstanceSnapshot, next: InstanceSnapshot): Record<string, JsonValue> {

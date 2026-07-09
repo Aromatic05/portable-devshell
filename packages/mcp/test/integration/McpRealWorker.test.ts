@@ -94,6 +94,94 @@ test("MCP initialize tools/list and tools/call succeed against the frozen worker
     assert.match(await readFile(join(homeDirectory, ".devshell", "aromatic-pc", "control-worker", "tool-calls.jsonl"), "utf8"), /bash_run/u);
 });
 
+test("MCP tools/call waits for approval before invoking the worker tool", async (t) => {
+    const homeDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-mcp-approval-home-"));
+    const workspacePath = await mkdtemp(join(tmpdir(), "portable-devshell-mcp-approval-workspace-"));
+    const workerBinaryPath = resolve(fileURLToPath(new URL("../../../../", import.meta.url)), "target/debug/devshell-worker");
+    const instance = new WorkerInstanceFactory().create({
+        allowTools: ["bash_run"],
+        approvalPolicy: { mode: "ask" },
+        defaultWorkspace: asWorkspacePath(workspacePath),
+        env: { ...process.env, HOME: homeDirectory },
+        homeDirectory,
+        name: asInstanceName("aromatic-pc"),
+        transport: new LocalWorkerTransport({
+            spawnFunction: nodeSpawn,
+            workerBinary: new WorkerBinary(workerBinaryPath)
+        })
+    });
+    const host = new McpHost({
+        auth: {
+            enabled: false,
+            provider: "none"
+        },
+        instances: [
+            {
+                allowlist: ["bash_run"],
+                name: "aromatic-pc",
+                worker: instance
+            }
+        ],
+        listenHost: "127.0.0.1",
+        listenPort: 0
+    });
+
+    t.after(async () => {
+        await host.stop().catch(() => undefined);
+        instance.close();
+        await instance.stop().catch(() => undefined);
+        await rm(homeDirectory, { force: true, recursive: true });
+        await rm(workspacePath, { force: true, recursive: true });
+    });
+
+    await instance.start();
+    await host.start();
+
+    const address = host.server.address;
+    assert.notEqual(address, null);
+    assert.equal(typeof address, "object");
+    const endpoint = `http://127.0.0.1:${address.port}/aromatic-pc/mcp`;
+
+    const initialize = await postJson(endpoint, await readFixture("mcp-initialize.json"));
+    const sessionHeaders = {
+        "mcp-protocol-version": String(initialize.result?.protocolVersion ?? ""),
+        "mcp-session-id": String(initialize.headers.get("mcp-session-id") ?? "")
+    };
+
+    await postRawJson(
+        endpoint,
+        {
+            jsonrpc: "2.0",
+            method: "notifications/initialized"
+        },
+        sessionHeaders
+    );
+
+    const callPromise = postJson(endpoint, await readFixture("mcp-tools-call.json"), sessionHeaders);
+    await new Promise((resolve) => setTimeout(resolve, 25));
+
+    const approvals = await instance.listApprovals();
+    assert.equal(approvals.length, 1);
+    assert.equal(approvals[0]?.status, "pending");
+    assert.equal(approvals[0]?.source, "mcp");
+    assert.deepEqual(await instance.readToolCalls(), []);
+
+    await instance.decideApproval(approvals[0]?.approvalId ?? "", {
+        decidedBy: "cli",
+        decision: "approve",
+        reason: "approved in mcp test"
+    });
+
+    const call = await callPromise;
+    assert.equal(call.error, undefined);
+    assert.equal(call.result?.isError, false);
+
+    const toolCalls = await instance.readToolCalls();
+    assert.equal(toolCalls[0]?.source, "mcp");
+    assert.equal(toolCalls[0]?.decision, "approved");
+    assert.equal(toolCalls[0]?.status, "completed");
+});
+
 async function postJson(url: string, body: JsonValue, extraHeaders?: Record<string, string>): Promise<any> {
     const response = await postRawJson(url, body, extraHeaders);
 

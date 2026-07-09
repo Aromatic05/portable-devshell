@@ -61,6 +61,7 @@ test("InstancePaths writes only into per-instance control-worker files", () => {
     assert.equal(paths.eventsFile, "/tmp/devshell-home/.devshell/task-5-paths/control-worker/events.jsonl");
     assert.equal(paths.toolCallsFile, "/tmp/devshell-home/.devshell/task-5-paths/control-worker/tool-calls.jsonl");
     assert.equal(paths.logsFile, "/tmp/devshell-home/.devshell/task-5-paths/control-worker/logs.jsonl");
+    assert.equal(paths.approvalsFile, "/tmp/devshell-home/.devshell/task-5-paths/control-worker/approvals.jsonl");
     assert.equal(paths.workerConfigFile, "/tmp/devshell-home/.devshell/task-5-paths/config.toml");
     assert.equal(paths.workerLogFile, "/tmp/devshell-home/.devshell/task-5-paths/logs/worker.log");
     assert.equal(paths.workerPidFile, "/tmp/devshell-home/.devshell/task-5-paths/state/worker.pid");

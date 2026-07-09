@@ -90,6 +90,24 @@ function createInstance(
     }>
 ): WorkerInstance {
     return new WorkerInstance({
+        approvalManager: {
+            decideApproval: async () => {
+                throw createError({
+                    code: "core.approvalNotFound",
+                    message: "unused",
+                    retryable: false
+                });
+            },
+            evaluate: async () => ({ decision: "allow" }),
+            getApproval: async () => {
+                throw createError({
+                    code: "core.approvalNotFound",
+                    message: "unused",
+                    retryable: false
+                });
+            },
+            listApprovals: async () => []
+        } as never,
         catalog: {
             hasSchema: () => false,
             listTools: () => [],
