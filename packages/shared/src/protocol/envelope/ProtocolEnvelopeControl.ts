@@ -1,34 +1,70 @@
 import type { ControlErrorBody } from "../../error/ErrorBodyControl.js";
 import type { JsonValue } from "../../type/TypeJsonValue.js";
 import type { ControlMethod } from "../method/ProtocolMethodControl.js";
-import type { ControlTarget } from "./ProtocolEnvelopeTarget.js";
+import type { ControlTarget, ControlTargetInstance } from "./ProtocolEnvelopeTarget.js";
 
-interface ControlEnvelopeBase {
+interface ControlEnvelopeWithId {
     id: string;
-    issuedAt: string;
 }
 
-export interface ControlRequestEnvelope extends ControlEnvelopeBase {
-    kind: "request";
+export interface ControlRequestEnvelope extends ControlEnvelopeWithId {
     method: ControlMethod;
     params?: JsonValue;
     target: ControlTarget;
+    type: "request";
 }
 
-export interface ControlResponseEnvelope extends ControlEnvelopeBase {
+export interface ControlResponseEnvelope extends ControlEnvelopeWithId {
     error?: ControlErrorBody;
-    kind: "response";
+    ok: boolean;
     result?: JsonValue;
+    type: "response";
 }
 
-export interface ControlEventEnvelope extends ControlEnvelopeBase {
+export interface ControlEventEnvelope {
     event: string;
-    kind: "event";
     payload?: JsonValue;
-    target: ControlTarget;
+    seq: number;
+    target: ControlTargetInstance;
+    type: "event";
 }
 
 export type ControlEnvelope =
     | ControlEventEnvelope
     | ControlRequestEnvelope
     | ControlResponseEnvelope;
+
+export interface ControlRelayInputEnvelope extends ControlEnvelopeWithId {
+    data?: string;
+    eof?: boolean;
+    type: "relay.input";
+}
+
+export interface ControlRelayOutputEnvelope extends ControlEnvelopeWithId {
+    data: string;
+    type: "relay.output";
+}
+
+export interface ControlStreamGapPayload extends Record<string, JsonValue> {
+    instance: string;
+    latestSeq: number;
+    oldestAvailableSeq: number;
+    requestedFromSeq: number;
+}
+
+export interface ControlStreamCancelledPayload extends Record<string, JsonValue> {
+    instance: string;
+    reason: string;
+}
+
+export interface ControlStreamGapEnvelope extends ControlEventEnvelope {
+    event: "stream.gap";
+    payload: ControlStreamGapPayload;
+    target: ControlTargetInstance;
+}
+
+export interface ControlStreamCancelledEnvelope extends ControlEventEnvelope {
+    event: "stream.cancelled";
+    payload: ControlStreamCancelledPayload;
+    target: ControlTargetInstance;
+}

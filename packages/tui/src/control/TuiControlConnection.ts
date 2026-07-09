@@ -1,9 +1,16 @@
 import { createConnection, type Socket } from "node:net";
 import { join } from "node:path";
 
-import { FrameReader, FrameWriter, type JsonValue } from "@portable-devshell/shared";
+import {
+    type ControlEventEnvelope,
+    type ControlResponseEnvelope,
+    type ControlTarget,
+    FrameReader,
+    FrameWriter,
+    type JsonValue
+} from "@portable-devshell/shared";
 
-import type { TuiControlEventEnvelope, TuiControlResponseEnvelope, TuiControlTarget } from "./TuiControlRequest.js";
+import type { TuiControlEventEnvelope } from "./TuiControlRequest.js";
 import { TuiControlStream, type TuiControlStreamMessage, toStreamMessage } from "./TuiControlStream.js";
 
 export interface TuiControlConnectionOptions {
@@ -30,7 +37,7 @@ export class TuiControlConnection {
         this.#socketPath = options.socketPath ?? resolveDefaultSocketPath(options.xdgRuntimeDir);
     }
 
-    async request(method: string, target: TuiControlTarget, params?: JsonValue): Promise<JsonValue> {
+    async request(method: string, target: ControlTarget, params?: JsonValue): Promise<JsonValue> {
         await this.connect();
         return await this.#requestConnected(method, target, params);
     }
@@ -99,7 +106,7 @@ export class TuiControlConnection {
         this.#connected = false;
     }
 
-    async #requestConnected(method: string, target: TuiControlTarget, params?: JsonValue): Promise<JsonValue> {
+    async #requestConnected(method: string, target: ControlTarget, params?: JsonValue): Promise<JsonValue> {
         const id = `tui-${++this.#counter}`;
         const response = new Promise<JsonValue>((resolve, reject) => {
             this.#pending.set(id, { reject, resolve });
@@ -107,7 +114,6 @@ export class TuiControlConnection {
 
         await this.#writer?.write({
             id,
-            issuedAt: new Date().toISOString(),
             method,
             params,
             target,
@@ -136,7 +142,7 @@ export class TuiControlConnection {
                 return;
             }
 
-            pending.reject(toRemoteError(frame as unknown as TuiControlResponseEnvelope));
+            pending.reject(toRemoteError(frame as unknown as ControlResponseEnvelope));
             return;
         }
 
@@ -148,7 +154,7 @@ export class TuiControlConnection {
             frame.target.kind === "instance" &&
             typeof frame.target.instance === "string"
         ) {
-            const event = frame as unknown as TuiControlEventEnvelope;
+            const event = frame as unknown as ControlEventEnvelope;
             this.#pushStreamMessage(toStreamMessage(event));
         }
     }
@@ -208,7 +214,7 @@ function mapConnectionError(error: unknown): Error {
     return error instanceof Error ? error : new Error(String(error));
 }
 
-function toRemoteError(response: TuiControlResponseEnvelope): Error {
+function toRemoteError(response: ControlResponseEnvelope): Error {
     return Object.assign(new Error(response.error?.message ?? "control request failed"), {
         code: response.error?.code ?? "control.requestFailed",
         details: response.error?.details,

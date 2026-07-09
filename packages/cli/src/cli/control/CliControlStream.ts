@@ -1,15 +1,14 @@
-import { createError, errorCodes, type JsonValue } from "@portable-devshell/shared";
+import { asInstanceName, createError, errorCodes, type ControlEventEnvelope, type JsonValue } from "@portable-devshell/shared";
 
 import type { CliControlConnection } from "./CliControlConnection.js";
 import type {
-    CliControlEventEnvelope,
     CliControlStreamCancelledEnvelope,
     CliControlStreamGapEnvelope
 } from "./CliControlRequest.js";
 
 export type CliControlStreamMessage =
     | {
-          envelope: CliControlEventEnvelope;
+          envelope: ControlEventEnvelope;
           kind: "instance.event";
       }
     | {
@@ -29,7 +28,7 @@ export class CliControlStream {
     readonly #initialMessages: CliControlStreamMessage[];
     #closed = false;
 
-    constructor(connection: CliControlConnection, initialEvents: CliControlEventEnvelope[]) {
+    constructor(connection: CliControlConnection, initialEvents: ControlEventEnvelope[]) {
         this.#connection = connection;
         this.#initialMessages = initialEvents.map((event) => toStreamMessage(event));
     }
@@ -46,7 +45,7 @@ export class CliControlStream {
                     },
                     seq: 0,
                     target: {
-                        instance: "",
+                        instance: asInstanceName(""),
                         kind: "instance"
                     },
                     type: "event"
@@ -63,7 +62,7 @@ export class CliControlStream {
         return await this.#connection.nextStreamMessage();
     }
 
-    async nextEvent(): Promise<CliControlEventEnvelope> {
+    async nextEvent(): Promise<ControlEventEnvelope> {
         const message = await this.nextMessage();
 
         if (message.kind === "instance.event") {
@@ -144,7 +143,7 @@ export function asCommandResult(value: JsonValue): CliCommandResult {
     return value as unknown as CliCommandResult;
 }
 
-function toStreamMessage(event: CliControlEventEnvelope): CliControlStreamMessage {
+function toStreamMessage(event: ControlEventEnvelope): CliControlStreamMessage {
     if (event.event === "stream.gap") {
         return {
             envelope: event as CliControlStreamGapEnvelope,

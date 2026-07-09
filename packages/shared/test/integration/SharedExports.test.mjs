@@ -44,15 +44,49 @@ test("configSchema rejects invalid auth and public exposure structure", () => {
     assert.equal(result.success, false);
 });
 
-test("envelopeSchema rejects request envelopes without target", () => {
+test("envelopeSchema accepts request envelopes with type and target.kind", () => {
     const result = envelopeSchema.safeParse({
         id: "req-1",
-        issuedAt: "2026-07-07T00:00:00.000Z",
-        kind: "request",
-        method: "controller.ping"
+        method: "control.ping",
+        target: {
+            kind: "control"
+        },
+        type: "request"
     });
 
-    assert.equal(result.success, false);
+    assert.equal(result.success, true);
+});
+
+test("envelopeSchema rejects legacy envelope fields", () => {
+    const legacyKind = envelopeSchema.safeParse({
+        id: "req-1",
+        kind: "request",
+        method: "control.ping",
+        target: {
+            kind: "control"
+        }
+    });
+    const legacyTarget = envelopeSchema.safeParse({
+        id: "req-2",
+        method: "control.ping",
+        target: {
+            type: "controller"
+        },
+        type: "request"
+    });
+    const legacyIssuedAt = envelopeSchema.safeParse({
+        id: "req-3",
+        issuedAt: "2026-07-07T00:00:00.000Z",
+        method: "control.ping",
+        target: {
+            kind: "control"
+        },
+        type: "request"
+    });
+
+    assert.equal(legacyKind.success, false);
+    assert.equal(legacyTarget.success, false);
+    assert.equal(legacyIssuedAt.success, false);
 });
 
 test("error codes use domain.reason format", () => {

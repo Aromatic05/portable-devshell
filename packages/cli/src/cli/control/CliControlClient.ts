@@ -1,4 +1,5 @@
 import type {
+    ControlEventEnvelope,
     InstanceCreateDraft,
     InstanceCreateResult,
     InstanceCreateSchema,
@@ -9,7 +10,7 @@ import type {
 } from "@portable-devshell/shared";
 
 import { CliControlConnection, type CliControlConnectionOptions } from "./CliControlConnection.js";
-import { createControlTarget, createInstanceTarget, type CliControlEventEnvelope } from "./CliControlRequest.js";
+import { createControlTarget, createInstanceTarget } from "./CliControlRequest.js";
 import {
     asCommandResult,
     asInstanceList,
@@ -123,7 +124,7 @@ export class CliControlClient implements CliControlClientLike {
     async subscribe(instance: string, fromSeq: number): Promise<CliControlStream> {
         const connection = new CliControlConnection(this.#connectionOptions);
         const result = (await connection.request("instance.subscribe", createInstanceTarget(instance), { fromSeq })) as unknown as {
-            events: CliControlEventEnvelope[];
+            events: ControlEventEnvelope[];
             lastSeq: number;
         };
 

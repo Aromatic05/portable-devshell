@@ -2,55 +2,28 @@ import { randomUUID } from "node:crypto";
 import type { Socket } from "node:net";
 
 import {
+    type ControlEventEnvelope,
     FrameReader,
     FrameWriter,
+    type ControlRelayInputEnvelope,
+    type ControlRelayOutputEnvelope,
+    type ControlRequestEnvelope,
+    type ControlResponseEnvelope,
     createError,
     errorCodes,
     toControlErrorBody,
-    type ControlClientKind,
-    type ControlErrorBody,
     type JsonValue
 } from "@portable-devshell/shared";
+import type { ControlClientKind } from "@portable-devshell/shared";
 
 import { StreamBackpressure } from "../../stream/StreamBackpressure.js";
 import { parseRouteTarget, type RouteTarget } from "../../route/RouteTarget.js";
 
-interface RpcRequestEnvelope {
-    id: string;
-    method: string;
-    params?: JsonValue;
-    target: RouteTarget;
-    type: "request";
-}
-
-interface RpcResponseEnvelope {
-    error?: ControlErrorBody;
-    id: string;
-    ok: boolean;
-    result?: JsonValue;
-    type: "response";
-}
-
-interface RpcEventEnvelope {
-    event: string;
-    payload?: JsonValue;
-    seq: number;
-    target: RouteTarget;
-    type: "event";
-}
-
-interface RpcRelayInputEnvelope {
-    data?: string;
-    eof?: boolean;
-    id: string;
-    type: "relay.input";
-}
-
-interface RpcRelayOutputEnvelope {
-    data: string;
-    id: string;
-    type: "relay.output";
-}
+type RpcRequestEnvelope = ControlRequestEnvelope & { target: RouteTarget };
+type RpcResponseEnvelope = ControlResponseEnvelope;
+type RpcEventEnvelope = ControlEventEnvelope & { target: RouteTarget };
+type RpcRelayInputEnvelope = ControlRelayInputEnvelope;
+type RpcRelayOutputEnvelope = ControlRelayOutputEnvelope;
 
 export interface ControlRpcRelaySession {
     closeInput(): void;
@@ -236,7 +209,7 @@ export class ControlRpcConnection {
             return {
                 request: {
                     id,
-                    method: frame.method,
+                    method: frame.method as ControlRequestEnvelope["method"],
                     params: frame.params,
                     target: parseRouteTarget(frame.target),
                     type: "request"

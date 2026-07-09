@@ -1,14 +1,19 @@
 import { createConnection, type Socket } from "node:net";
 import { join } from "node:path";
 
-import { FrameReader, FrameWriter, type JsonValue } from "@portable-devshell/shared";
+import {
+    type ControlEventEnvelope,
+    type ControlRelayInputEnvelope,
+    type ControlResponseEnvelope,
+    type ControlTarget,
+    FrameReader,
+    FrameWriter,
+    type JsonValue
+} from "@portable-devshell/shared";
 
 import type {
-    CliControlEventEnvelope,
     CliControlStreamCancelledEnvelope,
-    CliControlStreamGapEnvelope,
-    CliControlResponseEnvelope,
-    CliControlTarget
+    CliControlStreamGapEnvelope
 } from "./CliControlRequest.js";
 import { CliRenderError } from "../render/CliRenderError.js";
 import type { CliControlStreamMessage } from "./CliControlStream.js";
@@ -41,14 +46,14 @@ export class CliControlConnection {
         this.#socketPath = options.socketPath ?? resolveDefaultSocketPath(options.xdgRuntimeDir);
     }
 
-    async request(method: string, target: CliControlTarget, params?: JsonValue): Promise<JsonValue> {
+    async request(method: string, target: ControlTarget, params?: JsonValue): Promise<JsonValue> {
         await this.connect();
         return await this.#requestConnected(method, target, params);
     }
 
     async requestWithRelay(
         method: string,
-        target: CliControlTarget,
+        target: ControlTarget,
         relay: { onOutput(chunk: string): void; onRequestId?(requestId: string): void },
         params?: JsonValue
     ): Promise<JsonValue> {
@@ -62,7 +67,7 @@ export class CliControlConnection {
             data: Buffer.from(chunk).toString("base64"),
             id: requestId,
             type: "relay.input"
-        } as unknown as JsonValue);
+        } satisfies ControlRelayInputEnvelope as unknown as JsonValue);
     }
 
     async sendRelayEof(requestId: string): Promise<void> {
@@ -71,12 +76,12 @@ export class CliControlConnection {
             eof: true,
             id: requestId,
             type: "relay.input"
-        } as unknown as JsonValue);
+        } satisfies ControlRelayInputEnvelope as unknown as JsonValue);
     }
 
     async #requestConnected(
         method: string,
-        target: CliControlTarget,
+        target: ControlTarget,
         params?: JsonValue,
         onRelayOutput?: (chunk: string) => void,
         onRequestId?: (requestId: string) => void
@@ -93,7 +98,6 @@ export class CliControlConnection {
         try {
             await this.#writer?.write({
                 id,
-                issuedAt: new Date().toISOString(),
                 method,
                 params,
                 target,
@@ -195,7 +199,7 @@ export class CliControlConnection {
                 return;
             }
 
-            resolve.reject(toRemoteError(frame as unknown as CliControlResponseEnvelope));
+            resolve.reject(toRemoteError(frame as unknown as ControlResponseEnvelope));
             return;
         }
 
@@ -212,7 +216,7 @@ export class CliControlConnection {
             frame.target.kind === "instance" &&
             typeof frame.target.instance === "string"
         ) {
-            const event = frame as unknown as CliControlEventEnvelope;
+            const event = frame as unknown as ControlEventEnvelope;
             this.#pushStreamMessage(toStreamMessage(event));
         }
     }
@@ -275,7 +279,7 @@ function mapConnectionError(error: unknown): CliRenderError {
     return new CliRenderError("control.notRunning", error instanceof Error ? error.message : String(error));
 }
 
-function toRemoteError(response: CliControlResponseEnvelope): CliRenderError {
+function toRemoteError(response: ControlResponseEnvelope): CliRenderError {
     return new CliRenderError(response.error?.code ?? "control.requestFailed", response.error?.message ?? "control request failed", {
         cause: response.error?.cause,
         details: response.error?.details,
@@ -283,7 +287,7 @@ function toRemoteError(response: CliControlResponseEnvelope): CliRenderError {
     });
 }
 
-function toStreamMessage(event: CliControlEventEnvelope): CliControlStreamMessage {
+function toStreamMessage(event: ControlEventEnvelope): CliControlStreamMessage {
     if (event.event === "stream.gap") {
         return {
             envelope: event as CliControlStreamGapEnvelope,

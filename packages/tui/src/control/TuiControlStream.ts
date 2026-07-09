@@ -1,15 +1,14 @@
-import { createError, errorCodes, type JsonValue } from "@portable-devshell/shared";
+import { asInstanceName, createError, errorCodes, type ControlEventEnvelope, type JsonValue } from "@portable-devshell/shared";
 
 import type { TuiControlConnection } from "./TuiControlConnection.js";
 import type {
-    TuiControlEventEnvelope,
     TuiControlStreamCancelledEnvelope,
     TuiControlStreamGapEnvelope
 } from "./TuiControlRequest.js";
 
 export type TuiControlStreamMessage =
     | {
-          envelope: TuiControlEventEnvelope;
+          envelope: ControlEventEnvelope;
           kind: "instance.event";
       }
     | {
@@ -29,7 +28,7 @@ export class TuiControlStream {
     readonly #initialMessages: TuiControlStreamMessage[];
     #closed = false;
 
-    constructor(connection: TuiControlConnection, initialEvents: TuiControlEventEnvelope[]) {
+    constructor(connection: TuiControlConnection, initialEvents: ControlEventEnvelope[]) {
         this.#connection = connection;
         this.#initialMessages = initialEvents.map((event) => toStreamMessage(event));
     }
@@ -46,7 +45,7 @@ export class TuiControlStream {
                     },
                     seq: 0,
                     target: {
-                        instance: "",
+                        instance: asInstanceName(""),
                         kind: "instance"
                     },
                     type: "event"
@@ -69,7 +68,7 @@ export class TuiControlStream {
     }
 }
 
-export function toStreamMessage(event: TuiControlEventEnvelope): TuiControlStreamMessage {
+export function toStreamMessage(event: ControlEventEnvelope): TuiControlStreamMessage {
     if (event.event === "stream.gap") {
         return {
             envelope: event as TuiControlStreamGapEnvelope,

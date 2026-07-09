@@ -1,13 +1,12 @@
-import { asInstanceName, createError, errorCodes, type ControlError, type JsonValue } from "@portable-devshell/shared";
-
-export type RouteTarget =
-    | {
-          kind: "control";
-      }
-    | {
-          instance: string;
-          kind: "instance";
-      };
+import {
+    createControlTarget,
+    createError,
+    createInstanceTarget,
+    errorCodes,
+    type ControlError,
+    type ControlTarget as RouteTarget,
+    type JsonValue
+} from "@portable-devshell/shared";
 
 function isRecord(value: JsonValue | undefined): value is Record<string, JsonValue> {
     return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -19,14 +18,11 @@ export function parseRouteTarget(value: JsonValue | undefined): RouteTarget {
     }
 
     if (value.kind === "control") {
-        return { kind: "control" };
+        return createControlTarget();
     }
 
     if (value.kind === "instance" && typeof value.instance === "string" && value.instance.length > 0) {
-        return {
-            instance: asInstanceName(value.instance),
-            kind: "instance"
-        };
+        return createInstanceTarget(value.instance);
     }
 
     throw createTargetError();
@@ -39,3 +35,5 @@ function createTargetError(): ControlError {
         retryable: false
     });
 }
+
+export type { RouteTarget };

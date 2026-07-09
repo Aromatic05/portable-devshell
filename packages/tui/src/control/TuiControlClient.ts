@@ -1,10 +1,12 @@
 import type {
     ApprovalRequest,
+    ControlEventEnvelope,
     InstanceSnapshot,
     JsonValue,
     ToolCallQuery,
     ToolCallRecord
 } from "@portable-devshell/shared";
+import { asInstanceName } from "@portable-devshell/shared";
 import {
     createSubscribedStream,
     TuiControlConnection,
@@ -67,11 +69,11 @@ export class TuiControlClient implements TuiControlClientLike {
     async subscribe(instance: string, fromSeq: number): Promise<TuiControlStream> {
         const connection = new TuiControlConnection(this.#connectionOptions);
         const result = (await connection.request("instance.subscribe", createInstanceTarget(instance), { fromSeq })) as unknown as {
-            events: JsonValue[];
+            events: ControlEventEnvelope[] | JsonValue[];
             lastSeq: number;
         };
 
-        return createSubscribedStream(connection, result.events.map((event) => normalizeInitialEvent(instance, event)));
+        return createSubscribedStream(connection, result.events.map((event) => normalizeInitialEvent(instance, event as JsonValue)));
     }
 
     async #request(
@@ -102,7 +104,7 @@ function normalizeInitialEvent(instance: string, value: JsonValue): TuiControlEv
             payload: value as JsonValue,
             seq: value.seq,
             target: {
-                instance,
+                instance: asInstanceName(instance),
                 kind: "instance"
             },
             type: "event"
@@ -117,7 +119,7 @@ function normalizeInitialEvent(instance: string, value: JsonValue): TuiControlEv
         },
         seq: 0,
         target: {
-            instance,
+            instance: asInstanceName(instance),
             kind: "instance"
         },
         type: "event"
