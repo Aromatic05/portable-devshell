@@ -39,17 +39,20 @@ export class TuiRuntime {
         this.store = new TuiAppStore();
         this.scheduler = new RenderScheduler(this.store);
         this.focusManager = new TuiFocusManager(this.store, {
-            currentPanel: () => this.store.getState().activePanel,
-            graphFor: (panel, mode) =>
+            currentPage: () => this.store.getState().ui.selectedPage,
+            graphFor: (page, mode) =>
                 buildFocusGraphForState({
                     ...this.store.getState(),
-                    activePanel: panel,
                     interaction: {
                         ...this.store.getState().interaction,
-                        mode
+                        focusScope: mode
+                    },
+                    ui: {
+                        ...this.store.getState().ui,
+                        selectedPage: page
                     }
                 }),
-            mode: () => this.store.getState().interaction.mode
+            mode: () => this.store.getState().interaction.focusScope
         });
         this.keyDispatcher = new KeyDispatcher();
         this.commandDispatcher = new CommandDispatcher({
@@ -73,7 +76,7 @@ export class TuiRuntime {
             store: this.store
         });
         this.#alternateScreen = new AlternateScreen(this.#stdout);
-        this.focusManager.syncPanel(this.store.getState().activePanel, this.store.getState().interaction.mode);
+        this.focusManager.syncPanel(this.store.getState().ui.selectedPage, this.store.getState().interaction.focusScope);
     }
 
     async run(): Promise<void> {
@@ -116,7 +119,7 @@ export class TuiRuntime {
         tab?: boolean;
         upArrow?: boolean;
     }): Promise<void> {
-        await this.commandDispatcher.dispatchMany(this.keyDispatcher.dispatch(this.store.getState().interaction.mode, { input, key }));
+        await this.commandDispatcher.dispatchMany(this.keyDispatcher.dispatch(this.store.getState().interaction.focusScope, { input, key }));
     }
 
     async stop(): Promise<void> {

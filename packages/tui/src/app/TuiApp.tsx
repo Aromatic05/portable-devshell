@@ -14,11 +14,10 @@ import {
     selectConfirmDialogModel,
     selectErrorMessage,
     selectFooterModel,
-    selectFooterText,
     selectHeaderSummary,
     selectHeaderTitle,
     selectSearchModel,
-    selectSidebarItems
+    selectSidebarModel
 } from "../store/TuiSelectors.js";
 import type { TuiRuntime } from "./TuiRuntime.js";
 import { TuiRootLayout } from "./TuiRootLayout.js";
@@ -68,7 +67,7 @@ export function TuiApp(props: TuiAppProps) {
                 </Box>
             }
             rows={props.runtime.rows}
-            sidebar={<Sidebar items={selectSidebarItems(state)} />}
+            sidebar={<Sidebar model={selectSidebarModel(state)} />}
         />
     );
 }

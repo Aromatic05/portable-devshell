@@ -1,7 +1,8 @@
 import type { TuiAppStore } from "../store/TuiAppStore.js";
-import { buildFocusGraphForState, buildScreenDefinition, nextPanel, previousPanel } from "../screen/ScreenRouter.js";
+import { buildFocusGraphForState } from "../screen/ScreenRouter.js";
 import { TuiFocusManager } from "./TuiFocusManager.js";
-import { isSameFocusItem, type TuiUiIntent } from "./TuiInteractionTypes.js";
+import type { TuiUiIntent } from "./TuiInteractionTypes.js";
+import { selectMainBoxIds } from "../store/TuiSelectors.js";
 
 export interface CommandDispatcherOptions {
     focusManager: TuiFocusManager;
@@ -29,58 +30,28 @@ export class CommandDispatcher {
     async dispatch(intent: TuiUiIntent): Promise<boolean> {
         switch (intent.type) {
             case "app.requestQuit":
-                if (this.#store.getState().interaction.dirty) {
-                    this.#openConfirm({
-                        body: "Discard local changes and exit the TUI?",
-                        confirmIntent: { type: "app.quit" },
-                        confirmLabel: "Quit",
-                        title: "Confirm Exit"
-                    });
-                    return true;
-                }
-
-                await this.#onQuit();
-                return true;
             case "app.quit":
                 await this.#onQuit();
                 return true;
-            case "panel.activate":
-                this.#store.setActivePanel(intent.panel);
-                this.#store.setMode("normal");
-                this.#focusManager.syncPanel(intent.panel, this.#store.getState().interaction.mode);
-                if (intent.panel === "logs") {
+            case "page.select":
+                this.#store.setSelectedPage(intent.page);
+                this.#syncMainFocus();
+                if (intent.page === "logs" && this.#store.getState().ui.selectedInstance !== undefined) {
                     await this.#onLogsReload();
                     this.#store.setScreenStatus("logs", "Logs reloaded from instance.readLogs.");
                 }
                 return true;
-            case "panel.cycle": {
-                const panel = this.#store.getState().activePanel;
-                return await this.dispatch({
-                    panel: intent.direction === "next" ? nextPanel(panel) : previousPanel(panel),
-                    type: "panel.activate"
-                });
-            }
             case "focus.move":
-                if (this.#store.getState().activePanel === "logs" && (intent.direction === "up" || intent.direction === "down")) {
-                    return this.#handleLogsLineMove(intent.direction);
+                if (intent.direction === "next" || intent.direction === "previous") {
+                    return this.#moveAcrossScopes(intent.direction);
                 }
-
-                return this.#focusManager.move(intent.direction);
-            case "focus.set":
-                return this.#focusManager.setFocus(intent.item);
-            case "focus.activate": {
-                const item = this.#store.getState().interaction.currentFocus;
-                return item === undefined ? false : await this.dispatch({ item, type: "focus.activateItem" });
-            }
-            case "focus.activateItem":
-                for (const nextIntent of buildScreenDefinition(this.#store.getState()).activate(intent.item, this.#store.getState())) {
-                    await this.dispatch(nextIntent);
-                }
-                return true;
+                return this.#moveWithinScope(intent.direction);
+            case "focus.activate":
+                return await this.#activateCurrentScope();
             case "ui.cancel":
-                return await this.#cancel();
+                return this.#cancel();
             case "ui.help":
-                return await this.dispatch({ panel: "help", type: "panel.activate" });
+                return await this.dispatch({ page: "help", type: "page.select" });
             case "ui.redraw":
                 this.#store.bumpRedrawNonce();
                 this.#onRedraw();
@@ -88,67 +59,63 @@ export class CommandDispatcher {
             case "search.open":
                 this.#focusManager.pushRestore("search");
                 this.#store.setSearchOpen(true);
-                this.#store.setCurrentFocus({ kind: "field", id: "search.query" });
+                this.#store.setFocusScope("search");
                 return true;
-            case "search.append":
-                this.#store.setSearchQuery(`${this.#store.getState().interaction.search.query}${intent.text}`);
+            case "search.append": {
+                const page = this.#store.getState().ui.selectedPage;
+                const current = this.#store.getState().ui.searchQueries[page] ?? "";
+                this.#store.setSearchQuery(page, `${current}${intent.text}`);
                 return true;
-            case "search.backspace":
-                this.#store.setSearchQuery(this.#store.getState().interaction.search.query.slice(0, -1));
+            }
+            case "search.backspace": {
+                const page = this.#store.getState().ui.selectedPage;
+                const current = this.#store.getState().ui.searchQueries[page] ?? "";
+                this.#store.setSearchQuery(page, current.slice(0, -1));
                 return true;
+            }
             case "search.submit":
                 this.#store.setSearchOpen(false);
                 this.#focusManager.restore();
-                this.#focusManager.syncPanel(this.#store.getState().activePanel, this.#store.getState().interaction.mode);
                 return true;
-            case "actionMenu.open": {
-                const definition = buildScreenDefinition(this.#store.getState());
-                if (definition.actionMenu.items.length === 0) {
+            case "actionMenu.open":
+                this.#focusManager.pushRestore("actionMenu");
+                this.#store.setActionMenu("Read-only", [
+                    {
+                        id: "readonly.placeholder",
+                        intent: {
+                            page: this.#store.getState().ui.selectedPage,
+                            status: "Read-only action menu placeholder.",
+                            type: "screen.setStatus"
+                        },
+                        label: "Read-only placeholder"
+                    }
+                ]);
+                this.#store.setFocusScope("actionMenu");
+                return true;
+            case "actionMenu.move": {
+                const items = this.#store.getState().interaction.actionMenu.items;
+                if (items.length === 0) {
                     return false;
                 }
-
-                this.#focusManager.pushRestore("actionMenu");
-                this.#store.setActionMenu(definition.actionMenu.title, definition.actionMenu.items);
-                this.#store.setCurrentFocus({ kind: "action", id: definition.actionMenu.items[0]?.id ?? "" });
+                const current = this.#store.getState().interaction.actionMenu.selectedIndex;
+                const next = intent.direction === "down" ? (current + 1) % items.length : (current - 1 + items.length) % items.length;
+                this.#store.setActionMenu(this.#store.getState().interaction.actionMenu.title, items, next);
                 return true;
             }
-            case "actionMenu.move": {
-                const moved = this.#focusManager.move(intent.direction);
-                const focused = this.#store.getState().interaction.currentFocus;
-
-                if (focused?.kind === "action") {
-                    const selectedIndex = this.#store.getState().interaction.actionMenu.items.findIndex((item) => item.id === focused.id);
-                    if (selectedIndex >= 0) {
-                        this.#store.setActionMenu(
-                            this.#store.getState().interaction.actionMenu.title,
-                            this.#store.getState().interaction.actionMenu.items,
-                            selectedIndex
-                        );
-                    }
-                }
-
-                return moved;
-            }
             case "actionMenu.submit": {
-                const focused = this.#store.getState().interaction.currentFocus;
-                const item = this.#store.getState().interaction.actionMenu.items.find((entry) => focused?.kind === "action" && entry.id === focused.id);
-
+                const selectedIndex = this.#store.getState().interaction.actionMenu.selectedIndex;
+                const item = this.#store.getState().interaction.actionMenu.items[selectedIndex];
                 if (item === undefined) {
                     return false;
                 }
-
                 this.#store.setActionMenu("", []);
                 this.#focusManager.restore();
-                await this.dispatch(item.intent);
-                return true;
+                return await this.dispatch(item.intent);
             }
             case "confirm.accept": {
-                const focus = this.#store.getState().interaction.currentFocus;
-
-                if (focus?.kind === "button" && focus.id === "cancel") {
+                if (this.#store.getState().interaction.selectedConfirmButton === "cancel") {
                     return await this.dispatch({ type: "confirm.cancel" });
                 }
-
                 const confirmIntent = this.#store.getState().interaction.confirmDialog.confirmIntent;
                 this.#store.setConfirmDialog({
                     body: "",
@@ -169,69 +136,60 @@ export class CommandDispatcher {
                 this.#focusManager.restore();
                 return true;
             case "screen.pageUp":
-                return await this.#dispatchScreenIntent("pageUp");
+                return this.#scrollCurrentBox(-12);
             case "screen.pageDown":
-                return await this.#dispatchScreenIntent("pageDown");
+                return this.#scrollCurrentBox(12);
             case "screen.home":
-                return await this.#dispatchScreenIntent("home");
+                return this.#setCurrentBoxOffset(0);
             case "screen.end":
-                return await this.#dispatchScreenIntent("end");
+                return this.#setCurrentBoxOffset(Number.MAX_SAFE_INTEGER);
             case "screen.toggle": {
-                const focused = this.#store.getState().interaction.currentFocus;
-                if (focused === undefined) {
+                if (this.#store.getState().interaction.focusScope !== "mainBoxes") {
                     return false;
                 }
-
-                for (const nextIntent of buildScreenDefinition(this.#store.getState()).toggle(focused, this.#store.getState())) {
-                    await this.dispatch(nextIntent);
+                const boxId = this.#store.getState().ui.mainFocusId;
+                if (boxId === undefined) {
+                    return false;
                 }
+                const key = this.#expandedKey(boxId);
+                const expanded = this.#store.getState().ui.expandedBoxes[key] === true;
+                this.#store.toggleExpanded(key);
+                this.#store.setScreenStatus(this.#store.getState().ui.selectedPage, expanded ? "Collapsed box." : "Expanded box.");
                 return true;
             }
-            case "edit.setDirty":
-                this.#store.setDirty(intent.value);
-                if (!intent.value && this.#store.getState().interaction.mode === "edit") {
-                    this.#store.setMode("normal");
-                }
-                return true;
             case "logs.reload":
-                if (this.#store.getState().activePanel !== "logs") {
+                if (this.#store.getState().ui.selectedPage !== "logs" || this.#store.getState().ui.selectedInstance === undefined) {
                     return false;
                 }
-
                 await this.#onLogsReload();
                 this.#store.setScreenStatus("logs", "Logs reloaded from instance.readLogs.");
                 return true;
             case "logs.toggleFollow":
-                if (this.#store.getState().activePanel !== "logs") {
-                    return false;
-                }
-
-                const nextFollow = !this.#store.getState().interaction.logsViewport.follow;
-                this.#store.setLogsFollow(nextFollow);
-                this.#store.setScreenStatus(
-                    "logs",
-                    nextFollow ? "Follow enabled." : "Follow paused."
-                );
+                this.#store.setScreenStatus(this.#store.getState().ui.selectedPage, "Use Up/Down/Home/End to inspect log history.");
                 return true;
             case "logs.clearBuffer":
-                if (this.#store.getState().activePanel !== "logs") {
+                if (this.#store.getState().ui.selectedPage !== "logs") {
                     return false;
                 }
-
                 this.#store.clearLogsBuffer();
                 this.#store.setScreenStatus("logs", "Cleared local log buffer only.");
-                return true;
-            case "mode.set":
-                this.#store.setMode(intent.mode);
-                this.#focusManager.syncPanel(this.#store.getState().activePanel, intent.mode);
                 return true;
             case "overlay.openActionMenu":
                 this.#focusManager.pushRestore("actionMenu");
                 this.#store.setActionMenu(intent.title, intent.items);
-                this.#store.setCurrentFocus({ kind: "action", id: intent.items[0]?.id ?? "" });
+                this.#store.setFocusScope("actionMenu");
                 return true;
             case "overlay.openConfirm":
-                this.#openConfirm(intent);
+                this.#focusManager.pushRestore("confirm");
+                this.#store.setConfirmDialog({
+                    body: intent.body,
+                    cancelLabel: intent.cancelLabel,
+                    confirmIntent: intent.confirmIntent,
+                    confirmLabel: intent.confirmLabel,
+                    open: true,
+                    title: intent.title
+                });
+                this.#store.setFocusScope("confirm");
                 return true;
             case "overlay.closeActionMenu":
                 this.#store.setActionMenu("", []);
@@ -246,17 +204,23 @@ export class CommandDispatcher {
                 });
                 this.#focusManager.restore();
                 return true;
+            case "focus.scope.set":
+                this.#store.setFocusScope(intent.focusScope);
+                return true;
+            case "mainFocus.set":
+                this.#store.setMainFocusId(intent.id);
+                return true;
+            case "confirm.focus":
+                this.#store.setConfirmFocus(intent.button);
+                return true;
             case "ui.toggleExpanded":
                 this.#store.toggleExpanded(intent.key);
                 return true;
             case "screen.setStatus":
-                this.#store.setScreenStatus(intent.panel, intent.status);
-                return true;
-            case "screen.setToggle":
-                this.#store.setScreenToggle(intent.panel, intent.value);
+                this.#store.setScreenStatus(intent.page, intent.status);
                 return true;
             case "screen.clearStatus":
-                this.#store.setScreenStatus(this.#store.getState().activePanel, undefined);
+                this.#store.setScreenStatus(this.#store.getState().ui.selectedPage, undefined);
                 return true;
         }
     }
@@ -267,103 +231,191 @@ export class CommandDispatcher {
         }
     }
 
-    async #cancel(): Promise<boolean> {
-        const state = this.#store.getState();
-
-        if (state.interaction.mode === "actionMenu") {
+    #cancel(): boolean {
+        const scope = this.#store.getState().interaction.focusScope;
+        if (scope === "actionMenu") {
             this.#store.setActionMenu("", []);
             this.#focusManager.restore();
             return true;
         }
-
-        if (state.interaction.mode === "confirm") {
-            return await this.dispatch({ type: "confirm.cancel" });
+        if (scope === "confirm") {
+            void this.dispatch({ type: "confirm.cancel" });
+            return true;
         }
-
-        if (state.interaction.mode === "search") {
+        if (scope === "search") {
             this.#store.setSearchOpen(false);
             this.#focusManager.restore();
             return true;
         }
-
+        if (scope === "boxDetail") {
+            this.#store.setFocusScope("mainBoxes");
+            return true;
+        }
+        if (scope === "mainBoxes") {
+            if (this.#store.getState().ui.selectedInstance !== undefined) {
+                this.#store.setSidebarFocus("instances");
+                this.#store.setFocusScope("sidebarInstances");
+            } else {
+                this.#store.setSidebarFocus("pages");
+                this.#store.setFocusScope("sidebarPages");
+            }
+            return true;
+        }
+        if (scope === "sidebarInstances") {
+            this.#store.setSidebarFocus("pages");
+            this.#store.setFocusScope("sidebarPages");
+            return true;
+        }
         return false;
     }
 
-    async #dispatchScreenIntent(intent: "end" | "home" | "pageDown" | "pageUp"): Promise<boolean> {
-        if (this.#store.getState().activePanel === "logs") {
-            return this.#handleLogsViewportIntent(intent);
+    #moveAcrossScopes(direction: "next" | "previous"): boolean {
+        const scope = this.#store.getState().interaction.focusScope;
+        const hasInstances = this.#store.getState().instances.length > 0;
+        const boxIds = selectMainBoxIds(this.#store.getState());
+        const hasBoxes = boxIds.length > 0;
+
+        if (scope === "confirm") {
+            return this.#focusManager.move(direction);
         }
 
-        const definition = buildScreenDefinition(this.#store.getState());
-
-        for (const nextIntent of definition.handleIntent(intent, this.#store.getState())) {
-            await this.dispatch(nextIntent);
+        if (direction === "next") {
+            if (scope === "sidebarPages") {
+                if (hasInstances) {
+                    this.#store.setSidebarFocus("instances");
+                    this.#store.setFocusScope("sidebarInstances");
+                    return true;
+                }
+                if (hasBoxes) {
+                    this.#store.setFocusScope("mainBoxes");
+                    this.#syncMainFocus();
+                    return true;
+                }
+                return false;
+            }
+            if (scope === "sidebarInstances") {
+                if (hasBoxes) {
+                    this.#store.setFocusScope("mainBoxes");
+                    this.#syncMainFocus();
+                    return true;
+                }
+                this.#store.setSidebarFocus("pages");
+                this.#store.setFocusScope("sidebarPages");
+                return true;
+            }
+            if (scope === "mainBoxes" || scope === "boxDetail") {
+                this.#store.setSidebarFocus("pages");
+                this.#store.setFocusScope("sidebarPages");
+                return true;
+            }
         }
 
+        if (scope === "sidebarPages") {
+            if (hasBoxes) {
+                this.#store.setFocusScope("mainBoxes");
+                this.#syncMainFocus();
+                return true;
+            }
+            if (hasInstances) {
+                this.#store.setSidebarFocus("instances");
+                this.#store.setFocusScope("sidebarInstances");
+                return true;
+            }
+            return false;
+        }
+        if (scope === "sidebarInstances") {
+            this.#store.setSidebarFocus("pages");
+            this.#store.setFocusScope("sidebarPages");
+            return true;
+        }
+        if (scope === "mainBoxes" || scope === "boxDetail") {
+            if (hasInstances) {
+                this.#store.setSidebarFocus("instances");
+                this.#store.setFocusScope("sidebarInstances");
+                return true;
+            }
+            this.#store.setSidebarFocus("pages");
+            this.#store.setFocusScope("sidebarPages");
+            return true;
+        }
+        return false;
+    }
+
+    #moveWithinScope(direction: "up" | "down" | "left" | "right"): boolean {
+        const scope = this.#store.getState().interaction.focusScope;
+        if (scope === "mainBoxes" && this.#store.getState().ui.selectedPage === "logs" && selectMainBoxIds(this.#store.getState()).length <= 1) {
+            return this.#scrollCurrentBox(direction === "up" ? -1 : direction === "down" ? 1 : 0);
+        }
+        if (scope === "boxDetail") {
+            if (direction === "up") {
+                return this.#scrollCurrentBox(-1);
+            }
+            if (direction === "down") {
+                return this.#scrollCurrentBox(1);
+            }
+            return false;
+        }
+        return this.#focusManager.move(direction);
+    }
+
+    async #activateCurrentScope(): Promise<boolean> {
+        const scope = this.#store.getState().interaction.focusScope;
+        if (scope === "sidebarPages" && this.#store.getState().ui.selectedPage === "logs" && this.#store.getState().ui.selectedInstance !== undefined) {
+            await this.#onLogsReload();
+            this.#store.setScreenStatus("logs", "Logs reloaded from instance.readLogs.");
+            return true;
+        }
+        if (scope === "mainBoxes") {
+            if (this.#store.getState().ui.mainFocusId === undefined) {
+                return false;
+            }
+            this.#store.setFocusScope("boxDetail");
+            this.#store.setScreenStatus(this.#store.getState().ui.selectedPage, "Opened box detail.");
+            return true;
+        }
+        if (scope === "boxDetail") {
+            this.#store.setScreenStatus(this.#store.getState().ui.selectedPage, "Read-only detail.");
+            return true;
+        }
         return true;
     }
 
-    #openConfirm(input: { body: string; confirmIntent: TuiUiIntent; confirmLabel?: string; title: string }): void {
-        this.#focusManager.pushRestore("confirm");
-        this.#store.setConfirmDialog({
-            body: input.body,
-            confirmIntent: input.confirmIntent,
-            confirmLabel: input.confirmLabel ?? "Confirm",
-            open: true,
-            title: input.title
-        });
-        const graph = buildFocusGraphForState(this.#store.getState());
-        const cancelFocus = graph.first();
-        this.#store.setCurrentFocus(cancelFocus);
+    #syncMainFocus(): void {
+        const boxIds = selectMainBoxIds(this.#store.getState());
+        if (boxIds.length === 0) {
+            this.#store.setMainFocusId(undefined);
+            return;
+        }
+        const current = this.#store.getState().ui.mainFocusId;
+        if (current === undefined || !boxIds.includes(current)) {
+            this.#store.setMainFocusId(boxIds[0]);
+        }
     }
 
-    #handleLogsViewportIntent(intent: "end" | "home" | "pageDown" | "pageUp"): boolean {
+    #expandedKey(boxId: string): string {
         const state = this.#store.getState();
-        const totalLines = Object.values(state.logsByInstance).reduce((count, entries) => count + entries.length, 0);
-        const pageSize = 14;
-        const maxTopIndex = Math.max(0, totalLines - pageSize);
-        const currentTop = state.interaction.logsViewport.follow ? maxTopIndex : state.interaction.logsViewport.topIndex;
+        return `${state.ui.selectedPage}:${state.ui.selectedInstance}:${boxId}`;
+    }
 
-        if (intent === "end") {
-            this.#store.setLogsViewport(maxTopIndex, true);
-            this.#store.setScreenStatus("logs", "Moved to log end and resumed follow.");
-            return true;
+    #scrollCurrentBox(delta: number): boolean {
+        const boxId = this.#store.getState().ui.mainFocusId;
+        if (boxId === undefined) {
+            return false;
         }
-
-        if (intent === "home") {
-            this.#store.setLogsViewport(0, false);
-            this.#store.setScreenStatus("logs", "Moved to log start and paused follow.");
-            return true;
-        }
-
-        const delta = intent === "pageDown" ? pageSize : -pageSize;
-        const nextTop = Math.max(0, Math.min(maxTopIndex, currentTop + delta));
-        const follow = nextTop >= maxTopIndex;
-
-        this.#store.setLogsViewport(nextTop, follow);
-        this.#store.setScreenStatus("logs", follow ? "Reached log end and resumed follow." : "Scrolled logs and paused follow.");
+        const key = `${this.#store.getState().ui.selectedPage}:${this.#store.getState().ui.selectedInstance}:${boxId}`;
+        const current = this.#store.getState().ui.scrollOffsets[key] ?? 0;
+        const next = delta === 0 ? current : Math.max(0, current + delta);
+        this.#store.setScrollOffset(key, next);
         return true;
     }
 
-    #handleLogsLineMove(direction: "down" | "up"): boolean {
-        const state = this.#store.getState();
-        const totalLines = Object.values(state.logsByInstance).reduce((count, entries) => count + entries.length, 0);
-        const pageSize = 14;
-        const maxTopIndex = Math.max(0, totalLines - pageSize);
-        const currentTop = state.interaction.logsViewport.follow ? maxTopIndex : state.interaction.logsViewport.topIndex;
-        const delta = direction === "down" ? 1 : -1;
-        const nextTop = Math.max(0, Math.min(maxTopIndex, currentTop + delta));
-        const follow = nextTop >= maxTopIndex;
-
-        this.#store.setLogsViewport(nextTop, follow);
-        if (!follow && direction === "up") {
-            this.#store.setScreenStatus("logs", "Manual scroll paused follow.");
+    #setCurrentBoxOffset(offset: number): boolean {
+        const boxId = this.#store.getState().ui.mainFocusId;
+        if (boxId === undefined) {
+            return false;
         }
-
-        if (follow && direction === "down") {
-            this.#store.setScreenStatus("logs", "Reached log end and resumed follow.");
-        }
-
+        const key = `${this.#store.getState().ui.selectedPage}:${this.#store.getState().ui.selectedInstance}:${boxId}`;
+        this.#store.setScrollOffset(key, Math.max(0, offset));
         return true;
     }
 }
