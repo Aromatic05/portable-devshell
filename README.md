@@ -58,10 +58,16 @@ enabled = true
   - `PORTABLE_DEVSHELL_WORKER_DARWIN_X64_PATH`
   - `PORTABLE_DEVSHELL_WORKER_DARWIN_ARM64_PATH`
 - release lookup config:
-  - `PORTABLE_DEVSHELL_WORKER_RELEASE_REPOSITORY=owner/repo`
+  - default repository: `Aromatic05/portable-devshell`
+  - optional override: `PORTABLE_DEVSHELL_WORKER_RELEASE_REPOSITORY=owner/repo`
   - optional: `PORTABLE_DEVSHELL_WORKER_RELEASE_TAG=v0.2.0`
   - optional: `PORTABLE_DEVSHELL_WORKER_RELEASE_BASE_URL=https://github.com/owner/repo/releases/download`
   - optional: `PORTABLE_DEVSHELL_WORKER_CACHE_DIR=/custom/cache/path`
+
+- local build scripts:
+  - `pnpm build` only builds TypeScript packages
+  - `pnpm build:worker:debug` builds the host debug worker
+  - `pnpm build:worker:debug:<targetKey>` builds a specific debug worker target
 
 代码已经支持 target-specific probe、release asset resolution、install path 和 structured error。
 默认发布流程会在 GitHub tag `v*` 上自动构建四个 target 的 worker，并把二进制和对应 `.sha256` 上传到同名 GitHub Release。
