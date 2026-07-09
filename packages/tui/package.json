@@ -1,0 +1,25 @@
+{
+    "name": "@portable-devshell/tui",
+    "version": "0.0.0",
+    "private": true,
+    "type": "module",
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts",
+    "exports": {
+        ".": {
+            "types": "./dist/index.d.ts",
+            "default": "./dist/index.js"
+        }
+    },
+    "files": [
+        "dist"
+    ],
+    "dependencies": {
+        "@portable-devshell/shared": "workspace:*"
+    },
+    "scripts": {
+        "build": "tsc -b --force",
+        "typecheck": "tsc --noEmit -p tsconfig.json",
+        "test": "tsc -b --force && node --import ../mcp/test/RegisterWorkspacePackages.mjs --test test/unit/*.test.ts test/integration/*.test.ts"
+    }
+}
