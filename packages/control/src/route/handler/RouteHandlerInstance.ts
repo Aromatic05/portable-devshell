@@ -1,4 +1,4 @@
-import { createError, errorCodes, type JsonValue } from "@portable-devshell/shared";
+import { createError, errorCodes, type JsonValue, type ToolCallQuery, type ToolCallSource, type ToolCallStatus } from "@portable-devshell/shared";
 
 import type { InstanceRegistry } from "../../instance/registry/InstanceRegistry.js";
 import type { StreamSubscriptionManager } from "../../stream/StreamSubscriptionManager.js";
@@ -71,6 +71,8 @@ export class RouteHandlerInstance {
                 return (await descriptor.worker.stop()) as unknown as JsonValue;
             case "instance.readLogs":
                 return (await descriptor.worker.readLogs(readLogQuery(params))) as unknown as JsonValue;
+            case "instance.readToolCalls":
+                return (await descriptor.worker.readToolCalls(readToolCallQuery(params))) as unknown as JsonValue;
             case "instance.subscribe":
                 return await this.#streamSubscriptionManager.subscribe(
                     connection,
@@ -225,4 +227,63 @@ function readToolCall(params?: JsonValue): { input: JsonValue; toolName: string 
         input: params.input ?? null,
         toolName: params.toolName
     };
+}
+
+function readToolCallQuery(params?: JsonValue): ToolCallQuery {
+    if (!isRecord(params)) {
+        return {};
+    }
+
+    if (params.after !== undefined && typeof params.after !== "string") {
+        throw invalidToolCallQuery("instance.readToolCalls requires string after.");
+    }
+
+    if (params.before !== undefined && typeof params.before !== "string") {
+        throw invalidToolCallQuery("instance.readToolCalls requires string before.");
+    }
+
+    if (params.limit !== undefined && typeof params.limit !== "number") {
+        throw invalidToolCallQuery("instance.readToolCalls requires numeric limit.");
+    }
+
+    return {
+        ...(params.after === undefined ? {} : { after: params.after }),
+        ...(params.before === undefined ? {} : { before: params.before }),
+        ...(params.limit === undefined ? {} : { limit: params.limit }),
+        ...(params.source === undefined ? {} : { source: readToolCallSource(params.source) }),
+        ...(params.status === undefined ? {} : { status: readToolCallStatus(params.status) }),
+        ...(params.toolName === undefined
+            ? {}
+            : typeof params.toolName === "string"
+              ? { toolName: params.toolName }
+              : failToolCallQuery("instance.readToolCalls requires string toolName."))
+    };
+}
+
+function readToolCallSource(value: JsonValue): ToolCallSource {
+    if (value === "cli" || value === "tui" || value === "mcp") {
+        return value;
+    }
+
+    throw invalidToolCallQuery("instance.readToolCalls requires source to be cli, tui, or mcp.");
+}
+
+function readToolCallStatus(value: JsonValue): ToolCallStatus {
+    if (value === "completed" || value === "failed") {
+        return value;
+    }
+
+    throw invalidToolCallQuery("instance.readToolCalls requires status to be completed or failed.");
+}
+
+function invalidToolCallQuery(message: string) {
+    return createError({
+        code: errorCodes.targetInvalid,
+        message,
+        retryable: false
+    });
+}
+
+function failToolCallQuery(message: string): never {
+    throw invalidToolCallQuery(message);
 }

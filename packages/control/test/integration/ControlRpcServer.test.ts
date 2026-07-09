@@ -53,6 +53,25 @@ async function verifyRpcMethodsOverReusedConnection(): Promise<void> {
         const logs = await client.request("instance.readLogs", { instance: "alpha", kind: "instance" }, { fromSeq: 1 });
         assert.equal(logs.result.length, 1);
 
+        const toolCalls = await client.request("instance.readToolCalls", { instance: "alpha", kind: "instance" }, { limit: 1 });
+        assert.deepEqual(toolCalls.result, [
+            {
+                callId: "call-1",
+                completedAt: "2026-07-08T00:00:01.000Z",
+                exitCode: 0,
+                inputSummary: "{\"command\":\"pwd\"}",
+                instance: "alpha",
+                source: "cli",
+                startedAt: "2026-07-08T00:00:00.000Z",
+                status: "completed",
+                stderrBytes: 0,
+                stdoutBytes: 8,
+                timedOut: false,
+                toolName: "bash_run"
+            }
+        ]);
+        assert.deepEqual(worker.lastReadToolCallsQuery, { limit: 1 });
+
         const toolCall = await client.request(
             "instance.callTool",
             { instance: "alpha", kind: "instance" },
@@ -371,6 +390,7 @@ class FakeWorker {
     readonly #name: string;
     #interactiveStartEnabled = false;
     #refreshCount = 0;
+    #lastReadToolCallsQuery?: Record<string, unknown>;
     #lastInteractiveInput?: string;
     #lastToolCall?: { requestId?: string; sessionId?: string; source: string };
     #events: Array<{ at: string; data?: unknown; instanceName: string; seq: number; type: string }> = [];
@@ -411,6 +431,10 @@ class FakeWorker {
 
     get lastToolCall() {
         return this.#lastToolCall;
+    }
+
+    get lastReadToolCallsQuery() {
+        return this.#lastReadToolCallsQuery;
     }
 
     get lastInteractiveInput() {
@@ -469,6 +493,26 @@ class FakeWorker {
 
     async readLogs(query: { fromSeq?: number }) {
         return this.#logs.filter((entry) => entry.seq >= (query.fromSeq ?? 1));
+    }
+
+    async readToolCalls(query: Record<string, unknown> = {}) {
+        this.#lastReadToolCallsQuery = query;
+        return [
+            {
+                callId: "call-1",
+                completedAt: "2026-07-08T00:00:01.000Z",
+                exitCode: 0,
+                inputSummary: "{\"command\":\"pwd\"}",
+                instance: this.#name,
+                source: "cli",
+                startedAt: "2026-07-08T00:00:00.000Z",
+                status: "completed",
+                stderrBytes: 0,
+                stdoutBytes: 8,
+                timedOut: false,
+                toolName: "bash_run"
+            }
+        ];
     }
 
     async callTool(

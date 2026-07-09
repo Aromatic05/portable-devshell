@@ -1,4 +1,12 @@
-import type { InstanceCreateDraft, InstanceCreateResult, InstanceCreateSchema, InstanceCreateSummary, JsonValue } from "@portable-devshell/shared";
+import type {
+    InstanceCreateDraft,
+    InstanceCreateResult,
+    InstanceCreateSchema,
+    InstanceCreateSummary,
+    JsonValue,
+    ToolCallQuery,
+    ToolCallRecord
+} from "@portable-devshell/shared";
 
 import { CliControlConnection, type CliControlConnectionOptions } from "./CliControlConnection.js";
 import { createControlTarget, createInstanceTarget, type CliControlEventEnvelope } from "./CliControlRequest.js";
@@ -26,6 +34,7 @@ export interface CliControlClientLike {
     getSnapshot(instance: string): Promise<CliInstanceSnapshotEnvelope>;
     listInstances(): Promise<CliInstanceListEntry[]>;
     readLogs(instance: string, query?: { fromSeq?: number; limit?: number }): Promise<CliInstanceLogEntry[]>;
+    readToolCalls(instance: string, query?: ToolCallQuery): Promise<ToolCallRecord[]>;
     refreshStatus(instance: string): Promise<CliInstanceSnapshotEnvelope>;
     startInstance(instance: string, relay?: CliControlTerminalRelay): Promise<CliInstanceSnapshotEnvelope["snapshot"]>;
     stopInstance(instance: string): Promise<CliInstanceSnapshotEnvelope["snapshot"]>;
@@ -96,6 +105,10 @@ export class CliControlClient implements CliControlClientLike {
 
     async readLogs(instance: string, query?: { fromSeq?: number; limit?: number }): Promise<CliInstanceLogEntry[]> {
         return asLogEntries(await this.#request("instance.readLogs", createInstanceTarget(instance), query as JsonValue | undefined));
+    }
+
+    async readToolCalls(instance: string, query?: ToolCallQuery): Promise<ToolCallRecord[]> {
+        return (await this.#request("instance.readToolCalls", createInstanceTarget(instance), query as JsonValue | undefined)) as unknown as ToolCallRecord[];
     }
 
     async callTool(instance: string, toolName: string, input: JsonValue): Promise<CliCommandResult> {

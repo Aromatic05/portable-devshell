@@ -85,6 +85,20 @@ test("control lifecycle smoke drives the frozen worker and persists Task 12 arti
     assert.equal(Array.isArray(logs), true);
     assert.match(logs.map((entry: { message: string }) => entry.message).join("\n"), /portable-devshell-control/u);
 
+    const toolCalls = await request(
+        runtimePaths.socketFile,
+        "instance.readToolCalls",
+        { instance: "aromatic-pc", kind: "instance" },
+        { limit: 1, status: "completed", toolName: "bash_run" }
+    );
+    assert.equal(Array.isArray(toolCalls), true);
+    assert.equal(toolCalls[0]?.instance, "aromatic-pc");
+    assert.equal(toolCalls[0]?.source, "cli");
+    assert.equal(toolCalls[0]?.toolName, "bash_run");
+    assert.match(toolCalls[0]?.inputSummary ?? "", /pwd/u);
+    assert.equal(typeof toolCalls[0]?.stdoutBytes, "number");
+    assert.equal(toolCalls[0]?.timedOut, false);
+
     const instanceStopped = await request(runtimePaths.socketFile, "instance.stop", { instance: "aromatic-pc", kind: "instance" });
     assert.equal(instanceStopped.ready, false);
 

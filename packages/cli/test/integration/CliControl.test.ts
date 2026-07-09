@@ -42,6 +42,23 @@ test("CliControlClient performs control rpc over unix socket", async (t) => {
                                       }
                                   }
                               ]
+                            : envelope.method === "instance.readToolCalls"
+                              ? [
+                                    {
+                                        callId: "call-1",
+                                        completedAt: "2026-07-08T00:00:01.000Z",
+                                        exitCode: 0,
+                                        inputSummary: "{\"command\":\"pwd\"}",
+                                        instance: "demo-local",
+                                        source: "cli",
+                                        startedAt: "2026-07-08T00:00:00.000Z",
+                                        status: "completed",
+                                        stderrBytes: 0,
+                                        stdoutBytes: 8,
+                                        timedOut: false,
+                                        toolName: "bash_run"
+                                    }
+                                ]
                             : null,
                     type: "response"
                 } as unknown as JsonValue);
@@ -61,9 +78,12 @@ test("CliControlClient performs control rpc over unix socket", async (t) => {
 
     const client = new CliControlClient({ socketPath });
     const instances = await client.listInstances();
+    const toolCalls = await client.readToolCalls("demo-local", { limit: 1, status: "completed" });
 
     assert.equal(instances[0]?.name, "demo-local");
     assert.equal(instances[0]?.snapshot.status, "stopped");
+    assert.equal(toolCalls[0]?.instance, "demo-local");
+    assert.equal(toolCalls[0]?.toolName, "bash_run");
 });
 
 test("CliMain reports control not running without auto-starting it", async () => {

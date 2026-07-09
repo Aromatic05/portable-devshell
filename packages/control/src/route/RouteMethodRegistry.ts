@@ -13,6 +13,7 @@ const methodScopes = new Map<string, RouteScope>([
     ["instance.stop", "instance"],
     ["instance.refreshStatus", "instance"],
     ["instance.readLogs", "instance"],
+    ["instance.readToolCalls", "instance"],
     ["instance.subscribe", "instance"],
     ["instance.callTool", "instance"]
 ]);

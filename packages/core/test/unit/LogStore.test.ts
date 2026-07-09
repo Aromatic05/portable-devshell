@@ -73,10 +73,10 @@ test("InstanceLogStore and ToolCallHistory persist per-instance records", async 
         assert.equal(logEntry.seq, 1);
         assert.deepEqual(await logStore.read({ fromSeq: 1 }), [logEntry]);
 
-        await history.started("call-1", "bash_run", ["pwd"], { source: "cli" }, "2026-07-07T00:00:01.000Z");
+        await history.started("call-1", "bash_run", "{\"command\":\"pwd\"}", { source: "cli" }, "2026-07-07T00:00:01.000Z");
 
         await assert.rejects(
-            history.started("call-2", "bash_run", ["ls"], { source: "cli" }, "2026-07-07T00:00:02.000Z"),
+            history.started("call-2", "bash_run", "{\"command\":\"ls\"}", { source: "cli" }, "2026-07-07T00:00:02.000Z"),
             (error: unknown) => {
                 assert.ok(error instanceof InstanceBusyError);
                 assert.equal(error.code, errorCodes.coreInstanceBusy);
@@ -86,28 +86,38 @@ test("InstanceLogStore and ToolCallHistory persist per-instance records", async 
 
         const completed = await history.completed(
             "call-1",
-            { exitCode: 0, signal: undefined, stderr: "", stdout: "ok" },
+            { exitCode: 0, stderrBytes: 0, stdoutBytes: 2, timedOut: false },
             "2026-07-07T00:00:03.000Z"
         );
         assert.equal(completed.status, "completed");
-        assert.equal(completed.result?.stdout, "ok");
+        assert.equal(completed.exitCode, 0);
+        assert.equal(completed.stdoutBytes, 2);
+        assert.equal(completed.timedOut, false);
+        assert.equal(completed.inputSummary, "{\"command\":\"pwd\"}");
         assert.equal(completed.source, "cli");
 
-        await history.started("call-3", "bash_run", ["false"], { requestId: "req-3", source: "mcp" }, "2026-07-07T00:00:04.000Z");
+        await history.started("call-3", "bash_run", "{\"command\":\"false\"}", { requestId: "req-3", source: "mcp" }, "2026-07-07T00:00:04.000Z");
 
         const failed = await history.failed(
             "call-3",
             "worker.command_failed",
             "2026-07-07T00:00:05.000Z",
-            { exitCode: 1, signal: undefined, stderr: "boom", stdout: "" }
+            { exitCode: 1, stderrBytes: 4, stdoutBytes: 0, timedOut: false }
         );
         assert.equal(failed.status, "failed");
-        assert.equal(failed.errorCode, "worker.command_failed");
+        assert.equal(failed.error, "worker.command_failed");
         assert.equal(failed.requestId, "req-3");
         assert.equal(failed.source, "mcp");
+        assert.equal(failed.stderrBytes, 4);
 
         const records = await history.read();
-        assert.deepEqual(records.map((record) => record.status), ["completed", "failed"]);
+        assert.deepEqual(records.map((record) => record.callId), ["call-1", "call-3"]);
+        assert.deepEqual((await history.read({ limit: 1 })).map((record) => record.callId), ["call-3"]);
+        assert.deepEqual((await history.read({ after: "call-1" })).map((record) => record.callId), ["call-3"]);
+        assert.deepEqual((await history.read({ before: "call-3", limit: 1 })).map((record) => record.callId), ["call-1"]);
+        assert.deepEqual((await history.read({ source: "mcp" })).map((record) => record.callId), ["call-3"]);
+        assert.deepEqual((await history.read({ status: "completed" })).map((record) => record.callId), ["call-1"]);
+        assert.deepEqual((await history.read({ toolName: "bash_run" })).map((record) => record.callId), ["call-1", "call-3"]);
     } finally {
         await rm(root, { recursive: true, force: true });
     }

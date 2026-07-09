@@ -8,6 +8,7 @@ import {
     type CommandResult,
     type JsonValue,
     type ToolCallContext,
+    type ToolCallQuery,
     type ToolCallRecord,
     type WorkspacePath
 } from "@portable-devshell/shared";
@@ -299,7 +300,7 @@ export class WorkerInstance {
         } as const;
 
         try {
-            await this.#toolCallHistory.started(callId, toolName, toHistoryArgs(input), context, startedAt);
+            await this.#toolCallHistory.started(callId, toolName, toInputSummary(input), context, startedAt);
         } catch (error) {
             if (error instanceof InstanceBusyError) {
                 throw createError({
@@ -326,7 +327,16 @@ export class WorkerInstance {
             const result = await this.#toolInvoker.invoke(toolName, input);
             const completedAt = new Date().toISOString();
             await this.#appendToolLogs(result, eventContext);
-            await this.#toolCallHistory.completed(callId, result, completedAt);
+            await this.#toolCallHistory.completed(
+                callId,
+                {
+                    exitCode: result.exitCode,
+                    stderrBytes: readByteLength(result.stderr),
+                    stdoutBytes: readByteLength(result.stdout),
+                    timedOut: result.timedOut === true
+                },
+                completedAt
+            );
             await this.#appendEvent(
                 "toolCall.completed",
                 toEventData({
@@ -349,7 +359,19 @@ export class WorkerInstance {
             if (result !== undefined) {
                 await this.#appendToolLogs(result, eventContext);
             }
-            await this.#toolCallHistory.failed(callId, errorCode, finishedAt, result);
+            await this.#toolCallHistory.failed(
+                callId,
+                errorCode,
+                finishedAt,
+                result === undefined
+                    ? undefined
+                    : {
+                          exitCode: result.exitCode,
+                          stderrBytes: readByteLength(result.stderr),
+                          stdoutBytes: readByteLength(result.stdout),
+                          timedOut: result.timedOut === true
+                      }
+            );
             await this.#appendEvent(
                 "toolCall.failed",
                 toEventData({
@@ -372,7 +394,7 @@ export class WorkerInstance {
         return await this.#logStore.read(query);
     }
 
-    async readToolCalls(query: LogQuery = {}): Promise<ToolCallRecord[]> {
+    async readToolCalls(query: ToolCallQuery = {}): Promise<ToolCallRecord[]> {
         return await this.#toolCallHistory.read(query);
     }
 
@@ -636,16 +658,20 @@ export class WorkerInstance {
     }
 }
 
-function toHistoryArgs(input: JsonValue): string[] {
-    if (Array.isArray(input)) {
-        return input.map((value) => JSON.stringify(value) ?? "null");
-    }
+function toInputSummary(input: JsonValue): string {
+    const summary = (() => {
+        if (Array.isArray(input)) {
+            return input.map((value) => JSON.stringify(value) ?? "null").join(" ");
+        }
 
-    if (typeof input === "object" && input !== null) {
-        return [JSON.stringify(input)];
-    }
+        if (typeof input === "object" && input !== null) {
+            return JSON.stringify(input) ?? "null";
+        }
 
-    return [String(input)];
+        return String(input);
+    })();
+
+    return summary.length <= 400 ? summary : `${summary.slice(0, 400)}...`;
 }
 
 function asCommandResult(error: unknown): CommandResult | undefined {

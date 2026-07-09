@@ -63,6 +63,9 @@ test("CliMain handles control lifecycle commands and exit code mapping", async (
             async readLogs() {
                 return [];
             },
+            async readToolCalls() {
+                return [];
+            },
             async refreshStatus() {
                 throw new Error("unused");
             },
@@ -127,6 +130,9 @@ test("CliMain renders structured remote errors in verbose mode", async () => {
             async readLogs() {
                 return [];
             },
+            async readToolCalls() {
+                return [];
+            },
             async refreshStatus() {
                 throw new Error("unused");
             },
@@ -186,6 +192,9 @@ test("CliMain routes interactive instance.start relay output to stderr", async (
             return [];
         },
         async readLogs() {
+            return [];
+        },
+        async readToolCalls() {
             return [];
         },
         async refreshStatus() {
@@ -280,6 +289,9 @@ test("CliMain handles instance logs follow and tool call through injected client
             return readCount === 1
                 ? [{ at: "", instanceName: "demo-local", message: "before\n", seq: 1, stream: "stdout" as const }]
                 : [{ at: "", instanceName: "demo-local", message: "after\n", seq: 2, stream: "stdout" as const }];
+        },
+        async readToolCalls() {
+            return [];
         },
         async refreshStatus() {
             throw new Error("unused");
@@ -379,6 +391,9 @@ test("CliMain follows instance logs without skipping events between initial pull
             initialLogsRead = true;
             return [{ at: "", instanceName: "demo-local", message: "before\n", seq: 1, stream: "stdout" as const }];
         },
+        async readToolCalls() {
+            return [];
+        },
         async refreshStatus() {
             throw new Error("unused");
         },
@@ -476,6 +491,9 @@ test("CliMain recovers instance log follow when subscribe returns stream.gap", a
 
             return [{ at: "", instanceName: "demo-local", message: "before\n", seq: 1, stream: "stdout" as const }];
         },
+        async readToolCalls() {
+            return [];
+        },
         async refreshStatus() {
             throw new Error("unused");
         },
@@ -567,6 +585,9 @@ test("CliMain recovers watch status when subscribe returns stream.gap", async ()
             return [];
         },
         async readLogs() {
+            return [];
+        },
+        async readToolCalls() {
             return [];
         },
         async refreshStatus() {
@@ -680,6 +701,9 @@ test("CliMain runs interactive instance create through control rpc", async () =>
             return [];
         },
         async readLogs() {
+            return [];
+        },
+        async readToolCalls() {
             return [];
         },
         async refreshStatus() {

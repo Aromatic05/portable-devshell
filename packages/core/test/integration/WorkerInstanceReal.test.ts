@@ -144,7 +144,17 @@ test("WorkerInstance rejects not-ready and concurrent tool calls while persistin
         const records = await instance.readToolCalls();
         assert.deepEqual(records.map((record) => record.status), ["completed", "failed"]);
         assert.equal(records[0]?.source, "cli");
-        assert.equal(records[1]?.errorCode, errorCodes.coreToolSchemaUnavailable);
+        assert.equal(records[0]?.inputSummary, "{\"command\":\"pwd\"}");
+        assert.equal(records[0]?.stdoutBytes, 240);
+        assert.equal(records[0]?.stderrBytes, 0);
+        assert.equal(records[0]?.timedOut, false);
+        assert.equal(records[1]?.error, errorCodes.coreToolSchemaUnavailable);
+        assert.deepEqual(
+            (await instance.readToolCalls({ after: records[0]?.callId, limit: 1, status: "failed", toolName: "bash_run" })).map(
+                (record) => record.callId
+            ),
+            [records[1]?.callId]
+        );
 
         const logs = await instance.readLogs();
         assert.equal(logs.length, 1);

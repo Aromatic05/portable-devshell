@@ -18,6 +18,7 @@ test("RouteMethodRegistry resolves control and instance methods", () => {
     assert.equal(registry.resolve("control.listInstances"), "control");
     assert.equal(registry.resolve("control.createInstance"), "control");
     assert.equal(registry.resolve("instance.callTool"), "instance");
+    assert.equal(registry.resolve("instance.readToolCalls"), "instance");
     assert.equal(registry.resolve("control.getGlobalLogs"), undefined);
 });
 
