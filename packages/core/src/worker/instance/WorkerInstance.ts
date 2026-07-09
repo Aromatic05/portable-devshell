@@ -24,7 +24,7 @@ import { WorkerProtocolClient, type WorkerHandshakeResult } from "../../worker/p
 import { WorkerRpcBridge } from "../../worker/rpc/WorkerRpcBridge.js";
 import { WorkerToolCatalog } from "../tool/WorkerToolCatalog.js";
 import { WorkerToolInvoker } from "../tool/WorkerToolInvoker.js";
-import { InstanceStateMachine } from "../../instance/state/InstanceStateMachine.js";
+import { InstanceStateMachine, type InstanceStateUpdate } from "../../instance/state/InstanceStateMachine.js";
 import type { InstanceSnapshot } from "../../instance/state/InstanceStateSnapshot.js";
 import type { ResolvedWorkerInstanceConfig } from "./WorkerInstanceConfig.js";
 
@@ -115,7 +115,7 @@ export class WorkerInstance {
         }
 
         this.#workspacePath = asWorkspacePath(resolvedWorkspacePath);
-        this.#stateMachine.apply({
+        await this.#applyStateUpdate({
             connectionState: "disconnected",
             daemonState: "starting",
             lastErrorCode: undefined
@@ -139,7 +139,7 @@ export class WorkerInstance {
                 `Worker start failed for instance ${this.#config.name}.`,
                 this.#config.name
             );
-            this.#stateMachine.apply({
+            await this.#applyStateUpdate({
                 connectionState: "disconnected",
                 daemonState: "stopped",
                 lastErrorCode: getErrorCode(wrappedError, errorCodes.coreWorkerStartFailed)
@@ -147,27 +147,30 @@ export class WorkerInstance {
             throw wrappedError;
         }
 
-        this.#stateMachine.apply({ connectionState: "connecting" });
+        await this.#applyStateUpdate({ connectionState: "connecting" });
 
         try {
             await this.#rpcBridge.connect();
             await this.#protocolClient.ping();
             this.#handshake = await this.#protocolClient.handshake(this.#config.handshake);
             const tools = await this.#protocolClient.listTools();
-            this.#catalog.refresh(tools.tools);
-            const startedEvent = await this.#appendEvent("instance.started", {
+            const refreshedTools = this.#catalog.refresh(tools.tools);
+            await this.#appendEvent("worker.rpcConnected");
+            await this.#appendEvent(
+                "worker.schemaRefreshed",
+                toEventData({ toolCount: refreshedTools.length })
+            );
+            await this.#appendEvent("instance.started", {
                 workspace: this.#handshake.workspace,
                 workerVersion: this.#handshake.workerVersion
             });
 
-            this.#stateMachine.apply({
+            await this.#applyStateUpdate({
                 daemonState: "running",
-                lastErrorCode: undefined,
-                lastSeq: startedEvent.seq
+                lastErrorCode: undefined
             });
-            return this.#stateMachine.apply({
+            return await this.#applyStateUpdate({
                 connectionState: "connected",
-                lastSeq: startedEvent.seq
             });
         } catch (error) {
             const wrappedError = wrapWorkerCommandError(
@@ -177,7 +180,7 @@ export class WorkerInstance {
                 this.#config.name
             );
             this.#closeRpcBridge();
-            this.#stateMachine.apply({
+            await this.#applyStateUpdate({
                 connectionState: "disconnected",
                 daemonState: "running",
                 lastErrorCode: getErrorCode(wrappedError, errorCodes.coreWorkerHandshakeFailed)
@@ -223,7 +226,7 @@ export class WorkerInstance {
                 this.#config.name
             );
             stopErrorCode = getErrorCode(error, errorCodes.coreWorkerStopFailed);
-            this.#stateMachine.apply({
+            await this.#applyStateUpdate({
                 connectionState: "disconnected",
                 daemonState: "stopping",
                 lastErrorCode: getErrorCode(wrappedError, errorCodes.coreWorkerStopFailed)
@@ -234,16 +237,14 @@ export class WorkerInstance {
             this.#handshake = undefined;
         }
 
-        const stoppedEvent = await this.#appendEvent("instance.stopped");
-        this.#stateMachine.apply({
+        await this.#appendEvent("instance.stopped");
+        await this.#applyStateUpdate({
             daemonState: "stopped",
-            lastErrorCode: stopErrorCode,
-            lastSeq: stoppedEvent.seq
+            lastErrorCode: stopErrorCode
         });
-        return this.#stateMachine.apply({
+        return await this.#applyStateUpdate({
             connectionState: "disconnected",
-            lastErrorCode: undefined,
-            lastSeq: stoppedEvent.seq
+            lastErrorCode: undefined
         });
     }
 
@@ -259,7 +260,7 @@ export class WorkerInstance {
             case "stale":
                 this.#closeRpcBridge();
                 this.#handshake = undefined;
-                return this.#stateMachine.apply({
+                return await this.#applyStateUpdate({
                     connectionState: "disconnected",
                     daemonState: status.daemonState,
                     lastErrorCode: undefined,
@@ -268,7 +269,7 @@ export class WorkerInstance {
             case "running":
                 return await this.#refreshRunningStatus(status.pid);
             default:
-                return this.#stateMachine.apply({
+                return await this.#applyStateUpdate({
                     connectionState: "failed",
                     daemonState: "failed",
                     lastErrorCode: errorCodes.coreWorkerStatusFailed,
@@ -289,6 +290,13 @@ export class WorkerInstance {
 
         const callId = randomUUID();
         const startedAt = new Date().toISOString();
+        const eventContext = {
+            callId,
+            requestId: context.requestId,
+            sessionId: context.sessionId,
+            source: context.source,
+            toolName
+        } as const;
 
         try {
             await this.#toolCallHistory.started(callId, toolName, toHistoryArgs(input), context, startedAt);
@@ -308,27 +316,28 @@ export class WorkerInstance {
         await this.#appendEvent(
             "toolCall.started",
             toEventData({
-                callId,
-                requestId: context.requestId,
-                sessionId: context.sessionId,
-                source: context.source,
-                toolName
+                ...eventContext,
+                startedAt,
+                status: "started"
             })
         );
 
         try {
             const result = await this.#toolInvoker.invoke(toolName, input);
-            await this.#appendToolLogs(result);
-            await this.#toolCallHistory.completed(callId, result, new Date().toISOString());
+            const completedAt = new Date().toISOString();
+            await this.#appendToolLogs(result, eventContext);
+            await this.#toolCallHistory.completed(callId, result, completedAt);
             await this.#appendEvent(
                 "toolCall.completed",
                 toEventData({
-                    callId,
+                    ...eventContext,
+                    completedAt,
                     exitCode: result.exitCode,
-                    requestId: context.requestId,
-                    sessionId: context.sessionId,
-                    source: context.source,
-                    toolName
+                    startedAt,
+                    status: "completed",
+                    stderrBytes: readByteLength(result.stderr),
+                    stdoutBytes: readByteLength(result.stdout),
+                    timedOut: result.timedOut === true ? true : undefined
                 })
             );
             return result;
@@ -337,16 +346,22 @@ export class WorkerInstance {
             const errorCode = getErrorCode(error, errorCodes.coreProviderFailed);
             const result = asCommandResult(error);
 
+            if (result !== undefined) {
+                await this.#appendToolLogs(result, eventContext);
+            }
             await this.#toolCallHistory.failed(callId, errorCode, finishedAt, result);
             await this.#appendEvent(
                 "toolCall.failed",
                 toEventData({
-                    callId,
+                    ...eventContext,
+                    completedAt: finishedAt,
                     errorCode,
-                    requestId: context.requestId,
-                    sessionId: context.sessionId,
-                    source: context.source,
-                    toolName
+                    exitCode: result?.exitCode,
+                    startedAt,
+                    status: "failed",
+                    stderrBytes: result === undefined ? undefined : readByteLength(result.stderr),
+                    stdoutBytes: result === undefined ? undefined : readByteLength(result.stdout),
+                    timedOut: result?.timedOut === true ? true : undefined
                 })
             );
             throw error;
@@ -365,10 +380,10 @@ export class WorkerInstance {
         return this.#eventBuffer.readFrom(fromSeq);
     }
 
-    close(): void {
+    async close(): Promise<void> {
         this.#closeRpcBridge();
         this.#handshake = undefined;
-        this.#stateMachine.apply({
+        await this.#applyStateUpdate({
             connectionState: "disconnected",
             lastErrorCode: undefined
         });
@@ -387,7 +402,7 @@ export class WorkerInstance {
             return await this.#reconnectPromise;
         }
 
-        this.#reconnectPromise = this.#refreshRunningStatus(this.snapshot().pid, "reconnecting", true).finally(() => {
+        this.#reconnectPromise = this.#refreshRunningStatus(this.snapshot().pid, "reconnecting").finally(() => {
             this.#reconnectPromise = undefined;
         });
         return await this.#reconnectPromise;
@@ -395,10 +410,11 @@ export class WorkerInstance {
 
     async #refreshRunningStatus(
         pid?: number,
-        connectionState: "connecting" | "reconnecting" = this.snapshot().connectionState === "disconnected" ? "connecting" : "reconnecting",
-        emitReconnectEvents = false
+        connectionState: "connecting" | "reconnecting" = this.snapshot().connectionState === "disconnected" ? "connecting" : "reconnecting"
     ): Promise<InstanceSnapshot> {
-        this.#stateMachine.apply({
+        const shouldEmitRpcLifecycleEvents = this.snapshot().connectionState !== "connected";
+
+        await this.#applyStateUpdate({
             connectionState,
             daemonState: "running",
             lastErrorCode: undefined,
@@ -412,22 +428,19 @@ export class WorkerInstance {
             const tools = await this.#protocolClient.listTools();
             const refreshedTools = this.#catalog.refresh(tools.tools);
             this.#workspacePath = asWorkspacePath(this.#handshake.workspace);
-            let lastSeq = this.snapshot().lastSeq;
 
-            if (emitReconnectEvents) {
-                const connectedEvent = await this.#appendEvent("worker.rpcConnected");
-                const schemaEvent = await this.#appendEvent(
+            if (shouldEmitRpcLifecycleEvents) {
+                await this.#appendEvent("worker.rpcConnected");
+                await this.#appendEvent(
                     "worker.schemaRefreshed",
                     toEventData({ toolCount: refreshedTools.length })
                 );
-                lastSeq = Math.max(connectedEvent.seq, schemaEvent.seq);
             }
 
-            return this.#stateMachine.apply({
+            return await this.#applyStateUpdate({
                 connectionState: "connected",
                 daemonState: "running",
                 lastErrorCode: undefined,
-                lastSeq,
                 pid
             });
         } catch (error) {
@@ -439,7 +452,7 @@ export class WorkerInstance {
             );
             this.#closeRpcBridge();
             this.#handshake = undefined;
-            this.#stateMachine.apply({
+            await this.#applyStateUpdate({
                 connectionState: "failed",
                 daemonState: "running",
                 lastErrorCode: getErrorCode(wrappedError, errorCodes.coreWorkerHandshakeFailed),
@@ -480,7 +493,7 @@ export class WorkerInstance {
                 `Worker status failed for instance ${this.#config.name}.`,
                 this.#config.name
             );
-            this.#stateMachine.apply({
+            await this.#applyStateUpdate({
                 connectionState: "failed",
                 daemonState: "failed",
                 lastErrorCode: getErrorCode(wrappedError, errorCodes.coreWorkerStatusFailed)
@@ -495,7 +508,7 @@ export class WorkerInstance {
                 retryable: false,
                 details: toJsonDetails(withInstanceDetails(result.details, this.#config.name))
             });
-            this.#stateMachine.apply({
+            await this.#applyStateUpdate({
                 connectionState: "failed",
                 daemonState: "failed",
                 lastErrorCode: error.code
@@ -503,7 +516,16 @@ export class WorkerInstance {
             throw error;
         }
 
-        return parseWorkerStatus(result.stdout, this.#config.name);
+        try {
+            return parseWorkerStatus(result.stdout, this.#config.name);
+        } catch (error) {
+            await this.#applyStateUpdate({
+                connectionState: "failed",
+                daemonState: "failed",
+                lastErrorCode: getErrorCode(error, errorCodes.coreWorkerStatusFailed)
+            });
+            throw error;
+        }
     }
 
     async #handleRpcDisconnect(error: unknown): Promise<void> {
@@ -512,17 +534,16 @@ export class WorkerInstance {
         }
 
         const daemonState = this.snapshot().daemonState;
-        const disconnectedEvent = await this.#appendEvent(
+        await this.#appendEvent(
             "worker.rpcDisconnected",
             toEventData({ errorCode: getErrorCode(error, errorCodes.coreWorkerRpcDisconnected) })
         );
 
         this.#handshake = undefined;
-        this.#stateMachine.apply({
+        await this.#applyStateUpdate({
             connectionState: daemonState === "running" ? "reconnecting" : "disconnected",
             daemonState,
-            lastErrorCode: getErrorCode(error, errorCodes.coreWorkerRpcDisconnected),
-            lastSeq: disconnectedEvent.seq
+            lastErrorCode: getErrorCode(error, errorCodes.coreWorkerRpcDisconnected)
         });
 
         if (daemonState !== "running") {
@@ -545,23 +566,73 @@ export class WorkerInstance {
     }
 
     async #appendEvent(type: InstanceEventInput["type"], data?: JsonValue) {
-        return await this.#eventBuffer.append({
+        const event = await this.#eventBuffer.append({
             at: new Date().toISOString(),
             data,
             type
         });
+        this.#stateMachine.apply({ lastSeq: event.seq });
+        return event;
     }
 
-    async #appendToolLogs(result: CommandResult): Promise<void> {
+    async #appendToolLogs(
+        result: CommandResult,
+        context: {
+            callId: string;
+            requestId?: string;
+            sessionId?: string;
+            source: ToolCallContext["source"];
+            toolName: string;
+        }
+    ): Promise<void> {
         const at = new Date().toISOString();
 
         if (result.stdout.length > 0) {
             await this.#logStore.append("stdout", result.stdout, at);
+            await this.#appendEvent(
+                "log.appended",
+                toEventData({
+                    ...context,
+                    bytes: readByteLength(result.stdout),
+                    preview: readPreview(result.stdout),
+                    stream: "stdout",
+                    tail: readTail(result.stdout)
+                })
+            );
         }
 
         if (result.stderr.length > 0) {
             await this.#logStore.append("stderr", result.stderr, at);
+            await this.#appendEvent(
+                "log.appended",
+                toEventData({
+                    ...context,
+                    bytes: readByteLength(result.stderr),
+                    preview: readPreview(result.stderr),
+                    stream: "stderr",
+                    tail: readTail(result.stderr)
+                })
+            );
         }
+    }
+
+    async #applyStateUpdate(update: InstanceStateUpdate): Promise<InstanceSnapshot> {
+        const previous = this.snapshot();
+        const next = this.#stateMachine.apply(update);
+
+        if (previous.daemonState !== next.daemonState || normalizeLifecycleStatus(previous.status) !== normalizeLifecycleStatus(next.status)) {
+            await this.#appendEvent("instance.statusChanged", createStatusChangedEventData(previous, next));
+        }
+
+        if (previous.connectionState !== next.connectionState) {
+            await this.#appendEvent("instance.connectionChanged", createConnectionChangedEventData(previous, next));
+        }
+
+        if (previous.ready !== next.ready) {
+            await this.#appendEvent("instance.readyChanged", createReadyChangedEventData(previous, next));
+        }
+
+        return this.snapshot();
     }
 }
 
@@ -635,6 +706,59 @@ function toEventData(
     record: Record<string, JsonValue | undefined>
 ): Record<string, JsonValue> {
     return Object.fromEntries(Object.entries(record).filter(([, value]) => value !== undefined)) as Record<string, JsonValue>;
+}
+
+function createStatusChangedEventData(previous: InstanceSnapshot, next: InstanceSnapshot): Record<string, JsonValue> {
+    return toEventData({
+        connectionState: next.connectionState,
+        daemonState: next.daemonState,
+        lastErrorCode: next.lastErrorCode,
+        pid: next.pid,
+        previousDaemonState: previous.daemonState,
+        previousStatus: previous.status,
+        ready: next.ready,
+        status: next.status
+    });
+}
+
+function createConnectionChangedEventData(previous: InstanceSnapshot, next: InstanceSnapshot): Record<string, JsonValue> {
+    return toEventData({
+        connectionState: next.connectionState,
+        daemonState: next.daemonState,
+        lastErrorCode: next.lastErrorCode,
+        pid: next.pid,
+        previousConnectionState: previous.connectionState,
+        ready: next.ready,
+        status: next.status
+    });
+}
+
+function createReadyChangedEventData(previous: InstanceSnapshot, next: InstanceSnapshot): Record<string, JsonValue> {
+    return toEventData({
+        connectionState: next.connectionState,
+        daemonState: next.daemonState,
+        lastErrorCode: next.lastErrorCode,
+        pid: next.pid,
+        previousReady: previous.ready,
+        ready: next.ready,
+        status: next.status
+    });
+}
+
+function readByteLength(value: string): number {
+    return Buffer.byteLength(value, "utf8");
+}
+
+function readPreview(value: string): string {
+    return value.slice(0, 160);
+}
+
+function readTail(value: string): string {
+    return value.slice(-160);
+}
+
+function normalizeLifecycleStatus(status: InstanceSnapshot["status"]): "failed" | "running" | "stale" | "stopped" {
+    return status === "ready" ? "running" : status;
 }
 
 function parseWorkerStatus(

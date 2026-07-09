@@ -44,7 +44,7 @@ test("WorkerInstance completes lifecycle against frozen devshell-worker", async 
     });
 
     t.after(async () => {
-        instance.close();
+        await instance.close();
         await instance.stop().catch(() => undefined);
         await rm(workspacePath, { force: true, recursive: true });
         await rm(homeDirectory, { force: true, recursive: true });
@@ -62,7 +62,34 @@ test("WorkerInstance completes lifecycle against frozen devshell-worker", async 
 
     const replay = instance.subscribe(1);
     assert.equal(replay.kind, "events");
-    assert.equal(replay.events[0]?.type, "instance.started");
+    assert.deepEqual(
+        replay.events.map((event) => event.type),
+        [
+            "instance.statusChanged",
+            "instance.connectionChanged",
+            "worker.rpcConnected",
+            "worker.schemaRefreshed",
+            "instance.started",
+            "instance.statusChanged",
+            "instance.connectionChanged",
+            "instance.readyChanged"
+        ]
+    );
+    assert.deepEqual(replay.events[0]?.data, {
+        connectionState: "disconnected",
+        daemonState: "starting",
+        previousDaemonState: "stopped",
+        previousStatus: "stopped",
+        ready: false,
+        status: "running"
+    });
+    assert.deepEqual(replay.events.at(-1)?.data, {
+        connectionState: "connected",
+        daemonState: "running",
+        previousReady: false,
+        ready: true,
+        status: "ready"
+    });
 
     const stopped = await instance.stop();
     assert.equal(stopped.daemonState, "stopped");
@@ -81,6 +108,8 @@ test("WorkerInstance rejects not-ready and concurrent tool calls while persistin
     });
 
     try {
+        const stdout = "x".repeat(240);
+
         await assert.rejects(instance.callTool("bash_run", { command: "pwd" }, cliToolCallContext), (error: unknown) => {
             assert.equal((error as { code?: string }).code, errorCodes.coreInstanceNotReady);
             return true;
@@ -100,11 +129,11 @@ test("WorkerInstance rejects not-ready and concurrent tool calls while persistin
         harness.respond("bash_run", {
             exitCode: 0,
             stderr: "",
-            stdout: "/tmp/workspace\n"
+            stdout
         });
 
         const result = await firstCall;
-        assert.equal(result.stdout, "/tmp/workspace\n");
+        assert.equal(result.stdout, stdout);
 
         const invalidCall = instance.callTool("bash_run", { bad: true } as JsonValue, cliToolCallContext);
         await assert.rejects(invalidCall, (error: unknown) => {
@@ -120,17 +149,70 @@ test("WorkerInstance rejects not-ready and concurrent tool calls while persistin
         const logs = await instance.readLogs();
         assert.equal(logs.length, 1);
         assert.equal(logs[0]?.stream, "stdout");
-        assert.equal(logs[0]?.message, "/tmp/workspace\n");
+        assert.equal(logs[0]?.message, stdout);
 
         const replay = instance.subscribe(1);
         assert.equal(replay.kind, "events");
         assert.deepEqual(
             replay.events.map((event) => event.type),
-            ["instance.started", "toolCall.started", "toolCall.completed", "toolCall.started", "toolCall.failed"]
+            [
+                "instance.statusChanged",
+                "instance.connectionChanged",
+                "worker.rpcConnected",
+                "worker.schemaRefreshed",
+                "instance.started",
+                "instance.statusChanged",
+                "instance.connectionChanged",
+                "instance.readyChanged",
+                "toolCall.started",
+                "log.appended",
+                "toolCall.completed",
+                "toolCall.started",
+                "toolCall.failed"
+            ]
         );
+        assert.deepEqual(replay.events[8]?.data, {
+            callId: replay.events[8]?.data?.callId,
+            source: "cli",
+            startedAt: replay.events[8]?.data?.startedAt,
+            status: "started",
+            toolName: "bash_run"
+        });
+        assert.deepEqual(replay.events[9]?.data, {
+            bytes: 240,
+            callId: replay.events[8]?.data?.callId,
+            preview: stdout.slice(0, 160),
+            source: "cli",
+            stream: "stdout",
+            tail: stdout.slice(-160),
+            toolName: "bash_run"
+        });
+        assert.equal((replay.events[9]?.data as { preview?: string }).preview, stdout.slice(0, 160));
+        assert.notEqual((replay.events[9]?.data as { preview?: string }).preview, stdout);
+        assert.deepEqual(replay.events[10]?.data, {
+            callId: replay.events[8]?.data?.callId,
+            completedAt: replay.events[10]?.data?.completedAt,
+            exitCode: 0,
+            source: "cli",
+            startedAt: replay.events[8]?.data?.startedAt,
+            status: "completed",
+            stderrBytes: 0,
+            stdoutBytes: 240,
+            toolName: "bash_run"
+        });
+        assert.deepEqual(replay.events[12]?.data, {
+            callId: replay.events[12]?.data?.callId,
+            completedAt: replay.events[12]?.data?.completedAt,
+            errorCode: errorCodes.coreToolSchemaUnavailable,
+            source: "cli",
+            startedAt: replay.events[12]?.data?.startedAt,
+            status: "failed",
+            toolName: "bash_run"
+        });
 
         await instance.stop();
     } finally {
+        await instance.close();
         await rm(homeDirectory, { force: true, recursive: true });
     }
 });
@@ -162,8 +244,25 @@ test("WorkerInstance refreshStatus updates snapshot from worker status without a
         assert.equal(stale.daemonState, "stale");
         assert.equal(stale.connectionState, "disconnected");
         assert.equal(stale.ready, false);
+
+        const replay = instance.subscribe(1);
+        assert.equal(replay.kind, "events");
+        assert.deepEqual(
+            replay.events.map((event) => event.type),
+            [
+                "instance.statusChanged",
+                "instance.connectionChanged",
+                "worker.rpcConnected",
+                "worker.schemaRefreshed",
+                "instance.connectionChanged",
+                "instance.readyChanged",
+                "instance.statusChanged",
+                "instance.connectionChanged",
+                "instance.readyChanged"
+            ]
+        );
     } finally {
-        instance.close();
+        await instance.close();
         await rm(homeDirectory, { force: true, recursive: true });
     }
 });
@@ -198,10 +297,26 @@ test("WorkerInstance reconnectRpc refreshes schema after an rpc disconnect", asy
         assert.equal(replay.kind, "events");
         assert.deepEqual(
             replay.events.map((event) => event.type),
-            ["instance.started", "worker.rpcDisconnected", "worker.rpcConnected", "worker.schemaRefreshed"]
+            [
+                "instance.statusChanged",
+                "instance.connectionChanged",
+                "worker.rpcConnected",
+                "worker.schemaRefreshed",
+                "instance.started",
+                "instance.statusChanged",
+                "instance.connectionChanged",
+                "instance.readyChanged",
+                "worker.rpcDisconnected",
+                "instance.connectionChanged",
+                "instance.readyChanged",
+                "worker.rpcConnected",
+                "worker.schemaRefreshed",
+                "instance.connectionChanged",
+                "instance.readyChanged"
+            ]
         );
     } finally {
-        instance.close();
+        await instance.close();
         await rm(homeDirectory, { force: true, recursive: true });
     }
 });

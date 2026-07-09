@@ -5,16 +5,25 @@ export type InstanceEventType =
     | "instance.started"
     | "instance.stopped"
     | "instance.statusChanged"
+    | "instance.connectionChanged"
+    | "instance.readyChanged"
     | "worker.rpcConnected"
     | "worker.rpcDisconnected"
     | "worker.schemaRefreshed"
     | "toolCall.started"
+    | "toolCall.running"
     | "toolCall.completed"
     | "toolCall.failed"
+    | "toolCall.denied"
+    | "toolCall.expired"
     | "log.appended"
     | "mcp.sessionOpened"
     | "mcp.sessionClosed"
-    | "mcp.toolCalled";
+    | "mcp.toolCalled"
+    | "approval.requested"
+    | "approval.approved"
+    | "approval.denied"
+    | "approval.expired";
 
 export interface InstanceEvent {
     at: string;
