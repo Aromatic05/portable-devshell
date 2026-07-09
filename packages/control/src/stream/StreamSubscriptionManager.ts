@@ -1,4 +1,4 @@
-import { createError, errorCodes, type JsonValue } from "@portable-devshell/shared";
+import { createError, createInstanceTarget, errorCodes, type JsonValue } from "@portable-devshell/shared";
 
 import type { ControlRpcConnection } from "../control/rpc/ControlRpcConnection.js";
 import type { StreamSubscriptionInstance } from "./subscription/StreamSubscriptionInstance.js";
@@ -78,10 +78,7 @@ export class StreamSubscriptionManager {
                         requestedFromSeq: subscription.nextSeq
                     } as unknown as JsonValue,
                     seq: slice.lastSeq,
-                    target: {
-                        instance: subscription.instanceName,
-                        kind: "instance"
-                    },
+                    target: createInstanceTarget(subscription.instanceName),
                     type: "event"
                 });
                 await subscription.connection.sendEvent({
@@ -91,10 +88,7 @@ export class StreamSubscriptionManager {
                         reason: "gap"
                     } as unknown as JsonValue,
                     seq: slice.lastSeq,
-                    target: {
-                        instance: subscription.instanceName,
-                        kind: "instance"
-                    },
+                    target: createInstanceTarget(subscription.instanceName),
                     type: "event"
                 });
                 this.#subscriptions.delete(key);
@@ -107,10 +101,7 @@ export class StreamSubscriptionManager {
                     event: event.type,
                     payload: event as unknown as JsonValue,
                     seq: event.seq,
-                    target: {
-                        instance: subscription.instanceName,
-                        kind: "instance"
-                    },
+                    target: createInstanceTarget(subscription.instanceName),
                     type: "event"
                 });
             }

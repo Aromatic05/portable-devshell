@@ -410,7 +410,6 @@ async function request(socketPath: string, method: string, params?: JsonValue): 
 
     await writer.write({
         id: `${method}-${Date.now()}`,
-        issuedAt: new Date().toISOString(),
         method,
         params,
         target: { kind: "control" },

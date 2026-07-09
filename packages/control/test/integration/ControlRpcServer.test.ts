@@ -227,7 +227,6 @@ async function verifyShutdownToleratesClientDisconnect(): Promise<void> {
 
         await writer.write({
             id: "req-shutdown",
-            issuedAt: new Date().toISOString(),
             method: "control.shutdown",
             target: { kind: "control" },
             type: "request"
@@ -330,7 +329,6 @@ class RpcClient {
 
         await this.#writer.write({
             id,
-            issuedAt: new Date().toISOString(),
             method,
             params,
             target,

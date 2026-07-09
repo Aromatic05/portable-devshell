@@ -154,7 +154,6 @@ class RpcClient {
 
         await this.#writer.write({
             id,
-            issuedAt: new Date().toISOString(),
             method,
             params,
             target,

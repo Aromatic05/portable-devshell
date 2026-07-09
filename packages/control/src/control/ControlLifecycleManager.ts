@@ -223,7 +223,6 @@ class SocketControlLifecycleRpcClient implements ControlLifecycleRpcClient {
         try {
             await writer.write({
                 id: `${method}-${Date.now()}`,
-                issuedAt: new Date().toISOString(),
                 method,
                 params,
                 target: { kind: "control" },

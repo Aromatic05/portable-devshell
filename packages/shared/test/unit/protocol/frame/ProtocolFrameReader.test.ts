@@ -17,7 +17,7 @@ test("FrameReader assembles a frame from partial chunks", () => {
     const reader = new FrameReader();
     const frame = FrameCodec.encode({
         id: "req-1",
-        kind: "request"
+        type: "request"
     });
 
     assert.deepEqual(reader.push(frame.subarray(0, 2)), []);
@@ -25,7 +25,7 @@ test("FrameReader assembles a frame from partial chunks", () => {
     assert.deepEqual(reader.push(frame.subarray(5)), [
         {
             id: "req-1",
-            kind: "request"
+            type: "request"
         }
     ]);
     assert.equal(reader.bufferedByteLength, 0);
@@ -82,13 +82,13 @@ test("FrameWriter writes a length-prefixed JSON frame to a writable stream", asy
 
     await writer.write({
         id: "req-1",
-        kind: "response"
+        type: "response"
     });
 
     const frame = Buffer.concat(chunks);
 
     assert.deepEqual(FrameCodec.decode(frame), {
         id: "req-1",
-        kind: "response"
+        type: "response"
     });
 });

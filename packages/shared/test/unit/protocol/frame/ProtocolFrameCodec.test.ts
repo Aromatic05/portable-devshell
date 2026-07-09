@@ -15,7 +15,7 @@ function readErrorCode(error: unknown): string | undefined {
 test("FrameCodec encodes and decodes a single frame", () => {
     const value = {
         id: "req-1",
-        kind: "request",
+        type: "request",
         params: {
             ok: true
         }

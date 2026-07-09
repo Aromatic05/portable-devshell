@@ -224,7 +224,6 @@ async function request(
 
     await writer.write({
         id: identifyId,
-        issuedAt: new Date().toISOString(),
         method: "control.identifyClient",
         params: { clientKind },
         target: { kind: "control" },
@@ -233,7 +232,6 @@ async function request(
 
     await writer.write({
         id: requestId,
-        issuedAt: new Date().toISOString(),
         method,
         params,
         target,
