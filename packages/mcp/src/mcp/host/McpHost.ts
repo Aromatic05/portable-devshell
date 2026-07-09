@@ -14,6 +14,9 @@ interface ToolDefinition {
 }
 
 interface WorkerInstanceLike {
+    appendMcpSessionClosed(sessionId: string): Promise<void>;
+    appendMcpSessionOpened(sessionId: string): Promise<void>;
+    appendMcpToolCalled(toolName: string, context: { requestId?: string; sessionId?: string }): Promise<void>;
     callTool(toolName: string, input: JsonValue, context: { requestId?: string; sessionId?: string; source: "mcp" }): Promise<CommandResult>;
     hasToolSchemaCache?(): boolean;
     listTools(): ToolDefinition[];

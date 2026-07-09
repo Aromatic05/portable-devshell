@@ -40,6 +40,29 @@ test("initialize succeeds over SDK transport", async () => {
     }
 });
 
+test("session lifecycle emits MCP session events", async () => {
+    const harness = createWorkerHarness();
+    const binding = createBinding(harness);
+    const server = await createBindingServer(binding);
+
+    try {
+        await initialize(server.url);
+        assert.deepEqual(
+            harness.events.map((event) => event.type),
+            ["mcp.sessionOpened"]
+        );
+
+        await binding.close();
+        assert.deepEqual(
+            harness.events.map((event) => event.type),
+            ["mcp.sessionOpened", "mcp.sessionClosed"]
+        );
+    } finally {
+        await server.close();
+        await binding.close();
+    }
+});
+
 test("tools/list uses allowlist filtering", async () => {
     const binding = createBinding();
     const server = await createBindingServer(binding);
@@ -72,6 +95,13 @@ test("tools/call delegates to WorkerInstance.callTool", async () => {
         assert.equal(harness.calls[0]?.sessionId, session.headers["mcp-session-id"]);
         assert.equal(harness.calls[0]?.source, "mcp");
         assert.equal(harness.calls[0]?.toolName, "bash_run");
+        assert.deepEqual(harness.events.map((event) => event.type), ["mcp.sessionOpened", "mcp.toolCalled"]);
+        assert.deepEqual(harness.events[1]?.data, {
+            requestId: "req-tools-call",
+            sessionId: session.headers["mcp-session-id"],
+            source: "mcp",
+            toolName: "bash_run"
+        });
         assert.equal(response.body.result?.isError, false);
     } finally {
         await server.close();
@@ -241,6 +271,7 @@ function createWorkerHarness(options?: {
     tools?: ToolDefinition[];
 }) {
     const calls: Array<{ input: JsonValue; toolName: string }> = [];
+    const events: Array<{ data: Record<string, JsonValue>; type: string }> = [];
     const tools = options?.tools ?? [
         { name: "bash_run", description: "Run shell", inputSchema: { type: "object", properties: { command: { type: "string" } } } },
         { name: "read_logs", description: "Read logs", inputSchema: { type: "object" } }
@@ -257,7 +288,25 @@ function createWorkerHarness(options?: {
             source?: string;
             toolName: string;
         }>,
+        events,
         worker: {
+            async appendMcpSessionClosed(sessionId: string) {
+                events.push({ data: { sessionId }, type: "mcp.sessionClosed" });
+            },
+            async appendMcpSessionOpened(sessionId: string) {
+                events.push({ data: { sessionId }, type: "mcp.sessionOpened" });
+            },
+            async appendMcpToolCalled(toolName: string, context: { requestId?: string; sessionId?: string }) {
+                events.push({
+                    data: {
+                        requestId: context.requestId ?? null,
+                        sessionId: context.sessionId ?? null,
+                        source: "mcp",
+                        toolName
+                    },
+                    type: "mcp.toolCalled"
+                });
+            },
             hasToolSchemaCache() {
                 return hasToolSchemaCache;
             },

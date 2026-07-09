@@ -28,9 +28,13 @@ export class McpEndpointBinding {
     }
 
     async close(): Promise<void> {
-        const sessions = [...this.#sessions.values()];
-        this.#sessions.clear();
-        await Promise.all(sessions.map(async (session) => await session.server.close()));
+        const sessions = [...this.#sessions.entries()];
+        await Promise.all(
+            sessions.map(async ([sessionId, session]) => {
+                await session.server.close();
+                await this.#closeSession(sessionId);
+            })
+        );
     }
 
     async handleRequest(request: IncomingMessage, response: ServerResponse, body: JsonValue): Promise<void> {
@@ -79,11 +83,12 @@ export class McpEndpointBinding {
         );
         const transport = new StreamableHTTPServerTransport({
             enableJsonResponse: true,
-            onsessionclosed: (sessionId) => {
-                this.#sessions.delete(sessionId);
+            onsessionclosed: async (sessionId) => {
+                await this.#closeSession(sessionId);
             },
-            onsessioninitialized: (sessionId) => {
+            onsessioninitialized: async (sessionId) => {
                 this.#sessions.set(sessionId, session);
+                await this.#worker.appendSessionOpened(sessionId);
             },
             sessionIdGenerator: () => randomUUID()
         });
@@ -92,6 +97,14 @@ export class McpEndpointBinding {
         this.#registerHandlers(server, session);
         await server.connect(transport);
         return session;
+    }
+
+    async #closeSession(sessionId: string): Promise<void> {
+        if (!this.#sessions.delete(sessionId)) {
+            return;
+        }
+
+        await this.#worker.appendSessionClosed(sessionId);
     }
 
     #registerHandlers(server: Server, session: McpEndpointSession): void {

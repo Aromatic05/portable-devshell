@@ -11,6 +11,9 @@ interface ToolDefinition {
 }
 
 interface WorkerInstanceLike {
+    appendMcpSessionClosed(sessionId: string): Promise<void>;
+    appendMcpSessionOpened(sessionId: string): Promise<void>;
+    appendMcpToolCalled(toolName: string, context: { requestId?: string; sessionId?: string }): Promise<void>;
     callTool(toolName: string, input: JsonValue, context: ToolCallContext): Promise<CommandResult>;
     hasToolSchemaCache?(): boolean;
     listTools(): ToolDefinition[];
@@ -59,7 +62,19 @@ export class McpEndpointWorker {
         return this.#filter.filter(this.#worker.listTools()).find((tool) => tool.name === toolName);
     }
 
+    async appendSessionOpened(sessionId: string): Promise<void> {
+        await this.#worker.appendMcpSessionOpened(sessionId);
+    }
+
+    async appendSessionClosed(sessionId: string): Promise<void> {
+        await this.#worker.appendMcpSessionClosed(sessionId);
+    }
+
     async callTool(toolName: string, input: JsonValue, context: ToolCallContext) {
+        await this.#worker.appendMcpToolCalled(toolName, {
+            requestId: context.requestId,
+            sessionId: context.sessionId
+        });
         this.assertReady();
         const tool = this.getTool(toolName);
 

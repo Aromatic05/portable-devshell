@@ -211,6 +211,9 @@ function createHost(overrides?: {
                 name: "demo",
                 allowlist: ["bash_run"],
                 worker: {
+                    async appendMcpSessionClosed(_sessionId: string) {},
+                    async appendMcpSessionOpened(_sessionId: string) {},
+                    async appendMcpToolCalled(_toolName: string, _context: { requestId?: string; sessionId?: string }) {},
                     snapshot() {
                         return { ready: true };
                     },

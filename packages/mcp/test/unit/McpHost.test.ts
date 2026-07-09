@@ -20,6 +20,9 @@ test("route registry resolves per-instance binding", () => {
             allowlist: ["bash_run"],
             instanceName: "demo",
             worker: {
+                async appendMcpSessionClosed(_sessionId: string) {},
+                async appendMcpSessionOpened(_sessionId: string) {},
+                async appendMcpToolCalled(_toolName: string, _context: { requestId?: string; sessionId?: string }) {},
                 snapshot() {
                     return { ready: true };
                 },

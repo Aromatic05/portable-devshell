@@ -439,6 +439,26 @@ export class WorkerInstance {
         return await this.#toolCallHistory.read(query);
     }
 
+    async appendMcpSessionOpened(sessionId: string): Promise<void> {
+        await this.#appendEvent("mcp.sessionOpened", toEventData({ sessionId }));
+    }
+
+    async appendMcpSessionClosed(sessionId: string): Promise<void> {
+        await this.#appendEvent("mcp.sessionClosed", toEventData({ sessionId }));
+    }
+
+    async appendMcpToolCalled(toolName: string, context: { requestId?: string; sessionId?: string }): Promise<void> {
+        await this.#appendEvent(
+            "mcp.toolCalled",
+            toEventData({
+                requestId: context.requestId,
+                sessionId: context.sessionId,
+                source: "mcp",
+                toolName
+            })
+        );
+    }
+
     subscribe(fromSeq = 1): EventStreamGap | EventStreamSlice {
         return this.#eventBuffer.readFrom(fromSeq);
     }
