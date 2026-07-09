@@ -1,10 +1,9 @@
 import React from "react";
 import { Box } from "ink";
 
-const MAIN_WIDTH_RATIO = 0.8;
-const MAIN_FRAME_WIDTH = 4;
-const SIDEBAR_WIDTH_PERCENT = `${(1 - MAIN_WIDTH_RATIO) * 100}%`;
-const MAIN_WIDTH_PERCENT = `${MAIN_WIDTH_RATIO * 100}%`;
+const GAP = 1;
+const SIDEBAR_WIDTH_RATIO = 0.15;
+const MAIN_PANEL_WIDTH_RATIO = 0.85;
 
 export interface TuiRootLayoutProps {
     columns: number;
@@ -16,22 +15,44 @@ export interface TuiRootLayoutProps {
 }
 
 export function mainInnerWidth(columns: number): number {
-    return Math.max(0, Math.floor(columns * MAIN_WIDTH_RATIO) - MAIN_FRAME_WIDTH);
+    return Math.max(0, layoutMetrics(columns).mainPanelWidth - GAP * 8);
 }
 
 export function TuiRootLayout(props: TuiRootLayoutProps) {
+    const layout = layoutMetrics(props.columns);
+
     return (
         <Box flexDirection="column" height={props.rows} width={props.columns}>
             {props.header}
             <Box flexGrow={1} height={Math.max(0, props.rows - 6)}>
-                <Box width={SIDEBAR_WIDTH_PERCENT}>
+                <Box width={layout.outerGap} />
+                <Box width={layout.sidebarWidth}>
                     {props.sidebar}
                 </Box>
-                <Box borderStyle="single" flexDirection="column" flexGrow={1} paddingX={1} width={MAIN_WIDTH_PERCENT}>
+                <Box width={layout.panelGap} />
+                <Box borderStyle="single" flexDirection="column" paddingX={1} width={layout.mainPanelWidth}>
                     {props.main}
                 </Box>
+                <Box width={layout.outerGap} />
             </Box>
             {props.footer}
         </Box>
     );
+}
+
+function layoutMetrics(columns: number): {
+    mainPanelWidth: number;
+    outerGap: number;
+    panelGap: number;
+    sidebarWidth: number;
+} {
+    const totalGap = GAP * 3;
+    const usableWidth = Math.max(0, columns - totalGap);
+
+    return {
+        mainPanelWidth: Math.max(0, Math.floor(usableWidth * MAIN_PANEL_WIDTH_RATIO)),
+        outerGap: GAP,
+        panelGap: GAP,
+        sidebarWidth: Math.max(0, Math.floor(usableWidth * SIDEBAR_WIDTH_RATIO))
+    };
 }
