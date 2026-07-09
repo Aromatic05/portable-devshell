@@ -6,10 +6,20 @@
 - controller 负责配置、device registry、audit、policy、worker lifecycle、public auth
 - Rust worker 只负责 bash / file / tmux 一类执行能力
 
+当前边界：
+
+- CLI 和 TUI 都是 control client，不直接读实例文件，不直接 spawn worker，不直连 worker RPC
+- MCP 只暴露 per-instance endpoint，不暴露 instance 管理接口
+- audit approval gate 在 core `WorkerInstance.callTool`，TUI approval inbox 只负责展示和决策输入
+- control 不提供 global timeline / global logs / global tool calls 聚合接口
+- config editor 通过 control API 读写 `~/.devshell/control/config.toml` 与 `~/.devshell/control/instances/*.toml`
+- 当前仓库包含 TUI control session / view model 基础层，不宣称完整正式 TUI 页面已完成
+
 主配置路径：
 
 - `~/.devshell/control/config.toml`
 - `~/.devshell/control/instances/*.toml`
+- control socket: `$XDG_RUNTIME_DIR/portable-devshell/control.sock`
 
 最小配置可以只有：
 
@@ -107,6 +117,6 @@ ChatGPT Connector 使用入口：
   - `pnpm build:worker:debug:<targetKey>` builds a specific debug worker target
 
 代码已经支持 target-specific probe、release asset resolution、install path 和 structured error。
-默认发布流程会在 GitHub tag `v*` 上自动构建四个 target 的 worker，并把二进制和对应 `.sha256` 上传到同名 GitHub Release。
+默认发布流程会在 GitHub tag `v*` 上自动构建四个 target 的 worker，并尝试把二进制和对应 `.sha256` 上传到同名 GitHub Release；真实可用 release asset 以实际 release 产物为准。
 运行时如果没有 target-specific 本地覆盖路径，core 会先探测目标平台，再按 release tag 下载对应 worker；若 release 不存在或校验失败，将返回 `core.workerAssetUnavailable`。
 在 Linux host 上，默认构建会直接尝试 musl target；如果当前机器没有对应 target/std/toolchain，构建会失败，而不是退回到动态链接的 `gnu` binary。

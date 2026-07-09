@@ -26,6 +26,21 @@ tmp_home=$(mktemp -d)
 tmp_runtime=$(mktemp -d)
 tmp_workspace=$(mktemp -d)
 tmp_bin=$(mktemp -d)
+mcp_port=$(node <<'EOF'
+const net = require("node:net");
+const server = net.createServer();
+server.listen(0, "127.0.0.1", () => {
+  const address = server.address();
+  if (address === null || typeof address === "string") {
+    process.exit(1);
+  }
+
+  process.stdout.write(String(address.port));
+  server.close(() => process.exit(0));
+});
+server.on("error", () => process.exit(1));
+EOF
+)
 
 cleanup() {
     PATH="$tmp_bin:$PATH" HOME="$tmp_home" XDG_RUNTIME_DIR="$tmp_runtime" devshell instance stop aromatic-pc >/dev/null 2>&1 || true
@@ -38,12 +53,15 @@ trap cleanup EXIT INT TERM
 cp "$fixture_workspace/README.md" "$tmp_workspace/README.md"
 mkdir -p "$tmp_home/.devshell/control/instances"
 
-WORKSPACE_PATH="$tmp_workspace" FIXTURE_CONFIG="$fixture_config" OUTPUT_CONFIG="$tmp_home/.devshell/control/config.toml" node <<'EOF'
+WORKSPACE_PATH="$tmp_workspace" FIXTURE_CONFIG="$fixture_config" MCP_PORT="$mcp_port" OUTPUT_CONFIG="$tmp_home/.devshell/control/config.toml" node <<'EOF'
 const { readFileSync, writeFileSync } = require("node:fs");
 const fixture = readFileSync(process.env.FIXTURE_CONFIG, "utf8");
 writeFileSync(
   process.env.OUTPUT_CONFIG,
-  fixture.replace("__WORKSPACE__", process.env.WORKSPACE_PATH),
+  fixture
+    .replace("__WORKSPACE__", process.env.WORKSPACE_PATH)
+    .replace('listenPort = 17890', `listenPort = ${process.env.MCP_PORT}`)
+    .replace('publicBaseUrl = "http://127.0.0.1:17890"', `publicBaseUrl = "http://127.0.0.1:${process.env.MCP_PORT}"`),
   "utf8"
 );
 EOF
@@ -84,7 +102,7 @@ export XDG_RUNTIME_DIR="$tmp_runtime"
 devshell start >/dev/null
 devshell instance start aromatic-pc >/dev/null
 
-MCP_ENDPOINT="http://127.0.0.1:17890/aromatic-pc/mcp" WORKSPACE_PATH="$tmp_workspace" node --input-type=module <<'EOF'
+MCP_ENDPOINT="http://127.0.0.1:$mcp_port/aromatic-pc/mcp" WORKSPACE_PATH="$tmp_workspace" node --input-type=module <<'EOF'
 const endpoint = process.env.MCP_ENDPOINT;
 const workspacePath = process.env.WORKSPACE_PATH;
 

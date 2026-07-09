@@ -1,109 +1,114 @@
-# Task 13 Acceptance
+# Task 12-13 Acceptance
 
 ## Commands
 
+- `bash acceptance/run-final-acceptance.sh`
 - `bash acceptance/run-typecheck.sh`
 - `bash acceptance/run-unit-tests.sh`
 - `bash acceptance/run-real-worker-smoke.sh`
 - `bash acceptance/run-mcp-smoke.sh`
 
+`acceptance/run-final-acceptance.sh` 串行执行：
+
+- `pnpm build`
+- `pnpm typecheck`
+- `pnpm test`
+- `cargo test --manifest-path ./Cargo.toml`
+- `cargo build --manifest-path ./Cargo.toml`
+- `bash acceptance/run-real-worker-smoke.sh`
+- `bash acceptance/run-mcp-smoke.sh`
+
 ## Acceptance Checks
 
-### 1. control 是长期运行 server
+### 1. README 与代码路径一致
 
 - status: pass
-- evidence: `packages/control/test/integration/ControlRealWorker.test.ts` test `control lifecycle smoke drives the frozen worker and persists Task 12 artifacts`; `bash acceptance/run-real-worker-smoke.sh` produced `control: running` before any instance start.
+- evidence: `README.md` 现在明确 `~/.devshell/control/config.toml`、`~/.devshell/control/instances/*.toml`、`$XDG_RUNTIME_DIR/portable-devshell/control.sock`；`packages/control/src/control/path/ControlPathRuntime.ts` 和 `packages/control/test/unit/ControlConfig.test.ts` test `ControlPathRuntime` 使用同一路径。
+- fix commit: this batch
+
+### 2. README 不再描述旧架构或夸大 TUI 完成度
+
+- status: pass
+- evidence: `README.md` 明确 CLI/TUI 是 control client，不直接读文件、不 spawn worker、不直连 worker RPC；同时只声明当前仓库包含 `TuiControlSession` / `TuiViewModelStore` 基础层，不宣称完整正式 TUI 页面已完成。
+- fix commit: this batch
+
+### 3. MCP 是 per-instance endpoint，且不暴露管理面
+
+- status: pass
+- evidence: `README.md` 明确 MCP 只暴露 per-instance endpoint；`packages/mcp/src/mcp/host/route/McpHostRouteMatcher.ts` 只匹配 `/<instance>/mcp`；`packages/mcp/test/integration/McpHttpServer.test.ts` test `missing instance returns 404`。
+- fix commit: this batch
+
+### 4. approval gate 与 TUI approval inbox 的职责边界正确
+
+- status: pass
+- evidence: `README.md` 明确 approval gate 在 core `WorkerInstance.callTool`，TUI approval inbox 只负责展示和决策输入；`packages/core/test/integration/WorkerInstanceReal.test.ts` tests `WorkerInstance waits for approval before invoking tools and persists approval records` 与 `WorkerInstance denies and expires approval-gated calls without invoking tools`；`packages/mcp/test/integration/McpRealWorker.test.ts` test `MCP tools/call waits for approval before invoking the worker tool`。
+- fix commit: this batch
+
+### 5. control 不提供 global timeline / logs / tool calls
+
+- status: pass
+- evidence: `README.md` 明确 control 不做 global 聚合；`packages/control/src/route/RouteMethodRegistry.ts` 只注册 `instance.readLogs`、`instance.readToolCalls` 等 per-instance route；`packages/control/test/unit/RouteRouter.test.ts` test `RouteMethodRegistry resolves control and instance methods`。
+- fix commit: this batch
+
+### 6. stream gap 初始与运行期恢复可观察
+
+- status: pass
+- evidence: `packages/control/test/unit/StreamSubscription.test.ts` tests `StreamSubscriptionManager returns stream.gap when fromSeq is unavailable` 和 `StreamSubscriptionManager emits runtime stream.gap before cancelling the subscription`；`packages/control/test/integration/StreamRecovery.test.ts` 验证客户端收到 `stream.gap`、`stream.cancelled` 后可 resubscribe；`packages/core/test/unit/LogStore.test.ts` test `InstanceEventBuffer replays from fromSeq and reports stream.gap`。
 - fix commit: none
 
-### 2. cli 不会自动拉起 control
+### 7. instance status / connection / ready 与 worker rpc 事件可驱动 view model
 
 - status: pass
-- evidence: `packages/cli/test/integration/CliControl.test.ts` test `CliMain reports control not running without auto-starting it`.
+- evidence: `packages/core/test/integration/WorkerInstanceReal.test.ts` tests `WorkerInstance completes lifecycle against frozen devshell-worker`、`WorkerInstance refreshStatus updates snapshot from worker status without auto start`、`WorkerInstance reconnectRpc refreshes schema after an rpc disconnect`，覆盖 `instance.statusChanged`、`instance.connectionChanged`、`instance.readyChanged`、`worker.rpcConnected`、`worker.rpcDisconnected`、`worker.schemaRefreshed`、`log.appended`、`toolCall.*`。
 - fix commit: none
 
-### 3. cli 不直接读取文件系统状态
+### 8. instance.readToolCalls route、历史恢复与 source 识别成立
 
 - status: pass
-- evidence: `packages/cli/test/integration/CliControl.test.ts` test `CliControlClient performs control rpc over unix socket`; `rg -n "spawn|execFile|child_process|node:fs|readFile|writeFile|mkdir|readdir|stat" packages/cli/src` returned no matches.
+- evidence: `packages/control/test/integration/ControlRpcServer.test.ts` 验证 `instance.readToolCalls` route、`control.identifyClient`、CLI/TUI source 推导与 unknown client 拒绝；`packages/cli/test/integration/CliControl.test.ts` test `CliControlClient performs control rpc over unix socket` 覆盖 CLI 通过 control 读取 tool calls；`packages/tui/test/integration/TuiControlSession.test.ts` 通过 `readToolCalls()` 恢复历史 audit timeline；`packages/mcp/test/integration/McpRealWorker.test.ts` 记录 `source === "mcp"`。
 - fix commit: none
 
-### 4. cli 不直接 spawn devshell-worker
+### 9. approval allow / ask / deny / timeout 与 MCP approval gate 经过真实链路验证
 
 - status: pass
-- evidence: `packages/cli/test/integration/CliInstance.test.ts` test `CliMain covers Task 11 instance commands through control rpc`; `rg -n "spawn|execFile|child_process" packages/cli/src` returned no matches.
+- evidence: `packages/core/test/integration/WorkerInstanceReal.test.ts` 覆盖 `ask -> approve`、`deny`、`timeout/expired`；`packages/mcp/test/integration/McpRealWorker.test.ts` 覆盖 MCP 调用进入 pending approval、批准后执行、拒绝后返回 structured error。
 - fix commit: none
 
-### 5. control 不提供 global logs/global timeline/global tool calls
+### 10. config validate / update / apply 与 security.mode runtime env 成立
 
 - status: pass
-- evidence: `packages/control/src/route/RouteMethodRegistry.ts` only registers `control.ping`, `control.status`, `control.shutdown`, `control.listInstances`, `instance.getSnapshot`, `instance.start`, `instance.stop`, `instance.refreshStatus`, `instance.readLogs`, `instance.subscribe`, `instance.callTool`; `packages/control/test/unit/RouteRouter.test.ts` test `RouteMethodRegistry resolves Task 9 methods only`.
+- evidence: `packages/control/test/unit/ControlConfigEditorService.test.ts` tests `config editor accumulates apply summary across multiple updates`、`config editor allows updating and disabling a running instance without dropping current control`、`config editor refuses deleting a running instance`；`packages/control/test/unit/InstanceConfigMapper.test.ts` test `instance config mapper passes effective security mode, worker env, and approval policy into runtime config`。
 - fix commit: none
 
-### 6. core 长期持有 worker rpc bridge
+### 11. TuiControlSession gap / reconnect 与 view model 恢复成立
 
 - status: pass
-- evidence: `packages/core/test/unit/WorkerRpc.test.ts` test `WorkerRpcBridge reuses one spawned rpc process across multiple calls`; `packages/core/test/integration/WorkerInstanceReal.test.ts` test `WorkerInstance completes lifecycle against frozen devshell-worker`.
+- evidence: `packages/tui/test/integration/TuiControlSession.test.ts` tests `TuiControlSession recovers from runtime gap and control reconnect`、`TuiControlSession recovers when initial subscribe returns stream.gap`、`TuiControlSession backs off when subscribe keeps rejecting`；`packages/tui/test/unit/TuiViewModelStore.test.ts` test `TuiViewModelStore expresses connection, snapshot, log, audit, approval, and config state`。
 - fix commit: none
 
-### 7. core 不自动 start stopped/stale instance
+### 12. protocol DTO / frame compatibility 未退回 newline JSON
 
 - status: pass
-- evidence: `packages/control/test/unit/ControlLifecycle.test.ts` test `start keeps real worker config registered and does not auto-start worker`; `bash acceptance/run-real-worker-smoke.sh` returned `status: stopped` before explicit `devshell instance start aromatic-pc`.
+- evidence: `packages/shared/src/protocol/frame/ProtocolFrameCodec.ts` 与 `packages/shared/src/protocol/frame/ProtocolFrameReader.ts` 实现 4-byte big-endian length-prefixed JSON frame；`packages/shared/test/unit/protocol/frame/ProtocolFrameCodec.test.ts` 与 `packages/shared/test/unit/protocol/frame/ProtocolFrameReader.test.ts` 通过；`packages/control/test/integration/ControlRpcServer.test.ts` 复用同一 unix socket connection 走 frame RPC。
 - fix commit: none
 
-### 8. MCP 不暴露 instances 控制面
+### 13. multi-target worker 分发回归未被后续任务破坏
 
 - status: pass
-- evidence: `packages/mcp/src/mcp/host/route/McpHostRouteMatcher.ts` only matches `/<instance>/mcp`; `packages/mcp/src/mcp/host/route/McpHostRouteRegistry.ts` registers bindings by instance name only; `packages/mcp/test/integration/McpHttpServer.test.ts` test `missing instance returns 404`.
-- fix commit: none
+- evidence: `README.md` 明确代码支持 target probe / resolution / install，真实 release asset 以实际 release 为准；`.github/workflows/release-worker.yml` 构建并发布 `linux-x64`、`linux-arm64`、`darwin-x64`、`darwin-arm64`；`packages/core/test/unit/WorkerTargetResolver.test.ts`、`packages/core/test/unit/LocalWorkerInstaller.test.ts`、`packages/core/test/unit/WorkerTransport.test.ts` 覆盖 canonical target mapping、release-backed asset resolution、target-specific install path、ssh/docker/podman probe/install。
+- fix commit: this batch
 
-### 9. MCP 公网无鉴权会启动失败
-
-- status: pass
-- evidence: `packages/mcp/test/unit/McpAuth.test.ts` tests `listenHost=0.0.0.0 plus auth none is rejected` and `publicBaseUrl outside localhost plus auth none is rejected`; `packages/control/test/unit/ControlConfig.test.ts` test `public MCP without auth is rejected`.
-- fix commit: none
-
-### 10. 同一 instance 不支持并发 tool call
+### 14. 全链路 smoke 覆盖 control / CLI / worker / MCP 真实执行链路
 
 - status: pass
-- evidence: `packages/core/test/integration/WorkerInstanceReal.test.ts` test `WorkerInstance rejects not-ready and concurrent tool calls while persisting history`.
-- fix commit: none
+- evidence: `bash acceptance/run-real-worker-smoke.sh` 启动真实 control、实例、worker，验证 `status`、`instance start`、`instance call`、`instance logs`、`instance.readToolCalls` 和 JSONL 持久化；`bash acceptance/run-mcp-smoke.sh` 通过真实 HTTP MCP endpoint 验证 `initialize`、`tools/list`、`tools/call` 和 workspace 路径。
+- fix commit: this batch
 
-### 11. control RPC 没有退回 newline JSON
-
-- status: pass
-- evidence: `packages/shared/src/protocol/frame/ProtocolFrameCodec.ts` encodes and decodes 4-byte big-endian length-prefixed JSON frames; `packages/shared/test/unit/protocol/frame/ProtocolFrameCodec.test.ts` and `packages/shared/test/unit/protocol/frame/ProtocolFrameReader.test.ts` passed via `bash acceptance/run-unit-tests.sh`; `packages/control/test/integration/ControlRpcServer.test.ts` test `ControlRpcServer serves Task 9 rpc methods over reused unix socket connection`.
-- fix commit: none
-
-### 12. snapshot/stream 支持 seq/fromSeq
+### 15. 最终静态审查
 
 - status: pass
-- evidence: `packages/control/test/unit/StreamSubscription.test.ts` tests `StreamSubscriptionManager returns snapshot lastSeq and pushes sequenced events` and `StreamSubscriptionManager returns stream.gap when fromSeq is unavailable`; `packages/core/test/unit/LogStore.test.ts` test `InstanceEventBuffer replays from fromSeq and reports stream.gap`.
-- fix commit: none
-
-### 13. TS storage 与 worker storage 不冲突
-
-- status: pass
-- evidence: `packages/core/src/instance/InstancePaths.ts` writes TS-side data only to `~/.devshell/<instance>/control-worker/{events,tool-calls,logs}.jsonl` while worker files remain under `~/.devshell/<instance>/{config.toml,logs/worker.log,state/worker.pid}`; `packages/core/test/unit/InstanceState.test.ts` test `InstancePaths writes only into per-instance control-worker files`; `bash acceptance/run-real-worker-smoke.sh` verified `control-worker/tool-calls.jsonl`, `control-worker/events.jsonl`, and `control-worker/logs.jsonl`.
-- fix commit: none
-
-### 14. worker workspace 没有写入 worker config
-
-- status: pass
-- evidence: `packages/core/src/worker/command/WorkerCommandClient.ts` passes `workspacePath` only to worker start command; `packages/core/src/worker/transport/driver/WorkerTransportDriverLocal.ts` maps that workspace to `cwd` for `start` instead of writing config; `acceptance/fixtures/config.local.toml` stores workspace in TS control config as `defaultWorkspace`; `bash acceptance/run-real-worker-smoke.sh` and `bash acceptance/run-mcp-smoke.sh` confirmed runtime `pwd` equals the temporary workspace path.
-- fix commit: none
-
-### 15. tools schema 来自 worker tools.list
-
-- status: pass
-- evidence: `packages/core/test/unit/WorkerRpc.test.ts` test `WorkerProtocolClient performs ping, handshake, and tools.list against frozen devshell-worker`; `packages/core/test/unit/ToolPolicy.test.ts` tests `WorkerToolCatalog filters tools through allowlist and resets on clear` and `WorkerToolCatalog rejects invalid tool schema from tools.list`; `bash acceptance/run-mcp-smoke.sh` returned `toolsList.result.tools[0].name = "bash_run"`.
-- fix commit: none
-
-### 16. worker binary install 按 target 探测与分发
-
-- status: pass
-- evidence: `packages/core/src/worker/target/WorkerTargetProbe.ts` probes local via `process.platform/process.arch` and probes ssh/docker/podman via `uname -s` + `uname -m`; `packages/core/src/worker/WorkerAssetResolver.ts` resolves target-specific env overrides, host-local dev binaries, or GitHub Release assets `devshell-worker-<targetKey>` plus `.sha256`; `packages/core/src/worker/install/{LocalWorkerInstaller,RemoteWorkerInstaller}.ts` install into `~/.devshell/workers/<targetKey>/<sha256>/devshell-worker`; `.github/workflows/release-worker.yml` builds and publishes four target binaries on tag `v*`; `packages/core/test/unit/WorkerTargetResolver.test.ts`, `packages/core/test/unit/LocalWorkerInstaller.test.ts`, and `packages/core/test/unit/WorkerTransport.test.ts` cover canonical target mapping, release-backed asset resolution, ssh/container probe ordering, and target-specific remote install paths.
-- fix commit: pending
+- evidence: `README.md`、`ACCEPTANCE.md`、`acceptance/run-final-acceptance.sh` 与当前代码边界一致；`packages/tui/src` 仅包含 control/model/session 基础层文件，没有把未实现的完整页面 UI 写成已完成；route、socket、approval、multi-target 说明均能在源码和测试中找到对应证据。
+- fix commit: this batch
 
 ## Result
 
