@@ -120,6 +120,21 @@ test("WorkerInstance rejects not-ready and concurrent tool calls while persistin
 
         const firstCall = instance.callTool("bash_run", { command: "pwd" }, cliToolCallContext);
         await harness.waitForMethod("bash_run");
+        const runningRecords = await instance.readToolCalls({ status: "running" });
+        assert.deepEqual(
+            runningRecords.map((record) => ({
+                callId: record.callId,
+                status: record.status,
+                toolName: record.toolName
+            })),
+            [
+                {
+                    callId: runningRecords[0]?.callId,
+                    status: "running",
+                    toolName: "bash_run"
+                }
+            ]
+        );
 
         await assert.rejects(instance.callTool("bash_run", { command: "ls" }, cliToolCallContext), (error: unknown) => {
             assert.equal((error as { code?: string }).code, errorCodes.coreInstanceBusy);
@@ -269,6 +284,20 @@ test("WorkerInstance waits for approval before invoking tools and persists appro
         const approvalId = approvals[0]?.approvalId ?? "";
         assert.notEqual(approvalId, "");
         assert.equal((await instance.getApproval(approvalId)).status, "pending");
+        assert.deepEqual(
+            (await instance.readToolCalls({ status: "pendingApproval" })).map((record) => ({
+                approvalId: record.approvalId,
+                status: record.status,
+                toolName: record.toolName
+            })),
+            [
+                {
+                    approvalId,
+                    status: "pendingApproval",
+                    toolName: "bash_run"
+                }
+            ]
+        );
 
         const pendingReplay = instance.subscribe(1);
         assert.equal(pendingReplay.kind, "events");

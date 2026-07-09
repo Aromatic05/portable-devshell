@@ -145,7 +145,9 @@ export class ToolCallHistory {
 
     async read(query: ToolCallQuery = {}): Promise<ToolCallRecord[]> {
         await this.#initialize();
-        const filtered = sliceByFilters(sliceByCursor(await this.#store.readAll(), query), query);
+        const records = await this.#store.readAll();
+        const activeRecord = this.#readActiveRecord();
+        const filtered = sliceByFilters(sliceByCursor(activeRecord === undefined ? records : [...records, activeRecord], query), query);
         return applyLimit(filtered, query);
     }
 
@@ -169,6 +171,18 @@ export class ToolCallHistory {
         }
 
         return this.#activeCall;
+    }
+
+    #readActiveRecord(): ToolCallRecord | undefined {
+        if (this.#activeCall === undefined) {
+            return undefined;
+        }
+
+        return {
+            ...this.#activeCall,
+            instance: this.#instanceName,
+            timedOut: false
+        };
     }
 
     async #finishNonRunning(
