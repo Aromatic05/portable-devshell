@@ -62,6 +62,9 @@ pub fn serve(instance: InstanceName) -> Result<(), String> {
         }
         match listener.accept() {
             Ok((stream, _)) => {
+                stream
+                    .set_nonblocking(false)
+                    .map_err(|error| format!("failed to set accepted stream blocking: {error}"))?;
                 let router = Arc::clone(&router);
                 let instance_paths = instance_paths.clone();
                 thread::spawn(move || {
