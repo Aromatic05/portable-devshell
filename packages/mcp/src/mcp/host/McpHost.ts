@@ -1,9 +1,10 @@
 import type { CommandResult, JsonValue } from "@portable-devshell/shared";
+import { type McpAuthConfig } from "../auth/McpAuthConfig.js";
+import { McpOAuthProtectedResource } from "../auth/oauth/McpOAuthProtectedResource.js";
 import { McpAuthPublicExposureGuard, type McpExposureConfig } from "../auth/public/McpAuthPublicExposureGuard.js";
 import { McpEndpointBinding } from "../endpoint/McpEndpointBinding.js";
 import { McpEndpointWorker } from "../endpoint/McpEndpointWorker.js";
 import { McpHostHttpServer } from "./McpHostHttpServer.js";
-import { McpHostRouteMatcher } from "./route/McpHostRouteMatcher.js";
 import { McpHostRouteRegistry } from "./route/McpHostRouteRegistry.js";
 
 interface ToolDefinition {
@@ -22,22 +23,29 @@ interface WorkerInstanceLike {
 export interface McpHostInstanceConfig {
     allowlist: readonly string[];
     name: string;
+    path?: string;
     worker: WorkerInstanceLike;
 }
 
 export interface McpHostConfig extends McpExposureConfig {
+    auth?: McpAuthConfig;
     instances: readonly McpHostInstanceConfig[];
     listenPort: number;
 }
 
 export class McpHost {
+    readonly #auth?: McpAuthConfig;
     readonly #config: McpHostConfig;
     readonly #guard = new McpAuthPublicExposureGuard();
     readonly #httpServer: McpHostHttpServer;
+    readonly #oauth?: McpOAuthProtectedResource;
     readonly #registry = new McpHostRouteRegistry();
+    #started = false;
 
     constructor(config: McpHostConfig) {
         this.#config = config;
+        this.#auth = config.auth;
+        this.#oauth = config.auth?.provider === "oauth2" ? new McpOAuthProtectedResource(config.auth.oauth2) : undefined;
 
         for (const instance of config.instances) {
             this.registerInstance(instance);
@@ -47,31 +55,45 @@ export class McpHost {
             auth: config.auth,
             listenHost: config.listenHost,
             listenPort: config.listenPort,
-            matcher: new McpHostRouteMatcher(),
-            registry: this.#registry
+            oauth: this.#oauth,
+            publicBaseUrl: config.publicBaseUrl
         });
     }
 
     async start(): Promise<void> {
         this.#guard.assertSafe(this.#config);
+        await this.#oauth?.warmup();
+        for (const binding of this.#registry.list()) {
+            this.#httpServer.registerBinding(binding.path, binding.binding);
+        }
         await this.#httpServer.start();
+        this.#started = true;
     }
 
     async stop(): Promise<void> {
         await this.#httpServer.stop();
-        await Promise.all(this.#registry.list().map(async (binding) => await binding.close()));
+        await Promise.all(this.#registry.list().map(async (binding) => await binding.binding.close()));
+        this.#started = false;
     }
 
     registerInstance(instance: McpHostInstanceConfig): void {
-        this.#registry.register(
-            new McpEndpointBinding(
-                new McpEndpointWorker({
-                    allowlist: instance.allowlist,
-                    instanceName: instance.name,
-                    worker: instance.worker
-                })
-            )
+        const binding = new McpEndpointBinding(
+            new McpEndpointWorker({
+                allowlist: instance.allowlist,
+                instanceName: instance.name,
+                worker: instance.worker
+            })
         );
+        const path = instance.path ?? `/${instance.name}/mcp`;
+
+        this.#registry.register({
+            binding,
+            path
+        });
+
+        if (this.#started) {
+            this.#httpServer.registerBinding(path, binding);
+        }
     }
 
     get server(): McpHostHttpServer {

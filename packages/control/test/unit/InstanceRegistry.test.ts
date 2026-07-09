@@ -59,6 +59,7 @@ test("mcp endpoint path is generated and wiring only builds host configuration",
     assert.deepEqual(new McpEndpointConfigMapper().map(descriptor), {
         allowlist: ["bash_run"],
         name: "demo-local",
+        path: "/demo-local/mcp",
         worker: descriptor.worker
     });
 

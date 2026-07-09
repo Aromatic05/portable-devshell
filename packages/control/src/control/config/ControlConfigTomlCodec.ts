@@ -48,6 +48,15 @@ export interface ControlInstanceConfig {
     workspace?: string;
 }
 
+export interface ControlMcpOAuth2Config {
+    audience: string;
+    documentationUrl?: string;
+    issuer: string;
+    jwksUri?: string;
+    requiredScopes: string[];
+    resourceName: string;
+}
+
 export interface ControlGlobalConfig {
     control: {
         logLevel: string;
@@ -55,6 +64,7 @@ export interface ControlGlobalConfig {
     mcp: {
         auth: {
             mode: ControlMcpAuthMode;
+            oauth2?: ControlMcpOAuth2Config;
         };
         enabled: boolean;
         listenHost: string;
@@ -106,7 +116,8 @@ export class ControlConfigTomlCodec {
                 listenPort: config.mcp.listenPort,
                 ...(config.mcp.publicBaseUrl === undefined ? {} : { publicBaseUrl: config.mcp.publicBaseUrl }),
                 auth: {
-                    mode: config.mcp.auth.mode
+                    mode: config.mcp.auth.mode,
+                    ...(config.mcp.auth.oauth2 === undefined ? {} : { oauth2: withoutUndefined(config.mcp.auth.oauth2) })
                 }
             }
         });
@@ -134,7 +145,8 @@ export class ControlConfigTomlCodec {
             },
             mcp: {
                 auth: {
-                    mode: asAuthMode(asString(auth.mode, "mcp.auth.mode"))
+                    mode: asAuthMode(asString(auth.mode, "mcp.auth.mode")),
+                    oauth2: auth.oauth2 === undefined ? undefined : parseOauth2Config(auth.oauth2)
                 },
                 enabled: asBoolean(mcp.enabled, "mcp.enabled"),
                 listenHost: asString(mcp.listenHost, "mcp.listenHost"),
@@ -144,6 +156,19 @@ export class ControlConfigTomlCodec {
             version: asInteger(document.version, "version")
         };
     }
+}
+
+function parseOauth2Config(value: unknown): ControlMcpOAuth2Config {
+    const oauth2 = asRecord(value, "mcp.auth.oauth2");
+
+    return {
+        audience: asString(oauth2.audience, "mcp.auth.oauth2.audience"),
+        documentationUrl: asOptionalString(oauth2.documentationUrl, "mcp.auth.oauth2.documentationUrl"),
+        issuer: asString(oauth2.issuer, "mcp.auth.oauth2.issuer"),
+        jwksUri: asOptionalString(oauth2.jwksUri, "mcp.auth.oauth2.jwksUri"),
+        requiredScopes: oauth2.requiredScopes === undefined ? [] : asStringArray(oauth2.requiredScopes, "mcp.auth.oauth2.requiredScopes"),
+        resourceName: asString(oauth2.resourceName, "mcp.auth.oauth2.resourceName")
+    };
 }
 
 export class ControlInstanceTomlCodec {

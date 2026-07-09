@@ -1,19 +1,15 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 
+import type { McpAuthConfig } from "./McpAuthConfig.js";
 import { McpAuthProviderNone } from "./provider/McpAuthProviderNone.js";
 import { McpAuthProviderToken } from "./provider/McpAuthProviderToken.js";
-
-export interface McpAuthConfig {
-    enabled: boolean;
-    provider: string;
-}
 
 export class McpAuthMiddleware {
     readonly #noneProvider = new McpAuthProviderNone();
     readonly #tokenProvider = new McpAuthProviderToken();
 
     authorize(request: IncomingMessage, response: ServerResponse, config: McpAuthConfig | undefined): boolean {
-        if (config?.enabled !== true || config.provider === "none") {
+        if (config?.enabled !== true) {
             this.#noneProvider.authorize();
             return true;
         }

@@ -16,9 +16,12 @@
     ],
     "dependencies": {
         "@modelcontextprotocol/sdk": "1.29.0",
-        "@portable-devshell/shared": "workspace:*"
+        "@portable-devshell/shared": "workspace:*",
+        "express": "^5.2.1",
+        "jose": "^6.2.3"
     },
     "devDependencies": {
+        "@types/express": "^5.0.5",
         "@portable-devshell/core": "workspace:*"
     },
     "scripts": {

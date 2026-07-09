@@ -1,7 +1,7 @@
 import { createError, errorCodes, type InstanceContainerConfig, type InstanceContainerMountConfig } from "@portable-devshell/shared";
 import { McpAuthPublicExposureGuard } from "@portable-devshell/mcp";
 
-import type { ControlConfig, ControlInstanceConfig } from "./ControlConfigTomlCodec.js";
+import type { ControlConfig, ControlInstanceConfig, ControlMcpOAuth2Config } from "./ControlConfigTomlCodec.js";
 
 export class ControlConfigValidator {
     readonly #publicExposureGuard = new McpAuthPublicExposureGuard();
@@ -29,6 +29,7 @@ export class ControlConfigValidator {
                 listenHost: config.mcp.listenHost,
                 publicBaseUrl: config.mcp.publicBaseUrl
             });
+            this.#validateGlobalMcp(config);
 
             return config;
         } catch (error) {
@@ -158,6 +159,35 @@ export class ControlConfigValidator {
             throw new Error(`container.mounts[${index}].target is required for instance ${instanceName}`);
         }
     }
+
+    #validateGlobalMcp(config: ControlConfig): void {
+        if (config.mcp.publicBaseUrl !== undefined) {
+            parseUrl(config.mcp.publicBaseUrl, "mcp.publicBaseUrl");
+        }
+
+        if (config.mcp.auth.mode !== "oauth2") {
+            return;
+        }
+
+        if (config.mcp.auth.oauth2 === undefined) {
+            throw new Error("mcp.auth.oauth2 is required when mcp.auth.mode=oauth2");
+        }
+
+        this.#validateOauth2(config.mcp.auth.oauth2);
+    }
+
+    #validateOauth2(config: ControlMcpOAuth2Config): void {
+        parseUrl(config.issuer, "mcp.auth.oauth2.issuer");
+        parseUrl(config.audience, "mcp.auth.oauth2.audience");
+
+        if (config.documentationUrl !== undefined) {
+            parseUrl(config.documentationUrl, "mcp.auth.oauth2.documentationUrl");
+        }
+
+        if (config.jwksUri !== undefined) {
+            parseUrl(config.jwksUri, "mcp.auth.oauth2.jwksUri");
+        }
+    }
 }
 
 function toMcpGuardAuth(mode: "none" | "oauth2" | "token"): { enabled: boolean; provider: string } | undefined {
@@ -181,4 +211,12 @@ function isStructuredConfigError(error: unknown): error is { code: string } {
 function readFieldPath(message: string): string | undefined {
     const match = message.match(/^([A-Za-z0-9_.[\]/-]+)\s+/u);
     return match?.[1];
+}
+
+function parseUrl(value: string, fieldPath: string): URL {
+    try {
+        return new URL(value);
+    } catch {
+        throw new Error(`${fieldPath} must be a valid URL`);
+    }
 }

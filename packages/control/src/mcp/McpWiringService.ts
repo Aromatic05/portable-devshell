@@ -1,4 +1,4 @@
-import { McpHost } from "@portable-devshell/mcp";
+import { McpHost, type McpAuthConfig } from "@portable-devshell/mcp";
 
 import type { ControlConfig } from "../control/config/ControlConfigTomlCodec.js";
 import type { InstanceRegistry } from "../instance/registry/InstanceRegistry.js";
@@ -22,7 +22,7 @@ export class McpWiringService {
             .map((descriptor) => this.#mapper.map(descriptor));
 
         return new McpHost({
-            auth: toMcpHostAuth(config.mcp.auth.mode),
+            auth: toMcpHostAuth(config),
             instances: endpoints,
             listenHost: config.mcp.listenHost,
             listenPort: config.mcp.listenPort,
@@ -31,16 +31,37 @@ export class McpWiringService {
     }
 }
 
-function toMcpHostAuth(mode: "none" | "oauth2" | "token"): { enabled: boolean; provider: string } | undefined {
+function toMcpHostAuth(config: ControlConfig): McpAuthConfig | undefined {
+    const mode = config.mcp.auth.mode;
+
     if (mode === "none") {
         return {
-            enabled: false,
+            enabled: false as const,
             provider: "none"
         };
     }
 
+    if (mode === "oauth2") {
+        if (config.mcp.auth.oauth2 === undefined) {
+            throw new Error("mcp.auth.oauth2 is required when mcp.auth.mode=oauth2");
+        }
+
+        return {
+            enabled: true as const,
+            oauth2: {
+                audience: config.mcp.auth.oauth2.audience,
+                documentationUrl: config.mcp.auth.oauth2.documentationUrl,
+                issuer: config.mcp.auth.oauth2.issuer,
+                jwksUri: config.mcp.auth.oauth2.jwksUri,
+                requiredScopes: [...config.mcp.auth.oauth2.requiredScopes],
+                resourceName: config.mcp.auth.oauth2.resourceName
+            },
+            provider: "oauth2"
+        };
+    }
+
     return {
-        enabled: true,
-        provider: mode
+        enabled: true as const,
+        provider: "token"
     };
 }

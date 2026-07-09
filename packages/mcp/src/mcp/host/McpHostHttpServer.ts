@@ -1,8 +1,11 @@
-import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import { createServer, type IncomingMessage, type Server } from "node:http";
 
-import { McpAuthMiddleware, type McpAuthConfig } from "../auth/McpAuthMiddleware.js";
-import type { McpHostRouteMatcher } from "./route/McpHostRouteMatcher.js";
-import type { McpHostRouteRegistry } from "./route/McpHostRouteRegistry.js";
+import express, { type NextFunction, type Request, type RequestHandler, type Response } from "express";
+
+import type { McpAuthConfig } from "../auth/McpAuthConfig.js";
+import { McpAuthProviderToken } from "../auth/provider/McpAuthProviderToken.js";
+import { McpOAuthProtectedResource } from "../auth/oauth/McpOAuthProtectedResource.js";
+import { McpEndpointBinding } from "../endpoint/McpEndpointBinding.js";
 
 type JsonValue = boolean | number | null | string | JsonValue[] | { [key: string]: JsonValue };
 
@@ -10,8 +13,8 @@ interface McpHostHttpServerOptions {
     auth?: McpAuthConfig;
     listenHost: string;
     listenPort: number;
-    matcher: McpHostRouteMatcher;
-    registry: McpHostRouteRegistry;
+    oauth?: McpOAuthProtectedResource;
+    publicBaseUrl?: string;
 }
 
 function isRecord(value: unknown): value is Record<string, JsonValue> {
@@ -19,20 +22,25 @@ function isRecord(value: unknown): value is Record<string, JsonValue> {
 }
 
 export class McpHostHttpServer {
+    readonly #app = express();
     readonly #auth?: McpAuthConfig;
-    readonly #authMiddleware = new McpAuthMiddleware();
     readonly #listenHost: string;
     readonly #listenPort: number;
-    readonly #matcher: McpHostRouteMatcher;
-    readonly #registry: McpHostRouteRegistry;
+    readonly #oauth?: McpOAuthProtectedResource;
+    readonly #publicBaseUrl?: string;
+    readonly #registeredPaths = new Set<string>();
+    readonly #tokenProvider = new McpAuthProviderToken();
     #server?: Server;
 
     constructor(options: McpHostHttpServerOptions) {
         this.#auth = options.auth;
         this.#listenHost = options.listenHost;
         this.#listenPort = options.listenPort;
-        this.#matcher = options.matcher;
-        this.#registry = options.registry;
+        this.#oauth = options.oauth;
+        this.#publicBaseUrl = options.publicBaseUrl;
+
+        this.#app.disable("x-powered-by");
+        this.#registerGlobalMetadataRoute();
     }
 
     async start(): Promise<void> {
@@ -40,9 +48,7 @@ export class McpHostHttpServer {
             return;
         }
 
-        this.#server = createServer((request, response) => {
-            void this.#handleRequest(request, response);
-        });
+        this.#server = createServer(this.#app);
 
         await new Promise<void>((resolve, reject) => {
             this.#server?.once("error", reject);
@@ -73,30 +79,36 @@ export class McpHostHttpServer {
         return this.#server?.address();
     }
 
-    async #handleRequest(request: IncomingMessage, response: ServerResponse): Promise<void> {
-        const url = new URL(request.url ?? "/", "http://127.0.0.1");
-        const match = this.#matcher.match(url.pathname);
-
-        if (match === undefined) {
-            response.writeHead(404, { "content-type": "application/json" });
-            response.end(JSON.stringify({ error: "Not found" }));
+    registerBinding(path: string, binding: McpEndpointBinding): void {
+        if (this.#registeredPaths.has(path)) {
             return;
         }
 
-        if (!this.#authMiddleware.authorize(request, response, this.#auth)) {
-            return;
+        this.#registeredPaths.add(path);
+
+        const routeHandlers: RequestHandler[] = [];
+        const resourceServerUrl = this.#toPublicResourceUrl(path);
+
+        if (this.#auth?.provider === "oauth2" && this.#oauth !== undefined && resourceServerUrl !== undefined) {
+            routeHandlers.push(this.#oauth.requestAuthHandler(resourceServerUrl));
+            this.#app.use(this.#oauthProtectedResourceMetadataPath(path), this.#oauth.protectedResourceMetadataHandler(resourceServerUrl));
+        } else if (this.#auth?.provider === "token") {
+            routeHandlers.push((request: Request, response: Response, next: NextFunction) => {
+                const authorized = this.#tokenProvider.authorize(request.headers.authorization);
+
+                if (!authorized) {
+                    response.status(401).json({ error: "Unauthorized" });
+                    return;
+                }
+
+                next();
+            });
         }
 
-        const binding = this.#registry.resolve(match.instanceName);
-
-        if (binding === undefined) {
-            response.writeHead(404, { "content-type": "application/json" });
-            response.end(JSON.stringify({ error: "Instance not found" }));
-            return;
-        }
-
-        const body = await this.#readJsonBody(request);
-        await binding.handleRequest(request, response, body);
+        this.#app.all(path, ...routeHandlers, async (request: Request, response: Response) => {
+            const body = await this.#readJsonBody(request as IncomingMessage);
+            await binding.handleRequest(request, response, body);
+        });
     }
 
     async #readJsonBody(request: IncomingMessage): Promise<JsonValue> {
@@ -113,4 +125,34 @@ export class McpHostHttpServer {
         const value = JSON.parse(Buffer.concat(chunks).toString("utf8")) as unknown;
         return isRecord(value) ? value : {};
     }
+
+    #oauthProtectedResourceMetadataPath(path: string): string {
+        return `/.well-known/oauth-protected-resource${path === "/" ? "" : path}`;
+    }
+
+    #registerGlobalMetadataRoute(): void {
+        if (this.#auth?.provider !== "oauth2" || this.#oauth === undefined) {
+            return;
+        }
+
+        this.#app.use("/.well-known/oauth-authorization-server", this.#oauth.authorizationServerMetadataHandler());
+    }
+
+    #toPublicResourceUrl(path: string): URL | undefined {
+        if (this.#publicBaseUrl === undefined) {
+            return undefined;
+        }
+
+        const url = new URL(this.#publicBaseUrl);
+        url.pathname = joinUrlPaths(url.pathname, path);
+        url.search = "";
+        url.hash = "";
+        return url;
+    }
+}
+
+function joinUrlPaths(basePathname: string, nextPathname: string): string {
+    const base = basePathname === "/" ? "" : basePathname.replace(/\/+$/u, "");
+    const next = nextPathname.startsWith("/") ? nextPathname : `/${nextPathname}`;
+    return `${base}${next}`;
 }

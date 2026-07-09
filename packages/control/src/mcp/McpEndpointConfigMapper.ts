@@ -7,6 +7,7 @@ export class McpEndpointConfigMapper {
         return {
             allowlist: descriptor.allowTools,
             name: descriptor.name,
+            path: descriptor.mcpPath,
             worker: descriptor.worker
         };
     }

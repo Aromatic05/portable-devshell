@@ -97,6 +97,63 @@ test("public MCP without auth is rejected", async () => {
     }
 });
 
+test("oauth2 config requires nested issuer and audience settings", () => {
+    const codec = new ControlConfigTomlCodec();
+    const validator = new ControlConfigValidator();
+
+    assert.throws(
+        () =>
+            validator.validate({
+                ...createDefaultControlConfig(),
+                mcp: {
+                    ...createDefaultControlConfig().mcp,
+                    auth: {
+                        mode: "oauth2"
+                    },
+                    enabled: true
+                }
+            }),
+        /mcp\.auth\.oauth2 is required when mcp\.auth\.mode=oauth2/u
+    );
+
+    const config = codec.decode(
+        [
+            "version = 1",
+            "",
+            "[control]",
+            'logLevel = "info"',
+            "",
+            "[mcp]",
+            "enabled = true",
+            'listenHost = "127.0.0.1"',
+            "listenPort = 17890",
+            'publicBaseUrl = "http://127.0.0.1:17890"',
+            "",
+            "[mcp.auth]",
+            'mode = "oauth2"',
+            "",
+            "[mcp.auth.oauth2]",
+            'issuer = "http://127.0.0.1:9000"',
+            'audience = "aromatic-mcp"',
+            'resourceName = "aromatic"',
+            'requiredScopes = ["mcp"]',
+            ""
+        ].join("\n")
+    );
+
+    assert.deepEqual(config.mcp.auth, {
+        mode: "oauth2",
+        oauth2: {
+            audience: "aromatic-mcp",
+            documentationUrl: undefined,
+            issuer: "http://127.0.0.1:9000",
+            jwksUri: undefined,
+            requiredScopes: ["mcp"],
+            resourceName: "aromatic"
+        }
+    });
+});
+
 test("instance name without dash is rejected", () => {
     const validator = new ControlConfigValidator();
     const config = createDefaultControlConfig();
