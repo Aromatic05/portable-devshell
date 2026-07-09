@@ -5,10 +5,13 @@ import { FrameReader, FrameWriter, type JsonValue } from "@portable-devshell/sha
 
 import type {
     CliControlEventEnvelope,
+    CliControlStreamCancelledEnvelope,
+    CliControlStreamGapEnvelope,
     CliControlResponseEnvelope,
     CliControlTarget
 } from "./CliControlRequest.js";
 import { CliRenderError } from "../render/CliRenderError.js";
+import type { CliControlStreamMessage } from "./CliControlStream.js";
 
 export interface CliControlConnectionOptions {
     socketFactory?: (path: string) => Socket;
@@ -22,10 +25,11 @@ export class CliControlConnection {
     readonly #socketPath: string;
     readonly #pending = new Map<string, { reject: (error: unknown) => void; resolve: (value: JsonValue) => void }>();
     readonly #relayOutputs = new Map<string, (chunk: string) => void>();
-    readonly #events: CliControlEventEnvelope[] = [];
-    readonly #eventWaiters: Array<{ reject: (error: unknown) => void; resolve: (value: CliControlEventEnvelope) => void }> = [];
+    readonly #streamMessages: CliControlStreamMessage[] = [];
+    readonly #streamWaiters: Array<{ resolve: (value: CliControlStreamMessage) => void }> = [];
     #connected = false;
     #counter = 0;
+    #connectionClosed = false;
     #socket?: Socket;
     #writer?: FrameWriter;
 
@@ -98,16 +102,23 @@ export class CliControlConnection {
         }
     }
 
-    async nextEvent(): Promise<CliControlEventEnvelope> {
-        await this.connect();
-        const event = this.#events.shift();
+    async nextStreamMessage(): Promise<CliControlStreamMessage> {
+        const message = this.#streamMessages.shift();
 
-        if (event !== undefined) {
-            return event;
+        if (message !== undefined) {
+            return message;
         }
 
-        return await new Promise<CliControlEventEnvelope>((resolve, reject) => {
-            this.#eventWaiters.push({ reject, resolve });
+        if (this.#connectionClosed) {
+            return {
+                kind: "connection.closed"
+            };
+        }
+
+        await this.connect();
+
+        return await new Promise<CliControlStreamMessage>((resolve) => {
+            this.#streamWaiters.push({ resolve });
         });
     }
 
@@ -123,6 +134,7 @@ export class CliControlConnection {
         await new Promise<void>((resolve, reject) => {
             socket.once("connect", () => {
                 this.#connected = true;
+                this.#connectionClosed = false;
                 resolve();
             });
             socket.once("error", (error) => {
@@ -137,10 +149,19 @@ export class CliControlConnection {
         });
         socket.once("close", () => {
             this.#connected = false;
+            this.#connectionClosed = true;
             this.#failPending(new Error("control connection closed"));
+            this.#pushStreamMessage({
+                kind: "connection.closed"
+            });
         });
         socket.once("error", (error) => {
+            this.#connected = false;
+            this.#connectionClosed = true;
             this.#failPending(error);
+            this.#pushStreamMessage({
+                kind: "connection.closed"
+            });
         });
     }
 
@@ -186,14 +207,7 @@ export class CliControlConnection {
             typeof frame.target.instance === "string"
         ) {
             const event = frame as unknown as CliControlEventEnvelope;
-            const waiter = this.#eventWaiters.shift();
-
-            if (waiter !== undefined) {
-                waiter.resolve(event);
-                return;
-            }
-
-            this.#events.push(event);
+            this.#pushStreamMessage(toStreamMessage(event));
         }
     }
 
@@ -204,11 +218,30 @@ export class CliControlConnection {
 
         this.#pending.clear();
 
-        for (const waiter of this.#eventWaiters.splice(0)) {
-            waiter.reject(error);
+        this.#relayOutputs.clear();
+    }
+
+    #pushStreamMessage(message: CliControlStreamMessage): void {
+        if (message.kind === "connection.closed" && this.#connectionClosed !== true) {
+            this.#connectionClosed = true;
         }
 
-        this.#relayOutputs.clear();
+        const waiter = this.#streamWaiters.shift();
+
+        if (waiter !== undefined) {
+            waiter.resolve(message);
+            return;
+        }
+
+        if (message.kind === "connection.closed") {
+            const lastMessage = this.#streamMessages.at(-1);
+
+            if (lastMessage?.kind === "connection.closed") {
+                return;
+            }
+        }
+
+        this.#streamMessages.push(message);
     }
 }
 
@@ -242,4 +275,25 @@ function toRemoteError(response: CliControlResponseEnvelope): CliRenderError {
         details: response.error?.details,
         retryable: response.error?.retryable
     });
+}
+
+function toStreamMessage(event: CliControlEventEnvelope): CliControlStreamMessage {
+    if (event.event === "stream.gap") {
+        return {
+            envelope: event as CliControlStreamGapEnvelope,
+            kind: "stream.gap"
+        };
+    }
+
+    if (event.event === "stream.cancelled") {
+        return {
+            envelope: event as CliControlStreamCancelledEnvelope,
+            kind: "stream.cancelled"
+        };
+    }
+
+    return {
+        envelope: event,
+        kind: "instance.event"
+    };
 }

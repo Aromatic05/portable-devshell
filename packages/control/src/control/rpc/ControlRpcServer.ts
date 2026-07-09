@@ -30,6 +30,7 @@ export class ControlRpcServer {
     readonly #instanceRouter: RouteRouterInstance;
     readonly #connections = new Map<string, ControlRpcConnection>();
     #server?: Server;
+    #stopPromise?: Promise<void>;
 
     constructor(options: ControlRpcServerOptions) {
         this.#instanceRegistry = options.instanceRegistry;
@@ -66,6 +67,20 @@ export class ControlRpcServer {
     }
 
     async stop(): Promise<void> {
+        if (this.#stopPromise !== undefined) {
+            return await this.#stopPromise;
+        }
+
+        this.#stopPromise = this.#stopInternal();
+
+        try {
+            await this.#stopPromise;
+        } finally {
+            this.#stopPromise = undefined;
+        }
+    }
+
+    async #stopInternal(): Promise<void> {
         for (const connection of this.#connections.values()) {
             connection.close();
         }

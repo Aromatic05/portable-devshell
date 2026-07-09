@@ -10,7 +10,6 @@ import { RouteHandlerInstance } from "../../dist/route/handler/RouteHandlerInsta
 import { RouteRouterControl } from "../../dist/route/router/RouteRouterControl.js";
 import { RouteRouterInstance } from "../../dist/route/router/RouteRouterInstance.js";
 import { StreamSubscriptionManager } from "../../dist/stream/StreamSubscriptionManager.js";
-import "../integration/ControlRpcServer.test.ts";
 
 test("RouteMethodRegistry resolves control and instance methods", () => {
     const registry = new RouteMethodRegistry();

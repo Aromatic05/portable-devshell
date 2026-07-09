@@ -26,16 +26,51 @@ export interface CliControlResponseEnvelope {
     type: "response";
 }
 
-export interface CliControlEventEnvelope {
+export interface CliControlEventTarget {
+    instance: string;
+    kind: "instance";
+}
+
+export interface CliControlInstanceEventEnvelope {
     event: string;
     payload?: JsonValue;
     seq: number;
-    target: {
-        instance: string;
-        kind: "instance";
-    };
+    target: CliControlEventTarget;
     type: "event";
 }
+
+export interface CliControlStreamGapPayload {
+    instance: string;
+    latestSeq: number;
+    oldestAvailableSeq: number;
+    requestedFromSeq: number;
+}
+
+export interface CliControlStreamGapEnvelope {
+    event: "stream.gap";
+    payload: CliControlStreamGapPayload;
+    seq: number;
+    target: CliControlEventTarget;
+    type: "event";
+}
+
+export interface CliControlStreamCancelledPayload {
+    instance: string;
+    reason: string;
+}
+
+export interface CliControlStreamCancelledEnvelope {
+    event: "stream.cancelled";
+    payload: CliControlStreamCancelledPayload;
+    seq: number;
+    target: CliControlEventTarget;
+    type: "event";
+}
+
+export type CliControlEventEnvelope =
+    | CliControlInstanceEventEnvelope
+    | CliControlStreamGapEnvelope
+    | CliControlStreamCancelledEnvelope;
 
 export interface CliControlRelayInputEnvelope {
     data?: string;

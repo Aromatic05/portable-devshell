@@ -22,6 +22,7 @@ export class StreamSubscriptionManager {
                 retryable: true,
                 details: {
                     instance: instanceName,
+                    latestSeq: slice.lastSeq,
                     oldestAvailableSeq: slice.nextSeq,
                     requestedFromSeq: fromSeq
                 }
@@ -50,10 +51,7 @@ export class StreamSubscriptionManager {
             }
         }
 
-        if (this.#subscriptions.size === 0 && this.#timer !== undefined) {
-            clearInterval(this.#timer);
-            this.#timer = undefined;
-        }
+        this.#stopPollingWhenIdle();
     }
 
     #ensurePolling(): void {
@@ -71,7 +69,36 @@ export class StreamSubscriptionManager {
             const slice = subscription.instance.subscribe(subscription.nextSeq);
 
             if (slice.kind === "gap") {
+                await subscription.connection.sendEvent({
+                    event: "stream.gap",
+                    payload: {
+                        instance: subscription.instanceName,
+                        latestSeq: slice.lastSeq,
+                        oldestAvailableSeq: slice.nextSeq,
+                        requestedFromSeq: subscription.nextSeq
+                    } as unknown as JsonValue,
+                    seq: slice.lastSeq,
+                    target: {
+                        instance: subscription.instanceName,
+                        kind: "instance"
+                    },
+                    type: "event"
+                });
+                await subscription.connection.sendEvent({
+                    event: "stream.cancelled",
+                    payload: {
+                        instance: subscription.instanceName,
+                        reason: "gap"
+                    } as unknown as JsonValue,
+                    seq: slice.lastSeq,
+                    target: {
+                        instance: subscription.instanceName,
+                        kind: "instance"
+                    },
+                    type: "event"
+                });
                 this.#subscriptions.delete(key);
+                this.#stopPollingWhenIdle();
                 continue;
             }
 
@@ -94,5 +121,14 @@ export class StreamSubscriptionManager {
 
     #key(connectionId: string, instanceName: string): string {
         return `${connectionId}:${instanceName}`;
+    }
+
+    #stopPollingWhenIdle(): void {
+        if (this.#subscriptions.size > 0 || this.#timer === undefined) {
+            return;
+        }
+
+        clearInterval(this.#timer);
+        this.#timer = undefined;
     }
 }

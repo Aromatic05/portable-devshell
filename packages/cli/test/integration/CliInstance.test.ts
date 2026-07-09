@@ -1,17 +1,17 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { access, mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer, type Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { Readable } from "node:stream";
-import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 import { FrameReader, FrameWriter, type JsonValue } from "@portable-devshell/shared";
 
 import { CliMain } from "../../dist/cli/CliMain.js";
+import { CliControlClient } from "../../dist/cli/control/CliControlClient.js";
 
-test("CliMain covers Task 11 instance commands through control rpc", async (t) => {
+async function verifyCliInstanceCommandsThroughControlRpc(): Promise<void> {
     const runtimeRoot = await mkdtemp(join(tmpdir(), "portable-devshell-cli-instance-"));
     const socketDir = join(runtimeRoot, "portable-devshell");
     const socketPath = join(socketDir, "control.sock");
@@ -26,46 +26,138 @@ test("CliMain covers Task 11 instance commands through control rpc", async (t) =
         server.listen(socketPath, resolve);
     });
 
-    t.after(async () => {
-        server.close();
+    try {
+        const stdout = createBuffer();
+        const stderr = createBuffer();
+        const cli = new CliMain({
+            followEventLimit: 1,
+            stderr,
+            stdout,
+            xdgRuntimeDir: runtimeRoot
+        });
+
+        assert.equal(await cli.run(["instance", "list"]), 0);
+        assert.match(stdout.flush(), /demo-local\tstopped/u);
+
+        assert.equal(await cli.run(["instance", "status", "demo-local"]), 0);
+        assert.match(stdout.flush(), /instance: demo-local/u);
+
+        assert.equal(await cli.run(["instance", "start", "demo-local"]), 0);
+        assert.match(stdout.flush(), /status: ready/u);
+
+        assert.equal(await cli.run(["instance", "stop", "demo-local"]), 0);
+        assert.match(stdout.flush(), /status: stopped/u);
+
+        assert.equal(await cli.run(["instance", "logs", "demo-local"]), 0);
+        assert.equal(stdout.flush(), "[1] stdout before\n");
+
+        assert.equal(await cli.run(["instance", "logs", "demo-local", "-f"]), 0);
+        assert.equal(stdout.flush(), "[1] stdout before\n[2] stdout after\n");
+
+        assert.equal(await cli.run(["instance", "call", "demo-local", "bash_run", "{\"command\":\"pwd\"}"]), 0);
+        const callOutput = stdout.flush();
+        assert.match(callOutput, /tool: bash_run/u);
+        assert.match(callOutput, /stdout:\n\/tmp\/ws/u);
+        assert.equal(stderr.flush(), "");
+    } finally {
+        await closeServer(server);
         await rm(runtimeRoot, { force: true, recursive: true });
+    }
+}
+
+async function verifyCliControlClientSubscribeStreamStates(): Promise<void> {
+    const runtimeRoot = await mkdtemp(join(tmpdir(), "portable-devshell-cli-stream-"));
+    const socketDir = join(runtimeRoot, "portable-devshell");
+    const socketPath = join(socketDir, "control.sock");
+    await mkdir(socketDir, { recursive: true });
+    let subscribeCount = 0;
+    const server = createServer((socket) => {
+        const reader = new FrameReader();
+        const writer = new FrameWriter(socket);
+
+        socket.on("data", (chunk: Uint8Array) => {
+            for (const frame of reader.push(chunk)) {
+                const envelope = frame as Record<string, any>;
+
+                if (envelope.method !== "instance.subscribe") {
+                    continue;
+                }
+
+                subscribeCount += 1;
+                void respond(writer, envelope.id, { events: [], lastSeq: 1 }).then(() => {
+                    if (subscribeCount === 1) {
+                        setTimeout(() => {
+                            void writer.write({
+                                event: "stream.gap",
+                                payload: {
+                                    instance: "demo-local",
+                                    latestSeq: 3,
+                                    oldestAvailableSeq: 4,
+                                    requestedFromSeq: 4
+                                },
+                                seq: 3,
+                                target: { instance: "demo-local", kind: "instance" },
+                                type: "event"
+                            } as unknown as JsonValue);
+                            void writer.write({
+                                event: "stream.cancelled",
+                                payload: {
+                                    instance: "demo-local",
+                                    reason: "gap"
+                                },
+                                seq: 3,
+                                target: { instance: "demo-local", kind: "instance" },
+                                type: "event"
+                            } as unknown as JsonValue);
+                        }, 5);
+                        return;
+                    }
+
+                    setTimeout(() => {
+                        socket.destroy();
+                    }, 5);
+                });
+            }
+        });
     });
 
-    const stdout = createBuffer();
-    const stderr = createBuffer();
-    const cli = new CliMain({
-        followEventLimit: 1,
-        stderr,
-        stdout,
-        xdgRuntimeDir: runtimeRoot
+    await new Promise<void>((resolve, reject) => {
+        server.once("error", reject);
+        server.listen(socketPath, resolve);
     });
 
-    assert.equal(await cli.run(["instance", "list"]), 0);
-    assert.match(stdout.flush(), /demo-local\tstopped/u);
+    const client = new CliControlClient({ xdgRuntimeDir: runtimeRoot });
 
-    assert.equal(await cli.run(["instance", "status", "demo-local"]), 0);
-    assert.match(stdout.flush(), /instance: demo-local/u);
+    try {
+        const firstStream = await client.subscribe("demo-local", 4);
+        const gap = await firstStream.nextMessage();
+        assert.equal(gap.kind, "stream.gap");
+        assert.deepEqual(gap.kind === "stream.gap" ? gap.envelope.payload : undefined, {
+            instance: "demo-local",
+            latestSeq: 3,
+            oldestAvailableSeq: 4,
+            requestedFromSeq: 4
+        });
 
-    assert.equal(await cli.run(["instance", "start", "demo-local"]), 0);
-    assert.match(stdout.flush(), /status: ready/u);
+        const cancelled = await firstStream.nextMessage();
+        assert.equal(cancelled.kind, "stream.cancelled");
+        assert.deepEqual(cancelled.kind === "stream.cancelled" ? cancelled.envelope.payload : undefined, {
+            instance: "demo-local",
+            reason: "gap"
+        });
+        firstStream.close();
 
-    assert.equal(await cli.run(["instance", "stop", "demo-local"]), 0);
-    assert.match(stdout.flush(), /status: stopped/u);
+        const secondStream = await client.subscribe("demo-local", 4);
+        const closed = await secondStream.nextMessage();
+        assert.equal(closed.kind, "connection.closed");
+        secondStream.close();
+    } finally {
+        await closeServer(server);
+        await rm(runtimeRoot, { force: true, recursive: true });
+    }
+}
 
-    assert.equal(await cli.run(["instance", "logs", "demo-local"]), 0);
-    assert.equal(stdout.flush(), "[1] stdout before\n");
-
-    assert.equal(await cli.run(["instance", "logs", "demo-local", "-f"]), 0);
-    assert.equal(stdout.flush(), "[1] stdout before\n[2] stdout after\n");
-
-    assert.equal(await cli.run(["instance", "call", "demo-local", "bash_run", "{\"command\":\"pwd\"}"]), 0);
-    const callOutput = stdout.flush();
-    assert.match(callOutput, /tool: bash_run/u);
-    assert.match(callOutput, /stdout:\n\/tmp\/ws/u);
-    assert.equal(stderr.flush(), "");
-});
-
-test("CliMain runs Task 12 real worker smoke through control lifecycle", async (t) => {
+async function verifyCliRealWorkerSmoke(): Promise<void> {
     const homeDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-cli-real-home-"));
     const xdgRuntimeDir = await mkdtemp(join(tmpdir(), "portable-devshell-cli-real-runtime-"));
     const workspacePath = await mkdtemp(join(tmpdir(), "portable-devshell-cli-real-workspace-"));
@@ -97,58 +189,60 @@ test("CliMain runs Task 12 real worker smoke through control lifecycle", async (
         "utf8"
     );
 
-    t.after(async () => {
+    try {
+        assert.equal(await cli.run(["start"]), 0);
+        assert.match(stdout.flush(), /control: running/u);
+
+        assert.equal(await cli.run(["status"]), 0);
+        assert.match(stdout.flush(), /instances: 1/u);
+
+        assert.equal(await cli.run(["instance", "list"]), 0);
+        assert.match(stdout.flush(), /aromatic-pc\tstopped/u);
+
+        assert.equal(await cli.run(["instance", "status", "aromatic-pc"]), 0);
+        assert.match(stdout.flush(), /status: stopped/u);
+
+        assert.equal(await cli.run(["instance", "start", "aromatic-pc"]), 0);
+        assert.match(stdout.flush(), /status: ready/u);
+
+        assert.equal(await cli.run(["instance", "status", "aromatic-pc"]), 0);
+        assert.match(stdout.flush(), /ready: true/u);
+
+        assert.equal(await cli.run(["instance", "call", "aromatic-pc", "bash_run", "{\"command\":\"pwd\"}"]), 0);
+        const pwdOutput = stdout.flush();
+        assert.match(pwdOutput, new RegExp(workspacePath.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"), "u"));
+
+        assert.equal(
+            await cli.run(["instance", "call", "aromatic-pc", "bash_run", "{\"command\":\"echo portable-devshell\"}"]),
+            0
+        );
+        assert.match(stdout.flush(), /portable-devshell/u);
+
+        assert.equal(await cli.run(["instance", "logs", "aromatic-pc"]), 0);
+        const logsOutput = stdout.flush();
+        assert.match(logsOutput, /portable-devshell/u);
+        assert.match(logsOutput, new RegExp(workspacePath.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"), "u"));
+
+        assert.equal(await cli.run(["stop"]), 0);
+        controlStopped = true;
+        await waitForControlShutdown(xdgRuntimeDir);
+        assert.equal(stdout.flush(), "control: stopped\n");
+        assert.equal(stderr.flush(), "");
+
+        assert.match(await readFile(join(homeDirectory, ".devshell", "aromatic-pc", "control-worker", "tool-calls.jsonl"), "utf8"), /bash_run/u);
+    } finally {
         if (!controlStopped) {
             await cli.run(["stop"]).catch(() => undefined);
+            await waitForControlShutdown(xdgRuntimeDir).catch(() => undefined);
         }
         restoreEnv(workerEnvName, previousWorkerPath);
         await rm(homeDirectory, { force: true, recursive: true });
         await rm(xdgRuntimeDir, { force: true, recursive: true });
         await rm(workspacePath, { force: true, recursive: true });
-    });
+    }
+}
 
-    assert.equal(await cli.run(["start"]), 0);
-    assert.match(stdout.flush(), /control: running/u);
-
-    assert.equal(await cli.run(["status"]), 0);
-    assert.match(stdout.flush(), /instances: 1/u);
-
-    assert.equal(await cli.run(["instance", "list"]), 0);
-    assert.match(stdout.flush(), /aromatic-pc\tstopped/u);
-
-    assert.equal(await cli.run(["instance", "status", "aromatic-pc"]), 0);
-    assert.match(stdout.flush(), /status: stopped/u);
-
-    assert.equal(await cli.run(["instance", "start", "aromatic-pc"]), 0);
-    assert.match(stdout.flush(), /status: ready/u);
-
-    assert.equal(await cli.run(["instance", "status", "aromatic-pc"]), 0);
-    assert.match(stdout.flush(), /ready: true/u);
-
-    assert.equal(await cli.run(["instance", "call", "aromatic-pc", "bash_run", "{\"command\":\"pwd\"}"]), 0);
-    const pwdOutput = stdout.flush();
-    assert.match(pwdOutput, new RegExp(workspacePath.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"), "u"));
-
-    assert.equal(
-        await cli.run(["instance", "call", "aromatic-pc", "bash_run", "{\"command\":\"echo portable-devshell\"}"]),
-        0
-    );
-    assert.match(stdout.flush(), /portable-devshell/u);
-
-    assert.equal(await cli.run(["instance", "logs", "aromatic-pc"]), 0);
-    const logsOutput = stdout.flush();
-    assert.match(logsOutput, /portable-devshell/u);
-    assert.match(logsOutput, new RegExp(workspacePath.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"), "u"));
-
-    assert.equal(await cli.run(["stop"]), 0);
-    controlStopped = true;
-    assert.equal(stdout.flush(), "control: stopped\n");
-    assert.equal(stderr.flush(), "");
-
-    assert.match(await readFile(join(homeDirectory, ".devshell", "aromatic-pc", "control-worker", "tool-calls.jsonl"), "utf8"), /bash_run/u);
-});
-
-test("CliMain creates an instance interactively and uses it through the real control lifecycle", async (t) => {
+async function verifyCliInteractiveCreateFlow(): Promise<void> {
     const homeDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-cli-create-home-"));
     const xdgRuntimeDir = await mkdtemp(join(tmpdir(), "portable-devshell-cli-create-runtime-"));
     const workspacePath = await mkdtemp(join(tmpdir(), "portable-devshell-cli-create-workspace-"));
@@ -181,46 +275,53 @@ test("CliMain creates an instance interactively and uses it through the real con
     await mkdir(join(homeDirectory, ".devshell", "control", "instances"), { recursive: true });
     await writeFile(join(homeDirectory, ".devshell", "control", "config.toml"), createCreateConfig(), "utf8");
 
-    t.after(async () => {
+    try {
+        assert.equal(await cli.run(["start"]), 0);
+        assert.match(stdout.flush(), /control: running/u);
+
+        assert.equal(await cli.run(["instance", "create"]), 0);
+        const createOutput = stdout.flush();
+        assert.match(createOutput, /Summary/u);
+        assert.match(createOutput, /instance created: aromatic-pc/u);
+        assert.doesNotMatch(createOutput, /worker binary path:/u);
+
+        assert.equal(await cli.run(["instance", "list"]), 0);
+        assert.match(stdout.flush(), /aromatic-pc\tstopped/u);
+
+        assert.equal(await cli.run(["instance", "start", "aromatic-pc"]), 0);
+        assert.match(stdout.flush(), /status: ready/u);
+
+        assert.equal(await cli.run(["instance", "call", "aromatic-pc", "bash_run", "{\"command\":\"pwd\"}"]), 0);
+        assert.match(stdout.flush(), new RegExp(workspacePath.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"), "u"));
+
+        assert.doesNotMatch(await readFile(join(homeDirectory, ".devshell", "control", "config.toml"), "utf8"), /\[\[instances\]\]/u);
+        assert.match(
+            await readFile(join(homeDirectory, ".devshell", "control", "instances", "aromatic-pc.toml"), "utf8"),
+            /name = "aromatic-pc"/u
+        );
+        assert.doesNotMatch(await readFile(join(homeDirectory, ".devshell", "control", "config.toml"), "utf8"), /workerBinaryPath/u);
+
+        assert.equal(await cli.run(["stop"]), 0);
+        controlStopped = true;
+        await waitForControlShutdown(xdgRuntimeDir);
+        assert.equal(stdout.flush(), "control: stopped\n");
+        assert.equal(stderr.flush(), "");
+    } finally {
         if (!controlStopped) {
             await cli.run(["stop"]).catch(() => undefined);
+            await waitForControlShutdown(xdgRuntimeDir).catch(() => undefined);
         }
         restoreEnv(workerEnvName, previousWorkerPath);
         await rm(homeDirectory, { force: true, recursive: true });
         await rm(xdgRuntimeDir, { force: true, recursive: true });
         await rm(workspacePath, { force: true, recursive: true });
-    });
+    }
+}
 
-    assert.equal(await cli.run(["start"]), 0);
-    assert.match(stdout.flush(), /control: running/u);
-
-    assert.equal(await cli.run(["instance", "create"]), 0);
-    const createOutput = stdout.flush();
-    assert.match(createOutput, /Summary/u);
-    assert.match(createOutput, /instance created: aromatic-pc/u);
-    assert.doesNotMatch(createOutput, /worker binary path:/u);
-
-    assert.equal(await cli.run(["instance", "list"]), 0);
-    assert.match(stdout.flush(), /aromatic-pc\tstopped/u);
-
-    assert.equal(await cli.run(["instance", "start", "aromatic-pc"]), 0);
-    assert.match(stdout.flush(), /status: ready/u);
-
-    assert.equal(await cli.run(["instance", "call", "aromatic-pc", "bash_run", "{\"command\":\"pwd\"}"]), 0);
-    assert.match(stdout.flush(), new RegExp(workspacePath.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"), "u"));
-
-    assert.doesNotMatch(await readFile(join(homeDirectory, ".devshell", "control", "config.toml"), "utf8"), /\[\[instances\]\]/u);
-    assert.match(
-        await readFile(join(homeDirectory, ".devshell", "control", "instances", "aromatic-pc.toml"), "utf8"),
-        /name = "aromatic-pc"/u
-    );
-    assert.doesNotMatch(await readFile(join(homeDirectory, ".devshell", "control", "config.toml"), "utf8"), /workerBinaryPath/u);
-
-    assert.equal(await cli.run(["stop"]), 0);
-    controlStopped = true;
-    assert.equal(stdout.flush(), "control: stopped\n");
-    assert.equal(stderr.flush(), "");
-});
+await verifyCliInstanceCommandsThroughControlRpc();
+await verifyCliControlClientSubscribeStreamStates();
+await verifyCliRealWorkerSmoke();
+await verifyCliInteractiveCreateFlow();
 
 function createInstanceHarness(): { attach: (socket: Socket) => void } {
     return {
@@ -399,6 +500,36 @@ function createLocalInstanceConfig(name: string, workspacePath: string): string 
         "eventBufferSize = 50",
         ""
     ].join("\n");
+}
+
+async function closeServer(server: ReturnType<typeof createServer>): Promise<void> {
+    await new Promise<void>((resolve, reject) => {
+        server.close((error) => {
+            if (error !== undefined) {
+                reject(error);
+                return;
+            }
+
+            resolve();
+        });
+    });
+}
+
+async function waitForControlShutdown(xdgRuntimeDir: string, timeoutMs = 3_000): Promise<void> {
+    const socketPath = join(xdgRuntimeDir, "portable-devshell", "control.sock");
+    const deadline = Date.now() + timeoutMs;
+
+    while (Date.now() < deadline) {
+        try {
+            await access(socketPath);
+        } catch {
+            return;
+        }
+
+        await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+
+    throw new Error(`timed out waiting for control shutdown at ${socketPath}`);
 }
 
 function restoreEnv(name: keyof NodeJS.ProcessEnv, value: string | undefined): void {

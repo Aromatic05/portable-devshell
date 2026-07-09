@@ -63,10 +63,55 @@ test("StreamSubscriptionManager returns stream.gap when fromSeq is unavailable",
         (error: unknown) => {
             assert.equal((error as { code?: string }).code, "stream.gap");
             assert.equal((error as { retryable?: boolean }).retryable, true);
+            assert.deepEqual((error as { details?: Record<string, unknown> }).details, {
+                instance: "alpha",
+                latestSeq: 2,
+                oldestAvailableSeq: 2,
+                requestedFromSeq: 1
+            });
             return true;
         }
     );
     manager.unsubscribeConnection("conn-2");
+});
+
+test("StreamSubscriptionManager emits runtime stream.gap before cancelling the subscription", async () => {
+    const manager = new StreamSubscriptionManager(5);
+    const worker = new FakeWorker("alpha");
+    await worker.start("/tmp/ws");
+
+    const sentEvents: Array<Record<string, unknown>> = [];
+    const connection = {
+        id: "conn-3",
+        async sendEvent(event: Record<string, unknown>) {
+            sentEvents.push(event);
+        }
+    } as unknown as {
+        id: string;
+        sendEvent: (event: Record<string, unknown>) => Promise<void>;
+    };
+
+    await manager.subscribe(connection as never, "alpha", worker as unknown as WorkerInstance, 1);
+    worker.emit("toolCall.completed", { toolName: "bash_run" });
+    await waitFor(() => sentEvents.length === 1);
+
+    worker.emit("toolCall.completed", { toolName: "bash_run" });
+    worker.dropBefore(4);
+    await waitFor(() => sentEvents.length === 3);
+
+    assert.equal(sentEvents[1]?.event, "stream.gap");
+    assert.deepEqual(sentEvents[1]?.payload, {
+        instance: "alpha",
+        latestSeq: 3,
+        oldestAvailableSeq: 4,
+        requestedFromSeq: 3
+    });
+    assert.equal(sentEvents[2]?.event, "stream.cancelled");
+    assert.deepEqual(sentEvents[2]?.payload, {
+        instance: "alpha",
+        reason: "gap"
+    });
+    manager.unsubscribeConnection("conn-3");
 });
 
 class FakeWorker {

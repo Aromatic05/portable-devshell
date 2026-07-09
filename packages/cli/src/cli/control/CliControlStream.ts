@@ -1,28 +1,93 @@
-import type { JsonValue } from "@portable-devshell/shared";
+import { createError, errorCodes, type JsonValue } from "@portable-devshell/shared";
 
 import type { CliControlConnection } from "./CliControlConnection.js";
-import type { CliControlEventEnvelope } from "./CliControlRequest.js";
+import type {
+    CliControlEventEnvelope,
+    CliControlStreamCancelledEnvelope,
+    CliControlStreamGapEnvelope
+} from "./CliControlRequest.js";
+
+export type CliControlStreamMessage =
+    | {
+          envelope: CliControlEventEnvelope;
+          kind: "instance.event";
+      }
+    | {
+          envelope: CliControlStreamGapEnvelope;
+          kind: "stream.gap";
+      }
+    | {
+          envelope: CliControlStreamCancelledEnvelope;
+          kind: "stream.cancelled";
+      }
+    | {
+          kind: "connection.closed";
+      };
 
 export class CliControlStream {
     readonly #connection: CliControlConnection;
-    readonly #initialEvents: CliControlEventEnvelope[];
+    readonly #initialMessages: CliControlStreamMessage[];
+    #closed = false;
 
     constructor(connection: CliControlConnection, initialEvents: CliControlEventEnvelope[]) {
         this.#connection = connection;
-        this.#initialEvents = initialEvents;
+        this.#initialMessages = initialEvents.map((event) => toStreamMessage(event));
     }
 
-    async nextEvent(): Promise<CliControlEventEnvelope> {
-        const event = this.#initialEvents.shift();
+    async nextMessage(): Promise<CliControlStreamMessage> {
+        if (this.#closed) {
+            return {
+                kind: "stream.cancelled",
+                envelope: {
+                    event: "stream.cancelled",
+                    payload: {
+                        instance: "",
+                        reason: "client.closed"
+                    },
+                    seq: 0,
+                    target: {
+                        instance: "",
+                        kind: "instance"
+                    },
+                    type: "event"
+                }
+            };
+        }
+
+        const event = this.#initialMessages.shift();
 
         if (event !== undefined) {
             return event;
         }
 
-        return await this.#connection.nextEvent();
+        return await this.#connection.nextStreamMessage();
+    }
+
+    async nextEvent(): Promise<CliControlEventEnvelope> {
+        const message = await this.nextMessage();
+
+        if (message.kind === "instance.event") {
+            return message.envelope;
+        }
+
+        if (message.kind === "stream.gap") {
+            throw createError({
+                code: errorCodes.streamGap,
+                message: "Requested event sequence is no longer available. Pull a fresh snapshot.",
+                retryable: true,
+                details: message.envelope.payload as unknown as JsonValue
+            });
+        }
+
+        if (message.kind === "stream.cancelled") {
+            throw new Error(`stream.cancelled:${message.envelope.payload.reason}`);
+        }
+
+        throw new Error("control connection closed");
     }
 
     close(): void {
+        this.#closed = true;
         this.#connection.close();
     }
 }
@@ -77,4 +142,25 @@ export function asLogEntries(value: JsonValue): CliInstanceLogEntry[] {
 
 export function asCommandResult(value: JsonValue): CliCommandResult {
     return value as unknown as CliCommandResult;
+}
+
+function toStreamMessage(event: CliControlEventEnvelope): CliControlStreamMessage {
+    if (event.event === "stream.gap") {
+        return {
+            envelope: event as CliControlStreamGapEnvelope,
+            kind: "stream.gap"
+        };
+    }
+
+    if (event.event === "stream.cancelled") {
+        return {
+            envelope: event as CliControlStreamCancelledEnvelope,
+            kind: "stream.cancelled"
+        };
+    }
+
+    return {
+        envelope: event,
+        kind: "instance.event"
+    };
 }
