@@ -1,6 +1,6 @@
 import type { ApprovalRequest, JsonValue, ToolCallRecord } from "@portable-devshell/shared";
 
-import type { BoxLine, BoxModel } from "../component/ExpandableBox.js";
+import { measureExpandableBoxHeight, type BoxLine, type BoxModel } from "../component/ExpandableBox.js";
 import type { TuiMode } from "../interaction/TuiInteractionTypes.js";
 import type { ActivePage, ExpandableBoxStatus, PageId } from "../model/TuiUiTypes.js";
 import type { TuiAppState, TuiConnectionState, TuiInstanceListEntry, TuiLogEntry } from "./TuiReducers.js";
@@ -32,6 +32,12 @@ export interface MainScreenModel {
     emptyState?: string;
     pageTitle: string;
     statusLine?: string;
+}
+
+export interface MainBoxFlowMetrics {
+    boxRanges: Record<string, { end: number; start: number }>;
+    scrollKey: string;
+    totalLines: number;
 }
 
 export function selectActivePage(state: TuiAppState): ActivePage {
@@ -97,6 +103,28 @@ export function selectMainScreenModel(state: TuiAppState): MainScreenModel {
 
 export function selectMainBoxIds(state: TuiAppState): string[] {
     return selectMainScreenModel(state).boxes.map((box) => box.id);
+}
+
+export function selectMainBoxFlowMetrics(state: TuiAppState): MainBoxFlowMetrics {
+    const model = selectMainScreenModel(state);
+    let cursor = 0;
+    const boxRanges: Record<string, { end: number; start: number }> = {};
+
+    for (const box of model.boxes) {
+        const start = cursor;
+        cursor += measureExpandableBoxHeight(box);
+        boxRanges[box.id] = { end: cursor, start };
+    }
+
+    return {
+        boxRanges,
+        scrollKey: selectMainScrollKey(state),
+        totalLines: cursor
+    };
+}
+
+export function selectMainScrollKey(state: TuiAppState): string {
+    return `${state.ui.selectedPage}:${state.ui.selectedInstance ?? "-"}:main`;
 }
 
 export function selectFooterModel(state: TuiAppState): { mode: TuiMode; text: string } {
@@ -506,13 +534,10 @@ function buildBoxesForPage(state: TuiAppState, page: PageId, instanceName: strin
                 })
             );
         case "logs": {
-            const offsetKey = `${page}:${instanceName}:logs`;
-            const offset = state.ui.scrollOffsets[offsetKey] ?? 0;
             const filtered = applySearch(logs.map(renderLogLine), state.ui.searchQueries[page] ?? "");
-            const visible = filtered.slice(offset, offset + 12);
             return [
                 makeBox(state, page, instanceName, {
-                    detailLines: visible.length === 0 ? ["No logs loaded yet."] : visible,
+                    detailLines: filtered.length === 0 ? ["No logs loaded yet."] : filtered,
                     id: "logs",
                     status: "normal",
                     summaryLines: [compactSummary(["source", "instance.readLogs+log.appended"], ["entries", String(logs.length)])],

@@ -1,11 +1,12 @@
 import type { TuiAppStore } from "../store/TuiAppStore.js";
 import { buildFocusGraphForState } from "../screen/ScreenRouter.js";
+import { selectMainBoxFlowMetrics, selectMainBoxIds, selectMainScreenModel, selectMainScrollKey } from "../store/TuiSelectors.js";
 import { TuiFocusManager } from "./TuiFocusManager.js";
 import type { TuiUiIntent } from "./TuiInteractionTypes.js";
-import { selectMainBoxIds } from "../store/TuiSelectors.js";
 
 export interface CommandDispatcherOptions {
     focusManager: TuiFocusManager;
+    mainViewportRows(): number;
     onLogsReload(): Promise<void>;
     onQuit(): Promise<void>;
     onRedraw(): void;
@@ -14,6 +15,7 @@ export interface CommandDispatcherOptions {
 
 export class CommandDispatcher {
     readonly #focusManager: TuiFocusManager;
+    readonly #mainViewportRows: () => number;
     readonly #onLogsReload: () => Promise<void>;
     readonly #onQuit: () => Promise<void>;
     readonly #onRedraw: () => void;
@@ -21,6 +23,7 @@ export class CommandDispatcher {
 
     constructor(options: CommandDispatcherOptions) {
         this.#focusManager = options.focusManager;
+        this.#mainViewportRows = options.mainViewportRows;
         this.#onLogsReload = options.onLogsReload;
         this.#onQuit = options.onQuit;
         this.#onRedraw = options.onRedraw;
@@ -137,13 +140,13 @@ export class CommandDispatcher {
                 this.#focusManager.restore();
                 return true;
             case "screen.pageUp":
-                return this.#scrollCurrentBox(-12);
+                return this.#scrollMainColumn(-Math.max(1, this.#boxViewportRows() - 1));
             case "screen.pageDown":
-                return this.#scrollCurrentBox(12);
+                return this.#scrollMainColumn(Math.max(1, this.#boxViewportRows() - 1));
             case "screen.home":
-                return this.#setCurrentBoxOffset(0);
+                return this.#setMainColumnOffset(0);
             case "screen.end":
-                return this.#setCurrentBoxOffset(Number.MAX_SAFE_INTEGER);
+                return this.#setMainColumnOffset(this.#maxMainScrollOffset());
             case "screen.toggle": {
                 if (this.#store.getState().interaction.focusScope !== "mainBoxes") {
                     return false;
@@ -155,6 +158,7 @@ export class CommandDispatcher {
                 const key = this.#expandedKey(boxId);
                 const expanded = this.#store.getState().ui.expandedBoxes[key] === true;
                 this.#store.toggleExpanded(key);
+                this.#ensureMainFocusVisible();
                 this.#store.setScreenStatus(this.#store.getState().ui.selectedPage, expanded ? "Collapsed box." : "Expanded box.");
                 return true;
             }
@@ -292,19 +296,20 @@ export class CommandDispatcher {
 
     #moveWithinScope(direction: "up" | "down" | "left" | "right"): boolean {
         const scope = this.#store.getState().interaction.focusScope;
-        if (scope === "mainBoxes" && this.#store.getState().ui.selectedPage === "logs" && selectMainBoxIds(this.#store.getState()).length <= 1) {
-            return this.#scrollCurrentBox(direction === "up" ? -1 : direction === "down" ? 1 : 0);
-        }
         if (scope === "boxDetail") {
             if (direction === "up") {
-                return this.#scrollCurrentBox(-1);
+                return this.#scrollMainColumn(-1);
             }
             if (direction === "down") {
-                return this.#scrollCurrentBox(1);
+                return this.#scrollMainColumn(1);
             }
             return false;
         }
-        return this.#focusManager.move(direction);
+        const moved = this.#focusManager.move(direction);
+        if (moved && scope === "mainBoxes") {
+            this.#ensureMainFocusVisible();
+        }
+        return moved;
     }
 
     async #activateCurrentScope(): Promise<boolean> {
@@ -355,6 +360,7 @@ export class CommandDispatcher {
         if (current === undefined || !boxIds.includes(current)) {
             this.#store.setMainFocusId(boxIds[0]);
         }
+        this.#ensureMainFocusVisible();
     }
 
     #expandedKey(boxId: string): string {
@@ -362,25 +368,60 @@ export class CommandDispatcher {
         return `${state.ui.selectedPage}:${state.ui.selectedInstance}:${boxId}`;
     }
 
-    #scrollCurrentBox(delta: number): boolean {
-        const boxId = this.#store.getState().ui.mainFocusId;
-        if (boxId === undefined) {
-            return false;
-        }
-        const key = `${this.#store.getState().ui.selectedPage}:${this.#store.getState().ui.selectedInstance}:${boxId}`;
+    #scrollMainColumn(delta: number): boolean {
+        const key = selectMainScrollKey(this.#store.getState());
         const current = this.#store.getState().ui.scrollOffsets[key] ?? 0;
-        const next = delta === 0 ? current : Math.max(0, current + delta);
+        const next = clamp(delta === 0 ? current : current + delta, 0, this.#maxMainScrollOffset());
         this.#store.setScrollOffset(key, next);
         return true;
     }
 
-    #setCurrentBoxOffset(offset: number): boolean {
-        const boxId = this.#store.getState().ui.mainFocusId;
-        if (boxId === undefined) {
-            return false;
-        }
-        const key = `${this.#store.getState().ui.selectedPage}:${this.#store.getState().ui.selectedInstance}:${boxId}`;
-        this.#store.setScrollOffset(key, Math.max(0, offset));
+    #setMainColumnOffset(offset: number): boolean {
+        const key = selectMainScrollKey(this.#store.getState());
+        this.#store.setScrollOffset(key, clamp(offset, 0, this.#maxMainScrollOffset()));
         return true;
     }
+
+    #ensureMainFocusVisible(): void {
+        const state = this.#store.getState();
+        const boxId = state.ui.mainFocusId;
+        if (boxId === undefined) {
+            return;
+        }
+
+        const metrics = selectMainBoxFlowMetrics(state);
+        const range = metrics.boxRanges[boxId];
+        if (range === undefined) {
+            return;
+        }
+
+        const viewportRows = this.#boxViewportRows();
+        if (viewportRows <= 0) {
+            return;
+        }
+
+        const current = state.ui.scrollOffsets[metrics.scrollKey] ?? 0;
+        if (range.start < current) {
+            this.#store.setScrollOffset(metrics.scrollKey, range.start);
+            return;
+        }
+
+        if (range.end > current + viewportRows) {
+            this.#store.setScrollOffset(metrics.scrollKey, clamp(range.end - viewportRows, 0, this.#maxMainScrollOffset()));
+        }
+    }
+
+    #boxViewportRows(): number {
+        const model = selectMainScreenModel(this.#store.getState());
+        return Math.max(0, this.#mainViewportRows() - 1 - (model.statusLine === undefined ? 0 : 1) - (model.emptyState === undefined ? 0 : 1));
+    }
+
+    #maxMainScrollOffset(): number {
+        const metrics = selectMainBoxFlowMetrics(this.#store.getState());
+        return Math.max(0, metrics.totalLines - this.#boxViewportRows());
+    }
+}
+
+function clamp(value: number, min: number, max: number): number {
+    return Math.min(Math.max(value, min), max);
 }

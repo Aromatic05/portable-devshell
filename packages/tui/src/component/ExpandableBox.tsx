@@ -75,6 +75,10 @@ export function renderExpandableBoxLines(box: BoxModel, requestedInnerWidth: num
     ];
 }
 
+export function measureExpandableBoxHeight(box: BoxModel): number {
+    return (box.expanded ? box.expandedLines.length : box.collapsedLines.length) + 2;
+}
+
 function renderTopBorder(title: string, innerWidth: number, frame: { horizontal: string; topLeft: string; topRight: string }): string {
     const maxTitleWidth = Math.max(1, innerWidth - 1);
     const normalizedTitle = truncateTitle(title, maxTitleWidth);

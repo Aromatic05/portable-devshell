@@ -1,35 +1,48 @@
 import React from "react";
 import { Box, Text } from "ink";
 
-import { ExpandableBox } from "../component/ExpandableBox.js";
+import { renderExpandableBoxLines } from "../component/ExpandableBox.js";
 import { FocusGraph, type FocusNode } from "../interaction/FocusGraph.js";
 import type { FocusItem } from "../interaction/TuiInteractionTypes.js";
 import type { PageId } from "../model/TuiUiTypes.js";
 import type { TuiAppState } from "../store/TuiReducers.js";
-import { selectMainBoxIds, selectMainScreenModel } from "../store/TuiSelectors.js";
+import { selectMainBoxFlowMetrics, selectMainBoxIds, selectMainScreenModel } from "../store/TuiSelectors.js";
 
 export const orderedPages: PageId[] = ["instances", "config", "connector", "audit", "logs", "help"];
 
 export interface ScreenRouterProps {
     boxInnerWidth: number;
     state: TuiAppState;
+    viewportRows: number;
 }
 
 export function ScreenRouter(props: ScreenRouterProps) {
     const model = selectMainScreenModel(props.state);
+    const flow = selectMainBoxFlowMetrics(props.state);
+    const scrollOffset = props.state.ui.scrollOffsets[flow.scrollKey] ?? 0;
+    const boxViewportRows = Math.max(0, props.viewportRows - 1 - (model.statusLine === undefined ? 0 : 1) - (model.emptyState === undefined ? 0 : 1));
+    const renderedLines = model.boxes.flatMap((box) => renderExpandableBoxLines(box, props.boxInnerWidth));
+    const clampedOffset = clamp(scrollOffset, 0, Math.max(0, renderedLines.length - boxViewportRows));
+    const visibleLines = boxViewportRows > 0 ? renderedLines.slice(clampedOffset, clampedOffset + boxViewportRows) : [];
 
     return (
         <Box flexDirection="column">
             <Text bold>{model.pageTitle}</Text>
             {model.emptyState !== undefined ? <Text color="yellow">{model.emptyState}</Text> : undefined}
-            {model.boxes.map((box) => (
-                <Box key={box.id} width="100%">
-                    <ExpandableBox box={box} innerWidth={props.boxInnerWidth} />
-                </Box>
-            ))}
+            {model.emptyState === undefined
+                ? visibleLines.map((line) => (
+                      <Text color={line.color} dimColor={line.dimColor} key={line.key}>
+                          {line.text}
+                      </Text>
+                  ))
+                : undefined}
             {model.statusLine !== undefined ? <Text color="yellow">{model.statusLine}</Text> : undefined}
         </Box>
     );
+}
+
+function clamp(value: number, min: number, max: number): number {
+    return Math.min(Math.max(value, min), max);
 }
 
 export function pageFromShortcut(index: number): PageId | undefined {

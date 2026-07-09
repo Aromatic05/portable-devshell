@@ -20,7 +20,7 @@ import {
     selectSidebarModel
 } from "../store/TuiSelectors.js";
 import type { TuiRuntime } from "./TuiRuntime.js";
-import { TuiRootLayout } from "./TuiRootLayout.js";
+import { mainInnerWidth, TuiRootLayout } from "./TuiRootLayout.js";
 
 export interface TuiAppProps {
     runtime: TuiRuntime;
@@ -38,7 +38,11 @@ export function TuiApp(props: TuiAppProps) {
     const confirmDialog = selectConfirmDialogModel(state);
     const search = selectSearchModel(state);
     const footer = selectFooterModel(state);
-    const boxInnerWidth = Math.max(32, props.runtime.columns - 28);
+    const boxInnerWidth = mainInnerWidth(props.runtime.columns);
+    const viewportRows = Math.max(
+        0,
+        props.runtime.rows - 7 - (errorLines?.length ?? 0) - (search.open ? 1 : 0) - (connection.status === "connecting" ? 1 : 0)
+    );
 
     useInput((input, key) => {
         void props.runtime.handleInput(input, key);
@@ -50,10 +54,10 @@ export function TuiApp(props: TuiAppProps) {
             footer={<Footer text={footer.text} />}
             header={<Header stateLabel={connection.status} summary={selectHeaderSummary(state)} title={selectHeaderTitle()} />}
             main={
-                <Box flexDirection="column" flexGrow={1} gap={1}>
+                <Box flexDirection="column" flexGrow={1}>
                     {errorLines !== undefined ? <ErrorBanner lines={errorLines} /> : undefined}
                     {search.open ? <Text color="cyan">{`/ ${search.query}`}</Text> : undefined}
-                    <ScreenRouter boxInnerWidth={boxInnerWidth} state={state} />
+                    <ScreenRouter boxInnerWidth={boxInnerWidth} state={state} viewportRows={viewportRows} />
                     <ActionMenu items={actionMenu.items} open={actionMenu.open} title={actionMenu.title} />
                     <ConfirmDialog
                         body={confirmDialog.body}

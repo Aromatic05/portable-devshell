@@ -9,7 +9,7 @@ export interface SidebarProps {
 
 export function Sidebar(props: SidebarProps) {
     return (
-        <Box borderStyle="single" flexDirection="column" paddingX={1} width={24}>
+        <Box borderStyle="single" flexDirection="column" paddingX={1} width="100%">
             <SidebarSection items={props.model.pages} />
             <Box height={1} />
             <SidebarSection items={props.model.instances} />

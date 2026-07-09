@@ -122,6 +122,32 @@ test("Prompt 3 urgent fix keeps connector and logs pages read-only and instance-
     assert.equal(selectHelpLines(harness.store.getState()).some((line) => line.includes("Read-only cockpit")), true);
 });
 
+test("Main viewport scrolling uses one page-instance offset instead of per-box offsets", async () => {
+    const harness = createHarness();
+
+    await harness.press("5");
+    await harness.press("", { tab: true });
+    await harness.press(" ");
+    await harness.press("", { pageDown: true });
+
+    assert.equal(harness.store.getState().ui.scrollOffsets["logs:alpha:logs"], undefined);
+    assert.equal((harness.store.getState().ui.scrollOffsets["logs:alpha:main"] ?? 0) > 0, true);
+    assert.equal(selectMainScreenModel(harness.store.getState()).boxes[0]?.expandedLines.length, 20);
+});
+
+test("Moving focus down advances the shared main viewport to keep the focused box visible", async () => {
+    const harness = createHarness();
+
+    await harness.press("", { tab: true });
+    await harness.press("", { downArrow: true });
+    await harness.press("", { downArrow: true });
+    await harness.press("", { downArrow: true });
+    await harness.press("", { downArrow: true });
+
+    assert.equal(harness.store.getState().ui.mainFocusId, "approvals");
+    assert.equal((harness.store.getState().ui.scrollOffsets["instances:alpha:main"] ?? 0) > 0, true);
+});
+
 function createHarness() {
     const store = new TuiAppStore();
     seedPrompt3State(store);
@@ -144,6 +170,7 @@ function createHarness() {
     });
     const commandDispatcher = new CommandDispatcher({
         focusManager,
+        mainViewportRows: () => 12,
         onLogsReload: async () => {
             logsReloadRequests += 1;
         },
