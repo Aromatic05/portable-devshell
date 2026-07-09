@@ -21,14 +21,20 @@ export function ExpandableBox(props: ExpandableBoxProps) {
 
     return (
         <Box borderColor={borderColor} borderStyle="single" flexDirection="column" paddingX={1} paddingY={0}>
-            <Box justifyContent="space-between">
+            <Box>
                 <Text bold color={titleColor}>
                     {props.title}
                 </Text>
-                <Text color={statusColor}>{props.status ?? (props.disabled ? "disabled" : "normal")}</Text>
+                <Text color={statusColor}>{`  ${props.status ?? (props.disabled ? "disabled" : "normal")}`}</Text>
             </Box>
-            <Box flexDirection="column">{props.summary}</Box>
-            {props.expanded ? <Box flexDirection="column" marginTop={1}>{props.children}</Box> : undefined}
+            <Box flexDirection="column">
+                {props.summary}
+            </Box>
+            {props.expanded ? (
+                <Box flexDirection="column" marginTop={1}>
+                    {props.children}
+                </Box>
+            ) : undefined}
         </Box>
     );
 }

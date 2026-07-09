@@ -19,7 +19,7 @@ test("Prompt 3 urgent fix uses page + instance coordinates with two sidebar sect
     const sidebar = selectSidebarModel(harness.store.getState());
     assert.deepEqual(
         sidebar.pages.map((item) => item.label),
-        ["overview", "config", "connector", "audit", "logs", "help"]
+        ["instances", "config", "connector", "audit", "logs", "help"]
     );
     assert.deepEqual(
         sidebar.instances.map((item) => item.label),

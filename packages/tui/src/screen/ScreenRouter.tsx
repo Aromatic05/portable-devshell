@@ -31,11 +31,7 @@ export function ScreenRouter(props: ScreenRouterProps) {
                     key={box.id}
                     status={box.status}
                     summary={
-                        <>
-                            {box.summaryLines.map((line, index) => (
-                                <Text key={`${box.id}-summary-${index}`}>{line}</Text>
-                            ))}
-                        </>
+                        <Text dimColor>{box.summaryLines.join(" | ")}</Text>
                     }
                     title={box.title}
                 >

@@ -7,7 +7,7 @@ import type { ActivePage, ExpandableBoxStatus, PageId } from "../model/TuiUiType
 import type { TuiAppState, TuiConnectionState, TuiInstanceListEntry, TuiLogEntry } from "./TuiReducers.js";
 
 const pageEntries: Array<{ id: PageId; label: string }> = [
-    { id: "instances", label: "overview" },
+    { id: "instances", label: "instances" },
     { id: "config", label: "config" },
     { id: "connector", label: "connector" },
     { id: "audit", label: "audit" },
@@ -210,11 +210,33 @@ function buildBoxesForPage(state: TuiAppState, page: PageId, instanceName: strin
     if (page === "help") {
         return [
             makeBox(state, page, instanceName, {
-                detailLines: selectHelpLines(state),
-                id: "help",
+                detailLines: [
+                    "Tab cycles pages, instances, and main boxes.",
+                    "Shift+Tab reverses that cycle.",
+                    "Ctrl+[ returns from detail, search, menus, and main focus."
+                ],
+                id: "help-navigation",
                 status: "normal",
-                summaryLines: ["Read-only cockpit shortcuts and navigation."],
-                title: "Help"
+                summaryLines: ["navigation shortcuts", "scope cycling"],
+                title: "Navigation"
+            }),
+            makeBox(state, page, instanceName, {
+                detailLines: [
+                    "No start/stop worker actions.",
+                    "No approve/deny actions.",
+                    "No call tool, attach shell, create, or save actions."
+                ],
+                id: "help-readonly",
+                status: "disabled",
+                summaryLines: ["read-only boundaries", "state-changing actions disabled"],
+                title: "Read-only Boundaries"
+            }),
+            makeBox(state, page, instanceName, {
+                detailLines: selectHelpLines(state),
+                id: "help-context",
+                status: "normal",
+                summaryLines: [`current page ${state.ui.selectedPage}`, `selected instance ${state.ui.selectedInstance ?? "none"}`],
+                title: "Context"
             })
         ];
     }
@@ -430,6 +452,17 @@ function buildBoxesForPage(state: TuiAppState, page: PageId, instanceName: strin
                     status: "normal",
                     summaryLines: [`source instance.readLogs + log.appended`, `entries ${logs.length}`],
                     title: "Logs"
+                }),
+                makeBox(state, page, instanceName, {
+                    detailLines: [
+                        "Logs page only reads instance.readLogs.",
+                        "Live updates only append from log.appended stream events.",
+                        "worker.log is never read directly."
+                    ],
+                    id: "logs-source",
+                    status: "normal",
+                    summaryLines: ["instance.readLogs only", "log.appended stream only"],
+                    title: "Source"
                 })
             ];
         }
