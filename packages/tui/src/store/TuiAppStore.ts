@@ -1,7 +1,7 @@
 import type { ApprovalRequest, ControlEventEnvelope, InstanceSnapshot, JsonValue, ToolCallRecord } from "@portable-devshell/shared";
 
 import { type TuiActionMenuItem, type TuiUiIntent } from "../interaction/TuiInteractionTypes.js";
-import type { FocusScope, PageId, SidebarFocus } from "../model/TuiUiTypes.js";
+import type { FocusScope, PageId, SidebarCursor, SidebarFocus } from "../model/TuiUiTypes.js";
 import {
     createInitialTuiAppState,
     toRawEventRecord,
@@ -151,6 +151,13 @@ export class TuiAppStore {
         this.dispatch({
             button,
             type: "confirm.focus"
+        });
+    }
+
+    setSidebarCursor(cursor?: SidebarCursor): void {
+        this.dispatch({
+            cursor,
+            type: "sidebar.cursor.set"
         });
     }
 

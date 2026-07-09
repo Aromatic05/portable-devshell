@@ -11,9 +11,7 @@ export function Sidebar(props: SidebarProps) {
     return (
         <Box borderStyle="single" flexDirection="column" paddingX={1} width={24}>
             <SidebarSection items={props.model.pages} />
-            <Box marginY={1}>
-                <Text>--------------------</Text>
-            </Box>
+            <Box height={1} />
             <SidebarSection items={props.model.instances} />
         </Box>
     );
@@ -23,12 +21,7 @@ function SidebarSection(props: { items: SidebarModel["pages"] }) {
     return (
         <Box flexDirection="column">
             {props.items.map((item, index) => (
-                <Text
-                    backgroundColor={item.focused ? "cyan" : undefined}
-                    bold={item.selected}
-                    color={item.focused ? "black" : item.selected ? "green" : undefined}
-                    key={`${item.id}-${index}`}
-                >
+                <Text backgroundColor={item.focused ? "cyan" : undefined} bold={item.selected} color={item.selected ? "green" : item.focused ? "black" : undefined} key={`${item.id}-${index}`}>
                     {item.label}
                 </Text>
             ))}

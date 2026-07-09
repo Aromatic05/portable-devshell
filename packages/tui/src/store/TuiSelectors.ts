@@ -1,7 +1,6 @@
-import React from "react";
-import { Text } from "ink";
 import type { ApprovalRequest, JsonValue, ToolCallRecord } from "@portable-devshell/shared";
 
+import type { BoxLine, BoxModel } from "../component/ExpandableBox.js";
 import type { TuiMode } from "../interaction/TuiInteractionTypes.js";
 import type { ActivePage, ExpandableBoxStatus, PageId } from "../model/TuiUiTypes.js";
 import type { TuiAppState, TuiConnectionState, TuiInstanceListEntry, TuiLogEntry } from "./TuiReducers.js";
@@ -27,19 +26,9 @@ export interface SidebarModel {
     pages: SidebarEntry[];
 }
 
-export interface MainBoxModel {
-    detailLines: string[];
-    disabled?: boolean;
-    expanded: boolean;
-    id: string;
-    status?: ExpandableBoxStatus;
-    summaryLines: string[];
-    title: string;
-}
-
 export interface MainScreenModel {
     activePage: ActivePage;
-    boxes: MainBoxModel[];
+    boxes: BoxModel[];
     emptyState?: string;
     pageTitle: string;
     statusLine?: string;
@@ -65,15 +54,18 @@ export function selectHeaderSummary(state: TuiAppState): string {
 }
 
 export function selectSidebarModel(state: TuiAppState): SidebarModel {
+    const cursor = state.interaction.sidebarCursor;
+    const sidebarFocused = state.interaction.focusScope === "sidebarPages" || state.interaction.focusScope === "sidebarInstances";
+
     return {
         instances: state.instances.map((instance) => ({
-            focused: state.interaction.focusScope === "sidebarInstances" && state.ui.selectedInstance === instance.name,
+            focused: sidebarFocused && cursor?.kind === "instance" && cursor.id === instance.name,
             id: instance.name,
             label: instance.name,
             selected: state.ui.selectedInstance === instance.name
         })),
         pages: pageEntries.map((page) => ({
-            focused: state.interaction.focusScope === "sidebarPages" && state.ui.selectedPage === page.id,
+            focused: sidebarFocused && cursor?.kind === "page" && cursor.id === page.id,
             id: page.id,
             label: page.label,
             selected: state.ui.selectedPage === page.id
@@ -124,9 +116,8 @@ export function selectFooterText(state: TuiAppState): string {
 export function selectFooterShortcuts(state: TuiAppState): string[] {
     switch (state.interaction.focusScope) {
         case "sidebarPages":
-            return ["tab", "enter", "1-6", "↑↓", "^["];
         case "sidebarInstances":
-            return ["tab", "enter", "↑↓", "^["];
+            return ["tab", "enter", "1-6", "↑↓", "^["];
         case "mainBoxes":
             return ["tab", "enter", "space", "↑↓", "/", "a", "^["];
         case "boxDetail":
@@ -200,19 +191,22 @@ export function selectHelpLines(state: TuiAppState): string[] {
         `Current page ${state.ui.selectedPage}`,
         `Selected instance ${state.ui.selectedInstance ?? "none"}`,
         "Read-only cockpit. No start/stop/approve/deny/call tool/attach shell/create/save actions are available.",
-        "Tab cycles pages, instances, and main boxes.",
+        "Tab cycles sidebar and main boxes.",
+        "Up/Down moves sidebar focus without selecting.",
+        "Enter applies the focused sidebar item.",
         "Space expands and collapses the focused box.",
         "Ctrl+[ returns from detail, search, menus, and main focus."
     ];
 }
 
-function buildBoxesForPage(state: TuiAppState, page: PageId, instanceName: string | undefined): MainBoxModel[] {
+function buildBoxesForPage(state: TuiAppState, page: PageId, instanceName: string | undefined): BoxModel[] {
     if (page === "help") {
         return [
             makeBox(state, page, instanceName, {
                 detailLines: [
-                    "Tab cycles pages, instances, and main boxes.",
+                    "Tab cycles sidebar and main boxes.",
                     "Shift+Tab reverses that cycle.",
+                    "Up/Down moves sidebar focus without selecting.",
                     "Ctrl+[ returns from detail, search, menus, and main focus."
                 ],
                 id: "help-navigation",
@@ -257,46 +251,46 @@ function buildBoxesForPage(state: TuiAppState, page: PageId, instanceName: strin
             return [
                 makeBox(state, page, instanceName, {
                     detailLines: [
-                        `daemonState ${snapshot?.daemonState ?? "unknown"}`,
-                        `connectionState ${snapshot?.connectionState ?? "unknown"}`,
-                        `ready ${snapshot?.ready === true ? "true" : "false"}`,
-                        `status ${snapshot?.status ?? "unknown"}`
+                        formatField("Daemon", snapshot?.daemonState ?? "unknown"),
+                        formatField("Connect", snapshot?.connectionState ?? "unknown"),
+                        formatField("Ready", snapshot?.ready === true ? "yes" : "no"),
+                        formatField("Status", snapshot?.status ?? "unknown")
                     ],
                     id: "runtime",
                     status: runtimeStatus(snapshot),
-                    summaryLines: [`daemon ${snapshot?.daemonState ?? "unknown"}`, `ready ${snapshot?.ready === true ? "true" : "false"}`],
+                    summaryLines: [`daemon ${snapshot?.daemonState ?? "unknown"}`, `ready ${snapshot?.ready === true ? "yes" : "no"}`],
                     title: "Runtime"
                 }),
                 makeBox(state, page, instanceName, {
                     detailLines: [
-                        `provider ${instance?.provider ?? "unknown"}`,
-                        `workspace ${instance?.defaultWorkspace ?? "unavailable"}`,
-                        `lastSeq ${state.lastSeqByInstance[instanceName] ?? snapshot?.lastSeq ?? 0}`
+                        formatField("Provider", instance?.provider ?? "unknown"),
+                        formatField("Workspace", instance?.defaultWorkspace ?? "unavailable"),
+                        formatField("Last Seq", String(state.lastSeqByInstance[instanceName] ?? snapshot?.lastSeq ?? 0))
                     ],
                     id: "worker",
                     status: snapshot?.daemonState === "running" ? "running" : snapshot?.daemonState === "stopped" ? "disabled" : "warning",
-                    summaryLines: [`provider ${instance?.provider ?? "unknown"}`, `lastSeq ${state.lastSeqByInstance[instanceName] ?? snapshot?.lastSeq ?? 0}`],
+                    summaryLines: [`provider ${instance?.provider ?? "unknown"}`, `seq ${state.lastSeqByInstance[instanceName] ?? snapshot?.lastSeq ?? 0}`],
                     title: "Worker"
                 }),
                 makeBox(state, page, instanceName, {
                     detailLines: [
-                        `enabled ${instance?.mcpEnabled === true ? "true" : "false"}`,
-                        `path ${instance?.mcpPath ?? "unavailable"}`
+                        formatField("Enabled", instance?.mcpEnabled === true ? "yes" : "no"),
+                        formatField("Path", instance?.mcpPath ?? "unavailable")
                     ],
                     id: "mcp",
                     status: instance?.mcpEnabled === true ? "ready" : "disabled",
-                    summaryLines: [`enabled ${instance?.mcpEnabled === true ? "true" : "false"}`, `path ${instance?.mcpPath ?? "unavailable"}`],
+                    summaryLines: [`enabled ${instance?.mcpEnabled === true ? "yes" : "no"}`, shortenPath(instance?.mcpPath ?? "unavailable")],
                     title: "MCP"
                 }),
                 makeBox(state, page, instanceName, {
                     detailLines: [
-                        `preview ${buildEndpointPreview(state, instanceName)}`,
-                        `publicBaseUrl ${config?.publicBaseUrl ?? "unavailable"}`,
+                        formatField("Preview", buildEndpointPreview(state, instanceName)),
+                        formatField("Public URL", config?.publicBaseUrl ?? "unavailable"),
                         "Runtime readiness: not available in current control API"
                     ],
                     id: "public-endpoint",
                     status: "warning",
-                    summaryLines: [buildEndpointPreview(state, instanceName), "runtime readiness unavailable"],
+                    summaryLines: ["endpoint preview", "runtime readiness unavailable"],
                     title: "Public Endpoint"
                 }),
                 makeBox(state, page, instanceName, {
@@ -322,13 +316,13 @@ function buildBoxesForPage(state: TuiAppState, page: PageId, instanceName: strin
                 }),
                 makeBox(state, page, instanceName, {
                     detailLines: [
-                        `provider ${instance?.provider ?? "unknown"}`,
-                        `workspace ${instance?.defaultWorkspace ?? "unavailable"}`,
-                        `mcp path ${instance?.mcpPath ?? "unavailable"}`
+                        formatField("Provider", instance?.provider ?? "unknown"),
+                        formatField("Workspace", instance?.defaultWorkspace ?? "unavailable"),
+                        formatField("MCP Path", instance?.mcpPath ?? "unavailable")
                     ],
                     id: "config-summary",
                     status: "normal",
-                    summaryLines: [`workspace ${instance?.defaultWorkspace ?? "unavailable"}`, `mcp ${instance?.mcpPath ?? "unavailable"}`],
+                    summaryLines: [shortenPath(instance?.defaultWorkspace ?? "unavailable"), shortenPath(instance?.mcpPath ?? "unavailable")],
                     title: "Config Summary"
                 }),
                 makeBox(state, page, instanceName, {
@@ -481,17 +475,54 @@ function makeBox(
         summaryLines: string[];
         title: string;
     }
-): MainBoxModel {
+): BoxModel {
     const expandedKey = `${page}:${instance}:${input.id}`;
+    const summaryLines = normalizeCollapsedLines(input.summaryLines);
+
     return {
-        detailLines: input.detailLines,
+        collapsedLines: summaryLines,
         disabled: input.disabled,
         expanded: state.ui.expandedBoxes[expandedKey] === true,
+        expandedLines: input.detailLines.map((line) => ({ text: truncateLine(line, 58) })),
+        focused: state.ui.mainFocusId === input.id && (state.interaction.focusScope === "mainBoxes" || state.interaction.focusScope === "boxDetail"),
         id: input.id,
-        status: input.status,
-        summaryLines: input.summaryLines.slice(0, 2),
+        status: input.status ?? "normal",
         title: input.title
     };
+}
+
+function normalizeCollapsedLines(lines: string[]): [BoxLine] | [BoxLine, BoxLine] {
+    const normalized = lines.slice(0, 2).map((line) => ({ text: truncateLine(line, 58), tone: "muted" as const }));
+
+    if (normalized.length <= 1) {
+        return [normalized[0] ?? { text: "", tone: "muted" }];
+    }
+
+    return [normalized[0], normalized[1]];
+}
+
+function truncateLine(text: string, width: number): string {
+    if (text.length <= width) {
+        return text;
+    }
+
+    if (width <= 1) {
+        return "…";
+    }
+
+    return `${text.slice(0, width - 1)}…`;
+}
+
+function formatField(label: string, value: string): string {
+    return truncateLine(`${label.padEnd(10, " ")} ${value}`, 58);
+}
+
+function shortenPath(value: string): string {
+    if (value.length <= 28) {
+        return value;
+    }
+
+    return `...${value.slice(-(28 - 3))}`;
 }
 
 function pageTitle(page: PageId): string {

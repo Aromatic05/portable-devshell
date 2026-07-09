@@ -16,29 +16,15 @@ export interface ScreenRouterProps {
 
 export function ScreenRouter(props: ScreenRouterProps) {
     const model = selectMainScreenModel(props.state);
-    const focusedBoxId = props.state.interaction.focusScope === "mainBoxes" || props.state.interaction.focusScope === "boxDetail" ? props.state.ui.mainFocusId : undefined;
 
     return (
-        <Box flexDirection="column" gap={1}>
+        <Box flexDirection="column">
             <Text bold>{model.pageTitle}</Text>
             {model.emptyState !== undefined ? <Text color="yellow">{model.emptyState}</Text> : undefined}
             {model.boxes.map((box) => (
-                <ExpandableBox
-                    disabled={box.disabled}
-                    expanded={box.expanded}
-                    focused={focusedBoxId === box.id}
-                    id={box.id}
-                    key={box.id}
-                    status={box.status}
-                    summary={
-                        <Text dimColor>{box.summaryLines.join(" | ")}</Text>
-                    }
-                    title={box.title}
-                >
-                    {box.detailLines.map((line, index) => (
-                        <Text key={`${box.id}-detail-${index}`}>{line}</Text>
-                    ))}
-                </ExpandableBox>
+                <Box key={box.id} width="100%">
+                    <ExpandableBox box={box} />
+                </Box>
             ))}
             {model.statusLine !== undefined ? <Text color="yellow">{model.statusLine}</Text> : undefined}
         </Box>
@@ -61,9 +47,11 @@ export function buildFocusGraphForState(state: TuiAppState): FocusGraph {
         case "search":
             return new FocusGraph([{ item: { id: "search.query", kind: "field" } }]);
         case "sidebarPages":
-            return buildLinearGraph(orderedPages.map((page) => ({ id: page, kind: "page" as const })));
         case "sidebarInstances":
-            return buildLinearGraph(state.instances.map((instance) => ({ id: instance.name, kind: "instance" as const })));
+            return buildLinearGraph([
+                ...orderedPages.map((page) => ({ id: page, kind: "page" as const })),
+                ...state.instances.map((instance) => ({ id: instance.name, kind: "instance" as const }))
+            ]);
         case "boxDetail":
         case "mainBoxes":
             return buildLinearGraph(selectMainBoxIds(state).map((id) => ({ id, kind: "box" as const })));

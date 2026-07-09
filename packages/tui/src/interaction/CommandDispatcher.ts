@@ -35,6 +35,7 @@ export class CommandDispatcher {
                 return true;
             case "page.select":
                 this.#store.setSelectedPage(intent.page);
+                this.#store.setSidebarCursor({ id: intent.page, kind: "page" });
                 this.#syncMainFocus();
                 if (intent.page === "logs" && this.#store.getState().ui.selectedInstance !== undefined) {
                     await this.#onLogsReload();
@@ -252,17 +253,12 @@ export class CommandDispatcher {
             return true;
         }
         if (scope === "mainBoxes") {
-            if (this.#store.getState().ui.selectedInstance !== undefined) {
-                this.#store.setSidebarFocus("instances");
-                this.#store.setFocusScope("sidebarInstances");
-            } else {
-                this.#store.setSidebarFocus("pages");
-                this.#store.setFocusScope("sidebarPages");
-            }
+            const cursor = this.#store.getState().interaction.sidebarCursor;
+            this.#store.setFocusScope(cursor?.kind === "instance" ? "sidebarInstances" : "sidebarPages");
             return true;
         }
         if (scope === "sidebarInstances") {
-            this.#store.setSidebarFocus("pages");
+            this.#store.setSidebarCursor({ id: this.#store.getState().ui.selectedPage, kind: "page" });
             this.#store.setFocusScope("sidebarPages");
             return true;
         }
@@ -271,7 +267,6 @@ export class CommandDispatcher {
 
     #moveAcrossScopes(direction: "next" | "previous"): boolean {
         const scope = this.#store.getState().interaction.focusScope;
-        const hasInstances = this.#store.getState().instances.length > 0;
         const boxIds = selectMainBoxIds(this.#store.getState());
         const hasBoxes = boxIds.length > 0;
 
@@ -279,63 +274,17 @@ export class CommandDispatcher {
             return this.#focusManager.move(direction);
         }
 
-        if (direction === "next") {
-            if (scope === "sidebarPages") {
-                if (hasInstances) {
-                    this.#store.setSidebarFocus("instances");
-                    this.#store.setFocusScope("sidebarInstances");
-                    return true;
-                }
-                if (hasBoxes) {
-                    this.#store.setFocusScope("mainBoxes");
-                    this.#syncMainFocus();
-                    return true;
-                }
+        if (scope === "sidebarPages" || scope === "sidebarInstances") {
+            if (!hasBoxes) {
                 return false;
             }
-            if (scope === "sidebarInstances") {
-                if (hasBoxes) {
-                    this.#store.setFocusScope("mainBoxes");
-                    this.#syncMainFocus();
-                    return true;
-                }
-                this.#store.setSidebarFocus("pages");
-                this.#store.setFocusScope("sidebarPages");
-                return true;
-            }
-            if (scope === "mainBoxes" || scope === "boxDetail") {
-                this.#store.setSidebarFocus("pages");
-                this.#store.setFocusScope("sidebarPages");
-                return true;
-            }
-        }
-
-        if (scope === "sidebarPages") {
-            if (hasBoxes) {
-                this.#store.setFocusScope("mainBoxes");
-                this.#syncMainFocus();
-                return true;
-            }
-            if (hasInstances) {
-                this.#store.setSidebarFocus("instances");
-                this.#store.setFocusScope("sidebarInstances");
-                return true;
-            }
-            return false;
-        }
-        if (scope === "sidebarInstances") {
-            this.#store.setSidebarFocus("pages");
-            this.#store.setFocusScope("sidebarPages");
+            this.#store.setFocusScope("mainBoxes");
+            this.#syncMainFocus();
             return true;
         }
         if (scope === "mainBoxes" || scope === "boxDetail") {
-            if (hasInstances) {
-                this.#store.setSidebarFocus("instances");
-                this.#store.setFocusScope("sidebarInstances");
-                return true;
-            }
-            this.#store.setSidebarFocus("pages");
-            this.#store.setFocusScope("sidebarPages");
+            const cursor = this.#store.getState().interaction.sidebarCursor;
+            this.#store.setFocusScope(cursor?.kind === "instance" ? "sidebarInstances" : "sidebarPages");
             return true;
         }
         return false;
@@ -360,10 +309,26 @@ export class CommandDispatcher {
 
     async #activateCurrentScope(): Promise<boolean> {
         const scope = this.#store.getState().interaction.focusScope;
-        if (scope === "sidebarPages" && this.#store.getState().ui.selectedPage === "logs" && this.#store.getState().ui.selectedInstance !== undefined) {
-            await this.#onLogsReload();
-            this.#store.setScreenStatus("logs", "Logs reloaded from instance.readLogs.");
-            return true;
+        if (scope === "sidebarPages" || scope === "sidebarInstances") {
+            const cursor = this.#store.getState().interaction.sidebarCursor;
+            if (cursor?.kind === "page") {
+                this.#store.setSelectedPage(cursor.id);
+                this.#syncMainFocus();
+                if (cursor.id === "logs" && this.#store.getState().ui.selectedInstance !== undefined) {
+                    await this.#onLogsReload();
+                    this.#store.setScreenStatus("logs", "Logs reloaded from instance.readLogs.");
+                }
+                return true;
+            }
+            if (cursor?.kind === "instance") {
+                this.#store.setSelectedInstance(cursor.id);
+                this.#syncMainFocus();
+                if (this.#store.getState().ui.selectedPage === "logs") {
+                    await this.#onLogsReload();
+                    this.#store.setScreenStatus("logs", "Logs reloaded from instance.readLogs.");
+                }
+                return true;
+            }
         }
         if (scope === "mainBoxes") {
             if (this.#store.getState().ui.mainFocusId === undefined) {

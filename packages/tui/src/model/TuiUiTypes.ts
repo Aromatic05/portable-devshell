@@ -4,6 +4,8 @@ export type SidebarFocus = "pages" | "instances";
 
 export type FocusScope = "sidebarPages" | "sidebarInstances" | "mainBoxes" | "boxDetail" | "search" | "actionMenu" | "confirm";
 
+export type SidebarCursor = { id: PageId; kind: "page" } | { id: string; kind: "instance" };
+
 export type ExpandableBoxStatus = "normal" | "ready" | "running" | "warning" | "failed" | "disabled" | "pending";
 
 export type TuiUiState = {

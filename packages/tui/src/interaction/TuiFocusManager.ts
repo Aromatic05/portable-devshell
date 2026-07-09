@@ -23,9 +23,17 @@ export class TuiFocusManager {
     currentFocus(): FocusItem | undefined {
         const scope = this.#store.getState().interaction.focusScope;
         if (scope === "sidebarPages") {
+            const cursor = this.#store.getState().interaction.sidebarCursor;
+            if (cursor?.kind === "page") {
+                return cursor;
+            }
             return { id: this.#store.getState().ui.selectedPage, kind: "page" };
         }
         if (scope === "sidebarInstances") {
+            const cursor = this.#store.getState().interaction.sidebarCursor;
+            if (cursor?.kind === "instance") {
+                return cursor;
+            }
             const instance = this.#store.getState().ui.selectedInstance;
             return instance === undefined ? undefined : { id: instance, kind: "instance" };
         }
@@ -129,12 +137,12 @@ export class TuiFocusManager {
             case "page":
                 this.#store.setFocusScope("sidebarPages");
                 this.#store.setSidebarFocus("pages");
-                this.#store.setSelectedPage(item.id);
+                this.#store.setSidebarCursor(item);
                 return;
             case "instance":
                 this.#store.setFocusScope("sidebarInstances");
                 this.#store.setSidebarFocus("instances");
-                this.#store.setSelectedInstance(item.id);
+                this.#store.setSidebarCursor(item);
                 return;
             case "box":
                 this.#store.setFocusScope("mainBoxes");

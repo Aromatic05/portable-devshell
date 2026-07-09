@@ -1,4 +1,4 @@
-import type { FocusScope, PageId } from "../model/TuiUiTypes.js";
+import type { FocusScope, PageId, SidebarCursor } from "../model/TuiUiTypes.js";
 
 export type FocusItem =
     | { kind: "page"; id: PageId }
@@ -51,6 +51,7 @@ export interface TuiInteractionState {
     selectedActionId?: string;
     selectedConfirmButton: "cancel" | "confirm";
     search: TuiSearchState;
+    sidebarCursor?: SidebarCursor;
 }
 
 export type TuiUiIntent =
@@ -126,6 +127,7 @@ export function createEmptyInteractionState(): TuiInteractionState {
         selectedConfirmButton: "cancel",
         search: {
             open: false
-        }
+        },
+        sidebarCursor: undefined
     };
 }

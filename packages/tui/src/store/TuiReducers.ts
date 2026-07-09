@@ -1,7 +1,7 @@
 import { asInstanceName, type ApprovalRequest, type ControlEventEnvelope, type InstanceSnapshot, type JsonValue, type ToolCallRecord } from "@portable-devshell/shared";
 
 import { createEmptyInteractionState, type TuiActionMenuItem, type TuiInteractionState, type TuiUiIntent } from "../interaction/TuiInteractionTypes.js";
-import type { FocusScope, PageId, SidebarFocus, TuiUiState } from "../model/TuiUiTypes.js";
+import type { FocusScope, PageId, SidebarCursor, SidebarFocus, TuiUiState } from "../model/TuiUiTypes.js";
 
 export type TuiConnectionStatus = "connecting" | "connected" | "disconnected" | "error";
 
@@ -78,6 +78,7 @@ export type TuiAppAction =
     | { type: "log.clearBuffer" }
     | { mainFocusId?: string; type: "mainFocus.set" }
     | { button: "cancel" | "confirm"; type: "confirm.focus" }
+    | { cursor?: SidebarCursor; type: "sidebar.cursor.set" }
     | { items: TuiActionMenuItem[]; selectedIndex: number; title: string; type: "overlay.setActionMenu" }
     | { confirmIntent: TuiUiIntent; body: string; cancelLabel: string; confirmLabel: string; open: boolean; title: string; type: "overlay.setConfirmDialog" }
     | { sidebarFocus: SidebarFocus; type: "sidebar.focus.set" }
@@ -172,6 +173,14 @@ export function tuiAppReducer(state: TuiAppState, action: TuiAppAction): TuiAppS
                 interaction: {
                     ...state.interaction,
                     selectedConfirmButton: action.button
+                }
+            };
+        case "sidebar.cursor.set":
+            return {
+                ...state,
+                interaction: {
+                    ...state.interaction,
+                    sidebarCursor: action.cursor
                 }
             };
         case "sidebar.focus.set":
