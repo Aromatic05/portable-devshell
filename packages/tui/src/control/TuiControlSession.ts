@@ -1,0 +1,278 @@
+import type { JsonValue } from "@portable-devshell/shared";
+
+import type { TuiControlClientLike, TuiControlListInstanceEntry, TuiControlSnapshotEnvelope } from "./TuiControlClient.js";
+import { TuiControlClient } from "./TuiControlClient.js";
+import type { TuiControlStreamMessage } from "./TuiControlStream.js";
+import { TuiAppStore } from "../store/TuiAppStore.js";
+
+export interface TuiControlSessionOptions {
+    client?: TuiControlClientLike;
+    store?: TuiAppStore;
+}
+
+export class TuiControlSession {
+    readonly #client: TuiControlClientLike;
+    readonly #store: TuiAppStore;
+    readonly #subscriptions = new Map<string, TuiInstanceSubscription>();
+    #started = false;
+
+    constructor(options: TuiControlSessionOptions = {}) {
+        this.#client = options.client ?? new TuiControlClient();
+        this.#store = options.store ?? new TuiAppStore();
+    }
+
+    get store(): TuiAppStore {
+        return this.#store;
+    }
+
+    async start(): Promise<void> {
+        if (this.#started) {
+            return;
+        }
+
+        this.#started = true;
+        await this.refresh();
+    }
+
+    async stop(): Promise<void> {
+        this.#started = false;
+        this.#closeSubscriptions();
+    }
+
+    async reconnect(): Promise<void> {
+        if (!this.#started) {
+            return;
+        }
+
+        await this.refresh();
+    }
+
+    async refresh(): Promise<void> {
+        this.#store.setConnectionState("connecting");
+
+        try {
+            await this.#client.ping();
+            const instances = await this.#client.listInstances();
+            this.#store.replaceInstances(instances.map(({ mcpEnabled, name }) => ({ mcpEnabled, name })));
+            this.#store.setConfigView(await this.#readConfigView());
+            await this.#reloadAllInstances(instances);
+            this.#store.setConnectionState("connected");
+        } catch (error) {
+            const failure = toFailure(error);
+            this.#store.setConnectionState(failure.status, failure.error);
+            this.#closeSubscriptions();
+        }
+    }
+
+    async #reloadAllInstances(instances: TuiControlListInstanceEntry[]): Promise<void> {
+        this.#closeSubscriptions();
+
+        for (const instance of instances) {
+            const snapshotEnvelope = await this.#client.getSnapshot(instance.name);
+            this.#store.replaceSnapshot(snapshotEnvelope.snapshot);
+            const fromSeq = nextSubscribeSeq(snapshotEnvelope);
+            this.#subscribeInstance(instance.name, fromSeq);
+        }
+    }
+
+    async #reloadInstance(instance: string): Promise<void> {
+        const snapshotEnvelope = await this.#client.getSnapshot(instance);
+        this.#store.replaceSnapshot(snapshotEnvelope.snapshot);
+        this.#subscribeInstance(instance, nextSubscribeSeq(snapshotEnvelope));
+    }
+
+    async #readConfigView(): Promise<Record<string, JsonValue> | undefined> {
+        try {
+            return await this.#client.getConfigView();
+        } catch (error) {
+            if (readErrorCode(error) === "control.methodNotFound") {
+                return undefined;
+            }
+
+            throw error;
+        }
+    }
+
+    #subscribeInstance(instance: string, fromSeq: number): void {
+        this.#subscriptions.get(instance)?.close();
+        const subscription = new TuiInstanceSubscription({
+            instance,
+            onConnectionClosed: () => {
+                this.#handleDisconnected();
+            },
+            onGap: async () => {
+                if (!this.#started) {
+                    return;
+                }
+
+                await this.#reloadInstance(instance);
+            },
+            onInstanceEvent: (message) => {
+                this.#store.applyEvent(message.envelope);
+            },
+            onSubscribeError: async (error) => {
+                if (!this.#started) {
+                    return;
+                }
+
+                if (readErrorCode(error) === "stream.gap") {
+                    await this.#reloadInstance(instance);
+                    return;
+                }
+
+                const failure = toFailure(error);
+                this.#store.setConnectionState(failure.status, failure.error);
+                this.#closeSubscriptions();
+            },
+            subscribe: async (requestedFromSeq) => await this.#client.subscribe(instance, requestedFromSeq)
+        });
+
+        this.#subscriptions.set(instance, subscription);
+        void subscription.start(fromSeq);
+    }
+
+    #closeSubscriptions(): void {
+        for (const subscription of this.#subscriptions.values()) {
+            subscription.close();
+        }
+
+        this.#subscriptions.clear();
+    }
+
+    #handleDisconnected(): void {
+        this.#store.setConnectionState("disconnected");
+        this.#closeSubscriptions();
+    }
+}
+
+interface TuiInstanceSubscriptionOptions {
+    instance: string;
+    onConnectionClosed(): void;
+    onGap(): Promise<void>;
+    onInstanceEvent(message: Extract<TuiControlStreamMessage, { kind: "instance.event" }>): void;
+    onSubscribeError(error: unknown): Promise<void>;
+    subscribe(fromSeq: number): Promise<{ close(): void; nextMessage(): Promise<TuiControlStreamMessage> }>;
+}
+
+class TuiInstanceSubscription {
+    readonly #instance: string;
+    readonly #onConnectionClosed: () => void;
+    readonly #onGap: () => Promise<void>;
+    readonly #onInstanceEvent: (message: Extract<TuiControlStreamMessage, { kind: "instance.event" }>) => void;
+    readonly #onSubscribeError: (error: unknown) => Promise<void>;
+    readonly #subscribe: TuiInstanceSubscriptionOptions["subscribe"];
+    #closed = false;
+    #stream?: { close(): void; nextMessage(): Promise<TuiControlStreamMessage> };
+
+    constructor(options: TuiInstanceSubscriptionOptions) {
+        this.#instance = options.instance;
+        this.#onConnectionClosed = options.onConnectionClosed;
+        this.#onGap = options.onGap;
+        this.#onInstanceEvent = options.onInstanceEvent;
+        this.#onSubscribeError = options.onSubscribeError;
+        this.#subscribe = options.subscribe;
+    }
+
+    async start(fromSeq: number): Promise<void> {
+        try {
+            this.#stream = await this.#subscribe(fromSeq);
+
+            while (!this.#closed) {
+                const message = await this.#stream.nextMessage();
+
+                if (this.#closed) {
+                    return;
+                }
+
+                switch (message.kind) {
+                    case "instance.event":
+                        if (message.envelope.target.instance === this.#instance) {
+                            this.#onInstanceEvent(message);
+                        }
+                        break;
+                    case "stream.gap":
+                        this.close();
+                        await this.#onGap();
+                        return;
+                    case "stream.cancelled":
+                        if (message.envelope.payload.reason === "gap") {
+                            this.close();
+                            await this.#onGap();
+                            return;
+                        }
+
+                        this.close();
+                        this.#onConnectionClosed();
+                        return;
+                    case "connection.closed":
+                        this.close();
+                        this.#onConnectionClosed();
+                        return;
+                }
+            }
+        } catch (error) {
+            if (this.#closed) {
+                return;
+            }
+
+            this.close();
+            await this.#onSubscribeError(error);
+        }
+    }
+
+    close(): void {
+        if (this.#closed) {
+            return;
+        }
+
+        this.#closed = true;
+        this.#stream?.close();
+    }
+}
+
+function nextSubscribeSeq(snapshotEnvelope: TuiControlSnapshotEnvelope): number {
+    return Math.max(snapshotEnvelope.lastSeq, 1);
+}
+
+function readErrorCode(error: unknown): string | undefined {
+    if (typeof error !== "object" || error === null || !("code" in error)) {
+        return undefined;
+    }
+
+    return typeof error.code === "string" ? error.code : undefined;
+}
+
+function toFailure(error: unknown): {
+    error: { code?: string; message?: string };
+    status: "disconnected" | "error";
+} {
+    const code = readErrorCode(error);
+    const message = readErrorMessage(error);
+
+    if (code === "control.notRunning") {
+        return {
+            error: { code, message },
+            status: "disconnected"
+        };
+    }
+
+    return {
+        error: {
+            ...(code === undefined ? {} : { code }),
+            message
+        },
+        status: "error"
+    };
+}
+
+function readErrorMessage(error: unknown): string {
+    if (error instanceof Error) {
+        return error.message;
+    }
+
+    if (typeof error === "object" && error !== null && "message" in error && typeof error.message === "string") {
+        return error.message;
+    }
+
+    return String(error);
+}

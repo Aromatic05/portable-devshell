@@ -15,7 +15,9 @@
         "dist"
     ],
     "dependencies": {
-        "@portable-devshell/shared": "workspace:*"
+        "@portable-devshell/shared": "workspace:*",
+        "ink": "^5.2.1",
+        "react": "^18.3.1"
     },
     "scripts": {
         "build": "tsc -b --force",

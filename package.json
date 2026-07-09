@@ -17,6 +17,7 @@
         "typecheck": "pnpm -r --filter './packages/*' typecheck"
     },
     "devDependencies": {
+        "@types/react": "^18.3.11",
         "@types/node": "^24.0.0",
         "@eslint/js": "^9.31.0",
         "eslint": "^9.31.0",

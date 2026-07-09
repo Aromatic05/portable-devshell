@@ -1,22 +1,11 @@
-import type {
-    ApprovalRequest,
-    ControlEventEnvelope,
-    InstanceSnapshot,
-    JsonValue,
-    ToolCallQuery,
-    ToolCallRecord
-} from "@portable-devshell/shared";
-import { asInstanceName } from "@portable-devshell/shared";
+import { asInstanceName, type ControlEventEnvelope, type InstanceSnapshot, type JsonValue } from "@portable-devshell/shared";
+
 import {
     createSubscribedStream,
     TuiControlConnection,
     type TuiControlConnectionOptions
 } from "./TuiControlConnection.js";
-import {
-    createControlTarget,
-    createInstanceTarget,
-    type TuiControlEventEnvelope
-} from "./TuiControlRequest.js";
+import { createControlTarget, createInstanceTarget } from "./TuiControlRequest.js";
 import type { TuiControlStream } from "./TuiControlStream.js";
 
 export interface TuiControlSnapshotEnvelope {
@@ -27,15 +16,14 @@ export interface TuiControlSnapshotEnvelope {
 export interface TuiControlListInstanceEntry {
     mcpEnabled: boolean;
     name: string;
-    snapshot: TuiControlSnapshotEnvelope["snapshot"];
+    snapshot?: InstanceSnapshot;
 }
 
 export interface TuiControlClientLike {
     getConfigView(): Promise<Record<string, JsonValue>>;
     getSnapshot(instance: string): Promise<TuiControlSnapshotEnvelope>;
-    listApprovals(instance: string): Promise<ApprovalRequest[]>;
     listInstances(): Promise<TuiControlListInstanceEntry[]>;
-    readToolCalls(instance: string, query?: ToolCallQuery): Promise<ToolCallRecord[]>;
+    ping(): Promise<{ pong: boolean }>;
     subscribe(instance: string, fromSeq: number): Promise<TuiControlStream>;
 }
 
@@ -46,29 +34,27 @@ export class TuiControlClient implements TuiControlClientLike {
         this.#connectionOptions = options;
     }
 
+    async ping(): Promise<{ pong: boolean }> {
+        return (await this.#request("control.ping", createControlTarget())) as unknown as { pong: boolean };
+    }
+
     async listInstances(): Promise<TuiControlListInstanceEntry[]> {
         return (await this.#request("control.listInstances", createControlTarget())) as unknown as TuiControlListInstanceEntry[];
-    }
-
-    async getSnapshot(instance: string): Promise<TuiControlSnapshotEnvelope> {
-        return (await this.#request("instance.getSnapshot", createInstanceTarget(instance))) as unknown as TuiControlSnapshotEnvelope;
-    }
-
-    async readToolCalls(instance: string, query?: ToolCallQuery): Promise<ToolCallRecord[]> {
-        return (await this.#request("instance.readToolCalls", createInstanceTarget(instance), query as JsonValue | undefined)) as unknown as ToolCallRecord[];
-    }
-
-    async listApprovals(instance: string): Promise<ApprovalRequest[]> {
-        return (await this.#request("instance.listApprovals", createInstanceTarget(instance))) as unknown as ApprovalRequest[];
     }
 
     async getConfigView(): Promise<Record<string, JsonValue>> {
         return (await this.#request("control.getConfigView", createControlTarget())) as unknown as Record<string, JsonValue>;
     }
 
+    async getSnapshot(instance: string): Promise<TuiControlSnapshotEnvelope> {
+        return (await this.#request("instance.getSnapshot", createInstanceTarget(instance))) as unknown as TuiControlSnapshotEnvelope;
+    }
+
     async subscribe(instance: string, fromSeq: number): Promise<TuiControlStream> {
         const connection = new TuiControlConnection(this.#connectionOptions);
-        const result = (await connection.request("instance.subscribe", createInstanceTarget(instance), { fromSeq })) as unknown as {
+        const result = (await connection.request("instance.subscribe", createInstanceTarget(instance), {
+            fromSeq
+        })) as unknown as {
             events: ControlEventEnvelope[] | JsonValue[];
             lastSeq: number;
         };
@@ -76,11 +62,7 @@ export class TuiControlClient implements TuiControlClientLike {
         return createSubscribedStream(connection, result.events.map((event) => normalizeInitialEvent(instance, event as JsonValue)));
     }
 
-    async #request(
-        method: string,
-        target: ReturnType<typeof createControlTarget> | ReturnType<typeof createInstanceTarget>,
-        params?: JsonValue
-    ): Promise<JsonValue> {
+    async #request(method: string, target: ReturnType<typeof createControlTarget> | ReturnType<typeof createInstanceTarget>, params?: JsonValue): Promise<JsonValue> {
         const connection = new TuiControlConnection(this.#connectionOptions);
 
         try {
@@ -91,7 +73,7 @@ export class TuiControlClient implements TuiControlClientLike {
     }
 }
 
-function normalizeInitialEvent(instance: string, value: JsonValue): TuiControlEventEnvelope {
+function normalizeInitialEvent(instance: string, value: JsonValue): ControlEventEnvelope {
     if (
         typeof value === "object" &&
         value !== null &&
@@ -101,7 +83,7 @@ function normalizeInitialEvent(instance: string, value: JsonValue): TuiControlEv
     ) {
         return {
             event: value.type,
-            payload: value as JsonValue,
+            payload: value,
             seq: value.seq,
             target: {
                 instance: asInstanceName(instance),
