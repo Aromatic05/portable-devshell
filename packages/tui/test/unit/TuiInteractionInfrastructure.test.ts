@@ -116,7 +116,7 @@ test("Prompt 3 urgent fix keeps connector and logs pages read-only and instance-
     const logs = selectMainScreenModel(harness.store.getState());
     assert.equal(logs.activePage.page, "logs");
     assert.equal(logs.activePage.instance, "alpha");
-    assert.equal(logs.boxes[0]?.collapsedLines[0]?.text, "source instance.readLogs + log.appended");
+    assert.equal(logs.boxes[0]?.collapsedLines[0]?.text, "source=instance.readLogs+log.appended  entries=20");
 
     await harness.press("6");
     assert.equal(selectHelpLines(harness.store.getState()).some((line) => line.includes("Read-only cockpit")), true);

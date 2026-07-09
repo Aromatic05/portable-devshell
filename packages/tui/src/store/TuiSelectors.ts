@@ -1,6 +1,6 @@
 import type { ApprovalRequest, JsonValue, ToolCallRecord } from "@portable-devshell/shared";
 
-import type { BoxLine, BoxModel } from "../component/ExpandableBox.js";
+import { EXPANDABLE_BOX_INNER_WIDTH, type BoxLine, type BoxModel } from "../component/ExpandableBox.js";
 import type { TuiMode } from "../interaction/TuiInteractionTypes.js";
 import type { ActivePage, ExpandableBoxStatus, PageId } from "../model/TuiUiTypes.js";
 import type { TuiAppState, TuiConnectionState, TuiInstanceListEntry, TuiLogEntry } from "./TuiReducers.js";
@@ -258,7 +258,14 @@ function buildBoxesForPage(state: TuiAppState, page: PageId, instanceName: strin
                     ],
                     id: "runtime",
                     status: runtimeStatus(snapshot),
-                    summaryLines: [`daemon ${snapshot?.daemonState ?? "unknown"}`, `ready ${snapshot?.ready === true ? "yes" : "no"}`],
+                    summaryLines: [
+                        compactSummary(
+                            ["daemon", snapshot?.daemonState ?? "unknown"],
+                            ["rpc", snapshot?.connectionState ?? "unknown"],
+                            ["ready", snapshot?.ready === true ? "yes" : "no"],
+                            ["seq", String(state.lastSeqByInstance[instanceName] ?? snapshot?.lastSeq ?? 0)]
+                        )
+                    ],
                     title: "Runtime"
                 }),
                 makeBox(state, page, instanceName, {
@@ -269,7 +276,13 @@ function buildBoxesForPage(state: TuiAppState, page: PageId, instanceName: strin
                     ],
                     id: "worker",
                     status: snapshot?.daemonState === "running" ? "running" : snapshot?.daemonState === "stopped" ? "disabled" : "warning",
-                    summaryLines: [`provider ${instance?.provider ?? "unknown"}`, `seq ${state.lastSeqByInstance[instanceName] ?? snapshot?.lastSeq ?? 0}`],
+                    summaryLines: [
+                        compactSummary(
+                            ["provider", instance?.provider ?? "unknown"],
+                            ["workspace", shortenPath(instance?.defaultWorkspace ?? "unavailable")],
+                            ["seq", String(state.lastSeqByInstance[instanceName] ?? snapshot?.lastSeq ?? 0)]
+                        )
+                    ],
                     title: "Worker"
                 }),
                 makeBox(state, page, instanceName, {
@@ -279,7 +292,12 @@ function buildBoxesForPage(state: TuiAppState, page: PageId, instanceName: strin
                     ],
                     id: "mcp",
                     status: instance?.mcpEnabled === true ? "ready" : "disabled",
-                    summaryLines: [`enabled ${instance?.mcpEnabled === true ? "yes" : "no"}`, shortenPath(instance?.mcpPath ?? "unavailable")],
+                    summaryLines: [
+                        compactSummary(
+                            ["enabled", instance?.mcpEnabled === true ? "yes" : "no"],
+                            ["path", shortenPath(instance?.mcpPath ?? "unavailable")]
+                        )
+                    ],
                     title: "MCP"
                 }),
                 makeBox(state, page, instanceName, {
@@ -290,28 +308,52 @@ function buildBoxesForPage(state: TuiAppState, page: PageId, instanceName: strin
                     ],
                     id: "public-endpoint",
                     status: "warning",
-                    summaryLines: ["endpoint preview", "runtime readiness unavailable"],
+                    summaryLines: [
+                        compactSummary(
+                            ["endpoint", endpointAvailabilityLabel(config?.publicBaseUrl)],
+                            ["auth", config?.authMode ?? "unavailable"],
+                            ["baseUrl", config?.publicBaseUrl ?? "-"]
+                        ),
+                        "reason=no-runtime-api"
+                    ],
                     title: "Public Endpoint"
                 }),
                 makeBox(state, page, instanceName, {
                     detailLines: approvals.length === 0 ? ["none"] : approvals.slice(0, 6).map(renderApprovalLine),
                     id: "approvals",
                     status: approvals.length > 0 ? "pending" : "normal",
-                    summaryLines: [`pending ${approvals.length}`, approvals[0] === undefined ? "none" : renderApprovalLine(approvals[0])],
+                    summaryLines: [
+                        compactSummary(
+                            ["pending", String(approvals.length)],
+                            ["tool", approvals[0]?.toolName ?? "-"],
+                            ["risk", approvals[0] === undefined ? "-" : "high"]
+                        )
+                    ],
                     title: "Approvals"
                 }),
                 makeBox(state, page, instanceName, {
                     detailLines: toolCalls.length === 0 ? ["none"] : toolCalls.slice(0, 6).map(renderToolCallLine),
                     id: "recent-audit",
                     status: "normal",
-                    summaryLines: [`records ${toolCalls.length}`, toolCalls[0] === undefined ? "none" : renderToolCallLine(toolCalls[0])],
+                    summaryLines: [
+                        compactSummary(
+                            ["records", String(toolCalls.length)],
+                            ["last", toolCalls[0]?.status ?? "-"],
+                            ["tool", toolCalls[0]?.toolName ?? "-"]
+                        )
+                    ],
                     title: "Recent Audit"
                 }),
                 makeBox(state, page, instanceName, {
                     detailLines: logs.length === 0 ? ["none"] : logs.slice(-8).map(renderLogLine),
                     id: "recent-logs",
                     status: "normal",
-                    summaryLines: [`entries ${logs.length}`, logs.at(-1) === undefined ? "none" : renderLogLine(logs.at(-1) as TuiLogEntry)],
+                    summaryLines: [
+                        compactSummary(
+                            ["entries", String(logs.length)],
+                            ["last", logs.at(-1)?.tail ?? logs.at(-1)?.message ?? "-"]
+                        )
+                    ],
                     title: "Recent Logs"
                 }),
                 makeBox(state, page, instanceName, {
@@ -322,7 +364,13 @@ function buildBoxesForPage(state: TuiAppState, page: PageId, instanceName: strin
                     ],
                     id: "config-summary",
                     status: "normal",
-                    summaryLines: [shortenPath(instance?.defaultWorkspace ?? "unavailable"), shortenPath(instance?.mcpPath ?? "unavailable")],
+                    summaryLines: [
+                        compactSummary(
+                            ["provider", instance?.provider ?? "unknown"],
+                            ["workspace", shortenPath(instance?.defaultWorkspace ?? "unavailable")],
+                            ["mcp", instance?.mcpEnabled === true ? "enabled" : "disabled"]
+                        )
+                    ],
                     title: "Config Summary"
                 }),
                 makeBox(state, page, instanceName, {
@@ -330,7 +378,7 @@ function buildBoxesForPage(state: TuiAppState, page: PageId, instanceName: strin
                     disabled: true,
                     id: "shell-preview",
                     status: "disabled",
-                    summaryLines: ["attach shell disabled", "read-only cockpit"],
+                    summaryLines: [compactSummary(["attach", "disabled"], ["mode", "readonly"])],
                     title: "Shell Preview"
                 })
             ];
@@ -339,40 +387,50 @@ function buildBoxesForPage(state: TuiAppState, page: PageId, instanceName: strin
                 makeBox(state, page, instanceName, {
                     detailLines: [`provider ${instance?.provider ?? "unknown"}`],
                     id: "provider",
-                    summaryLines: [`provider ${instance?.provider ?? "unknown"}`],
+                    summaryLines: [compactSummary(["provider", instance?.provider ?? "unknown"])],
                     title: "Provider"
                 }),
                 makeBox(state, page, instanceName, {
                     detailLines: [`workspace ${instance?.defaultWorkspace ?? "unavailable"}`],
                     id: "workspace",
-                    summaryLines: [`workspace ${instance?.defaultWorkspace ?? "unavailable"}`],
+                    summaryLines: [compactSummary(["workspace", shortenPath(instance?.defaultWorkspace ?? "unavailable")])],
                     title: "Workspace"
                 }),
                 makeBox(state, page, instanceName, {
                     detailLines: [`enabled ${instance?.mcpEnabled === true ? "true" : "false"}`, `path ${instance?.mcpPath ?? "unavailable"}`],
                     id: "mcp-config",
                     status: instance?.mcpEnabled === true ? "ready" : "disabled",
-                    summaryLines: [`enabled ${instance?.mcpEnabled === true ? "true" : "false"}`, `path ${instance?.mcpPath ?? "unavailable"}`],
+                    summaryLines: [
+                        compactSummary(
+                            ["enabled", instance?.mcpEnabled === true ? "true" : "false"],
+                            ["path", shortenPath(instance?.mcpPath ?? "unavailable")]
+                        )
+                    ],
                     title: "MCP"
                 }),
                 makeBox(state, page, instanceName, {
                     detailLines: [`lastErrorCode ${snapshot?.lastErrorCode ?? "none"}`, `connectionState ${snapshot?.connectionState ?? "unknown"}`],
                     id: "security",
                     status: snapshot?.lastErrorCode === undefined ? "normal" : "warning",
-                    summaryLines: [`lastErrorCode ${snapshot?.lastErrorCode ?? "none"}`, `connection ${snapshot?.connectionState ?? "unknown"}`],
+                    summaryLines: [
+                        compactSummary(
+                            ["lastError", snapshot?.lastErrorCode ?? "none"],
+                            ["connection", snapshot?.connectionState ?? "unknown"]
+                        )
+                    ],
                     title: "Security"
                 }),
                 makeBox(state, page, instanceName, {
                     detailLines: approvals.length === 0 ? ["pending approvals none"] : approvals.slice(0, 6).map(renderApprovalLine),
                     id: "approval-policy",
                     status: approvals.length > 0 ? "pending" : "normal",
-                    summaryLines: [`pending ${approvals.length}`, "policy changes disabled"],
+                    summaryLines: [compactSummary(["pending", String(approvals.length)], ["mode", "readonly"])],
                     title: "Approval Policy"
                 }),
                 makeBox(state, page, instanceName, {
                     detailLines: ["source instance.readLogs + log.appended", `cached ${logs.length}`],
                     id: "logs-policy",
-                    summaryLines: ["no worker.log reads", `cached ${logs.length}`],
+                    summaryLines: [compactSummary(["source", "instance.readLogs"], ["cached", String(logs.length)])],
                     title: "Logs Policy"
                 })
             ];
@@ -386,20 +444,26 @@ function buildBoxesForPage(state: TuiAppState, page: PageId, instanceName: strin
                     ],
                     id: "mcp-runtime-config",
                     status: instance?.mcpEnabled === true ? "warning" : "disabled",
-                    summaryLines: [`enabled ${instance?.mcpEnabled === true ? "true" : "false"}`, "runtime readiness unavailable"],
+                    summaryLines: [
+                        compactSummary(
+                            ["enabled", instance?.mcpEnabled === true ? "true" : "false"],
+                            ["path", shortenPath(instance?.mcpPath ?? "unavailable")]
+                        ),
+                        "reason=no-runtime-api"
+                    ],
                     title: "MCP Runtime Config"
                 }),
                 makeBox(state, page, instanceName, {
                     detailLines: [buildEndpointPreview(state, instanceName), "Runtime readiness: not available in current control API"],
                     id: "endpoint-preview",
                     status: "warning",
-                    summaryLines: [buildEndpointPreview(state, instanceName), "preview only"],
+                    summaryLines: [compactSummary(["endpoint", buildEndpointPreview(state, instanceName)]), "reason=preview-only"],
                     title: "Endpoint Preview"
                 }),
                 makeBox(state, page, instanceName, {
                     detailLines: [`auth.mode ${config?.authMode ?? "unavailable"}`, `publicBaseUrl ${config?.publicBaseUrl ?? "unavailable"}`],
                     id: "auth-config",
-                    summaryLines: [`auth.mode ${config?.authMode ?? "unavailable"}`, `publicBaseUrl ${config?.publicBaseUrl ?? "unavailable"}`],
+                    summaryLines: [compactSummary(["auth", config?.authMode ?? "unavailable"], ["baseUrl", config?.publicBaseUrl ?? "-"])],
                     title: "Auth Config"
                 }),
                 makeBox(state, page, instanceName, {
@@ -409,7 +473,10 @@ function buildBoxesForPage(state: TuiAppState, page: PageId, instanceName: strin
                     ],
                     id: "public-availability-reason",
                     status: "warning",
-                    summaryLines: [config?.publicBaseUrl === undefined ? "publicBaseUrl missing" : "publicBaseUrl configured", "no runtime status in control API"],
+                    summaryLines: [
+                        compactSummary(["endpoint", endpointAvailabilityLabel(config?.publicBaseUrl)]),
+                        config?.publicBaseUrl === undefined ? "reason=missing-publicBaseUrl" : "reason=no-runtime-api"
+                    ],
                     title: "Public Availability Reason"
                 })
             ];
@@ -430,7 +497,11 @@ function buildBoxesForPage(state: TuiAppState, page: PageId, instanceName: strin
                               ],
                     id: record === undefined ? "audit-empty" : `audit-${record.callId}`,
                     status: record === undefined ? "normal" : toolCallStatus(record),
-                    summaryLines: [record === undefined ? "no records" : renderToolCallLine(record)],
+                    summaryLines: [
+                        record === undefined
+                            ? compactSummary(["records", "0"], ["last", "-"], ["tool", "-"])
+                            : compactSummary(["status", record.status], ["tool", record.toolName], ["source", record.source])
+                    ],
                     title: record === undefined ? "Audit" : `Audit ${index + 1}`
                 })
             );
@@ -444,7 +515,7 @@ function buildBoxesForPage(state: TuiAppState, page: PageId, instanceName: strin
                     detailLines: visible.length === 0 ? ["No logs loaded yet."] : visible,
                     id: "logs",
                     status: "normal",
-                    summaryLines: [`source instance.readLogs + log.appended`, `entries ${logs.length}`],
+                    summaryLines: [compactSummary(["source", "instance.readLogs+log.appended"], ["entries", String(logs.length)])],
                     title: "Logs"
                 }),
                 makeBox(state, page, instanceName, {
@@ -455,7 +526,7 @@ function buildBoxesForPage(state: TuiAppState, page: PageId, instanceName: strin
                     ],
                     id: "logs-source",
                     status: "normal",
-                    summaryLines: ["instance.readLogs only", "log.appended stream only"],
+                    summaryLines: [compactSummary(["source", "instance.readLogs"], ["stream", "log.appended"])],
                     title: "Source"
                 })
             ];
@@ -492,7 +563,10 @@ function makeBox(
 }
 
 function normalizeCollapsedLines(lines: string[]): [BoxLine] | [BoxLine, BoxLine] {
-    const normalized = lines.slice(0, 2).map((line) => ({ text: truncateLine(line, 58), tone: "muted" as const }));
+    const normalized = lines.slice(0, 2).map((line, index) => ({
+        text: truncateLine(line, EXPANDABLE_BOX_INNER_WIDTH),
+        tone: collapsedToneFor(line, index)
+    }));
 
     if (normalized.length <= 1) {
         return [normalized[0] ?? { text: "", tone: "muted" }];
@@ -514,7 +588,7 @@ function truncateLine(text: string, width: number): string {
 }
 
 function formatField(label: string, value: string): string {
-    return truncateLine(`${label.padEnd(10, " ")} ${value}`, 58);
+    return truncateLine(`${label.padEnd(14, " ")} ${value}`, EXPANDABLE_BOX_INNER_WIDTH);
 }
 
 function shortenPath(value: string): string {
@@ -523,6 +597,26 @@ function shortenPath(value: string): string {
     }
 
     return `...${value.slice(-(28 - 3))}`;
+}
+
+function compactSummary(...entries: Array<[string, string]>): string {
+    return truncateLine(entries.map(([key, value]) => `${key}=${value}`).join("  "), EXPANDABLE_BOX_INNER_WIDTH);
+}
+
+function collapsedToneFor(line: string, index: number): BoxLine["tone"] {
+    if (index === 0) {
+        return "normal";
+    }
+
+    if (line.startsWith("reason=") || line.startsWith("lastError=")) {
+        return "warning";
+    }
+
+    return "muted";
+}
+
+function endpointAvailabilityLabel(publicBaseUrl: string | undefined): string {
+    return publicBaseUrl === undefined ? "unavailable" : "configured";
 }
 
 function pageTitle(page: PageId): string {
