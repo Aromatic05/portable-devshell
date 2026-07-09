@@ -8,7 +8,8 @@
 
 主配置路径：
 
-- `~/.devshell/config/devshell.toml`
+- `~/.devshell/control/config.toml`
+- `~/.devshell/control/instances/*.toml`
 
 最小配置可以只有：
 
@@ -16,26 +17,63 @@
 version = 1
 ```
 
-开启 public Connector 的最小配置：
+开启带 OAuth 的 public MCP / ChatGPT Connector：
 
 ```toml
 version = 1
 
-[public]
+[control]
+logLevel = "info"
+
+[mcp]
 enabled = true
+listenHost = "0.0.0.0"
+listenPort = 17890
 publicBaseUrl = "https://devshell.example.com"
 
-[public.oauth]
+[mcp.auth]
+mode = "oauth2"
+
+[mcp.auth.oauth2]
+issuer = "https://auth.example.com/realms/aromatic"
+audience = "aromatic-mcp"
+resourceName = "aromatic"
+requiredScopes = ["mcp"]
+documentationUrl = "https://docs.example.com/aromatic"
+```
+
+实例配置示例：
+
+```toml
+version = 1
+name = "aromatic-pc"
 enabled = true
+provider = "local"
+workspace = "/workspace/aromatic"
+
+[mcp]
+enabled = true
+allowTools = ["bash_run"]
 ```
 
 常用命令：
 
-- `devshell config print --expanded`
-- `devshell public urls`
-- `devshell public doctor`
-- `devshell mcp serve`
+- `devshell start`
+- `devshell instance start aromatic-pc`
+- `devshell instance status aromatic-pc`
 - `devshell tui`
+
+ChatGPT Connector 使用入口：
+
+- MCP endpoint: `https://devshell.example.com/aromatic-pc/mcp`
+- protected resource metadata: `https://devshell.example.com/.well-known/oauth-protected-resource/aromatic-pc/mcp`
+- authorization server metadata mirror: `https://devshell.example.com/.well-known/oauth-authorization-server`
+
+当前实现定位：
+
+- `portable-devshell` 自身作为 MCP protected resource。
+- OAuth / OIDC 由外部成熟身份提供商负责。
+- MCP server 负责 discovery、Bearer challenge、JWT/JWKS 校验和 metadata 暴露。
 
 ## Worker Targets
 
