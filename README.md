@@ -1,40 +1,67 @@
-# portable-devshell 0.2
+# portable-devshell
 
-`portable-devshell` 现在以 TypeScript controller daemon 为中心：
+`portable-devshell` 用来把一个本地、SSH 或容器里的工作区包装成可启动的 instance，并通过 MCP 暴露给 `Codex`、`Claude Code`、`ChatGPT Connector` 等客户端。
 
-- CLI / TUI / MCP stdio / public REST / public MCP 都连接 controller
-- controller 负责配置、device registry、audit、policy、worker lifecycle、public auth
-- Rust worker 只负责 bash / file / tmux 一类执行能力
+## 有哪些功能
 
-当前边界：
+- 用一个 control daemon 统一管理多个 instance。
+- 每个 instance 绑定一个 workspace，可单独启动、停止、查看状态和日志。
+- 通过 HTTP 暴露 MCP，每个 instance 对应一个 `/<instance>/mcp` endpoint。
+- 支持本地 `localhost` MCP，也支持带 OAuth 的公网 MCP。
+- 支持 `local`、`ssh`、`docker`、`podman` 四种 provider。
 
-- CLI 和 TUI 都是 control client，不直接读实例文件，不直接 spawn worker，不直连 worker RPC
-- MCP 只暴露 per-instance endpoint，不暴露 instance 管理接口
-- audit approval gate 在 core `WorkerInstance.callTool`，TUI approval inbox 只负责展示和决策输入
-- control 不提供 global timeline / global logs / global tool calls 聚合接口
-- config editor 通过 control API 读写 `~/.devshell/control/config.toml` 与 `~/.devshell/control/instances/*.toml`
-- 当前仓库包含 TUI control session / view model 基础层，不宣称完整正式 TUI 页面已完成
+## 如何快速开始
 
-主配置路径：
+从源码仓库运行时，先构建 TypeScript CLI 和 Rust worker：
 
-- `~/.devshell/control/config.toml`
-- `~/.devshell/control/instances/*.toml`
-- control socket: `$XDG_RUNTIME_DIR/portable-devshell/control.sock`
-
-最小配置可以只有：
-
-```toml
-version = 1
+```bash
+pnpm install
+pnpm build
+cargo build -p devshell-worker --manifest-path ./Cargo.toml
 ```
 
-开启带 OAuth 的 public MCP / ChatGPT Connector：
+然后启动 control daemon。第一次启动会自动创建默认配置：
+
+```bash
+node packages/cli/dist/cli/CliMain.js start
+```
+
+接着创建一个 instance，并按提示填写 `name`、`workspace`、`provider`、`MCP enabled` 等字段：
+
+```bash
+node packages/cli/dist/cli/CliMain.js instance create
+```
+
+最后启动 instance：
+
+```bash
+node packages/cli/dist/cli/CliMain.js instance start <instance>
+```
+
+更完整的首次启动说明见 [docs/quickstart.md](docs/quickstart.md)。
+
+## 如何启动 MCP
+
+要让某个 instance 暴露 MCP，需要同时满足两件事：
+
+- 全局 `mcp.enabled = true`
+- 该 instance 自己的 `[mcp] enabled = true`
+
+默认 endpoint 形如：
+
+```text
+http://127.0.0.1:17890/<instance>/mcp
+```
+
+详细配置、验证方法和示例见 [docs/mcp.md](docs/mcp.md)。
+
+## 如何启用 OAuth
+
+如果你要把 MCP 暴露到公网，建议直接使用 `mcp.auth.mode = "oauth2"`。`portable-devshell` 会同时提供 OAuth 保护资源元数据和授权服务器。
+
+最小示例：
 
 ```toml
-version = 1
-
-[control]
-logLevel = "info"
-
 [mcp]
 enabled = true
 listenHost = "0.0.0.0"
@@ -45,78 +72,48 @@ publicBaseUrl = "https://devshell.example.com"
 mode = "oauth2"
 
 [mcp.auth.oauth2]
-resourceName = "aromatic"
+resourceName = "portable-devshell"
 requiredScopes = ["mcp"]
-documentationUrl = "https://docs.example.com/aromatic"
 ```
 
-实例配置示例：
+完整字段和调试入口见 [docs/oauth.md](docs/oauth.md)。
+
+## 如何接入 Codex
+
+把某个 instance 的 MCP endpoint 加到 Codex 的 MCP 配置里即可，例如：
 
 ```toml
-version = 1
-name = "aromatic-pc"
-enabled = true
-provider = "local"
-workspace = "/workspace/aromatic"
-
-[mcp]
-enabled = true
-allowTools = ["bash_run"]
+[mcp_servers.portable_devshell]
+url = "http://127.0.0.1:17890/<instance>/mcp"
 ```
 
-常用命令：
+如果 endpoint 开了 OAuth，再执行一次登录即可。详细步骤见 [docs/clients.md#codex](docs/clients.md#codex)。
 
-- `devshell start`
-- `devshell instance start aromatic-pc`
-- `devshell instance status aromatic-pc`
-- `devshell tui`
+## 如何接入 Claude Code
 
-ChatGPT Connector 使用入口：
+Claude Code 可以直接把这个 endpoint 作为远程 HTTP MCP server 添加进去：
 
-- MCP endpoint: `https://devshell.example.com/aromatic-pc/mcp`
-- protected resource metadata: `https://devshell.example.com/.well-known/oauth-protected-resource/aromatic-pc/mcp`
-- authorization server metadata mirror: `https://devshell.example.com/.well-known/oauth-authorization-server`
+```bash
+claude mcp add --transport http portable-devshell http://127.0.0.1:17890/<instance>/mcp
+```
 
-当前实现定位：
+如果 endpoint 开了 OAuth，再执行登录。详细步骤见 [docs/clients.md#claude-code](docs/clients.md#claude-code)。
 
-- `portable-devshell` 自身作为 MCP protected resource。
-- `portable-devshell` 内置并自动启动 `oidc-provider`。
-- MCP server 负责 protected resource metadata、Bearer challenge 和 access token 验证。
-- 本地启动不再依赖额外的外部 OIDC 服务。
+## 如何接入 ChatGPT Connector
 
-## Worker Targets
+ChatGPT Connector 需要一个可从 ChatGPT 访问的 HTTPS MCP endpoint。把公网地址填成：
 
-`portable-devshell` 的 TypeScript core 现在按 worker target 解析和安装 `devshell-worker`。
+```text
+https://devshell.example.com/<instance>/mcp
+```
 
-- supported targets: `linux-x64`, `linux-arm64`, `darwin-x64`, `darwin-arm64`
-- linux build targets: `x86_64-unknown-linux-musl`, `aarch64-unknown-linux-musl` (static linking)
-- local target probe: `process.platform` + `process.arch`
-- ssh target probe: remote `uname -s` + `uname -m`
-- docker/podman target probe: container `uname -s` + `uname -m`
-- release asset layout: `devshell-worker-<targetKey>` and `devshell-worker-<targetKey>.sha256`
-- install path:
-  - local: `~/.devshell/workers/<targetKey>/<sha256>/devshell-worker`
-  - ssh/container: `~/.devshell/workers/<targetKey>/<sha256>/devshell-worker`
-  - active symlink: `~/.devshell/bin/devshell-worker`
-- release cache path: `~/.devshell/release-cache/workers/<tag>/<targetKey>/<sha256>/devshell-worker`
-- target-specific env override:
-  - `PORTABLE_DEVSHELL_WORKER_LINUX_X64_PATH`
-  - `PORTABLE_DEVSHELL_WORKER_LINUX_ARM64_PATH`
-  - `PORTABLE_DEVSHELL_WORKER_DARWIN_X64_PATH`
-  - `PORTABLE_DEVSHELL_WORKER_DARWIN_ARM64_PATH`
-- release lookup config:
-  - default repository: `Aromatic05/portable-devshell`
-  - optional override: `PORTABLE_DEVSHELL_WORKER_RELEASE_REPOSITORY=owner/repo`
-  - optional: `PORTABLE_DEVSHELL_WORKER_RELEASE_TAG=v0.2.0`
-  - optional: `PORTABLE_DEVSHELL_WORKER_RELEASE_BASE_URL=https://github.com/owner/repo/releases/download`
-  - optional: `PORTABLE_DEVSHELL_WORKER_CACHE_DIR=/custom/cache/path`
+如果启用了 OAuth，ChatGPT 会按 MCP/OAuth 流程完成授权。详细步骤见 [docs/clients.md#chatgpt-connector](docs/clients.md#chatgpt-connector)。
 
-- local build scripts:
-  - `pnpm build` only builds TypeScript packages
-  - `pnpm build:worker:debug` builds the host debug worker
-  - `pnpm build:worker:debug:<targetKey>` builds a specific debug worker target
+## 更多文档
 
-代码已经支持 target-specific probe、release asset resolution、install path 和 structured error。
-默认发布流程会在 GitHub tag `v*` 上自动构建四个 target 的 worker，并尝试把二进制和对应 `.sha256` 上传到同名 GitHub Release；真实可用 release asset 以实际 release 产物为准。
-运行时如果没有 target-specific 本地覆盖路径，core 会先探测目标平台，再按 release tag 下载对应 worker；若 release 不存在或校验失败，将返回 `core.workerAssetUnavailable`。
-在 Linux host 上，默认构建会直接尝试 musl target；如果当前机器没有对应 target/std/toolchain，构建会失败，而不是退回到动态链接的 `gnu` binary。
+- [docs/README.md](docs/README.md)
+- [docs/quickstart.md](docs/quickstart.md)
+- [docs/mcp.md](docs/mcp.md)
+- [docs/oauth.md](docs/oauth.md)
+- [docs/clients.md](docs/clients.md)
+- [docs/reference.md](docs/reference.md)
