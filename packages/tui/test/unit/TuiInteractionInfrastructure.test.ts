@@ -91,7 +91,7 @@ test("Prompt 3 urgent fix expands stable bordered boxes and preserves state thro
 
     await harness.press("", { return: true });
     assert.equal(harness.store.getState().interaction.focusScope, "boxDetail");
-    await harness.press("[", { ctrl: true });
+    await harness.press("", { escape: true });
     assert.equal(harness.store.getState().interaction.focusScope, "mainBoxes");
     await harness.press("[", { ctrl: true });
     assert.equal(harness.store.getState().interaction.focusScope, "sidebarPages");

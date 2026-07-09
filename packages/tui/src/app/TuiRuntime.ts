@@ -109,6 +109,7 @@ export class TuiRuntime {
         backspace?: boolean;
         ctrl?: boolean;
         downArrow?: boolean;
+        escape?: boolean;
         end?: boolean;
         home?: boolean;
         leftArrow?: boolean;

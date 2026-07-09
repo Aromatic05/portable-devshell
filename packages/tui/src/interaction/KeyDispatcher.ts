@@ -7,6 +7,7 @@ export interface TuiKeyPress {
         backspace?: boolean;
         ctrl?: boolean;
         downArrow?: boolean;
+        escape?: boolean;
         end?: boolean;
         home?: boolean;
         leftArrow?: boolean;
@@ -45,6 +46,9 @@ export class KeyDispatcher {
     #global(press: TuiKeyPress): TuiUiIntent | undefined {
         if (press.key.ctrl && press.input === "d") {
             return { type: "app.requestQuit" };
+        }
+        if (press.key.escape || press.input === "\u001B") {
+            return { type: "ui.cancel" };
         }
         if (press.key.ctrl && press.input === "[") {
             return { type: "ui.cancel" };

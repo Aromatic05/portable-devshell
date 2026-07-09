@@ -145,17 +145,17 @@ export function selectFooterShortcuts(state: TuiAppState): string[] {
     switch (state.interaction.focusScope) {
         case "sidebarPages":
         case "sidebarInstances":
-            return ["tab", "enter", "1-6", "↑↓", "^["];
+            return ["tab", "enter", "1-6", "↑↓", "esc"];
         case "mainBoxes":
-            return ["tab", "enter", "space", "↑↓", "/", "a", "^["];
+            return ["tab", "enter", "space", "↑↓", "/", "a", "esc"];
         case "boxDetail":
-            return ["enter", "↑↓", "/", "^["];
+            return ["enter", "↑↓", "/", "esc"];
         case "search":
-            return ["type", "bs", "enter", "^["];
+            return ["type", "bs", "enter", "esc"];
         case "actionMenu":
-            return ["↑↓", "enter", "^["];
+            return ["↑↓", "enter", "esc"];
         case "confirm":
-            return ["tab", "←→", "enter", "^["];
+            return ["tab", "←→", "enter", "esc"];
     }
 }
 
@@ -223,7 +223,8 @@ export function selectHelpLines(state: TuiAppState): string[] {
         "Up/Down moves sidebar focus without selecting.",
         "Enter applies the focused sidebar item.",
         "Space expands and collapses the focused box.",
-        "Ctrl+[ returns from detail, search, menus, and main focus."
+        "Esc returns from detail, search, menus, and main focus.",
+        "Ctrl+[ remains available as a terminal-safe escape fallback."
     ];
 }
 
