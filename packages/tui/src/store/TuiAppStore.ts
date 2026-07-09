@@ -1,5 +1,7 @@
 import type { ApprovalRequest, ControlEventEnvelope, InstanceSnapshot, JsonValue, ToolCallRecord } from "@portable-devshell/shared";
 
+import { type TuiActionMenuItem, type TuiUiIntent } from "../interaction/TuiInteractionTypes.js";
+import type { FocusScope, PageId, SidebarFocus } from "../model/TuiUiTypes.js";
 import {
     createInitialTuiAppState,
     toRawEventRecord,
@@ -8,10 +10,8 @@ import {
     type TuiAppState,
     type TuiConnectionStatus,
     type TuiInstanceListEntry,
-    type TuiLogEntry,
-    type TuiPanel
+    type TuiLogEntry
 } from "./TuiReducers.js";
-import type { FocusItem, TuiActionMenuItem, TuiMode, TuiUiIntent } from "../interaction/TuiInteractionTypes.js";
 
 export interface TuiAppStoreOptions {
     initialState?: TuiAppState;
@@ -53,13 +53,6 @@ export class TuiAppStore {
         }
     }
 
-    setActivePanel(panel: TuiPanel): void {
-        this.dispatch({
-            panel,
-            type: "panel.setActive"
-        });
-    }
-
     setConfigView(configView?: Record<string, JsonValue>): void {
         this.dispatch({
             configView,
@@ -76,31 +69,53 @@ export class TuiAppStore {
         });
     }
 
-    setCurrentFocus(item?: FocusItem): void {
+    setFocusScope(focusScope: FocusScope): void {
         this.dispatch({
-            item,
-            type: "focus.setCurrent"
+            focusScope,
+            type: "focus.scope.set"
         });
     }
 
-    setMode(mode: TuiMode): void {
+    setSidebarFocus(sidebarFocus: SidebarFocus): void {
         this.dispatch({
-            mode,
-            type: "mode.set"
+            sidebarFocus,
+            type: "sidebar.focus.set"
         });
     }
 
-    setDirty(value: boolean): void {
+    setMainFocusId(mainFocusId?: string): void {
         this.dispatch({
-            type: "interaction.setDirty",
-            value
+            mainFocusId,
+            type: "mainFocus.set"
         });
     }
 
-    toggleExpanded(key: string): void {
+    setSelectedPage(page: PageId): void {
         this.dispatch({
-            key,
-            type: "interaction.toggleExpanded"
+            page,
+            type: "ui.selectPage"
+        });
+    }
+
+    setSelectedInstance(instance?: string): void {
+        this.dispatch({
+            instance,
+            type: "ui.selectInstance"
+        });
+    }
+
+    pushRestore(focusScope: FocusScope, sidebarFocus: SidebarFocus, mainFocusId?: string): void {
+        this.dispatch({
+            focusScope,
+            mainFocusId,
+            sidebarFocus,
+            type: "restore.push"
+        });
+    }
+
+    popRestore(): void {
+        this.dispatch({
+            type: "restore.pop"
         });
     }
 
@@ -132,6 +147,13 @@ export class TuiAppStore {
         });
     }
 
+    setConfirmFocus(button: "cancel" | "confirm"): void {
+        this.dispatch({
+            button,
+            type: "confirm.focus"
+        });
+    }
+
     setSearchOpen(value: boolean): void {
         this.dispatch({
             type: "search.setOpen",
@@ -139,41 +161,34 @@ export class TuiAppStore {
         });
     }
 
-    setSearchQuery(query: string): void {
+    setSearchQuery(page: PageId, query: string): void {
         this.dispatch({
+            page,
             query,
             type: "search.setQuery"
         });
     }
 
-    setScreenStatus(panel: TuiPanel, status?: string): void {
+    setScreenStatus(page: PageId, status?: string): void {
         this.dispatch({
-            panel,
+            page,
             status,
             type: "screen.setStatus"
         });
     }
 
-    setScreenToggle(panel: TuiPanel, value: boolean): void {
+    toggleExpanded(key: string): void {
         this.dispatch({
-            panel,
-            type: "screen.setToggle",
-            value
+            key,
+            type: "ui.toggleExpanded"
         });
     }
 
-    setLogsViewport(topIndex: number, follow: boolean): void {
+    setScrollOffset(key: string, offset: number): void {
         this.dispatch({
-            follow,
-            topIndex,
-            type: "logs.setViewport"
-        });
-    }
-
-    setLogsFollow(follow: boolean): void {
-        this.dispatch({
-            follow,
-            type: "logs.setViewport"
+            key,
+            offset,
+            type: "ui.setScrollOffset"
         });
     }
 

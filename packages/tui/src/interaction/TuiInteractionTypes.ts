@@ -1,14 +1,14 @@
-import type { TuiPanel } from "../store/TuiReducers.js";
-
-export type TuiMode = "normal" | "edit" | "actionMenu" | "confirm" | "search";
+import type { FocusScope, PageId } from "../model/TuiUiTypes.js";
 
 export type FocusItem =
-    | { kind: "panel"; id: string }
-    | { kind: "listItem"; id: string }
-    | { kind: "card"; id: string }
+    | { kind: "page"; id: PageId }
+    | { kind: "instance"; id: string }
+    | { kind: "box"; id: string }
     | { kind: "field"; id: string }
     | { kind: "button"; id: "save" | "cancel" | string }
     | { kind: "action"; id: string };
+
+export type TuiMode = FocusScope;
 
 export interface TuiActionMenuItem {
     id: string;
@@ -34,37 +34,31 @@ export interface TuiConfirmDialogState {
 
 export interface TuiSearchState {
     open: boolean;
-    query: string;
-}
-
-export interface TuiLogsViewportState {
-    follow: boolean;
-    topIndex: number;
 }
 
 export interface TuiInteractionState {
     actionMenu: TuiActionMenuState;
     confirmDialog: TuiConfirmDialogState;
-    currentFocus?: FocusItem;
     dirty: boolean;
-    expandedByKey: Record<string, boolean>;
-    logsViewport: TuiLogsViewportState;
-    mode: TuiMode;
+    focusScope: FocusScope;
     redrawNonce: number;
-    screenStatusByPanel: Partial<Record<TuiPanel, string>>;
-    screenToggleByPanel: Partial<Record<TuiPanel, boolean>>;
+    restoreStack: Array<{
+        focusScope: FocusScope;
+        mainFocusId?: string;
+        sidebarFocus: "pages" | "instances";
+    }>;
+    screenStatusByPage: Partial<Record<PageId, string>>;
+    selectedActionId?: string;
+    selectedConfirmButton: "cancel" | "confirm";
     search: TuiSearchState;
 }
 
 export type TuiUiIntent =
     | { type: "app.quit" }
     | { type: "app.requestQuit" }
-    | { panel: TuiPanel; type: "panel.activate" }
-    | { direction: "next" | "previous"; type: "panel.cycle" }
+    | { page: PageId; type: "page.select" }
     | { direction: "next" | "previous" | "up" | "down" | "left" | "right"; type: "focus.move" }
-    | { item: FocusItem; type: "focus.set" }
     | { type: "focus.activate" }
-    | { item: FocusItem; type: "focus.activateItem" }
     | { type: "ui.cancel" }
     | { type: "ui.help" }
     | { type: "ui.redraw" }
@@ -85,15 +79,15 @@ export type TuiUiIntent =
     | { type: "logs.reload" }
     | { type: "logs.toggleFollow" }
     | { type: "logs.clearBuffer" }
-    | { value: boolean; type: "edit.setDirty" }
-    | { mode: TuiMode; type: "mode.set" }
     | { items: TuiActionMenuItem[]; title: string; type: "overlay.openActionMenu" }
     | { body: string; cancelLabel?: string; confirmIntent: TuiUiIntent; confirmLabel?: string; title: string; type: "overlay.openConfirm" }
     | { type: "overlay.closeActionMenu" }
     | { type: "overlay.closeConfirm" }
     | { key: string; type: "ui.toggleExpanded" }
-    | { panel: TuiPanel; status: string; type: "screen.setStatus" }
-    | { panel: TuiPanel; value: boolean; type: "screen.setToggle" }
+    | { focusScope: FocusScope; type: "focus.scope.set" }
+    | { id?: string; type: "mainFocus.set" }
+    | { button: "cancel" | "confirm"; type: "confirm.focus" }
+    | { page: PageId; status: string; type: "screen.setStatus" }
     | { type: "screen.clearStatus" };
 
 export function focusItemKey(item: FocusItem): string {
@@ -125,18 +119,13 @@ export function createEmptyInteractionState(): TuiInteractionState {
             title: ""
         },
         dirty: false,
-        expandedByKey: {},
-        logsViewport: {
-            follow: true,
-            topIndex: 0
-        },
-        mode: "normal",
+        focusScope: "sidebarPages",
         redrawNonce: 0,
-        screenStatusByPanel: {},
-        screenToggleByPanel: {},
+        restoreStack: [],
+        screenStatusByPage: {},
+        selectedConfirmButton: "cancel",
         search: {
-            open: false,
-            query: ""
+            open: false
         }
     };
 }

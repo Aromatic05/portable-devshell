@@ -1,15 +1,8 @@
 import { asInstanceName, type ApprovalRequest, type ControlEventEnvelope, type InstanceSnapshot, type JsonValue, type ToolCallRecord } from "@portable-devshell/shared";
 
-import {
-    createEmptyInteractionState,
-    type FocusItem,
-    type TuiActionMenuItem,
-    type TuiInteractionState,
-    type TuiMode,
-    type TuiUiIntent
-} from "../interaction/TuiInteractionTypes.js";
+import { createEmptyInteractionState, type TuiActionMenuItem, type TuiInteractionState, type TuiUiIntent } from "../interaction/TuiInteractionTypes.js";
+import type { FocusScope, PageId, SidebarFocus, TuiUiState } from "../model/TuiUiTypes.js";
 
-export type TuiPanel = "instances" | "connector" | "audit" | "logs" | "approvals" | "help";
 export type TuiConnectionStatus = "connecting" | "connected" | "disconnected" | "error";
 
 export interface TuiInstanceListEntry {
@@ -58,7 +51,6 @@ export interface TuiGlobalDerivedState {
 }
 
 export interface TuiAppState {
-    activePanel: TuiPanel;
     approvalsByInstance: Record<string, ApprovalRequest[]>;
     configView?: Record<string, JsonValue>;
     connection: TuiConnectionState;
@@ -71,41 +63,44 @@ export interface TuiAppState {
     rawEvents: TuiRawEventRecord[];
     snapshotsByInstance: Record<string, InstanceSnapshot>;
     toolCallsByInstance: Record<string, ToolCallRecord[]>;
+    ui: TuiUiState;
 }
 
 export type TuiAppAction =
-    | { panel: TuiPanel; type: "panel.setActive" }
     | { approvals: ApprovalRequest[]; instance: string; type: "approval.replace" }
     | { configView?: Record<string, JsonValue>; type: "control.setConfigView" }
     | { errorCode?: string; errorMessage?: string; status: TuiConnectionStatus; type: "control.setConnectionState" }
-    | { item?: FocusItem; type: "focus.setCurrent" }
+    | { focusScope: FocusScope; type: "focus.scope.set" }
     | { instance: string; seq: number; type: "instance.setLastSeq" }
     | { instances: TuiInstanceListEntry[]; type: "instance.replaceList" }
     | { entry: TuiLogEntry; type: "log.append" }
     | { instance: string; logs: TuiLogEntry[]; type: "log.replace" }
     | { type: "log.clearBuffer" }
+    | { mainFocusId?: string; type: "mainFocus.set" }
+    | { button: "cancel" | "confirm"; type: "confirm.focus" }
     | { items: TuiActionMenuItem[]; selectedIndex: number; title: string; type: "overlay.setActionMenu" }
     | { confirmIntent: TuiUiIntent; body: string; cancelLabel: string; confirmLabel: string; open: boolean; title: string; type: "overlay.setConfirmDialog" }
-    | { value: boolean; type: "interaction.setDirty" }
-    | { key: string; type: "interaction.toggleExpanded" }
-    | { mode: TuiMode; type: "mode.set" }
-    | { follow: boolean; topIndex?: number; type: "logs.setViewport" }
-    | { query: string; type: "search.setQuery" }
+    | { sidebarFocus: SidebarFocus; type: "sidebar.focus.set" }
     | { type: "search.setOpen"; value: boolean }
-    | { panel: TuiPanel; status?: string; type: "screen.setStatus" }
-    | { panel: TuiPanel; type: "screen.setToggle"; value: boolean }
-    | { instance: string; records: ToolCallRecord[]; type: "toolCall.replace" }
+    | { page: PageId; query: string; type: "search.setQuery" }
+    | { page: PageId; status?: string; type: "screen.setStatus" }
+    | { instance?: string; type: "ui.selectInstance" }
+    | { page: PageId; type: "ui.selectPage" }
+    | { key: string; type: "ui.toggleExpanded" }
+    | { key: string; offset: number; type: "ui.setScrollOffset" }
     | { type: "ui.bumpRedrawNonce" }
+    | { snapshot: InstanceSnapshot; type: "snapshot.replace" }
+    | { instance: string; records: ToolCallRecord[]; type: "toolCall.replace" }
     | { maxEvents?: number; rawEvent: TuiRawEventRecord; type: "event.append" }
-    | { snapshot: InstanceSnapshot; type: "snapshot.replace" };
+    | { type: "restore.pop" }
+    | { focusScope: FocusScope; mainFocusId?: string; sidebarFocus: SidebarFocus; type: "restore.push" };
 
 export function createInitialTuiAppState(): TuiAppState {
     return {
-        activePanel: "instances",
+        approvalsByInstance: {},
         connection: {
             status: "connecting"
         },
-        approvalsByInstance: {},
         globalDerived: {
             connectedInstanceCount: 0,
             pendingApprovalCount: 0,
@@ -118,17 +113,21 @@ export function createInitialTuiAppState(): TuiAppState {
         logsByInstance: {},
         rawEvents: [],
         snapshotsByInstance: {},
-        toolCallsByInstance: {}
+        toolCallsByInstance: {},
+        ui: {
+            expandedBoxes: {},
+            mainFocusId: undefined,
+            scrollOffsets: {},
+            searchQueries: {},
+            selectedInstance: undefined,
+            selectedPage: "instances",
+            sidebarFocus: "pages"
+        }
     };
 }
 
 export function tuiAppReducer(state: TuiAppState, action: TuiAppAction): TuiAppState {
     switch (action.type) {
-        case "panel.setActive":
-            return {
-                ...state,
-                activePanel: action.panel
-            };
         case "approval.replace":
             return withDerivedState({
                 ...state,
@@ -151,16 +150,40 @@ export function tuiAppReducer(state: TuiAppState, action: TuiAppAction): TuiAppS
                     status: action.status
                 }
             };
-        case "focus.setCurrent":
+        case "focus.scope.set":
             return {
                 ...state,
                 interaction: {
                     ...state.interaction,
-                    currentFocus: action.item
+                    focusScope: action.focusScope
+                }
+            };
+        case "mainFocus.set":
+            return {
+                ...state,
+                ui: {
+                    ...state.ui,
+                    mainFocusId: action.mainFocusId
+                }
+            };
+        case "confirm.focus":
+            return {
+                ...state,
+                interaction: {
+                    ...state.interaction,
+                    selectedConfirmButton: action.button
+                }
+            };
+        case "sidebar.focus.set":
+            return {
+                ...state,
+                ui: {
+                    ...state.ui,
+                    sidebarFocus: action.sidebarFocus
                 }
             };
         case "instance.replaceList":
-            return withDerivedState({
+            return withDerivedState(selectInstanceAfterListReplace({
                 ...state,
                 approvalsByInstance: pruneByInstances(state.approvalsByInstance, action.instances),
                 instances: [...action.instances],
@@ -169,81 +192,14 @@ export function tuiAppReducer(state: TuiAppState, action: TuiAppAction): TuiAppS
                 logsByInstance: pruneByInstances(state.logsByInstance, action.instances),
                 snapshotsByInstance: pruneByInstances(state.snapshotsByInstance, action.instances),
                 toolCallsByInstance: pruneByInstances(state.toolCallsByInstance, action.instances)
-            });
-        case "overlay.setActionMenu":
-            return {
-                ...state,
-                interaction: {
-                    ...state.interaction,
-                    actionMenu: {
-                        items: [...action.items],
-                        open: action.items.length > 0,
-                        selectedIndex: action.selectedIndex,
-                        title: action.title
-                    }
-                }
-            };
-        case "overlay.setConfirmDialog":
-            return {
-                ...state,
-                interaction: {
-                    ...state.interaction,
-                    confirmDialog: {
-                        body: action.body,
-                        cancelLabel: action.cancelLabel,
-                        confirmIntent: action.confirmIntent,
-                        confirmLabel: action.confirmLabel,
-                        open: action.open,
-                        title: action.title
-                    }
-                }
-            };
-        case "interaction.setDirty":
-            return {
-                ...state,
-                interaction: {
-                    ...state.interaction,
-                    dirty: action.value
-                }
-            };
-        case "interaction.toggleExpanded":
-            return {
-                ...state,
-                interaction: {
-                    ...state.interaction,
-                    expandedByKey: {
-                        ...state.interaction.expandedByKey,
-                        [action.key]: state.interaction.expandedByKey[action.key] !== true
-                    }
-                }
-            };
-        case "mode.set":
-            return {
-                ...state,
-                interaction: {
-                    ...state.interaction,
-                    mode: action.mode
-                }
-            };
-        case "logs.setViewport":
-            return {
-                ...state,
-                interaction: {
-                    ...state.interaction,
-                    logsViewport: {
-                        follow: action.follow,
-                        topIndex: action.topIndex ?? state.interaction.logsViewport.topIndex
-                    }
-                }
-            };
+            }));
         case "log.append": {
             const current = state.logsByInstance[action.entry.instance] ?? [];
-            const next = mergeLogEntry(current, action.entry);
             return withDerivedState({
                 ...state,
                 logsByInstance: {
                     ...state.logsByInstance,
-                    [action.entry.instance]: next
+                    [action.entry.instance]: mergeLogEntry(current, action.entry)
                 }
             });
         }
@@ -258,24 +214,36 @@ export function tuiAppReducer(state: TuiAppState, action: TuiAppAction): TuiAppS
         case "log.clearBuffer":
             return withDerivedState({
                 ...state,
-                interaction: {
-                    ...state.interaction,
-                    logsViewport: {
-                        follow: true,
-                        topIndex: 0
-                    }
-                },
                 logsByInstance: {}
             });
-        case "search.setQuery":
+        case "overlay.setActionMenu":
             return {
                 ...state,
                 interaction: {
                     ...state.interaction,
-                    search: {
-                        ...state.interaction.search,
-                        query: action.query
-                    }
+                    actionMenu: {
+                        items: [...action.items],
+                        open: action.items.length > 0,
+                        selectedIndex: action.selectedIndex,
+                        title: action.title
+                    },
+                    selectedActionId: action.items[action.selectedIndex]?.id
+                }
+            };
+        case "overlay.setConfirmDialog":
+            return {
+                ...state,
+                interaction: {
+                    ...state.interaction,
+                    confirmDialog: {
+                        body: action.body,
+                        cancelLabel: action.cancelLabel,
+                        confirmIntent: action.confirmIntent,
+                        confirmLabel: action.confirmLabel,
+                        open: action.open,
+                        title: action.title
+                    },
+                    selectedConfirmButton: "cancel"
                 }
             };
         case "search.setOpen":
@@ -289,30 +257,69 @@ export function tuiAppReducer(state: TuiAppState, action: TuiAppAction): TuiAppS
                     }
                 }
             };
+        case "search.setQuery":
+            return {
+                ...state,
+                ui: {
+                    ...state.ui,
+                    searchQueries: {
+                        ...state.ui.searchQueries,
+                        [action.page]: action.query
+                    }
+                }
+            };
         case "screen.setStatus":
             return {
                 ...state,
                 interaction: {
                     ...state.interaction,
-                    screenStatusByPanel:
+                    screenStatusByPage:
                         action.status === undefined
-                            ? Object.fromEntries(
-                                  Object.entries(state.interaction.screenStatusByPanel).filter(([panel]) => panel !== action.panel)
-                              )
+                            ? {
+                                  ...state.interaction.screenStatusByPage,
+                                  [action.page]: action.status
+                              }
                             : {
-                                  ...state.interaction.screenStatusByPanel,
-                                  [action.panel]: action.status
+                                  ...state.interaction.screenStatusByPage,
+                                  [action.page]: action.status
                               }
                 }
             };
-        case "screen.setToggle":
+        case "ui.selectInstance":
             return {
                 ...state,
-                interaction: {
-                    ...state.interaction,
-                    screenToggleByPanel: {
-                        ...state.interaction.screenToggleByPanel,
-                        [action.panel]: action.value
+                ui: {
+                    ...state.ui,
+                    selectedInstance: action.instance
+                }
+            };
+        case "ui.selectPage":
+            return {
+                ...state,
+                ui: {
+                    ...state.ui,
+                    selectedPage: action.page
+                }
+            };
+        case "ui.toggleExpanded":
+            return {
+                ...state,
+                ui: {
+                    ...state.ui,
+                    expandedBoxes: {
+                        ...state.ui.expandedBoxes,
+                        [action.key]: state.ui.expandedBoxes[action.key] !== true
+                    }
+                }
+            };
+        case "ui.setScrollOffset":
+            return {
+                ...state,
+                ui: {
+                    ...state.ui,
+                    scrollOffsets: {
+                        ...state.ui.scrollOffsets,
+                        [action.key]: action.offset
                     }
                 }
             };
@@ -324,20 +331,18 @@ export function tuiAppReducer(state: TuiAppState, action: TuiAppAction): TuiAppS
                     redrawNonce: state.interaction.redrawNonce + 1
                 }
             };
-        case "snapshot.replace": {
-            const instance = action.snapshot.name;
+        case "snapshot.replace":
             return withDerivedState({
                 ...state,
                 lastSeqByInstance: {
                     ...state.lastSeqByInstance,
-                    [instance]: action.snapshot.lastSeq
+                    [action.snapshot.name]: action.snapshot.lastSeq
                 },
                 snapshotsByInstance: {
                     ...state.snapshotsByInstance,
-                    [instance]: action.snapshot
+                    [action.snapshot.name]: action.snapshot
                 }
             });
-        }
         case "toolCall.replace":
             return withDerivedState({
                 ...state,
@@ -374,6 +379,29 @@ export function tuiAppReducer(state: TuiAppState, action: TuiAppAction): TuiAppS
             };
             return withDerivedState(applyEventRecord(nextState, action.rawEvent));
         }
+        case "restore.push":
+            return {
+                ...state,
+                interaction: {
+                    ...state.interaction,
+                    restoreStack: [
+                        ...state.interaction.restoreStack,
+                        {
+                            focusScope: action.focusScope,
+                            mainFocusId: action.mainFocusId,
+                            sidebarFocus: action.sidebarFocus
+                        }
+                    ]
+                }
+            };
+        case "restore.pop":
+            return {
+                ...state,
+                interaction: {
+                    ...state.interaction,
+                    restoreStack: state.interaction.restoreStack.slice(0, -1)
+                }
+            };
     }
 }
 
@@ -383,6 +411,22 @@ export function toRawEventRecord(envelope: ControlEventEnvelope): TuiRawEventRec
         instance: envelope.target.instance,
         payload: envelope.payload,
         seq: envelope.seq
+    };
+}
+
+function selectInstanceAfterListReplace(state: TuiAppState): TuiAppState {
+    const names = new Set(state.instances.map((instance) => instance.name));
+    const selectedInstance =
+        state.ui.selectedInstance !== undefined && names.has(state.ui.selectedInstance)
+            ? state.ui.selectedInstance
+            : state.instances[0]?.name;
+
+    return {
+        ...state,
+        ui: {
+            ...state.ui,
+            selectedInstance
+        }
     };
 }
 

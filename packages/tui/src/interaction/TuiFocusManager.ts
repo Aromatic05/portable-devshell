@@ -1,18 +1,18 @@
 import type { TuiAppStore } from "../store/TuiAppStore.js";
-import type { TuiPanel } from "../store/TuiReducers.js";
 import { FocusGraph, type FocusDirection } from "./FocusGraph.js";
 import { type FocusItem, type TuiMode, isSameFocusItem } from "./TuiInteractionTypes.js";
+import type { PageId } from "../model/TuiUiTypes.js";
 
 export interface FocusManagerContext {
-    currentPanel(): TuiPanel;
-    graphFor(panel: TuiPanel, mode: TuiMode): FocusGraph;
+    currentPage(): PageId;
+    graphFor(page: PageId, mode: TuiMode): FocusGraph;
     mode(): TuiMode;
 }
 
 export class TuiFocusManager {
     readonly #context: FocusManagerContext;
-    readonly #panelMemory = new Map<TuiPanel, FocusItem>();
-    readonly #restoreStack: Array<{ focus?: FocusItem; mode: TuiMode; panel: TuiPanel }> = [];
+    readonly #pageMemory = new Map<PageId, FocusItem>();
+    readonly #restoreStack: Array<{ focus?: FocusItem; mode: TuiMode; page: PageId }> = [];
     readonly #store: TuiAppStore;
 
     constructor(store: TuiAppStore, context: FocusManagerContext) {
@@ -21,53 +21,75 @@ export class TuiFocusManager {
     }
 
     currentFocus(): FocusItem | undefined {
-        return this.#store.getState().interaction.currentFocus;
+        const scope = this.#store.getState().interaction.focusScope;
+        if (scope === "sidebarPages") {
+            return { id: this.#store.getState().ui.selectedPage, kind: "page" };
+        }
+        if (scope === "sidebarInstances") {
+            const instance = this.#store.getState().ui.selectedInstance;
+            return instance === undefined ? undefined : { id: instance, kind: "instance" };
+        }
+        if (scope === "mainBoxes" || scope === "boxDetail") {
+            const boxId = this.#store.getState().ui.mainFocusId;
+            return boxId === undefined ? undefined : { id: boxId, kind: "box" };
+        }
+        if (scope === "actionMenu") {
+            const actionId = this.#store.getState().interaction.selectedActionId;
+            return actionId === undefined ? undefined : { id: actionId, kind: "action" };
+        }
+        if (scope === "confirm") {
+            return { id: this.#store.getState().interaction.selectedConfirmButton, kind: "button" };
+        }
+        if (scope === "search") {
+            return { id: "search.query", kind: "field" };
+        }
+        return undefined;
     }
 
     currentMode(): TuiMode {
-        return this.#store.getState().interaction.mode;
+        return this.#store.getState().interaction.focusScope;
     }
 
-    currentPanel(): TuiPanel {
-        return this.#store.getState().activePanel;
+    currentPage(): PageId {
+        return this.#store.getState().ui.selectedPage;
     }
 
-    syncPanel(panel: TuiPanel, mode = this.currentMode()): void {
-        const graph = this.#context.graphFor(panel, mode);
-        const remembered = this.#panelMemory.get(panel);
+    syncPanel(page: PageId, mode = this.currentMode()): void {
+        const graph = this.#context.graphFor(page, mode);
+        const remembered = this.#pageMemory.get(page);
         const current = this.currentFocus();
         const nextFocus = graph.includes(current) ? current : graph.includes(remembered) ? remembered : graph.first();
-        this.#store.setCurrentFocus(nextFocus);
+        this.#applyFocus(nextFocus);
 
         if (nextFocus !== undefined) {
-            this.#panelMemory.set(panel, nextFocus);
+            this.#pageMemory.set(page, nextFocus);
         }
     }
 
     move(direction: FocusDirection): boolean {
-        const panel = this.currentPanel();
-        const graph = this.#context.graphFor(panel, this.currentMode());
+        const page = this.currentPage();
+        const graph = this.#context.graphFor(page, this.currentMode());
         const next = graph.move(this.currentFocus(), direction);
 
         if (next === undefined || isSameFocusItem(next, this.currentFocus())) {
             return false;
         }
 
-        this.#store.setCurrentFocus(next);
-        this.#panelMemory.set(panel, next);
+        this.#applyFocus(next);
+        this.#pageMemory.set(page, next);
         return true;
     }
 
     setFocus(item: FocusItem): boolean {
-        const panel = this.currentPanel();
-        const graph = this.#context.graphFor(panel, this.currentMode());
+        const page = this.currentPage();
+        const graph = this.#context.graphFor(page, this.currentMode());
 
         if (!graph.includes(item)) {
             return false;
         }
 
-        this.#store.setCurrentFocus(item);
-        this.#panelMemory.set(panel, item);
+        this.#applyFocus(item);
+        this.#pageMemory.set(page, item);
         return true;
     }
 
@@ -75,9 +97,9 @@ export class TuiFocusManager {
         this.#restoreStack.push({
             focus: this.currentFocus(),
             mode: this.currentMode(),
-            panel: this.currentPanel()
+            page: this.currentPage()
         });
-        this.#store.setMode(mode);
+        this.#store.setFocusScope(mode);
     }
 
     restore(): boolean {
@@ -87,14 +109,47 @@ export class TuiFocusManager {
             return false;
         }
 
-        this.#store.setMode(restored.mode);
-        this.#store.setActivePanel(restored.panel);
-        this.syncPanel(restored.panel, restored.mode);
+        this.#store.setFocusScope(restored.mode);
+        this.#store.setSelectedPage(restored.page);
+        this.syncPanel(restored.page, restored.mode);
 
         if (restored.focus !== undefined) {
             this.setFocus(restored.focus);
         }
 
         return true;
+    }
+
+    #applyFocus(item: FocusItem | undefined): void {
+        if (item === undefined) {
+            return;
+        }
+
+        switch (item.kind) {
+            case "page":
+                this.#store.setFocusScope("sidebarPages");
+                this.#store.setSidebarFocus("pages");
+                this.#store.setSelectedPage(item.id);
+                return;
+            case "instance":
+                this.#store.setFocusScope("sidebarInstances");
+                this.#store.setSidebarFocus("instances");
+                this.#store.setSelectedInstance(item.id);
+                return;
+            case "box":
+                this.#store.setFocusScope("mainBoxes");
+                this.#store.setMainFocusId(item.id);
+                return;
+            case "action":
+                this.#store.setFocusScope("actionMenu");
+                return;
+            case "button":
+                this.#store.setFocusScope("confirm");
+                this.#store.setConfirmFocus(item.id === "confirm" ? "confirm" : "cancel");
+                return;
+            case "field":
+                this.#store.setFocusScope("search");
+                return;
+        }
     }
 }
