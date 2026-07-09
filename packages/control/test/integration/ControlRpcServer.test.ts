@@ -18,6 +18,7 @@ async function verifyRpcMethodsOverReusedConnection(): Promise<void> {
         instanceRegistry: new InstanceRegistry([
             {
                 allowTools: [],
+                enabled: true,
                 mcpEnabled: false,
                 mcpPath: "",
                 name: "alpha",
@@ -250,6 +251,7 @@ async function verifyInteractiveStartRelay(): Promise<void> {
         instanceRegistry: new InstanceRegistry([
             {
                 allowTools: [],
+                enabled: true,
                 mcpEnabled: false,
                 mcpPath: "",
                 name: "alpha",

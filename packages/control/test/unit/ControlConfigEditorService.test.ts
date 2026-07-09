@@ -8,7 +8,7 @@ import {
     createDefaultControlConfig
 } from "../../dist/index.js";
 
-test("config editor updates instance config, exposes effective security mode, and reports apply summary", async () => {
+test("config editor accumulates apply summary across multiple updates", async () => {
     let config = createConfig();
     const registry = new InstanceRegistryBuilder().build(config);
     const writes: unknown[] = [];
@@ -72,6 +72,16 @@ test("config editor updates instance config, exposes effective security mode, an
     assert.equal(config.instances[0]?.approvalPolicy?.mode, "ask");
     assert.equal(registry.get("demo-local")?.worker.snapshot().effectiveSecurityMode, "workspace");
 
+    await service.updateMcpConfig({
+        auth: {
+            mode: "token"
+        },
+        enabled: true,
+        listenHost: "127.0.0.1",
+        listenPort: 17891,
+        publicBaseUrl: "http://127.0.0.1:17891"
+    });
+
     const applied = service.applyConfig() as {
         affectedInstances: string[];
         affectedMcpEndpoints: string[];
@@ -79,9 +89,12 @@ test("config editor updates instance config, exposes effective security mode, an
         reloadRequired: boolean;
         restartControlRequired: boolean;
     };
-    assert.deepEqual(applied.appliedChanges, [{ kind: "instance.updated", target: "demo-local" }]);
+    assert.deepEqual(applied.appliedChanges, [
+        { kind: "instance.updated", target: "demo-local" },
+        { kind: "mcp.updated", target: "mcp" }
+    ]);
     assert.deepEqual(applied.affectedInstances, ["demo-local"]);
-    assert.deepEqual(applied.affectedMcpEndpoints, ["/demo-local/mcp"]);
+    assert.deepEqual(applied.affectedMcpEndpoints, ["/demo-local/mcp", "mcp"]);
     assert.equal(applied.reloadRequired, true);
     assert.equal(applied.restartControlRequired, true);
     assert.deepEqual(service.applyConfig(), {
@@ -93,11 +106,87 @@ test("config editor updates instance config, exposes effective security mode, an
     });
 });
 
+test("config editor allows updating and disabling a running instance without dropping current control", async () => {
+    let config = createConfig();
+    const reconfigureCalls: Array<Record<string, unknown>> = [];
+    const registry = new InstanceRegistry([
+        {
+            allowTools: ["bash_run"],
+            enabled: true,
+            mcpEnabled: true,
+            mcpPath: "/demo-local/mcp",
+            name: "demo-local",
+            worker: {
+                reconfigure(input: Record<string, unknown>) {
+                    reconfigureCalls.push(input);
+                },
+                snapshot() {
+                    return {
+                        connectionState: "connected",
+                        daemonState: "running",
+                        effectiveSecurityMode: "disabled",
+                        lastSeq: 0,
+                        name: "demo-local",
+                        ready: true,
+                        status: "ready"
+                    };
+                }
+            }
+        }
+    ]);
+    const service = new ControlConfigEditorService({
+        configStore: {
+            async write(nextConfig: unknown) {
+                config = nextConfig as typeof config;
+            }
+        },
+        getConfig: () => config,
+        instanceRegistry: registry,
+        setConfig: (nextConfig) => {
+            config = nextConfig;
+        }
+    });
+
+    await service.updateInstanceConfig({
+        ...config.instances[0],
+        approvalPolicy: {
+            mode: "ask"
+        },
+        mcp: {
+            allowTools: ["bash_run"],
+            enabled: true,
+            path: "/demo-local/mcp"
+        },
+        security: {
+            mode: "workspace"
+        }
+    });
+    await service.disableInstance({ instanceName: "demo-local" });
+
+    assert.equal(config.instances[0]?.enabled, false);
+    assert.equal(config.instances[0]?.security?.mode, "workspace");
+    assert.equal(reconfigureCalls.length, 1);
+    assert.deepEqual(reconfigureCalls[0], {
+        approvalPolicy: {
+            mode: "ask",
+            rules: undefined
+        },
+        defaultWorkspace: "/tmp/demo",
+        effectiveSecurityMode: "workspace",
+        env: {
+            DEVSHELL_WORKER_INTERNAL_SECURITY_MODE: "workspace",
+            DEVSHELL_WORKER_SECURITY_MODE: "workspace"
+        }
+    });
+    assert.equal(registry.get("demo-local")?.enabled, false);
+});
+
 test("config editor refuses deleting a running instance", async () => {
     let config = createConfig();
     const registry = new InstanceRegistry([
         {
             allowTools: ["bash_run"],
+            enabled: true,
             mcpEnabled: true,
             mcpPath: "/demo-local/mcp",
             name: "demo-local",

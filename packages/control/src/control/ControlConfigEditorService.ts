@@ -1,4 +1,5 @@
 import {
+    asWorkspacePath,
     createError,
     errorCodes,
     type ApprovalPolicy,
@@ -89,15 +90,23 @@ export class ControlConfigEditorService {
             });
         }
 
-        this.#assertInstanceStopped(instance.name, "update");
         const nextConfig = this.#validateConfig({
             ...currentConfig,
             instances: currentConfig.instances.map((entry) => (entry.name === instance.name ? instance : entry))
         });
         await this.#persistConfig(nextConfig);
-        this.#instanceRegistry.delete(instance.name);
-        if (instance.enabled) {
-            this.#instanceRegistry.add(this.#instanceConfigMapper.map(instance));
+        const descriptor = this.#instanceRegistry.get(instance.name);
+
+        if (descriptor === undefined) {
+            if (instance.enabled) {
+                this.#instanceRegistry.add(this.#instanceConfigMapper.map(instance));
+            }
+        } else {
+            descriptor.allowTools = [...instance.mcp.allowTools];
+            descriptor.enabled = instance.enabled;
+            descriptor.mcpEnabled = instance.mcp.enabled;
+            descriptor.mcpPath = instance.mcp.path ?? `/${instance.name}/mcp`;
+            descriptor.worker.reconfigure(toWorkerReconfigureInput(instance));
         }
         this.#rememberApplyResult(buildApplyResult(currentConfig, nextConfig, [{ kind: "instance.updated", target: instance.name }]));
         return this.getConfigView();
@@ -168,10 +177,6 @@ export class ControlConfigEditorService {
             });
         }
 
-        if (!enabled) {
-            this.#assertInstanceStopped(instanceName, "disable");
-        }
-
         const nextConfig = this.#validateConfig({
             ...currentConfig,
             instances: currentConfig.instances.map((entry) => (entry.name === instanceName ? { ...entry, enabled } : entry))
@@ -179,10 +184,17 @@ export class ControlConfigEditorService {
 
         await this.#persistConfig(nextConfig);
 
+        const instance = nextConfig.instances.find((entry) => entry.name === instanceName)!;
+        const descriptor = this.#instanceRegistry.get(instanceName);
+
         if (enabled) {
-            this.#instanceRegistry.add(this.#instanceConfigMapper.map(nextConfig.instances.find((entry) => entry.name === instanceName)!));
-        } else {
-            this.#instanceRegistry.delete(instanceName);
+            if (descriptor === undefined) {
+                this.#instanceRegistry.add(this.#instanceConfigMapper.map(instance));
+            } else {
+                descriptor.enabled = true;
+            }
+        } else if (descriptor !== undefined) {
+            descriptor.enabled = false;
         }
 
         this.#rememberApplyResult(
@@ -224,7 +236,7 @@ export class ControlConfigEditorService {
     }
 
     #rememberApplyResult(result: ApplyResult): void {
-        this.#lastApplyResult = result;
+        this.#lastApplyResult = mergeApplyResults(this.#lastApplyResult, result);
     }
 }
 
@@ -308,6 +320,40 @@ function buildApplyResult(previous: ControlConfig, next: ControlConfig, appliedC
         appliedChanges,
         reloadRequired: affectedInstances.size > 0,
         restartControlRequired
+    };
+}
+
+function mergeApplyResults(previous: ApplyResult, next: ApplyResult): ApplyResult {
+    return {
+        affectedInstances: [...new Set([...previous.affectedInstances, ...next.affectedInstances])].sort((left, right) =>
+            left.localeCompare(right)
+        ),
+        affectedMcpEndpoints: [...new Set([...previous.affectedMcpEndpoints, ...next.affectedMcpEndpoints])].sort((left, right) =>
+            left.localeCompare(right)
+        ),
+        appliedChanges: [...previous.appliedChanges, ...next.appliedChanges],
+        reloadRequired: previous.reloadRequired || next.reloadRequired,
+        restartControlRequired: previous.restartControlRequired || next.restartControlRequired
+    };
+}
+
+function toWorkerReconfigureInput(instance: ControlInstanceConfig): {
+    approvalPolicy?: ApprovalPolicy;
+    defaultWorkspace?: ReturnType<typeof asWorkspacePath>;
+    effectiveSecurityMode: "disabled" | "workspace";
+    env?: NodeJS.ProcessEnv;
+} {
+    const effectiveSecurityMode = resolveSecurityMode(instance.security?.mode);
+
+    return {
+        approvalPolicy: instance.approvalPolicy,
+        defaultWorkspace: instance.workspace === undefined ? undefined : asWorkspacePath(instance.workspace),
+        effectiveSecurityMode,
+        env: {
+            ...instance.env,
+            DEVSHELL_WORKER_INTERNAL_SECURITY_MODE: effectiveSecurityMode,
+            DEVSHELL_WORKER_SECURITY_MODE: effectiveSecurityMode
+        }
     };
 }
 

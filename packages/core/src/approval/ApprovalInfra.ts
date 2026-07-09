@@ -94,7 +94,7 @@ interface ApprovalManagerOptions {
 
 export class ApprovalManager {
     readonly #instanceName: InstanceName;
-    readonly #policy: ApprovalPolicy;
+    #policy: ApprovalPolicy;
     readonly #store: ApprovalStore;
     readonly #timeoutMs: number;
     readonly #pending = new Map<
@@ -249,6 +249,10 @@ export class ApprovalManager {
         }
 
         return resolvedRequest;
+    }
+
+    setPolicy(policy: ApprovalPolicy | undefined): void {
+        this.#policy = policy ?? { mode: "disabled" };
     }
 
     async #expire(approvalId: string): Promise<ApprovalResolution> {

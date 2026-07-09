@@ -442,6 +442,19 @@ export class WorkerInstance {
         return await this.#toolCallHistory.read(query);
     }
 
+    reconfigure(input: {
+        approvalPolicy?: ResolvedWorkerInstanceConfig["approvalPolicy"];
+        defaultWorkspace?: WorkspacePath;
+        effectiveSecurityMode: ResolvedWorkerInstanceConfig["effectiveSecurityMode"];
+        env?: NodeJS.ProcessEnv;
+    }): void {
+        this.#config.approvalPolicy = input.approvalPolicy;
+        this.#config.defaultWorkspace = input.defaultWorkspace;
+        this.#config.effectiveSecurityMode = input.effectiveSecurityMode;
+        this.#config.env = input.env;
+        this.#approvalManager.setPolicy(input.approvalPolicy);
+    }
+
     async appendMcpSessionOpened(sessionId: string): Promise<void> {
         await this.#appendEvent("mcp.sessionOpened", toEventData({ sessionId }));
     }

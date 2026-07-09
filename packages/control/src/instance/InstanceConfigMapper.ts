@@ -16,6 +16,7 @@ export class InstanceConfigMapper {
 
         return {
             allowTools: instance.mcp.allowTools,
+            enabled: instance.enabled,
             mcpEnabled: instance.mcp.enabled,
             mcpPath: `/${instance.name}/mcp`,
             name: instance.name,

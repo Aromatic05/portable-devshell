@@ -18,6 +18,7 @@ async function verifyStreamRecovery(): Promise<void> {
         instanceRegistry: new InstanceRegistry([
             {
                 allowTools: [],
+                enabled: true,
                 mcpEnabled: false,
                 mcpPath: "",
                 name: "alpha",

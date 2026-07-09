@@ -62,6 +62,14 @@ export class RouteHandlerInstance {
                 } as unknown as JsonValue;
             }
             case "instance.start":
+                if (!descriptor.enabled) {
+                    throw createError({
+                        code: errorCodes.instanceConflict,
+                        details: { instance: descriptor.name, operation: "start" },
+                        message: `Instance ${descriptor.name} is disabled.`,
+                        retryable: false
+                    });
+                }
                 return (
                     await this.#startInteractive(
                         connection,
@@ -76,7 +84,7 @@ export class RouteHandlerInstance {
                     )
                 ) as unknown as JsonValue;
             case "instance.stop":
-                return (await descriptor.worker.stop()) as unknown as JsonValue;
+                return (await this.#stopInstance(descriptor)) as unknown as JsonValue;
             case "instance.readLogs":
                 return (await descriptor.worker.readLogs(readLogQuery(params))) as unknown as JsonValue;
             case "instance.readToolCalls":
@@ -133,6 +141,16 @@ export class RouteHandlerInstance {
             connection.unregisterRelaySession(requestId);
             relay.closeInput();
         }
+    }
+
+    async #stopInstance(descriptor: { enabled: boolean; name: string; worker: { stop(): Promise<unknown> } }): Promise<unknown> {
+        const result = await descriptor.worker.stop();
+
+        if (!descriptor.enabled) {
+            this.#instanceRegistry.delete(descriptor.name);
+        }
+
+        return result;
     }
 }
 
