@@ -23,6 +23,7 @@ const releaseRepositoryEnvVar = "PORTABLE_DEVSHELL_WORKER_RELEASE_REPOSITORY";
 const releaseBaseUrlEnvVar = "PORTABLE_DEVSHELL_WORKER_RELEASE_BASE_URL";
 const releaseTagEnvVar = "PORTABLE_DEVSHELL_WORKER_RELEASE_TAG";
 const cacheDirectoryEnvVar = "PORTABLE_DEVSHELL_WORKER_CACHE_DIR";
+const defaultReleaseRepository = "Aromatic05/portable-devshell";
 
 export class WorkerAssetResolver {
     readonly #moduleDir: string;
@@ -271,12 +272,8 @@ export class WorkerAssetResolver {
             return explicitBaseUrl.replace(/\/+$/u, "");
         }
 
-        const repository = process.env[releaseRepositoryEnvVar];
-        if (repository !== undefined && repository.length > 0) {
-            return `https://github.com/${repository.replace(/^\/+|\/+$/gu, "")}/releases/download`;
-        }
-
-        return undefined;
+        const repository = process.env[releaseRepositoryEnvVar] ?? defaultReleaseRepository;
+        return repository.length > 0 ? `https://github.com/${repository.replace(/^\/+|\/+$/gu, "")}/releases/download` : undefined;
     }
 
     #resolveReleaseTag(): string | undefined {
