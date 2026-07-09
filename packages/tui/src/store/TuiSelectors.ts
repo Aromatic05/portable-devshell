@@ -1,4 +1,5 @@
-import type { TuiAppState, TuiConnectionState, TuiInstanceListEntry, TuiPanel, TuiRawEventRecord } from "./TuiReducers.js";
+import { focusItemKey, type FocusItem, type TuiMode } from "../interaction/TuiInteractionTypes.js";
+import type { TuiAppState, TuiConnectionState, TuiPanel, TuiRawEventRecord } from "./TuiReducers.js";
 
 const panels: Array<{ label: string; panel: TuiPanel }> = [
     { label: "Instances", panel: "instances" },
@@ -22,7 +23,7 @@ export function selectHeaderTitle(): string {
 }
 
 export function selectHeaderSummary(state: TuiAppState): string {
-    return `instances ${state.instances.length} | connected ${state.globalDerived.connectedInstanceCount} | events ${state.globalDerived.totalEventCount}`;
+    return `instances ${state.instances.length} | live ${state.globalDerived.connectedInstanceCount} | events ${state.globalDerived.totalEventCount}`;
 }
 
 export function selectSidebarItems(state: TuiAppState): Array<{ active: boolean; label: string; panel: TuiPanel }> {
@@ -53,7 +54,21 @@ export function selectRecentEvents(state: TuiAppState, limit = 10): TuiRawEventR
 }
 
 export function selectFooterText(state: TuiAppState): string {
-    return `state ${state.connection.status} | panel ${panelLabel(state.activePanel)} | ↑↓ switch | 1-6 jump | r reconnect | q quit`;
+    const prefix = `${state.connection.status} ${panelLabel(state.activePanel)} ${state.interaction.mode}`;
+    const focus = state.interaction.currentFocus === undefined ? "focus none" : `focus ${focusLabel(state.interaction.currentFocus)}`;
+
+    switch (state.interaction.mode) {
+        case "actionMenu":
+            return `${prefix} | ${focus} | ↑↓ enter ctrl+[`;
+        case "confirm":
+            return `${prefix} | ${focus} | tab ←→ enter ctrl+[`;
+        case "search":
+            return `${prefix} | ${focus} | type bs enter ctrl+[`;
+        case "edit":
+            return `${prefix} | ${focus} | 1-6 [] tab ↔ enter sp a / ^[ ^D ^L`;
+        case "normal":
+            return `${prefix} | ${focus} | 1-6 [] tab ↔ enter sp a / ? ^D ^L`;
+    }
 }
 
 export function selectErrorMessage(state: TuiAppState): string[] | undefined {
@@ -82,10 +97,10 @@ export function selectConfigLines(state: TuiAppState): string[] {
 
 export function selectConnectorLines(state: TuiAppState): string[] {
     return [
-        `Connection state: ${state.connection.status}`,
-        `Control instances: ${state.instances.length}`,
-        "Prompt 1 scope: control RPC only.",
-        "No worker RPC, attach shell, or config editing."
+        `connection ${state.connection.status}`,
+        `instances ${state.instances.length}`,
+        "control RPC only",
+        "no worker RPC"
     ];
 }
 
@@ -100,16 +115,66 @@ export function selectAuditLines(state: TuiAppState): string[] {
 }
 
 export function selectLogLines(state: TuiAppState): string[] {
-    return [
-        "Prompt 1 does not read worker log files.",
-        `Buffered control events: ${state.rawEvents.length}`
-    ];
+    return ["logs placeholder", `events ${state.rawEvents.length}`];
 }
 
 export function selectHelpLines(): string[] {
-    return ["q quit", "r reconnect control session", "up/down move sidebar selection", "1-6 jump to panel"];
+    return ["ctrl+d quit", "ctrl+[ close", "1-6 panels", "[ ] cycle", "tab arrows move", "a menu", "/ search", "? help"];
+}
+
+export function selectFooterModel(state: TuiAppState): { mode: TuiMode; text: string } {
+    return {
+        mode: state.interaction.mode,
+        text: selectFooterText(state)
+    };
+}
+
+export function selectActionMenuModel(state: TuiAppState): { items: Array<{ active: boolean; id: string; label: string }>; open: boolean; title: string } {
+    const focused = state.interaction.currentFocus;
+
+    return {
+        items: state.interaction.actionMenu.items.map((item) => ({
+            active: focused?.kind === "action" && focused.id === item.id,
+            id: item.id,
+            label: item.label
+        })),
+        open: state.interaction.actionMenu.open,
+        title: state.interaction.actionMenu.title
+    };
+}
+
+export function selectConfirmDialogModel(state: TuiAppState): {
+    body: string;
+    confirmFocused: boolean;
+    confirmLabel: string;
+    open: boolean;
+    cancelFocused: boolean;
+    cancelLabel: string;
+    title: string;
+} {
+    return {
+        body: state.interaction.confirmDialog.body,
+        cancelFocused: state.interaction.currentFocus?.kind === "button" && state.interaction.currentFocus.id === "cancel",
+        cancelLabel: state.interaction.confirmDialog.cancelLabel,
+        confirmFocused: state.interaction.currentFocus?.kind === "button" && state.interaction.currentFocus.id === "confirm",
+        confirmLabel: state.interaction.confirmDialog.confirmLabel,
+        open: state.interaction.confirmDialog.open,
+        title: state.interaction.confirmDialog.title
+    };
+}
+
+export function selectSearchModel(state: TuiAppState): { open: boolean; query: string } {
+    return {
+        open: state.interaction.search.open,
+        query: state.interaction.search.query
+    };
 }
 
 function panelLabel(panel: TuiPanel): string {
     return panels.find((item) => item.panel === panel)?.label ?? panel;
+}
+
+function focusLabel(item: FocusItem): string {
+    const compactId = item.id.includes(".") ? item.id.split(".").at(-1) ?? item.id : item.id;
+    return `${item.kind}:${compactId}`;
 }

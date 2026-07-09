@@ -10,6 +10,7 @@ import {
     type TuiInstanceListEntry,
     type TuiPanel
 } from "./TuiReducers.js";
+import type { FocusItem, TuiActionMenuItem, TuiMode, TuiUiIntent } from "../interaction/TuiInteractionTypes.js";
 
 export interface TuiAppStoreOptions {
     initialState?: TuiAppState;
@@ -71,6 +72,91 @@ export class TuiAppStore {
             errorMessage: error?.message,
             status,
             type: "control.setConnectionState"
+        });
+    }
+
+    setCurrentFocus(item?: FocusItem): void {
+        this.dispatch({
+            item,
+            type: "focus.setCurrent"
+        });
+    }
+
+    setMode(mode: TuiMode): void {
+        this.dispatch({
+            mode,
+            type: "mode.set"
+        });
+    }
+
+    setDirty(value: boolean): void {
+        this.dispatch({
+            type: "interaction.setDirty",
+            value
+        });
+    }
+
+    setActionMenu(title: string, items: TuiActionMenuItem[], selectedIndex = 0): void {
+        this.dispatch({
+            items,
+            selectedIndex,
+            title,
+            type: "overlay.setActionMenu"
+        });
+    }
+
+    setConfirmDialog(input: {
+        body: string;
+        cancelLabel?: string;
+        confirmIntent: TuiUiIntent;
+        confirmLabel?: string;
+        open: boolean;
+        title: string;
+    }): void {
+        this.dispatch({
+            body: input.body,
+            cancelLabel: input.cancelLabel ?? "Cancel",
+            confirmIntent: input.confirmIntent,
+            confirmLabel: input.confirmLabel ?? "Confirm",
+            open: input.open,
+            title: input.title,
+            type: "overlay.setConfirmDialog"
+        });
+    }
+
+    setSearchOpen(value: boolean): void {
+        this.dispatch({
+            type: "search.setOpen",
+            value
+        });
+    }
+
+    setSearchQuery(query: string): void {
+        this.dispatch({
+            query,
+            type: "search.setQuery"
+        });
+    }
+
+    setScreenStatus(panel: TuiPanel, status?: string): void {
+        this.dispatch({
+            panel,
+            status,
+            type: "screen.setStatus"
+        });
+    }
+
+    setScreenToggle(panel: TuiPanel, value: boolean): void {
+        this.dispatch({
+            panel,
+            type: "screen.setToggle",
+            value
+        });
+    }
+
+    bumpRedrawNonce(): void {
+        this.dispatch({
+            type: "ui.bumpRedrawNonce"
         });
     }
 

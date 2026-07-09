@@ -1,165 +1,100 @@
-export interface TuiFocusEntry {
-    actionId?: string;
-    id: string;
-    visible?: boolean;
-}
+import type { TuiAppStore } from "../store/TuiAppStore.js";
+import type { TuiPanel } from "../store/TuiReducers.js";
+import { FocusGraph, type FocusDirection } from "./FocusGraph.js";
+import { type FocusItem, type TuiMode, isSameFocusItem } from "./TuiInteractionTypes.js";
 
-export interface TuiFocusScope {
-    id: string;
-    parentId?: string;
+export interface FocusManagerContext {
+    currentPanel(): TuiPanel;
+    graphFor(panel: TuiPanel, mode: TuiMode): FocusGraph;
+    mode(): TuiMode;
 }
 
 export class TuiFocusManager {
-    readonly #entries = new Map<string, TuiFocusEntry[]>();
-    readonly #scopes = new Map<string, TuiFocusScope>();
-    readonly #stack: string[] = [];
-    readonly #lastFocusedByScope = new Map<string, string>();
-    #focusedId?: string;
+    readonly #context: FocusManagerContext;
+    readonly #panelMemory = new Map<TuiPanel, FocusItem>();
+    readonly #restoreStack: Array<{ focus?: FocusItem; mode: TuiMode; panel: TuiPanel }> = [];
+    readonly #store: TuiAppStore;
 
-    registerScope(scope: TuiFocusScope): void {
-        this.#scopes.set(scope.id, { ...scope });
+    constructor(store: TuiAppStore, context: FocusManagerContext) {
+        this.#store = store;
+        this.#context = context;
+    }
 
-        if (this.#stack.length === 0) {
-            this.#stack.push(scope.id);
+    currentFocus(): FocusItem | undefined {
+        return this.#store.getState().interaction.currentFocus;
+    }
+
+    currentMode(): TuiMode {
+        return this.#store.getState().interaction.mode;
+    }
+
+    currentPanel(): TuiPanel {
+        return this.#store.getState().activePanel;
+    }
+
+    syncPanel(panel: TuiPanel, mode = this.currentMode()): void {
+        const graph = this.#context.graphFor(panel, mode);
+        const remembered = this.#panelMemory.get(panel);
+        const current = this.currentFocus();
+        const nextFocus = graph.includes(current) ? current : graph.includes(remembered) ? remembered : graph.first();
+        this.#store.setCurrentFocus(nextFocus);
+
+        if (nextFocus !== undefined) {
+            this.#panelMemory.set(panel, nextFocus);
         }
     }
 
-    setScopeEntries(scopeId: string, entries: ReadonlyArray<TuiFocusEntry>): void {
-        this.#entries.set(
-            scopeId,
-            entries.map((entry) => ({
-                ...entry,
-                visible: entry.visible !== false
-            }))
-        );
+    move(direction: FocusDirection): boolean {
+        const panel = this.currentPanel();
+        const graph = this.#context.graphFor(panel, this.currentMode());
+        const next = graph.move(this.currentFocus(), direction);
 
-        if (this.#currentScopeId() === scopeId && !this.#isVisible(this.#focusedId)) {
-            this.focusFirstVisible(scopeId);
-        }
-    }
-
-    enterScope(scopeId: string, focusedId?: string): void {
-        if (!this.#scopes.has(scopeId)) {
-            throw new Error(`Unknown focus scope: ${scopeId}`);
-        }
-
-        if (this.#currentScopeId() !== scopeId) {
-            this.#stack.push(scopeId);
-        }
-
-        if (focusedId !== undefined && this.focus(scopeId, focusedId)) {
-            return;
-        }
-
-        this.focusFirstVisible(scopeId);
-    }
-
-    exitScope(): boolean {
-        if (this.#stack.length <= 1) {
+        if (next === undefined || isSameFocusItem(next, this.currentFocus())) {
             return false;
         }
 
-        this.#stack.pop();
-        this.focusFirstVisible(this.#currentScopeId());
+        this.#store.setCurrentFocus(next);
+        this.#panelMemory.set(panel, next);
         return true;
     }
 
-    focus(scopeId: string, entryId: string): boolean {
-        const entry = this.#visibleEntries(scopeId).find((candidate) => candidate.id === entryId);
+    setFocus(item: FocusItem): boolean {
+        const panel = this.currentPanel();
+        const graph = this.#context.graphFor(panel, this.currentMode());
 
-        if (entry === undefined) {
+        if (!graph.includes(item)) {
             return false;
         }
 
-        this.#focusedId = entry.id;
-        this.#lastFocusedByScope.set(scopeId, entry.id);
+        this.#store.setCurrentFocus(item);
+        this.#panelMemory.set(panel, item);
         return true;
     }
 
-    focusFirstVisible(scopeId = this.#currentScopeId()): boolean {
-        const rememberedId = this.#lastFocusedByScope.get(scopeId);
+    pushRestore(mode: TuiMode): void {
+        this.#restoreStack.push({
+            focus: this.currentFocus(),
+            mode: this.currentMode(),
+            panel: this.currentPanel()
+        });
+        this.#store.setMode(mode);
+    }
 
-        if (rememberedId !== undefined && this.focus(scopeId, rememberedId)) {
-            return true;
-        }
+    restore(): boolean {
+        const restored = this.#restoreStack.pop();
 
-        const entry = this.#visibleEntries(scopeId)[0];
-
-        if (entry === undefined) {
-            this.#focusedId = undefined;
+        if (restored === undefined) {
             return false;
         }
 
-        this.#focusedId = entry.id;
-        this.#lastFocusedByScope.set(scopeId, entry.id);
+        this.#store.setMode(restored.mode);
+        this.#store.setActivePanel(restored.panel);
+        this.syncPanel(restored.panel, restored.mode);
+
+        if (restored.focus !== undefined) {
+            this.setFocus(restored.focus);
+        }
+
         return true;
-    }
-
-    focusNext(): boolean {
-        return this.#move(1);
-    }
-
-    focusPrevious(): boolean {
-        return this.#move(-1);
-    }
-
-    focusDirectional(direction: "down" | "left" | "right" | "up"): boolean {
-        return direction === "left" || direction === "up" ? this.focusPrevious() : this.focusNext();
-    }
-
-    currentScopeId(): string {
-        return this.#currentScopeId();
-    }
-
-    currentFocusId(): string | undefined {
-        return this.#focusedId;
-    }
-
-    currentEntry(): TuiFocusEntry | undefined {
-        return this.#visibleEntries(this.#currentScopeId()).find((entry) => entry.id === this.#focusedId);
-    }
-
-    visibleEntries(scopeId = this.#currentScopeId()): TuiFocusEntry[] {
-        return this.#visibleEntries(scopeId).map((entry) => ({ ...entry }));
-    }
-
-    #move(offset: 1 | -1): boolean {
-        const entries = this.#visibleEntries(this.#currentScopeId());
-
-        if (entries.length === 0) {
-            this.#focusedId = undefined;
-            return false;
-        }
-
-        const currentIndex = this.#focusedId === undefined ? -1 : entries.findIndex((entry) => entry.id === this.#focusedId);
-        const baseIndex = currentIndex === -1 ? (offset === 1 ? -1 : 0) : currentIndex;
-        const nextIndex = (baseIndex + offset + entries.length) % entries.length;
-        this.#focusedId = entries[nextIndex]?.id;
-        if (this.#focusedId !== undefined) {
-            this.#lastFocusedByScope.set(this.#currentScopeId(), this.#focusedId);
-        }
-        return this.#focusedId !== undefined;
-    }
-
-    #currentScopeId(): string {
-        const scopeId = this.#stack.at(-1);
-
-        if (scopeId === undefined) {
-            throw new Error("Focus manager has no active scope.");
-        }
-
-        return scopeId;
-    }
-
-    #visibleEntries(scopeId: string): TuiFocusEntry[] {
-        return (this.#entries.get(scopeId) ?? []).filter((entry) => entry.visible !== false);
-    }
-
-    #isVisible(entryId: string | undefined): boolean {
-        if (entryId === undefined) {
-            return false;
-        }
-
-        return this.#visibleEntries(this.#currentScopeId()).some((entry) => entry.id === entryId);
     }
 }

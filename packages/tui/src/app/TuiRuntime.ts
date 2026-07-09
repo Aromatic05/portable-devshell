@@ -6,7 +6,11 @@ import { render, type Instance as InkInstance } from "ink";
 import { TuiApp } from "./TuiApp.js";
 import { TuiControlClient } from "../control/TuiControlClient.js";
 import { TuiControlSession } from "../control/TuiControlSession.js";
+import { CommandDispatcher } from "../interaction/CommandDispatcher.js";
+import { KeyDispatcher } from "../interaction/KeyDispatcher.js";
+import { TuiFocusManager } from "../interaction/TuiFocusManager.js";
 import { RenderScheduler } from "../render/RenderScheduler.js";
+import { buildFocusGraphForState } from "../screen/ScreenRouter.js";
 import { TuiAppStore } from "../store/TuiAppStore.js";
 
 export interface TuiRuntimeOptions {
@@ -16,6 +20,9 @@ export interface TuiRuntimeOptions {
 }
 
 export class TuiRuntime {
+    readonly commandDispatcher: CommandDispatcher;
+    readonly focusManager: TuiFocusManager;
+    readonly keyDispatcher: KeyDispatcher;
     readonly scheduler: RenderScheduler;
     readonly session: TuiControlSession;
     readonly store: TuiAppStore;
@@ -31,6 +38,30 @@ export class TuiRuntime {
         this.#stdout = options.stdout ?? process.stdout;
         this.store = new TuiAppStore();
         this.scheduler = new RenderScheduler(this.store);
+        this.focusManager = new TuiFocusManager(this.store, {
+            currentPanel: () => this.store.getState().activePanel,
+            graphFor: (panel, mode) =>
+                buildFocusGraphForState({
+                    ...this.store.getState(),
+                    activePanel: panel,
+                    interaction: {
+                        ...this.store.getState().interaction,
+                        mode
+                    }
+                }),
+            mode: () => this.store.getState().interaction.mode
+        });
+        this.keyDispatcher = new KeyDispatcher();
+        this.commandDispatcher = new CommandDispatcher({
+            focusManager: this.focusManager,
+            onQuit: async () => {
+                await this.stop();
+            },
+            onRedraw: () => {
+                this.redraw();
+            },
+            store: this.store
+        });
         this.#client = new TuiControlClient({
             xdgRuntimeDir: options.xdgRuntimeDir
         });
@@ -39,6 +70,7 @@ export class TuiRuntime {
             store: this.store
         });
         this.#alternateScreen = new AlternateScreen(this.#stdout);
+        this.focusManager.syncPanel(this.store.getState().activePanel, this.store.getState().interaction.mode);
     }
 
     async run(): Promise<void> {
@@ -58,6 +90,32 @@ export class TuiRuntime {
         await this.session.reconnect();
     }
 
+    get columns(): number {
+        return this.#stdout.columns ?? 120;
+    }
+
+    get rows(): number {
+        return this.#stdout.rows ?? 40;
+    }
+
+    async handleInput(input: string, key: {
+        backspace?: boolean;
+        ctrl?: boolean;
+        downArrow?: boolean;
+        end?: boolean;
+        home?: boolean;
+        leftArrow?: boolean;
+        pageDown?: boolean;
+        pageUp?: boolean;
+        return?: boolean;
+        rightArrow?: boolean;
+        shift?: boolean;
+        tab?: boolean;
+        upArrow?: boolean;
+    }): Promise<void> {
+        await this.commandDispatcher.dispatchMany(this.keyDispatcher.dispatch(this.store.getState().interaction.mode, { input, key }));
+    }
+
     async stop(): Promise<void> {
         if (this.#stopped) {
             return;
@@ -68,6 +126,10 @@ export class TuiRuntime {
         this.scheduler.dispose();
         this.#ink?.unmount();
         this.#alternateScreen.exit();
+    }
+
+    redraw(): void {
+        this.#stdout.write("\u001B[2J\u001B[H");
     }
 }
 
