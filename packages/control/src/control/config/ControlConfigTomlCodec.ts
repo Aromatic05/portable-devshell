@@ -49,9 +49,9 @@ export interface ControlInstanceConfig {
 }
 
 export interface ControlMcpOAuth2Config {
-    audience: string;
+    audience?: string;
     documentationUrl?: string;
-    issuer: string;
+    issuer?: string;
     jwksUri?: string;
     requiredScopes: string[];
     resourceName: string;
@@ -162,9 +162,9 @@ function parseOauth2Config(value: unknown): ControlMcpOAuth2Config {
     const oauth2 = asRecord(value, "mcp.auth.oauth2");
 
     return {
-        audience: asString(oauth2.audience, "mcp.auth.oauth2.audience"),
+        audience: asOptionalString(oauth2.audience, "mcp.auth.oauth2.audience"),
         documentationUrl: asOptionalString(oauth2.documentationUrl, "mcp.auth.oauth2.documentationUrl"),
-        issuer: asString(oauth2.issuer, "mcp.auth.oauth2.issuer"),
+        issuer: asOptionalString(oauth2.issuer, "mcp.auth.oauth2.issuer"),
         jwksUri: asOptionalString(oauth2.jwksUri, "mcp.auth.oauth2.jwksUri"),
         requiredScopes: oauth2.requiredScopes === undefined ? [] : asStringArray(oauth2.requiredScopes, "mcp.auth.oauth2.requiredScopes"),
         resourceName: asString(oauth2.resourceName, "mcp.auth.oauth2.resourceName")

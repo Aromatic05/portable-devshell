@@ -27,6 +27,7 @@ export class McpHostHttpServer {
     readonly #listenHost: string;
     readonly #listenPort: number;
     readonly #oauth?: McpOAuthProtectedResource;
+    #oauthInstalled = false;
     readonly #publicBaseUrl?: string;
     readonly #registeredPaths = new Set<string>();
     readonly #tokenProvider = new McpAuthProviderToken();
@@ -40,12 +41,16 @@ export class McpHostHttpServer {
         this.#publicBaseUrl = options.publicBaseUrl;
 
         this.#app.disable("x-powered-by");
-        this.#registerGlobalMetadataRoute();
     }
 
     async start(): Promise<void> {
         if (this.#server !== undefined) {
             return;
+        }
+
+        if (this.#oauth !== undefined && !this.#oauthInstalled) {
+            this.#oauth.install(this.#app);
+            this.#oauthInstalled = true;
         }
 
         this.#server = createServer(this.#app);
@@ -90,8 +95,9 @@ export class McpHostHttpServer {
         const resourceServerUrl = this.#toPublicResourceUrl(path);
 
         if (this.#auth?.provider === "oauth2" && this.#oauth !== undefined && resourceServerUrl !== undefined) {
+            this.#oauth.registerResource(resourceServerUrl);
             routeHandlers.push(this.#oauth.requestAuthHandler(resourceServerUrl));
-            this.#app.use(this.#oauthProtectedResourceMetadataPath(path), this.#oauth.protectedResourceMetadataHandler(resourceServerUrl));
+            this.#app.use(this.#oauthProtectedResourceMetadataPath(resourceServerUrl), this.#oauth.protectedResourceMetadataHandler(resourceServerUrl));
         } else if (this.#auth?.provider === "token") {
             routeHandlers.push((request: Request, response: Response, next: NextFunction) => {
                 const authorized = this.#tokenProvider.authorize(request.headers.authorization);
@@ -126,16 +132,9 @@ export class McpHostHttpServer {
         return isRecord(value) ? value : {};
     }
 
-    #oauthProtectedResourceMetadataPath(path: string): string {
-        return `/.well-known/oauth-protected-resource${path === "/" ? "" : path}`;
-    }
-
-    #registerGlobalMetadataRoute(): void {
-        if (this.#auth?.provider !== "oauth2" || this.#oauth === undefined) {
-            return;
-        }
-
-        this.#app.use("/.well-known/oauth-authorization-server", this.#oauth.authorizationServerMetadataHandler());
+    #oauthProtectedResourceMetadataPath(resourceServerUrl: URL): string {
+        const pathname = resourceServerUrl.pathname;
+        return `/.well-known/oauth-protected-resource${pathname === "/" ? "" : pathname}`;
     }
 
     #toPublicResourceUrl(path: string): URL | undefined {

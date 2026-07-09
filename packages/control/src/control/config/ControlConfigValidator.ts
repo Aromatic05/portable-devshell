@@ -177,15 +177,8 @@ export class ControlConfigValidator {
     }
 
     #validateOauth2(config: ControlMcpOAuth2Config): void {
-        parseUrl(config.issuer, "mcp.auth.oauth2.issuer");
-        parseUrl(config.audience, "mcp.auth.oauth2.audience");
-
         if (config.documentationUrl !== undefined) {
             parseUrl(config.documentationUrl, "mcp.auth.oauth2.documentationUrl");
-        }
-
-        if (config.jwksUri !== undefined) {
-            parseUrl(config.jwksUri, "mcp.auth.oauth2.jwksUri");
         }
     }
 }

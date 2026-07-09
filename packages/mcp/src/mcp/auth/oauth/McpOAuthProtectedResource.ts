@@ -1,54 +1,164 @@
-import type { Request, RequestHandler, Response } from "express";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { userInfo } from "node:os";
+import { join } from "node:path";
 
-import { discoverAuthorizationServerMetadata } from "@modelcontextprotocol/sdk/client/auth.js";
-import {
-    InvalidTokenError,
-    ServerError
-} from "@modelcontextprotocol/sdk/server/auth/errors.js";
+import express, { type Express, type Request, type RequestHandler, type Response } from "express";
+import { exportJWK, generateKeyPair } from "jose";
+import Provider from "oidc-provider";
+
+import { InvalidTokenError, ServerError } from "@modelcontextprotocol/sdk/server/auth/errors.js";
 import { requireBearerAuth } from "@modelcontextprotocol/sdk/server/auth/middleware/bearerAuth.js";
 import type { OAuthTokenVerifier } from "@modelcontextprotocol/sdk/server/auth/provider.js";
 import { getOAuthProtectedResourceMetadataUrl } from "@modelcontextprotocol/sdk/server/auth/router.js";
 import { checkResourceAllowed, resourceUrlFromServerUrl } from "@modelcontextprotocol/sdk/shared/auth-utils.js";
-import type {
-    AuthorizationServerMetadata,
-    OAuthProtectedResourceMetadata
-} from "@modelcontextprotocol/sdk/shared/auth.js";
-import { createRemoteJWKSet, jwtVerify, errors as joseErrors, type JWTPayload, type JWTVerifyGetKey } from "jose";
+import type { OAuthProtectedResourceMetadata } from "@modelcontextprotocol/sdk/shared/auth.js";
 
 import type { McpOAuth2Config } from "../McpAuthConfig.js";
+import { createMcpOidcFileAdapterFactory } from "./McpOidcFileAdapter.js";
 
-interface McpOAuthState {
-    authorizationServerMetadata: AuthorizationServerMetadata;
-    jwksUri: string;
-    keySet: JWTVerifyGetKey;
-}
+type ProviderGrant = InstanceType<Provider["Grant"]>;
 
 export class McpOAuthProtectedResource {
+    readonly #accountId = readLocalAccountId();
+    readonly #basePath: string;
     readonly #config: McpOAuth2Config;
-    readonly #verifier: McpOAuthTokenVerifier;
+    readonly #issuerUrl: URL;
+    readonly #registeredResources = new Set<string>();
+    readonly #storageDir: string;
+    #provider?: Provider;
 
-    constructor(config: McpOAuth2Config) {
+    constructor(config: McpOAuth2Config, publicBaseUrl: string, storageDir: string) {
         this.#config = config;
-        this.#verifier = new McpOAuthTokenVerifier(config);
+        this.#issuerUrl = new URL(publicBaseUrl);
+        this.#basePath = normalizeBasePath(this.#issuerUrl.pathname);
+        this.#storageDir = storageDir;
+    }
+
+    registerResource(resourceServerUrl: URL): void {
+        this.#registeredResources.add(resourceUrlFromServerUrl(resourceServerUrl).href);
     }
 
     async warmup(): Promise<void> {
-        await this.#verifier.warmup();
+        if (this.#provider !== undefined) {
+            return;
+        }
+
+        await mkdir(this.#storageDir, { recursive: true });
+        const jwks = await readOrCreateJwks(this.#storageDir);
+
+        this.#provider = new Provider(stripTrailingSlash(this.#issuerUrl.href), {
+            adapter: createMcpOidcFileAdapterFactory(join(this.#storageDir, "adapter")),
+            clientDefaults: {
+                grant_types: ["authorization_code", "refresh_token"],
+                response_types: ["code"],
+                token_endpoint_auth_method: "none"
+            },
+            claims: {
+                openid: ["sub"]
+            },
+            features: {
+                devInteractions: { enabled: false },
+                registration: {
+                    enabled: true,
+                    initialAccessToken: false
+                },
+                registrationManagement: {
+                    enabled: true
+                },
+                resourceIndicators: {
+                    defaultResource: async (_ctx, _client, oneOf) => {
+                        if (Array.isArray(oneOf) && oneOf.length === 1) {
+                            return oneOf[0];
+                        }
+
+                        if (this.#registeredResources.size === 1) {
+                            return [...this.#registeredResources][0];
+                        }
+
+                        throw new Error("Unable to determine a default resource indicator.");
+                    },
+                    enabled: true,
+                    getResourceServerInfo: async (_ctx, resourceIndicator) => {
+                        if (!this.#registeredResources.has(resourceIndicator)) {
+                            throw new Error(`Unknown resource indicator: ${resourceIndicator}`);
+                        }
+
+                        return {
+                            accessTokenFormat: "opaque" as const,
+                            audience: resourceIndicator,
+                            scope: this.#config.requiredScopes.join(" ")
+                        };
+                    },
+                    useGrantedResource: async () => true
+                },
+                revocation: {
+                    enabled: true
+                }
+            },
+            findAccount: async (_ctx, sub) => {
+                if (sub !== this.#accountId) {
+                    return undefined;
+                }
+
+                return {
+                    accountId: this.#accountId,
+                    async claims() {
+                        return { sub: readLocalAccountId() };
+                    }
+                };
+            },
+            interactions: {
+                url: async (_ctx, interaction) => `${this.#basePath}/interaction/${interaction.uid}`,
+            },
+            jwks,
+            routes: {
+                authorization: "/authorize",
+                end_session: "/session/end",
+                jwks: "/jwks",
+                registration: "/register",
+                revocation: "/revoke",
+                token: "/token",
+                userinfo: "/userinfo"
+            },
+            scopes: ["openid", "offline_access", ...this.#config.requiredScopes],
+            ttl: {
+                AccessToken: () => 60 * 60,
+                Grant: () => 30 * 24 * 60 * 60,
+                IdToken: () => 60 * 60,
+                Interaction: () => 10 * 60,
+                Session: () => 30 * 24 * 60 * 60
+            }
+        });
     }
 
-    authorizationServerMetadataHandler(): RequestHandler {
-        return async (_request: Request, response: Response) => {
-            const state = await this.#verifier.readState();
-            response.json(state.authorizationServerMetadata);
-        };
+    install(app: Express): void {
+        const provider = this.#requireProvider();
+        const parseForm = express.urlencoded({ extended: false });
+
+        app.get(this.#interactionRoute(), async (request, response) => {
+            await this.#renderInteraction(provider, request, response);
+        });
+        app.post(this.#interactionRoute(), parseForm, async (request, response) => {
+            await this.#submitInteraction(provider, request, response);
+        });
+
+        const callback = provider.callback();
+        app.use((request, response, next) => {
+            const pathname = new URL(request.url ?? "/", "http://127.0.0.1").pathname;
+
+            if (!this.#shouldHandleProviderPath(pathname)) {
+                next();
+                return;
+            }
+
+            callback(request, response);
+        });
     }
 
     protectedResourceMetadataHandler(resourceServerUrl: URL): RequestHandler {
         return async (_request: Request, response: Response) => {
-            const state = await this.#verifier.readState();
             const metadata: OAuthProtectedResourceMetadata = {
-                authorization_servers: [state.authorizationServerMetadata.issuer],
-                jwks_uri: state.jwksUri,
+                authorization_servers: [stripTrailingSlash(this.#issuerUrl.href)],
                 resource: resourceUrlFromServerUrl(resourceServerUrl).href,
                 resource_documentation: this.#config.documentationUrl,
                 resource_name: this.#config.resourceName,
@@ -63,181 +173,300 @@ export class McpOAuthProtectedResource {
         return requireBearerAuth({
             requiredScopes: this.#config.requiredScopes,
             resourceMetadataUrl: getOAuthProtectedResourceMetadataUrl(resourceServerUrl),
-            verifier: new McpOAuthResourceVerifier(this.#verifier, resourceServerUrl)
+            verifier: new McpOAuthResourceVerifier(this.#requireProvider(), resourceServerUrl)
         });
     }
-}
 
-class McpOAuthTokenVerifier implements OAuthTokenVerifier {
-    readonly #config: McpOAuth2Config;
-    #statePromise?: Promise<McpOAuthState>;
-
-    constructor(config: McpOAuth2Config) {
-        this.#config = config;
+    #interactionRoute(): string {
+        return `${this.#basePath}/interaction/:uid`;
     }
 
-    async warmup(): Promise<void> {
-        await this.readState();
+    #requireProvider(): Provider {
+        if (this.#provider === undefined) {
+            throw new Error("OIDC provider is not initialized. Call warmup() before install().");
+        }
+
+        return this.#provider;
     }
 
-    async readState(): Promise<McpOAuthState> {
-        if (this.#statePromise === undefined) {
-            this.#statePromise = this.#loadState();
+    #shouldHandleProviderPath(pathname: string): boolean {
+        if (pathname.startsWith("/.well-known/")) {
+            return true;
         }
 
-        return await this.#statePromise;
+        const authPrefixes = ["/authorize", "/jwks", "/register", "/revoke", "/session", "/token", "/userinfo"];
+        return authPrefixes.some((prefix) => pathname.startsWith(`${this.#basePath}${prefix}`));
     }
 
-    async verifyAccessToken(token: string) {
-        const state = await this.readState();
+    async #renderInteraction(provider: Provider, request: Request, response: Response): Promise<void> {
+        const details = await provider.interactionDetails(request, response);
+        const promptName = details.prompt.name;
 
-        try {
-            const { payload } = await jwtVerify(token, state.keySet, {
-                audience: this.#config.audience,
-                issuer: this.#config.issuer
-            });
-
-            return {
-                clientId: readClientId(payload),
-                expiresAt: typeof payload.exp === "number" ? payload.exp : undefined,
-                extra: payload,
-                resource: readResource(payload),
-                scopes: readScopes(payload),
-                token
-            };
-        } catch (error) {
-            if (error instanceof joseErrors.JWTExpired || error instanceof joseErrors.JWTClaimValidationFailed) {
-                throw new InvalidTokenError(readErrorMessage(error));
-            }
-
-            if (error instanceof joseErrors.JWKSInvalid || error instanceof joseErrors.JWKSNoMatchingKey) {
-                throw new InvalidTokenError(readErrorMessage(error));
-            }
-
-            if (error instanceof joseErrors.JWTInvalid || error instanceof joseErrors.JOSEError) {
-                throw new InvalidTokenError(readErrorMessage(error));
-            }
-
-            throw new ServerError(readErrorMessage(error, "OAuth token verification failed."));
+        if (promptName !== "login" && promptName !== "consent") {
+            response.status(501).type("text/plain").send(`unsupported interaction prompt: ${promptName}`);
+            return;
         }
+
+        response
+            .status(200)
+            .type("html")
+            .send(renderInteractionPage({
+                accountId: this.#accountId,
+                clientName: readClientName(details.params.client_id, details.params.client_name),
+                promptName,
+                requiredScopes: readStringArray(details.prompt.details.missingOIDCScope),
+                requestedResources: readRequestedResources(details.prompt.details.missingResourceScopes)
+            }));
     }
 
-    async #loadState(): Promise<McpOAuthState> {
-        const metadata = await discoverAuthorizationServerMetadata(this.#config.issuer);
+    async #submitInteraction(provider: Provider, request: Request, response: Response): Promise<void> {
+        const { prompt: { details, name }, grantId, params, session } = await provider.interactionDetails(request, response);
 
-        if (metadata === undefined) {
-            throw new Error(`Unable to discover authorization server metadata for issuer ${this.#config.issuer}.`);
-        }
-
-        const discoveredIssuer = canonicalIssuer(metadata.issuer);
-        const configuredIssuer = canonicalIssuer(this.#config.issuer);
-
-        if (discoveredIssuer !== configuredIssuer) {
-            throw new Error(`Discovered issuer ${metadata.issuer} does not match configured issuer ${this.#config.issuer}.`);
-        }
-
-        const jwksUri =
-            this.#config.jwksUri ??
-            ("jwks_uri" in metadata && typeof metadata.jwks_uri === "string" ? metadata.jwks_uri : undefined);
-
-        if (jwksUri === undefined) {
-            throw new Error(
-                `Authorization server ${metadata.issuer} did not publish jwks_uri. Configure mcp.auth.oauth2.jwksUri explicitly.`
+        if (name === "login") {
+            await provider.interactionFinished(
+                request,
+                response,
+                {
+                    login: { accountId: this.#accountId }
+                },
+                { mergeWithLastSubmission: false }
             );
+            return;
         }
 
-        return {
-            authorizationServerMetadata: metadata,
-            jwksUri,
-            keySet: createRemoteJWKSet(new URL(jwksUri))
-        };
+        if (name !== "consent") {
+            response.status(501).type("text/plain").send(`unsupported interaction prompt: ${name}`);
+            return;
+        }
+
+        let grant: ProviderGrant | undefined;
+
+        if (grantId !== undefined) {
+            grant = await provider.Grant.find(grantId);
+        }
+
+        if (grant === undefined) {
+            grant = new provider.Grant({
+                accountId: session?.accountId ?? this.#accountId,
+                clientId: String(params.client_id)
+            });
+        }
+
+        if (details.missingOIDCScope) {
+            grant.addOIDCScope(readStringArray(details.missingOIDCScope).join(" "));
+        }
+
+        if (details.missingOIDCClaims) {
+            grant.addOIDCClaims(readStringArray(details.missingOIDCClaims));
+        }
+
+        if (details.missingResourceScopes) {
+            for (const [indicator, scopes] of Object.entries(details.missingResourceScopes)) {
+                grant.addResourceScope(indicator, readStringArray(scopes).join(" "));
+            }
+        }
+
+        await provider.interactionFinished(
+            request,
+            response,
+            {
+                consent: { grantId: await grant.save() }
+            },
+            { mergeWithLastSubmission: true }
+        );
     }
 }
 
 class McpOAuthResourceVerifier implements OAuthTokenVerifier {
     readonly #expectedResourceUrl: URL;
-    readonly #verifier: McpOAuthTokenVerifier;
+    readonly #provider: Provider;
 
-    constructor(verifier: McpOAuthTokenVerifier, expectedResourceUrl: URL) {
-        this.#verifier = verifier;
+    constructor(provider: Provider, expectedResourceUrl: URL) {
+        this.#provider = provider;
         this.#expectedResourceUrl = resourceUrlFromServerUrl(expectedResourceUrl);
     }
 
     async verifyAccessToken(token: string) {
-        const authInfo = await this.#verifier.verifyAccessToken(token);
+        const accessToken = await this.#provider.AccessToken.find(token);
+
+        if (accessToken === undefined || accessToken.isValid !== true) {
+            throw new InvalidTokenError("Token is invalid or expired.");
+        }
+
+        const resource = readTokenResource(accessToken.aud);
 
         if (
-            authInfo.resource !== undefined &&
+            resource !== undefined &&
             checkResourceAllowed({
                 configuredResource: this.#expectedResourceUrl,
-                requestedResource: authInfo.resource
+                requestedResource: resource
             }) === false
         ) {
-            throw new InvalidTokenError(`Token resource ${authInfo.resource.href} is not valid for ${this.#expectedResourceUrl.href}.`);
+            throw new InvalidTokenError(`Token resource ${resource.href} is not valid for ${this.#expectedResourceUrl.href}.`);
         }
 
-        return authInfo;
+        if (typeof accessToken.clientId !== "string" || accessToken.clientId.length === 0) {
+            throw new ServerError("Issued access token does not include a client identifier.");
+        }
+
+        return {
+            clientId: accessToken.clientId,
+            expiresAt: accessToken.exp,
+            extra: undefined,
+            resource,
+            scopes: [...accessToken.scopes],
+            token
+        };
     }
 }
 
-function canonicalIssuer(source: string): string {
-    const url = new URL(source);
-    const href = url.href;
-    return href.endsWith("/") ? href.slice(0, -1) : href;
+function normalizeBasePath(pathname: string): string {
+    if (pathname === "/") {
+        return "";
+    }
+
+    return pathname.replace(/\/+$/u, "");
 }
 
-function readClientId(payload: JWTPayload): string {
-    const candidates = [payload.client_id, payload.azp, payload.sub];
+function readClientName(clientId: unknown, clientName: unknown): string {
+    if (typeof clientName === "string" && clientName.length > 0) {
+        return clientName;
+    }
 
-    for (const candidate of candidates) {
-        if (typeof candidate === "string" && candidate.length > 0) {
-            return candidate;
+    if (typeof clientId === "string" && clientId.length > 0) {
+        return clientId;
+    }
+
+    return "unknown-client";
+}
+
+function readLocalAccountId(): string {
+    try {
+        return userInfo().username;
+    } catch {
+        return "aromatic";
+    }
+}
+
+function readRequestedResources(resources: unknown): Array<{ indicator: string; scopes: string[] }> {
+    if (typeof resources !== "object" || resources === null || Array.isArray(resources)) {
+        return [];
+    }
+
+    return Object.entries(resources)
+        .map(([indicator, scopes]) => ({
+            indicator,
+            scopes: readStringArray(scopes)
+        }))
+        .filter(({ scopes }) => scopes.length > 0);
+}
+
+function readStringArray(value: unknown): string[] {
+    if (!Array.isArray(value)) {
+        return [];
+    }
+
+    return value.filter((entry): entry is string => typeof entry === "string");
+}
+
+function readTokenResource(audience: string | string[] | undefined): URL | undefined {
+    const values = typeof audience === "string" ? [audience] : Array.isArray(audience) ? audience : [];
+
+    for (const value of values) {
+        try {
+            return new URL(value);
+        } catch {
+            continue;
         }
     }
 
-    throw new InvalidTokenError("Token does not include a usable client identifier.");
+    return undefined;
 }
 
-function readResource(payload: JWTPayload): URL | undefined {
-    const value = payload.resource;
+function renderInteractionPage(input: {
+    accountId: string;
+    clientName: string;
+    promptName: "consent" | "login";
+    requestedResources: Array<{ indicator: string; scopes: string[] }>;
+    requiredScopes: string[];
+}): string {
+    const scopes = input.requiredScopes.map((scope) => `<li>${escapeHtml(scope)}</li>`).join("");
+    const resources = input.requestedResources
+        .map(
+            ({ indicator, scopes: requestedScopes }) =>
+                `<li><strong>${escapeHtml(indicator)}</strong><ul>${requestedScopes
+                    .map((scope) => `<li>${escapeHtml(scope)}</li>`)
+                    .join("")}</ul></li>`
+        )
+        .join("");
 
-    if (typeof value !== "string" || value.length === 0) {
-        return undefined;
-    }
+    const title = input.promptName === "login" ? "Sign In" : "Authorize";
+    const action = input.promptName === "login" ? "Continue as aromatic" : "Approve access";
+
+    return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>${title}</title>
+  <style>
+    body { font-family: ui-sans-serif, system-ui, sans-serif; background: #f6f5ef; color: #1e1b16; margin: 0; padding: 32px 16px; }
+    main { max-width: 720px; margin: 0 auto; background: #fffdf7; border: 1px solid #ddd3c1; border-radius: 16px; padding: 24px; box-shadow: 0 12px 40px rgba(30, 27, 22, 0.08); }
+    h1 { margin-top: 0; font-size: 28px; }
+    p, li { line-height: 1.5; }
+    button { border: 0; border-radius: 999px; background: #1e1b16; color: #fffdf7; padding: 12px 20px; font-size: 16px; cursor: pointer; }
+    ul { margin-top: 8px; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>${title}</h1>
+    <p><strong>${escapeHtml(input.clientName)}</strong> is requesting access as <strong>${escapeHtml(input.accountId)}</strong>.</p>
+    ${scopes.length > 0 ? `<p>Scopes:</p><ul>${scopes}</ul>` : ""}
+    ${resources.length > 0 ? `<p>Resource access:</p><ul>${resources}</ul>` : ""}
+    <form method="post">
+      <button type="submit">${action}</button>
+    </form>
+  </main>
+</body>
+</html>`;
+}
+
+function escapeHtml(value: string): string {
+    return value
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#39;");
+}
+
+function stripTrailingSlash(value: string): string {
+    return value.endsWith("/") ? value.slice(0, -1) : value;
+}
+
+async function readOrCreateJwks(storageDir: string): Promise<{ keys: Array<Record<string, unknown>> }> {
+    const jwksPath = join(storageDir, "jwks.json");
 
     try {
-        return new URL(value);
-    } catch {
-        throw new InvalidTokenError(`Token resource claim is not a valid URL: ${value}`);
-    }
-}
-
-function readScopes(payload: JWTPayload): string[] {
-    const scopes = new Set<string>();
-
-    if (typeof payload.scope === "string") {
-        for (const scope of payload.scope.split(/\s+/u)) {
-            if (scope.length > 0) {
-                scopes.add(scope);
-            }
+        return JSON.parse(await readFile(jwksPath, "utf8")) as { keys: Array<Record<string, unknown>> };
+    } catch (error) {
+        if (!isMissing(error)) {
+            throw error;
         }
     }
 
-    if (typeof payload.scp === "string" && payload.scp.length > 0) {
-        scopes.add(payload.scp);
-    }
+    const { privateKey } = await generateKeyPair("RS256", { extractable: true });
+    const jwk = await exportJWK(privateKey);
+    jwk.alg = "RS256";
+    jwk.kid = "aromatic-oidc-signing-key";
+    jwk.use = "sig";
 
-    if (Array.isArray(payload.scp)) {
-        for (const scope of payload.scp) {
-            if (typeof scope === "string" && scope.length > 0) {
-                scopes.add(scope);
-            }
-        }
-    }
-
-    return [...scopes];
+    const jwks = { keys: [jwk as unknown as Record<string, unknown>] };
+    await writeFile(jwksPath, JSON.stringify(jwks), "utf8");
+    return jwks;
 }
 
-function readErrorMessage(error: unknown, fallback = "Unknown error"): string {
-    return error instanceof Error ? error.message : fallback;
+function isMissing(error: unknown): error is NodeJS.ErrnoException {
+    return typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT";
 }

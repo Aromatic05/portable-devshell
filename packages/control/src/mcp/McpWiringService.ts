@@ -11,7 +11,7 @@ export class McpWiringService {
         this.#mapper = options?.mapper ?? new McpEndpointConfigMapper();
     }
 
-    wire(config: ControlConfig, registry: InstanceRegistry): McpHost | undefined {
+    wire(config: ControlConfig, registry: InstanceRegistry, options?: { storageDir?: string }): McpHost | undefined {
         if (!config.mcp.enabled) {
             return undefined;
         }
@@ -26,7 +26,8 @@ export class McpWiringService {
             instances: endpoints,
             listenHost: config.mcp.listenHost,
             listenPort: config.mcp.listenPort,
-            publicBaseUrl: config.mcp.publicBaseUrl
+            publicBaseUrl: config.mcp.publicBaseUrl,
+            storageDir: options?.storageDir
         });
     }
 }
@@ -49,10 +50,7 @@ function toMcpHostAuth(config: ControlConfig): McpAuthConfig | undefined {
         return {
             enabled: true as const,
             oauth2: {
-                audience: config.mcp.auth.oauth2.audience,
                 documentationUrl: config.mcp.auth.oauth2.documentationUrl,
-                issuer: config.mcp.auth.oauth2.issuer,
-                jwksUri: config.mcp.auth.oauth2.jwksUri,
                 requiredScopes: [...config.mcp.auth.oauth2.requiredScopes],
                 resourceName: config.mcp.auth.oauth2.resourceName
             },

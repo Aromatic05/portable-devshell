@@ -4,6 +4,7 @@ import type { McpHost } from "@portable-devshell/mcp";
 import { ControlInstanceCreateService } from "./ControlInstanceCreateService.js";
 import { ControlConfigStore } from "./config/ControlConfigStore.js";
 import type { ControlConfig } from "./config/ControlConfigTomlCodec.js";
+import { ControlPathHome } from "./path/ControlPathHome.js";
 import { InstanceRegistry } from "../instance/registry/InstanceRegistry.js";
 import { InstanceRegistryBuilder } from "../instance/registry/InstanceRegistryBuilder.js";
 import { McpWiringService } from "../mcp/McpWiringService.js";
@@ -53,7 +54,9 @@ export class ControlServer {
 
         this.#config = config;
         this.#instanceRegistry = registry;
-        this.#mcpHost = this.#mcpWiringService.wire(config, registry);
+        this.#mcpHost = this.#mcpWiringService.wire(config, registry, {
+            storageDir: new ControlPathHome(this.#homeDirectory).oauthDir
+        });
         this.#rpcServer = new ControlRpcServer({
             instanceCreateService: new ControlInstanceCreateService({
                 configStore: this.#configStore,

@@ -35,8 +35,6 @@ publicBaseUrl = "https://devshell.example.com"
 mode = "oauth2"
 
 [mcp.auth.oauth2]
-issuer = "https://auth.example.com/realms/aromatic"
-audience = "aromatic-mcp"
 resourceName = "aromatic"
 requiredScopes = ["mcp"]
 documentationUrl = "https://docs.example.com/aromatic"
@@ -72,8 +70,9 @@ ChatGPT Connector 使用入口：
 当前实现定位：
 
 - `portable-devshell` 自身作为 MCP protected resource。
-- OAuth / OIDC 由外部成熟身份提供商负责。
-- MCP server 负责 discovery、Bearer challenge、JWT/JWKS 校验和 metadata 暴露。
+- `portable-devshell` 内置并自动启动 `oidc-provider`。
+- MCP server 负责 protected resource metadata、Bearer challenge 和 access token 验证。
+- 本地启动不再依赖额外的外部 OIDC 服务。
 
 ## Worker Targets
 

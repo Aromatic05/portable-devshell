@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
 import { createServer as createNodeServer } from "node:http";
-import { readFile } from "node:fs/promises";
-import { dirname, resolve } from "node:path";
+import { createHash, randomBytes } from "node:crypto";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { dirname, join, resolve } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { exportJWK, generateKeyPair, SignJWT } from "jose";
 import { McpHost } from "@portable-devshell/mcp";
 
 const fixturesDirectory = resolve(dirname(fileURLToPath(import.meta.url)), "../fixtures");
@@ -63,22 +64,21 @@ test("initialize succeeds over HTTP", async () => {
 });
 
 test("oauth2 exposes protected resource metadata and accepts a valid bearer token", async () => {
-    const provider = await createOidcProvider();
     const port = await reservePort();
+    const storageDir = await mkdtemp(join(tmpdir(), "portable-devshell-mcp-oidc-"));
     const host = createHost({
         auth: {
             enabled: true,
             oauth2: {
-                audience: "aromatic-mcp",
                 documentationUrl: "https://docs.example.com/aromatic",
-                issuer: provider.issuer,
                 requiredScopes: ["mcp"],
                 resourceName: "aromatic"
             },
             provider: "oauth2"
         },
         listenPort: port,
-        publicBaseUrl: `http://127.0.0.1:${port}`
+        publicBaseUrl: `http://127.0.0.1:${port}`,
+        storageDir
     });
 
     await host.start();
@@ -104,27 +104,77 @@ test("oauth2 exposes protected resource metadata and accepts a valid bearer toke
         const protectedMetadata = await fetch(`http://127.0.0.1:${address.port}/.well-known/oauth-protected-resource/demo/mcp`);
         assert.equal(protectedMetadata.status, 200);
         assert.deepEqual(await protectedMetadata.json(), {
-            authorization_servers: [provider.issuer],
-            jwks_uri: provider.jwksUri,
+            authorization_servers: [`http://127.0.0.1:${address.port}`],
             resource: endpoint,
             resource_documentation: "https://docs.example.com/aromatic",
             resource_name: "aromatic",
             scopes_supported: ["mcp"]
         });
 
-        const authorizationServerMetadata = await fetch(`http://127.0.0.1:${address.port}/.well-known/oauth-authorization-server`);
+        const authorizationServerMetadata = await fetch(`http://127.0.0.1:${address.port}/.well-known/openid-configuration`);
         assert.equal(authorizationServerMetadata.status, 200);
-        assert.equal((await authorizationServerMetadata.json()).issuer, provider.issuer);
+        const metadata = await authorizationServerMetadata.json() as {
+            authorization_endpoint: string;
+            issuer: string;
+            registration_endpoint: string;
+            token_endpoint: string;
+        };
+        assert.equal(metadata.issuer, `http://127.0.0.1:${address.port}`);
 
-        const token = await provider.issueToken({
-            audience: "aromatic-mcp",
-            scope: "mcp"
+        const clientRegistration = await fetch(metadata.registration_endpoint, {
+            method: "POST",
+            headers: {
+                "content-type": "application/json"
+            },
+            body: JSON.stringify({
+                application_type: "native",
+                client_name: "codex-aromatic",
+                grant_types: ["authorization_code", "refresh_token"],
+                redirect_uris: ["http://127.0.0.1:45678/callback"],
+                response_types: ["code"],
+                token_endpoint_auth_method: "none"
+            })
         });
+        assert.equal(clientRegistration.status, 201);
+        const client = await clientRegistration.json() as { client_id: string; redirect_uris: string[] };
+        assert.equal(typeof client.client_id, "string");
+
+        const verifier = base64Url(randomBytes(32));
+        const challenge = base64Url(createHash("sha256").update(verifier).digest());
+        const redirectUri = client.redirect_uris[0]!;
+        const authorizationUrl = new URL(metadata.authorization_endpoint);
+        authorizationUrl.searchParams.set("client_id", client.client_id);
+        authorizationUrl.searchParams.set("redirect_uri", redirectUri);
+        authorizationUrl.searchParams.set("response_type", "code");
+        authorizationUrl.searchParams.set("scope", "openid offline_access mcp");
+        authorizationUrl.searchParams.set("code_challenge", challenge);
+        authorizationUrl.searchParams.set("code_challenge_method", "S256");
+        authorizationUrl.searchParams.set("resource", endpoint);
+
+        const code = await authorizeViaInteractions(authorizationUrl, redirectUri);
+
+        const tokenResponse = await fetch(metadata.token_endpoint, {
+            method: "POST",
+            headers: {
+                "content-type": "application/x-www-form-urlencoded"
+            },
+            body: new URLSearchParams({
+                client_id: client.client_id,
+                code,
+                code_verifier: verifier,
+                grant_type: "authorization_code",
+                redirect_uri: redirectUri
+            })
+        });
+        assert.equal(tokenResponse.status, 200);
+        const tokens = await tokenResponse.json() as { access_token: string };
+        assert.equal(typeof tokens.access_token, "string");
+
         const response = await fetch(endpoint, {
             method: "POST",
             headers: {
                 accept: "application/json, text/event-stream",
-                authorization: `Bearer ${token}`,
+                authorization: `Bearer ${tokens.access_token}`,
                 "content-type": "application/json"
             },
             body: JSON.stringify(await readFixture("mcp-initialize.json"))
@@ -136,7 +186,7 @@ test("oauth2 exposes protected resource metadata and accepts a valid bearer toke
         assert.equal(typeof response.headers.get("mcp-session-id"), "string");
     } finally {
         await host.stop();
-        await provider.close();
+        await rm(storageDir, { force: true, recursive: true });
     }
 });
 
@@ -148,11 +198,13 @@ function createHost(overrides?: {
     auth?: ConstructorParameters<typeof McpHost>[0]["auth"];
     listenPort?: number;
     publicBaseUrl?: string;
+    storageDir?: string;
 }): McpHost {
     return new McpHost({
         listenHost: "127.0.0.1",
         listenPort: overrides?.listenPort ?? 0,
         publicBaseUrl: overrides?.publicBaseUrl,
+        storageDir: overrides?.storageDir,
         auth: overrides?.auth ?? { enabled: false, provider: "none" },
         instances: [
             {
@@ -172,85 +224,6 @@ function createHost(overrides?: {
             }
         ]
     });
-}
-
-async function createOidcProvider() {
-    const { privateKey, publicKey } = await generateKeyPair("RS256");
-    const jwk = await exportJWK(publicKey);
-    jwk.alg = "RS256";
-    jwk.kid = "aromatic-kid";
-    jwk.use = "sig";
-
-    const server = createNodeServer((request, response) => {
-        const url = new URL(request.url ?? "/", "http://127.0.0.1");
-
-        if (url.pathname === "/.well-known/openid-configuration") {
-            const issuer = `http://127.0.0.1:${address.port}`;
-            response.writeHead(200, { "content-type": "application/json" });
-            response.end(
-                JSON.stringify({
-                    authorization_endpoint: `${issuer}/authorize`,
-                    grant_types_supported: ["authorization_code", "refresh_token"],
-                    issuer,
-                    jwks_uri: `${issuer}/jwks`,
-                    response_types_supported: ["code"],
-                    subject_types_supported: ["public"],
-                    token_endpoint: `${issuer}/token`,
-                    id_token_signing_alg_values_supported: ["RS256"]
-                })
-            );
-            return;
-        }
-
-        if (url.pathname === "/jwks") {
-            response.writeHead(200, { "content-type": "application/json" });
-            response.end(JSON.stringify({ keys: [jwk] }));
-            return;
-        }
-
-        response.writeHead(404);
-        response.end();
-    });
-
-    await new Promise<void>((resolve) => {
-        server.listen(0, "127.0.0.1", () => resolve());
-    });
-
-    const address = server.address();
-    assert.notEqual(address, null);
-    assert.equal(typeof address, "object");
-
-    const issuer = `http://127.0.0.1:${address.port}`;
-
-    return {
-        close: async () => {
-            await new Promise<void>((resolve, reject) => {
-                server.close((error) => {
-                    if (error) {
-                        reject(error);
-                        return;
-                    }
-
-                    resolve();
-                });
-            });
-        },
-        issueToken: async (options: { audience: string; scope: string }) => {
-            return await new SignJWT({
-                client_id: "chatgpt-connector",
-                scope: options.scope
-            })
-                .setProtectedHeader({ alg: "RS256", kid: "aromatic-kid" })
-                .setAudience(options.audience)
-                .setExpirationTime("5m")
-                .setIssuedAt()
-                .setIssuer(issuer)
-                .setSubject("chatgpt-connector")
-                .sign(privateKey);
-        },
-        issuer,
-        jwksUri: `${issuer}/jwks`
-    };
 }
 
 async function reservePort(): Promise<number> {
@@ -277,4 +250,85 @@ async function reservePort(): Promise<number> {
     });
 
     return port;
+}
+
+async function authorizeViaInteractions(authorizationUrl: URL, redirectUri: string): Promise<string> {
+    let currentUrl = authorizationUrl.href;
+    let method: "GET" | "POST" = "GET";
+    let cookieHeader = "";
+
+    for (let step = 0; step < 10; step += 1) {
+        const response = await fetch(currentUrl, {
+            method,
+            headers: {
+                ...(cookieHeader.length === 0 ? {} : { cookie: cookieHeader }),
+                ...(method === "POST" ? { "content-type": "application/x-www-form-urlencoded" } : {})
+            },
+            body: method === "POST" ? new URLSearchParams({ submit: "1" }).toString() : undefined,
+            redirect: "manual"
+        });
+
+        cookieHeader = mergeCookieHeader(cookieHeader, response);
+
+        if (response.status === 200) {
+            method = "POST";
+            continue;
+        }
+
+        const locationHeader = response.headers.get("location");
+        assert.notEqual(locationHeader, null);
+        const nextUrl = new URL(locationHeader!, currentUrl);
+
+        if (`${nextUrl.origin}${nextUrl.pathname}` === redirectUri) {
+            const code = nextUrl.searchParams.get("code");
+            assert.notEqual(code, null);
+            return code!;
+        }
+
+        currentUrl = nextUrl.href;
+        method = "GET";
+    }
+
+    throw new Error("authorization flow did not complete");
+}
+
+function base64Url(value: Buffer): string {
+    return value.toString("base64url");
+}
+
+function mergeCookieHeader(existing: string, response: Response): string {
+    const nextEntries = readSetCookieEntries(response);
+    if (nextEntries.length === 0) {
+        return existing;
+    }
+
+    const cookies = new Map<string, string>();
+
+    for (const entry of existing.split(/;\s*/u).filter((part) => part.length > 0)) {
+        const [name, value] = entry.split("=", 2);
+        if (name !== undefined && value !== undefined) {
+            cookies.set(name, value);
+        }
+    }
+
+    for (const header of nextEntries) {
+        const [pair] = header.split(";", 1);
+        const [name, value] = pair.split("=", 2);
+
+        if (name !== undefined && value !== undefined) {
+            cookies.set(name, value);
+        }
+    }
+
+    return [...cookies.entries()].map(([name, value]) => `${name}=${value}`).join("; ");
+}
+
+function readSetCookieEntries(response: Response): string[] {
+    const headers = response.headers as Headers & { getSetCookie?: () => string[] };
+    if (typeof headers.getSetCookie === "function") {
+        return headers.getSetCookie();
+    }
+
+    const header = response.headers.get("set-cookie");
+    return header === null ? [] : [header];
 }

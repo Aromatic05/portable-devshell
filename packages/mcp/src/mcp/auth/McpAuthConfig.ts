@@ -1,8 +1,5 @@
 export interface McpOAuth2Config {
-    audience: string;
     documentationUrl?: string;
-    issuer: string;
-    jwksUri?: string;
     requiredScopes: string[];
     resourceName: string;
 }

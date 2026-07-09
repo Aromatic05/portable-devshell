@@ -31,6 +31,7 @@ export interface McpHostConfig extends McpExposureConfig {
     auth?: McpAuthConfig;
     instances: readonly McpHostInstanceConfig[];
     listenPort: number;
+    storageDir?: string;
 }
 
 export class McpHost {
@@ -45,7 +46,10 @@ export class McpHost {
     constructor(config: McpHostConfig) {
         this.#config = config;
         this.#auth = config.auth;
-        this.#oauth = config.auth?.provider === "oauth2" ? new McpOAuthProtectedResource(config.auth.oauth2) : undefined;
+        this.#oauth =
+            config.auth?.provider === "oauth2" && config.publicBaseUrl !== undefined && config.storageDir !== undefined
+                ? new McpOAuthProtectedResource(config.auth.oauth2, config.publicBaseUrl, config.storageDir)
+                : undefined;
 
         for (const instance of config.instances) {
             this.registerInstance(instance);
@@ -62,6 +66,9 @@ export class McpHost {
 
     async start(): Promise<void> {
         this.#guard.assertSafe(this.#config);
+        if (this.#auth?.provider === "oauth2" && this.#oauth === undefined) {
+            throw new Error("mcp.publicBaseUrl and storageDir are required when mcp.auth.mode=oauth2");
+        }
         await this.#oauth?.warmup();
         for (const binding of this.#registry.list()) {
             this.#httpServer.registerBinding(binding.path, binding.binding);
