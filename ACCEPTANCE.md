@@ -86,28 +86,35 @@
 - evidence: `packages/tui/test/integration/TuiControlSession.test.ts` tests `TuiControlSession recovers from runtime gap and control reconnect`、`TuiControlSession recovers when initial subscribe returns stream.gap`、`TuiControlSession backs off when subscribe keeps rejecting`；`packages/tui/test/unit/TuiViewModelStore.test.ts` test `TuiViewModelStore expresses connection, snapshot, log, audit, approval, and config state`。
 - fix commit: none
 
-### 12. protocol DTO / frame compatibility 未退回 newline JSON
+### 12. TUI interaction 的 focus / keymap / form / modal / save-cancel / Enter / Esc / Tab 语义成立
+
+- status: pass
+- evidence: `packages/tui/src/interaction/TuiFocusManager.ts` 实现 scope stack、可见项过滤、方向/Tab 焦点移动和离开嵌套 scope 后恢复先前焦点；`packages/tui/src/interaction/TuiKeymap.ts` 绑定 `tab`、`shift+tab`、`enter`、`esc`、方向键、`ctrl+c`；`packages/tui/src/interaction/TuiInteractionController.ts` 实现 `form.save`、`form.cancel`、`modal.close`、`focus.activate` 与 escape 统一语义；`packages/tui/test/unit/TuiInteractionController.test.ts` tests `TuiFocusManager skips hidden entries and restores the previous focus when leaving nested scopes`、`TuiInteractionController drives save and cancel actions through tab navigation and enter`、`TuiInteractionController blocks invalid and duplicate async submit attempts`、`TuiInteractionController uses enter for modal confirm, escape for modal close, and surfaces submit errors` 直接覆盖 focus/keymap/form/modal/save-cancel/Enter/Esc/Tab。
+- validation: `pnpm --filter @portable-devshell/tui test`
+- fix commit: this batch
+
+### 13. protocol DTO / frame compatibility 未退回 newline JSON
 
 - status: pass
 - evidence: `packages/shared/src/protocol/frame/ProtocolFrameCodec.ts` 与 `packages/shared/src/protocol/frame/ProtocolFrameReader.ts` 实现 4-byte big-endian length-prefixed JSON frame；`packages/shared/test/unit/protocol/frame/ProtocolFrameCodec.test.ts` 与 `packages/shared/test/unit/protocol/frame/ProtocolFrameReader.test.ts` 通过；`packages/control/test/integration/ControlRpcServer.test.ts` 复用同一 unix socket connection 走 frame RPC。
 - fix commit: none
 
-### 13. multi-target worker 分发回归未被后续任务破坏
+### 14. multi-target worker 分发回归未被后续任务破坏
 
 - status: pass
 - evidence: `README.md` 明确代码支持 target probe / resolution / install，真实 release asset 以实际 release 为准；`.github/workflows/release-worker.yml` 构建并发布 `linux-x64`、`linux-arm64`、`darwin-x64`、`darwin-arm64`；`packages/core/test/unit/WorkerTargetResolver.test.ts`、`packages/core/test/unit/LocalWorkerInstaller.test.ts`、`packages/core/test/unit/WorkerTransport.test.ts` 覆盖 canonical target mapping、release-backed asset resolution、target-specific install path、ssh/docker/podman probe/install。
 - fix commit: this batch
 
-### 14. 全链路 smoke 覆盖 control / CLI / worker / MCP 真实执行链路
+### 15. 全链路 smoke 覆盖 control / CLI / worker / MCP 真实执行链路
 
 - status: pass
 - evidence: `bash acceptance/run-real-worker-smoke.sh` 启动真实 control、实例、worker，验证 `status`、`instance start`、`instance call`、`instance logs`、`instance.readToolCalls` 和 JSONL 持久化；`bash acceptance/run-mcp-smoke.sh` 通过真实 HTTP MCP endpoint 验证 `initialize`、`tools/list`、`tools/call` 和 workspace 路径。
 - fix commit: this batch
 
-### 15. 最终静态审查
+### 16. 最终静态审查
 
 - status: pass
-- evidence: `README.md`、`ACCEPTANCE.md`、`acceptance/run-final-acceptance.sh` 与当前代码边界一致；`packages/tui/src` 仅包含 control/model/session 基础层文件，没有把未实现的完整页面 UI 写成已完成；route、socket、approval、multi-target 说明均能在源码和测试中找到对应证据。
+- evidence: `README.md`、`ACCEPTANCE.md`、`acceptance/run-final-acceptance.sh` 与当前代码边界一致；`packages/tui/src` 当前包含 `control`、`model`、`session` 与 `interaction` 基础层文件，且 `ACCEPTANCE.md` 已按现状补齐 interaction 验收证据，没有把超出当前实现范围的 UI 能力写成已完成；route、socket、approval、multi-target 说明均能在源码和测试中找到对应证据。
 - fix commit: this batch
 
 ## Result
