@@ -1,205 +1,221 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { TuiFormState, TuiInteractionController, TuiModalState } from "../../dist/index.js";
+import { TuiFocusManager, TuiFormState, TuiInteractionController, TuiModalState } from "../../dist/index.js";
 
-test("Tui interaction controller cycles focus and skips hidden entries", async () => {
-    const controller = createController({
-        initialValue: { workspace: "/tmp/ws" },
-        onSubmit: async (draft) => draft
-    });
+test("TuiFocusManager skips hidden entries and restores the previous focus when leaving nested scopes", () => {
+    const focusManager = new TuiFocusManager();
 
-    controller.focusManager.registerScope({ id: "main" });
-    controller.focusManager.setScopeEntries("main", [
-        { id: "sidebar.tab.instances" },
-        { id: "instance.list" },
-        { id: "status.panel", visible: false },
-        { id: "logs.panel" },
-        { id: "tool.audit.box" },
-        { id: "approval.inbox.item" }
+    focusManager.registerScope({ id: "sidebar" });
+    focusManager.registerScope({ id: "panel", parentId: "sidebar" });
+    focusManager.registerScope({ id: "modal", parentId: "panel" });
+
+    focusManager.setScopeEntries("sidebar", [
+        { actionId: "sidebar.instances", id: "sidebar.instances" },
+        { actionId: "sidebar.config", id: "sidebar.config" }
     ]);
-    controller.focusManager.focusFirstVisible("main");
+    focusManager.setScopeEntries("panel", [
+        { actionId: "instance.select", id: "instance.list" },
+        { actionId: "status.open", id: "status.panel", visible: false },
+        { actionId: "logs.open", id: "logs.panel" },
+        { actionId: "audit.open", id: "tool.audit.box" },
+        { actionId: "approval.open", id: "approval.inbox.item" }
+    ]);
+    focusManager.setScopeEntries("modal", [
+        { actionId: "modal.confirm", id: "modal.confirm" },
+        { actionId: "modal.cancel", id: "modal.cancel" }
+    ]);
 
-    assert.equal(controller.focusManager.currentFocusId(), "sidebar.tab.instances");
+    focusManager.enterScope("sidebar", "sidebar.config");
+    focusManager.enterScope("panel", "logs.panel");
 
-    await controller.handleKey("tab");
-    assert.equal(controller.focusManager.currentFocusId(), "instance.list");
+    assert.equal(focusManager.currentFocusId(), "logs.panel");
 
-    await controller.handleKey("down");
-    assert.equal(controller.focusManager.currentFocusId(), "logs.panel");
+    focusManager.focusDirectional("down");
+    assert.equal(focusManager.currentFocusId(), "tool.audit.box");
 
-    await controller.handleKey("shift+tab");
-    assert.equal(controller.focusManager.currentFocusId(), "instance.list");
+    focusManager.focusDirectional("down");
+    assert.equal(focusManager.currentFocusId(), "approval.inbox.item");
 
-    await controller.handleKey("up");
-    assert.equal(controller.focusManager.currentFocusId(), "sidebar.tab.instances");
+    focusManager.enterScope("modal", "modal.cancel");
+    assert.equal(focusManager.currentFocusId(), "modal.cancel");
+
+    assert.equal(focusManager.exitScope(), true);
+    assert.equal(focusManager.currentScopeId(), "panel");
+    assert.equal(focusManager.currentFocusId(), "approval.inbox.item");
 });
 
-test("Tui interaction controller drives save, cancel, validation, and refresh through focused actions", async () => {
-    const submitted: Array<{ workspace: string }> = [];
+test("TuiInteractionController drives save and cancel actions through tab navigation and enter", async () => {
+    const submittedDrafts: Array<{ name: string }> = [];
     let refreshCount = 0;
-    const controller = createController({
-        initialValue: { workspace: "/tmp/ws" },
-        onRefresh: async () => {
-            refreshCount += 1;
-        },
-        onSubmit: async (draft) => {
-            submitted.push({ ...draft });
-            return draft;
-        },
-        validate: (draft) => (draft.workspace.length === 0 ? { workspace: "workspace is required" } : {})
+    const controller = new TuiInteractionController({
+        form: new TuiFormState(
+            { name: "alpha" },
+            {
+                onRefresh: () => {
+                    refreshCount += 1;
+                },
+                onSubmit: async (draft) => {
+                    submittedDrafts.push(draft);
+                    return draft;
+                },
+                validate: (draft) => (draft.name.length === 0 ? { name: "required" } : {})
+            }
+        ),
+        modal: new TuiModalState()
     });
 
-    controller.focusManager.registerScope({ id: "main" });
-    controller.focusManager.registerScope({ id: "config-form", parentId: "main" });
-    controller.focusManager.setScopeEntries("main", [{ id: "config.form" }]);
-    controller.focusManager.setScopeEntries("config-form", [
-        { id: "config.form", actionId: "form.edit" },
-        { id: "save.button", actionId: "form.save" },
-        { id: "cancel.button", actionId: "form.cancel" }
-    ]);
-    controller.dispatcher.register("form.edit", () => {
-        controller.formState().beginEdit();
-        return true;
-    });
-
-    controller.focusManager.enterScope("config-form", "config.form");
-    await controller.handleKey("enter");
-
-    controller.formState().update("workspace", "");
-    controller.focusManager.focus("config-form", "save.button");
-    assert.equal(await controller.handleKey("enter"), false);
-    assert.deepEqual(submitted, []);
-    assert.equal(controller.formState().source().workspace, "/tmp/ws");
-    assert.equal(controller.formState().validationErrors().workspace, "workspace is required");
-
-    controller.formState().update("workspace", "/tmp/next");
-    assert.equal(controller.formState().dirty(), true);
-    assert.equal(controller.formState().canSave(), true);
-
-    assert.equal(await controller.handleKey("enter"), true);
-    assert.deepEqual(submitted, [{ workspace: "/tmp/next" }]);
-    assert.equal(refreshCount, 1);
-    assert.equal(controller.formState().source().workspace, "/tmp/next");
-    assert.equal(controller.formState().dirty(), false);
-
-    controller.formState().beginEdit();
-    controller.formState().update("workspace", "/tmp/draft");
-    controller.focusManager.focus("config-form", "cancel.button");
-    assert.equal(await controller.handleKey("enter"), true);
-    assert.equal(controller.focusManager.currentScopeId(), "main");
-    assert.equal(controller.formState().source().workspace, "/tmp/next");
-    assert.equal(controller.formState().draft().workspace, "/tmp/next");
-    assert.equal(controller.formState().dirty(), false);
-});
-
-test("Tui interaction controller closes modal or exits edit mode on esc", async () => {
-    const controller = createController({
-        initialValue: { workspace: "/tmp/ws" },
-        onSubmit: async (draft) => draft
-    });
-
-    controller.focusManager.registerScope({ id: "main" });
-    controller.focusManager.registerScope({ id: "config-form", parentId: "main" });
-    controller.focusManager.registerScope({ id: "modal", parentId: "config-form" });
-    controller.focusManager.setScopeEntries("main", [{ id: "sidebar.tab.instances" }]);
-    controller.focusManager.setScopeEntries("config-form", [
+    controller.focusManager.registerScope({ id: "root" });
+    controller.focusManager.registerScope({ id: "form", parentId: "root" });
+    controller.focusManager.setScopeEntries("root", [{ actionId: "open.form", id: "sidebar.config" }]);
+    controller.focusManager.setScopeEntries("form", [
         { id: "config.form" },
-        { id: "save.button", actionId: "form.save" },
-        { id: "cancel.button", actionId: "form.cancel" }
+        { actionId: "form.save", id: "save.button" },
+        { actionId: "form.cancel", id: "cancel.button" }
     ]);
-    controller.focusManager.setScopeEntries("modal", [
-        { id: "modal.confirm", actionId: "modal.confirm" },
-        { id: "modal.cancel", actionId: "modal.close" }
-    ]);
-    let confirmed = false;
-    controller.dispatcher.register("modal.confirm", () => {
-        confirmed = true;
-        return controller.dispatcher.dispatch("modal.close");
-    });
 
-    controller.focusManager.enterScope("config-form", "config.form");
-    controller.formState().beginEdit();
-    controller.formState().update("workspace", "/tmp/draft");
+    controller.focusManager.enterScope("root", "sidebar.config");
+    controller.focusManager.enterScope("form", "config.form");
 
-    assert.equal(await controller.handleKey("esc"), true);
-    assert.equal(controller.focusManager.currentScopeId(), "main");
-    assert.equal(controller.formState().draft().workspace, "/tmp/ws");
+    controller.formState().update("name", "beta");
+
+    assert.equal(await controller.handleKey("tab"), true);
+    assert.equal(controller.focusManager.currentFocusId(), "save.button");
+    assert.equal(await controller.handleKey("shift+tab"), true);
+    assert.equal(controller.focusManager.currentFocusId(), "config.form");
+    assert.equal(await controller.handleKey("tab"), true);
+    assert.equal(controller.focusManager.currentFocusId(), "save.button");
+    assert.equal(await controller.handleKey("enter"), true);
+    assert.deepEqual(submittedDrafts, [{ name: "beta" }]);
+    assert.equal(refreshCount, 1);
+    assert.equal(controller.formState().source().name, "beta");
     assert.equal(controller.formState().dirty(), false);
 
-    controller.focusManager.enterScope("config-form", "config.form");
-    controller.modal().open({
-        cancelLabel: "Cancel",
-        confirmActionId: "modal.confirm",
-        confirmLabel: "Confirm",
-        description: "Delete instance?",
-        title: "Confirm"
-    });
-    controller.focusManager.enterScope("modal", "modal.confirm");
+    controller.formState().update("name", "gamma");
 
+    assert.equal(await controller.handleKey("tab"), true);
+    assert.equal(controller.focusManager.currentFocusId(), "cancel.button");
     assert.equal(await controller.handleKey("enter"), true);
-    assert.equal(confirmed, true);
-    assert.equal(controller.modalState().open, false);
-    assert.equal(controller.focusManager.currentScopeId(), "config-form");
-
-    controller.modal().open({
-        cancelLabel: "Cancel",
-        confirmActionId: "modal.confirm",
-        confirmLabel: "Confirm",
-        description: "Delete instance?",
-        title: "Confirm"
-    });
-    controller.focusManager.enterScope("modal", "modal.cancel");
-    assert.equal(await controller.handleKey("esc"), true);
-    assert.equal(controller.modalState().open, false);
-    assert.equal(controller.focusManager.currentScopeId(), "config-form");
+    assert.equal(controller.focusManager.currentScopeId(), "root");
+    assert.equal(controller.focusManager.currentFocusId(), "sidebar.config");
+    assert.equal(controller.formState().draft().name, "beta");
+    assert.equal(controller.formState().dirty(), false);
 });
 
-test("Tui interaction controller prevents duplicate async submit while a save is running", async () => {
-    let resolveSubmit: ((value: { workspace: string }) => void) | undefined;
+test("TuiInteractionController blocks invalid and duplicate async submit attempts", async () => {
+    const deferred = createDeferred<{ name: string }>();
+    let refreshCount = 0;
     let submitCount = 0;
-    const controller = createController({
-        initialValue: { workspace: "/tmp/ws" },
-        onSubmit: async (draft) => {
-            submitCount += 1;
-            return await new Promise<{ workspace: string }>((resolve) => {
-                resolveSubmit = resolve;
-            }).then(() => draft);
-        }
+    const controller = new TuiInteractionController({
+        form: new TuiFormState(
+            { name: "alpha" },
+            {
+                onRefresh: () => {
+                    refreshCount += 1;
+                },
+                onSubmit: async (draft) => {
+                    submitCount += 1;
+                    return await deferred.promise.then(() => draft);
+                },
+                validate: (draft) => (draft.name.length === 0 ? { name: "required" } : {})
+            }
+        ),
+        modal: new TuiModalState()
     });
 
-    controller.focusManager.registerScope({ id: "config-form" });
-    controller.focusManager.setScopeEntries("config-form", [{ id: "save.button", actionId: "form.save" }]);
-    controller.focusManager.enterScope("config-form", "save.button");
-    controller.formState().beginEdit();
-    controller.formState().update("workspace", "/tmp/next");
+    controller.focusManager.registerScope({ id: "form" });
+    controller.focusManager.setScopeEntries("form", [
+        { id: "config.form" },
+        { actionId: "form.save", id: "save.button" }
+    ]);
+    controller.focusManager.enterScope("form", "save.button");
+
+    controller.formState().update("name", "");
+    assert.equal(await controller.handleKey("enter"), false);
+    assert.deepEqual(controller.formState().validationErrors(), { name: "required" });
+    assert.equal(submitCount, 0);
+
+    controller.formState().update("name", "beta");
 
     const firstSubmit = controller.handleKey("enter");
     const secondSubmit = controller.handleKey("enter");
 
-    await Promise.resolve();
-    assert.equal(submitCount, 1);
-    assert.equal(controller.formState().isSubmitting(), true);
+    deferred.resolve({ name: "beta" });
 
-    resolveSubmit?.({ workspace: "/tmp/next" });
     assert.equal(await firstSubmit, true);
     assert.equal(await secondSubmit, false);
-    assert.equal(controller.formState().isSubmitting(), false);
-    assert.equal(controller.formState().source().workspace, "/tmp/next");
+    assert.equal(submitCount, 1);
+    assert.equal(refreshCount, 1);
+    assert.equal(controller.formState().source().name, "beta");
 });
 
-function createController(options: {
-    initialValue: { workspace: string };
-    onRefresh?: () => Promise<void> | void;
-    onSubmit: (draft: { workspace: string }) => Promise<{ workspace: string }> | { workspace: string };
-    validate?: (draft: { workspace: string }) => Record<string, string>;
-}) {
-    return new TuiInteractionController({
-        form: new TuiFormState(options.initialValue, {
-            onRefresh: options.onRefresh,
-            onSubmit: options.onSubmit,
-            validate: options.validate
-        }),
+test("TuiInteractionController uses enter for modal confirm, escape for modal close, and surfaces submit errors", async () => {
+    let confirmed = 0;
+    const controller = new TuiInteractionController({
+        form: new TuiFormState(
+            { name: "alpha" },
+            {
+                onSubmit: async () => {
+                    throw new Error("server rejected config");
+                }
+            }
+        ),
         modal: new TuiModalState()
     });
+
+    controller.dispatcher.register("modal.confirm", () => {
+        confirmed += 1;
+        return true;
+    });
+
+    controller.focusManager.registerScope({ id: "root" });
+    controller.focusManager.registerScope({ id: "form", parentId: "root" });
+    controller.focusManager.registerScope({ id: "modal", parentId: "form" });
+    controller.focusManager.setScopeEntries("root", [{ actionId: "open.form", id: "sidebar.config" }]);
+    controller.focusManager.setScopeEntries("form", [
+        { id: "config.form" },
+        { actionId: "form.save", id: "save.button" }
+    ]);
+    controller.focusManager.setScopeEntries("modal", [
+        { actionId: "modal.confirm", id: "modal.confirm" },
+        { actionId: "modal.close", id: "modal.cancel" }
+    ]);
+
+    controller.focusManager.enterScope("root", "sidebar.config");
+    controller.focusManager.enterScope("form", "save.button");
+    controller.formState().update("name", "beta");
+
+    controller.modal().open({
+        cancelLabel: "Cancel",
+        confirmActionId: "modal.confirm",
+        confirmLabel: "Apply",
+        description: "Confirm config apply.",
+        title: "Apply changes"
+    });
+    controller.focusManager.enterScope("modal", "modal.confirm");
+
+    assert.equal(await controller.handleKey("enter"), true);
+    assert.equal(confirmed, 1);
+
+    assert.equal(await controller.handleKey("esc"), true);
+    assert.equal(controller.modalState().open, false);
+    assert.equal(controller.focusManager.currentScopeId(), "form");
+    assert.equal(controller.focusManager.currentFocusId(), "save.button");
+
+    assert.equal(await controller.handleKey("enter"), false);
+    assert.equal(controller.errorMessage(), "server rejected config");
+    assert.equal(await controller.handleKey("ctrl+c"), true);
+    assert.equal(controller.quitRequested(), true);
+});
+
+function createDeferred<T>(): {
+    promise: Promise<T>;
+    resolve(value: T): void;
+} {
+    let resolve!: (value: T) => void;
+    const promise = new Promise<T>((nextResolve) => {
+        resolve = nextResolve;
+    });
+
+    return { promise, resolve };
 }
