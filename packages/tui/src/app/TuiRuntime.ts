@@ -54,6 +54,9 @@ export class TuiRuntime {
         this.keyDispatcher = new KeyDispatcher();
         this.commandDispatcher = new CommandDispatcher({
             focusManager: this.focusManager,
+            onLogsReload: async () => {
+                await this.session.refreshLogs();
+            },
             onQuit: async () => {
                 await this.stop();
             },

@@ -37,11 +37,18 @@ export interface TuiSearchState {
     query: string;
 }
 
+export interface TuiLogsViewportState {
+    follow: boolean;
+    topIndex: number;
+}
+
 export interface TuiInteractionState {
     actionMenu: TuiActionMenuState;
     confirmDialog: TuiConfirmDialogState;
     currentFocus?: FocusItem;
     dirty: boolean;
+    expandedByKey: Record<string, boolean>;
+    logsViewport: TuiLogsViewportState;
     mode: TuiMode;
     redrawNonce: number;
     screenStatusByPanel: Partial<Record<TuiPanel, string>>;
@@ -75,12 +82,16 @@ export type TuiUiIntent =
     | { type: "screen.home" }
     | { type: "screen.end" }
     | { type: "screen.toggle" }
+    | { type: "logs.reload" }
+    | { type: "logs.toggleFollow" }
+    | { type: "logs.clearBuffer" }
     | { value: boolean; type: "edit.setDirty" }
     | { mode: TuiMode; type: "mode.set" }
     | { items: TuiActionMenuItem[]; title: string; type: "overlay.openActionMenu" }
     | { body: string; cancelLabel?: string; confirmIntent: TuiUiIntent; confirmLabel?: string; title: string; type: "overlay.openConfirm" }
     | { type: "overlay.closeActionMenu" }
     | { type: "overlay.closeConfirm" }
+    | { key: string; type: "ui.toggleExpanded" }
     | { panel: TuiPanel; status: string; type: "screen.setStatus" }
     | { panel: TuiPanel; value: boolean; type: "screen.setToggle" }
     | { type: "screen.clearStatus" };
@@ -114,6 +125,11 @@ export function createEmptyInteractionState(): TuiInteractionState {
             title: ""
         },
         dirty: false,
+        expandedByKey: {},
+        logsViewport: {
+            follow: true,
+            topIndex: 0
+        },
         mode: "normal",
         redrawNonce: 0,
         screenStatusByPanel: {},

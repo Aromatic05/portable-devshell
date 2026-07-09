@@ -1,9 +1,15 @@
 import type { JsonValue } from "@portable-devshell/shared";
 
-import type { TuiControlClientLike, TuiControlListInstanceEntry, TuiControlSnapshotEnvelope } from "./TuiControlClient.js";
+import type {
+    TuiControlClientLike,
+    TuiControlListInstanceEntry,
+    TuiControlLogEntry,
+    TuiControlSnapshotEnvelope
+} from "./TuiControlClient.js";
 import { TuiControlClient } from "./TuiControlClient.js";
 import type { TuiControlStreamMessage } from "./TuiControlStream.js";
 import { TuiAppStore } from "../store/TuiAppStore.js";
+import type { TuiInstanceListEntry, TuiLogEntry } from "../store/TuiReducers.js";
 
 export interface TuiControlSessionOptions {
     client?: TuiControlClientLike;
@@ -47,15 +53,24 @@ export class TuiControlSession {
         await this.refresh();
     }
 
+    async refreshLogs(): Promise<void> {
+        const instances = this.#readRuntimeInstances();
+
+        for (const instance of instances) {
+            await this.#reloadLogs(instance);
+        }
+    }
+
     async refresh(): Promise<void> {
         this.#store.setConnectionState("connecting");
 
         try {
             await this.#client.ping();
-            const instances = await this.#client.listInstances();
-            this.#store.replaceInstances(instances.map(({ mcpEnabled, name }) => ({ mcpEnabled, name })));
-            this.#store.setConfigView(await this.#readConfigView());
-            await this.#reloadAllInstances(instances);
+            const configView = await this.#readConfigView();
+            const runtimeInstances = await this.#client.listInstances();
+            this.#store.replaceInstances(mergeInstances(configView, runtimeInstances));
+            this.#store.setConfigView(configView);
+            await this.#reloadAllInstances(runtimeInstances);
             this.#store.setConnectionState("connected");
         } catch (error) {
             const failure = toFailure(error);
@@ -68,17 +83,41 @@ export class TuiControlSession {
         this.#closeSubscriptions();
 
         for (const instance of instances) {
-            const snapshotEnvelope = await this.#client.getSnapshot(instance.name);
-            this.#store.replaceSnapshot(snapshotEnvelope.snapshot);
-            const fromSeq = nextSubscribeSeq(snapshotEnvelope);
-            this.#subscribeInstance(instance.name, fromSeq);
+            await this.#reloadRuntimeInstance(instance.name);
         }
     }
 
     async #reloadInstance(instance: string): Promise<void> {
+        await this.#reloadRuntimeInstance(instance);
+    }
+
+    async #reloadRuntimeInstance(instance: string): Promise<void> {
         const snapshotEnvelope = await this.#client.getSnapshot(instance);
         this.#store.replaceSnapshot(snapshotEnvelope.snapshot);
+        await this.#reloadLogs(instance);
+        await this.#reloadToolCalls(instance);
+        await this.#reloadApprovals(instance);
         this.#subscribeInstance(instance, nextSubscribeSeq(snapshotEnvelope));
+    }
+
+    async #reloadLogs(instance: string): Promise<void> {
+        const logs = await this.#client.readLogs(instance);
+        this.#store.replaceLogs(instance, logs.map(mapLogEntry));
+    }
+
+    async #reloadToolCalls(instance: string): Promise<void> {
+        this.#store.replaceToolCalls(instance, await this.#client.readToolCalls(instance, { limit: 100 }));
+    }
+
+    async #reloadApprovals(instance: string): Promise<void> {
+        this.#store.replaceApprovals(instance, await this.#client.listApprovals(instance));
+    }
+
+    #readRuntimeInstances(): string[] {
+        return this.#store
+            .getState()
+            .instances.filter((instance) => this.#store.getState().snapshotsByInstance[instance.name] !== undefined)
+            .map((instance) => instance.name);
     }
 
     async #readConfigView(): Promise<Record<string, JsonValue> | undefined> {
@@ -232,6 +271,81 @@ class TuiInstanceSubscription {
 
 function nextSubscribeSeq(snapshotEnvelope: TuiControlSnapshotEnvelope): number {
     return Math.max(snapshotEnvelope.lastSeq, 1);
+}
+
+function mergeInstances(
+    configView: Record<string, JsonValue> | undefined,
+    runtimeInstances: TuiControlListInstanceEntry[]
+): TuiInstanceListEntry[] {
+    const runtimeByName = new Map(runtimeInstances.map((instance) => [instance.name, instance] as const));
+    const configured = readConfigInstances(configView);
+    const merged = new Map<string, TuiInstanceListEntry>();
+
+    for (const instance of configured) {
+        const runtime = runtimeByName.get(instance.name);
+        merged.set(instance.name, {
+            defaultWorkspace: instance.defaultWorkspace,
+            enabled: instance.enabled,
+            mcpEnabled: runtime?.mcpEnabled ?? instance.mcpEnabled,
+            mcpPath: instance.mcpPath,
+            name: instance.name,
+            provider: instance.provider
+        });
+    }
+
+    for (const runtime of runtimeInstances) {
+        if (merged.has(runtime.name)) {
+            continue;
+        }
+
+        merged.set(runtime.name, {
+            enabled: true,
+            mcpEnabled: runtime.mcpEnabled,
+            name: runtime.name
+        });
+    }
+
+    return [...merged.values()].sort((left, right) => left.name.localeCompare(right.name));
+}
+
+function readConfigInstances(configView: Record<string, JsonValue> | undefined): TuiInstanceListEntry[] {
+    const value = configView?.instances;
+
+    if (!Array.isArray(value)) {
+        return [];
+    }
+
+    return value.flatMap((entry) => {
+        if (typeof entry !== "object" || entry === null || Array.isArray(entry) || typeof entry.name !== "string") {
+            return [];
+        }
+
+        const mcp = typeof entry.mcp === "object" && entry.mcp !== null && !Array.isArray(entry.mcp) ? entry.mcp : undefined;
+        return [
+            {
+                defaultWorkspace: typeof entry.workspace === "string" ? entry.workspace : undefined,
+                enabled: entry.enabled !== false,
+                mcpEnabled: mcp?.enabled === true,
+                mcpPath: typeof mcp?.path === "string" ? mcp.path : undefined,
+                name: entry.name,
+                provider: typeof entry.provider === "string" ? entry.provider : undefined
+            }
+        ];
+    });
+}
+
+function mapLogEntry(entry: TuiControlLogEntry): TuiLogEntry {
+    return {
+        at: entry.at,
+        bytes: Buffer.byteLength(entry.message, "utf8"),
+        instance: entry.instanceName,
+        message: entry.message,
+        preview: entry.message.slice(0, 160),
+        receivedAt: entry.at,
+        seq: entry.seq,
+        stream: entry.stream,
+        tail: entry.message.slice(-160)
+    };
 }
 
 function readErrorCode(error: unknown): string | undefined {

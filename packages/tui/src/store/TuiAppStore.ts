@@ -1,4 +1,4 @@
-import type { ControlEventEnvelope, InstanceSnapshot, JsonValue } from "@portable-devshell/shared";
+import type { ApprovalRequest, ControlEventEnvelope, InstanceSnapshot, JsonValue, ToolCallRecord } from "@portable-devshell/shared";
 
 import {
     createInitialTuiAppState,
@@ -8,6 +8,7 @@ import {
     type TuiAppState,
     type TuiConnectionStatus,
     type TuiInstanceListEntry,
+    type TuiLogEntry,
     type TuiPanel
 } from "./TuiReducers.js";
 import type { FocusItem, TuiActionMenuItem, TuiMode, TuiUiIntent } from "../interaction/TuiInteractionTypes.js";
@@ -96,6 +97,13 @@ export class TuiAppStore {
         });
     }
 
+    toggleExpanded(key: string): void {
+        this.dispatch({
+            key,
+            type: "interaction.toggleExpanded"
+        });
+    }
+
     setActionMenu(title: string, items: TuiActionMenuItem[], selectedIndex = 0): void {
         this.dispatch({
             items,
@@ -154,6 +162,27 @@ export class TuiAppStore {
         });
     }
 
+    setLogsViewport(topIndex: number, follow: boolean): void {
+        this.dispatch({
+            follow,
+            topIndex,
+            type: "logs.setViewport"
+        });
+    }
+
+    setLogsFollow(follow: boolean): void {
+        this.dispatch({
+            follow,
+            type: "logs.setViewport"
+        });
+    }
+
+    clearLogsBuffer(): void {
+        this.dispatch({
+            type: "log.clearBuffer"
+        });
+    }
+
     bumpRedrawNonce(): void {
         this.dispatch({
             type: "ui.bumpRedrawNonce"
@@ -171,6 +200,37 @@ export class TuiAppStore {
         this.dispatch({
             snapshot,
             type: "snapshot.replace"
+        });
+    }
+
+    replaceLogs(instance: string, logs: TuiLogEntry[]): void {
+        this.dispatch({
+            instance,
+            logs,
+            type: "log.replace"
+        });
+    }
+
+    appendLog(entry: TuiLogEntry): void {
+        this.dispatch({
+            entry,
+            type: "log.append"
+        });
+    }
+
+    replaceToolCalls(instance: string, records: ToolCallRecord[]): void {
+        this.dispatch({
+            instance,
+            records,
+            type: "toolCall.replace"
+        });
+    }
+
+    replaceApprovals(instance: string, approvals: ApprovalRequest[]): void {
+        this.dispatch({
+            approvals,
+            instance,
+            type: "approval.replace"
         });
     }
 

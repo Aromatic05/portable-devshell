@@ -181,8 +181,16 @@ export class KeyDispatcher {
             return [{ type: "ui.help" }];
         }
 
-        if (mode === "edit" && press.input === "s") {
-            return [{ item: { kind: "button", id: "save" }, type: "focus.activateItem" }];
+        if (mode === "normal" && (press.input === "r" || press.input === "R")) {
+            return [{ type: "logs.reload" }];
+        }
+
+        if (mode === "normal" && (press.input === "f" || press.input === "F")) {
+            return [{ type: "logs.toggleFollow" }];
+        }
+
+        if (mode === "normal" && (press.input === "c" || press.input === "C")) {
+            return [{ type: "logs.clearBuffer" }];
         }
 
         return [];
@@ -202,13 +210,13 @@ function panelFromDigit(input: "1" | "2" | "3" | "4" | "5" | "6") {
         case "1":
             return "instances";
         case "2":
-            return "config";
-        case "3":
             return "connector";
-        case "4":
+        case "3":
             return "audit";
-        case "5":
+        case "4":
             return "logs";
+        case "5":
+            return "approvals";
         case "6":
             return "help";
     }

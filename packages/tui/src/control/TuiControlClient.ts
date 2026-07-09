@@ -1,4 +1,4 @@
-import { asInstanceName, type ControlEventEnvelope, type InstanceSnapshot, type JsonValue } from "@portable-devshell/shared";
+import { asInstanceName, type ApprovalRequest, type ControlEventEnvelope, type InstanceSnapshot, type JsonValue, type ToolCallRecord } from "@portable-devshell/shared";
 
 import {
     createSubscribedStream,
@@ -19,11 +19,22 @@ export interface TuiControlListInstanceEntry {
     snapshot?: InstanceSnapshot;
 }
 
+export interface TuiControlLogEntry {
+    at: string;
+    instanceName: string;
+    message: string;
+    seq: number;
+    stream: "stderr" | "stdout";
+}
+
 export interface TuiControlClientLike {
     getConfigView(): Promise<Record<string, JsonValue>>;
     getSnapshot(instance: string): Promise<TuiControlSnapshotEnvelope>;
+    listApprovals(instance: string): Promise<ApprovalRequest[]>;
     listInstances(): Promise<TuiControlListInstanceEntry[]>;
     ping(): Promise<{ pong: boolean }>;
+    readLogs(instance: string, params?: { fromSeq?: number; limit?: number }): Promise<TuiControlLogEntry[]>;
+    readToolCalls(instance: string, params?: { limit?: number }): Promise<ToolCallRecord[]>;
     subscribe(instance: string, fromSeq: number): Promise<TuiControlStream>;
 }
 
@@ -48,6 +59,18 @@ export class TuiControlClient implements TuiControlClientLike {
 
     async getSnapshot(instance: string): Promise<TuiControlSnapshotEnvelope> {
         return (await this.#request("instance.getSnapshot", createInstanceTarget(instance))) as unknown as TuiControlSnapshotEnvelope;
+    }
+
+    async readLogs(instance: string, params?: { fromSeq?: number; limit?: number }): Promise<TuiControlLogEntry[]> {
+        return (await this.#request("instance.readLogs", createInstanceTarget(instance), params as unknown as JsonValue)) as unknown as TuiControlLogEntry[];
+    }
+
+    async readToolCalls(instance: string, params?: { limit?: number }): Promise<ToolCallRecord[]> {
+        return (await this.#request("instance.readToolCalls", createInstanceTarget(instance), params as unknown as JsonValue)) as unknown as ToolCallRecord[];
+    }
+
+    async listApprovals(instance: string): Promise<ApprovalRequest[]> {
+        return (await this.#request("instance.listApprovals", createInstanceTarget(instance))) as unknown as ApprovalRequest[];
     }
 
     async subscribe(instance: string, fromSeq: number): Promise<TuiControlStream> {

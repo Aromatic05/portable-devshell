@@ -5,6 +5,7 @@ import { isSameFocusItem, type TuiUiIntent } from "./TuiInteractionTypes.js";
 
 export interface CommandDispatcherOptions {
     focusManager: TuiFocusManager;
+    onLogsReload(): Promise<void>;
     onQuit(): Promise<void>;
     onRedraw(): void;
     store: TuiAppStore;
@@ -12,12 +13,14 @@ export interface CommandDispatcherOptions {
 
 export class CommandDispatcher {
     readonly #focusManager: TuiFocusManager;
+    readonly #onLogsReload: () => Promise<void>;
     readonly #onQuit: () => Promise<void>;
     readonly #onRedraw: () => void;
     readonly #store: TuiAppStore;
 
     constructor(options: CommandDispatcherOptions) {
         this.#focusManager = options.focusManager;
+        this.#onLogsReload = options.onLogsReload;
         this.#onQuit = options.onQuit;
         this.#onRedraw = options.onRedraw;
         this.#store = options.store;
@@ -43,8 +46,12 @@ export class CommandDispatcher {
                 return true;
             case "panel.activate":
                 this.#store.setActivePanel(intent.panel);
-                this.#store.setMode(this.#store.getState().interaction.dirty && intent.panel === "config" ? "edit" : "normal");
+                this.#store.setMode("normal");
                 this.#focusManager.syncPanel(intent.panel, this.#store.getState().interaction.mode);
+                if (intent.panel === "logs") {
+                    await this.#onLogsReload();
+                    this.#store.setScreenStatus("logs", "Logs reloaded from instance.readLogs.");
+                }
                 return true;
             case "panel.cycle": {
                 const panel = this.#store.getState().activePanel;
@@ -54,6 +61,10 @@ export class CommandDispatcher {
                 });
             }
             case "focus.move":
+                if (this.#store.getState().activePanel === "logs" && (intent.direction === "up" || intent.direction === "down")) {
+                    return this.#handleLogsLineMove(intent.direction);
+                }
+
                 return this.#focusManager.move(intent.direction);
             case "focus.set":
                 return this.#focusManager.setFocus(intent.item);
@@ -182,6 +193,34 @@ export class CommandDispatcher {
                     this.#store.setMode("normal");
                 }
                 return true;
+            case "logs.reload":
+                if (this.#store.getState().activePanel !== "logs") {
+                    return false;
+                }
+
+                await this.#onLogsReload();
+                this.#store.setScreenStatus("logs", "Logs reloaded from instance.readLogs.");
+                return true;
+            case "logs.toggleFollow":
+                if (this.#store.getState().activePanel !== "logs") {
+                    return false;
+                }
+
+                const nextFollow = !this.#store.getState().interaction.logsViewport.follow;
+                this.#store.setLogsFollow(nextFollow);
+                this.#store.setScreenStatus(
+                    "logs",
+                    nextFollow ? "Follow enabled." : "Follow paused."
+                );
+                return true;
+            case "logs.clearBuffer":
+                if (this.#store.getState().activePanel !== "logs") {
+                    return false;
+                }
+
+                this.#store.clearLogsBuffer();
+                this.#store.setScreenStatus("logs", "Cleared local log buffer only.");
+                return true;
             case "mode.set":
                 this.#store.setMode(intent.mode);
                 this.#focusManager.syncPanel(this.#store.getState().activePanel, intent.mode);
@@ -206,6 +245,9 @@ export class CommandDispatcher {
                     title: ""
                 });
                 this.#focusManager.restore();
+                return true;
+            case "ui.toggleExpanded":
+                this.#store.toggleExpanded(intent.key);
                 return true;
             case "screen.setStatus":
                 this.#store.setScreenStatus(intent.panel, intent.status);
@@ -244,22 +286,14 @@ export class CommandDispatcher {
             return true;
         }
 
-        if (state.interaction.mode === "edit") {
-            if (state.activePanel === "config") {
-                this.#store.setScreenToggle("config", false);
-            }
-
-            this.#store.setDirty(false);
-            this.#store.setMode("normal");
-            this.#store.setScreenStatus(state.activePanel, "Edit cancelled.");
-            this.#focusManager.syncPanel(state.activePanel, "normal");
-            return true;
-        }
-
         return false;
     }
 
     async #dispatchScreenIntent(intent: "end" | "home" | "pageDown" | "pageUp"): Promise<boolean> {
+        if (this.#store.getState().activePanel === "logs") {
+            return this.#handleLogsViewportIntent(intent);
+        }
+
         const definition = buildScreenDefinition(this.#store.getState());
 
         for (const nextIntent of definition.handleIntent(intent, this.#store.getState())) {
@@ -281,5 +315,55 @@ export class CommandDispatcher {
         const graph = buildFocusGraphForState(this.#store.getState());
         const cancelFocus = graph.first();
         this.#store.setCurrentFocus(cancelFocus);
+    }
+
+    #handleLogsViewportIntent(intent: "end" | "home" | "pageDown" | "pageUp"): boolean {
+        const state = this.#store.getState();
+        const totalLines = Object.values(state.logsByInstance).reduce((count, entries) => count + entries.length, 0);
+        const pageSize = 14;
+        const maxTopIndex = Math.max(0, totalLines - pageSize);
+        const currentTop = state.interaction.logsViewport.follow ? maxTopIndex : state.interaction.logsViewport.topIndex;
+
+        if (intent === "end") {
+            this.#store.setLogsViewport(maxTopIndex, true);
+            this.#store.setScreenStatus("logs", "Moved to log end and resumed follow.");
+            return true;
+        }
+
+        if (intent === "home") {
+            this.#store.setLogsViewport(0, false);
+            this.#store.setScreenStatus("logs", "Moved to log start and paused follow.");
+            return true;
+        }
+
+        const delta = intent === "pageDown" ? pageSize : -pageSize;
+        const nextTop = Math.max(0, Math.min(maxTopIndex, currentTop + delta));
+        const follow = nextTop >= maxTopIndex;
+
+        this.#store.setLogsViewport(nextTop, follow);
+        this.#store.setScreenStatus("logs", follow ? "Reached log end and resumed follow." : "Scrolled logs and paused follow.");
+        return true;
+    }
+
+    #handleLogsLineMove(direction: "down" | "up"): boolean {
+        const state = this.#store.getState();
+        const totalLines = Object.values(state.logsByInstance).reduce((count, entries) => count + entries.length, 0);
+        const pageSize = 14;
+        const maxTopIndex = Math.max(0, totalLines - pageSize);
+        const currentTop = state.interaction.logsViewport.follow ? maxTopIndex : state.interaction.logsViewport.topIndex;
+        const delta = direction === "down" ? 1 : -1;
+        const nextTop = Math.max(0, Math.min(maxTopIndex, currentTop + delta));
+        const follow = nextTop >= maxTopIndex;
+
+        this.#store.setLogsViewport(nextTop, follow);
+        if (!follow && direction === "up") {
+            this.#store.setScreenStatus("logs", "Manual scroll paused follow.");
+        }
+
+        if (follow && direction === "down") {
+            this.#store.setScreenStatus("logs", "Reached log end and resumed follow.");
+        }
+
+        return true;
     }
 }
