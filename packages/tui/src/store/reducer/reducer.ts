@@ -1,0 +1,284 @@
+import { applyEventRecord } from "./eventReducer.js";
+import { compareToolCallRecord, dedupeLogs, mergeLogEntry, pruneByInstanceNames, pruneByInstances, selectInstanceAfterListReplace, withDerivedState } from "./helpers.js";
+import type { TuiAppAction, TuiAppState } from "./types.js";
+
+export function tuiAppReducer(state: TuiAppState, action: TuiAppAction): TuiAppState {
+    switch (action.type) {
+        case "approval.replace":
+            return withDerivedState({
+                ...state,
+                approvalsByInstance: {
+                    ...state.approvalsByInstance,
+                    [action.instance]: [...action.approvals].sort((left, right) => right.createdAt.localeCompare(left.createdAt))
+                }
+            });
+        case "control.setConfigView":
+            return {
+                ...state,
+                configView: action.configView
+            };
+        case "control.setConnectionState":
+            return {
+                ...state,
+                connection: {
+                    errorCode: action.errorCode,
+                    errorMessage: action.errorMessage,
+                    status: action.status
+                }
+            };
+        case "focus.scope.set":
+            return {
+                ...state,
+                interaction: {
+                    ...state.interaction,
+                    focusScope: action.focusScope
+                }
+            };
+        case "mainFocus.set":
+            return {
+                ...state,
+                ui: {
+                    ...state.ui,
+                    mainFocusId: action.mainFocusId
+                }
+            };
+        case "confirm.focus":
+            return {
+                ...state,
+                interaction: {
+                    ...state.interaction,
+                    selectedConfirmButton: action.button
+                }
+            };
+        case "sidebar.cursor.set":
+            return {
+                ...state,
+                interaction: {
+                    ...state.interaction,
+                    sidebarCursor: action.cursor
+                }
+            };
+        case "sidebar.focus.set":
+            return {
+                ...state,
+                ui: {
+                    ...state.ui,
+                    sidebarFocus: action.sidebarFocus
+                }
+            };
+        case "instance.replaceList":
+            return withDerivedState(selectInstanceAfterListReplace({
+                ...state,
+                approvalsByInstance: pruneByInstances(state.approvalsByInstance, action.instances),
+                instances: [...action.instances],
+                lastSeqByInstance: pruneByInstanceNames(state.lastSeqByInstance, action.instances),
+                lastStatusChangeAtByInstance: pruneByInstanceNames(state.lastStatusChangeAtByInstance, action.instances),
+                logsByInstance: pruneByInstances(state.logsByInstance, action.instances),
+                snapshotsByInstance: pruneByInstances(state.snapshotsByInstance, action.instances),
+                toolCallsByInstance: pruneByInstances(state.toolCallsByInstance, action.instances)
+            }));
+        case "log.append": {
+            const current = state.logsByInstance[action.entry.instance] ?? [];
+            return withDerivedState({
+                ...state,
+                logsByInstance: {
+                    ...state.logsByInstance,
+                    [action.entry.instance]: mergeLogEntry(current, action.entry)
+                }
+            });
+        }
+        case "log.replace":
+            return withDerivedState({
+                ...state,
+                logsByInstance: {
+                    ...state.logsByInstance,
+                    [action.instance]: dedupeLogs(action.logs)
+                }
+            });
+        case "log.clearBuffer":
+            return withDerivedState({
+                ...state,
+                logsByInstance: {}
+            });
+        case "overlay.setActionMenu":
+            return {
+                ...state,
+                interaction: {
+                    ...state.interaction,
+                    actionMenu: {
+                        items: [...action.items],
+                        open: action.items.length > 0,
+                        selectedIndex: action.selectedIndex,
+                        title: action.title
+                    },
+                    selectedActionId: action.items[action.selectedIndex]?.id
+                }
+            };
+        case "overlay.setConfirmDialog":
+            return {
+                ...state,
+                interaction: {
+                    ...state.interaction,
+                    confirmDialog: {
+                        body: action.body,
+                        cancelLabel: action.cancelLabel,
+                        confirmIntent: action.confirmIntent,
+                        confirmLabel: action.confirmLabel,
+                        open: action.open,
+                        title: action.title
+                    },
+                    selectedConfirmButton: "cancel"
+                }
+            };
+        case "search.setOpen":
+            return {
+                ...state,
+                interaction: {
+                    ...state.interaction,
+                    search: {
+                        ...state.interaction.search,
+                        open: action.value
+                    }
+                }
+            };
+        case "search.setQuery":
+            return {
+                ...state,
+                ui: {
+                    ...state.ui,
+                    searchQueries: {
+                        ...state.ui.searchQueries,
+                        [action.page]: action.query
+                    }
+                }
+            };
+        case "screen.setStatus":
+            return {
+                ...state,
+                interaction: {
+                    ...state.interaction,
+                    screenStatusByPage: {
+                        ...state.interaction.screenStatusByPage,
+                        [action.page]: action.status
+                    }
+                }
+            };
+        case "ui.selectInstance":
+            return {
+                ...state,
+                ui: {
+                    ...state.ui,
+                    selectedInstance: action.instance
+                }
+            };
+        case "ui.selectPage":
+            return {
+                ...state,
+                ui: {
+                    ...state.ui,
+                    selectedPage: action.page
+                }
+            };
+        case "ui.toggleExpanded":
+            return {
+                ...state,
+                ui: {
+                    ...state.ui,
+                    expandedBoxes: {
+                        ...state.ui.expandedBoxes,
+                        [action.key]: state.ui.expandedBoxes[action.key] !== true
+                    }
+                }
+            };
+        case "ui.setScrollOffset":
+            return {
+                ...state,
+                ui: {
+                    ...state.ui,
+                    scrollOffsets: {
+                        ...state.ui.scrollOffsets,
+                        [action.key]: action.offset
+                    }
+                }
+            };
+        case "ui.bumpRedrawNonce":
+            return {
+                ...state,
+                interaction: {
+                    ...state.interaction,
+                    redrawNonce: state.interaction.redrawNonce + 1
+                }
+            };
+        case "snapshot.replace":
+            return withDerivedState({
+                ...state,
+                lastSeqByInstance: {
+                    ...state.lastSeqByInstance,
+                    [action.snapshot.name]: action.snapshot.lastSeq
+                },
+                snapshotsByInstance: {
+                    ...state.snapshotsByInstance,
+                    [action.snapshot.name]: action.snapshot
+                }
+            });
+        case "toolCall.replace":
+            return withDerivedState({
+                ...state,
+                toolCallsByInstance: {
+                    ...state.toolCallsByInstance,
+                    [action.instance]: [...action.records].sort(compareToolCallRecord)
+                }
+            });
+        case "instance.setLastSeq":
+            if ((state.lastSeqByInstance[action.instance] ?? 0) >= action.seq) {
+                return state;
+            }
+
+            return {
+                ...state,
+                lastSeqByInstance: {
+                    ...state.lastSeqByInstance,
+                    [action.instance]: action.seq
+                }
+            };
+        case "event.append": {
+            const rawEvents = [...state.rawEvents, action.rawEvent];
+            const maxEvents = action.maxEvents ?? 100;
+            const nextState = {
+                ...state,
+                lastSeqByInstance:
+                    (state.lastSeqByInstance[action.rawEvent.instance] ?? 0) >= action.rawEvent.seq
+                        ? state.lastSeqByInstance
+                        : {
+                              ...state.lastSeqByInstance,
+                              [action.rawEvent.instance]: action.rawEvent.seq
+                          },
+                rawEvents: rawEvents.slice(Math.max(0, rawEvents.length - maxEvents))
+            };
+            return withDerivedState(applyEventRecord(nextState, action.rawEvent));
+        }
+        case "restore.push":
+            return {
+                ...state,
+                interaction: {
+                    ...state.interaction,
+                    restoreStack: [
+                        ...state.interaction.restoreStack,
+                        {
+                            focusScope: action.focusScope,
+                            mainFocusId: action.mainFocusId,
+                            sidebarFocus: action.sidebarFocus
+                        }
+                    ]
+                }
+            };
+        case "restore.pop":
+            return {
+                ...state,
+                interaction: {
+                    ...state.interaction,
+                    restoreStack: state.interaction.restoreStack.slice(0, -1)
+                }
+            };
+    }
+}

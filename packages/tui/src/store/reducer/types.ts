@@ -1,0 +1,106 @@
+import type { ApprovalRequest, ControlEventEnvelope, InstanceSnapshot, JsonValue, ToolCallRecord } from "@portable-devshell/shared";
+
+import type { TuiActionMenuItem, TuiInteractionState, TuiUiIntent } from "../../interaction/TuiInteractionTypes.js";
+import type { FocusScope, PageId, SidebarCursor, SidebarFocus, TuiUiState } from "../../model/TuiUiTypes.js";
+
+export type TuiConnectionStatus = "connecting" | "connected" | "disconnected" | "error";
+
+export interface TuiInstanceListEntry {
+    defaultWorkspace?: string;
+    enabled: boolean;
+    mcpEnabled: boolean;
+    mcpPath?: string;
+    name: string;
+    provider?: string;
+}
+
+export interface TuiLogEntry {
+    at?: string;
+    bytes?: number;
+    callId?: string;
+    instance: string;
+    message?: string;
+    preview?: string;
+    receivedAt: string;
+    requestId?: string;
+    seq: number;
+    sessionId?: string;
+    source?: "cli" | "tui" | "mcp";
+    stream: "stderr" | "stdout";
+    tail?: string;
+    toolName?: string;
+}
+
+export interface TuiConnectionState {
+    errorCode?: string;
+    errorMessage?: string;
+    status: TuiConnectionStatus;
+}
+
+export interface TuiRawEventRecord {
+    event: string;
+    instance: string;
+    payload?: JsonValue;
+    seq: number;
+}
+
+export interface TuiGlobalDerivedState {
+    connectedInstanceCount: number;
+    pendingApprovalCount: number;
+    totalEventCount: number;
+}
+
+export interface TuiAppState {
+    approvalsByInstance: Record<string, ApprovalRequest[]>;
+    configView?: Record<string, JsonValue>;
+    connection: TuiConnectionState;
+    globalDerived: TuiGlobalDerivedState;
+    interaction: TuiInteractionState;
+    instances: TuiInstanceListEntry[];
+    lastSeqByInstance: Record<string, number>;
+    lastStatusChangeAtByInstance: Record<string, string>;
+    logsByInstance: Record<string, TuiLogEntry[]>;
+    rawEvents: TuiRawEventRecord[];
+    snapshotsByInstance: Record<string, InstanceSnapshot>;
+    toolCallsByInstance: Record<string, ToolCallRecord[]>;
+    ui: TuiUiState;
+}
+
+export type TuiAppAction =
+    | { approvals: ApprovalRequest[]; instance: string; type: "approval.replace" }
+    | { configView?: Record<string, JsonValue>; type: "control.setConfigView" }
+    | { errorCode?: string; errorMessage?: string; status: TuiConnectionStatus; type: "control.setConnectionState" }
+    | { focusScope: FocusScope; type: "focus.scope.set" }
+    | { instance: string; seq: number; type: "instance.setLastSeq" }
+    | { instances: TuiInstanceListEntry[]; type: "instance.replaceList" }
+    | { entry: TuiLogEntry; type: "log.append" }
+    | { instance: string; logs: TuiLogEntry[]; type: "log.replace" }
+    | { type: "log.clearBuffer" }
+    | { mainFocusId?: string; type: "mainFocus.set" }
+    | { button: "cancel" | "confirm"; type: "confirm.focus" }
+    | { cursor?: SidebarCursor; type: "sidebar.cursor.set" }
+    | { items: TuiActionMenuItem[]; selectedIndex: number; title: string; type: "overlay.setActionMenu" }
+    | { confirmIntent: TuiUiIntent; body: string; cancelLabel: string; confirmLabel: string; open: boolean; title: string; type: "overlay.setConfirmDialog" }
+    | { sidebarFocus: SidebarFocus; type: "sidebar.focus.set" }
+    | { type: "search.setOpen"; value: boolean }
+    | { page: PageId; query: string; type: "search.setQuery" }
+    | { page: PageId; status?: string; type: "screen.setStatus" }
+    | { instance?: string; type: "ui.selectInstance" }
+    | { page: PageId; type: "ui.selectPage" }
+    | { key: string; type: "ui.toggleExpanded" }
+    | { key: string; offset: number; type: "ui.setScrollOffset" }
+    | { type: "ui.bumpRedrawNonce" }
+    | { snapshot: InstanceSnapshot; type: "snapshot.replace" }
+    | { instance: string; records: ToolCallRecord[]; type: "toolCall.replace" }
+    | { maxEvents?: number; rawEvent: TuiRawEventRecord; type: "event.append" }
+    | { type: "restore.pop" }
+    | { focusScope: FocusScope; mainFocusId?: string; sidebarFocus: SidebarFocus; type: "restore.push" };
+
+export function toRawEventRecord(envelope: ControlEventEnvelope): TuiRawEventRecord {
+    return {
+        event: envelope.event,
+        instance: envelope.target.instance,
+        payload: envelope.payload,
+        seq: envelope.seq
+    };
+}
