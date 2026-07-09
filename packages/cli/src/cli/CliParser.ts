@@ -7,6 +7,7 @@ export type CliParsedCommand =
     | { kind: "control.start" }
     | { kind: "control.status" }
     | { kind: "control.stop" }
+    | { kind: "tui" }
     | { input: JsonValue; instance: string; kind: "instance.call"; toolName: string }
     | { kind: "instance.create" }
     | { kind: "instance.list" }
@@ -32,6 +33,8 @@ export class CliParser {
                 return this.#expectNoExtra(argv, { kind: "control.status" });
             case "logs":
                 return this.#expectNoExtra(argv, { kind: "control.logs" });
+            case "tui":
+                return this.#expectNoExtra(argv, { kind: "tui" });
             case "instance":
                 return this.#parseInstance(argv.slice(1));
             case "watch":

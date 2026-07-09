@@ -33,6 +33,7 @@ export interface CliMainOptions {
     createLifecycleManager?: () => Promise<CliLifecycleManagerLike>;
     followEventLimit?: number;
     homeDirectory?: string;
+    runTui?: () => Promise<void>;
     stdin?: NodeJS.ReadableStream;
     stderr?: { write(chunk: string): void };
     stdout?: { write(chunk: string): void };
@@ -45,6 +46,7 @@ export class CliMain {
     readonly #exitMapper = new CliExitMapper();
     readonly #followEventLimit?: number;
     readonly #parser = new CliParser();
+    readonly #runTui?: () => Promise<void>;
     readonly #stdin: NodeJS.ReadableStream;
     readonly #stderr: { write(chunk: string): void };
     readonly #stdout: { write(chunk: string): void };
@@ -55,6 +57,7 @@ export class CliMain {
         this.#createClient = options.createClient ?? (() => new CliControlClient({ xdgRuntimeDir: this.#xdgRuntimeDir }));
         this.#createLifecycleManager = options.createLifecycleManager;
         this.#followEventLimit = options.followEventLimit;
+        this.#runTui = options.runTui;
         this.#stdin = options.stdin ?? process.stdin;
         this.#stderr = options.stderr ?? process.stderr;
         this.#stdout = options.stdout ?? process.stdout;
@@ -87,6 +90,9 @@ export class CliMain {
                 return;
             case "control.logs":
                 this.#stdout.write(renderControlLogs(await new CliCommandControlLogs().execute(await this.#lifecycle())));
+                return;
+            case "tui":
+                await this.#startTui();
                 return;
             case "instance.list":
                 this.#stdout.write(renderInstanceList(await new CliCommandInstanceList().execute(this.#createClient())));
@@ -181,6 +187,21 @@ export class CliMain {
 
         return new imported.ControlLifecycleManager({
             homeDirectory: this.#homeDirectory,
+            xdgRuntimeDir: this.#xdgRuntimeDir
+        });
+    }
+
+    async #startTui(): Promise<void> {
+        if (this.#runTui !== undefined) {
+            await this.#runTui();
+            return;
+        }
+
+        const imported = (await import("@portable-devshell/tui")) as {
+            runTui(options?: { xdgRuntimeDir?: string }): Promise<void>;
+        };
+
+        await imported.runTui({
             xdgRuntimeDir: this.#xdgRuntimeDir
         });
     }

@@ -10,7 +10,8 @@
     },
     "dependencies": {
         "@portable-devshell/control": "workspace:*",
-        "@portable-devshell/shared": "workspace:*"
+        "@portable-devshell/shared": "workspace:*",
+        "@portable-devshell/tui": "workspace:*"
     },
     "exports": {
         ".": {
