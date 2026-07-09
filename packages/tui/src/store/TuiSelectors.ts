@@ -56,19 +56,7 @@ export function selectRecentEvents(state: TuiAppState, limit = 10): TuiRawEventR
 export function selectFooterText(state: TuiAppState): string {
     const prefix = `${state.connection.status} ${panelLabel(state.activePanel)} ${state.interaction.mode}`;
     const focus = state.interaction.currentFocus === undefined ? "focus none" : `focus ${focusLabel(state.interaction.currentFocus)}`;
-
-    switch (state.interaction.mode) {
-        case "actionMenu":
-            return `${prefix} | ${focus} | ↑↓ enter ctrl+[`;
-        case "confirm":
-            return `${prefix} | ${focus} | tab ←→ enter ctrl+[`;
-        case "search":
-            return `${prefix} | ${focus} | type bs enter ctrl+[`;
-        case "edit":
-            return `${prefix} | ${focus} | 1-6 [] tab ↔ enter sp a / ^[ ^D ^L`;
-        case "normal":
-            return `${prefix} | ${focus} | 1-6 [] tab ↔ enter sp a / ? ^D ^L`;
-    }
+    return `${prefix} | ${focus} | ${selectFooterShortcuts(state).join(" ")}`;
 }
 
 export function selectErrorMessage(state: TuiAppState): string[] | undefined {
@@ -129,6 +117,28 @@ export function selectFooterModel(state: TuiAppState): { mode: TuiMode; text: st
     };
 }
 
+export function selectFooterShortcuts(state: TuiAppState): string[] {
+    switch (state.interaction.mode) {
+        case "actionMenu":
+            return ["↑↓", "enter", "ctrl+["];
+        case "confirm":
+            return ["tab", "←→", "enter", "ctrl+["];
+        case "search":
+            return ["type", "bs", "enter", "ctrl+["];
+        case "edit":
+        case "normal": {
+            const shortcuts = ["1-6", "[]", "tab", "↔", "enter"];
+
+            if (canToggleCurrentFocus(state)) {
+                shortcuts.push("sp");
+            }
+
+            shortcuts.push("a", "/", "?", "^[", "^D", "^L");
+            return shortcuts;
+        }
+    }
+}
+
 export function selectActionMenuModel(state: TuiAppState): { items: Array<{ active: boolean; id: string; label: string }>; open: boolean; title: string } {
     const focused = state.interaction.currentFocus;
 
@@ -177,4 +187,18 @@ function panelLabel(panel: TuiPanel): string {
 function focusLabel(item: FocusItem): string {
     const compactId = item.id.includes(".") ? item.id.split(".").at(-1) ?? item.id : item.id;
     return `${item.kind}:${compactId}`;
+}
+
+function canToggleCurrentFocus(state: TuiAppState): boolean {
+    const currentFocus = state.interaction.currentFocus;
+
+    if (currentFocus === undefined) {
+        return false;
+    }
+
+    if (state.activePanel !== "config") {
+        return true;
+    }
+
+    return currentFocus.kind === "field";
 }

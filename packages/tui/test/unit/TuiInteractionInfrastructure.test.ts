@@ -109,6 +109,8 @@ test("Prompt 2 ctrl+d uses confirm dialog when dirty and confirm defaults to can
 
     assert.equal(harness.store.getState().interaction.mode, "edit");
     assert.equal(harness.store.getState().interaction.dirty, true);
+    assert.match(selectFooterText(harness.store.getState()), /\?/u);
+    assert.match(selectFooterText(harness.store.getState()), /\bsp\b/u);
 
     await harness.press("d", { ctrl: true });
     assert.equal(harness.store.getState().interaction.mode, "confirm");
@@ -136,6 +138,8 @@ test("Prompt 2 save and cancel are real focus items with visual highlight and en
     await harness.press(" ");
     await harness.press("", { downArrow: true });
 
+    assert.doesNotMatch(selectFooterText(harness.store.getState()), /\bsp\b/u);
+    assert.match(selectFooterText(harness.store.getState()), /\?/u);
     assert.equal(hasHighlightedLabel(harness.store.getState(), "[ Save ]"), true);
     assert.equal(hasHighlightedLabel(harness.store.getState(), "[ Cancel ]"), false);
 
