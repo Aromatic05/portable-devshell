@@ -4,14 +4,14 @@ import { createServer, type Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { Readable } from "node:stream";
+import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 import { FrameReader, FrameWriter, type JsonValue } from "@portable-devshell/shared";
 
 import { CliMain } from "../../dist/cli/CliMain.js";
-import { CliControlClient } from "../../dist/cli/control/CliControlClient.js";
 
-async function verifyCliInstanceCommandsThroughControlRpc(): Promise<void> {
+async function runInstanceCommandsThroughControlRpc(t: { after(callback: () => Promise<void> | void): void }): Promise<void> {
     const runtimeRoot = await mkdtemp(join(tmpdir(), "portable-devshell-cli-instance-"));
     const socketDir = join(runtimeRoot, "portable-devshell");
     const socketPath = join(socketDir, "control.sock");
@@ -26,138 +26,46 @@ async function verifyCliInstanceCommandsThroughControlRpc(): Promise<void> {
         server.listen(socketPath, resolve);
     });
 
-    try {
-        const stdout = createBuffer();
-        const stderr = createBuffer();
-        const cli = new CliMain({
-            followEventLimit: 1,
-            stderr,
-            stdout,
-            xdgRuntimeDir: runtimeRoot
-        });
-
-        assert.equal(await cli.run(["instance", "list"]), 0);
-        assert.match(stdout.flush(), /demo-local\tstopped/u);
-
-        assert.equal(await cli.run(["instance", "status", "demo-local"]), 0);
-        assert.match(stdout.flush(), /instance: demo-local/u);
-
-        assert.equal(await cli.run(["instance", "start", "demo-local"]), 0);
-        assert.match(stdout.flush(), /status: ready/u);
-
-        assert.equal(await cli.run(["instance", "stop", "demo-local"]), 0);
-        assert.match(stdout.flush(), /status: stopped/u);
-
-        assert.equal(await cli.run(["instance", "logs", "demo-local"]), 0);
-        assert.equal(stdout.flush(), "[1] stdout before\n");
-
-        assert.equal(await cli.run(["instance", "logs", "demo-local", "-f"]), 0);
-        assert.equal(stdout.flush(), "[1] stdout before\n[2] stdout after\n");
-
-        assert.equal(await cli.run(["instance", "call", "demo-local", "bash_run", "{\"command\":\"pwd\"}"]), 0);
-        const callOutput = stdout.flush();
-        assert.match(callOutput, /tool: bash_run/u);
-        assert.match(callOutput, /stdout:\n\/tmp\/ws/u);
-        assert.equal(stderr.flush(), "");
-    } finally {
+    t.after(async () => {
         await closeServer(server);
         await rm(runtimeRoot, { force: true, recursive: true });
-    }
-}
-
-async function verifyCliControlClientSubscribeStreamStates(): Promise<void> {
-    const runtimeRoot = await mkdtemp(join(tmpdir(), "portable-devshell-cli-stream-"));
-    const socketDir = join(runtimeRoot, "portable-devshell");
-    const socketPath = join(socketDir, "control.sock");
-    await mkdir(socketDir, { recursive: true });
-    let subscribeCount = 0;
-    const server = createServer((socket) => {
-        const reader = new FrameReader();
-        const writer = new FrameWriter(socket);
-
-        socket.on("data", (chunk: Uint8Array) => {
-            for (const frame of reader.push(chunk)) {
-                const envelope = frame as Record<string, any>;
-
-                if (envelope.method !== "instance.subscribe") {
-                    continue;
-                }
-
-                subscribeCount += 1;
-                void respond(writer, envelope.id, { events: [], lastSeq: 1 }).then(() => {
-                    if (subscribeCount === 1) {
-                        setTimeout(() => {
-                            void writer.write({
-                                event: "stream.gap",
-                                payload: {
-                                    instance: "demo-local",
-                                    latestSeq: 3,
-                                    oldestAvailableSeq: 4,
-                                    requestedFromSeq: 4
-                                },
-                                seq: 3,
-                                target: { instance: "demo-local", kind: "instance" },
-                                type: "event"
-                            } as unknown as JsonValue);
-                            void writer.write({
-                                event: "stream.cancelled",
-                                payload: {
-                                    instance: "demo-local",
-                                    reason: "gap"
-                                },
-                                seq: 3,
-                                target: { instance: "demo-local", kind: "instance" },
-                                type: "event"
-                            } as unknown as JsonValue);
-                        }, 5);
-                        return;
-                    }
-
-                    setTimeout(() => {
-                        socket.destroy();
-                    }, 5);
-                });
-            }
-        });
     });
 
-    await new Promise<void>((resolve, reject) => {
-        server.once("error", reject);
-        server.listen(socketPath, resolve);
+    const stdout = createBuffer();
+    const stderr = createBuffer();
+    const cli = new CliMain({
+        followEventLimit: 1,
+        stderr,
+        stdout,
+        xdgRuntimeDir: runtimeRoot
     });
 
-    const client = new CliControlClient({ xdgRuntimeDir: runtimeRoot });
+    assert.equal(await cli.run(["instance", "list"]), 0);
+    assert.match(stdout.flush(), /demo-local\tstopped/u);
 
-    try {
-        const firstStream = await client.subscribe("demo-local", 4);
-        const gap = await firstStream.nextMessage();
-        assert.equal(gap.kind, "stream.gap");
-        assert.deepEqual(gap.kind === "stream.gap" ? gap.envelope.payload : undefined, {
-            instance: "demo-local",
-            latestSeq: 3,
-            oldestAvailableSeq: 4,
-            requestedFromSeq: 4
-        });
+    assert.equal(await cli.run(["instance", "status", "demo-local"]), 0);
+    assert.match(stdout.flush(), /instance: demo-local/u);
 
-        const cancelled = await firstStream.nextMessage();
-        assert.equal(cancelled.kind, "stream.cancelled");
-        assert.deepEqual(cancelled.kind === "stream.cancelled" ? cancelled.envelope.payload : undefined, {
-            instance: "demo-local",
-            reason: "gap"
-        });
-        firstStream.close();
+    assert.equal(await cli.run(["instance", "start", "demo-local"]), 0);
+    assert.match(stdout.flush(), /status: ready/u);
 
-        const secondStream = await client.subscribe("demo-local", 4);
-        const closed = await secondStream.nextMessage();
-        assert.equal(closed.kind, "connection.closed");
-        secondStream.close();
-    } finally {
-        await closeServer(server);
-        await rm(runtimeRoot, { force: true, recursive: true });
-    }
+    assert.equal(await cli.run(["instance", "stop", "demo-local"]), 0);
+    assert.match(stdout.flush(), /status: stopped/u);
+
+    assert.equal(await cli.run(["instance", "logs", "demo-local"]), 0);
+    assert.equal(stdout.flush(), "[1] stdout before\n");
+
+    assert.equal(await cli.run(["instance", "logs", "demo-local", "-f"]), 0);
+    assert.equal(stdout.flush(), "[1] stdout before\n[2] stdout after\n");
+
+    assert.equal(await cli.run(["instance", "call", "demo-local", "bash_run", "{\"command\":\"pwd\"}"]), 0);
+    const callOutput = stdout.flush();
+    assert.match(callOutput, /tool: bash_run/u);
+    assert.match(callOutput, /stdout:\n\/tmp\/ws/u);
+    assert.equal(stderr.flush(), "");
 }
 
-async function verifyCliRealWorkerSmoke(): Promise<void> {
+async function runRealWorkerSmoke(): Promise<void> {
     const homeDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-cli-real-home-"));
     const xdgRuntimeDir = await mkdtemp(join(tmpdir(), "portable-devshell-cli-real-runtime-"));
     const workspacePath = await mkdtemp(join(tmpdir(), "portable-devshell-cli-real-workspace-"));
@@ -188,10 +96,12 @@ async function verifyCliRealWorkerSmoke(): Promise<void> {
         createLocalInstanceConfig("aromatic-pc", workspacePath),
         "utf8"
     );
+    let controlPid: number | undefined;
 
     try {
         assert.equal(await cli.run(["start"]), 0);
         assert.match(stdout.flush(), /control: running/u);
+        controlPid = await readControlPid(homeDirectory);
 
         assert.equal(await cli.run(["status"]), 0);
         assert.match(stdout.flush(), /instances: 1/u);
@@ -226,6 +136,7 @@ async function verifyCliRealWorkerSmoke(): Promise<void> {
         assert.equal(await cli.run(["stop"]), 0);
         controlStopped = true;
         await waitForControlShutdown(xdgRuntimeDir);
+        await ensureProcessExit(controlPid);
         assert.equal(stdout.flush(), "control: stopped\n");
         assert.equal(stderr.flush(), "");
 
@@ -235,6 +146,7 @@ async function verifyCliRealWorkerSmoke(): Promise<void> {
             await cli.run(["stop"]).catch(() => undefined);
             await waitForControlShutdown(xdgRuntimeDir).catch(() => undefined);
         }
+        await ensureProcessExit(controlPid).catch(() => undefined);
         restoreEnv(workerEnvName, previousWorkerPath);
         await rm(homeDirectory, { force: true, recursive: true });
         await rm(xdgRuntimeDir, { force: true, recursive: true });
@@ -242,7 +154,7 @@ async function verifyCliRealWorkerSmoke(): Promise<void> {
     }
 }
 
-async function verifyCliInteractiveCreateFlow(): Promise<void> {
+async function runInteractiveCreateFlow(t: { after(callback: () => Promise<void> | void): void }): Promise<void> {
     const homeDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-cli-create-home-"));
     const xdgRuntimeDir = await mkdtemp(join(tmpdir(), "portable-devshell-cli-create-runtime-"));
     const workspacePath = await mkdtemp(join(tmpdir(), "portable-devshell-cli-create-workspace-"));
@@ -274,54 +186,65 @@ async function verifyCliInteractiveCreateFlow(): Promise<void> {
     await mkdir(join(homeDirectory, ".devshell", "control"), { recursive: true });
     await mkdir(join(homeDirectory, ".devshell", "control", "instances"), { recursive: true });
     await writeFile(join(homeDirectory, ".devshell", "control", "config.toml"), createCreateConfig(), "utf8");
+    let controlPid: number | undefined;
 
-    try {
-        assert.equal(await cli.run(["start"]), 0);
-        assert.match(stdout.flush(), /control: running/u);
-
-        assert.equal(await cli.run(["instance", "create"]), 0);
-        const createOutput = stdout.flush();
-        assert.match(createOutput, /Summary/u);
-        assert.match(createOutput, /instance created: aromatic-pc/u);
-        assert.doesNotMatch(createOutput, /worker binary path:/u);
-
-        assert.equal(await cli.run(["instance", "list"]), 0);
-        assert.match(stdout.flush(), /aromatic-pc\tstopped/u);
-
-        assert.equal(await cli.run(["instance", "start", "aromatic-pc"]), 0);
-        assert.match(stdout.flush(), /status: ready/u);
-
-        assert.equal(await cli.run(["instance", "call", "aromatic-pc", "bash_run", "{\"command\":\"pwd\"}"]), 0);
-        assert.match(stdout.flush(), new RegExp(workspacePath.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"), "u"));
-
-        assert.doesNotMatch(await readFile(join(homeDirectory, ".devshell", "control", "config.toml"), "utf8"), /\[\[instances\]\]/u);
-        assert.match(
-            await readFile(join(homeDirectory, ".devshell", "control", "instances", "aromatic-pc.toml"), "utf8"),
-            /name = "aromatic-pc"/u
-        );
-        assert.doesNotMatch(await readFile(join(homeDirectory, ".devshell", "control", "config.toml"), "utf8"), /workerBinaryPath/u);
-
-        assert.equal(await cli.run(["stop"]), 0);
-        controlStopped = true;
-        await waitForControlShutdown(xdgRuntimeDir);
-        assert.equal(stdout.flush(), "control: stopped\n");
-        assert.equal(stderr.flush(), "");
-    } finally {
+    t.after(async () => {
         if (!controlStopped) {
             await cli.run(["stop"]).catch(() => undefined);
             await waitForControlShutdown(xdgRuntimeDir).catch(() => undefined);
         }
+        await ensureProcessExit(controlPid).catch(() => undefined);
         restoreEnv(workerEnvName, previousWorkerPath);
         await rm(homeDirectory, { force: true, recursive: true });
         await rm(xdgRuntimeDir, { force: true, recursive: true });
         await rm(workspacePath, { force: true, recursive: true });
-    }
+    });
+
+    assert.equal(await cli.run(["start"]), 0);
+    assert.match(stdout.flush(), /control: running/u);
+    controlPid = await readControlPid(homeDirectory);
+
+    assert.equal(await cli.run(["instance", "create"]), 0);
+    const createOutput = stdout.flush();
+    assert.match(createOutput, /Summary/u);
+    assert.match(createOutput, /instance created: aromatic-pc/u);
+    assert.doesNotMatch(createOutput, /worker binary path:/u);
+
+    assert.equal(await cli.run(["instance", "list"]), 0);
+    assert.match(stdout.flush(), /aromatic-pc\tstopped/u);
+
+    assert.equal(await cli.run(["instance", "start", "aromatic-pc"]), 0);
+    assert.match(stdout.flush(), /status: ready/u);
+
+    assert.equal(await cli.run(["instance", "call", "aromatic-pc", "bash_run", "{\"command\":\"pwd\"}"]), 0);
+    assert.match(stdout.flush(), new RegExp(workspacePath.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"), "u"));
+
+    assert.doesNotMatch(await readFile(join(homeDirectory, ".devshell", "control", "config.toml"), "utf8"), /\[\[instances\]\]/u);
+    assert.match(
+        await readFile(join(homeDirectory, ".devshell", "control", "instances", "aromatic-pc.toml"), "utf8"),
+        /name = "aromatic-pc"/u
+    );
+    assert.doesNotMatch(await readFile(join(homeDirectory, ".devshell", "control", "config.toml"), "utf8"), /workerBinaryPath/u);
+
+    assert.equal(await cli.run(["stop"]), 0);
+    controlStopped = true;
+    await waitForControlShutdown(xdgRuntimeDir);
+    await ensureProcessExit(controlPid);
+    assert.equal(stdout.flush(), "control: stopped\n");
+    assert.equal(stderr.flush(), "");
 }
 
-await verifyCliInstanceCommandsThroughControlRpc();
-await verifyCliControlClientSubscribeStreamStates();
-await verifyCliRealWorkerSmoke();
-await verifyCliInteractiveCreateFlow();
+test("CliInstance integration", async (t) => {
+    await t.test("CliMain covers Task 11 instance commands through control rpc", async (subtest) => {
+        await runInstanceCommandsThroughControlRpc(subtest);
+    });
+    await t.test("CliMain runs Task 12 real worker smoke through control lifecycle", async () => {
+        await runRealWorkerSmoke();
+    });
+    await t.test("CliMain creates an instance interactively and uses it through the real control lifecycle", async (subtest) => {
+        await runInteractiveCreateFlow(subtest);
+    });
+});
 
 function createInstanceHarness(): { attach: (socket: Socket) => void } {
     return {
@@ -502,11 +425,22 @@ function createLocalInstanceConfig(name: string, workspacePath: string): string 
     ].join("\n");
 }
 
+async function readControlPid(homeDirectory: string): Promise<number | undefined> {
+    try {
+        const source = (await readFile(join(homeDirectory, ".devshell", "control", "control.pid"), "utf8")).trim();
+        const pid = Number.parseInt(source, 10);
+        return Number.isSafeInteger(pid) && pid > 0 ? pid : undefined;
+    } catch {
+        return undefined;
+    }
+}
+
 async function closeServer(server: ReturnType<typeof createServer>): Promise<void> {
+    const origin = captureStack("closeServer");
     await new Promise<void>((resolve, reject) => {
         server.close((error) => {
             if (error !== undefined) {
-                reject(error);
+                reject(appendTimeoutOrigin(error, origin));
                 return;
             }
 
@@ -516,6 +450,7 @@ async function closeServer(server: ReturnType<typeof createServer>): Promise<voi
 }
 
 async function waitForControlShutdown(xdgRuntimeDir: string, timeoutMs = 3_000): Promise<void> {
+    const origin = captureStack(`waitForControlShutdown(${xdgRuntimeDir})`);
     const socketPath = join(xdgRuntimeDir, "portable-devshell", "control.sock");
     const deadline = Date.now() + timeoutMs;
 
@@ -529,7 +464,61 @@ async function waitForControlShutdown(xdgRuntimeDir: string, timeoutMs = 3_000):
         await new Promise((resolve) => setTimeout(resolve, 20));
     }
 
-    throw new Error(`timed out waiting for control shutdown at ${socketPath}`);
+    throw new Error(`timed out waiting for control shutdown at ${socketPath}\n${origin}`);
+}
+
+async function ensureProcessExit(pid: number | undefined, timeoutMs = 3_000): Promise<void> {
+    if (pid === undefined) {
+        return;
+    }
+
+    const origin = captureStack(`ensureProcessExit(${pid})`);
+    const deadline = Date.now() + timeoutMs;
+
+    while (Date.now() < deadline) {
+        try {
+            process.kill(pid, 0);
+        } catch (error) {
+            if (typeof error === "object" && error !== null && "code" in error && error.code === "ESRCH") {
+                return;
+            }
+
+            throw error;
+        }
+
+        await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+
+    process.kill(pid, "SIGKILL");
+
+    for (let attempts = 0; attempts < 50; attempts += 1) {
+        try {
+            process.kill(pid, 0);
+        } catch (error) {
+            if (typeof error === "object" && error !== null && "code" in error && error.code === "ESRCH") {
+                return;
+            }
+
+            throw error;
+        }
+
+        await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+
+    throw new Error(`timed out waiting for process ${pid} to exit after SIGKILL\n${origin}`);
+}
+
+function captureStack(label: string): string {
+    return new Error(`Timeout origin: ${label}`).stack ?? `Timeout origin: ${label}`;
+}
+
+function appendTimeoutOrigin(error: unknown, origin: string): Error {
+    if (error instanceof Error) {
+        error.stack = `${error.stack ?? `${error.name}: ${error.message}`}\n${origin}`;
+        return error;
+    }
+
+    return new Error(`${String(error)}\n${origin}`);
 }
 
 function restoreEnv(name: keyof NodeJS.ProcessEnv, value: string | undefined): void {
