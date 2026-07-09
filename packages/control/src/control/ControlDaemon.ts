@@ -115,8 +115,13 @@ async function main(): Promise<void> {
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
     await main().catch((error) => {
-        console.error(error);
-        process.exit(1);
+        return new ControlLogger()
+            .error(renderStartupFailure(error))
+            .catch(() => undefined)
+            .finally(() => {
+                console.error(error);
+                process.exit(1);
+            });
     });
 }
 
@@ -141,4 +146,12 @@ function collectNodeBootstrapArgs(execArgv: readonly string[]): string[] {
     }
 
     return args;
+}
+
+function renderStartupFailure(error: unknown): string {
+    if (error instanceof Error && typeof error.stack === "string" && error.stack.length > 0) {
+        return `control server failed to start\n${error.stack}`;
+    }
+
+    return `control server failed to start\n${String(error)}`;
 }

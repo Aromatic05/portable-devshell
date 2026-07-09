@@ -61,10 +61,14 @@ export class ControlLifecycleManager {
         await this.#socketFile.ensureRuntimeDir();
         ControlDaemon.spawnDetached(this.#spawnOptions);
 
-        return await this.#waitFor(async () => {
-            const next = await this.status();
-            return next.running ? next : undefined;
-        }, "control server did not become ready");
+        try {
+            return await this.#waitFor(async () => {
+                const next = await this.status();
+                return next.running ? next : undefined;
+            }, "control server did not become ready");
+        } catch (error) {
+            throw new Error(await this.#renderStartFailure(error));
+        }
     }
 
     async stop(): Promise<ControlLifecycleStatus> {
@@ -129,6 +133,18 @@ export class ControlLifecycleManager {
         }
 
         throw new Error(timeoutMessage);
+    }
+
+    async #renderStartFailure(error: unknown): Promise<string> {
+        const baseMessage = error instanceof Error ? error.message : String(error);
+        const logs = await this.logs();
+        const tail = tailLines(logs, 80);
+
+        if (tail.length === 0) {
+            return baseMessage;
+        }
+
+        return `${baseMessage}\ncontrol log:\n${tail}`;
     }
 }
 
@@ -227,4 +243,17 @@ class SocketControlLifecycleRpcClient implements ControlLifecycleRpcClient {
 
 function isJsonRecord(value: JsonValue): value is { [key: string]: JsonValue } {
     return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function tailLines(source: string, limit: number): string {
+    const lines = source
+        .trim()
+        .split("\n")
+        .filter((line) => line.length > 0);
+
+    if (lines.length === 0) {
+        return "";
+    }
+
+    return lines.slice(-limit).join("\n");
 }

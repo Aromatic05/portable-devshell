@@ -72,6 +72,43 @@ test("stale pid does not mark control as running and start replaces it", async (
     assert.notEqual(started.pid, 999999);
 });
 
+test("start failure includes recent control log output", async () => {
+    const manager = new ControlLifecycleManager({
+        logger: {
+            error: async () => undefined,
+            info: async () => undefined,
+            path: "/tmp/control.log",
+            readAll: async () => "[2026-07-09T00:00:00.000Z] ERROR control server failed to start\nControlError: invalid config"
+        },
+        pidFile: {
+            read: async () => undefined,
+            remove: async () => undefined,
+            write: async () => undefined,
+            path: "/tmp/control.pid"
+        },
+        rpcClient: {
+            async request() {
+                throw new Error("offline");
+            }
+        },
+        socketFile: {
+            ensureRuntimeDir: async () => undefined,
+            path: "/tmp/control.sock",
+            remove: async () => undefined,
+            runtimeDir: "/tmp"
+        },
+        spawnFunction() {
+            return { unref() {} } as never;
+        },
+        waitTimeoutMs: 25
+    });
+
+    await assert.rejects(
+        manager.start(),
+        /control server did not become ready\ncontrol log:\n\[2026-07-09T00:00:00.000Z\] ERROR control server failed to start\nControlError: invalid config/u
+    );
+});
+
 test("stop sends control.shutdown over rpc", async () => {
     const methods: string[] = [];
     let running = true;
