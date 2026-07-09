@@ -257,6 +257,12 @@ function createInstanceHarness(): { attach: (socket: Socket) => void } {
                     const envelope = frame as Record<string, any>;
 
                     switch (envelope.method) {
+                        case "control.identifyClient":
+                            void respond(writer, envelope.id, {
+                                clientKind: envelope.params?.clientKind,
+                                ok: true
+                            });
+                            break;
                         case "control.listInstances":
                             void respond(writer, envelope.id, [
                                 {

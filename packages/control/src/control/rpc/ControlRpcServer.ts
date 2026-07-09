@@ -136,7 +136,7 @@ export class ControlRpcServer {
         try {
             const result =
                 scope === "control"
-                    ? await this.#controlRouter.route(request)
+                    ? await this.#controlRouter.route(connection, request)
                     : await this.#instanceRouter.route(connection, request);
 
             await connection.sendResponse({

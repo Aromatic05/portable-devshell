@@ -1,6 +1,7 @@
 import type { InstanceName } from "../../type/identity/TypeIdentityInstanceName.js";
 
 export type ToolCallSource = "cli" | "tui" | "mcp";
+export type ControlClientKind = ToolCallSource | "unknown";
 
 export interface ToolCallContext {
     requestId?: string;

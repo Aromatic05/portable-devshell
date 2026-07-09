@@ -15,6 +15,7 @@ test("CliControlClient performs control rpc over unix socket", async (t) => {
     const socketDir = join(runtimeRoot, "portable-devshell");
     const socketPath = join(socketDir, "control.sock");
     await mkdir(socketDir, { recursive: true });
+    const methods: string[] = [];
     const server = createServer((socket) => {
         const reader = new FrameReader();
         const writer = new FrameWriter(socket);
@@ -22,12 +23,18 @@ test("CliControlClient performs control rpc over unix socket", async (t) => {
         socket.on("data", (chunk: Uint8Array) => {
             for (const frame of reader.push(chunk)) {
                 const envelope = frame as Record<string, any>;
+                methods.push(String(envelope.method));
 
                 void writer.write({
                     id: envelope.id,
                     ok: true,
                     result:
-                        envelope.method === "control.listInstances"
+                        envelope.method === "control.identifyClient"
+                            ? {
+                                  clientKind: envelope.params?.clientKind,
+                                  ok: true
+                              }
+                            : envelope.method === "control.listInstances"
                             ? [
                                   {
                                       mcpEnabled: true,
@@ -84,6 +91,7 @@ test("CliControlClient performs control rpc over unix socket", async (t) => {
     assert.equal(instances[0]?.snapshot.status, "stopped");
     assert.equal(toolCalls[0]?.instance, "demo-local");
     assert.equal(toolCalls[0]?.toolName, "bash_run");
+    assert.deepEqual(methods, ["control.identifyClient", "control.listInstances", "control.identifyClient", "instance.readToolCalls"]);
 });
 
 test("CliMain reports control not running without auto-starting it", async () => {

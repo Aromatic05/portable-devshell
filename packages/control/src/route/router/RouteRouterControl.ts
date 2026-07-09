@@ -1,5 +1,6 @@
 import { createError, errorCodes, type JsonValue } from "@portable-devshell/shared";
 
+import type { ControlRpcConnection } from "../../control/rpc/ControlRpcConnection.js";
 import type { RpcRequestEnvelope } from "../../control/rpc/ControlRpcConnection.js";
 import { RouteHandlerControl } from "../handler/RouteHandlerControl.js";
 
@@ -10,7 +11,7 @@ export class RouteRouterControl {
         this.#handler = handler;
     }
 
-    async route(request: RpcRequestEnvelope): Promise<JsonValue> {
+    async route(connection: ControlRpcConnection, request: RpcRequestEnvelope): Promise<JsonValue> {
         if (request.target.kind !== "control") {
             throw createError({
                 code: errorCodes.targetInvalid,
@@ -19,6 +20,6 @@ export class RouteRouterControl {
             });
         }
 
-        return await this.#handler.handle(request.method, request.params);
+        return await this.#handler.handle(connection, request.method, request.params);
     }
 }

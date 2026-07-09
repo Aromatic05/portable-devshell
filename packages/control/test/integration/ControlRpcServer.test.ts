@@ -31,6 +31,9 @@ async function verifyRpcMethodsOverReusedConnection(): Promise<void> {
     const client = await RpcClient.connect(socketPath);
 
     try {
+        const identified = await client.identifyClient("cli");
+        assert.equal(identified.result.clientKind, "cli");
+
         const ping = await client.request("control.ping", { kind: "control" });
         assert.equal(ping.result.pong, true);
 
@@ -82,28 +85,55 @@ async function verifyRpcMethodsOverReusedConnection(): Promise<void> {
         assert.match(String(worker.lastToolCall?.requestId ?? ""), /^req-\d+$/u);
         assert.equal(typeof worker.lastToolCall?.sessionId, "string");
 
+        const tuiClient = await RpcClient.connect(socketPath);
+        const unknownClient = await RpcClient.connect(socketPath);
+
+        try {
+            const tuiIdentified = await tuiClient.identifyClient("tui");
+            assert.equal(tuiIdentified.result.clientKind, "tui");
+
+            const tuiToolCall = await tuiClient.request(
+                "instance.callTool",
+                { instance: "alpha", kind: "instance" },
+                { input: { command: "pwd" }, toolName: "bash_run" }
+            );
+            assert.equal(tuiToolCall.result.exitCode, 0);
+            assert.equal(worker.lastToolCall?.source, "tui");
+
+            const unknownToolCall = await unknownClient.request(
+                "instance.callTool",
+                { instance: "alpha", kind: "instance" },
+                { input: { command: "pwd" }, toolName: "bash_run" }
+            );
+            assert.equal(unknownToolCall.ok, false);
+            assert.equal(unknownToolCall.error.code, "control.clientIdentityRequired");
+        } finally {
+            tuiClient.close();
+            unknownClient.close();
+        }
+
         const subscribed = await client.request(
             "instance.subscribe",
             { instance: "alpha", kind: "instance" },
             { fromSeq: 1 }
         );
-        assert.equal(subscribed.result.lastSeq, 2);
-        assert.equal(subscribed.result.events.length, 2);
+        assert.equal(subscribed.result.lastSeq, 3);
+        assert.equal(subscribed.result.events.length, 3);
 
         worker.emit("toolCall.completed", { toolName: "bash_run" });
         const streamed = await client.nextEvent();
-        assert.equal(streamed.seq, 3);
+        assert.equal(streamed.seq, 4);
         assert.equal(streamed.target.instance, "alpha");
 
         worker.emit("toolCall.completed", { toolName: "bash_run" });
-        worker.dropBefore(5);
+        worker.dropBefore(6);
         const runtimeGap = await client.nextEvent();
         assert.equal(runtimeGap.event, "stream.gap");
         assert.deepEqual(runtimeGap.payload, {
             instance: "alpha",
-            latestSeq: 4,
-            oldestAvailableSeq: 5,
-            requestedFromSeq: 4
+            latestSeq: 5,
+            oldestAvailableSeq: 6,
+            requestedFromSeq: 5
         });
 
         const cancelled = await client.nextEvent();
@@ -116,10 +146,10 @@ async function verifyRpcMethodsOverReusedConnection(): Promise<void> {
         const resubscribed = await client.request(
             "instance.subscribe",
             { instance: "alpha", kind: "instance" },
-            { fromSeq: 5 }
+            { fromSeq: 6 }
         );
         assert.equal(resubscribed.ok, true);
-        assert.equal(resubscribed.result.lastSeq, 4);
+        assert.equal(resubscribed.result.lastSeq, 5);
         assert.equal(resubscribed.result.events.length, 0);
 
         const stopped = await client.request("instance.stop", { instance: "alpha", kind: "instance" });
@@ -263,6 +293,10 @@ class RpcClient {
             client.#socket.once("error", reject);
         });
         return client;
+    }
+
+    async identifyClient(clientKind: "cli" | "tui"): Promise<Record<string, any>> {
+        return await this.request("control.identifyClient", { kind: "control" }, { clientKind });
     }
 
     async request(method: string, target: Record<string, unknown>, params?: JsonValue): Promise<Record<string, any>> {

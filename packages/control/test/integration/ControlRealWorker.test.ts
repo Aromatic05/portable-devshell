@@ -184,7 +184,8 @@ async function request(
     socketPath: string,
     method: string,
     target: { kind: "control" } | { instance: string; kind: "instance" },
-    params?: JsonValue
+    params?: JsonValue,
+    clientKind: "cli" | "tui" = "cli"
 ): Promise<any> {
     const socket = createConnection(socketPath);
     const reader = new FrameReader();
@@ -195,30 +196,43 @@ async function request(
         socket.once("error", reject);
     });
 
+    const identifyId = `identify-${method}-${Date.now()}`;
+    const requestId = `${method}-${Date.now()}-request`;
     const response = new Promise<any>((resolve, reject) => {
         socket.on("data", (chunk: Uint8Array) => {
             for (const frame of reader.push(chunk)) {
                 const envelope = frame as Record<string, any>;
 
-                if (envelope.type !== "response") {
+                if (envelope.type !== "response" || (envelope.id !== identifyId && envelope.id !== requestId)) {
                     continue;
                 }
 
-                socket.destroy();
-
                 if (envelope.ok !== true) {
+                    socket.destroy();
                     reject(new Error(envelope.error?.message ?? "request failed"));
                     return;
                 }
 
-                resolve(envelope.result);
+                if (envelope.id === requestId) {
+                    socket.destroy();
+                    resolve(envelope.result);
+                }
             }
         });
         socket.once("error", reject);
     });
 
     await writer.write({
-        id: `${method}-${Date.now()}`,
+        id: identifyId,
+        issuedAt: new Date().toISOString(),
+        method: "control.identifyClient",
+        params: { clientKind },
+        target: { kind: "control" },
+        type: "request"
+    } as unknown as JsonValue);
+
+    await writer.write({
+        id: requestId,
         issuedAt: new Date().toISOString(),
         method,
         params,

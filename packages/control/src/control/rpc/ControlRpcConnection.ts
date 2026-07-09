@@ -1,7 +1,16 @@
 import { randomUUID } from "node:crypto";
 import type { Socket } from "node:net";
 
-import { FrameReader, FrameWriter, createError, errorCodes, toControlErrorBody, type ControlErrorBody, type JsonValue } from "@portable-devshell/shared";
+import {
+    FrameReader,
+    FrameWriter,
+    createError,
+    errorCodes,
+    toControlErrorBody,
+    type ControlClientKind,
+    type ControlErrorBody,
+    type JsonValue
+} from "@portable-devshell/shared";
 
 import { StreamBackpressure } from "../../stream/StreamBackpressure.js";
 import { parseRouteTarget, type RouteTarget } from "../../route/RouteTarget.js";
@@ -59,6 +68,7 @@ export class ControlRpcConnection {
     readonly #writer: FrameWriter;
     readonly #backpressure = new StreamBackpressure();
     readonly #relaySessions = new Map<string, ControlRpcRelaySession>();
+    #clientKind: ControlClientKind = "unknown";
     #closed = false;
 
     constructor(socket: Socket) {
@@ -68,6 +78,14 @@ export class ControlRpcConnection {
 
     get id(): string {
         return this.#id;
+    }
+
+    get clientKind(): ControlClientKind {
+        return this.#clientKind;
+    }
+
+    identifyClient(clientKind: ControlClientKind): void {
+        this.#clientKind = clientKind;
     }
 
     start(onRequest: (request: RpcRequestEnvelope) => Promise<void> | void, onClose: () => void): void {

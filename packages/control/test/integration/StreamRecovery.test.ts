@@ -31,6 +31,9 @@ async function verifyStreamRecovery(): Promise<void> {
     const client = await RpcClient.connect(socketPath);
 
     try {
+        const identified = await client.identifyClient("cli");
+        assert.equal(identified.result.clientKind, "cli");
+
         const started = await client.request("instance.start", { instance: "alpha", kind: "instance" }, { workspacePath: "/tmp/ws" });
         assert.equal(started.result.ready, true);
 
@@ -136,6 +139,10 @@ class RpcClient {
             client.#socket.once("error", reject);
         });
         return client;
+    }
+
+    async identifyClient(clientKind: "cli" | "tui"): Promise<Record<string, any>> {
+        return await this.request("control.identifyClient", { kind: "control" }, { clientKind });
     }
 
     async request(method: string, target: Record<string, unknown>, params?: JsonValue): Promise<Record<string, any>> {

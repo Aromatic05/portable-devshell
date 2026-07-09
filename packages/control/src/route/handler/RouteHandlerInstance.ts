@@ -1,4 +1,11 @@
-import { createError, errorCodes, type JsonValue, type ToolCallQuery, type ToolCallSource, type ToolCallStatus } from "@portable-devshell/shared";
+import {
+    createError,
+    errorCodes,
+    type JsonValue,
+    type ToolCallQuery,
+    type ToolCallSource,
+    type ToolCallStatus
+} from "@portable-devshell/shared";
 
 import type { InstanceRegistry } from "../../instance/registry/InstanceRegistry.js";
 import type { StreamSubscriptionManager } from "../../stream/StreamSubscriptionManager.js";
@@ -86,7 +93,7 @@ export class RouteHandlerInstance {
                     await descriptor.worker.callTool(toolName, input, {
                         requestId,
                         sessionId: connection.id,
-                        source: "cli"
+                        source: readConnectionSource(connection, descriptor.name)
                     })
                 ) as unknown as JsonValue;
             }
@@ -115,6 +122,22 @@ export class RouteHandlerInstance {
             relay.closeInput();
         }
     }
+}
+
+function readConnectionSource(connection: ControlRpcConnection, instanceName: string): ToolCallSource {
+    if (connection.clientKind === "cli" || connection.clientKind === "tui" || connection.clientKind === "mcp") {
+        return connection.clientKind;
+    }
+
+    throw createError({
+        code: errorCodes.controlClientIdentityRequired,
+        message: `Connection must identify as cli or tui before calling tools for instance ${instanceName}.`,
+        retryable: false,
+        details: {
+            clientKind: connection.clientKind,
+            instance: instanceName
+        }
+    });
 }
 
 interface ControlStartInteractiveSession {

@@ -1,6 +1,7 @@
 export type RouteScope = "control" | "instance";
 
 const methodScopes = new Map<string, RouteScope>([
+    ["control.identifyClient", "control"],
     ["control.ping", "control"],
     ["control.status", "control"],
     ["control.shutdown", "control"],

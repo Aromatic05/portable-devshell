@@ -14,6 +14,7 @@ import { StreamSubscriptionManager } from "../../dist/stream/StreamSubscriptionM
 test("RouteMethodRegistry resolves control and instance methods", () => {
     const registry = new RouteMethodRegistry();
 
+    assert.equal(registry.resolve("control.identifyClient"), "control");
     assert.equal(registry.resolve("control.ping"), "control");
     assert.equal(registry.resolve("control.listInstances"), "control");
     assert.equal(registry.resolve("control.createInstance"), "control");
@@ -31,12 +32,19 @@ test("RouteRouterControl rejects instance targets with control.invalidTarget", a
     );
 
     await assert.rejects(
-        controlRouter.route({
-            id: "req-1",
-            method: "control.ping",
-            target: { instance: "alpha", kind: "instance" },
-            type: "request"
-        }),
+        controlRouter.route(
+            {
+                clientKind: "unknown",
+                id: "conn-control",
+                identifyClient() {}
+            } as never,
+            {
+                id: "req-1",
+                method: "control.ping",
+                target: { instance: "alpha", kind: "instance" },
+                type: "request"
+            }
+        ),
         (error: unknown) => {
             assert.equal((error as { code?: string }).code, "control.invalidTarget");
             return true;
@@ -58,12 +66,19 @@ test("Route routers dispatch by target and return instance not found / invalid t
         })
     );
 
-    const controlResult = (await controlRouter.route({
-        id: "req-1",
-        method: "control.ping",
-        target: { kind: "control" },
-        type: "request"
-    })) as { pong: boolean };
+    const controlResult = (await controlRouter.route(
+        {
+            clientKind: "unknown",
+            id: "conn-control",
+            identifyClient() {}
+        } as never,
+        {
+            id: "req-1",
+            method: "control.ping",
+            target: { kind: "control" },
+            type: "request"
+        }
+    )) as { pong: boolean };
 
     assert.equal(controlResult.pong, true);
 

@@ -14,12 +14,14 @@ import { CliRenderError } from "../render/CliRenderError.js";
 import type { CliControlStreamMessage } from "./CliControlStream.js";
 
 export interface CliControlConnectionOptions {
+    clientKind?: "cli" | "tui";
     socketFactory?: (path: string) => Socket;
     socketPath?: string;
     xdgRuntimeDir?: string;
 }
 
 export class CliControlConnection {
+    readonly #clientKind: "cli" | "tui";
     readonly #reader = new FrameReader();
     readonly #socketFactory: (path: string) => Socket;
     readonly #socketPath: string;
@@ -34,12 +36,14 @@ export class CliControlConnection {
     #writer?: FrameWriter;
 
     constructor(options: CliControlConnectionOptions = {}) {
+        this.#clientKind = options.clientKind ?? "cli";
         this.#socketFactory = options.socketFactory ?? createConnection;
         this.#socketPath = options.socketPath ?? resolveDefaultSocketPath(options.xdgRuntimeDir);
     }
 
     async request(method: string, target: CliControlTarget, params?: JsonValue): Promise<JsonValue> {
-        return await this.#request(method, target, params);
+        await this.connect();
+        return await this.#requestConnected(method, target, params);
     }
 
     async requestWithRelay(
@@ -48,7 +52,8 @@ export class CliControlConnection {
         relay: { onOutput(chunk: string): void; onRequestId?(requestId: string): void },
         params?: JsonValue
     ): Promise<JsonValue> {
-        return await this.#request(method, target, params, relay.onOutput, relay.onRequestId);
+        await this.connect();
+        return await this.#requestConnected(method, target, params, relay.onOutput, relay.onRequestId);
     }
 
     async sendRelayInput(requestId: string, chunk: Uint8Array): Promise<void> {
@@ -69,14 +74,13 @@ export class CliControlConnection {
         } as unknown as JsonValue);
     }
 
-    async #request(
+    async #requestConnected(
         method: string,
         target: CliControlTarget,
         params?: JsonValue,
         onRelayOutput?: (chunk: string) => void,
         onRequestId?: (requestId: string) => void
     ): Promise<JsonValue> {
-        await this.connect();
         const id = `cli-${++this.#counter}`;
         const response = new Promise<JsonValue>((resolve, reject) => {
             this.#pending.set(id, { reject, resolve });
@@ -163,6 +167,8 @@ export class CliControlConnection {
                 kind: "connection.closed"
             });
         });
+
+        await this.#requestConnected("control.identifyClient", { kind: "control" }, { clientKind: this.#clientKind });
     }
 
     close(): void {

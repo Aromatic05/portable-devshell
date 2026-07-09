@@ -1,5 +1,7 @@
 export const errorCodes = {
     authConfigInvalid: "control.configInvalid",
+    controlClientIdentityInvalid: "control.clientIdentityInvalid",
+    controlClientIdentityRequired: "control.clientIdentityRequired",
     controlConfigLoadFailed: "control.configLoadFailed",
     controlConfigParseFailed: "control.configParseFailed",
     controlConfigValidationFailed: "control.configValidationFailed",
