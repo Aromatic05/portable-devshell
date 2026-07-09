@@ -1,0 +1,77 @@
+name: release-worker
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            target: linux-x64
+            rust_target: x86_64-unknown-linux-musl
+          - runner: ubuntu-24.04
+            target: linux-arm64
+            rust_target: aarch64-unknown-linux-musl
+          - runner: macos-14
+            target: darwin-arm64
+            rust_target: aarch64-apple-darwin
+          - runner: macos-14
+            target: darwin-x64
+            rust_target: x86_64-apple-darwin
+
+    runs-on: ${{ matrix.runner }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install Rust toolchain
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          rustup target add "${{ matrix.rust_target }}"
+
+      - name: Build worker release asset
+        run: node ./scripts/build-worker.mjs --target "${{ matrix.target }}" --output-dir ./release-assets
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: worker-${{ matrix.target }}
+          path: release-assets/*
+
+  publish:
+    needs: build
+    runs-on: ubuntu-24.04
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+          path: release-assets
+          pattern: worker-*
+
+      - name: Publish GitHub release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" release-assets/* --clobber
+          else
+            gh release create "$tag" release-assets/* --generate-notes --title "$tag"
+          fi

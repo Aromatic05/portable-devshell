@@ -1,4 +1,5 @@
-import { chmodSync, copyFileSync, existsSync, mkdirSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
@@ -24,28 +25,42 @@ const TARGETS = {
 
 const repoRoot = fileURLToPath(new URL("../", import.meta.url));
 const args = process.argv.slice(2);
-const copyOnly = args.includes("--copy-only");
 const explicitTarget = readOption("--target");
-const sourceOverride = readOption("--source");
+const outputDirectory = readOption("--output-dir");
 const target = explicitTarget === undefined ? detectHostTarget() : resolveTarget(explicitTarget);
-const workerSource = sourceOverride ?? resolveSourcePath(target);
-const bundledWorkerPath = resolve(repoRoot, "packages/core/assets/workers", target.key, "devshell-worker");
+const profile = outputDirectory === undefined ? "debug" : "release";
+const workerSource = resolveSourcePath(target, profile);
 
-if (!copyOnly) {
-    run("cargo", ["build", "-p", "devshell-worker", "--manifest-path", resolve(repoRoot, "Cargo.toml"), "--target", target.rustTarget], {
+run(
+    "cargo",
+    [
+        "build",
+        "-p",
+        "devshell-worker",
+        "--manifest-path",
+        resolve(repoRoot, "Cargo.toml"),
+        "--target",
+        target.rustTarget,
+        ...(profile === "release" ? ["--release"] : [])
+    ],
+    {
         env: {
             ...process.env,
             ...buildCargoTargetEnv(target)
         }
-    });
-}
+    }
+);
 
-mkdirSync(dirname(bundledWorkerPath), { recursive: true });
 if (!existsSync(workerSource)) {
     throw new Error(`worker binary is missing at ${workerSource}`);
 }
-copyFileSync(workerSource, bundledWorkerPath);
-chmodSync(bundledWorkerPath, 0o755);
+
+if (outputDirectory !== undefined) {
+    const outputPath = resolve(outputDirectory, `devshell-worker-${target.key}`);
+    const shaPath = `${outputPath}.sha256`;
+    const bytes = copyWorker(workerSource, outputPath);
+    writeFileSync(shaPath, `${createHash("sha256").update(bytes).digest("hex")}\n`, "utf8");
+}
 
 function run(command, args, options = {}) {
     const result = spawnSync(command, args, {
@@ -87,8 +102,16 @@ function readOption(name) {
     return value;
 }
 
-function resolveSourcePath(target) {
-    return resolve(repoRoot, "target", target.rustTarget, "debug", "devshell-worker");
+function resolveSourcePath(target, profile) {
+    return resolve(repoRoot, "target", target.rustTarget, profile, "devshell-worker");
+}
+
+function copyWorker(sourcePath, outputPath) {
+    const bytes = readFileSync(sourcePath);
+    mkdirSync(dirname(outputPath), { recursive: true });
+    copyFileSync(sourcePath, outputPath);
+    chmodSync(outputPath, 0o755);
+    return bytes;
 }
 
 function detectHostTarget() {
