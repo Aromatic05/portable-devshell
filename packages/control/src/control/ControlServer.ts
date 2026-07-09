@@ -2,6 +2,7 @@ import { createError, errorCodes } from "@portable-devshell/shared";
 import type { McpHost } from "@portable-devshell/mcp";
 
 import { ControlInstanceCreateService } from "./ControlInstanceCreateService.js";
+import { ControlConfigEditorService } from "./ControlConfigEditorService.js";
 import { ControlConfigStore } from "./config/ControlConfigStore.js";
 import type { ControlConfig } from "./config/ControlConfigTomlCodec.js";
 import { ControlPathHome } from "./path/ControlPathHome.js";
@@ -57,7 +58,17 @@ export class ControlServer {
         this.#mcpHost = this.#mcpWiringService.wire(config, registry, {
             storageDir: new ControlPathHome(this.#homeDirectory).oauthDir
         });
+        const setConfig = (nextConfig: ControlConfig) => {
+            this.#config = nextConfig;
+        };
         this.#rpcServer = new ControlRpcServer({
+            configEditorService: new ControlConfigEditorService({
+                configStore: this.#configStore,
+                getConfig: () => this.#requireConfig(),
+                homeDirectory: this.#homeDirectory,
+                instanceRegistry: this.#instanceRegistry,
+                setConfig
+            }),
             instanceCreateService: new ControlInstanceCreateService({
                 configStore: this.#configStore,
                 getConfig: () => this.#requireConfig(),
@@ -65,7 +76,7 @@ export class ControlServer {
                 homeDirectory: this.#homeDirectory,
                 instanceRegistry: this.#instanceRegistry,
                 setConfig: (nextConfig) => {
-                    this.#config = nextConfig;
+                    setConfig(nextConfig);
                 }
             }),
             instanceRegistry: this.#instanceRegistry,

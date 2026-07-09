@@ -17,6 +17,10 @@ export class InstanceRegistry {
         this.#descriptors.set(descriptor.name, descriptor);
     }
 
+    delete(name: string): void {
+        this.#descriptors.delete(name);
+    }
+
     list(): readonly InstanceDescriptor[] {
         return [...this.#descriptors.values()];
     }

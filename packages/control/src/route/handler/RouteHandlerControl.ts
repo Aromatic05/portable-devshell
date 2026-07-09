@@ -1,19 +1,23 @@
 import { createError, errorCodes, type JsonValue } from "@portable-devshell/shared";
 
+import type { ControlConfigEditorService } from "../../control/ControlConfigEditorService.js";
 import type { ControlInstanceCreateService } from "../../control/ControlInstanceCreateService.js";
 import type { ControlRpcConnection } from "../../control/rpc/ControlRpcConnection.js";
 import type { InstanceRegistry } from "../../instance/registry/InstanceRegistry.js";
 
 export interface RouteHandlerControlOptions {
+    configEditorService?: ControlConfigEditorService;
     instanceCreateService?: ControlInstanceCreateService;
     instanceRegistry: InstanceRegistry;
 }
 
 export class RouteHandlerControl {
+    readonly #configEditorService?: ControlConfigEditorService;
     readonly #instanceCreateService?: ControlInstanceCreateService;
     readonly #instanceRegistry: InstanceRegistry;
 
     constructor(options: RouteHandlerControlOptions) {
+        this.#configEditorService = options.configEditorService;
         this.#instanceCreateService = options.instanceCreateService;
         this.#instanceRegistry = options.instanceRegistry;
     }
@@ -49,12 +53,28 @@ export class RouteHandlerControl {
                     name: descriptor.name,
                     snapshot: descriptor.worker.snapshot()
                 })) as unknown as JsonValue;
+            case "control.getConfigView":
+                return this.#requireConfigEditorService().getConfigView();
+            case "control.validateConfigDraft":
+                return this.#requireConfigEditorService().validateConfigDraft(params);
             case "control.getInstanceCreateSchema":
                 return this.#requireInstanceCreateService().getSchema() as unknown as JsonValue;
             case "control.validateInstanceCreateDraft":
                 return this.#requireInstanceCreateService().validateDraft(params) as unknown as JsonValue;
             case "control.createInstance":
                 return (await this.#requireInstanceCreateService().createInstance(params)) as unknown as JsonValue;
+            case "control.updateInstanceConfig":
+                return await this.#requireConfigEditorService().updateInstanceConfig(params);
+            case "control.updateMcpConfig":
+                return await this.#requireConfigEditorService().updateMcpConfig(params);
+            case "control.deleteInstance":
+                return await this.#requireConfigEditorService().deleteInstance(params);
+            case "control.enableInstance":
+                return await this.#requireConfigEditorService().enableInstance(params);
+            case "control.disableInstance":
+                return await this.#requireConfigEditorService().disableInstance(params);
+            case "control.applyConfig":
+                return this.#requireConfigEditorService().applyConfig();
             default:
                 throw createError({
                     code: errorCodes.envelopeInvalid,
@@ -72,6 +92,18 @@ export class RouteHandlerControl {
         throw createError({
             code: errorCodes.envelopeInvalid,
             message: "Instance creation is not available.",
+            retryable: false
+        });
+    }
+
+    #requireConfigEditorService(): ControlConfigEditorService {
+        if (this.#configEditorService !== undefined) {
+            return this.#configEditorService;
+        }
+
+        throw createError({
+            code: errorCodes.envelopeInvalid,
+            message: "Config editing is not available.",
             retryable: false
         });
     }

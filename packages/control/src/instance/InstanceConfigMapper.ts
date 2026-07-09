@@ -24,11 +24,19 @@ export class InstanceConfigMapper {
     }
 
     #toWorkerConfig(instance: ControlInstanceConfig): WorkerInstanceConfig {
+        const effectiveSecurityMode = instance.security?.mode === "workspace" ? "workspace" : "disabled";
+
         return {
             allowTools: instance.mcp.allowTools,
             defaultWorkspace: instance.workspace === undefined ? undefined : asWorkspacePath(instance.workspace),
-            env: instance.env,
+            env: {
+                ...instance.env,
+                DEVSHELL_WORKER_INTERNAL_SECURITY_MODE: effectiveSecurityMode,
+                DEVSHELL_WORKER_SECURITY_MODE: effectiveSecurityMode
+            },
             eventBufferSize: instance.logs?.eventBufferSize,
+            approvalPolicy: instance.approvalPolicy,
+            effectiveSecurityMode,
             homeDirectory: process.env.HOME,
             name: asInstanceName(instance.name),
             transport: WorkerTransportFactory.create(this.#toTransportOptions(instance))

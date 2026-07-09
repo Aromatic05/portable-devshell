@@ -1,4 +1,10 @@
-import { createError, errorCodes, type InstanceContainerConfig, type InstanceContainerMountConfig } from "@portable-devshell/shared";
+import {
+    createError,
+    errorCodes,
+    type ApprovalPolicy,
+    type InstanceContainerConfig,
+    type InstanceContainerMountConfig
+} from "@portable-devshell/shared";
 import { McpAuthPublicExposureGuard } from "@portable-devshell/mcp";
 
 import type { ControlConfig, ControlInstanceConfig, ControlMcpOAuth2Config } from "./ControlConfigTomlCodec.js";
@@ -60,6 +66,9 @@ export class ControlConfigValidator {
         if (instance.workspace === undefined) {
             throw new Error(`workspace is required for instance ${instance.name}`);
         }
+
+        this.#validateSecurityMode(instance.security?.mode);
+        this.#validateApprovalPolicy(instance.approvalPolicy);
 
         const expectedPath = `/${instance.name}/mcp`;
         if (instance.mcp.path !== undefined && instance.mcp.path !== expectedPath) {
@@ -179,6 +188,38 @@ export class ControlConfigValidator {
     #validateOauth2(config: ControlMcpOAuth2Config): void {
         if (config.documentationUrl !== undefined) {
             parseUrl(config.documentationUrl, "mcp.auth.oauth2.documentationUrl");
+        }
+    }
+
+    #validateSecurityMode(mode: string | undefined): void {
+        if (mode === undefined || mode === "disabled" || mode === "workspace") {
+            return;
+        }
+
+        throw new Error(`security.mode must be one of disabled, workspace`);
+    }
+
+    #validateApprovalPolicy(policy: ApprovalPolicy | undefined): void {
+        if (policy === undefined) {
+            return;
+        }
+
+        if (policy.mode !== "disabled" && policy.mode !== "allow" && policy.mode !== "ask" && policy.mode !== "deny") {
+            throw new Error(`approvalPolicy.mode must be one of disabled, allow, ask, deny`);
+        }
+
+        for (const [index, rule] of (policy.rules ?? []).entries()) {
+            if (rule.match !== "exact") {
+                throw new Error(`approvalPolicy.rules[${index}].match must be exact`);
+            }
+
+            if (rule.source !== "all" && rule.source !== "cli" && rule.source !== "tui" && rule.source !== "mcp") {
+                throw new Error(`approvalPolicy.rules[${index}].source must be one of all, cli, tui, mcp`);
+            }
+
+            if (rule.decision !== "allow" && rule.decision !== "ask" && rule.decision !== "deny") {
+                throw new Error(`approvalPolicy.rules[${index}].decision must be one of allow, ask, deny`);
+            }
         }
     }
 }

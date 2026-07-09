@@ -1,9 +1,10 @@
-import type { ApprovalPolicy, ApprovalTimeout, InstanceName, WorkspacePath } from "@portable-devshell/shared";
+import type { ApprovalPolicy, ApprovalTimeout, EffectiveSecurityMode, InstanceName, WorkspacePath } from "@portable-devshell/shared";
 
 import type { WorkerCommandTransport } from "../command/WorkerCommandTransport.js";
 import type { WorkerHandshakeParams } from "../../worker/protocol/WorkerProtocolClient.js";
 
 export interface WorkerInstanceConfig {
+    effectiveSecurityMode?: EffectiveSecurityMode;
     name: InstanceName;
     transport: WorkerCommandTransport;
     defaultWorkspace?: WorkspacePath;
@@ -18,6 +19,7 @@ export interface WorkerInstanceConfig {
 
 export interface ResolvedWorkerInstanceConfig extends WorkerInstanceConfig {
     allowTools: readonly string[];
+    effectiveSecurityMode: EffectiveSecurityMode;
     eventBufferSize: number;
     handshake: WorkerHandshakeParams;
 }
@@ -26,6 +28,7 @@ export function resolveWorkerInstanceConfig(config: WorkerInstanceConfig): Resol
     return {
         ...config,
         allowTools: config.allowTools ?? [],
+        effectiveSecurityMode: config.effectiveSecurityMode ?? "disabled",
         eventBufferSize: config.eventBufferSize ?? 100,
         handshake: {
             minProtocolVersion: 1,

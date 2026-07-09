@@ -82,7 +82,10 @@ export class WorkerInstance {
     }
 
     snapshot(): InstanceSnapshot {
-        return this.#stateMachine.snapshot();
+        return {
+            ...this.#stateMachine.snapshot(),
+            effectiveSecurityMode: this.#config.effectiveSecurityMode
+        };
     }
 
     listTools() {

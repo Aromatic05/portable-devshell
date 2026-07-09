@@ -55,6 +55,9 @@ test("valid config fixture is loaded", async () => {
         assert.equal(config.instances[0]?.name, "demo-local");
         assert.equal(config.instances[0]?.mcp.allowTools[0], "bash_run");
         assert.equal(config.instances[0]?.logs?.eventBufferSize, 50);
+        assert.equal(config.instances[0]?.approvalPolicy?.mode, "ask");
+        assert.equal(config.instances[0]?.approvalPolicy?.rules?.[0]?.source, "mcp");
+        assert.equal(config.instances[0]?.security?.mode, "workspace");
         assert.equal(config.instances[0]?.workspace, "/tmp/demo");
     } finally {
         await rm(homeDirectory, { force: true, recursive: true });
@@ -184,6 +187,27 @@ test("instance name without dash is rejected", () => {
     );
 });
 
+test("instance security mode must be valid", () => {
+    const validator = new ControlConfigValidator();
+    const config = createDefaultControlConfig();
+
+    config.instances.push({
+        enabled: true,
+        mcp: {
+            allowTools: ["bash_run"],
+            enabled: true
+        },
+        name: "demo-local",
+        provider: "local",
+        security: {
+            mode: "invalid"
+        },
+        workspace: "/tmp/demo"
+    });
+
+    assert.throws(() => validator.validate(config), /security\.mode must be one of disabled, workspace/u);
+});
+
 test("ssh instance config requires ssh.command and rejects legacy host fields", () => {
     const validator = new ControlConfigValidator();
 
@@ -240,6 +264,17 @@ async function writeFileWithParents(path: string, source: string): Promise<void>
 
 function createInstanceConfig(workspace: string) {
     return {
+        approvalPolicy: {
+            mode: "ask" as const,
+            rules: [
+                {
+                    decision: "deny" as const,
+                    match: "exact" as const,
+                    source: "mcp" as const,
+                    toolName: "bash_run"
+                }
+            ]
+        },
         enabled: true,
         env: {
             DEMO: "1"
@@ -253,6 +288,9 @@ function createInstanceConfig(workspace: string) {
         },
         name: "demo-local",
         provider: "local" as const,
+        security: {
+            mode: "workspace"
+        },
         workspace
     };
 }

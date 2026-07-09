@@ -1,6 +1,10 @@
 import {
     createError,
     errorCodes,
+    type ApprovalPolicy,
+    type ApprovalPolicyDecision,
+    type ApprovalPolicyMode,
+    type ApprovalPolicySourceScope,
     type InstanceContainerComposeConfig,
     type InstanceContainerConfig,
     type InstanceContainerDockerfileConfig,
@@ -34,6 +38,7 @@ export interface ControlInstanceSshConfig {
 }
 
 export interface ControlInstanceConfig {
+    approvalPolicy?: ApprovalPolicy;
     container?: InstanceContainerConfig;
     dockerBinary?: string;
     enabled: boolean;
@@ -213,6 +218,7 @@ export class ControlInstanceTomlCodec {
                 ...(instance.mcp.path === undefined ? {} : { path: instance.mcp.path })
             },
             ...(instance.logs === undefined ? {} : { logs: withoutUndefined(instance.logs) }),
+            ...(instance.approvalPolicy === undefined ? {} : { approvalPolicy: encodeApprovalPolicy(instance.approvalPolicy) }),
             ...(instance.security === undefined ? {} : { security: withoutUndefined(instance.security) })
         });
     }
@@ -222,6 +228,7 @@ function parseInstanceDocument(document: TomlRecord): ControlInstanceConfig {
     const env = asOptionalRecord(document.env, "env");
     const mcp = asRecord(document.mcp, "mcp");
     const logs = asOptionalRecord(document.logs, "logs");
+    const approvalPolicy = asOptionalRecord(document.approvalPolicy, "approvalPolicy");
     const security = asOptionalRecord(document.security, "security");
     const ssh = asOptionalRecord(document.ssh, "ssh");
     const container = asOptionalRecord(document.container, "container");
@@ -247,6 +254,7 @@ function parseInstanceDocument(document: TomlRecord): ControlInstanceConfig {
     }
 
     return {
+        approvalPolicy: approvalPolicy === undefined ? undefined : parseApprovalPolicy(approvalPolicy),
         container: container === undefined ? undefined : parseContainerConfig(container),
         dockerBinary: asOptionalString(document.dockerBinary, "dockerBinary"),
         enabled: asBoolean(document.enabled, "enabled"),
@@ -270,6 +278,48 @@ function parseInstanceDocument(document: TomlRecord): ControlInstanceConfig {
         ssh: ssh === undefined ? undefined : { command: asOptionalString(ssh.command, "ssh.command") },
         workspace: asOptionalString(document.workspace, "workspace")
     };
+}
+
+function encodeApprovalPolicy(policy: ApprovalPolicy): TomlRecord {
+    return {
+        mode: policy.mode,
+        ...(policy.rules === undefined || policy.rules.length === 0
+            ? {}
+            : {
+                  rules: policy.rules.map((rule) => ({
+                      decision: rule.decision,
+                      match: rule.match,
+                      source: rule.source,
+                      ...(rule.toolName === undefined ? {} : { toolName: rule.toolName })
+                  }))
+              })
+    };
+}
+
+function parseApprovalPolicy(policy: TomlRecord): ApprovalPolicy {
+    return {
+        mode: asApprovalPolicyMode(asString(policy.mode, "approvalPolicy.mode")),
+        rules: policy.rules === undefined ? undefined : parseApprovalPolicyRules(policy.rules, "approvalPolicy.rules")
+    };
+}
+
+function parseApprovalPolicyRules(value: unknown, fieldName: string): ApprovalPolicy["rules"] {
+    const rules = asOptionalArray(value, fieldName);
+
+    return rules?.map((entry, index) => {
+        const record = asRecord(entry, `${fieldName}[${index}]`);
+
+        return {
+            decision: asApprovalPolicyDecision(
+                asString(record.decision, `${fieldName}[${index}].decision`)
+            ),
+            match: asApprovalPolicyMatch(asString(record.match, `${fieldName}[${index}].match`)),
+            source: asApprovalPolicySourceScope(
+                asString(record.source, `${fieldName}[${index}].source`)
+            ),
+            toolName: asOptionalString(record.toolName, `${fieldName}[${index}].toolName`)
+        };
+    });
 }
 
 function encodeContainer(container: InstanceContainerConfig): TomlRecord {
@@ -539,6 +589,38 @@ function asAuthMode(value: string): ControlMcpAuthMode {
     }
 
     throw new Error(`unsupported mcp.auth.mode: ${value}`);
+}
+
+function asApprovalPolicyMode(value: string): ApprovalPolicyMode {
+    if (value === "disabled" || value === "allow" || value === "ask" || value === "deny") {
+        return value;
+    }
+
+    throw new Error(`unsupported approvalPolicy.mode: ${value}`);
+}
+
+function asApprovalPolicyDecision(value: string): ApprovalPolicyDecision {
+    if (value === "allow" || value === "ask" || value === "deny") {
+        return value;
+    }
+
+    throw new Error(`unsupported approvalPolicy.rules[].decision: ${value}`);
+}
+
+function asApprovalPolicyMatch(value: string): "exact" {
+    if (value === "exact") {
+        return value;
+    }
+
+    throw new Error(`unsupported approvalPolicy.rules[].match: ${value}`);
+}
+
+function asApprovalPolicySourceScope(value: string): ApprovalPolicySourceScope {
+    if (value === "all" || value === "cli" || value === "tui" || value === "mcp") {
+        return value;
+    }
+
+    throw new Error(`unsupported approvalPolicy.rules[].source: ${value}`);
 }
 
 function asMountMode(value: string): InstanceContainerMountConfig["mode"] {
