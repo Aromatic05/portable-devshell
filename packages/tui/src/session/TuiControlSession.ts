@@ -155,7 +155,13 @@ export class TuiControlSession {
             subscribe: async (requestedFromSeq) => await this.#client.subscribe(instance, requestedFromSeq)
         });
         this.#subscriptions.set(instance, subscription);
-        void subscription.start(fromSeq);
+        void subscription.start(fromSeq).catch(async () => {
+            if (this.#subscriptions.get(instance) !== subscription) {
+                return;
+            }
+
+            await this.#recoverInstance(instance);
+        });
     }
 
     async #recoverInstance(instance: string): Promise<void> {

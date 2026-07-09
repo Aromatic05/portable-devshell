@@ -87,6 +87,36 @@ test("TuiControlSession recovers from runtime gap and control reconnect", async 
     await waitFor(() => ((session.store.getConfigView()?.version as number | undefined) ?? 0) === 2);
 });
 
+test("TuiControlSession recovers when initial subscribe returns stream.gap", async (t) => {
+    const runtimeDir = await mkdtemp(join(tmpdir(), "portable-devshell-tui-session-initial-gap-"));
+    const socketPath = join(runtimeDir, "control.sock");
+    const worker = new FakeWorker("alpha");
+    worker.initialSubscribeGapCount = 1;
+    const server = createServer(socketPath, worker, () => 1);
+
+    await server.start();
+
+    const session = new TuiControlSession({
+        client: new TuiControlClient({ socketPath }),
+        reconnectDelayMs: 25
+    });
+
+    t.after(async () => {
+        await session.stop();
+        await server.stop().catch(() => undefined);
+        await rm(runtimeDir, { force: true, recursive: true });
+    });
+
+    await session.start();
+    await waitFor(() => session.store.getConnection().state === "connected");
+    await waitFor(() => worker.readToolCallsCount >= 2);
+    await waitFor(() => worker.listApprovalsCount >= 2);
+    await waitFor(() => worker.subscribeFromSeqs.filter((fromSeq) => fromSeq === 1).length >= 2);
+
+    assert.equal(session.store.getPendingApprovals("alpha")[0]?.approvalId, "approval-1");
+    assert.equal(session.store.getToolAudit("alpha")[0]?.callId, "call-1");
+});
+
 function createServer(socketPath: string, worker: FakeWorker, getConfigVersion: () => number): ControlRpcServer {
     return new ControlRpcServer({
         configEditorService: {
@@ -123,6 +153,7 @@ class FakeWorker {
     subscribeFromSeqs: number[] = [];
     readToolCallsCount = 0;
     listApprovalsCount = 0;
+    initialSubscribeGapCount = 0;
 
     constructor(name: string) {
         this.#name = name;
@@ -179,6 +210,17 @@ class FakeWorker {
 
     subscribe(fromSeq = 1) {
         this.subscribeFromSeqs.push(fromSeq);
+
+        if (this.initialSubscribeGapCount > 0) {
+            this.initialSubscribeGapCount -= 1;
+            return {
+                code: "stream.gap",
+                fromSeq,
+                kind: "gap" as const,
+                lastSeq: this.#lastSeq,
+                nextSeq: fromSeq + 1
+            };
+        }
 
         const nextSeq = this.#events[0]?.seq ?? this.#lastSeq + 1;
 
