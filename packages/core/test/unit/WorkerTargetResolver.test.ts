@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
@@ -38,14 +38,13 @@ test("WorkerTargetMapper rejects unsupported uname values with structured error"
     );
 });
 
-test("WorkerAssetResolver prefers target-specific env var over package asset", async (t) => {
+test("WorkerAssetResolver prefers target-specific env var over release lookup", async (t) => {
     const fixture = await createResolverFixture();
     t.after(fixture.cleanup);
 
     const target = getWorkerTargetByKey("darwin-arm64");
     const envPath = join(fixture.root, "env", "devshell-worker");
     await writeExecutable(envPath, "#!/bin/sh\necho env\n");
-    await writeExecutable(join(fixture.root, "assets", "workers", target.key, "devshell-worker"), "#!/bin/sh\necho package\n");
 
     const previous = process.env.PORTABLE_DEVSHELL_WORKER_DARWIN_ARM64_PATH;
     process.env.PORTABLE_DEVSHELL_WORKER_DARWIN_ARM64_PATH = envPath;
@@ -59,20 +58,77 @@ test("WorkerAssetResolver prefers target-specific env var over package asset", a
     assert.deepEqual(asset.searchedPaths, [envPath]);
 });
 
-test("WorkerAssetResolver resolves package asset from target-specific directory", async (t) => {
+test("WorkerAssetResolver resolves release asset from configured release base url and reuses cache", async (t) => {
     const fixture = await createResolverFixture();
     t.after(fixture.cleanup);
 
     const target = getWorkerTargetByKey("linux-arm64");
-    const binaryPath = join(fixture.root, "assets", "workers", target.key, "devshell-worker");
     const contents = "#!/bin/sh\necho package\n";
-    await writeExecutable(binaryPath, contents);
+    const sha256 = createHash("sha256").update(contents).digest("hex");
+    const assetName = `devshell-worker-${target.key}`;
+    const requestUrls: string[] = [];
+    const previousBaseUrl = process.env.PORTABLE_DEVSHELL_WORKER_RELEASE_BASE_URL;
+    const previousTag = process.env.PORTABLE_DEVSHELL_WORKER_RELEASE_TAG;
+    const previousCacheDirectory = process.env.PORTABLE_DEVSHELL_WORKER_CACHE_DIR;
+    const previousFetch = globalThis.fetch;
+    const releaseBaseUrl = "https://example.test/releases/download";
+    process.env.PORTABLE_DEVSHELL_WORKER_RELEASE_BASE_URL = releaseBaseUrl;
+    process.env.PORTABLE_DEVSHELL_WORKER_RELEASE_TAG = "v9.9.9";
+    process.env.PORTABLE_DEVSHELL_WORKER_CACHE_DIR = join(fixture.root, "cache");
+    t.after(() => restoreEnv("PORTABLE_DEVSHELL_WORKER_RELEASE_BASE_URL", previousBaseUrl));
+    t.after(() => restoreEnv("PORTABLE_DEVSHELL_WORKER_RELEASE_TAG", previousTag));
+    t.after(() => restoreEnv("PORTABLE_DEVSHELL_WORKER_CACHE_DIR", previousCacheDirectory));
+    t.after(() => {
+        globalThis.fetch = previousFetch;
+    });
+
+    globalThis.fetch = async (input) => {
+        const url = String(input);
+        requestUrls.push(url);
+
+        if (url === `${releaseBaseUrl}/v9.9.9/${assetName}.sha256`) {
+            return new Response(`${sha256}\n`, {
+                headers: { "content-type": "text/plain" },
+                status: 200
+            });
+        }
+
+        if (url === `${releaseBaseUrl}/v9.9.9/${assetName}`) {
+            return new Response(contents, {
+                headers: { "content-type": "application/octet-stream" },
+                status: 200
+            });
+        }
+
+        return new Response("missing", { status: 404 });
+    };
 
     const asset = await fixture.resolver.resolve(target);
+    const cachedContents = await readFile(asset.binaryPath, "utf8");
+    globalThis.fetch = async (input) => {
+        const url = String(input);
+        requestUrls.push(url);
+        if (url === `${releaseBaseUrl}/v9.9.9/${assetName}.sha256`) {
+            return new Response(`${sha256}\n`, {
+                headers: { "content-type": "text/plain" },
+                status: 200
+            });
+        }
 
-    assert.equal(asset.binaryPath, binaryPath);
-    assert.equal(asset.source, "package");
-    assert.equal(asset.sha256, createHash("sha256").update(contents).digest("hex"));
+        throw new Error("cached release asset should not redownload binary");
+    };
+    const cachedAsset = await fixture.resolver.resolve(target);
+
+    assert.equal(asset.source, "release");
+    assert.equal(asset.sha256, sha256);
+    assert.equal(cachedContents, contents);
+    assert.equal(cachedAsset.source, "release");
+    assert.equal(cachedAsset.binaryPath, asset.binaryPath);
+    assert.deepEqual(requestUrls, [
+        `${releaseBaseUrl}/v9.9.9/${assetName}.sha256`,
+        `${releaseBaseUrl}/v9.9.9/${assetName}`,
+        `${releaseBaseUrl}/v9.9.9/${assetName}.sha256`
+    ]);
 });
 
 test("WorkerAssetResolver allows host target to use dev fallback", async (t) => {
@@ -114,11 +170,23 @@ test("WorkerAssetResolver does not use host dev fallback for non-host target", a
     });
 });
 
-test("WorkerAssetResolver reports searched paths when asset is unavailable", async (t) => {
+test("WorkerAssetResolver reports release lookup details when asset is unavailable", async (t) => {
     const fixture = await createResolverFixture();
     t.after(fixture.cleanup);
 
     const target = getWorkerTargetByKey("darwin-arm64");
+    const previousBaseUrl = process.env.PORTABLE_DEVSHELL_WORKER_RELEASE_BASE_URL;
+    const previousTag = process.env.PORTABLE_DEVSHELL_WORKER_RELEASE_TAG;
+    const previousFetch = globalThis.fetch;
+    process.env.PORTABLE_DEVSHELL_WORKER_RELEASE_BASE_URL = "https://example.test/releases/download";
+    process.env.PORTABLE_DEVSHELL_WORKER_RELEASE_TAG = "v1.2.3";
+    t.after(() => restoreEnv("PORTABLE_DEVSHELL_WORKER_RELEASE_BASE_URL", previousBaseUrl));
+    t.after(() => restoreEnv("PORTABLE_DEVSHELL_WORKER_RELEASE_TAG", previousTag));
+    t.after(() => {
+        globalThis.fetch = previousFetch;
+    });
+
+    globalThis.fetch = async () => new Response("missing", { status: 404 });
 
     await assert.rejects(fixture.resolver.resolve(target), (error: unknown) => {
         assert.ok(typeof error === "object" && error !== null);
@@ -126,7 +194,7 @@ test("WorkerAssetResolver reports searched paths when asset is unavailable", asy
         const details = (error as { details?: Record<string, unknown> }).details;
         assert.equal(details?.targetKey, "darwin-arm64");
         assert.equal(Array.isArray(details?.searchedPaths), true);
-        assert.equal((details?.searchedPaths as string[]).some((entry) => entry.endsWith("/assets/workers/darwin-arm64/devshell-worker")), true);
+        assert.equal((details?.searchedPaths as string[]).some((entry) => entry.endsWith("/v1.2.3/devshell-worker-darwin-arm64.sha256")), true);
         return true;
     });
 });
@@ -139,6 +207,7 @@ async function createResolverFixture(): Promise<{
     const root = await mkdtemp(join(tmpdir(), "portable-devshell-resolver-"));
     const modulePath = join(root, "src", "worker", "WorkerAssetResolver.js");
     await mkdir(dirname(modulePath), { recursive: true });
+    await writeFile(join(root, "package.json"), JSON.stringify({ name: "portable-devshell", version: "0.2.0" }), "utf8");
 
     return {
         root,

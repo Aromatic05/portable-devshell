@@ -72,7 +72,8 @@ test("CliMain runs Task 12 real worker smoke through control lifecycle", async (
     const workerBinaryPath = resolve(fileURLToPath(new URL("../../../../", import.meta.url)), "target/debug/devshell-worker");
     const stdout = createBuffer();
     const stderr = createBuffer();
-    const previousWorkerPath = process.env.PORTABLE_DEVSHELL_WORKER_PATH;
+    const workerEnvName = hostWorkerEnvName();
+    const previousWorkerPath = process.env[workerEnvName];
     let controlStopped = false;
     const cli = new CliMain({
         homeDirectory,
@@ -81,7 +82,7 @@ test("CliMain runs Task 12 real worker smoke through control lifecycle", async (
         xdgRuntimeDir
     });
 
-    process.env.PORTABLE_DEVSHELL_WORKER_PATH = workerBinaryPath;
+    process.env[workerEnvName] = workerBinaryPath;
 
     await mkdir(join(homeDirectory, ".devshell", "control"), { recursive: true });
     await mkdir(join(homeDirectory, ".devshell", "control", "instances"), { recursive: true });
@@ -100,7 +101,7 @@ test("CliMain runs Task 12 real worker smoke through control lifecycle", async (
         if (!controlStopped) {
             await cli.run(["stop"]).catch(() => undefined);
         }
-        restoreEnv("PORTABLE_DEVSHELL_WORKER_PATH", previousWorkerPath);
+        restoreEnv(workerEnvName, previousWorkerPath);
         await rm(homeDirectory, { force: true, recursive: true });
         await rm(xdgRuntimeDir, { force: true, recursive: true });
         await rm(workspacePath, { force: true, recursive: true });
@@ -154,7 +155,8 @@ test("CliMain creates an instance interactively and uses it through the real con
     const workerBinaryPath = resolve(fileURLToPath(new URL("../../../../", import.meta.url)), "target/debug/devshell-worker");
     const stdout = createBuffer();
     const stderr = createBuffer();
-    const previousWorkerPath = process.env.PORTABLE_DEVSHELL_WORKER_PATH;
+    const workerEnvName = hostWorkerEnvName();
+    const previousWorkerPath = process.env[workerEnvName];
     let controlStopped = false;
     const cli = new CliMain({
         homeDirectory,
@@ -173,7 +175,7 @@ test("CliMain creates an instance interactively and uses it through the real con
         xdgRuntimeDir
     });
 
-    process.env.PORTABLE_DEVSHELL_WORKER_PATH = workerBinaryPath;
+    process.env[workerEnvName] = workerBinaryPath;
 
     await mkdir(join(homeDirectory, ".devshell", "control"), { recursive: true });
     await mkdir(join(homeDirectory, ".devshell", "control", "instances"), { recursive: true });
@@ -183,7 +185,7 @@ test("CliMain creates an instance interactively and uses it through the real con
         if (!controlStopped) {
             await cli.run(["stop"]).catch(() => undefined);
         }
-        restoreEnv("PORTABLE_DEVSHELL_WORKER_PATH", previousWorkerPath);
+        restoreEnv(workerEnvName, previousWorkerPath);
         await rm(homeDirectory, { force: true, recursive: true });
         await rm(xdgRuntimeDir, { force: true, recursive: true });
         await rm(workspacePath, { force: true, recursive: true });
@@ -406,4 +408,30 @@ function restoreEnv(name: keyof NodeJS.ProcessEnv, value: string | undefined): v
     }
 
     process.env[name] = value;
+}
+
+function hostWorkerEnvName(): keyof NodeJS.ProcessEnv {
+    return `PORTABLE_DEVSHELL_WORKER_${normalizePlatform(process.platform)}_${normalizeArch(process.arch)}_PATH`;
+}
+
+function normalizePlatform(platform: NodeJS.Platform): string {
+    switch (platform) {
+        case "linux":
+            return "LINUX";
+        case "darwin":
+            return "DARWIN";
+        default:
+            throw new Error(`unsupported platform in test: ${platform}`);
+    }
+}
+
+function normalizeArch(arch: string): string {
+    switch (arch) {
+        case "x64":
+            return "X64";
+        case "arm64":
+            return "ARM64";
+        default:
+            throw new Error(`unsupported architecture in test: ${arch}`);
+    }
 }

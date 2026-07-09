@@ -19,7 +19,8 @@ test("control lifecycle smoke drives the frozen worker and persists Task 12 arti
     const xdgRuntimeDir = await mkdtemp(join(tmpdir(), "portable-devshell-control-real-runtime-"));
     const workspacePath = await mkdtemp(join(tmpdir(), "portable-devshell-control-real-workspace-"));
     const workerBinaryPath = resolve(fileURLToPath(new URL("../../../../", import.meta.url)), "target/debug/devshell-worker");
-    const previousWorkerPath = process.env.PORTABLE_DEVSHELL_WORKER_PATH;
+    const workerEnvName = hostWorkerEnvName();
+    const previousWorkerPath = process.env[workerEnvName];
     const homePaths = new ControlPathHome(homeDirectory);
     const runtimePaths = new ControlPathRuntime(xdgRuntimeDir);
     const manager = new ControlLifecycleManager({
@@ -28,7 +29,7 @@ test("control lifecycle smoke drives the frozen worker and persists Task 12 arti
         waitTimeoutMs: 10_000
     });
 
-    process.env.PORTABLE_DEVSHELL_WORKER_PATH = workerBinaryPath;
+    process.env[workerEnvName] = workerBinaryPath;
 
     await mkdir(homePaths.controlHomeDir, { recursive: true });
     await mkdir(homePaths.instancesDir, { recursive: true });
@@ -41,7 +42,7 @@ test("control lifecycle smoke drives the frozen worker and persists Task 12 arti
 
     t.after(async () => {
         await manager.stop().catch(() => undefined);
-        restoreEnv("PORTABLE_DEVSHELL_WORKER_PATH", previousWorkerPath);
+        restoreEnv(workerEnvName, previousWorkerPath);
         await rm(homeDirectory, { force: true, recursive: true });
         await rm(xdgRuntimeDir, { force: true, recursive: true });
         await rm(workspacePath, { force: true, recursive: true });
@@ -137,6 +138,32 @@ function restoreEnv(name: keyof NodeJS.ProcessEnv, value: string | undefined): v
     }
 
     process.env[name] = value;
+}
+
+function hostWorkerEnvName(): keyof NodeJS.ProcessEnv {
+    return `PORTABLE_DEVSHELL_WORKER_${normalizePlatform(process.platform)}_${normalizeArch(process.arch)}_PATH`;
+}
+
+function normalizePlatform(platform: NodeJS.Platform): string {
+    switch (platform) {
+        case "linux":
+            return "LINUX";
+        case "darwin":
+            return "DARWIN";
+        default:
+            throw new Error(`unsupported platform in test: ${platform}`);
+    }
+}
+
+function normalizeArch(arch: string): string {
+    switch (arch) {
+        case "x64":
+            return "X64";
+        case "arm64":
+            return "ARM64";
+        default:
+            throw new Error(`unsupported architecture in test: ${arch}`);
+    }
 }
 
 async function request(
