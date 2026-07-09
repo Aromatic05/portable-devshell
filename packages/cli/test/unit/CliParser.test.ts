@@ -38,4 +38,5 @@ test("Cli package exposes the Task 11 bin and runtime dependency contract", asyn
         devshell: "./dist/cli/CliMain.js"
     });
     assert.equal(packageJson.dependencies?.["@portable-devshell/shared"], "workspace:*");
+    assert.equal(packageJson.dependencies?.["@portable-devshell/tui"], "workspace:*");
 });

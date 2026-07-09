@@ -3,129 +3,84 @@ import test from "node:test";
 
 import { asInstanceName } from "@portable-devshell/shared";
 
-import { TuiViewModelStore } from "../../dist/index.js";
+import { RenderScheduler, TuiAppStore } from "../../dist/index.js";
 
-test("TuiViewModelStore expresses connection, snapshot, log, audit, approval, and config state", () => {
-    const store = new TuiViewModelStore();
+test("TuiAppStore tracks connection, snapshots, lastSeq, and raw events", () => {
+    const store = new TuiAppStore({ maxRawEvents: 2 });
 
     store.setConnectionState("connected");
-    store.resetInstances([{ mcpEnabled: true, name: "alpha" }]);
-    store.setConfigView({
-        instances: [{ name: "alpha", security: { mode: "workspace" } }],
-        version: 1
-    });
-    store.upsertSnapshot({
+    store.replaceInstances([{ mcpEnabled: false, name: "alpha" }]);
+    store.replaceSnapshot({
         connectionState: "connected",
         daemonState: "running",
-        lastSeq: 1,
+        lastSeq: 2,
         name: asInstanceName("alpha"),
-        ready: false,
-        status: "running"
-    });
-    store.replaceToolCalls("alpha", [
-        {
-            callId: "call-history",
-            completedAt: "2026-07-09T00:00:01.000Z",
-            exitCode: 0,
-            inputSummary: "{\"command\":\"pwd\"}",
-            instance: asInstanceName("alpha"),
-            source: "tui",
-            startedAt: "2026-07-09T00:00:00.000Z",
-            status: "completed",
-            stderrBytes: 0,
-            stdoutBytes: 8,
-            timedOut: false,
-            toolName: "bash_run"
-        }
-    ]);
-    store.replaceApprovals("alpha", [
-        {
-            approvalId: "approval-history",
-            callId: "call-pending",
-            createdAt: "2026-07-09T00:00:02.000Z",
-            expiresAt: "2026-07-09T00:05:02.000Z",
-            inputSummary: "{\"command\":\"rm -rf\"}",
-            instance: asInstanceName("alpha"),
-            reason: "Approval required before running bash_run.",
-            riskLevel: "high",
-            source: "tui",
-            status: "pending",
-            toolName: "bash_run"
-        }
-    ]);
-
-    store.applyEvent({
-        event: "instance.readyChanged",
-        payload: {
-            at: "2026-07-09T00:00:03.000Z",
-            data: {
-                connectionState: "connected",
-                daemonState: "running",
-                ready: true,
-                status: "ready"
-            },
-            instanceName: "alpha",
-            seq: 2,
-            type: "instance.readyChanged"
-        },
-        seq: 2,
-        target: { instance: "alpha", kind: "instance" },
-        type: "event"
+        ready: true,
+        status: "ready"
     });
     store.applyEvent({
-        event: "toolCall.running",
-        payload: {
-            at: "2026-07-09T00:00:04.000Z",
-            data: {
-                callId: "call-live",
-                inputSummary: "{\"command\":\"ls\"}",
-                requestId: "req-1",
-                sessionId: "session-1",
-                source: "tui",
-                startedAt: "2026-07-09T00:00:04.000Z",
-                status: "running",
-                toolName: "bash_run"
-            },
-            instanceName: "alpha",
-            seq: 3,
-            type: "toolCall.running"
-        },
+        event: "toolCall.completed",
+        payload: { callId: "call-3" },
         seq: 3,
-        target: { instance: "alpha", kind: "instance" },
+        target: {
+            instance: asInstanceName("alpha"),
+            kind: "instance"
+        },
         type: "event"
     });
     store.applyEvent({
-        event: "log.appended",
-        payload: {
-            at: "2026-07-09T00:00:05.000Z",
-            data: {
-                bytes: 12,
-                callId: "call-live",
-                preview: "stdout line\n",
-                requestId: "req-1",
-                sessionId: "session-1",
-                source: "tui",
-                stream: "stdout",
-                tail: "stdout line\n",
-                toolName: "bash_run"
-            },
-            instanceName: "alpha",
-            seq: 4,
-            type: "log.appended"
+        event: "toolCall.completed",
+        payload: { callId: "call-3-duplicate" },
+        seq: 3,
+        target: {
+            instance: asInstanceName("alpha"),
+            kind: "instance"
         },
+        type: "event"
+    });
+    store.applyEvent({
+        event: "toolCall.completed",
+        payload: { callId: "call-4" },
         seq: 4,
-        target: { instance: "alpha", kind: "instance" },
+        target: {
+            instance: asInstanceName("alpha"),
+            kind: "instance"
+        },
         type: "event"
     });
 
-    const view = store.snapshot();
+    const state = store.getState();
 
-    assert.equal(view.connection.state, "connected");
-    assert.equal(view.instances[0]?.snapshot?.ready, true);
-    assert.equal(view.logs[0]?.stream, "stdout");
-    assert.equal(view.logs[0]?.callId, "call-live");
-    assert.equal(view.toolAudit.some((record) => record.callId === "call-history"), true);
-    assert.equal(view.toolAudit.some((record) => record.callId === "call-live" && record.status === "running"), true);
-    assert.equal(view.approvals[0]?.approvalId, "approval-history");
-    assert.equal((view.config?.version as number | undefined) ?? 0, 1);
+    assert.equal(state.connection.status, "connected");
+    assert.equal(state.instances[0]?.name, "alpha");
+    assert.equal(state.snapshotsByInstance.alpha?.status, "ready");
+    assert.equal(state.lastSeqByInstance.alpha, 4);
+    assert.equal(state.rawEvents.length, 2);
+    assert.deepEqual(
+        state.rawEvents.map((event) => event.seq),
+        [3, 4]
+    );
+    assert.equal(state.globalDerived.connectedInstanceCount, 1);
+});
+
+test("RenderScheduler batches multiple store updates into one render notification", async () => {
+    const store = new TuiAppStore();
+    const scheduler = new RenderScheduler(store, 5);
+    let renderCount = 0;
+
+    const unsubscribe = scheduler.subscribe(() => {
+        renderCount += 1;
+    });
+
+    store.setConnectionState("connected");
+    store.setActivePanel("logs");
+    store.setActivePanel("help");
+
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    unsubscribe();
+    scheduler.dispose();
+
+    assert.equal(renderCount, 1);
+    assert.equal(scheduler.getSnapshot().activePanel, "help");
 });

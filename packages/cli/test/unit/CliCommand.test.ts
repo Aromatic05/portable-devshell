@@ -91,6 +91,30 @@ test("CliMain handles control lifecycle commands and exit code mapping", async (
     assert.equal(stderr.flush(), "missing\n");
 });
 
+test("CliMain routes the tui command through the injected runtime", async () => {
+    const stdout = createBuffer();
+    const stderr = createBuffer();
+    let started = false;
+    const cli = new CliMain({
+        createClient: () => {
+            throw new Error("client should not be used for tui");
+        },
+        createLifecycleManager: async () => {
+            throw new Error("lifecycle should not be used for tui");
+        },
+        runTui: async () => {
+            started = true;
+        },
+        stderr,
+        stdout
+    });
+
+    assert.equal(await cli.run(["tui"]), 0);
+    assert.equal(started, true);
+    assert.equal(stdout.flush(), "");
+    assert.equal(stderr.flush(), "");
+});
+
 test("CliMain renders structured remote errors in verbose mode", async () => {
     const stdout = createBuffer();
     const stderr = createBuffer();

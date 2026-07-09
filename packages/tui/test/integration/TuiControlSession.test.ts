@@ -11,19 +11,27 @@ import { ControlRpcServer } from "../../../control/dist/control/rpc/ControlRpcSe
 import { InstanceRegistry } from "../../../control/dist/instance/registry/InstanceRegistry.js";
 import { TuiControlClient, TuiControlSession } from "../../dist/index.js";
 
-test("TuiControlSession recovers from runtime gap and control reconnect", async (t) => {
+test("TuiControlSession pulls instances, snapshots, subscribes, and recovers from stream.gap", async (t) => {
     const runtimeDir = await mkdtemp(join(tmpdir(), "portable-devshell-tui-session-"));
     const socketPath = join(runtimeDir, "control.sock");
     const worker = new FakeWorker("alpha");
-    let configVersion = 1;
-    let server = createServer(socketPath, worker, () => configVersion);
+    const server = createServer(socketPath, worker, () => 7);
+    const session = new TuiControlSession({
+        client: new TuiControlClient({ socketPath })
+    });
+
+    worker.emit("toolCall.completed", {
+        callId: "seed-1",
+        source: "tui",
+        toolName: "bash_run"
+    });
+    worker.emit("toolCall.completed", {
+        callId: "seed-2",
+        source: "tui",
+        toolName: "bash_run"
+    });
 
     await server.start();
-
-    const session = new TuiControlSession({
-        client: new TuiControlClient({ socketPath }),
-        reconnectDelayMs: 25
-    });
 
     t.after(async () => {
         await session.stop();
@@ -32,122 +40,65 @@ test("TuiControlSession recovers from runtime gap and control reconnect", async 
     });
 
     await session.start();
-    await waitFor(() => session.store.getConnection().state === "connected");
-    await waitFor(() => session.store.getInstance("alpha")?.snapshot?.lastSeq === 0);
+    await waitFor(() => session.store.getState().connection.status === "connected");
+    await waitFor(() => worker.subscribeFromSeqs.length === 1);
 
-    assert.equal(session.store.getPendingApprovals("alpha")[0]?.approvalId, "approval-1");
-    assert.equal(session.store.getToolAudit("alpha")[0]?.callId, "call-1");
-    assert.equal((session.store.getConfigView()?.version as number | undefined) ?? 0, 1);
-
-    worker.emit("toolCall.completed", {
-        callId: "call-live-1",
-        completedAt: "2026-07-09T00:00:10.000Z",
-        inputSummary: "{\"command\":\"pwd\"}",
-        source: "tui",
-        startedAt: "2026-07-09T00:00:09.000Z",
-        status: "completed",
-        toolName: "bash_run"
-    });
-    await waitFor(() => session.store.getToolAudit("alpha").some((record) => record.callId === "call-live-1"));
+    assert.equal(session.store.getState().instances.length, 1);
+    assert.equal(session.store.getState().snapshotsByInstance.alpha?.lastSeq, 2);
+    assert.equal(session.store.getState().configView?.version, 7);
+    assert.equal(worker.snapshotCallCount >= 2, true);
+    assert.deepEqual(worker.subscribeFromSeqs, [2]);
 
     worker.emit("toolCall.completed", {
-        callId: "call-gap",
-        completedAt: "2026-07-09T00:00:11.000Z",
-        inputSummary: "{\"command\":\"ls\"}",
+        callId: "live-3",
         source: "tui",
-        startedAt: "2026-07-09T00:00:10.000Z",
-        status: "completed",
         toolName: "bash_run"
     });
-    worker.dropBefore(3);
+    await waitFor(() => session.store.getState().rawEvents.some((event) => event.seq === 3));
 
-    await waitFor(() => worker.readToolCallsCount >= 2);
-    await waitFor(() => worker.listApprovalsCount >= 2);
-    await waitFor(() => worker.subscribeFromSeqs.includes(3));
-
-    worker.emit("log.appended", {
-        bytes: 9,
-        callId: "call-gap",
-        preview: "after-gap",
+    worker.emit("toolCall.completed", {
+        callId: "live-4",
         source: "tui",
-        stream: "stdout",
-        tail: "after-gap",
         toolName: "bash_run"
     });
-    await waitFor(() => session.store.getLogTail("alpha").some((entry) => entry.callId === "call-gap"));
+    worker.emit("toolCall.completed", {
+        callId: "live-5",
+        source: "tui",
+        toolName: "bash_run"
+    });
+    worker.dropBefore(5);
+
+    await waitFor(() => worker.subscribeFromSeqs.includes(5));
+    assert.equal(worker.snapshotCallCount >= 3, true);
+
+    worker.emit("toolCall.completed", {
+        callId: "after-gap",
+        source: "tui",
+        toolName: "bash_run"
+    });
+    await waitFor(() => session.store.getState().rawEvents.some((event) => event.seq === 6));
 
     await server.stop();
-    await waitFor(() => session.store.getConnection().state === "disconnected");
-
-    configVersion = 2;
-    server = createServer(socketPath, worker, () => configVersion);
-    await server.start();
-
-    await waitFor(() => session.store.getConnection().state === "connected");
-    await waitFor(() => ((session.store.getConfigView()?.version as number | undefined) ?? 0) === 2);
+    await waitFor(() => session.store.getState().connection.status === "disconnected");
 });
 
-test("TuiControlSession recovers when initial subscribe returns stream.gap", async (t) => {
-    const runtimeDir = await mkdtemp(join(tmpdir(), "portable-devshell-tui-session-initial-gap-"));
+test("TuiControlSession reports missing control without auto-starting it", async () => {
+    const runtimeDir = await mkdtemp(join(tmpdir(), "portable-devshell-tui-not-running-"));
     const socketPath = join(runtimeDir, "control.sock");
-    const worker = new FakeWorker("alpha");
-    worker.initialSubscribeGapCount = 1;
-    const server = createServer(socketPath, worker, () => 1);
-
-    await server.start();
-
     const session = new TuiControlSession({
-        client: new TuiControlClient({ socketPath }),
-        reconnectDelayMs: 25
+        client: new TuiControlClient({ socketPath })
     });
 
-    t.after(async () => {
+    try {
+        await session.start();
+        assert.equal(session.store.getState().connection.status, "disconnected");
+        assert.equal(session.store.getState().connection.errorCode, "control.notRunning");
+        assert.equal(session.store.getState().connection.errorMessage, "control server is not running.");
+        assert.deepEqual(session.store.getState().instances, []);
+    } finally {
         await session.stop();
-        await server.stop().catch(() => undefined);
         await rm(runtimeDir, { force: true, recursive: true });
-    });
-
-    await session.start();
-    await waitFor(() => session.store.getConnection().state === "connected");
-    await waitFor(() => worker.readToolCallsCount >= 2);
-    await waitFor(() => worker.listApprovalsCount >= 2);
-    await waitFor(() => worker.subscribeFromSeqs.filter((fromSeq) => fromSeq === 1).length >= 2);
-
-    assert.equal(session.store.getPendingApprovals("alpha")[0]?.approvalId, "approval-1");
-    assert.equal(session.store.getToolAudit("alpha")[0]?.callId, "call-1");
-});
-
-test("TuiControlSession backs off when subscribe keeps rejecting", async (t) => {
-    const runtimeDir = await mkdtemp(join(tmpdir(), "portable-devshell-tui-session-subscribe-reject-"));
-    const socketPath = join(runtimeDir, "control.sock");
-    const worker = new FakeWorker("alpha");
-    worker.persistentSubscribeReject = true;
-    const server = createServer(socketPath, worker, () => 1);
-
-    await server.start();
-
-    const session = new TuiControlSession({
-        client: new TuiControlClient({ socketPath }),
-        reconnectDelayMs: 100
-    });
-
-    t.after(async () => {
-        await session.stop();
-        await server.stop().catch(() => undefined);
-        await rm(runtimeDir, { force: true, recursive: true });
-    });
-
-    await session.start();
-    await waitFor(() => session.store.getConnection().state === "connected");
-
-    await sleep(30);
-    assert.equal(worker.subscribeFromSeqs.length, 1);
-    assert.equal(worker.readToolCallsCount, 1);
-    assert.equal(worker.listApprovalsCount, 1);
-
-    await waitFor(() => worker.subscribeFromSeqs.length >= 2, 500);
-    assert.equal(worker.readToolCallsCount >= 2, true);
-    assert.equal(worker.listApprovalsCount >= 2, true);
+    }
 });
 
 function createServer(socketPath: string, worker: FakeWorker, getConfigVersion: () => number): ControlRpcServer {
@@ -175,92 +126,27 @@ class FakeWorker {
     readonly #name: string;
     #events: Array<{ at: string; data?: unknown; instanceName: string; seq: number; type: string }> = [];
     #lastSeq = 0;
-    #snapshot = {
-        connectionState: "connected",
-        daemonState: "running",
-        lastSeq: 0,
-        name: asInstanceName("alpha"),
-        ready: true,
-        status: "ready"
-    } as const;
+    snapshotCallCount = 0;
     subscribeFromSeqs: number[] = [];
-    readToolCallsCount = 0;
-    listApprovalsCount = 0;
-    initialSubscribeGapCount = 0;
-    persistentSubscribeReject = false;
 
     constructor(name: string) {
         this.#name = name;
-        this.#snapshot = {
-            ...this.#snapshot,
-            name: asInstanceName(name)
-        };
     }
 
     snapshot() {
-        return this.#snapshot;
-    }
-
-    async readToolCalls() {
-        this.readToolCallsCount += 1;
-
-        return [
-            {
-                callId: "call-1",
-                completedAt: "2026-07-09T00:00:01.000Z",
-                exitCode: 0,
-                inputSummary: "{\"command\":\"pwd\"}",
-                instance: asInstanceName(this.#name),
-                source: "tui",
-                startedAt: "2026-07-09T00:00:00.000Z",
-                status: "completed",
-                stderrBytes: 0,
-                stdoutBytes: 8,
-                timedOut: false,
-                toolName: "bash_run"
-            }
-        ];
-    }
-
-    async listApprovals() {
-        this.listApprovalsCount += 1;
-
-        return [
-            {
-                approvalId: "approval-1",
-                callId: "call-approval-1",
-                createdAt: "2026-07-09T00:00:02.000Z",
-                expiresAt: "2026-07-09T00:05:02.000Z",
-                inputSummary: "{\"command\":\"rm -rf\"}",
-                instance: asInstanceName(this.#name),
-                reason: "Approval required before running bash_run.",
-                riskLevel: "high",
-                source: "tui",
-                status: "pending",
-                toolName: "bash_run"
-            }
-        ];
+        this.snapshotCallCount += 1;
+        return {
+            connectionState: "connected",
+            daemonState: "running",
+            lastSeq: this.#lastSeq,
+            name: asInstanceName(this.#name),
+            ready: true,
+            status: "ready"
+        } as const;
     }
 
     subscribe(fromSeq = 1) {
         this.subscribeFromSeqs.push(fromSeq);
-
-        if (this.persistentSubscribeReject) {
-            throw Object.assign(new Error("subscribe rejected"), {
-                code: "stream.gap"
-            });
-        }
-
-        if (this.initialSubscribeGapCount > 0) {
-            this.initialSubscribeGapCount -= 1;
-            return {
-                code: "stream.gap",
-                fromSeq,
-                kind: "gap" as const,
-                lastSeq: this.#lastSeq,
-                nextSeq: fromSeq + 1
-            };
-        }
 
         const nextSeq = this.#events[0]?.seq ?? this.#lastSeq + 1;
 
@@ -292,10 +178,6 @@ class FakeWorker {
 
         this.#lastSeq = event.seq;
         this.#events.push(event);
-        this.#snapshot = {
-            ...this.#snapshot,
-            lastSeq: this.#lastSeq
-        };
     }
 
     dropBefore(seq: number): void {
@@ -315,8 +197,4 @@ async function waitFor(factory: () => boolean, timeoutMs = 2_000): Promise<void>
     }
 
     throw new Error("Timed out waiting for condition.");
-}
-
-async function sleep(ms: number): Promise<void> {
-    await new Promise((resolve) => setTimeout(resolve, ms));
 }
