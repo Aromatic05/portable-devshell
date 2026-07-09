@@ -46,18 +46,24 @@ enabled = true
 - local target probe: `process.platform` + `process.arch`
 - ssh target probe: remote `uname -s` + `uname -m`
 - docker/podman target probe: container `uname -s` + `uname -m`
-- packaged asset layout: `packages/core/assets/workers/<targetKey>/devshell-worker`
+- release asset layout: `devshell-worker-<targetKey>` and `devshell-worker-<targetKey>.sha256`
 - install path:
   - local: `~/.devshell/workers/<targetKey>/<sha256>/devshell-worker`
   - ssh/container: `~/.devshell/workers/<targetKey>/<sha256>/devshell-worker`
   - active symlink: `~/.devshell/bin/devshell-worker`
+- release cache path: `~/.devshell/release-cache/workers/<tag>/<targetKey>/<sha256>/devshell-worker`
 - target-specific env override:
   - `PORTABLE_DEVSHELL_WORKER_LINUX_X64_PATH`
   - `PORTABLE_DEVSHELL_WORKER_LINUX_ARM64_PATH`
   - `PORTABLE_DEVSHELL_WORKER_DARWIN_X64_PATH`
   - `PORTABLE_DEVSHELL_WORKER_DARWIN_ARM64_PATH`
+- release lookup config:
+  - `PORTABLE_DEVSHELL_WORKER_RELEASE_REPOSITORY=owner/repo`
+  - optional: `PORTABLE_DEVSHELL_WORKER_RELEASE_TAG=v0.2.0`
+  - optional: `PORTABLE_DEVSHELL_WORKER_RELEASE_BASE_URL=https://github.com/owner/repo/releases/download`
+  - optional: `PORTABLE_DEVSHELL_WORKER_CACHE_DIR=/custom/cache/path`
 
-代码已经支持 target-specific probe、asset resolution、install path 和 structured error。
-仓库是否实际包含某个 target 的 worker binary，以 `packages/core/assets/workers/<targetKey>/` 下是否存在对应文件为准；若缺失，将返回 `core.workerAssetUnavailable`，而不是假装回退到错误平台的 binary。
+代码已经支持 target-specific probe、release asset resolution、install path 和 structured error。
+默认发布流程会在 GitHub tag `v*` 上自动构建四个 target 的 worker，并把二进制和对应 `.sha256` 上传到同名 GitHub Release。
+运行时如果没有 target-specific 本地覆盖路径，core 会先探测目标平台，再按 release tag 下载对应 worker；若 release 不存在或校验失败，将返回 `core.workerAssetUnavailable`。
 在 Linux host 上，默认构建会直接尝试 musl target；如果当前机器没有对应 target/std/toolchain，构建会失败，而不是退回到动态链接的 `gnu` binary。
-当前仓库快照已经包含 `linux-x64`、`linux-arm64`、`darwin-x64`、`darwin-arm64` 四个 target 的 worker asset。
