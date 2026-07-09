@@ -31,21 +31,31 @@ test("Prompt 3 urgent fix uses page + instance coordinates with two sidebar sect
     assert.equal(harness.store.getState().ui.selectedPage, "instances");
     assert.equal(harness.store.getState().ui.selectedInstance, "alpha");
 
-    await harness.press("2");
+    await harness.press("", { downArrow: true });
+    assert.equal(harness.store.getState().ui.selectedPage, "instances");
+    assert.equal(harness.store.getState().interaction.sidebarCursor?.kind, "page");
+    assert.equal(harness.store.getState().interaction.sidebarCursor?.id, "config");
+
+    await harness.press("", { return: true });
     assert.equal(harness.store.getState().ui.selectedPage, "config");
+
+    for (let index = 0; index < 6; index += 1) {
+        await harness.press("", { downArrow: true });
+    }
+    assert.equal(harness.store.getState().interaction.sidebarCursor?.kind, "instance");
+    assert.equal(harness.store.getState().interaction.sidebarCursor?.id, "beta");
     assert.equal(harness.store.getState().ui.selectedInstance, "alpha");
 
-    await harness.press("", { tab: true });
-    assert.equal(harness.store.getState().interaction.focusScope, "sidebarInstances");
-    await harness.press("", { downArrow: true });
+    await harness.press("", { return: true });
     assert.equal(harness.store.getState().ui.selectedInstance, "beta");
-    assert.equal(harness.store.getState().ui.selectedPage, "config");
+
+    await harness.press("", { tab: true });
+    assert.equal(harness.store.getState().interaction.focusScope, "mainBoxes");
 });
 
 test("Prompt 3 urgent fix expands stable bordered boxes and preserves state through stream updates", async () => {
     const harness = createHarness();
 
-    await harness.press("", { tab: true });
     await harness.press("", { tab: true });
 
     const firstBoxId = harness.store.getState().ui.mainFocusId;
@@ -84,7 +94,7 @@ test("Prompt 3 urgent fix expands stable bordered boxes and preserves state thro
     await harness.press("[", { ctrl: true });
     assert.equal(harness.store.getState().interaction.focusScope, "mainBoxes");
     await harness.press("[", { ctrl: true });
-    assert.equal(harness.store.getState().interaction.focusScope, "sidebarInstances");
+    assert.equal(harness.store.getState().interaction.focusScope, "sidebarPages");
 });
 
 test("Prompt 3 urgent fix keeps connector and logs pages read-only and instance-scoped", async () => {
@@ -97,7 +107,7 @@ test("Prompt 3 urgent fix keeps connector and logs pages read-only and instance-
         ["MCP Runtime Config", "Endpoint Preview", "Auth Config", "Public Availability Reason"]
     );
     assert.equal(
-        connector.boxes.some((box) => box.detailLines.some((line) => line.includes("Runtime readiness: not available in current control API"))),
+        connector.boxes.some((box) => box.expandedLines.some((line) => line.text.includes("Runtime readiness: not available in current control API"))),
         true
     );
 
@@ -106,7 +116,7 @@ test("Prompt 3 urgent fix keeps connector and logs pages read-only and instance-
     const logs = selectMainScreenModel(harness.store.getState());
     assert.equal(logs.activePage.page, "logs");
     assert.equal(logs.activePage.instance, "alpha");
-    assert.equal(logs.boxes[0]?.summaryLines[0], "source instance.readLogs + log.appended");
+    assert.equal(logs.boxes[0]?.collapsedLines[0]?.text, "source instance.readLogs + log.appended");
 
     await harness.press("6");
     assert.equal(selectHelpLines(harness.store.getState()).some((line) => line.includes("Read-only cockpit")), true);
