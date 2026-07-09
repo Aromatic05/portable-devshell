@@ -261,6 +261,50 @@ fn invalid_rpc_requests_return_structured_errors() {
 }
 
 #[test]
+fn start_falls_back_to_stable_runtime_dir_when_xdg_runtime_dir_is_missing() {
+    let env = TestEnv::new();
+    let instance = "aromatic-mac";
+
+    let start = env
+        .command_without_runtime_dir()
+        .current_dir(env.workspace())
+        .args(["start", "--instance", instance])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let start: Value = serde_json::from_slice(&start).unwrap();
+
+    assert_eq!(start["ok"], true);
+    assert_eq!(start["started"], true);
+    assert!(env.fallback_socket_file(instance).exists());
+
+    let status_output = env
+        .command_without_runtime_dir()
+        .args(["status", "--instance", instance])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let status: Value = serde_json::from_slice(&status_output).unwrap();
+    assert_eq!(status["state"], "running");
+    assert_eq!(status["running"], true);
+
+    let stop_output = env
+        .command_without_runtime_dir()
+        .args(["stop", "--instance", instance])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let stop: Value = serde_json::from_slice(&stop_output).unwrap();
+    assert_eq!(stop["stopped"], true);
+}
+
+#[test]
 fn workspace_security_mode_rejects_cwd_escape() {
     let env = TestEnv::new();
     let instance = "aromatic-secure";

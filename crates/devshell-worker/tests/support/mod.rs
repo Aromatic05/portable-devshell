@@ -42,6 +42,14 @@ impl TestEnv {
             .join("worker.sock")
     }
 
+    pub fn fallback_socket_file(&self, instance: &str) -> PathBuf {
+        self.home_root
+            .join("runtime")
+            .join("devshell-worker")
+            .join(instance)
+            .join("worker.sock")
+    }
+
     pub fn command(&self) -> Command {
         let mut command = Command::cargo_bin("devshell-worker").unwrap();
         self.configure_command(&mut command);
@@ -59,6 +67,15 @@ impl TestEnv {
         let mut command = Command::cargo_bin("devshell-worker").unwrap();
         self.configure_command(&mut command);
         command.env(key, value);
+        command
+    }
+
+    pub fn command_without_runtime_dir(&self) -> Command {
+        let mut command = Command::cargo_bin("devshell-worker").unwrap();
+        command
+            .env("HOME", self._home_guard.path())
+            .env("PORTABLE_DEVSHELL_HOME", &self.home_root)
+            .env_remove("XDG_RUNTIME_DIR");
         command
     }
 
