@@ -1,56 +1,44 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import React, { isValidElement } from "react";
-
 import {
     buildFocusGraphForState,
     CommandDispatcher,
     KeyDispatcher,
-    ScreenRouter,
     selectFooterText,
+    selectHelpLines,
     TuiAppStore,
     TuiFocusManager
 } from "../../dist/index.js";
 
-test("Prompt 2 panel routing and focus graph navigation stay inside the current panel", async () => {
+test("Prompt 3 panel routing and instances detail stay read-only", async () => {
     const harness = createHarness();
 
-    await harness.press("2");
-    assert.equal(harness.store.getState().activePanel, "config");
-    assert.deepEqual(harness.store.getState().interaction.currentFocus, { id: "config.summary", kind: "card" });
-
-    await harness.press("", { tab: true });
-    assert.deepEqual(harness.store.getState().interaction.currentFocus, { id: "config.localToggle", kind: "field" });
+    await harness.press("1");
+    assert.equal(harness.store.getState().activePanel, "instances");
+    assert.deepEqual(harness.store.getState().interaction.currentFocus, { id: "instances.summary", kind: "card" });
 
     await harness.press("", { downArrow: true });
-    assert.deepEqual(harness.store.getState().interaction.currentFocus, { id: "save", kind: "button" });
+    assert.deepEqual(harness.store.getState().interaction.currentFocus, { id: "instances.row.0", kind: "listItem" });
 
-    await harness.press("", { rightArrow: true });
-    assert.deepEqual(harness.store.getState().interaction.currentFocus, { id: "cancel", kind: "button" });
+    await harness.press("", { return: true });
+    assert.equal(harness.store.getState().interaction.screenStatusByPanel.instances, "Opened selected instance detail without starting worker.");
+    assert.equal(harness.store.getState().interaction.screenToggleByPanel.instances, true);
 
-    await harness.press("", { leftArrow: true });
-    assert.deepEqual(harness.store.getState().interaction.currentFocus, { id: "save", kind: "button" });
+    await harness.press(" ");
+    assert.equal(harness.store.getState().interaction.screenToggleByPanel.instances, false);
+
+    await harness.press("2");
+    assert.equal(harness.store.getState().activePanel, "connector");
 
     await harness.press("]");
-    assert.equal(harness.store.getState().activePanel, "connector");
-    assert.deepEqual(harness.store.getState().interaction.currentFocus, { id: "connector.summary", kind: "card" });
+    assert.equal(harness.store.getState().activePanel, "audit");
 
     await harness.press("[");
-    assert.equal(harness.store.getState().activePanel, "config");
-    assert.deepEqual(harness.store.getState().interaction.currentFocus, { id: "save", kind: "button" });
-
-    await harness.press("", { end: true });
-    assert.deepEqual(harness.store.getState().interaction.currentFocus, { id: "cancel", kind: "button" });
-
-    await harness.press("", { home: true });
-    assert.deepEqual(harness.store.getState().interaction.currentFocus, { id: "config.summary", kind: "card" });
-
-    await harness.press("", { pageDown: true });
-    assert.equal(harness.store.getState().interaction.screenStatusByPanel.config, "pageDown handled by config panel.");
+    assert.equal(harness.store.getState().activePanel, "connector");
 });
 
-test("Prompt 2 action menu opens, moves, executes, closes, and footer only shows valid shortcuts", async () => {
+test("Prompt 3 action menu is read-only placeholder and help/footer reflect current mode", async () => {
     const harness = createHarness();
 
     assert.match(selectFooterText(harness.store.getState()), /1-6/u);
@@ -58,105 +46,66 @@ test("Prompt 2 action menu opens, moves, executes, closes, and footer only shows
     await harness.press("a");
     assert.equal(harness.store.getState().interaction.mode, "actionMenu");
     assert.equal(harness.store.getState().interaction.actionMenu.open, true);
-    assert.deepEqual(harness.store.getState().interaction.currentFocus, { id: "instances.mark", kind: "action" });
-    assert.match(selectFooterText(harness.store.getState()), /↑↓ enter/u);
-    assert.doesNotMatch(selectFooterText(harness.store.getState()), /1-6/u);
+    assert.deepEqual(harness.store.getState().interaction.currentFocus, { id: "instances.readonly", kind: "action" });
 
-    await harness.press("", { downArrow: true });
-    assert.deepEqual(harness.store.getState().interaction.currentFocus, { id: "instances.help", kind: "action" });
-
-    await harness.press("[", { ctrl: true });
-    assert.equal(harness.store.getState().interaction.mode, "normal");
-    assert.equal(harness.store.getState().interaction.actionMenu.open, false);
-
-    await harness.press("a");
-    await harness.press("", { downArrow: true });
     await harness.press("", { return: true });
-    assert.equal(harness.store.getState().activePanel, "help");
     assert.equal(harness.store.getState().interaction.mode, "normal");
-    assert.equal(harness.store.getState().interaction.actionMenu.open, false);
+    assert.equal(harness.store.getState().interaction.screenStatusByPanel.instances, "Read-only action menu placeholder.");
+
+    await harness.press("6");
+    assert.equal(harness.store.getState().activePanel, "help");
+    assert.equal(selectHelpLines(harness.store.getState()).some((line) => line.includes("Read-only cockpit")), true);
 });
 
-test("Prompt 2 search mode handles local input and ctrl+[ closes temporary state without quitting", async () => {
+test("Prompt 3 search stays local and approvals cards only expand locally", async () => {
     const harness = createHarness();
+
+    await harness.press("5");
+    assert.equal(harness.store.getState().activePanel, "approvals");
 
     await harness.press("/");
     assert.equal(harness.store.getState().interaction.mode, "search");
-    assert.equal(harness.store.getState().interaction.search.open, true);
-    assert.deepEqual(harness.store.getState().interaction.currentFocus, { id: "search.query", kind: "field" });
-    assert.match(selectFooterText(harness.store.getState()), /type bs enter/u);
-    assert.doesNotMatch(selectFooterText(harness.store.getState()), /1-6/u);
-
-    await harness.press("x");
-    await harness.press("y");
-    assert.equal(harness.store.getState().interaction.search.query, "xy");
-
-    await harness.press("", { backspace: true });
-    assert.equal(harness.store.getState().interaction.search.query, "x");
-
-    await harness.press("[", { ctrl: true });
-    assert.equal(harness.store.getState().interaction.mode, "normal");
-    assert.equal(harness.store.getState().interaction.search.open, false);
-    assert.equal(harness.quitCount(), 0);
-});
-
-test("Prompt 2 ctrl+d uses confirm dialog when dirty and confirm defaults to cancel", async () => {
-    const harness = createHarness();
-
-    await harness.press("2");
-    await harness.press("", { tab: true });
-    await harness.press(" ");
-
-    assert.equal(harness.store.getState().interaction.mode, "edit");
-    assert.equal(harness.store.getState().interaction.dirty, true);
-    assert.match(selectFooterText(harness.store.getState()), /\?/u);
-    assert.match(selectFooterText(harness.store.getState()), /\bsp\b/u);
-
-    await harness.press("d", { ctrl: true });
-    assert.equal(harness.store.getState().interaction.mode, "confirm");
-    assert.equal(harness.store.getState().interaction.confirmDialog.open, true);
-    assert.deepEqual(harness.store.getState().interaction.currentFocus, { id: "cancel", kind: "button" });
-    assert.match(selectFooterText(harness.store.getState()), /tab ←→ enter/u);
-    assert.doesNotMatch(selectFooterText(harness.store.getState()), /1-6/u);
-
-    await harness.press("[", { ctrl: true });
-    assert.equal(harness.store.getState().interaction.mode, "edit");
-    assert.equal(harness.quitCount(), 0);
-
-    await harness.press("d", { ctrl: true });
-    await harness.press("", { rightArrow: true });
-    assert.deepEqual(harness.store.getState().interaction.currentFocus, { id: "confirm", kind: "button" });
+    await harness.press("a");
     await harness.press("", { return: true });
-    assert.equal(harness.quitCount(), 1);
-});
+    assert.equal(harness.store.getState().interaction.search.query, "a");
+    assert.equal(harness.store.getState().interaction.mode, "normal");
 
-test("Prompt 2 save and cancel are real focus items with visual highlight and enter only activates the focused item", async () => {
-    const harness = createHarness();
-
-    await harness.press("2");
-    await harness.press("", { tab: true });
-    await harness.press(" ");
     await harness.press("", { downArrow: true });
+    assert.deepEqual(harness.store.getState().interaction.currentFocus, { id: "approvals.row.0", kind: "listItem" });
 
-    assert.doesNotMatch(selectFooterText(harness.store.getState()), /\bsp\b/u);
-    assert.match(selectFooterText(harness.store.getState()), /\?/u);
-    assert.equal(hasHighlightedLabel(harness.store.getState(), "[ Save ]"), true);
-    assert.equal(hasHighlightedLabel(harness.store.getState(), "[ Cancel ]"), false);
+    await harness.press(" ");
+    assert.equal(harness.store.getState().interaction.expandedByKey["approval.alpha.approval-1"], true);
+    assert.equal(harness.store.getState().interaction.screenStatusByPanel.approvals, "Expanded approvals card.");
+});
 
-    await harness.press("", { rightArrow: true });
-    assert.equal(hasHighlightedLabel(harness.store.getState(), "[ Save ]"), false);
-    assert.equal(hasHighlightedLabel(harness.store.getState(), "[ Cancel ]"), true);
+test("Prompt 3 logs page reloads, scrolls, toggles follow, and clear only resets UI buffer", async () => {
+    const harness = createHarness();
 
-    await harness.press("", { return: true });
-    assert.equal(harness.store.getState().interaction.dirty, false);
-    assert.equal(harness.store.getState().interaction.screenToggleByPanel.config, false);
-    assert.equal(harness.store.getState().interaction.mode, "normal");
+    await harness.press("4");
+    assert.equal(harness.store.getState().activePanel, "logs");
+    assert.equal(harness.logsReloadCount(), 1);
+    assert.equal(harness.store.getState().interaction.screenStatusByPanel.logs, "Logs reloaded from instance.readLogs.");
+
+    await harness.press("", { upArrow: true });
+    assert.equal(harness.store.getState().interaction.logsViewport.follow, false);
+
+    await harness.press("f");
+    assert.equal(harness.store.getState().interaction.logsViewport.follow, true);
+
+    await harness.press("r");
+    assert.equal(harness.logsReloadCount(), 2);
+
+    await harness.press("c");
+    assert.deepEqual(harness.store.getState().logsByInstance, {});
+    assert.equal(harness.store.getState().interaction.screenStatusByPanel.logs, "Cleared local log buffer only.");
 });
 
 function createHarness() {
     const store = new TuiAppStore();
+    seedPrompt3State(store);
     let quitRequests = 0;
     let redrawRequests = 0;
+    let logsReloadRequests = 0;
     const focusManager = new TuiFocusManager(store, {
         currentPanel: () => store.getState().activePanel,
         graphFor: (panel, mode) =>
@@ -172,6 +121,9 @@ function createHarness() {
     });
     const commandDispatcher = new CommandDispatcher({
         focusManager,
+        onLogsReload: async () => {
+            logsReloadRequests += 1;
+        },
         onQuit: async () => {
             quitRequests += 1;
         },
@@ -188,6 +140,9 @@ function createHarness() {
         async press(input: string, key: Record<string, boolean> = {}) {
             await commandDispatcher.dispatchMany(keyDispatcher.dispatch(store.getState().interaction.mode, { input, key }));
         },
+        logsReloadCount() {
+            return logsReloadRequests;
+        },
         quitCount() {
             return quitRequests;
         },
@@ -198,58 +153,77 @@ function createHarness() {
     };
 }
 
-function hasHighlightedLabel(state: ReturnType<TuiAppStore["getState"]>, label: string): boolean {
-    const tree = renderNode(ScreenRouter({ state }));
-    return collectHighlightedText(tree).includes(label);
-}
-
-function collectHighlightedText(node: unknown): string[] {
-    if (!isValidElement(node)) {
-        return [];
-    }
-
-    const ownText = node.props.backgroundColor === "cyan" ? [readText(node.props.children)] : [];
-    const children = normalizeChildren(node.props.children).flatMap((child) => collectHighlightedText(renderNode(child)));
-
-    return [...ownText, ...children];
-}
-
-function renderNode(node: unknown): unknown {
-    if (!isValidElement(node)) {
-        return node;
-    }
-
-    if (typeof node.type === "function" && node.type.name !== "Text" && node.type.name !== "Box") {
-        return renderNode(node.type(node.props));
-    }
-
-    return node;
-}
-
-function normalizeChildren(children: unknown): unknown[] {
-    if (Array.isArray(children)) {
-        return children;
-    }
-
-    return children === undefined || children === null ? [] : [children];
-}
-
-function readText(node: unknown): string {
-    if (typeof node === "string") {
-        return node;
-    }
-
-    if (typeof node === "number") {
-        return String(node);
-    }
-
-    if (Array.isArray(node)) {
-        return node.map((child) => readText(child)).join("");
-    }
-
-    if (isValidElement(node)) {
-        return readText(node.props.children);
-    }
-
-    return "";
+function seedPrompt3State(store: TuiAppStore) {
+    store.replaceInstances([
+        {
+            defaultWorkspace: "/workspace/alpha",
+            enabled: true,
+            mcpEnabled: true,
+            mcpPath: "/alpha/mcp",
+            name: "alpha",
+            provider: "local"
+        }
+    ]);
+    store.setConfigView({
+        instances: [
+            {
+                enabled: true,
+                mcp: { enabled: true, path: "/alpha/mcp" },
+                name: "alpha",
+                provider: "local",
+                workspace: "/workspace/alpha"
+            }
+        ],
+        mcp: {
+            auth: { mode: "none" },
+            enabled: true,
+            listenHost: "127.0.0.1",
+            listenPort: 3210
+        }
+    });
+    store.replaceSnapshot({
+        connectionState: "connected",
+        daemonState: "running",
+        lastSeq: 3,
+        name: "alpha",
+        ready: true,
+        status: "ready"
+    } as never);
+    store.replaceToolCalls("alpha", [
+        {
+            callId: "call-1",
+            completedAt: "2026-07-09T00:00:01.000Z",
+            inputSummary: "{\"cmd\":\"pwd\"}",
+            instance: "alpha" as never,
+            source: "tui",
+            startedAt: "2026-07-09T00:00:00.000Z",
+            status: "completed",
+            timedOut: false,
+            toolName: "bash_run"
+        }
+    ]);
+    store.replaceApprovals("alpha", [
+        {
+            approvalId: "approval-1",
+            callId: "call-1",
+            createdAt: "2026-07-09T00:00:00.000Z",
+            expiresAt: "2026-07-09T00:10:00.000Z",
+            inputSummary: "{\"cmd\":\"rm\"}",
+            instance: "alpha" as never,
+            reason: "needs review",
+            riskLevel: "high",
+            source: "tui",
+            status: "pending",
+            toolName: "bash_run"
+        }
+    ]);
+    store.replaceLogs("alpha", [
+        ...Array.from({ length: 20 }, (_, index) => ({
+            instance: "alpha",
+            message: `line ${index + 1}`,
+            receivedAt: `2026-07-09T00:00:${String(index).padStart(2, "0")}.000Z`,
+            seq: index + 1,
+            stream: "stdout" as const
+        }))
+    ]);
 }

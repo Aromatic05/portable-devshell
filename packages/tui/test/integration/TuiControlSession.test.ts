@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { asInstanceName, type JsonValue } from "@portable-devshell/shared";
+import { asInstanceName, type ApprovalRequest, type JsonValue, type ToolCallRecord } from "@portable-devshell/shared";
 import type { WorkerInstance } from "@portable-devshell/core";
 
 import { ControlRpcServer } from "../../../control/dist/control/rpc/ControlRpcServer.js";
@@ -44,26 +44,53 @@ test("TuiControlSession pulls instances, snapshots, subscribes, and recovers fro
     await waitFor(() => worker.subscribeFromSeqs.length === 1);
 
     assert.equal(session.store.getState().instances.length, 1);
+    assert.equal(session.store.getState().instances[0]?.enabled, true);
+    assert.equal(session.store.getState().instances[0]?.provider, "local");
+    assert.equal(session.store.getState().instances[0]?.defaultWorkspace, "/workspace/alpha");
     assert.equal(session.store.getState().snapshotsByInstance.alpha?.lastSeq, 2);
     assert.equal(session.store.getState().configView?.version, 7);
     assert.equal(worker.snapshotCallCount >= 2, true);
     assert.deepEqual(worker.subscribeFromSeqs, [2]);
+    assert.equal(session.store.getState().logsByInstance.alpha?.length, 1);
+    assert.equal(session.store.getState().toolCallsByInstance.alpha?.length, 1);
+    assert.equal(session.store.getState().approvalsByInstance.alpha?.length, 1);
 
     worker.emit("toolCall.completed", {
         callId: "live-3",
+        completedAt: new Date().toISOString(),
+        inputSummary: "{\"cmd\":\"pwd\"}",
         source: "tui",
+        startedAt: new Date(1).toISOString(),
+        status: "completed",
         toolName: "bash_run"
     });
     await waitFor(() => session.store.getState().rawEvents.some((event) => event.seq === 3));
+    assert.equal(session.store.getState().toolCallsByInstance.alpha?.some((record) => record.callId === "live-3"), true);
+
+    worker.emit("log.appended", {
+        bytes: 11,
+        stream: "stdout",
+        tail: "hello world",
+        toolName: "bash_run"
+    });
+    await waitFor(() => (session.store.getState().logsByInstance.alpha?.length ?? 0) >= 2);
 
     worker.emit("toolCall.completed", {
         callId: "live-4",
+        completedAt: new Date().toISOString(),
+        inputSummary: "{\"cmd\":\"ls\"}",
         source: "tui",
+        startedAt: new Date(2).toISOString(),
+        status: "completed",
         toolName: "bash_run"
     });
     worker.emit("toolCall.completed", {
         callId: "live-5",
+        completedAt: new Date().toISOString(),
+        inputSummary: "{\"cmd\":\"echo\"}",
         source: "tui",
+        startedAt: new Date(3).toISOString(),
+        status: "completed",
         toolName: "bash_run"
     });
     worker.dropBefore(5);
@@ -105,7 +132,19 @@ function createServer(socketPath: string, worker: FakeWorker, getConfigVersion: 
     return new ControlRpcServer({
         configEditorService: {
             getConfigView() {
-                return { instances: [{ name: "alpha" }], version: getConfigVersion() };
+                return {
+                    instances: [
+                        {
+                            enabled: true,
+                            mcp: { enabled: false, path: "/alpha/mcp" },
+                            name: "alpha",
+                            provider: "local",
+                            workspace: "/workspace/alpha"
+                        }
+                    ],
+                    mcp: { auth: { mode: "none" }, enabled: false, listenHost: "127.0.0.1", listenPort: 3210 },
+                    version: getConfigVersion()
+                };
             }
         } as never,
         instanceRegistry: new InstanceRegistry([
@@ -126,11 +165,51 @@ class FakeWorker {
     readonly #name: string;
     #events: Array<{ at: string; data?: unknown; instanceName: string; seq: number; type: string }> = [];
     #lastSeq = 0;
+    readonly #approvals: ApprovalRequest[];
+    readonly #logs: Array<{ at: string; instanceName: string; message: string; seq: number; stream: "stderr" | "stdout" }>;
+    readonly #toolCalls: ToolCallRecord[];
     snapshotCallCount = 0;
     subscribeFromSeqs: number[] = [];
 
     constructor(name: string) {
         this.#name = name;
+        this.#logs = [
+            {
+                at: new Date(0).toISOString(),
+                instanceName: name,
+                message: "seed log line",
+                seq: 1,
+                stream: "stdout"
+            }
+        ];
+        this.#toolCalls = [
+            {
+                callId: "seed-call",
+                completedAt: new Date(0).toISOString(),
+                inputSummary: "{\"cmd\":\"true\"}",
+                instance: asInstanceName(name),
+                source: "tui",
+                startedAt: new Date(0).toISOString(),
+                status: "completed",
+                timedOut: false,
+                toolName: "bash_run"
+            }
+        ];
+        this.#approvals = [
+            {
+                approvalId: "approval-1",
+                callId: "seed-call",
+                createdAt: new Date(0).toISOString(),
+                expiresAt: new Date(60_000).toISOString(),
+                inputSummary: "{\"cmd\":\"rm\"}",
+                instance: asInstanceName(name),
+                reason: "needs review",
+                riskLevel: "high",
+                source: "tui",
+                status: "pending",
+                toolName: "bash_run"
+            }
+        ];
     }
 
     snapshot() {
@@ -165,6 +244,18 @@ class FakeWorker {
             kind: "events" as const,
             lastSeq: this.#lastSeq
         };
+    }
+
+    async readLogs() {
+        return this.#logs;
+    }
+
+    async readToolCalls() {
+        return this.#toolCalls;
+    }
+
+    async listApprovals() {
+        return this.#approvals;
     }
 
     emit(type: string, data?: Record<string, JsonValue>): void {

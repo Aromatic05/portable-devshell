@@ -2,19 +2,24 @@ import React from "react";
 import { Box, Text } from "ink";
 
 import { FocusGraph, type FocusNode } from "../interaction/FocusGraph.js";
-import { focusItemKey, isSameFocusItem, type FocusItem, type TuiActionMenuItem, type TuiUiIntent } from "../interaction/TuiInteractionTypes.js";
+import { isSameFocusItem, type FocusItem, type TuiActionMenuItem, type TuiUiIntent } from "../interaction/TuiInteractionTypes.js";
 import type { TuiAppState, TuiPanel } from "../store/TuiReducers.js";
 import {
+    selectApprovalCards,
+    selectApprovalLines,
+    selectAuditCards,
     selectAuditLines,
-    selectConfigLines,
     selectConnectorLines,
+    selectExpanded,
     selectHelpLines,
+    selectInstanceDetailLines,
     selectInstanceRows,
     selectLogLines,
+    selectLogViewport,
     selectPanelTitle
 } from "../store/TuiSelectors.js";
 
-export const orderedPanels: TuiPanel[] = ["instances", "config", "connector", "audit", "logs", "help"];
+export const orderedPanels: TuiPanel[] = ["instances", "connector", "audit", "logs", "approvals", "help"];
 
 export interface ScreenRouterProps {
     state: TuiAppState;
@@ -33,16 +38,16 @@ export function ScreenRouter(props: ScreenRouterProps) {
     switch (props.state.activePanel) {
         case "instances":
             return <InstancesScreen state={props.state} />;
-        case "config":
-            return <ConfigScreen state={props.state} />;
         case "connector":
             return <LinesScreen focusPrefix="connector" lines={selectConnectorLines(props.state)} state={props.state} title={selectPanelTitle("connector")} />;
         case "audit":
-            return <LinesScreen focusPrefix="audit" lines={selectAuditLines(props.state)} state={props.state} title={selectPanelTitle("audit")} />;
+            return <CardsScreen cards={selectAuditCards(props.state)} focusPrefix="audit" state={props.state} title={selectPanelTitle("audit")} />;
         case "logs":
             return <LinesScreen focusPrefix="logs" lines={selectLogLines(props.state)} state={props.state} title={selectPanelTitle("logs")} />;
+        case "approvals":
+            return <CardsScreen cards={selectApprovalCards(props.state)} focusPrefix="approvals" state={props.state} title={selectPanelTitle("approvals")} />;
         case "help":
-            return <LinesScreen focusPrefix="help" lines={selectHelpLines()} state={props.state} title={selectPanelTitle("help")} />;
+            return <LinesScreen focusPrefix="help" lines={selectHelpLines(props.state)} state={props.state} title={selectPanelTitle("help")} />;
     }
 }
 
@@ -50,16 +55,16 @@ export function buildScreenDefinition(state: TuiAppState): TuiScreenDefinition {
     switch (state.activePanel) {
         case "instances":
             return buildInstancesDefinition(state);
-        case "config":
-            return buildConfigDefinition(state);
         case "connector":
             return buildLinesDefinition(state, "connector", selectConnectorLines(state));
         case "audit":
-            return buildLinesDefinition(state, "audit", selectAuditLines(state));
+            return buildCardDefinition(state, "audit", selectAuditCards(state), selectAuditLines(state));
         case "logs":
             return buildLinesDefinition(state, "logs", selectLogLines(state));
+        case "approvals":
+            return buildCardDefinition(state, "approvals", selectApprovalCards(state), selectApprovalLines(state));
         case "help":
-            return buildLinesDefinition(state, "help", selectHelpLines());
+            return buildLinesDefinition(state, "help", selectHelpLines(state));
     }
 }
 
@@ -122,44 +127,29 @@ export function previousPanel(panel: TuiPanel): TuiPanel {
 }
 
 function InstancesScreen(props: ScreenRouterProps) {
-    const rows = selectInstanceRows(props.state);
-    const filteredRows = filterLines(rows, props.state.interaction.search.query);
+    const rows = filterLines(selectInstanceRows(props.state), props.state.interaction.search.query);
+    const detailLines = selectInstanceDetailLines(props.state);
     const currentFocus = props.state.interaction.currentFocus;
+    const expanded = props.state.interaction.screenToggleByPanel.instances !== false;
 
     return (
         <Box flexDirection="column" gap={1}>
             <Text bold>{selectPanelTitle("instances")}</Text>
             <FocusableCard focused={isFocused(currentFocus, { kind: "card", id: "instances.summary" })} text={`instances ${props.state.instances.length}`} />
-            <Box flexDirection="column">
-                {filteredRows.map((row, index) => (
-                    <Text
-                        color={isFocused(currentFocus, { kind: "listItem", id: `instances.row.${index}` }) ? "cyan" : undefined}
-                        key={`${row}-${index}`}
-                    >
-                        {row}
-                    </Text>
-                ))}
-            </Box>
-            <ScreenStatus state={props.state} />
-        </Box>
-    );
-}
-
-function ConfigScreen(props: ScreenRouterProps) {
-    const currentFocus = props.state.interaction.currentFocus;
-    const toggleValue = props.state.interaction.screenToggleByPanel.config === true;
-    const dirty = props.state.interaction.dirty;
-
-    return (
-        <Box flexDirection="column" gap={1}>
-            <Text bold>{selectPanelTitle("config")}</Text>
-            <FocusableCard focused={isFocused(currentFocus, { kind: "card", id: "config.summary" })} text={selectConfigLines(props.state)[0] ?? "Config view unavailable."} />
-            <Text color={isFocused(currentFocus, { kind: "field", id: "config.localToggle" }) ? "cyan" : undefined}>
-                {`[${toggleValue ? "x" : " "}] Local edit toggle preview`}
-            </Text>
-            <Box gap={1}>
-                <FocusableButton focused={isFocused(currentFocus, { kind: "button", id: "save" })} label={dirty ? "Save" : "Save (disabled view)"} />
-                <FocusableButton focused={isFocused(currentFocus, { kind: "button", id: "cancel" })} label={dirty ? "Cancel" : "Cancel"} />
+            <Box gap={2}>
+                <Box flexDirection="column" width="65%">
+                    {rows.map((row, index) => (
+                        <Text color={isFocused(currentFocus, { kind: "listItem", id: `instances.row.${index}` }) ? "cyan" : undefined} key={`${row}-${index}`}>
+                            {row}
+                        </Text>
+                    ))}
+                </Box>
+                <Box flexDirection="column" width="35%">
+                    <Text color={isFocused(currentFocus, { kind: "card", id: "instances.detail" }) ? "cyan" : undefined}>Selected Detail</Text>
+                    {(expanded ? detailLines : detailLines.slice(0, 1)).map((line, index) => (
+                        <Text key={`${line}-${index}`}>{line}</Text>
+                    ))}
+                </Box>
             </Box>
             <ScreenStatus state={props.state} />
         </Box>
@@ -180,6 +170,33 @@ function LinesScreen(props: ScreenRouterProps & { focusPrefix: string; lines: st
                     </Text>
                 ))}
             </Box>
+            {props.focusPrefix === "logs" ? <Text>{`follow ${selectLogViewport(props.state).follow ? "on" : "off"}`}</Text> : undefined}
+            <ScreenStatus state={props.state} />
+        </Box>
+    );
+}
+
+function CardsScreen(props: ScreenRouterProps & { cards: Array<{ expanded: boolean; id: string; lines: Array<{ text: string }> }>; focusPrefix: string; title: string }) {
+    const currentFocus = props.state.interaction.currentFocus;
+
+    return (
+        <Box flexDirection="column" gap={1}>
+            <Text bold>{props.title}</Text>
+            <FocusableCard focused={isFocused(currentFocus, { kind: "card", id: `${props.focusPrefix}.summary` })} text={`${props.cards.length} cards`} />
+            <Box flexDirection="column">
+                {props.cards.map((card, index) => (
+                    <Box flexDirection="column" key={card.id}>
+                        {card.lines.map((line, lineIndex) => (
+                            <Text
+                                color={lineIndex === 0 && isFocused(currentFocus, { kind: "listItem", id: `${props.focusPrefix}.row.${index}` }) ? "cyan" : undefined}
+                                key={`${card.id}-${lineIndex}`}
+                            >
+                                {line.text}
+                            </Text>
+                        ))}
+                    </Box>
+                ))}
+            </Box>
             <ScreenStatus state={props.state} />
         </Box>
     );
@@ -188,17 +205,27 @@ function LinesScreen(props: ScreenRouterProps & { focusPrefix: string; lines: st
 function buildInstancesDefinition(state: TuiAppState): TuiScreenDefinition {
     const rows = filterLines(selectInstanceRows(state), state.interaction.search.query);
     const nodes: FocusNode[] = [
-        { down: rows[0] === undefined ? undefined : { kind: "listItem", id: "instances.row.0" } as FocusItem, item: { kind: "card", id: "instances.summary" } as FocusItem }
+        {
+            down: rows[0] === undefined ? ({ kind: "card", id: "instances.detail" } as FocusItem) : ({ kind: "listItem", id: "instances.row.0" } as FocusItem),
+            item: { kind: "card", id: "instances.summary" } as FocusItem
+        }
     ];
 
     rows.forEach((_, index) => {
         nodes.push({
+            down: index === rows.length - 1 ? ({ kind: "card", id: "instances.detail" } as FocusItem) : ({ kind: "listItem", id: `instances.row.${index + 1}` } as FocusItem),
             item: { kind: "listItem", id: `instances.row.${index}` },
             next: { kind: "listItem", id: `instances.row.${(index + 1) % rows.length}` },
             previous: { kind: "listItem", id: `instances.row.${(index - 1 + rows.length) % rows.length}` },
-            up: index === 0 ? { kind: "card", id: "instances.summary" } : { kind: "listItem", id: `instances.row.${index - 1}` },
-            down: index === rows.length - 1 ? { kind: "card", id: "instances.summary" } : { kind: "listItem", id: `instances.row.${index + 1}` }
+            up: index === 0 ? ({ kind: "card", id: "instances.summary" } as FocusItem) : ({ kind: "listItem", id: `instances.row.${index - 1}` } as FocusItem)
         });
+    });
+
+    nodes.push({
+        item: { kind: "card", id: "instances.detail" },
+        next: { kind: "card", id: "instances.summary" },
+        previous: rows.length === 0 ? ({ kind: "card", id: "instances.summary" } as FocusItem) : ({ kind: "listItem", id: `instances.row.${rows.length - 1}` } as FocusItem),
+        up: rows.length === 0 ? ({ kind: "card", id: "instances.summary" } as FocusItem) : ({ kind: "listItem", id: `instances.row.${rows.length - 1}` } as FocusItem)
     });
 
     const graph = new FocusGraph(nodes);
@@ -206,19 +233,19 @@ function buildInstancesDefinition(state: TuiAppState): TuiScreenDefinition {
     return {
         actionMenu: {
             items: [
-                { id: "instances.mark", intent: { panel: "instances", status: "Marked instances panel as reviewed.", type: "screen.setStatus" }, label: "Mark reviewed" },
-                { id: "instances.help", intent: { panel: "help", type: "panel.activate" }, label: "Open help panel" }
+                { id: "instances.readonly", intent: { panel: "instances", status: "Read-only action menu placeholder.", type: "screen.setStatus" }, label: "Read-only placeholder" }
             ],
             title: "Instances Actions"
         },
         activate(item) {
-            return [
-                {
-                    panel: "instances",
-                    status: item.kind === "listItem" ? `Activated ${item.id}.` : "Activated instances summary.",
-                    type: "screen.setStatus"
-                }
-            ];
+            if (item.kind === "listItem") {
+                return [
+                    { panel: "instances", status: "Opened selected instance detail without starting worker.", type: "screen.setStatus" },
+                    { panel: "instances", type: "screen.setToggle", value: true }
+                ];
+            }
+
+            return [{ panel: "instances", status: "Focused instances detail.", type: "screen.setStatus" }];
         },
         focusGraph: graph,
         handleIntent(intent) {
@@ -227,96 +254,20 @@ function buildInstancesDefinition(state: TuiAppState): TuiScreenDefinition {
             }
 
             if (intent === "end") {
-                return [{ item: graph.last() ?? { kind: "card", id: "instances.summary" }, type: "focus.set" }];
+                return [{ item: { kind: "card", id: "instances.detail" }, type: "focus.set" }];
             }
 
             return [{ panel: "instances", status: `${intent} handled by instances panel.`, type: "screen.setStatus" }];
         },
         panel: "instances",
-        toggle(_item, panelState) {
-            const nextValue = panelState.interaction.screenToggleByPanel.instances !== true;
+        toggle() {
             return [
-                { panel: "instances", type: "screen.setToggle", value: nextValue },
-                { panel: "instances", status: nextValue ? "Instances panel expanded." : "Instances panel collapsed.", type: "screen.setStatus" }
-            ];
-        }
-    };
-}
-
-function buildConfigDefinition(state: TuiAppState): TuiScreenDefinition {
-    const summary = { kind: "card", id: "config.summary" } as FocusItem;
-    const field = { kind: "field", id: "config.localToggle" } as FocusItem;
-    const save = { kind: "button", id: "save" } as FocusItem;
-    const cancel = { kind: "button", id: "cancel" } as FocusItem;
-    const graph = new FocusGraph([
-        { down: field, item: summary, next: field, previous: cancel },
-        { down: save, item: field, next: save, previous: summary, up: summary },
-        { item: save, left: field, next: cancel, previous: field, right: cancel, up: field },
-        { item: cancel, left: save, next: summary, previous: save, right: save, up: field }
-    ]);
-
-    return {
-        actionMenu: {
-            items: [
-                { id: "config.focusSave", intent: { item: save, type: "focus.set" }, label: "Focus save" },
-                { id: "config.clearDraft", intent: { panel: "config", status: "Local draft cleared.", type: "screen.setStatus" }, label: "Clear draft note" }
-            ],
-            title: "Config Actions"
-        },
-        activate(item, panelState) {
-            if (item.kind === "field") {
-                const nextValue = panelState.interaction.screenToggleByPanel.config !== true;
-                return [
-                    { panel: "config", type: "screen.setToggle", value: nextValue },
-                    { type: "edit.setDirty", value: true },
-                    { mode: "edit", type: "mode.set" },
-                    { panel: "config", status: `Local toggle set to ${nextValue ? "on" : "off"}.`, type: "screen.setStatus" }
-                ];
-            }
-
-            if (item.kind === "button" && item.id === "save") {
-                return [
-                    { type: "edit.setDirty", value: false },
-                    { mode: "normal", type: "mode.set" },
-                    { panel: "config", status: "Local config draft saved.", type: "screen.setStatus" }
-                ];
-            }
-
-            if (item.kind === "button" && item.id === "cancel") {
-                return [
-                    { panel: "config", type: "screen.setToggle", value: false },
-                    { type: "edit.setDirty", value: false },
-                    { mode: "normal", type: "mode.set" },
-                    { panel: "config", status: "Local config draft discarded.", type: "screen.setStatus" }
-                ];
-            }
-
-            return [{ panel: "config", status: "Activated config summary.", type: "screen.setStatus" }];
-        },
-        focusGraph: graph,
-        handleIntent(intent) {
-            if (intent === "home") {
-                return [{ item: summary, type: "focus.set" }];
-            }
-
-            if (intent === "end") {
-                return [{ item: cancel, type: "focus.set" }];
-            }
-
-            return [{ panel: "config", status: `${intent} handled by config panel.`, type: "screen.setStatus" }];
-        },
-        panel: "config",
-        toggle(item, panelState) {
-            if (item.kind !== "field") {
-                return [{ panel: "config", status: "Nothing to toggle for current focus.", type: "screen.setStatus" }];
-            }
-
-            const nextValue = panelState.interaction.screenToggleByPanel.config !== true;
-            return [
-                { panel: "config", type: "screen.setToggle", value: nextValue },
-                { type: "edit.setDirty", value: true },
-                { mode: "edit", type: "mode.set" },
-                { panel: "config", status: nextValue ? "Config toggle enabled." : "Config toggle disabled.", type: "screen.setStatus" }
+                { panel: "instances", type: "screen.setToggle", value: state.interaction.screenToggleByPanel.instances === false },
+                {
+                    panel: "instances",
+                    status: state.interaction.screenToggleByPanel.instances === false ? "Expanded selected instance detail." : "Collapsed selected instance detail.",
+                    type: "screen.setStatus"
+                }
             ];
         }
     };
@@ -333,11 +284,11 @@ function buildLinesDefinition(state: TuiAppState, panel: TuiPanel, lines: string
 
     filteredLines.slice(1).forEach((_, index, entries) => {
         nodes.push({
+            down: index === entries.length - 1 ? ({ kind: "card", id: `${panel}.summary` } as FocusItem) : ({ kind: "listItem", id: `${panel}.row.${index + 1}` } as FocusItem),
             item: { kind: "listItem", id: `${panel}.row.${index}` },
             next: { kind: "listItem", id: `${panel}.row.${(index + 1) % entries.length}` },
             previous: { kind: "listItem", id: `${panel}.row.${(index - 1 + entries.length) % entries.length}` },
-            up: index === 0 ? { kind: "card", id: `${panel}.summary` } : { kind: "listItem", id: `${panel}.row.${index - 1}` },
-            down: index === entries.length - 1 ? { kind: "card", id: `${panel}.summary` } : { kind: "listItem", id: `${panel}.row.${index + 1}` }
+            up: index === 0 ? ({ kind: "card", id: `${panel}.summary` } as FocusItem) : ({ kind: "listItem", id: `${panel}.row.${index - 1}` } as FocusItem)
         });
     });
 
@@ -345,14 +296,11 @@ function buildLinesDefinition(state: TuiAppState, panel: TuiPanel, lines: string
 
     return {
         actionMenu: {
-            items: [
-                { id: `${panel}.note`, intent: { panel, status: `${panelLabel(panel)} action executed.`, type: "screen.setStatus" }, label: "Write local note" },
-                { id: `${panel}.instances`, intent: { panel: "instances", type: "panel.activate" }, label: "Back to instances" }
-            ],
+            items: [{ id: `${panel}.readonly`, intent: { panel, status: "Read-only action menu placeholder.", type: "screen.setStatus" }, label: "Read-only placeholder" }],
             title: `${panelLabel(panel)} Actions`
         },
         activate(item) {
-            return [{ panel, status: `Activated ${focusItemKey(item)}.`, type: "screen.setStatus" }];
+            return [{ panel, status: `Focused ${item.id}.`, type: "screen.setStatus" }];
         },
         focusGraph: graph,
         handleIntent(intent) {
@@ -367,11 +315,86 @@ function buildLinesDefinition(state: TuiAppState, panel: TuiPanel, lines: string
             return [{ panel, status: `${intent} handled by ${panelLabel(panel)}.`, type: "screen.setStatus" }];
         },
         panel,
-        toggle(_item, panelState) {
-            const nextValue = panelState.interaction.screenToggleByPanel[panel] !== true;
+        toggle() {
+            return [{ panel, status: `${panelLabel(panel)} is read-only.`, type: "screen.setStatus" }];
+        }
+    };
+}
+
+function buildCardDefinition(
+    state: TuiAppState,
+    panel: "audit" | "approvals",
+    cards: Array<{ id: string }>,
+    lines: string[]
+): TuiScreenDefinition {
+    const filteredLines = filterLines(lines, state.interaction.search.query);
+    const nodes: FocusNode[] = [
+        {
+            down: cards[0] === undefined ? undefined : ({ kind: "listItem", id: `${panel}.row.0` } as FocusItem),
+            item: { kind: "card", id: `${panel}.summary` } as FocusItem
+        }
+    ];
+
+    cards.forEach((_, index) => {
+        nodes.push({
+            down: index === cards.length - 1 ? ({ kind: "card", id: `${panel}.summary` } as FocusItem) : ({ kind: "listItem", id: `${panel}.row.${index + 1}` } as FocusItem),
+            item: { kind: "listItem", id: `${panel}.row.${index}` },
+            next: { kind: "listItem", id: `${panel}.row.${(index + 1) % cards.length}` },
+            previous: { kind: "listItem", id: `${panel}.row.${(index - 1 + cards.length) % cards.length}` },
+            up: index === 0 ? ({ kind: "card", id: `${panel}.summary` } as FocusItem) : ({ kind: "listItem", id: `${panel}.row.${index - 1}` } as FocusItem)
+        });
+    });
+
+    const graph = new FocusGraph(nodes);
+
+    return {
+        actionMenu: {
+            items: [{ id: `${panel}.readonly`, intent: { panel, status: "Read-only action menu placeholder.", type: "screen.setStatus" }, label: "Read-only placeholder" }],
+            title: `${panelLabel(panel)} Actions`
+        },
+        activate(item) {
+            if (item.kind === "listItem") {
+                const index = Number(item.id.split(".").at(-1));
+                const card = cards[index];
+
+                if (card !== undefined) {
+                    return [
+                        { key: card.id, type: "ui.toggleExpanded" },
+                        { panel, status: `${selectExpanded(state, card.id) ? "Collapsed" : "Expanded"} ${panel} card.`, type: "screen.setStatus" }
+                    ];
+                }
+            }
+
+            return [{ panel, status: `${panelLabel(panel)} focused.`, type: "screen.setStatus" }];
+        },
+        focusGraph: graph,
+        handleIntent(intent) {
+            if (intent === "home") {
+                return [{ item: graph.first() ?? { kind: "card", id: `${panel}.summary` }, type: "focus.set" }];
+            }
+
+            if (intent === "end") {
+                return [{ item: graph.last() ?? (filteredLines.length === 0 ? { kind: "card", id: `${panel}.summary` } : { kind: "listItem", id: `${panel}.row.${cards.length - 1}` }), type: "focus.set" }];
+            }
+
+            return [{ panel, status: `${intent} handled by ${panelLabel(panel)}.`, type: "screen.setStatus" }];
+        },
+        panel,
+        toggle(item) {
+            if (item.kind !== "listItem") {
+                return [{ panel, status: `${panelLabel(panel)} is read-only.`, type: "screen.setStatus" }];
+            }
+
+            const index = Number(item.id.split(".").at(-1));
+            const card = cards[index];
+
+            if (card === undefined) {
+                return [{ panel, status: "No card selected.", type: "screen.setStatus" }];
+            }
+
             return [
-                { panel, type: "screen.setToggle", value: nextValue },
-                { panel, status: nextValue ? `${panelLabel(panel)} expanded.` : `${panelLabel(panel)} collapsed.`, type: "screen.setStatus" }
+                { key: card.id, type: "ui.toggleExpanded" },
+                { panel, status: `${selectExpanded(state, card.id) ? "Collapsed" : "Expanded"} ${panel} card.`, type: "screen.setStatus" }
             ];
         }
     };
@@ -379,14 +402,6 @@ function buildLinesDefinition(state: TuiAppState, panel: TuiPanel, lines: string
 
 function FocusableCard(props: { focused: boolean; text: string }) {
     return <Text color={props.focused ? "cyan" : undefined}>{props.text}</Text>;
-}
-
-function FocusableButton(props: { focused: boolean; label: string }) {
-    return (
-        <Text backgroundColor={props.focused ? "cyan" : undefined} color={props.focused ? "black" : undefined}>
-            {`[ ${props.label} ]`}
-        </Text>
-    );
 }
 
 function ScreenStatus(props: { state: TuiAppState }) {
