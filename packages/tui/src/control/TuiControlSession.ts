@@ -20,6 +20,7 @@ export class TuiControlSession {
     readonly #client: TuiControlClientLike;
     readonly #store: TuiAppStore;
     readonly #subscriptions = new Map<string, TuiInstanceSubscription>();
+    #oauthRefreshTimer?: ReturnType<typeof setInterval>;
     #started = false;
 
     constructor(options: TuiControlSessionOptions = {}) {
@@ -38,10 +39,17 @@ export class TuiControlSession {
 
         this.#started = true;
         await this.refresh();
+        this.#oauthRefreshTimer = setInterval(() => {
+            void this.#reloadOAuthApprovals(this.#store.getState().configView).catch(() => undefined);
+        }, 1_000);
     }
 
     async stop(): Promise<void> {
         this.#started = false;
+        if (this.#oauthRefreshTimer !== undefined) {
+            clearInterval(this.#oauthRefreshTimer);
+            this.#oauthRefreshTimer = undefined;
+        }
         this.#closeSubscriptions();
     }
 
