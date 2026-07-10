@@ -10,6 +10,7 @@ import {
     type InstanceCreateSummary,
     type InstanceSnapshot,
     type JsonValue,
+    type OAuthApprovalRequest,
     type ToolCallQuery,
     type ToolCallRecord
 } from "@portable-devshell/shared";
@@ -67,6 +68,7 @@ export interface TuiControlClientLike {
     getSnapshot(instance: string): Promise<TuiControlSnapshotEnvelope>;
     listApprovals(instance: string): Promise<ApprovalRequest[]>;
     listInstances(): Promise<TuiControlListInstanceEntry[]>;
+    listOAuthApprovals?(): Promise<OAuthApprovalRequest[]>;
     ping(): Promise<{ pong: boolean }>;
     readLogs(instance: string, params?: { fromSeq?: number; limit?: number }): Promise<TuiControlLogEntry[]>;
     readToolCalls(instance: string, params?: ToolCallQuery): Promise<ToolCallRecord[]>;
@@ -84,6 +86,7 @@ export interface TuiControlClientLike {
         decision: ApprovalDecision["decision"],
         options?: TuiControlDecisionOptions
     ): Promise<ApprovalRequest>;
+    decideOAuthApproval?(approvalId: string, decision: "approve" | "deny"): Promise<OAuthApprovalRequest>;
     subscribe(instance: string, fromSeq: number): Promise<TuiControlStream>;
 }
 
@@ -100,6 +103,10 @@ export class TuiControlClient implements TuiControlClientLike {
 
     async listInstances(): Promise<TuiControlListInstanceEntry[]> {
         return (await this.#request("control.listInstances", createControlTarget())) as unknown as TuiControlListInstanceEntry[];
+    }
+
+    async listOAuthApprovals(): Promise<OAuthApprovalRequest[]> {
+        return (await this.#request("control.listOAuthApprovals", createControlTarget())) as unknown as OAuthApprovalRequest[];
     }
 
     async getConfigView(): Promise<Record<string, JsonValue>> {
@@ -201,6 +208,10 @@ export class TuiControlClient implements TuiControlClientLike {
             decision,
             ...options
         })) as unknown as ApprovalRequest;
+    }
+
+    async decideOAuthApproval(approvalId: string, decision: "approve" | "deny"): Promise<OAuthApprovalRequest> {
+        return (await this.#request("control.decideOAuthApproval", createControlTarget(), { approvalId, decision })) as unknown as OAuthApprovalRequest;
     }
 
     async callTool(instance: string, toolName: string, input: JsonValue): Promise<CommandResult> {

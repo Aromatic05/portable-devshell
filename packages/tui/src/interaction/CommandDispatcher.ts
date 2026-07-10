@@ -22,6 +22,7 @@ export interface CommandDispatcherOptions {
     onInstanceConfigUpdate?(instance: Record<string, JsonValue>): Promise<void>;
     onInstanceDangerAction?(action: "delete" | "disable", instance: string): Promise<void>;
     onMcpConfigUpdate?(mcp: Record<string, JsonValue>): Promise<void>;
+    onOAuthApprovalDecision?(approvalId: string, decision: "approve" | "deny"): Promise<void>;
     onValidateConfigDraft?(draft: Record<string, JsonValue>): Promise<void>;
     onValidateInstanceCreateDraft?(draft: InstanceCreateDraft): Promise<InstanceCreateSummary>;
     store: TuiAppStore;
@@ -43,6 +44,7 @@ export class CommandDispatcher {
     readonly #onInstanceConfigUpdate: (instance: Record<string, JsonValue>) => Promise<void>;
     readonly #onInstanceDangerAction: (action: "delete" | "disable", instance: string) => Promise<void>;
     readonly #onMcpConfigUpdate: (mcp: Record<string, JsonValue>) => Promise<void>;
+    readonly #onOAuthApprovalDecision: (approvalId: string, decision: "approve" | "deny") => Promise<void>;
     readonly #onValidateConfigDraft: (draft: Record<string, JsonValue>) => Promise<void>;
     readonly #onValidateInstanceCreateDraft: (draft: InstanceCreateDraft) => Promise<InstanceCreateSummary>;
     readonly #store: TuiAppStore;
@@ -63,6 +65,7 @@ export class CommandDispatcher {
         this.#onInstanceConfigUpdate = options.onInstanceConfigUpdate ?? unavailable;
         this.#onInstanceDangerAction = options.onInstanceDangerAction ?? unavailable;
         this.#onMcpConfigUpdate = options.onMcpConfigUpdate ?? unavailable;
+        this.#onOAuthApprovalDecision = options.onOAuthApprovalDecision ?? unavailable;
         this.#onValidateConfigDraft = options.onValidateConfigDraft ?? unavailable;
         this.#onValidateInstanceCreateDraft = options.onValidateInstanceCreateDraft ?? unavailable;
         this.#store = options.store;
@@ -506,6 +509,18 @@ export class CommandDispatcher {
             const box = selectMainScreenModel(state).boxes.find((candidate) => candidate.id === boxId);
             const lineId = box?.selectedDetailLineId;
             const actionId = boxId === undefined || lineId === undefined ? undefined : lineId.slice(`${boxId}:`.length);
+
+            if (state.ui.selectedPage === "connector" && actionId?.startsWith("oauth.approve:")) {
+                await this.#onOAuthApprovalDecision(actionId.slice("oauth.approve:".length), "approve");
+                this.#store.setScreenStatus("connector", "OAuth approval granted.");
+                return true;
+            }
+
+            if (state.ui.selectedPage === "connector" && actionId?.startsWith("oauth.deny:")) {
+                await this.#onOAuthApprovalDecision(actionId.slice("oauth.deny:".length), "deny");
+                this.#store.setScreenStatus("connector", "OAuth approval denied.");
+                return true;
+            }
 
             if ((state.ui.selectedPage === "config" || state.ui.selectedPage === "connector") && boxId !== undefined && lineId !== undefined) {
                 return this.#openPageEditor(state.ui.selectedPage, boxId);

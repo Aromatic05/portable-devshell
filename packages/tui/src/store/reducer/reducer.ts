@@ -12,6 +12,11 @@ export function tuiAppReducer(state: TuiAppState, action: TuiAppAction): TuiAppS
                     [action.instance]: [...action.approvals].sort((left, right) => right.createdAt.localeCompare(left.createdAt))
                 }
             });
+        case "oauthApproval.replace":
+            return withDerivedState({
+                ...state,
+                oauthApprovals: [...action.approvals].sort((left, right) => right.createdAt.localeCompare(left.createdAt))
+            });
         case "command.upsert": {
             const without = state.commandRecords.filter((command) => command.commandId !== action.command.commandId);
             return {

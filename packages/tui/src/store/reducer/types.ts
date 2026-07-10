@@ -1,4 +1,4 @@
-import type { ApprovalRequest, ControlError, ControlEventEnvelope, InstanceSnapshot, JsonValue, ToolCallRecord } from "@portable-devshell/shared";
+import type { ApprovalRequest, ControlError, ControlEventEnvelope, InstanceSnapshot, JsonValue, OAuthApprovalRequest, ToolCallRecord } from "@portable-devshell/shared";
 
 import type { TuiActionMenuItem, TuiEditorState, TuiInteractionState, TuiUiIntent } from "../../interaction/TuiInteractionTypes.js";
 import type { AuditPageState, FocusScope, PageId, SidebarCursor, SidebarFocus, TuiUiState } from "../../model/TuiUiTypes.js";
@@ -80,6 +80,7 @@ export interface TuiAppState {
     lastSeqByInstance: Record<string, number>;
     lastStatusChangeAtByInstance: Record<string, string>;
     logsByInstance: Record<string, TuiLogEntry[]>;
+    oauthApprovals: OAuthApprovalRequest[];
     rawEvents: TuiRawEventRecord[];
     panelErrors: Record<string, ControlError>;
     relayByCommand: Record<string, TuiRelayRecord>;
@@ -90,6 +91,7 @@ export interface TuiAppState {
 
 export type TuiAppAction =
     | { approvals: ApprovalRequest[]; instance: string; type: "approval.replace" }
+    | { approvals: OAuthApprovalRequest[]; type: "oauthApproval.replace" }
     | { command: TuiCommandRecord; type: "command.upsert" }
     | { error?: ControlError; key: string; type: "panelError.set" }
     | { commandId: string; chunk: string; type: "relay.appendOutput" }

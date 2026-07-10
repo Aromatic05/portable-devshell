@@ -360,6 +360,35 @@ test("connector editor presents unavailable endpoints and control runtime limits
     assert.equal(selectHelpLines(harness.store.getState()).some((line) => line.includes("Read-only until an explicit instance action")), true);
 });
 
+test("connector approves pending OAuth registration requests", async () => {
+    const harness = createHarness();
+    harness.store.replaceOAuthApprovals([
+        {
+            approvalId: "oauth-1",
+            clientId: "chatgpt-client",
+            clientName: "ChatGPT",
+            createdAt: "2026-07-10T00:00:00.000Z",
+            expiresAt: "2026-07-10T00:05:00.000Z",
+            kind: "registration",
+            redirectUris: ["https://chatgpt.com/callback"],
+            requestedResources: [],
+            requestedScopes: [],
+            status: "pending"
+        }
+    ]);
+
+    await harness.press("3");
+    const approval = selectMainScreenModel(harness.store.getState()).boxes.find((box) => box.id === "oauth-approval-oauth-1")!;
+    assert.equal(approval.title, "OAuth registration approval");
+    harness.store.toggleExpanded(approval.expandedKey);
+    harness.store.setMainFocusId(approval.id);
+    harness.store.setFocusScope("boxDetail");
+    harness.store.setSelectedDetailLine(approval.expandedKey, `${approval.id}:oauth.approve:oauth-1`);
+
+    await harness.press("", { return: true });
+    assert.deepEqual(harness.oauthApprovalDecisions(), [{ approvalId: "oauth-1", decision: "approve" }]);
+});
+
 test("Main viewport scrolling uses one page-instance offset instead of per-box offsets", async () => {
     const harness = createHarness();
 
@@ -523,6 +552,7 @@ async function openCreateWizard(harness: ReturnType<typeof createHarness>): Prom
 
 function createHarness(options: {
     onAttachShell?: (instance: string) => Promise<void>;
+    onOAuthApprovalDecision?: (approvalId: string, decision: "approve" | "deny") => Promise<void>;
     onToolCall?: (instance: string, toolName: string, input: string) => Promise<boolean>;
     onValidateConfigDraft?: () => Promise<void>;
     onValidateInstanceCreateDraft?: () => Promise<unknown>;
@@ -530,6 +560,7 @@ function createHarness(options: {
     const store = new TuiAppStore();
     seedPrompt3State(store);
     const approvalDecisions: Array<{ approvalId: string; decision: string; instance: string }> = [];
+    const oauthApprovalDecisions: Array<{ approvalId: string; decision: string }> = [];
     const instanceActions: Array<{ action: string; instance: string }> = [];
     const shellAttaches: string[] = [];
     let logsReloadRequests = 0;
@@ -564,6 +595,9 @@ function createHarness(options: {
         onLogsReload: async () => {
             logsReloadRequests += 1;
         },
+        onOAuthApprovalDecision: options.onOAuthApprovalDecision ?? (async (approvalId, decision) => {
+            oauthApprovalDecisions.push({ approvalId, decision });
+        }),
         onQuit: async () => undefined,
         onRedraw: () => undefined,
         onToolCall: options.onToolCall ?? (async () => true),
@@ -604,6 +638,9 @@ function createHarness(options: {
         },
         logsReloadCount() {
             return logsReloadRequests;
+        },
+        oauthApprovalDecisions() {
+            return oauthApprovalDecisions;
         },
         shellAttaches() {
             return shellAttaches;

@@ -1,4 +1,4 @@
-import { type ApprovalRequest, type ControlError, type ControlEventEnvelope, type InstanceSnapshot, type JsonValue, type ToolCallRecord } from "@portable-devshell/shared";
+import { type ApprovalRequest, type ControlError, type ControlEventEnvelope, type InstanceSnapshot, type JsonValue, type OAuthApprovalRequest, type ToolCallRecord } from "@portable-devshell/shared";
 
 import { type TuiActionMenuItem, type TuiEditorState, type TuiUiIntent } from "../interaction/TuiInteractionTypes.js";
 import type { AuditPageState, FocusScope, PageId, SidebarCursor, SidebarFocus } from "../model/TuiUiTypes.js";
@@ -304,6 +304,13 @@ export class TuiAppStore {
             approvals,
             instance,
             type: "approval.replace"
+        });
+    }
+
+    replaceOAuthApprovals(approvals: OAuthApprovalRequest[]): void {
+        this.dispatch({
+            approvals,
+            type: "oauthApproval.replace"
         });
     }
 

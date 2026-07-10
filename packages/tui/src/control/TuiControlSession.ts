@@ -74,6 +74,7 @@ export class TuiControlSession {
             const runtimeInstances = await this.#client.listInstances();
             this.#store.replaceInstances(mergeInstances(configView, runtimeInstances));
             this.#store.setConfigView(configView);
+            await this.#reloadOAuthApprovals(configView);
             await this.#reloadAllInstances(runtimeInstances);
             this.#store.setConnectionState("connected");
         } catch (error) {
@@ -115,6 +116,15 @@ export class TuiControlSession {
 
     async #reloadApprovals(instance: string): Promise<void> {
         this.#store.replaceApprovals(instance, await this.#client.listApprovals(instance));
+    }
+
+    async #reloadOAuthApprovals(configView: Record<string, JsonValue> | undefined): Promise<void> {
+        if (this.#client.listOAuthApprovals === undefined || oauthApprovalsUnavailable(configView)) {
+            this.#store.replaceOAuthApprovals([]);
+            return;
+        }
+
+        this.#store.replaceOAuthApprovals(await this.#client.listOAuthApprovals());
     }
 
     #readRuntimeInstances(): string[] {
@@ -186,6 +196,16 @@ export class TuiControlSession {
         this.#store.setConnectionState("disconnected");
         this.#closeSubscriptions();
     }
+}
+
+function oauthApprovalsUnavailable(configView: Record<string, JsonValue> | undefined): boolean {
+    const mcp = configView?.mcp;
+    if (typeof mcp !== "object" || mcp === null || Array.isArray(mcp)) {
+        return true;
+    }
+
+    const auth = mcp.auth;
+    return typeof auth !== "object" || auth === null || Array.isArray(auth) || auth.mode !== "oauth2";
 }
 
 interface TuiInstanceSubscriptionOptions {

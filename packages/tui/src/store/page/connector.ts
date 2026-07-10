@@ -1,4 +1,4 @@
-import type { JsonValue } from "@portable-devshell/shared";
+import type { JsonValue, OAuthApprovalRequest } from "@portable-devshell/shared";
 
 import type { BoxModel } from "../../component/ExpandableBox.js";
 import type { TuiAppState } from "../TuiReducers.js";
@@ -68,8 +68,35 @@ export function buildConnectorPageBoxes(state: TuiAppState, instanceName: string
             status: authNonePublic ? "failed" : "normal",
             summaryLines: [compactSummary(["publicAuth", authNonePublic ? "invalid" : "valid"])],
             title: "Validation"
-        })
+        }),
+        ...state.oauthApprovals.map((approval) => oauthApprovalBox(state, instanceName, approval))
     ];
+}
+
+function oauthApprovalBox(state: TuiAppState, instanceName: string, approval: OAuthApprovalRequest): BoxModel {
+    return makeBox(state, "connector", instanceName, {
+        detailLines: [
+            `kind ${approval.kind}`,
+            `client ${approval.clientName}`,
+            `clientId ${approval.clientId}`,
+            `redirectUris ${approval.redirectUris.join(", ") || "-"}`,
+            `scopes ${approval.requestedScopes.join(", ") || "-"}`,
+            `resources ${approval.requestedResources.join(", ") || "-"}`,
+            `createdAt ${approval.createdAt}`,
+            `expiresAt ${approval.expiresAt}`,
+            `status ${approval.status}`,
+            ...(approval.status === "pending"
+                ? [
+                      { id: `oauth.approve:${approval.approvalId}`, text: "[ Approve ]", tone: "accent" as const },
+                      { id: `oauth.deny:${approval.approvalId}`, text: "[ Deny ]", tone: "danger" as const }
+                  ]
+                : [])
+        ],
+        id: `oauth-approval-${approval.approvalId}`,
+        status: approval.status === "pending" ? "pending" : approval.status === "approved" ? "ready" : "failed",
+        summaryLines: [compactSummary(["kind", approval.kind], ["client", approval.clientName], ["status", approval.status])],
+        title: `OAuth ${approval.kind} approval`
+    });
 }
 
 function selectedInstanceDraft(state: TuiAppState, instanceName: string): Record<string, JsonValue> {

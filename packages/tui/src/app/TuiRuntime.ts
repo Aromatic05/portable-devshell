@@ -104,6 +104,10 @@ export class TuiRuntime {
             onMcpConfigUpdate: async (mcp) => {
                 await this.#client.updateMcpConfig(mcp);
             },
+            onOAuthApprovalDecision: async (approvalId, decision) => {
+                await this.#client.decideOAuthApproval(approvalId, decision);
+                await this.session.refresh();
+            },
             onValidateConfigDraft: async (draft) => {
                 await this.#client.validateConfigDraft(draft);
             },
