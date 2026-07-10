@@ -64,7 +64,7 @@ impl ToolHandler for FileEditTool {
             ));
         }
         if snapshot.full_text.is_none() {
-            return edit_sparse(&self.state, input, requested.raw, path, snapshot);
+            return edit_sparse(&self.state, &call, input, requested.raw, path, snapshot);
         }
         let mut text = TextFile::read(&path)?;
         if text.revision != snapshot.revision {
@@ -120,7 +120,7 @@ impl ToolHandler for FileEditTool {
             snapshot.total_lines,
             text.final_newline,
         )?;
-        atomic_write(&path, &text.encoded())?;
+        atomic_write(&call, &input.path, &path, &text.encoded())?;
         let text = TextFile::read(&path)?;
         let count = text.lines.len().min(200);
         let seen = 1..=count;
@@ -161,6 +161,7 @@ impl ToolHandler for FileEditTool {
 
 fn edit_sparse(
     state: &FileToolState,
+    call: &ToolCall,
     input: FileEditInput,
     display_path: String,
     path: std::path::PathBuf,
@@ -222,6 +223,7 @@ fn edit_sparse(
         metadata.final_newline,
     )?;
 
+    verify_write_target(call, &input.path, &path)?;
     let parent = path
         .parent()
         .ok_or_else(|| ToolError::new("file.writeFailed", "target has no parent"))?;
@@ -266,6 +268,7 @@ fn edit_sparse(
     }
     temp.flush()
         .map_err(|error| ToolError::new("file.writeFailed", error.to_string()))?;
+    verify_write_target(call, &input.path, &path)?;
     temp.persist(&path)
         .map_err(|error| ToolError::new("file.writeFailed", error.error.to_string()))?;
 
@@ -513,7 +516,13 @@ fn validate_operations(
     Ok(())
 }
 
-fn atomic_write(path: &std::path::Path, bytes: &[u8]) -> Result<(), ToolError> {
+fn atomic_write(
+    call: &ToolCall,
+    raw_path: &str,
+    path: &std::path::Path,
+    bytes: &[u8],
+) -> Result<(), ToolError> {
+    verify_write_target(call, raw_path, path)?;
     let parent = path
         .parent()
         .ok_or_else(|| ToolError::new("file.writeFailed", "target has no parent"))?;
@@ -523,8 +532,24 @@ fn atomic_write(path: &std::path::Path, bytes: &[u8]) -> Result<(), ToolError> {
         .map_err(|error| ToolError::new("file.writeFailed", error.to_string()))?;
     temp.flush()
         .map_err(|error| ToolError::new("file.writeFailed", error.to_string()))?;
+    verify_write_target(call, raw_path, path)?;
     temp.persist(path)
         .map_err(|error| ToolError::new("file.writeFailed", error.error.to_string()))?;
+    Ok(())
+}
+
+fn verify_write_target(
+    call: &ToolCall,
+    raw_path: &str,
+    expected: &std::path::Path,
+) -> Result<(), ToolError> {
+    let (_, resolved) = resolve_existing(call, raw_path, true)?;
+    if resolved != expected {
+        return Err(ToolError::new(
+            "file.writeFailed",
+            "target changed while preparing the write",
+        ));
+    }
     Ok(())
 }
 fn validate_range(
