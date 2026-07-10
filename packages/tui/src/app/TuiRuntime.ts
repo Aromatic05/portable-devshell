@@ -6,6 +6,7 @@ import { render, type Instance as InkInstance } from "ink";
 import { ControlError, createError, errorCodes, type JsonValue } from "@portable-devshell/shared";
 
 import { TuiApp } from "./TuiApp.js";
+import { buildTuiHitRegions, hitTargetAt, type TuiHitTarget } from "./TuiHitRegions.js";
 import { AttachShellCommandResolver } from "../attach/AttachShellCommandResolver.js";
 import { AttachShellRunner } from "../attach/AttachShellRunner.js";
 import { TuiControlClient } from "../control/TuiControlClient.js";
@@ -17,7 +18,7 @@ import { RenderScheduler } from "../render/RenderScheduler.js";
 import { buildFocusGraphForState } from "../screen/ScreenRouter.js";
 import { TuiAppStore } from "../store/TuiAppStore.js";
 import type { TuiCommandRecord } from "../store/TuiReducers.js";
-import { selectMainBoxFlowMetrics, selectMainScreenModel } from "../store/TuiSelectors.js";
+import { selectMainScreenModel } from "../store/TuiSelectors.js";
 
 export interface TuiRuntimeOptions {
     stdin?: ReadStream;
@@ -344,9 +345,9 @@ export class TuiRuntime {
             return;
         }
 
-        const sidebarWidth = Math.floor(Math.max(0, this.columns - 3) * 0.15);
         if ((event.button & 64) !== 0) {
-            if (event.x > sidebarWidth + 2) {
+            const target = hitTargetAt(buildTuiHitRegions(this.store.getState(), { columns: this.columns, rows: this.rows }), event.x, event.y);
+            if (target?.kind === "scrollViewport") {
                 await this.commandDispatcher.dispatch({ type: (event.button & 1) === 0 ? "screen.pageUp" : "screen.pageDown" });
             }
             return;
@@ -356,76 +357,52 @@ export class TuiRuntime {
             return;
         }
 
-        if (event.x >= 2 && event.x <= sidebarWidth + 1) {
-            await this.#handleSidebarClick(event.y);
-            return;
-        }
-
-        if (event.x > sidebarWidth + 2) {
-            await this.#handleMainClick(event.y);
+        const target = hitTargetAt(buildTuiHitRegions(this.store.getState(), { columns: this.columns, rows: this.rows }), event.x, event.y);
+        if (target !== undefined) {
+            await this.#handleHitTarget(target);
         }
     }
 
-    async #handleSidebarClick(row: number): Promise<void> {
-        const pageIndex = row - 5;
-        const pages = ["instances", "config", "connector", "audit", "logs", "help"] as const;
-        const page = pages[pageIndex];
-        if (page !== undefined) {
-            await this.commandDispatcher.dispatch({ page, type: "page.select" });
-            this.focusManager.setFocus({ id: page, kind: "page" });
+    async #handleHitTarget(target: TuiHitTarget): Promise<void> {
+        if (target.kind === "page") {
+            await this.commandDispatcher.dispatch({ page: target.id as "instances" | "config" | "connector" | "audit" | "logs" | "help", type: "page.select" });
+            this.focusManager.setFocus({ id: target.id as "instances" | "config" | "connector" | "audit" | "logs" | "help", kind: "page" });
             return;
         }
-
-        const instance = this.store.getState().instances[row - 12];
-        if (instance !== undefined) {
-            this.store.setSelectedInstance(instance.name);
-            this.focusManager.setFocus({ id: instance.name, kind: "instance" });
+        if (target.kind === "instance") {
+            this.store.setSelectedInstance(target.id);
+            this.focusManager.setFocus({ id: target.id, kind: "instance" });
+            return;
         }
-    }
-
-    async #handleMainClick(row: number): Promise<void> {
-        const state = this.store.getState();
-        const model = selectMainScreenModel(state);
-        const metrics = selectMainBoxFlowMetrics(state);
-        const scrollOffset = state.ui.scrollOffsets[metrics.scrollKey] ?? 0;
-        const flowStartRow = 6 + (model.errorLines?.length ?? 0);
-        const viewportRows = Math.max(0, this.rows - 8 - (model.statusLine === undefined ? 0 : 1) - (model.emptyState === undefined ? 0 : 1));
-        const visibleFlowLines = Math.min(Math.max(0, metrics.totalLines - scrollOffset), viewportRows);
-        const actionIndex = row - (flowStartRow + visibleFlowLines + (model.statusLine === undefined ? 0 : 1) + 2);
-        const actionMenu = state.interaction.actionMenu;
-        if (actionMenu.open && actionIndex >= 0 && actionIndex < actionMenu.items.length) {
-            this.store.setActionMenu(actionMenu.title, actionMenu.items, actionIndex);
+        if (target.kind === "action") {
+            const actionMenu = this.store.getState().interaction.actionMenu;
+            this.store.setActionMenu(actionMenu.title, actionMenu.items, target.index);
             await this.commandDispatcher.dispatch({ type: "actionMenu.submit" });
             return;
         }
-
-        const flowLine = row - flowStartRow + scrollOffset;
-        const box = model.boxes.find((candidate) => {
-            const range = metrics.boxRanges[candidate.id];
-            return range !== undefined && flowLine >= range.start && flowLine < range.end;
-        });
-        if (box === undefined) {
+        if (target.kind === "scrollViewport") {
             return;
         }
-
-        const range = metrics.boxRanges[box.id]!;
-        if (flowLine === range.start) {
-            this.focusManager.setFocus({ id: box.id, kind: "box" });
+        const state = this.store.getState();
+        if (target.kind === "boxTitle") {
+            this.focusManager.setFocus({ id: target.boxId, kind: "box" });
             await this.commandDispatcher.dispatch({ type: "screen.toggle" });
+            return;
+        }
+        const box = selectMainScreenModel(state).boxes.find((candidate) => candidate.id === target.boxId);
+        if (box === undefined) {
             return;
         }
         if (!box.expanded) {
             this.focusManager.setFocus({ id: box.id, kind: "box" });
             return;
         }
-
-        const detailLine = box.expandedLines[flowLine - range.start - 1];
-        if (detailLine?.id === undefined) {
+        if (target.lineId === undefined) {
             return;
         }
 
         if (state.interaction.editor?.kind === "create" && box.id === "create-wizard") {
-            this.store.setSelectedDetailLine(box.expandedKey, detailLine.id);
+            this.store.setSelectedDetailLine(box.expandedKey, target.lineId);
             await this.commandDispatcher.dispatch({ type: "focus.activate" });
             return;
         }
@@ -433,14 +410,14 @@ export class TuiRuntime {
         if (state.ui.selectedPage === "config" || state.ui.selectedPage === "connector") {
             this.focusManager.setFocus({ id: box.id, kind: "box" });
             await this.commandDispatcher.dispatch({ type: "focus.activate" });
-            this.store.setSelectedDetailLine(box.expandedKey, detailLine.id);
+            this.store.setSelectedDetailLine(box.expandedKey, target.lineId);
             await this.commandDispatcher.dispatch({ type: "focus.activate" });
             return;
         }
 
         this.focusManager.setFocus({ id: box.id, kind: "box" });
         this.store.setFocusScope("boxDetail");
-        this.store.setSelectedDetailLine(box.expandedKey, detailLine.id);
+        this.store.setSelectedDetailLine(box.expandedKey, target.lineId);
         await this.commandDispatcher.dispatch({ type: "focus.activate" });
     }
 

@@ -15,11 +15,11 @@ export interface TuiRootLayoutProps {
 }
 
 export function mainInnerWidth(columns: number): number {
-    return Math.max(0, layoutMetrics(columns).mainPanelWidth - GAP * 8);
+    return Math.max(0, tuiLayoutMetrics(columns).mainPanelWidth - GAP * 8);
 }
 
 export function TuiRootLayout(props: TuiRootLayoutProps) {
-    const layout = layoutMetrics(props.columns);
+    const layout = tuiLayoutMetrics(props.columns);
 
     return (
         <Box flexDirection="column" height={props.rows} width={props.columns}>
@@ -40,7 +40,7 @@ export function TuiRootLayout(props: TuiRootLayoutProps) {
     );
 }
 
-function layoutMetrics(columns: number): {
+export function tuiLayoutMetrics(columns: number): {
     mainPanelWidth: number;
     outerGap: number;
     panelGap: number;

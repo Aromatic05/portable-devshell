@@ -6,6 +6,7 @@ export * from "./control/TuiControlStream.js";
 export * from "./attach/AttachShellCommandResolver.js";
 export * from "./attach/AttachShellRunner.js";
 export * from "./attach/AttachShellTypes.js";
+export * from "./app/TuiHitRegions.js";
 export * from "./interaction/CommandDispatcher.js";
 export * from "./interaction/FocusGraph.js";
 export * from "./interaction/KeyDispatcher.js";

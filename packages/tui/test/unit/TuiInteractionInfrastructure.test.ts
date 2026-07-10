@@ -4,12 +4,14 @@ import test from "node:test";
 import { renderExpandableBoxLines } from "../../dist/component/ExpandableBox.js";
 import {
     buildFocusGraphForState,
+    buildTuiHitRegions,
     CommandDispatcher,
     KeyDispatcher,
     selectFooterText,
     selectHelpLines,
     selectMainScreenModel,
     selectSidebarModel,
+    hitTargetAt,
     TuiAppStore,
     TuiFocusManager
 } from "../../dist/index.js";
@@ -66,6 +68,29 @@ test("Prompt 3 urgent fix uses page + instance coordinates with a two-stage Tab 
 
     await harness.press("", { return: true });
     assert.equal(harness.store.getState().ui.selectedInstance, "beta");
+});
+
+test("mouse hit regions follow the rendered sidebar, boxes, and overlays", () => {
+    const harness = createHarness();
+    const viewport = { columns: 120, rows: 40 };
+    const initialRegions = buildTuiHitRegions(harness.store.getState(), viewport);
+    const pageRegion = initialRegions.find((region) => region.target.kind === "page" && region.target.id === "config")!;
+    const instanceRegion = initialRegions.find((region) => region.target.kind === "instance" && region.target.id === "alpha")!;
+    const boxRegion = initialRegions.find((region) => region.target.kind === "boxTitle" && region.target.boxId === "create-instance")!;
+
+    assert.deepEqual(hitTargetAt(initialRegions, pageRegion.x, pageRegion.y), pageRegion.target);
+    assert.deepEqual(hitTargetAt(initialRegions, instanceRegion.x, instanceRegion.y), instanceRegion.target);
+    assert.deepEqual(hitTargetAt(initialRegions, boxRegion.x, boxRegion.y), boxRegion.target);
+
+    harness.store.setActionMenu("Actions", [{ id: "attach", intent: { type: "actionMenu.open" }, label: "Attach Shell" }], 0);
+    const actionRegions = buildTuiHitRegions(harness.store.getState(), viewport);
+    const actionRegion = actionRegions.find((region) => region.target.kind === "action")!;
+    assert.deepEqual(hitTargetAt(actionRegions, actionRegion.x, actionRegion.y), actionRegion.target);
+
+    harness.store.setPanelError("instances:alpha", { code: "control.failed", message: "rendered error" });
+    const erroredRegions = buildTuiHitRegions(harness.store.getState(), viewport);
+    const shiftedBoxRegion = erroredRegions.find((region) => region.target.kind === "boxTitle" && region.target.boxId === "create-instance")!;
+    assert.equal(shiftedBoxRegion.y, boxRegion.y + 3);
 });
 
 test("Prompt 3 detail line focus preserves state through stream updates", async () => {
