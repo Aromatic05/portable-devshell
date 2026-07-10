@@ -104,7 +104,7 @@ export class TuiFocusManager {
 
     setFocus(item: FocusItem): boolean {
         const page = this.currentPage();
-        const graph = this.#context.graphFor(page, this.currentMode());
+        const graph = this.#context.graphFor(page, focusModeFor(item, this.currentMode()));
 
         if (!graph.includes(item)) {
             return false;
@@ -192,4 +192,23 @@ function detailKey(state: TuiAppState, boxId: string): string {
     }
 
     return `${state.ui.selectedPage}:${state.ui.selectedInstance}:${boxId}`;
+}
+
+function focusModeFor(item: FocusItem, current: TuiMode): TuiMode {
+    switch (item.kind) {
+        case "page":
+            return "sidebarPages";
+        case "instance":
+            return "sidebarInstances";
+        case "box":
+            return "mainBoxes";
+        case "line":
+            return "boxDetail";
+        case "action":
+            return "actionMenu";
+        case "button":
+            return "confirm";
+        case "field":
+            return current === "toolForm" ? "toolForm" : "search";
+    }
 }

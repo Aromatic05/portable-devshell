@@ -122,6 +122,16 @@ test("Prompt 3 detail line focus preserves state through stream updates", async 
     assert.equal(harness.store.getState().interaction.focusScope, "sidebarPages");
 });
 
+test("main box focus activates the main panel from the sidebar", () => {
+    const harness = createHarness();
+
+    const moved = harness.focusManager.setFocus({ id: "instance:alpha", kind: "box" });
+
+    assert.equal(moved, true);
+    assert.equal(harness.store.getState().interaction.focusScope, "mainBoxes");
+    assert.equal(harness.store.getState().ui.mainFocusId, "instance:alpha");
+});
+
 test("Prompt 3 detail line selection clamps to a valid line after data replacement", async () => {
     const harness = createHarness();
 
@@ -354,6 +364,7 @@ function createHarness(options: {
         approvalDecisions() {
             return approvalDecisions;
         },
+        focusManager,
         instanceActions() {
             return instanceActions;
         },
