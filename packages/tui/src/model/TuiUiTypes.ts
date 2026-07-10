@@ -1,4 +1,4 @@
-export type PageId = "instances" | "config" | "connector" | "audit" | "logs" | "help";
+export type PageId = "instances" | "config" | "connector" | "oauth" | "audit" | "logs" | "help";
 
 export type SidebarFocus = "pages" | "instances";
 

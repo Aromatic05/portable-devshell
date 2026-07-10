@@ -510,15 +510,15 @@ export class CommandDispatcher {
             const lineId = box?.selectedDetailLineId;
             const actionId = boxId === undefined || lineId === undefined ? undefined : lineId.slice(`${boxId}:`.length);
 
-            if (state.ui.selectedPage === "connector" && actionId?.startsWith("oauth.approve:")) {
+            if (state.ui.selectedPage === "oauth" && actionId?.startsWith("oauth.approve:")) {
                 await this.#onOAuthApprovalDecision(actionId.slice("oauth.approve:".length), "approve");
-                this.#store.setScreenStatus("connector", "OAuth approval granted.");
+                this.#store.setScreenStatus("oauth", "OAuth approval granted.");
                 return true;
             }
 
-            if (state.ui.selectedPage === "connector" && actionId?.startsWith("oauth.deny:")) {
+            if (state.ui.selectedPage === "oauth" && actionId?.startsWith("oauth.deny:")) {
                 await this.#onOAuthApprovalDecision(actionId.slice("oauth.deny:".length), "deny");
-                this.#store.setScreenStatus("connector", "OAuth approval denied.");
+                this.#store.setScreenStatus("oauth", "OAuth approval denied.");
                 return true;
             }
 

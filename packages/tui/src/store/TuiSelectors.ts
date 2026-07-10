@@ -9,6 +9,7 @@ const pageEntries: Array<{ id: PageId; label: string }> = [
     { id: "instances", label: "instances" },
     { id: "config", label: "config" },
     { id: "connector", label: "connector" },
+    { id: "oauth", label: "oauth" },
     { id: "audit", label: "audit" },
     { id: "logs", label: "logs" },
     { id: "help", label: "help" }
@@ -86,7 +87,7 @@ export function selectMainScreenModel(state: TuiAppState): MainScreenModel {
     const panelError = state.panelErrors[`${activePage.page}:${activePage.instance ?? "-"}`];
     const errorLines = panelError === undefined ? undefined : [`${panelError.code}: ${panelError.message}`];
 
-    if (activePage.page !== "instances" && activePage.page !== "help" && activePage.instance === undefined) {
+    if (activePage.page !== "instances" && activePage.page !== "help" && activePage.page !== "oauth" && activePage.instance === undefined) {
         return {
             activePage,
             boxes: [],
@@ -150,7 +151,7 @@ export function selectFooterShortcuts(state: TuiAppState): string[] {
     switch (state.interaction.focusScope) {
         case "sidebarPages":
         case "sidebarInstances":
-            return ["tab", "enter", "1-6", "↑↓", "esc"];
+            return ["tab", "enter", "1-7", "↑↓", "esc"];
         case "mainBoxes":
             return ["tab", "enter", "space", "↑↓", "/", "a", "esc"];
         case "boxDetail":

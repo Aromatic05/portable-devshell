@@ -22,7 +22,7 @@ test("Prompt 3 urgent fix uses page + instance coordinates with a two-stage Tab 
     const sidebar = selectSidebarModel(harness.store.getState());
     assert.deepEqual(
         sidebar.pages.map((item) => item.label),
-        ["instances", "config", "connector", "audit", "logs", "help"]
+        ["instances", "config", "connector", "oauth", "audit", "logs", "help"]
     );
     assert.deepEqual(
         sidebar.instances.map((item) => item.label),
@@ -54,7 +54,7 @@ test("Prompt 3 urgent fix uses page + instance coordinates with a two-stage Tab 
     await harness.press("", { return: true });
     assert.equal(harness.store.getState().ui.selectedPage, "config");
 
-    for (let index = 0; index < 6; index += 1) {
+    for (let index = 0; index < 7; index += 1) {
         await harness.press("", { downArrow: true });
     }
     assert.equal(harness.store.getState().interaction.sidebarCursor?.kind, "instance");
@@ -312,7 +312,7 @@ test("expanded entries retain Attach Shell alongside the configuration actions",
 test("Prompt 3 detail line selection clamps to a valid line after data replacement", async () => {
     const harness = createHarness();
 
-    await harness.press("5");
+    await harness.press("6");
     await harness.press("", { tab: true });
     await harness.press(" ");
     await harness.press("", { downArrow: true });
@@ -349,18 +349,18 @@ test("connector editor presents unavailable endpoints and control runtime limits
     const configuredEndpoint = selectMainScreenModel(harness.store.getState()).boxes.find((box) => box.id === "endpoint-preview");
     assert.deepEqual(configuredEndpoint?.collapsedLines.map((line) => line.text), ["endpoint=https://example.test/tunnel/alpha/custom-mcp"]);
 
-    await harness.press("5");
+    await harness.press("6");
     assert.equal(harness.logsReloadCount(), 1);
     const logs = selectMainScreenModel(harness.store.getState());
     assert.equal(logs.activePage.page, "logs");
     assert.equal(logs.activePage.instance, "alpha");
     assert.equal(logs.boxes[0]?.collapsedLines[0]?.text, "source=instance.readLogs+log.appended  entries=20");
 
-    await harness.press("6");
+    await harness.press("7");
     assert.equal(selectHelpLines(harness.store.getState()).some((line) => line.includes("Read-only until an explicit instance action")), true);
 });
 
-test("connector approves pending OAuth registration requests", async () => {
+test("OAuth panel approves pending registration requests", async () => {
     const harness = createHarness();
     harness.store.replaceOAuthApprovals([
         {
@@ -377,7 +377,7 @@ test("connector approves pending OAuth registration requests", async () => {
         }
     ]);
 
-    await harness.press("3");
+    await harness.press("4");
     const approval = selectMainScreenModel(harness.store.getState()).boxes.find((box) => box.id === "oauth-approval-oauth-1")!;
     assert.equal(approval.title, "OAuth registration approval");
     harness.store.toggleExpanded(approval.expandedKey);
@@ -392,7 +392,7 @@ test("connector approves pending OAuth registration requests", async () => {
 test("Main viewport scrolling uses one page-instance offset instead of per-box offsets", async () => {
     const harness = createHarness();
 
-    await harness.press("5");
+    await harness.press("6");
     await harness.press("", { tab: true });
     await harness.press(" ");
     await harness.press("", { pageDown: true });
@@ -437,7 +437,7 @@ test("instance actions require a focused entry and Stop defaults to Cancel", asy
 test("Pending Approval Enter opens an isolated approval detail without a tool form or action menu", async () => {
     const harness = createHarness();
 
-    await harness.press("4");
+    await harness.press("5");
     await harness.press("", { tab: true });
     await harness.press("", { downArrow: true });
     const audit = selectMainScreenModel(harness.store.getState()).boxes[0]!;
@@ -461,7 +461,7 @@ test("Pending Approval Enter opens an isolated approval detail without a tool fo
 test("approval detail approves directly and deny requires a Back-focused confirmation", async () => {
     const harness = createHarness();
 
-    await harness.press("4");
+    await harness.press("5");
     await harness.press("", { tab: true });
     await harness.press("", { downArrow: true });
     await harness.press("", { return: true });
@@ -489,7 +489,7 @@ test("approval detail approves directly and deny requires a Back-focused confirm
 test("approval detail Back restores the audit list focus and scroll position", async () => {
     const harness = createHarness();
 
-    await harness.press("4");
+    await harness.press("5");
     await harness.press("", { tab: true });
     await harness.press("", { downArrow: true });
     harness.store.setScrollOffset("audit:alpha:main", 3);
