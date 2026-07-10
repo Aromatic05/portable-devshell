@@ -63,6 +63,7 @@ export interface TuiControlClientLike {
     disableInstance(instanceName: string): Promise<Record<string, JsonValue>>;
     enableInstance(instanceName: string): Promise<Record<string, JsonValue>>;
     getConfigView(): Promise<Record<string, JsonValue>>;
+    getMcpStatus(): Promise<Record<string, JsonValue>>;
     getInstanceCreateSchema(): Promise<InstanceCreateSchema>;
     getApproval(instance: string, approvalId: string): Promise<ApprovalRequest>;
     getSnapshot(instance: string): Promise<TuiControlSnapshotEnvelope>;
@@ -107,6 +108,10 @@ export class TuiControlClient implements TuiControlClientLike {
 
     async listOAuthApprovals(): Promise<OAuthApprovalRequest[]> {
         return (await this.#request("control.listOAuthApprovals", createControlTarget())) as unknown as OAuthApprovalRequest[];
+    }
+
+    async getMcpStatus(): Promise<Record<string, JsonValue>> {
+        return (await this.#request("control.getMcpStatus", createControlTarget())) as unknown as Record<string, JsonValue>;
     }
 
     async getConfigView(): Promise<Record<string, JsonValue>> {

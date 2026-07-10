@@ -4,6 +4,7 @@ const methodScopes = new Map<string, RouteScope>([
     ["control.identifyClient", "control"],
     ["control.ping", "control"],
     ["control.status", "control"],
+    ["control.getMcpStatus", "control"],
     ["control.shutdown", "control"],
     ["control.listInstances", "control"],
     ["control.getConfigView", "control"],

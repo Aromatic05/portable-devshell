@@ -11,6 +11,7 @@ export function buildConnectorPageBoxes(state: TuiAppState, instanceName: string
     const unsaved = state.ui.dirtyForms[`connector:${instanceName}`] === true || state.ui.dirtyForms[`config:${instanceName}`] === true ? " [UNSAVED]" : "";
     const actions = [buttonLine("save", "Save"), buttonLine("cancel", "Cancel")];
     const endpoint = endpointPreview(mcpDraft, readPath(instanceDraft, "mcp.path"), instanceName);
+    const runtime = runtimeStatus(state, instanceDraft, mcpDraft, endpoint);
     const authNonePublic = isPublic(mcpDraft) && readPath(mcpDraft, "auth.mode") === "none";
 
     return [
@@ -20,14 +21,15 @@ export function buildConnectorPageBoxes(state: TuiAppState, instanceName: string
                 fieldLine("instance.mcp.path", "mcp.path", readPath(instanceDraft, "mcp.path")),
                 fieldLine("instance.mcp.allowTools", "allowTools", readPath(instanceDraft, "mcp.allowTools")),
                 ...editorErrorLine(state, "connector", "mcp-endpoint", ["mcp", "allowTools"]),
-                "runtime=notAvailable",
-                "reason=control does not expose runtime readiness",
+                `MCP runtime        ${runtime.runtime}`,
+                `Public endpoint    ${runtime.publicEndpoint}`,
+                `Reason             ${runtime.reason}`,
                 ...actions
             ],
             id: "mcp-endpoint",
-            status: readPath(instanceDraft, "mcp.enabled") === true ? "warning" : "disabled",
+            status: runtime.runtime === "running" ? "ready" : runtime.runtime === "disabled" ? "disabled" : "failed",
             summaryLines: [compactSummary(["enabled", String(readPath(instanceDraft, "mcp.enabled") ?? false)], ["path", String(readPath(instanceDraft, "mcp.path") ?? "-")])],
-            title: `MCP Endpoint${unsaved}`
+            title: `[Instance] MCP Endpoint${unsaved}`
         }),
         makeBox(state, "connector", instanceName, {
             detailLines: [
@@ -39,7 +41,7 @@ export function buildConnectorPageBoxes(state: TuiAppState, instanceName: string
             ],
             id: "public-base-url",
             summaryLines: [compactSummary(["host", String(readPath(mcpDraft, "listenHost") ?? "-")], ["baseUrl", String(readPath(mcpDraft, "publicBaseUrl") ?? "-")])],
-            title: `Public Base URL${unsaved}`
+            title: `[Global] Public Base URL${unsaved}`
         }),
         makeBox(state, "connector", instanceName, {
             detailLines: [
@@ -51,14 +53,14 @@ export function buildConnectorPageBoxes(state: TuiAppState, instanceName: string
             id: "auth",
             status: authNonePublic ? "failed" : "normal",
             summaryLines: [compactSummary(["mode", String(readPath(mcpDraft, "auth.mode") ?? "-")], ["public", isPublic(mcpDraft) ? "yes" : "no"])],
-            title: `Auth${unsaved}`
+            title: `[Global] Auth${unsaved}`
         }),
         makeBox(state, "connector", instanceName, {
             detailLines: [endpoint.value, ...(endpoint.reason === undefined ? [] : [`reason=${endpoint.reason}`])],
             id: "endpoint-preview",
             status: endpoint.reason === undefined ? "normal" : "warning",
             summaryLines: [endpoint.value, ...(endpoint.reason === undefined ? [] : [`reason=${endpoint.reason}`])],
-            title: "Endpoint Preview"
+            title: "Configured Endpoint"
         }),
         makeBox(state, "connector", instanceName, {
             detailLines: authNonePublic
@@ -67,7 +69,7 @@ export function buildConnectorPageBoxes(state: TuiAppState, instanceName: string
             id: "validation",
             status: authNonePublic ? "failed" : "normal",
             summaryLines: [compactSummary(["publicAuth", authNonePublic ? "invalid" : "valid"])],
-            title: "Validation"
+            title: "Configuration Validation"
         })
     ];
 }
@@ -104,4 +106,26 @@ function isPublic(mcp: Record<string, JsonValue>): boolean {
     const publicBaseUrl = readPath(mcp, "publicBaseUrl");
     const host = readPath(mcp, "listenHost");
     return (typeof publicBaseUrl === "string" && !/^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(?::|\/|$)/.test(publicBaseUrl)) || host === "0.0.0.0";
+}
+
+function runtimeStatus(
+    state: TuiAppState,
+    instance: Record<string, JsonValue>,
+    mcp: Record<string, JsonValue>,
+    endpoint: { reason?: string; value: string }
+): { publicEndpoint: string; reason: string; runtime: string } {
+    if (readPath(instance, "mcp.enabled") !== true || readPath(mcp, "enabled") !== true) {
+        return { publicEndpoint: "unavailable", reason: "MCP is disabled", runtime: "disabled" };
+    }
+    const status = state.mcpStatus;
+    if (status?.running !== true) {
+        return { publicEndpoint: "unavailable", reason: typeof status?.reason === "string" ? status.reason : "MCP host is not listening", runtime: "stopped" };
+    }
+    if (status.authMode === "oauth2" && status.oauthReady !== true) {
+        return { publicEndpoint: "unavailable", reason: "OAuth runtime is not ready", runtime: "running" };
+    }
+    if (endpoint.reason !== undefined) {
+        return { publicEndpoint: "unavailable", reason: endpoint.reason, runtime: "running" };
+    }
+    return { publicEndpoint: endpoint.value.replace(/^endpoint=/, ""), reason: "ready", runtime: "running" };
 }

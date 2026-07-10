@@ -467,10 +467,10 @@ test("connector editor presents unavailable endpoints and control runtime limits
     const connector = selectMainScreenModel(harness.store.getState());
     assert.deepEqual(
         connector.boxes.map((box) => box.title),
-        ["MCP Endpoint", "Public Base URL", "Auth", "Endpoint Preview", "Validation"]
+        ["[Instance] MCP Endpoint", "[Global] Public Base URL", "[Global] Auth", "Configured Endpoint", "Configuration Validation"]
     );
     assert.equal(
-        connector.boxes.some((box) => box.expandedLines.some((line) => line.text === "runtime=notAvailable")),
+        connector.boxes.some((box) => box.expandedLines.some((line) => line.text === "MCP runtime        stopped")),
         true
     );
     const endpointPreview = connector.boxes.find((box) => box.id === "endpoint-preview");

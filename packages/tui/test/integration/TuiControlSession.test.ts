@@ -187,6 +187,7 @@ function createServer(socketPath: string, worker: FakeWorker, getConfigVersion: 
                 };
             }
         } as never,
+        getMcpStatus: () => ({ running: false, reason: "MCP runtime is disabled." }),
         instanceRegistry: new InstanceRegistry([
             {
                 allowTools: [],

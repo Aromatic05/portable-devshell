@@ -11,6 +11,7 @@ export interface RouteHandlerControlOptions {
     instanceCreateService?: ControlInstanceCreateService;
     instanceRegistry: InstanceRegistry;
     getOAuthApprovals?: () => McpOAuthApprovalService | undefined;
+    getMcpStatus?: () => JsonValue;
 }
 
 export class RouteHandlerControl {
@@ -18,12 +19,14 @@ export class RouteHandlerControl {
     readonly #instanceCreateService?: ControlInstanceCreateService;
     readonly #instanceRegistry: InstanceRegistry;
     readonly #getOAuthApprovals: () => McpOAuthApprovalService | undefined;
+    readonly #getMcpStatus: () => JsonValue;
 
     constructor(options: RouteHandlerControlOptions) {
         this.#configEditorService = options.configEditorService;
         this.#instanceCreateService = options.instanceCreateService;
         this.#instanceRegistry = options.instanceRegistry;
         this.#getOAuthApprovals = options.getOAuthApprovals ?? (() => undefined);
+        this.#getMcpStatus = options.getMcpStatus ?? (() => ({ running: false, reason: "MCP runtime is disabled." }));
     }
 
     async handle(connection: ControlRpcConnection, method: string, params?: JsonValue): Promise<JsonValue> {
@@ -44,6 +47,8 @@ export class RouteHandlerControl {
             }
             case "control.ping":
                 return { pong: true };
+            case "control.getMcpStatus":
+                return this.#getMcpStatus();
             case "control.status":
                 return {
                     instanceCount: this.#instanceRegistry.list().length,

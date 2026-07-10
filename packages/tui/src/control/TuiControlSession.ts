@@ -64,6 +64,7 @@ export class TuiControlSession {
 
     async refreshConfig(): Promise<void> {
         const configView = await this.#readConfigView();
+        this.#store.setMcpStatus(await this.#client.getMcpStatus());
         const runtimeInstances = await this.#client.listInstances();
         this.#store.replaceInstances(mergeInstances(configView, runtimeInstances));
         this.#store.setConfigView(configView);
@@ -101,6 +102,7 @@ export class TuiControlSession {
             await this.#client.ping();
             const configView = await this.#readConfigView();
             const runtimeInstances = await this.#client.listInstances();
+            this.#store.setMcpStatus(await this.#client.getMcpStatus());
             this.#store.replaceInstances(mergeInstances(configView, runtimeInstances));
             this.#store.setConfigView(configView);
             await this.#reloadOAuthApprovals(configView);

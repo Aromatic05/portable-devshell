@@ -70,6 +70,7 @@ export class ControlServer {
                     setConfig
                 }),
                 getOAuthApprovals: () => this.#mcpHost?.oauthApprovals,
+                getMcpStatus: () => (this.#mcpHost as unknown as { status(): import("@portable-devshell/shared").JsonValue } | undefined)?.status() ?? { running: false, reason: "MCP runtime is disabled." },
                 instanceCreateService: new ControlInstanceCreateService({
                 configStore: this.#configStore,
                 getConfig: () => this.#requireConfig(),

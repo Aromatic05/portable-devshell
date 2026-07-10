@@ -80,6 +80,7 @@ export interface TuiAppState {
     lastSeqByInstance: Record<string, number>;
     lastStatusChangeAtByInstance: Record<string, string>;
     logsByInstance: Record<string, TuiLogEntry[]>;
+    mcpStatus?: Record<string, JsonValue>;
     oauthApprovals: OAuthApprovalRequest[];
     rawEvents: TuiRawEventRecord[];
     panelErrors: Record<string, ControlError>;
@@ -97,6 +98,7 @@ export type TuiAppAction =
     | { commandId: string; chunk: string; type: "relay.appendOutput" }
     | { commandId: string; provider?: string; requestId?: string; workspace?: string; type: "relay.setMetadata" }
     | { configView?: Record<string, JsonValue>; type: "control.setConfigView" }
+    | { mcpStatus?: Record<string, JsonValue>; type: "control.setMcpStatus" }
     | { errorCode?: string; errorMessage?: string; status: TuiConnectionStatus; type: "control.setConnectionState" }
     | { focusScope: FocusScope; type: "focus.scope.set" }
     | { auditPage: AuditPageState; type: "auditPage.set" }

@@ -1,7 +1,7 @@
 import { unlink } from "node:fs/promises";
 import { createServer, type Server, type Socket } from "node:net";
 
-import { createError, errorCodes, toControlErrorBody, type ControlErrorBody } from "@portable-devshell/shared";
+import { createError, errorCodes, toControlErrorBody, type ControlErrorBody, type JsonValue } from "@portable-devshell/shared";
 import type { McpOAuthApprovalService } from "@portable-devshell/mcp";
 
 import type { InstanceRegistry } from "../../instance/registry/InstanceRegistry.js";
@@ -20,6 +20,7 @@ export interface ControlRpcServerOptions {
     instanceCreateService?: ControlInstanceCreateService;
     instanceRegistry: InstanceRegistry;
     getOAuthApprovals?: () => McpOAuthApprovalService | undefined;
+    getMcpStatus?: () => JsonValue;
     shutdown?: () => Promise<void> | void;
     socketPath: string;
 }
@@ -44,6 +45,7 @@ export class ControlRpcServer {
             new RouteHandlerControl({
                 configEditorService: options.configEditorService,
                 getOAuthApprovals: options.getOAuthApprovals,
+            getMcpStatus: options.getMcpStatus,
                 instanceRegistry: this.#instanceRegistry,
                 instanceCreateService: options.instanceCreateService
             })

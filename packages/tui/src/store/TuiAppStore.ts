@@ -54,6 +54,10 @@ export class TuiAppStore {
         }
     }
 
+    setMcpStatus(mcpStatus?: Record<string, JsonValue>): void {
+        this.dispatch({ mcpStatus, type: "control.setMcpStatus" });
+    }
+
     setConfigView(configView?: Record<string, JsonValue>): void {
         this.dispatch({
             configView,

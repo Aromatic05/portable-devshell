@@ -108,4 +108,23 @@ export class McpHost {
     get oauthApprovals(): McpOAuthApprovalService | undefined {
         return this.#oauth?.approvals;
     }
+
+    status(): {
+        authMode: "none" | "oauth2" | "token";
+        listenAddress?: string;
+        oauthReady: boolean;
+        publicBaseUrl?: string;
+        running: boolean;
+    } {
+        const address = this.#httpServer.address;
+        const running = this.#started && address !== undefined && address !== null;
+        const listenAddress = typeof address === "object" && address !== null ? `${address.address}:${address.port}` : undefined;
+        return {
+            authMode: this.#auth?.provider ?? "none",
+            ...(listenAddress === undefined ? {} : { listenAddress }),
+            oauthReady: this.#auth?.provider !== "oauth2" || this.#oauth !== undefined,
+            ...(this.#config.publicBaseUrl === undefined ? {} : { publicBaseUrl: this.#config.publicBaseUrl }),
+            running
+        };
+    }
 }

@@ -71,6 +71,11 @@ export function tuiAppReducer(state: TuiAppState, action: TuiAppAction): TuiAppS
                 ...state,
                 configView: action.configView
             };
+        case "control.setMcpStatus":
+            return {
+                ...state,
+                mcpStatus: action.mcpStatus
+            };
         case "control.setConnectionState":
             return {
                 ...state,
