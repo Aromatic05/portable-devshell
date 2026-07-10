@@ -132,6 +132,54 @@ test("main box focus activates the main panel from the sidebar", () => {
     assert.equal(harness.store.getState().ui.mainFocusId, "instance:alpha");
 });
 
+test("Create flow uses a wizard with focusable fields and command buttons", async () => {
+    const harness = createHarness();
+
+    await harness.press("", { tab: true });
+    await harness.press("", { return: true });
+
+    assert.equal(harness.store.getState().interaction.focusScope, "wizard");
+    assert.equal(harness.store.getState().ui.mainFocusId, "create-wizard");
+    const wizard = selectMainScreenModel(harness.store.getState()).boxes[0];
+    assert.equal(wizard?.title, "Create");
+    assert.equal(wizard?.expandedLines.some((line) => line.id?.includes(":field:name")), true);
+    assert.equal(wizard?.expandedLines.some((line) => line.id?.includes(":button:validate")), true);
+    assert.equal(wizard?.expandedLines.some((line) => line.id?.includes(":button:create")), true);
+    assert.equal(wizard?.expandedLines.some((line) => line.id?.includes(":button:cancel")), true);
+});
+
+test("wizard validation keeps the draft and reports the control error", async () => {
+    const harness = createHarness({
+        onValidateInstanceCreateDraft: async () => {
+            throw new Error("name is required");
+        }
+    });
+
+    await harness.press("", { tab: true });
+    await harness.press("", { return: true });
+    for (let index = 0; index < 6; index += 1) {
+        await harness.press("", { tab: true });
+    }
+    await harness.press("", { return: true });
+
+    assert.equal(harness.store.getState().interaction.focusScope, "wizard");
+    assert.equal(harness.store.getState().interaction.editor?.error, "name is required");
+    assert.notEqual(harness.store.getState().ui.formDrafts.create, undefined);
+});
+
+test("expanded entries retain Attach Shell alongside the configuration actions", async () => {
+    const harness = createHarness();
+
+    await harness.press("", { tab: true });
+    await harness.press("", { downArrow: true });
+    await harness.press("", { return: true });
+
+    const entry = selectMainScreenModel(harness.store.getState()).boxes.find((box) => box.id === "instance:alpha");
+    assert.equal(entry?.expandedLines.some((line) => line.text === "[ Attach Shell ]"), true);
+    assert.equal(entry?.expandedLines.some((line) => line.text === "[ Open Config ]"), true);
+    assert.equal(entry?.expandedLines.some((line) => line.text === "[ Open Connector ]"), true);
+});
+
 test("Prompt 3 detail line selection clamps to a valid line after data replacement", async () => {
     const harness = createHarness();
 
@@ -149,17 +197,17 @@ test("Prompt 3 detail line selection clamps to a valid line after data replaceme
     assert.equal(logsBox?.selectedDetailLineId, "logs:No");
 });
 
-test("Prompt 4 keeps connector and logs instance-scoped until an explicit action", async () => {
+test("connector editor remains instance-scoped and exposes control API limits", async () => {
     const harness = createHarness();
 
     await harness.press("3");
     const connector = selectMainScreenModel(harness.store.getState());
     assert.deepEqual(
         connector.boxes.map((box) => box.title),
-        ["MCP Runtime Config", "Endpoint Preview", "Auth Config", "Public Availability Reason"]
+        ["MCP Endpoint", "Public Base URL", "Auth", "Endpoint Preview", "Validation"]
     );
     assert.equal(
-        connector.boxes.some((box) => box.expandedLines.some((line) => line.text.includes("Runtime readiness: not available in current control API"))),
+        connector.boxes.some((box) => box.expandedLines.some((line) => line.text.includes("runtime readiness: not available in current control API"))),
         true
     );
 
@@ -310,6 +358,7 @@ test("non-collection actions attach only the selected sidebar entry", async () =
 function createHarness(options: {
     onAttachShell?: (instance: string) => Promise<void>;
     onToolCall?: (instance: string, toolName: string, input: string) => Promise<boolean>;
+    onValidateInstanceCreateDraft?: () => Promise<unknown>;
 } = {}) {
     const store = new TuiAppStore();
     seedPrompt3State(store);
@@ -351,6 +400,7 @@ function createHarness(options: {
         onQuit: async () => undefined,
         onRedraw: () => undefined,
         onToolCall: options.onToolCall ?? (async () => true),
+        onValidateInstanceCreateDraft: options.onValidateInstanceCreateDraft as never,
         store
     });
     const keyDispatcher = new KeyDispatcher();
