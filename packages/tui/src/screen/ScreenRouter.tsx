@@ -83,10 +83,9 @@ export function buildFocusGraphForState(state: TuiAppState): FocusGraph {
             ]);
         case "mainBoxes":
             return buildLinearGraph(
-                selectMainScreenModel(state).boxes.flatMap((box) => [
-                    { id: box.id, kind: "box" as const },
-                    ...(box.expanded ? box.expandedLines.map((line) => ({ boxId: box.id, id: line.id ?? line.text, kind: "line" as const })) : [])
-                ])
+                selectMainScreenModel(state).boxes.flatMap<FocusItem>((box) =>
+                    box.expanded ? box.expandedLines.map((line) => ({ boxId: box.id, id: line.id ?? line.text, kind: "line" as const })) : [{ id: box.id, kind: "box" as const }]
+                )
             );
         case "boxDetail": {
             const box = selectMainScreenModel(state).boxes.find((candidate) => candidate.id === state.ui.mainFocusId);

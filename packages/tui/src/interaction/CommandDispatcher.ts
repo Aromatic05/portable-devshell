@@ -185,6 +185,9 @@ export class CommandDispatcher {
                 this.#store.toggleExpanded(key);
                 if (expanded) {
                     this.#store.setSelectedDetailLine(key, undefined);
+                } else {
+                    const box = selectMainScreenModel(this.#store.getState()).boxes.find((candidate) => candidate.id === boxId);
+                    this.#store.setSelectedDetailLine(key, box?.expandedLines[0]?.id);
                 }
                 this.#ensureMainFocusVisible();
                 this.#store.setScreenStatus(this.#store.getState().ui.selectedPage, expanded ? "Collapsed box." : "Expanded box.");
