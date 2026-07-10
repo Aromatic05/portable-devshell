@@ -16,6 +16,8 @@ use crate::tools::{ToolAccess, ToolCall, ToolCatalogEntry, ToolError, ToolHandle
 
 const DEFAULT_TIMEOUT_MS: u64 = 30_000;
 const DEFAULT_MAX_OUTPUT_BYTES: usize = 4 * 1024 * 1024;
+const MAX_TIMEOUT_MS: u64 = 300_000;
+const MAX_OUTPUT_BYTES: usize = 16 * 1024 * 1024;
 const MAX_STDIN_BYTES: usize = 4 * 1024 * 1024;
 
 pub struct BashRunTool {
@@ -56,6 +58,12 @@ impl ToolHandler for BashRunTool {
             return Err(ToolError::new(
                 "tool.invalidArguments",
                 "timeoutMs and maxOutputBytes must be positive",
+            ));
+        }
+        if timeout_ms > MAX_TIMEOUT_MS || max_output > MAX_OUTPUT_BYTES {
+            return Err(ToolError::new(
+                "tool.invalidArguments",
+                "timeoutMs or maxOutputBytes exceeds the worker limit",
             ));
         }
         if params

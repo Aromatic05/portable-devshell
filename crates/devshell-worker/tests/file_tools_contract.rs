@@ -171,3 +171,25 @@ fn file_info_reports_a_dangling_symlink() {
 
     env.json_command(&["stop", "--instance", instance]);
 }
+
+#[test]
+fn bash_run_rejects_values_over_worker_hard_limits() {
+    let env = TestEnv::new();
+    let instance = "aromatic-bash-limits";
+    start(&env, instance);
+
+    let response = call(
+        &env,
+        instance,
+        "1",
+        "bash_run",
+        json!({
+            "command": "true",
+            "timeoutMs": 300_001,
+        }),
+    );
+    assert_eq!(response["ok"], false);
+    assert_eq!(response["error"]["code"], "tool.invalidArguments");
+
+    env.json_command(&["stop", "--instance", instance]);
+}
