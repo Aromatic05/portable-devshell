@@ -128,6 +128,46 @@ test("TuiControlSession reports missing control without auto-starting it", async
     }
 });
 
+test("TuiControlClient sends explicit instance operations through control RPC and preserves start relay output", async (t) => {
+    const runtimeDir = await mkdtemp(join(tmpdir(), "portable-devshell-tui-operations-"));
+    const socketPath = join(runtimeDir, "control.sock");
+    const worker = new FakeWorker("alpha");
+    const server = createServer(socketPath, worker, () => 7);
+    const client = new TuiControlClient({ socketPath });
+
+    t.after(async () => {
+        await server.stop().catch(() => undefined);
+        await rm(runtimeDir, { force: true, recursive: true });
+    });
+
+    await server.start();
+
+    const refreshed = await client.refreshStatus("alpha");
+    assert.equal(refreshed.snapshot.name, "alpha");
+
+    const relayOutput: string[] = [];
+    const started = await client.startInstance("alpha", {
+        relay: {
+            onOutput: (chunk) => {
+                relayOutput.push(chunk);
+            }
+        },
+        workspacePath: "/workspace/alpha"
+    });
+    assert.equal(started.name, "alpha");
+    assert.deepEqual(relayOutput, ["starting alpha\n"]);
+    assert.deepEqual(await client.stopInstance("alpha"), started);
+
+    const approval = await client.getApproval("alpha", "approval-1");
+    assert.equal(approval.status, "pending");
+    await client.decideApproval("alpha", "approval-1", "approve");
+    assert.equal(worker.decisions[0]?.decision, "approve");
+
+    const result = await client.callTool("alpha", "bash_run", { command: "pwd" });
+    assert.equal(result.exitCode, 0);
+    assert.equal(worker.callToolCount, 1);
+});
+
 function createServer(socketPath: string, worker: FakeWorker, getConfigVersion: () => number): ControlRpcServer {
     return new ControlRpcServer({
         configEditorService: {
@@ -170,6 +210,8 @@ class FakeWorker {
     readonly #toolCalls: ToolCallRecord[];
     snapshotCallCount = 0;
     subscribeFromSeqs: number[] = [];
+    callToolCount = 0;
+    decisions: Array<{ approvalId: string; decision: string }> = [];
 
     constructor(name: string) {
         this.#name = name;
@@ -256,6 +298,39 @@ class FakeWorker {
 
     async listApprovals() {
         return this.#approvals;
+    }
+
+    async refreshStatus() {
+        return this.snapshot();
+    }
+
+    async startInteractive(_workspacePath?: string, relay?: { writeOutput(chunk: string): Promise<void> }) {
+        await relay?.writeOutput(`starting ${this.#name}\n`);
+        return this.snapshot();
+    }
+
+    async stop() {
+        return this.snapshot();
+    }
+
+    async getApproval(approvalId: string) {
+        const approval = this.#approvals.find((candidate) => candidate.approvalId === approvalId);
+        assert.notEqual(approval, undefined);
+        return approval;
+    }
+
+    async decideApproval(approvalId: string, decision: { decision: string }) {
+        this.decisions.push({ approvalId, decision: decision.decision });
+        return await this.getApproval(approvalId);
+    }
+
+    async callTool() {
+        this.callToolCount += 1;
+        return {
+            exitCode: 0,
+            stderr: "",
+            stdout: "ok"
+        };
     }
 
     emit(type: string, data?: Record<string, JsonValue>): void {

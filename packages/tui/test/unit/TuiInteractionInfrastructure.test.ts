@@ -34,7 +34,7 @@ test("Prompt 3 urgent fix uses page + instance coordinates with two sidebar sect
     assert.equal(harness.store.getState().interaction.focusScope, "mainBoxes");
     assert.deepEqual(
         selectMainScreenModel(harness.store.getState()).boxes.map((box) => box.title),
-        ["alpha", "beta"]
+        ["alpha", "Approval"]
     );
     await harness.press("[", { ctrl: true });
     assert.equal(harness.store.getState().interaction.focusScope, "sidebarPages");
@@ -102,7 +102,7 @@ test("Prompt 3 urgent fix expands stable bordered boxes and preserves state thro
     assert.equal(harness.store.getState().interaction.focusScope, "sidebarPages");
 });
 
-test("Prompt 3 urgent fix keeps connector and logs pages read-only and instance-scoped", async () => {
+test("Prompt 4 keeps connector and logs instance-scoped until an explicit action", async () => {
     const harness = createHarness();
 
     await harness.press("3");
@@ -124,7 +124,7 @@ test("Prompt 3 urgent fix keeps connector and logs pages read-only and instance-
     assert.equal(logs.boxes[0]?.collapsedLines[0]?.text, "source=instance.readLogs+log.appended  entries=20");
 
     await harness.press("6");
-    assert.equal(selectHelpLines(harness.store.getState()).some((line) => line.includes("Read-only cockpit")), true);
+    assert.equal(selectHelpLines(harness.store.getState()).some((line) => line.includes("Read-only until an explicit instance action")), true);
 });
 
 test("Main viewport scrolling uses one page-instance offset instead of per-box offsets", async () => {
@@ -147,13 +147,49 @@ test("Moving focus down advances the shared main viewport to keep the focused bo
     await harness.press(" ");
     await harness.press("", { downArrow: true });
 
-    assert.equal(harness.store.getState().ui.mainFocusId, "instance-beta");
+    assert.equal(harness.store.getState().ui.mainFocusId, "approval-approval-1");
     assert.equal((harness.store.getState().ui.scrollOffsets["instances:alpha:main"] ?? 0) > 0, true);
+});
+
+test("Prompt 4 instance actions require explicit selection and Stop defaults to Cancel", async () => {
+    const harness = createHarness();
+
+    await harness.press("a");
+    assert.equal(harness.store.getState().interaction.focusScope, "actionMenu");
+    assert.equal(harness.store.getState().interaction.actionMenu.items[0]?.label, "Start Worker");
+    await harness.press("", { downArrow: true });
+    await harness.press("", { return: true });
+
+    assert.equal(harness.store.getState().interaction.focusScope, "confirm");
+    assert.equal(harness.store.getState().interaction.selectedConfirmButton, "cancel");
+    await harness.press("", { return: true });
+    assert.deepEqual(harness.instanceActions(), []);
+    assert.equal(harness.store.getState().ui.selectedInstance, "alpha");
+});
+
+test("Prompt 4 approval detail opens a non-default Deny action without deciding", async () => {
+    const harness = createHarness();
+
+    await harness.press("", { tab: true });
+    await harness.press("", { downArrow: true });
+    await harness.press("", { return: true });
+    assert.equal(harness.store.getState().interaction.focusScope, "boxDetail");
+    await harness.press("", { return: true });
+
+    assert.equal(harness.store.getState().interaction.focusScope, "actionMenu");
+    assert.deepEqual(
+        harness.store.getState().interaction.actionMenu.items.map((item) => item.label),
+        ["Approve", "Deny", "Cancel"]
+    );
+    assert.equal(harness.store.getState().interaction.selectedActionId, "approval.approve");
+    assert.deepEqual(harness.approvalDecisions(), []);
 });
 
 function createHarness() {
     const store = new TuiAppStore();
     seedPrompt3State(store);
+    const approvalDecisions: Array<{ approvalId: string; decision: string; instance: string }> = [];
+    const instanceActions: Array<{ action: string; instance: string }> = [];
     let logsReloadRequests = 0;
     const focusManager = new TuiFocusManager(store, {
         currentPage: () => store.getState().ui.selectedPage,
@@ -174,11 +210,18 @@ function createHarness() {
     const commandDispatcher = new CommandDispatcher({
         focusManager,
         mainViewportRows: () => 12,
+        onApprovalDecision: async (instance, approvalId, decision) => {
+            approvalDecisions.push({ approvalId, decision, instance });
+        },
+        onInstanceAction: async (action, instance) => {
+            instanceActions.push({ action, instance });
+        },
         onLogsReload: async () => {
             logsReloadRequests += 1;
         },
         onQuit: async () => undefined,
         onRedraw: () => undefined,
+        onToolCall: async () => true,
         store
     });
     const keyDispatcher = new KeyDispatcher();
@@ -188,6 +231,12 @@ function createHarness() {
     return {
         async press(input: string, key: Record<string, boolean> = {}) {
             await commandDispatcher.dispatchMany(keyDispatcher.dispatch(store.getState().interaction.focusScope, { input, key }));
+        },
+        approvalDecisions() {
+            return approvalDecisions;
+        },
+        instanceActions() {
+            return instanceActions;
         },
         logsReloadCount() {
             return logsReloadRequests;
