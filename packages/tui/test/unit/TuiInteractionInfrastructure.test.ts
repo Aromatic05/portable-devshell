@@ -167,6 +167,24 @@ test("wizard validation keeps the draft and reports the control error", async ()
     assert.notEqual(harness.store.getState().ui.formDrafts.create, undefined);
 });
 
+test("wizard normalizes friendly container mode labels before control validation", async () => {
+    let validatedMode: unknown;
+    const harness = createHarness({
+        onValidateInstanceCreateDraft: async (draft) => {
+            validatedMode = (draft as { container?: { mode?: unknown } }).container?.mode;
+            return {};
+        }
+    });
+
+    await harness.press("", { tab: true });
+    await harness.press("", { return: true });
+    harness.store.setFormDraft("create", { container: { mode: "Existing stopped container" }, name: "alpha", provider: "docker" });
+    await harness.dispatch({ type: "editor.validate" });
+
+    assert.equal(validatedMode, "existingStoppedContainer");
+    assert.equal((harness.store.getState().ui.formDrafts.create as { container?: { mode?: unknown } }).container?.mode, "existingStoppedContainer");
+});
+
 test("config validation errors render in the active field box", async () => {
     const harness = createHarness({
         onValidateConfigDraft: async () => {

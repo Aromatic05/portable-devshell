@@ -679,7 +679,9 @@ export class CommandDispatcher {
         }
         try {
             if (editor.kind === "create") {
-                const summary = await this.#onValidateInstanceCreateDraft(this.#editorDraft(editor.key, defaultCreateDraft()) as unknown as InstanceCreateDraft);
+                const draft = normalizeDraftForSave(this.#editorDraft(editor.key, defaultCreateDraft()));
+                const summary = await this.#onValidateInstanceCreateDraft(draft as unknown as InstanceCreateDraft);
+                this.#store.setFormDraft(editor.key, draft);
                 this.#store.setEditor({ ...editor, editing: false, error: undefined, summary: summary as unknown as JsonValue });
                 return true;
             }

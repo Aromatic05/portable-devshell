@@ -126,7 +126,8 @@ function wizardFields(step: number, draft: Record<string, JsonValue>): Array<str
                 fieldLine("container.build.dockerfile", "dockerfile", readPath(draft, "container.build.dockerfile")),
                 fieldLine("container.compose.file", "compose file", readPath(draft, "container.compose.file")),
                 fieldLine("container.compose.service", "compose service", readPath(draft, "container.compose.service")),
-                "Modes: distro preset, dockerfile, compose, existing image, existing stopped container"
+                "Modes: Distro preset -> preset; Dockerfile -> dockerfile; Compose -> compose",
+                "       Existing image -> existingImage; Existing stopped container -> existingStoppedContainer"
             ];
         case 3:
             return [

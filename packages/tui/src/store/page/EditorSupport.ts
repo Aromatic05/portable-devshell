@@ -118,6 +118,12 @@ function normalizeRecord(value: Record<string, JsonValue>): Record<string, JsonV
                 return [key, normalizeRecord(entry as Record<string, JsonValue>)];
             }
             if (typeof entry === "string") {
+                if (key === "mode") {
+                    const containerMode = containerModeValue(entry);
+                    if (containerMode !== undefined) {
+                        return [key, containerMode];
+                    }
+                }
                 if (entry === "true" || entry === "false") {
                     return [key, entry === "true"];
                 }
@@ -131,4 +137,21 @@ function normalizeRecord(value: Record<string, JsonValue>): Record<string, JsonV
             return [key, entry];
         })
     ) as Record<string, JsonValue>;
+}
+
+function containerModeValue(value: string): string | undefined {
+    switch (value.trim().toLowerCase()) {
+        case "distro preset":
+            return "preset";
+        case "dockerfile":
+            return "dockerfile";
+        case "compose":
+            return "compose";
+        case "existing image":
+            return "existingImage";
+        case "existing stopped container":
+            return "existingStoppedContainer";
+        default:
+            return undefined;
+    }
 }
