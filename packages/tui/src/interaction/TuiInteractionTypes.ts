@@ -18,7 +18,7 @@ export type FocusItem =
     | { kind: "page"; id: PageId }
     | { kind: "instance"; id: string }
     | { kind: "box"; id: string }
-    | { kind: "line"; id: string }
+    | { boxId: string; kind: "line"; id: string }
     | { kind: "field"; id: string }
     | { kind: "button"; id: "save" | "cancel" | string }
     | { kind: "action"; id: string };
@@ -140,7 +140,7 @@ export type TuiUiIntent =
     | { approvalId: string; decision: "approve" | "deny"; instance: string; type: "approval.decide" };
 
 export function focusItemKey(item: FocusItem): string {
-    return `${item.kind}:${item.id}`;
+    return item.kind === "line" ? `${item.kind}:${item.boxId}:${item.id}` : `${item.kind}:${item.id}`;
 }
 
 export function isSameFocusItem(left: FocusItem | undefined, right: FocusItem | undefined): boolean {
@@ -148,7 +148,7 @@ export function isSameFocusItem(left: FocusItem | undefined, right: FocusItem | 
         return left === right;
     }
 
-    return left.kind === right.kind && left.id === right.id;
+    return left.kind === right.kind && left.id === right.id && (left.kind !== "line" || right.kind !== "line" || left.boxId === right.boxId);
 }
 
 export function createEmptyInteractionState(): TuiInteractionState {

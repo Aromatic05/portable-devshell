@@ -39,7 +39,12 @@ export class TuiFocusManager {
             return instance === undefined ? undefined : { id: instance, kind: "instance" };
         }
         if (scope === "mainBoxes") {
-            const boxId = this.#store.getState().ui.mainFocusId;
+            const state = this.#store.getState();
+            const boxId = state.ui.mainFocusId;
+            const lineId = boxId === undefined ? undefined : state.interaction.selectedDetailLineIds[detailKey(state, boxId)];
+            if (boxId !== undefined && lineId !== undefined) {
+                return { boxId, id: lineId, kind: "line" };
+            }
             return boxId === undefined ? undefined : { id: boxId, kind: "box" };
         }
         if (scope === "boxDetail") {
@@ -50,7 +55,7 @@ export class TuiFocusManager {
             }
             const key = detailKey(state, boxId);
             const lineId = state.interaction.selectedDetailLineIds[key];
-            return lineId === undefined ? undefined : { id: lineId, kind: "line" };
+            return lineId === undefined ? undefined : { boxId, id: lineId, kind: "line" };
         }
         if (scope === "actionMenu") {
             const actionId = this.#store.getState().interaction.selectedActionId;
@@ -170,15 +175,13 @@ export class TuiFocusManager {
             case "box":
                 this.#store.setFocusScope("mainBoxes");
                 this.#store.setMainFocusId(item.id);
+                this.#store.setSelectedDetailLine(detailKey(this.#store.getState(), item.id), undefined);
                 return;
             case "line": {
                 const state = this.#store.getState();
-                const boxId = state.ui.mainFocusId;
-                if (boxId === undefined) {
-                    return;
-                }
-                this.#store.setFocusScope("boxDetail");
-                this.#store.setSelectedDetailLine(detailKey(state, boxId), item.id);
+                this.#store.setFocusScope("mainBoxes");
+                this.#store.setMainFocusId(item.boxId);
+                this.#store.setSelectedDetailLine(detailKey(state, item.boxId), item.id);
                 return;
             }
             case "action":
@@ -236,7 +239,7 @@ function focusModeFor(item: FocusItem, current: TuiMode): TuiMode {
         case "box":
             return "mainBoxes";
         case "line":
-            return "boxDetail";
+            return "mainBoxes";
         case "action":
             return "actionMenu";
         case "button":
