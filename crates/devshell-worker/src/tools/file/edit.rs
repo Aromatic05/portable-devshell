@@ -1,6 +1,8 @@
+use std::io::Write;
 use std::sync::Arc;
 
 use schemars::schema_for;
+use tempfile::NamedTempFile;
 
 use crate::tools::file::state::TextFile;
 use crate::tools::file::types::{
@@ -122,8 +124,7 @@ impl ToolHandler for FileEditTool {
             Some(value) => value,
             None => text.final_newline,
         };
-        std::fs::write(&path, text.encoded())
-            .map_err(|error| ToolError::new("file.writeFailed", error.to_string()))?;
+        atomic_write(&path, &text.encoded())?;
         let text = TextFile::read(&path)?;
         let count = text.lines.len().min(200);
         let seen = 1..=count;
@@ -151,7 +152,7 @@ impl ToolHandler for FileEditTool {
             revision: text.revision,
             added_lines: added,
             removed_lines: removed,
-            first_changed_line: first.min(1),
+            first_changed_line: first,
             content,
             returned_ranges: ranges,
             total_lines: text.lines.len(),
@@ -243,6 +244,31 @@ fn validate_operations(
             "edit ranges overlap",
         ));
     }
+    if boundaries.iter().any(|boundary| {
+        ranges
+            .iter()
+            .any(|(start, end)| *start <= *boundary && *boundary < *end)
+    }) {
+        return Err(ToolError::new(
+            "file.operationConflict",
+            "an insert cannot occur inside a replace or delete range",
+        ));
+    }
+    Ok(())
+}
+
+fn atomic_write(path: &std::path::Path, bytes: &[u8]) -> Result<(), ToolError> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| ToolError::new("file.writeFailed", "target has no parent"))?;
+    let mut temp = NamedTempFile::new_in(parent)
+        .map_err(|error| ToolError::new("file.writeFailed", error.to_string()))?;
+    temp.write_all(bytes)
+        .map_err(|error| ToolError::new("file.writeFailed", error.to_string()))?;
+    temp.flush()
+        .map_err(|error| ToolError::new("file.writeFailed", error.to_string()))?;
+    temp.persist(path)
+        .map_err(|error| ToolError::new("file.writeFailed", error.error.to_string()))?;
     Ok(())
 }
 fn validate_range(
