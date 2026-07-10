@@ -69,7 +69,7 @@ impl RpcRouter {
         let tool = self
             .tools
             .find(&tool_name)
-            .map_err(|error| RpcError::new("rpc.methodNotFound", error.message))?;
+            .map_err(|error| RpcError::new(error.code, error.message))?;
         tool.call(ToolCall {
             workspace: PathBuf::from(&self.runtime.workspace),
             params: request.params.clone(),

@@ -306,6 +306,18 @@ fn invalid_rpc_requests_return_structured_errors() {
     assert_eq!(invalid_json["error"]["code"], "rpc.invalidRequest");
     assert_eq!(invalid_json["id"], "");
 
+    let missing_tool = env.rpc(
+        instance,
+        &serde_json::json!({
+            "type": "request",
+            "id": "bad-3",
+            "method": "missing_tool",
+            "params": {}
+        }),
+    );
+    assert_eq!(missing_tool["ok"], false);
+    assert_eq!(missing_tool["error"]["code"], "tool.notFound");
+
     env.json_command(&["stop", "--instance", instance]);
 }
 
