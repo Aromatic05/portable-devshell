@@ -111,6 +111,12 @@ test("space expands a box without blocking main box navigation", async () => {
 
     await harness.press(" ");
     assert.equal(harness.store.getState().ui.expandedBoxes[expandedKey], true);
+    await harness.press("", { downArrow: true });
+    assert.equal(typeof harness.store.getState().interaction.selectedDetailLineIds[expandedKey], "string");
+    await harness.press(" ");
+    assert.equal(harness.store.getState().ui.expandedBoxes[expandedKey], false);
+    assert.equal(harness.store.getState().interaction.selectedDetailLineIds[expandedKey], undefined);
+    await harness.press(" ");
     const expandedLineCount = selectMainScreenModel(harness.store.getState()).boxes.find((box) => box.id === firstBoxId)!.expandedLines.length;
     for (let index = 0; index <= expandedLineCount; index += 1) {
         await harness.press("", { downArrow: true });
