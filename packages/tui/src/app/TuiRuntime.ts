@@ -42,6 +42,7 @@ export class TuiRuntime {
     #commandCounter = 0;
     #attachResume?: () => void;
     #attachWait?: Promise<void>;
+    #cursorBlinkTimer?: ReturnType<typeof setInterval>;
     #inputStarted = false;
     #mouseBuffer = "";
     #stopped = false;
@@ -134,6 +135,7 @@ export class TuiRuntime {
     async run(): Promise<void> {
         this.#alternateScreen.enter();
         this.#startInput();
+        this.#startCursorBlink();
         this.#mountInk();
 
         await this.session.start();
@@ -194,6 +196,7 @@ export class TuiRuntime {
         }
 
         this.#stopped = true;
+        this.#stopCursorBlink();
         await this.session.stop();
         this.scheduler.dispose();
         this.#ink?.unmount();
@@ -204,6 +207,21 @@ export class TuiRuntime {
 
     redraw(): void {
         this.#stdout.write("\u001B[2J\u001B[H");
+    }
+
+    #startCursorBlink(): void {
+        this.#cursorBlinkTimer = setInterval(() => {
+            if (this.store.getState().interaction.editor?.editing === true) {
+                this.store.bumpRedrawNonce();
+            }
+        }, 500);
+    }
+
+    #stopCursorBlink(): void {
+        if (this.#cursorBlinkTimer !== undefined) {
+            clearInterval(this.#cursorBlinkTimer);
+            this.#cursorBlinkTimer = undefined;
+        }
     }
 
     async #runInstanceAction(action: "refresh" | "start" | "stop", instance: string): Promise<void> {

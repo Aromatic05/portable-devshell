@@ -174,6 +174,25 @@ test("wizard validation keeps the draft and reports the control error", async ()
     assert.notEqual(harness.store.getState().ui.formDrafts.create, undefined);
 });
 
+test("editing a field supports backspace, cursor movement, and inline cursor rendering", async () => {
+    const harness = createHarness();
+
+    await openCreateWizard(harness);
+    await harness.press("", { return: true });
+    await harness.press("a");
+    await harness.press("b");
+    await harness.press("c");
+    await harness.press("", { leftArrow: true });
+    await harness.press("", { leftArrow: true });
+    await harness.press("", { backspace: true });
+    await harness.press("", { leftArrow: true });
+    await harness.press("z");
+
+    assert.equal((harness.store.getState().ui.formDrafts.create as { name?: unknown }).name, "zbc");
+    const wizard = selectMainScreenModel(harness.store.getState()).boxes[0];
+    assert.equal(wizard?.expandedLines.some((line) => line.text.includes("█")), true);
+});
+
 test("wizard normalizes friendly container mode labels before control validation", async () => {
     let validatedMode: unknown;
     const harness = createHarness({
