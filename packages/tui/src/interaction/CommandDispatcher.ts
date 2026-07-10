@@ -281,10 +281,22 @@ export class CommandDispatcher {
             case "instance.openAudit":
                 return await this.dispatch({ page: "audit", type: "page.select" });
             case "approval.open":
-                this.#openApprovalActionMenu(intent.instance, intent.approvalId);
+                this.#openApprovalDetail(intent.approvalId);
                 return true;
             case "approval.decide":
+                if (intent.decision === "deny") {
+                    this.#openDenyConfirm();
+                    return true;
+                }
                 await this.#onApprovalDecision(intent.instance, intent.approvalId, intent.decision);
+                this.#returnToAuditList();
+                return true;
+            case "approval.confirmDeny":
+                await this.#onApprovalDecision(intent.instance, intent.approvalId, "deny");
+                this.#returnToAuditList();
+                return true;
+            case "approval.back":
+                this.#returnToAuditList();
                 return true;
             case "toolForm.open":
                 this.#focusManager.pushRestore("toolForm");
@@ -353,6 +365,10 @@ export class CommandDispatcher {
 
     #cancel(): boolean {
         const scope = this.#store.getState().interaction.focusScope;
+        if (scope === "approvalDetail" || scope === "denyConfirm") {
+            this.#returnToAuditList();
+            return true;
+        }
         if (scope === "form" || scope === "wizard") {
             void this.#discardEditor();
             return true;
@@ -398,7 +414,7 @@ export class CommandDispatcher {
         const boxIds = selectMainBoxIds(this.#store.getState());
         const hasBoxes = boxIds.length > 0;
 
-        if (scope === "confirm") {
+        if (scope === "confirm" || scope === "approvalDetail" || scope === "denyConfirm") {
             return this.#focusManager.move(direction);
         }
 
@@ -424,6 +440,9 @@ export class CommandDispatcher {
 
     #moveWithinScope(direction: "up" | "down" | "left" | "right"): boolean {
         const scope = this.#store.getState().interaction.focusScope;
+        if (scope === "approvalDetail" || scope === "denyConfirm") {
+            return (direction === "up" || direction === "down") && this.#focusManager.move(direction);
+        }
         if (scope === "boxDetail" || scope === "form" || scope === "wizard") {
             return (direction === "up" || direction === "down") && this.#focusManager.move(direction);
         }
@@ -436,6 +455,7 @@ export class CommandDispatcher {
 
     async #activateCurrentScope(): Promise<boolean> {
         const scope = this.#store.getState().interaction.focusScope;
+        const state = this.#store.getState();
         if (scope === "sidebarPages" || scope === "sidebarInstances") {
             const cursor = this.#store.getState().interaction.sidebarCursor;
             if (cursor?.kind === "page") {
@@ -458,10 +478,20 @@ export class CommandDispatcher {
             }
         }
         if (scope === "mainBoxes") {
-            return this.#focusManager.currentFocus()?.kind === "line" ? await this.#activateDetailLine() : false;
+            const focused = this.#focusManager.currentFocus();
+            if (focused?.kind === "line") {
+                return await this.#activateDetailLine();
+            }
+            if (state.ui.selectedPage === "audit" && state.ui.selectedInstance !== undefined && focused?.kind === "box" && focused.id.startsWith("approval-")) {
+                return await this.dispatch({ approvalId: focused.id.slice("approval-".length), instance: state.ui.selectedInstance!, type: "approval.open" });
+            }
+            return false;
         }
         if (scope === "boxDetail") {
             return await this.#activateDetailLine();
+        }
+        if (scope === "approvalDetail" || scope === "denyConfirm") {
+            return await this.#activateApprovalAction();
         }
         if (scope === "form" || scope === "wizard") {
             return await this.#activateEditorFocus();
@@ -472,7 +502,6 @@ export class CommandDispatcher {
     async #activateDetailLine(): Promise<boolean> {
             const state = this.#store.getState();
             const boxId = state.ui.mainFocusId;
-            const instance = state.ui.selectedInstance;
             const box = selectMainScreenModel(state).boxes.find((candidate) => candidate.id === boxId);
             const lineId = box?.selectedDetailLineId;
             const actionId = boxId === undefined || lineId === undefined ? undefined : lineId.slice(`${boxId}:`.length);
@@ -485,12 +514,6 @@ export class CommandDispatcher {
 
             if (button !== undefined && state.ui.selectedPage === "instances") {
                 return await this.#activateInstanceButton(boxId, button);
-            }
-            if (instance !== undefined && actionId?.startsWith("approval.action:")) {
-                return await this.dispatch({ approvalId: actionId.slice("approval.action:".length), instance, type: "approval.open" });
-            }
-            if (instance !== undefined && actionId?.startsWith("tool.action:")) {
-                return await this.dispatch({ instance, toolName: actionId.slice("tool.action:".length), type: "toolForm.open" });
             }
             if (actionId?.startsWith("instance.attachShell:")) {
                 return await this.#openAttachShellConfirm(actionId.slice("instance.attachShell:".length));
@@ -941,14 +964,59 @@ export class CommandDispatcher {
         });
     }
 
-    #openApprovalActionMenu(instance: string, approvalId: string): void {
-        this.#focusManager.pushRestore("actionMenu");
-        this.#store.setActionMenu(`Approval: ${approvalId}`, [
-            { id: "approval.approve", intent: { approvalId, decision: "approve", instance, type: "approval.decide" }, label: "Approve" },
-            { id: "approval.deny", intent: { approvalId, decision: "deny", instance, type: "approval.decide" }, label: "Deny" },
-            { id: "approval.cancel", intent: { type: "overlay.closeActionMenu" }, label: "Cancel" }
-        ]);
-        this.#store.setFocusScope("actionMenu");
+    #openApprovalDetail(approvalId: string): void {
+        const state = this.#store.getState();
+        this.#store.setActionMenu("", []);
+        this.#store.clearToolForm();
+        this.#store.setAuditPage({
+            approvalId,
+            listFocusId: state.ui.mainFocusId,
+            listScrollOffset: state.ui.scrollOffsets[selectMainScrollKey(state)] ?? 0,
+            mode: "approvalDetail",
+            selectedAction: "approve"
+        });
+        this.#store.setFocusScope("approvalDetail");
+    }
+
+    #openDenyConfirm(): void {
+        const auditPage = this.#store.getState().interaction.auditPage;
+        if (auditPage.mode !== "approvalDetail") {
+            return;
+        }
+        this.#store.setAuditPage({ ...auditPage, mode: "denyConfirm", selectedAction: "back" });
+        this.#store.setFocusScope("denyConfirm");
+    }
+
+    #returnToAuditList(): void {
+        const auditPage = this.#store.getState().interaction.auditPage;
+        this.#store.setAuditPage({ mode: "list" });
+        this.#store.setFocusScope("mainBoxes");
+        this.#store.setMainFocusId(auditPage.listFocusId);
+        if (auditPage.listScrollOffset !== undefined) {
+            this.#store.setScrollOffset(selectMainScrollKey(this.#store.getState()), auditPage.listScrollOffset);
+        }
+    }
+
+    async #activateApprovalAction(): Promise<boolean> {
+        const state = this.#store.getState();
+        const { auditPage } = state.interaction;
+        const instance = state.ui.selectedInstance;
+        if (auditPage.approvalId === undefined || instance === undefined) {
+            return false;
+        }
+        if (auditPage.selectedAction === "back") {
+            return await this.dispatch({ type: "approval.back" });
+        }
+        if (auditPage.selectedAction === "approve" && auditPage.mode === "approvalDetail") {
+            return await this.dispatch({ approvalId: auditPage.approvalId, decision: "approve", instance, type: "approval.decide" });
+        }
+        if (auditPage.selectedAction === "deny") {
+            if (auditPage.mode === "approvalDetail") {
+                return await this.dispatch({ approvalId: auditPage.approvalId, decision: "deny", instance, type: "approval.decide" });
+            }
+            return await this.dispatch({ approvalId: auditPage.approvalId, instance, type: "approval.confirmDeny" });
+        }
+        return false;
     }
 
     #syncMainFocus(): void {

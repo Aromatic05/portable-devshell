@@ -167,6 +167,10 @@ export function selectFooterShortcuts(state: TuiAppState): string[] {
             return ["↑↓", "enter", "esc"];
         case "confirm":
             return ["tab", "←→", "enter", "esc"];
+        case "approvalDetail":
+            return ["tab", "↑↓", "enter", "esc"];
+        case "denyConfirm":
+            return ["tab", "↑↓", "enter", "esc"];
     }
 }
 

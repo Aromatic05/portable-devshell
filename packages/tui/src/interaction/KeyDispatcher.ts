@@ -34,6 +34,9 @@ export class KeyDispatcher {
                 return this.#forActionMenu(press);
             case "confirm":
                 return this.#forConfirm(press);
+            case "approvalDetail":
+            case "denyConfirm":
+                return this.#forApprovalDetail(press);
             case "search":
                 return this.#forSearch(press);
             case "toolForm":
@@ -90,6 +93,22 @@ export class KeyDispatcher {
         }
         if (press.key.return) {
             return [{ type: "confirm.accept" }];
+        }
+        return [];
+    }
+
+    #forApprovalDetail(press: TuiKeyPress): TuiUiIntent[] {
+        if (press.key.tab && press.key.shift) {
+            return [{ direction: "previous", type: "focus.move" }];
+        }
+        if (press.key.tab || press.key.upArrow) {
+            return [{ direction: "previous", type: "focus.move" }];
+        }
+        if (press.key.downArrow) {
+            return [{ direction: "next", type: "focus.move" }];
+        }
+        if (press.key.return) {
+            return [{ type: "focus.activate" }];
         }
         return [];
     }

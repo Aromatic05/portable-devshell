@@ -87,6 +87,14 @@ export function tuiAppReducer(state: TuiAppState, action: TuiAppAction): TuiAppS
                     focusScope: action.focusScope
                 }
             };
+        case "auditPage.set":
+            return {
+                ...state,
+                interaction: {
+                    ...state.interaction,
+                    auditPage: action.auditPage
+                }
+            };
         case "mainFocus.set":
             return {
                 ...state,

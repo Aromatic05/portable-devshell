@@ -64,6 +64,10 @@ export class TuiFocusManager {
         if (scope === "confirm") {
             return { id: this.#store.getState().interaction.selectedConfirmButton, kind: "button" };
         }
+        if (scope === "approvalDetail" || scope === "denyConfirm") {
+            const action = this.#store.getState().interaction.auditPage.selectedAction;
+            return action === undefined ? undefined : { id: action, kind: "approvalAction" };
+        }
         if (scope === "search") {
             return { id: "search.query", kind: "field" };
         }
@@ -187,6 +191,14 @@ export class TuiFocusManager {
             case "action":
                 this.#store.setFocusScope("actionMenu");
                 return;
+            case "approvalAction": {
+                const state = this.#store.getState();
+                this.#store.setAuditPage({
+                    ...state.interaction.auditPage,
+                    selectedAction: item.id
+                });
+                return;
+            }
             case "button":
                 if (this.currentMode() === "form" || this.currentMode() === "wizard") {
                     const state = this.#store.getState();
@@ -242,6 +254,8 @@ function focusModeFor(item: FocusItem, current: TuiMode): TuiMode {
             return "mainBoxes";
         case "action":
             return "actionMenu";
+        case "approvalAction":
+            return current === "denyConfirm" ? "denyConfirm" : "approvalDetail";
         case "button":
             return "confirm";
         case "field":

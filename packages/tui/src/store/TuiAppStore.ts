@@ -1,7 +1,7 @@
 import { type ApprovalRequest, type ControlError, type ControlEventEnvelope, type InstanceSnapshot, type JsonValue, type ToolCallRecord } from "@portable-devshell/shared";
 
 import { type TuiActionMenuItem, type TuiEditorState, type TuiUiIntent } from "../interaction/TuiInteractionTypes.js";
-import type { FocusScope, PageId, SidebarCursor, SidebarFocus } from "../model/TuiUiTypes.js";
+import type { AuditPageState, FocusScope, PageId, SidebarCursor, SidebarFocus } from "../model/TuiUiTypes.js";
 import {
     createInitialTuiAppState,
     toRawEventRecord,
@@ -74,6 +74,13 @@ export class TuiAppStore {
         this.dispatch({
             focusScope,
             type: "focus.scope.set"
+        });
+    }
+
+    setAuditPage(auditPage: AuditPageState): void {
+        this.dispatch({
+            auditPage,
+            type: "auditPage.set"
         });
     }
 

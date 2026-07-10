@@ -1,5 +1,6 @@
 import React from "react";
 import { Box, Text } from "ink";
+import type { ApprovalRequest } from "@portable-devshell/shared";
 
 import { renderExpandableBoxLines } from "../component/ExpandableBox.js";
 import { ErrorBanner } from "../component/ErrorBanner.js";
@@ -18,6 +19,13 @@ export interface ScreenRouterProps {
 }
 
 export function ScreenRouter(props: ScreenRouterProps) {
+    const auditPage = props.state.interaction.auditPage;
+    if (props.state.ui.selectedPage === "audit" && auditPage.mode !== "list") {
+        const approval = (props.state.approvalsByInstance[props.state.ui.selectedInstance ?? ""] ?? []).find(
+            (candidate) => candidate.approvalId === auditPage.approvalId
+        );
+        return <ApprovalDetail approval={approval} mode={auditPage.mode} selectedAction={auditPage.selectedAction} />;
+    }
     const model = selectMainScreenModel(props.state);
     const flow = selectMainBoxFlowMetrics(props.state);
     const scrollOffset = props.state.ui.scrollOffsets[flow.scrollKey] ?? 0;
@@ -43,6 +51,38 @@ export function ScreenRouter(props: ScreenRouterProps) {
     );
 }
 
+function ApprovalDetail(props: { approval?: ApprovalRequest; mode: "approvalDetail" | "denyConfirm"; selectedAction?: "approve" | "deny" | "back" }) {
+    if (props.approval === undefined) {
+        return <Text color="yellow">Approval is no longer pending. Back returns to the audit list.</Text>;
+    }
+
+    const fields = [
+        ["instance", props.approval.instance],
+        ["source", props.approval.source],
+        ["tool", props.approval.toolName],
+        ["risk", props.approval.riskLevel],
+        ["reason", props.approval.reason],
+        ["input", props.approval.inputSummary],
+        ["requested time", props.approval.createdAt]
+    ] as const;
+    const actions = props.mode === "approvalDetail" ? (["approve", "deny", "back"] as const) : (["deny", "back"] as const);
+
+    return (
+        <Box flexDirection="column">
+            <Text bold>{props.mode === "approvalDetail" ? "Approval Detail" : "Confirm Deny"}</Text>
+            {fields.map(([label, value]) => (
+                <Text key={label}>{`${label}: ${value}`}</Text>
+            ))}
+            {props.mode === "denyConfirm" ? <Text color="yellow">Deny this approval?</Text> : undefined}
+            <Box marginTop={1}>
+                {actions.map((action) => (
+                    <Text backgroundColor={props.selectedAction === action ? "cyan" : undefined} key={action}>{` ${action[0]!.toUpperCase()}${action.slice(1)} `}</Text>
+                ))}
+            </Box>
+        </Box>
+    );
+}
+
 function clamp(value: number, min: number, max: number): number {
     return Math.min(Math.max(value, min), max);
 }
@@ -59,6 +99,17 @@ export function buildFocusGraphForState(state: TuiAppState): FocusGraph {
             return buildLinearGraph([
                 { id: "cancel", kind: "button" as const },
                 { id: "confirm", kind: "button" as const }
+            ]);
+        case "approvalDetail":
+            return buildLinearGraph([
+                { id: "approve", kind: "approvalAction" as const },
+                { id: "deny", kind: "approvalAction" as const },
+                { id: "back", kind: "approvalAction" as const }
+            ]);
+        case "denyConfirm":
+            return buildLinearGraph([
+                { id: "deny", kind: "approvalAction" as const },
+                { id: "back", kind: "approvalAction" as const }
             ]);
         case "search":
             return new FocusGraph([{ item: { id: "search.query", kind: "field" } }]);

@@ -1,7 +1,7 @@
 import type { ApprovalRequest, ControlError, ControlEventEnvelope, InstanceSnapshot, JsonValue, ToolCallRecord } from "@portable-devshell/shared";
 
 import type { TuiActionMenuItem, TuiEditorState, TuiInteractionState, TuiUiIntent } from "../../interaction/TuiInteractionTypes.js";
-import type { FocusScope, PageId, SidebarCursor, SidebarFocus, TuiUiState } from "../../model/TuiUiTypes.js";
+import type { AuditPageState, FocusScope, PageId, SidebarCursor, SidebarFocus, TuiUiState } from "../../model/TuiUiTypes.js";
 
 export type TuiConnectionStatus = "connecting" | "connected" | "disconnected" | "error";
 
@@ -97,6 +97,7 @@ export type TuiAppAction =
     | { configView?: Record<string, JsonValue>; type: "control.setConfigView" }
     | { errorCode?: string; errorMessage?: string; status: TuiConnectionStatus; type: "control.setConnectionState" }
     | { focusScope: FocusScope; type: "focus.scope.set" }
+    | { auditPage: AuditPageState; type: "auditPage.set" }
     | { instance: string; seq: number; type: "instance.setLastSeq" }
     | { instances: TuiInstanceListEntry[]; type: "instance.replaceList" }
     | { entry: TuiLogEntry; type: "log.append" }

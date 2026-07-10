@@ -17,8 +17,7 @@ export function buildAuditPageBoxes(state: TuiAppState, instanceName: string): B
                           `startedAt ${record.startedAt}`,
                           `completedAt ${record.completedAt ?? "-"}`,
                           `source ${record.source}`,
-                          `input ${record.inputSummary || "-"}`,
-                          { id: `tool.action:${record.toolName}`, text: "Open tool action form." }
+                          `input ${record.inputSummary || "-"}`
                       ],
             id: record === undefined ? "audit-empty" : `audit-${record.callId}`,
             status: record === undefined ? "normal" : toolCallStatus(record),
@@ -40,12 +39,11 @@ export function buildAuditPageBoxes(state: TuiAppState, instanceName: string): B
                     formatField("Tool", approval.toolName),
                     formatField("Risk", approval.riskLevel),
                     formatField("Reason", approval.reason),
-                    formatField("Input", approval.inputSummary),
-                    { id: `approval.action:${approval.approvalId}`, text: "Open approval actions." }
+                    formatField("Input", approval.inputSummary)
                 ],
                 id: `approval-${approval.approvalId}`,
                 status: "pending",
-                summaryLines: [renderApprovalLine(approval), "Enter opens detail; it never approves directly."],
+                summaryLines: [renderApprovalLine(approval), "Enter opens approval detail."],
                 title: "Pending Approval"
             })
         )

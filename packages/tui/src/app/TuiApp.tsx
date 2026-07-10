@@ -38,6 +38,7 @@ export function TuiApp(props: TuiAppProps) {
     const confirmDialog = selectConfirmDialogModel(state);
     const search = selectSearchModel(state);
     const toolForm = state.interaction.toolForm;
+    const auditDetailOpen = state.ui.selectedPage === "audit" && state.interaction.auditPage.mode !== "list";
     const footer = selectFooterModel(state);
     const boxInnerWidth = mainInnerWidth(props.runtime.columns);
     const viewportRows = Math.max(
@@ -58,7 +59,7 @@ export function TuiApp(props: TuiAppProps) {
                 <Box flexDirection="column" flexGrow={1}>
                     {errorLines !== undefined ? <ErrorBanner lines={errorLines} /> : undefined}
                     {search.open ? <Text color="cyan">{`/ ${search.query}`}</Text> : undefined}
-                    {toolForm?.open === true ? (
+                    {toolForm?.open === true && !auditDetailOpen ? (
                         <Box borderStyle="round" borderColor="cyan" flexDirection="column" paddingX={1}>
                             <Text bold>{`Call Tool: ${toolForm.toolName}`}</Text>
                             <Text dimColor>{`instance ${toolForm.instance}`}</Text>
@@ -67,16 +68,18 @@ export function TuiApp(props: TuiAppProps) {
                         </Box>
                     ) : undefined}
                     <ScreenRouter boxInnerWidth={boxInnerWidth} state={state} viewportRows={viewportRows} />
-                    <ActionMenu items={actionMenu.items} open={actionMenu.open} title={actionMenu.title} />
-                    <ConfirmDialog
-                        body={confirmDialog.body}
-                        cancelFocused={confirmDialog.cancelFocused}
-                        cancelLabel={confirmDialog.cancelLabel}
-                        confirmFocused={confirmDialog.confirmFocused}
-                        confirmLabel={confirmDialog.confirmLabel}
-                        open={confirmDialog.open}
-                        title={confirmDialog.title}
-                    />
+                    {!auditDetailOpen ? <ActionMenu items={actionMenu.items} open={actionMenu.open} title={actionMenu.title} /> : undefined}
+                    {!auditDetailOpen ? (
+                        <ConfirmDialog
+                            body={confirmDialog.body}
+                            cancelFocused={confirmDialog.cancelFocused}
+                            cancelLabel={confirmDialog.cancelLabel}
+                            confirmFocused={confirmDialog.confirmFocused}
+                            confirmLabel={confirmDialog.confirmLabel}
+                            open={confirmDialog.open}
+                            title={confirmDialog.title}
+                        />
+                    ) : undefined}
                     {connection.status === "connecting" ? <Text color="cyan">Connecting to control server...</Text> : undefined}
                 </Box>
             }

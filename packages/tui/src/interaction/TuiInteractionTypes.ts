@@ -1,6 +1,6 @@
 import type { InstanceCreateSchema, JsonValue } from "@portable-devshell/shared";
 
-import type { FocusScope, PageId, SidebarCursor } from "../model/TuiUiTypes.js";
+import type { AuditPageState, FocusScope, PageId, SidebarCursor } from "../model/TuiUiTypes.js";
 
 export type TuiEditorKind = "config" | "connector" | "create";
 
@@ -22,7 +22,8 @@ export type FocusItem =
     | { boxId: string; kind: "line"; id: string }
     | { kind: "field"; id: string }
     | { kind: "button"; id: "save" | "cancel" | string }
-    | { kind: "action"; id: string };
+    | { kind: "action"; id: string }
+    | { kind: "approvalAction"; id: "approve" | "deny" | "back" };
 
 export type TuiMode = FocusScope;
 
@@ -61,6 +62,7 @@ export interface TuiToolFormState {
 
 export interface TuiInteractionState {
     actionMenu: TuiActionMenuState;
+    auditPage: AuditPageState;
     confirmDialog: TuiConfirmDialogState;
     dirty: boolean;
     focusScope: FocusScope;
@@ -139,7 +141,9 @@ export type TuiUiIntent =
     | { type: "instance.openLogs" }
     | { type: "instance.openAudit" }
     | { approvalId: string; instance: string; type: "approval.open" }
-    | { approvalId: string; decision: "approve" | "deny"; instance: string; type: "approval.decide" };
+    | { approvalId: string; decision: "approve" | "deny"; instance: string; type: "approval.decide" }
+    | { type: "approval.back" }
+    | { approvalId: string; instance: string; type: "approval.confirmDeny" };
 
 export function focusItemKey(item: FocusItem): string {
     return item.kind === "line" ? `${item.kind}:${item.boxId}:${item.id}` : `${item.kind}:${item.id}`;
@@ -160,6 +164,9 @@ export function createEmptyInteractionState(): TuiInteractionState {
             open: false,
             selectedIndex: 0,
             title: ""
+        },
+        auditPage: {
+            mode: "list"
         },
         confirmDialog: {
             body: "",

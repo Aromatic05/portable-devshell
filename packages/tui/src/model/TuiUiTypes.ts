@@ -12,7 +12,19 @@ export type FocusScope =
     | "search"
     | "toolForm"
     | "actionMenu"
-    | "confirm";
+    | "confirm"
+    | "approvalDetail"
+    | "denyConfirm";
+
+export type AuditPageMode = "list" | "approvalDetail" | "denyConfirm";
+
+export type AuditPageState = {
+    approvalId?: string;
+    listFocusId?: string;
+    listScrollOffset?: number;
+    mode: AuditPageMode;
+    selectedAction?: "approve" | "deny" | "back";
+};
 
 export type SidebarCursor = { id: PageId; kind: "page" } | { id: string; kind: "instance" };
 
