@@ -1152,7 +1152,11 @@ function withInstanceDetails(details: CommandDiagnostic | undefined, instance: s
 }
 
 function wrapWorkerCommandError(error: unknown, code: string, message: string, instance: string): unknown {
-    if (!isKnownErrorCode(error) || getErrorCode(error, code) === code) {
+    if (
+        !isKnownErrorCode(error) ||
+        getErrorCode(error, code) === code ||
+        getErrorCode(error, code) !== errorCodes.coreProviderFailed
+    ) {
         return error;
     }
 

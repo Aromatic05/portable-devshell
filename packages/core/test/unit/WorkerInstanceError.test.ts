@@ -82,8 +82,29 @@ test("WorkerInstance wraps start stop and status command failures with diagnosti
     });
 });
 
+test("WorkerInstance preserves catalog failures during startup", async () => {
+    const instance = createInstance({
+        listTools: async () => {
+            throw createError({
+                code: "core.toolSchemaUnavailable",
+                details: { toolName: "bash_run" },
+                message: "Worker tool catalog is incompatible.",
+                retryable: false
+            });
+        }
+    });
+
+    await assert.rejects(instance.start("/tmp/workspace"), (error: unknown) => {
+        assert.ok(typeof error === "object" && error !== null);
+        assert.equal((error as { code?: string }).code, "core.toolSchemaUnavailable");
+        assert.equal((error as { message?: string }).message, "Worker tool catalog is incompatible.");
+        return true;
+    });
+});
+
 function createInstance(
     commands: Partial<{
+        listTools: () => Promise<{ tools: [] }>;
         start: () => Promise<{ details?: Record<string, unknown>; exitCode: number | null; stderr: string; stdout: string }>;
         status: () => Promise<{ details?: Record<string, unknown>; exitCode: number | null; stderr: string; stdout: string }>;
         stop: () => Promise<{ details?: Record<string, unknown>; exitCode: number | null; stderr: string; stdout: string }>;
@@ -136,7 +157,7 @@ function createInstance(
         } as never,
         protocolClient: {
             handshake: async () => ({ instance: "demo-local", protocolVersion: 1, workspace: "/tmp/workspace", workerVersion: "0.0.0" }),
-            listTools: async () => ({ tools: [] }),
+            listTools: commands.listTools ?? (async () => ({ tools: [] })),
             ping: async () => ({ pong: true })
         } as never,
         rpcBridge: {
