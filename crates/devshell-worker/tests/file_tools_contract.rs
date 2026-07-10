@@ -109,6 +109,7 @@ fn file_search_honors_include_and_returns_a_query_bound_cursor() {
     let env = TestEnv::new();
     let instance = "aromatic-file-search";
     fs::write(env.workspace().join("match.txt"), "needle\n").unwrap();
+    fs::write(env.workspace().join("more.txt"), "needle\n").unwrap();
     fs::write(env.workspace().join("match.log"), "needle\n").unwrap();
     start(&env, instance);
 
