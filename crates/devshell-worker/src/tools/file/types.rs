@@ -124,7 +124,7 @@ pub struct FileFindInput {
     pub limit: Option<usize>,
     pub cursor: Option<String>,
 }
-#[derive(Debug, Deserialize, JsonSchema, PartialEq)]
+#[derive(Debug, Deserialize, JsonSchema, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum FindType {
     File,
@@ -161,7 +161,7 @@ pub struct FileSearchInput {
     pub max_matches_per_file: Option<usize>,
     pub cursor: Option<String>,
 }
-#[derive(Debug, Deserialize, JsonSchema, PartialEq)]
+#[derive(Debug, Deserialize, JsonSchema, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum SearchSyntax {
     Literal,

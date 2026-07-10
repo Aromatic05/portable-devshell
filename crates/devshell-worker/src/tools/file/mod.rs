@@ -1,3 +1,4 @@
+pub mod cursor;
 pub mod edit;
 pub mod find;
 pub mod info;
@@ -16,11 +17,13 @@ use crate::security::path::{
 use crate::tools::{ToolCall, ToolError};
 
 pub struct FileToolState {
+    pub cursors: Mutex<cursor::CursorStore>,
     pub snapshots: Mutex<state::SnapshotStore>,
 }
 impl FileToolState {
     pub fn new() -> Arc<Self> {
         Arc::new(Self {
+            cursors: Mutex::new(cursor::CursorStore::default()),
             snapshots: Mutex::new(state::SnapshotStore::default()),
         })
     }
