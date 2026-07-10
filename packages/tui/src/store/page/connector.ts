@@ -9,7 +9,9 @@ export function buildConnectorPageBoxes(state: TuiAppState, instanceName: string
     const instanceDraft = editorDraft(state, `config:${instanceName}`, selectedInstanceDraft(state, instanceName));
     const mcpDraft = editorDraft(state, `connector:${instanceName}`, globalMcpDraft(state));
     const unsaved = state.ui.dirtyForms[`connector:${instanceName}`] === true || state.ui.dirtyForms[`config:${instanceName}`] === true ? " [UNSAVED]" : "";
-    const actions = [buttonLine("save", "Save"), buttonLine("cancel", "Cancel")];
+    const instanceDirty = state.ui.dirtyForms[`config:${instanceName}`] === true;
+    const globalDirty = state.ui.dirtyForms[`connector:${instanceName}`] === true;
+    const affectedScopes = [instanceDirty ? "instance" : undefined, globalDirty ? "global" : undefined].filter(Boolean).join(" + ") || "none";
     const endpoint = endpointPreview(mcpDraft, readPath(instanceDraft, "mcp.path"), instanceName);
     const runtime = runtimeStatus(state, instanceDraft, mcpDraft, endpoint);
     const authNonePublic = isPublic(mcpDraft) && readPath(mcpDraft, "auth.mode") === "none";
@@ -23,8 +25,7 @@ export function buildConnectorPageBoxes(state: TuiAppState, instanceName: string
                 ...editorErrorLine(state, "connector", "mcp-endpoint", ["mcp", "allowTools"]),
                 `MCP runtime        ${runtime.runtime}`,
                 `Public endpoint    ${runtime.publicEndpoint}`,
-                `Reason             ${runtime.reason}`,
-                ...actions
+                `Reason             ${runtime.reason}`
             ],
             id: "mcp-endpoint",
             status: runtime.runtime === "running" ? "ready" : runtime.runtime === "disabled" ? "disabled" : "failed",
@@ -36,8 +37,7 @@ export function buildConnectorPageBoxes(state: TuiAppState, instanceName: string
                 fieldLine("listenHost", "listenHost", readPath(mcpDraft, "listenHost")),
                 fieldLine("listenPort", "listenPort", readPath(mcpDraft, "listenPort")),
                 fieldLine("publicBaseUrl", "publicBaseUrl", readPath(mcpDraft, "publicBaseUrl")),
-                ...editorErrorLine(state, "connector", "public-base-url", ["listenHost", "listenPort", "publicBaseUrl"]),
-                ...actions
+                ...editorErrorLine(state, "connector", "public-base-url", ["listenHost", "listenPort", "publicBaseUrl"])
             ],
             id: "public-base-url",
             summaryLines: [compactSummary(["host", String(readPath(mcpDraft, "listenHost") ?? "-")], ["baseUrl", String(readPath(mcpDraft, "publicBaseUrl") ?? "-")])],
@@ -47,13 +47,25 @@ export function buildConnectorPageBoxes(state: TuiAppState, instanceName: string
             detailLines: [
                 fieldLine("auth.mode", "auth.mode", readPath(mcpDraft, "auth.mode")),
                 ...(authNonePublic ? [{ id: "auth-warning", text: "auth.mode=none is not valid for a public endpoint", tone: "danger" as const }] : []),
-                ...editorErrorLine(state, "connector", "auth", ["auth"]),
-                ...actions
+                ...editorErrorLine(state, "connector", "auth", ["auth"])
             ],
             id: "auth",
             status: authNonePublic ? "failed" : "normal",
             summaryLines: [compactSummary(["mode", String(readPath(mcpDraft, "auth.mode") ?? "-")], ["public", isPublic(mcpDraft) ? "yes" : "no"])],
             title: `[Global] Auth${unsaved}`
+        }),
+        makeBox(state, "connector", instanceName, {
+            detailLines: [
+                `Affected scopes    ${affectedScopes}`,
+                `Instance changes   ${instanceDirty ? "yes" : "no"}`,
+                `Global changes     ${globalDirty ? "yes" : "no"}`,
+                buttonLine("save", "Save", !instanceDirty && !globalDirty),
+                buttonLine("cancel", "Cancel", !instanceDirty && !globalDirty)
+            ],
+            id: "connector-actions",
+            status: instanceDirty || globalDirty ? "warning" : "normal",
+            summaryLines: [compactSummary(["scopes", affectedScopes], ["dirty", instanceDirty || globalDirty ? "yes" : "no"])],
+            title: "Page Actions"
         }),
         makeBox(state, "connector", instanceName, {
             detailLines: [endpoint.value, ...(endpoint.reason === undefined ? [] : [`reason=${endpoint.reason}`])],

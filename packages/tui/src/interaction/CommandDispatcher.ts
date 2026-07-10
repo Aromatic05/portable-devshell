@@ -588,11 +588,18 @@ export class CommandDispatcher {
                 return await this.dispatch({ enabled: true, instance, type: "instance.setEnabled" });
             }
 
-            if ((state.ui.selectedPage === "config" || state.ui.selectedPage === "connector") && boxId !== undefined && lineId !== undefined) {
-                return this.#openPageEditor(state.ui.selectedPage, boxId);
+            const button = actionId?.startsWith("button:") ? actionId.slice("button:".length) : undefined;
+
+            if (state.ui.selectedPage === "connector" && (button === "save" || button === "cancel")) {
+                if (state.interaction.editor?.kind !== "connector") {
+                    this.#store.setEditor({ editing: false, key: `connector:${state.ui.selectedInstance}`, kind: "connector" });
+                }
+                return button === "save" ? await this.#saveEditor(false) : await this.#discardEditor();
             }
 
-            const button = actionId?.startsWith("button:") ? actionId.slice("button:".length) : undefined;
+            if ((state.ui.selectedPage === "config" || state.ui.selectedPage === "connector") && boxId !== undefined && actionId?.startsWith("field:")) {
+                return this.#openPageEditor(state.ui.selectedPage, boxId);
+            }
 
             if (state.ui.selectedPage === "audit" && state.ui.selectedInstance !== undefined && actionId?.startsWith("approval.open:")) {
                 return await this.dispatch({ approvalId: actionId.slice("approval.open:".length), instance: state.ui.selectedInstance, type: "approval.open" });
@@ -907,18 +914,25 @@ export class CommandDispatcher {
             if (restartInstance && wasRunning) {
                 await this.#onInstanceAction("stop", instance);
             }
-            const instanceDraft = normalizeDraftForSave(this.#editorDraft(`config:${instance}`, this.#instanceDraft(instance)));
-            await this.#onInstanceConfigUpdate(instanceDraft);
-            if (editor.kind === "connector") {
-                await this.#onMcpConfigUpdate(normalizeDraftForSave(this.#editorDraft(`connector:${instance}`, this.#mcpDraft())));
+            const instanceKey = `config:${instance}`;
+            const globalKey = `connector:${instance}`;
+            const instanceDraft = normalizeDraftForSave(this.#editorDraft(instanceKey, this.#instanceDraft(instance)));
+            const globalDraft = normalizeDraftForSave(this.#editorDraft(globalKey, this.#mcpDraft()));
+            const instanceDirty = state.ui.dirtyForms[instanceKey] === true;
+            const globalDirty = editor.kind === "connector" && state.ui.dirtyForms[globalKey] === true;
+            if (instanceDirty) {
+                await this.#onInstanceConfigUpdate(instanceDraft);
             }
-            const applyResult = await this.#onApplyConfig();
+            if (globalDirty) {
+                await this.#onMcpConfigUpdate(globalDraft);
+            }
+            const applyResult = instanceDirty || globalDirty ? await this.#onApplyConfig() : {};
             if (restartInstance && wasRunning) {
                 await this.#onInstanceAction("start", instance);
             }
             this.#store.setFormDraft(`config:${instance}`, instanceDraft, false);
             if (editor.kind === "connector") {
-                this.#store.setFormDraft(`connector:${instance}`, this.#editorDraft(`connector:${instance}`, this.#mcpDraft()), false);
+                this.#store.setFormDraft(globalKey, globalDraft, false);
             }
             this.#store.setEditor({ ...editor, editing: false, error: undefined });
             this.#store.setScreenStatus(

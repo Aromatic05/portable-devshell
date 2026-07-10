@@ -494,7 +494,7 @@ test("connector editor presents unavailable endpoints and control runtime limits
     const connector = selectMainScreenModel(harness.store.getState());
     assert.deepEqual(
         connector.boxes.map((box) => box.title),
-        ["[Instance] MCP Endpoint", "[Global] Public Base URL", "[Global] Auth", "Configured Endpoint", "Configuration Validation"]
+        ["[Instance] MCP Endpoint", "[Global] Public Base URL", "[Global] Auth", "Page Actions", "Configured Endpoint", "Configuration Validation"]
     );
     assert.equal(
         connector.boxes.some((box) => box.expandedLines.some((line) => line.text === "MCP runtime        stopped")),
@@ -520,6 +520,31 @@ test("connector editor presents unavailable endpoints and control runtime limits
 
     await harness.press("7");
     assert.equal(selectHelpLines(harness.store.getState()).some((line) => line.includes("directly inside each expanded instance box")), true);
+});
+
+test("connector page actions expose and save only affected scopes", async () => {
+    const instanceUpdates: unknown[] = [];
+    const mcpUpdates: unknown[] = [];
+    const harness = createHarness({
+        onInstanceConfigUpdate: async (value) => { instanceUpdates.push(value); return {}; },
+        onMcpConfigUpdate: async (value) => { mcpUpdates.push(value); return {}; }
+    });
+
+    await harness.press("3");
+    await harness.press("", { tab: true });
+    await harness.press(" ");
+    harness.store.setFormDraft("connector:alpha", { auth: { mode: "none" }, enabled: true, listenHost: "127.0.0.1", listenPort: 3210 }, true);
+    const actions = selectMainScreenModel(harness.store.getState()).boxes.find((box) => box.id === "connector-actions")!;
+    assert.equal(actions.expandedLines.some((line) => line.text === "Affected scopes    global"), true);
+    harness.store.setMainFocusId(actions.id);
+    harness.store.setFocusScope("mainBoxes");
+    if (!actions.expanded) {
+        harness.store.toggleExpanded(actions.expandedKey);
+    }
+    harness.store.setSelectedDetailLine(actions.expandedKey, "connector-actions:button:save");
+    await harness.dispatch({ type: "focus.activate" });
+    assert.equal(instanceUpdates.length, 0);
+    assert.equal(mcpUpdates.length, 1);
 });
 
 test("long detail lines open a wrapped full-text viewer", async () => {
@@ -799,6 +824,8 @@ async function openCreateWizard(harness: ReturnType<typeof createHarness>): Prom
 function createHarness(options: {
     onAttachShell?: (instance: string) => Promise<void>;
     onOAuthApprovalDecision?: (approvalId: string, decision: "approve" | "deny") => Promise<void>;
+    onInstanceConfigUpdate?: (value: Record<string, unknown>) => Promise<void>;
+    onMcpConfigUpdate?: (value: Record<string, unknown>) => Promise<void>;
     onToolCall?: (instance: string, toolName: string, input: string) => Promise<boolean>;
     onValidateConfigDraft?: () => Promise<void>;
     onValidateInstanceCreateDraft?: () => Promise<unknown>;
@@ -852,6 +879,9 @@ function createHarness(options: {
         onOAuthApprovalDecision: options.onOAuthApprovalDecision ?? (async (approvalId, decision) => {
             oauthApprovalDecisions.push({ approvalId, decision });
         }),
+        onInstanceConfigUpdate: options.onInstanceConfigUpdate as never,
+        onMcpConfigUpdate: options.onMcpConfigUpdate as never,
+        onApplyConfig: async () => ({}),
         onQuit: async () => undefined,
         onRedraw: () => undefined,
         onToolCall: options.onToolCall ?? (async () => true),
@@ -869,7 +899,7 @@ function createHarness(options: {
             providers: ["local", "ssh", "docker", "podman"] as const
         }),
         onValidateInstanceCreateDraft: options.onValidateInstanceCreateDraft as never,
-        onValidateConfigDraft: options.onValidateConfigDraft,
+        onValidateConfigDraft: options.onValidateConfigDraft ?? (async () => undefined),
         store
     });
     const keyDispatcher = new KeyDispatcher();
