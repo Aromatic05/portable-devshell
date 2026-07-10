@@ -86,13 +86,13 @@ test("InstanceLogStore and ToolCallHistory persist per-instance records", async 
 
         const completed = await history.completed(
             "call-1",
-            { exitCode: 0, stderrBytes: 0, stdoutBytes: 2, timedOut: false },
-            "2026-07-07T00:00:03.000Z"
+            "2026-07-07T00:00:03.000Z",
+            { exitCode: 0, stderrBytes: 0, stdoutBytes: 2, termination: "exited" }
         );
         assert.equal(completed.status, "completed");
         assert.equal(completed.exitCode, 0);
         assert.equal(completed.stdoutBytes, 2);
-        assert.equal(completed.timedOut, false);
+        assert.equal(completed.termination, "exited");
         assert.equal(completed.inputSummary, "{\"command\":\"pwd\"}");
         assert.equal(completed.source, "cli");
 
@@ -102,7 +102,7 @@ test("InstanceLogStore and ToolCallHistory persist per-instance records", async 
             "call-3",
             "worker.command_failed",
             "2026-07-07T00:00:05.000Z",
-            { exitCode: 1, stderrBytes: 4, stdoutBytes: 0, timedOut: false }
+            { exitCode: 1, stderrBytes: 4, stdoutBytes: 0, termination: "exited" }
         );
         assert.equal(failed.status, "failed");
         assert.equal(failed.error, "worker.command_failed");

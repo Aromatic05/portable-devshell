@@ -162,7 +162,7 @@ test("WorkerInstance rejects not-ready and concurrent tool calls while persistin
         assert.equal(records[0]?.inputSummary, "{\"command\":\"pwd\"}");
         assert.equal(records[0]?.stdoutBytes, 240);
         assert.equal(records[0]?.stderrBytes, 0);
-        assert.equal(records[0]?.timedOut, false);
+        assert.equal(records[0]?.termination, undefined);
         assert.equal(records[1]?.error, errorCodes.coreToolSchemaUnavailable);
         assert.deepEqual(
             (await instance.readToolCalls({ after: records[0]?.callId, limit: 1, status: "failed", toolName: "bash_run" })).map(
@@ -472,9 +472,11 @@ test("WorkerInstance reconnectRpc refreshes schema after an rpc disconnect", asy
 
         harness.setTools([
             {
+                access: "execute",
                 description: "Run a shell command.",
                 inputSchema: toolSchemaFor("cwd"),
-                name: "bash_run"
+                name: "bash_run",
+                outputSchema: { type: "object" }
             }
         ]);
         harness.disconnect();
@@ -513,7 +515,7 @@ test("WorkerInstance reconnectRpc refreshes schema after an rpc disconnect", asy
 
 function createWorkerInstanceHarness(): {
     disconnect: () => void;
-    setTools: (tools: Array<{ description: string; inputSchema: JsonValue; name: string }>) => void;
+    setTools: (tools: Array<{ access: "execute"; description: string; inputSchema: JsonValue; name: string; outputSchema: JsonValue }>) => void;
     transport: WorkerCommandTransport;
     requestedMethods: () => number;
     respond: (method: string, result: Record<string, JsonValue>) => void;
@@ -527,9 +529,11 @@ function createWorkerInstanceHarness(): {
     let commandStatus: "running" | "stale" | "stopped" = "stopped";
     let tools = [
         {
+            access: "execute" as const,
             description: "Run a shell command.",
             inputSchema: toolSchemaFor("command"),
-            name: "bash_run"
+            name: "bash_run",
+            outputSchema: { type: "object" }
         }
     ];
     let activeProcess:
@@ -687,7 +691,7 @@ function isRequestFrame(value: unknown): value is { id: string; method: string }
 function createLifecycleResponse(
     method: string,
     id: string,
-    tools: Array<{ description: string; inputSchema: JsonValue; name: string }>
+    tools: Array<{ access: "execute"; description: string; inputSchema: JsonValue; name: string; outputSchema: JsonValue }>
 ): WorkerRpcResponseEnvelope {
     if (method === "worker.ping") {
         return {

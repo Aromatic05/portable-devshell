@@ -18,9 +18,11 @@ interface CommandResult {
 }
 
 interface ToolDefinition {
-    description?: string;
-    inputSchema?: JsonValue;
+    access: "read" | "write" | "execute" | "session";
+    description: string;
+    inputSchema: JsonValue;
     name: string;
+    outputSchema: JsonValue;
 }
 
 test("initialize succeeds over SDK transport", async () => {
@@ -273,8 +275,8 @@ function createWorkerHarness(options?: {
     const calls: Array<{ input: JsonValue; toolName: string }> = [];
     const events: Array<{ data: Record<string, JsonValue>; type: string }> = [];
     const tools = options?.tools ?? [
-        { name: "bash_run", description: "Run shell", inputSchema: { type: "object", properties: { command: { type: "string" } } } },
-        { name: "read_logs", description: "Read logs", inputSchema: { type: "object" } }
+        { access: "execute" as const, name: "bash_run", description: "Run shell", inputSchema: { type: "object", properties: { command: { type: "string" } } }, outputSchema: { type: "object" } },
+        { access: "read" as const, name: "read_logs", description: "Read logs", inputSchema: { type: "object" }, outputSchema: { type: "object" } }
     ];
     const hasToolSchemaCache = options?.hasToolSchemaCache ?? true;
     const ready = options?.ready ?? true;
