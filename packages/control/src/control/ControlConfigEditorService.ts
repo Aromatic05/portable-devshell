@@ -101,6 +101,9 @@ export class ControlConfigEditorService {
             if (instance.enabled) {
                 this.#instanceRegistry.add(this.#instanceConfigMapper.map(instance));
             }
+        } else if (requiresWorkerRebuild(existing, instance)) {
+            this.#assertInstanceStopped(instance.name, "update");
+            this.#instanceRegistry.add(this.#instanceConfigMapper.map(instance));
         } else {
             descriptor.allowTools = [...instance.mcp.allowTools];
             descriptor.enabled = instance.enabled;
@@ -355,6 +358,17 @@ function toWorkerReconfigureInput(instance: ControlInstanceConfig): {
             DEVSHELL_WORKER_SECURITY_MODE: effectiveSecurityMode
         }
     };
+}
+
+function requiresWorkerRebuild(previous: ControlInstanceConfig, next: ControlInstanceConfig): boolean {
+    return [
+        previous.provider !== next.provider,
+        stableStringify(previous.ssh) !== stableStringify(next.ssh),
+        stableStringify(previous.container) !== stableStringify(next.container),
+        previous.dockerBinary !== next.dockerBinary,
+        previous.podmanBinary !== next.podmanBinary,
+        stableStringify(previous.logs) !== stableStringify(next.logs)
+    ].some(Boolean);
 }
 
 function hasMcpEndpointChange(

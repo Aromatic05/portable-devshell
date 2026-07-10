@@ -92,6 +92,9 @@ export type TuiUiIntent =
     | { type: "editor.backspace" }
     | { direction: "left" | "right"; type: "editor.cursorMove" }
     | { type: "editor.save" }
+    | { type: "editor.saveAndRestart" }
+    | { type: "editor.reload" }
+    | { type: "editor.reloadConfirmed" }
     | { type: "editor.validate" }
     | { direction: "next" | "previous"; type: "wizard.step" }
     | { type: "editor.discard" }

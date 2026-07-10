@@ -108,7 +108,7 @@ test("search filters instances, config, audit, and logs only", async () => {
     for (const character of "workspace") {
         await harness.press(character);
     }
-    assert.deepEqual(selectMainScreenModel(harness.store.getState()).boxes.map((box) => box.id), ["workspace"]);
+    assert.deepEqual(selectMainScreenModel(harness.store.getState()).boxes.map((box) => box.id), ["configuration"]);
     await harness.press("", { return: true });
 
     await harness.press("5");
@@ -329,8 +329,8 @@ test("config validation errors render in the active field box", async () => {
     await harness.press("", { return: true });
     await harness.press("s", { ctrl: true });
 
-    const provider = selectMainScreenModel(harness.store.getState()).boxes.find((box) => box.id === "provider");
-    assert.equal(provider?.expandedLines.some((line) => line.text === "error: workspace must be an absolute path"), true);
+    const configuration = selectMainScreenModel(harness.store.getState()).boxes.find((box) => box.id === "configuration");
+    assert.equal(configuration?.expandedLines.some((line) => line.text === "error: workspace must be an absolute path"), true);
 });
 
 test("config choices use angle selectors and switch with arrow keys", async () => {
@@ -351,17 +351,38 @@ test("config choices use angle selectors and switch with arrow keys", async () =
         workspace: "/workspace/alpha"
     });
 
-    const boxes = selectMainScreenModel(harness.store.getState()).boxes;
-    assert.equal(boxes.find((box) => box.id === "provider")?.expandedLines[0]?.text.endsWith("<local>"), true);
-    assert.equal(boxes.find((box) => box.id === "provider")?.expandedLines[1]?.text.endsWith("<true>"), true);
-    assert.equal(boxes.find((box) => box.id === "mcp-config")?.expandedLines[0]?.text.endsWith("<true>"), true);
-    assert.equal(boxes.find((box) => box.id === "security")?.expandedLines[0]?.text.endsWith("<disabled>"), true);
-    assert.equal(boxes.find((box) => box.id === "approval-policy")?.expandedLines[0]?.text.endsWith("<ask>"), true);
+    const configuration = selectMainScreenModel(harness.store.getState()).boxes.find((box) => box.id === "configuration");
+    assert.equal(configuration?.expandedLines.some((line) => line.text.endsWith("<local>")), true);
+    assert.equal(configuration?.expandedLines.some((line) => line.text.endsWith("<disabled>")), true);
+    assert.equal(configuration?.expandedLines.some((line) => line.text.endsWith("<ask>")), true);
 
     await harness.press("", { rightArrow: true });
     assert.equal((harness.store.getState().ui.formDrafts["config:alpha"] as { provider?: unknown }).provider, "ssh");
     await harness.press("", { leftArrow: true });
     assert.equal((harness.store.getState().ui.formDrafts["config:alpha"] as { provider?: unknown }).provider, "local");
+});
+
+test("config exposes reload, save-only, and save-and-restart semantics", async () => {
+    const harness = createHarness();
+
+    await harness.press("2");
+    await harness.press("", { tab: true });
+    await harness.press(" ");
+    await harness.press("", { downArrow: true });
+    await harness.press("", { return: true });
+
+    const configuration = selectMainScreenModel(harness.store.getState()).boxes.find((box) => box.id === "configuration")!;
+    assert.equal(configuration.expandedLines.some((line) => line.text === "[ Reload ]"), true);
+    assert.equal(configuration.expandedLines.some((line) => line.text === "[ Save Only ]"), true);
+    assert.equal(configuration.expandedLines.some((line) => line.text === "[ Save & Restart ]"), true);
+
+    harness.store.setFormDraft("config:alpha", {
+        ...(harness.store.getState().ui.formDrafts["config:alpha"] as Record<string, unknown>),
+        provider: "ssh"
+    });
+    const changed = selectMainScreenModel(harness.store.getState()).boxes.find((box) => box.id === "configuration")!;
+    assert.equal(changed.expandedLines.find((line) => line.text === "[ Save Only ]")?.disabled, true);
+    assert.equal(changed.expandedLines.some((line) => line.text === "Apply mode          restart required"), true);
 });
 
 test("connector discard confirms and clears its per-instance MCP draft", async () => {

@@ -17,7 +17,7 @@ export interface CommandDispatcherOptions {
     onQuit(): Promise<void>;
     onRedraw(): void;
     onToolCall(instance: string, toolName: string, input: string): Promise<boolean>;
-    onApplyConfig?(): Promise<void>;
+    onApplyConfig?(): Promise<JsonValue>;
     onCreateInstance?(draft: InstanceCreateDraft): Promise<void>;
     onGetInstanceCreateSchema?(): Promise<InstanceCreateSchema>;
     onInstanceConfigUpdate?(instance: Record<string, JsonValue>): Promise<void>;
@@ -41,7 +41,7 @@ export class CommandDispatcher {
     readonly #onQuit: () => Promise<void>;
     readonly #onRedraw: () => void;
     readonly #onToolCall: CommandDispatcherOptions["onToolCall"];
-    readonly #onApplyConfig: () => Promise<void>;
+    readonly #onApplyConfig: () => Promise<JsonValue>;
     readonly #onCreateInstance: (draft: InstanceCreateDraft) => Promise<void>;
     readonly #onGetInstanceCreateSchema: () => Promise<InstanceCreateSchema>;
     readonly #onInstanceConfigUpdate: (instance: Record<string, JsonValue>) => Promise<void>;
@@ -346,7 +346,13 @@ export class CommandDispatcher {
             case "editor.validate":
                 return await this.#validateEditor();
             case "editor.save":
-                return await this.#saveEditor();
+                return await this.#saveEditor(false);
+            case "editor.saveAndRestart":
+                return await this.#saveEditor(true);
+            case "editor.reload":
+                return await this.#reloadEditor(false);
+            case "editor.reloadConfirmed":
+                return await this.#reloadEditor(true);
             case "editor.discard":
                 return await this.#discardEditor();
             case "wizard.step":
@@ -657,7 +663,11 @@ export class CommandDispatcher {
         if (action?.startsWith("button:")) {
             switch (action.slice("button:".length)) {
                 case "save":
-                    return await this.#saveEditor();
+                    return await this.#saveEditor(false);
+                case "save-restart":
+                    return await this.#saveEditor(true);
+                case "reload":
+                    return await this.#reloadEditor(false);
                 case "cancel":
                     return await this.#discardEditor();
                 case "validate":
@@ -803,7 +813,7 @@ export class CommandDispatcher {
         }
     }
 
-    async #saveEditor(): Promise<boolean> {
+    async #saveEditor(restartInstance: boolean): Promise<boolean> {
         const editor = this.#store.getState().interaction.editor;
         const instance = this.#store.getState().ui.selectedInstance;
         if (editor === undefined) {
@@ -819,23 +829,58 @@ export class CommandDispatcher {
             return false;
         }
         try {
+            const state = this.#store.getState();
+            const wasRunning = state.snapshotsByInstance[instance]?.daemonState === "running" || state.snapshotsByInstance[instance]?.ready === true;
+            if (restartInstance && wasRunning) {
+                await this.#onInstanceAction("stop", instance);
+            }
             const instanceDraft = normalizeDraftForSave(this.#editorDraft(`config:${instance}`, this.#instanceDraft(instance)));
             await this.#onInstanceConfigUpdate(instanceDraft);
             if (editor.kind === "connector") {
                 await this.#onMcpConfigUpdate(normalizeDraftForSave(this.#editorDraft(`connector:${instance}`, this.#mcpDraft())));
             }
-            await this.#onApplyConfig();
+            const applyResult = await this.#onApplyConfig();
+            if (restartInstance && wasRunning) {
+                await this.#onInstanceAction("start", instance);
+            }
             this.#store.setFormDraft(`config:${instance}`, instanceDraft, false);
             if (editor.kind === "connector") {
                 this.#store.setFormDraft(`connector:${instance}`, this.#editorDraft(`connector:${instance}`, this.#mcpDraft()), false);
             }
             this.#store.setEditor({ ...editor, editing: false, error: undefined });
-            this.#store.setScreenStatus(this.#store.getState().ui.selectedPage, "Saved through control RPC.");
+            this.#store.setScreenStatus(
+                this.#store.getState().ui.selectedPage,
+                describeApplyResult(applyResult, restartInstance && wasRunning)
+            );
             return true;
         } catch (error) {
             this.#store.setEditor({ ...editor, editing: false, error: readErrorMessage(error) });
             return false;
         }
+    }
+
+    async #reloadEditor(confirmed: boolean): Promise<boolean> {
+        const editor = this.#store.getState().interaction.editor;
+        if (editor === undefined) {
+            return false;
+        }
+        const dirty = this.#editorDraftKeys(editor).some((key) => this.#store.getState().ui.dirtyForms[key] === true);
+        if (dirty && !confirmed) {
+            return await this.dispatch({
+                body: "Discard local changes and reload from control?",
+                confirmIntent: { type: "editor.reloadConfirmed" },
+                confirmLabel: "Reload",
+                title: "Reload Configuration",
+                type: "overlay.openConfirm"
+            });
+        }
+        for (const key of this.#editorDraftKeys(editor)) {
+            this.#store.clearFormDraft(key);
+        }
+        this.#store.setEditor(undefined);
+        this.#store.setFocusScope("mainBoxes");
+        await this.dispatch({ type: "page.reload" });
+        return true;
     }
 
     async #createFromWizard(): Promise<boolean> {
@@ -1146,6 +1191,18 @@ function inputText(value: JsonValue | undefined): string {
 
 function readErrorMessage(error: unknown): string {
     return error instanceof Error ? error.message : String(error);
+}
+
+function describeApplyResult(result: JsonValue, restarted: boolean): string {
+    const record = asRecord(result);
+    const controlRestart = record?.restartControlRequired === true;
+    if (restarted) {
+        return controlRestart ? "Saved and instance restarted. Control restart is still required for MCP changes." : "Saved and instance restarted.";
+    }
+    if (controlRestart) {
+        return "Saved. Control restart is required for MCP changes.";
+    }
+    return record?.reloadRequired === true ? "Saved and hot-applied to future instance operations." : "Saved.";
 }
 
 function isSearchablePage(page: import("../model/TuiUiTypes.js").PageId): boolean {

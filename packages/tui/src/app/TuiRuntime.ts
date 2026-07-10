@@ -82,8 +82,9 @@ export class TuiRuntime {
                 await this.#attachShell(instance);
             },
             onApplyConfig: async () => {
-                await this.#client.applyConfig();
+                const result = await this.#client.applyConfig();
                 await this.session.refresh();
+                return result;
             },
             onCreateInstance: async (draft) => {
                 await this.#client.createInstance(draft);
