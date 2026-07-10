@@ -233,7 +233,7 @@ class FakeWorker {
                 source: "tui",
                 startedAt: new Date(0).toISOString(),
                 status: "completed",
-                timedOut: false,
+                termination: "exited",
                 toolName: "bash_run"
             }
         ];

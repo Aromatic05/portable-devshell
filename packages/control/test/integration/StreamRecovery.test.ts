@@ -271,7 +271,7 @@ class FakeWorker {
             signal: undefined,
             stderr: "",
             stdout: "/tmp/ws\n",
-            timedOut: false
+            termination: "exited"
         };
     }
 

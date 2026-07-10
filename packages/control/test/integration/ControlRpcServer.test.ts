@@ -70,7 +70,7 @@ async function verifyRpcMethodsOverReusedConnection(): Promise<void> {
                 status: "completed",
                 stderrBytes: 0,
                 stdoutBytes: 8,
-                timedOut: false,
+                termination: "exited",
                 toolName: "bash_run"
             }
         ]);
@@ -584,7 +584,7 @@ class FakeWorker {
                 status: "completed",
                 stderrBytes: 0,
                 stdoutBytes: 8,
-                timedOut: false,
+                termination: "exited",
                 toolName: "bash_run"
             }
         ];
@@ -637,7 +637,7 @@ class FakeWorker {
             signal: undefined,
             stderr: "",
             stdout: "/tmp/ws\n",
-            timedOut: false
+            termination: "exited"
         };
     }
 

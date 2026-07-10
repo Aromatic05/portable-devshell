@@ -717,7 +717,7 @@ function seedPrompt3State(store: TuiAppStore) {
             source: "tui",
             startedAt: "2026-07-09T00:00:00.000Z",
             status: "completed",
-            timedOut: false,
+            termination: "exited",
             toolName: "bash_run"
         }
     ]);

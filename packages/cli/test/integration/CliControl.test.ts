@@ -62,7 +62,7 @@ test("CliControlClient performs control rpc over unix socket", async (t) => {
                                         status: "completed",
                                         stderrBytes: 0,
                                         stdoutBytes: 8,
-                                        timedOut: false,
+                                        termination: "exited",
                                         toolName: "bash_run"
                                     }
                                 ]
