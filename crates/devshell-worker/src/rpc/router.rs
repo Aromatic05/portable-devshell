@@ -66,14 +66,6 @@ impl RpcRouter {
             .tools
             .find(&tool_name)
             .map_err(|error| RpcError::new("rpc.methodNotFound", error.message))?;
-        self.policy
-            .check_tool_call(&tool_name, &request.params)
-            .map_err(|error| {
-                let mut rpc_error = RpcError::new(error.code, error.message);
-                rpc_error.details = error.details;
-                rpc_error
-            })?;
-
         tool.call(ToolCall {
             workspace: PathBuf::from(&self.runtime.workspace),
             params: request.params.clone(),
@@ -81,6 +73,7 @@ impl RpcRouter {
         })
         .map_err(|error| {
             let mut rpc_error = RpcError::new(error.code, error.message);
+            rpc_error.retryable = error.retryable;
             rpc_error.details = error.details;
             rpc_error
         })

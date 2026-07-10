@@ -1,8 +1,4 @@
-use std::path::{Path, PathBuf};
-
-use serde_json::Value;
-
-use crate::tools::name::ToolName;
+use crate::security::path::FilesystemCapability;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum SecurityMode {
@@ -32,74 +28,31 @@ impl SecurityError {
 }
 
 pub trait SecurityPolicy: Send + Sync {
-    fn check_tool_call(
-        &self,
-        _tool_name: &ToolName,
-        _params: &Value,
-    ) -> Result<(), SecurityError> {
-        Ok(())
-    }
-
-    fn resolve_workspace_path(
-        &self,
-        workspace: &Path,
-        requested: Option<PathBuf>,
-    ) -> Result<PathBuf, SecurityError>;
+    fn check_capability(&self, capability: FilesystemCapability) -> Result<(), SecurityError>;
 }
 
 #[derive(Default)]
 pub struct DisabledSecurityPolicy;
 
 impl SecurityPolicy for DisabledSecurityPolicy {
-    fn resolve_workspace_path(
-        &self,
-        workspace: &Path,
-        requested: Option<PathBuf>,
-    ) -> Result<PathBuf, SecurityError> {
-        let path = requested.unwrap_or_else(|| workspace.to_path_buf());
-        let path = if path.is_absolute() {
-            path
-        } else {
-            workspace.join(path)
-        };
-        if path.exists() {
-            Ok(path)
-        } else {
-            Err(SecurityError::invalid_params(format!(
-                "cwd does not exist: {}",
-                path.display()
-            )))
-        }
+    fn check_capability(&self, _capability: FilesystemCapability) -> Result<(), SecurityError> {
+        Ok(())
     }
 }
 
 pub struct WorkspaceSecurityPolicy;
 
 impl SecurityPolicy for WorkspaceSecurityPolicy {
-    fn resolve_workspace_path(
-        &self,
-        workspace: &Path,
-        requested: Option<PathBuf>,
-    ) -> Result<PathBuf, SecurityError> {
-        let path = requested.unwrap_or_else(|| workspace.to_path_buf());
-        let path = if path.is_absolute() {
-            path
-        } else {
-            workspace.join(path)
-        };
-        let canonical = path.canonicalize().map_err(|error| {
-            SecurityError::invalid_params(format!(
-                "failed to canonicalize cwd {}: {error}",
-                path.display()
-            ))
-        })?;
-        if !canonical.starts_with(workspace) {
-            return Err(SecurityError::new(
-                "security.cwdOutsideWorkspace",
-                format!("cwd must remain inside workspace: {}", canonical.display()),
-            ));
+    fn check_capability(&self, capability: FilesystemCapability) -> Result<(), SecurityError> {
+        match capability {
+            FilesystemCapability::AbsoluteRead | FilesystemCapability::AbsoluteWrite => Err(SecurityError::new(
+                "security.denied",
+                "absolute filesystem access is denied in workspace security mode",
+            )),
+            FilesystemCapability::WorkspaceRead
+            | FilesystemCapability::WorkspaceWrite
+            | FilesystemCapability::ProcessExecute => Ok(()),
         }
-        Ok(canonical)
     }
 }
 

@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use schemars::JsonSchema;
 use serde::Serialize;
 use crate::security::SecurityPolicy;
 use crate::tools::{ToolError, ToolName};
@@ -12,12 +13,23 @@ pub struct ToolCall {
     pub policy: Arc<dyn SecurityPolicy>,
 }
 
+#[derive(Clone, Copy, Debug, JsonSchema, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ToolAccess {
+    Read,
+    Write,
+    Execute,
+    Session,
+}
+
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ToolCatalogEntry {
     pub name: String,
     pub description: String,
     pub input_schema: serde_json::Value,
+    pub output_schema: serde_json::Value,
+    pub access: ToolAccess,
 }
 
 pub trait ToolHandler: Send + Sync {

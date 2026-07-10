@@ -1,3 +1,4 @@
+pub mod path;
 pub mod policy;
 
 pub use policy::{
