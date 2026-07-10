@@ -69,7 +69,6 @@ export function buildFocusGraphForState(state: TuiAppState): FocusGraph {
             const box = selectMainScreenModel(state).boxes.find((candidate) => candidate.id === state.ui.mainFocusId);
             return buildLinearGraph(
                 (box?.expandedLines ?? [])
-                    .filter((line) => line.id?.includes(":field:") === true || line.id?.includes(":button:") === true)
                     .map((line) => ({
                         id: line.id!,
                         kind: line.id!.includes(":button:") ? ("button" as const) : ("field" as const)
@@ -83,10 +82,15 @@ export function buildFocusGraphForState(state: TuiAppState): FocusGraph {
                 ...state.instances.map((instance) => ({ id: instance.name, kind: "instance" as const }))
             ]);
         case "mainBoxes":
-            return buildLinearGraph(selectMainBoxIds(state).map((id) => ({ id, kind: "box" as const })));
+            return buildLinearGraph(
+                selectMainScreenModel(state).boxes.flatMap((box) => [
+                    { id: box.id, kind: "box" as const },
+                    ...(box.expanded ? box.expandedLines.map((line) => ({ boxId: box.id, id: line.id ?? line.text, kind: "line" as const })) : [])
+                ])
+            );
         case "boxDetail": {
             const box = selectMainScreenModel(state).boxes.find((candidate) => candidate.id === state.ui.mainFocusId);
-            return buildLinearGraph((box?.expandedLines ?? []).map((line) => ({ id: line.id ?? line.text, kind: "line" as const })));
+            return buildLinearGraph((box?.expandedLines ?? []).map((line) => ({ boxId: box?.id ?? "", id: line.id ?? line.text, kind: "line" as const })));
         }
     }
 }

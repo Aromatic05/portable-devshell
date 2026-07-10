@@ -191,7 +191,7 @@ export class KeyDispatcher {
         if (press.key.end) {
             return [{ type: "screen.end" }];
         }
-        if (press.key.return && mode !== "mainBoxes") {
+        if (press.key.return) {
             return [{ type: "focus.activate" }];
         }
         if (press.input === " ") {
