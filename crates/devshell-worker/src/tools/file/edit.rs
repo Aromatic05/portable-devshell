@@ -6,7 +6,7 @@ use std::sync::Arc;
 use schemars::schema_for;
 use tempfile::NamedTempFile;
 
-use crate::tools::file::state::TextFile;
+use crate::tools::file::state::{SnapshotContent, TextFile};
 use crate::tools::file::types::{
     FileEditInput, FileEditOperation, FileEditOutput, InsertAt, ReturnedRange,
 };
@@ -63,7 +63,7 @@ impl ToolHandler for FileEditTool {
                 "snapshot belongs to a different file",
             ));
         }
-        if snapshot.full_text.is_none() {
+        if matches!(snapshot.content, SnapshotContent::Sparse) {
             return edit_sparse(&self.state, &call, input, requested.raw, path, snapshot);
         }
         let mut text = TextFile::read(&path)?;

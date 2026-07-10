@@ -33,6 +33,12 @@ pub struct TextMetadata {
 }
 
 #[derive(Clone)]
+pub enum SnapshotContent {
+    Full(String),
+    Sparse,
+}
+
+#[derive(Clone)]
 pub struct FileSnapshot {
     pub id: String,
     pub canonical_path: String,
@@ -43,7 +49,7 @@ pub struct FileSnapshot {
     pub bom: bool,
     pub line_ending: &'static str,
     pub final_newline: bool,
-    pub full_text: Option<String>,
+    pub content: SnapshotContent,
     pub created_at_ms: u128,
     pub last_accessed_at_ms: u128,
 }
@@ -74,14 +80,14 @@ impl SnapshotStore {
             return id;
         }
         let normalized = text.normalized();
-        let full_text = if normalized.len() <= FULL_SNAPSHOT_LIMIT {
-            Some(normalized)
+        let content = if normalized.len() <= FULL_SNAPSHOT_LIMIT {
+            SnapshotContent::Full(normalized)
         } else {
-            None
+            SnapshotContent::Sparse
         };
         let id = Uuid::new_v4().to_string();
-        if let Some(content) = &full_text {
-            self.full_text_bytes += content.len();
+        if let SnapshotContent::Full(text) = &content {
+            self.full_text_bytes += text.len();
         }
         self.snapshots.insert(
             id.clone(),
@@ -95,7 +101,7 @@ impl SnapshotStore {
                 bom: text.bom,
                 line_ending: text.line_ending,
                 final_newline: text.final_newline,
-                full_text,
+                content,
                 created_at_ms: now,
                 last_accessed_at_ms: now,
             },
@@ -136,7 +142,7 @@ impl SnapshotStore {
                 bom: metadata.bom,
                 line_ending: metadata.line_ending,
                 final_newline: metadata.final_newline,
-                full_text: None,
+                content: SnapshotContent::Sparse,
                 created_at_ms: now,
                 last_accessed_at_ms: now,
             },
@@ -169,9 +175,11 @@ impl SnapshotStore {
             if let Some(snapshot) = self.snapshots.remove(&id) {
                 self.by_content
                     .remove(&(snapshot.canonical_path, snapshot.revision));
-                self.full_text_bytes = self
-                    .full_text_bytes
-                    .saturating_sub(snapshot.full_text.map_or(0, |text| text.len()));
+                let bytes = match snapshot.content {
+                    SnapshotContent::Full(text) => text.len(),
+                    SnapshotContent::Sparse => 0,
+                };
+                self.full_text_bytes = self.full_text_bytes.saturating_sub(bytes);
             }
         }
     }
@@ -309,4 +317,39 @@ pub fn now_ms() -> u128 {
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_millis()
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+
+    use super::{FULL_SNAPSHOT_LIMIT, SnapshotContent, SnapshotStore, TextFile};
+
+    fn text(revision: &str, line: String) -> TextFile {
+        TextFile {
+            bom: false,
+            final_newline: false,
+            line_ending: "\n",
+            lines: vec![line],
+            revision: revision.to_string(),
+            total_bytes: 0,
+        }
+    }
+
+    #[test]
+    fn snapshot_store_reuses_seen_lines_and_uses_sparse_storage_for_large_text() {
+        let mut store = SnapshotStore::default();
+        let path = Path::new("/workspace/document.txt");
+        let small = text("small", "content".to_string());
+        let id = store.remember(path, &small, [1]);
+        assert_eq!(store.remember(path, &small, [2]), id);
+        assert!(store.get(&id).unwrap().seen_lines.contains(&2));
+
+        let large = text("large", "x".repeat(FULL_SNAPSHOT_LIMIT + 1));
+        let large_id = store.remember(Path::new("/workspace/large.txt"), &large, [1]);
+        assert!(matches!(
+            store.get(&large_id).unwrap().content,
+            SnapshotContent::Sparse
+        ));
+    }
 }
