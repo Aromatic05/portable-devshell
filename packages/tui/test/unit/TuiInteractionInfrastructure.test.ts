@@ -167,6 +167,55 @@ test("wizard validation keeps the draft and reports the control error", async ()
     assert.notEqual(harness.store.getState().ui.formDrafts.create, undefined);
 });
 
+test("config validation errors render in the active field box", async () => {
+    const harness = createHarness({
+        onValidateConfigDraft: async () => {
+            throw new Error("workspace must be an absolute path");
+        }
+    });
+
+    await harness.press("2");
+    await harness.press("", { tab: true });
+    await harness.press("", { return: true });
+    await harness.press("s", { ctrl: true });
+
+    const provider = selectMainScreenModel(harness.store.getState()).boxes.find((box) => box.id === "provider");
+    assert.equal(provider?.expandedLines.some((line) => line.text === "error: workspace must be an absolute path"), true);
+});
+
+test("connector discard confirms and clears its per-instance MCP draft", async () => {
+    const harness = createHarness();
+
+    await harness.press("3");
+    await harness.press("", { tab: true });
+    await harness.press("", { return: true });
+    await harness.press("", { return: true });
+
+    assert.equal(harness.store.getState().ui.dirtyForms["config:alpha"], true);
+    await harness.dispatch({ type: "editor.discard" });
+    assert.equal(harness.store.getState().interaction.confirmDialog.open, true);
+    assert.equal(harness.store.getState().interaction.selectedConfirmButton, "cancel");
+    await harness.press("", { rightArrow: true });
+    await harness.press("", { return: true });
+
+    assert.equal(harness.store.getState().interaction.editor, undefined);
+    assert.equal(harness.store.getState().ui.formDrafts["config:alpha"], undefined);
+});
+
+test("instances collection does not append a start command box", () => {
+    const harness = createHarness();
+    harness.store.upsertCommand({
+        commandId: "start-alpha",
+        sourcePanel: "instances",
+        startedAt: "2026-07-10T00:00:00.000Z",
+        status: "succeeded",
+        targetInstance: "alpha",
+        title: "Start Worker: alpha"
+    });
+
+    assert.deepEqual(selectMainScreenModel(harness.store.getState()).boxes.map((box) => box.id), ["create-instance", "instance:alpha", "instance:beta"]);
+});
+
 test("expanded entries retain Attach Shell alongside the configuration actions", async () => {
     const harness = createHarness();
 
@@ -358,6 +407,7 @@ test("non-collection actions attach only the selected sidebar entry", async () =
 function createHarness(options: {
     onAttachShell?: (instance: string) => Promise<void>;
     onToolCall?: (instance: string, toolName: string, input: string) => Promise<boolean>;
+    onValidateConfigDraft?: () => Promise<void>;
     onValidateInstanceCreateDraft?: () => Promise<unknown>;
 } = {}) {
     const store = new TuiAppStore();
@@ -414,6 +464,7 @@ function createHarness(options: {
             providers: ["local", "ssh", "docker", "podman"] as const
         }),
         onValidateInstanceCreateDraft: options.onValidateInstanceCreateDraft as never,
+        onValidateConfigDraft: options.onValidateConfigDraft,
         store
     });
     const keyDispatcher = new KeyDispatcher();
@@ -421,6 +472,9 @@ function createHarness(options: {
     focusManager.syncPanel(store.getState().ui.selectedPage, store.getState().interaction.focusScope);
 
     return {
+        async dispatch(intent: Parameters<CommandDispatcher["dispatch"]>[0]) {
+            await commandDispatcher.dispatch(intent);
+        },
         async press(input: string, key: Record<string, boolean> = {}) {
             await commandDispatcher.dispatchMany(keyDispatcher.dispatch(store.getState().interaction.focusScope, { input, key }));
         },
