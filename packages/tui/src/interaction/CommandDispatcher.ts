@@ -468,6 +468,10 @@ export class CommandDispatcher {
             const lineId = box?.selectedDetailLineId;
             const actionId = boxId === undefined || lineId === undefined ? undefined : lineId.slice(`${boxId}:`.length);
 
+            if ((state.ui.selectedPage === "config" || state.ui.selectedPage === "connector") && boxId !== undefined && lineId !== undefined) {
+                return this.#openPageEditor(state.ui.selectedPage, boxId);
+            }
+
             const button = actionId?.startsWith("button:") ? actionId.slice("button:".length) : undefined;
 
             if (button !== undefined && state.ui.selectedPage === "instances") {

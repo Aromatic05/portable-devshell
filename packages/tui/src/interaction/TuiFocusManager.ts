@@ -220,6 +220,10 @@ function detailKey(state: TuiAppState, boxId: string): string {
         return "instances:all:create-wizard";
     }
 
+    if (state.ui.selectedPage === "instances" && boxId === "create-instance") {
+        return "instances:undefined:create-instance";
+    }
+
     return `${state.ui.selectedPage}:${state.ui.selectedInstance}:${boxId}`;
 }
 
