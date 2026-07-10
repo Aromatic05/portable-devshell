@@ -65,7 +65,7 @@ function ApprovalDetail(props: { approval?: ApprovalRequest; mode: "approvalDeta
         ["input", props.approval.inputSummary],
         ["requested time", props.approval.createdAt]
     ] as const;
-    const actions = props.mode === "approvalDetail" ? (["approve", "deny", "back"] as const) : (["deny", "back"] as const);
+    const actions = props.mode === "approvalDetail" ? (["back", "deny", "approve"] as const) : (["back", "deny"] as const);
 
     return (
         <Box flexDirection="column">
@@ -100,14 +100,14 @@ export function buildFocusGraphForState(state: TuiAppState): FocusGraph {
             ]);
         case "approvalDetail":
             return buildLinearGraph([
-                { id: "approve", kind: "approvalAction" as const },
+                { id: "back", kind: "approvalAction" as const },
                 { id: "deny", kind: "approvalAction" as const },
-                { id: "back", kind: "approvalAction" as const }
+                { id: "approve", kind: "approvalAction" as const }
             ]);
         case "denyConfirm":
             return buildLinearGraph([
-                { id: "deny", kind: "approvalAction" as const },
-                { id: "back", kind: "approvalAction" as const }
+                { id: "back", kind: "approvalAction" as const },
+                { id: "deny", kind: "approvalAction" as const }
             ]);
         case "search":
             return new FocusGraph([{ item: { id: "search.query", kind: "field" } }]);

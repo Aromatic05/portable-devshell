@@ -1042,7 +1042,7 @@ export class CommandDispatcher {
             listFocusId: state.ui.mainFocusId,
             listScrollOffset: state.ui.scrollOffsets[selectMainScrollKey(state)] ?? 0,
             mode: "approvalDetail",
-            selectedAction: "approve"
+            selectedAction: "back"
         });
         this.#store.setFocusScope("approvalDetail");
     }
@@ -1077,7 +1077,13 @@ export class CommandDispatcher {
             return await this.dispatch({ type: "approval.back" });
         }
         if (auditPage.selectedAction === "approve" && auditPage.mode === "approvalDetail") {
-            return await this.dispatch({ approvalId: auditPage.approvalId, decision: "approve", instance, type: "approval.decide" });
+            return await this.dispatch({
+                body: "Approve this tool call? The requested operation may execute immediately.",
+                confirmIntent: { approvalId: auditPage.approvalId, decision: "approve", instance, type: "approval.decide" },
+                confirmLabel: "Approve",
+                title: "Confirm Approval",
+                type: "overlay.openConfirm"
+            });
         }
         if (auditPage.selectedAction === "deny") {
             if (auditPage.mode === "approvalDetail") {

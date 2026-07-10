@@ -1,50 +1,55 @@
+import type { ApprovalRequest } from "@portable-devshell/shared";
+
 import type { BoxModel } from "../../component/ExpandableBox.js";
 import type { TuiAppState } from "../TuiReducers.js";
 import { buildSelectedInstancePageContext, compactSummary, formatField, makeBox, toolCallStatus } from "./PageBoxSupport.js";
 
 export function buildAuditPageBoxes(state: TuiAppState, instanceName: string): BoxModel[] {
     const { approvals, toolCalls } = buildSelectedInstancePageContext(state, instanceName);
+    const pending = approvals.map((approval, index) => approvalBox(state, instanceName, approval, index));
+    const history = toolCalls.length === 0
+        ? [makeBox(state, "audit", instanceName, {
+              detailLines: ["No tool call history."],
+              id: "audit-empty",
+              status: "normal",
+              summaryLines: [compactSummary(["records", "0"])],
+              title: "Tool Call History"
+          })]
+        : toolCalls.map((record) =>
+              makeBox(state, "audit", instanceName, {
+                  detailLines: [
+                      `callId ${record.callId}`,
+                      `tool ${record.toolName}`,
+                      `status ${record.status}`,
+                      `startedAt ${record.startedAt}`,
+                      `completedAt ${record.completedAt ?? "-"}`,
+                      `source ${record.source}`,
+                      `input ${record.inputSummary || "-"}`
+                  ],
+                  id: `audit-${record.callId}`,
+                  status: toolCallStatus(record),
+                  summaryLines: [compactSummary(["status", record.status], ["source", record.source], ["time", record.startedAt])],
+                  title: `${record.toolName} · ${record.status}`
+              })
+          );
 
-    const auditBoxes = (toolCalls.length === 0 ? [undefined] : toolCalls).map((record, index) =>
-        makeBox(state, "audit", instanceName, {
-            detailLines:
-                record === undefined
-                    ? ["No tool call history from instance.readToolCalls or stream events.", ...approvalLines(approvals)]
-                    : [
-                          ...approvalLines([
-                              ...approvals.filter((approval) => approval.callId === record.callId),
-                              ...(index === 0 ? approvals.filter((approval) => !toolCalls.some((toolCall) => toolCall.callId === approval.callId)) : [])
-                          ]),
-                          `callId ${record.callId}`,
-                          `tool ${record.toolName}`,
-                          `status ${record.status}`,
-                          `startedAt ${record.startedAt}`,
-                          `completedAt ${record.completedAt ?? "-"}`,
-                          `source ${record.source}`,
-                          `input ${record.inputSummary || "-"}`
-                      ],
-            id: record === undefined ? "audit-empty" : `audit-${record.callId}`,
-            status: record === undefined ? "normal" : toolCallStatus(record),
-            summaryLines: [
-                record === undefined
-                    ? compactSummary(["records", "0"], ["last", "-"], ["tool", "-"])
-                    : compactSummary(["status", record.status], ["tool", record.toolName], ["source", record.source])
-            ],
-            title: record === undefined ? "Audit" : `Audit ${index + 1}`
-        })
-    );
-
-    return auditBoxes;
+    return [...pending, ...history];
 }
 
-function approvalLines(approvals: ReturnType<typeof buildSelectedInstancePageContext>["approvals"]): Array<string | { id: string; text: string; tone: "accent" }> {
-    return approvals.flatMap((approval) => [
-        "Pending approval:",
-        formatField("Approval", approval.approvalId),
-        formatField("Tool", approval.toolName),
-        formatField("Risk", approval.riskLevel),
-        formatField("Reason", approval.reason),
-        formatField("Input", approval.inputSummary),
-        { id: `approval.open:${approval.approvalId}`, text: "Enter approval review", tone: "accent" }
-    ]);
+function approvalBox(state: TuiAppState, instanceName: string, approval: ApprovalRequest, index: number): BoxModel {
+    return makeBox(state, "audit", instanceName, {
+        detailLines: [
+            formatField("Approval", approval.approvalId),
+            formatField("Tool", approval.toolName),
+            formatField("Risk", approval.riskLevel),
+            formatField("Source", approval.source),
+            formatField("Reason", approval.reason),
+            formatField("Input", approval.inputSummary),
+            { id: `approval.open:${approval.approvalId}`, text: "[ Review ]", tone: "accent" }
+        ],
+        id: `approval-${approval.approvalId}`,
+        status: "pending",
+        summaryLines: [compactSummary(["risk", approval.riskLevel], ["tool", approval.toolName], ["source", approval.source])],
+        title: `Pending Approval ${index + 1} · ${approval.toolName}`
+    });
 }
