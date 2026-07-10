@@ -3,7 +3,6 @@ import type { Socket } from "node:net";
 import {
     ProtocolControlClientConnection,
     type ControlEventEnvelope,
-    type ControlRelayInputEnvelope,
     type ControlResponseEnvelope,
     type ControlTarget,
     type JsonValue

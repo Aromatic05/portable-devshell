@@ -1,7 +1,7 @@
 import type { InstanceCreateDraft, InstanceCreateSchema, InstanceCreateSummary, JsonValue } from "@portable-devshell/shared";
 
 import type { TuiAppStore } from "../store/TuiAppStore.js";
-import { asRecord, cloneRecord, editorDraft, inputValue, normalizeDraftForSave, readPath, removeInputValue, setPath } from "../store/page/EditorSupport.js";
+import { asRecord, cloneRecord, editorDraft, normalizeDraftForSave, readPath, setPath } from "../store/page/EditorSupport.js";
 import { selectMainBoxFlowMetrics, selectMainBoxIds, selectMainScreenModel, selectMainScrollKey } from "../store/TuiSelectors.js";
 import { TuiFocusManager } from "./TuiFocusManager.js";
 import type { TuiEditorState, TuiUiIntent } from "./TuiInteractionTypes.js";

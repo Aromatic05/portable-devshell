@@ -9,7 +9,6 @@ import {
     type InstanceContainerConfig,
     type InstanceContainerDockerfileConfig,
     type InstanceContainerExistingImageConfig,
-    type InstanceContainerExistingStoppedContainerConfig,
     type InstanceContainerMountConfig,
     type InstanceContainerPresetConfig
 } from "@portable-devshell/shared";

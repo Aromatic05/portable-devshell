@@ -336,7 +336,7 @@ export class TuiRuntime {
         }
 
         const input = this.#mouseBuffer + chunk.toString();
-        const pattern = /\u001B\[<(\d+);(\d+);(\d+)([Mm])/g;
+        const pattern = new RegExp(`${String.fromCharCode(27)}\\[<(\\d+);(\\d+);(\\d+)([Mm])`, "g");
         let cursor = 0;
 
         for (const match of input.matchAll(pattern)) {

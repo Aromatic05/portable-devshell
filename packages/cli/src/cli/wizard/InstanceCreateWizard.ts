@@ -1,4 +1,4 @@
-import { createInterface, type Interface } from "node:readline/promises";
+import { createInterface } from "node:readline/promises";
 
 import type {
     InstanceContainerConfig,

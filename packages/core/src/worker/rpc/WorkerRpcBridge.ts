@@ -49,25 +49,19 @@ export class WorkerRpcBridge {
     }
 
     async request(request: WorkerRpcRequestEnvelope): Promise<WorkerRpcResponseEnvelope> {
-        const process = await this.#ensureProcess();
+        await this.#ensureProcess();
         const writer = this.#writer;
 
         if (writer === undefined) {
             throw WorkerRpcError.disconnected({ instanceName: this.#rpcOptions.instanceName });
         }
 
-        return await new Promise<WorkerRpcResponseEnvelope>(async (resolve, reject) => {
+        return await new Promise<WorkerRpcResponseEnvelope>((resolve, reject) => {
             this.#pending.set(request.id, { resolve, reject });
-
-            try {
-                await writer.write(request as unknown as JsonValue);
-            } catch (error) {
+            void writer.write(request as unknown as JsonValue).catch((error: unknown) => {
                 this.#pending.delete(request.id);
                 this.#disconnect(this.#createDisconnectError(error));
-                return;
-            }
-
-            void process;
+            });
         });
     }
 

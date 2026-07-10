@@ -8,7 +8,7 @@ import { FocusGraph, type FocusNode } from "../interaction/FocusGraph.js";
 import type { FocusItem } from "../interaction/TuiInteractionTypes.js";
 import type { PageId } from "../model/TuiUiTypes.js";
 import type { TuiAppState } from "../store/TuiReducers.js";
-import { selectMainBoxFlowMetrics, selectMainBoxIds, selectMainScreenModel } from "../store/TuiSelectors.js";
+import { selectMainBoxFlowMetrics, selectMainScreenModel } from "../store/TuiSelectors.js";
 
 export const orderedPages: PageId[] = ["instances", "config", "connector", "oauth", "audit", "logs", "help"];
 

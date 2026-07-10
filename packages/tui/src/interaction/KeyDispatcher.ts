@@ -139,7 +139,7 @@ export class KeyDispatcher {
         return [];
     }
 
-    #forEditor(press: TuiKeyPress, mode: "form" | "wizard"): TuiUiIntent[] {
+    #forEditor(press: TuiKeyPress, _mode: "form" | "wizard"): TuiUiIntent[] {
         if (press.key.ctrl && (press.input === "s" || press.input === "S")) {
             return [{ type: "editor.save" }];
         }
