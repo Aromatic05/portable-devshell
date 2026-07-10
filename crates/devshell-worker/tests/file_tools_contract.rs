@@ -273,3 +273,45 @@ fn file_edit_uses_the_first_actual_line_ending_when_writing_back() {
 
     env.json_command(&["stop", "--instance", instance]);
 }
+
+#[test]
+fn file_edit_updates_a_sparse_snapshot_without_losing_the_file_shape() {
+    let env = TestEnv::new();
+    let instance = "aromatic-sparse-edit";
+    let mut content = String::with_capacity(4 * 1024 * 1024 + 1024);
+    content.push_str("first line\n");
+    while content.len() <= 4 * 1024 * 1024 {
+        content.push_str("unchanged sparse snapshot line\n");
+    }
+    fs::write(env.workspace().join("large.txt"), content).unwrap();
+    start(&env, instance);
+
+    let read = call(
+        &env,
+        instance,
+        "1",
+        "file_read",
+        json!({ "path": "./large.txt", "ranges": [{ "startLine": 1, "lineCount": 1 }] }),
+    );
+    assert_eq!(read["ok"], true);
+    let edited = call(
+        &env,
+        instance,
+        "2",
+        "file_edit",
+        json!({
+            "path": "./large.txt",
+            "snapshotId": read["result"]["snapshotId"],
+            "operations": [{
+                "op": "replace",
+                "startLine": 1,
+                "endLine": 1,
+                "lines": ["updated line"],
+            }],
+        }),
+    );
+    assert_eq!(edited["ok"], true, "{edited}");
+    assert_eq!(fs::read_to_string(env.workspace().join("large.txt")).unwrap().lines().next(), Some("updated line"));
+
+    env.json_command(&["stop", "--instance", instance]);
+}

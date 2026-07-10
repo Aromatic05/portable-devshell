@@ -1,5 +1,6 @@
 use std::collections::{BTreeSet, HashMap, VecDeque};
 use std::fs;
+use std::io::{BufRead, BufReader};
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -19,6 +20,16 @@ pub struct TextFile {
     pub lines: Vec<String>,
     pub revision: String,
     pub total_bytes: usize,
+}
+
+#[derive(Clone)]
+pub struct TextMetadata {
+    pub bom: bool,
+    pub final_newline: bool,
+    pub line_ending: &'static str,
+    pub revision: String,
+    pub total_bytes: usize,
+    pub total_lines: usize,
 }
 
 #[derive(Clone)]
@@ -126,6 +137,69 @@ impl SnapshotStore {
 }
 
 impl TextFile {
+    pub fn inspect(path: &Path) -> Result<TextMetadata, ToolError> {
+        let file = fs::File::open(path).map_err(|error| {
+            ToolError::new(
+                "file.notFound",
+                format!("failed to read {}: {error}", path.display()),
+            )
+        })?;
+        let mut reader = BufReader::new(file);
+        let mut hasher = blake3::Hasher::new();
+        let mut buffer = Vec::new();
+        let mut first = true;
+        let mut bom = false;
+        let mut final_newline = false;
+        let mut line_ending = "\n";
+        let mut total_bytes = 0;
+        let mut total_lines = 0;
+
+        loop {
+            buffer.clear();
+            let count = reader
+                .read_until(b'\n', &mut buffer)
+                .map_err(|error| ToolError::new("file.writeFailed", error.to_string()))?;
+            if count == 0 {
+                break;
+            }
+            hasher.update(&buffer);
+            total_bytes += count;
+            if buffer.contains(&0) {
+                return Err(ToolError::new("file.notText", "file contains NUL bytes"));
+            }
+            let had_newline = buffer.last() == Some(&b'\n');
+            let mut content = buffer.as_slice();
+            if first && content.starts_with(&[0xEF, 0xBB, 0xBF]) {
+                bom = true;
+                content = &content[3..];
+            }
+            first = false;
+            let content = content.strip_suffix(b"\n").unwrap_or(content);
+            let content = content.strip_suffix(b"\r").unwrap_or(content);
+            std::str::from_utf8(content)
+                .map_err(|_| ToolError::new("file.notText", "file is not valid UTF-8"))?;
+            if had_newline || !content.is_empty() {
+                total_lines += 1;
+            }
+            if had_newline && total_lines == 1 {
+                line_ending = if buffer.get(buffer.len().saturating_sub(2)) == Some(&b'\r') {
+                    "\r\n"
+                } else {
+                    "\n"
+                };
+            }
+            final_newline = had_newline;
+        }
+        Ok(TextMetadata {
+            bom,
+            final_newline,
+            line_ending,
+            revision: hasher.finalize().to_hex().to_string(),
+            total_bytes,
+            total_lines,
+        })
+    }
+
     pub fn read(path: &Path) -> Result<Self, ToolError> {
         let bytes = fs::read(path).map_err(|error| {
             ToolError::new(
