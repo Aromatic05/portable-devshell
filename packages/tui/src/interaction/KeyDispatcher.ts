@@ -44,7 +44,7 @@ export class KeyDispatcher {
             case "sidebarInstances":
             case "mainBoxes":
             case "boxDetail":
-                return this.#forMainScopes(press);
+                return this.#forMainScopes(mode, press);
         }
     }
 
@@ -156,7 +156,7 @@ export class KeyDispatcher {
         return [];
     }
 
-    #forMainScopes(press: TuiKeyPress): TuiUiIntent[] {
+    #forMainScopes(mode: "sidebarPages" | "sidebarInstances" | "mainBoxes" | "boxDetail", press: TuiKeyPress): TuiUiIntent[] {
         if (isShortcutDigit(press.input)) {
             const page = pageFromShortcut(Number(press.input));
             return page === undefined ? [] : [{ page, type: "page.select" }];
@@ -191,7 +191,7 @@ export class KeyDispatcher {
         if (press.key.end) {
             return [{ type: "screen.end" }];
         }
-        if (press.key.return) {
+        if (press.key.return && mode !== "mainBoxes") {
             return [{ type: "focus.activate" }];
         }
         if (press.input === " ") {

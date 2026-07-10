@@ -173,7 +173,8 @@ export class CommandDispatcher {
             case "screen.end":
                 return this.#setMainColumnOffset(this.#maxMainScrollOffset());
             case "screen.toggle": {
-                if (this.#store.getState().interaction.focusScope !== "mainBoxes") {
+                const scope = this.#store.getState().interaction.focusScope;
+                if (scope !== "mainBoxes" && scope !== "boxDetail") {
                     return false;
                 }
                 const boxId = this.#store.getState().ui.mainFocusId;
@@ -183,6 +184,13 @@ export class CommandDispatcher {
                 const key = this.#expandedKey(boxId);
                 const expanded = this.#store.getState().ui.expandedBoxes[key] === true;
                 this.#store.toggleExpanded(key);
+                const box = selectMainScreenModel(this.#store.getState()).boxes.find((candidate) => candidate.id === boxId);
+                if (expanded) {
+                    this.#store.setFocusScope("mainBoxes");
+                } else if (box?.expandedLines[0]?.id !== undefined) {
+                    this.#store.setSelectedDetailLine(key, box.expandedLines[0].id);
+                    this.#store.setFocusScope("boxDetail");
+                }
                 this.#ensureMainFocusVisible();
                 this.#store.setScreenStatus(this.#store.getState().ui.selectedPage, expanded ? "Collapsed box." : "Expanded box.");
                 return true;
@@ -450,29 +458,7 @@ export class CommandDispatcher {
             }
         }
         if (scope === "mainBoxes") {
-            const state = this.#store.getState();
-            const boxId = state.ui.mainFocusId;
-            if (boxId === undefined) {
-                return false;
-            }
-            const box = selectMainScreenModel(state).boxes.find((candidate) => candidate.id === boxId);
-            if (box === undefined || box.expandedLines.length === 0) {
-                return false;
-            }
-            if (box.id === "create-instance") {
-                return await this.#openCreateWizard();
-            }
-            if (state.ui.selectedPage === "config" || state.ui.selectedPage === "connector") {
-                return this.#openPageEditor(state.ui.selectedPage, box.id);
-            }
-            if (!box.expanded) {
-                this.#store.toggleExpanded(this.#expandedKey(boxId));
-            }
-            this.#store.setSelectedDetailLine(this.#expandedKey(boxId), box.selectedDetailLineId ?? box.expandedLines[0].id);
-            this.#store.setFocusScope("boxDetail");
-            this.#ensureMainFocusVisible();
-            this.#store.setScreenStatus(this.#store.getState().ui.selectedPage, "Opened box detail.");
-            return true;
+            return false;
         }
         if (scope === "boxDetail") {
             const state = this.#store.getState();
