@@ -113,6 +113,9 @@ importers:
       react:
         specifier: ^18.3.1
         version: 18.3.1
+      string-argv:
+        specifier: ^0.3.2
+        version: 0.3.2
 
 packages:
 
