@@ -266,7 +266,10 @@ fn file_edit_uses_the_first_actual_line_ending_when_writing_back() {
         }),
     );
     assert_eq!(edited["ok"], true);
-    assert_eq!(fs::read(env.workspace().join("document.txt")).unwrap(), b"updated\nsecond\n");
+    assert_eq!(
+        fs::read(env.workspace().join("document.txt")).unwrap(),
+        b"updated\nsecond\n"
+    );
 
     env.json_command(&["stop", "--instance", instance]);
 }

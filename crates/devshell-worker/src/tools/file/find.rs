@@ -73,7 +73,10 @@ impl ToolHandler for FileFindTool {
         let respect_gitignore = input.respect_gitignore.unwrap_or(true);
         let limit = input.limit.unwrap_or(200);
         if limit > 1000 {
-            return Err(ToolError::new("tool.invalidArguments", "limit cannot exceed 1000"));
+            return Err(ToolError::new(
+                "tool.invalidArguments",
+                "limit cannot exceed 1000",
+            ));
         }
         let query = json!({
             "path": root_raw,
@@ -98,7 +101,8 @@ impl ToolHandler for FileFindTool {
             .ignore(respect_gitignore)
             .require_git(false);
         for entry in walker.build() {
-            let entry = entry.map_err(|error| ToolError::new("file.writeFailed", error.to_string()))?;
+            let entry =
+                entry.map_err(|error| ToolError::new("file.writeFailed", error.to_string()))?;
             let path = entry.path();
             if path == root {
                 continue;

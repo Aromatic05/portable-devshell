@@ -142,7 +142,13 @@ impl TextFile {
             .map_err(|_| ToolError::new("file.notText", "file is not valid UTF-8"))?;
         let line_ending = content
             .find('\n')
-            .map(|index| if index > 0 && content.as_bytes()[index - 1] == b'\r' { "\r\n" } else { "\n" })
+            .map(|index| {
+                if index > 0 && content.as_bytes()[index - 1] == b'\r' {
+                    "\r\n"
+                } else {
+                    "\n"
+                }
+            })
             .unwrap_or("\n");
         let final_newline = content.ends_with('\n') || content.ends_with('\r');
         let normalized = content.replace("\r\n", "\n").replace('\r', "\n");

@@ -115,7 +115,8 @@ impl ToolHandler for FileSearchTool {
             .require_git(false);
         let mut files = Vec::new();
         for entry in walker.build() {
-            let entry = entry.map_err(|error| ToolError::new("file.writeFailed", error.to_string()))?;
+            let entry =
+                entry.map_err(|error| ToolError::new("file.writeFailed", error.to_string()))?;
             let path = entry.path();
             if !entry.file_type().is_some_and(|kind| kind.is_file()) {
                 continue;
@@ -143,12 +144,12 @@ impl ToolHandler for FileSearchTool {
             }
             let shown = shown_lines(&matches, text.lines.len(), context);
             let content = format_content(&text.lines, &matches, &shown);
-            let snapshot_id = self
-                .state
-                .snapshots
-                .lock()
-                .unwrap()
-                .remember(path, &text, shown.iter().copied());
+            let snapshot_id =
+                self.state
+                    .snapshots
+                    .lock()
+                    .unwrap()
+                    .remember(path, &text, shown.iter().copied());
             let display = if requested.raw == "./" {
                 format!("./{relative_text}")
             } else {

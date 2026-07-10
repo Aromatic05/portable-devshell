@@ -39,7 +39,10 @@ impl ToolHandler for FileWriteTool {
         let input: FileWriteInput = serde_json::from_value(call.params.clone())
             .map_err(|error| ToolError::new("tool.invalidArguments", error.to_string()))?;
         if input.content.contains('\0') {
-            return Err(ToolError::new("file.notText", "content cannot contain NUL bytes"));
+            return Err(ToolError::new(
+                "file.notText",
+                "content cannot contain NUL bytes",
+            ));
         }
         let (requested, path) = resolve_create(&call, &input.path)?;
         let write_lock = self.state.write_lock(&path);

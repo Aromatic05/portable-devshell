@@ -34,7 +34,8 @@ impl FileToolState {
 
     pub fn write_lock(&self, path: &Path) -> Arc<Mutex<()>> {
         let mut locks = self.write_locks.lock().unwrap();
-        locks.entry(path.to_path_buf())
+        locks
+            .entry(path.to_path_buf())
             .or_insert_with(|| Arc::new(Mutex::new(())))
             .clone()
     }
