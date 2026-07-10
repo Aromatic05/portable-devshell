@@ -22,7 +22,11 @@ test("CliControlClient performs control rpc over unix socket", async (t) => {
 
         socket.on("data", (chunk: Uint8Array) => {
             for (const frame of reader.push(chunk)) {
-                const envelope = frame as Record<string, any>;
+                const envelope = frame as {
+                    id: string;
+                    method: string;
+                    params?: { clientKind?: JsonValue };
+                };
                 methods.push(String(envelope.method));
 
                 void writer.write({

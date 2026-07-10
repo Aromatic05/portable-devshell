@@ -186,7 +186,7 @@ async function runInteractiveCreateFlow(t: { after(callback: () => Promise<void>
     await mkdir(join(homeDirectory, ".devshell", "control"), { recursive: true });
     await mkdir(join(homeDirectory, ".devshell", "control", "instances"), { recursive: true });
     await writeFile(join(homeDirectory, ".devshell", "control", "config.toml"), createCreateConfig(), "utf8");
-    let controlPid: number | undefined;
+    let controlPid: number | undefined = undefined;
 
     t.after(async () => {
         if (!controlStopped) {
@@ -254,7 +254,11 @@ function createInstanceHarness(): { attach: (socket: Socket) => void } {
 
             socket.on("data", (chunk: Uint8Array) => {
                 for (const frame of reader.push(chunk)) {
-                    const envelope = frame as Record<string, any>;
+                    const envelope = frame as {
+                        id: string;
+                        method: string;
+                        params?: { clientKind?: JsonValue };
+                    };
 
                     switch (envelope.method) {
                         case "control.identifyClient":

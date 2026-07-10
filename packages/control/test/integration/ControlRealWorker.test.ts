@@ -186,6 +186,7 @@ async function request(
     target: { kind: "control" } | { instance: string; kind: "instance" },
     params?: JsonValue,
     clientKind: "cli" | "tui" = "cli"
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 ): Promise<any> {
     const socket = createConnection(socketPath);
     const reader = new FrameReader();
@@ -198,9 +199,11 @@ async function request(
 
     const identifyId = `identify-${method}-${Date.now()}`;
     const requestId = `${method}-${Date.now()}-request`;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const response = new Promise<any>((resolve, reject) => {
         socket.on("data", (chunk: Uint8Array) => {
             for (const frame of reader.push(chunk)) {
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
                 const envelope = frame as Record<string, any>;
 
                 if (envelope.type !== "response" || (envelope.id !== identifyId && envelope.id !== requestId)) {

@@ -218,7 +218,6 @@ class RpcClient {
 
 class FakeWorker {
     readonly #name: string;
-    #lastToolCall?: { requestId?: string; sessionId?: string; source: string };
     #events: Array<{ at: string; data?: unknown; instanceName: string; seq: number; type: string }> = [];
     #lastSeq = 0;
     #snapshot = {
@@ -264,7 +263,6 @@ class FakeWorker {
         _input: JsonValue,
         context: { requestId?: string; sessionId?: string; source: string }
     ) {
-        this.#lastToolCall = context;
         this.emit("toolCall.completed", { source: context.source, toolName: "bash_run" });
         return {
             exitCode: 0,

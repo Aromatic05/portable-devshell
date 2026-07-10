@@ -165,6 +165,7 @@ test("stop tolerates shutdown socket races in the real lifecycle rpc client", as
 
         socket.on("data", (chunk: Uint8Array) => {
             for (const frame of reader.push(chunk)) {
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
                 const envelope = frame as Record<string, any>;
 
                 if (envelope.method === "control.status") {
@@ -376,6 +377,7 @@ async function reserveTcpPort(): Promise<number> {
     return address.port;
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function request(socketPath: string, method: string, params?: JsonValue): Promise<any> {
     const socket = createConnection(socketPath);
     const reader = new FrameReader();
@@ -386,9 +388,11 @@ async function request(socketPath: string, method: string, params?: JsonValue): 
         socket.once("error", reject);
     });
 
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const response = new Promise<any>((resolve, reject) => {
         socket.on("data", (chunk: Uint8Array) => {
             for (const frame of reader.push(chunk)) {
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
                 const envelope = frame as Record<string, any>;
 
                 if (envelope.type !== "response") {

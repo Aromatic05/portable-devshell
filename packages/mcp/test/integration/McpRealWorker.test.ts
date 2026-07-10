@@ -133,7 +133,9 @@ test("MCP tools/call waits for approval before invoking the worker tool", async 
         listenHost: "127.0.0.1",
         listenPort: 0
     });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let callPromise: Promise<any> | undefined;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let deniedPromise: Promise<any> | undefined;
 
     try {
@@ -220,12 +222,14 @@ test("MCP tools/call waits for approval before invoking the worker tool", async 
     }
 });
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function postJson(url: string, body: JsonValue, extraHeaders?: Record<string, string>): Promise<any> {
     const response = await postRawJson(url, body, extraHeaders);
 
     assert.equal(response.status, 200);
     return {
         headers: response.headers,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         ...(JSON.parse(response.text) as Record<string, any>)
     };
 }

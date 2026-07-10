@@ -238,6 +238,7 @@ async function postJson(url: string, body: JsonValue, extraHeaders?: Record<stri
     const response = await postRawJson(url, body, extraHeaders);
 
     return {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         body: JSON.parse(response.text) as Record<string, any>,
         headers: response.headers,
         status: response.status
