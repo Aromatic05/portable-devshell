@@ -1,16 +1,11 @@
-type JsonValue = boolean | number | null | string | JsonValue[] | { [key: string]: JsonValue };
-
-interface ToolDefinition {
-    description?: string;
-    inputSchema?: JsonValue;
-    name: string;
-}
+import type { JsonValue, ToolDefinition } from "@portable-devshell/shared";
 
 export interface McpTool {
     [key: string]: JsonValue;
     description: string;
     inputSchema: JsonValue;
     name: string;
+    outputSchema: JsonValue;
 }
 
 export class McpToolSchemaUnavailableError extends Error {
@@ -24,14 +19,15 @@ export class McpToolSchemaUnavailableError extends Error {
 
 export class McpToolSchemaAdapter {
     toMcpTool(tool: ToolDefinition, description: string): McpTool {
-        if (tool.inputSchema === undefined) {
+        if (tool.inputSchema === undefined || tool.outputSchema === undefined) {
             throw new McpToolSchemaUnavailableError(tool.name);
         }
 
         return {
             description,
             inputSchema: tool.inputSchema,
-            name: tool.name
+            name: tool.name,
+            outputSchema: tool.outputSchema
         };
     }
 }

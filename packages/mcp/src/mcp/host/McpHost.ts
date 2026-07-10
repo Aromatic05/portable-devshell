@@ -1,4 +1,4 @@
-import type { CommandResult, JsonValue } from "@portable-devshell/shared";
+import type { JsonValue, ToolDefinition } from "@portable-devshell/shared";
 import { type McpAuthConfig } from "../auth/McpAuthConfig.js";
 import { McpOAuthProtectedResource } from "../auth/oauth/McpOAuthProtectedResource.js";
 import type { McpOAuthApprovalService } from "../auth/oauth/McpOAuthApprovalService.js";
@@ -8,17 +8,11 @@ import { McpEndpointWorker } from "../endpoint/McpEndpointWorker.js";
 import { McpHostHttpServer } from "./McpHostHttpServer.js";
 import { McpHostRouteRegistry } from "./route/McpHostRouteRegistry.js";
 
-interface ToolDefinition {
-    description?: string;
-    inputSchema?: JsonValue;
-    name: string;
-}
-
 interface WorkerInstanceLike {
     appendMcpSessionClosed(sessionId: string): Promise<void>;
     appendMcpSessionOpened(sessionId: string): Promise<void>;
     appendMcpToolCalled(toolName: string, context: { requestId?: string; sessionId?: string }): Promise<void>;
-    callTool(toolName: string, input: JsonValue, context: { requestId?: string; sessionId?: string; source: "mcp" }): Promise<CommandResult>;
+    callTool(toolName: string, input: JsonValue, context: { requestId?: string; sessionId?: string; source: "mcp" }): Promise<JsonValue>;
     hasToolSchemaCache?(): boolean;
     listTools(): ToolDefinition[];
     snapshot(): { ready?: boolean };

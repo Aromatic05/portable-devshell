@@ -4,7 +4,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { CallToolRequestSchema, ErrorCode, isInitializeRequest, ListToolsRequestSchema, McpError } from "@modelcontextprotocol/sdk/types.js";
-import { toControlErrorBody, type CommandResult, type ControlErrorBody, type JsonValue, type ToolCallContext } from "@portable-devshell/shared";
+import { toControlErrorBody, type ControlErrorBody, type JsonValue, type ToolCallContext } from "@portable-devshell/shared";
 
 import { McpToolSchemaUnavailableError } from "../tool/McpToolSchemaAdapter.js";
 import { McpEndpointWorker } from "./McpEndpointWorker.js";
@@ -186,15 +186,16 @@ function writeJsonRpcError(response: ServerResponse, statusCode: number, code: n
     );
 }
 
-function toCallToolResult(result: CommandResult) {
+function toCallToolResult(result: JsonValue) {
     return {
         content: [
             {
                 type: "text" as const,
-                text: result.stdout
+                text: JSON.stringify(result)
             }
         ],
-        isError: result.exitCode !== 0
+        isError: false,
+        structuredContent: result
     };
 }
 

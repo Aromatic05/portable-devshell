@@ -1,20 +1,14 @@
-import { createError, errorCodes, type CommandResult, type JsonValue, type ToolCallContext } from "@portable-devshell/shared";
+import { createError, errorCodes, type JsonValue, type ToolCallContext, type ToolDefinition } from "@portable-devshell/shared";
 
 import { McpToolDescriptionEnhancer } from "../tool/McpToolDescriptionEnhancer.js";
 import { McpToolFilter } from "../tool/McpToolFilter.js";
 import { McpToolSchemaAdapter, McpToolSchemaUnavailableError, type McpTool } from "../tool/McpToolSchemaAdapter.js";
 
-interface ToolDefinition {
-    description?: string;
-    inputSchema?: JsonValue;
-    name: string;
-}
-
 interface WorkerInstanceLike {
     appendMcpSessionClosed(sessionId: string): Promise<void>;
     appendMcpSessionOpened(sessionId: string): Promise<void>;
     appendMcpToolCalled(toolName: string, context: { requestId?: string; sessionId?: string }): Promise<void>;
-    callTool(toolName: string, input: JsonValue, context: ToolCallContext): Promise<CommandResult>;
+    callTool(toolName: string, input: JsonValue, context: ToolCallContext): Promise<JsonValue>;
     hasToolSchemaCache?(): boolean;
     listTools(): ToolDefinition[];
     snapshot(): { ready?: boolean };

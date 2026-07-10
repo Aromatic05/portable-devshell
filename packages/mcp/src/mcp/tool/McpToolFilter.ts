@@ -1,6 +1,4 @@
-interface ToolDefinition {
-    name: string;
-}
+import type { ToolDefinition } from "@portable-devshell/shared";
 
 export class McpToolFilter {
     readonly #allowlist: ReadonlySet<string>;

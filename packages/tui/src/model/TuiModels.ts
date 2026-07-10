@@ -193,7 +193,7 @@ export class TuiToolAuditModel {
             status: readToolCallStatus(data.status) ?? current?.status ?? "running",
             stderrBytes: readOptionalNumber(data.stderrBytes) ?? current?.stderrBytes,
             stdoutBytes: readOptionalNumber(data.stdoutBytes) ?? current?.stdoutBytes,
-            timedOut: data.timedOut === true ? true : (current?.timedOut ?? false),
+            termination: data.termination === "exited" || data.termination === "signaled" || data.termination === "timeout" || data.termination === "outputLimit" ? data.termination : current?.termination,
             toolName: readOptionalString(data.toolName) ?? current?.toolName ?? ""
         } satisfies ToolCallRecord;
 
