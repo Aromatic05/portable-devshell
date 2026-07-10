@@ -6,6 +6,7 @@ export * from "./dto/DtoCommandResult.js";
 export * from "./dto/instance/DtoInstanceCreate.js";
 export * from "./dto/instance/DtoInstanceEvent.js";
 export * from "./dto/instance/DtoInstanceSnapshot.js";
+export * from "./dto/oauth/index.js";
 export * from "./dto/tool/DtoToolApproval.js";
 export * from "./dto/tool/DtoToolCallRecord.js";
 export * from "./dto/tool/DtoToolDefinition.js";
