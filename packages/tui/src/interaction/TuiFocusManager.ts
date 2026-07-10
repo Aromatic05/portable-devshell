@@ -1,4 +1,5 @@
 import type { TuiAppStore } from "../store/TuiAppStore.js";
+import type { TuiAppState } from "../store/TuiReducers.js";
 import { FocusGraph, type FocusDirection } from "./FocusGraph.js";
 import { type FocusItem, type TuiMode, isSameFocusItem } from "./TuiInteractionTypes.js";
 import type { PageId } from "../model/TuiUiTypes.js";
@@ -47,7 +48,7 @@ export class TuiFocusManager {
             if (boxId === undefined) {
                 return undefined;
             }
-            const key = `${state.ui.selectedPage}:${state.ui.selectedInstance}:${boxId}`;
+            const key = detailKey(state, boxId);
             const lineId = state.interaction.selectedDetailLineIds[key];
             return lineId === undefined ? undefined : { id: lineId, kind: "line" };
         }
@@ -168,7 +169,7 @@ export class TuiFocusManager {
                     return;
                 }
                 this.#store.setFocusScope("boxDetail");
-                this.#store.setSelectedDetailLine(`${state.ui.selectedPage}:${state.ui.selectedInstance}:${boxId}`, item.id);
+                this.#store.setSelectedDetailLine(detailKey(state, boxId), item.id);
                 return;
             }
             case "action":
@@ -183,4 +184,12 @@ export class TuiFocusManager {
                 return;
         }
     }
+}
+
+function detailKey(state: TuiAppState, boxId: string): string {
+    if (state.ui.selectedPage === "instances" && boxId.startsWith("instance:")) {
+        return `instances:${boxId.slice("instance:".length)}:instance`;
+    }
+
+    return `${state.ui.selectedPage}:${state.ui.selectedInstance}:${boxId}`;
 }

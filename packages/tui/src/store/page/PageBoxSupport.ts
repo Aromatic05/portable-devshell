@@ -34,13 +34,14 @@ export function makeBox(
     input: {
         detailLines: Array<string | { id: string; text: string; tone?: BoxLine["tone"] }>;
         disabled?: boolean;
+        expandedKey?: string;
         id: string;
         status?: ExpandableBoxStatus;
         summaryLines: string[];
         title: string;
     }
 ): BoxModel {
-    const expandedKey = `${page}:${instance}:${input.id}`;
+    const expandedKey = input.expandedKey ?? `${page}:${instance}:${input.id}`;
     const summaryLines = normalizeCollapsedLines(input.summaryLines);
 
     const expandedLines = normalizeExpandedLines(input.id, input.detailLines);
@@ -50,6 +51,7 @@ export function makeBox(
         collapsedLines: summaryLines,
         disabled: input.disabled,
         expanded: state.ui.expandedBoxes[expandedKey] === true,
+        expandedKey,
         expandedLines,
         focused: state.ui.mainFocusId === input.id && (state.interaction.focusScope === "mainBoxes" || state.interaction.focusScope === "boxDetail"),
         id: input.id,

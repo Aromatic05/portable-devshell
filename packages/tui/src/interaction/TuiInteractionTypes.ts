@@ -108,6 +108,7 @@ export type TuiUiIntent =
     | { instance: string; type: "instance.start" }
     | { instance: string; type: "instance.stop" }
     | { instance: string; type: "instance.refresh" }
+    | { instance: string; type: "instance.attachShell" }
     | { type: "instance.openLogs" }
     | { type: "instance.openAudit" }
     | { approvalId: string; instance: string; type: "approval.open" }

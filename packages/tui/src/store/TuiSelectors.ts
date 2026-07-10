@@ -86,7 +86,7 @@ export function selectMainScreenModel(state: TuiAppState): MainScreenModel {
     const panelError = state.panelErrors[`${activePage.page}:${activePage.instance ?? "-"}`];
     const errorLines = panelError === undefined ? undefined : [`${panelError.code}: ${panelError.message}`];
 
-    if (activePage.page !== "help" && activePage.instance === undefined) {
+    if (activePage.page !== "instances" && activePage.page !== "help" && activePage.instance === undefined) {
         return {
             activePage,
             boxes: [],
@@ -129,7 +129,7 @@ export function selectMainBoxFlowMetrics(state: TuiAppState): MainBoxFlowMetrics
 }
 
 export function selectMainScrollKey(state: TuiAppState): string {
-    return `${state.ui.selectedPage}:${state.ui.selectedInstance ?? "-"}:main`;
+    return `${state.ui.selectedPage}:${state.ui.selectedPage === "instances" ? "collection" : state.ui.selectedInstance ?? "-"}:main`;
 }
 
 export function selectFooterModel(state: TuiAppState): { mode: TuiMode; text: string } {

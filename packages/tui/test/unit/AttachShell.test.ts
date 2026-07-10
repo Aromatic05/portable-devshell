@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
+import { EventEmitter } from "node:events";
 import test from "node:test";
 
-import { AttachShellCommandResolver, AttachShellResolutionError } from "../../dist/index.js";
+import { AttachShellCommandResolver, AttachShellResolutionError, AttachShellRunner } from "../../dist/index.js";
 
 test("Attach Shell resolves a local login shell from control-provided instance data", () => {
     const command = new AttachShellCommandResolver().resolve({
@@ -39,4 +40,22 @@ test("Attach Shell refuses a stopped container without starting it", () => {
         }),
         (error: unknown) => error instanceof AttachShellResolutionError && error.message === "Container is not running. Use Start Worker first."
     );
+});
+
+test("Attach Shell restores the TUI after a spawn failure", async () => {
+    const lifecycle: string[] = [];
+    const child = new EventEmitter();
+    const runner = new AttachShellRunner({
+        hooks: {
+            resume: () => lifecycle.push("resume"),
+            suspend: () => lifecycle.push("suspend")
+        },
+        spawn: () => {
+            queueMicrotask(() => child.emit("error", Object.assign(new Error("missing shell"), { code: "EACCES" })));
+            return child as never;
+        }
+    });
+
+    await assert.rejects(() => runner.run({ args: ["-l"], command: "missing-shell" }), /missing shell/u);
+    assert.deepEqual(lifecycle, ["suspend", "resume"]);
 });

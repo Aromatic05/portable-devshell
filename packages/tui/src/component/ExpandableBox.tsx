@@ -18,6 +18,7 @@ export interface BoxModel {
     expandedLines: readonly BoxLine[];
     focused: boolean;
     id: string;
+    expandedKey: string;
     selectedDetailLineId?: string;
     status: ExpandableBoxStatus;
     title: string;

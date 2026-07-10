@@ -15,7 +15,7 @@ export function buildBoxesForPage(state: TuiAppState, page: PageId, instanceName
             case "help":
                 return buildHelpPageBoxes(state);
             case "instances":
-                return instanceName === undefined ? [] : buildInstancesPageBoxes(state, instanceName);
+                return buildInstancesPageBoxes(state);
             case "config":
                 return instanceName === undefined ? [] : buildConfigPageBoxes(state, instanceName);
             case "connector":

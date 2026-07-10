@@ -5,6 +5,8 @@ import { render, type Instance as InkInstance } from "ink";
 import { ControlError, createError, errorCodes, type JsonValue } from "@portable-devshell/shared";
 
 import { TuiApp } from "./TuiApp.js";
+import { AttachShellCommandResolver } from "../attach/AttachShellCommandResolver.js";
+import { AttachShellRunner } from "../attach/AttachShellRunner.js";
 import { TuiControlClient } from "../control/TuiControlClient.js";
 import { TuiControlSession } from "../control/TuiControlSession.js";
 import { CommandDispatcher } from "../interaction/CommandDispatcher.js";
@@ -34,6 +36,8 @@ export class TuiRuntime {
     readonly #alternateScreen: AlternateScreen;
     #ink?: InkInstance;
     #commandCounter = 0;
+    #attachResume?: () => void;
+    #attachWait?: Promise<void>;
     #stopped = false;
 
     constructor(options: TuiRuntimeOptions = {}) {
@@ -66,6 +70,9 @@ export class TuiRuntime {
             onInstanceAction: async (action, instance) => {
                 await this.#runInstanceAction(action, instance);
             },
+            onAttachShell: async (instance) => {
+                await this.#attachShell(instance);
+            },
             mainViewportRows: () => Math.max(0, this.rows - 7),
             onLogsReload: async () => {
                 await this.session.refreshLogs();
@@ -92,14 +99,26 @@ export class TuiRuntime {
 
     async run(): Promise<void> {
         this.#alternateScreen.enter();
-        this.#ink = render(React.createElement(TuiApp, { runtime: this }), {
-            exitOnCtrlC: false,
-            stdin: this.#stdin,
-            stdout: this.#stdout
-        });
+        this.#mountInk();
 
         await this.session.start();
-        await this.#ink.waitUntilExit();
+        while (!this.#stopped) {
+            const ink = this.#ink;
+            if (ink === undefined) {
+                await this.#attachWait;
+                continue;
+            }
+
+            await ink.waitUntilExit();
+            if (this.#stopped) {
+                break;
+            }
+            if (this.#attachWait !== undefined) {
+                await this.#attachWait;
+                continue;
+            }
+            break;
+        }
         await this.stop();
     }
 
@@ -143,6 +162,7 @@ export class TuiRuntime {
         await this.session.stop();
         this.scheduler.dispose();
         this.#ink?.unmount();
+        this.#ink = undefined;
         this.#alternateScreen.exit();
     }
 
@@ -188,6 +208,70 @@ export class TuiRuntime {
                     await this.session.refreshInstance(instance);
                 });
         }
+    }
+
+    async #attachShell(instance: string): Promise<void> {
+        const entry = this.store.getState().instances.find((candidate) => candidate.name === instance);
+        if (entry === undefined) {
+            this.store.setScreenStatus(this.store.getState().ui.selectedPage, "Attach Shell failed: selected entry is unavailable.");
+            return;
+        }
+
+        try {
+            const command = new AttachShellCommandResolver().resolve({
+                configView: this.store.getState().configView,
+                instance: entry,
+                snapshot: this.store.getState().snapshotsByInstance[instance]
+            });
+            await new AttachShellRunner({
+                hooks: {
+                    resume: () => this.#resumeAfterAttach(),
+                    suspend: () => this.#suspendForAttach()
+                }
+            }).run(command);
+        } catch (error) {
+            this.store.setScreenStatus(this.store.getState().ui.selectedPage, `Attach Shell failed: ${readErrorMessage(error)}`);
+            return;
+        }
+
+        try {
+            const refreshed = await this.#client.refreshStatus(instance);
+            this.store.replaceSnapshot(refreshed.snapshot);
+            await this.session.refreshInstance(instance);
+            this.store.setScreenStatus(this.store.getState().ui.selectedPage, "Shell exited. Status refreshed from control.");
+        } catch (error) {
+            this.store.setScreenStatus(this.store.getState().ui.selectedPage, `Shell exited. Status refresh failed: ${readErrorMessage(error)}`);
+        }
+    }
+
+    #mountInk(): void {
+        this.#ink = render(React.createElement(TuiApp, { runtime: this }), {
+            exitOnCtrlC: false,
+            stdin: this.#stdin,
+            stdout: this.#stdout
+        });
+    }
+
+    #suspendForAttach(): void {
+        if (this.#attachWait !== undefined) {
+            return;
+        }
+
+        this.#attachWait = new Promise<void>((resolve) => {
+            this.#attachResume = resolve;
+        });
+        this.#ink?.unmount();
+        this.#ink = undefined;
+        this.#alternateScreen.exit();
+    }
+
+    #resumeAfterAttach(): void {
+        this.#alternateScreen.enter();
+        this.#mountInk();
+        const resume = this.#attachResume;
+        this.#attachResume = undefined;
+        this.#attachWait = undefined;
+        resume?.();
     }
 
     async #decideApproval(instance: string, approvalId: string, decision: "approve" | "deny"): Promise<void> {
@@ -261,6 +345,10 @@ function toControlError(error: unknown): ControlError {
         message: typeof candidate?.message === "string" ? candidate.message : String(error),
         retryable: candidate?.retryable === true
     });
+}
+
+function readErrorMessage(error: unknown): string {
+    return error instanceof Error ? error.message : String(error);
 }
 
 class AlternateScreen {

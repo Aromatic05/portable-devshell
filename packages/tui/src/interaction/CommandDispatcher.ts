@@ -8,6 +8,7 @@ export interface CommandDispatcherOptions {
     focusManager: TuiFocusManager;
     onApprovalDecision(instance: string, approvalId: string, decision: "approve" | "deny"): Promise<void>;
     onInstanceAction(action: "refresh" | "start" | "stop", instance: string): Promise<void>;
+    onAttachShell(instance: string): Promise<void>;
     mainViewportRows(): number;
     onLogsReload(): Promise<void>;
     onQuit(): Promise<void>;
@@ -20,6 +21,7 @@ export class CommandDispatcher {
     readonly #focusManager: TuiFocusManager;
     readonly #onApprovalDecision: CommandDispatcherOptions["onApprovalDecision"];
     readonly #onInstanceAction: CommandDispatcherOptions["onInstanceAction"];
+    readonly #onAttachShell: CommandDispatcherOptions["onAttachShell"];
     readonly #mainViewportRows: () => number;
     readonly #onLogsReload: () => Promise<void>;
     readonly #onQuit: () => Promise<void>;
@@ -31,6 +33,7 @@ export class CommandDispatcher {
         this.#focusManager = options.focusManager;
         this.#onApprovalDecision = options.onApprovalDecision;
         this.#onInstanceAction = options.onInstanceAction;
+        this.#onAttachShell = options.onAttachShell;
         this.#mainViewportRows = options.mainViewportRows;
         this.#onLogsReload = options.onLogsReload;
         this.#onQuit = options.onQuit;
@@ -232,6 +235,9 @@ export class CommandDispatcher {
             case "instance.refresh":
                 await this.#onInstanceAction("refresh", intent.instance);
                 return true;
+            case "instance.attachShell":
+                await this.#onAttachShell(intent.instance);
+                return true;
             case "instance.openLogs":
                 return await this.dispatch({ page: "logs", type: "page.select" });
             case "instance.openAudit":
@@ -417,6 +423,9 @@ export class CommandDispatcher {
             if (instance !== undefined && actionId?.startsWith("tool.action:")) {
                 return await this.dispatch({ instance, toolName: actionId.slice("tool.action:".length), type: "toolForm.open" });
             }
+            if (actionId?.startsWith("instance.attachShell:")) {
+                return await this.#openAttachShellConfirm(actionId.slice("instance.attachShell:".length));
+            }
             this.#store.setScreenStatus(this.#store.getState().ui.selectedPage, "Detail has no action.");
             return true;
         }
@@ -424,14 +433,27 @@ export class CommandDispatcher {
     }
 
     #openInstanceActionMenu(): boolean {
-        const instance = this.#store.getState().ui.selectedInstance;
+        const state = this.#store.getState();
+        const focusedBox = selectMainScreenModel(state).boxes.find((box) => box.id === state.ui.mainFocusId);
+        const instance = state.ui.selectedPage === "instances" ? this.#instanceNameFromBox(focusedBox?.id) : state.ui.selectedInstance;
         if (instance === undefined) {
-            this.#store.setScreenStatus(this.#store.getState().ui.selectedPage, "Select an instance before opening actions.");
+            this.#store.setScreenStatus(state.ui.selectedPage, "Focus an entry before opening actions.");
             return false;
         }
 
         this.#focusManager.pushRestore("actionMenu");
-        this.#store.setActionMenu(`Instance: ${instance}`, [
+        this.#store.setActionMenu(`Actions: ${instance}`, [
+            {
+                id: "instance.attachShell",
+                intent: {
+                    body: "This shell is not audited and is not controlled by devshell.",
+                    confirmIntent: { instance, type: "instance.attachShell" },
+                    confirmLabel: "Attach Shell",
+                    title: "UNMANAGED SHELL",
+                    type: "overlay.openConfirm"
+                },
+                label: state.ui.selectedPage === "instances" ? "Attach Shell" : `Attach Shell to ${instance}`
+            },
             { id: "instance.start", intent: { instance, type: "instance.start" }, label: "Start Worker" },
             {
                 id: "instance.stop",
@@ -451,6 +473,16 @@ export class CommandDispatcher {
         ]);
         this.#store.setFocusScope("actionMenu");
         return true;
+    }
+
+    async #openAttachShellConfirm(instance: string): Promise<boolean> {
+        return this.dispatch({
+            body: "This shell is not audited and is not controlled by devshell.",
+            confirmIntent: { instance, type: "instance.attachShell" },
+            confirmLabel: "Attach Shell",
+            title: "UNMANAGED SHELL",
+            type: "overlay.openConfirm"
+        });
     }
 
     #openApprovalActionMenu(instance: string, approvalId: string): void {
@@ -478,7 +510,11 @@ export class CommandDispatcher {
 
     #expandedKey(boxId: string): string {
         const state = this.#store.getState();
-        return `${state.ui.selectedPage}:${state.ui.selectedInstance}:${boxId}`;
+        return selectMainScreenModel(state).boxes.find((box) => box.id === boxId)?.expandedKey ?? `${state.ui.selectedPage}:${state.ui.selectedInstance}:${boxId}`;
+    }
+
+    #instanceNameFromBox(boxId: string | undefined): string | undefined {
+        return boxId?.startsWith("instance:") ? boxId.slice("instance:".length) : undefined;
     }
 
     #scrollMainColumn(delta: number): boolean {

@@ -35,7 +35,7 @@ test("Prompt 3 urgent fix uses page + instance coordinates with a two-stage Tab 
     assert.equal(harness.store.getState().interaction.focusScope, "mainBoxes");
     assert.deepEqual(
         selectMainScreenModel(harness.store.getState()).boxes.map((box) => box.title),
-        ["alpha", "Approval"]
+        ["Create Instance", "alpha", "beta"]
     );
     await harness.press("[", { ctrl: true });
     assert.equal(harness.store.getState().interaction.focusScope, "sidebarPages");
@@ -72,13 +72,14 @@ test("Prompt 3 detail line focus preserves state through stream updates", async 
     const harness = createHarness();
 
     await harness.press("", { tab: true });
+    await harness.press("", { downArrow: true });
 
     const firstBoxId = harness.store.getState().ui.mainFocusId;
     assert.equal(harness.store.getState().interaction.focusScope, "mainBoxes");
     assert.equal(typeof firstBoxId, "string");
     assert.match(selectFooterText(harness.store.getState()), /space/u);
 
-    const expandedKey = `instances:alpha:${firstBoxId}`;
+    const expandedKey = "instances:alpha:instance";
     await harness.press("", { return: true });
     assert.equal(harness.store.getState().ui.expandedBoxes[expandedKey], true);
     assert.equal(harness.store.getState().interaction.focusScope, "boxDetail");
@@ -180,19 +181,23 @@ test("Moving focus down advances the shared main viewport to keep the focused bo
     const harness = createHarness();
 
     await harness.press("", { tab: true });
+    await harness.press("", { downArrow: true });
     await harness.press(" ");
     await harness.press("", { downArrow: true });
 
-    assert.equal(harness.store.getState().ui.mainFocusId, "approval-approval-1");
-    assert.equal((harness.store.getState().ui.scrollOffsets["instances:alpha:main"] ?? 0) > 0, true);
+    assert.equal(harness.store.getState().ui.mainFocusId, "instance:beta");
+    assert.equal((harness.store.getState().ui.scrollOffsets["instances:collection:main"] ?? 0) > 0, true);
 });
 
-test("Prompt 4 instance actions require explicit selection and Stop defaults to Cancel", async () => {
+test("instance actions require a focused entry and Stop defaults to Cancel", async () => {
     const harness = createHarness();
 
+    await harness.press("", { tab: true });
+    await harness.press("", { downArrow: true });
     await harness.press("a");
     assert.equal(harness.store.getState().interaction.focusScope, "actionMenu");
-    assert.equal(harness.store.getState().interaction.actionMenu.items[0]?.label, "Start Worker");
+    assert.equal(harness.store.getState().interaction.actionMenu.items[0]?.label, "Attach Shell");
+    await harness.press("", { downArrow: true });
     await harness.press("", { downArrow: true });
     await harness.press("", { return: true });
 
@@ -206,14 +211,15 @@ test("Prompt 4 instance actions require explicit selection and Stop defaults to 
 test("Prompt 4 approval action uses the selected detail line without deciding", async () => {
     const harness = createHarness();
 
+    await harness.press("4");
     await harness.press("", { tab: true });
     await harness.press("", { downArrow: true });
     await harness.press("", { return: true });
     assert.equal(harness.store.getState().interaction.focusScope, "boxDetail");
-    for (let index = 0; index < 6; index += 1) {
+    for (let index = 0; index < 5; index += 1) {
         await harness.press("", { downArrow: true });
     }
-    assert.equal(harness.store.getState().interaction.selectedDetailLineIds["instances:alpha:approval-approval-1"], "approval-approval-1:approval.action:approval-1");
+    assert.equal(harness.store.getState().interaction.selectedDetailLineIds["audit:alpha:approval-approval-1"], "approval-approval-1:approval.action:approval-1");
     await harness.press("", { return: true });
 
     assert.equal(harness.store.getState().interaction.focusScope, "actionMenu");
@@ -259,20 +265,47 @@ test("Prompt 4 command failure keeps the selected detail target", async () => {
     assert.equal(harness.store.getState().interaction.toolForm?.toolName, "bash_run");
 });
 
-test("Prompt 4 action menu no longer exposes Attach Shell", async () => {
+test("Attach Shell uses the focused collection entry and confirms before running", async () => {
     const harness = createHarness();
 
+    await harness.press("", { tab: true });
     await harness.press("a");
+    assert.equal(harness.store.getState().interaction.focusScope, "mainBoxes");
 
-    assert.equal(harness.store.getState().interaction.actionMenu.items.some((item) => item.label.includes("Attach Shell")), false);
-    assert.equal(harness.store.getState().interaction.actionMenu.items.some((item) => item.id.includes("attachShell")), false);
+    await harness.press("", { downArrow: true });
+    await harness.press("a");
+    assert.equal(harness.store.getState().interaction.actionMenu.items[0]?.label, "Attach Shell");
+    await harness.press("", { return: true });
+
+    assert.equal(harness.store.getState().interaction.confirmDialog.title, "UNMANAGED SHELL");
+    assert.equal(harness.store.getState().interaction.confirmDialog.body, "This shell is not audited and is not controlled by devshell.");
+    assert.deepEqual(harness.shellAttaches(), []);
+    await harness.press("", { rightArrow: true });
+    await harness.press("", { return: true });
+
+    assert.deepEqual(harness.shellAttaches(), ["alpha"]);
+    assert.deepEqual(harness.instanceActions(), []);
+    assert.equal(harness.store.getState().toolCallsByInstance.alpha?.length, 1);
 });
 
-function createHarness(options: { onToolCall?: (instance: string, toolName: string, input: string) => Promise<boolean> } = {}) {
+test("non-collection actions attach only the selected sidebar entry", async () => {
+    const harness = createHarness();
+
+    await harness.press("3");
+    await harness.press("a");
+
+    assert.equal(harness.store.getState().interaction.actionMenu.items[0]?.label, "Attach Shell to alpha");
+});
+
+function createHarness(options: {
+    onAttachShell?: (instance: string) => Promise<void>;
+    onToolCall?: (instance: string, toolName: string, input: string) => Promise<boolean>;
+} = {}) {
     const store = new TuiAppStore();
     seedPrompt3State(store);
     const approvalDecisions: Array<{ approvalId: string; decision: string; instance: string }> = [];
     const instanceActions: Array<{ action: string; instance: string }> = [];
+    const shellAttaches: string[] = [];
     let logsReloadRequests = 0;
     const focusManager = new TuiFocusManager(store, {
         currentPage: () => store.getState().ui.selectedPage,
@@ -299,6 +332,9 @@ function createHarness(options: { onToolCall?: (instance: string, toolName: stri
         onInstanceAction: async (action, instance) => {
             instanceActions.push({ action, instance });
         },
+        onAttachShell: options.onAttachShell ?? (async (instance) => {
+            shellAttaches.push(instance);
+        }),
         onLogsReload: async () => {
             logsReloadRequests += 1;
         },
@@ -323,6 +359,9 @@ function createHarness(options: { onToolCall?: (instance: string, toolName: stri
         },
         logsReloadCount() {
             return logsReloadRequests;
+        },
+        shellAttaches() {
+            return shellAttaches;
         },
         store
     };
