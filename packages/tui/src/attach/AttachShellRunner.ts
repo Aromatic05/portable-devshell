@@ -1,6 +1,6 @@
 import { spawn, type ChildProcess, type SpawnOptions } from "node:child_process";
 
-import type { AttachShellCommand, AttachShellRunnerHooks } from "./AttachShellTypes.js";
+import type { AttachShellCommand, AttachShellReadinessCheck, AttachShellRunnerHooks } from "./AttachShellTypes.js";
 
 export type AttachShellSpawn = (command: string, args: readonly string[], options: SpawnOptions) => ChildProcess;
 
@@ -17,6 +17,7 @@ export class AttachShellRunner {
         this.#hooks.suspend();
 
         try {
+            await this.#ensureReady(command.readinessCheck);
             await this.#runWithFallback(command);
         } finally {
             this.#hooks.resume();
@@ -25,38 +26,56 @@ export class AttachShellRunner {
 
     async #runWithFallback(command: AttachShellCommand): Promise<void> {
         try {
-            await this.#spawnAndWait(command);
+            const result = await this.#spawnAndWait(command);
+            if (result.exitCode === command.fallbackOnExitCode) {
+                await this.#runFallback(command);
+            }
         } catch (error) {
             if (readErrorCode(error) !== "ENOENT") {
                 throw error;
             }
 
-            for (const fallback of command.fallbackCommands ?? []) {
-                try {
-                    await this.#spawnAndWait(fallback);
-                    return;
-                } catch (fallbackError) {
-                    if (readErrorCode(fallbackError) !== "ENOENT") {
-                        throw fallbackError;
-                    }
-                }
-            }
-
-            throw error;
+            await this.#runFallback(command, error);
         }
     }
 
-    #spawnAndWait(command: AttachShellCommand): Promise<void> {
+    async #runFallback(command: AttachShellCommand, initialError?: unknown): Promise<void> {
+        for (const fallback of command.fallbackCommands ?? []) {
+            try {
+                await this.#spawnAndWait(fallback);
+                return;
+            } catch (fallbackError) {
+                if (readErrorCode(fallbackError) !== "ENOENT") {
+                    throw fallbackError;
+                }
+            }
+        }
+
+        throw initialError ?? new Error("Attach Shell fallback command is unavailable.");
+    }
+
+    async #ensureReady(check: AttachShellReadinessCheck | undefined): Promise<void> {
+        if (check === undefined) {
+            return;
+        }
+
+        const result = await this.#spawnAndCollect(check);
+        if (result.exitCode !== 0 || !result.stdout.split(/\r?\n/u).some((line) => line.trim() === check.expectedOutput)) {
+            throw new Error("Container is not running. Use Start Worker first.");
+        }
+    }
+
+    #spawnAndWait(command: AttachShellCommand): Promise<{ exitCode: number | null }> {
         return new Promise((resolve, reject) => {
             let settled = false;
-            const finish = (error?: Error): void => {
+            const finish = (exitCode: number | null, error?: Error): void => {
                 if (settled) {
                     return;
                 }
 
                 settled = true;
                 if (error === undefined) {
-                    resolve();
+                    resolve({ exitCode });
                     return;
                 }
 
@@ -70,12 +89,44 @@ export class AttachShellRunner {
                     stdio: "inherit"
                 });
             } catch (error) {
-                finish(asError(error));
+                finish(null, asError(error));
                 return;
             }
 
-            child.once("error", (error) => finish(error));
-            child.once("close", () => finish());
+            child.once("error", (error) => finish(null, error));
+            child.once("close", (code) => finish(code));
+        });
+    }
+
+    #spawnAndCollect(check: AttachShellReadinessCheck): Promise<{ exitCode: number | null; stdout: string }> {
+        return new Promise((resolve, reject) => {
+            let settled = false;
+            const output: Buffer[] = [];
+            const finish = (exitCode: number | null, error?: Error): void => {
+                if (settled) {
+                    return;
+                }
+
+                settled = true;
+                if (error === undefined) {
+                    resolve({ exitCode, stdout: Buffer.concat(output).toString() });
+                    return;
+                }
+
+                reject(error);
+            };
+
+            let child: ChildProcess;
+            try {
+                child = this.#spawn(check.command, check.args, { stdio: ["ignore", "pipe", "ignore"] });
+            } catch (error) {
+                finish(null, asError(error));
+                return;
+            }
+
+            child.stdout?.on("data", (chunk: Buffer) => output.push(Buffer.from(chunk)));
+            child.once("error", (error) => finish(null, error));
+            child.once("close", (code) => finish(code));
         });
     }
 }

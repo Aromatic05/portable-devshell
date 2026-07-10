@@ -42,6 +42,22 @@ test("Attach Shell refuses a stopped container without starting it", () => {
     );
 });
 
+test("Attach Shell probes a running container before opening its shell", () => {
+    const command = new AttachShellCommandResolver().resolve({
+        configView: {
+            instances: [{ container: { containerName: "alpha", mode: "preset" }, name: "alpha", provider: "docker" }]
+        },
+        instance: { name: "alpha", provider: "docker" },
+        snapshot: { daemonState: "running" } as never
+    });
+
+    assert.deepEqual(command.readinessCheck, {
+        args: ["inspect", "--format", "{{.State.Running}}", "alpha"],
+        command: "docker",
+        expectedOutput: "true"
+    });
+});
+
 test("Attach Shell restores the TUI after a spawn failure", async () => {
     const lifecycle: string[] = [];
     const child = new EventEmitter();
@@ -58,4 +74,52 @@ test("Attach Shell restores the TUI after a spawn failure", async () => {
 
     await assert.rejects(() => runner.run({ args: ["-l"], command: "missing-shell" }), /missing shell/u);
     assert.deepEqual(lifecycle, ["suspend", "resume"]);
+});
+
+test("Attach Shell retries sh when a container bash exits with 127", async () => {
+    const calls: string[][] = [];
+    const runner = new AttachShellRunner({
+        hooks: { resume: () => undefined, suspend: () => undefined },
+        spawn: (_command, args) => {
+            calls.push([...args]);
+            const child = new EventEmitter();
+            queueMicrotask(() => child.emit("close", calls.length === 1 ? 127 : 0));
+            return child as never;
+        }
+    });
+
+    await runner.run({
+        args: ["exec", "-it", "alpha", "bash"],
+        command: "docker",
+        fallbackCommands: [{ args: ["exec", "-it", "alpha", "sh"], command: "docker" }],
+        fallbackOnExitCode: 127
+    });
+
+    assert.deepEqual(calls, [["exec", "-it", "alpha", "bash"], ["exec", "-it", "alpha", "sh"]]);
+});
+
+test("Attach Shell refuses a failed readiness probe before spawning an interactive shell", async () => {
+    const commands: string[] = [];
+    const runner = new AttachShellRunner({
+        hooks: { resume: () => undefined, suspend: () => undefined },
+        spawn: (command) => {
+            commands.push(command);
+            const child = Object.assign(new EventEmitter(), { stdout: new EventEmitter() });
+            queueMicrotask(() => {
+                child.stdout.emit("data", Buffer.from("false\n"));
+                child.emit("close", 0);
+            });
+            return child as never;
+        }
+    });
+
+    await assert.rejects(
+        () => runner.run({
+            args: ["exec", "-it", "alpha", "bash"],
+            command: "docker",
+            readinessCheck: { args: ["inspect", "--format", "{{.State.Running}}", "alpha"], command: "docker", expectedOutput: "true" }
+        }),
+        /Container is not running\. Use Start Worker first\./u
+    );
+    assert.deepEqual(commands, ["docker"]);
 });
