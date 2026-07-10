@@ -5,9 +5,10 @@ use std::sync::Arc;
 use schemars::schema_for;
 use tempfile::NamedTempFile;
 
+use crate::security::path::parse_requested_path;
 use crate::tools::file::state::TextFile;
 use crate::tools::file::types::{FileWriteInput, FileWriteMode, FileWriteOutput};
-use crate::tools::file::{FileToolState, resolve_create};
+use crate::tools::file::{FileToolState, authorize, resolve_create};
 use crate::tools::{ToolAccess, ToolCall, ToolCatalogEntry, ToolError, ToolHandler, ToolName};
 
 pub struct FileWriteTool {
@@ -44,16 +45,19 @@ impl ToolHandler for FileWriteTool {
                 "content cannot contain NUL bytes",
             ));
         }
-        let (requested, path) = resolve_create(&call, &input.path)?;
-        let write_lock = self.state.write_lock(&path);
-        let _write_guard = write_lock.lock().unwrap();
-        let existing = path.symlink_metadata().is_ok();
-        if input.mode == FileWriteMode::Create && existing {
+        let requested_path = parse_requested_path(&input.path)?;
+        authorize(&call, requested_path.namespace, true)?;
+        let existing_entry = requested_path.path(&call.workspace).symlink_metadata().is_ok();
+        if input.mode == FileWriteMode::Create && existing_entry {
             return Err(ToolError::new(
                 "file.alreadyExists",
                 "create requires a missing target",
             ));
         }
+        let (requested, path) = resolve_create(&call, &input.path)?;
+        let write_lock = self.state.write_lock(&path);
+        let _write_guard = write_lock.lock().unwrap();
+        let existing = path.symlink_metadata().is_ok();
         if input.mode == FileWriteMode::Overwrite && existing {
             let expected = input.expected_revision.as_deref().ok_or_else(|| {
                 ToolError::new(

@@ -172,6 +172,34 @@ fn file_info_reports_a_dangling_symlink() {
     env.json_command(&["stop", "--instance", instance]);
 }
 
+#[cfg(unix)]
+#[test]
+fn file_write_create_rejects_a_dangling_symlink_as_existing() {
+    use std::os::unix::fs::symlink;
+
+    let env = TestEnv::new();
+    let instance = "aromatic-file-write-symlink";
+    symlink("missing-target", env.workspace().join("dangling-link")).unwrap();
+    start(&env, instance);
+
+    let response = call(
+        &env,
+        instance,
+        "1",
+        "file_write",
+        json!({
+            "path": "./dangling-link",
+            "content": "replacement",
+            "mode": "create",
+        }),
+    );
+    assert_eq!(response["ok"], false, "{response}");
+    assert_eq!(response["error"]["code"], "file.alreadyExists");
+    assert!(env.workspace().join("dangling-link").symlink_metadata().unwrap().file_type().is_symlink());
+
+    env.json_command(&["stop", "--instance", instance]);
+}
+
 #[test]
 fn bash_run_rejects_values_over_worker_hard_limits() {
     let env = TestEnv::new();
