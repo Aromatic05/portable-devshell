@@ -24,6 +24,7 @@ pub struct FileReadOutput {
     pub total_lines: usize,
     pub total_bytes: usize,
     pub truncated: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub next_start_line: Option<usize>,
 }
 #[derive(Clone, Debug, Serialize, JsonSchema)]
@@ -135,6 +136,7 @@ pub enum FindType {
 #[serde(rename_all = "camelCase")]
 pub struct FileFindOutput {
     pub entries: Vec<FileFindEntry>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub next_cursor: Option<String>,
 }
 #[derive(Debug, Serialize, JsonSchema)]
@@ -171,6 +173,7 @@ pub enum SearchSyntax {
 #[serde(rename_all = "camelCase")]
 pub struct FileSearchOutput {
     pub files: Vec<FileSearchFile>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub next_cursor: Option<String>,
 }
 #[derive(Debug, Serialize, JsonSchema)]

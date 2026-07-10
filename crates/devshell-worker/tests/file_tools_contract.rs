@@ -46,6 +46,40 @@ fn file_tools_reject_intermediate_dot_segments() {
 }
 
 #[test]
+fn file_tools_omit_absent_optional_output_fields() {
+    let env = TestEnv::new();
+    let instance = "aromatic-file-optional-output";
+    fs::write(env.workspace().join("document.txt"), "needle\n").unwrap();
+    start(&env, instance);
+
+    let read = call(
+        &env,
+        instance,
+        "1",
+        "file_read",
+        json!({ "path": "./document.txt", "ranges": [{ "startLine": 1, "lineCount": 1 }] }),
+    );
+    assert_eq!(read["ok"], true, "{read}");
+    assert!(read["result"].get("nextStartLine").is_none());
+
+    let found = call(&env, instance, "2", "file_find", json!({ "path": "./" }));
+    assert_eq!(found["ok"], true, "{found}");
+    assert!(found["result"].get("nextCursor").is_none());
+
+    let searched = call(
+        &env,
+        instance,
+        "3",
+        "file_search",
+        json!({ "pattern": "needle", "syntax": "literal" }),
+    );
+    assert_eq!(searched["ok"], true, "{searched}");
+    assert!(searched["result"].get("nextCursor").is_none());
+
+    env.json_command(&["stop", "--instance", instance]);
+}
+
+#[test]
 fn file_edit_reports_the_actual_first_changed_line() {
     let env = TestEnv::new();
     let instance = "aromatic-file-edit";

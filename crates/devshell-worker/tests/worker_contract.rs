@@ -230,7 +230,8 @@ fn bash_run_returns_success_for_timeout_and_output_limit() {
     );
     assert_eq!(timed_out["ok"], true);
     assert_eq!(timed_out["result"]["termination"], "timeout");
-    assert!(timed_out["result"]["exitCode"].is_null());
+    assert!(timed_out["result"].get("exitCode").is_none());
+    assert!(timed_out["result"].get("termSignal").is_none());
 
     let output_limited = env.rpc(
         instance,
