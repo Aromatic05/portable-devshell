@@ -37,9 +37,19 @@ export class TuiFocusManager {
             const instance = this.#store.getState().ui.selectedInstance;
             return instance === undefined ? undefined : { id: instance, kind: "instance" };
         }
-        if (scope === "mainBoxes" || scope === "boxDetail") {
+        if (scope === "mainBoxes") {
             const boxId = this.#store.getState().ui.mainFocusId;
             return boxId === undefined ? undefined : { id: boxId, kind: "box" };
+        }
+        if (scope === "boxDetail") {
+            const state = this.#store.getState();
+            const boxId = state.ui.mainFocusId;
+            if (boxId === undefined) {
+                return undefined;
+            }
+            const key = `${state.ui.selectedPage}:${state.ui.selectedInstance}:${boxId}`;
+            const lineId = state.interaction.selectedDetailLineIds[key];
+            return lineId === undefined ? undefined : { id: lineId, kind: "line" };
         }
         if (scope === "actionMenu") {
             const actionId = this.#store.getState().interaction.selectedActionId;
@@ -151,6 +161,16 @@ export class TuiFocusManager {
                 this.#store.setFocusScope("mainBoxes");
                 this.#store.setMainFocusId(item.id);
                 return;
+            case "line": {
+                const state = this.#store.getState();
+                const boxId = state.ui.mainFocusId;
+                if (boxId === undefined) {
+                    return;
+                }
+                this.#store.setFocusScope("boxDetail");
+                this.#store.setSelectedDetailLine(`${state.ui.selectedPage}:${state.ui.selectedInstance}:${boxId}`, item.id);
+                return;
+            }
             case "action":
                 this.#store.setFocusScope("actionMenu");
                 return;

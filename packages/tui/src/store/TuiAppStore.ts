@@ -155,6 +155,14 @@ export class TuiAppStore {
         });
     }
 
+    setSelectedDetailLine(key: string, lineId?: string): void {
+        this.dispatch({
+            key,
+            lineId,
+            type: "detailLine.select"
+        });
+    }
+
     setSidebarCursor(cursor?: SidebarCursor): void {
         this.dispatch({
             cursor,

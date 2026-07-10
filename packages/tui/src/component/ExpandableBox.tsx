@@ -6,6 +6,7 @@ import type { ExpandableBoxStatus } from "../model/TuiUiTypes.js";
 export type BoxLineTone = "normal" | "muted" | "accent" | "success" | "warning" | "danger";
 
 export interface BoxLine {
+    id?: string;
     text: string;
     tone?: BoxLineTone;
 }
@@ -17,6 +18,7 @@ export interface BoxModel {
     expandedLines: readonly BoxLine[];
     focused: boolean;
     id: string;
+    selectedDetailLineId?: string;
     status: ExpandableBoxStatus;
     title: string;
 }
@@ -30,7 +32,7 @@ export function ExpandableBox(props: ExpandableBoxProps) {
     return (
         <Box flexDirection="column">
             {renderExpandableBoxLines(props.box, props.innerWidth).map((line) => (
-                <Text color={line.color} dimColor={line.dimColor} key={line.key}>
+                <Text backgroundColor={line.backgroundColor} color={line.color} dimColor={line.dimColor} key={line.key}>
                     {line.text}
                 </Text>
             ))}
@@ -39,6 +41,7 @@ export function ExpandableBox(props: ExpandableBoxProps) {
 }
 
 export interface ExpandableBoxRenderLine {
+    backgroundColor?: string;
     color?: string;
     dimColor?: boolean;
     key: string;
@@ -61,12 +64,17 @@ export function renderExpandableBoxLines(box: BoxModel, requestedInnerWidth: num
             key: `${box.id}-top`,
             text: titleLine
         },
-        ...bodyLines.map((line, index) => ({
-            color: lineColor(line.tone),
-            dimColor: line.tone === "muted",
-            key: `${box.id}-${index}`,
-            text: renderBodyLine(line.text, innerWidth)
-        })),
+        ...bodyLines.map((line, index) => {
+            const selected = box.expanded && box.focused && box.selectedDetailLineId === line.id;
+
+            return {
+                backgroundColor: selected ? "cyan" : undefined,
+                color: selected ? "black" : lineColor(line.tone),
+                dimColor: !selected && line.tone === "muted",
+                key: `${box.id}-${line.id ?? index}`,
+                text: renderBodyLine(line.text, innerWidth)
+            };
+        }),
         {
             color: borderColor,
             key: `${box.id}-bottom`,

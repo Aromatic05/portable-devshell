@@ -99,6 +99,23 @@ export function tuiAppReducer(state: TuiAppState, action: TuiAppAction): TuiAppS
                     selectedConfirmButton: action.button
                 }
             };
+        case "detailLine.select": {
+            const selectedDetailLineIds = { ...state.interaction.selectedDetailLineIds };
+
+            if (action.lineId === undefined) {
+                delete selectedDetailLineIds[action.key];
+            } else {
+                selectedDetailLineIds[action.key] = action.lineId;
+            }
+
+            return {
+                ...state,
+                interaction: {
+                    ...state.interaction,
+                    selectedDetailLineIds
+                }
+            };
+        }
         case "sidebar.cursor.set":
             return {
                 ...state,

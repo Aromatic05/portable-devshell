@@ -32,7 +32,7 @@ export function makeBox(
     page: PageId,
     instance: string | undefined,
     input: {
-        detailLines: string[];
+        detailLines: Array<string | { id: string; text: string; tone?: BoxLine["tone"] }>;
         disabled?: boolean;
         id: string;
         status?: ExpandableBoxStatus;
@@ -43,13 +43,17 @@ export function makeBox(
     const expandedKey = `${page}:${instance}:${input.id}`;
     const summaryLines = normalizeCollapsedLines(input.summaryLines);
 
+    const expandedLines = normalizeExpandedLines(input.id, input.detailLines);
+    const selectedDetailLineId = state.interaction.selectedDetailLineIds[expandedKey];
+
     return {
         collapsedLines: summaryLines,
         disabled: input.disabled,
         expanded: state.ui.expandedBoxes[expandedKey] === true,
-        expandedLines: input.detailLines.map((line) => ({ text: line })),
+        expandedLines,
         focused: state.ui.mainFocusId === input.id && (state.interaction.focusScope === "mainBoxes" || state.interaction.focusScope === "boxDetail"),
         id: input.id,
+        selectedDetailLineId: expandedLines.some((line) => line.id === selectedDetailLineId) ? selectedDetailLineId : expandedLines[0]?.id,
         status: input.status ?? "normal",
         title: input.title
     };
@@ -212,6 +216,31 @@ function normalizeCollapsedLines(lines: string[]): [BoxLine] | [BoxLine, BoxLine
     }
 
     return [normalized[0], normalized[1]];
+}
+
+function normalizeExpandedLines(
+    boxId: string,
+    lines: Array<string | { id: string; text: string; tone?: BoxLine["tone"] }>
+): BoxLine[] {
+    const occurrences = new Map<string, number>();
+
+    return lines.map((line) => {
+        const text = typeof line === "string" ? line : line.text;
+        const requestedId = typeof line === "string" ? stableDetailLineId(text) : line.id;
+        const occurrence = occurrences.get(requestedId) ?? 0;
+        occurrences.set(requestedId, occurrence + 1);
+
+        return {
+            id: occurrence === 0 ? `${boxId}:${requestedId}` : `${boxId}:${requestedId}:${occurrence + 1}`,
+            text,
+            ...(typeof line === "string" || line.tone === undefined ? {} : { tone: line.tone })
+        };
+    });
+}
+
+function stableDetailLineId(text: string): string {
+    const field = text.trim().split(/\s{2,}|\s/)[0] ?? "detail";
+    return field.replace(/[^a-zA-Z0-9_.:-]/g, "-") || "detail";
 }
 
 function collapsedToneFor(line: string, index: number): BoxLine["tone"] {

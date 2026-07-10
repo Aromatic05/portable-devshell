@@ -4,6 +4,7 @@ export type FocusItem =
     | { kind: "page"; id: PageId }
     | { kind: "instance"; id: string }
     | { kind: "box"; id: string }
+    | { kind: "line"; id: string }
     | { kind: "field"; id: string }
     | { kind: "button"; id: "save" | "cancel" | string }
     | { kind: "action"; id: string };
@@ -57,6 +58,7 @@ export interface TuiInteractionState {
     screenStatusByPage: Partial<Record<PageId, string>>;
     selectedActionId?: string;
     selectedConfirmButton: "cancel" | "confirm";
+    selectedDetailLineIds: Record<string, string>;
     search: TuiSearchState;
     toolForm?: TuiToolFormState;
     sidebarCursor?: SidebarCursor;
@@ -108,7 +110,6 @@ export type TuiUiIntent =
     | { instance: string; type: "instance.refresh" }
     | { type: "instance.openLogs" }
     | { type: "instance.openAudit" }
-    | { type: "instance.attachShell" }
     | { approvalId: string; instance: string; type: "approval.open" }
     | { approvalId: string; decision: "approve" | "deny"; instance: string; type: "approval.decide" };
 
@@ -146,6 +147,7 @@ export function createEmptyInteractionState(): TuiInteractionState {
         restoreStack: [],
         screenStatusByPage: {},
         selectedConfirmButton: "cancel",
+        selectedDetailLineIds: {},
         search: {
             open: false
         },

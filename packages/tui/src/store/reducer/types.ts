@@ -104,6 +104,7 @@ export type TuiAppAction =
     | { type: "log.clearBuffer" }
     | { mainFocusId?: string; type: "mainFocus.set" }
     | { button: "cancel" | "confirm"; type: "confirm.focus" }
+    | { key: string; lineId?: string; type: "detailLine.select" }
     | { cursor?: SidebarCursor; type: "sidebar.cursor.set" }
     | { items: TuiActionMenuItem[]; selectedIndex: number; title: string; type: "overlay.setActionMenu" }
     | { confirmIntent: TuiUiIntent; body: string; cancelLabel: string; confirmLabel: string; open: boolean; title: string; type: "overlay.setConfirmDialog" }

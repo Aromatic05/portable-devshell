@@ -33,7 +33,7 @@ export function ScreenRouter(props: ScreenRouterProps) {
             {model.emptyState !== undefined ? <Text color="yellow">{model.emptyState}</Text> : undefined}
             {model.emptyState === undefined
                 ? visibleLines.map((line) => (
-                      <Text color={line.color} dimColor={line.dimColor} key={line.key}>
+                      <Text backgroundColor={line.backgroundColor} color={line.color} dimColor={line.dimColor} key={line.key}>
                           {line.text}
                       </Text>
                   ))
@@ -70,9 +70,12 @@ export function buildFocusGraphForState(state: TuiAppState): FocusGraph {
                 ...orderedPages.map((page) => ({ id: page, kind: "page" as const })),
                 ...state.instances.map((instance) => ({ id: instance.name, kind: "instance" as const }))
             ]);
-        case "boxDetail":
         case "mainBoxes":
             return buildLinearGraph(selectMainBoxIds(state).map((id) => ({ id, kind: "box" as const })));
+        case "boxDetail": {
+            const box = selectMainScreenModel(state).boxes.find((candidate) => candidate.id === state.ui.mainFocusId);
+            return buildLinearGraph((box?.expandedLines ?? []).map((line) => ({ id: line.id ?? line.text, kind: "line" as const })));
+        }
     }
 }
 
