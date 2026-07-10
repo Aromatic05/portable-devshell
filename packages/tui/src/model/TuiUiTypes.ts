@@ -40,6 +40,7 @@ export type TuiUiState = {
     searchQueries: Record<string, string>;
     formDrafts: Record<string, unknown>;
     dirtyForms: Record<string, boolean>;
+    logsFollowByInstance: Record<string, boolean>;
 };
 
 export type ActivePage = {

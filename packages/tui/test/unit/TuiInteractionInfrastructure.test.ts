@@ -448,6 +448,7 @@ test("Prompt 3 detail line selection clamps to a valid line after data replaceme
 
     await harness.press("6");
     await harness.press("", { tab: true });
+    harness.store.setMainFocusId("logs");
     await harness.press(" ");
     await harness.press("", { downArrow: true });
 
@@ -488,7 +489,8 @@ test("connector editor presents unavailable endpoints and control runtime limits
     const logs = selectMainScreenModel(harness.store.getState());
     assert.equal(logs.activePage.page, "logs");
     assert.equal(logs.activePage.instance, "alpha");
-    assert.equal(logs.boxes[0]?.collapsedLines[0]?.text, "source=instance.readLogs+log.appended  entries=20");
+    assert.equal(logs.boxes[0]?.collapsedLines[0]?.text, "follow=on  visible=20  total=20");
+    assert.equal(logs.boxes.some((box) => box.title === "Source"), false);
 
     await harness.press("7");
     assert.equal(selectHelpLines(harness.store.getState()).some((line) => line.includes("directly inside each expanded instance box")), true);
@@ -556,17 +558,39 @@ test("OAuth detail keeps static rows selectable after expanding a completed appr
     assert.equal(harness.store.getState().interaction.selectedDetailLineIds[approval.expandedKey], `${approval.id}:kind`);
 });
 
-test("Main viewport scrolling uses one page-instance offset instead of per-box offsets", async () => {
+test("Logs controls expose statistics and real follow state", async () => {
     const harness = createHarness();
 
     await harness.press("6");
     await harness.press("", { tab: true });
     await harness.press(" ");
+    const controls = selectMainScreenModel(harness.store.getState()).boxes.find((box) => box.id === "logs-controls")!;
+    assert.equal(controls.title, "Log Controls & Statistics");
+    assert.equal(controls.expandedLines.some((line) => line.text === "Follow             on"), true);
+    assert.equal(controls.expandedLines.some((line) => line.text === "Total              20"), true);
+
+    harness.store.setSelectedDetailLine(controls.expandedKey, "logs-controls:button:toggle-follow");
+    await harness.dispatch({ type: "focus.activate" });
+    assert.equal(harness.store.getState().ui.logsFollowByInstance.alpha, false);
+
+    await harness.dispatch({ type: "logs.toggleFollow" });
+    assert.equal(harness.store.getState().ui.logsFollowByInstance.alpha, true);
+    await harness.dispatch({ type: "screen.pageUp" });
+    assert.equal(harness.store.getState().ui.logsFollowByInstance.alpha, false);
+});
+
+test("Main viewport scrolling uses one page-instance offset instead of per-box offsets", async () => {
+    const harness = createHarness();
+
+    await harness.press("6");
+    await harness.press("", { tab: true });
+    harness.store.setMainFocusId("logs");
+    await harness.press(" ");
     await harness.press("", { pageDown: true });
 
     assert.equal(harness.store.getState().ui.scrollOffsets["logs:alpha:logs"], undefined);
     assert.equal((harness.store.getState().ui.scrollOffsets["logs:alpha:main"] ?? 0) > 0, true);
-    assert.equal(selectMainScreenModel(harness.store.getState()).boxes[0]?.expandedLines.length, 20);
+    assert.equal(selectMainScreenModel(harness.store.getState()).boxes.find((box) => box.id === "logs")?.expandedLines.length, 20);
 });
 
 test("Moving focus down advances the shared main viewport to keep the focused box visible", async () => {

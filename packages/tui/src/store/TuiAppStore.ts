@@ -237,6 +237,10 @@ export class TuiAppStore {
         });
     }
 
+    setLogsFollow(instance: string, follow: boolean): void {
+        this.dispatch({ follow, instance, type: "logs.setFollow" });
+    }
+
     setScrollOffset(key: string, offset: number): void {
         this.dispatch({
             key,

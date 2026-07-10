@@ -182,10 +182,12 @@ export class CommandDispatcher {
                 this.#focusManager.restore();
                 return true;
             case "screen.pageUp":
+                this.#pauseLogFollow();
                 return this.#scrollMainColumn(-Math.max(1, this.#boxViewportRows() - 1));
             case "screen.pageDown":
                 return this.#scrollMainColumn(Math.max(1, this.#boxViewportRows() - 1));
             case "screen.home":
+                this.#pauseLogFollow();
                 return this.#setMainColumnOffset(0);
             case "screen.end":
                 return this.#setMainColumnOffset(this.#maxMainScrollOffset());
@@ -210,9 +212,19 @@ export class CommandDispatcher {
                 this.#store.setScreenStatus(this.#store.getState().ui.selectedPage, expanded ? "Collapsed box." : "Expanded box.");
                 return true;
             }
-            case "logs.toggleFollow":
-                this.#store.setScreenStatus(this.#store.getState().ui.selectedPage, "Use Up/Down/Home/End to inspect log history.");
+            case "logs.toggleFollow": {
+                const instance = this.#store.getState().ui.selectedInstance;
+                if (this.#store.getState().ui.selectedPage !== "logs" || instance === undefined) {
+                    return false;
+                }
+                const follow = this.#store.getState().ui.logsFollowByInstance[instance] === false;
+                this.#store.setLogsFollow(instance, follow);
+                if (follow) {
+                    this.#setMainColumnOffset(this.#maxMainScrollOffset());
+                }
+                this.#store.setScreenStatus("logs", follow ? "Following new log entries." : "Log follow paused.");
                 return true;
+            }
             case "logs.clearBuffer":
                 if (this.#store.getState().ui.selectedPage !== "logs") {
                     return false;
@@ -551,6 +563,20 @@ export class CommandDispatcher {
                 return await this.dispatch({ approvalId: actionId.slice("approval.open:".length), instance: state.ui.selectedInstance, type: "approval.open" });
             }
 
+            if (button !== undefined && state.ui.selectedPage === "logs") {
+                switch (button) {
+                    case "reload":
+                        return await this.dispatch({ type: "page.reload" });
+                    case "toggle-follow":
+                        return await this.dispatch({ type: "logs.toggleFollow" });
+                    case "clear-filter":
+                        this.#store.setSearchQuery("logs", "");
+                        this.#syncMainFocus();
+                        return true;
+                    case "clear-buffer":
+                        return await this.dispatch({ type: "logs.clearBuffer" });
+                }
+            }
             if (button !== undefined && state.ui.selectedPage === "instances") {
                 return await this.#activateInstanceButton(boxId, button);
             }
@@ -1092,6 +1118,13 @@ export class CommandDispatcher {
             return await this.dispatch({ approvalId: auditPage.approvalId, instance, type: "approval.confirmDeny" });
         }
         return false;
+    }
+
+    #pauseLogFollow(): void {
+        const state = this.#store.getState();
+        if (state.ui.selectedPage === "logs" && state.ui.selectedInstance !== undefined) {
+            this.#store.setLogsFollow(state.ui.selectedInstance, false);
+        }
     }
 
     #syncMainFocus(): void {

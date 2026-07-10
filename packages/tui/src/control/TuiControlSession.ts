@@ -193,6 +193,10 @@ export class TuiControlSession {
             },
             onInstanceEvent: (message) => {
                 this.#store.applyEvent(message.envelope);
+                const state = this.#store.getState();
+                if (message.envelope.event === "log.appended" && state.ui.selectedPage === "logs" && state.ui.selectedInstance === instance && state.ui.logsFollowByInstance[instance] !== false) {
+                    this.#store.setScrollOffset(`logs:${instance}:main`, Number.MAX_SAFE_INTEGER);
+                }
             },
             onSubscribeError: async (error) => {
                 if (!this.#started) {

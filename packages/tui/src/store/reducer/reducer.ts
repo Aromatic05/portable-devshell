@@ -331,6 +331,17 @@ export function tuiAppReducer(state: TuiAppState, action: TuiAppAction): TuiAppS
                     }
                 }
             };
+        case "logs.setFollow":
+            return {
+                ...state,
+                ui: {
+                    ...state.ui,
+                    logsFollowByInstance: {
+                        ...state.ui.logsFollowByInstance,
+                        [action.instance]: action.follow
+                    }
+                }
+            };
         case "ui.bumpRedrawNonce":
             return {
                 ...state,
