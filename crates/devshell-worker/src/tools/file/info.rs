@@ -5,7 +5,7 @@ use std::time::UNIX_EPOCH;
 use schemars::schema_for;
 
 use crate::tools::file::types::{FileInfoInput, FileInfoOutput};
-use crate::tools::file::{FileToolState, resolve_existing};
+use crate::tools::file::{FileToolState, resolve_info};
 use crate::tools::{ToolAccess, ToolCall, ToolCatalogEntry, ToolError, ToolHandler, ToolName};
 
 pub struct FileInfoTool {
@@ -37,8 +37,7 @@ impl ToolHandler for FileInfoTool {
     fn call(&self, call: ToolCall) -> Result<serde_json::Value, ToolError> {
         let input: FileInfoInput = serde_json::from_value(call.params.clone())
             .map_err(|error| ToolError::new("tool.invalidArguments", error.to_string()))?;
-        let (requested, canonical) = resolve_existing(&call, &input.path, false)?;
-        let raw = requested.path(&call.workspace);
+        let (requested, raw) = resolve_info(&call, &input.path)?;
         let metadata = fs::symlink_metadata(&raw)
             .map_err(|error| ToolError::new("file.notFound", error.to_string()))?;
         let entry_type = if metadata.file_type().is_symlink() {
@@ -51,7 +50,7 @@ impl ToolHandler for FileInfoTool {
             "other"
         };
         let target_type = if entry_type == "symlink" {
-            fs::metadata(&canonical).ok().map(|metadata| {
+            fs::metadata(&raw).ok().map(|metadata| {
                 if metadata.is_file() {
                     "file".to_string()
                 } else if metadata.is_dir() {

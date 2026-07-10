@@ -45,6 +45,50 @@ pub fn resolve_create(
     let resolved = resolve_create_target(&call.workspace, &requested)?;
     Ok((requested, resolved.canonical))
 }
+
+pub fn resolve_info(
+    call: &ToolCall,
+    raw: &str,
+) -> Result<(RequestedPath, std::path::PathBuf), ToolError> {
+    let requested = parse_requested_path(raw)?;
+    authorize(call, requested.namespace, false)?;
+    let path = requested.path(&call.workspace);
+    std::fs::symlink_metadata(&path)
+        .map_err(|error| ToolError::new("file.notFound", error.to_string()))?;
+
+    if requested.namespace == PathNamespace::Workspace {
+        if let Ok(target) = path.canonicalize() {
+            let workspace = call
+                .workspace
+                .canonicalize()
+                .map_err(|error| ToolError::new("file.writeFailed", error.to_string()))?;
+            if target.strip_prefix(&workspace).is_err() {
+                return Err(ToolError::new(
+                    "file.pathEscapesWorkspace",
+                    format!("path escapes workspace: {}", target.display()),
+                ));
+            }
+        } else {
+            let parent = path
+                .parent()
+                .ok_or_else(|| ToolError::new("file.invalidPath", "path has no parent"))?
+                .canonicalize()
+                .map_err(|error| ToolError::new("file.writeFailed", error.to_string()))?;
+            let workspace = call
+                .workspace
+                .canonicalize()
+                .map_err(|error| ToolError::new("file.writeFailed", error.to_string()))?;
+            if parent.strip_prefix(&workspace).is_err() {
+                return Err(ToolError::new(
+                    "file.pathEscapesWorkspace",
+                    format!("path escapes workspace: {}", parent.display()),
+                ));
+            }
+        }
+    }
+
+    Ok((requested, path))
+}
 pub fn authorize(call: &ToolCall, namespace: PathNamespace, write: bool) -> Result<(), ToolError> {
     let capability = match (namespace, write) {
         (PathNamespace::Workspace, false) => FilesystemCapability::WorkspaceRead,

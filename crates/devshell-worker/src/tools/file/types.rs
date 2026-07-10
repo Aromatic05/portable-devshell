@@ -196,6 +196,8 @@ pub struct FileInfoOutput {
     pub entry_type: String,
     pub size_bytes: u64,
     pub modified_at_ms: u128,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub mode: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub target_type: Option<String>,
 }
