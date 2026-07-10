@@ -382,6 +382,7 @@ test("Pending Approval Enter opens an isolated approval detail without a tool fo
     await harness.press("", { downArrow: true });
     const audit = selectMainScreenModel(harness.store.getState()).boxes[0]!;
     assert.equal(audit.title, "Audit 1");
+    assert.equal(audit.expandedLines[0]?.text, "Pending approval:");
     assert.equal(audit.expandedLines.some((line) => line.text === "Enter approval review"), true);
     harness.store.setActionMenu("Actions", [{ id: "tool", intent: { type: "actionMenu.open" }, label: "Call Tool" }]);
     harness.store.setToolForm("alpha", "bash_run", '{"command":""}');
