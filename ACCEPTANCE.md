@@ -1,4 +1,4 @@
-# Task 12-13 Acceptance
+# Current Acceptance
 
 ## Commands
 
@@ -29,7 +29,7 @@
 ### 2. README 不再描述旧架构或夸大 TUI 完成度
 
 - status: pass
-- evidence: `README.md` 明确 CLI/TUI 是 control client，不直接读文件、不 spawn worker、不直连 worker RPC；同时只声明当前仓库包含 `TuiControlSession` / `TuiViewModelStore` 基础层，不宣称完整正式 TUI 页面已完成。
+- evidence: `README.md` 明确 CLI/TUI 是 control client，不直接读文件、不 spawn worker、不直连 worker RPC；当前 TUI 由 `TuiRuntime`、`TuiControlSession`、`TuiAppStore` 和 interaction 层组成，不宣称超出已实现页面与交互范围的能力。
 - fix commit: this batch
 
 ### 3. MCP 是 per-instance endpoint，且不暴露管理面
@@ -83,13 +83,13 @@
 ### 11. TuiControlSession gap / reconnect 与 view model 恢复成立
 
 - status: pass
-- evidence: `packages/tui/test/integration/TuiControlSession.test.ts` tests `TuiControlSession recovers from runtime gap and control reconnect`、`TuiControlSession recovers when initial subscribe returns stream.gap`、`TuiControlSession backs off when subscribe keeps rejecting`；`packages/tui/test/unit/TuiViewModelStore.test.ts` test `TuiViewModelStore expresses connection, snapshot, log, audit, approval, and config state`。
+- evidence: `packages/tui/test/integration/TuiControlSession.test.ts` 覆盖 control 连接、实例快照、stream gap 恢复与 control 缺失；`packages/tui/test/unit/TuiInteractionInfrastructure.test.ts` 覆盖 store 驱动的页面、实例、日志、audit、approval 与 connector 视图模型。
 - fix commit: none
 
 ### 12. TUI interaction 的 focus / keymap / form / modal / save-cancel / Enter / Esc / Tab 语义成立
 
 - status: pass
-- evidence: `packages/tui/src/interaction/TuiFocusManager.ts` 实现 scope stack、可见项过滤、方向/Tab 焦点移动和离开嵌套 scope 后恢复先前焦点；`packages/tui/src/interaction/TuiKeymap.ts` 绑定 `tab`、`shift+tab`、`enter`、`esc`、方向键、`ctrl+c`；`packages/tui/src/interaction/TuiInteractionController.ts` 实现 `form.save`、`form.cancel`、`modal.close`、`focus.activate` 与 escape 统一语义；`packages/tui/test/unit/TuiInteractionController.test.ts` tests `TuiFocusManager skips hidden entries and restores the previous focus when leaving nested scopes`、`TuiInteractionController drives save and cancel actions through tab navigation and enter`、`TuiInteractionController blocks invalid and duplicate async submit attempts`、`TuiInteractionController uses enter for modal confirm, escape for modal close, and surfaces submit errors` 直接覆盖 focus/keymap/form/modal/save-cancel/Enter/Esc/Tab。
+- evidence: `packages/tui/src/interaction/TuiFocusManager.ts`、`KeyDispatcher.ts` 与 `CommandDispatcher.ts` 共同实现连续 sidebar 焦点、Tab 区域切换、box/form/wizard/action menu 交互及 Enter/Esc 语义；`packages/tui/test/unit/TuiInteractionInfrastructure.test.ts` 覆盖焦点、键盘、save/cancel、wizard、connector、Attach Shell 和 mouse hit region。
 - validation: `pnpm --filter @portable-devshell/tui test`
 - fix commit: this batch
 
@@ -114,7 +114,7 @@
 ### 16. 最终静态审查
 
 - status: pass
-- evidence: `README.md`、`ACCEPTANCE.md`、`acceptance/run-final-acceptance.sh` 与当前代码边界一致；`packages/tui/src` 当前包含 `control`、`model`、`session` 与 `interaction` 基础层文件，且 `ACCEPTANCE.md` 已按现状补齐 interaction 验收证据，没有把超出当前实现范围的 UI 能力写成已完成；route、socket、approval、multi-target 说明均能在源码和测试中找到对应证据。
+- evidence: `README.md`、`ACCEPTANCE.md`、`acceptance/run-final-acceptance.sh` 与当前代码边界一致；TUI 证据只引用当前存在的 runtime、store、interaction、render 与测试文件；route、socket、approval、multi-target 说明均能在源码和测试中找到对应证据。
 - fix commit: this batch
 
 ## Result
