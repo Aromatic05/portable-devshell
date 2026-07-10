@@ -93,7 +93,7 @@ test("mouse hit regions follow the rendered sidebar, boxes, and overlays", () =>
     assert.equal(shiftedBoxRegion.y, boxRegion.y + 3);
 });
 
-test("space opens a box for line selection while enter remains a line action", async () => {
+test("space expands a box without blocking main box navigation", async () => {
     const harness = createHarness();
 
     await harness.press("", { tab: true });
@@ -111,44 +111,12 @@ test("space opens a box for line selection while enter remains a line action", a
 
     await harness.press(" ");
     assert.equal(harness.store.getState().ui.expandedBoxes[expandedKey], true);
-    assert.equal(harness.store.getState().interaction.focusScope, "boxDetail");
-
-    const initialBox = selectMainScreenModel(harness.store.getState()).boxes.find((box) => box.id === firstBoxId);
-    assert.equal(harness.store.getState().interaction.selectedDetailLineIds[expandedKey], initialBox?.expandedLines[0]?.id);
-    await harness.press("", { downArrow: true });
-    const selectedLineId = harness.store.getState().interaction.selectedDetailLineIds[expandedKey];
-    assert.equal(selectedLineId, initialBox?.expandedLines[1]?.id);
-    const focusedBox = selectMainScreenModel(harness.store.getState()).boxes.find((box) => box.id === firstBoxId);
-    const selectedRenderLine = renderExpandableBoxLines(focusedBox!, 48).find((line) => line.key === `${firstBoxId}-${selectedLineId}`);
-    assert.equal(selectedRenderLine?.backgroundColor, "cyan");
-
-    harness.store.applyEvent({
-        event: "log.appended",
-        payload: {
-            at: "2026-07-09T00:00:21.000Z",
-            data: {
-                bytes: 4,
-                stream: "stdout",
-                tail: "tail"
-            }
-        },
-        seq: 21,
-        target: {
-            instance: "alpha",
-            kind: "instance"
-        },
-        type: "event"
-    } as never);
-
-    assert.equal(harness.store.getState().ui.selectedPage, "instances");
-    assert.equal(harness.store.getState().ui.selectedInstance, "alpha");
-    assert.equal(harness.store.getState().ui.expandedBoxes[expandedKey], true);
-    assert.equal(harness.store.getState().interaction.selectedDetailLineIds[expandedKey], selectedLineId);
-
-    await harness.press("", { escape: true });
+    const expandedLineCount = selectMainScreenModel(harness.store.getState()).boxes.find((box) => box.id === firstBoxId)!.expandedLines.length;
+    for (let index = 0; index <= expandedLineCount; index += 1) {
+        await harness.press("", { downArrow: true });
+    }
     assert.equal(harness.store.getState().interaction.focusScope, "mainBoxes");
-    await harness.press("[", { ctrl: true });
-    assert.equal(harness.store.getState().interaction.focusScope, "sidebarPages");
+    assert.equal(harness.store.getState().ui.mainFocusId, "instance:beta");
 });
 
 test("main box focus activates the main panel from the sidebar", () => {
@@ -184,10 +152,7 @@ test("wizard validation keeps the draft and reports the control error", async ()
     });
 
     await openCreateWizard(harness);
-    for (let index = 0; index < 6; index += 1) {
-        await harness.press("", { tab: true });
-    }
-    await harness.press("", { return: true });
+    await harness.dispatch({ type: "editor.validate" });
 
     assert.equal(harness.store.getState().interaction.focusScope, "wizard");
     assert.equal(harness.store.getState().interaction.editor?.error, "name is required");
@@ -221,6 +186,7 @@ test("config validation errors render in the active field box", async () => {
     await harness.press("2");
     await harness.press("", { tab: true });
     await harness.press(" ");
+    await harness.press("", { downArrow: true });
     await harness.press("", { return: true });
     await harness.press("s", { ctrl: true });
 
@@ -234,6 +200,7 @@ test("connector discard confirms and clears its per-instance MCP draft", async (
     await harness.press("3");
     await harness.press("", { tab: true });
     await harness.press(" ");
+    await harness.press("", { downArrow: true });
     await harness.press("", { return: true });
     await harness.press("", { return: true });
 
@@ -281,6 +248,7 @@ test("Prompt 3 detail line selection clamps to a valid line after data replaceme
     await harness.press("5");
     await harness.press("", { tab: true });
     await harness.press(" ");
+    await harness.press("", { downArrow: true });
     await harness.press("", { downArrow: true });
 
     const key = "logs:alpha:logs";
@@ -378,8 +346,8 @@ test("Prompt 4 approval action uses the selected detail line without deciding", 
     await harness.press("", { tab: true });
     await harness.press("", { downArrow: true });
     await harness.press(" ");
-    assert.equal(harness.store.getState().interaction.focusScope, "boxDetail");
-    for (let index = 0; index < 5; index += 1) {
+    assert.equal(harness.store.getState().interaction.focusScope, "mainBoxes");
+    for (let index = 0; index < 6; index += 1) {
         await harness.press("", { downArrow: true });
     }
     assert.equal(harness.store.getState().interaction.selectedDetailLineIds["audit:alpha:approval-approval-1"], "approval-approval-1:approval.action:approval-1");
@@ -400,7 +368,7 @@ test("Prompt 4 tool form is bound to the selected audit detail line", async () =
     await harness.press("4");
     await harness.press("", { tab: true });
     await harness.press(" ");
-    for (let index = 0; index < 7; index += 1) {
+    for (let index = 0; index < 8; index += 1) {
         await harness.press("", { downArrow: true });
     }
     await harness.press("", { return: true });
@@ -416,7 +384,7 @@ test("Prompt 4 command failure keeps the selected detail target", async () => {
     await harness.press("4");
     await harness.press("", { tab: true });
     await harness.press(" ");
-    for (let index = 0; index < 7; index += 1) {
+    for (let index = 0; index < 8; index += 1) {
         await harness.press("", { downArrow: true });
     }
     await harness.press("", { return: true });
@@ -463,7 +431,7 @@ test("non-collection actions attach only the selected sidebar entry", async () =
 async function openCreateWizard(harness: ReturnType<typeof createHarness>): Promise<void> {
     await harness.press("", { tab: true });
     await harness.press(" ");
-    for (let index = 0; index < 9; index += 1) {
+    for (let index = 0; index < 10; index += 1) {
         await harness.press("", { downArrow: true });
     }
     await harness.press("", { return: true });

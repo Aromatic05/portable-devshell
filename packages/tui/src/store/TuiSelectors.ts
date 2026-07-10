@@ -152,7 +152,7 @@ export function selectFooterShortcuts(state: TuiAppState): string[] {
         case "sidebarInstances":
             return ["tab", "enter", "1-6", "↑↓", "esc"];
         case "mainBoxes":
-            return ["tab", "space", "↑↓", "/", "a", "esc"];
+            return ["tab", "enter", "space", "↑↓", "/", "a", "esc"];
         case "boxDetail":
             return ["enter", "↑↓", "/", "esc"];
         case "search":
