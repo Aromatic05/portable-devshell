@@ -174,6 +174,7 @@ export class TuiRuntime {
     async handleInput(input: string, key: {
         backspace?: boolean;
         ctrl?: boolean;
+        delete?: boolean;
         downArrow?: boolean;
         escape?: boolean;
         end?: boolean;

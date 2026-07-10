@@ -6,6 +6,7 @@ export interface TuiKeyPress {
     key: {
         backspace?: boolean;
         ctrl?: boolean;
+        delete?: boolean;
         downArrow?: boolean;
         escape?: boolean;
         end?: boolean;
@@ -147,7 +148,7 @@ export class KeyDispatcher {
         if (press.key.rightArrow) {
             return [{ direction: "right", type: "editor.cursorMove" }];
         }
-        if (press.key.backspace) {
+        if (press.key.backspace || press.key.delete) {
             return [{ type: "editor.backspace" }];
         }
         if (press.input.length === 1 && !press.key.ctrl) {
