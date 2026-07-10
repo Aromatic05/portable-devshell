@@ -400,6 +400,19 @@ function createHarness(options: {
         onQuit: async () => undefined,
         onRedraw: () => undefined,
         onToolCall: options.onToolCall ?? (async () => true),
+        onGetInstanceCreateSchema: async () => ({
+            container: {
+                defaultMode: "preset" as const,
+                modes: ["preset", "dockerfile", "compose", "existingImage", "existingStoppedContainer"] as const,
+                presets: []
+            },
+            defaultAllowTools: ["bash_run"],
+            defaultEnabled: true,
+            defaultMcpEnabled: true,
+            defaultProvider: "local" as const,
+            defaultSecurityMode: "disabled",
+            providers: ["local", "ssh", "docker", "podman"] as const
+        }),
         onValidateInstanceCreateDraft: options.onValidateInstanceCreateDraft as never,
         store
     });

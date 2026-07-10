@@ -57,14 +57,14 @@ export class CommandDispatcher {
         this.#onQuit = options.onQuit;
         this.#onRedraw = options.onRedraw;
         this.#onToolCall = options.onToolCall;
-        this.#onApplyConfig = options.onApplyConfig ?? (async () => undefined);
-        this.#onCreateInstance = options.onCreateInstance ?? (async () => undefined);
-        this.#onGetInstanceCreateSchema = options.onGetInstanceCreateSchema ?? (async () => defaultCreateSchema());
-        this.#onInstanceConfigUpdate = options.onInstanceConfigUpdate ?? (async () => undefined);
-        this.#onInstanceDangerAction = options.onInstanceDangerAction ?? (async () => undefined);
-        this.#onMcpConfigUpdate = options.onMcpConfigUpdate ?? (async () => undefined);
-        this.#onValidateConfigDraft = options.onValidateConfigDraft ?? (async () => undefined);
-        this.#onValidateInstanceCreateDraft = options.onValidateInstanceCreateDraft ?? (async (draft) => draft as unknown as InstanceCreateSummary);
+        this.#onApplyConfig = options.onApplyConfig ?? unavailable;
+        this.#onCreateInstance = options.onCreateInstance ?? unavailable;
+        this.#onGetInstanceCreateSchema = options.onGetInstanceCreateSchema ?? unavailable;
+        this.#onInstanceConfigUpdate = options.onInstanceConfigUpdate ?? unavailable;
+        this.#onInstanceDangerAction = options.onInstanceDangerAction ?? unavailable;
+        this.#onMcpConfigUpdate = options.onMcpConfigUpdate ?? unavailable;
+        this.#onValidateConfigDraft = options.onValidateConfigDraft ?? unavailable;
+        this.#onValidateInstanceCreateDraft = options.onValidateInstanceCreateDraft ?? unavailable;
         this.#store = options.store;
     }
 
@@ -1002,22 +1002,6 @@ function clamp(value: number, min: number, max: number): number {
     return Math.min(Math.max(value, min), max);
 }
 
-function defaultCreateSchema(): InstanceCreateSchema {
-    return {
-        container: {
-            defaultMode: "preset",
-            modes: ["preset", "dockerfile", "compose", "existingImage", "existingStoppedContainer"],
-            presets: []
-        },
-        defaultAllowTools: ["bash_run"],
-        defaultEnabled: true,
-        defaultMcpEnabled: true,
-        defaultProvider: "local",
-        defaultSecurityMode: "disabled",
-        providers: ["local", "ssh", "docker", "podman"]
-    };
-}
-
 function defaultCreateDraft(): Record<string, JsonValue> {
     return {
         enabled: true,
@@ -1031,4 +1015,8 @@ function defaultCreateDraft(): Record<string, JsonValue> {
 
 function readErrorMessage(error: unknown): string {
     return error instanceof Error ? error.message : String(error);
+}
+
+async function unavailable(): Promise<never> {
+    throw new Error("Control RPC handler is unavailable.");
 }
