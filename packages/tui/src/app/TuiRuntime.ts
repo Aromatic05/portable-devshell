@@ -1,4 +1,5 @@
 import type { ReadStream, WriteStream } from "node:tty";
+import { PassThrough } from "node:stream";
 
 import React from "react";
 import { render, type Instance as InkInstance } from "ink";
@@ -16,6 +17,7 @@ import { RenderScheduler } from "../render/RenderScheduler.js";
 import { buildFocusGraphForState } from "../screen/ScreenRouter.js";
 import { TuiAppStore } from "../store/TuiAppStore.js";
 import type { TuiCommandRecord } from "../store/TuiReducers.js";
+import { selectMainBoxFlowMetrics, selectMainScreenModel } from "../store/TuiSelectors.js";
 
 export interface TuiRuntimeOptions {
     stdin?: ReadStream;
@@ -32,17 +34,21 @@ export class TuiRuntime {
     readonly store: TuiAppStore;
     readonly #client: TuiControlClient;
     readonly #stdin: ReadStream;
+    readonly #inkStdin: ReadStream;
     readonly #stdout: WriteStream;
     readonly #alternateScreen: AlternateScreen;
     #ink?: InkInstance;
     #commandCounter = 0;
     #attachResume?: () => void;
     #attachWait?: Promise<void>;
+    #inputStarted = false;
+    #mouseBuffer = "";
     #stopped = false;
 
     constructor(options: TuiRuntimeOptions = {}) {
         this.#stdin = options.stdin ?? process.stdin;
         this.#stdout = options.stdout ?? process.stdout;
+        this.#inkStdin = createInkStdin(this.#stdin);
         this.store = new TuiAppStore();
         this.scheduler = new RenderScheduler(this.store);
         this.focusManager = new TuiFocusManager(this.store, {
@@ -99,6 +105,7 @@ export class TuiRuntime {
 
     async run(): Promise<void> {
         this.#alternateScreen.enter();
+        this.#startInput();
         this.#mountInk();
 
         await this.session.start();
@@ -163,6 +170,7 @@ export class TuiRuntime {
         this.scheduler.dispose();
         this.#ink?.unmount();
         this.#ink = undefined;
+        this.#stopInput();
         this.#alternateScreen.exit();
     }
 
@@ -247,9 +255,137 @@ export class TuiRuntime {
     #mountInk(): void {
         this.#ink = render(React.createElement(TuiApp, { runtime: this }), {
             exitOnCtrlC: false,
-            stdin: this.#stdin,
+            stdin: this.#inkStdin,
             stdout: this.#stdout
         });
+    }
+
+    #startInput(): void {
+        if (this.#inputStarted) {
+            return;
+        }
+
+        this.#inputStarted = true;
+        this.#stdin.on("data", this.#forwardTerminalInput);
+    }
+
+    #stopInput(): void {
+        if (!this.#inputStarted) {
+            return;
+        }
+
+        this.#inputStarted = false;
+        this.#stdin.off("data", this.#forwardTerminalInput);
+    }
+
+    #forwardTerminalInput = (chunk: string | Buffer): void => {
+        if (this.#ink === undefined) {
+            return;
+        }
+
+        const input = this.#mouseBuffer + chunk.toString();
+        const pattern = /\u001B\[<(\d+);(\d+);(\d+)([Mm])/g;
+        let cursor = 0;
+
+        for (const match of input.matchAll(pattern)) {
+            const start = match.index ?? 0;
+            this.#inkStdin.write(input.slice(cursor, start));
+            cursor = start + match[0].length;
+            void this.#handleMouse({
+                button: Number(match[1]),
+                kind: match[4] === "M" ? "press" : "release",
+                x: Number(match[2]),
+                y: Number(match[3])
+            });
+        }
+
+        const remainder = input.slice(cursor);
+        const partialStart = remainder.lastIndexOf("\u001B[<");
+        if (partialStart >= 0) {
+            this.#inkStdin.write(remainder.slice(0, partialStart));
+            this.#mouseBuffer = remainder.slice(partialStart);
+            return;
+        }
+
+        this.#mouseBuffer = "";
+        this.#inkStdin.write(remainder);
+    };
+
+    async #handleMouse(event: { button: number; kind: "press" | "release"; x: number; y: number }): Promise<void> {
+        if (event.kind !== "press") {
+            return;
+        }
+
+        const sidebarWidth = Math.floor(Math.max(0, this.columns - 3) * 0.15);
+        if ((event.button & 64) !== 0) {
+            if (event.x > sidebarWidth + 2) {
+                await this.commandDispatcher.dispatch({ type: (event.button & 1) === 0 ? "screen.pageUp" : "screen.pageDown" });
+            }
+            return;
+        }
+
+        if ((event.button & 3) !== 0) {
+            return;
+        }
+
+        if (event.x >= 2 && event.x <= sidebarWidth + 1) {
+            await this.#handleSidebarClick(event.y);
+            return;
+        }
+
+        if (event.x > sidebarWidth + 2) {
+            await this.#handleMainClick(event.y);
+        }
+    }
+
+    async #handleSidebarClick(row: number): Promise<void> {
+        const pageIndex = row - 5;
+        const pages = ["instances", "config", "connector", "audit", "logs", "help"] as const;
+        const page = pages[pageIndex];
+        if (page !== undefined) {
+            await this.commandDispatcher.dispatch({ page, type: "page.select" });
+            this.focusManager.setFocus({ id: page, kind: "page" });
+            return;
+        }
+
+        const instance = this.store.getState().instances[row - 12];
+        if (instance !== undefined) {
+            this.store.setSelectedInstance(instance.name);
+            this.focusManager.setFocus({ id: instance.name, kind: "instance" });
+        }
+    }
+
+    async #handleMainClick(row: number): Promise<void> {
+        const state = this.store.getState();
+        const model = selectMainScreenModel(state);
+        const metrics = selectMainBoxFlowMetrics(state);
+        const scrollOffset = state.ui.scrollOffsets[metrics.scrollKey] ?? 0;
+        const flowLine = row - 6 + scrollOffset;
+        const box = model.boxes.find((candidate) => {
+            const range = metrics.boxRanges[candidate.id];
+            return range !== undefined && flowLine >= range.start && flowLine < range.end;
+        });
+        if (box === undefined) {
+            return;
+        }
+
+        const range = metrics.boxRanges[box.id]!;
+        this.focusManager.setFocus({ id: box.id, kind: "box" });
+        if (flowLine === range.start) {
+            await this.commandDispatcher.dispatch({ type: "screen.toggle" });
+            return;
+        }
+        if (!box.expanded) {
+            return;
+        }
+
+        const detailLine = box.expandedLines[flowLine - range.start - 1];
+        if (detailLine?.id === undefined) {
+            return;
+        }
+        this.store.setFocusScope("boxDetail");
+        this.store.setSelectedDetailLine(box.expandedKey, detailLine.id);
+        await this.commandDispatcher.dispatch({ type: "focus.activate" });
     }
 
     #suspendForAttach(): void {
@@ -351,6 +487,19 @@ function readErrorMessage(error: unknown): string {
     return error instanceof Error ? error.message : String(error);
 }
 
+function createInkStdin(stdin: ReadStream): ReadStream {
+    const proxy = new PassThrough() as PassThrough & {
+        isTTY?: boolean;
+        setRawMode?(enabled: boolean): PassThrough;
+    };
+    proxy.isTTY = stdin.isTTY;
+    proxy.setRawMode = (enabled) => {
+        stdin.setRawMode?.(enabled);
+        return proxy;
+    };
+    return proxy as unknown as ReadStream;
+}
+
 class AlternateScreen {
     readonly #stdout: WriteStream;
     #active = false;
@@ -365,7 +514,7 @@ class AlternateScreen {
         }
 
         this.#active = true;
-        this.#stdout.write("\u001B[?1049h\u001B[?25l");
+        this.#stdout.write("\u001B[?1049h\u001B[?25l\u001B[?1000h\u001B[?1002h\u001B[?1006h");
     }
 
     exit(): void {
@@ -374,6 +523,6 @@ class AlternateScreen {
         }
 
         this.#active = false;
-        this.#stdout.write("\u001B[?25h\u001B[?1049l");
+        this.#stdout.write("\u001B[?1006l\u001B[?1002l\u001B[?1000l\u001B[?25h\u001B[?1049l");
     }
 }
