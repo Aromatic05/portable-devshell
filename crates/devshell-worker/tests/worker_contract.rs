@@ -95,9 +95,28 @@ fn handshake_tools_and_bash_run_flow_work_over_framed_rpc() {
         }),
     );
     assert_eq!(tools["ok"], true);
-    assert_eq!(tools["result"]["tools"][0]["name"], "bash_run");
-    assert!(tools["result"]["tools"][0]["inputSchema"]["properties"]["timeoutMs"].is_object());
-    assert!(tools["result"]["tools"][0]["inputSchema"]["properties"]["maxOutputBytes"].is_object());
+    let catalog = tools["result"]["tools"].as_array().unwrap();
+    assert_eq!(
+        catalog
+            .iter()
+            .map(|tool| tool["name"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        vec![
+            "bash_run",
+            "file_edit",
+            "file_find",
+            "file_info",
+            "file_read",
+            "file_search",
+            "file_write",
+        ]
+    );
+    for tool in catalog {
+        assert!(tool["description"].is_string());
+        assert!(tool["inputSchema"].is_object());
+        assert!(tool["outputSchema"].is_object());
+        assert!(matches!(tool["access"].as_str(), Some("read" | "write" | "execute" | "session")));
+    }
 
     let bash_run = env.rpc(
         instance,
@@ -112,7 +131,9 @@ fn handshake_tools_and_bash_run_flow_work_over_framed_rpc() {
     );
     assert_eq!(bash_run["ok"], true);
     assert_eq!(bash_run["result"]["exitCode"], 0);
-    assert_eq!(bash_run["result"]["timedOut"], false);
+    assert_eq!(bash_run["result"]["termination"], "exited");
+    assert_eq!(bash_run["result"]["stdoutTruncated"], false);
+    assert_eq!(bash_run["result"]["stderrTruncated"], false);
     assert_eq!(
         bash_run["result"]["stdout"],
         format!("{}\nready", env.workspace().canonicalize().unwrap().display())
@@ -161,7 +182,7 @@ fn handshake_rejects_unsupported_protocol_versions() {
 }
 
 #[test]
-fn bash_run_preserves_timeout_and_output_limit_semantics() {
+fn bash_run_returns_success_for_timeout_and_output_limit() {
     let env = TestEnv::new();
     let instance = "aromatic-timeout";
 
@@ -184,7 +205,7 @@ fn bash_run_preserves_timeout_and_output_limit_semantics() {
         }),
     );
     assert_eq!(timed_out["ok"], true);
-    assert_eq!(timed_out["result"]["timedOut"], true);
+    assert_eq!(timed_out["result"]["termination"], "timeout");
     assert!(timed_out["result"]["exitCode"].is_null());
 
     let output_limited = env.rpc(
@@ -199,9 +220,9 @@ fn bash_run_preserves_timeout_and_output_limit_semantics() {
             }
         }),
     );
-    assert_eq!(output_limited["ok"], false);
-    assert_eq!(output_limited["error"]["code"], "bash.outputLimitExceeded");
-    assert_eq!(output_limited["error"]["details"]["maxOutputBytes"], 128);
+    assert_eq!(output_limited["ok"], true);
+    assert_eq!(output_limited["result"]["termination"], "outputLimit");
+    assert_eq!(output_limited["result"]["stdoutTruncated"], true);
 
     env.json_command(&["stop", "--instance", instance]);
 }

@@ -9,6 +9,7 @@ test("WorkerToolCatalog filters tools through allowlist and resets on clear", ()
 
     const tools = catalog.refresh([
         {
+            access: "execute",
             description: "Run a shell command.",
             inputSchema: {
                 properties: {
@@ -17,12 +18,15 @@ test("WorkerToolCatalog filters tools through allowlist and resets on clear", ()
                 required: ["command"],
                 type: "object"
             },
-            name: "bash_run"
+            name: "bash_run",
+            outputSchema: { type: "object" }
         },
         {
+            access: "read",
             description: "Should be filtered.",
             inputSchema: {},
-            name: "internal_only"
+            name: "internal_only",
+            outputSchema: {}
         }
     ]);
 
@@ -40,9 +44,11 @@ test("WorkerToolCatalog rejects invalid tool schema from tools.list", () => {
         () =>
             catalog.refresh([
                 {
+                    access: "execute",
                     description: "Missing tool name.",
                     inputSchema: {},
-                    name: ""
+                    name: "",
+                    outputSchema: {}
                 }
             ]),
         (error: unknown) => {
@@ -50,4 +56,16 @@ test("WorkerToolCatalog rejects invalid tool schema from tools.list", () => {
             return true;
         }
     );
+});
+
+test("WorkerToolCatalog rejects tool definitions without output schema or access", () => {
+    const catalog = new WorkerToolCatalog(new ToolAllowlist([]));
+
+    assert.throws(() => catalog.refresh([
+        {
+            description: "Incomplete tool.",
+            inputSchema: {},
+            name: "bash_run"
+        } as never
+    ]));
 });
