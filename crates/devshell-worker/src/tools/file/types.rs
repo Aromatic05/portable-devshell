@@ -41,7 +41,12 @@ pub struct FileEditInput {
     pub operations: Vec<FileEditOperation>,
 }
 #[derive(Debug, Deserialize, JsonSchema)]
-#[serde(tag = "op", rename_all = "camelCase")]
+#[serde(
+    tag = "op",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
 pub enum FileEditOperation {
     Replace {
         start_line: usize,

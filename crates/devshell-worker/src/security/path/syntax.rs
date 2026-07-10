@@ -32,8 +32,8 @@ pub fn parse_requested_path(raw: &str) -> Result<RequestedPath, ToolError> {
         ));
     };
     let segments = match namespace {
-        PathNamespace::Workspace => raw.trim_start_matches("./").split('/'),
-        PathNamespace::Absolute => raw.trim_start_matches('/').split('/'),
+        PathNamespace::Workspace => raw[2..].split('/'),
+        PathNamespace::Absolute => raw[1..].split('/'),
     };
     for segment in segments {
         if segment == "." || segment == ".." {
