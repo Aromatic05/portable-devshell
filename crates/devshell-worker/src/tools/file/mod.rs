@@ -8,6 +8,8 @@ pub mod state;
 pub mod types;
 pub mod write;
 
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use crate::security::path::{
@@ -19,13 +21,22 @@ use crate::tools::{ToolCall, ToolError};
 pub struct FileToolState {
     pub cursors: Mutex<cursor::CursorStore>,
     pub snapshots: Mutex<state::SnapshotStore>,
+    write_locks: Mutex<HashMap<PathBuf, Arc<Mutex<()>>>>,
 }
 impl FileToolState {
     pub fn new() -> Arc<Self> {
         Arc::new(Self {
             cursors: Mutex::new(cursor::CursorStore::default()),
             snapshots: Mutex::new(state::SnapshotStore::default()),
+            write_locks: Mutex::new(HashMap::new()),
         })
+    }
+
+    pub fn write_lock(&self, path: &Path) -> Arc<Mutex<()>> {
+        let mut locks = self.write_locks.lock().unwrap();
+        locks.entry(path.to_path_buf())
+            .or_insert_with(|| Arc::new(Mutex::new(())))
+            .clone()
     }
 }
 

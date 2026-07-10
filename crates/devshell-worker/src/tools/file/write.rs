@@ -38,7 +38,12 @@ impl ToolHandler for FileWriteTool {
     fn call(&self, call: ToolCall) -> Result<serde_json::Value, ToolError> {
         let input: FileWriteInput = serde_json::from_value(call.params.clone())
             .map_err(|error| ToolError::new("tool.invalidArguments", error.to_string()))?;
+        if input.content.contains('\0') {
+            return Err(ToolError::new("file.notText", "content cannot contain NUL bytes"));
+        }
         let (requested, path) = resolve_create(&call, &input.path)?;
+        let write_lock = self.state.write_lock(&path);
+        let _write_guard = write_lock.lock().unwrap();
         let existing = path.symlink_metadata().is_ok();
         if input.mode == FileWriteMode::Create && existing {
             return Err(ToolError::new(
@@ -85,6 +90,23 @@ impl ToolHandler for FileWriteTool {
                 temp.as_file()
                     .set_permissions(fs::Permissions::from_mode(metadata.permissions().mode()))
                     .map_err(|error| ToolError::new("file.writeFailed", error.to_string()))?;
+            }
+        }
+        let (_, verified_target) = resolve_create(&call, &input.path)?;
+        if verified_target != path {
+            return Err(ToolError::new(
+                "file.writeFailed",
+                "target changed while preparing the write",
+            ));
+        }
+        if existing {
+            let expected = input.expected_revision.as_deref().unwrap();
+            let current = TextFile::read(&path)?;
+            if current.revision != expected {
+                return Err(ToolError::retryable(
+                    "file.revisionMismatch",
+                    "file changed while preparing the write",
+                ));
             }
         }
         temp.persist(&path)

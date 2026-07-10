@@ -193,3 +193,44 @@ fn bash_run_rejects_values_over_worker_hard_limits() {
 
     env.json_command(&["stop", "--instance", instance]);
 }
+
+#[test]
+fn file_write_requires_a_matching_revision_to_overwrite() {
+    let env = TestEnv::new();
+    let instance = "aromatic-file-write";
+    start(&env, instance);
+
+    let created = call(
+        &env,
+        instance,
+        "1",
+        "file_write",
+        json!({ "path": "./document.txt", "content": "first\n", "mode": "create" }),
+    );
+    assert_eq!(created["ok"], true);
+    let rejected = call(
+        &env,
+        instance,
+        "2",
+        "file_write",
+        json!({ "path": "./document.txt", "content": "second\n", "mode": "overwrite" }),
+    );
+    assert_eq!(rejected["ok"], false);
+    assert_eq!(rejected["error"]["code"], "file.invalidArguments");
+
+    let overwritten = call(
+        &env,
+        instance,
+        "3",
+        "file_write",
+        json!({
+            "path": "./document.txt",
+            "content": "second\n",
+            "mode": "overwrite",
+            "expectedRevision": created["result"]["revision"],
+        }),
+    );
+    assert_eq!(overwritten["ok"], true);
+
+    env.json_command(&["stop", "--instance", instance]);
+}
