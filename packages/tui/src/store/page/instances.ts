@@ -73,7 +73,7 @@ export function buildInstancesPageBoxes(state: TuiAppState, instanceName: string
                           formatField("Reason", approval.reason),
                           formatField("Input", approval.inputSummary),
                           formatField("Expires", approval.expiresAt),
-                          "Enter again for Approve, Deny, or Cancel."
+                          { id: `approval.action:${approval.approvalId}`, text: "Open approval actions." }
                       ],
                       id: `approval-${approval.approvalId}`,
                       status: "pending",

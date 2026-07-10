@@ -35,7 +35,7 @@ export function buildHelpPageBoxes(state: TuiAppState): BoxModel[] {
                 "Use a to open explicit actions for the selected instance.",
                 "Stop Worker always opens a confirmation dialog with Cancel focused.",
                 "Approval detail offers Approve, Deny, and Cancel; Enter never approves a list item.",
-                "Attach Shell is unavailable. Create and save actions remain unavailable."
+                "Create and save actions remain unavailable."
             ],
             id: "help-readonly",
             status: "disabled",

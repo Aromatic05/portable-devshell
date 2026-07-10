@@ -236,9 +236,6 @@ export class CommandDispatcher {
                 return await this.dispatch({ page: "logs", type: "page.select" });
             case "instance.openAudit":
                 return await this.dispatch({ page: "audit", type: "page.select" });
-            case "instance.attachShell":
-                this.#store.setScreenStatus(this.#store.getState().ui.selectedPage, "Attach Shell is not implemented.");
-                return true;
             case "approval.open":
                 this.#openApprovalActionMenu(intent.instance, intent.approvalId);
                 return true;
@@ -355,13 +352,7 @@ export class CommandDispatcher {
     #moveWithinScope(direction: "up" | "down" | "left" | "right"): boolean {
         const scope = this.#store.getState().interaction.focusScope;
         if (scope === "boxDetail") {
-            if (direction === "up") {
-                return this.#scrollMainColumn(-1);
-            }
-            if (direction === "down") {
-                return this.#scrollMainColumn(1);
-            }
-            return false;
+            return (direction === "up" || direction === "down") && this.#focusManager.move(direction);
         }
         const moved = this.#focusManager.move(direction);
         if (moved && scope === "mainBoxes") {
@@ -394,19 +385,37 @@ export class CommandDispatcher {
             }
         }
         if (scope === "mainBoxes") {
-            if (this.#store.getState().ui.mainFocusId === undefined) {
+            const state = this.#store.getState();
+            const boxId = state.ui.mainFocusId;
+            if (boxId === undefined) {
                 return false;
             }
+            const box = selectMainScreenModel(state).boxes.find((candidate) => candidate.id === boxId);
+            if (box === undefined || box.expandedLines.length === 0) {
+                return false;
+            }
+            if (!box.expanded) {
+                this.#store.toggleExpanded(this.#expandedKey(boxId));
+            }
+            this.#store.setSelectedDetailLine(this.#expandedKey(boxId), box.selectedDetailLineId ?? box.expandedLines[0].id);
             this.#store.setFocusScope("boxDetail");
+            this.#ensureMainFocusVisible();
             this.#store.setScreenStatus(this.#store.getState().ui.selectedPage, "Opened box detail.");
             return true;
         }
         if (scope === "boxDetail") {
-            const boxId = this.#store.getState().ui.mainFocusId;
-            const instance = this.#store.getState().ui.selectedInstance;
-            const approvalId = boxId?.startsWith("approval-") ? boxId.slice("approval-".length) : undefined;
-            if (instance !== undefined && approvalId !== undefined) {
-                return await this.dispatch({ approvalId, instance, type: "approval.open" });
+            const state = this.#store.getState();
+            const boxId = state.ui.mainFocusId;
+            const instance = state.ui.selectedInstance;
+            const box = selectMainScreenModel(state).boxes.find((candidate) => candidate.id === boxId);
+            const lineId = box?.selectedDetailLineId;
+            const actionId = boxId === undefined || lineId === undefined ? undefined : lineId.slice(`${boxId}:`.length);
+
+            if (instance !== undefined && actionId?.startsWith("approval.action:")) {
+                return await this.dispatch({ approvalId: actionId.slice("approval.action:".length), instance, type: "approval.open" });
+            }
+            if (instance !== undefined && actionId?.startsWith("tool.action:")) {
+                return await this.dispatch({ instance, toolName: actionId.slice("tool.action:".length), type: "toolForm.open" });
             }
             this.#store.setScreenStatus(this.#store.getState().ui.selectedPage, "Detail has no action.");
             return true;
@@ -438,8 +447,7 @@ export class CommandDispatcher {
             { id: "instance.refresh", intent: { instance, type: "instance.refresh" }, label: "Refresh Status" },
             { id: "instance.logs", intent: { type: "instance.openLogs" }, label: "Open Logs" },
             { id: "instance.audit", intent: { type: "instance.openAudit" }, label: "Open Audit" },
-            { id: "instance.callTool", intent: { instance, toolName: "bash_run", type: "toolForm.open" }, label: "Call Tool" },
-            { id: "instance.attachShell", intent: { type: "instance.attachShell" }, label: "Attach Shell (unavailable)" }
+            { id: "instance.callTool", intent: { instance, toolName: "bash_run", type: "toolForm.open" }, label: "Call Tool" }
         ]);
         this.#store.setFocusScope("actionMenu");
         return true;
