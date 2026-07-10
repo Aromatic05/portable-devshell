@@ -411,11 +411,11 @@ test("OAuth detail keeps static rows selectable after expanding a completed appr
     await harness.press(" ");
 
     const approval = selectMainScreenModel(harness.store.getState()).boxes[0]!;
-    assert.equal(harness.store.getState().interaction.focusScope, "boxDetail");
+    assert.equal(harness.store.getState().interaction.focusScope, "mainBoxes");
     assert.equal(harness.store.getState().interaction.selectedDetailLineIds[approval.expandedKey], `${approval.id}:kind`);
 
     await harness.press("", { downArrow: true });
-    assert.equal(harness.store.getState().interaction.focusScope, "boxDetail");
+    assert.equal(harness.store.getState().interaction.focusScope, "mainBoxes");
     assert.equal(harness.store.getState().interaction.selectedDetailLineIds[approval.expandedKey], `${approval.id}:client`);
 
     await harness.press("", { upArrow: true });

@@ -227,6 +227,10 @@ export class TuiFocusManager {
 }
 
 function detailKey(state: TuiAppState, boxId: string): string {
+    if (state.ui.selectedPage === "oauth") {
+        return `oauth:undefined:${boxId}`;
+    }
+
     if (state.ui.selectedPage === "instances" && boxId.startsWith("instance:")) {
         return `instances:${boxId.slice("instance:".length)}:instance`;
     }
