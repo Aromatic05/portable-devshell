@@ -229,7 +229,14 @@ fn file_write_create_rejects_a_dangling_symlink_as_existing() {
     );
     assert_eq!(response["ok"], false, "{response}");
     assert_eq!(response["error"]["code"], "file.alreadyExists");
-    assert!(env.workspace().join("dangling-link").symlink_metadata().unwrap().file_type().is_symlink());
+    assert!(
+        env.workspace()
+            .join("dangling-link")
+            .symlink_metadata()
+            .unwrap()
+            .file_type()
+            .is_symlink()
+    );
 
     env.json_command(&["stop", "--instance", instance]);
 }
@@ -416,7 +423,10 @@ fn file_edit_applies_eof_sentinel_to_all_eof_operations() {
         }),
     );
     assert_eq!(inserted["ok"], true, "{inserted}");
-    assert_eq!(fs::read(env.workspace().join("document.txt")).unwrap(), b"one\ntwo\n");
+    assert_eq!(
+        fs::read(env.workspace().join("document.txt")).unwrap(),
+        b"one\ntwo\n"
+    );
 
     let empty = call(
         &env,

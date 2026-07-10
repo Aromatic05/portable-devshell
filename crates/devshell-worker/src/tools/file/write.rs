@@ -47,7 +47,10 @@ impl ToolHandler for FileWriteTool {
         }
         let requested_path = parse_requested_path(&input.path)?;
         authorize(&call, requested_path.namespace, true)?;
-        let existing_entry = requested_path.path(&call.workspace).symlink_metadata().is_ok();
+        let existing_entry = requested_path
+            .path(&call.workspace)
+            .symlink_metadata()
+            .is_ok();
         if input.mode == FileWriteMode::Create && existing_entry {
             return Err(ToolError::new(
                 "file.alreadyExists",

@@ -99,10 +99,8 @@ impl ToolHandler for FileEditTool {
                     text.lines.drain(start_line - 1..*end_line);
                 }
                 FileEditOperation::Insert { at, line, lines } => {
-                    let replacement = edit_lines(
-                        lines,
-                        is_eof_insert(at, *line, snapshot.total_lines),
-                    )?;
+                    let replacement =
+                        edit_lines(lines, is_eof_insert(at, *line, snapshot.total_lines))?;
                     let index = match at {
                         InsertAt::Head => 0,
                         InsertAt::Tail => text.lines.len(),
@@ -115,11 +113,8 @@ impl ToolHandler for FileEditTool {
                 }
             }
         }
-        text.final_newline = final_newline_after(
-            &input.operations,
-            snapshot.total_lines,
-            text.final_newline,
-        )?;
+        text.final_newline =
+            final_newline_after(&input.operations, snapshot.total_lines, text.final_newline)?;
         atomic_write(&call, &input.path, &path, &text.encoded())?;
         let text = TextFile::read(&path)?;
         let count = text.lines.len().min(200);
@@ -174,7 +169,11 @@ fn edit_sparse(
             "file changed since this snapshot",
         ));
     }
-    validate_operations(&input.operations, &snapshot.seen_lines, metadata.total_lines)?;
+    validate_operations(
+        &input.operations,
+        &snapshot.seen_lines,
+        metadata.total_lines,
+    )?;
 
     let mut ranges = BTreeMap::new();
     let mut inserts = BTreeMap::new();
@@ -203,7 +202,8 @@ fn edit_sparse(
                 ranges.insert(*start_line, (*end_line, None));
             }
             FileEditOperation::Insert { at, line, lines } => {
-                let replacement = edit_lines(lines, is_eof_insert(at, *line, metadata.total_lines))?;
+                let replacement =
+                    edit_lines(lines, is_eof_insert(at, *line, metadata.total_lines))?;
                 let boundary = match at {
                     InsertAt::Head => 0,
                     InsertAt::Tail => metadata.total_lines,
@@ -344,7 +344,10 @@ fn read_line<'a>(
         .read_until(b'\n', buffer)
         .map_err(|error| ToolError::new("file.writeFailed", error.to_string()))?;
     if count == 0 {
-        return Err(ToolError::new("file.writeFailed", "file ended before its expected line count"));
+        return Err(ToolError::new(
+            "file.writeFailed",
+            "file ended before its expected line count",
+        ));
     }
     let mut line = buffer.as_slice();
     line = line.strip_suffix(b"\n").unwrap_or(line);
@@ -357,8 +360,8 @@ fn read_line<'a>(
 }
 
 fn read_anchored_prefix(path: &std::path::Path, count: usize) -> Result<String, ToolError> {
-    let source = fs::File::open(path)
-        .map_err(|error| ToolError::new("file.notFound", error.to_string()))?;
+    let source =
+        fs::File::open(path).map_err(|error| ToolError::new("file.notFound", error.to_string()))?;
     let mut reader = BufReader::new(source);
     let mut buffer = Vec::new();
     let mut first_line = true;
@@ -428,9 +431,7 @@ fn final_newline_after(
                 checked_lines(lines)?;
                 replacement = Some(lines.last().is_some_and(String::is_empty));
             }
-            FileEditOperation::Insert { at, line, lines }
-                if is_eof_insert(at, *line, total) =>
-            {
+            FileEditOperation::Insert { at, line, lines } if is_eof_insert(at, *line, total) => {
                 checked_lines(lines)?;
                 tail_insert = Some(lines.last().is_some_and(String::is_empty));
             }
