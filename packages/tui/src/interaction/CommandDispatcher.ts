@@ -13,6 +13,7 @@ export interface CommandDispatcherOptions {
     onAttachShell(instance: string): Promise<void>;
     mainViewportRows(): number;
     onLogsReload(): Promise<void>;
+    onPageReload(page: import("../model/TuiUiTypes.js").PageId, instance: string | undefined): Promise<void>;
     onQuit(): Promise<void>;
     onRedraw(): void;
     onToolCall(instance: string, toolName: string, input: string): Promise<boolean>;
@@ -36,6 +37,7 @@ export class CommandDispatcher {
     readonly #onAttachShell: CommandDispatcherOptions["onAttachShell"];
     readonly #mainViewportRows: () => number;
     readonly #onLogsReload: () => Promise<void>;
+    readonly #onPageReload: CommandDispatcherOptions["onPageReload"];
     readonly #onQuit: () => Promise<void>;
     readonly #onRedraw: () => void;
     readonly #onToolCall: CommandDispatcherOptions["onToolCall"];
@@ -58,6 +60,7 @@ export class CommandDispatcher {
         this.#onAttachShell = options.onAttachShell;
         this.#mainViewportRows = options.mainViewportRows;
         this.#onLogsReload = options.onLogsReload;
+        this.#onPageReload = options.onPageReload;
         this.#onQuit = options.onQuit;
         this.#onRedraw = options.onRedraw;
         this.#onToolCall = options.onToolCall;
@@ -89,6 +92,18 @@ export class CommandDispatcher {
                     this.#store.setScreenStatus("logs", "Logs reloaded from instance.readLogs.");
                 }
                 return true;
+            case "page.reload": {
+                const state = this.#store.getState();
+                try {
+                    await this.#onPageReload(state.ui.selectedPage, state.ui.selectedInstance);
+                    this.#store.setScreenStatus(state.ui.selectedPage, "Page reloaded.");
+                    this.#syncMainFocus();
+                    return true;
+                } catch (error) {
+                    this.#store.setScreenStatus(state.ui.selectedPage, `Reload failed: ${readErrorMessage(error)}`);
+                    return false;
+                }
+            }
             case "focus.move":
                 if (intent.direction === "next" || intent.direction === "previous") {
                     return this.#moveAcrossScopes(intent.direction);
@@ -177,13 +192,6 @@ export class CommandDispatcher {
                 this.#store.setScreenStatus(this.#store.getState().ui.selectedPage, expanded ? "Collapsed box." : "Expanded box.");
                 return true;
             }
-            case "logs.reload":
-                if (this.#store.getState().ui.selectedPage !== "logs" || this.#store.getState().ui.selectedInstance === undefined) {
-                    return false;
-                }
-                await this.#onLogsReload();
-                this.#store.setScreenStatus("logs", "Logs reloaded from instance.readLogs.");
-                return true;
             case "logs.toggleFollow":
                 this.#store.setScreenStatus(this.#store.getState().ui.selectedPage, "Use Up/Down/Home/End to inspect log history.");
                 return true;
@@ -452,7 +460,7 @@ export class CommandDispatcher {
             if (state.ui.selectedPage === "audit" && state.ui.selectedInstance !== undefined && approvalId !== undefined) {
                 return await this.dispatch({ approvalId, instance: state.ui.selectedInstance, type: "approval.open" });
             }
-            return false;
+            return await this.dispatch({ type: "screen.toggle" });
         }
         if (scope === "boxDetail") {
             return await this.#activateDetailLine();
@@ -520,8 +528,7 @@ export class CommandDispatcher {
             if (actionId?.startsWith("instance.attachShell:")) {
                 return await this.#openAttachShellConfirm(actionId.slice("instance.attachShell:".length));
             }
-            this.#store.setScreenStatus(this.#store.getState().ui.selectedPage, "Detail has no action.");
-            return true;
+            return await this.dispatch({ type: "screen.toggle" });
     }
 
     async #openCreateWizard(): Promise<boolean> {

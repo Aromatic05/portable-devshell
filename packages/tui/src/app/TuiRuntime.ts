@@ -126,6 +126,31 @@ export class TuiRuntime {
             onLogsReload: async () => {
                 await this.session.refreshLogs();
             },
+            onPageReload: async (page, instance) => {
+                switch (page) {
+                    case "instances":
+                    case "help":
+                        await this.session.refresh();
+                        return;
+                    case "config":
+                    case "connector":
+                        await this.session.refreshConfig();
+                        return;
+                    case "oauth":
+                        await this.session.refreshOAuth();
+                        return;
+                    case "audit":
+                        if (instance !== undefined) {
+                            await this.session.refreshAudit(instance);
+                        }
+                        return;
+                    case "logs":
+                        if (instance !== undefined) {
+                            await this.session.refreshLogsForInstance(instance);
+                        }
+                        return;
+                }
+            },
             onQuit: async () => {
                 await this.stop();
             },

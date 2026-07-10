@@ -70,6 +70,7 @@ export type TuiUiIntent =
     | { type: "app.quit" }
     | { type: "app.requestQuit" }
     | { page: PageId; type: "page.select" }
+    | { type: "page.reload" }
     | { direction: "next" | "previous" | "up" | "down" | "left" | "right"; type: "focus.move" }
     | { type: "focus.activate" }
     | { type: "ui.cancel" }
@@ -100,7 +101,6 @@ export type TuiUiIntent =
     | { type: "screen.home" }
     | { type: "screen.end" }
     | { type: "screen.toggle" }
-    | { type: "logs.reload" }
     | { type: "logs.toggleFollow" }
     | { type: "logs.clearBuffer" }
     | { body: string; cancelLabel?: string; confirmIntent: TuiUiIntent; confirmLabel?: string; title: string; type: "overlay.openConfirm" }

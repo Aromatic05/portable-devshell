@@ -70,6 +70,28 @@ test("Prompt 3 urgent fix uses page + instance coordinates with a two-stage Tab 
     assert.equal(harness.store.getState().ui.selectedInstance, "beta");
 });
 
+test("page shortcuts include 7 and reload works on every page", async () => {
+    const harness = createHarness();
+
+    await harness.press("7");
+    assert.equal(harness.store.getState().ui.selectedPage, "help");
+
+    for (const shortcut of ["1", "2", "3", "4", "5", "6", "7"]) {
+        await harness.press(shortcut);
+        await harness.press("r");
+    }
+
+    assert.deepEqual(harness.pageReloads(), [
+        { instance: "alpha", page: "instances" },
+        { instance: "alpha", page: "config" },
+        { instance: "alpha", page: "connector" },
+        { instance: "alpha", page: "oauth" },
+        { instance: "alpha", page: "audit" },
+        { instance: "alpha", page: "logs" },
+        { instance: "alpha", page: "help" }
+    ]);
+});
+
 test("mouse hit regions follow the rendered sidebar, boxes, and overlays", () => {
     const harness = createHarness();
     const viewport = { columns: 120, rows: 40 };
@@ -102,9 +124,11 @@ test("space expands a box without blocking main box navigation", async () => {
 
     const expandedKey = "instances:alpha:instance";
     await harness.press("", { return: true });
-    assert.equal(harness.store.getState().ui.expandedBoxes[expandedKey], undefined);
+    assert.equal(harness.store.getState().ui.expandedBoxes[expandedKey], true);
     assert.equal(harness.store.getState().interaction.focusScope, "mainBoxes");
 
+    await harness.press(" ");
+    assert.equal(harness.store.getState().ui.expandedBoxes[expandedKey], false);
     await harness.press(" ");
     assert.equal(harness.store.getState().ui.expandedBoxes[expandedKey], true);
     const expandedBox = selectMainScreenModel(harness.store.getState()).boxes.find((box) => box.id === firstBoxId)!;
@@ -607,6 +631,7 @@ function createHarness(options: {
     const enabledChanges: Array<{ enabled: boolean; instance: string }> = [];
     const shellAttaches: string[] = [];
     let logsReloadRequests = 0;
+    const pageReloads: Array<{ instance: string | undefined; page: string }> = [];
     const focusManager = new TuiFocusManager(store, {
         currentPage: () => store.getState().ui.selectedPage,
         graphFor: (page, mode) =>
@@ -640,6 +665,9 @@ function createHarness(options: {
         }),
         onLogsReload: async () => {
             logsReloadRequests += 1;
+        },
+        onPageReload: async (page, instance) => {
+            pageReloads.push({ instance, page });
         },
         onOAuthApprovalDecision: options.onOAuthApprovalDecision ?? (async (approvalId, decision) => {
             oauthApprovalDecisions.push({ approvalId, decision });
@@ -690,6 +718,9 @@ function createHarness(options: {
         },
         oauthApprovalDecisions() {
             return oauthApprovalDecisions;
+        },
+        pageReloads() {
+            return pageReloads;
         },
         shellAttaches() {
             return shellAttaches;

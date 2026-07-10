@@ -61,6 +61,27 @@ export class TuiControlSession {
         await this.refresh();
     }
 
+
+    async refreshConfig(): Promise<void> {
+        const configView = await this.#readConfigView();
+        const runtimeInstances = await this.#client.listInstances();
+        this.#store.replaceInstances(mergeInstances(configView, runtimeInstances));
+        this.#store.setConfigView(configView);
+    }
+
+    async refreshOAuth(): Promise<void> {
+        await this.#reloadOAuthApprovals(this.#store.getState().configView);
+    }
+
+    async refreshAudit(instance: string): Promise<void> {
+        await this.#reloadToolCalls(instance);
+        await this.#reloadApprovals(instance);
+    }
+
+    async refreshLogsForInstance(instance: string): Promise<void> {
+        await this.#reloadLogs(instance);
+    }
+
     async refreshLogs(): Promise<void> {
         const instances = this.#readRuntimeInstances();
 
