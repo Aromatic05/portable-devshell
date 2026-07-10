@@ -32,6 +32,8 @@ export class KeyDispatcher {
         switch (mode) {
             case "confirm":
                 return this.#forConfirm(press);
+            case "textDetail":
+                return this.#forTextDetail(press);
             case "approvalDetail":
             case "denyConfirm":
                 return this.#forApprovalDetail(press);
@@ -64,6 +66,32 @@ export class KeyDispatcher {
             return { type: "ui.redraw" };
         }
         return undefined;
+    }
+
+
+    #forTextDetail(press: TuiKeyPress): TuiUiIntent[] {
+        if (press.key.upArrow) {
+            return [{ delta: -1, type: "textDetail.scroll" }];
+        }
+        if (press.key.downArrow) {
+            return [{ delta: 1, type: "textDetail.scroll" }];
+        }
+        if (press.key.pageUp) {
+            return [{ delta: -10, type: "textDetail.scroll" }];
+        }
+        if (press.key.pageDown) {
+            return [{ delta: 10, type: "textDetail.scroll" }];
+        }
+        if (press.key.home) {
+            return [{ delta: -1_000_000, type: "textDetail.scroll" }];
+        }
+        if (press.key.end) {
+            return [{ delta: 1_000_000, type: "textDetail.scroll" }];
+        }
+        if (press.key.return) {
+            return [{ type: "textDetail.close" }];
+        }
+        return [];
     }
 
     #forConfirm(press: TuiKeyPress): TuiUiIntent[] {

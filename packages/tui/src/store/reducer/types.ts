@@ -117,6 +117,7 @@ export type TuiAppAction =
     | { page: PageId; query: string; type: "search.setQuery" }
     | { input: string; instance: string; toolName: string; type: "toolForm.set" }
     | { type: "toolForm.clear" }
+    | { body: string; open: boolean; scrollOffset: number; title: string; type: "textDetail.set" }
     | { editor?: TuiEditorState; type: "editor.set" }
     | { dirty: boolean; key: string; value: unknown; type: "formDraft.set" }
     | { key: string; type: "formDraft.clear" }

@@ -19,6 +19,20 @@ export interface ScreenRouterProps {
 }
 
 export function ScreenRouter(props: ScreenRouterProps) {
+    const textDetail = props.state.interaction.textDetail;
+    if (textDetail.open) {
+        const width = Math.max(20, props.boxInnerWidth);
+        const lines = wrapText(textDetail.body, width);
+        const viewport = Math.max(1, props.viewportRows - 2);
+        const offset = clamp(textDetail.scrollOffset, 0, Math.max(0, lines.length - viewport));
+        return (
+            <Box flexDirection="column">
+                <Text bold>{textDetail.title}</Text>
+                {lines.slice(offset, offset + viewport).map((line, index) => <Text key={`${offset + index}:${line}`}>{line}</Text>)}
+                <Text dimColor>{`line ${Math.min(offset + 1, Math.max(lines.length, 1))}-${Math.min(offset + viewport, lines.length)} / ${lines.length} · Esc/Enter back`}</Text>
+            </Box>
+        );
+    }
     const auditPage = props.state.interaction.auditPage;
     if (props.state.ui.selectedPage === "audit" && auditPage.mode !== "list") {
         const approval = (props.state.approvalsByInstance[props.state.ui.selectedInstance ?? ""] ?? []).find(
@@ -93,6 +107,8 @@ export function pageFromShortcut(index: number): PageId | undefined {
 
 export function buildFocusGraphForState(state: TuiAppState): FocusGraph {
     switch (state.interaction.focusScope) {
+        case "textDetail":
+            return new FocusGraph([]);
         case "confirm":
             return buildLinearGraph([
                 { id: "cancel", kind: "button" as const },
@@ -152,4 +168,18 @@ function buildLinearGraph(items: FocusItem[]): FocusGraph {
         up: items[(index - 1 + items.length) % items.length]
     }));
     return new FocusGraph(nodes);
+}
+
+function wrapText(value: string, width: number): string[] {
+    const output: string[] = [];
+    for (const sourceLine of value.split(/\r?\n/u)) {
+        if (sourceLine.length === 0) {
+            output.push("");
+            continue;
+        }
+        for (let offset = 0; offset < sourceLine.length; offset += width) {
+            output.push(sourceLine.slice(offset, offset + width));
+        }
+    }
+    return output.length === 0 ? [""] : output;
 }

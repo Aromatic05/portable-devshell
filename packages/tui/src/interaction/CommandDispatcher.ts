@@ -191,6 +191,20 @@ export class CommandDispatcher {
                 return this.#setMainColumnOffset(0);
             case "screen.end":
                 return this.#setMainColumnOffset(this.#maxMainScrollOffset());
+            case "textDetail.open":
+                this.#focusManager.pushRestore("textDetail");
+                this.#store.setTextDetail({ body: intent.body, open: true, title: intent.title });
+                this.#store.setFocusScope("textDetail");
+                return true;
+            case "textDetail.close":
+                this.#store.setTextDetail({ body: "", open: false, title: "" });
+                this.#focusManager.restore();
+                return true;
+            case "textDetail.scroll": {
+                const detail = this.#store.getState().interaction.textDetail;
+                this.#store.setTextDetail({ ...detail, scrollOffset: Math.max(0, detail.scrollOffset + intent.delta) });
+                return true;
+            }
             case "screen.toggle": {
                 if (this.#store.getState().interaction.focusScope !== "mainBoxes") {
                     return false;
@@ -384,6 +398,10 @@ export class CommandDispatcher {
 
     #cancel(): boolean {
         const scope = this.#store.getState().interaction.focusScope;
+        if (scope === "textDetail") {
+            void this.dispatch({ type: "textDetail.close" });
+            return true;
+        }
         if (scope === "approvalDetail" || scope === "denyConfirm") {
             this.#returnToAuditList();
             return true;
@@ -454,6 +472,10 @@ export class CommandDispatcher {
 
     #moveWithinScope(direction: "up" | "down" | "left" | "right"): boolean {
         const scope = this.#store.getState().interaction.focusScope;
+        if (scope === "textDetail") {
+            void this.dispatch({ type: "textDetail.close" });
+            return true;
+        }
         if (scope === "approvalDetail" || scope === "denyConfirm") {
             return (direction === "up" || direction === "down") && this.#focusManager.move(direction);
         }
@@ -504,6 +526,10 @@ export class CommandDispatcher {
         }
         if (scope === "boxDetail") {
             return await this.#activateDetailLine();
+        }
+        if (scope === "textDetail") {
+            void this.dispatch({ type: "textDetail.close" });
+            return true;
         }
         if (scope === "approvalDetail" || scope === "denyConfirm") {
             return await this.#activateApprovalAction();
@@ -591,6 +617,13 @@ export class CommandDispatcher {
             }
             if (actionId?.startsWith("instance.attachShell:")) {
                 return await this.#openAttachShellConfirm(actionId.slice("instance.attachShell:".length));
+            }
+            if (selectedLine !== undefined && selectedLine.text.length > 60) {
+                return await this.dispatch({
+                    body: selectedLine.text,
+                    title: `${box?.title ?? state.ui.selectedPage} · full text`,
+                    type: "textDetail.open"
+                });
             }
             return await this.dispatch({ type: "screen.toggle" });
     }

@@ -212,6 +212,16 @@ export class TuiAppStore {
         });
     }
 
+    setTextDetail(input: { body: string; open: boolean; scrollOffset?: number; title: string }): void {
+        this.dispatch({
+            body: input.body,
+            open: input.open,
+            scrollOffset: input.scrollOffset ?? 0,
+            title: input.title,
+            type: "textDetail.set"
+        });
+    }
+
     clearToolForm(): void {
         this.dispatch({
             type: "toolForm.clear"

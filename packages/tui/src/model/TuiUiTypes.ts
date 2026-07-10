@@ -13,7 +13,8 @@ export type FocusScope =
     | "toolForm"
     | "confirm"
     | "approvalDetail"
-    | "denyConfirm";
+    | "denyConfirm"
+    | "textDetail";
 
 export type AuditPageMode = "list" | "approvalDetail" | "denyConfirm";
 

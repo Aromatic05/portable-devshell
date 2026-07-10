@@ -247,6 +247,19 @@ export function tuiAppReducer(state: TuiAppState, action: TuiAppAction): TuiAppS
                     toolForm: undefined
                 }
             };
+        case "textDetail.set":
+            return {
+                ...state,
+                interaction: {
+                    ...state.interaction,
+                    textDetail: {
+                        body: action.body,
+                        open: action.open,
+                        scrollOffset: action.scrollOffset,
+                        title: action.title
+                    }
+                }
+            };
         case "editor.set":
             return {
                 ...state,

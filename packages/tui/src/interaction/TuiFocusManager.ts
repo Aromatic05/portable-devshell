@@ -64,6 +64,9 @@ export class TuiFocusManager {
             const action = this.#store.getState().interaction.auditPage.selectedAction;
             return action === undefined ? undefined : { id: action, kind: "approvalAction" };
         }
+        if (scope === "textDetail") {
+            return undefined;
+        }
         if (scope === "search") {
             return { id: "search.query", kind: "field" };
         }

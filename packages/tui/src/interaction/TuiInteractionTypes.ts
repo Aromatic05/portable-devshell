@@ -39,6 +39,13 @@ export interface TuiSearchState {
     open: boolean;
 }
 
+export interface TuiTextDetailState {
+    body: string;
+    open: boolean;
+    scrollOffset: number;
+    title: string;
+}
+
 export interface TuiToolFormState {
     input: string;
     instance: string;
@@ -63,6 +70,7 @@ export interface TuiInteractionState {
     search: TuiSearchState;
     editor?: TuiEditorState;
     toolForm?: TuiToolFormState;
+    textDetail: TuiTextDetailState;
     sidebarCursor?: SidebarCursor;
 }
 
@@ -105,6 +113,9 @@ export type TuiUiIntent =
     | { type: "screen.home" }
     | { type: "screen.end" }
     | { type: "screen.toggle" }
+    | { body: string; title: string; type: "textDetail.open" }
+    | { type: "textDetail.close" }
+    | { delta: number; type: "textDetail.scroll" }
     | { type: "logs.toggleFollow" }
     | { type: "logs.clearBuffer" }
     | { body: string; cancelLabel?: string; confirmIntent: TuiUiIntent; confirmLabel?: string; title: string; type: "overlay.openConfirm" }
@@ -162,6 +173,7 @@ export function createEmptyInteractionState(): TuiInteractionState {
         search: {
             open: false
         },
+        textDetail: { body: "", open: false, scrollOffset: 0, title: "" },
         sidebarCursor: undefined
     };
 }

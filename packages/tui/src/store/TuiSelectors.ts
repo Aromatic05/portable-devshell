@@ -168,6 +168,8 @@ export function selectFooterShortcuts(state: TuiAppState): string[] {
             return ["tab", "enter", "ctrl+s", "ctrl+[", "ctrl+d"];
         case "wizard":
             return ["tab", "enter", "ctrl+s", "ctrl+[", "ctrl+d"];
+        case "textDetail":
+            return ["↑↓", "pgup/pgdn", "home/end", "enter", "esc"];
         case "confirm":
             return ["tab", "←→", "enter", "esc"];
         case "approvalDetail":
