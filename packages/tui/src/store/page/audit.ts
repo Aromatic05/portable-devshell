@@ -11,17 +11,17 @@ export function buildAuditPageBoxes(state: TuiAppState, instanceName: string): B
                 record === undefined
                     ? ["No tool call history from instance.readToolCalls or stream events.", ...approvalLines(approvals)]
                     : [
+                          ...approvalLines([
+                              ...approvals.filter((approval) => approval.callId === record.callId),
+                              ...(index === 0 ? approvals.filter((approval) => !toolCalls.some((toolCall) => toolCall.callId === approval.callId)) : [])
+                          ]),
                           `callId ${record.callId}`,
                           `tool ${record.toolName}`,
                           `status ${record.status}`,
                           `startedAt ${record.startedAt}`,
                           `completedAt ${record.completedAt ?? "-"}`,
                           `source ${record.source}`,
-                          `input ${record.inputSummary || "-"}`,
-                          ...approvalLines([
-                              ...approvals.filter((approval) => approval.callId === record.callId),
-                              ...(index === 0 ? approvals.filter((approval) => !toolCalls.some((toolCall) => toolCall.callId === approval.callId)) : [])
-                          ])
+                          `input ${record.inputSummary || "-"}`
                       ],
             id: record === undefined ? "audit-empty" : `audit-${record.callId}`,
             status: record === undefined ? "normal" : toolCallStatus(record),
