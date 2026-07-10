@@ -162,6 +162,10 @@ export class KeyDispatcher {
     }
 
     #forMainScopes(mode: "sidebarPages" | "sidebarInstances" | "mainBoxes" | "boxDetail", press: TuiKeyPress): TuiUiIntent[] {
+        const instanceIndex = shiftedInstanceIndex(press);
+        if (instanceIndex !== undefined) {
+            return [{ index: instanceIndex, type: "instance.selectIndex" }];
+        }
         if (isShortcutDigit(press.input)) {
             const page = pageFromShortcut(Number(press.input));
             return page === undefined ? [] : [{ page, type: "page.select" }];
@@ -217,4 +221,17 @@ export class KeyDispatcher {
 
 function isShortcutDigit(input: string): input is "1" | "2" | "3" | "4" | "5" | "6" | "7" {
     return input === "1" || input === "2" || input === "3" || input === "4" || input === "5" || input === "6" || input === "7";
+}
+
+function shiftedInstanceIndex(press: TuiKeyPress): number | undefined {
+    if (press.key.shift && isShortcutDigit(press.input)) {
+        return Number(press.input) - 1;
+    }
+
+    if (press.input.length !== 1) {
+        return undefined;
+    }
+    const symbols = "!@#$%^&*()";
+    const index = symbols.indexOf(press.input);
+    return index === -1 ? undefined : index;
 }

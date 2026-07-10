@@ -155,7 +155,7 @@ export function selectFooterShortcuts(state: TuiAppState): string[] {
     switch (state.interaction.focusScope) {
         case "sidebarPages":
         case "sidebarInstances":
-            return ["tab", "enter", "1-7", "r", "↑↓", "esc"];
+            return ["tab", "enter", "1-7", "shift+1-9", "r", "↑↓", "esc"];
         case "mainBoxes":
             return ["tab", "enter", "space", "r", "↑↓", ...(isSearchablePage(state.ui.selectedPage) ? ["/"] : []), "esc"];
         case "boxDetail":

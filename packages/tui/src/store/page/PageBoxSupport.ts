@@ -32,7 +32,7 @@ export function makeBox(
     page: PageId,
     instance: string | undefined,
     input: {
-        detailLines: Array<string | { id: string; text: string; tone?: BoxLine["tone"] }>;
+        detailLines: Array<string | { disabled?: boolean; id: string; text: string; tone?: BoxLine["tone"] }>;
         disabled?: boolean;
         expandedKey?: string;
         id: string;
@@ -231,7 +231,7 @@ function normalizeCollapsedLines(lines: string[]): [BoxLine] | [BoxLine, BoxLine
 
 function normalizeExpandedLines(
     boxId: string,
-    lines: Array<string | { id: string; text: string; tone?: BoxLine["tone"] }>
+    lines: Array<string | { disabled?: boolean; id: string; text: string; tone?: BoxLine["tone"] }>
 ): BoxLine[] {
     const occurrences = new Map<string, number>();
 
@@ -244,6 +244,7 @@ function normalizeExpandedLines(
         return {
             id: occurrence === 0 ? `${boxId}:${requestedId}` : `${boxId}:${requestedId}:${occurrence + 1}`,
             text,
+            ...(typeof line === "string" || line.disabled !== true ? {} : { disabled: true }),
             ...(typeof line === "string" || line.tone === undefined ? {} : { tone: line.tone })
         };
     });

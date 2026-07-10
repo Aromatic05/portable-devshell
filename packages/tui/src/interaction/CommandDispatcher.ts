@@ -92,6 +92,17 @@ export class CommandDispatcher {
                     this.#store.setScreenStatus("logs", "Logs reloaded from instance.readLogs.");
                 }
                 return true;
+            case "instance.selectIndex": {
+                const entry = this.#store.getState().instances[intent.index];
+                if (entry === undefined) {
+                    this.#store.setScreenStatus(this.#store.getState().ui.selectedPage, `Instance ${intent.index + 1} is unavailable.`);
+                    return false;
+                }
+                this.#store.setSelectedInstance(entry.name);
+                this.#store.setSidebarCursor({ id: entry.name, kind: "instance" });
+                this.#syncMainFocus();
+                return true;
+            }
             case "page.reload": {
                 const state = this.#store.getState();
                 try {
@@ -487,6 +498,11 @@ export class CommandDispatcher {
             const box = selectMainScreenModel(state).boxes.find((candidate) => candidate.id === boxId);
             const lineId = box?.selectedDetailLineId;
             const actionId = boxId === undefined || lineId === undefined ? undefined : lineId.slice(`${boxId}:`.length);
+            const selectedLine = box?.expandedLines.find((line) => line.id === lineId);
+            if (selectedLine?.disabled === true) {
+                this.#store.setScreenStatus(state.ui.selectedPage, "Action is unavailable in the current state.");
+                return false;
+            }
 
             if (state.ui.selectedPage === "oauth" && actionId?.startsWith("oauth.approve:")) {
                 await this.#onOAuthApprovalDecision(actionId.slice("oauth.approve:".length), "approve");

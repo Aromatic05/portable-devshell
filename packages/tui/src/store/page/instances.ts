@@ -32,7 +32,7 @@ export function buildInstancesPageBoxes(state: TuiAppState): BoxModel[] {
         ...state.instances.map((entry) => {
             const snapshot = state.snapshotsByInstance[entry.name];
             const approvals = (state.approvalsByInstance[entry.name] ?? []).filter((approval) => approval.status === "pending");
-            const restart = shouldRestart(snapshot);
+            const lifecycle = lifecycleAvailability(state, entry.name, entry.enabled, snapshot);
 
             return makeBox(state, "instances", entry.name, {
                 detailLines: [
@@ -47,9 +47,9 @@ export function buildInstancesPageBoxes(state: TuiAppState): BoxModel[] {
                     formatField("approvals", String(approvals.length)),
                     "",
                     "Actions",
-                    buttonLine("attach-shell", "Attach Shell"),
-                    buttonLine(restart ? "restart" : "start", restart ? "Restart" : "Start"),
-                    buttonLine("stop", "Stop"),
+                    buttonLine("attach-shell", "Attach Shell", !lifecycle.attach),
+                    buttonLine(lifecycle.restart ? "restart" : "start", lifecycle.restart ? "Restart" : "Start", !lifecycle.startOrRestart),
+                    buttonLine("stop", "Stop", !lifecycle.stop),
                     buttonLine("delete", "Delete")
                 ],
                 expandedKey: `instances:${entry.name}:instance`,
@@ -76,8 +76,24 @@ function instanceRuntimeSummary(snapshot: TuiAppState["snapshotsByInstance"][str
     return `daemon=${snapshot?.daemonState ?? "unknown"} rpc=${snapshot?.connectionState ?? "unknown"} ready=no`;
 }
 
-function shouldRestart(snapshot: TuiAppState["snapshotsByInstance"][string] | undefined): boolean {
-    return snapshot?.daemonState !== undefined && snapshot.daemonState !== "stopped" && snapshot.daemonState !== "failed";
+function lifecycleAvailability(
+    state: TuiAppState,
+    instance: string,
+    enabled: boolean,
+    snapshot: TuiAppState["snapshotsByInstance"][string] | undefined
+): { attach: boolean; restart: boolean; startOrRestart: boolean; stop: boolean } {
+    const busy = state.commandRecords.some((record) => record.targetInstance === instance && record.status === "running");
+    const daemon = snapshot?.daemonState;
+    const running = daemon === "running" || snapshot?.ready === true;
+    const transitional = busy || daemon === "starting" || daemon === "stopping";
+    const restart = running;
+
+    return {
+        attach: enabled && running && !transitional,
+        restart,
+        startOrRestart: enabled && !transitional,
+        stop: enabled && running && !transitional
+    };
 }
 
 function buildCreateWizard(state: TuiAppState): BoxModel {

@@ -6,6 +6,7 @@ import type { ExpandableBoxStatus } from "../model/TuiUiTypes.js";
 export type BoxLineTone = "normal" | "muted" | "accent" | "success" | "warning" | "danger";
 
 export interface BoxLine {
+    disabled?: boolean;
     id?: string;
     text: string;
     tone?: BoxLineTone;
@@ -71,7 +72,7 @@ export function renderExpandableBoxLines(box: BoxModel, requestedInnerWidth: num
             return {
                 backgroundColor: selected ? "cyan" : undefined,
                 color: selected ? "black" : lineColor(line.tone),
-                dimColor: !selected && line.tone === "muted",
+                dimColor: !selected && (line.tone === "muted" || line.disabled === true),
                 key: `${box.id}-${line.id ?? index}`,
                 text: renderBodyLine(line.text, innerWidth)
             };

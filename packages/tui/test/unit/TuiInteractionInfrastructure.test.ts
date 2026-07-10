@@ -133,6 +133,48 @@ test("search filters instances, config, audit, and logs only", async () => {
     assert.equal(harness.store.getState().interaction.search.open, false);
 });
 
+test("shifted number shortcuts switch the selected instance without coupling Instances box focus", async () => {
+    const harness = createHarness();
+
+    await harness.press("@", { shift: true });
+    assert.equal(harness.store.getState().ui.selectedInstance, "beta");
+    assert.equal(harness.store.getState().interaction.sidebarCursor?.kind, "instance");
+    assert.equal(harness.store.getState().interaction.sidebarCursor?.id, "beta");
+
+    await harness.press("1");
+    await harness.press("", { tab: true });
+    await harness.press("", { downArrow: true });
+    assert.equal(harness.store.getState().ui.mainFocusId, "instance:alpha");
+    assert.equal(harness.store.getState().ui.selectedInstance, "beta");
+});
+
+test("instance lifecycle buttons are disabled from runtime and command state", async () => {
+    const harness = createHarness();
+
+    await harness.press("", { tab: true });
+    await harness.press("", { downArrow: true });
+    await harness.press(" ");
+    let alpha = selectMainScreenModel(harness.store.getState()).boxes.find((box) => box.id === "instance:alpha")!;
+    assert.notEqual(alpha.expandedLines.find((line) => line.text === "[ Restart ]")?.disabled, true);
+    assert.notEqual(alpha.expandedLines.find((line) => line.text === "[ Stop ]")?.disabled, true);
+
+    harness.store.upsertCommand({
+        commandId: "busy-alpha",
+        sourcePanel: "instances",
+        startedAt: "2026-07-10T00:00:00.000Z",
+        status: "running",
+        targetInstance: "alpha",
+        title: "Restart Worker: alpha"
+    });
+    alpha = selectMainScreenModel(harness.store.getState()).boxes.find((box) => box.id === "instance:alpha")!;
+    assert.equal(alpha.expandedLines.find((line) => line.text === "[ Restart ]")?.disabled, true);
+    assert.equal(alpha.expandedLines.find((line) => line.text === "[ Stop ]")?.disabled, true);
+
+    harness.store.setSelectedDetailLine("instances:alpha:instance", "instance:alpha:button:restart");
+    await harness.dispatch({ type: "focus.activate" });
+    assert.deepEqual(harness.instanceActions(), []);
+});
+
 test("mouse hit regions follow the rendered sidebar, boxes, and overlays", () => {
     const harness = createHarness();
     const viewport = { columns: 120, rows: 40 };

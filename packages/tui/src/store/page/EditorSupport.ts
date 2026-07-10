@@ -22,8 +22,8 @@ export function choiceLine(id: string, label: string, value: JsonValue | undefin
     return { id: `field:${id}`, text: `${label.padEnd(18, " ")} <${displayValue(value)}>` };
 }
 
-export function buttonLine(id: string, label: string): { id: string; text: string; tone: "accent" } {
-    return { id: `button:${id}`, text: `[ ${label} ]`, tone: "accent" };
+export function buttonLine(id: string, label: string, disabled = false): { disabled?: boolean; id: string; text: string; tone: "accent" | "muted" } {
+    return { disabled: disabled || undefined, id: `button:${id}`, text: `[ ${label} ]`, tone: disabled ? "muted" : "accent" };
 }
 
 export function editorErrorLine(
