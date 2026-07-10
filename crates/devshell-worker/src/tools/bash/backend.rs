@@ -11,19 +11,22 @@ pub fn spawn_bash(
     shell: &PathBuf,
     command_text: &str,
     cwd: &Path,
-    env: &BTreeMap<String, String>,
+    env: &BTreeMap<String, Option<String>>,
 ) -> Result<Child, ToolError> {
     let mut command = Command::new(shell);
     command
         .arg("-lc")
         .arg(command_text)
         .current_dir(cwd)
-        .stdin(Stdio::null())
+        .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
 
     for (key, value) in env {
-        command.env(key, value);
+        match value {
+            Some(value) => { command.env(key, value); }
+            None => { command.env_remove(key); }
+        }
     }
 
     unsafe {

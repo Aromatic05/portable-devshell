@@ -349,7 +349,7 @@ fn workspace_security_mode_rejects_cwd_escape() {
         }),
     );
     assert_eq!(escaped["ok"], false);
-    assert_eq!(escaped["error"]["code"], "security.cwdOutsideWorkspace");
+    assert_eq!(escaped["error"]["code"], "bash.invalidCwd");
 
     env.json_command(&["stop", "--instance", instance]);
 }
