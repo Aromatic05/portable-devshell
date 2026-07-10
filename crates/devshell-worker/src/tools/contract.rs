@@ -1,6 +1,8 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use crate::daemon::process_registry::ActiveProcessRegistry;
+
 use crate::security::SecurityPolicy;
 use crate::tools::{ToolError, ToolName};
 use schemars::JsonSchema;
@@ -11,6 +13,7 @@ pub struct ToolCall {
     pub workspace: PathBuf,
     pub params: serde_json::Value,
     pub policy: Arc<dyn SecurityPolicy>,
+    pub process_registry: Arc<ActiveProcessRegistry>,
 }
 
 #[derive(Clone, Copy, Debug, JsonSchema, Serialize)]

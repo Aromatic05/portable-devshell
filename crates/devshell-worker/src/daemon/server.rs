@@ -1,6 +1,7 @@
 use std::fs;
+use std::net::Shutdown;
 use std::os::unix::net::{UnixListener, UnixStream};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
@@ -66,7 +67,7 @@ pub fn serve(instance: InstanceName) -> Result<(), String> {
                 let router = Arc::clone(&router);
                 let instance_paths = instance_paths.clone();
                 thread::spawn(move || {
-                    if let Err(error) = handle_connection(stream, &router) {
+                    if let Err(error) = handle_connection(stream, router) {
                         let _ = append_log(&instance_paths, &format!("connection error: {error}"));
                     }
                 });
@@ -87,9 +88,14 @@ pub fn serve(instance: InstanceName) -> Result<(), String> {
     Ok(())
 }
 
-fn handle_connection(mut stream: UnixStream, router: &RpcRouter) -> Result<(), String> {
+fn handle_connection(stream: UnixStream, router: Arc<RpcRouter>) -> Result<(), String> {
+    let mut reader = stream
+        .try_clone()
+        .map_err(|error| format!("failed to clone rpc connection: {error}"))?;
+    let writer = Arc::new(Mutex::new(stream));
+
     loop {
-        let frame = match read_frame(&mut stream) {
+        let frame = match read_frame(&mut reader) {
             Ok(Some(frame)) => frame,
             Ok(None) => return Ok(()),
             Err(error) => {
@@ -104,28 +110,53 @@ fn handle_connection(mut stream: UnixStream, router: &RpcRouter) -> Result<(), S
                             ),
                         ),
                     );
-                    let _ = write_response(&mut stream, &response);
+                    let _ = write_serialized_response(&writer, &response);
                 }
                 return Err(error);
             }
         };
 
         match decode_request_frame(&frame) {
-            Ok(request) => {
-                let response = router.dispatch(request);
-                write_response(&mut stream, &response)?;
+            Ok(request) if router.is_control_method(&request.method) => {
+                let response = router.dispatch_control(request);
+                write_serialized_response(&writer, &response)?;
                 if router.shutdown_requested() {
-                    break;
+                    if let Ok(stream) = writer.lock() {
+                        let _ = stream.shutdown(Shutdown::Both);
+                    }
+                    return Ok(());
                 }
             }
+            Ok(request) => match router.acquire_tool_permit() {
+                Ok(permit) => {
+                    let router = Arc::clone(&router);
+                    let writer = Arc::clone(&writer);
+                    thread::spawn(move || {
+                        let response = router.dispatch_tool(request, permit);
+                        let _ = write_serialized_response(&writer, &response);
+                    });
+                }
+                Err(error) => {
+                    let response = RpcResponse::failure(request.id, error);
+                    write_serialized_response(&writer, &response)?;
+                }
+            },
             Err(error) => {
                 let response = RpcResponse::failure(error.id, error.error);
-                write_response(&mut stream, &response)?;
+                write_serialized_response(&writer, &response)?;
             }
         }
     }
+}
 
-    Ok(())
+fn write_serialized_response(
+    writer: &Arc<Mutex<UnixStream>>,
+    response: &RpcResponse,
+) -> Result<(), String> {
+    let mut stream = writer
+        .lock()
+        .map_err(|_| "rpc connection writer lock poisoned".to_string())?;
+    write_response(&mut *stream, response)
 }
 
 fn remove_empty_runtime_dir(path: &std::path::Path) {

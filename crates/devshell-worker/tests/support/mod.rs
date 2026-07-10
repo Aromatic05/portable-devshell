@@ -50,6 +50,19 @@ impl TestEnv {
             .join("worker.sock")
     }
 
+    pub fn std_command(&self) -> std::process::Command {
+        let mut command =
+            std::process::Command::new(assert_cmd::cargo::cargo_bin("devshell-worker"));
+        command
+            .env("HOME", self._home_guard.path())
+            .env("PORTABLE_DEVSHELL_HOME", &self.home_root)
+            .env("XDG_RUNTIME_DIR", &self.runtime_root)
+            .env_remove("DEVSHELL_WORKER_INTERNAL_INSTANCE")
+            .env_remove("DEVSHELL_WORKER_INTERNAL_WORKSPACE")
+            .env_remove("DEVSHELL_WORKER_INTERNAL_SECURITY_MODE");
+        command
+    }
+
     pub fn command(&self) -> Command {
         let mut command = Command::cargo_bin("devshell-worker").unwrap();
         self.configure_command(&mut command);
@@ -75,7 +88,10 @@ impl TestEnv {
         command
             .env("HOME", self._home_guard.path())
             .env("PORTABLE_DEVSHELL_HOME", &self.home_root)
-            .env_remove("XDG_RUNTIME_DIR");
+            .env_remove("XDG_RUNTIME_DIR")
+            .env_remove("DEVSHELL_WORKER_INTERNAL_INSTANCE")
+            .env_remove("DEVSHELL_WORKER_INTERNAL_WORKSPACE")
+            .env_remove("DEVSHELL_WORKER_INTERNAL_SECURITY_MODE");
         command
     }
 
@@ -118,6 +134,9 @@ impl TestEnv {
         command
             .env("HOME", self._home_guard.path())
             .env("PORTABLE_DEVSHELL_HOME", &self.home_root)
-            .env("XDG_RUNTIME_DIR", &self.runtime_root);
+            .env("XDG_RUNTIME_DIR", &self.runtime_root)
+            .env_remove("DEVSHELL_WORKER_INTERNAL_INSTANCE")
+            .env_remove("DEVSHELL_WORKER_INTERNAL_WORKSPACE")
+            .env_remove("DEVSHELL_WORKER_INTERNAL_SECURITY_MODE");
     }
 }

@@ -1,6 +1,9 @@
 mod support;
 
 use std::fs;
+use std::io::{Read, Write};
+use std::process::Stdio;
+use std::time::{Duration, Instant};
 
 use serde_json::Value;
 use support::TestEnv;
@@ -512,4 +515,83 @@ fn daemon_start_failures_and_accept_loop_errors_clean_runtime_files() {
             .exists()
     );
     assert!(!env.socket_file(loop_fail).exists());
+}
+
+#[test]
+fn long_tool_call_does_not_block_control_requests_on_the_same_rpc_connection() {
+    let env = TestEnv::new();
+    let instance = "aromatic-concurrent-rpc";
+
+    env.command()
+        .current_dir(env.workspace())
+        .args(["start", "--instance", instance])
+        .assert()
+        .success();
+
+    let mut bridge = env
+        .std_command()
+        .args(["rpc", "--instance", instance])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut stdin = bridge.stdin.take().unwrap();
+    let mut stdout = bridge.stdout.take().unwrap();
+
+    write_rpc_frame(
+        &mut stdin,
+        &serde_json::json!({
+            "type": "request",
+            "id": "long-tool",
+            "method": "bash_run",
+            "params": {
+                "command": "sleep 2; printf done",
+                "timeoutMs": 5000
+            }
+        }),
+    );
+    write_rpc_frame(
+        &mut stdin,
+        &serde_json::json!({
+            "type": "request",
+            "id": "ping-during-tool",
+            "method": "worker.ping",
+            "params": {}
+        }),
+    );
+
+    let started = Instant::now();
+    let first = read_rpc_frame(&mut stdout);
+    assert_eq!(first["id"], "ping-during-tool");
+    assert_eq!(first["ok"], true);
+    assert!(
+        started.elapsed() < Duration::from_secs(1),
+        "worker.ping was blocked by the long tool call"
+    );
+
+    let second = read_rpc_frame(&mut stdout);
+    assert_eq!(second["id"], "long-tool");
+    assert_eq!(second["ok"], true);
+    assert_eq!(second["result"]["stdout"], "done");
+
+    drop(stdin);
+    bridge.wait().unwrap();
+    env.json_command(&["stop", "--instance", instance]);
+}
+
+fn write_rpc_frame(writer: &mut impl Write, value: &Value) {
+    let payload = serde_json::to_vec(value).unwrap();
+    writer
+        .write_all(&(payload.len() as u32).to_be_bytes())
+        .unwrap();
+    writer.write_all(&payload).unwrap();
+    writer.flush().unwrap();
+}
+
+fn read_rpc_frame(reader: &mut impl Read) -> Value {
+    let mut length = [0_u8; 4];
+    reader.read_exact(&mut length).unwrap();
+    let mut payload = vec![0_u8; u32::from_be_bytes(length) as usize];
+    reader.read_exact(&mut payload).unwrap();
+    serde_json::from_slice(&payload).unwrap()
 }

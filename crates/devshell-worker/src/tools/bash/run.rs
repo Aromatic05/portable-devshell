@@ -1,5 +1,7 @@
 use std::io::{Read, Write};
+use std::ops::{Deref, DerefMut};
 use std::path::PathBuf;
+use std::process::{Child, ExitStatus};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::thread;
@@ -8,6 +10,7 @@ use std::time::{Duration, Instant};
 use schemars::schema_for;
 
 use crate::platform;
+use crate::daemon::process_registry::ActiveProcessGuard;
 use crate::security::path::{FilesystemCapability, parse_requested_path, resolve_existing_target};
 use crate::tools::bash::backend::spawn_bash;
 use crate::tools::bash::group::bash_run_name;
@@ -88,6 +91,14 @@ impl ToolHandler for BashRunTool {
             &params.env,
         )?;
         let pid = child.id() as i32;
+        let process_guard = match call.process_registry.register(pid) {
+            Ok(process_guard) => process_guard,
+            Err(error) => {
+                let _ = child.wait();
+                return Err(ToolError::new("bash.spawnFailed", error));
+            }
+        };
+        let mut child = ManagedBashChild::new(child, pid, process_guard);
         if let Some(stdin) = params.stdin {
             let mut input = child
                 .stdin
@@ -122,7 +133,7 @@ impl ToolHandler for BashRunTool {
         );
         let termination = wait(&mut child, pid, Duration::from_millis(timeout_ms), &limit)?;
         let status = child
-            .wait()
+            .wait_and_reap()
             .map_err(|error| ToolError::new("bash.ioFailed", error.to_string()))?;
         let stdout = stdout_thread
             .join()
@@ -159,6 +170,55 @@ impl ToolHandler for BashRunTool {
         .map_err(|error| ToolError::new("tool.internalError", error.to_string()))
     }
 }
+struct ManagedBashChild {
+    child: Child,
+    process_group: i32,
+    reaped: bool,
+    _process_guard: ActiveProcessGuard,
+}
+
+impl ManagedBashChild {
+    fn new(child: Child, process_group: i32, process_guard: ActiveProcessGuard) -> Self {
+        Self {
+            child,
+            process_group,
+            reaped: false,
+            _process_guard: process_guard,
+        }
+    }
+
+    fn wait_and_reap(&mut self) -> std::io::Result<ExitStatus> {
+        let status = self.child.wait()?;
+        self.reaped = true;
+        Ok(status)
+    }
+}
+
+impl Deref for ManagedBashChild {
+    type Target = Child;
+
+    fn deref(&self) -> &Self::Target {
+        &self.child
+    }
+}
+
+impl DerefMut for ManagedBashChild {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.child
+    }
+}
+
+impl Drop for ManagedBashChild {
+    fn drop(&mut self) {
+        if self.reaped {
+            return;
+        }
+        let _ = platform::terminate_process_group(self.process_group, true);
+        let _ = self.child.wait();
+        self.reaped = true;
+    }
+}
+
 struct StreamOutput {
     kept: Vec<u8>,
     truncated: bool,
@@ -206,7 +266,7 @@ fn spawn_reader(
     })
 }
 fn wait(
-    child: &mut std::process::Child,
+    child: &mut Child,
     pid: i32,
     timeout: Duration,
     limit: &AtomicBool,

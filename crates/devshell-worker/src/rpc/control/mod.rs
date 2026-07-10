@@ -9,8 +9,9 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
 use crate::daemon::process::WorkerRuntimeContext;
+use crate::daemon::process_registry::ActiveProcessRegistry;
 use crate::instance::WorkerConfig;
-use crate::rpc::router::ControlHandler;
+use crate::rpc::router::{ActiveToolCallRegistry, ControlHandler};
 use crate::tools::ToolRegistry;
 
 pub fn register_control_handlers(
@@ -18,6 +19,8 @@ pub fn register_control_handlers(
     config: WorkerConfig,
     runtime: WorkerRuntimeContext,
     shutdown_requested: Arc<AtomicBool>,
+    active_processes: Arc<ActiveProcessRegistry>,
+    active_tool_calls: Arc<ActiveToolCallRegistry>,
     tools: Arc<ToolRegistry>,
 ) {
     handlers.insert(
@@ -33,7 +36,11 @@ pub fn register_control_handlers(
     );
     handlers.insert(
         "worker.stop".to_string(),
-        Arc::new(stop::StopHandler::new(shutdown_requested)),
+        Arc::new(stop::StopHandler::new(
+            shutdown_requested,
+            active_processes,
+            active_tool_calls,
+        )),
     );
     handlers.insert("worker.ping".to_string(), Arc::new(ping::PingHandler));
     handlers.insert(
