@@ -332,6 +332,8 @@ export class CommandDispatcher {
                 return this.#editFocusedField(intent.text, false);
             case "editor.backspace":
                 return this.#editFocusedField("", true);
+            case "editor.cursorMove":
+                return this.#moveEditorCursor(intent.direction);
             case "editor.validate":
                 return await this.#validateEditor();
             case "editor.save":
@@ -640,7 +642,7 @@ export class CommandDispatcher {
                 this.#store.setFormDraft(target.key, setPath(draft, target.path, !current));
                 return true;
             }
-            this.#store.setEditor({ ...editor, editing: true, error: undefined });
+            this.#store.setEditor({ ...editor, cursor: inputText(current).length, editing: true, error: undefined });
             return true;
         }
         return false;
@@ -660,7 +662,29 @@ export class CommandDispatcher {
         const target = this.#draftTarget(action.slice("field:".length));
         const draft = this.#editorDraft(target.key, target.fallback);
         const current = readPath(draft, target.path);
-        this.#store.setFormDraft(target.key, setPath(draft, target.path, backspace ? removeInputValue(current) : inputValue(current, input)));
+        const text = inputText(current);
+        const cursor = Math.min(Math.max(editor.cursor ?? text.length, 0), text.length);
+        const next = backspace ? `${text.slice(0, Math.max(0, cursor - 1))}${text.slice(cursor)}` : `${text.slice(0, cursor)}${input}${text.slice(cursor)}`;
+        this.#store.setFormDraft(target.key, setPath(draft, target.path, next));
+        this.#store.setEditor({ ...editor, cursor: backspace ? Math.max(0, cursor - 1) : cursor + input.length });
+        return true;
+    }
+
+    #moveEditorCursor(direction: "left" | "right"): boolean {
+        const editor = this.#store.getState().interaction.editor;
+        const boxId = this.#store.getState().ui.mainFocusId;
+        if (editor === undefined || !editor.editing || boxId === undefined) {
+            return false;
+        }
+        const lineId = this.#store.getState().interaction.selectedDetailLineIds[this.#expandedKey(boxId)];
+        const action = lineId?.slice(`${boxId}:`.length);
+        if (action?.startsWith("field:") !== true) {
+            return false;
+        }
+        const target = this.#draftTarget(action.slice("field:".length));
+        const text = inputText(readPath(this.#editorDraft(target.key, target.fallback), target.path));
+        const cursor = Math.min(Math.max(editor.cursor ?? text.length, 0), text.length);
+        this.#store.setEditor({ ...editor, cursor: direction === "left" ? Math.max(0, cursor - 1) : Math.min(text.length, cursor + 1) });
         return true;
     }
 
@@ -1016,6 +1040,10 @@ function defaultCreateDraft(): Record<string, JsonValue> {
         security: { mode: "disabled" },
         workspace: ""
     };
+}
+
+function inputText(value: JsonValue | undefined): string {
+    return Array.isArray(value) ? value.join(", ") : String(value ?? "");
 }
 
 function readErrorMessage(error: unknown): string {

@@ -44,8 +44,12 @@ export function makeBox(
     const expandedKey = input.expandedKey ?? `${page}:${instance}:${input.id}`;
     const summaryLines = normalizeCollapsedLines(input.summaryLines);
 
-    const expandedLines = normalizeExpandedLines(input.id, input.detailLines);
     const selectedDetailLineId = state.interaction.selectedDetailLineIds[expandedKey];
+    const expandedLines = normalizeExpandedLines(input.id, input.detailLines).map((line) =>
+        state.interaction.editor?.editing === true && line.id === selectedDetailLineId
+            ? { ...line, text: insertCursor(line.text, state.interaction.editor.cursor ?? 0, state.interaction.redrawNonce % 2 === 0) }
+            : line
+    );
 
     return {
         collapsedLines: summaryLines,
@@ -248,6 +252,18 @@ function normalizeExpandedLines(
 function stableDetailLineId(text: string): string {
     const field = text.trim().split(/\s{2,}|\s/)[0] ?? "detail";
     return field.replace(/[^a-zA-Z0-9_.:-]/g, "-") || "detail";
+}
+
+function insertCursor(text: string, offset: number, visible: boolean): string {
+    const start = text.lastIndexOf("[ ");
+    const end = text.lastIndexOf(" ]");
+    if (start === -1 || end <= start) {
+        return text;
+    }
+    const valueStart = start + 2;
+    const value = text.slice(valueStart, end);
+    const cursor = Math.min(Math.max(offset, 0), value.length);
+    return `${text.slice(0, valueStart)}${value.slice(0, cursor)}${visible ? "█" : " "}${value.slice(cursor)}${text.slice(end)}`;
 }
 
 function collapsedToneFor(line: string, index: number): BoxLine["tone"] {
