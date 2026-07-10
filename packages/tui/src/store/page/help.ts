@@ -34,7 +34,7 @@ export function buildHelpPageBoxes(state: TuiAppState): BoxModel[] {
             detailLines: [
                 "Use a to open explicit actions for the selected instance.",
                 "Stop Worker always opens a confirmation dialog with Cancel focused.",
-                "Approval detail offers Approve, Deny, and Cancel; Enter never approves a list item.",
+                "Approval detail offers Approve, Deny, and Back; Enter never approves a list item.",
                 "Create and save actions remain unavailable."
             ],
             id: "help-readonly",
