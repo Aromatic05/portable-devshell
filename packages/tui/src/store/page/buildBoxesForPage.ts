@@ -29,5 +29,27 @@ export function buildBoxesForPage(state: TuiAppState, page: PageId, instanceName
         }
     })();
 
+    if (page === "instances" || page === "config" || page === "audit") {
+        return filterBoxes(boxes, state.ui.searchQueries[page] ?? "");
+    }
+
     return boxes;
+}
+
+function filterBoxes(boxes: BoxModel[], query: string): BoxModel[] {
+    const normalized = query.trim().toLowerCase();
+    if (normalized.length === 0) {
+        return boxes;
+    }
+
+    return boxes.filter((box) =>
+        [
+            box.title,
+            ...box.collapsedLines.map((line) => line.text),
+            ...box.expandedLines.map((line) => line.text)
+        ]
+            .join("\n")
+            .toLowerCase()
+            .includes(normalized)
+    );
 }

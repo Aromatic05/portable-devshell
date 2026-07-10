@@ -92,6 +92,47 @@ test("page shortcuts include 7 and reload works on every page", async () => {
     ]);
 });
 
+test("search filters instances, config, audit, and logs only", async () => {
+    const harness = createHarness();
+
+    await harness.press("/");
+    await harness.press("b");
+    await harness.press("e");
+    await harness.press("t");
+    await harness.press("a");
+    assert.deepEqual(selectMainScreenModel(harness.store.getState()).boxes.map((box) => box.id), ["instance:beta"]);
+    await harness.press("", { return: true });
+
+    await harness.press("2");
+    await harness.press("/");
+    for (const character of "workspace") {
+        await harness.press(character);
+    }
+    assert.deepEqual(selectMainScreenModel(harness.store.getState()).boxes.map((box) => box.id), ["workspace"]);
+    await harness.press("", { return: true });
+
+    await harness.press("5");
+    await harness.press("/");
+    for (const character of "bash_run") {
+        await harness.press(character);
+    }
+    assert.deepEqual(selectMainScreenModel(harness.store.getState()).boxes.map((box) => box.id), ["audit-call-1"]);
+    await harness.press("", { return: true });
+
+    await harness.press("6");
+    await harness.press("/");
+    for (const character of "line 20") {
+        await harness.press(character);
+    }
+    const logs = selectMainScreenModel(harness.store.getState()).boxes.find((box) => box.id === "logs");
+    assert.deepEqual(logs?.expandedLines.map((line) => line.text), ["stdout #20 alpha line 20"]);
+    await harness.press("", { return: true });
+
+    await harness.press("3");
+    await harness.press("/");
+    assert.equal(harness.store.getState().interaction.search.open, false);
+});
+
 test("mouse hit regions follow the rendered sidebar, boxes, and overlays", () => {
     const harness = createHarness();
     const viewport = { columns: 120, rows: 40 };

@@ -98,9 +98,13 @@ export function selectMainScreenModel(state: TuiAppState): MainScreenModel {
         };
     }
 
+    const boxes = buildBoxesForPage(state, activePage.page, activePage.instance);
+    const query = state.ui.searchQueries[activePage.page] ?? "";
+
     return {
         activePage,
-        boxes: buildBoxesForPage(state, activePage.page, activePage.instance),
+        boxes,
+        ...(query.length > 0 && boxes.length === 0 && isSearchablePage(activePage.page) ? { emptyState: `No matches for "${query}".` } : {}),
         errorLines,
         pageTitle: pageTitle(activePage.page),
         statusLine
@@ -153,9 +157,9 @@ export function selectFooterShortcuts(state: TuiAppState): string[] {
         case "sidebarInstances":
             return ["tab", "enter", "1-7", "r", "↑↓", "esc"];
         case "mainBoxes":
-            return ["tab", "enter", "space", "r", "↑↓", "/", "esc"];
+            return ["tab", "enter", "space", "r", "↑↓", ...(isSearchablePage(state.ui.selectedPage) ? ["/"] : []), "esc"];
         case "boxDetail":
-            return ["enter", "space", "r", "↑↓", "/", "esc"];
+            return ["enter", "space", "r", "↑↓", ...(isSearchablePage(state.ui.selectedPage) ? ["/"] : []), "esc"];
         case "search":
             return ["type", "bs", "enter", "esc"];
         case "toolForm":
@@ -218,6 +222,10 @@ export function selectExpanded(state: TuiAppState, key: string): boolean {
 
 export function selectHelpLines(state: TuiAppState): string[] {
     return buildHelpLines(state);
+}
+
+function isSearchablePage(page: PageId): boolean {
+    return page === "instances" || page === "config" || page === "audit" || page === "logs";
 }
 
 function pageTitle(page: PageId): string {

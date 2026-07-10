@@ -119,21 +119,28 @@ export class CommandDispatcher {
                 this.#store.bumpRedrawNonce();
                 this.#onRedraw();
                 return true;
-            case "search.open":
+            case "search.open": {
+                const page = this.#store.getState().ui.selectedPage;
+                if (!isSearchablePage(page)) {
+                    return false;
+                }
                 this.#focusManager.pushRestore("search");
                 this.#store.setSearchOpen(true);
                 this.#store.setFocusScope("search");
                 return true;
+            }
             case "search.append": {
                 const page = this.#store.getState().ui.selectedPage;
                 const current = this.#store.getState().ui.searchQueries[page] ?? "";
                 this.#store.setSearchQuery(page, `${current}${intent.text}`);
+                this.#syncMainFocus();
                 return true;
             }
             case "search.backspace": {
                 const page = this.#store.getState().ui.selectedPage;
                 const current = this.#store.getState().ui.searchQueries[page] ?? "";
                 this.#store.setSearchQuery(page, current.slice(0, -1));
+                this.#syncMainFocus();
                 return true;
             }
             case "search.submit":
@@ -1123,6 +1130,10 @@ function inputText(value: JsonValue | undefined): string {
 
 function readErrorMessage(error: unknown): string {
     return error instanceof Error ? error.message : String(error);
+}
+
+function isSearchablePage(page: import("../model/TuiUiTypes.js").PageId): boolean {
+    return page === "instances" || page === "config" || page === "audit" || page === "logs";
 }
 
 async function unavailable(): Promise<never> {
