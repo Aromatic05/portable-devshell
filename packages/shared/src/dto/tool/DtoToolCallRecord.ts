@@ -4,6 +4,7 @@ export type ToolCallSource = "cli" | "tui" | "mcp";
 export type ControlClientKind = ToolCallSource | "unknown";
 
 export interface ToolCallContext {
+    purpose?: string;
     requestId?: string;
     sessionId?: string;
     source: ToolCallSource;
@@ -38,6 +39,9 @@ export interface ToolCallRecord {
     status: ToolCallStatus;
     stderrBytes?: number;
     stdoutBytes?: number;
-    timedOut: boolean;
+    termSignal?: number;
+    termination?: ToolTermination;
     toolName: string;
 }
+
+export type ToolTermination = "exited" | "signaled" | "timeout" | "outputLimit";

@@ -289,7 +289,7 @@ export class WorkerInstance {
         }
     }
 
-    async callTool(toolName: string, input: JsonValue, context: ToolCallContext): Promise<CommandResult> {
+    async callTool(toolName: string, input: JsonValue, context: ToolCallContext): Promise<JsonValue> {
         if (!this.snapshot().ready) {
             throw createError({
                 code: errorCodes.coreInstanceNotReady,
@@ -352,17 +352,21 @@ export class WorkerInstance {
 
         try {
             const result = await this.#toolInvoker.invoke(toolName, input);
+            const bashResult = toolName === "bash_run" ? asBashToolResult(result) : undefined;
             const completedAt = new Date().toISOString();
-            await this.#appendToolLogs(result, runningContext);
+            if (bashResult !== undefined) {
+                await this.#appendToolLogs({ ...bashResult, exitCode: bashResult.exitCode ?? null, signal: undefined, timedOut: false }, runningContext);
+            }
             await this.#toolCallHistory.completed(
                 callId,
-                {
-                    exitCode: result.exitCode,
-                    stderrBytes: readByteLength(result.stderr),
-                    stdoutBytes: readByteLength(result.stdout),
-                    timedOut: result.timedOut === true
-                },
-                completedAt
+                completedAt,
+                bashResult === undefined ? undefined : {
+                    exitCode: bashResult.exitCode,
+                    stderrBytes: bashResult.stderrBytes,
+                    stdoutBytes: bashResult.stdoutBytes,
+                    termSignal: bashResult.termSignal,
+                    termination: bashResult.termination
+                }
             );
             await this.#appendEvent(
                 "toolCall.completed",
@@ -370,12 +374,13 @@ export class WorkerInstance {
                     ...runningContext,
                     completedAt,
                     ...(approvalState.decision === undefined ? {} : { decision: approvalState.decision }),
-                    exitCode: result.exitCode,
+                    exitCode: bashResult?.exitCode,
                     startedAt,
                     status: "completed",
-                    stderrBytes: readByteLength(result.stderr),
-                    stdoutBytes: readByteLength(result.stdout),
-                    timedOut: result.timedOut === true ? true : undefined
+                    stderrBytes: bashResult?.stderrBytes,
+                    stdoutBytes: bashResult?.stdoutBytes,
+                    termSignal: bashResult?.termSignal,
+                    termination: bashResult?.termination
                 })
             );
             return result;
@@ -396,8 +401,7 @@ export class WorkerInstance {
                     : {
                           exitCode: result.exitCode,
                           stderrBytes: readByteLength(result.stderr),
-                          stdoutBytes: readByteLength(result.stdout),
-                          timedOut: result.timedOut === true
+                          stdoutBytes: readByteLength(result.stdout)
                       }
             );
             await this.#appendEvent(
@@ -411,8 +415,7 @@ export class WorkerInstance {
                     startedAt,
                     status: "failed",
                     stderrBytes: result === undefined ? undefined : readByteLength(result.stderr),
-                    stdoutBytes: result === undefined ? undefined : readByteLength(result.stdout),
-                    timedOut: result?.timedOut === true ? true : undefined
+                    stdoutBytes: result === undefined ? undefined : readByteLength(result.stdout)
                 })
             );
             throw error;
@@ -950,6 +953,36 @@ function asCommandResult(error: unknown): CommandResult | undefined {
         stderr: "",
         stdout: "",
         timedOut: candidate.timedOut === true
+    };
+}
+
+function asBashToolResult(value: JsonValue): {
+    exitCode?: number | null;
+    stderr: string;
+    stderrBytes: number;
+    stdout: string;
+    stdoutBytes: number;
+    termSignal?: number;
+    termination?: "exited" | "signaled" | "timeout" | "outputLimit";
+} | undefined {
+    if (typeof value !== "object" || value === null || Array.isArray(value)) {
+        return undefined;
+    }
+
+    const result = value as Record<string, JsonValue>;
+    if (typeof result.stdout !== "string" || typeof result.stderr !== "string") {
+        return undefined;
+    }
+
+    const termination = result.termination;
+    return {
+        ...(typeof result.exitCode === "number" || result.exitCode === null ? { exitCode: result.exitCode } : {}),
+        stderr: result.stderr,
+        stderrBytes: typeof result.stderrBytes === "number" ? result.stderrBytes : readByteLength(result.stderr),
+        stdout: result.stdout,
+        stdoutBytes: typeof result.stdoutBytes === "number" ? result.stdoutBytes : readByteLength(result.stdout),
+        ...(typeof result.termSignal === "number" ? { termSignal: result.termSignal } : {}),
+        ...(termination === "exited" || termination === "signaled" || termination === "timeout" || termination === "outputLimit" ? { termination } : {})
     };
 }
 

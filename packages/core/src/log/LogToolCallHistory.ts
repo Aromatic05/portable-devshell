@@ -85,8 +85,8 @@ export class ToolCallHistory {
 
     async completed(
         callId: string,
-        result: { exitCode: number | null; stderrBytes: number; stdoutBytes: number; timedOut: boolean },
-        completedAt: string
+        completedAt: string,
+        result?: { exitCode?: number | null; stderrBytes?: number; stdoutBytes?: number; termSignal?: number; termination?: "exited" | "signaled" | "timeout" | "outputLimit" }
     ): Promise<ToolCallRecord> {
         await this.#initialize();
         this.#assertActiveCall(callId);
@@ -95,12 +95,13 @@ export class ToolCallHistory {
         const record: ToolCallRecord = {
             ...startedRecord,
             completedAt,
-            exitCode: result.exitCode,
+            ...(result?.exitCode === undefined ? {} : { exitCode: result.exitCode }),
             instance: this.#instanceName,
             status: "completed",
-            stderrBytes: result.stderrBytes,
-            stdoutBytes: result.stdoutBytes,
-            timedOut: result.timedOut
+            ...(result?.stderrBytes === undefined ? {} : { stderrBytes: result.stderrBytes }),
+            ...(result?.stdoutBytes === undefined ? {} : { stdoutBytes: result.stdoutBytes }),
+            ...(result?.termSignal === undefined ? {} : { termSignal: result.termSignal }),
+            ...(result?.termination === undefined ? {} : { termination: result.termination })
         };
 
         this.#activeCall = undefined;
@@ -112,7 +113,7 @@ export class ToolCallHistory {
         callId: string,
         error: string,
         completedAt: string,
-        result?: { exitCode?: number | null; stderrBytes?: number; stdoutBytes?: number; timedOut: boolean }
+        result?: { exitCode?: number | null; stderrBytes?: number; stdoutBytes?: number; termSignal?: number; termination?: "exited" | "signaled" | "timeout" | "outputLimit" }
     ): Promise<ToolCallRecord> {
         await this.#initialize();
         this.#assertActiveCall(callId);
@@ -127,7 +128,8 @@ export class ToolCallHistory {
             status: "failed",
             ...(result?.stderrBytes === undefined ? {} : { stderrBytes: result.stderrBytes }),
             ...(result?.stdoutBytes === undefined ? {} : { stdoutBytes: result.stdoutBytes }),
-            timedOut: result?.timedOut === true
+            ...(result?.termSignal === undefined ? {} : { termSignal: result.termSignal }),
+            ...(result?.termination === undefined ? {} : { termination: result.termination })
         };
 
         this.#activeCall = undefined;
@@ -180,8 +182,7 @@ export class ToolCallHistory {
 
         return {
             ...this.#activeCall,
-            instance: this.#instanceName,
-            timedOut: false
+            instance: this.#instanceName
         };
     }
 
@@ -202,8 +203,7 @@ export class ToolCallHistory {
             decision,
             error,
             instance: this.#instanceName,
-            status,
-            timedOut: false
+            status
         };
 
         this.#activeCall = undefined;

@@ -1,4 +1,4 @@
-import { createError, errorCodes, type CommandResult, type JsonValue } from "@portable-devshell/shared";
+import { createError, errorCodes, type JsonValue } from "@portable-devshell/shared";
 
 import { WorkerRpcClient } from "../../worker/rpc/WorkerRpcClient.js";
 import { WorkerToolCatalog } from "./WorkerToolCatalog.js";
@@ -12,7 +12,7 @@ export class WorkerToolInvoker {
         this.#catalog = catalog;
     }
 
-    async invoke(toolName: string, input: JsonValue): Promise<CommandResult> {
+    async invoke(toolName: string, input: JsonValue): Promise<JsonValue> {
         const tool = this.#catalog.getTool(toolName);
 
         if (tool === undefined) {
@@ -25,27 +25,10 @@ export class WorkerToolInvoker {
         }
 
         validateAgainstSchema(tool.inputSchema, input, toolName, "input");
-        return asCommandResult(await this.#rpcClient.request(toolName, input));
+        const result = await this.#rpcClient.request(toolName, input);
+        validateAgainstSchema(tool.outputSchema, result, toolName, "output");
+        return result;
     }
-}
-
-function asCommandResult(value: JsonValue): CommandResult {
-    if (!isRecord(value)) {
-        throw createError({
-            code: errorCodes.coreToolSchemaUnavailable,
-            message: "Tool result must be an object.",
-            retryable: false,
-            details: { result: value }
-        });
-    }
-
-    return {
-        exitCode: typeof value.exitCode === "number" || value.exitCode === null ? value.exitCode : null,
-        signal: typeof value.signal === "string" ? value.signal : undefined,
-        stderr: typeof value.stderr === "string" ? value.stderr : "",
-        stdout: typeof value.stdout === "string" ? value.stdout : "",
-        timedOut: value.timedOut === true
-    };
 }
 
 function validateAgainstSchema(schema: JsonValue, value: JsonValue, toolName: string, path: string): void {

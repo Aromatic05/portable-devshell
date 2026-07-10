@@ -27,10 +27,24 @@ export const toolSchema = {
             throw new Error("tool.name must be a non-empty string");
         }
 
+        if (typeof value.description !== "string") {
+            throw new Error("tool.description must be a string");
+        }
+
+        if (!isRecord(value.inputSchema) || !isRecord(value.outputSchema)) {
+            throw new Error("tool schemas must be JSON objects");
+        }
+
+        if (value.access !== "read" && value.access !== "write" && value.access !== "execute" && value.access !== "session") {
+            throw new Error("tool.access is invalid");
+        }
+
         return {
-            description: value.description === undefined ? undefined : String(value.description),
+            access: value.access,
+            description: value.description,
             inputSchema: value.inputSchema as JsonValue,
-            name: value.name
+            name: value.name,
+            outputSchema: value.outputSchema as JsonValue
         };
     },
     safeParse(value: unknown): ParseResult<ToolDefinition> {
