@@ -138,6 +138,8 @@ test("oauth2 exposes protected resource metadata and accepts a valid bearer toke
         assert.equal(clientRegistration.status, 201);
         const client = await clientRegistration.json() as { client_id: string; redirect_uris: string[] };
         assert.equal(typeof client.client_id, "string");
+        const registrationApproval = await waitForPendingApproval(host, "registration");
+        await host.oauthApprovals?.decide(registrationApproval.approvalId, "approve", "tui");
 
         const verifier = base64Url(randomBytes(32));
         const challenge = base64Url(createHash("sha256").update(verifier).digest());
@@ -151,7 +153,10 @@ test("oauth2 exposes protected resource metadata and accepts a valid bearer toke
         authorizationUrl.searchParams.set("code_challenge_method", "S256");
         authorizationUrl.searchParams.set("resource", endpoint);
 
-        const code = await authorizeViaInteractions(authorizationUrl, redirectUri);
+        const code = await authorizeViaInteractions(authorizationUrl, redirectUri, async () => {
+            const approval = await waitForPendingApproval(host, "authorization");
+            await host.oauthApprovals?.decide(approval.approvalId, "approve", "tui");
+        });
 
         const tokenResponse = await fetch(metadata.token_endpoint, {
             method: "POST",
@@ -255,7 +260,7 @@ async function reservePort(): Promise<number> {
     return port;
 }
 
-async function authorizeViaInteractions(authorizationUrl: URL, redirectUri: string): Promise<string> {
+async function authorizeViaInteractions(authorizationUrl: URL, redirectUri: string, approve: () => Promise<void>): Promise<string> {
     let currentUrl = authorizationUrl.href;
     let method: "GET" | "POST" = "GET";
     let cookieHeader = "";
@@ -274,6 +279,7 @@ async function authorizeViaInteractions(authorizationUrl: URL, redirectUri: stri
         cookieHeader = mergeCookieHeader(cookieHeader, response);
 
         if (response.status === 200) {
+            await approve();
             method = "POST";
             continue;
         }
@@ -293,6 +299,12 @@ async function authorizeViaInteractions(authorizationUrl: URL, redirectUri: stri
     }
 
     throw new Error("authorization flow did not complete");
+}
+
+async function waitForPendingApproval(host: McpHost, kind: "authorization" | "registration") {
+    const approval = (await host.oauthApprovals?.list())?.find((candidate) => candidate.kind === kind && candidate.status === "pending");
+    assert.notEqual(approval, undefined, `pending ${kind} approval was not created`);
+    return approval!;
 }
 
 function base64Url(value: Buffer): string {

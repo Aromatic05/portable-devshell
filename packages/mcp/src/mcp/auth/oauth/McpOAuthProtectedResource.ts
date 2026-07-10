@@ -15,6 +15,7 @@ import type { OAuthProtectedResourceMetadata } from "@modelcontextprotocol/sdk/s
 
 import type { McpOAuth2Config } from "../McpAuthConfig.js";
 import { createMcpOidcFileAdapterFactory } from "./McpOidcFileAdapter.js";
+import { McpOAuthApprovalService, type OAuthApprovalInput } from "./McpOAuthApprovalService.js";
 
 type ProviderGrant = InstanceType<Provider["Grant"]>;
 
@@ -23,6 +24,7 @@ export class McpOAuthProtectedResource {
     readonly #basePath: string;
     readonly #config: McpOAuth2Config;
     readonly #issuerUrl: URL;
+    readonly #approvals: McpOAuthApprovalService;
     readonly #registeredResources = new Set<string>();
     readonly #storageDir: string;
     #provider?: Provider;
@@ -32,6 +34,11 @@ export class McpOAuthProtectedResource {
         this.#issuerUrl = new URL(publicBaseUrl);
         this.#basePath = normalizeBasePath(this.#issuerUrl.pathname);
         this.#storageDir = storageDir;
+        this.#approvals = new McpOAuthApprovalService(storageDir);
+    }
+
+    get approvals(): McpOAuthApprovalService {
+        return this.#approvals;
     }
 
     registerResource(resourceServerUrl: URL): void {
@@ -44,6 +51,7 @@ export class McpOAuthProtectedResource {
         }
 
         await mkdir(this.#storageDir, { recursive: true });
+        await this.#approvals.warmup();
         const jwks = await readOrCreateJwks(this.#storageDir);
 
         this.#provider = new Provider(stripTrailingSlash(this.#issuerUrl.href), {
@@ -129,11 +137,19 @@ export class McpOAuthProtectedResource {
                 Session: () => 30 * 24 * 60 * 60
             }
         });
+        this.#provider.on("registration_create.success", (_context, client) => {
+            void this.#approvals.registerClient(toRegistrationApprovalInput(client));
+        });
     }
 
     install(app: Express): void {
         const provider = this.#requireProvider();
         const parseForm = express.urlencoded({ extended: false });
+
+        app.get(`${this.#basePath}/oauth/approvals/:approvalId`, async (request, response) => {
+            const approval = await this.#approvals.get(request.params.approvalId);
+            response.json({ status: approval?.status ?? "missing" });
+        });
 
         app.get(this.#interactionRoute(), async (request, response) => {
             await this.#renderInteraction(provider, request, response);
@@ -207,20 +223,38 @@ export class McpOAuthProtectedResource {
             return;
         }
 
-        response
-            .status(200)
-            .type("html")
-            .send(renderInteractionPage({
-                accountId: this.#accountId,
-                clientName: readClientName(details.params.client_id, details.params.client_name),
-                promptName,
-                requiredScopes: readStringArray(details.prompt.details.missingOIDCScope),
-                requestedResources: readRequestedResources(details.prompt.details.missingResourceScopes)
-            }));
+        const approval = await this.#approvals.requestAuthorization(String(details.uid), toAuthorizationApprovalInput(details));
+
+        if (approval.status === "denied" || approval.status === "expired") {
+            await this.#finishDeniedInteraction(provider, request, response, approval.status);
+            return;
+        }
+
+        response.status(200).type("html").send(renderInteractionPage({
+            accountId: this.#accountId,
+            approvalId: approval.approvalId,
+            approvalStatus: approval.status,
+            clientName: readClientName(details.params.client_id, details.params.client_name),
+            promptName,
+            requiredScopes: readStringArray(details.prompt.details.missingOIDCScope),
+            requestedResources: readRequestedResources(details.prompt.details.missingResourceScopes)
+        }));
     }
 
     async #submitInteraction(provider: Provider, request: Request, response: Response): Promise<void> {
-        const { prompt: { details, name }, grantId, params, session } = await provider.interactionDetails(request, response);
+        const interaction = await provider.interactionDetails(request, response);
+        const { prompt: { details, name }, grantId, params, session } = interaction;
+        const approval = await this.#approvals.getAuthorization(String(interaction.uid));
+
+        if (approval?.status !== "approved") {
+            if (approval?.status === "pending") {
+                response.status(409).type("text/plain").send("Administrator approval is still pending.");
+                return;
+            }
+
+            await this.#finishDeniedInteraction(provider, request, response, approval?.status ?? "missing");
+            return;
+        }
 
         if (name === "login") {
             await provider.interactionFinished(
@@ -273,6 +307,18 @@ export class McpOAuthProtectedResource {
                 consent: { grantId: await grant.save() }
             },
             { mergeWithLastSubmission: true }
+        );
+    }
+
+    async #finishDeniedInteraction(provider: Provider, request: Request, response: Response, status: "denied" | "expired" | "missing"): Promise<void> {
+        await provider.interactionFinished(
+            request,
+            response,
+            {
+                error: "access_denied",
+                error_description: status === "expired" ? "Administrator approval expired." : "Administrator approval was denied."
+            },
+            { mergeWithLastSubmission: false }
         );
     }
 }
@@ -385,6 +431,8 @@ function readTokenResource(audience: string | string[] | undefined): URL | undef
 
 function renderInteractionPage(input: {
     accountId: string;
+    approvalId: string;
+    approvalStatus: "approved" | "pending";
     clientName: string;
     promptName: "consent" | "login";
     requestedResources: Array<{ indicator: string; scopes: string[] }>;
@@ -402,6 +450,7 @@ function renderInteractionPage(input: {
 
     const title = input.promptName === "login" ? "Sign In" : "Authorize";
     const action = input.promptName === "login" ? "Continue as aromatic" : "Approve access";
+    const waiting = input.approvalStatus === "pending";
 
     return `<!doctype html>
 <html lang="en">
@@ -424,12 +473,47 @@ function renderInteractionPage(input: {
     <p><strong>${escapeHtml(input.clientName)}</strong> is requesting access as <strong>${escapeHtml(input.accountId)}</strong>.</p>
     ${scopes.length > 0 ? `<p>Scopes:</p><ul>${scopes}</ul>` : ""}
     ${resources.length > 0 ? `<p>Resource access:</p><ul>${resources}</ul>` : ""}
-    <form method="post">
-      <button type="submit">${action}</button>
+    <p id="approval-status">${waiting ? "Waiting for administrator approval." : "Administrator approved this request."}</p>
+    <form id="interaction-form" method="post">
+      <button type="submit" ${waiting ? "disabled" : ""}>${action}</button>
     </form>
+    <script>
+      const status = document.getElementById("approval-status");
+      const form = document.getElementById("interaction-form");
+      async function checkApproval() {
+        const response = await fetch("${escapeHtml(`/oauth/approvals/${input.approvalId}`)}", { cache: "no-store" });
+        const payload = await response.json();
+        if (payload.status === "approved") { form.submit(); return; }
+        if (payload.status === "denied" || payload.status === "expired" || payload.status === "missing") {
+          status.textContent = "Administrator approval was not granted.";
+          return;
+        }
+        setTimeout(checkApproval, 1000);
+      }
+      checkApproval();
+    </script>
   </main>
 </body>
 </html>`;
+}
+
+function toRegistrationApprovalInput(client: unknown): OAuthApprovalInput {
+    const value = client as { clientId?: unknown; clientName?: unknown; redirectUris?: unknown };
+    return {
+        clientId: typeof value.clientId === "string" ? value.clientId : "unknown-client",
+        clientName: readClientName(value.clientId, value.clientName),
+        redirectUris: readStringArray(value.redirectUris)
+    };
+}
+
+function toAuthorizationApprovalInput(details: Awaited<ReturnType<Provider["interactionDetails"]>>): OAuthApprovalInput {
+    return {
+        clientId: typeof details.params.client_id === "string" ? details.params.client_id : "unknown-client",
+        clientName: readClientName(details.params.client_id, details.params.client_name),
+        redirectUris: typeof details.params.redirect_uri === "string" ? [details.params.redirect_uri] : [],
+        requestedResources: typeof details.params.resource === "string" ? [details.params.resource] : [],
+        requestedScopes: typeof details.params.scope === "string" ? details.params.scope.split(/\s+/u).filter((scope) => scope.length > 0) : []
+    };
 }
 
 function escapeHtml(value: string): string {

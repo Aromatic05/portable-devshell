@@ -1,6 +1,7 @@
 import type { CommandResult, JsonValue } from "@portable-devshell/shared";
 import { type McpAuthConfig } from "../auth/McpAuthConfig.js";
 import { McpOAuthProtectedResource } from "../auth/oauth/McpOAuthProtectedResource.js";
+import type { McpOAuthApprovalService } from "../auth/oauth/McpOAuthApprovalService.js";
 import { McpAuthPublicExposureGuard, type McpExposureConfig } from "../auth/public/McpAuthPublicExposureGuard.js";
 import { McpEndpointBinding } from "../endpoint/McpEndpointBinding.js";
 import { McpEndpointWorker } from "../endpoint/McpEndpointWorker.js";
@@ -108,5 +109,9 @@ export class McpHost {
 
     get server(): McpHostHttpServer {
         return this.#httpServer;
+    }
+
+    get oauthApprovals(): McpOAuthApprovalService | undefined {
+        return this.#oauth?.approvals;
     }
 }
