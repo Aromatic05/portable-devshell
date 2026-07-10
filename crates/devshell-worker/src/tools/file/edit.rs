@@ -107,18 +107,15 @@ impl ToolHandler for FileEditTool {
                 }
             }
         }
-        text.final_newline = match input
-            .operations
-            .iter()
-            .find_map(|operation| match operation {
+        text.final_newline = match input.operations.iter().find_map(|operation| match operation {
                 FileEditOperation::Insert {
                     at: InsertAt::Tail,
                     lines,
                     ..
                 }
-                | FileEditOperation::Replace { lines, .. } => {
-                    Some(lines.last().is_some_and(String::is_empty))
-                }
+                => Some(lines.last().is_some_and(String::is_empty)),
+                FileEditOperation::Replace { end_line, lines, .. } if *end_line == snapshot.total_lines =>
+                    Some(lines.last().is_some_and(String::is_empty)),
                 _ => None,
             }) {
             Some(value) => value,

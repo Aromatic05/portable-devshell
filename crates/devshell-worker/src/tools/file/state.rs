@@ -140,11 +140,10 @@ impl TextFile {
         let bom = bytes.starts_with(&[0xEF, 0xBB, 0xBF]);
         let content = std::str::from_utf8(if bom { &bytes[3..] } else { &bytes })
             .map_err(|_| ToolError::new("file.notText", "file is not valid UTF-8"))?;
-        let line_ending = if content.contains("\r\n") {
-            "\r\n"
-        } else {
-            "\n"
-        };
+        let line_ending = content
+            .find('\n')
+            .map(|index| if index > 0 && content.as_bytes()[index - 1] == b'\r' { "\r\n" } else { "\n" })
+            .unwrap_or("\n");
         let final_newline = content.ends_with('\n') || content.ends_with('\r');
         let normalized = content.replace("\r\n", "\n").replace('\r', "\n");
         let body = normalized.strip_suffix('\n').unwrap_or(&normalized);

@@ -234,3 +234,39 @@ fn file_write_requires_a_matching_revision_to_overwrite() {
 
     env.json_command(&["stop", "--instance", instance]);
 }
+
+#[test]
+fn file_edit_uses_the_first_actual_line_ending_when_writing_back() {
+    let env = TestEnv::new();
+    let instance = "aromatic-file-ending";
+    fs::write(env.workspace().join("document.txt"), b"first\nsecond\r\n").unwrap();
+    start(&env, instance);
+
+    let read = call(
+        &env,
+        instance,
+        "1",
+        "file_read",
+        json!({ "path": "./document.txt" }),
+    );
+    let edited = call(
+        &env,
+        instance,
+        "2",
+        "file_edit",
+        json!({
+            "path": "./document.txt",
+            "snapshotId": read["result"]["snapshotId"],
+            "operations": [{
+                "op": "replace",
+                "startLine": 1,
+                "endLine": 1,
+                "lines": ["updated"],
+            }],
+        }),
+    );
+    assert_eq!(edited["ok"], true);
+    assert_eq!(fs::read(env.workspace().join("document.txt")).unwrap(), b"updated\nsecond\n");
+
+    env.json_command(&["stop", "--instance", instance]);
+}
