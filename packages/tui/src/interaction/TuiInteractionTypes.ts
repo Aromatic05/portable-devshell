@@ -123,6 +123,7 @@ export type TuiUiIntent =
     | { instance: string; type: "instance.delete" }
     | { approvalId: string; instance: string; type: "approval.open" }
     | { approvalId: string; decision: "approve" | "deny"; instance: string; type: "approval.decide" }
+    | { approvalId: string; decision: "approve" | "deny"; type: "oauthApproval.decide" }
     | { type: "approval.back" }
     | { approvalId: string; instance: string; type: "approval.confirmDeny" };
 

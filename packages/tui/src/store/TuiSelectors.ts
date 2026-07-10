@@ -44,7 +44,7 @@ export interface MainBoxFlowMetrics {
 
 export function selectActivePage(state: TuiAppState): ActivePage {
     return {
-        instance: state.ui.selectedInstance,
+        instance: state.ui.selectedPage === "oauth" || state.ui.selectedPage === "help" ? undefined : state.ui.selectedInstance,
         page: state.ui.selectedPage
     };
 }

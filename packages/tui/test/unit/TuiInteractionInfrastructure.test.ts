@@ -522,6 +522,10 @@ test("OAuth panel approves pending registration requests", async () => {
     harness.store.setSelectedDetailLine(approval.expandedKey, `${approval.id}:oauth.approve:oauth-1`);
 
     await harness.press("", { return: true });
+    assert.equal(harness.store.getState().interaction.confirmDialog.title, "Confirm OAuth Approval");
+    assert.deepEqual(harness.oauthApprovalDecisions(), []);
+    await harness.press("", { rightArrow: true });
+    await harness.press("", { return: true });
     assert.deepEqual(harness.oauthApprovalDecisions(), [{ approvalId: "oauth-1", decision: "approve" }]);
 });
 
@@ -544,9 +548,10 @@ test("OAuth detail keeps static rows selectable after expanding a completed appr
 
     await harness.press("4");
     await harness.press("", { tab: true });
+    const approval = selectMainScreenModel(harness.store.getState()).boxes.find((box) => box.id === "oauth-approval-oauth-completed")!;
+    harness.store.setMainFocusId(approval.id);
     await harness.press(" ");
 
-    const approval = selectMainScreenModel(harness.store.getState()).boxes[0]!;
     assert.equal(harness.store.getState().interaction.focusScope, "mainBoxes");
     assert.equal(harness.store.getState().interaction.selectedDetailLineIds[approval.expandedKey], `${approval.id}:kind`);
 

@@ -300,6 +300,10 @@ export class CommandDispatcher {
                 await this.#onApprovalDecision(intent.instance, intent.approvalId, intent.decision);
                 this.#returnToAuditList();
                 return true;
+            case "oauthApproval.decide":
+                await this.#onOAuthApprovalDecision(intent.approvalId, intent.decision);
+                this.#store.setScreenStatus("oauth", intent.decision === "approve" ? "OAuth approval granted." : "OAuth approval denied.");
+                return true;
             case "approval.confirmDeny":
                 await this.#onApprovalDecision(intent.instance, intent.approvalId, "deny");
                 this.#returnToAuditList();
@@ -523,9 +527,14 @@ export class CommandDispatcher {
             }
 
             if (state.ui.selectedPage === "oauth" && actionId?.startsWith("oauth.approve:")) {
-                await this.#onOAuthApprovalDecision(actionId.slice("oauth.approve:".length), "approve");
-                this.#store.setScreenStatus("oauth", "OAuth approval granted.");
-                return true;
+                const approvalId = actionId.slice("oauth.approve:".length);
+                return await this.dispatch({
+                    body: "Approve this OAuth request? The client may receive authorization immediately.",
+                    confirmIntent: { approvalId, decision: "approve", type: "oauthApproval.decide" },
+                    confirmLabel: "Approve",
+                    title: "Confirm OAuth Approval",
+                    type: "overlay.openConfirm"
+                });
             }
 
             if (state.ui.selectedPage === "oauth" && actionId?.startsWith("oauth.deny:")) {
