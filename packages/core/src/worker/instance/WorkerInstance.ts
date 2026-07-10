@@ -355,7 +355,7 @@ export class WorkerInstance {
             const bashResult = toolName === "bash_run" ? asBashToolResult(result) : undefined;
             const completedAt = new Date().toISOString();
             if (bashResult !== undefined) {
-                await this.#appendToolLogs({ ...bashResult, exitCode: bashResult.exitCode ?? null, signal: undefined, timedOut: false }, runningContext);
+                await this.#appendToolLogs(bashResult, runningContext);
             }
             await this.#toolCallHistory.completed(
                 callId,
@@ -654,7 +654,9 @@ export class WorkerInstance {
 
         try {
             await this.reconnectRpc();
-        } catch {}
+        } catch {
+            return;
+        }
     }
 
     #closeRpcBridge(): void {
@@ -842,7 +844,7 @@ export class WorkerInstance {
     }
 
     async #appendToolLogs(
-        result: CommandResult,
+        result: Pick<CommandResult, "stderr" | "stdout">,
         context: {
             callId: string;
             requestId?: string;

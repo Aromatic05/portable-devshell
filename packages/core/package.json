@@ -16,6 +16,7 @@
     ],
     "dependencies": {
         "@portable-devshell/shared": "workspace:*",
+        "ajv": "8.20.0",
         "string-argv": "^0.3.2"
     },
     "scripts": {
