@@ -4,6 +4,10 @@ import {
     type ApprovalRequest,
     type CommandResult,
     type ControlEventEnvelope,
+    type InstanceCreateDraft,
+    type InstanceCreateResult,
+    type InstanceCreateSchema,
+    type InstanceCreateSummary,
     type InstanceSnapshot,
     type JsonValue,
     type ToolCallQuery,
@@ -52,7 +56,13 @@ export interface TuiControlDecisionOptions {
 }
 
 export interface TuiControlClientLike {
+    applyConfig(): Promise<JsonValue>;
+    createInstance(draft: InstanceCreateDraft): Promise<InstanceCreateResult>;
+    deleteInstance(instanceName: string): Promise<Record<string, JsonValue>>;
+    disableInstance(instanceName: string): Promise<Record<string, JsonValue>>;
+    enableInstance(instanceName: string): Promise<Record<string, JsonValue>>;
     getConfigView(): Promise<Record<string, JsonValue>>;
+    getInstanceCreateSchema(): Promise<InstanceCreateSchema>;
     getApproval(instance: string, approvalId: string): Promise<ApprovalRequest>;
     getSnapshot(instance: string): Promise<TuiControlSnapshotEnvelope>;
     listApprovals(instance: string): Promise<ApprovalRequest[]>;
@@ -63,6 +73,10 @@ export interface TuiControlClientLike {
     refreshStatus(instance: string): Promise<TuiControlSnapshotEnvelope>;
     startInstance(instance: string, options?: TuiControlStartOptions): Promise<InstanceSnapshot>;
     stopInstance(instance: string): Promise<InstanceSnapshot>;
+    updateInstanceConfig(instanceConfig: JsonValue): Promise<Record<string, JsonValue>>;
+    updateMcpConfig(mcpConfig: JsonValue): Promise<Record<string, JsonValue>>;
+    validateConfigDraft(draft: JsonValue): Promise<Record<string, JsonValue>>;
+    validateInstanceCreateDraft(draft: InstanceCreateDraft): Promise<InstanceCreateSummary>;
     callTool(instance: string, toolName: string, input: JsonValue): Promise<CommandResult>;
     decideApproval(
         instance: string,
@@ -90,6 +104,46 @@ export class TuiControlClient implements TuiControlClientLike {
 
     async getConfigView(): Promise<Record<string, JsonValue>> {
         return (await this.#request("control.getConfigView", createControlTarget())) as unknown as Record<string, JsonValue>;
+    }
+
+    async validateConfigDraft(draft: JsonValue): Promise<Record<string, JsonValue>> {
+        return (await this.#request("control.validateConfigDraft", createControlTarget(), draft)) as unknown as Record<string, JsonValue>;
+    }
+
+    async updateInstanceConfig(instanceConfig: JsonValue): Promise<Record<string, JsonValue>> {
+        return (await this.#request("control.updateInstanceConfig", createControlTarget(), instanceConfig)) as unknown as Record<string, JsonValue>;
+    }
+
+    async updateMcpConfig(mcpConfig: JsonValue): Promise<Record<string, JsonValue>> {
+        return (await this.#request("control.updateMcpConfig", createControlTarget(), mcpConfig)) as unknown as Record<string, JsonValue>;
+    }
+
+    async applyConfig(): Promise<JsonValue> {
+        return await this.#request("control.applyConfig", createControlTarget());
+    }
+
+    async getInstanceCreateSchema(): Promise<InstanceCreateSchema> {
+        return (await this.#request("control.getInstanceCreateSchema", createControlTarget())) as unknown as InstanceCreateSchema;
+    }
+
+    async validateInstanceCreateDraft(draft: InstanceCreateDraft): Promise<InstanceCreateSummary> {
+        return (await this.#request("control.validateInstanceCreateDraft", createControlTarget(), draft as unknown as JsonValue)) as unknown as InstanceCreateSummary;
+    }
+
+    async createInstance(draft: InstanceCreateDraft): Promise<InstanceCreateResult> {
+        return (await this.#request("control.createInstance", createControlTarget(), draft as unknown as JsonValue)) as unknown as InstanceCreateResult;
+    }
+
+    async enableInstance(instanceName: string): Promise<Record<string, JsonValue>> {
+        return (await this.#request("control.enableInstance", createControlTarget(), { instanceName })) as unknown as Record<string, JsonValue>;
+    }
+
+    async disableInstance(instanceName: string): Promise<Record<string, JsonValue>> {
+        return (await this.#request("control.disableInstance", createControlTarget(), { instanceName })) as unknown as Record<string, JsonValue>;
+    }
+
+    async deleteInstance(instanceName: string): Promise<Record<string, JsonValue>> {
+        return (await this.#request("control.deleteInstance", createControlTarget(), { instanceName })) as unknown as Record<string, JsonValue>;
     }
 
     async getSnapshot(instance: string): Promise<TuiControlSnapshotEnvelope> {
