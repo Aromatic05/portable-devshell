@@ -130,7 +130,7 @@ export class McpOAuthProtectedResource {
             },
             scopes: ["openid", "offline_access", ...this.#config.requiredScopes],
             ttl: {
-                AccessToken: () => 60 * 60,
+                AccessToken: () => 24 * 60 * 60,
                 Grant: () => 30 * 24 * 60 * 60,
                 IdToken: () => 60 * 60,
                 Interaction: () => 10 * 60,
