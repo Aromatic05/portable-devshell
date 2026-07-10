@@ -182,13 +182,15 @@ test("editing a field supports backspace, cursor movement, and inline cursor ren
     await harness.press("a");
     await harness.press("b");
     await harness.press("c");
+    await harness.press("d");
     await harness.press("", { leftArrow: true });
     await harness.press("", { leftArrow: true });
     await harness.press("", { backspace: true });
+    await harness.press("", { delete: true });
     await harness.press("", { leftArrow: true });
     await harness.press("z");
 
-    assert.equal((harness.store.getState().ui.formDrafts.create as { name?: unknown }).name, "zbc");
+    assert.equal((harness.store.getState().ui.formDrafts.create as { name?: unknown }).name, "zcd");
     const wizard = selectMainScreenModel(harness.store.getState()).boxes[0];
     assert.equal(wizard?.expandedLines.some((line) => line.text.includes("█")), true);
 });
