@@ -230,6 +230,35 @@ test("config validation errors render in the active field box", async () => {
     assert.equal(provider?.expandedLines.some((line) => line.text === "error: workspace must be an absolute path"), true);
 });
 
+test("config choices use angle selectors and switch with arrow keys", async () => {
+    const harness = createHarness();
+
+    await harness.press("2");
+    await harness.press("", { tab: true });
+    await harness.press(" ");
+    await harness.press("", { downArrow: true });
+    await harness.press("", { return: true });
+    harness.store.setFormDraft("config:alpha", {
+        approvalPolicy: { mode: "ask" },
+        enabled: true,
+        mcp: { enabled: true, path: "/alpha/mcp" },
+        name: "alpha",
+        provider: "local",
+        security: { mode: "disabled" },
+        workspace: "/workspace/alpha"
+    });
+
+    const boxes = selectMainScreenModel(harness.store.getState()).boxes;
+    assert.equal(boxes.find((box) => box.id === "provider")?.expandedLines[0]?.text.endsWith("<local>"), true);
+    assert.equal(boxes.find((box) => box.id === "security")?.expandedLines[0]?.text.endsWith("<disabled>"), true);
+    assert.equal(boxes.find((box) => box.id === "approval-policy")?.expandedLines[0]?.text.endsWith("<ask>"), true);
+
+    await harness.press("", { rightArrow: true });
+    assert.equal((harness.store.getState().ui.formDrafts["config:alpha"] as { provider?: unknown }).provider, "ssh");
+    await harness.press("", { leftArrow: true });
+    assert.equal((harness.store.getState().ui.formDrafts["config:alpha"] as { provider?: unknown }).provider, "local");
+});
+
 test("connector discard confirms and clears its per-instance MCP draft", async () => {
     const harness = createHarness();
 
