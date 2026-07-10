@@ -3,7 +3,7 @@ import type { JsonValue } from "@portable-devshell/shared";
 import type { BoxModel } from "../../component/ExpandableBox.js";
 import type { TuiAppState } from "../TuiReducers.js";
 import { buildSelectedInstancePageContext, compactSummary, makeBox, shortenPath } from "./PageBoxSupport.js";
-import { asRecord, buttonLine, editorDraft, editorErrorLine, fieldLine, readPath } from "./EditorSupport.js";
+import { asRecord, buttonLine, choiceLine, editorDraft, editorErrorLine, fieldLine, readPath } from "./EditorSupport.js";
 
 export function buildConfigPageBoxes(state: TuiAppState, instanceName: string): BoxModel[] {
     const { instance } = buildSelectedInstancePageContext(state, instanceName);
@@ -14,7 +14,7 @@ export function buildConfigPageBoxes(state: TuiAppState, instanceName: string): 
 
     return [
         makeBox(state, "config", instanceName, {
-            detailLines: [fieldLine("provider", "provider", readPath(draft, "provider")), fieldLine("enabled", "enabled", readPath(draft, "enabled")), ...editorErrorLine(state, "config", "provider", ["provider", "enabled"]), ...actions],
+            detailLines: [choiceLine("provider", "provider", readPath(draft, "provider")), choiceLine("enabled", "enabled", readPath(draft, "enabled")), ...editorErrorLine(state, "config", "provider", ["provider", "enabled"]), ...actions],
             id: "provider",
             summaryLines: [compactSummary(["provider", stringValue(readPath(draft, "provider"), "unknown")], ["editable", "yes"])],
             title: `Provider${unsaved}`
@@ -27,7 +27,7 @@ export function buildConfigPageBoxes(state: TuiAppState, instanceName: string): 
         }),
         makeBox(state, "config", instanceName, {
             detailLines: [
-                fieldLine("mcp.enabled", "mcp.enabled", readPath(draft, "mcp.enabled")),
+                choiceLine("mcp.enabled", "mcp.enabled", readPath(draft, "mcp.enabled")),
                 fieldLine("mcp.path", "mcp.path", readPath(draft, "mcp.path")),
                 fieldLine("mcp.allowTools", "allowTools", readPath(draft, "mcp.allowTools")),
                 ...editorErrorLine(state, "config", "mcp-config", ["mcp"]),
@@ -39,13 +39,13 @@ export function buildConfigPageBoxes(state: TuiAppState, instanceName: string): 
             title: `MCP Config${unsaved}`
         }),
         makeBox(state, "config", instanceName, {
-            detailLines: [fieldLine("security.mode", "security.mode", readPath(draft, "security.mode")), ...editorErrorLine(state, "config", "security", ["security"]), ...actions],
+            detailLines: [choiceLine("security.mode", "security.mode", readPath(draft, "security.mode")), ...editorErrorLine(state, "config", "security", ["security"]), ...actions],
             id: "security",
             summaryLines: [compactSummary(["mode", stringValue(readPath(draft, "security.mode"), "disabled")])],
             title: `Security${unsaved}`
         }),
         makeBox(state, "config", instanceName, {
-            detailLines: [fieldLine("approvalPolicy.mode", "approvalPolicy.mode", readPath(draft, "approvalPolicy.mode")), ...editorErrorLine(state, "config", "approval-policy", ["approvalPolicy"]), ...actions],
+            detailLines: [choiceLine("approvalPolicy.mode", "approvalPolicy.mode", readPath(draft, "approvalPolicy.mode")), ...editorErrorLine(state, "config", "approval-policy", ["approvalPolicy"]), ...actions],
             id: "approval-policy",
             summaryLines: [compactSummary(["mode", stringValue(readPath(draft, "approvalPolicy.mode"), "default")])],
             title: `Approval Policy${unsaved}`

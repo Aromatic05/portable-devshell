@@ -18,6 +18,10 @@ export function fieldLine(id: string, label: string, value: JsonValue | undefine
     return { id: `field:${id}`, text: `${label.padEnd(18, " ")} [ ${displayValue(value)} ]` };
 }
 
+export function choiceLine(id: string, label: string, value: JsonValue | undefined): { id: string; text: string } {
+    return { id: `field:${id}`, text: `${label.padEnd(18, " ")} <${displayValue(value)}>` };
+}
+
 export function buttonLine(id: string, label: string): { id: string; text: string; tone: "accent" } {
     return { id: `button:${id}`, text: `[ ${label} ]`, tone: "accent" };
 }
