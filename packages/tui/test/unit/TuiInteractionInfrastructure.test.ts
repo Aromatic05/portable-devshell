@@ -374,61 +374,75 @@ test("instance actions require a focused entry and Stop defaults to Cancel", asy
     assert.equal(harness.store.getState().ui.selectedInstance, "alpha");
 });
 
-test("Prompt 4 approval action uses the selected detail line without deciding", async () => {
+test("Pending Approval Enter opens an isolated approval detail without a tool form or action menu", async () => {
     const harness = createHarness();
 
     await harness.press("4");
     await harness.press("", { tab: true });
     await harness.press("", { downArrow: true });
-    await harness.press(" ");
-    assert.equal(harness.store.getState().interaction.focusScope, "mainBoxes");
-    for (let index = 0; index < 5; index += 1) {
-        await harness.press("", { downArrow: true });
-    }
-    assert.equal(harness.store.getState().interaction.selectedDetailLineIds["audit:alpha:approval-approval-1"], "approval-approval-1:approval.action:approval-1");
+    harness.store.setActionMenu("Actions", [{ id: "tool", intent: { type: "actionMenu.open" }, label: "Call Tool" }]);
+    harness.store.setToolForm("alpha", "bash_run", '{"command":""}');
     await harness.press("", { return: true });
 
-    assert.equal(harness.store.getState().interaction.focusScope, "actionMenu");
-    assert.deepEqual(
-        harness.store.getState().interaction.actionMenu.items.map((item) => item.label),
-        ["Approve", "Deny", "Cancel"]
-    );
-    assert.equal(harness.store.getState().interaction.selectedActionId, "approval.approve");
+    const state = harness.store.getState();
+    assert.equal(state.interaction.auditPage.mode, "approvalDetail");
+    assert.equal(state.interaction.auditPage.approvalId, "approval-1");
+    assert.equal(state.interaction.auditPage.selectedAction, "approve");
+    assert.equal(state.interaction.focusScope, "approvalDetail");
+    assert.equal(state.interaction.actionMenu.open, false);
+    assert.equal(state.interaction.toolForm, undefined);
     assert.deepEqual(harness.approvalDecisions(), []);
 });
 
-test("Prompt 4 tool form is bound to the selected audit detail line", async () => {
+test("approval detail approves directly and deny requires a Back-focused confirmation", async () => {
     const harness = createHarness();
 
     await harness.press("4");
     await harness.press("", { tab: true });
-    await harness.press(" ");
-    for (let index = 0; index < 7; index += 1) {
-        await harness.press("", { downArrow: true });
-    }
+    await harness.press("", { downArrow: true });
+    await harness.press("", { return: true });
     await harness.press("", { return: true });
 
-    assert.equal(harness.store.getState().interaction.focusScope, "toolForm");
-    assert.equal(harness.store.getState().interaction.toolForm?.instance, "alpha");
-    assert.equal(harness.store.getState().interaction.toolForm?.toolName, "bash_run");
+    assert.deepEqual(harness.approvalDecisions(), [{ approvalId: "approval-1", decision: "approve", instance: "alpha" }]);
+    assert.equal(harness.store.getState().interaction.auditPage.mode, "list");
+
+    await harness.press("", { return: true });
+    await harness.press("", { downArrow: true });
+    await harness.press("", { return: true });
+
+    assert.equal(harness.store.getState().interaction.auditPage.mode, "denyConfirm");
+    assert.equal(harness.store.getState().interaction.auditPage.selectedAction, "back");
+    await harness.press("", { upArrow: true });
+    await harness.press("", { return: true });
+
+    assert.deepEqual(harness.approvalDecisions(), [
+        { approvalId: "approval-1", decision: "approve", instance: "alpha" },
+        { approvalId: "approval-1", decision: "deny", instance: "alpha" }
+    ]);
+    assert.equal(harness.store.getState().interaction.auditPage.mode, "list");
 });
 
-test("Prompt 4 command failure keeps the selected detail target", async () => {
-    const harness = createHarness({ onToolCall: async () => false });
+test("approval detail Back restores the audit list focus and scroll position", async () => {
+    const harness = createHarness();
 
     await harness.press("4");
     await harness.press("", { tab: true });
-    await harness.press(" ");
-    for (let index = 0; index < 7; index += 1) {
-        await harness.press("", { downArrow: true });
-    }
+    await harness.press("", { downArrow: true });
+    harness.store.setScrollOffset("audit:alpha:main", 3);
     await harness.press("", { return: true });
+    await harness.press("", { downArrow: true });
+    await harness.press("", { downArrow: true });
     await harness.press("", { return: true });
 
-    assert.equal(harness.store.getState().ui.selectedPage, "audit");
-    assert.equal(harness.store.getState().ui.selectedInstance, "alpha");
-    assert.equal(harness.store.getState().interaction.focusScope, "toolForm");
-    assert.equal(harness.store.getState().interaction.toolForm?.toolName, "bash_run");
+    assert.equal(harness.store.getState().interaction.auditPage.mode, "list");
+    assert.equal(harness.store.getState().ui.mainFocusId, "approval-approval-1");
+    assert.equal(harness.store.getState().ui.scrollOffsets["audit:alpha:main"], 3);
+    assert.deepEqual(harness.approvalDecisions(), []);
+
+    await harness.press("", { return: true });
+    await harness.press("[", { ctrl: true });
+    assert.equal(harness.store.getState().interaction.auditPage.mode, "list");
+    assert.equal(harness.store.getState().ui.mainFocusId, "approval-approval-1");
 });
 
 test("Attach Shell uses the focused collection entry and confirms before running", async () => {
