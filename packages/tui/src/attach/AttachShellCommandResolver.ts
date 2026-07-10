@@ -67,7 +67,11 @@ export class AttachShellCommandResolver {
             }
 
             const prefix = composePrefix(binary, compose);
-            return withShellFallback(prefix, service);
+            return withShellFallback(prefix, service, {
+                args: [...prefix.slice(1, -1), "ps", "--status", "running", "--services"],
+                command: binary,
+                expectedOutput: service
+            });
         }
 
         const name = typeof container?.containerName === "string" ? container.containerName : undefined;
@@ -75,7 +79,11 @@ export class AttachShellCommandResolver {
             throw new AttachShellResolutionError("Attach Shell requires configured container identity.");
         }
 
-        return withShellFallback([binary, "exec", "-it"], name);
+        return withShellFallback([binary, "exec", "-it"], name, {
+            args: ["inspect", "--format", "{{.State.Running}}", name],
+            command: binary,
+            expectedOutput: "true"
+        });
     }
 }
 
@@ -106,11 +114,13 @@ function composePrefix(binary: string, compose: Record<string, unknown>): string
     return [binary, "compose", "--file", file, ...(projectName === undefined ? [] : ["--project-name", projectName]), "exec"];
 }
 
-function withShellFallback(prefix: string[], target: string): AttachShellCommand {
+function withShellFallback(prefix: string[], target: string, readinessCheck: AttachShellCommand["readinessCheck"]): AttachShellCommand {
     return {
         args: [...prefix.slice(1), target, "bash"],
         command: prefix[0] ?? "",
-        fallbackCommands: [{ args: [...prefix.slice(1), target, "sh"], command: prefix[0] ?? "" }]
+        fallbackCommands: [{ args: [...prefix.slice(1), target, "sh"], command: prefix[0] ?? "" }],
+        fallbackOnExitCode: 127,
+        readinessCheck
     };
 }
 

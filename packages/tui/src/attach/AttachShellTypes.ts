@@ -7,6 +7,14 @@ export interface AttachShellCommand {
     command: string;
     cwd?: string;
     fallbackCommands?: AttachShellCommand[];
+    fallbackOnExitCode?: number;
+    readinessCheck?: AttachShellReadinessCheck;
+}
+
+export interface AttachShellReadinessCheck {
+    args: string[];
+    command: string;
+    expectedOutput: string;
 }
 
 export interface AttachShellInstanceSummary {
