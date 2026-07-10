@@ -93,7 +93,7 @@ test("mouse hit regions follow the rendered sidebar, boxes, and overlays", () =>
     assert.equal(shiftedBoxRegion.y, boxRegion.y + 3);
 });
 
-test("Prompt 3 detail line focus preserves state through stream updates", async () => {
+test("space opens a box for line selection while enter remains a line action", async () => {
     const harness = createHarness();
 
     await harness.press("", { tab: true });
@@ -106,6 +106,10 @@ test("Prompt 3 detail line focus preserves state through stream updates", async 
 
     const expandedKey = "instances:alpha:instance";
     await harness.press("", { return: true });
+    assert.equal(harness.store.getState().ui.expandedBoxes[expandedKey], undefined);
+    assert.equal(harness.store.getState().interaction.focusScope, "mainBoxes");
+
+    await harness.press(" ");
     assert.equal(harness.store.getState().ui.expandedBoxes[expandedKey], true);
     assert.equal(harness.store.getState().interaction.focusScope, "boxDetail");
 
@@ -160,8 +164,7 @@ test("main box focus activates the main panel from the sidebar", () => {
 test("Create flow uses a wizard with focusable fields and command buttons", async () => {
     const harness = createHarness();
 
-    await harness.press("", { tab: true });
-    await harness.press("", { return: true });
+    await openCreateWizard(harness);
 
     assert.equal(harness.store.getState().interaction.focusScope, "wizard");
     assert.equal(harness.store.getState().ui.mainFocusId, "create-wizard");
@@ -180,8 +183,7 @@ test("wizard validation keeps the draft and reports the control error", async ()
         }
     });
 
-    await harness.press("", { tab: true });
-    await harness.press("", { return: true });
+    await openCreateWizard(harness);
     for (let index = 0; index < 6; index += 1) {
         await harness.press("", { tab: true });
     }
@@ -201,8 +203,7 @@ test("wizard normalizes friendly container mode labels before control validation
         }
     });
 
-    await harness.press("", { tab: true });
-    await harness.press("", { return: true });
+    await openCreateWizard(harness);
     harness.store.setFormDraft("create", { container: { mode: "Existing stopped container" }, name: "alpha", provider: "docker" });
     await harness.dispatch({ type: "editor.validate" });
 
@@ -219,6 +220,7 @@ test("config validation errors render in the active field box", async () => {
 
     await harness.press("2");
     await harness.press("", { tab: true });
+    await harness.press(" ");
     await harness.press("", { return: true });
     await harness.press("s", { ctrl: true });
 
@@ -231,6 +233,7 @@ test("connector discard confirms and clears its per-instance MCP draft", async (
 
     await harness.press("3");
     await harness.press("", { tab: true });
+    await harness.press(" ");
     await harness.press("", { return: true });
     await harness.press("", { return: true });
 
@@ -264,7 +267,7 @@ test("expanded entries retain Attach Shell alongside the configuration actions",
 
     await harness.press("", { tab: true });
     await harness.press("", { downArrow: true });
-    await harness.press("", { return: true });
+    await harness.press(" ");
 
     const entry = selectMainScreenModel(harness.store.getState()).boxes.find((box) => box.id === "instance:alpha");
     assert.equal(entry?.expandedLines.some((line) => line.text === "[ Attach Shell ]"), true);
@@ -277,7 +280,7 @@ test("Prompt 3 detail line selection clamps to a valid line after data replaceme
 
     await harness.press("5");
     await harness.press("", { tab: true });
-    await harness.press("", { return: true });
+    await harness.press(" ");
     await harness.press("", { downArrow: true });
 
     const key = "logs:alpha:logs";
@@ -342,6 +345,7 @@ test("Moving focus down advances the shared main viewport to keep the focused bo
     await harness.press("", { tab: true });
     await harness.press("", { downArrow: true });
     await harness.press(" ");
+    await harness.press(" ");
     await harness.press("", { downArrow: true });
 
     assert.equal(harness.store.getState().ui.mainFocusId, "instance:beta");
@@ -373,7 +377,7 @@ test("Prompt 4 approval action uses the selected detail line without deciding", 
     await harness.press("4");
     await harness.press("", { tab: true });
     await harness.press("", { downArrow: true });
-    await harness.press("", { return: true });
+    await harness.press(" ");
     assert.equal(harness.store.getState().interaction.focusScope, "boxDetail");
     for (let index = 0; index < 5; index += 1) {
         await harness.press("", { downArrow: true });
@@ -395,7 +399,7 @@ test("Prompt 4 tool form is bound to the selected audit detail line", async () =
 
     await harness.press("4");
     await harness.press("", { tab: true });
-    await harness.press("", { return: true });
+    await harness.press(" ");
     for (let index = 0; index < 7; index += 1) {
         await harness.press("", { downArrow: true });
     }
@@ -411,7 +415,7 @@ test("Prompt 4 command failure keeps the selected detail target", async () => {
 
     await harness.press("4");
     await harness.press("", { tab: true });
-    await harness.press("", { return: true });
+    await harness.press(" ");
     for (let index = 0; index < 7; index += 1) {
         await harness.press("", { downArrow: true });
     }
@@ -455,6 +459,15 @@ test("non-collection actions attach only the selected sidebar entry", async () =
 
     assert.equal(harness.store.getState().interaction.actionMenu.items[0]?.label, "Attach Shell to alpha");
 });
+
+async function openCreateWizard(harness: ReturnType<typeof createHarness>): Promise<void> {
+    await harness.press("", { tab: true });
+    await harness.press(" ");
+    for (let index = 0; index < 9; index += 1) {
+        await harness.press("", { downArrow: true });
+    }
+    await harness.press("", { return: true });
+}
 
 function createHarness(options: {
     onAttachShell?: (instance: string) => Promise<void>;
