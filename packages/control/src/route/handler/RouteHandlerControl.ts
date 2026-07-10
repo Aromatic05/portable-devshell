@@ -1,4 +1,5 @@
 import { createError, errorCodes, type JsonValue } from "@portable-devshell/shared";
+import type { McpOAuthApprovalService } from "@portable-devshell/mcp";
 
 import type { ControlConfigEditorService } from "../../control/ControlConfigEditorService.js";
 import type { ControlInstanceCreateService } from "../../control/ControlInstanceCreateService.js";
@@ -9,17 +10,20 @@ export interface RouteHandlerControlOptions {
     configEditorService?: ControlConfigEditorService;
     instanceCreateService?: ControlInstanceCreateService;
     instanceRegistry: InstanceRegistry;
+    getOAuthApprovals?: () => McpOAuthApprovalService | undefined;
 }
 
 export class RouteHandlerControl {
     readonly #configEditorService?: ControlConfigEditorService;
     readonly #instanceCreateService?: ControlInstanceCreateService;
     readonly #instanceRegistry: InstanceRegistry;
+    readonly #getOAuthApprovals: () => McpOAuthApprovalService | undefined;
 
     constructor(options: RouteHandlerControlOptions) {
         this.#configEditorService = options.configEditorService;
         this.#instanceCreateService = options.instanceCreateService;
         this.#instanceRegistry = options.instanceRegistry;
+        this.#getOAuthApprovals = options.getOAuthApprovals ?? (() => undefined);
     }
 
     async handle(connection: ControlRpcConnection, method: string, params?: JsonValue): Promise<JsonValue> {
@@ -75,6 +79,14 @@ export class RouteHandlerControl {
                 return await this.#requireConfigEditorService().disableInstance(params);
             case "control.applyConfig":
                 return this.#requireConfigEditorService().applyConfig();
+            case "control.listOAuthApprovals":
+                return (await this.#requireOAuthApprovals().list()) as unknown as JsonValue;
+            case "control.decideOAuthApproval":
+                return (await this.#requireOAuthApprovals().decide(
+                    readOAuthApprovalId(params),
+                    readOAuthApprovalDecision(params),
+                    readOAuthApprovalDecidedBy(connection)
+                )) as unknown as JsonValue;
             default:
                 throw createError({
                     code: errorCodes.envelopeInvalid,
@@ -104,6 +116,19 @@ export class RouteHandlerControl {
         throw createError({
             code: errorCodes.envelopeInvalid,
             message: "Config editing is not available.",
+            retryable: false
+        });
+    }
+
+    #requireOAuthApprovals(): McpOAuthApprovalService {
+        const approvals = this.#getOAuthApprovals();
+        if (approvals !== undefined) {
+            return approvals;
+        }
+
+        throw createError({
+            code: errorCodes.envelopeInvalid,
+            message: "OAuth approvals are not available.",
             retryable: false
         });
     }
@@ -137,6 +162,42 @@ function readDeclaredClientKind(params?: JsonValue): "cli" | "tui" {
     throw createError({
         code: errorCodes.controlClientIdentityInvalid,
         message: "control.identifyClient requires clientKind to be cli or tui.",
+        retryable: false
+    });
+}
+
+function readOAuthApprovalId(params?: JsonValue): string {
+    if (!isRecord(params) || typeof params.approvalId !== "string" || params.approvalId.length === 0) {
+        throw createError({
+            code: errorCodes.targetInvalid,
+            message: "control.decideOAuthApproval requires approvalId.",
+            retryable: false
+        });
+    }
+
+    return params.approvalId;
+}
+
+function readOAuthApprovalDecision(params?: JsonValue): "approve" | "deny" {
+    if (!isRecord(params) || (params.decision !== "approve" && params.decision !== "deny")) {
+        throw createError({
+            code: errorCodes.targetInvalid,
+            message: "control.decideOAuthApproval requires decision approve or deny.",
+            retryable: false
+        });
+    }
+
+    return params.decision;
+}
+
+function readOAuthApprovalDecidedBy(connection: ControlRpcConnection): "cli" | "tui" {
+    if (connection.clientKind === "cli" || connection.clientKind === "tui") {
+        return connection.clientKind;
+    }
+
+    throw createError({
+        code: errorCodes.controlClientIdentityRequired,
+        message: "Connection must identify as cli or tui before deciding OAuth approvals.",
         retryable: false
     });
 }

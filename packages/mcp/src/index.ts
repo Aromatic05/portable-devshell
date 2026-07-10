@@ -3,6 +3,7 @@ export * from "./mcp/auth/McpAuthMiddleware.js";
 export * from "./mcp/auth/provider/McpAuthProviderNone.js";
 export * from "./mcp/auth/provider/McpAuthProviderToken.js";
 export * from "./mcp/auth/oauth/McpOAuthProtectedResource.js";
+export * from "./mcp/auth/oauth/McpOAuthApprovalService.js";
 export * from "./mcp/auth/public/McpAuthPublicBaseUrlValidator.js";
 export * from "./mcp/auth/public/McpAuthPublicExposureGuard.js";
 export * from "./mcp/connector/McpConnectorChatGpt.js";

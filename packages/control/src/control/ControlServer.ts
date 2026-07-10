@@ -62,14 +62,15 @@ export class ControlServer {
             this.#config = nextConfig;
         };
         this.#rpcServer = new ControlRpcServer({
-            configEditorService: new ControlConfigEditorService({
+                configEditorService: new ControlConfigEditorService({
                 configStore: this.#configStore,
                 getConfig: () => this.#requireConfig(),
                 homeDirectory: this.#homeDirectory,
                 instanceRegistry: this.#instanceRegistry,
-                setConfig
-            }),
-            instanceCreateService: new ControlInstanceCreateService({
+                    setConfig
+                }),
+                getOAuthApprovals: () => this.#mcpHost?.oauthApprovals,
+                instanceCreateService: new ControlInstanceCreateService({
                 configStore: this.#configStore,
                 getConfig: () => this.#requireConfig(),
                 getMcpHost: () => this.#mcpHost,

@@ -17,6 +17,8 @@ const methodScopes = new Map<string, RouteScope>([
     ["control.enableInstance", "control"],
     ["control.disableInstance", "control"],
     ["control.applyConfig", "control"],
+    ["control.listOAuthApprovals", "control"],
+    ["control.decideOAuthApproval", "control"],
     ["instance.getSnapshot", "instance"],
     ["instance.start", "instance"],
     ["instance.stop", "instance"],
