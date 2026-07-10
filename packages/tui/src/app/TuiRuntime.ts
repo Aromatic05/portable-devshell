@@ -409,14 +409,12 @@ export class TuiRuntime {
 
         if (state.ui.selectedPage === "config" || state.ui.selectedPage === "connector") {
             this.focusManager.setFocus({ id: box.id, kind: "box" });
-            await this.commandDispatcher.dispatch({ type: "focus.activate" });
             this.store.setSelectedDetailLine(box.expandedKey, target.lineId);
             await this.commandDispatcher.dispatch({ type: "focus.activate" });
             return;
         }
 
         this.focusManager.setFocus({ id: box.id, kind: "box" });
-        this.store.setFocusScope("boxDetail");
         this.store.setSelectedDetailLine(box.expandedKey, target.lineId);
         await this.commandDispatcher.dispatch({ type: "focus.activate" });
     }

@@ -173,8 +173,7 @@ export class CommandDispatcher {
             case "screen.end":
                 return this.#setMainColumnOffset(this.#maxMainScrollOffset());
             case "screen.toggle": {
-                const scope = this.#store.getState().interaction.focusScope;
-                if (scope !== "mainBoxes" && scope !== "boxDetail") {
+                if (this.#store.getState().interaction.focusScope !== "mainBoxes") {
                     return false;
                 }
                 const boxId = this.#store.getState().ui.mainFocusId;
@@ -184,13 +183,6 @@ export class CommandDispatcher {
                 const key = this.#expandedKey(boxId);
                 const expanded = this.#store.getState().ui.expandedBoxes[key] === true;
                 this.#store.toggleExpanded(key);
-                const box = selectMainScreenModel(this.#store.getState()).boxes.find((candidate) => candidate.id === boxId);
-                if (expanded) {
-                    this.#store.setFocusScope("mainBoxes");
-                } else if (box?.expandedLines[0]?.id !== undefined) {
-                    this.#store.setSelectedDetailLine(key, box.expandedLines[0].id);
-                    this.#store.setFocusScope("boxDetail");
-                }
                 this.#ensureMainFocusVisible();
                 this.#store.setScreenStatus(this.#store.getState().ui.selectedPage, expanded ? "Collapsed box." : "Expanded box.");
                 return true;
@@ -458,9 +450,18 @@ export class CommandDispatcher {
             }
         }
         if (scope === "mainBoxes") {
-            return false;
+            return this.#focusManager.currentFocus()?.kind === "line" ? await this.#activateDetailLine() : false;
         }
         if (scope === "boxDetail") {
+            return await this.#activateDetailLine();
+        }
+        if (scope === "form" || scope === "wizard") {
+            return await this.#activateEditorFocus();
+        }
+        return true;
+    }
+
+    async #activateDetailLine(): Promise<boolean> {
             const state = this.#store.getState();
             const boxId = state.ui.mainFocusId;
             const instance = state.ui.selectedInstance;
@@ -488,11 +489,6 @@ export class CommandDispatcher {
             }
             this.#store.setScreenStatus(this.#store.getState().ui.selectedPage, "Detail has no action.");
             return true;
-        }
-        if (scope === "form" || scope === "wizard") {
-            return await this.#activateEditorFocus();
-        }
-        return true;
     }
 
     async #openCreateWizard(): Promise<boolean> {
