@@ -360,7 +360,18 @@ export class TuiRuntime {
         const model = selectMainScreenModel(state);
         const metrics = selectMainBoxFlowMetrics(state);
         const scrollOffset = state.ui.scrollOffsets[metrics.scrollKey] ?? 0;
-        const flowLine = row - 6 + scrollOffset;
+        const flowStartRow = 6 + (model.errorLines?.length ?? 0);
+        const viewportRows = Math.max(0, this.rows - 8 - (model.statusLine === undefined ? 0 : 1) - (model.emptyState === undefined ? 0 : 1));
+        const visibleFlowLines = Math.min(Math.max(0, metrics.totalLines - scrollOffset), viewportRows);
+        const actionIndex = row - (flowStartRow + visibleFlowLines + (model.statusLine === undefined ? 0 : 1) + 2);
+        const actionMenu = state.interaction.actionMenu;
+        if (actionMenu.open && actionIndex >= 0 && actionIndex < actionMenu.items.length) {
+            this.store.setActionMenu(actionMenu.title, actionMenu.items, actionIndex);
+            await this.commandDispatcher.dispatch({ type: "actionMenu.submit" });
+            return;
+        }
+
+        const flowLine = row - flowStartRow + scrollOffset;
         const box = model.boxes.find((candidate) => {
             const range = metrics.boxRanges[candidate.id];
             return range !== undefined && flowLine >= range.start && flowLine < range.end;
@@ -490,11 +501,21 @@ function readErrorMessage(error: unknown): string {
 function createInkStdin(stdin: ReadStream): ReadStream {
     const proxy = new PassThrough() as PassThrough & {
         isTTY?: boolean;
+        ref?(): PassThrough;
         setRawMode?(enabled: boolean): PassThrough;
+        unref?(): PassThrough;
     };
     proxy.isTTY = stdin.isTTY;
+    proxy.ref = () => {
+        stdin.ref();
+        return proxy;
+    };
     proxy.setRawMode = (enabled) => {
         stdin.setRawMode?.(enabled);
+        return proxy;
+    };
+    proxy.unref = () => {
+        stdin.unref();
         return proxy;
     };
     return proxy as unknown as ReadStream;
