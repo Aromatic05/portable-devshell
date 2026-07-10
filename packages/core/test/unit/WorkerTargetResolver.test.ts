@@ -159,7 +159,7 @@ test("WorkerAssetResolver does not use host dev fallback for non-host target", a
     const previousRepository = process.env.PORTABLE_DEVSHELL_WORKER_RELEASE_REPOSITORY;
     const previousTag = process.env.PORTABLE_DEVSHELL_WORKER_RELEASE_TAG;
     const previousFetch = globalThis.fetch;
-    process.env.PORTABLE_DEVSHELL_WORKER_RELEASE_TAG = "v0.2.0";
+    process.env.PORTABLE_DEVSHELL_WORKER_RELEASE_TAG = "v0.2.2";
     t.after(() => restoreEnv("PORTABLE_DEVSHELL_WORKER_RELEASE_REPOSITORY", previousRepository));
     t.after(() => restoreEnv("PORTABLE_DEVSHELL_WORKER_RELEASE_TAG", previousTag));
     t.after(() => {
@@ -223,7 +223,7 @@ async function createResolverFixture(): Promise<{
     const root = await mkdtemp(join(tmpdir(), "portable-devshell-resolver-"));
     const modulePath = join(root, "src", "worker", "WorkerAssetResolver.js");
     await mkdir(dirname(modulePath), { recursive: true });
-    await writeFile(join(root, "package.json"), JSON.stringify({ name: "portable-devshell", version: "0.2.0" }), "utf8");
+    await writeFile(join(root, "package.json"), JSON.stringify({ name: "portable-devshell", version: "0.2.2" }), "utf8");
 
     return {
         root,
