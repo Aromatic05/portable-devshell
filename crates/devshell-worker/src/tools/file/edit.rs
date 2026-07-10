@@ -84,7 +84,7 @@ impl ToolHandler for FileEditTool {
                     end_line,
                     lines,
                 } => {
-                    let replacement = checked_lines(lines)?;
+                    let replacement = edit_lines(lines, *end_line == snapshot.total_lines)?;
                     first = first.min(*start_line);
                     removed += end_line - start_line + 1;
                     added += replacement.len();
@@ -99,7 +99,10 @@ impl ToolHandler for FileEditTool {
                     text.lines.drain(start_line - 1..*end_line);
                 }
                 FileEditOperation::Insert { at, line, lines } => {
-                    let replacement = checked_lines(lines)?;
+                    let replacement = edit_lines(
+                        lines,
+                        is_eof_insert(at, *line, snapshot.total_lines),
+                    )?;
                     let index = match at {
                         InsertAt::Head => 0,
                         InsertAt::Tail => text.lines.len(),
@@ -112,25 +115,11 @@ impl ToolHandler for FileEditTool {
                 }
             }
         }
-        text.final_newline = match input
-            .operations
-            .iter()
-            .find_map(|operation| match operation {
-                FileEditOperation::Insert {
-                    at: InsertAt::Tail,
-                    lines,
-                    ..
-                } => Some(lines.last().is_some_and(String::is_empty)),
-                FileEditOperation::Replace {
-                    end_line, lines, ..
-                } if *end_line == snapshot.total_lines => {
-                    Some(lines.last().is_some_and(String::is_empty))
-                }
-                _ => None,
-            }) {
-            Some(value) => value,
-            None => text.final_newline,
-        };
+        text.final_newline = final_newline_after(
+            &input.operations,
+            snapshot.total_lines,
+            text.final_newline,
+        )?;
         atomic_write(&path, &text.encoded())?;
         let text = TextFile::read(&path)?;
         let count = text.lines.len().min(200);
@@ -198,7 +187,7 @@ fn edit_sparse(
                 end_line,
                 lines,
             } => {
-                let replacement = checked_lines(lines)?;
+                let replacement = edit_lines(lines, *end_line == metadata.total_lines)?;
                 first = first.min(*start_line);
                 removed += end_line - start_line + 1;
                 added += replacement.len();
@@ -213,7 +202,7 @@ fn edit_sparse(
                 ranges.insert(*start_line, (*end_line, None));
             }
             FileEditOperation::Insert { at, line, lines } => {
-                let replacement = checked_lines(lines)?;
+                let replacement = edit_lines(lines, is_eof_insert(at, *line, metadata.total_lines))?;
                 let boundary = match at {
                     InsertAt::Head => 0,
                     InsertAt::Tail => metadata.total_lines,
@@ -227,21 +216,11 @@ fn edit_sparse(
         }
     }
 
-    let final_newline = input
-        .operations
-        .iter()
-        .find_map(|operation| match operation {
-            FileEditOperation::Insert {
-                at: InsertAt::Tail,
-                lines,
-                ..
-            } => Some(lines.last().is_some_and(String::is_empty)),
-            FileEditOperation::Replace {
-                end_line, lines, ..
-            } if *end_line == metadata.total_lines => Some(lines.last().is_some_and(String::is_empty)),
-            _ => None,
-        })
-        .unwrap_or(metadata.final_newline);
+    let final_newline = final_newline_after(
+        &input.operations,
+        metadata.total_lines,
+        metadata.final_newline,
+    )?;
 
     let parent = path
         .parent()
@@ -387,7 +366,7 @@ fn read_anchored_prefix(path: &std::path::Path, count: usize) -> Result<String, 
     }
     Ok(content.join("\n"))
 }
-fn checked_lines(lines: &[String]) -> Result<Vec<String>, ToolError> {
+fn checked_lines(lines: &[String]) -> Result<(), ToolError> {
     if lines.is_empty() {
         return Err(ToolError::new(
             "file.emptyOperation",
@@ -403,7 +382,59 @@ fn checked_lines(lines: &[String]) -> Result<Vec<String>, ToolError> {
             "line payload cannot contain line breaks",
         ));
     }
+    Ok(())
+}
+
+fn edit_lines(lines: &[String], eof: bool) -> Result<Vec<String>, ToolError> {
+    checked_lines(lines)?;
+    if !eof {
+        return Ok(lines.to_vec());
+    }
+    let lines = if lines.last().is_some_and(String::is_empty) {
+        &lines[..lines.len() - 1]
+    } else {
+        lines
+    };
+    if lines.is_empty() {
+        return Err(ToolError::new(
+            "file.emptyOperation",
+            "EOF payload has no logical line content",
+        ));
+    }
     Ok(lines.to_vec())
+}
+
+fn is_eof_insert(at: &InsertAt, line: Option<usize>, total: usize) -> bool {
+    matches!(at, InsertAt::Tail)
+        || matches!(at, InsertAt::After) && line == Some(total)
+        || total == 0 && matches!(at, InsertAt::Head)
+}
+
+fn final_newline_after(
+    operations: &[FileEditOperation],
+    total: usize,
+    original: bool,
+) -> Result<bool, ToolError> {
+    let mut replacement = None;
+    let mut tail_insert = None;
+    for operation in operations {
+        match operation {
+            FileEditOperation::Replace {
+                end_line, lines, ..
+            } if *end_line == total => {
+                checked_lines(lines)?;
+                replacement = Some(lines.last().is_some_and(String::is_empty));
+            }
+            FileEditOperation::Insert { at, line, lines }
+                if is_eof_insert(at, *line, total) =>
+            {
+                checked_lines(lines)?;
+                tail_insert = Some(lines.last().is_some_and(String::is_empty));
+            }
+            _ => {}
+        }
+    }
+    Ok(tail_insert.or(replacement).unwrap_or(original))
 }
 fn validate_operations(
     operations: &[FileEditOperation],
@@ -419,7 +450,7 @@ fn validate_operations(
                 end_line,
                 lines,
             } => {
-                checked_lines(lines)?;
+                edit_lines(lines, *end_line == total)?;
                 validate_range(*start_line, *end_line, total, seen)?;
                 ranges.push((*start_line, *end_line));
             }
@@ -431,7 +462,6 @@ fn validate_operations(
                 ranges.push((*start_line, *end_line));
             }
             FileEditOperation::Insert { at, line, lines } => {
-                checked_lines(lines)?;
                 let boundary = match at {
                     InsertAt::Head => 0,
                     InsertAt::Tail => total,
@@ -453,6 +483,7 @@ fn validate_operations(
                         "insert anchor is not in snapshot coverage",
                     ));
                 }
+                edit_lines(lines, is_eof_insert(at, *line, total))?;
                 if !boundaries.insert(boundary) {
                     return Err(ToolError::new(
                         "file.operationConflict",

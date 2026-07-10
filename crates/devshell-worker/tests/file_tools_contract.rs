@@ -321,3 +321,65 @@ fn file_edit_updates_a_sparse_snapshot_without_losing_the_file_shape() {
 
     env.json_command(&["stop", "--instance", instance]);
 }
+
+#[test]
+fn file_edit_applies_eof_sentinel_to_all_eof_operations() {
+    let env = TestEnv::new();
+    let instance = "aromatic-file-eof";
+    fs::write(env.workspace().join("document.txt"), "one\n").unwrap();
+    fs::write(env.workspace().join("empty.txt"), "").unwrap();
+    start(&env, instance);
+
+    let document = call(
+        &env,
+        instance,
+        "1",
+        "file_read",
+        json!({ "path": "./document.txt" }),
+    );
+    let inserted = call(
+        &env,
+        instance,
+        "2",
+        "file_edit",
+        json!({
+            "path": "./document.txt",
+            "snapshotId": document["result"]["snapshotId"],
+            "operations": [{
+                "op": "insert",
+                "at": "after",
+                "line": 1,
+                "lines": ["two", ""],
+            }],
+        }),
+    );
+    assert_eq!(inserted["ok"], true, "{inserted}");
+    assert_eq!(fs::read(env.workspace().join("document.txt")).unwrap(), b"one\ntwo\n");
+
+    let empty = call(
+        &env,
+        instance,
+        "3",
+        "file_read",
+        json!({ "path": "./empty.txt" }),
+    );
+    let empty_insert = call(
+        &env,
+        instance,
+        "4",
+        "file_edit",
+        json!({
+            "path": "./empty.txt",
+            "snapshotId": empty["result"]["snapshotId"],
+            "operations": [{
+                "op": "insert",
+                "at": "head",
+                "lines": [""],
+            }],
+        }),
+    );
+    assert_eq!(empty_insert["ok"], false, "{empty_insert}");
+    assert_eq!(empty_insert["error"]["code"], "file.emptyOperation");
+
+    env.json_command(&["stop", "--instance", instance]);
+}
