@@ -250,6 +250,8 @@ test("config choices use angle selectors and switch with arrow keys", async () =
 
     const boxes = selectMainScreenModel(harness.store.getState()).boxes;
     assert.equal(boxes.find((box) => box.id === "provider")?.expandedLines[0]?.text.endsWith("<local>"), true);
+    assert.equal(boxes.find((box) => box.id === "provider")?.expandedLines[1]?.text.endsWith("<true>"), true);
+    assert.equal(boxes.find((box) => box.id === "mcp-config")?.expandedLines[0]?.text.endsWith("<true>"), true);
     assert.equal(boxes.find((box) => box.id === "security")?.expandedLines[0]?.text.endsWith("<disabled>"), true);
     assert.equal(boxes.find((box) => box.id === "approval-policy")?.expandedLines[0]?.text.endsWith("<ask>"), true);
 
