@@ -1,8 +1,8 @@
 use serde::Serialize;
 
 use crate::cli::InstanceArgs;
-use crate::daemon::{process, shutdown};
 use crate::daemon::process::DaemonState;
+use crate::daemon::{process, shutdown};
 use crate::instance::InstanceName;
 use crate::socket::SocketPaths;
 use crate::storage::InstancePaths;

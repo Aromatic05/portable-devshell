@@ -23,7 +23,14 @@ fn start_uses_runtime_workspace_and_keeps_config_minimal() {
 
     assert_eq!(start["ok"], true);
     assert_eq!(start["started"], true);
-    assert_eq!(start["workspace"], env.workspace().canonicalize().unwrap().display().to_string());
+    assert_eq!(
+        start["workspace"],
+        env.workspace()
+            .canonicalize()
+            .unwrap()
+            .display()
+            .to_string()
+    );
 
     let instance_root = env.instance_root(instance);
     assert!(instance_root.join("config.toml").exists());
@@ -44,7 +51,11 @@ fn start_uses_runtime_workspace_and_keeps_config_minimal() {
     assert_eq!(status["running"], true);
     assert_eq!(
         status["workspace"],
-        env.workspace().canonicalize().unwrap().display().to_string()
+        env.workspace()
+            .canonicalize()
+            .unwrap()
+            .display()
+            .to_string()
     );
 
     env.json_command(&["stop", "--instance", instance]);
@@ -78,10 +89,17 @@ fn handshake_tools_and_bash_run_flow_work_over_framed_rpc() {
     assert_eq!(handshake["type"], "response");
     assert_eq!(handshake["ok"], true);
     assert_eq!(handshake["result"]["protocolVersion"], 1);
-    assert_eq!(handshake["result"]["workerVersion"], env!("CARGO_PKG_VERSION"));
+    assert_eq!(
+        handshake["result"]["workerVersion"],
+        env!("CARGO_PKG_VERSION")
+    );
     assert_eq!(
         handshake["result"]["workspace"],
-        env.workspace().canonicalize().unwrap().display().to_string()
+        env.workspace()
+            .canonicalize()
+            .unwrap()
+            .display()
+            .to_string()
     );
     assert!(handshake["result"].get("tools").is_none());
 
@@ -115,7 +133,10 @@ fn handshake_tools_and_bash_run_flow_work_over_framed_rpc() {
         assert!(tool["description"].is_string());
         assert!(tool["inputSchema"].is_object());
         assert!(tool["outputSchema"].is_object());
-        assert!(matches!(tool["access"].as_str(), Some("read" | "write" | "execute" | "session")));
+        assert!(matches!(
+            tool["access"].as_str(),
+            Some("read" | "write" | "execute" | "session")
+        ));
     }
 
     let bash_run = env.rpc(
@@ -136,7 +157,10 @@ fn handshake_tools_and_bash_run_flow_work_over_framed_rpc() {
     assert_eq!(bash_run["result"]["stderrTruncated"], false);
     assert_eq!(
         bash_run["result"]["stdout"],
-        format!("{}\nready", env.workspace().canonicalize().unwrap().display())
+        format!(
+            "{}\nready",
+            env.workspace().canonicalize().unwrap().display()
+        )
     );
 
     let stopped = env.json_command(&["stop", "--instance", instance]);
@@ -273,7 +297,10 @@ fn invalid_rpc_requests_return_structured_errors() {
     assert_eq!(wrong_type["error"]["code"], "rpc.invalidRequest");
     assert_eq!(wrong_type["id"], "bad-1");
 
-    let invalid_json = env.raw_rpc(instance, br#"{"type":"request","id":"bad-2","method":"worker.ping","params":"#);
+    let invalid_json = env.raw_rpc(
+        instance,
+        br#"{"type":"request","id":"bad-2","method":"worker.ping","params":"#,
+    );
     assert_eq!(invalid_json["ok"], false);
     assert_eq!(invalid_json["error"]["code"], "rpc.invalidRequest");
     assert_eq!(invalid_json["id"], "");
@@ -454,7 +481,11 @@ fn daemon_start_failures_and_accept_loop_errors_clean_runtime_files() {
         .args(["start", "--instance", bind_fail])
         .assert()
         .failure();
-    assert!(!env.instance_root(bind_fail).join("state/worker.pid").exists());
+    assert!(
+        !env.instance_root(bind_fail)
+            .join("state/worker.pid")
+            .exists()
+    );
     assert!(!env.socket_file(bind_fail).exists());
 
     env.command_with_env("DEVSHELL_WORKER_TEST_FAIL_ACCEPT_LOOP", "1")
@@ -462,6 +493,10 @@ fn daemon_start_failures_and_accept_loop_errors_clean_runtime_files() {
         .args(["start", "--instance", loop_fail])
         .assert()
         .failure();
-    assert!(!env.instance_root(loop_fail).join("state/worker.pid").exists());
+    assert!(
+        !env.instance_root(loop_fail)
+            .join("state/worker.pid")
+            .exists()
+    );
     assert!(!env.socket_file(loop_fail).exists());
 }

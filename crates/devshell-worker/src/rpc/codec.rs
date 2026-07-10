@@ -53,17 +53,24 @@ pub fn decode_request_frame(frame: &[u8]) -> Result<RpcRequest, RequestDecodeErr
     })?;
     let value: Value = serde_json::from_slice(payload).map_err(|error| RequestDecodeError {
         id: String::new(),
-        error: RpcError::new("rpc.invalidRequest", format!("invalid rpc request json: {error}")),
+        error: RpcError::new(
+            "rpc.invalidRequest",
+            format!("invalid rpc request json: {error}"),
+        ),
     })?;
     let id = value
         .get("id")
         .and_then(Value::as_str)
         .unwrap_or("")
         .to_string();
-    let request: RpcRequest = serde_json::from_value(value).map_err(|error| RequestDecodeError {
-        id,
-        error: RpcError::new("rpc.invalidRequest", format!("invalid rpc request: {error}")),
-    })?;
+    let request: RpcRequest =
+        serde_json::from_value(value).map_err(|error| RequestDecodeError {
+            id,
+            error: RpcError::new(
+                "rpc.invalidRequest",
+                format!("invalid rpc request: {error}"),
+            ),
+        })?;
     if request.message_type != "request" {
         return Err(RequestDecodeError {
             id: request.id,
@@ -112,7 +119,9 @@ pub fn read_frame(reader: &mut impl Read) -> Result<Option<Vec<u8>>, String> {
     }
 
     let mut payload = vec![0_u8; length];
-    reader.read_exact(&mut payload).map_err(|error| error.to_string())?;
+    reader
+        .read_exact(&mut payload)
+        .map_err(|error| error.to_string())?;
     let mut frame = header.to_vec();
     frame.extend_from_slice(&payload);
     Ok(Some(frame))

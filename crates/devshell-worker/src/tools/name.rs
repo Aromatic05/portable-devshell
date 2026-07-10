@@ -13,11 +13,18 @@ impl ToolName {
         };
 
         if group.is_empty() || operation.is_empty() {
-            return Err(format!("tool method `{raw}` must use non-empty group and operation"));
+            return Err(format!(
+                "tool method `{raw}` must use non-empty group and operation"
+            ));
         }
 
-        if !group.chars().all(|value| value.is_ascii_lowercase() || value.is_ascii_digit()) {
-            return Err(format!("tool group `{group}` must use lowercase ASCII letters or digits"));
+        if !group
+            .chars()
+            .all(|value| value.is_ascii_lowercase() || value.is_ascii_digit())
+        {
+            return Err(format!(
+                "tool group `{group}` must use lowercase ASCII letters or digits"
+            ));
         }
 
         if !operation

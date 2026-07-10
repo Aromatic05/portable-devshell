@@ -12,8 +12,8 @@ use crate::rpc::error::RpcError;
 use crate::rpc::response::RpcResponse;
 use crate::rpc::router::RpcRouter;
 use crate::socket::SocketPaths;
-use crate::storage::permissions::{ensure_dir, ensure_file_mode};
 use crate::storage::InstancePaths;
+use crate::storage::permissions::{ensure_dir, ensure_file_mode};
 use crate::tools::builtin_registry;
 
 const FAIL_AFTER_BIND_ENV: &str = "DEVSHELL_WORKER_TEST_FAIL_AFTER_BIND";
@@ -51,9 +51,7 @@ pub fn serve(instance: InstanceName) -> Result<(), String> {
         .set_nonblocking(true)
         .map_err(|error| format!("failed to set listener nonblocking: {error}"))?;
 
-    let tools = Arc::new(
-        builtin_registry().map_err(|error| error.message)?,
-    );
+    let tools = Arc::new(builtin_registry().map_err(|error| error.message)?);
     let router = Arc::new(RpcRouter::new(config.clone(), runtime, tools));
 
     while !router.shutdown_requested() {
@@ -89,10 +87,7 @@ pub fn serve(instance: InstanceName) -> Result<(), String> {
     Ok(())
 }
 
-fn handle_connection(
-    mut stream: UnixStream,
-    router: &RpcRouter,
-) -> Result<(), String> {
+fn handle_connection(mut stream: UnixStream, router: &RpcRouter) -> Result<(), String> {
     loop {
         let frame = match read_frame(&mut stream) {
             Ok(Some(frame)) => frame,
@@ -164,10 +159,8 @@ impl RuntimeFilesGuard {
 impl Drop for RuntimeFilesGuard {
     fn drop(&mut self) {
         if self.armed {
-            let _ = process::clear_runtime_files(
-                &self.instance_paths,
-                &self.socket_paths.socket_file,
-            );
+            let _ =
+                process::clear_runtime_files(&self.instance_paths, &self.socket_paths.socket_file);
             remove_empty_runtime_dir(&self.socket_paths.instance_runtime_dir);
         }
     }

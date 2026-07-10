@@ -1,14 +1,14 @@
 use serde::Serialize;
 
 use crate::cli::InstanceArgs;
-use crate::daemon::{process, readiness};
 use crate::daemon::process::DaemonState;
+use crate::daemon::{process, readiness};
 use crate::instance::{InstanceLock, InstanceName, build_config, write_config};
 use crate::rpc::bridge::send_request;
 use crate::rpc::request::RpcRequest;
 use crate::socket::SocketPaths;
-use crate::storage::permissions::ensure_dir;
 use crate::storage::InstancePaths;
+use crate::storage::permissions::ensure_dir;
 
 #[derive(Serialize)]
 struct StartResponse {

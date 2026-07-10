@@ -45,10 +45,12 @@ pub struct WorkspaceSecurityPolicy;
 impl SecurityPolicy for WorkspaceSecurityPolicy {
     fn check_capability(&self, capability: FilesystemCapability) -> Result<(), SecurityError> {
         match capability {
-            FilesystemCapability::AbsoluteRead | FilesystemCapability::AbsoluteWrite => Err(SecurityError::new(
-                "security.denied",
-                "absolute filesystem access is denied in workspace security mode",
-            )),
+            FilesystemCapability::AbsoluteRead | FilesystemCapability::AbsoluteWrite => {
+                Err(SecurityError::new(
+                    "security.denied",
+                    "absolute filesystem access is denied in workspace security mode",
+                ))
+            }
             FilesystemCapability::WorkspaceRead
             | FilesystemCapability::WorkspaceWrite
             | FilesystemCapability::ProcessExecute => Ok(()),

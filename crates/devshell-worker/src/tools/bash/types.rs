@@ -1,7 +1,7 @@
-use std::collections::BTreeMap;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
+use std::collections::BTreeMap;
 
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -37,4 +37,9 @@ pub struct BashRunOutput {
 
 #[derive(Debug, PartialEq, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub enum BashTermination { Exited, Signaled, Timeout, OutputLimit }
+pub enum BashTermination {
+    Exited,
+    Signaled,
+    Timeout,
+    OutputLimit,
+}

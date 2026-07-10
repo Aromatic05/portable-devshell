@@ -73,11 +73,17 @@ pub fn spawn(
 pub fn capture_workspace() -> Result<PathBuf, String> {
     let cwd =
         std::env::current_dir().map_err(|error| format!("failed to read current dir: {error}"))?;
-    let workspace = cwd
-        .canonicalize()
-        .map_err(|error| format!("failed to canonicalize workspace {}: {error}", cwd.display()))?;
+    let workspace = cwd.canonicalize().map_err(|error| {
+        format!(
+            "failed to canonicalize workspace {}: {error}",
+            cwd.display()
+        )
+    })?;
     if !workspace.is_dir() {
-        return Err(format!("workspace is not a directory: {}", workspace.display()));
+        return Err(format!(
+            "workspace is not a directory: {}",
+            workspace.display()
+        ));
     }
     Ok(workspace)
 }
@@ -92,7 +98,10 @@ pub fn read_runtime_context() -> Result<WorkerRuntimeContext, String> {
         .canonicalize()
         .map_err(|error| format!("failed to canonicalize daemon workspace: {error}"))?;
     if !workspace.is_dir() {
-        return Err(format!("daemon workspace is not a directory: {}", workspace.display()));
+        return Err(format!(
+            "daemon workspace is not a directory: {}",
+            workspace.display()
+        ));
     }
     Ok(WorkerRuntimeContext {
         instance,

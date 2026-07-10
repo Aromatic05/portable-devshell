@@ -21,7 +21,11 @@ pub struct RpcRouter {
 }
 
 impl RpcRouter {
-    pub fn new(config: WorkerConfig, runtime: WorkerRuntimeContext, tools: Arc<ToolRegistry>) -> Self {
+    pub fn new(
+        config: WorkerConfig,
+        runtime: WorkerRuntimeContext,
+        tools: Arc<ToolRegistry>,
+    ) -> Self {
         let shutdown_requested = Arc::new(AtomicBool::new(false));
         let mut control_handlers = HashMap::new();
         register_control_handlers(

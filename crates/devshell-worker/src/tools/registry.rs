@@ -26,10 +26,9 @@ impl ToolRegistry {
     }
 
     pub fn find(&self, name: &ToolName) -> Result<Arc<dyn ToolHandler>, ToolError> {
-        self.handlers
-            .get(&name.as_str())
-            .cloned()
-            .ok_or_else(|| ToolError::new("tool.notFound", format!("tool `{name}` is not registered")))
+        self.handlers.get(&name.as_str()).cloned().ok_or_else(|| {
+            ToolError::new("tool.notFound", format!("tool `{name}` is not registered"))
+        })
     }
 
     pub fn catalog(&self) -> Vec<ToolCatalogEntry> {

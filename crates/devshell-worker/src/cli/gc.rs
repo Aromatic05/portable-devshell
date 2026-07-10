@@ -28,7 +28,11 @@ pub fn run(args: GcArgs) -> Result<String, String> {
         .map_err(|error| format!("failed to read {}: {error}", home_root.display()))?
     {
         let entry = entry.map_err(|error| error.to_string())?;
-        if !entry.file_type().map_err(|error| error.to_string())?.is_dir() {
+        if !entry
+            .file_type()
+            .map_err(|error| error.to_string())?
+            .is_dir()
+        {
             continue;
         }
 

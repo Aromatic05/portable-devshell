@@ -47,10 +47,7 @@ pub fn run_bridge(socket_file: &Path) -> Result<String, String> {
     Ok(String::new())
 }
 
-pub fn send_request(
-    socket_file: &Path,
-    request: &RpcRequest,
-) -> Result<RpcResponse, String> {
+pub fn send_request(socket_file: &Path, request: &RpcRequest) -> Result<RpcResponse, String> {
     let mut stream = UnixStream::connect(socket_file)
         .map_err(|error| format!("failed to connect {}: {error}", socket_file.display()))?;
     write_request_frame(&mut stream, request)?;

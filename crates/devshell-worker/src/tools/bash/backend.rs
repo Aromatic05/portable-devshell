@@ -24,8 +24,12 @@ pub fn spawn_bash(
 
     for (key, value) in env {
         match value {
-            Some(value) => { command.env(key, value); }
-            None => { command.env_remove(key); }
+            Some(value) => {
+                command.env(key, value);
+            }
+            None => {
+                command.env_remove(key);
+            }
         }
     }
 
