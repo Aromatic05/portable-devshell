@@ -1,5 +1,4 @@
 import type { TuiAppStore } from "../store/TuiAppStore.js";
-import { buildFocusGraphForState } from "../screen/ScreenRouter.js";
 import { selectMainBoxFlowMetrics, selectMainBoxIds, selectMainScreenModel, selectMainScrollKey } from "../store/TuiSelectors.js";
 import { TuiFocusManager } from "./TuiFocusManager.js";
 import type { TuiUiIntent } from "./TuiInteractionTypes.js";
