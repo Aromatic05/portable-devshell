@@ -12,6 +12,41 @@ export function tuiAppReducer(state: TuiAppState, action: TuiAppAction): TuiAppS
                     [action.instance]: [...action.approvals].sort((left, right) => right.createdAt.localeCompare(left.createdAt))
                 }
             });
+        case "command.upsert": {
+            const without = state.commandRecords.filter((command) => command.commandId !== action.command.commandId);
+            return {
+                ...state,
+                commandRecords: [...without, action.command].sort((left, right) => right.startedAt.localeCompare(left.startedAt))
+            };
+        }
+        case "relay.appendOutput": {
+            const current = state.relayByCommand[action.commandId] ?? { commandId: action.commandId, output: [] };
+            return {
+                ...state,
+                relayByCommand: {
+                    ...state.relayByCommand,
+                    [action.commandId]: {
+                        ...current,
+                        output: [...current.output, action.chunk]
+                    }
+                }
+            };
+        }
+        case "relay.setMetadata": {
+            const current = state.relayByCommand[action.commandId] ?? { commandId: action.commandId, output: [] };
+            return {
+                ...state,
+                relayByCommand: {
+                    ...state.relayByCommand,
+                    [action.commandId]: {
+                        ...current,
+                        ...(action.provider === undefined ? {} : { provider: action.provider }),
+                        ...(action.requestId === undefined ? {} : { requestId: action.requestId }),
+                        ...(action.workspace === undefined ? {} : { workspace: action.workspace })
+                    }
+                }
+            };
+        }
         case "control.setConfigView":
             return {
                 ...state,

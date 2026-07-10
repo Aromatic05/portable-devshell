@@ -1,4 +1,4 @@
-import type { ApprovalRequest, ControlEventEnvelope, InstanceSnapshot, JsonValue, ToolCallRecord } from "@portable-devshell/shared";
+import type { ApprovalRequest, ControlError, ControlEventEnvelope, InstanceSnapshot, JsonValue, ToolCallRecord } from "@portable-devshell/shared";
 
 import type { TuiActionMenuItem, TuiInteractionState, TuiUiIntent } from "../../interaction/TuiInteractionTypes.js";
 import type { FocusScope, PageId, SidebarCursor, SidebarFocus, TuiUiState } from "../../model/TuiUiTypes.js";
@@ -50,8 +50,28 @@ export interface TuiGlobalDerivedState {
     totalEventCount: number;
 }
 
+export interface TuiCommandRecord {
+    commandId: string;
+    completedAt?: string;
+    error?: ControlError;
+    sourcePanel: string;
+    startedAt: string;
+    status: "running" | "succeeded" | "failed";
+    targetInstance?: string;
+    title: string;
+}
+
+export interface TuiRelayRecord {
+    commandId: string;
+    output: string[];
+    provider?: string;
+    requestId?: string;
+    workspace?: string;
+}
+
 export interface TuiAppState {
     approvalsByInstance: Record<string, ApprovalRequest[]>;
+    commandRecords: TuiCommandRecord[];
     configView?: Record<string, JsonValue>;
     connection: TuiConnectionState;
     globalDerived: TuiGlobalDerivedState;
@@ -61,6 +81,7 @@ export interface TuiAppState {
     lastStatusChangeAtByInstance: Record<string, string>;
     logsByInstance: Record<string, TuiLogEntry[]>;
     rawEvents: TuiRawEventRecord[];
+    relayByCommand: Record<string, TuiRelayRecord>;
     snapshotsByInstance: Record<string, InstanceSnapshot>;
     toolCallsByInstance: Record<string, ToolCallRecord[]>;
     ui: TuiUiState;
@@ -68,6 +89,9 @@ export interface TuiAppState {
 
 export type TuiAppAction =
     | { approvals: ApprovalRequest[]; instance: string; type: "approval.replace" }
+    | { command: TuiCommandRecord; type: "command.upsert" }
+    | { commandId: string; chunk: string; type: "relay.appendOutput" }
+    | { commandId: string; provider?: string; requestId?: string; workspace?: string; type: "relay.setMetadata" }
     | { configView?: Record<string, JsonValue>; type: "control.setConfigView" }
     | { errorCode?: string; errorMessage?: string; status: TuiConnectionStatus; type: "control.setConnectionState" }
     | { focusScope: FocusScope; type: "focus.scope.set" }

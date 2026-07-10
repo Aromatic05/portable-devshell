@@ -4,6 +4,7 @@ import type { TuiAppState } from "./types.js";
 export function createInitialTuiAppState(): TuiAppState {
     return {
         approvalsByInstance: {},
+        commandRecords: [],
         connection: {
             status: "connecting"
         },
@@ -18,6 +19,7 @@ export function createInitialTuiAppState(): TuiAppState {
         lastStatusChangeAtByInstance: {},
         logsByInstance: {},
         rawEvents: [],
+        relayByCommand: {},
         snapshotsByInstance: {},
         toolCallsByInstance: {},
         ui: {

@@ -8,6 +8,7 @@ import {
     tuiAppReducer,
     type TuiAppAction,
     type TuiAppState,
+    type TuiCommandRecord,
     type TuiConnectionStatus,
     type TuiInstanceListEntry,
     type TuiLogEntry
@@ -253,6 +254,29 @@ export class TuiAppStore {
             approvals,
             instance,
             type: "approval.replace"
+        });
+    }
+
+    upsertCommand(command: TuiCommandRecord): void {
+        this.dispatch({
+            command,
+            type: "command.upsert"
+        });
+    }
+
+    appendRelayOutput(commandId: string, chunk: string): void {
+        this.dispatch({
+            chunk,
+            commandId,
+            type: "relay.appendOutput"
+        });
+    }
+
+    setRelayMetadata(commandId: string, input: { provider?: string; requestId?: string; workspace?: string }): void {
+        this.dispatch({
+            commandId,
+            ...input,
+            type: "relay.setMetadata"
         });
     }
 
