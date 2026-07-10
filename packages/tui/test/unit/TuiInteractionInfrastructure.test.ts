@@ -380,6 +380,9 @@ test("Pending Approval Enter opens an isolated approval detail without a tool fo
     await harness.press("4");
     await harness.press("", { tab: true });
     await harness.press("", { downArrow: true });
+    const audit = selectMainScreenModel(harness.store.getState()).boxes[0]!;
+    assert.equal(audit.title, "Audit 1");
+    assert.equal(audit.expandedLines.some((line) => line.text === "Enter approval review"), true);
     harness.store.setActionMenu("Actions", [{ id: "tool", intent: { type: "actionMenu.open" }, label: "Call Tool" }]);
     harness.store.setToolForm("alpha", "bash_run", '{"command":""}');
     await harness.press("", { return: true });
@@ -435,14 +438,14 @@ test("approval detail Back restores the audit list focus and scroll position", a
     await harness.press("", { return: true });
 
     assert.equal(harness.store.getState().interaction.auditPage.mode, "list");
-    assert.equal(harness.store.getState().ui.mainFocusId, "approval-approval-1");
+    assert.equal(harness.store.getState().ui.mainFocusId, "audit-call-1");
     assert.equal(harness.store.getState().ui.scrollOffsets["audit:alpha:main"], 3);
     assert.deepEqual(harness.approvalDecisions(), []);
 
     await harness.press("", { return: true });
     await harness.press("[", { ctrl: true });
     assert.equal(harness.store.getState().interaction.auditPage.mode, "list");
-    assert.equal(harness.store.getState().ui.mainFocusId, "approval-approval-1");
+    assert.equal(harness.store.getState().ui.mainFocusId, "audit-call-1");
 });
 
 test("Attach Shell uses the focused collection entry and confirms before running", async () => {
