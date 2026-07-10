@@ -111,6 +111,10 @@ test("space expands a box without blocking main box navigation", async () => {
 
     await harness.press(" ");
     assert.equal(harness.store.getState().ui.expandedBoxes[expandedKey], true);
+    const expandedBox = selectMainScreenModel(harness.store.getState()).boxes.find((box) => box.id === firstBoxId)!;
+    const expandedRenderLines = renderExpandableBoxLines(expandedBox, 48);
+    assert.equal(expandedRenderLines.length, expandedBox.expandedLines.length + 2);
+    assert.equal(expandedRenderLines.some((line) => line.key === `${firstBoxId}-top`), true);
     await harness.press("", { downArrow: true });
     assert.equal(typeof harness.store.getState().interaction.selectedDetailLineIds[expandedKey], "string");
     await harness.press(" ");
@@ -118,7 +122,7 @@ test("space expands a box without blocking main box navigation", async () => {
     assert.equal(harness.store.getState().interaction.selectedDetailLineIds[expandedKey], undefined);
     await harness.press(" ");
     const expandedLineCount = selectMainScreenModel(harness.store.getState()).boxes.find((box) => box.id === firstBoxId)!.expandedLines.length;
-    for (let index = 0; index <= expandedLineCount; index += 1) {
+    for (let index = 0; index < expandedLineCount; index += 1) {
         await harness.press("", { downArrow: true });
     }
     assert.equal(harness.store.getState().interaction.focusScope, "mainBoxes");
@@ -144,6 +148,11 @@ test("Create flow uses a wizard with focusable fields and command buttons", asyn
     assert.equal(harness.store.getState().ui.mainFocusId, "create-wizard");
     const wizard = selectMainScreenModel(harness.store.getState()).boxes[0];
     assert.equal(wizard?.title, "Create");
+    assert.equal(harness.store.getState().interaction.selectedDetailLineIds["instances:all:create-wizard"], wizard?.expandedLines[2]?.id);
+    await harness.press("", { upArrow: true });
+    assert.equal(harness.store.getState().interaction.selectedDetailLineIds["instances:all:create-wizard"], wizard?.expandedLines[1]?.id);
+    await harness.press("", { upArrow: true });
+    assert.equal(harness.store.getState().interaction.selectedDetailLineIds["instances:all:create-wizard"], wizard?.expandedLines[0]?.id);
     assert.equal(wizard?.expandedLines.some((line) => line.id?.includes(":field:name")), true);
     assert.equal(wizard?.expandedLines.some((line) => line.id?.includes(":button:validate")), true);
     assert.equal(wizard?.expandedLines.some((line) => line.id?.includes(":button:create")), true);
@@ -255,7 +264,6 @@ test("Prompt 3 detail line selection clamps to a valid line after data replaceme
     await harness.press("", { tab: true });
     await harness.press(" ");
     await harness.press("", { downArrow: true });
-    await harness.press("", { downArrow: true });
 
     const key = "logs:alpha:logs";
     assert.equal(harness.store.getState().interaction.selectedDetailLineIds[key], "logs:stdout:2");
@@ -353,7 +361,7 @@ test("Prompt 4 approval action uses the selected detail line without deciding", 
     await harness.press("", { downArrow: true });
     await harness.press(" ");
     assert.equal(harness.store.getState().interaction.focusScope, "mainBoxes");
-    for (let index = 0; index < 6; index += 1) {
+    for (let index = 0; index < 5; index += 1) {
         await harness.press("", { downArrow: true });
     }
     assert.equal(harness.store.getState().interaction.selectedDetailLineIds["audit:alpha:approval-approval-1"], "approval-approval-1:approval.action:approval-1");
@@ -374,7 +382,7 @@ test("Prompt 4 tool form is bound to the selected audit detail line", async () =
     await harness.press("4");
     await harness.press("", { tab: true });
     await harness.press(" ");
-    for (let index = 0; index < 8; index += 1) {
+    for (let index = 0; index < 7; index += 1) {
         await harness.press("", { downArrow: true });
     }
     await harness.press("", { return: true });
@@ -390,7 +398,7 @@ test("Prompt 4 command failure keeps the selected detail target", async () => {
     await harness.press("4");
     await harness.press("", { tab: true });
     await harness.press(" ");
-    for (let index = 0; index < 8; index += 1) {
+    for (let index = 0; index < 7; index += 1) {
         await harness.press("", { downArrow: true });
     }
     await harness.press("", { return: true });
@@ -437,7 +445,7 @@ test("non-collection actions attach only the selected sidebar entry", async () =
 async function openCreateWizard(harness: ReturnType<typeof createHarness>): Promise<void> {
     await harness.press("", { tab: true });
     await harness.press(" ");
-    for (let index = 0; index < 10; index += 1) {
+    for (let index = 0; index < 9; index += 1) {
         await harness.press("", { downArrow: true });
     }
     await harness.press("", { return: true });
