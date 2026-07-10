@@ -344,6 +344,11 @@ export function tuiAppReducer(state: TuiAppState, action: TuiAppAction): TuiAppS
                     }
                 }
             };
+        case "control.setRestartRequired":
+            return {
+                ...state,
+                ui: { ...state.ui, controlRestartRequired: action.required }
+            };
         case "logs.setFollow":
             return {
                 ...state,

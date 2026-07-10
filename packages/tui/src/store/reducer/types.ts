@@ -127,6 +127,7 @@ export type TuiAppAction =
     | { key: string; type: "ui.toggleExpanded" }
     | { key: string; offset: number; type: "ui.setScrollOffset" }
     | { follow: boolean; instance: string; type: "logs.setFollow" }
+    | { required: boolean; type: "control.setRestartRequired" }
     | { type: "ui.bumpRedrawNonce" }
     | { snapshot: InstanceSnapshot; type: "snapshot.replace" }
     | { instance: string; records: ToolCallRecord[]; type: "toolCall.replace" }

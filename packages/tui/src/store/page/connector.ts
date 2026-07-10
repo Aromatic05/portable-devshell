@@ -60,7 +60,8 @@ export function buildConnectorPageBoxes(state: TuiAppState, instanceName: string
                 `Instance changes   ${instanceDirty ? "yes" : "no"}`,
                 `Global changes     ${globalDirty ? "yes" : "no"}`,
                 buttonLine("save", "Save", !instanceDirty && !globalDirty),
-                buttonLine("cancel", "Cancel", !instanceDirty && !globalDirty)
+                buttonLine("cancel", "Cancel", !instanceDirty && !globalDirty),
+                buttonLine("restart-control", "Restart Control", !state.ui.controlRestartRequired)
             ],
             id: "connector-actions",
             status: instanceDirty || globalDirty ? "warning" : "normal",

@@ -56,6 +56,8 @@ export class RouteHandlerControl {
                 };
             case "control.shutdown":
                 return { accepted: true };
+            case "control.restart":
+                return { accepted: true };
             case "control.listInstances":
                 return this.#instanceRegistry.list().map((descriptor) => ({
                     mcpEnabled: descriptor.mcpEnabled,

@@ -42,6 +42,7 @@ export type TuiUiState = {
     formDrafts: Record<string, unknown>;
     dirtyForms: Record<string, boolean>;
     logsFollowByInstance: Record<string, boolean>;
+    controlRestartRequired: boolean;
 };
 
 export type ActivePage = {

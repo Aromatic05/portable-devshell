@@ -36,10 +36,15 @@ export interface TuiControlListInstanceEntry {
 
 export interface TuiControlLogEntry {
     at: string;
+    callId?: string;
     instanceName: string;
     message: string;
+    requestId?: string;
     seq: number;
+    sessionId?: string;
+    source?: "cli" | "mcp" | "tui";
     stream: "stderr" | "stdout";
+    toolName?: string;
 }
 
 export interface TuiControlStartOptions {
@@ -71,6 +76,7 @@ export interface TuiControlClientLike {
     listInstances(): Promise<TuiControlListInstanceEntry[]>;
     listOAuthApprovals?(): Promise<OAuthApprovalRequest[]>;
     ping(): Promise<{ pong: boolean }>;
+    restartControl(): Promise<Record<string, JsonValue>>;
     readLogs(instance: string, params?: { fromSeq?: number; limit?: number }): Promise<TuiControlLogEntry[]>;
     readToolCalls(instance: string, params?: ToolCallQuery): Promise<ToolCallRecord[]>;
     refreshStatus(instance: string): Promise<TuiControlSnapshotEnvelope>;
@@ -96,6 +102,10 @@ export class TuiControlClient implements TuiControlClientLike {
 
     constructor(options: TuiControlConnectionOptions = {}) {
         this.#connectionOptions = options;
+    }
+
+    async restartControl(): Promise<Record<string, JsonValue>> {
+        return (await this.#request("control.restart", createControlTarget())) as unknown as Record<string, JsonValue>;
     }
 
     async ping(): Promise<{ pong: boolean }> {

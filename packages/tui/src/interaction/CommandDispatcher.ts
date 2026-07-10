@@ -18,6 +18,7 @@ export interface CommandDispatcherOptions {
     onRedraw(): void;
     onToolCall(instance: string, toolName: string, input: string): Promise<boolean>;
     onApplyConfig?(): Promise<JsonValue>;
+    onControlRestart?(): Promise<void>;
     onCreateInstance?(draft: InstanceCreateDraft): Promise<void>;
     onGetInstanceCreateSchema?(): Promise<InstanceCreateSchema>;
     onInstanceConfigUpdate?(instance: Record<string, JsonValue>): Promise<void>;
@@ -42,6 +43,7 @@ export class CommandDispatcher {
     readonly #onRedraw: () => void;
     readonly #onToolCall: CommandDispatcherOptions["onToolCall"];
     readonly #onApplyConfig: () => Promise<JsonValue>;
+    readonly #onControlRestart: () => Promise<void>;
     readonly #onCreateInstance: (draft: InstanceCreateDraft) => Promise<void>;
     readonly #onGetInstanceCreateSchema: () => Promise<InstanceCreateSchema>;
     readonly #onInstanceConfigUpdate: (instance: Record<string, JsonValue>) => Promise<void>;
@@ -65,6 +67,7 @@ export class CommandDispatcher {
         this.#onRedraw = options.onRedraw;
         this.#onToolCall = options.onToolCall;
         this.#onApplyConfig = options.onApplyConfig ?? unavailable;
+        this.#onControlRestart = options.onControlRestart ?? unavailable;
         this.#onCreateInstance = options.onCreateInstance ?? unavailable;
         this.#onGetInstanceCreateSchema = options.onGetInstanceCreateSchema ?? unavailable;
         this.#onInstanceConfigUpdate = options.onInstanceConfigUpdate ?? unavailable;
@@ -103,6 +106,11 @@ export class CommandDispatcher {
                 this.#syncMainFocus();
                 return true;
             }
+            case "control.restart":
+                await this.#onControlRestart();
+                this.#store.setControlRestartRequired(false);
+                this.#store.setScreenStatus("connector", "Control runtime restarted and MCP configuration reloaded.");
+                return true;
             case "page.reload": {
                 const state = this.#store.getState();
                 try {
@@ -590,6 +598,15 @@ export class CommandDispatcher {
 
             const button = actionId?.startsWith("button:") ? actionId.slice("button:".length) : undefined;
 
+            if (state.ui.selectedPage === "connector" && button === "restart-control") {
+                return await this.dispatch({
+                    body: "Restart the control runtime now? TUI will reconnect automatically.",
+                    confirmIntent: { type: "control.restart" },
+                    confirmLabel: "Restart Control",
+                    title: "Restart Control",
+                    type: "overlay.openConfirm"
+                });
+            }
             if (state.ui.selectedPage === "connector" && (button === "save" || button === "cancel")) {
                 if (state.interaction.editor?.kind !== "connector") {
                     this.#store.setEditor({ editing: false, key: `connector:${state.ui.selectedInstance}`, kind: "connector" });
@@ -927,6 +944,9 @@ export class CommandDispatcher {
                 await this.#onMcpConfigUpdate(globalDraft);
             }
             const applyResult = instanceDirty || globalDirty ? await this.#onApplyConfig() : {};
+            if (asRecord(applyResult)?.restartControlRequired === true) {
+                this.#store.setControlRestartRequired(true);
+            }
             if (restartInstance && wasRunning) {
                 await this.#onInstanceAction("start", instance);
             }

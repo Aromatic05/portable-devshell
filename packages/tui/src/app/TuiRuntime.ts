@@ -86,6 +86,11 @@ export class TuiRuntime {
                 await this.session.refresh();
                 return result;
             },
+            onControlRestart: async () => {
+                await this.#client.restartControl();
+                await new Promise((resolve) => setTimeout(resolve, 100));
+                await this.session.reconnect();
+            },
             onCreateInstance: async (draft) => {
                 await this.#client.createInstance(draft);
                 await this.session.refresh();

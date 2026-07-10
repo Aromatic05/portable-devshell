@@ -25,6 +25,7 @@ export function createInitialTuiAppState(): TuiAppState {
         snapshotsByInstance: {},
         toolCallsByInstance: {},
         ui: {
+            controlRestartRequired: false,
             dirtyForms: {},
             expandedBoxes: {},
             focusScope: "sidebarPages",

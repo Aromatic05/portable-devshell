@@ -79,6 +79,7 @@ export type TuiUiIntent =
     | { type: "app.requestQuit" }
     | { page: PageId; type: "page.select" }
     | { type: "page.reload" }
+    | { type: "control.restart" }
     | { index: number; type: "instance.selectIndex" }
     | { direction: "next" | "previous" | "up" | "down" | "left" | "right"; type: "focus.move" }
     | { type: "focus.activate" }

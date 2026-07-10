@@ -113,7 +113,9 @@ export class McpHost {
         authMode: "none" | "oauth2" | "token";
         listenAddress?: string;
         oauthReady: boolean;
+        protocolReadiness: "notChecked";
         publicBaseUrl?: string;
+        publicReachability: "notChecked";
         running: boolean;
     } {
         const address = this.#httpServer.address;
@@ -123,7 +125,9 @@ export class McpHost {
             authMode: this.#auth?.provider ?? "none",
             ...(listenAddress === undefined ? {} : { listenAddress }),
             oauthReady: this.#auth?.provider !== "oauth2" || this.#oauth !== undefined,
+            protocolReadiness: "notChecked",
             ...(this.#config.publicBaseUrl === undefined ? {} : { publicBaseUrl: this.#config.publicBaseUrl }),
+            publicReachability: "notChecked",
             running
         };
     }

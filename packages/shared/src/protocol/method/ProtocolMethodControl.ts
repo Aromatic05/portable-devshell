@@ -9,6 +9,7 @@ export const controlMethods = {
     controlIdentifyClient: "control.identifyClient",
     controlListInstances: "control.listInstances",
     controlPing: "control.ping",
+    controlRestart: "control.restart",
     controlShutdown: "control.shutdown",
     controlStatus: "control.status",
     controlUpdateInstanceConfig: "control.updateInstanceConfig",

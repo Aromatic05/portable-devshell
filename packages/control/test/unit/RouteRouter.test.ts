@@ -16,6 +16,7 @@ test("RouteMethodRegistry resolves control and instance methods", () => {
 
     assert.equal(registry.resolve("control.identifyClient"), "control");
     assert.equal(registry.resolve("control.ping"), "control");
+    assert.equal(registry.resolve("control.restart"), "control");
     assert.equal(registry.resolve("control.listInstances"), "control");
     assert.equal(registry.resolve("control.createInstance"), "control");
     assert.equal(registry.resolve("instance.callTool"), "instance");

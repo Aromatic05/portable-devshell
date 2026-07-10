@@ -22,12 +22,14 @@ export interface ControlRpcServerOptions {
     getOAuthApprovals?: () => McpOAuthApprovalService | undefined;
     getMcpStatus?: () => JsonValue;
     shutdown?: () => Promise<void> | void;
+    restart?: () => Promise<void> | void;
     socketPath: string;
 }
 
 export class ControlRpcServer {
     readonly #instanceRegistry: InstanceRegistry;
     readonly #shutdown?: () => Promise<void> | void;
+    readonly #restart?: () => Promise<void> | void;
     readonly #socketPath: string;
     readonly #methodRegistry = new RouteMethodRegistry();
     readonly #subscriptionManager = new StreamSubscriptionManager();
@@ -40,6 +42,7 @@ export class ControlRpcServer {
     constructor(options: ControlRpcServerOptions) {
         this.#instanceRegistry = options.instanceRegistry;
         this.#shutdown = options.shutdown;
+        this.#restart = options.restart;
         this.#socketPath = options.socketPath;
         this.#controlRouter = new RouteRouterControl(
             new RouteHandlerControl({
@@ -157,6 +160,10 @@ export class ControlRpcServer {
             if (request.method === "control.shutdown") {
                 queueMicrotask(() => {
                     void (this.#shutdown?.() ?? this.stop());
+                });
+            } else if (request.method === "control.restart") {
+                queueMicrotask(() => {
+                    void this.#restart?.();
                 });
             }
         } catch (error) {

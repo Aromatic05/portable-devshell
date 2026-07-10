@@ -54,6 +54,10 @@ export class TuiAppStore {
         }
     }
 
+    setControlRestartRequired(required: boolean): void {
+        this.dispatch({ required, type: "control.setRestartRequired" });
+    }
+
     setMcpStatus(mcpStatus?: Record<string, JsonValue>): void {
         this.dispatch({ mcpStatus, type: "control.setMcpStatus" });
     }

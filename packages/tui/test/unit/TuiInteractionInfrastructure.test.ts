@@ -125,7 +125,7 @@ test("search filters instances, config, audit, and logs only", async () => {
         await harness.press(character);
     }
     const logs = selectMainScreenModel(harness.store.getState()).boxes.find((box) => box.id === "logs");
-    assert.deepEqual(logs?.expandedLines.map((line) => line.text), ["stdout #20 alpha line 20"]);
+    assert.deepEqual(logs?.expandedLines.map((line) => line.text), ["2026-07-09T00:00:19.000Z stdout #20 alpha line 20"]);
     await harness.press("", { return: true });
 
     await harness.press("3");
@@ -479,7 +479,7 @@ test("Prompt 3 detail line selection clamps to a valid line after data replaceme
     await harness.press("", { downArrow: true });
 
     const key = "logs:alpha:logs";
-    assert.equal(harness.store.getState().interaction.selectedDetailLineIds[key], "logs:stdout:2");
+    assert.equal(harness.store.getState().interaction.selectedDetailLineIds[key], "logs:2026-07-09T00:00:01.000Z");
     harness.store.replaceLogs("alpha", []);
 
     const logsBox = selectMainScreenModel(harness.store.getState()).boxes.find((box) => box.id === "logs");
@@ -642,6 +642,26 @@ test("OAuth detail keeps static rows selectable after expanding a completed appr
 
     await harness.press("", { upArrow: true });
     assert.equal(harness.store.getState().interaction.selectedDetailLineIds[approval.expandedKey], `${approval.id}:kind`);
+});
+
+test("logs render timestamps and correlation metadata", () => {
+    const harness = createHarness();
+    harness.store.replaceLogs("alpha", [{
+        at: "2026-07-11T12:34:56.000Z",
+        callId: "call-1",
+        instance: "alpha",
+        message: "done",
+        receivedAt: "2026-07-11T12:34:56.000Z",
+        requestId: "req-1",
+        seq: 21,
+        sessionId: "session-1",
+        source: "mcp",
+        stream: "stdout",
+        toolName: "bash_run"
+    }]);
+    harness.store.setSelectedPage("logs");
+    const logs = selectMainScreenModel(harness.store.getState()).boxes.find((box) => box.id === "logs")!;
+    assert.equal(logs.expandedLines[0]?.text, "2026-07-11T12:34:56.000Z stdout #21 tool=bash_run call=call-1 request=req-1 session=session-1 source=mcp done");
 });
 
 test("Logs controls expose statistics and real follow state", async () => {

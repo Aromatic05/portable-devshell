@@ -85,6 +85,10 @@ export class ControlServer {
             shutdown: async () => {
                 await this.stop();
             },
+            restart: async () => {
+                await this.stop();
+                await this.start();
+            },
             socketPath: this.#socketFile.path
         });
 
