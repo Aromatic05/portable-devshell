@@ -30,8 +30,6 @@ export class KeyDispatcher {
         }
 
         switch (mode) {
-            case "actionMenu":
-                return this.#forActionMenu(press);
             case "confirm":
                 return this.#forConfirm(press);
             case "approvalDetail":
@@ -66,19 +64,6 @@ export class KeyDispatcher {
             return { type: "ui.redraw" };
         }
         return undefined;
-    }
-
-    #forActionMenu(press: TuiKeyPress): TuiUiIntent[] {
-        if (press.key.upArrow) {
-            return [{ direction: "up", type: "actionMenu.move" }];
-        }
-        if (press.key.downArrow) {
-            return [{ direction: "down", type: "actionMenu.move" }];
-        }
-        if (press.key.return) {
-            return [{ type: "actionMenu.submit" }];
-        }
-        return [];
     }
 
     #forConfirm(press: TuiKeyPress): TuiUiIntent[] {
@@ -219,9 +204,6 @@ export class KeyDispatcher {
         }
         if (press.input === "/") {
             return [{ type: "search.open" }];
-        }
-        if (press.input === "a") {
-            return [{ type: "actionMenu.open" }];
         }
         if (press.input === "?") {
             return [{ type: "ui.help" }];

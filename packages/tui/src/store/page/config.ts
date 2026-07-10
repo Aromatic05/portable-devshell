@@ -62,10 +62,10 @@ export function buildConfigPageBoxes(state: TuiAppState, instanceName: string): 
             title: `Logs Policy${unsaved}`
         }),
         makeBox(state, "config", instanceName, {
-            detailLines: [buttonLine("disable", "Disable"), buttonLine("delete", "Delete")],
+            detailLines: [buttonLine("delete", "Delete")],
             id: "danger-zone",
             status: instance?.enabled === false ? "disabled" : "warning",
-            summaryLines: [compactSummary(["enabled", instance?.enabled === true ? "true" : "false"], ["actions", "disable,delete"])],
+            summaryLines: [compactSummary(["enabled", instance?.enabled === true ? "true" : "false"], ["actions", "delete"])],
             title: "Danger Zone"
         })
     ];

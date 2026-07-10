@@ -1,7 +1,6 @@
 import React, { useSyncExternalStore } from "react";
 import { Box, Text, useInput } from "ink";
 
-import { ActionMenu } from "../component/ActionMenu.js";
 import { ConfirmDialog } from "../component/ConfirmDialog.js";
 import { ErrorBanner } from "../component/ErrorBanner.js";
 import { Footer } from "../component/Footer.js";
@@ -9,7 +8,6 @@ import { Header } from "../component/Header.js";
 import { Sidebar } from "../component/Sidebar.js";
 import { ScreenRouter } from "../screen/ScreenRouter.js";
 import {
-    selectActionMenuModel,
     selectConnectionState,
     selectConfirmDialogModel,
     selectErrorMessage,
@@ -34,7 +32,6 @@ export function TuiApp(props: TuiAppProps) {
     );
     const connection = selectConnectionState(state);
     const errorLines = selectErrorMessage(state);
-    const actionMenu = selectActionMenuModel(state);
     const confirmDialog = selectConfirmDialogModel(state);
     const search = selectSearchModel(state);
     const toolForm = state.interaction.toolForm;
@@ -68,7 +65,6 @@ export function TuiApp(props: TuiAppProps) {
                         </Box>
                     ) : undefined}
                     <ScreenRouter boxInnerWidth={boxInnerWidth} state={state} viewportRows={viewportRows} />
-                    {!auditDetailOpen ? <ActionMenu items={actionMenu.items} open={actionMenu.open} title={actionMenu.title} /> : undefined}
                     {!auditDetailOpen ? (
                         <ConfirmDialog
                             body={confirmDialog.body}

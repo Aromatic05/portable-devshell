@@ -2,7 +2,7 @@ import type { JsonValue } from "@portable-devshell/shared";
 
 import type { BoxModel } from "../../component/ExpandableBox.js";
 import type { TuiAppState } from "../TuiReducers.js";
-import { compactSummary, formatField, makeBox, runtimeStatus } from "./PageBoxSupport.js";
+import { compactSummary, formatField, makeBox, runtimeStatus, shortenPath } from "./PageBoxSupport.js";
 import { buttonLine, editorDraft, fieldLine, readPath } from "./EditorSupport.js";
 
 export function buildInstancesPageBoxes(state: TuiAppState): BoxModel[] {
@@ -32,48 +32,52 @@ export function buildInstancesPageBoxes(state: TuiAppState): BoxModel[] {
         ...state.instances.map((entry) => {
             const snapshot = state.snapshotsByInstance[entry.name];
             const approvals = (state.approvalsByInstance[entry.name] ?? []).filter((approval) => approval.status === "pending");
-            const summaryLines = [
-                compactSummary(
-                    ["provider", entry.provider ?? "unknown"],
-                    ["daemon", snapshot?.daemonState ?? "unknown"],
-                    ["rpc", snapshot?.connectionState ?? "unknown"],
-                    ["ready", snapshot?.ready === true ? "yes" : "no"]
-                )
-            ];
-
-            if (snapshot?.lastErrorCode !== undefined) {
-                summaryLines.push(`lastError=${snapshot.lastErrorCode}`);
-            }
+            const restart = shouldRestart(snapshot);
 
             return makeBox(state, "instances", entry.name, {
                 detailLines: [
-                    formatField("enabled", entry.enabled ? "yes" : "no"),
+                    {
+                        id: `instance.toggleEnabled:${entry.name}`,
+                        text: `enabled       [ ${entry.enabled ? "yes" : "no"} ]`,
+                        tone: "accent"
+                    },
                     formatField("provider", entry.provider ?? "unknown"),
                     formatField("workspace", entry.defaultWorkspace ?? "-"),
-                    formatField("daemonState", snapshot?.daemonState ?? "unknown"),
-                    formatField("connectionState", snapshot?.connectionState ?? "unknown"),
-                    formatField("ready", snapshot?.ready === true ? "true" : "false"),
-                    formatField("mcpPath", entry.mcpPath ?? `/${entry.name}/mcp`),
-                    formatField("pendingApprovals", String(approvals.length)),
-                    formatField("lastError", snapshot?.lastErrorCode ?? "-"),
+                    formatField("runtime", instanceRuntimeSummary(snapshot)),
+                    formatField("approvals", String(approvals.length)),
                     "",
                     "Actions",
                     buttonLine("attach-shell", "Attach Shell"),
-                    buttonLine("open-config", "Open Config"),
-                    buttonLine("open-connector", "Open Connector"),
-                    buttonLine("open-audit", "Open Audit"),
-                    buttonLine("open-logs", "Open Logs"),
-                    buttonLine("disable", "Disable"),
+                    buttonLine(restart ? "restart" : "start", restart ? "Restart" : "Start"),
+                    buttonLine("stop", "Stop"),
                     buttonLine("delete", "Delete")
                 ],
                 expandedKey: `instances:${entry.name}:instance`,
                 id: `instance:${entry.name}`,
                 status: entry.enabled ? runtimeStatus(snapshot) : "disabled",
-                summaryLines,
+                summaryLines: [
+                    compactSummary(
+                        ["provider", entry.provider ?? "unknown"],
+                        ["workspace", shortenPath(entry.defaultWorkspace ?? "-")],
+                        ["approvals", String(approvals.length)]
+                    )
+                ],
                 title: entry.name
             });
         })
     ];
+}
+
+function instanceRuntimeSummary(snapshot: TuiAppState["snapshotsByInstance"][string] | undefined): string {
+    if (snapshot?.ready === true) {
+        return "ready";
+    }
+
+    return `daemon=${snapshot?.daemonState ?? "unknown"} rpc=${snapshot?.connectionState ?? "unknown"} ready=no`;
+}
+
+function shouldRestart(snapshot: TuiAppState["snapshotsByInstance"][string] | undefined): boolean {
+    return snapshot?.daemonState !== undefined && snapshot.daemonState !== "stopped" && snapshot.daemonState !== "failed";
 }
 
 function buildCreateWizard(state: TuiAppState): BoxModel {

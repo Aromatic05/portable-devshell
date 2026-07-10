@@ -3,7 +3,6 @@ import type { TuiAppState } from "../store/TuiReducers.js";
 import { tuiLayoutMetrics } from "./TuiRootLayout.js";
 
 export type TuiHitTarget =
-    | { kind: "action"; index: number }
     | { boxId: string; kind: "boxBody"; lineId?: string }
     | { boxId: string; kind: "boxTitle" }
     | { id: string; kind: "instance" }
@@ -73,13 +72,6 @@ export function buildTuiHitRegions(state: TuiAppState, viewport: { columns: numb
         }
     }
 
-    let overlayY = mainY + boxViewportRows + (main.statusLine === undefined ? 0 : 1);
-    if (state.interaction.actionMenu.open) {
-        overlayY += 1;
-        for (let index = 0; index < state.interaction.actionMenu.items.length; index += 1) {
-            regions.push({ height: 1, target: { index, kind: "action" }, width: mainWidth, x: mainX, y: overlayY + index });
-        }
-    }
 
     return regions;
 }

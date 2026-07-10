@@ -57,10 +57,6 @@ export class TuiFocusManager {
             const lineId = state.interaction.selectedDetailLineIds[key];
             return lineId === undefined ? undefined : { boxId, id: lineId, kind: "line" };
         }
-        if (scope === "actionMenu") {
-            const actionId = this.#store.getState().interaction.selectedActionId;
-            return actionId === undefined ? undefined : { id: actionId, kind: "action" };
-        }
         if (scope === "confirm") {
             return { id: this.#store.getState().interaction.selectedConfirmButton, kind: "button" };
         }
@@ -188,9 +184,6 @@ export class TuiFocusManager {
                 this.#store.setSelectedDetailLine(detailKey(state, item.boxId), item.id);
                 return;
             }
-            case "action":
-                this.#store.setFocusScope("actionMenu");
-                return;
             case "approvalAction": {
                 const state = this.#store.getState();
                 this.#store.setAuditPage({
@@ -256,8 +249,6 @@ function focusModeFor(item: FocusItem, current: TuiMode): TuiMode {
             return "mainBoxes";
         case "line":
             return "mainBoxes";
-        case "action":
-            return "actionMenu";
         case "approvalAction":
             return current === "denyConfirm" ? "denyConfirm" : "approvalDetail";
         case "button":

@@ -6,7 +6,7 @@ export function buildHelpLines(state: TuiAppState): string[] {
     return [
         `Current page ${state.ui.selectedPage}`,
         `Selected instance ${state.ui.selectedInstance ?? "none"}`,
-        "Read-only until an explicit instance action is chosen from the action menu.",
+        "Instance lifecycle actions are available directly inside each expanded instance box.",
         "Tab cycles sidebar and main boxes.",
         "Up/Down moves sidebar focus without selecting.",
         "Enter applies the focused sidebar item.",

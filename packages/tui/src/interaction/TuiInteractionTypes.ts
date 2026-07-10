@@ -22,23 +22,9 @@ export type FocusItem =
     | { boxId: string; kind: "line"; id: string }
     | { kind: "field"; id: string }
     | { kind: "button"; id: "save" | "cancel" | string }
-    | { kind: "action"; id: string }
     | { kind: "approvalAction"; id: "approve" | "deny" | "back" };
 
 export type TuiMode = FocusScope;
-
-export interface TuiActionMenuItem {
-    id: string;
-    label: string;
-    intent: TuiUiIntent;
-}
-
-export interface TuiActionMenuState {
-    items: TuiActionMenuItem[];
-    open: boolean;
-    selectedIndex: number;
-    title: string;
-}
 
 export interface TuiConfirmDialogState {
     body: string;
@@ -61,7 +47,6 @@ export interface TuiToolFormState {
 }
 
 export interface TuiInteractionState {
-    actionMenu: TuiActionMenuState;
     auditPage: AuditPageState;
     confirmDialog: TuiConfirmDialogState;
     dirty: boolean;
@@ -73,7 +58,6 @@ export interface TuiInteractionState {
         sidebarFocus: "pages" | "instances";
     }>;
     screenStatusByPage: Partial<Record<PageId, string>>;
-    selectedActionId?: string;
     selectedConfirmButton: "cancel" | "confirm";
     selectedDetailLineIds: Record<string, string>;
     search: TuiSearchState;
@@ -109,9 +93,6 @@ export type TuiUiIntent =
     | { type: "editor.validate" }
     | { direction: "next" | "previous"; type: "wizard.step" }
     | { type: "editor.discard" }
-    | { type: "actionMenu.open" }
-    | { direction: "up" | "down"; type: "actionMenu.move" }
-    | { type: "actionMenu.submit" }
     | { type: "confirm.accept" }
     | { type: "confirm.cancel" }
     | { type: "screen.pageUp" }
@@ -122,9 +103,7 @@ export type TuiUiIntent =
     | { type: "logs.reload" }
     | { type: "logs.toggleFollow" }
     | { type: "logs.clearBuffer" }
-    | { items: TuiActionMenuItem[]; title: string; type: "overlay.openActionMenu" }
     | { body: string; cancelLabel?: string; confirmIntent: TuiUiIntent; confirmLabel?: string; title: string; type: "overlay.openConfirm" }
-    | { type: "overlay.closeActionMenu" }
     | { type: "overlay.closeConfirm" }
     | { key: string; type: "ui.toggleExpanded" }
     | { focusScope: FocusScope; type: "focus.scope.set" }
@@ -133,13 +112,11 @@ export type TuiUiIntent =
     | { page: PageId; status: string; type: "screen.setStatus" }
     | { type: "screen.clearStatus" }
     | { instance: string; type: "instance.start" }
+    | { instance: string; type: "instance.restart" }
+    | { enabled: boolean; instance: string; type: "instance.setEnabled" }
     | { instance: string; type: "instance.stop" }
-    | { instance: string; type: "instance.refresh" }
     | { instance: string; type: "instance.attachShell" }
-    | { instance: string; type: "instance.disable" }
     | { instance: string; type: "instance.delete" }
-    | { type: "instance.openLogs" }
-    | { type: "instance.openAudit" }
     | { approvalId: string; instance: string; type: "approval.open" }
     | { approvalId: string; decision: "approve" | "deny"; instance: string; type: "approval.decide" }
     | { type: "approval.back" }
@@ -159,12 +136,6 @@ export function isSameFocusItem(left: FocusItem | undefined, right: FocusItem | 
 
 export function createEmptyInteractionState(): TuiInteractionState {
     return {
-        actionMenu: {
-            items: [],
-            open: false,
-            selectedIndex: 0,
-            title: ""
-        },
         auditPage: {
             mode: "list"
         },

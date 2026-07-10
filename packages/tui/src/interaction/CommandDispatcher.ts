@@ -9,7 +9,7 @@ import type { TuiEditorState, TuiUiIntent } from "./TuiInteractionTypes.js";
 export interface CommandDispatcherOptions {
     focusManager: TuiFocusManager;
     onApprovalDecision(instance: string, approvalId: string, decision: "approve" | "deny"): Promise<void>;
-    onInstanceAction(action: "refresh" | "start" | "stop", instance: string): Promise<void>;
+    onInstanceAction(action: "refresh" | "restart" | "start" | "stop", instance: string): Promise<void>;
     onAttachShell(instance: string): Promise<void>;
     mainViewportRows(): number;
     onLogsReload(): Promise<void>;
@@ -20,7 +20,8 @@ export interface CommandDispatcherOptions {
     onCreateInstance?(draft: InstanceCreateDraft): Promise<void>;
     onGetInstanceCreateSchema?(): Promise<InstanceCreateSchema>;
     onInstanceConfigUpdate?(instance: Record<string, JsonValue>): Promise<void>;
-    onInstanceDangerAction?(action: "delete" | "disable", instance: string): Promise<void>;
+    onInstanceDangerAction?(action: "delete", instance: string): Promise<void>;
+    onInstanceEnabledChange?(instance: string, enabled: boolean): Promise<void>;
     onMcpConfigUpdate?(mcp: Record<string, JsonValue>): Promise<void>;
     onOAuthApprovalDecision?(approvalId: string, decision: "approve" | "deny"): Promise<void>;
     onValidateConfigDraft?(draft: Record<string, JsonValue>): Promise<void>;
@@ -42,7 +43,8 @@ export class CommandDispatcher {
     readonly #onCreateInstance: (draft: InstanceCreateDraft) => Promise<void>;
     readonly #onGetInstanceCreateSchema: () => Promise<InstanceCreateSchema>;
     readonly #onInstanceConfigUpdate: (instance: Record<string, JsonValue>) => Promise<void>;
-    readonly #onInstanceDangerAction: (action: "delete" | "disable", instance: string) => Promise<void>;
+    readonly #onInstanceDangerAction: (action: "delete", instance: string) => Promise<void>;
+    readonly #onInstanceEnabledChange: (instance: string, enabled: boolean) => Promise<void>;
     readonly #onMcpConfigUpdate: (mcp: Record<string, JsonValue>) => Promise<void>;
     readonly #onOAuthApprovalDecision: (approvalId: string, decision: "approve" | "deny") => Promise<void>;
     readonly #onValidateConfigDraft: (draft: Record<string, JsonValue>) => Promise<void>;
@@ -64,6 +66,7 @@ export class CommandDispatcher {
         this.#onGetInstanceCreateSchema = options.onGetInstanceCreateSchema ?? unavailable;
         this.#onInstanceConfigUpdate = options.onInstanceConfigUpdate ?? unavailable;
         this.#onInstanceDangerAction = options.onInstanceDangerAction ?? unavailable;
+        this.#onInstanceEnabledChange = options.onInstanceEnabledChange ?? unavailable;
         this.#onMcpConfigUpdate = options.onMcpConfigUpdate ?? unavailable;
         this.#onOAuthApprovalDecision = options.onOAuthApprovalDecision ?? unavailable;
         this.#onValidateConfigDraft = options.onValidateConfigDraft ?? unavailable;
@@ -122,28 +125,6 @@ export class CommandDispatcher {
                 this.#store.setSearchOpen(false);
                 this.#focusManager.restore();
                 return true;
-            case "actionMenu.open":
-                return this.#openInstanceActionMenu();
-            case "actionMenu.move": {
-                const items = this.#store.getState().interaction.actionMenu.items;
-                if (items.length === 0) {
-                    return false;
-                }
-                const current = this.#store.getState().interaction.actionMenu.selectedIndex;
-                const next = intent.direction === "down" ? (current + 1) % items.length : (current - 1 + items.length) % items.length;
-                this.#store.setActionMenu(this.#store.getState().interaction.actionMenu.title, items, next);
-                return true;
-            }
-            case "actionMenu.submit": {
-                const selectedIndex = this.#store.getState().interaction.actionMenu.selectedIndex;
-                const item = this.#store.getState().interaction.actionMenu.items[selectedIndex];
-                if (item === undefined) {
-                    return false;
-                }
-                this.#store.setActionMenu("", []);
-                this.#focusManager.restore();
-                return await this.dispatch(item.intent);
-            }
             case "confirm.accept": {
                 if (this.#store.getState().interaction.selectedConfirmButton === "cancel") {
                     return await this.dispatch({ type: "confirm.cancel" });
@@ -213,11 +194,6 @@ export class CommandDispatcher {
                 this.#store.clearLogsBuffer();
                 this.#store.setScreenStatus("logs", "Cleared local log buffer only.");
                 return true;
-            case "overlay.openActionMenu":
-                this.#focusManager.pushRestore("actionMenu");
-                this.#store.setActionMenu(intent.title, intent.items);
-                this.#store.setFocusScope("actionMenu");
-                return true;
             case "overlay.openConfirm":
                 this.#focusManager.pushRestore("confirm");
                 this.#store.setConfirmDialog({
@@ -229,10 +205,6 @@ export class CommandDispatcher {
                     title: intent.title
                 });
                 this.#store.setFocusScope("confirm");
-                return true;
-            case "overlay.closeActionMenu":
-                this.#store.setActionMenu("", []);
-                this.#focusManager.restore();
                 return true;
             case "overlay.closeConfirm":
                 this.#store.setConfirmDialog({
@@ -264,25 +236,21 @@ export class CommandDispatcher {
             case "instance.start":
                 await this.#onInstanceAction("start", intent.instance);
                 return true;
+            case "instance.restart":
+                await this.#onInstanceAction("restart", intent.instance);
+                return true;
             case "instance.stop":
                 await this.#onInstanceAction("stop", intent.instance);
                 return true;
-            case "instance.refresh":
-                await this.#onInstanceAction("refresh", intent.instance);
+            case "instance.setEnabled":
+                await this.#onInstanceEnabledChange(intent.instance, intent.enabled);
                 return true;
             case "instance.attachShell":
                 await this.#onAttachShell(intent.instance);
                 return true;
-            case "instance.disable":
-                await this.#onInstanceDangerAction("disable", intent.instance);
-                return true;
             case "instance.delete":
                 await this.#onInstanceDangerAction("delete", intent.instance);
                 return true;
-            case "instance.openLogs":
-                return await this.dispatch({ page: "logs", type: "page.select" });
-            case "instance.openAudit":
-                return await this.dispatch({ page: "audit", type: "page.select" });
             case "approval.open":
                 this.#openApprovalDetail(intent.approvalId);
                 return true;
@@ -374,11 +342,6 @@ export class CommandDispatcher {
         }
         if (scope === "form" || scope === "wizard") {
             void this.#discardEditor();
-            return true;
-        }
-        if (scope === "actionMenu") {
-            this.#store.setActionMenu("", []);
-            this.#focusManager.restore();
             return true;
         }
         if (scope === "confirm") {
@@ -522,6 +485,25 @@ export class CommandDispatcher {
                 return true;
             }
 
+            if (state.ui.selectedPage === "instances" && actionId?.startsWith("instance.toggleEnabled:")) {
+                const instance = actionId.slice("instance.toggleEnabled:".length);
+                const entry = state.instances.find((candidate) => candidate.name === instance);
+                if (entry === undefined) {
+                    return false;
+                }
+                if (entry.enabled) {
+                    const running = state.snapshotsByInstance[instance]?.daemonState !== "stopped";
+                    return await this.dispatch({
+                        body: running ? `Stop and disable ${instance}?` : `Disable ${instance}?`,
+                        confirmIntent: { enabled: false, instance, type: "instance.setEnabled" },
+                        confirmLabel: "Disable",
+                        title: "Confirm Disable",
+                        type: "overlay.openConfirm"
+                    });
+                }
+                return await this.dispatch({ enabled: true, instance, type: "instance.setEnabled" });
+            }
+
             if ((state.ui.selectedPage === "config" || state.ui.selectedPage === "connector") && boxId !== undefined && lineId !== undefined) {
                 return this.#openPageEditor(state.ui.selectedPage, boxId);
             }
@@ -602,24 +584,22 @@ export class CommandDispatcher {
         switch (button) {
             case "attach-shell":
                 return await this.#openAttachShellConfirm(instance);
-            case "open-config":
-                this.#store.setSelectedInstance(instance);
-                return await this.dispatch({ page: "config", type: "page.select" });
-            case "open-connector":
-                this.#store.setSelectedInstance(instance);
-                return await this.dispatch({ page: "connector", type: "page.select" });
-            case "open-audit":
-                this.#store.setSelectedInstance(instance);
-                return await this.dispatch({ page: "audit", type: "page.select" });
-            case "open-logs":
-                this.#store.setSelectedInstance(instance);
-                return await this.dispatch({ page: "logs", type: "page.select" });
-            case "disable":
+            case "start":
+                return await this.dispatch({ instance, type: "instance.start" });
+            case "restart":
                 return await this.dispatch({
-                    body: `Disable ${instance}?`,
-                    confirmIntent: { instance, type: "instance.disable" },
-                    confirmLabel: "Disable",
-                    title: "Confirm Disable",
+                    body: `Restart ${instance}?`,
+                    confirmIntent: { instance, type: "instance.restart" },
+                    confirmLabel: "Restart",
+                    title: "Confirm Restart",
+                    type: "overlay.openConfirm"
+                });
+            case "stop":
+                return await this.dispatch({
+                    body: `Stop ${instance}?`,
+                    confirmIntent: { instance, type: "instance.stop" },
+                    confirmLabel: "Stop",
+                    title: "Confirm Stop",
                     type: "overlay.openConfirm"
                 });
             case "delete":
@@ -658,17 +638,16 @@ export class CommandDispatcher {
                     return this.#changeWizardStep("previous");
                 case "next":
                     return this.#changeWizardStep("next");
-                case "disable":
                 case "delete": {
                     const instance = state.ui.selectedInstance;
                     if (instance === undefined) {
                         return false;
                     }
                     return await this.dispatch({
-                        body: `${action.slice("button:".length) === "delete" ? "Delete" : "Disable"} ${instance}?`,
-                        confirmIntent: { instance, type: action.slice("button:".length) === "delete" ? "instance.delete" : "instance.disable" },
-                        confirmLabel: action.slice("button:".length) === "delete" ? "Delete" : "Disable",
-                        title: action.slice("button:".length) === "delete" ? "Confirm Delete" : "Confirm Disable",
+                        body: `Delete ${instance}?`,
+                        confirmIntent: { instance, type: "instance.delete" },
+                        confirmLabel: "Delete",
+                        title: "Confirm Delete",
                         type: "overlay.openConfirm"
                     });
                 }
@@ -970,49 +949,6 @@ export class CommandDispatcher {
         }
     }
 
-    #openInstanceActionMenu(): boolean {
-        const state = this.#store.getState();
-        const focusedBox = selectMainScreenModel(state).boxes.find((box) => box.id === state.ui.mainFocusId);
-        const instance = state.ui.selectedPage === "instances" ? this.#instanceNameFromBox(focusedBox?.id) : state.ui.selectedInstance;
-        if (instance === undefined) {
-            this.#store.setScreenStatus(state.ui.selectedPage, "Focus an entry before opening actions.");
-            return false;
-        }
-
-        this.#focusManager.pushRestore("actionMenu");
-        this.#store.setActionMenu(`Actions: ${instance}`, [
-            {
-                id: "instance.attachShell",
-                intent: {
-                    body: "This shell is not audited and is not controlled by devshell.",
-                    confirmIntent: { instance, type: "instance.attachShell" },
-                    confirmLabel: "Attach Shell",
-                    title: "UNMANAGED SHELL",
-                    type: "overlay.openConfirm"
-                },
-                label: state.ui.selectedPage === "instances" ? "Attach Shell" : `Attach Shell to ${instance}`
-            },
-            { id: "instance.start", intent: { instance, type: "instance.start" }, label: "Start Worker" },
-            {
-                id: "instance.stop",
-                intent: {
-                    body: `Stop Worker for ${instance}?`,
-                    confirmIntent: { instance, type: "instance.stop" },
-                    confirmLabel: "Stop Worker",
-                    title: "Confirm Stop Worker",
-                    type: "overlay.openConfirm"
-                },
-                label: "Stop Worker"
-            },
-            { id: "instance.refresh", intent: { instance, type: "instance.refresh" }, label: "Refresh Status" },
-            { id: "instance.logs", intent: { type: "instance.openLogs" }, label: "Open Logs" },
-            { id: "instance.audit", intent: { type: "instance.openAudit" }, label: "Open Audit" },
-            { id: "instance.callTool", intent: { instance, toolName: "bash_run", type: "toolForm.open" }, label: "Call Tool" }
-        ]);
-        this.#store.setFocusScope("actionMenu");
-        return true;
-    }
-
     async #openAttachShellConfirm(instance: string): Promise<boolean> {
         return this.dispatch({
             body: "This shell is not audited and is not controlled by devshell.",
@@ -1025,7 +961,6 @@ export class CommandDispatcher {
 
     #openApprovalDetail(approvalId: string): void {
         const state = this.#store.getState();
-        this.#store.setActionMenu("", []);
         this.#store.clearToolForm();
         this.#store.setAuditPage({
             approvalId,

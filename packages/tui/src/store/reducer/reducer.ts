@@ -183,20 +183,6 @@ export function tuiAppReducer(state: TuiAppState, action: TuiAppAction): TuiAppS
                 ...state,
                 logsByInstance: {}
             });
-        case "overlay.setActionMenu":
-            return {
-                ...state,
-                interaction: {
-                    ...state.interaction,
-                    actionMenu: {
-                        items: [...action.items],
-                        open: action.items.length > 0,
-                        selectedIndex: action.selectedIndex,
-                        title: action.title
-                    },
-                    selectedActionId: action.items[action.selectedIndex]?.id
-                }
-            };
         case "overlay.setConfirmDialog":
             return {
                 ...state,

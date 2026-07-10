@@ -93,8 +93,6 @@ export function pageFromShortcut(index: number): PageId | undefined {
 
 export function buildFocusGraphForState(state: TuiAppState): FocusGraph {
     switch (state.interaction.focusScope) {
-        case "actionMenu":
-            return buildLinearGraph(state.interaction.actionMenu.items.map((item) => ({ id: item.id, kind: "action" as const })));
         case "confirm":
             return buildLinearGraph([
                 { id: "cancel", kind: "button" as const },

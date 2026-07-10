@@ -153,7 +153,7 @@ export function selectFooterShortcuts(state: TuiAppState): string[] {
         case "sidebarInstances":
             return ["tab", "enter", "1-7", "↑↓", "esc"];
         case "mainBoxes":
-            return ["tab", "enter", "space", "↑↓", "/", "a", "esc"];
+            return ["tab", "enter", "space", "↑↓", "/", "esc"];
         case "boxDetail":
             return ["enter", "↑↓", "/", "esc"];
         case "search":
@@ -164,8 +164,6 @@ export function selectFooterShortcuts(state: TuiAppState): string[] {
             return ["tab", "enter", "ctrl+s", "ctrl+[", "ctrl+d"];
         case "wizard":
             return ["tab", "enter", "ctrl+s", "ctrl+[", "ctrl+d"];
-        case "actionMenu":
-            return ["↑↓", "enter", "esc"];
         case "confirm":
             return ["tab", "←→", "enter", "esc"];
         case "approvalDetail":
@@ -185,18 +183,6 @@ export function selectErrorMessage(state: TuiAppState): string[] | undefined {
     }
 
     return undefined;
-}
-
-export function selectActionMenuModel(state: TuiAppState): { items: Array<{ active: boolean; id: string; label: string }>; open: boolean; title: string } {
-    return {
-        items: state.interaction.actionMenu.items.map((item) => ({
-            active: state.interaction.selectedActionId === item.id,
-            id: item.id,
-            label: item.label
-        })),
-        open: state.interaction.actionMenu.open,
-        title: state.interaction.actionMenu.title
-    };
 }
 
 export function selectConfirmDialogModel(state: TuiAppState): {

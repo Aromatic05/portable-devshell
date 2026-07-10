@@ -11,7 +11,6 @@ export type FocusScope =
     | "wizard"
     | "search"
     | "toolForm"
-    | "actionMenu"
     | "confirm"
     | "approvalDetail"
     | "denyConfirm";

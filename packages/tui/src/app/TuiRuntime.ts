@@ -93,12 +93,22 @@ export class TuiRuntime {
             onInstanceConfigUpdate: async (instance) => {
                 await this.#client.updateInstanceConfig(instance);
             },
-            onInstanceDangerAction: async (action, instance) => {
-                if (action === "delete") {
-                    await this.#client.deleteInstance(instance);
-                } else {
-                    await this.#client.disableInstance(instance);
+            onInstanceDangerAction: async (_action, instance) => {
+                await this.#client.deleteInstance(instance);
+                await this.session.refresh();
+            },
+            onInstanceEnabledChange: async (instance, enabled) => {
+                const config = this.store.getState().configView;
+                const entries = Array.isArray(config?.instances) ? config.instances : [];
+                const current = entries.find((entry) => typeof entry === "object" && entry !== null && !Array.isArray(entry) && entry.name === instance);
+                if (typeof current !== "object" || current === null || Array.isArray(current)) {
+                    throw new Error(`Instance config is unavailable: ${instance}`);
                 }
+                if (!enabled && this.store.getState().snapshotsByInstance[instance]?.daemonState !== undefined && this.store.getState().snapshotsByInstance[instance]?.daemonState !== "stopped") {
+                    await this.#client.stopInstance(instance);
+                }
+                await this.#client.updateInstanceConfig({ ...current, enabled });
+                await this.#client.applyConfig();
                 await this.session.refresh();
             },
             onMcpConfigUpdate: async (mcp) => {
@@ -229,7 +239,7 @@ export class TuiRuntime {
         }
     }
 
-    async #runInstanceAction(action: "refresh" | "start" | "stop", instance: string): Promise<void> {
+    async #runInstanceAction(action: "refresh" | "restart" | "start" | "stop", instance: string): Promise<void> {
         switch (action) {
             case "refresh":
                 await this.#runCommand(`Refresh Status: ${instance}`, instance, async () => {
@@ -240,6 +250,29 @@ export class TuiRuntime {
                 return;
             case "start":
                 await this.#runCommand(`Start Worker: ${instance}`, instance, async (commandId) => {
+                    const entry = this.store.getState().instances.find((candidate) => candidate.name === instance);
+                    this.store.setRelayMetadata(commandId, {
+                        provider: entry?.provider,
+                        workspace: entry?.defaultWorkspace
+                    });
+                    const snapshot = await this.#client.startInstance(instance, {
+                        relay: {
+                            onOutput: (chunk) => {
+                                this.store.appendRelayOutput(commandId, chunk);
+                            },
+                            onRequestId: (requestId) => {
+                                this.store.setRelayMetadata(commandId, { requestId });
+                            }
+                        },
+                        workspacePath: entry?.defaultWorkspace
+                    });
+                    this.store.replaceSnapshot(snapshot);
+                    await this.session.refreshInstance(instance);
+                });
+                return;
+            case "restart":
+                await this.#runCommand(`Restart Worker: ${instance}`, instance, async (commandId) => {
+                    await this.#client.stopInstance(instance);
                     const entry = this.store.getState().instances.find((candidate) => candidate.name === instance);
                     this.store.setRelayMetadata(commandId, {
                         provider: entry?.provider,
@@ -395,12 +428,6 @@ export class TuiRuntime {
         if (target.kind === "instance") {
             this.store.setSelectedInstance(target.id);
             this.focusManager.setFocus({ id: target.id, kind: "instance" });
-            return;
-        }
-        if (target.kind === "action") {
-            const actionMenu = this.store.getState().interaction.actionMenu;
-            this.store.setActionMenu(actionMenu.title, actionMenu.items, target.index);
-            await this.commandDispatcher.dispatch({ type: "actionMenu.submit" });
             return;
         }
         if (target.kind === "scrollViewport") {

@@ -1,6 +1,6 @@
 import { type ApprovalRequest, type ControlError, type ControlEventEnvelope, type InstanceSnapshot, type JsonValue, type OAuthApprovalRequest, type ToolCallRecord } from "@portable-devshell/shared";
 
-import { type TuiActionMenuItem, type TuiEditorState, type TuiUiIntent } from "../interaction/TuiInteractionTypes.js";
+import { type TuiEditorState, type TuiUiIntent } from "../interaction/TuiInteractionTypes.js";
 import type { AuditPageState, FocusScope, PageId, SidebarCursor, SidebarFocus } from "../model/TuiUiTypes.js";
 import {
     createInitialTuiAppState,
@@ -124,15 +124,6 @@ export class TuiAppStore {
     popRestore(): void {
         this.dispatch({
             type: "restore.pop"
-        });
-    }
-
-    setActionMenu(title: string, items: TuiActionMenuItem[], selectedIndex = 0): void {
-        this.dispatch({
-            items,
-            selectedIndex,
-            title,
-            type: "overlay.setActionMenu"
         });
     }
 

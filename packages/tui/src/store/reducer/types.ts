@@ -1,6 +1,6 @@
 import type { ApprovalRequest, ControlError, ControlEventEnvelope, InstanceSnapshot, JsonValue, OAuthApprovalRequest, ToolCallRecord } from "@portable-devshell/shared";
 
-import type { TuiActionMenuItem, TuiEditorState, TuiInteractionState, TuiUiIntent } from "../../interaction/TuiInteractionTypes.js";
+import type { TuiEditorState, TuiInteractionState, TuiUiIntent } from "../../interaction/TuiInteractionTypes.js";
 import type { AuditPageState, FocusScope, PageId, SidebarCursor, SidebarFocus, TuiUiState } from "../../model/TuiUiTypes.js";
 
 export type TuiConnectionStatus = "connecting" | "connected" | "disconnected" | "error";
@@ -109,7 +109,6 @@ export type TuiAppAction =
     | { button: "cancel" | "confirm"; type: "confirm.focus" }
     | { key: string; lineId?: string; type: "detailLine.select" }
     | { cursor?: SidebarCursor; type: "sidebar.cursor.set" }
-    | { items: TuiActionMenuItem[]; selectedIndex: number; title: string; type: "overlay.setActionMenu" }
     | { confirmIntent: TuiUiIntent; body: string; cancelLabel: string; confirmLabel: string; open: boolean; title: string; type: "overlay.setConfirmDialog" }
     | { sidebarFocus: SidebarFocus; type: "sidebar.focus.set" }
     | { type: "search.setOpen"; value: boolean }
