@@ -39,6 +39,23 @@ export class TuiControlConnection {
         return await this.#connection.request(method, target, params);
     }
 
+    async requestWithRelay(
+        method: string,
+        target: ControlTarget,
+        relay: { onOutput(chunk: string): void; onRequestId?(requestId: string): void },
+        params?: JsonValue
+    ): Promise<JsonValue> {
+        return await this.#connection.requestWithRelay(method, target, relay, params);
+    }
+
+    async sendRelayInput(requestId: string, chunk: Uint8Array): Promise<void> {
+        await this.#connection.sendRelayInput(requestId, chunk);
+    }
+
+    async sendRelayEof(requestId: string): Promise<void> {
+        await this.#connection.sendRelayEof(requestId);
+    }
+
     async nextStreamMessage(): Promise<TuiControlStreamMessage> {
         return await this.#connection.nextStreamMessage();
     }
