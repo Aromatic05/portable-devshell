@@ -70,15 +70,15 @@ function ApprovalDetail(props: { approval?: ApprovalRequest; mode: "approvalDeta
     return (
         <Box flexDirection="column">
             <Text bold>{props.mode === "approvalDetail" ? "Approval Detail" : "Confirm Deny"}</Text>
-            <Box>
-                {actions.map((action) => (
-                    <Text backgroundColor={props.selectedAction === action ? "cyan" : undefined} key={action}>{` ${action[0]!.toUpperCase()}${action.slice(1)} `}</Text>
-                ))}
-            </Box>
             {fields.map(([label, value]) => (
                 <Text key={label}>{`${label}: ${value}`}</Text>
             ))}
             {props.mode === "denyConfirm" ? <Text color="yellow">Deny this approval?</Text> : undefined}
+            <Box marginTop={1}>
+                {actions.map((action) => (
+                    <Text backgroundColor={props.selectedAction === action ? "cyan" : undefined} key={action}>{` ${action[0]!.toUpperCase()}${action.slice(1)} `}</Text>
+                ))}
+            </Box>
         </Box>
     );
 }

@@ -1,6 +1,6 @@
 import type { BoxModel } from "../../component/ExpandableBox.js";
 import type { TuiAppState } from "../TuiReducers.js";
-import { buildSelectedInstancePageContext, compactSummary, formatField, makeBox, renderApprovalLine, toolCallStatus } from "./PageBoxSupport.js";
+import { buildSelectedInstancePageContext, compactSummary, formatField, makeBox, toolCallStatus } from "./PageBoxSupport.js";
 
 export function buildAuditPageBoxes(state: TuiAppState, instanceName: string): BoxModel[] {
     const { approvals, toolCalls } = buildSelectedInstancePageContext(state, instanceName);
@@ -9,7 +9,7 @@ export function buildAuditPageBoxes(state: TuiAppState, instanceName: string): B
         makeBox(state, "audit", instanceName, {
             detailLines:
                 record === undefined
-                    ? ["No tool call history from instance.readToolCalls or stream events."]
+                    ? ["No tool call history from instance.readToolCalls or stream events.", ...approvalLines(approvals)]
                     : [
                           `callId ${record.callId}`,
                           `tool ${record.toolName}`,
@@ -17,7 +17,11 @@ export function buildAuditPageBoxes(state: TuiAppState, instanceName: string): B
                           `startedAt ${record.startedAt}`,
                           `completedAt ${record.completedAt ?? "-"}`,
                           `source ${record.source}`,
-                          `input ${record.inputSummary || "-"}`
+                          `input ${record.inputSummary || "-"}`,
+                          ...approvalLines([
+                              ...approvals.filter((approval) => approval.callId === record.callId),
+                              ...(index === 0 ? approvals.filter((approval) => !toolCalls.some((toolCall) => toolCall.callId === approval.callId)) : [])
+                          ])
                       ],
             id: record === undefined ? "audit-empty" : `audit-${record.callId}`,
             status: record === undefined ? "normal" : toolCallStatus(record),
@@ -30,22 +34,17 @@ export function buildAuditPageBoxes(state: TuiAppState, instanceName: string): B
         })
     );
 
-    return [
-        ...auditBoxes,
-        ...approvals.map((approval) =>
-            makeBox(state, "audit", instanceName, {
-                detailLines: [
-                    formatField("Approval", approval.approvalId),
-                    formatField("Tool", approval.toolName),
-                    formatField("Risk", approval.riskLevel),
-                    formatField("Reason", approval.reason),
-                    formatField("Input", approval.inputSummary)
-                ],
-                id: `approval-${approval.approvalId}`,
-                status: "pending",
-                summaryLines: [renderApprovalLine(approval), "Enter opens approval detail."],
-                title: "Pending Approval"
-            })
-        )
-    ];
+    return auditBoxes;
+}
+
+function approvalLines(approvals: ReturnType<typeof buildSelectedInstancePageContext>["approvals"]): Array<string | { id: string; text: string; tone: "accent" }> {
+    return approvals.flatMap((approval) => [
+        "Pending approval:",
+        formatField("Approval", approval.approvalId),
+        formatField("Tool", approval.toolName),
+        formatField("Risk", approval.riskLevel),
+        formatField("Reason", approval.reason),
+        formatField("Input", approval.inputSummary),
+        { id: `approval.open:${approval.approvalId}`, text: "Enter approval review", tone: "accent" }
+    ]);
 }

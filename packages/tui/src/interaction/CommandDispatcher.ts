@@ -482,8 +482,9 @@ export class CommandDispatcher {
             if (focused?.kind === "line") {
                 return await this.#activateDetailLine();
             }
-            if (state.ui.selectedPage === "audit" && state.ui.selectedInstance !== undefined && focused?.kind === "box" && focused.id.startsWith("approval-")) {
-                return await this.dispatch({ approvalId: focused.id.slice("approval-".length), instance: state.ui.selectedInstance!, type: "approval.open" });
+            const approvalId = focused?.kind === "box" ? this.#approvalIdFromBox(focused.id) : undefined;
+            if (state.ui.selectedPage === "audit" && state.ui.selectedInstance !== undefined && approvalId !== undefined) {
+                return await this.dispatch({ approvalId, instance: state.ui.selectedInstance, type: "approval.open" });
             }
             return false;
         }
@@ -511,6 +512,10 @@ export class CommandDispatcher {
             }
 
             const button = actionId?.startsWith("button:") ? actionId.slice("button:".length) : undefined;
+
+            if (state.ui.selectedPage === "audit" && state.ui.selectedInstance !== undefined && actionId?.startsWith("approval.open:")) {
+                return await this.dispatch({ approvalId: actionId.slice("approval.open:".length), instance: state.ui.selectedInstance, type: "approval.open" });
+            }
 
             if (button !== undefined && state.ui.selectedPage === "instances") {
                 return await this.#activateInstanceButton(boxId, button);
@@ -1039,6 +1044,12 @@ export class CommandDispatcher {
 
     #instanceNameFromBox(boxId: string | undefined): string | undefined {
         return boxId?.startsWith("instance:") ? boxId.slice("instance:".length) : undefined;
+    }
+
+    #approvalIdFromBox(boxId: string): string | undefined {
+        const box = selectMainScreenModel(this.#store.getState()).boxes.find((candidate) => candidate.id === boxId);
+        const action = box?.expandedLines.find((line) => line.id?.startsWith(`${boxId}:approval.open:`));
+        return action?.id?.slice(`${boxId}:approval.open:`.length);
     }
 
     #scrollMainColumn(delta: number): boolean {
