@@ -279,6 +279,16 @@ async function authorizeViaInteractions(authorizationUrl: URL, redirectUri: stri
         cookieHeader = mergeCookieHeader(cookieHeader, response);
 
         if (response.status === 200) {
+            const blocked = await fetch(currentUrl, {
+                method: "POST",
+                headers: {
+                    cookie: cookieHeader,
+                    "content-type": "application/x-www-form-urlencoded"
+                },
+                body: new URLSearchParams({ submit: "1" }).toString(),
+                redirect: "manual"
+            });
+            assert.equal(blocked.status, 409);
             await approve();
             method = "POST";
             continue;
