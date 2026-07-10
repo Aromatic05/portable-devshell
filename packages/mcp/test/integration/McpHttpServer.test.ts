@@ -172,8 +172,9 @@ test("oauth2 exposes protected resource metadata and accepts a valid bearer toke
             })
         });
         assert.equal(tokenResponse.status, 200);
-        const tokens = await tokenResponse.json() as { access_token: string };
+        const tokens = await tokenResponse.json() as { access_token: string; expires_in: number };
         assert.equal(typeof tokens.access_token, "string");
+        assert.equal(tokens.expires_in, 24 * 60 * 60);
 
         const response = await fetch(endpoint, {
             method: "POST",
