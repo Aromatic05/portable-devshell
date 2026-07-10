@@ -666,6 +666,10 @@ export class CommandDispatcher {
             const target = this.#draftTarget(field);
             const draft = this.#editorDraft(target.key, target.fallback);
             const current = readPath(draft, target.path);
+            if (this.#choiceValues(editor, field) !== undefined) {
+                this.#store.setEditor({ ...editor, editing: false, error: undefined });
+                return true;
+            }
             if (typeof current === "boolean") {
                 this.#store.setFormDraft(target.key, setPath(draft, target.path, !current));
                 return true;
@@ -701,7 +705,7 @@ export class CommandDispatcher {
     #moveEditorCursor(direction: "left" | "right"): boolean {
         const editor = this.#store.getState().interaction.editor;
         const boxId = this.#store.getState().ui.mainFocusId;
-        if (editor === undefined || !editor.editing || boxId === undefined) {
+        if (editor === undefined || boxId === undefined) {
             return false;
         }
         const lineId = this.#store.getState().interaction.selectedDetailLineIds[this.#expandedKey(boxId)];
@@ -709,11 +713,46 @@ export class CommandDispatcher {
         if (action?.startsWith("field:") !== true) {
             return false;
         }
-        const target = this.#draftTarget(action.slice("field:".length));
+        const field = action.slice("field:".length);
+        const target = this.#draftTarget(field);
+        const choices = this.#choiceValues(editor, field);
+        if (choices !== undefined) {
+            const draft = this.#editorDraft(target.key, target.fallback);
+            const current = readPath(draft, target.path);
+            const currentIndex = choices.findIndex((choice) => choice === current);
+            const nextIndex = direction === "left"
+                ? (currentIndex - 1 + choices.length) % choices.length
+                : (currentIndex + 1) % choices.length;
+            this.#store.setFormDraft(target.key, setPath(draft, target.path, choices[currentIndex === -1 ? 0 : nextIndex]!));
+            this.#store.setEditor({ ...editor, editing: false, error: undefined });
+            return true;
+        }
+        if (!editor.editing) {
+            return false;
+        }
         const text = inputText(readPath(this.#editorDraft(target.key, target.fallback), target.path));
         const cursor = Math.min(Math.max(editor.cursor ?? text.length, 0), text.length);
         this.#store.setEditor({ ...editor, cursor: direction === "left" ? Math.max(0, cursor - 1) : Math.min(text.length, cursor + 1) });
         return true;
+    }
+
+    #choiceValues(editor: TuiEditorState, field: string): readonly JsonValue[] | undefined {
+        if (editor.kind !== "config") {
+            return undefined;
+        }
+        switch (field) {
+            case "provider":
+                return ["local", "ssh", "docker", "podman"];
+            case "enabled":
+            case "mcp.enabled":
+                return [true, false];
+            case "security.mode":
+                return ["disabled", "workspace"];
+            case "approvalPolicy.mode":
+                return ["disabled", "allow", "ask", "deny"];
+            default:
+                return undefined;
+        }
     }
 
     async #validateEditor(): Promise<boolean> {
