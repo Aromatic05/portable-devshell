@@ -141,11 +141,11 @@ export class KeyDispatcher {
         if (press.key.return) {
             return [{ type: "focus.activate" }];
         }
-        if (mode === "wizard" && press.key.leftArrow) {
-            return [{ direction: "previous", type: "wizard.step" }];
+        if (press.key.leftArrow) {
+            return [{ direction: "left", type: "editor.cursorMove" }];
         }
-        if (mode === "wizard" && press.key.rightArrow) {
-            return [{ direction: "next", type: "wizard.step" }];
+        if (press.key.rightArrow) {
+            return [{ direction: "right", type: "editor.cursorMove" }];
         }
         if (press.key.backspace) {
             return [{ type: "editor.backspace" }];

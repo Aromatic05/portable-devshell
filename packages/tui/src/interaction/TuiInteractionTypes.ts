@@ -5,6 +5,7 @@ import type { FocusScope, PageId, SidebarCursor } from "../model/TuiUiTypes.js";
 export type TuiEditorKind = "config" | "connector" | "create";
 
 export interface TuiEditorState {
+    cursor?: number;
     editing: boolean;
     error?: string;
     key: string;
@@ -101,6 +102,7 @@ export type TuiUiIntent =
     | { type: "editor.close" }
     | { text: string; type: "editor.append" }
     | { type: "editor.backspace" }
+    | { direction: "left" | "right"; type: "editor.cursorMove" }
     | { type: "editor.save" }
     | { type: "editor.validate" }
     | { direction: "next" | "previous"; type: "wizard.step" }
