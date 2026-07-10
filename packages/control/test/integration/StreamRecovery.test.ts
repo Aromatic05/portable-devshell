@@ -110,9 +110,9 @@ async function verifyStreamRecovery(): Promise<void> {
 
 class RpcClient {
     readonly #reader = new FrameReader();
-    readonly #pending = new Map<string, { reject: (error: unknown) => void; resolve: (value: Record<string, any>) => void }>();
-    readonly #events: Array<Record<string, any>> = [];
-    readonly #eventWaiters: Array<{ reject: (error: unknown) => void; resolve: (event: Record<string, any>) => void }> = [];
+    readonly #pending = new Map<string, { reject: (error: unknown) => void; resolve: (value: Record<string, JsonValue>) => void }>();
+    readonly #events: Array<Record<string, JsonValue>> = [];
+    readonly #eventWaiters: Array<{ reject: (error: unknown) => void; resolve: (event: Record<string, JsonValue>) => void }> = [];
     readonly #socket;
     readonly #writer: FrameWriter;
     #counter = 0;
@@ -122,7 +122,7 @@ class RpcClient {
         this.#writer = new FrameWriter(this.#socket);
         this.#socket.on("data", (chunk: Uint8Array) => {
             for (const frame of this.#reader.push(chunk)) {
-                this.#accept(frame as Record<string, any>);
+                this.#accept(frame as Record<string, JsonValue>);
             }
         });
         this.#socket.once("close", () => {
@@ -142,13 +142,13 @@ class RpcClient {
         return client;
     }
 
-    async identifyClient(clientKind: "cli" | "tui"): Promise<Record<string, any>> {
+    async identifyClient(clientKind: "cli" | "tui"): Promise<Record<string, JsonValue>> {
         return await this.request("control.identifyClient", { kind: "control" }, { clientKind });
     }
 
-    async request(method: string, target: Record<string, unknown>, params?: JsonValue): Promise<Record<string, any>> {
+    async request(method: string, target: Record<string, unknown>, params?: JsonValue): Promise<Record<string, JsonValue>> {
         const id = `req-${++this.#counter}`;
-        const response = new Promise<Record<string, any>>((resolve, reject) => {
+        const response = new Promise<Record<string, JsonValue>>((resolve, reject) => {
             this.#pending.set(id, { reject, resolve });
         });
 
@@ -163,14 +163,14 @@ class RpcClient {
         return await response;
     }
 
-    async nextEvent(): Promise<Record<string, any>> {
+    async nextEvent(): Promise<Record<string, JsonValue>> {
         const existing = this.#events.shift();
 
         if (existing !== undefined) {
             return existing;
         }
 
-        return await new Promise<Record<string, any>>((resolve, reject) => {
+        return await new Promise<Record<string, JsonValue>>((resolve, reject) => {
             this.#eventWaiters.push({ reject, resolve });
         });
     }
@@ -179,7 +179,7 @@ class RpcClient {
         this.#socket.destroy();
     }
 
-    #accept(frame: Record<string, any>): void {
+    #accept(frame: Record<string, JsonValue>): void {
         if (frame.type === "response" && typeof frame.id === "string") {
             const pending = this.#pending.get(frame.id);
 
