@@ -4,7 +4,7 @@ import type { TuiAppStore } from "../store/TuiAppStore.js";
 import { asRecord, cloneRecord, editorDraft, inputValue, normalizeDraftForSave, readPath, removeInputValue, setPath } from "../store/page/EditorSupport.js";
 import { selectMainBoxFlowMetrics, selectMainBoxIds, selectMainScreenModel, selectMainScrollKey } from "../store/TuiSelectors.js";
 import { TuiFocusManager } from "./TuiFocusManager.js";
-import type { TuiUiIntent } from "./TuiInteractionTypes.js";
+import type { TuiEditorState, TuiUiIntent } from "./TuiInteractionTypes.js";
 
 export interface CommandDispatcherOptions {
     focusManager: TuiFocusManager;
@@ -754,7 +754,7 @@ export class CommandDispatcher {
         if (editor === undefined) {
             return false;
         }
-        if (this.#store.getState().ui.dirtyForms[editor.key] === true) {
+        if (this.#editorDraftKeys(editor).some((key) => this.#store.getState().ui.dirtyForms[key] === true)) {
             return await this.dispatch({
                 body: "Discard unsaved changes?",
                 confirmIntent: { type: "editor.close" },
@@ -770,7 +770,9 @@ export class CommandDispatcher {
     #closeEditor(): void {
         const editor = this.#store.getState().interaction.editor;
         if (editor !== undefined) {
-            this.#store.clearFormDraft(editor.key);
+            for (const key of this.#editorDraftKeys(editor)) {
+                this.#store.clearFormDraft(key);
+            }
         }
         this.#store.setEditor(undefined);
         this.#store.setFocusScope("mainBoxes");
@@ -816,6 +818,15 @@ export class CommandDispatcher {
 
     #editorDraft(key: string, fallback: Record<string, JsonValue>): Record<string, JsonValue> {
         return editorDraft(this.#store.getState(), key, fallback);
+    }
+
+    #editorDraftKeys(editor: TuiEditorState): string[] {
+        if (editor.kind !== "connector") {
+            return [editor.key];
+        }
+
+        const instance = this.#store.getState().ui.selectedInstance;
+        return instance === undefined ? [editor.key] : [editor.key, `config:${instance}`];
     }
 
     #instanceDraft(instanceName: string): Record<string, JsonValue> {

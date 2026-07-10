@@ -7,7 +7,6 @@ import { buildConnectorPageBoxes } from "./connector.js";
 import { buildHelpPageBoxes } from "./help.js";
 import { buildInstancesPageBoxes } from "./instances.js";
 import { buildLogsPageBoxes } from "./logs.js";
-import { buildCommandBoxes } from "./PageBoxSupport.js";
 
 export function buildBoxesForPage(state: TuiAppState, page: PageId, instanceName: string | undefined): BoxModel[] {
     const boxes = (() => {
@@ -27,5 +26,5 @@ export function buildBoxesForPage(state: TuiAppState, page: PageId, instanceName
         }
     })();
 
-    return [...boxes, ...buildCommandBoxes(state, page, instanceName)];
+    return boxes;
 }

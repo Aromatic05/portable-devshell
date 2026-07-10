@@ -22,6 +22,26 @@ export function buttonLine(id: string, label: string): { id: string; text: strin
     return { id: `button:${id}`, text: `[ ${label} ]`, tone: "accent" };
 }
 
+export function editorErrorLine(
+    state: TuiAppState,
+    kind: "config" | "connector",
+    boxId: string,
+    fieldNames: readonly string[]
+): Array<{ id: string; text: string; tone: "danger" }> {
+    const editor = state.interaction.editor;
+    const error = editor?.kind === kind ? editor.error : undefined;
+    if (error === undefined) {
+        return [];
+    }
+
+    const matchesField = fieldNames.some((field) => error.includes(field));
+    if (!matchesField && state.ui.mainFocusId !== boxId) {
+        return [];
+    }
+
+    return [{ id: `validation-error:${boxId}`, text: `error: ${error}`, tone: "danger" }];
+}
+
 export function displayValue(value: JsonValue | undefined): string {
     if (Array.isArray(value)) {
         return value.join(", ");

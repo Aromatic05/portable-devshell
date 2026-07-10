@@ -3,7 +3,7 @@ import type { JsonValue } from "@portable-devshell/shared";
 import type { BoxModel } from "../../component/ExpandableBox.js";
 import type { TuiAppState } from "../TuiReducers.js";
 import { compactSummary, makeBox } from "./PageBoxSupport.js";
-import { asRecord, buttonLine, editorDraft, fieldLine, readPath } from "./EditorSupport.js";
+import { asRecord, buttonLine, editorDraft, editorErrorLine, fieldLine, readPath } from "./EditorSupport.js";
 
 export function buildConnectorPageBoxes(state: TuiAppState, instanceName: string): BoxModel[] {
     const instanceDraft = editorDraft(state, `config:${instanceName}`, selectedInstanceDraft(state, instanceName));
@@ -19,6 +19,7 @@ export function buildConnectorPageBoxes(state: TuiAppState, instanceName: string
                 fieldLine("instance.mcp.enabled", "mcp.enabled", readPath(instanceDraft, "mcp.enabled")),
                 fieldLine("instance.mcp.path", "mcp.path", readPath(instanceDraft, "mcp.path")),
                 fieldLine("instance.mcp.allowTools", "allowTools", readPath(instanceDraft, "mcp.allowTools")),
+                ...editorErrorLine(state, "connector", "mcp-endpoint", ["mcp", "allowTools"]),
                 "runtime readiness: not available in current control API",
                 ...actions
             ],
@@ -32,6 +33,7 @@ export function buildConnectorPageBoxes(state: TuiAppState, instanceName: string
                 fieldLine("listenHost", "listenHost", readPath(mcpDraft, "listenHost")),
                 fieldLine("listenPort", "listenPort", readPath(mcpDraft, "listenPort")),
                 fieldLine("publicBaseUrl", "publicBaseUrl", readPath(mcpDraft, "publicBaseUrl")),
+                ...editorErrorLine(state, "connector", "public-base-url", ["listenHost", "listenPort", "publicBaseUrl"]),
                 ...actions
             ],
             id: "public-base-url",
@@ -42,6 +44,7 @@ export function buildConnectorPageBoxes(state: TuiAppState, instanceName: string
             detailLines: [
                 fieldLine("auth.mode", "auth.mode", readPath(mcpDraft, "auth.mode")),
                 ...(authNonePublic ? [{ id: "auth-warning", text: "auth.mode=none is not valid for a public endpoint", tone: "danger" as const }] : []),
+                ...editorErrorLine(state, "connector", "auth", ["auth"]),
                 ...actions
             ],
             id: "auth",

@@ -3,7 +3,7 @@ import type { JsonValue } from "@portable-devshell/shared";
 import type { BoxModel } from "../../component/ExpandableBox.js";
 import type { TuiAppState } from "../TuiReducers.js";
 import { buildSelectedInstancePageContext, compactSummary, makeBox, shortenPath } from "./PageBoxSupport.js";
-import { asRecord, buttonLine, editorDraft, fieldLine, readPath } from "./EditorSupport.js";
+import { asRecord, buttonLine, editorDraft, editorErrorLine, fieldLine, readPath } from "./EditorSupport.js";
 
 export function buildConfigPageBoxes(state: TuiAppState, instanceName: string): BoxModel[] {
     const { instance } = buildSelectedInstancePageContext(state, instanceName);
@@ -14,13 +14,13 @@ export function buildConfigPageBoxes(state: TuiAppState, instanceName: string): 
 
     return [
         makeBox(state, "config", instanceName, {
-            detailLines: [fieldLine("provider", "provider", readPath(draft, "provider")), fieldLine("enabled", "enabled", readPath(draft, "enabled")), ...actions],
+            detailLines: [fieldLine("provider", "provider", readPath(draft, "provider")), fieldLine("enabled", "enabled", readPath(draft, "enabled")), ...editorErrorLine(state, "config", "provider", ["provider", "enabled"]), ...actions],
             id: "provider",
             summaryLines: [compactSummary(["provider", stringValue(readPath(draft, "provider"), "unknown")], ["editable", "yes"])],
             title: `Provider${unsaved}`
         }),
         makeBox(state, "config", instanceName, {
-            detailLines: [fieldLine("workspace", "defaultWorkspace", readPath(draft, "workspace")), ...actions],
+            detailLines: [fieldLine("workspace", "defaultWorkspace", readPath(draft, "workspace")), ...editorErrorLine(state, "config", "workspace", ["workspace"]), ...actions],
             id: "workspace",
             summaryLines: [compactSummary(["workspace", shortenPath(stringValue(readPath(draft, "workspace"), "unavailable"))])],
             title: `Workspace${unsaved}`
@@ -30,6 +30,7 @@ export function buildConfigPageBoxes(state: TuiAppState, instanceName: string): 
                 fieldLine("mcp.enabled", "mcp.enabled", readPath(draft, "mcp.enabled")),
                 fieldLine("mcp.path", "mcp.path", readPath(draft, "mcp.path")),
                 fieldLine("mcp.allowTools", "allowTools", readPath(draft, "mcp.allowTools")),
+                ...editorErrorLine(state, "config", "mcp-config", ["mcp"]),
                 ...actions
             ],
             id: "mcp-config",
@@ -38,13 +39,13 @@ export function buildConfigPageBoxes(state: TuiAppState, instanceName: string): 
             title: `MCP Config${unsaved}`
         }),
         makeBox(state, "config", instanceName, {
-            detailLines: [fieldLine("security.mode", "security.mode", readPath(draft, "security.mode")), ...actions],
+            detailLines: [fieldLine("security.mode", "security.mode", readPath(draft, "security.mode")), ...editorErrorLine(state, "config", "security", ["security"]), ...actions],
             id: "security",
             summaryLines: [compactSummary(["mode", stringValue(readPath(draft, "security.mode"), "disabled")])],
             title: `Security${unsaved}`
         }),
         makeBox(state, "config", instanceName, {
-            detailLines: [fieldLine("approvalPolicy.mode", "approvalPolicy.mode", readPath(draft, "approvalPolicy.mode")), ...actions],
+            detailLines: [fieldLine("approvalPolicy.mode", "approvalPolicy.mode", readPath(draft, "approvalPolicy.mode")), ...editorErrorLine(state, "config", "approval-policy", ["approvalPolicy"]), ...actions],
             id: "approval-policy",
             summaryLines: [compactSummary(["mode", stringValue(readPath(draft, "approvalPolicy.mode"), "default")])],
             title: `Approval Policy${unsaved}`
@@ -53,6 +54,7 @@ export function buildConfigPageBoxes(state: TuiAppState, instanceName: string): 
             detailLines: [
                 fieldLine("logs.retentionDays", "retentionDays", readPath(draft, "logs.retentionDays")),
                 fieldLine("logs.eventBufferSize", "eventBufferSize", readPath(draft, "logs.eventBufferSize")),
+                ...editorErrorLine(state, "config", "logs-policy", ["logs", "retentionDays", "eventBufferSize"]),
                 ...actions
             ],
             id: "logs-policy",
