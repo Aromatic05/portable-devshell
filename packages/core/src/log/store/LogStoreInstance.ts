@@ -5,10 +5,15 @@ import { JsonlStore } from "./LogStoreJsonl.js";
 
 export interface InstanceLogEntry {
     at: string;
+    callId?: string;
     instanceName: InstanceName;
     message: string;
+    requestId?: string;
     seq: number;
+    sessionId?: string;
+    source?: "cli" | "mcp" | "tui";
     stream: "stderr" | "stdout";
+    toolName?: string;
 }
 
 export class InstanceLogStore {
@@ -22,11 +27,17 @@ export class InstanceLogStore {
         this.#store = store;
     }
 
-    async append(stream: InstanceLogEntry["stream"], message: string, at: string): Promise<InstanceLogEntry> {
+    async append(
+        stream: InstanceLogEntry["stream"],
+        message: string,
+        at: string,
+        context: Pick<InstanceLogEntry, "callId" | "requestId" | "sessionId" | "source" | "toolName"> = {}
+    ): Promise<InstanceLogEntry> {
         await this.#initialize();
 
         const entry: InstanceLogEntry = {
             at,
+            ...context,
             instanceName: this.#instanceName,
             message,
             seq: this.#lastSeq + 1,

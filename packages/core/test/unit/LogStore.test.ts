@@ -69,8 +69,19 @@ test("InstanceLogStore and ToolCallHistory persist per-instance records", async 
         const logStore = new InstanceLogStore(instanceName, new JsonlStore<InstanceLogEntry>(paths.logsFile));
         const history = new ToolCallHistory(instanceName, new JsonlStore(paths.toolCallsFile));
 
-        const logEntry = await logStore.append("stdout", "hello", "2026-07-07T00:00:00.000Z");
+        const logEntry = await logStore.append("stdout", "hello", "2026-07-07T00:00:00.000Z", {
+            callId: "call-1",
+            requestId: "request-1",
+            sessionId: "session-1",
+            source: "mcp",
+            toolName: "bash_run"
+        });
         assert.equal(logEntry.seq, 1);
+        assert.equal(logEntry.callId, "call-1");
+        assert.equal(logEntry.requestId, "request-1");
+        assert.equal(logEntry.sessionId, "session-1");
+        assert.equal(logEntry.source, "mcp");
+        assert.equal(logEntry.toolName, "bash_run");
         assert.deepEqual(await logStore.read({ fromSeq: 1 }), [logEntry]);
 
         await history.started("call-1", "bash_run", "{\"command\":\"pwd\"}", { source: "cli" }, "2026-07-07T00:00:01.000Z");

@@ -856,7 +856,7 @@ export class WorkerInstance {
         const at = new Date().toISOString();
 
         if (result.stdout.length > 0) {
-            await this.#logStore.append("stdout", result.stdout, at);
+            await this.#logStore.append("stdout", result.stdout, at, context);
             await this.#appendEvent(
                 "log.appended",
                 toEventData({
@@ -870,7 +870,7 @@ export class WorkerInstance {
         }
 
         if (result.stderr.length > 0) {
-            await this.#logStore.append("stderr", result.stderr, at);
+            await this.#logStore.append("stderr", result.stderr, at, context);
             await this.#appendEvent(
                 "log.appended",
                 toEventData({

@@ -397,13 +397,18 @@ function mapLogEntry(entry: TuiControlLogEntry): TuiLogEntry {
     return {
         at: entry.at,
         bytes: Buffer.byteLength(entry.message, "utf8"),
+        callId: entry.callId,
         instance: entry.instanceName,
         message: entry.message,
+        requestId: entry.requestId,
         preview: entry.message.slice(0, 160),
         receivedAt: entry.at,
         seq: entry.seq,
+        sessionId: entry.sessionId,
+        source: entry.source,
         stream: entry.stream,
-        tail: entry.message.slice(-160)
+        tail: entry.message.slice(-160),
+        toolName: entry.toolName
     };
 }
 

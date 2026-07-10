@@ -205,7 +205,14 @@ export function renderToolCallLine(record: ToolCallRecord): string {
 }
 
 export function renderLogLine(entry: TuiLogEntry): string {
-    return `${entry.stream} #${entry.seq} ${entry.message ?? entry.tail ?? entry.preview ?? ""}`;
+    const context = [
+        entry.toolName === undefined ? undefined : `tool=${entry.toolName}`,
+        entry.callId === undefined ? undefined : `call=${entry.callId}`,
+        entry.requestId === undefined ? undefined : `request=${entry.requestId}`,
+        entry.sessionId === undefined ? undefined : `session=${entry.sessionId}`,
+        entry.source === undefined ? undefined : `source=${entry.source}`
+    ].filter(Boolean).join(" ");
+    return `${entry.at ?? entry.receivedAt} ${entry.stream} #${entry.seq}${context.length === 0 ? "" : ` ${context}`} ${entry.message ?? entry.tail ?? entry.preview ?? ""}`;
 }
 
 export function applySearch(lines: string[], query: string): string[] {
