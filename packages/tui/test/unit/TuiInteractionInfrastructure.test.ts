@@ -389,6 +389,39 @@ test("OAuth panel approves pending registration requests", async () => {
     assert.deepEqual(harness.oauthApprovalDecisions(), [{ approvalId: "oauth-1", decision: "approve" }]);
 });
 
+test("OAuth detail keeps static rows selectable after expanding a completed approval", async () => {
+    const harness = createHarness();
+    harness.store.replaceOAuthApprovals([
+        {
+            approvalId: "oauth-completed",
+            clientId: "completed-client",
+            clientName: "Completed Client",
+            createdAt: "2026-07-10T00:00:00.000Z",
+            expiresAt: "2026-07-10T00:05:00.000Z",
+            kind: "authorization",
+            redirectUris: ["http://localhost:53242/callback"],
+            requestedResources: ["https://example.test/mcp"],
+            requestedScopes: ["mcp"],
+            status: "approved"
+        }
+    ]);
+
+    await harness.press("4");
+    await harness.press("", { tab: true });
+    await harness.press(" ");
+
+    const approval = selectMainScreenModel(harness.store.getState()).boxes[0]!;
+    assert.equal(harness.store.getState().interaction.focusScope, "boxDetail");
+    assert.equal(harness.store.getState().interaction.selectedDetailLineIds[approval.expandedKey], `${approval.id}:kind`);
+
+    await harness.press("", { downArrow: true });
+    assert.equal(harness.store.getState().interaction.focusScope, "boxDetail");
+    assert.equal(harness.store.getState().interaction.selectedDetailLineIds[approval.expandedKey], `${approval.id}:client`);
+
+    await harness.press("", { upArrow: true });
+    assert.equal(harness.store.getState().interaction.selectedDetailLineIds[approval.expandedKey], `${approval.id}:kind`);
+});
+
 test("Main viewport scrolling uses one page-instance offset instead of per-box offsets", async () => {
     const harness = createHarness();
 
