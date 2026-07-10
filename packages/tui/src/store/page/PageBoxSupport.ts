@@ -187,11 +187,15 @@ export function toolCallStatus(record: ToolCallRecord): ExpandableBoxStatus {
             return "ready";
         case "running":
             return "running";
+        case "queued":
         case "pendingApproval":
             return "pending";
+        case "cancelled":
+            return "warning";
         case "failed":
         case "denied":
         case "expired":
+        case "queueTimeout":
             return "failed";
     }
 }
