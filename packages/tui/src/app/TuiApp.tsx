@@ -37,6 +37,7 @@ export function TuiApp(props: TuiAppProps) {
     const actionMenu = selectActionMenuModel(state);
     const confirmDialog = selectConfirmDialogModel(state);
     const search = selectSearchModel(state);
+    const toolForm = state.interaction.toolForm;
     const footer = selectFooterModel(state);
     const boxInnerWidth = mainInnerWidth(props.runtime.columns);
     const viewportRows = Math.max(
@@ -57,6 +58,14 @@ export function TuiApp(props: TuiAppProps) {
                 <Box flexDirection="column" flexGrow={1}>
                     {errorLines !== undefined ? <ErrorBanner lines={errorLines} /> : undefined}
                     {search.open ? <Text color="cyan">{`/ ${search.query}`}</Text> : undefined}
+                    {toolForm?.open === true ? (
+                        <Box borderStyle="round" borderColor="cyan" flexDirection="column" paddingX={1}>
+                            <Text bold>{`Call Tool: ${toolForm.toolName}`}</Text>
+                            <Text dimColor>{`instance ${toolForm.instance}`}</Text>
+                            <Text color="cyan">{toolForm.input}</Text>
+                            <Text dimColor>Enter submit, Esc cancel</Text>
+                        </Box>
+                    ) : undefined}
                     <ScreenRouter boxInnerWidth={boxInnerWidth} state={state} viewportRows={viewportRows} />
                     <ActionMenu items={actionMenu.items} open={actionMenu.open} title={actionMenu.title} />
                     <ConfirmDialog

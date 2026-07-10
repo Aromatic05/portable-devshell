@@ -30,6 +30,7 @@ export interface MainScreenModel {
     activePage: ActivePage;
     boxes: BoxModel[];
     emptyState?: string;
+    errorLines?: string[];
     pageTitle: string;
     statusLine?: string;
 }
@@ -82,12 +83,15 @@ export function selectSidebarModel(state: TuiAppState): SidebarModel {
 export function selectMainScreenModel(state: TuiAppState): MainScreenModel {
     const activePage = selectActivePage(state);
     const statusLine = state.interaction.screenStatusByPage[activePage.page];
+    const panelError = state.panelErrors[`${activePage.page}:${activePage.instance ?? "-"}`];
+    const errorLines = panelError === undefined ? undefined : [`${panelError.code}: ${panelError.message}`];
 
     if (activePage.page !== "help" && activePage.instance === undefined) {
         return {
             activePage,
             boxes: [],
             emptyState: "No instance selected. Select one from the lower sidebar list.",
+            errorLines,
             pageTitle: pageTitle(activePage.page),
             statusLine
         };
@@ -96,6 +100,7 @@ export function selectMainScreenModel(state: TuiAppState): MainScreenModel {
     return {
         activePage,
         boxes: buildBoxesForPage(state, activePage.page, activePage.instance),
+        errorLines,
         pageTitle: pageTitle(activePage.page),
         statusLine
     };
@@ -152,6 +157,8 @@ export function selectFooterShortcuts(state: TuiAppState): string[] {
             return ["enter", "↑↓", "/", "esc"];
         case "search":
             return ["type", "bs", "enter", "esc"];
+        case "toolForm":
+            return ["type JSON", "bs", "enter", "esc"];
         case "actionMenu":
             return ["↑↓", "enter", "esc"];
         case "confirm":

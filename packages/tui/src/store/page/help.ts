@@ -6,7 +6,7 @@ export function buildHelpLines(state: TuiAppState): string[] {
     return [
         `Current page ${state.ui.selectedPage}`,
         `Selected instance ${state.ui.selectedInstance ?? "none"}`,
-        "Read-only cockpit. No start/stop/approve/deny/call tool/attach shell/create/save actions are available.",
+        "Read-only until an explicit instance action is chosen from the action menu.",
         "Tab cycles sidebar and main boxes.",
         "Up/Down moves sidebar focus without selecting.",
         "Enter applies the focused sidebar item.",
@@ -32,14 +32,15 @@ export function buildHelpPageBoxes(state: TuiAppState): BoxModel[] {
         }),
         makeBox(state, "help", undefined, {
             detailLines: [
-                "No start/stop worker actions.",
-                "No approve/deny actions.",
-                "No call tool, attach shell, create, or save actions."
+                "Use a to open explicit actions for the selected instance.",
+                "Stop Worker always opens a confirmation dialog with Cancel focused.",
+                "Approval detail offers Approve, Deny, and Cancel; Enter never approves a list item.",
+                "Attach Shell is unavailable. Create and save actions remain unavailable."
             ],
             id: "help-readonly",
             status: "disabled",
-            summaryLines: ["read-only boundaries", "state-changing actions disabled"],
-            title: "Read-only Boundaries"
+            summaryLines: ["explicit action boundaries", "no automatic worker start"],
+            title: "Action Boundaries"
         }),
         makeBox(state, "help", undefined, {
             detailLines: buildHelpLines(state),

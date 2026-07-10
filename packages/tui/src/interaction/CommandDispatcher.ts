@@ -6,27 +6,36 @@ import type { TuiUiIntent } from "./TuiInteractionTypes.js";
 
 export interface CommandDispatcherOptions {
     focusManager: TuiFocusManager;
+    onApprovalDecision(instance: string, approvalId: string, decision: "approve" | "deny"): Promise<void>;
+    onInstanceAction(action: "refresh" | "start" | "stop", instance: string): Promise<void>;
     mainViewportRows(): number;
     onLogsReload(): Promise<void>;
     onQuit(): Promise<void>;
     onRedraw(): void;
+    onToolCall(instance: string, toolName: string, input: string): Promise<boolean>;
     store: TuiAppStore;
 }
 
 export class CommandDispatcher {
     readonly #focusManager: TuiFocusManager;
+    readonly #onApprovalDecision: CommandDispatcherOptions["onApprovalDecision"];
+    readonly #onInstanceAction: CommandDispatcherOptions["onInstanceAction"];
     readonly #mainViewportRows: () => number;
     readonly #onLogsReload: () => Promise<void>;
     readonly #onQuit: () => Promise<void>;
     readonly #onRedraw: () => void;
+    readonly #onToolCall: CommandDispatcherOptions["onToolCall"];
     readonly #store: TuiAppStore;
 
     constructor(options: CommandDispatcherOptions) {
         this.#focusManager = options.focusManager;
+        this.#onApprovalDecision = options.onApprovalDecision;
+        this.#onInstanceAction = options.onInstanceAction;
         this.#mainViewportRows = options.mainViewportRows;
         this.#onLogsReload = options.onLogsReload;
         this.#onQuit = options.onQuit;
         this.#onRedraw = options.onRedraw;
+        this.#onToolCall = options.onToolCall;
         this.#store = options.store;
     }
 
@@ -82,20 +91,7 @@ export class CommandDispatcher {
                 this.#focusManager.restore();
                 return true;
             case "actionMenu.open":
-                this.#focusManager.pushRestore("actionMenu");
-                this.#store.setActionMenu("Read-only", [
-                    {
-                        id: "readonly.placeholder",
-                        intent: {
-                            page: this.#store.getState().ui.selectedPage,
-                            status: "Read-only action menu placeholder.",
-                            type: "screen.setStatus"
-                        },
-                        label: "Read-only placeholder"
-                    }
-                ]);
-                this.#store.setFocusScope("actionMenu");
-                return true;
+                return this.#openInstanceActionMenu();
             case "actionMenu.move": {
                 const items = this.#store.getState().interaction.actionMenu.items;
                 if (items.length === 0) {
@@ -227,6 +223,63 @@ export class CommandDispatcher {
             case "screen.clearStatus":
                 this.#store.setScreenStatus(this.#store.getState().ui.selectedPage, undefined);
                 return true;
+            case "instance.start":
+                await this.#onInstanceAction("start", intent.instance);
+                return true;
+            case "instance.stop":
+                await this.#onInstanceAction("stop", intent.instance);
+                return true;
+            case "instance.refresh":
+                await this.#onInstanceAction("refresh", intent.instance);
+                return true;
+            case "instance.openLogs":
+                return await this.dispatch({ page: "logs", type: "page.select" });
+            case "instance.openAudit":
+                return await this.dispatch({ page: "audit", type: "page.select" });
+            case "instance.attachShell":
+                this.#store.setScreenStatus(this.#store.getState().ui.selectedPage, "Attach Shell is not implemented.");
+                return true;
+            case "approval.open":
+                this.#openApprovalActionMenu(intent.instance, intent.approvalId);
+                return true;
+            case "approval.decide":
+                await this.#onApprovalDecision(intent.instance, intent.approvalId, intent.decision);
+                return true;
+            case "toolForm.open":
+                this.#focusManager.pushRestore("toolForm");
+                this.#store.setToolForm(intent.instance, intent.toolName, '{"command":""}');
+                return true;
+            case "toolForm.append": {
+                const form = this.#store.getState().interaction.toolForm;
+                if (form === undefined) {
+                    return false;
+                }
+                this.#store.setToolForm(form.instance, form.toolName, `${form.input}${intent.text}`);
+                return true;
+            }
+            case "toolForm.backspace": {
+                const form = this.#store.getState().interaction.toolForm;
+                if (form === undefined) {
+                    return false;
+                }
+                this.#store.setToolForm(form.instance, form.toolName, form.input.slice(0, -1));
+                return true;
+            }
+            case "toolForm.submit": {
+                const form = this.#store.getState().interaction.toolForm;
+                if (form === undefined) {
+                    return false;
+                }
+                if (await this.#onToolCall(form.instance, form.toolName, form.input)) {
+                    this.#store.clearToolForm();
+                    this.#focusManager.restore();
+                }
+                return true;
+            }
+            case "toolForm.cancel":
+                this.#store.clearToolForm();
+                this.#focusManager.restore();
+                return true;
         }
     }
 
@@ -249,6 +302,11 @@ export class CommandDispatcher {
         }
         if (scope === "search") {
             this.#store.setSearchOpen(false);
+            this.#focusManager.restore();
+            return true;
+        }
+        if (scope === "toolForm") {
+            this.#store.clearToolForm();
             this.#focusManager.restore();
             return true;
         }
@@ -344,10 +402,57 @@ export class CommandDispatcher {
             return true;
         }
         if (scope === "boxDetail") {
-            this.#store.setScreenStatus(this.#store.getState().ui.selectedPage, "Read-only detail.");
+            const boxId = this.#store.getState().ui.mainFocusId;
+            const instance = this.#store.getState().ui.selectedInstance;
+            const approvalId = boxId?.startsWith("approval-") ? boxId.slice("approval-".length) : undefined;
+            if (instance !== undefined && approvalId !== undefined) {
+                return await this.dispatch({ approvalId, instance, type: "approval.open" });
+            }
+            this.#store.setScreenStatus(this.#store.getState().ui.selectedPage, "Detail has no action.");
             return true;
         }
         return true;
+    }
+
+    #openInstanceActionMenu(): boolean {
+        const instance = this.#store.getState().ui.selectedInstance;
+        if (instance === undefined) {
+            this.#store.setScreenStatus(this.#store.getState().ui.selectedPage, "Select an instance before opening actions.");
+            return false;
+        }
+
+        this.#focusManager.pushRestore("actionMenu");
+        this.#store.setActionMenu(`Instance: ${instance}`, [
+            { id: "instance.start", intent: { instance, type: "instance.start" }, label: "Start Worker" },
+            {
+                id: "instance.stop",
+                intent: {
+                    body: `Stop Worker for ${instance}?`,
+                    confirmIntent: { instance, type: "instance.stop" },
+                    confirmLabel: "Stop Worker",
+                    title: "Confirm Stop Worker",
+                    type: "overlay.openConfirm"
+                },
+                label: "Stop Worker"
+            },
+            { id: "instance.refresh", intent: { instance, type: "instance.refresh" }, label: "Refresh Status" },
+            { id: "instance.logs", intent: { type: "instance.openLogs" }, label: "Open Logs" },
+            { id: "instance.audit", intent: { type: "instance.openAudit" }, label: "Open Audit" },
+            { id: "instance.callTool", intent: { instance, toolName: "bash_run", type: "toolForm.open" }, label: "Call Tool" },
+            { id: "instance.attachShell", intent: { type: "instance.attachShell" }, label: "Attach Shell (unavailable)" }
+        ]);
+        this.#store.setFocusScope("actionMenu");
+        return true;
+    }
+
+    #openApprovalActionMenu(instance: string, approvalId: string): void {
+        this.#focusManager.pushRestore("actionMenu");
+        this.#store.setActionMenu(`Approval: ${approvalId}`, [
+            { id: "approval.approve", intent: { approvalId, decision: "approve", instance, type: "approval.decide" }, label: "Approve" },
+            { id: "approval.deny", intent: { approvalId, decision: "deny", instance, type: "approval.decide" }, label: "Deny" },
+            { id: "approval.cancel", intent: { type: "overlay.closeActionMenu" }, label: "Cancel" }
+        ]);
+        this.#store.setFocusScope("actionMenu");
     }
 
     #syncMainFocus(): void {

@@ -2,7 +2,7 @@ export type PageId = "instances" | "config" | "connector" | "audit" | "logs" | "
 
 export type SidebarFocus = "pages" | "instances";
 
-export type FocusScope = "sidebarPages" | "sidebarInstances" | "mainBoxes" | "boxDetail" | "search" | "actionMenu" | "confirm";
+export type FocusScope = "sidebarPages" | "sidebarInstances" | "mainBoxes" | "boxDetail" | "search" | "toolForm" | "actionMenu" | "confirm";
 
 export type SidebarCursor = { id: PageId; kind: "page" } | { id: string; kind: "instance" };
 

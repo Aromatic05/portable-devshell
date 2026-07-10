@@ -2,6 +2,7 @@ import React from "react";
 import { Box, Text } from "ink";
 
 import { renderExpandableBoxLines } from "../component/ExpandableBox.js";
+import { ErrorBanner } from "../component/ErrorBanner.js";
 import { FocusGraph, type FocusNode } from "../interaction/FocusGraph.js";
 import type { FocusItem } from "../interaction/TuiInteractionTypes.js";
 import type { PageId } from "../model/TuiUiTypes.js";
@@ -28,6 +29,7 @@ export function ScreenRouter(props: ScreenRouterProps) {
     return (
         <Box flexDirection="column">
             <Text bold>{model.pageTitle}</Text>
+            {model.errorLines === undefined ? undefined : <ErrorBanner lines={model.errorLines} />}
             {model.emptyState !== undefined ? <Text color="yellow">{model.emptyState}</Text> : undefined}
             {model.emptyState === undefined
                 ? visibleLines.map((line) => (
@@ -60,6 +62,8 @@ export function buildFocusGraphForState(state: TuiAppState): FocusGraph {
             ]);
         case "search":
             return new FocusGraph([{ item: { id: "search.query", kind: "field" } }]);
+        case "toolForm":
+            return new FocusGraph([{ item: { id: "toolForm.input", kind: "field" } }]);
         case "sidebarPages":
         case "sidebarInstances":
             return buildLinearGraph([

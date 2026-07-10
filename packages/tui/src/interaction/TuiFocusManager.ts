@@ -51,6 +51,9 @@ export class TuiFocusManager {
         if (scope === "search") {
             return { id: "search.query", kind: "field" };
         }
+        if (scope === "toolForm") {
+            return { id: "toolForm.input", kind: "field" };
+        }
         return undefined;
     }
 
@@ -156,7 +159,7 @@ export class TuiFocusManager {
                 this.#store.setConfirmFocus(item.id === "confirm" ? "confirm" : "cancel");
                 return;
             case "field":
-                this.#store.setFocusScope("search");
+                this.#store.setFocusScope(this.currentMode() === "toolForm" ? "toolForm" : "search");
                 return;
         }
     }

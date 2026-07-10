@@ -18,6 +18,7 @@ export function createInitialTuiAppState(): TuiAppState {
         lastSeqByInstance: {},
         lastStatusChangeAtByInstance: {},
         logsByInstance: {},
+        panelErrors: {},
         rawEvents: [],
         relayByCommand: {},
         snapshotsByInstance: {},

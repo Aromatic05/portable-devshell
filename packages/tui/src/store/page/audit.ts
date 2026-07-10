@@ -1,11 +1,11 @@
 import type { BoxModel } from "../../component/ExpandableBox.js";
 import type { TuiAppState } from "../TuiReducers.js";
-import { buildSelectedInstancePageContext, compactSummary, makeBox, toolCallStatus } from "./PageBoxSupport.js";
+import { buildSelectedInstancePageContext, compactSummary, formatField, makeBox, renderApprovalLine, toolCallStatus } from "./PageBoxSupport.js";
 
 export function buildAuditPageBoxes(state: TuiAppState, instanceName: string): BoxModel[] {
-    const { toolCalls } = buildSelectedInstancePageContext(state, instanceName);
+    const { approvals, toolCalls } = buildSelectedInstancePageContext(state, instanceName);
 
-    return (toolCalls.length === 0 ? [undefined] : toolCalls).map((record, index) =>
+    const auditBoxes = (toolCalls.length === 0 ? [undefined] : toolCalls).map((record, index) =>
         makeBox(state, "audit", instanceName, {
             detailLines:
                 record === undefined
@@ -29,4 +29,24 @@ export function buildAuditPageBoxes(state: TuiAppState, instanceName: string): B
             title: record === undefined ? "Audit" : `Audit ${index + 1}`
         })
     );
+
+    return [
+        ...auditBoxes,
+        ...approvals.map((approval) =>
+            makeBox(state, "audit", instanceName, {
+                detailLines: [
+                    formatField("Approval", approval.approvalId),
+                    formatField("Tool", approval.toolName),
+                    formatField("Risk", approval.riskLevel),
+                    formatField("Reason", approval.reason),
+                    formatField("Input", approval.inputSummary),
+                    "Enter again for Approve, Deny, or Cancel."
+                ],
+                id: `approval-${approval.approvalId}`,
+                status: "pending",
+                summaryLines: [renderApprovalLine(approval), "Enter opens detail; it never approves directly."],
+                title: "Pending Approval"
+            })
+        )
+    ];
 }

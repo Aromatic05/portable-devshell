@@ -55,6 +55,44 @@ export function makeBox(
     };
 }
 
+export function buildCommandBoxes(state: TuiAppState, page: PageId, instance: string | undefined): BoxModel[] {
+    if (instance === undefined) {
+        return [];
+    }
+
+    const command = state.commandRecords.find(
+        (record) => record.targetInstance === instance && record.title === `Start Worker: ${instance}`
+    );
+
+    if (command === undefined) {
+        return [];
+    }
+
+    const relay = state.relayByCommand[command.commandId];
+    const output = relay?.output.flatMap((chunk) => chunk.split(/\r?\n/)).filter((line) => line.length > 0) ?? [];
+    const status = command.status === "succeeded" ? "ready" : command.status === "failed" ? "failed" : "running";
+
+    return [
+        makeBox(state, page, instance, {
+            detailLines: [
+                formatField("Workspace", relay?.workspace ?? "unavailable"),
+                formatField("Provider", relay?.provider ?? "unknown"),
+                formatField("Status", command.status),
+                ...(command.error === undefined ? [] : [formatField("Error", `${command.error.code}: ${command.error.message}`)]),
+                "Relay output:",
+                ...(output.length === 0 ? ["No relay output received."] : output)
+            ],
+            id: `start-${command.commandId}`,
+            status,
+            summaryLines: [
+                compactSummary(["status", command.status], ["workspace", shortenPath(relay?.workspace ?? "unavailable")]),
+                command.error === undefined ? "relay=control RPC" : `lastError=${command.error.code}`
+            ],
+            title: `Start Worker: ${instance}`
+        })
+    ];
+}
+
 export function formatField(label: string, value: string): string {
     return `${label.padEnd(14, " ")} ${value}`;
 }

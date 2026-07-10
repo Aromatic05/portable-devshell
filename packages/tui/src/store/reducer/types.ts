@@ -81,6 +81,7 @@ export interface TuiAppState {
     lastStatusChangeAtByInstance: Record<string, string>;
     logsByInstance: Record<string, TuiLogEntry[]>;
     rawEvents: TuiRawEventRecord[];
+    panelErrors: Record<string, ControlError>;
     relayByCommand: Record<string, TuiRelayRecord>;
     snapshotsByInstance: Record<string, InstanceSnapshot>;
     toolCallsByInstance: Record<string, ToolCallRecord[]>;
@@ -90,6 +91,7 @@ export interface TuiAppState {
 export type TuiAppAction =
     | { approvals: ApprovalRequest[]; instance: string; type: "approval.replace" }
     | { command: TuiCommandRecord; type: "command.upsert" }
+    | { error?: ControlError; key: string; type: "panelError.set" }
     | { commandId: string; chunk: string; type: "relay.appendOutput" }
     | { commandId: string; provider?: string; requestId?: string; workspace?: string; type: "relay.setMetadata" }
     | { configView?: Record<string, JsonValue>; type: "control.setConfigView" }
@@ -108,6 +110,8 @@ export type TuiAppAction =
     | { sidebarFocus: SidebarFocus; type: "sidebar.focus.set" }
     | { type: "search.setOpen"; value: boolean }
     | { page: PageId; query: string; type: "search.setQuery" }
+    | { input: string; instance: string; toolName: string; type: "toolForm.set" }
+    | { type: "toolForm.clear" }
     | { page: PageId; status?: string; type: "screen.setStatus" }
     | { instance?: string; type: "ui.selectInstance" }
     | { page: PageId; type: "ui.selectPage" }

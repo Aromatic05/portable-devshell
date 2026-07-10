@@ -36,6 +36,13 @@ export interface TuiSearchState {
     open: boolean;
 }
 
+export interface TuiToolFormState {
+    input: string;
+    instance: string;
+    open: boolean;
+    toolName: string;
+}
+
 export interface TuiInteractionState {
     actionMenu: TuiActionMenuState;
     confirmDialog: TuiConfirmDialogState;
@@ -51,6 +58,7 @@ export interface TuiInteractionState {
     selectedActionId?: string;
     selectedConfirmButton: "cancel" | "confirm";
     search: TuiSearchState;
+    toolForm?: TuiToolFormState;
     sidebarCursor?: SidebarCursor;
 }
 
@@ -67,6 +75,11 @@ export type TuiUiIntent =
     | { type: "search.submit" }
     | { text: string; type: "search.append" }
     | { type: "search.backspace" }
+    | { instance: string; toolName: string; type: "toolForm.open" }
+    | { text: string; type: "toolForm.append" }
+    | { type: "toolForm.backspace" }
+    | { type: "toolForm.submit" }
+    | { type: "toolForm.cancel" }
     | { type: "actionMenu.open" }
     | { direction: "up" | "down"; type: "actionMenu.move" }
     | { type: "actionMenu.submit" }
@@ -89,7 +102,15 @@ export type TuiUiIntent =
     | { id?: string; type: "mainFocus.set" }
     | { button: "cancel" | "confirm"; type: "confirm.focus" }
     | { page: PageId; status: string; type: "screen.setStatus" }
-    | { type: "screen.clearStatus" };
+    | { type: "screen.clearStatus" }
+    | { instance: string; type: "instance.start" }
+    | { instance: string; type: "instance.stop" }
+    | { instance: string; type: "instance.refresh" }
+    | { type: "instance.openLogs" }
+    | { type: "instance.openAudit" }
+    | { type: "instance.attachShell" }
+    | { approvalId: string; instance: string; type: "approval.open" }
+    | { approvalId: string; decision: "approve" | "deny"; instance: string; type: "approval.decide" };
 
 export function focusItemKey(item: FocusItem): string {
     return `${item.kind}:${item.id}`;

@@ -1,4 +1,4 @@
-import type { ApprovalRequest, ControlEventEnvelope, InstanceSnapshot, JsonValue, ToolCallRecord } from "@portable-devshell/shared";
+import { type ApprovalRequest, type ControlError, type ControlEventEnvelope, type InstanceSnapshot, type JsonValue, type ToolCallRecord } from "@portable-devshell/shared";
 
 import { type TuiActionMenuItem, type TuiUiIntent } from "../interaction/TuiInteractionTypes.js";
 import type { FocusScope, PageId, SidebarCursor, SidebarFocus } from "../model/TuiUiTypes.js";
@@ -182,6 +182,29 @@ export class TuiAppStore {
             page,
             status,
             type: "screen.setStatus"
+        });
+    }
+
+    setPanelError(key: string, error?: ControlError): void {
+        this.dispatch({
+            error,
+            key,
+            type: "panelError.set"
+        });
+    }
+
+    setToolForm(instance: string, toolName: string, input: string): void {
+        this.dispatch({
+            input,
+            instance,
+            toolName,
+            type: "toolForm.set"
+        });
+    }
+
+    clearToolForm(): void {
+        this.dispatch({
+            type: "toolForm.clear"
         });
     }
 

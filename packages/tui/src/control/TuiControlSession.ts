@@ -61,6 +61,10 @@ export class TuiControlSession {
         }
     }
 
+    async refreshInstance(instance: string): Promise<void> {
+        await this.#reloadRuntimeInstance(instance);
+    }
+
     async refresh(): Promise<void> {
         this.#store.setConnectionState("connecting");
 

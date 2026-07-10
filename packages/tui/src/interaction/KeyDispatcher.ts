@@ -35,6 +35,8 @@ export class KeyDispatcher {
                 return this.#forConfirm(press);
             case "search":
                 return this.#forSearch(press);
+            case "toolForm":
+                return this.#forToolForm(press);
             case "sidebarPages":
             case "sidebarInstances":
             case "mainBoxes":
@@ -97,6 +99,19 @@ export class KeyDispatcher {
         }
         if (press.input.length === 1 && !press.key.ctrl) {
             return [{ text: press.input, type: "search.append" }];
+        }
+        return [];
+    }
+
+    #forToolForm(press: TuiKeyPress): TuiUiIntent[] {
+        if (press.key.backspace) {
+            return [{ type: "toolForm.backspace" }];
+        }
+        if (press.key.return) {
+            return [{ type: "toolForm.submit" }];
+        }
+        if (press.input.length === 1 && !press.key.ctrl) {
+            return [{ text: press.input, type: "toolForm.append" }];
         }
         return [];
     }

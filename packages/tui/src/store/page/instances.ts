@@ -1,39 +1,40 @@
 import type { BoxModel } from "../../component/ExpandableBox.js";
 import type { TuiAppState } from "../TuiReducers.js";
-import { compactSummary, formatField, makeBox, runtimeStatus } from "./PageBoxSupport.js";
+import { compactSummary, formatField, makeBox, renderApprovalLine, runtimeStatus } from "./PageBoxSupport.js";
 
-export function buildInstancesPageBoxes(state: TuiAppState): BoxModel[] {
-    if (state.instances.length === 0) {
+export function buildInstancesPageBoxes(state: TuiAppState, instanceName: string): BoxModel[] {
+    const entry = state.instances.find((candidate) => candidate.name === instanceName);
+
+    if (entry === undefined) {
         return [
-            makeBox(state, "instances", "instances", {
-                detailLines: ["No instances loaded from control.listInstances."],
+            makeBox(state, "instances", instanceName, {
+                detailLines: [`Instance ${instanceName} is no longer available from control.listInstances.`],
                 id: "instances-empty",
                 status: "warning",
-                summaryLines: ["instances=0"],
-                title: "Instances"
+                summaryLines: ["instance unavailable"],
+                title: "Selected Instance"
             })
         ];
     }
 
-    return state.instances.map((entry) => {
-        const snapshot = state.snapshotsByInstance[entry.name];
-        const logs = state.logsByInstance[entry.name] ?? [];
-        const approvals = (state.approvalsByInstance[entry.name] ?? []).filter((approval) => approval.status === "pending");
-        const status = entry.enabled ? runtimeStatus(snapshot) : "disabled";
-        const summaryLines = [
-            compactSummary(
-                ["provider", entry.provider ?? "unknown"],
-                ["daemon", snapshot?.daemonState ?? "unknown"],
-                ["ready", snapshot?.ready === true ? "yes" : "no"],
-                ["seq", String(state.lastSeqByInstance[entry.name] ?? snapshot?.lastSeq ?? 0)]
-            )
-        ];
+    const snapshot = state.snapshotsByInstance[entry.name];
+    const logs = state.logsByInstance[entry.name] ?? [];
+    const approvals = (state.approvalsByInstance[entry.name] ?? []).filter((approval) => approval.status === "pending");
+    const summaryLines = [
+        compactSummary(
+            ["provider", entry.provider ?? "unknown"],
+            ["daemon", snapshot?.daemonState ?? "unknown"],
+            ["ready", snapshot?.ready === true ? "yes" : "no"],
+            ["seq", String(state.lastSeqByInstance[entry.name] ?? snapshot?.lastSeq ?? 0)]
+        )
+    ];
 
-        if (snapshot?.lastErrorCode !== undefined) {
-            summaryLines.push(`lastError=${snapshot.lastErrorCode}`);
-        }
+    if (snapshot?.lastErrorCode !== undefined) {
+        summaryLines.push(`lastError=${snapshot.lastErrorCode}`);
+    }
 
-        return makeBox(state, "instances", entry.name, {
+    return [
+        makeBox(state, "instances", entry.name, {
             detailLines: [
                 formatField("Name", entry.name),
                 formatField("Enabled", entry.enabled ? "yes" : "no"),
@@ -48,10 +49,37 @@ export function buildInstancesPageBoxes(state: TuiAppState): BoxModel[] {
                 formatField("Logs", String(logs.length)),
                 formatField("Last Seq", String(state.lastSeqByInstance[entry.name] ?? snapshot?.lastSeq ?? 0))
             ],
-            id: `instance-${entry.name}`,
-            status,
+            id: "instance-status",
+            status: entry.enabled ? runtimeStatus(snapshot) : "disabled",
             summaryLines,
             title: entry.name
-        });
-    });
+        }),
+        ...(approvals.length === 0
+            ? [
+                  makeBox(state, "instances", entry.name, {
+                      detailLines: ["No pending approvals from instance.listApprovals."],
+                      id: "approvals-empty",
+                      status: "normal",
+                      summaryLines: ["pending=0"],
+                      title: "Approvals"
+                  })
+              ]
+            : approvals.map((approval) =>
+                  makeBox(state, "instances", entry.name, {
+                      detailLines: [
+                          formatField("Approval", approval.approvalId),
+                          formatField("Tool", approval.toolName),
+                          formatField("Risk", approval.riskLevel),
+                          formatField("Reason", approval.reason),
+                          formatField("Input", approval.inputSummary),
+                          formatField("Expires", approval.expiresAt),
+                          "Enter again for Approve, Deny, or Cancel."
+                      ],
+                      id: `approval-${approval.approvalId}`,
+                      status: "pending",
+                      summaryLines: [renderApprovalLine(approval), "Enter opens detail; it never approves directly."],
+                      title: "Approval"
+                  })
+              ))
+    ];
 }

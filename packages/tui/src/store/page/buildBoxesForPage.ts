@@ -7,20 +7,25 @@ import { buildConnectorPageBoxes } from "./connector.js";
 import { buildHelpPageBoxes } from "./help.js";
 import { buildInstancesPageBoxes } from "./instances.js";
 import { buildLogsPageBoxes } from "./logs.js";
+import { buildCommandBoxes } from "./PageBoxSupport.js";
 
 export function buildBoxesForPage(state: TuiAppState, page: PageId, instanceName: string | undefined): BoxModel[] {
-    switch (page) {
-        case "help":
-            return buildHelpPageBoxes(state);
-        case "instances":
-            return buildInstancesPageBoxes(state);
-        case "config":
-            return instanceName === undefined ? [] : buildConfigPageBoxes(state, instanceName);
-        case "connector":
-            return instanceName === undefined ? [] : buildConnectorPageBoxes(state, instanceName);
-        case "audit":
-            return instanceName === undefined ? [] : buildAuditPageBoxes(state, instanceName);
-        case "logs":
-            return instanceName === undefined ? [] : buildLogsPageBoxes(state, instanceName);
-    }
+    const boxes = (() => {
+        switch (page) {
+            case "help":
+                return buildHelpPageBoxes(state);
+            case "instances":
+                return instanceName === undefined ? [] : buildInstancesPageBoxes(state, instanceName);
+            case "config":
+                return instanceName === undefined ? [] : buildConfigPageBoxes(state, instanceName);
+            case "connector":
+                return instanceName === undefined ? [] : buildConnectorPageBoxes(state, instanceName);
+            case "audit":
+                return instanceName === undefined ? [] : buildAuditPageBoxes(state, instanceName);
+            case "logs":
+                return instanceName === undefined ? [] : buildLogsPageBoxes(state, instanceName);
+        }
+    })();
+
+    return [...boxes, ...buildCommandBoxes(state, page, instanceName)];
 }

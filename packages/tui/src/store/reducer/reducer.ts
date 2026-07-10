@@ -19,6 +19,20 @@ export function tuiAppReducer(state: TuiAppState, action: TuiAppAction): TuiAppS
                 commandRecords: [...without, action.command].sort((left, right) => right.startedAt.localeCompare(left.startedAt))
             };
         }
+        case "panelError.set": {
+            const panelErrors = { ...state.panelErrors };
+
+            if (action.error === undefined) {
+                delete panelErrors[action.key];
+            } else {
+                panelErrors[action.key] = action.error;
+            }
+
+            return {
+                ...state,
+                panelErrors
+            };
+        }
         case "relay.appendOutput": {
             const current = state.relayByCommand[action.commandId] ?? { commandId: action.commandId, output: [] };
             return {
@@ -185,6 +199,27 @@ export function tuiAppReducer(state: TuiAppState, action: TuiAppAction): TuiAppS
                         ...state.ui.searchQueries,
                         [action.page]: action.query
                     }
+                }
+            };
+        case "toolForm.set":
+            return {
+                ...state,
+                interaction: {
+                    ...state.interaction,
+                    toolForm: {
+                        input: action.input,
+                        instance: action.instance,
+                        open: true,
+                        toolName: action.toolName
+                    }
+                }
+            };
+        case "toolForm.clear":
+            return {
+                ...state,
+                interaction: {
+                    ...state.interaction,
+                    toolForm: undefined
                 }
             };
         case "screen.setStatus":
