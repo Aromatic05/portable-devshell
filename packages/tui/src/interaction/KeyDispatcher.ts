@@ -23,7 +23,7 @@ export interface TuiKeyPress {
 
 export class KeyDispatcher {
     dispatch(mode: TuiMode, press: TuiKeyPress): TuiUiIntent[] {
-        const globalIntent = this.#global(press);
+        const globalIntent = this.#global(mode, press);
         if (globalIntent !== undefined) {
             return [globalIntent];
         }
@@ -37,6 +37,9 @@ export class KeyDispatcher {
                 return this.#forSearch(press);
             case "toolForm":
                 return this.#forToolForm(press);
+            case "form":
+            case "wizard":
+                return this.#forEditor(press, mode);
             case "sidebarPages":
             case "sidebarInstances":
             case "mainBoxes":
@@ -45,9 +48,9 @@ export class KeyDispatcher {
         }
     }
 
-    #global(press: TuiKeyPress): TuiUiIntent | undefined {
+    #global(mode: TuiMode, press: TuiKeyPress): TuiUiIntent | undefined {
         if (press.key.ctrl && press.input === "d") {
-            return { type: "app.requestQuit" };
+            return mode === "form" || mode === "wizard" ? undefined : { type: "app.requestQuit" };
         }
         if (press.key.escape || press.input === "\u001B") {
             return { type: "ui.cancel" };
@@ -112,6 +115,43 @@ export class KeyDispatcher {
         }
         if (press.input.length === 1 && !press.key.ctrl) {
             return [{ text: press.input, type: "toolForm.append" }];
+        }
+        return [];
+    }
+
+    #forEditor(press: TuiKeyPress, mode: "form" | "wizard"): TuiUiIntent[] {
+        if (press.key.ctrl && (press.input === "s" || press.input === "S")) {
+            return [{ type: "editor.save" }];
+        }
+        if (press.key.ctrl && press.input === "d") {
+            return [{ type: "editor.discard" }];
+        }
+        if (press.key.tab && press.key.shift) {
+            return [{ direction: "previous", type: "focus.move" }];
+        }
+        if (press.key.tab) {
+            return [{ direction: "next", type: "focus.move" }];
+        }
+        if (press.key.upArrow) {
+            return [{ direction: "up", type: "focus.move" }];
+        }
+        if (press.key.downArrow) {
+            return [{ direction: "down", type: "focus.move" }];
+        }
+        if (press.key.return) {
+            return [{ type: "focus.activate" }];
+        }
+        if (mode === "wizard" && press.key.leftArrow) {
+            return [{ direction: "previous", type: "wizard.step" }];
+        }
+        if (mode === "wizard" && press.key.rightArrow) {
+            return [{ direction: "next", type: "wizard.step" }];
+        }
+        if (press.key.backspace) {
+            return [{ type: "editor.backspace" }];
+        }
+        if (press.input.length === 1 && !press.key.ctrl) {
+            return [{ text: press.input, type: "editor.append" }];
         }
         return [];
     }

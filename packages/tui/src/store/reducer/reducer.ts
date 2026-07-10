@@ -81,6 +81,10 @@ export function tuiAppReducer(state: TuiAppState, action: TuiAppAction): TuiAppS
                 interaction: {
                     ...state.interaction,
                     focusScope: action.focusScope
+                },
+                ui: {
+                    ...state.ui,
+                    focusScope: action.focusScope
                 }
             };
         case "mainFocus.set":
@@ -239,6 +243,41 @@ export function tuiAppReducer(state: TuiAppState, action: TuiAppAction): TuiAppS
                     toolForm: undefined
                 }
             };
+        case "editor.set":
+            return {
+                ...state,
+                interaction: {
+                    ...state.interaction,
+                    editor: action.editor
+                }
+            };
+        case "formDraft.set":
+            return {
+                ...state,
+                ui: {
+                    ...state.ui,
+                    dirtyForms: {
+                        ...state.ui.dirtyForms,
+                        [action.key]: action.dirty
+                    },
+                    formDrafts: {
+                        ...state.ui.formDrafts,
+                        [action.key]: action.value
+                    }
+                }
+            };
+        case "formDraft.clear": {
+            const { [action.key]: _removedDraft, ...formDrafts } = state.ui.formDrafts;
+            const { [action.key]: _removedDirty, ...dirtyForms } = state.ui.dirtyForms;
+            return {
+                ...state,
+                ui: {
+                    ...state.ui,
+                    dirtyForms,
+                    formDrafts
+                }
+            };
+        }
         case "screen.setStatus":
             return {
                 ...state,

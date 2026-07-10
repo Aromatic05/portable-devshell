@@ -1,4 +1,18 @@
+import type { InstanceCreateSchema, JsonValue } from "@portable-devshell/shared";
+
 import type { FocusScope, PageId, SidebarCursor } from "../model/TuiUiTypes.js";
+
+export type TuiEditorKind = "config" | "connector" | "create";
+
+export interface TuiEditorState {
+    editing: boolean;
+    error?: string;
+    key: string;
+    kind: TuiEditorKind;
+    schema?: InstanceCreateSchema;
+    step?: number;
+    summary?: JsonValue;
+}
 
 export type FocusItem =
     | { kind: "page"; id: PageId }
@@ -60,6 +74,7 @@ export interface TuiInteractionState {
     selectedConfirmButton: "cancel" | "confirm";
     selectedDetailLineIds: Record<string, string>;
     search: TuiSearchState;
+    editor?: TuiEditorState;
     toolForm?: TuiToolFormState;
     sidebarCursor?: SidebarCursor;
 }
@@ -82,6 +97,14 @@ export type TuiUiIntent =
     | { type: "toolForm.backspace" }
     | { type: "toolForm.submit" }
     | { type: "toolForm.cancel" }
+    | { kind: TuiEditorKind; key: string; schema?: InstanceCreateSchema; type: "editor.open" }
+    | { type: "editor.close" }
+    | { text: string; type: "editor.append" }
+    | { type: "editor.backspace" }
+    | { type: "editor.save" }
+    | { type: "editor.validate" }
+    | { direction: "next" | "previous"; type: "wizard.step" }
+    | { type: "editor.discard" }
     | { type: "actionMenu.open" }
     | { direction: "up" | "down"; type: "actionMenu.move" }
     | { type: "actionMenu.submit" }
@@ -109,6 +132,8 @@ export type TuiUiIntent =
     | { instance: string; type: "instance.stop" }
     | { instance: string; type: "instance.refresh" }
     | { instance: string; type: "instance.attachShell" }
+    | { instance: string; type: "instance.disable" }
+    | { instance: string; type: "instance.delete" }
     | { type: "instance.openLogs" }
     | { type: "instance.openAudit" }
     | { approvalId: string; instance: string; type: "approval.open" }

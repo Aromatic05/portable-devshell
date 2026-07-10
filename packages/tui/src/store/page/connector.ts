@@ -1,47 +1,92 @@
+import type { JsonValue } from "@portable-devshell/shared";
+
 import type { BoxModel } from "../../component/ExpandableBox.js";
 import type { TuiAppState } from "../TuiReducers.js";
-import { buildEndpointPreview, buildSelectedInstancePageContext, compactSummary, endpointAvailabilityLabel, makeBox, shortenPath } from "./PageBoxSupport.js";
+import { compactSummary, makeBox } from "./PageBoxSupport.js";
+import { asRecord, buttonLine, editorDraft, fieldLine, readPath } from "./EditorSupport.js";
 
 export function buildConnectorPageBoxes(state: TuiAppState, instanceName: string): BoxModel[] {
-    const { config, instance } = buildSelectedInstancePageContext(state, instanceName);
+    const instanceDraft = editorDraft(state, `config:${instanceName}`, selectedInstanceDraft(state, instanceName));
+    const mcpDraft = editorDraft(state, `connector:${instanceName}`, globalMcpDraft(state));
+    const unsaved = state.ui.dirtyForms[`connector:${instanceName}`] === true || state.ui.dirtyForms[`config:${instanceName}`] === true ? " [UNSAVED]" : "";
+    const actions = [buttonLine("save", "Save"), buttonLine("cancel", "Cancel")];
+    const endpoint = endpointPreview(mcpDraft, instanceName);
+    const authNonePublic = isPublic(mcpDraft) && readPath(mcpDraft, "auth.mode") === "none";
 
     return [
         makeBox(state, "connector", instanceName, {
             detailLines: [
-                `mcp enabled ${instance?.mcpEnabled === true ? "true" : "false"}`,
-                `mcp path ${instance?.mcpPath ?? "unavailable"}`,
-                "Runtime readiness: not available in current control API"
+                fieldLine("instance.mcp.enabled", "mcp.enabled", readPath(instanceDraft, "mcp.enabled")),
+                fieldLine("instance.mcp.path", "mcp.path", readPath(instanceDraft, "mcp.path")),
+                fieldLine("instance.mcp.allowTools", "allowTools", readPath(instanceDraft, "mcp.allowTools")),
+                "runtime readiness: not available in current control API",
+                ...actions
             ],
-            id: "mcp-runtime-config",
-            status: instance?.mcpEnabled === true ? "warning" : "disabled",
-            summaryLines: [compactSummary(["enabled", instance?.mcpEnabled === true ? "true" : "false"], ["path", shortenPath(instance?.mcpPath ?? "unavailable")]), "reason=no-runtime-api"],
-            title: "MCP Runtime Config"
-        }),
-        makeBox(state, "connector", instanceName, {
-            detailLines: [buildEndpointPreview(state, instanceName), "Runtime readiness: not available in current control API"],
-            id: "endpoint-preview",
-            status: "warning",
-            summaryLines: [compactSummary(["endpoint", buildEndpointPreview(state, instanceName)]), "reason=preview-only"],
-            title: "Endpoint Preview"
-        }),
-        makeBox(state, "connector", instanceName, {
-            detailLines: [`auth.mode ${config?.authMode ?? "unavailable"}`, `publicBaseUrl ${config?.publicBaseUrl ?? "unavailable"}`],
-            id: "auth-config",
-            summaryLines: [compactSummary(["auth", config?.authMode ?? "unavailable"], ["baseUrl", config?.publicBaseUrl ?? "-"])],
-            title: "Auth Config"
+            id: "mcp-endpoint",
+            status: readPath(instanceDraft, "mcp.enabled") === true ? "warning" : "disabled",
+            summaryLines: [compactSummary(["enabled", String(readPath(instanceDraft, "mcp.enabled") ?? false)], ["path", String(readPath(instanceDraft, "mcp.path") ?? "-")])],
+            title: `MCP Endpoint${unsaved}`
         }),
         makeBox(state, "connector", instanceName, {
             detailLines: [
-                config?.publicBaseUrl === undefined ? "publicBaseUrl missing" : `publicBaseUrl ${config.publicBaseUrl}`,
-                "Runtime readiness: not available in current control API"
+                fieldLine("listenHost", "listenHost", readPath(mcpDraft, "listenHost")),
+                fieldLine("listenPort", "listenPort", readPath(mcpDraft, "listenPort")),
+                fieldLine("publicBaseUrl", "publicBaseUrl", readPath(mcpDraft, "publicBaseUrl")),
+                ...actions
             ],
-            id: "public-availability-reason",
+            id: "public-base-url",
+            summaryLines: [compactSummary(["host", String(readPath(mcpDraft, "listenHost") ?? "-")], ["baseUrl", String(readPath(mcpDraft, "publicBaseUrl") ?? "-")])],
+            title: `Public Base URL${unsaved}`
+        }),
+        makeBox(state, "connector", instanceName, {
+            detailLines: [
+                fieldLine("auth.mode", "auth.mode", readPath(mcpDraft, "auth.mode")),
+                ...(authNonePublic ? [{ id: "auth-warning", text: "auth.mode=none is not valid for a public endpoint", tone: "danger" as const }] : []),
+                ...actions
+            ],
+            id: "auth",
+            status: authNonePublic ? "failed" : "normal",
+            summaryLines: [compactSummary(["mode", String(readPath(mcpDraft, "auth.mode") ?? "-")], ["public", isPublic(mcpDraft) ? "yes" : "no"])],
+            title: `Auth${unsaved}`
+        }),
+        makeBox(state, "connector", instanceName, {
+            detailLines: [endpoint, "runtime readiness: not available in current control API"],
+            id: "endpoint-preview",
             status: "warning",
-            summaryLines: [
-                compactSummary(["endpoint", endpointAvailabilityLabel(config?.publicBaseUrl)]),
-                config?.publicBaseUrl === undefined ? "reason=missing-publicBaseUrl" : "reason=no-runtime-api"
-            ],
-            title: "Public Availability Reason"
+            summaryLines: [compactSummary(["endpoint", endpoint]), "reason=preview-only"],
+            title: "Endpoint Preview"
+        }),
+        makeBox(state, "connector", instanceName, {
+            detailLines: authNonePublic
+                ? ["validator error: auth.mode=none cannot expose a non-local endpoint"]
+                : ["validation follows control.validateConfigDraft"],
+            id: "validation",
+            status: authNonePublic ? "failed" : "normal",
+            summaryLines: [compactSummary(["publicAuth", authNonePublic ? "invalid" : "valid"])],
+            title: "Validation"
         })
     ];
+}
+
+function selectedInstanceDraft(state: TuiAppState, instanceName: string): Record<string, JsonValue> {
+    const entry = Array.isArray(state.configView?.instances)
+        ? state.configView.instances.find((value) => asRecord(value)?.name === instanceName)
+        : undefined;
+    return asRecord(entry) ?? { mcp: { allowTools: [], enabled: true, path: `/${instanceName}/mcp` }, name: instanceName };
+}
+
+function globalMcpDraft(state: TuiAppState): Record<string, JsonValue> {
+    return asRecord(state.configView?.mcp) ?? { auth: { mode: "none" }, enabled: false, listenHost: "127.0.0.1", listenPort: 0 };
+}
+
+function endpointPreview(mcp: Record<string, JsonValue>, instanceName: string): string {
+    const host = String(readPath(mcp, "listenHost") ?? "127.0.0.1");
+    const port = String(readPath(mcp, "listenPort") ?? "-");
+    return `http://${host}:${port}/${instanceName}/mcp`;
+}
+
+function isPublic(mcp: Record<string, JsonValue>): boolean {
+    const publicBaseUrl = readPath(mcp, "publicBaseUrl");
+    const host = readPath(mcp, "listenHost");
+    return (typeof publicBaseUrl === "string" && !/^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(?::|\/|$)/.test(publicBaseUrl)) || host === "0.0.0.0";
 }

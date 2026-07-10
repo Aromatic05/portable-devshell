@@ -65,6 +65,15 @@ export class TuiFocusManager {
         if (scope === "toolForm") {
             return { id: "toolForm.input", kind: "field" };
         }
+        if (scope === "form" || scope === "wizard") {
+            const state = this.#store.getState();
+            const boxId = state.ui.mainFocusId;
+            if (boxId === undefined) {
+                return undefined;
+            }
+            const lineId = state.interaction.selectedDetailLineIds[detailKey(state, boxId)];
+            return lineId === undefined ? undefined : { id: lineId, kind: lineId.includes(":button:") ? "button" : "field" };
+        }
         return undefined;
     }
 
@@ -176,10 +185,26 @@ export class TuiFocusManager {
                 this.#store.setFocusScope("actionMenu");
                 return;
             case "button":
+                if (this.currentMode() === "form" || this.currentMode() === "wizard") {
+                    const state = this.#store.getState();
+                    const boxId = state.ui.mainFocusId;
+                    if (boxId !== undefined) {
+                        this.#store.setSelectedDetailLine(detailKey(state, boxId), item.id);
+                    }
+                    return;
+                }
                 this.#store.setFocusScope("confirm");
                 this.#store.setConfirmFocus(item.id === "confirm" ? "confirm" : "cancel");
                 return;
             case "field":
+                if (this.currentMode() === "form" || this.currentMode() === "wizard") {
+                    const state = this.#store.getState();
+                    const boxId = state.ui.mainFocusId;
+                    if (boxId !== undefined) {
+                        this.#store.setSelectedDetailLine(detailKey(state, boxId), item.id);
+                    }
+                    return;
+                }
                 this.#store.setFocusScope(this.currentMode() === "toolForm" ? "toolForm" : "search");
                 return;
         }
@@ -189,6 +214,10 @@ export class TuiFocusManager {
 function detailKey(state: TuiAppState, boxId: string): string {
     if (state.ui.selectedPage === "instances" && boxId.startsWith("instance:")) {
         return `instances:${boxId.slice("instance:".length)}:instance`;
+    }
+
+    if (state.ui.selectedPage === "instances" && boxId === "create-wizard") {
+        return "instances:all:create-wizard";
     }
 
     return `${state.ui.selectedPage}:${state.ui.selectedInstance}:${boxId}`;

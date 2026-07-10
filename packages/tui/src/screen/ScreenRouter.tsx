@@ -64,6 +64,18 @@ export function buildFocusGraphForState(state: TuiAppState): FocusGraph {
             return new FocusGraph([{ item: { id: "search.query", kind: "field" } }]);
         case "toolForm":
             return new FocusGraph([{ item: { id: "toolForm.input", kind: "field" } }]);
+        case "form":
+        case "wizard": {
+            const box = selectMainScreenModel(state).boxes.find((candidate) => candidate.id === state.ui.mainFocusId);
+            return buildLinearGraph(
+                (box?.expandedLines ?? [])
+                    .filter((line) => line.id?.includes(":field:") === true || line.id?.includes(":button:") === true)
+                    .map((line) => ({
+                        id: line.id!,
+                        kind: line.id!.includes(":button:") ? ("button" as const) : ("field" as const)
+                    }))
+            );
+        }
         case "sidebarPages":
         case "sidebarInstances":
             return buildLinearGraph([

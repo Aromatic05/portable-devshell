@@ -1,4 +1,7 @@
+import type { InstanceCreateDraft, InstanceCreateSchema, InstanceCreateSummary, JsonValue } from "@portable-devshell/shared";
+
 import type { TuiAppStore } from "../store/TuiAppStore.js";
+import { asRecord, cloneRecord, editorDraft, inputValue, normalizeDraftForSave, readPath, removeInputValue, setPath } from "../store/page/EditorSupport.js";
 import { selectMainBoxFlowMetrics, selectMainBoxIds, selectMainScreenModel, selectMainScrollKey } from "../store/TuiSelectors.js";
 import { TuiFocusManager } from "./TuiFocusManager.js";
 import type { TuiUiIntent } from "./TuiInteractionTypes.js";
@@ -13,6 +16,14 @@ export interface CommandDispatcherOptions {
     onQuit(): Promise<void>;
     onRedraw(): void;
     onToolCall(instance: string, toolName: string, input: string): Promise<boolean>;
+    onApplyConfig?(): Promise<void>;
+    onCreateInstance?(draft: InstanceCreateDraft): Promise<void>;
+    onGetInstanceCreateSchema?(): Promise<InstanceCreateSchema>;
+    onInstanceConfigUpdate?(instance: Record<string, JsonValue>): Promise<void>;
+    onInstanceDangerAction?(action: "delete" | "disable", instance: string): Promise<void>;
+    onMcpConfigUpdate?(mcp: Record<string, JsonValue>): Promise<void>;
+    onValidateConfigDraft?(draft: Record<string, JsonValue>): Promise<void>;
+    onValidateInstanceCreateDraft?(draft: InstanceCreateDraft): Promise<InstanceCreateSummary>;
     store: TuiAppStore;
 }
 
@@ -26,6 +37,14 @@ export class CommandDispatcher {
     readonly #onQuit: () => Promise<void>;
     readonly #onRedraw: () => void;
     readonly #onToolCall: CommandDispatcherOptions["onToolCall"];
+    readonly #onApplyConfig: () => Promise<void>;
+    readonly #onCreateInstance: (draft: InstanceCreateDraft) => Promise<void>;
+    readonly #onGetInstanceCreateSchema: () => Promise<InstanceCreateSchema>;
+    readonly #onInstanceConfigUpdate: (instance: Record<string, JsonValue>) => Promise<void>;
+    readonly #onInstanceDangerAction: (action: "delete" | "disable", instance: string) => Promise<void>;
+    readonly #onMcpConfigUpdate: (mcp: Record<string, JsonValue>) => Promise<void>;
+    readonly #onValidateConfigDraft: (draft: Record<string, JsonValue>) => Promise<void>;
+    readonly #onValidateInstanceCreateDraft: (draft: InstanceCreateDraft) => Promise<InstanceCreateSummary>;
     readonly #store: TuiAppStore;
 
     constructor(options: CommandDispatcherOptions) {
@@ -38,6 +57,14 @@ export class CommandDispatcher {
         this.#onQuit = options.onQuit;
         this.#onRedraw = options.onRedraw;
         this.#onToolCall = options.onToolCall;
+        this.#onApplyConfig = options.onApplyConfig ?? (async () => undefined);
+        this.#onCreateInstance = options.onCreateInstance ?? (async () => undefined);
+        this.#onGetInstanceCreateSchema = options.onGetInstanceCreateSchema ?? (async () => defaultCreateSchema());
+        this.#onInstanceConfigUpdate = options.onInstanceConfigUpdate ?? (async () => undefined);
+        this.#onInstanceDangerAction = options.onInstanceDangerAction ?? (async () => undefined);
+        this.#onMcpConfigUpdate = options.onMcpConfigUpdate ?? (async () => undefined);
+        this.#onValidateConfigDraft = options.onValidateConfigDraft ?? (async () => undefined);
+        this.#onValidateInstanceCreateDraft = options.onValidateInstanceCreateDraft ?? (async (draft) => draft as unknown as InstanceCreateSummary);
         this.#store = options.store;
     }
 
@@ -237,6 +264,12 @@ export class CommandDispatcher {
             case "instance.attachShell":
                 await this.#onAttachShell(intent.instance);
                 return true;
+            case "instance.disable":
+                await this.#onInstanceDangerAction("disable", intent.instance);
+                return true;
+            case "instance.delete":
+                await this.#onInstanceDangerAction("delete", intent.instance);
+                return true;
             case "instance.openLogs":
                 return await this.dispatch({ page: "logs", type: "page.select" });
             case "instance.openAudit":
@@ -282,6 +315,25 @@ export class CommandDispatcher {
                 this.#store.clearToolForm();
                 this.#focusManager.restore();
                 return true;
+            case "editor.open":
+                this.#store.setEditor({ editing: false, key: intent.key, kind: intent.kind, ...(intent.schema === undefined ? {} : { schema: intent.schema }), ...(intent.kind === "create" ? { step: 1 } : {}) });
+                this.#store.setFocusScope(intent.kind === "create" ? "wizard" : "form");
+                return true;
+            case "editor.close":
+                this.#closeEditor();
+                return true;
+            case "editor.append":
+                return this.#editFocusedField(intent.text, false);
+            case "editor.backspace":
+                return this.#editFocusedField("", true);
+            case "editor.validate":
+                return await this.#validateEditor();
+            case "editor.save":
+                return await this.#saveEditor();
+            case "editor.discard":
+                return await this.#discardEditor();
+            case "wizard.step":
+                return this.#changeWizardStep(intent.direction);
         }
     }
 
@@ -293,6 +345,10 @@ export class CommandDispatcher {
 
     #cancel(): boolean {
         const scope = this.#store.getState().interaction.focusScope;
+        if (scope === "form" || scope === "wizard") {
+            void this.#discardEditor();
+            return true;
+        }
         if (scope === "actionMenu") {
             this.#store.setActionMenu("", []);
             this.#focusManager.restore();
@@ -338,6 +394,10 @@ export class CommandDispatcher {
             return this.#focusManager.move(direction);
         }
 
+        if (scope === "form" || scope === "wizard") {
+            return this.#focusManager.move(direction);
+        }
+
         if (scope === "sidebarPages" || scope === "sidebarInstances") {
             if (!hasBoxes) {
                 return false;
@@ -356,7 +416,7 @@ export class CommandDispatcher {
 
     #moveWithinScope(direction: "up" | "down" | "left" | "right"): boolean {
         const scope = this.#store.getState().interaction.focusScope;
-        if (scope === "boxDetail") {
+        if (scope === "boxDetail" || scope === "form" || scope === "wizard") {
             return (direction === "up" || direction === "down") && this.#focusManager.move(direction);
         }
         const moved = this.#focusManager.move(direction);
@@ -399,6 +459,12 @@ export class CommandDispatcher {
             if (box === undefined || box.expandedLines.length === 0) {
                 return false;
             }
+            if (box.id === "create-instance") {
+                return await this.#openCreateWizard();
+            }
+            if (state.ui.selectedPage === "config" || state.ui.selectedPage === "connector") {
+                return this.#openPageEditor(state.ui.selectedPage, box.id);
+            }
             if (!box.expanded) {
                 this.#store.toggleExpanded(this.#expandedKey(boxId));
             }
@@ -416,6 +482,11 @@ export class CommandDispatcher {
             const lineId = box?.selectedDetailLineId;
             const actionId = boxId === undefined || lineId === undefined ? undefined : lineId.slice(`${boxId}:`.length);
 
+            const button = actionId?.startsWith("button:") ? actionId.slice("button:".length) : undefined;
+
+            if (button !== undefined && state.ui.selectedPage === "instances") {
+                return await this.#activateInstanceButton(boxId, button);
+            }
             if (instance !== undefined && actionId?.startsWith("approval.action:")) {
                 return await this.dispatch({ approvalId: actionId.slice("approval.action:".length), instance, type: "approval.open" });
             }
@@ -428,7 +499,364 @@ export class CommandDispatcher {
             this.#store.setScreenStatus(this.#store.getState().ui.selectedPage, "Detail has no action.");
             return true;
         }
+        if (scope === "form" || scope === "wizard") {
+            return await this.#activateEditorFocus();
+        }
         return true;
+    }
+
+    async #openCreateWizard(): Promise<boolean> {
+        try {
+            const schema = await this.#onGetInstanceCreateSchema();
+            const key = "create";
+            if (this.#store.getState().ui.formDrafts[key] === undefined) {
+                this.#store.setFormDraft(key, {
+                    enabled: schema.defaultEnabled,
+                    mcp: { allowTools: [...schema.defaultAllowTools], enabled: schema.defaultMcpEnabled },
+                    name: "",
+                    provider: schema.defaultProvider,
+                    security: { mode: schema.defaultSecurityMode },
+                    workspace: ""
+                }, false);
+            }
+            this.#store.setMainFocusId("create-wizard");
+            if (this.#store.getState().ui.expandedBoxes["instances:all:create-wizard"] !== true) {
+                this.#store.toggleExpanded("instances:all:create-wizard");
+            }
+            await this.dispatch({ key, kind: "create", schema, type: "editor.open" });
+            this.#selectFirstEditorItem();
+            return true;
+        } catch (error) {
+            this.#store.setScreenStatus("instances", `Create setup failed: ${readErrorMessage(error)}`);
+            return false;
+        }
+    }
+
+    #openPageEditor(kind: "config" | "connector", boxId: string): boolean {
+        const state = this.#store.getState();
+        const instance = state.ui.selectedInstance;
+        if (instance === undefined) {
+            return false;
+        }
+        const key = kind === "config" ? `config:${instance}` : `connector:${instance}`;
+        if (state.ui.formDrafts[key] === undefined) {
+            const source = kind === "config" ? this.#instanceDraft(instance) : this.#mcpDraft();
+            this.#store.setFormDraft(key, source, false);
+        }
+        const box = selectMainScreenModel(this.#store.getState()).boxes.find((candidate) => candidate.id === boxId);
+        if (box !== undefined && !box.expanded) {
+            this.#store.toggleExpanded(box.expandedKey);
+        }
+        this.#store.setMainFocusId(boxId);
+        this.#store.setEditor({ editing: false, key, kind });
+        this.#store.setFocusScope("form");
+        this.#selectFirstEditorItem();
+        return true;
+    }
+
+    async #activateInstanceButton(boxId: string | undefined, button: string): Promise<boolean> {
+        const instance = this.#instanceNameFromBox(boxId);
+        if (instance === undefined) {
+            if (button === "create") {
+                return await this.#openCreateWizard();
+            }
+            return false;
+        }
+        switch (button) {
+            case "attach-shell":
+                return await this.#openAttachShellConfirm(instance);
+            case "open-config":
+                this.#store.setSelectedInstance(instance);
+                return await this.dispatch({ page: "config", type: "page.select" });
+            case "open-connector":
+                this.#store.setSelectedInstance(instance);
+                return await this.dispatch({ page: "connector", type: "page.select" });
+            case "open-audit":
+                this.#store.setSelectedInstance(instance);
+                return await this.dispatch({ page: "audit", type: "page.select" });
+            case "open-logs":
+                this.#store.setSelectedInstance(instance);
+                return await this.dispatch({ page: "logs", type: "page.select" });
+            case "disable":
+                return await this.dispatch({
+                    body: `Disable ${instance}?`,
+                    confirmIntent: { instance, type: "instance.disable" },
+                    confirmLabel: "Disable",
+                    title: "Confirm Disable",
+                    type: "overlay.openConfirm"
+                });
+            case "delete":
+                return await this.dispatch({
+                    body: `Delete ${instance}? This cannot be undone.`,
+                    confirmIntent: { instance, type: "instance.delete" },
+                    confirmLabel: "Delete",
+                    title: "Confirm Delete",
+                    type: "overlay.openConfirm"
+                });
+            default:
+                return false;
+        }
+    }
+
+    async #activateEditorFocus(): Promise<boolean> {
+        const state = this.#store.getState();
+        const editor = state.interaction.editor;
+        const boxId = state.ui.mainFocusId;
+        if (editor === undefined || boxId === undefined) {
+            return false;
+        }
+        const lineId = state.interaction.selectedDetailLineIds[this.#expandedKey(boxId)];
+        const action = lineId?.slice(`${boxId}:`.length);
+        if (action?.startsWith("button:")) {
+            switch (action.slice("button:".length)) {
+                case "save":
+                    return await this.#saveEditor();
+                case "cancel":
+                    return await this.#discardEditor();
+                case "validate":
+                    return await this.#validateEditor();
+                case "create":
+                    return await this.#createFromWizard();
+                case "back":
+                    return this.#changeWizardStep("previous");
+                case "next":
+                    return this.#changeWizardStep("next");
+                case "disable":
+                case "delete": {
+                    const instance = state.ui.selectedInstance;
+                    if (instance === undefined) {
+                        return false;
+                    }
+                    return await this.dispatch({
+                        body: `${action.slice("button:".length) === "delete" ? "Delete" : "Disable"} ${instance}?`,
+                        confirmIntent: { instance, type: action.slice("button:".length) === "delete" ? "instance.delete" : "instance.disable" },
+                        confirmLabel: action.slice("button:".length) === "delete" ? "Delete" : "Disable",
+                        title: action.slice("button:".length) === "delete" ? "Confirm Delete" : "Confirm Disable",
+                        type: "overlay.openConfirm"
+                    });
+                }
+                default:
+                    return false;
+            }
+        }
+        if (action?.startsWith("field:")) {
+            const field = action.slice("field:".length);
+            const target = this.#draftTarget(field);
+            const draft = this.#editorDraft(target.key, target.fallback);
+            const current = readPath(draft, target.path);
+            if (typeof current === "boolean") {
+                this.#store.setFormDraft(target.key, setPath(draft, target.path, !current));
+                return true;
+            }
+            this.#store.setEditor({ ...editor, editing: true, error: undefined });
+            return true;
+        }
+        return false;
+    }
+
+    #editFocusedField(input: string, backspace: boolean): boolean {
+        const editor = this.#store.getState().interaction.editor;
+        const boxId = this.#store.getState().ui.mainFocusId;
+        if (editor === undefined || boxId === undefined) {
+            return false;
+        }
+        const lineId = this.#store.getState().interaction.selectedDetailLineIds[this.#expandedKey(boxId)];
+        const action = lineId?.slice(`${boxId}:`.length);
+        if (!editor.editing || action?.startsWith("field:") !== true) {
+            return false;
+        }
+        const target = this.#draftTarget(action.slice("field:".length));
+        const draft = this.#editorDraft(target.key, target.fallback);
+        const current = readPath(draft, target.path);
+        this.#store.setFormDraft(target.key, setPath(draft, target.path, backspace ? removeInputValue(current) : inputValue(current, input)));
+        return true;
+    }
+
+    async #validateEditor(): Promise<boolean> {
+        const editor = this.#store.getState().interaction.editor;
+        if (editor === undefined) {
+            return false;
+        }
+        try {
+            if (editor.kind === "create") {
+                const summary = await this.#onValidateInstanceCreateDraft(this.#editorDraft(editor.key, defaultCreateDraft()) as unknown as InstanceCreateDraft);
+                this.#store.setEditor({ ...editor, editing: false, error: undefined, summary: summary as unknown as JsonValue });
+                return true;
+            }
+            const draft = this.#fullConfigDraft(editor.kind === "connector");
+            this.#assertPublicAuth(draft);
+            await this.#onValidateConfigDraft(draft);
+            this.#store.setEditor({ ...editor, editing: false, error: undefined });
+            return true;
+        } catch (error) {
+            this.#store.setEditor({ ...editor, editing: false, error: readErrorMessage(error) });
+            return false;
+        }
+    }
+
+    async #saveEditor(): Promise<boolean> {
+        const editor = this.#store.getState().interaction.editor;
+        const instance = this.#store.getState().ui.selectedInstance;
+        if (editor === undefined) {
+            return false;
+        }
+        if (editor.kind === "create") {
+            return await this.#createFromWizard();
+        }
+        if (instance === undefined) {
+            return false;
+        }
+        if (!(await this.#validateEditor())) {
+            return false;
+        }
+        try {
+            const instanceDraft = normalizeDraftForSave(this.#editorDraft(`config:${instance}`, this.#instanceDraft(instance)));
+            await this.#onInstanceConfigUpdate(instanceDraft);
+            if (editor.kind === "connector") {
+                await this.#onMcpConfigUpdate(normalizeDraftForSave(this.#editorDraft(`connector:${instance}`, this.#mcpDraft())));
+            }
+            await this.#onApplyConfig();
+            this.#store.setFormDraft(`config:${instance}`, instanceDraft, false);
+            if (editor.kind === "connector") {
+                this.#store.setFormDraft(`connector:${instance}`, this.#editorDraft(`connector:${instance}`, this.#mcpDraft()), false);
+            }
+            this.#store.setEditor({ ...editor, editing: false, error: undefined });
+            this.#store.setScreenStatus(this.#store.getState().ui.selectedPage, "Saved through control RPC.");
+            return true;
+        } catch (error) {
+            this.#store.setEditor({ ...editor, editing: false, error: readErrorMessage(error) });
+            return false;
+        }
+    }
+
+    async #createFromWizard(): Promise<boolean> {
+        const editor = this.#store.getState().interaction.editor;
+        if (editor?.kind !== "create") {
+            return false;
+        }
+        if (!(await this.#validateEditor())) {
+            return false;
+        }
+        try {
+            await this.#onCreateInstance(normalizeDraftForSave(this.#editorDraft(editor.key, defaultCreateDraft())) as unknown as InstanceCreateDraft);
+            this.#store.clearFormDraft(editor.key);
+            this.#closeEditor();
+            this.#store.setScreenStatus("instances", "Created through control RPC.");
+            return true;
+        } catch (error) {
+            this.#store.setEditor({ ...editor, error: readErrorMessage(error) });
+            return false;
+        }
+    }
+
+    async #discardEditor(): Promise<boolean> {
+        const editor = this.#store.getState().interaction.editor;
+        if (editor === undefined) {
+            return false;
+        }
+        if (this.#store.getState().ui.dirtyForms[editor.key] === true) {
+            return await this.dispatch({
+                body: "Discard unsaved changes?",
+                confirmIntent: { type: "editor.close" },
+                confirmLabel: "Discard",
+                title: "Discard Unsaved Changes",
+                type: "overlay.openConfirm"
+            });
+        }
+        this.#closeEditor();
+        return true;
+    }
+
+    #closeEditor(): void {
+        const editor = this.#store.getState().interaction.editor;
+        if (editor !== undefined) {
+            this.#store.clearFormDraft(editor.key);
+        }
+        this.#store.setEditor(undefined);
+        this.#store.setFocusScope("mainBoxes");
+        this.#syncMainFocus();
+    }
+
+    #changeWizardStep(direction: "next" | "previous"): boolean {
+        const editor = this.#store.getState().interaction.editor;
+        if (editor?.kind !== "create") {
+            return false;
+        }
+        const step = Math.min(5, Math.max(1, (editor.step ?? 1) + (direction === "next" ? 1 : -1)));
+        this.#store.setEditor({ ...editor, editing: false, step });
+        this.#selectFirstEditorItem();
+        return true;
+    }
+
+    #selectFirstEditorItem(): void {
+        const boxId = this.#store.getState().ui.mainFocusId;
+        const box = boxId === undefined ? undefined : selectMainScreenModel(this.#store.getState()).boxes.find((candidate) => candidate.id === boxId);
+        const line = box?.expandedLines.find((candidate) => candidate.id?.includes(":field:") === true || candidate.id?.includes(":button:") === true);
+        if (box !== undefined && line?.id !== undefined) {
+            this.#store.setSelectedDetailLine(box.expandedKey, line.id);
+        }
+    }
+
+    #draftTarget(field: string): { fallback: Record<string, JsonValue>; key: string; path: string } {
+        const editor = this.#store.getState().interaction.editor!;
+        const instance = this.#store.getState().ui.selectedInstance;
+        if (editor.kind === "create") {
+            return { fallback: defaultCreateDraft(), key: editor.key, path: field };
+        }
+        if (editor.kind === "connector" && field.startsWith("instance.")) {
+            const name = instance!;
+            return { fallback: this.#instanceDraft(name), key: `config:${name}`, path: field.slice("instance.".length) };
+        }
+        return {
+            fallback: editor.kind === "connector" ? this.#mcpDraft() : this.#instanceDraft(instance!),
+            key: editor.key,
+            path: field
+        };
+    }
+
+    #editorDraft(key: string, fallback: Record<string, JsonValue>): Record<string, JsonValue> {
+        return editorDraft(this.#store.getState(), key, fallback);
+    }
+
+    #instanceDraft(instanceName: string): Record<string, JsonValue> {
+        const configView = this.#store.getState().configView;
+        const entries = configView?.instances;
+        const entry = Array.isArray(entries)
+            ? entries.find((value) => asRecord(value)?.name === instanceName)
+            : undefined;
+        return cloneRecord(asRecord(entry) ?? { enabled: true, mcp: { allowTools: [], enabled: true, path: `/${instanceName}/mcp` }, name: instanceName, provider: "local", security: { mode: "disabled" }, workspace: "" });
+    }
+
+    #mcpDraft(): Record<string, JsonValue> {
+        return cloneRecord(asRecord(this.#store.getState().configView?.mcp) ?? { auth: { mode: "none" }, enabled: false, listenHost: "127.0.0.1", listenPort: 0 });
+    }
+
+    #fullConfigDraft(includeMcp: boolean): Record<string, JsonValue> {
+        const state = this.#store.getState();
+        const instance = state.ui.selectedInstance!;
+        const config = cloneRecord(state.configView ?? { control: {}, instances: [], mcp: this.#mcpDraft(), version: 1 });
+        const rawInstances = config.instances;
+        const instances = Array.isArray(rawInstances)
+            ? rawInstances.map((entry) =>
+                  asRecord(entry)?.name === instance ? normalizeDraftForSave(this.#editorDraft(`config:${instance}`, this.#instanceDraft(instance))) : entry
+              )
+            : [];
+        config.instances = instances;
+        if (includeMcp) {
+            config.mcp = normalizeDraftForSave(this.#editorDraft(`connector:${instance}`, this.#mcpDraft()));
+        }
+        return config;
+    }
+
+    #assertPublicAuth(config: Record<string, JsonValue>): void {
+        const mcp = asRecord(config.mcp);
+        const auth = asRecord(mcp?.auth);
+        const baseUrl = mcp?.publicBaseUrl;
+        const publicHost = mcp?.listenHost === "0.0.0.0";
+        const publicUrl = typeof baseUrl === "string" && !/^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(?::|\/|$)/.test(baseUrl);
+        if ((publicHost || publicUrl) && auth?.mode === "none") {
+            throw new Error("auth.mode=none cannot expose a non-local endpoint.");
+        }
     }
 
     #openInstanceActionMenu(): boolean {
@@ -572,4 +1000,35 @@ export class CommandDispatcher {
 
 function clamp(value: number, min: number, max: number): number {
     return Math.min(Math.max(value, min), max);
+}
+
+function defaultCreateSchema(): InstanceCreateSchema {
+    return {
+        container: {
+            defaultMode: "preset",
+            modes: ["preset", "dockerfile", "compose", "existingImage", "existingStoppedContainer"],
+            presets: []
+        },
+        defaultAllowTools: ["bash_run"],
+        defaultEnabled: true,
+        defaultMcpEnabled: true,
+        defaultProvider: "local",
+        defaultSecurityMode: "disabled",
+        providers: ["local", "ssh", "docker", "podman"]
+    };
+}
+
+function defaultCreateDraft(): Record<string, JsonValue> {
+    return {
+        enabled: true,
+        mcp: { allowTools: ["bash_run"], enabled: true },
+        name: "",
+        provider: "local",
+        security: { mode: "disabled" },
+        workspace: ""
+    };
+}
+
+function readErrorMessage(error: unknown): string {
+    return error instanceof Error ? error.message : String(error);
 }

@@ -159,6 +159,10 @@ export function selectFooterShortcuts(state: TuiAppState): string[] {
             return ["type", "bs", "enter", "esc"];
         case "toolForm":
             return ["type JSON", "bs", "enter", "esc"];
+        case "form":
+            return ["tab", "enter", "ctrl+s", "ctrl+[", "ctrl+d"];
+        case "wizard":
+            return ["tab", "enter", "ctrl+s", "ctrl+[", "ctrl+d"];
         case "actionMenu":
             return ["↑↓", "enter", "esc"];
         case "confirm":

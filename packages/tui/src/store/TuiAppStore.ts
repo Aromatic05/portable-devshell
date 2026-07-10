@@ -1,6 +1,6 @@
 import { type ApprovalRequest, type ControlError, type ControlEventEnvelope, type InstanceSnapshot, type JsonValue, type ToolCallRecord } from "@portable-devshell/shared";
 
-import { type TuiActionMenuItem, type TuiUiIntent } from "../interaction/TuiInteractionTypes.js";
+import { type TuiActionMenuItem, type TuiEditorState, type TuiUiIntent } from "../interaction/TuiInteractionTypes.js";
 import type { FocusScope, PageId, SidebarCursor, SidebarFocus } from "../model/TuiUiTypes.js";
 import {
     createInitialTuiAppState,
@@ -214,6 +214,18 @@ export class TuiAppStore {
         this.dispatch({
             type: "toolForm.clear"
         });
+    }
+
+    setEditor(editor?: TuiEditorState): void {
+        this.dispatch({ editor, type: "editor.set" });
+    }
+
+    setFormDraft(key: string, value: unknown, dirty = true): void {
+        this.dispatch({ dirty, key, type: "formDraft.set", value });
+    }
+
+    clearFormDraft(key: string): void {
+        this.dispatch({ key, type: "formDraft.clear" });
     }
 
     toggleExpanded(key: string): void {

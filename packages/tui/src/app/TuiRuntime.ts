@@ -79,6 +79,33 @@ export class TuiRuntime {
             onAttachShell: async (instance) => {
                 await this.#attachShell(instance);
             },
+            onApplyConfig: async () => {
+                await this.#client.applyConfig();
+                await this.session.refresh();
+            },
+            onCreateInstance: async (draft) => {
+                await this.#client.createInstance(draft);
+                await this.session.refresh();
+            },
+            onGetInstanceCreateSchema: async () => await this.#client.getInstanceCreateSchema(),
+            onInstanceConfigUpdate: async (instance) => {
+                await this.#client.updateInstanceConfig(instance);
+            },
+            onInstanceDangerAction: async (action, instance) => {
+                if (action === "delete") {
+                    await this.#client.deleteInstance(instance);
+                } else {
+                    await this.#client.disableInstance(instance);
+                }
+                await this.session.refresh();
+            },
+            onMcpConfigUpdate: async (mcp) => {
+                await this.#client.updateMcpConfig(mcp);
+            },
+            onValidateConfigDraft: async (draft) => {
+                await this.#client.validateConfigDraft(draft);
+            },
+            onValidateInstanceCreateDraft: async (draft) => await this.#client.validateInstanceCreateDraft(draft),
             mainViewportRows: () => Math.max(0, this.rows - 7),
             onLogsReload: async () => {
                 await this.session.refreshLogs();
@@ -381,12 +408,13 @@ export class TuiRuntime {
         }
 
         const range = metrics.boxRanges[box.id]!;
-        this.focusManager.setFocus({ id: box.id, kind: "box" });
         if (flowLine === range.start) {
+            this.focusManager.setFocus({ id: box.id, kind: "box" });
             await this.commandDispatcher.dispatch({ type: "screen.toggle" });
             return;
         }
         if (!box.expanded) {
+            this.focusManager.setFocus({ id: box.id, kind: "box" });
             return;
         }
 
@@ -394,6 +422,22 @@ export class TuiRuntime {
         if (detailLine?.id === undefined) {
             return;
         }
+
+        if (state.interaction.editor?.kind === "create" && box.id === "create-wizard") {
+            this.store.setSelectedDetailLine(box.expandedKey, detailLine.id);
+            await this.commandDispatcher.dispatch({ type: "focus.activate" });
+            return;
+        }
+
+        if (state.ui.selectedPage === "config" || state.ui.selectedPage === "connector") {
+            this.focusManager.setFocus({ id: box.id, kind: "box" });
+            await this.commandDispatcher.dispatch({ type: "focus.activate" });
+            this.store.setSelectedDetailLine(box.expandedKey, detailLine.id);
+            await this.commandDispatcher.dispatch({ type: "focus.activate" });
+            return;
+        }
+
+        this.focusManager.setFocus({ id: box.id, kind: "box" });
         this.store.setFocusScope("boxDetail");
         this.store.setSelectedDetailLine(box.expandedKey, detailLine.id);
         await this.commandDispatcher.dispatch({ type: "focus.activate" });

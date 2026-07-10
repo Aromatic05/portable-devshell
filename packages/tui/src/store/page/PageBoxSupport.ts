@@ -53,7 +53,12 @@ export function makeBox(
         expanded: state.ui.expandedBoxes[expandedKey] === true,
         expandedKey,
         expandedLines,
-        focused: state.ui.mainFocusId === input.id && (state.interaction.focusScope === "mainBoxes" || state.interaction.focusScope === "boxDetail"),
+        focused:
+            state.ui.mainFocusId === input.id &&
+            (state.interaction.focusScope === "mainBoxes" ||
+                state.interaction.focusScope === "boxDetail" ||
+                state.interaction.focusScope === "form" ||
+                state.interaction.focusScope === "wizard"),
         id: input.id,
         selectedDetailLineId: expandedLines.some((line) => line.id === selectedDetailLineId) ? selectedDetailLineId : expandedLines[0]?.id,
         status: input.status ?? "normal",

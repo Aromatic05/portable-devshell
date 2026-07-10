@@ -1,6 +1,6 @@
 import type { ApprovalRequest, ControlError, ControlEventEnvelope, InstanceSnapshot, JsonValue, ToolCallRecord } from "@portable-devshell/shared";
 
-import type { TuiActionMenuItem, TuiInteractionState, TuiUiIntent } from "../../interaction/TuiInteractionTypes.js";
+import type { TuiActionMenuItem, TuiEditorState, TuiInteractionState, TuiUiIntent } from "../../interaction/TuiInteractionTypes.js";
 import type { FocusScope, PageId, SidebarCursor, SidebarFocus, TuiUiState } from "../../model/TuiUiTypes.js";
 
 export type TuiConnectionStatus = "connecting" | "connected" | "disconnected" | "error";
@@ -113,6 +113,9 @@ export type TuiAppAction =
     | { page: PageId; query: string; type: "search.setQuery" }
     | { input: string; instance: string; toolName: string; type: "toolForm.set" }
     | { type: "toolForm.clear" }
+    | { editor?: TuiEditorState; type: "editor.set" }
+    | { dirty: boolean; key: string; value: unknown; type: "formDraft.set" }
+    | { key: string; type: "formDraft.clear" }
     | { page: PageId; status?: string; type: "screen.setStatus" }
     | { instance?: string; type: "ui.selectInstance" }
     | { page: PageId; type: "ui.selectPage" }
