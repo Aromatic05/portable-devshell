@@ -100,7 +100,7 @@ test("search filters instances, config, audit, and logs only", async () => {
     await harness.press("e");
     await harness.press("t");
     await harness.press("a");
-    assert.deepEqual(selectMainScreenModel(harness.store.getState()).boxes.map((box) => box.id), ["instance:beta"]);
+    assert.deepEqual(selectMainScreenModel(harness.store.getState()).boxes.map((box) => box.id), ["instances-filter-status", "instance:beta"]);
     await harness.press("", { return: true });
 
     await harness.press("2");
@@ -108,7 +108,7 @@ test("search filters instances, config, audit, and logs only", async () => {
     for (const character of "workspace") {
         await harness.press(character);
     }
-    assert.deepEqual(selectMainScreenModel(harness.store.getState()).boxes.map((box) => box.id), ["configuration"]);
+    assert.deepEqual(selectMainScreenModel(harness.store.getState()).boxes.map((box) => box.id), ["config-filter-status", "configuration"]);
     await harness.press("", { return: true });
 
     await harness.press("5");
@@ -116,7 +116,7 @@ test("search filters instances, config, audit, and logs only", async () => {
     for (const character of "bash_run") {
         await harness.press(character);
     }
-    assert.deepEqual(selectMainScreenModel(harness.store.getState()).boxes.map((box) => box.id), ["approval-approval-1", "audit-call-1"]);
+    assert.deepEqual(selectMainScreenModel(harness.store.getState()).boxes.map((box) => box.id), ["audit-filter-status", "approval-approval-1", "audit-call-1"]);
     await harness.press("", { return: true });
 
     await harness.press("6");
@@ -131,6 +131,32 @@ test("search filters instances, config, audit, and logs only", async () => {
     await harness.press("3");
     await harness.press("/");
     assert.equal(harness.store.getState().interaction.search.open, false);
+});
+
+test("audit structured filters and persistent filter controls work", async () => {
+    const harness = createHarness();
+
+    await harness.press("5");
+    harness.store.setSearchQuery("audit", "risk:high source:tui tool:bash_run");
+    let boxes = selectMainScreenModel(harness.store.getState()).boxes;
+    assert.equal(boxes[0]?.id, "audit-filter-status");
+    assert.equal(boxes.some((box) => box.id === "approval-approval-1"), true);
+    assert.equal(boxes.some((box) => box.id === "audit-call-1"), false);
+
+    harness.store.setSearchQuery("audit", "status:completed source:tui tool:bash_run");
+    boxes = selectMainScreenModel(harness.store.getState()).boxes;
+    assert.equal(boxes.some((box) => box.id === "audit-call-1"), true);
+
+    harness.store.setSearchQuery("audit", "status:failed");
+    boxes = selectMainScreenModel(harness.store.getState()).boxes;
+    assert.deepEqual(boxes.map((box) => box.id), ["audit-filter-status"]);
+
+    harness.store.setMainFocusId("audit-filter-status");
+    harness.store.setFocusScope("mainBoxes");
+    harness.store.toggleExpanded("audit:alpha:audit-filter-status");
+    harness.store.setSelectedDetailLine("audit:alpha:audit-filter-status", "audit-filter-status:button:clear-filter");
+    await harness.dispatch({ type: "focus.activate" });
+    assert.equal(harness.store.getState().ui.searchQueries.audit, "");
 });
 
 test("shifted number shortcuts switch the selected instance without coupling Instances box focus", async () => {
@@ -494,6 +520,36 @@ test("connector editor presents unavailable endpoints and control runtime limits
 
     await harness.press("7");
     assert.equal(selectHelpLines(harness.store.getState()).some((line) => line.includes("directly inside each expanded instance box")), true);
+});
+
+test("long detail lines open a wrapped full-text viewer", async () => {
+    const harness = createHarness();
+    harness.store.replaceOAuthApprovals([{
+        approvalId: "oauth-long",
+        clientId: "client-long",
+        clientName: "Long Client",
+        createdAt: "2026-07-10T00:00:00.000Z",
+        expiresAt: "2026-07-10T00:05:00.000Z",
+        kind: "authorization",
+        redirectUris: ["https://example.test/callback/with/a/very/long/path/that/does/not/fit/in/a/single/terminal/line"],
+        requestedResources: [],
+        requestedScopes: ["mcp"],
+        status: "approved"
+    }]);
+
+    await harness.press("4");
+    await harness.press("", { tab: true });
+    const approval = selectMainScreenModel(harness.store.getState()).boxes.find((box) => box.id === "oauth-approval-oauth-long")!;
+    harness.store.setMainFocusId(approval.id);
+    harness.store.toggleExpanded(approval.expandedKey);
+    harness.store.setSelectedDetailLine(approval.expandedKey, `${approval.id}:redirectUris`);
+    await harness.dispatch({ type: "focus.activate" });
+
+    assert.equal(harness.store.getState().interaction.focusScope, "textDetail");
+    assert.equal(harness.store.getState().interaction.textDetail.open, true);
+    assert.match(harness.store.getState().interaction.textDetail.body, /very\/long\/path/u);
+    await harness.press("", { return: true });
+    assert.equal(harness.store.getState().interaction.textDetail.open, false);
 });
 
 test("OAuth panel approves pending registration requests", async () => {

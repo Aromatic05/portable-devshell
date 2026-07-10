@@ -598,6 +598,11 @@ export class CommandDispatcher {
                 return await this.dispatch({ approvalId: actionId.slice("approval.open:".length), instance: state.ui.selectedInstance, type: "approval.open" });
             }
 
+            if (button === "clear-filter" && (state.ui.selectedPage === "instances" || state.ui.selectedPage === "config" || state.ui.selectedPage === "audit")) {
+                this.#store.setSearchQuery(state.ui.selectedPage, "");
+                this.#syncMainFocus();
+                return true;
+            }
             if (button !== undefined && state.ui.selectedPage === "logs") {
                 switch (button) {
                     case "reload":
