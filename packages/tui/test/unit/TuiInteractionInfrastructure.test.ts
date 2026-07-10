@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { renderExpandableBoxLines } from "../../dist/component/ExpandableBox.js";
 import {
     buildFocusGraphForState,
     CommandDispatcher,
@@ -13,7 +14,7 @@ import {
     TuiFocusManager
 } from "../../dist/index.js";
 
-test("Prompt 3 urgent fix uses page + instance coordinates with two sidebar sections", async () => {
+test("Prompt 3 urgent fix uses page + instance coordinates with a two-stage Tab cycle", async () => {
     const harness = createHarness();
 
     const sidebar = selectSidebarModel(harness.store.getState());
@@ -38,6 +39,10 @@ test("Prompt 3 urgent fix uses page + instance coordinates with two sidebar sect
     );
     await harness.press("[", { ctrl: true });
     assert.equal(harness.store.getState().interaction.focusScope, "sidebarPages");
+    await harness.press("", { tab: true });
+    assert.equal(harness.store.getState().interaction.focusScope, "mainBoxes");
+    await harness.press("", { shift: true, tab: true });
+    assert.equal(harness.store.getState().interaction.focusScope, "sidebarPages");
 
     await harness.press("", { downArrow: true });
     assert.equal(harness.store.getState().ui.selectedPage, "instances");
@@ -54,11 +59,16 @@ test("Prompt 3 urgent fix uses page + instance coordinates with two sidebar sect
     assert.equal(harness.store.getState().interaction.sidebarCursor?.id, "beta");
     assert.equal(harness.store.getState().ui.selectedInstance, "alpha");
 
+    await harness.press("", { tab: true });
+    assert.equal(harness.store.getState().interaction.focusScope, "mainBoxes");
+    await harness.press("", { shift: true, tab: true });
+    assert.equal(harness.store.getState().interaction.focusScope, "sidebarInstances");
+
     await harness.press("", { return: true });
     assert.equal(harness.store.getState().ui.selectedInstance, "beta");
 });
 
-test("Prompt 3 urgent fix expands stable bordered boxes and preserves state through stream updates", async () => {
+test("Prompt 3 detail line focus preserves state through stream updates", async () => {
     const harness = createHarness();
 
     await harness.press("", { tab: true });
@@ -68,9 +78,19 @@ test("Prompt 3 urgent fix expands stable bordered boxes and preserves state thro
     assert.equal(typeof firstBoxId, "string");
     assert.match(selectFooterText(harness.store.getState()), /space/u);
 
-    await harness.press(" ");
     const expandedKey = `instances:alpha:${firstBoxId}`;
+    await harness.press("", { return: true });
     assert.equal(harness.store.getState().ui.expandedBoxes[expandedKey], true);
+    assert.equal(harness.store.getState().interaction.focusScope, "boxDetail");
+
+    const initialBox = selectMainScreenModel(harness.store.getState()).boxes.find((box) => box.id === firstBoxId);
+    assert.equal(harness.store.getState().interaction.selectedDetailLineIds[expandedKey], initialBox?.expandedLines[0]?.id);
+    await harness.press("", { downArrow: true });
+    const selectedLineId = harness.store.getState().interaction.selectedDetailLineIds[expandedKey];
+    assert.equal(selectedLineId, initialBox?.expandedLines[1]?.id);
+    const focusedBox = selectMainScreenModel(harness.store.getState()).boxes.find((box) => box.id === firstBoxId);
+    const selectedRenderLine = renderExpandableBoxLines(focusedBox!, 48).find((line) => line.key === `${firstBoxId}-${selectedLineId}`);
+    assert.equal(selectedRenderLine?.backgroundColor, "cyan");
 
     harness.store.applyEvent({
         event: "log.appended",
@@ -93,13 +113,29 @@ test("Prompt 3 urgent fix expands stable bordered boxes and preserves state thro
     assert.equal(harness.store.getState().ui.selectedPage, "instances");
     assert.equal(harness.store.getState().ui.selectedInstance, "alpha");
     assert.equal(harness.store.getState().ui.expandedBoxes[expandedKey], true);
+    assert.equal(harness.store.getState().interaction.selectedDetailLineIds[expandedKey], selectedLineId);
 
-    await harness.press("", { return: true });
-    assert.equal(harness.store.getState().interaction.focusScope, "boxDetail");
     await harness.press("", { escape: true });
     assert.equal(harness.store.getState().interaction.focusScope, "mainBoxes");
     await harness.press("[", { ctrl: true });
     assert.equal(harness.store.getState().interaction.focusScope, "sidebarPages");
+});
+
+test("Prompt 3 detail line selection clamps to a valid line after data replacement", async () => {
+    const harness = createHarness();
+
+    await harness.press("5");
+    await harness.press("", { tab: true });
+    await harness.press("", { return: true });
+    await harness.press("", { downArrow: true });
+
+    const key = "logs:alpha:logs";
+    assert.equal(harness.store.getState().interaction.selectedDetailLineIds[key], "logs:stdout:2");
+    harness.store.replaceLogs("alpha", []);
+
+    const logsBox = selectMainScreenModel(harness.store.getState()).boxes.find((box) => box.id === "logs");
+    assert.equal(logsBox?.selectedDetailLineId, logsBox?.expandedLines[0]?.id);
+    assert.equal(logsBox?.selectedDetailLineId, "logs:No");
 });
 
 test("Prompt 4 keeps connector and logs instance-scoped until an explicit action", async () => {
@@ -167,13 +203,17 @@ test("Prompt 4 instance actions require explicit selection and Stop defaults to 
     assert.equal(harness.store.getState().ui.selectedInstance, "alpha");
 });
 
-test("Prompt 4 approval detail opens a non-default Deny action without deciding", async () => {
+test("Prompt 4 approval action uses the selected detail line without deciding", async () => {
     const harness = createHarness();
 
     await harness.press("", { tab: true });
     await harness.press("", { downArrow: true });
     await harness.press("", { return: true });
     assert.equal(harness.store.getState().interaction.focusScope, "boxDetail");
+    for (let index = 0; index < 6; index += 1) {
+        await harness.press("", { downArrow: true });
+    }
+    assert.equal(harness.store.getState().interaction.selectedDetailLineIds["instances:alpha:approval-approval-1"], "approval-approval-1:approval.action:approval-1");
     await harness.press("", { return: true });
 
     assert.equal(harness.store.getState().interaction.focusScope, "actionMenu");
@@ -185,7 +225,50 @@ test("Prompt 4 approval detail opens a non-default Deny action without deciding"
     assert.deepEqual(harness.approvalDecisions(), []);
 });
 
-function createHarness() {
+test("Prompt 4 tool form is bound to the selected audit detail line", async () => {
+    const harness = createHarness();
+
+    await harness.press("4");
+    await harness.press("", { tab: true });
+    await harness.press("", { return: true });
+    for (let index = 0; index < 7; index += 1) {
+        await harness.press("", { downArrow: true });
+    }
+    await harness.press("", { return: true });
+
+    assert.equal(harness.store.getState().interaction.focusScope, "toolForm");
+    assert.equal(harness.store.getState().interaction.toolForm?.instance, "alpha");
+    assert.equal(harness.store.getState().interaction.toolForm?.toolName, "bash_run");
+});
+
+test("Prompt 4 command failure keeps the selected detail target", async () => {
+    const harness = createHarness({ onToolCall: async () => false });
+
+    await harness.press("4");
+    await harness.press("", { tab: true });
+    await harness.press("", { return: true });
+    for (let index = 0; index < 7; index += 1) {
+        await harness.press("", { downArrow: true });
+    }
+    await harness.press("", { return: true });
+    await harness.press("", { return: true });
+
+    assert.equal(harness.store.getState().ui.selectedPage, "audit");
+    assert.equal(harness.store.getState().ui.selectedInstance, "alpha");
+    assert.equal(harness.store.getState().interaction.focusScope, "toolForm");
+    assert.equal(harness.store.getState().interaction.toolForm?.toolName, "bash_run");
+});
+
+test("Prompt 4 action menu no longer exposes Attach Shell", async () => {
+    const harness = createHarness();
+
+    await harness.press("a");
+
+    assert.equal(harness.store.getState().interaction.actionMenu.items.some((item) => item.label.includes("Attach Shell")), false);
+    assert.equal(harness.store.getState().interaction.actionMenu.items.some((item) => item.id.includes("attachShell")), false);
+});
+
+function createHarness(options: { onToolCall?: (instance: string, toolName: string, input: string) => Promise<boolean> } = {}) {
     const store = new TuiAppStore();
     seedPrompt3State(store);
     const approvalDecisions: Array<{ approvalId: string; decision: string; instance: string }> = [];
@@ -221,7 +304,7 @@ function createHarness() {
         },
         onQuit: async () => undefined,
         onRedraw: () => undefined,
-        onToolCall: async () => true,
+        onToolCall: options.onToolCall ?? (async () => true),
         store
     });
     const keyDispatcher = new KeyDispatcher();
