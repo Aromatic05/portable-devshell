@@ -1,5 +1,4 @@
 import {
-    errorCodes,
     type InstanceName,
     type ToolCallContext,
     type ToolCallQuery,
@@ -9,29 +8,23 @@ import {
 
 import { JsonlStore } from "./store/LogStoreJsonl.js";
 
-export class InstanceBusyError extends Error {
-    readonly code = errorCodes.coreInstanceBusy;
-
-    constructor(instanceName: string) {
-        super(`Instance ${instanceName} is busy.`);
-    }
+interface ActiveToolCall {
+    approvalId?: string;
+    callId: string;
+    decision?: ToolCallApprovalDecision;
+    inputSummary: string;
+    requestId?: string;
+    sessionId?: string;
+    source: ToolCallContext["source"];
+    startedAt: string;
+    status: ToolCallRecord["status"];
+    toolName: string;
 }
 
 export class ToolCallHistory {
     readonly #instanceName: InstanceName;
     readonly #store: JsonlStore<ToolCallRecord>;
-    #activeCall?: {
-        approvalId?: string;
-        callId: string;
-        decision?: ToolCallApprovalDecision;
-        inputSummary: string;
-        requestId?: string;
-        sessionId?: string;
-        source: ToolCallContext["source"];
-        startedAt: string;
-        status: ToolCallRecord["status"];
-        toolName: string;
-    };
+    readonly #activeCalls = new Map<string, ActiveToolCall>();
     #initialized = false;
 
     constructor(instanceName: InstanceName, store: JsonlStore<ToolCallRecord>) {
@@ -48,12 +41,7 @@ export class ToolCallHistory {
         status: ToolCallRecord["status"] = "running"
     ): Promise<void> {
         await this.#initialize();
-
-        if (this.#activeCall !== undefined) {
-            throw new InstanceBusyError(this.#instanceName);
-        }
-
-        this.#activeCall = {
+        this.#activeCalls.set(callId, {
             callId,
             inputSummary,
             requestId: context.requestId,
@@ -62,25 +50,21 @@ export class ToolCallHistory {
             startedAt,
             status,
             toolName
-        };
+        });
     }
 
     async pendingApproval(callId: string, approvalId: string): Promise<void> {
         await this.#initialize();
-        this.#assertActiveCall(callId);
-        if (this.#activeCall !== undefined) {
-            this.#activeCall.approvalId = approvalId;
-            this.#activeCall.status = "pendingApproval";
-        }
+        const activeCall = this.#readActiveCall(callId);
+        activeCall.approvalId = approvalId;
+        activeCall.status = "pendingApproval";
     }
 
     async running(callId: string, decision?: ToolCallApprovalDecision): Promise<void> {
         await this.#initialize();
-        this.#assertActiveCall(callId);
-        if (this.#activeCall !== undefined) {
-            this.#activeCall.status = "running";
-            this.#activeCall.decision = decision;
-        }
+        const activeCall = this.#readActiveCall(callId);
+        activeCall.status = "running";
+        activeCall.decision = decision;
     }
 
     async completed(
@@ -88,25 +72,7 @@ export class ToolCallHistory {
         completedAt: string,
         result?: { exitCode?: number | null; stderrBytes?: number; stdoutBytes?: number; termSignal?: number; termination?: "exited" | "signaled" | "timeout" | "outputLimit" }
     ): Promise<ToolCallRecord> {
-        await this.#initialize();
-        this.#assertActiveCall(callId);
-
-        const startedRecord = this.#readActiveCall(callId);
-        const record: ToolCallRecord = {
-            ...startedRecord,
-            completedAt,
-            ...(result?.exitCode === undefined ? {} : { exitCode: result.exitCode }),
-            instance: this.#instanceName,
-            status: "completed",
-            ...(result?.stderrBytes === undefined ? {} : { stderrBytes: result.stderrBytes }),
-            ...(result?.stdoutBytes === undefined ? {} : { stdoutBytes: result.stdoutBytes }),
-            ...(result?.termSignal === undefined ? {} : { termSignal: result.termSignal }),
-            ...(result?.termination === undefined ? {} : { termination: result.termination })
-        };
-
-        this.#activeCall = undefined;
-        await this.#store.append(record);
-        return record;
+        return await this.#finishRunning(callId, completedAt, "completed", undefined, result);
     }
 
     async failed(
@@ -115,26 +81,7 @@ export class ToolCallHistory {
         completedAt: string,
         result?: { exitCode?: number | null; stderrBytes?: number; stdoutBytes?: number; termSignal?: number; termination?: "exited" | "signaled" | "timeout" | "outputLimit" }
     ): Promise<ToolCallRecord> {
-        await this.#initialize();
-        this.#assertActiveCall(callId);
-
-        const startedRecord = this.#readActiveCall(callId);
-        const record: ToolCallRecord = {
-            ...startedRecord,
-            completedAt,
-            error,
-            ...(result?.exitCode === undefined ? {} : { exitCode: result.exitCode }),
-            instance: this.#instanceName,
-            status: "failed",
-            ...(result?.stderrBytes === undefined ? {} : { stderrBytes: result.stderrBytes }),
-            ...(result?.stdoutBytes === undefined ? {} : { stdoutBytes: result.stdoutBytes }),
-            ...(result?.termSignal === undefined ? {} : { termSignal: result.termSignal }),
-            ...(result?.termination === undefined ? {} : { termination: result.termination })
-        };
-
-        this.#activeCall = undefined;
-        await this.#store.append(record);
-        return record;
+        return await this.#finishRunning(callId, completedAt, "failed", error, result);
     }
 
     async denied(callId: string, error: string, completedAt: string): Promise<ToolCallRecord> {
@@ -145,11 +92,23 @@ export class ToolCallHistory {
         return await this.#finishNonRunning(callId, error, completedAt, "expired", "expired");
     }
 
+    async queueTimeout(callId: string, error: string, completedAt: string): Promise<ToolCallRecord> {
+        return await this.#finishNonRunning(callId, error, completedAt, "queueTimeout");
+    }
+
+    async cancelled(callId: string, error: string, completedAt: string): Promise<ToolCallRecord> {
+        return await this.#finishNonRunning(callId, error, completedAt, "cancelled");
+    }
+
+    hasActive(callId: string): boolean {
+        return this.#activeCalls.has(callId);
+    }
+
     async read(query: ToolCallQuery = {}): Promise<ToolCallRecord[]> {
         await this.#initialize();
         const records = await this.#store.readAll();
-        const activeRecord = this.#readActiveRecord();
-        const filtered = sliceByFilters(sliceByCursor(activeRecord === undefined ? records : [...records, activeRecord], query), query);
+        const activeRecords = this.#readActiveRecords();
+        const filtered = sliceByFilters(sliceByCursor([...records, ...activeRecords], query), query);
         return applyLimit(filtered, query);
     }
 
@@ -160,74 +119,90 @@ export class ToolCallHistory {
         this.#initialized = true;
     }
 
-    #assertActiveCall(callId: string): void {
-        if (this.#activeCall?.callId !== callId) {
-            throw new Error(`Active tool call ${callId} was not found.`);
-        }
-    }
+    #readActiveCall(callId: string): ActiveToolCall {
+        const activeCall = this.#activeCalls.get(callId);
 
-    #readActiveCall(callId: string) {
-        this.#assertActiveCall(callId);
-        if (this.#activeCall === undefined) {
+        if (activeCall === undefined) {
             throw new Error(`Active tool call ${callId} was not found.`);
         }
 
-        return this.#activeCall;
+        return activeCall;
     }
 
-    #readActiveRecord(): ToolCallRecord | undefined {
-        if (this.#activeCall === undefined) {
-            return undefined;
-        }
-
-        return {
-            ...this.#activeCall,
+    #readActiveRecords(): ToolCallRecord[] {
+        return [...this.#activeCalls.values()].map((activeCall) => ({
+            ...activeCall,
             instance: this.#instanceName
+        }));
+    }
+
+    async #finishRunning(
+        callId: string,
+        completedAt: string,
+        status: Extract<ToolCallRecord["status"], "completed" | "failed">,
+        error?: string,
+        result?: { exitCode?: number | null; stderrBytes?: number; stdoutBytes?: number; termSignal?: number; termination?: "exited" | "signaled" | "timeout" | "outputLimit" }
+    ): Promise<ToolCallRecord> {
+        await this.#initialize();
+        const startedRecord = this.#readActiveCall(callId);
+        const record: ToolCallRecord = {
+            ...startedRecord,
+            completedAt,
+            ...(error === undefined ? {} : { error }),
+            ...(result?.exitCode === undefined ? {} : { exitCode: result.exitCode }),
+            instance: this.#instanceName,
+            status,
+            ...(result?.stderrBytes === undefined ? {} : { stderrBytes: result.stderrBytes }),
+            ...(result?.stdoutBytes === undefined ? {} : { stdoutBytes: result.stdoutBytes }),
+            ...(result?.termSignal === undefined ? {} : { termSignal: result.termSignal }),
+            ...(result?.termination === undefined ? {} : { termination: result.termination })
         };
+
+        await this.#store.append(record);
+        this.#activeCalls.delete(callId);
+        return record;
     }
 
     async #finishNonRunning(
         callId: string,
         error: string,
         completedAt: string,
-        status: Extract<ToolCallRecord["status"], "denied" | "expired">,
-        decision: ToolCallApprovalDecision
+        status: Extract<ToolCallRecord["status"], "denied" | "expired" | "queueTimeout" | "cancelled">,
+        decision?: ToolCallApprovalDecision
     ): Promise<ToolCallRecord> {
         await this.#initialize();
-        this.#assertActiveCall(callId);
-
         const startedRecord = this.#readActiveCall(callId);
         const record: ToolCallRecord = {
             ...startedRecord,
             completedAt,
-            decision,
+            ...(decision === undefined ? {} : { decision }),
             error,
             instance: this.#instanceName,
             status
         };
 
-        this.#activeCall = undefined;
         await this.#store.append(record);
+        this.#activeCalls.delete(callId);
         return record;
     }
 }
 
 function sliceByFilters(records: ToolCallRecord[], query: ToolCallQuery): ToolCallRecord[] {
     return records.filter((record) => {
-            if (query.source !== undefined && record.source !== query.source) {
-                return false;
-            }
+        if (query.source !== undefined && record.source !== query.source) {
+            return false;
+        }
 
-            if (query.status !== undefined && record.status !== query.status) {
-                return false;
-            }
+        if (query.status !== undefined && record.status !== query.status) {
+            return false;
+        }
 
-            if (query.toolName !== undefined && record.toolName !== query.toolName) {
-                return false;
-            }
+        if (query.toolName !== undefined && record.toolName !== query.toolName) {
+            return false;
+        }
 
-            return true;
-        });
+        return true;
+    });
 }
 
 function sliceByCursor(records: ToolCallRecord[], query: ToolCallQuery): ToolCallRecord[] {

@@ -97,7 +97,7 @@ test("WorkerInstance completes lifecycle against frozen devshell-worker", async 
     assert.equal(stopped.ready, false);
 });
 
-test("WorkerInstance rejects not-ready and concurrent tool calls while persisting history", async () => {
+test("WorkerInstance rejects not-ready and schedules concurrent tool calls while persisting history", async () => {
     const homeDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-instance-harness-"));
     const harness = createWorkerInstanceHarness();
     const instanceName = asInstanceName("task-6-harness");
@@ -119,27 +119,19 @@ test("WorkerInstance rejects not-ready and concurrent tool calls while persistin
         assert.equal(started.ready, true);
 
         const firstCall = instance.callTool("bash_run", { command: "pwd" }, cliToolCallContext);
-        await harness.waitForMethod("bash_run");
+        const secondCall = instance.callTool("bash_run", { command: "ls" }, cliToolCallContext);
+        await harness.waitForMethodCount("bash_run", 2);
         const runningRecords = await instance.readToolCalls({ status: "running" });
         assert.deepEqual(
             runningRecords.map((record) => ({
-                callId: record.callId,
                 status: record.status,
                 toolName: record.toolName
             })),
             [
-                {
-                    callId: runningRecords[0]?.callId,
-                    status: "running",
-                    toolName: "bash_run"
-                }
+                { status: "running", toolName: "bash_run" },
+                { status: "running", toolName: "bash_run" }
             ]
         );
-
-        await assert.rejects(instance.callTool("bash_run", { command: "ls" }, cliToolCallContext), (error: unknown) => {
-            assert.equal((error as { code?: string }).code, errorCodes.coreInstanceBusy);
-            return true;
-        });
 
         harness.respond("bash_run", {
             exitCode: 0,
@@ -150,6 +142,15 @@ test("WorkerInstance rejects not-ready and concurrent tool calls while persistin
         const result = await firstCall;
         assert.equal(result.stdout, stdout);
 
+        harness.respond("bash_run", {
+            exitCode: 0,
+            stderr: "",
+            stdout: "ls output\n"
+        });
+
+        const secondResult = await secondCall;
+        assert.equal(secondResult.stdout, "ls output\n");
+
         const invalidCall = instance.callTool("bash_run", { bad: true } as JsonValue, cliToolCallContext);
         await assert.rejects(invalidCall, (error: unknown) => {
             assert.equal((error as { code?: string }).code, errorCodes.coreToolSchemaUnavailable);
@@ -157,29 +158,31 @@ test("WorkerInstance rejects not-ready and concurrent tool calls while persistin
         });
 
         const records = await instance.readToolCalls();
-        assert.deepEqual(records.map((record) => record.status), ["completed", "failed"]);
+        assert.deepEqual(records.map((record) => record.status), ["completed", "completed", "failed"]);
         assert.equal(records[0]?.source, "cli");
         assert.equal(records[0]?.inputSummary, "{\"command\":\"pwd\"}");
         assert.equal(records[0]?.stdoutBytes, 240);
         assert.equal(records[0]?.stderrBytes, 0);
         assert.equal(records[0]?.termination, undefined);
-        assert.equal(records[1]?.error, errorCodes.coreToolSchemaUnavailable);
+        assert.equal(records[2]?.error, errorCodes.coreToolSchemaUnavailable);
         assert.deepEqual(
-            (await instance.readToolCalls({ after: records[0]?.callId, limit: 1, status: "failed", toolName: "bash_run" })).map(
+            (await instance.readToolCalls({ after: records[1]?.callId, limit: 1, status: "failed", toolName: "bash_run" })).map(
                 (record) => record.callId
             ),
-            [records[1]?.callId]
+            [records[2]?.callId]
         );
 
         const logs = await instance.readLogs();
-        assert.equal(logs.length, 1);
+        assert.equal(logs.length, 2);
         assert.equal(logs[0]?.stream, "stdout");
         assert.equal(logs[0]?.message, stdout);
+        assert.equal(logs[1]?.stream, "stdout");
+        assert.equal(logs[1]?.message, "ls output\n");
 
         const replay = instance.subscribe(1);
         assert.equal(replay.kind, "events");
         assert.deepEqual(
-            replay.events.map((event) => event.type),
+            replay.events.slice(0, 8).map((event) => event.type),
             [
                 "instance.statusChanged",
                 "instance.connectionChanged",
@@ -188,65 +191,62 @@ test("WorkerInstance rejects not-ready and concurrent tool calls while persistin
                 "instance.started",
                 "instance.statusChanged",
                 "instance.connectionChanged",
-                "instance.readyChanged",
-                "toolCall.started",
-                "toolCall.running",
-                "log.appended",
-                "toolCall.completed",
-                "toolCall.started",
-                "toolCall.running",
-                "toolCall.failed"
+                "instance.readyChanged"
             ]
         );
-        assert.deepEqual(replay.events[8]?.data, {
-            callId: replay.events[8]?.data?.callId,
+
+        const eventTypesForCall = (callId: string | undefined) =>
+            replay.events.filter((event) => event.data?.callId === callId).map((event) => event.type);
+
+        assert.deepEqual(eventTypesForCall(records[0]?.callId), [
+            "toolCall.queued",
+            "toolCall.running",
+            "log.appended",
+            "toolCall.completed"
+        ]);
+        assert.deepEqual(eventTypesForCall(records[1]?.callId), [
+            "toolCall.queued",
+            "toolCall.running",
+            "log.appended",
+            "toolCall.completed"
+        ]);
+        assert.deepEqual(eventTypesForCall(records[2]?.callId), [
+            "toolCall.queued",
+            "toolCall.running",
+            "toolCall.failed"
+        ]);
+
+        const firstQueued = replay.events.find(
+            (event) => event.type === "toolCall.queued" && event.data?.callId === records[0]?.callId
+        );
+        const firstRunning = replay.events.find(
+            (event) => event.type === "toolCall.running" && event.data?.callId === records[0]?.callId
+        );
+        const failedEvent = replay.events.find(
+            (event) => event.type === "toolCall.failed" && event.data?.callId === records[2]?.callId
+        );
+
+        assert.deepEqual(firstQueued?.data, {
+            callId: records[0]?.callId,
+            queuedAt: firstQueued?.data.queuedAt,
             source: "cli",
-            startedAt: replay.events[8]?.data?.startedAt,
-            status: "started",
+            startedAt: firstQueued?.data.startedAt,
+            status: "queued",
             toolName: "bash_run"
         });
-        assert.deepEqual(replay.events[9]?.data, {
-            callId: replay.events[8]?.data?.callId,
+        assert.deepEqual(firstRunning?.data, {
+            callId: records[0]?.callId,
             source: "cli",
-            startedAt: replay.events[8]?.data?.startedAt,
+            startedAt: firstQueued?.data.startedAt,
             status: "running",
             toolName: "bash_run"
         });
-        assert.deepEqual(replay.events[10]?.data, {
-            bytes: 240,
-            callId: replay.events[8]?.data?.callId,
-            preview: stdout.slice(0, 160),
-            source: "cli",
-            stream: "stdout",
-            tail: stdout.slice(-160),
-            toolName: "bash_run"
-        });
-        assert.equal((replay.events[10]?.data as { preview?: string }).preview, stdout.slice(0, 160));
-        assert.notEqual((replay.events[10]?.data as { preview?: string }).preview, stdout);
-        assert.deepEqual(replay.events[11]?.data, {
-            callId: replay.events[8]?.data?.callId,
-            completedAt: replay.events[11]?.data?.completedAt,
-            exitCode: 0,
-            source: "cli",
-            startedAt: replay.events[8]?.data?.startedAt,
-            status: "completed",
-            stderrBytes: 0,
-            stdoutBytes: 240,
-            toolName: "bash_run"
-        });
-        assert.deepEqual(replay.events[13]?.data, {
-            callId: replay.events[13]?.data?.callId,
-            source: "cli",
-            startedAt: replay.events[13]?.data?.startedAt,
-            status: "running",
-            toolName: "bash_run"
-        });
-        assert.deepEqual(replay.events[14]?.data, {
-            callId: replay.events[14]?.data?.callId,
-            completedAt: replay.events[14]?.data?.completedAt,
+        assert.deepEqual(failedEvent?.data, {
+            callId: records[2]?.callId,
+            completedAt: failedEvent?.data.completedAt,
             errorCode: errorCodes.coreToolSchemaUnavailable,
             source: "cli",
-            startedAt: replay.events[12]?.data?.startedAt,
+            startedAt: failedEvent?.data.startedAt,
             status: "failed",
             toolName: "bash_run"
         });
@@ -523,7 +523,7 @@ function createWorkerInstanceHarness(): {
     waitForMethod: (method: string) => Promise<void>;
     waitForMethodCount: (method: string, count: number) => Promise<void>;
 } {
-    const pending = new Map<string, string>();
+    const pending = new Map<string, string[]>();
     const requestMethods: string[] = [];
     const methodWaiters = new Map<string, Array<() => void>>();
     let commandStatus: "running" | "stale" | "stopped" = "stopped";
@@ -586,7 +586,9 @@ function createWorkerInstanceHarness(): {
                         continue;
                     }
 
-                    pending.set(frame.method, frame.id);
+                    const pendingIds = pending.get(frame.method) ?? [];
+                    pendingIds.push(frame.id);
+                    pending.set(frame.method, pendingIds);
                     requestMethods.push(frame.method);
                     methodWaiters.get(frame.method)?.splice(0).forEach((resolve) => resolve());
 
@@ -630,13 +632,17 @@ function createWorkerInstanceHarness(): {
             return requestMethods.length;
         },
         respond(method, result) {
-            const requestId = pending.get(method);
+            const requestIds = pending.get(method);
+            const requestId = requestIds?.shift();
 
             if (requestId === undefined) {
                 throw new Error(`No pending request for ${method}.`);
             }
 
-            pending.delete(method);
+            if (requestIds.length === 0) {
+                pending.delete(method);
+            }
+
             void activeProcess?.writer.write({
                 id: requestId,
                 ok: true,

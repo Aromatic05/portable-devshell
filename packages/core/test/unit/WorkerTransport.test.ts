@@ -21,6 +21,14 @@ import { createError, errorCodes } from "@portable-devshell/shared";
 
 const shellEscape = (value: string): string => `'${value.replaceAll("'", `'\\''`)}'`;
 
+function sanitizedWorkerEnv(): NodeJS.ProcessEnv {
+    const env = { ...process.env };
+    delete env.DEVSHELL_WORKER_INTERNAL_INSTANCE;
+    delete env.DEVSHELL_WORKER_INTERNAL_WORKSPACE;
+    delete env.DEVSHELL_WORKER_INTERNAL_SECURITY_MODE;
+    return env;
+}
+
 test("local transport builds start command and rpc bridge", async () => {
     const recorder = createSpawnRecorder();
     const transport = new LocalWorkerTransport({
@@ -37,7 +45,7 @@ test("local transport builds start command and rpc bridge", async () => {
     assert.equal(recorder.calls[0]?.command, "/worker/bin");
     assert.deepEqual(recorder.calls[0]?.args, ["start", "--instance", "task-3-local"]);
     assert.equal(recorder.calls[0]?.options.cwd, "/tmp/workspace");
-    assert.deepEqual(recorder.calls[0]?.options.env, { ...process.env });
+    assert.deepEqual(recorder.calls[0]?.options.env, sanitizedWorkerEnv());
     assert.deepEqual(recorder.calls[0]?.options.stdio, ["ignore", "pipe", "pipe"]);
 
     const rpcProcess = await transport.spawnWorkerRpc({ instanceName: "task-3-local" });
@@ -50,7 +58,7 @@ test("local transport builds start command and rpc bridge", async () => {
     assert.equal(recorder.calls[1]?.command, "/worker/bin");
     assert.deepEqual(recorder.calls[1]?.args, ["rpc", "--instance", "task-3-local"]);
     assert.equal(recorder.calls[1]?.options.cwd, undefined);
-    assert.deepEqual(recorder.calls[1]?.options.env, { ...process.env });
+    assert.deepEqual(recorder.calls[1]?.options.env, sanitizedWorkerEnv());
     assert.deepEqual(recorder.calls[1]?.options.stdio, ["pipe", "pipe", "pipe"]);
 });
 
@@ -66,7 +74,7 @@ test("local transport runs installWorker probe", async () => {
     assert.deepEqual(recorder.calls[0], {
         command: "/worker/bin",
         args: ["--version"],
-        options: { cwd: undefined, env: undefined, stdio: ["ignore", "pipe", "pipe"] }
+        options: { cwd: undefined, env: sanitizedWorkerEnv(), stdio: ["ignore", "pipe", "pipe"] }
     });
 });
 
@@ -162,7 +170,7 @@ test("local transport preserves base process env when instance env is provided",
     process.env.HOME = "/base/home";
     process.env.XDG_RUNTIME_DIR = "/base/runtime";
     const expectedEnv = {
-        ...process.env,
+        ...sanitizedWorkerEnv(),
         FOO: "bar"
     };
 

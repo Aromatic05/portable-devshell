@@ -30,6 +30,7 @@ export * from "./worker/target/WorkerTarget.js";
 export * from "./worker/target/WorkerTargetMapper.js";
 export * from "./worker/target/WorkerTargetProbe.js";
 export * from "./worker/tool/WorkerToolCatalog.js";
+export * from "./worker/tool/ToolCallScheduler.js";
 export * from "./worker/tool/WorkerToolInvoker.js";
 export * from "./worker/transport/driver/WorkerTransportDriverDocker.js";
 export * from "./worker/transport/driver/WorkerTransportDriverLocal.js";

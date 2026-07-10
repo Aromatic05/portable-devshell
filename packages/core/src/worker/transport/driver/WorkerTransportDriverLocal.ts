@@ -41,6 +41,7 @@ export class LocalWorkerTransport implements WorkerCommandTransport {
         const installCommand = new WorkerBinary(await this.#resolveExecutable()).buildInstallCommand();
         const context = this.#createCommandContext("installWorker", [installCommand.command, ...installCommand.args]);
         const child = this.#spawnCommand(context, {
+            env: this.#mergeEnv(undefined),
             stdio: ["ignore", "pipe", "pipe"]
         });
 
@@ -119,10 +120,14 @@ export class LocalWorkerTransport implements WorkerCommandTransport {
     }
 
     #mergeEnv(env: NodeJS.ProcessEnv | undefined): NodeJS.ProcessEnv {
-        return {
+        const merged = {
             ...process.env,
             ...env
         };
+        delete merged.DEVSHELL_WORKER_INTERNAL_INSTANCE;
+        delete merged.DEVSHELL_WORKER_INTERNAL_WORKSPACE;
+        delete merged.DEVSHELL_WORKER_INTERNAL_SECURITY_MODE;
+        return merged;
     }
 
     #spawnCommand(

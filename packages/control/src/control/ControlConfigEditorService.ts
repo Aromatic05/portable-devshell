@@ -259,6 +259,7 @@ function toConfigView(config: ControlConfig): Record<string, JsonValue> {
             enabled: instance.enabled,
             ...(instance.env === undefined ? {} : { env: { ...instance.env } }),
             ...(instance.logs === undefined ? {} : { logs: { ...instance.logs } }),
+            ...(instance.tools === undefined ? {} : { tools: cloneToolsConfig(instance.tools) }),
             mcp: {
                 allowTools: [...instance.mcp.allowTools],
                 enabled: instance.mcp.enabled,
@@ -367,7 +368,8 @@ function requiresWorkerRebuild(previous: ControlInstanceConfig, next: ControlIns
         stableStringify(previous.container) !== stableStringify(next.container),
         previous.dockerBinary !== next.dockerBinary,
         previous.podmanBinary !== next.podmanBinary,
-        stableStringify(previous.logs) !== stableStringify(next.logs)
+        stableStringify(previous.logs) !== stableStringify(next.logs),
+        stableStringify(previous.tools) !== stableStringify(next.tools)
     ].some(Boolean);
 }
 
@@ -433,6 +435,7 @@ function readSingleInstanceConfig(
             mode: resolveSecurityMode(readSecurityMode(instance.security, current?.security?.mode, `${fieldName}.security`))
         },
         ssh: readSshConfig(instance.ssh, current?.ssh, `${fieldName}.ssh`),
+        tools: readToolsConfig(instance.tools, current?.tools, `${fieldName}.tools`),
         workspace: readOptionalString(instance.workspace, `${fieldName}.workspace`)
     };
 }
@@ -507,6 +510,65 @@ function readLogsConfig(
         eventBufferSize: readOptionalInteger(logs.eventBufferSize, `${fieldName}.eventBufferSize`),
         retentionDays: readOptionalInteger(logs.retentionDays, `${fieldName}.retentionDays`)
     };
+}
+
+function readToolsConfig(
+    value: JsonValue | undefined,
+    current: ControlInstanceConfig["tools"],
+    fieldName: string
+): ControlInstanceConfig["tools"] {
+    if (value === undefined) {
+        return current;
+    }
+
+    const tools = readRecord(value, fieldName);
+    return {
+        scheduler: readToolSchedulerConfig(tools.scheduler, current?.scheduler, `${fieldName}.scheduler`)
+    };
+}
+
+function readToolSchedulerConfig(
+    value: JsonValue | undefined,
+    current: NonNullable<ControlInstanceConfig["tools"]>["scheduler"],
+    fieldName: string
+): NonNullable<ControlInstanceConfig["tools"]>["scheduler"] {
+    if (value === undefined) {
+        return current;
+    }
+
+    const scheduler = readRecord(value, fieldName);
+    return {
+        maxRunning: readOptionalInteger(scheduler.maxRunning, `${fieldName}.maxRunning`),
+        queueDepth: readOptionalInteger(scheduler.queueDepth, `${fieldName}.queueDepth`),
+        queueTimeoutMs: readOptionalInteger(scheduler.queueTimeoutMs, `${fieldName}.queueTimeoutMs`),
+        maxRunningPerSession: readOptionalInteger(scheduler.maxRunningPerSession, `${fieldName}.maxRunningPerSession`),
+        queueDepthPerSession: readOptionalInteger(scheduler.queueDepthPerSession, `${fieldName}.queueDepthPerSession`),
+        byTool: readToolSchedulerByTool(scheduler.byTool, current?.byTool, `${fieldName}.byTool`)
+    };
+}
+
+function readToolSchedulerByTool(
+    value: JsonValue | undefined,
+    current: NonNullable<NonNullable<ControlInstanceConfig["tools"]>["scheduler"]>["byTool"],
+    fieldName: string
+): NonNullable<NonNullable<ControlInstanceConfig["tools"]>["scheduler"]>["byTool"] {
+    if (value === undefined) {
+        return current;
+    }
+
+    const byTool = readRecord(value, fieldName);
+    return Object.fromEntries(
+        Object.entries(byTool).map(([toolName, rawToolLimit]) => {
+            const toolLimit = readRecord(rawToolLimit, `${fieldName}.${toolName}`);
+            return [
+                toolName,
+                {
+                    maxRunning: readOptionalInteger(toolLimit.maxRunning, `${fieldName}.${toolName}.maxRunning`),
+                    queueDepth: readOptionalInteger(toolLimit.queueDepth, `${fieldName}.${toolName}.queueDepth`)
+                }
+            ];
+        })
+    );
 }
 
 function readInstanceMcpConfig(
@@ -760,7 +822,25 @@ function cloneInstanceConfig(instance: ControlInstanceConfig): ControlInstanceCo
             allowTools: [...instance.mcp.allowTools]
         },
         security: instance.security === undefined ? undefined : { ...instance.security },
-        ssh: instance.ssh === undefined ? undefined : { ...instance.ssh }
+        ssh: instance.ssh === undefined ? undefined : { ...instance.ssh },
+        tools: instance.tools === undefined ? undefined : cloneToolsConfig(instance.tools)
+    };
+}
+
+function cloneToolsConfig(tools: NonNullable<ControlInstanceConfig["tools"]>): NonNullable<ControlInstanceConfig["tools"]> {
+    return {
+        scheduler:
+            tools.scheduler === undefined
+                ? undefined
+                : {
+                      ...tools.scheduler,
+                      byTool:
+                          tools.scheduler.byTool === undefined
+                              ? undefined
+                              : Object.fromEntries(
+                                    Object.entries(tools.scheduler.byTool).map(([toolName, limits]) => [toolName, { ...limits }])
+                                )
+                  }
     };
 }
 

@@ -22,13 +22,14 @@ import { InstanceEventBuffer } from "../../log/LogEventBuffer.js";
 import type { LogQuery } from "../../log/LogQuery.js";
 import type { InstanceLogEntry } from "../../log/store/LogStoreInstance.js";
 import { InstanceLogStore } from "../../log/store/LogStoreInstance.js";
-import { InstanceBusyError, ToolCallHistory } from "../../log/LogToolCallHistory.js";
+import { ToolCallHistory } from "../../log/LogToolCallHistory.js";
 import { WorkerCommandClient } from "../../worker/command/WorkerCommandClient.js";
 import type { WorkerCommandInteractiveSession } from "../../worker/command/WorkerCommandTransport.js";
 import { WorkerProtocolClient, type WorkerHandshakeResult } from "../../worker/protocol/WorkerProtocolClient.js";
 import { WorkerRpcBridge } from "../../worker/rpc/WorkerRpcBridge.js";
 import { WorkerToolCatalog } from "../tool/WorkerToolCatalog.js";
 import { WorkerToolInvoker } from "../tool/WorkerToolInvoker.js";
+import { ToolCallScheduler, type ToolSchedulerReservation } from "../tool/ToolCallScheduler.js";
 import { InstanceStateMachine, type InstanceStateUpdate } from "../../instance/state/InstanceStateMachine.js";
 import type { InstanceSnapshot } from "../../instance/state/InstanceStateSnapshot.js";
 import type { ResolvedWorkerInstanceConfig } from "./WorkerInstanceConfig.js";
@@ -44,6 +45,7 @@ interface WorkerInstanceDependencies {
     rpcBridge: WorkerRpcBridge;
     stateMachine: InstanceStateMachine;
     toolCallHistory: ToolCallHistory;
+    toolCallScheduler: ToolCallScheduler;
     toolInvoker: WorkerToolInvoker;
 }
 
@@ -58,6 +60,7 @@ export class WorkerInstance {
     readonly #rpcBridge: WorkerRpcBridge;
     readonly #stateMachine: InstanceStateMachine;
     readonly #toolCallHistory: ToolCallHistory;
+    readonly #toolCallScheduler: ToolCallScheduler;
     readonly #toolInvoker: WorkerToolInvoker;
     #handshake?: WorkerHandshakeResult;
     #intentionalRpcCloseDepth = 0;
@@ -75,6 +78,7 @@ export class WorkerInstance {
         this.#rpcBridge = dependencies.rpcBridge;
         this.#stateMachine = dependencies.stateMachine;
         this.#toolCallHistory = dependencies.toolCallHistory;
+        this.#toolCallScheduler = dependencies.toolCallScheduler;
         this.#toolInvoker = dependencies.toolInvoker;
         this.#rpcBridge.onDisconnect((error) => {
             void this.#handleRpcDisconnect(error);
@@ -310,53 +314,75 @@ export class WorkerInstance {
             toolName
         } as const;
 
-        try {
-            await this.#toolCallHistory.started(callId, toolName, inputSummary, context, startedAt);
-        } catch (error) {
-            if (error instanceof InstanceBusyError) {
-                throw createError({
-                    code: errorCodes.coreInstanceBusy,
-                    message: error.message,
-                    retryable: false,
-                    details: { instanceName: this.#config.name, toolName }
-                });
-            }
+        let reservation: ToolSchedulerReservation;
 
+        try {
+            reservation = this.#toolCallScheduler.reserve({
+                callId,
+                instanceName: this.#config.name,
+                sessionId: context.sessionId,
+                source: context.source,
+                toolName
+            });
+        } catch (error) {
+            throw normalizeToolSchedulerError(error);
+        }
+
+        let approvalState: { approvalId?: string; decision?: ToolCallApprovalDecision };
+
+        try {
+            await this.#toolCallHistory.started(callId, toolName, inputSummary, context, startedAt, "queued");
+            await this.#appendEvent(
+                "toolCall.queued",
+                toEventData({
+                    ...eventContext,
+                    queuedAt: startedAt,
+                    startedAt,
+                    status: "queued"
+                })
+            );
+
+            approvalState = await this.#prepareToolCallApproval(
+                callId,
+                toolName,
+                inputSummary,
+                context,
+                startedAt,
+                () => reservation.markPendingApproval()
+            );
+        } catch (error) {
+            reservation.release();
+            if (this.#toolCallHistory.hasActive(callId)) {
+                const failedAt = new Date().toISOString();
+                const errorCode = getErrorCode(error, errorCodes.coreProviderFailed);
+                await this.#toolCallHistory.failed(callId, errorCode, failedAt).catch(() => undefined);
+            }
             throw error;
         }
 
-        await this.#appendEvent(
-            "toolCall.started",
-            toEventData({
-                ...eventContext,
-                startedAt,
-                status: "started"
-            })
-        );
-
-        const approvalState = await this.#prepareToolCallApproval(callId, toolName, inputSummary, context, startedAt);
         const runningContext = {
             ...eventContext,
             ...(approvalState.approvalId === undefined ? {} : { approvalId: approvalState.approvalId })
         };
 
-        await this.#appendEvent(
-            "toolCall.running",
-            toEventData({
-                ...runningContext,
-                ...(approvalState.decision === undefined ? {} : { decision: approvalState.decision }),
-                startedAt,
-                status: "running"
-            })
-        );
-
+        let toolExecutionSucceeded = false;
         try {
-            const result = await this.#toolInvoker.invoke(toolName, input);
+            const result = await reservation.run(async () => {
+                await this.#toolCallHistory.running(callId, approvalState.decision);
+                await this.#appendEvent(
+                    "toolCall.running",
+                    toEventData({
+                        ...runningContext,
+                        ...(approvalState.decision === undefined ? {} : { decision: approvalState.decision }),
+                        startedAt,
+                        status: "running"
+                    })
+                );
+                return await this.#toolInvoker.invoke(toolName, input);
+            });
+            toolExecutionSucceeded = true;
             const bashResult = toolName === "bash_run" ? asBashToolResult(result) : undefined;
             const completedAt = new Date().toISOString();
-            if (bashResult !== undefined) {
-                await this.#appendToolLogs(bashResult, runningContext);
-            }
             await this.#toolCallHistory.completed(
                 callId,
                 completedAt,
@@ -368,6 +394,9 @@ export class WorkerInstance {
                     termination: bashResult.termination
                 }
             );
+            if (bashResult !== undefined) {
+                await this.#appendToolLogs(bashResult, runningContext);
+            }
             await this.#appendEvent(
                 "toolCall.completed",
                 toEventData({
@@ -385,9 +414,34 @@ export class WorkerInstance {
             );
             return result;
         } catch (error) {
+            if (toolExecutionSucceeded) {
+                throw error;
+            }
             const finishedAt = new Date().toISOString();
             const errorCode = getErrorCode(error, errorCodes.coreProviderFailed);
             const result = asCommandResult(error);
+            const nonRunningStatus = readNonRunningSchedulerStatus(errorCode);
+
+            if (nonRunningStatus !== undefined) {
+                if (nonRunningStatus === "queueTimeout") {
+                    await this.#toolCallHistory.queueTimeout(callId, errorCode, finishedAt);
+                } else {
+                    await this.#toolCallHistory.cancelled(callId, errorCode, finishedAt);
+                }
+                const eventType = nonRunningStatus === "queueTimeout" ? "toolCall.queueTimeout" : "toolCall.cancelled";
+                await this.#appendEvent(
+                    eventType,
+                    toEventData({
+                        ...runningContext,
+                        completedAt: finishedAt,
+                        errorCode,
+                        ...(approvalState.decision === undefined ? {} : { decision: approvalState.decision }),
+                        startedAt,
+                        status: nonRunningStatus
+                    })
+                );
+                throw normalizeToolSchedulerError(error);
+            }
 
             if (result !== undefined) {
                 await this.#appendToolLogs(result, runningContext);
@@ -684,7 +738,8 @@ export class WorkerInstance {
         toolName: string,
         inputSummary: string,
         context: ToolCallContext,
-        startedAt: string
+        startedAt: string,
+        onPendingApproval: () => void
     ): Promise<{ approvalId?: string; decision?: ToolCallApprovalDecision }> {
         let evaluation: Awaited<ReturnType<ApprovalManager["evaluate"]>>;
 
@@ -700,7 +755,6 @@ export class WorkerInstance {
         }
 
         if (evaluation.decision === "allow") {
-            await this.#toolCallHistory.running(callId);
             return {};
         }
 
@@ -708,6 +762,7 @@ export class WorkerInstance {
             return await this.#denyToolCall(callId, toolName, context, startedAt, evaluation.error);
         }
 
+        onPendingApproval();
         await this.#toolCallHistory.pendingApproval(callId, evaluation.request.approvalId);
         await this.#appendEvent("approval.requested", toApprovalEventData(evaluation.request));
         await this.#appendEvent(
@@ -733,7 +788,6 @@ export class WorkerInstance {
 
         if (resolution.status === "approved") {
             const approvedRequest = await this.#approvalManager.getApproval(evaluation.request.approvalId);
-            await this.#toolCallHistory.running(callId, "approved");
             await this.#appendEvent("approval.approved", toApprovalEventData(approvedRequest, resolution.decision));
             return {
                 approvalId: evaluation.request.approvalId,
@@ -998,6 +1052,47 @@ function getErrorCode(error: unknown, fallback: string): string {
 
 function isKnownErrorCode(error: unknown): boolean {
     return typeof error === "object" && error !== null && "code" in error && typeof error.code === "string";
+}
+
+function readNonRunningSchedulerStatus(errorCode: string): "queueTimeout" | "cancelled" | undefined {
+    if (errorCode === errorCodes.coreToolQueueTimeout) {
+        return "queueTimeout";
+    }
+
+    if (errorCode === errorCodes.coreToolCallCancelled) {
+        return "cancelled";
+    }
+
+    return undefined;
+}
+
+function normalizeToolSchedulerError(error: unknown): unknown {
+    const errorCode = getErrorCode(error, errorCodes.coreProviderFailed);
+
+    if (
+        errorCode !== errorCodes.coreToolSchedulerFull &&
+        errorCode !== errorCodes.coreToolQueueTimeout &&
+        errorCode !== errorCodes.coreToolCallCancelled
+    ) {
+        return error;
+    }
+
+    return createError({
+        code: errorCode,
+        cause: error,
+        message: error instanceof Error ? error.message : "Tool scheduler rejected the tool call.",
+        retryable: true,
+        details: readErrorDetails(error)
+    });
+}
+
+function readErrorDetails(error: unknown): JsonValue {
+    if (typeof error !== "object" || error === null || Array.isArray(error) || !("details" in error)) {
+        return {};
+    }
+
+    const details = (error as { details?: unknown }).details;
+    return details === undefined ? {} : (details as JsonValue);
 }
 
 function isInteractiveSession(value: unknown): value is WorkerCommandInteractiveSession {

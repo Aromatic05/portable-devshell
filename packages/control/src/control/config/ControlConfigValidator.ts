@@ -69,6 +69,7 @@ export class ControlConfigValidator {
 
         this.#validateSecurityMode(instance.security?.mode);
         this.#validateApprovalPolicy(instance.approvalPolicy);
+        this.#validateToolScheduler(instance.tools?.scheduler);
 
         const expectedPath = `/${instance.name}/mcp`;
         if (instance.mcp.path !== undefined && instance.mcp.path !== expectedPath) {
@@ -222,6 +223,46 @@ export class ControlConfigValidator {
             }
         }
     }
+    #validateToolScheduler(scheduler: NonNullable<ControlInstanceConfig["tools"]>["scheduler"]): void {
+        if (scheduler === undefined) {
+            return;
+        }
+
+        this.#validatePositiveInteger(scheduler.maxRunning, "tools.scheduler.maxRunning");
+        this.#validateNonNegativeInteger(scheduler.queueDepth, "tools.scheduler.queueDepth");
+        this.#validatePositiveInteger(scheduler.queueTimeoutMs, "tools.scheduler.queueTimeoutMs");
+        this.#validatePositiveInteger(scheduler.maxRunningPerSession, "tools.scheduler.maxRunningPerSession");
+        this.#validateNonNegativeInteger(scheduler.queueDepthPerSession, "tools.scheduler.queueDepthPerSession");
+
+        for (const [toolName, limit] of Object.entries(scheduler.byTool ?? {})) {
+            if (toolName.trim().length === 0) {
+                throw new Error("tools.scheduler.byTool tool name must not be empty");
+            }
+            this.#validatePositiveInteger(limit.maxRunning, `tools.scheduler.byTool.${toolName}.maxRunning`);
+            this.#validateNonNegativeInteger(limit.queueDepth, `tools.scheduler.byTool.${toolName}.queueDepth`);
+        }
+    }
+
+    #validatePositiveInteger(value: number | undefined, fieldPath: string): void {
+        if (value === undefined) {
+            return;
+        }
+
+        if (!Number.isInteger(value) || value < 1) {
+            throw new Error(`${fieldPath} must be a positive integer`);
+        }
+    }
+
+    #validateNonNegativeInteger(value: number | undefined, fieldPath: string): void {
+        if (value === undefined) {
+            return;
+        }
+
+        if (!Number.isInteger(value) || value < 0) {
+            throw new Error(`${fieldPath} must be a non-negative integer`);
+        }
+    }
+
 }
 
 function toMcpGuardAuth(mode: "none" | "oauth2" | "token"): { enabled: boolean; provider: string } | undefined {

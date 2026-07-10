@@ -10,7 +10,7 @@ export interface ToolCallContext {
     source: ToolCallSource;
 }
 
-export type ToolCallStatus = "pendingApproval" | "running" | "completed" | "failed" | "denied" | "expired";
+export type ToolCallStatus = "queued" | "pendingApproval" | "running" | "completed" | "failed" | "denied" | "expired" | "queueTimeout" | "cancelled";
 
 export type ToolCallApprovalDecision = "approved" | "denied" | "expired";
 

@@ -10,7 +10,6 @@ import { McpToolSchemaUnavailableError } from "../tool/McpToolSchemaAdapter.js";
 import { McpEndpointWorker } from "./McpEndpointWorker.js";
 
 interface McpEndpointSession {
-    nextToolCallContext?: ToolCallContext;
     server: Server;
     transport: StreamableHTTPServerTransport;
 }
@@ -46,14 +45,6 @@ export class McpEndpointBinding {
             if (session === undefined) {
                 writeJsonRpcError(response, 404, -32001, "Session not found");
                 return;
-            }
-
-            if (isToolsCallBody(body)) {
-                session.nextToolCallContext = {
-                    requestId: toRequestId(getRequestId(body)),
-                    sessionId,
-                    source: "mcp"
-                };
             }
 
             await session.transport.handleRequest(request, response, body);
@@ -94,7 +85,7 @@ export class McpEndpointBinding {
         });
         const session: McpEndpointSession = { server, transport };
 
-        this.#registerHandlers(server, session);
+        this.#registerHandlers(server);
         await server.connect(transport);
         return session;
     }
@@ -107,7 +98,7 @@ export class McpEndpointBinding {
         await this.#worker.appendSessionClosed(sessionId);
     }
 
-    #registerHandlers(server: Server, session: McpEndpointSession): void {
+    #registerHandlers(server: Server): void {
         server.setRequestHandler(ListToolsRequestSchema, async () => {
             try {
                 return {
@@ -118,14 +109,16 @@ export class McpEndpointBinding {
             }
         });
 
-        server.setRequestHandler(CallToolRequestSchema, async (request) => {
+        server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
             try {
-                const context = session.nextToolCallContext ?? { source: "mcp" as const };
-                session.nextToolCallContext = undefined;
+                const context: ToolCallContext = {
+                    requestId: toRequestId(extra.requestId),
+                    sessionId: extra.sessionId,
+                    source: "mcp"
+                };
                 const result = await this.#worker.callTool(request.params.name, (request.params.arguments ?? {}) as JsonValue, context);
                 return toCallToolResult(result);
             } catch (error) {
-                session.nextToolCallContext = undefined;
                 throw toMcpError(error);
             }
         });
@@ -156,9 +149,6 @@ function toRequestId(value: unknown): string | undefined {
     return undefined;
 }
 
-function isToolsCallBody(value: JsonValue): value is { id?: string | number; method: "tools/call" } {
-    return typeof value === "object" && value !== null && !Array.isArray(value) && value.method === "tools/call";
-}
 
 function getRequestId(body: JsonValue): string | number | null {
     if (typeof body === "object" && body !== null && !Array.isArray(body) && "id" in body) {

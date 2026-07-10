@@ -22,6 +22,24 @@ export interface ControlInstanceLogsConfig {
     retentionDays?: number;
 }
 
+export interface ControlToolSchedulerToolLimitConfig {
+    maxRunning?: number;
+    queueDepth?: number;
+}
+
+export interface ControlToolSchedulerConfig {
+    maxRunning?: number;
+    queueDepth?: number;
+    queueTimeoutMs?: number;
+    maxRunningPerSession?: number;
+    queueDepthPerSession?: number;
+    byTool?: Record<string, ControlToolSchedulerToolLimitConfig>;
+}
+
+export interface ControlInstanceToolsConfig {
+    scheduler?: ControlToolSchedulerConfig;
+}
+
 export interface ControlInstanceMcpConfig {
     allowTools: string[];
     enabled: boolean;
@@ -49,6 +67,7 @@ export interface ControlInstanceConfig {
     provider: ControlProviderKind;
     security?: ControlInstanceSecurityConfig;
     ssh?: ControlInstanceSshConfig;
+    tools?: ControlInstanceToolsConfig;
     workspace?: string;
 }
 
@@ -218,6 +237,7 @@ export class ControlInstanceTomlCodec {
             },
             ...(instance.logs === undefined ? {} : { logs: withoutUndefined(instance.logs) }),
             ...(instance.approvalPolicy === undefined ? {} : { approvalPolicy: encodeApprovalPolicy(instance.approvalPolicy) }),
+            ...(instance.tools === undefined ? {} : { tools: encodeToolsConfig(instance.tools) }),
             ...(instance.security === undefined ? {} : { security: withoutUndefined(instance.security) })
         });
     }
@@ -231,6 +251,7 @@ function parseInstanceDocument(document: TomlRecord): ControlInstanceConfig {
     const security = asOptionalRecord(document.security, "security");
     const ssh = asOptionalRecord(document.ssh, "ssh");
     const container = asOptionalRecord(document.container, "container");
+    const tools = asOptionalRecord(document.tools, "tools");
 
     if (document.workerBinaryPath !== undefined) {
         throw new Error("workerBinaryPath is not supported");
@@ -275,8 +296,74 @@ function parseInstanceDocument(document: TomlRecord): ControlInstanceConfig {
         provider: asProviderKind(asString(document.provider, "provider")),
         security: security === undefined ? undefined : { mode: asOptionalString(security.mode, "security.mode") },
         ssh: ssh === undefined ? undefined : { command: asOptionalString(ssh.command, "ssh.command") },
+        tools: tools === undefined ? undefined : parseToolsConfig(tools),
         workspace: asOptionalString(document.workspace, "workspace")
     };
+}
+
+function encodeToolsConfig(tools: ControlInstanceToolsConfig): TomlRecord {
+    return {
+        ...(tools.scheduler === undefined ? {} : { scheduler: encodeToolSchedulerConfig(tools.scheduler) })
+    };
+}
+
+function encodeToolSchedulerConfig(scheduler: ControlToolSchedulerConfig): TomlRecord {
+    return {
+        ...withoutUndefined({
+            maxRunning: scheduler.maxRunning,
+            queueDepth: scheduler.queueDepth,
+            queueTimeoutMs: scheduler.queueTimeoutMs,
+            maxRunningPerSession: scheduler.maxRunningPerSession,
+            queueDepthPerSession: scheduler.queueDepthPerSession
+        }),
+        ...(scheduler.byTool === undefined ? {} : { byTool: encodeToolSchedulerByTool(scheduler.byTool) })
+    };
+}
+
+function encodeToolSchedulerByTool(byTool: Record<string, ControlToolSchedulerToolLimitConfig>): TomlRecord {
+    return Object.fromEntries(
+        Object.entries(byTool).map(([toolName, limits]) => [
+            toolName,
+            withoutUndefined({
+                maxRunning: limits.maxRunning,
+                queueDepth: limits.queueDepth
+            })
+        ])
+    ) as TomlRecord;
+}
+
+function parseToolsConfig(tools: TomlRecord): ControlInstanceToolsConfig {
+    const scheduler = asOptionalRecord(tools.scheduler, "tools.scheduler");
+    return {
+        scheduler: scheduler === undefined ? undefined : parseToolSchedulerConfig(scheduler)
+    };
+}
+
+function parseToolSchedulerConfig(scheduler: TomlRecord): ControlToolSchedulerConfig {
+    const byTool = asOptionalRecord(scheduler.byTool, "tools.scheduler.byTool");
+    return {
+        maxRunning: asOptionalInteger(scheduler.maxRunning, "tools.scheduler.maxRunning"),
+        queueDepth: asOptionalInteger(scheduler.queueDepth, "tools.scheduler.queueDepth"),
+        queueTimeoutMs: asOptionalInteger(scheduler.queueTimeoutMs, "tools.scheduler.queueTimeoutMs"),
+        maxRunningPerSession: asOptionalInteger(scheduler.maxRunningPerSession, "tools.scheduler.maxRunningPerSession"),
+        queueDepthPerSession: asOptionalInteger(scheduler.queueDepthPerSession, "tools.scheduler.queueDepthPerSession"),
+        byTool: byTool === undefined ? undefined : parseToolSchedulerByTool(byTool)
+    };
+}
+
+function parseToolSchedulerByTool(byTool: TomlRecord): Record<string, ControlToolSchedulerToolLimitConfig> {
+    return Object.fromEntries(
+        Object.entries(byTool).map(([toolName, value]) => {
+            const toolLimit = asRecord(value, `tools.scheduler.byTool.${toolName}`);
+            return [
+                toolName,
+                {
+                    maxRunning: asOptionalInteger(toolLimit.maxRunning, `tools.scheduler.byTool.${toolName}.maxRunning`),
+                    queueDepth: asOptionalInteger(toolLimit.queueDepth, `tools.scheduler.byTool.${toolName}.queueDepth`)
+                }
+            ];
+        })
+    );
 }
 
 function encodeApprovalPolicy(policy: ApprovalPolicy): TomlRecord {

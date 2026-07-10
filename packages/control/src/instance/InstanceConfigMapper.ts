@@ -37,6 +37,7 @@ export class InstanceConfigMapper {
             },
             eventBufferSize: instance.logs?.eventBufferSize,
             approvalPolicy: instance.approvalPolicy,
+            toolScheduler: instance.tools?.scheduler,
             effectiveSecurityMode,
             homeDirectory: process.env.HOME,
             name: asInstanceName(instance.name),

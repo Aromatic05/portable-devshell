@@ -12,6 +12,7 @@ import { WorkerRpcBridge } from "../../worker/rpc/WorkerRpcBridge.js";
 import { WorkerRpcClient } from "../../worker/rpc/WorkerRpcClient.js";
 import { WorkerToolCatalog } from "../tool/WorkerToolCatalog.js";
 import { WorkerToolInvoker } from "../tool/WorkerToolInvoker.js";
+import { ToolCallScheduler } from "../tool/ToolCallScheduler.js";
 import { ToolAllowlist } from "../../tool/ToolAllowlist.js";
 import { InstancePaths } from "../../instance/InstancePaths.js";
 import { InstanceStateMachine } from "../../instance/state/InstanceStateMachine.js";
@@ -51,6 +52,7 @@ export class WorkerInstanceFactory {
                 timeout: resolved.approvalTimeout
             }),
             toolCallHistory: new ToolCallHistory(resolved.name, new JsonlStore<ToolCallRecord>(paths.toolCallsFile)),
+            toolCallScheduler: new ToolCallScheduler(resolved.toolScheduler),
             toolInvoker: new WorkerToolInvoker(rpcClient, catalog)
         });
     }
