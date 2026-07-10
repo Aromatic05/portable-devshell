@@ -22,7 +22,7 @@ export class WorkerToolCatalog {
             if (!parsed.success) {
                 throw createError({
                     code: errorCodes.coreToolSchemaUnavailable,
-                    message: `Tool schema for ${tool.name} is invalid.`,
+                    message: `Worker tool catalog is incompatible: ${tool.name} has an invalid schema. Upgrade and restart the Worker to match this portable-devshell version.`,
                     retryable: false,
                     details: {
                         toolName: tool.name,

@@ -58,14 +58,22 @@ test("WorkerToolCatalog rejects invalid tool schema from tools.list", () => {
     );
 });
 
-test("WorkerToolCatalog rejects tool definitions without output schema or access", () => {
+test("WorkerToolCatalog identifies an incompatible Worker catalog", () => {
     const catalog = new WorkerToolCatalog(new ToolAllowlist([]));
 
-    assert.throws(() => catalog.refresh([
-        {
-            description: "Incomplete tool.",
-            inputSchema: {},
-            name: "bash_run"
-        } as never
-    ]));
+    assert.throws(
+        () => catalog.refresh([
+            {
+                description: "Incomplete tool.",
+                inputSchema: {},
+                name: "bash_run"
+            } as never
+        ]),
+        (error: unknown) => {
+            assert.equal((error as { code?: string }).code, errorCodes.coreToolSchemaUnavailable);
+            assert.match((error as { message?: string }).message ?? "", /Upgrade and restart the Worker/u);
+            assert.equal((error as { details?: { reason?: string } }).details?.reason, "tool schemas must be JSON objects");
+            return true;
+        }
+    );
 });
