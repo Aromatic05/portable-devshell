@@ -278,9 +278,9 @@ fn file_edit_uses_the_first_actual_line_ending_when_writing_back() {
 fn file_edit_updates_a_sparse_snapshot_without_losing_the_file_shape() {
     let env = TestEnv::new();
     let instance = "aromatic-sparse-edit";
-    let mut content = String::with_capacity(4 * 1024 * 1024 + 1024);
+    let mut content = String::with_capacity(16 * 1024 * 1024 + 1024);
     content.push_str("first line\n");
-    while content.len() <= 4 * 1024 * 1024 {
+    while content.len() <= 16 * 1024 * 1024 {
         content.push_str("unchanged sparse snapshot line\n");
     }
     fs::write(env.workspace().join("large.txt"), content).unwrap();
@@ -311,7 +311,13 @@ fn file_edit_updates_a_sparse_snapshot_without_losing_the_file_shape() {
         }),
     );
     assert_eq!(edited["ok"], true, "{edited}");
-    assert_eq!(fs::read_to_string(env.workspace().join("large.txt")).unwrap().lines().next(), Some("updated line"));
+    assert_eq!(
+        fs::read_to_string(env.workspace().join("large.txt"))
+            .unwrap()
+            .lines()
+            .next(),
+        Some("updated line")
+    );
 
     env.json_command(&["stop", "--instance", instance]);
 }

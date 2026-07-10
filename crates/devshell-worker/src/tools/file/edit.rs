@@ -1,4 +1,6 @@
-use std::io::Write;
+use std::collections::BTreeMap;
+use std::fs;
+use std::io::{BufRead, BufReader, Write};
 use std::sync::Arc;
 
 use schemars::schema_for;
@@ -60,6 +62,9 @@ impl ToolHandler for FileEditTool {
                 "file.snapshotPathMismatch",
                 "snapshot belongs to a different file",
             ));
+        }
+        if snapshot.full_text.is_none() {
+            return edit_sparse(&self.state, input, requested.raw, path, snapshot);
         }
         let mut text = TextFile::read(&path)?;
         if text.revision != snapshot.revision {
@@ -163,6 +168,224 @@ impl ToolHandler for FileEditTool {
         })
         .map_err(|error| ToolError::new("tool.internalError", error.to_string()))
     }
+}
+
+fn edit_sparse(
+    state: &FileToolState,
+    input: FileEditInput,
+    display_path: String,
+    path: std::path::PathBuf,
+    snapshot: crate::tools::file::state::FileSnapshot,
+) -> Result<serde_json::Value, ToolError> {
+    let metadata = TextFile::inspect(&path)?;
+    if metadata.revision != snapshot.revision {
+        return Err(ToolError::retryable(
+            "file.revisionMismatch",
+            "file changed since this snapshot",
+        ));
+    }
+    validate_operations(&input.operations, &snapshot.seen_lines, metadata.total_lines)?;
+
+    let mut ranges = BTreeMap::new();
+    let mut inserts = BTreeMap::new();
+    let mut added = 0;
+    let mut removed = 0;
+    let mut first = usize::MAX;
+    for operation in &input.operations {
+        match operation {
+            FileEditOperation::Replace {
+                start_line,
+                end_line,
+                lines,
+            } => {
+                let replacement = checked_lines(lines)?;
+                first = first.min(*start_line);
+                removed += end_line - start_line + 1;
+                added += replacement.len();
+                ranges.insert(*start_line, (*end_line, Some(replacement)));
+            }
+            FileEditOperation::Delete {
+                start_line,
+                end_line,
+            } => {
+                first = first.min(*start_line);
+                removed += end_line - start_line + 1;
+                ranges.insert(*start_line, (*end_line, None));
+            }
+            FileEditOperation::Insert { at, line, lines } => {
+                let replacement = checked_lines(lines)?;
+                let boundary = match at {
+                    InsertAt::Head => 0,
+                    InsertAt::Tail => metadata.total_lines,
+                    InsertAt::Before => line.unwrap() - 1,
+                    InsertAt::After => line.unwrap(),
+                };
+                first = first.min(boundary + 1);
+                added += replacement.len();
+                inserts.insert(boundary, replacement);
+            }
+        }
+    }
+
+    let final_newline = input
+        .operations
+        .iter()
+        .find_map(|operation| match operation {
+            FileEditOperation::Insert {
+                at: InsertAt::Tail,
+                lines,
+                ..
+            } => Some(lines.last().is_some_and(String::is_empty)),
+            FileEditOperation::Replace {
+                end_line, lines, ..
+            } if *end_line == metadata.total_lines => Some(lines.last().is_some_and(String::is_empty)),
+            _ => None,
+        })
+        .unwrap_or(metadata.final_newline);
+
+    let parent = path
+        .parent()
+        .ok_or_else(|| ToolError::new("file.writeFailed", "target has no parent"))?;
+    let source = fs::File::open(&path)
+        .map_err(|error| ToolError::new("file.notFound", error.to_string()))?;
+    let mut reader = BufReader::new(source);
+    let mut temp = NamedTempFile::new_in(parent)
+        .map_err(|error| ToolError::new("file.writeFailed", error.to_string()))?;
+    if metadata.bom {
+        temp.write_all(&[0xEF, 0xBB, 0xBF])
+            .map_err(|error| ToolError::new("file.writeFailed", error.to_string()))?;
+    }
+
+    let mut wrote_line = false;
+    let mut line_no = 1;
+    let mut first_input_line = true;
+    let mut buffer = Vec::new();
+    while line_no <= metadata.total_lines {
+        if let Some(lines) = inserts.get(&(line_no - 1)) {
+            write_lines(&mut temp, lines, metadata.line_ending, &mut wrote_line)?;
+        }
+        if let Some((end_line, replacement)) = ranges.get(&line_no) {
+            if let Some(lines) = replacement {
+                write_lines(&mut temp, lines, metadata.line_ending, &mut wrote_line)?;
+            }
+            for _ in line_no..=*end_line {
+                read_line(&mut reader, &mut buffer, &mut first_input_line)?;
+            }
+            line_no = end_line + 1;
+            continue;
+        }
+        let line = read_line(&mut reader, &mut buffer, &mut first_input_line)?;
+        write_line(&mut temp, line, metadata.line_ending, &mut wrote_line)?;
+        line_no += 1;
+    }
+    if let Some(lines) = inserts.get(&metadata.total_lines) {
+        write_lines(&mut temp, lines, metadata.line_ending, &mut wrote_line)?;
+    }
+    if final_newline && wrote_line {
+        temp.write_all(metadata.line_ending.as_bytes())
+            .map_err(|error| ToolError::new("file.writeFailed", error.to_string()))?;
+    }
+    temp.flush()
+        .map_err(|error| ToolError::new("file.writeFailed", error.to_string()))?;
+    temp.persist(&path)
+        .map_err(|error| ToolError::new("file.writeFailed", error.error.to_string()))?;
+
+    let metadata = TextFile::inspect(&path)?;
+    let count = metadata.total_lines.min(200);
+    let content = read_anchored_prefix(&path, count)?;
+    let snapshot_id = state
+        .snapshots
+        .lock()
+        .unwrap()
+        .remember_sparse(&path, &metadata, 1..=count);
+    let returned_ranges = if count == 0 {
+        Vec::new()
+    } else {
+        vec![ReturnedRange {
+            start_line: 1,
+            end_line: count,
+        }]
+    };
+    serde_json::to_value(FileEditOutput {
+        path: display_path,
+        snapshot_id,
+        revision: metadata.revision,
+        added_lines: added,
+        removed_lines: removed,
+        first_changed_line: first,
+        content,
+        returned_ranges,
+        total_lines: metadata.total_lines,
+        total_bytes: metadata.total_bytes,
+        truncated: metadata.total_lines > count,
+    })
+    .map_err(|error| ToolError::new("tool.internalError", error.to_string()))
+}
+
+fn write_lines(
+    output: &mut NamedTempFile,
+    lines: &[String],
+    line_ending: &str,
+    wrote_line: &mut bool,
+) -> Result<(), ToolError> {
+    for line in lines {
+        write_line(output, line, line_ending, wrote_line)?;
+    }
+    Ok(())
+}
+
+fn write_line(
+    output: &mut NamedTempFile,
+    line: &str,
+    line_ending: &str,
+    wrote_line: &mut bool,
+) -> Result<(), ToolError> {
+    if *wrote_line {
+        output
+            .write_all(line_ending.as_bytes())
+            .map_err(|error| ToolError::new("file.writeFailed", error.to_string()))?;
+    }
+    output
+        .write_all(line.as_bytes())
+        .map_err(|error| ToolError::new("file.writeFailed", error.to_string()))?;
+    *wrote_line = true;
+    Ok(())
+}
+
+fn read_line<'a>(
+    reader: &mut BufReader<fs::File>,
+    buffer: &'a mut Vec<u8>,
+    first_line: &mut bool,
+) -> Result<&'a str, ToolError> {
+    buffer.clear();
+    let count = reader
+        .read_until(b'\n', buffer)
+        .map_err(|error| ToolError::new("file.writeFailed", error.to_string()))?;
+    if count == 0 {
+        return Err(ToolError::new("file.writeFailed", "file ended before its expected line count"));
+    }
+    let mut line = buffer.as_slice();
+    line = line.strip_suffix(b"\n").unwrap_or(line);
+    line = line.strip_suffix(b"\r").unwrap_or(line);
+    if *first_line && line.starts_with(&[0xEF, 0xBB, 0xBF]) {
+        line = &line[3..];
+    }
+    *first_line = false;
+    std::str::from_utf8(line).map_err(|_| ToolError::new("file.notText", "file is not valid UTF-8"))
+}
+
+fn read_anchored_prefix(path: &std::path::Path, count: usize) -> Result<String, ToolError> {
+    let source = fs::File::open(path)
+        .map_err(|error| ToolError::new("file.notFound", error.to_string()))?;
+    let mut reader = BufReader::new(source);
+    let mut buffer = Vec::new();
+    let mut first_line = true;
+    let mut content = Vec::new();
+    for line_no in 1..=count {
+        let line = read_line(&mut reader, &mut buffer, &mut first_line)?;
+        content.push(format!("{line_no}:{line}"));
+    }
+    Ok(content.join("\n"))
 }
 fn checked_lines(lines: &[String]) -> Result<Vec<String>, ToolError> {
     if lines.is_empty() {

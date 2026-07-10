@@ -106,6 +106,47 @@ impl SnapshotStore {
         id
     }
 
+    pub fn remember_sparse(
+        &mut self,
+        path: &Path,
+        metadata: &TextMetadata,
+        seen_lines: impl IntoIterator<Item = usize>,
+    ) -> String {
+        let key = (path.display().to_string(), metadata.revision.clone());
+        let now = now_ms();
+        if let Some(id) = self.by_content.get(&key).cloned() {
+            if let Some(snapshot) = self.snapshots.get_mut(&id) {
+                snapshot.seen_lines.extend(seen_lines);
+                snapshot.last_accessed_at_ms = now;
+            }
+            self.touch(&id);
+            return id;
+        }
+
+        let id = Uuid::new_v4().to_string();
+        self.snapshots.insert(
+            id.clone(),
+            FileSnapshot {
+                id: id.clone(),
+                canonical_path: key.0.clone(),
+                revision: key.1.clone(),
+                seen_lines: seen_lines.into_iter().collect(),
+                total_lines: metadata.total_lines,
+                total_bytes: metadata.total_bytes,
+                bom: metadata.bom,
+                line_ending: metadata.line_ending,
+                final_newline: metadata.final_newline,
+                full_text: None,
+                created_at_ms: now,
+                last_accessed_at_ms: now,
+            },
+        );
+        self.by_content.insert(key, id.clone());
+        self.lru.push_back(id.clone());
+        self.evict();
+        id
+    }
+
     pub fn get(&mut self, id: &str) -> Result<FileSnapshot, ToolError> {
         let snapshot = self.snapshots.get_mut(id).ok_or_else(|| {
             ToolError::retryable("file.snapshotNotFound", "snapshot is no longer available")
