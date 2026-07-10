@@ -255,6 +255,7 @@ export class TuiRuntime {
         try {
             const command = new AttachShellCommandResolver().resolve({
                 configView: this.store.getState().configView,
+                environment: process.env,
                 instance: entry,
                 snapshot: this.store.getState().snapshotsByInstance[instance]
             });
@@ -451,6 +452,8 @@ export class TuiRuntime {
         this.#attachWait = new Promise<void>((resolve) => {
             this.#attachResume = resolve;
         });
+        this.#stopInput();
+        this.#mouseBuffer = "";
         this.#ink?.unmount();
         this.#ink = undefined;
         this.#alternateScreen.exit();
@@ -459,6 +462,7 @@ export class TuiRuntime {
     #resumeAfterAttach(): void {
         this.#alternateScreen.enter();
         this.#mountInk();
+        this.#startInput();
         const resume = this.#attachResume;
         this.#attachResume = undefined;
         this.#attachWait = undefined;
