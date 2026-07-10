@@ -246,7 +246,7 @@ test("Prompt 3 detail line selection clamps to a valid line after data replaceme
     assert.equal(logsBox?.selectedDetailLineId, "logs:No");
 });
 
-test("connector editor remains instance-scoped and exposes control API limits", async () => {
+test("connector editor presents unavailable endpoints and control runtime limits as user states", async () => {
     const harness = createHarness();
 
     await harness.press("3");
@@ -256,9 +256,18 @@ test("connector editor remains instance-scoped and exposes control API limits", 
         ["MCP Endpoint", "Public Base URL", "Auth", "Endpoint Preview", "Validation"]
     );
     assert.equal(
-        connector.boxes.some((box) => box.expandedLines.some((line) => line.text.includes("runtime readiness: not available in current control API"))),
+        connector.boxes.some((box) => box.expandedLines.some((line) => line.text === "runtime=notAvailable")),
         true
     );
+    const endpointPreview = connector.boxes.find((box) => box.id === "endpoint-preview");
+    assert.deepEqual(endpointPreview?.collapsedLines.map((line) => line.text), ["endpoint=unavailable", "reason=missing publicBaseUrl"]);
+
+    harness.store.setConfigView({
+        instances: [{ mcp: { enabled: true, path: "/alpha/custom-mcp" }, name: "alpha", provider: "local" }],
+        mcp: { auth: { mode: "none" }, enabled: true, listenHost: "127.0.0.1", listenPort: 3210, publicBaseUrl: "https://example.test/tunnel" }
+    });
+    const configuredEndpoint = selectMainScreenModel(harness.store.getState()).boxes.find((box) => box.id === "endpoint-preview");
+    assert.deepEqual(configuredEndpoint?.collapsedLines.map((line) => line.text), ["endpoint=https://example.test/tunnel/alpha/custom-mcp"]);
 
     await harness.press("5");
     assert.equal(harness.logsReloadCount(), 1);

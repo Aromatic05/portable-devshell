@@ -10,7 +10,7 @@ export function buildConnectorPageBoxes(state: TuiAppState, instanceName: string
     const mcpDraft = editorDraft(state, `connector:${instanceName}`, globalMcpDraft(state));
     const unsaved = state.ui.dirtyForms[`connector:${instanceName}`] === true || state.ui.dirtyForms[`config:${instanceName}`] === true ? " [UNSAVED]" : "";
     const actions = [buttonLine("save", "Save"), buttonLine("cancel", "Cancel")];
-    const endpoint = endpointPreview(mcpDraft, instanceName);
+    const endpoint = endpointPreview(mcpDraft, readPath(instanceDraft, "mcp.path"), instanceName);
     const authNonePublic = isPublic(mcpDraft) && readPath(mcpDraft, "auth.mode") === "none";
 
     return [
@@ -20,7 +20,8 @@ export function buildConnectorPageBoxes(state: TuiAppState, instanceName: string
                 fieldLine("instance.mcp.path", "mcp.path", readPath(instanceDraft, "mcp.path")),
                 fieldLine("instance.mcp.allowTools", "allowTools", readPath(instanceDraft, "mcp.allowTools")),
                 ...editorErrorLine(state, "connector", "mcp-endpoint", ["mcp", "allowTools"]),
-                "runtime readiness: not available in current control API",
+                "runtime=notAvailable",
+                "reason=control does not expose runtime readiness",
                 ...actions
             ],
             id: "mcp-endpoint",
@@ -53,16 +54,16 @@ export function buildConnectorPageBoxes(state: TuiAppState, instanceName: string
             title: `Auth${unsaved}`
         }),
         makeBox(state, "connector", instanceName, {
-            detailLines: [endpoint, "runtime readiness: not available in current control API"],
+            detailLines: [endpoint.value, ...(endpoint.reason === undefined ? [] : [`reason=${endpoint.reason}`])],
             id: "endpoint-preview",
-            status: "warning",
-            summaryLines: [compactSummary(["endpoint", endpoint]), "reason=preview-only"],
+            status: endpoint.reason === undefined ? "normal" : "warning",
+            summaryLines: [endpoint.value, ...(endpoint.reason === undefined ? [] : [`reason=${endpoint.reason}`])],
             title: "Endpoint Preview"
         }),
         makeBox(state, "connector", instanceName, {
             detailLines: authNonePublic
                 ? ["validator error: auth.mode=none cannot expose a non-local endpoint"]
-                : ["validation follows control.validateConfigDraft"],
+                : ["validation=available before save"],
             id: "validation",
             status: authNonePublic ? "failed" : "normal",
             summaryLines: [compactSummary(["publicAuth", authNonePublic ? "invalid" : "valid"])],
@@ -82,10 +83,21 @@ function globalMcpDraft(state: TuiAppState): Record<string, JsonValue> {
     return asRecord(state.configView?.mcp) ?? { auth: { mode: "none" }, enabled: false, listenHost: "127.0.0.1", listenPort: 0 };
 }
 
-function endpointPreview(mcp: Record<string, JsonValue>, instanceName: string): string {
-    const host = String(readPath(mcp, "listenHost") ?? "127.0.0.1");
-    const port = String(readPath(mcp, "listenPort") ?? "-");
-    return `http://${host}:${port}/${instanceName}/mcp`;
+function endpointPreview(mcp: Record<string, JsonValue>, configuredPath: JsonValue | undefined, instanceName: string): { reason?: string; value: string } {
+    const publicBaseUrl = readPath(mcp, "publicBaseUrl");
+    if (typeof publicBaseUrl !== "string" || publicBaseUrl.length === 0) {
+        return { reason: "missing publicBaseUrl", value: "endpoint=unavailable" };
+    }
+
+    try {
+        const baseUrl = new URL(publicBaseUrl);
+        const path = typeof configuredPath === "string" && configuredPath.length > 0 ? configuredPath : `/${instanceName}/mcp`;
+        const endpointPath = path.startsWith("/") ? path.slice(1) : path;
+        const normalizedBaseUrl = baseUrl.toString().endsWith("/") ? baseUrl.toString().slice(0, -1) : baseUrl.toString();
+        return { value: `endpoint=${new URL(endpointPath, `${normalizedBaseUrl}/`).toString()}` };
+    } catch {
+        return { reason: "invalid publicBaseUrl", value: "endpoint=unavailable" };
+    }
 }
 
 function isPublic(mcp: Record<string, JsonValue>): boolean {
