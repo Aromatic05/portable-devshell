@@ -1,6 +1,6 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
-use std::io::Write;
+use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -8,7 +8,9 @@ use regex::Regex;
 use schemars::schema_for;
 use tempfile::NamedTempFile;
 
-use crate::tools::file::state::{FileSnapshot, SnapshotContent, TextFile};
+use crate::tools::file::state::{
+    FULL_SNAPSHOT_LIMIT, FileSnapshot, SnapshotContent, TextFile, TextMetadata,
+};
 use crate::tools::file::structure;
 use crate::tools::file::types::{
     FileEditApplyPatchInput, FileEditFileOutput, FileEditMode, FileEditOperation, FileEditOutput,
@@ -197,6 +199,8 @@ struct PreparedChange {
     added_lines: usize,
     removed_lines: usize,
     diff: String,
+    stream_operations: Option<Vec<FileEditOperation>>,
+    sparse_metadata: Option<TextMetadata>,
 }
 
 fn normalize_request(request: EditRequest) -> Result<NormalizedRequest, ToolError> {
@@ -340,19 +344,33 @@ fn resolve_lock_paths(
     request: &NormalizedRequest,
 ) -> Result<Vec<PathBuf>, ToolError> {
     let mut paths = Vec::new();
+    let mut canonical_sources = BTreeSet::new();
+    let mut canonical_targets = BTreeSet::new();
+
+    let mut add_source = |path: PathBuf| -> Result<(), ToolError> {
+        if !canonical_sources.insert(path.clone()) {
+            return Err(path_conflict(
+                "multiple source paths resolve to the same canonical file",
+            ));
+        }
+        paths.push(path);
+        Ok(())
+    };
+    let mut pending_targets = Vec::new();
+
     match request {
         NormalizedRequest::Text(sections) => {
             for section in sections {
-                paths.push(resolve_existing(call, &section.path, true)?.1);
+                add_source(resolve_existing(call, &section.path, true)?.1)?;
                 if let Some(target) = &section.move_to {
                     let path = resolve_create(call, target)?.1;
                     reject_existing_target(&path)?;
-                    paths.push(path);
+                    pending_targets.push(path);
                 }
             }
         }
         NormalizedRequest::Replace(input) => {
-            paths.push(resolve_existing(call, &input.path, true)?.1);
+            add_source(resolve_existing(call, &input.path, true)?.1)?;
         }
         NormalizedRequest::Patch(groups) => {
             for group in groups {
@@ -369,17 +387,32 @@ fn resolve_lock_paths(
                 if first.op == FileEditPatchOperation::Create && first.strict_create {
                     reject_existing_target(&source)?;
                 }
-                paths.push(source);
+                add_source(source)?;
                 for action in &group.actions {
                     if let Some(rename) = &action.rename {
                         let target = resolve_create(call, rename)?.1;
                         reject_existing_target(&target)?;
-                        paths.push(target);
+                        pending_targets.push(target);
                     }
                 }
             }
         }
     }
+
+    for target in pending_targets {
+        if canonical_sources.contains(&target) {
+            return Err(path_conflict(
+                "a move target resolves to another source file",
+            ));
+        }
+        if !canonical_targets.insert(target.clone()) {
+            return Err(path_conflict(
+                "multiple move targets resolve to the same canonical path",
+            ));
+        }
+        paths.push(target);
+    }
+
     paths.sort();
     paths.dedup();
     Ok(paths)
@@ -429,28 +462,103 @@ fn prepare_text_section(
         .unwrap()
         .get(&section.snapshot_reference)?;
     ensure_snapshot_path(&snapshot, &source_path)?;
-    let current = TextFile::read(&source_path)?;
+    let metadata = TextMetadata::inspect(&source_path)?;
 
     if section.remove {
-        if current.revision != snapshot.revision {
+        if metadata.revision != snapshot.revision {
             return Err(revision_mismatch("file changed since the snapshot"));
         }
+        let before = (metadata.total_bytes <= FULL_SNAPSHOT_LIMIT)
+            .then(|| TextFile::read(&source_path))
+            .transpose()?;
         return Ok(PreparedChange {
             source_display: requested.raw.clone(),
             source_path: Some(source_path.clone()),
             target_display: requested.raw,
             target_path: source_path,
-            expected_revision: Some(current.revision.clone()),
-            before: Some(current.clone()),
+            expected_revision: Some(metadata.revision.clone()),
+            before,
             after: None,
             operation: FileEditResultOperation::Delete,
             first_changed_line: None,
             added_lines: 0,
-            removed_lines: current.lines.len(),
-            diff: compact_diff(&current.lines, &[], 1),
+            removed_lines: metadata.total_lines,
+            diff: "delete entire file".to_string(),
+            stream_operations: None,
+            sparse_metadata: Some(metadata),
         });
     }
 
+    let target = if let Some(move_to) = &section.move_to {
+        let (target_requested, target_path) = resolve_create(call, move_to)?;
+        reject_existing_target(&target_path)?;
+        (
+            target_requested.raw,
+            target_path,
+            FileEditResultOperation::Move,
+        )
+    } else {
+        (
+            requested.raw.clone(),
+            source_path.clone(),
+            FileEditResultOperation::Update,
+        )
+    };
+
+    if metadata.total_bytes > FULL_SNAPSHOT_LIMIT {
+        if !matches!(snapshot.content, SnapshotContent::Sparse) {
+            return Err(ToolError::new(
+                "file.snapshotInvalid",
+                "large file requires a sparse snapshot",
+            ));
+        }
+        if metadata.revision != snapshot.revision {
+            return Err(revision_mismatch(
+                "sparse snapshot changed and cannot be recovered",
+            ));
+        }
+        if section.operations.iter().any(|operation| {
+            matches!(
+                operation,
+                FileEditOperation::ReplaceBlock { .. }
+                    | FileEditOperation::DeleteBlock { .. }
+                    | FileEditOperation::InsertBlockPost { .. }
+            )
+        }) {
+            return Err(ToolError::new(
+                "file.blockUnsupportedForLargeFile",
+                "Tree-sitter block edits require a file small enough for structural parsing; use explicit line ranges",
+            ));
+        }
+        validate_operations(
+            &section.operations,
+            &snapshot.seen_lines,
+            snapshot.total_lines,
+        )?;
+        validate_geometry(&section.operations, metadata.total_lines)?;
+        let (added, removed, first) = operation_counts(&section.operations, metadata.total_lines);
+        return Ok(PreparedChange {
+            source_display: requested.raw,
+            source_path: Some(source_path),
+            target_display: target.0,
+            target_path: target.1,
+            expected_revision: Some(metadata.revision.clone()),
+            before: None,
+            after: None,
+            operation: target.2,
+            first_changed_line: first,
+            added_lines: added,
+            removed_lines: removed,
+            diff: format!(
+                "streaming edit: +{added} -{removed}, first changed line {}",
+                first.unwrap_or(1)
+            ),
+            stream_operations: Some(section.operations),
+            sparse_metadata: Some(metadata),
+        });
+    }
+
+    let current = TextFile::read(&source_path)?;
     let source = match &snapshot.content {
         SnapshotContent::Full(content) => content.clone(),
         SnapshotContent::Sparse => current.normalized(),
@@ -479,21 +587,11 @@ fn prepare_text_section(
 
     let before = current.clone();
     let mut after = current.clone();
-    let (added, removed, first) = apply_line_operations(&mut after, &operations)?;
-    let target = if let Some(move_to) = &section.move_to {
-        let (target_requested, target_path) = resolve_create(call, move_to)?;
-        reject_existing_target(&target_path)?;
-        (
-            target_requested.raw,
-            target_path,
-            FileEditResultOperation::Move,
-        )
+    let (added, removed, first) = if operations.is_empty() {
+        (0, 0, None)
     } else {
-        (
-            requested.raw.clone(),
-            source_path.clone(),
-            FileEditResultOperation::Update,
-        )
+        let (added, removed, first) = apply_line_operations(&mut after, &operations)?;
+        (added, removed, Some(first))
     };
 
     Ok(PreparedChange {
@@ -505,11 +603,59 @@ fn prepare_text_section(
         before: Some(before.clone()),
         after: Some(after.clone()),
         operation: target.2,
-        first_changed_line: Some(first),
+        first_changed_line: first,
         added_lines: added,
         removed_lines: removed,
-        diff: compact_diff(&before.lines, &after.lines, first),
+        diff: compact_diff(&before.lines, &after.lines, first.unwrap_or(1)),
+        stream_operations: None,
+        sparse_metadata: None,
     })
+}
+
+fn operation_counts(
+    operations: &[FileEditOperation],
+    total_lines: usize,
+) -> (usize, usize, Option<usize>) {
+    let mut added = 0usize;
+    let mut removed = 0usize;
+    let mut first = None;
+    for operation in operations {
+        match operation {
+            FileEditOperation::Replace {
+                start_line,
+                end_line,
+                lines,
+            } => {
+                let sentinel =
+                    *end_line == total_lines && lines.last().is_some_and(String::is_empty);
+                added += lines.len().saturating_sub(usize::from(sentinel));
+                removed += end_line - start_line + 1;
+                first = Some(first.map_or(*start_line, |value: usize| value.min(*start_line)));
+            }
+            FileEditOperation::Delete {
+                start_line,
+                end_line,
+            } => {
+                removed += end_line - start_line + 1;
+                first = Some(first.map_or(*start_line, |value: usize| value.min(*start_line)));
+            }
+            FileEditOperation::Insert { at, line, lines } => {
+                let boundary = match at {
+                    InsertAt::Head => 0,
+                    InsertAt::Tail => total_lines,
+                    InsertAt::Before => line.unwrap() - 1,
+                    InsertAt::After => line.unwrap(),
+                };
+                let controls_eof = boundary == total_lines;
+                let sentinel = controls_eof && lines.last().is_some_and(String::is_empty);
+                added += lines.len().saturating_sub(usize::from(sentinel));
+                let changed = boundary.saturating_add(1).max(1);
+                first = Some(first.map_or(changed, |value: usize| value.min(changed)));
+            }
+            _ => {}
+        }
+    }
+    (added, removed, first)
 }
 
 fn prepare_replace(
@@ -554,6 +700,8 @@ fn prepare_replace(
         added_lines: added,
         removed_lines: removed,
         diff: compact_diff(&before.lines, &after.lines, first.unwrap_or(1)),
+        stream_operations: None,
+        sparse_metadata: None,
     })
 }
 
@@ -687,6 +835,8 @@ fn prepare_patch_group(
         added_lines: added,
         removed_lines: removed,
         diff: compact_diff(&before_lines, &after_lines, first_changed.unwrap_or(1)),
+        stream_operations: None,
+        sparse_metadata: None,
     })
 }
 
@@ -770,9 +920,34 @@ fn commit_change(
         }
         FileEditResultOperation::Move => {
             let source = change.source_path.as_ref().unwrap();
+            reject_existing_target(&change.target_path)?;
+            if let Some(operations) = &change.stream_operations {
+                if operations.is_empty() {
+                    fs::rename(source, &change.target_path)
+                        .map_err(|error| ToolError::new("file.writeFailed", error.to_string()))?;
+                } else {
+                    stream_rewrite(
+                        source,
+                        &change.target_path,
+                        operations,
+                        change.sparse_metadata.as_ref().unwrap(),
+                    )?;
+                    fs::remove_file(source)
+                        .map_err(|error| ToolError::new("file.writeFailed", error.to_string()))?;
+                }
+                let metadata = TextMetadata::inspect(&change.target_path)?;
+                let mut snapshots = state.snapshots.lock().unwrap();
+                snapshots.migrate_path(source, &change.target_path);
+                let snapshot = snapshots.remember_sparse(
+                    &change.target_path,
+                    &metadata,
+                    preview_seen(change.first_changed_line, metadata.total_lines),
+                );
+                drop(snapshots);
+                return render_sparse_output(change, &metadata, snapshot.id, snapshot.tag);
+            }
             let after = change.after.as_ref().unwrap();
             atomic_write(source, &after.encoded(), change.before.as_ref())?;
-            reject_existing_target(&change.target_path)?;
             fs::rename(source, &change.target_path)
                 .map_err(|error| ToolError::new("file.writeFailed", error.to_string()))?;
             let text = TextFile::read(&change.target_path)?;
@@ -787,6 +962,22 @@ fn commit_change(
             Ok(render_output(change, &text, snapshot.id, snapshot.tag))
         }
         FileEditResultOperation::Create | FileEditResultOperation::Update => {
+            if let Some(operations) = &change.stream_operations {
+                let source = change.source_path.as_ref().unwrap();
+                stream_rewrite(
+                    source,
+                    &change.target_path,
+                    operations,
+                    change.sparse_metadata.as_ref().unwrap(),
+                )?;
+                let metadata = TextMetadata::inspect(&change.target_path)?;
+                let snapshot = state.snapshots.lock().unwrap().remember_sparse(
+                    &change.target_path,
+                    &metadata,
+                    preview_seen(change.first_changed_line, metadata.total_lines),
+                );
+                return render_sparse_output(change, &metadata, snapshot.id, snapshot.tag);
+            }
             let after = change.after.as_ref().unwrap();
             atomic_write(
                 &change.target_path,
@@ -802,6 +993,221 @@ fn commit_change(
             Ok(render_output(change, &text, snapshot.id, snapshot.tag))
         }
     }
+}
+
+fn render_sparse_output(
+    change: &PreparedChange,
+    metadata: &TextMetadata,
+    snapshot_id: String,
+    snapshot_tag: String,
+) -> Result<FileEditFileOutput, ToolError> {
+    let header = format!("[{}#{}]", change.target_display, snapshot_tag);
+    let seen = preview_seen(change.first_changed_line, metadata.total_lines);
+    let (preview, preview_range, truncated) =
+        if let (Some(start), Some(end)) = (seen.first().copied(), seen.last().copied()) {
+            let selected =
+                TextMetadata::read_selected(&change.target_path, &[(start, end)], 256 * 1024)?;
+            let body = selected
+                .lines
+                .iter()
+                .map(|(line, text)| format!("{line}:{text}"))
+                .collect::<Vec<_>>()
+                .join("\n");
+            (
+                Some(if body.is_empty() {
+                    header.clone()
+                } else {
+                    format!("{header}\n{body}")
+                }),
+                Some(ReturnedRange {
+                    start_line: start,
+                    end_line: selected
+                        .lines
+                        .last()
+                        .map(|(line, _)| *line)
+                        .unwrap_or(start),
+                }),
+                selected.next_line.is_some() || end < metadata.total_lines,
+            )
+        } else {
+            (Some(header.clone()), None, false)
+        };
+    Ok(FileEditFileOutput {
+        path: change.target_display.clone(),
+        snapshot_id: Some(snapshot_id),
+        snapshot_tag: Some(snapshot_tag),
+        revision: Some(metadata.revision.clone()),
+        header: Some(header),
+        operation: change.operation,
+        moved_from: matches!(change.operation, FileEditResultOperation::Move)
+            .then(|| change.source_display.clone()),
+        diff: change.diff.clone(),
+        added_lines: change.added_lines,
+        removed_lines: change.removed_lines,
+        first_changed_line: change.first_changed_line,
+        total_lines: Some(metadata.total_lines),
+        total_bytes: Some(metadata.total_bytes),
+        preview,
+        preview_range,
+        truncated,
+    })
+}
+
+fn stream_rewrite(
+    source: &Path,
+    target: &Path,
+    operations: &[FileEditOperation],
+    metadata: &TextMetadata,
+) -> Result<(), ToolError> {
+    let parent = target
+        .parent()
+        .ok_or_else(|| ToolError::new("file.writeFailed", "target has no parent"))?;
+    fs::create_dir_all(parent)
+        .map_err(|error| ToolError::new("file.writeFailed", error.to_string()))?;
+    let permissions = fs::metadata(source)
+        .map_err(|error| ToolError::new("file.writeFailed", error.to_string()))?
+        .permissions();
+    let mut temp = NamedTempFile::new_in(parent)
+        .map_err(|error| ToolError::new("file.writeFailed", error.to_string()))?;
+
+    let mut replacements = BTreeMap::<usize, (usize, Vec<String>)>::new();
+    let mut insertions = BTreeMap::<usize, Vec<String>>::new();
+    let mut final_newline = metadata.final_newline;
+    let mut eof_controller = false;
+    for operation in operations {
+        match operation {
+            FileEditOperation::Replace {
+                start_line,
+                end_line,
+                lines,
+            } => {
+                let mut body = lines.clone();
+                if *end_line == metadata.total_lines {
+                    if eof_controller {
+                        return Err(path_conflict(
+                            "multiple operations control the end-of-file newline",
+                        ));
+                    }
+                    eof_controller = true;
+                    final_newline = body.last().is_some_and(String::is_empty);
+                    if final_newline {
+                        body.pop();
+                    }
+                }
+                replacements.insert(*start_line, (*end_line, body));
+            }
+            FileEditOperation::Delete {
+                start_line,
+                end_line,
+            } => {
+                replacements.insert(*start_line, (*end_line, Vec::new()));
+            }
+            FileEditOperation::Insert { at, line, lines } => {
+                let boundary = match at {
+                    InsertAt::Head => 0,
+                    InsertAt::Tail => metadata.total_lines,
+                    InsertAt::Before => line.unwrap() - 1,
+                    InsertAt::After => line.unwrap(),
+                };
+                let mut body = lines.clone();
+                if boundary == metadata.total_lines {
+                    if eof_controller {
+                        return Err(path_conflict(
+                            "multiple operations control the end-of-file newline",
+                        ));
+                    }
+                    eof_controller = true;
+                    final_newline = body.last().is_some_and(String::is_empty);
+                    if final_newline {
+                        body.pop();
+                    }
+                }
+                insertions.insert(boundary, body);
+            }
+            _ => {
+                return Err(ToolError::new(
+                    "file.invalidPatch",
+                    "large-file streaming edit received an unexpanded block operation",
+                ));
+            }
+        }
+    }
+
+    if metadata.bom {
+        temp.write_all(&[0xEF, 0xBB, 0xBF])
+            .map_err(|error| ToolError::new("file.writeFailed", error.to_string()))?;
+    }
+    let separator = metadata.line_ending.as_bytes();
+    let mut wrote_line = false;
+    let mut write_line = |line: &str, temp: &mut NamedTempFile| -> Result<(), ToolError> {
+        if wrote_line {
+            temp.write_all(separator)
+                .map_err(|error| ToolError::new("file.writeFailed", error.to_string()))?;
+        }
+        temp.write_all(line.as_bytes())
+            .map_err(|error| ToolError::new("file.writeFailed", error.to_string()))?;
+        wrote_line = true;
+        Ok(())
+    };
+
+    let file = fs::File::open(source)
+        .map_err(|error| ToolError::new("file.notFound", error.to_string()))?;
+    let mut reader = BufReader::new(file);
+    let mut buffer = Vec::new();
+    let mut line_no = 0usize;
+    let mut skip_until = 0usize;
+    loop {
+        buffer.clear();
+        if reader
+            .read_until(b'\n', &mut buffer)
+            .map_err(|error| ToolError::new("file.readFailed", error.to_string()))?
+            == 0
+        {
+            break;
+        }
+        line_no += 1;
+        if let Some(lines) = insertions.get(&(line_no - 1)) {
+            for line in lines {
+                write_line(line, &mut temp)?;
+            }
+        }
+        if line_no <= skip_until {
+            continue;
+        }
+        if let Some((end, lines)) = replacements.get(&line_no) {
+            for line in lines {
+                write_line(line, &mut temp)?;
+            }
+            skip_until = *end;
+            continue;
+        }
+        let mut content = buffer.as_slice();
+        if line_no == 1 && content.starts_with(&[0xEF, 0xBB, 0xBF]) {
+            content = &content[3..];
+        }
+        content = content.strip_suffix(b"\n").unwrap_or(content);
+        content = content.strip_suffix(b"\r").unwrap_or(content);
+        let line = std::str::from_utf8(content)
+            .map_err(|_| ToolError::new("file.notText", "file is not valid UTF-8"))?;
+        write_line(line, &mut temp)?;
+    }
+    if let Some(lines) = insertions.get(&metadata.total_lines) {
+        for line in lines {
+            write_line(line, &mut temp)?;
+        }
+    }
+    if final_newline && wrote_line {
+        temp.write_all(separator)
+            .map_err(|error| ToolError::new("file.writeFailed", error.to_string()))?;
+    }
+    temp.flush()
+        .map_err(|error| ToolError::new("file.writeFailed", error.to_string()))?;
+    temp.as_file()
+        .set_permissions(permissions)
+        .map_err(|error| ToolError::new("file.writeFailed", error.to_string()))?;
+    temp.persist(target)
+        .map_err(|error| ToolError::new("file.writeFailed", error.error.to_string()))?;
+    Ok(())
 }
 
 fn render_output(
@@ -844,7 +1250,7 @@ fn verify_expected_state(call: &ToolCall, change: &PreparedChange) -> Result<(),
             ));
         }
         if let Some(expected) = &change.expected_revision {
-            let current = TextFile::read(source)?;
+            let current = TextMetadata::inspect(source)?;
             if &current.revision != expected {
                 return Err(revision_mismatch("file changed during preflight"));
             }
@@ -1797,6 +2203,35 @@ fn apply_line_operations(
     text: &mut TextFile,
     operations: &[FileEditOperation],
 ) -> Result<(usize, usize, usize), ToolError> {
+    let original_total = text.lines.len();
+    let mut eof_newline = None;
+    for operation in operations {
+        let lines = match operation {
+            FileEditOperation::Replace {
+                end_line, lines, ..
+            } if *end_line == original_total => Some(lines),
+            FileEditOperation::Insert {
+                at: InsertAt::Tail,
+                lines,
+                ..
+            } => Some(lines),
+            FileEditOperation::Insert {
+                at: InsertAt::After,
+                line: Some(line),
+                lines,
+            } if *line == original_total => Some(lines),
+            _ => None,
+        };
+        if let Some(lines) = lines {
+            if eof_newline.is_some() {
+                return Err(path_conflict(
+                    "multiple operations control the end-of-file newline",
+                ));
+            }
+            eof_newline = Some(lines.last().is_some_and(String::is_empty));
+        }
+    }
+
     let mut added = 0;
     let mut removed = 0;
     let mut first = usize::MAX;
@@ -1807,10 +2242,14 @@ fn apply_line_operations(
                 end_line,
                 lines,
             } => {
+                let mut replacement = lines.clone();
+                if *end_line == original_total && replacement.last().is_some_and(String::is_empty) {
+                    replacement.pop();
+                }
                 first = first.min(*start_line);
                 removed += end_line - start_line + 1;
-                added += lines.len();
-                text.lines.splice(start_line - 1..*end_line, lines.clone());
+                added += replacement.len();
+                text.lines.splice(start_line - 1..*end_line, replacement);
             }
             FileEditOperation::Delete {
                 start_line,
@@ -1827,12 +2266,21 @@ fn apply_line_operations(
                     InsertAt::Before => line.unwrap() - 1,
                     InsertAt::After => line.unwrap(),
                 };
+                let controls_eof = matches!(at, InsertAt::Tail)
+                    || matches!(at, InsertAt::After) && line == &Some(original_total);
+                let mut insertion = lines.clone();
+                if controls_eof && insertion.last().is_some_and(String::is_empty) {
+                    insertion.pop();
+                }
                 first = first.min(index + 1);
-                added += lines.len();
-                text.lines.splice(index..index, lines.clone());
+                added += insertion.len();
+                text.lines.splice(index..index, insertion);
             }
             _ => unreachable!(),
         }
+    }
+    if let Some(final_newline) = eof_newline {
+        text.final_newline = final_newline && !text.lines.is_empty();
     }
     Ok((added, removed, first))
 }

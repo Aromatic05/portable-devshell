@@ -1,5 +1,6 @@
 use std::collections::{BTreeSet, HashMap, VecDeque};
 use std::fs;
+use std::io::{BufRead, BufReader};
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -20,6 +21,22 @@ pub struct TextFile {
     pub lines: Vec<String>,
     pub revision: String,
     pub total_bytes: usize,
+}
+
+#[derive(Clone, Debug)]
+pub struct TextMetadata {
+    pub bom: bool,
+    pub final_newline: bool,
+    pub line_ending: &'static str,
+    pub revision: String,
+    pub total_bytes: usize,
+    pub total_lines: usize,
+}
+
+#[derive(Debug)]
+pub struct SelectedLines {
+    pub lines: Vec<(usize, String)>,
+    pub next_line: Option<usize>,
 }
 
 #[derive(Clone)]
@@ -97,6 +114,47 @@ impl SnapshotStore {
                 seen_lines: seen_lines.into_iter().collect(),
                 total_lines: text.lines.len(),
                 content,
+                last_accessed_at_ms: now,
+            },
+        );
+        self.by_content.insert(key, id.clone());
+        self.by_tag.insert(tag.clone(), id.clone());
+        self.lru.push_back(id.clone());
+        self.evict();
+        SnapshotReference { id, tag }
+    }
+
+    pub fn remember_sparse(
+        &mut self,
+        path: &Path,
+        metadata: &TextMetadata,
+        seen_lines: impl IntoIterator<Item = usize>,
+    ) -> SnapshotReference {
+        let key = (path.display().to_string(), metadata.revision.clone());
+        let now = now_ms();
+        if let Some(id) = self.by_content.get(&key).cloned() {
+            if let Some(snapshot) = self.snapshots.get_mut(&id) {
+                snapshot.seen_lines.extend(seen_lines);
+                snapshot.last_accessed_at_ms = now;
+                let reference = SnapshotReference {
+                    id: snapshot.id.clone(),
+                    tag: snapshot.tag.clone(),
+                };
+                self.touch(&id);
+                return reference;
+            }
+        }
+        let (id, tag) = self.new_identity();
+        self.snapshots.insert(
+            id.clone(),
+            FileSnapshot {
+                id: id.clone(),
+                tag: tag.clone(),
+                canonical_path: key.0.clone(),
+                revision: key.1.clone(),
+                seen_lines: seen_lines.into_iter().collect(),
+                total_lines: metadata.total_lines,
+                content: SnapshotContent::Sparse,
                 last_accessed_at_ms: now,
             },
         );
@@ -225,6 +283,138 @@ impl SnapshotStore {
             };
             self.full_text_bytes = self.full_text_bytes.saturating_sub(bytes);
         }
+    }
+}
+
+impl TextMetadata {
+    pub fn inspect(path: &Path) -> Result<Self, ToolError> {
+        let file = fs::File::open(path).map_err(|error| {
+            ToolError::new(
+                "file.notFound",
+                format!("failed to read {}: {error}", path.display()),
+            )
+        })?;
+        let mut reader = BufReader::new(file);
+        let mut hasher = blake3::Hasher::new();
+        let mut buffer = Vec::new();
+        let mut total_bytes = 0usize;
+        let mut total_lines = 0usize;
+        let mut bom = false;
+        let mut first = true;
+        let mut final_newline = false;
+        let mut line_ending = "\n";
+        loop {
+            buffer.clear();
+            let count = reader
+                .read_until(b'\n', &mut buffer)
+                .map_err(|error| ToolError::new("file.readFailed", error.to_string()))?;
+            if count == 0 {
+                break;
+            }
+            hasher.update(&buffer);
+            total_bytes += count;
+            if buffer.contains(&0) {
+                return Err(ToolError::new("file.notText", "file contains NUL bytes"));
+            }
+            let had_newline = buffer.last() == Some(&b'\n');
+            let mut content = buffer.as_slice();
+            if first && content.starts_with(&[0xEF, 0xBB, 0xBF]) {
+                bom = true;
+                content = &content[3..];
+            }
+            first = false;
+            let without_lf = content.strip_suffix(b"\n").unwrap_or(content);
+            let without_eol = without_lf.strip_suffix(b"\r").unwrap_or(without_lf);
+            std::str::from_utf8(without_eol)
+                .map_err(|_| ToolError::new("file.notText", "file is not valid UTF-8"))?;
+            if had_newline || !without_eol.is_empty() {
+                total_lines += 1;
+            }
+            if had_newline && total_lines == 1 {
+                line_ending = if without_lf.len() != without_eol.len() {
+                    "\r\n"
+                } else {
+                    "\n"
+                };
+            }
+            final_newline = had_newline;
+        }
+        Ok(Self {
+            bom,
+            final_newline,
+            line_ending,
+            revision: hasher.finalize().to_hex().to_string(),
+            total_bytes,
+            total_lines,
+        })
+    }
+
+    pub fn read_selected(
+        path: &Path,
+        ranges: &[(usize, usize)],
+        max_rendered_bytes: usize,
+    ) -> Result<SelectedLines, ToolError> {
+        let file = fs::File::open(path).map_err(|error| {
+            ToolError::new(
+                "file.notFound",
+                format!("failed to read {}: {error}", path.display()),
+            )
+        })?;
+        let mut reader = BufReader::new(file);
+        let mut buffer = Vec::new();
+        let mut line_no = 0usize;
+        let mut range_index = 0usize;
+        let mut rendered_bytes = 0usize;
+        let mut lines = Vec::new();
+        loop {
+            buffer.clear();
+            if reader
+                .read_until(b'\n', &mut buffer)
+                .map_err(|error| ToolError::new("file.readFailed", error.to_string()))?
+                == 0
+            {
+                break;
+            }
+            line_no += 1;
+            while range_index < ranges.len() && line_no > ranges[range_index].1 {
+                range_index += 1;
+            }
+            if range_index >= ranges.len() {
+                break;
+            }
+            let (start, end) = ranges[range_index];
+            if line_no < start || line_no > end {
+                continue;
+            }
+            let mut content = buffer.as_slice();
+            if line_no == 1 && content.starts_with(&[0xEF, 0xBB, 0xBF]) {
+                content = &content[3..];
+            }
+            content = content.strip_suffix(b"\n").unwrap_or(content);
+            content = content.strip_suffix(b"\r").unwrap_or(content);
+            let text = std::str::from_utf8(content)
+                .map_err(|_| ToolError::new("file.notText", "file is not valid UTF-8"))?;
+            let line_bytes =
+                line_no.to_string().len() + 1 + text.len() + usize::from(!lines.is_empty());
+            if rendered_bytes + line_bytes > max_rendered_bytes {
+                if lines.is_empty() {
+                    return Err(ToolError::new(
+                        "file.lineTooLarge",
+                        "one selected line exceeds the file_read output byte limit",
+                    ));
+                }
+                return Ok(SelectedLines {
+                    lines,
+                    next_line: Some(line_no),
+                });
+            }
+            rendered_bytes += line_bytes;
+            lines.push((line_no, text.to_string()));
+        }
+        Ok(SelectedLines {
+            lines,
+            next_line: None,
+        })
     }
 }
 
