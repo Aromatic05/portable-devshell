@@ -5,13 +5,7 @@ use serde::{Deserialize, Serialize};
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct FileReadInput {
     pub path: String,
-    pub ranges: Option<Vec<LineRange>>,
-}
-#[derive(Clone, Debug, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct LineRange {
-    pub start_line: usize,
-    pub line_count: usize,
+    pub selector: Option<String>,
 }
 #[derive(Debug, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
@@ -25,7 +19,7 @@ pub struct FileReadOutput {
     pub total_bytes: usize,
     pub truncated: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub next_start_line: Option<usize>,
+    pub next_selector: Option<String>,
 }
 #[derive(Clone, Debug, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
@@ -93,14 +87,7 @@ pub struct FileEditOutput {
 pub struct FileWriteInput {
     pub path: String,
     pub content: String,
-    pub mode: FileWriteMode,
     pub expected_revision: Option<String>,
-}
-#[derive(Debug, Deserialize, JsonSchema, PartialEq)]
-#[serde(rename_all = "camelCase")]
-pub enum FileWriteMode {
-    Create,
-    Overwrite,
 }
 #[derive(Debug, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
@@ -189,16 +176,24 @@ pub struct FileSearchFile {
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct FileInfoInput {
-    pub path: String,
+    pub paths: Vec<String>,
 }
 #[derive(Debug, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct FileInfoOutput {
+    pub entries: Vec<FileInfoEntry>,
+}
+#[derive(Debug, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct FileInfoEntry {
     pub path: String,
-    #[serde(rename = "type")]
-    pub entry_type: String,
-    pub size_bytes: u64,
-    pub modified_at_ms: u128,
+    pub exists: bool,
+    #[serde(rename = "type", skip_serializing_if = "Option::is_none")]
+    pub entry_type: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub size_bytes: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub modified_at_ms: Option<u128>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub mode: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]

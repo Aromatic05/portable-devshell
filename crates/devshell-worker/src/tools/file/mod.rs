@@ -5,6 +5,7 @@ pub mod info;
 pub mod read;
 pub mod search;
 pub mod state;
+pub mod structure;
 pub mod types;
 pub mod write;
 

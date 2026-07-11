@@ -57,10 +57,10 @@ fn file_tools_omit_absent_optional_output_fields() {
         instance,
         "1",
         "file_read",
-        json!({ "path": "./document.txt", "ranges": [{ "startLine": 1, "lineCount": 1 }] }),
+        json!({ "path": "./document.txt", "selector": "1-1:raw" }),
     );
     assert_eq!(read["ok"], true, "{read}");
-    assert!(read["result"].get("nextStartLine").is_none());
+    assert!(read["result"].get("nextSelector").is_none());
 
     let found = call(&env, instance, "2", "file_find", json!({ "path": "./" }));
     assert_eq!(found["ok"], true, "{found}");
@@ -197,11 +197,11 @@ fn file_info_reports_a_dangling_symlink() {
         instance,
         "1",
         "file_info",
-        json!({ "path": "./dangling-link" }),
+        json!({ "paths": ["./dangling-link"] }),
     );
     assert_eq!(info["ok"], true);
-    assert_eq!(info["result"]["type"], "symlink");
-    assert!(info["result"].get("targetType").is_none());
+    assert_eq!(info["result"]["entries"][0]["type"], "symlink");
+    assert!(info["result"]["entries"][0].get("targetType").is_none());
 
     env.json_command(&["stop", "--instance", instance]);
 }
@@ -224,7 +224,6 @@ fn file_write_create_rejects_a_dangling_symlink_as_existing() {
         json!({
             "path": "./dangling-link",
             "content": "replacement",
-            "mode": "create",
         }),
     );
     assert_eq!(response["ok"], false, "{response}");
@@ -274,7 +273,7 @@ fn file_write_requires_a_matching_revision_to_overwrite() {
         instance,
         "1",
         "file_write",
-        json!({ "path": "./document.txt", "content": "first\n", "mode": "create" }),
+        json!({ "path": "./document.txt", "content": "first\n" }),
     );
     assert_eq!(created["ok"], true);
     let rejected = call(
@@ -282,10 +281,10 @@ fn file_write_requires_a_matching_revision_to_overwrite() {
         instance,
         "2",
         "file_write",
-        json!({ "path": "./document.txt", "content": "second\n", "mode": "overwrite" }),
+        json!({ "path": "./document.txt", "content": "second\n" }),
     );
     assert_eq!(rejected["ok"], false);
-    assert_eq!(rejected["error"]["code"], "file.invalidArguments");
+    assert_eq!(rejected["error"]["code"], "file.alreadyExists");
 
     let overwritten = call(
         &env,
@@ -295,7 +294,6 @@ fn file_write_requires_a_matching_revision_to_overwrite() {
         json!({
             "path": "./document.txt",
             "content": "second\n",
-            "mode": "overwrite",
             "expectedRevision": created["result"]["revision"],
         }),
     );
@@ -360,7 +358,7 @@ fn file_edit_updates_a_sparse_snapshot_without_losing_the_file_shape() {
         instance,
         "1",
         "file_read",
-        json!({ "path": "./large.txt", "ranges": [{ "startLine": 1, "lineCount": 1 }] }),
+        json!({ "path": "./large.txt", "selector": "1-1:raw" }),
     );
     assert_eq!(read["ok"], true);
     let edited = call(
@@ -453,5 +451,93 @@ fn file_edit_applies_eof_sentinel_to_all_eof_operations() {
     assert_eq!(empty_insert["ok"], false, "{empty_insert}");
     assert_eq!(empty_insert["error"]["code"], "file.emptyOperation");
 
+    env.json_command(&["stop", "--instance", instance]);
+}
+
+#[test]
+fn file_read_selector_returns_copyable_header_and_expands_context() {
+    let env = TestEnv::new();
+    let instance = "aromatic-read-selector";
+    fs::write(
+        env.workspace().join("document.txt"),
+        "one\ntwo\nthree\nfour\nfive\nsix\n",
+    )
+    .unwrap();
+    start(&env, instance);
+    let read = call(
+        &env,
+        instance,
+        "1",
+        "file_read",
+        json!({ "path": "./document.txt", "selector": "3-3" }),
+    );
+    assert_eq!(read["ok"], true, "{read}");
+    let content = read["result"]["content"].as_str().unwrap();
+    assert!(content.starts_with("[./document.txt#"));
+    assert!(content.contains("2:two"));
+    assert!(content.contains("6:six"));
+    env.json_command(&["stop", "--instance", instance]);
+}
+
+#[test]
+fn file_read_uses_tree_sitter_structure_summary_for_source_files() {
+    let env = TestEnv::new();
+    let instance = "aromatic-read-structure";
+    fs::write(env.workspace().join("main.rs"), "use std::fs;\n\nfn first() {\n    println!(\"hidden body\");\n}\n\nstruct Item { value: usize }\n").unwrap();
+    start(&env, instance);
+    let read = call(
+        &env,
+        instance,
+        "1",
+        "file_read",
+        json!({ "path": "./main.rs" }),
+    );
+    assert_eq!(read["ok"], true, "{read}");
+    let content = read["result"]["content"].as_str().unwrap();
+    assert!(content.contains("1:use std::fs;"));
+    assert!(content.contains("3:fn first() {"));
+    assert!(content.contains("7:struct Item"));
+    assert!(!content.contains("hidden body"));
+    assert!(read["result"]["nextSelector"].is_string());
+    env.json_command(&["stop", "--instance", instance]);
+}
+
+#[test]
+fn file_info_returns_missing_entries_without_failing_the_batch() {
+    let env = TestEnv::new();
+    let instance = "aromatic-info-batch";
+    fs::write(env.workspace().join("present.txt"), "present\n").unwrap();
+    start(&env, instance);
+    let info = call(
+        &env,
+        instance,
+        "1",
+        "file_info",
+        json!({ "paths": ["./present.txt", "./missing.txt"] }),
+    );
+    assert_eq!(info["ok"], true, "{info}");
+    assert_eq!(info["result"]["entries"][0]["exists"], true);
+    assert_eq!(info["result"]["entries"][1]["exists"], false);
+    env.json_command(&["stop", "--instance", instance]);
+}
+
+#[test]
+fn file_write_expected_revision_requires_an_existing_file() {
+    let env = TestEnv::new();
+    let instance = "aromatic-write-update-only";
+    start(&env, instance);
+    let result = call(
+        &env,
+        instance,
+        "1",
+        "file_write",
+        json!({
+            "path": "./missing.txt",
+            "content": "content\n",
+            "expectedRevision": "deadbeef"
+        }),
+    );
+    assert_eq!(result["ok"], false, "{result}");
+    assert_eq!(result["error"]["code"], "file.notFound");
     env.json_command(&["stop", "--instance", instance]);
 }

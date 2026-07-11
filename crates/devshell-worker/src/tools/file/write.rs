@@ -7,7 +7,7 @@ use tempfile::NamedTempFile;
 
 use crate::security::path::parse_requested_path;
 use crate::tools::file::state::TextFile;
-use crate::tools::file::types::{FileWriteInput, FileWriteMode, FileWriteOutput};
+use crate::tools::file::types::{FileWriteInput, FileWriteOutput};
 use crate::tools::file::{FileToolState, authorize, resolve_create};
 use crate::tools::{ToolAccess, ToolCall, ToolCatalogEntry, ToolError, ToolHandler, ToolName};
 
@@ -30,7 +30,7 @@ impl ToolHandler for FileWriteTool {
     fn catalog_entry(&self) -> ToolCatalogEntry {
         ToolCatalogEntry {
             name: self.name.as_str(),
-            description: "Create or atomically overwrite a UTF-8 text file.".to_string(),
+            description: "Create a new UTF-8 text file, or fully rewrite an existing file when expectedRevision is provided.".to_string(),
             input_schema: serde_json::to_value(schema_for!(FileWriteInput)).unwrap(),
             output_schema: serde_json::to_value(schema_for!(FileWriteOutput)).unwrap(),
             access: ToolAccess::Write,
@@ -51,23 +51,26 @@ impl ToolHandler for FileWriteTool {
             .path(&call.workspace)
             .symlink_metadata()
             .is_ok();
-        if input.mode == FileWriteMode::Create && existing_entry {
-            return Err(ToolError::new(
-                "file.alreadyExists",
-                "create requires a missing target",
-            ));
+        match (&input.expected_revision, existing_entry) {
+            (None, true) => {
+                return Err(ToolError::new(
+                    "file.alreadyExists",
+                    "creation requires a missing target",
+                ));
+            }
+            (Some(_), false) => {
+                return Err(ToolError::new(
+                    "file.notFound",
+                    "update requires an existing target",
+                ));
+            }
+            _ => {}
         }
         let (requested, path) = resolve_create(&call, &input.path)?;
         let write_lock = self.state.write_lock(&path);
         let _write_guard = write_lock.lock().unwrap();
         let existing = path.symlink_metadata().is_ok();
-        if input.mode == FileWriteMode::Overwrite && existing {
-            let expected = input.expected_revision.as_deref().ok_or_else(|| {
-                ToolError::new(
-                    "file.invalidArguments",
-                    "overwrite requires expectedRevision for an existing file",
-                )
-            })?;
+        if let Some(expected) = input.expected_revision.as_deref() {
             let current = TextFile::read(&path)?;
             if current.revision != expected {
                 return Err(ToolError::retryable(
@@ -109,8 +112,7 @@ impl ToolHandler for FileWriteTool {
                 "target changed while preparing the write",
             ));
         }
-        if existing {
-            let expected = input.expected_revision.as_deref().unwrap();
+        if let Some(expected) = input.expected_revision.as_deref() {
             let current = TextFile::read(&path)?;
             if current.revision != expected {
                 return Err(ToolError::retryable(
