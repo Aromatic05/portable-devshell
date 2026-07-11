@@ -8,4 +8,4 @@ export interface ToolDefinition {
     outputSchema: JsonValue;
 }
 
-export type ToolAccess = "read" | "write" | "execute" | "session";
+export type ToolAccess = "read" | "write" | "execute";

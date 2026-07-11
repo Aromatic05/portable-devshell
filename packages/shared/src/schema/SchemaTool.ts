@@ -35,7 +35,7 @@ export const toolSchema = {
             throw new Error("tool schemas must be JSON objects");
         }
 
-        if (value.access !== "read" && value.access !== "write" && value.access !== "execute" && value.access !== "session") {
+        if (value.access !== "read" && value.access !== "write" && value.access !== "execute") {
             throw new Error("tool.access is invalid");
         }
 

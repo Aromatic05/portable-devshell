@@ -30,7 +30,7 @@ export interface WorkerHandshakeResult {
 }
 
 export interface WorkerToolDefinition {
-    access: "read" | "write" | "execute" | "session";
+    access: "read" | "write" | "execute";
     name: string;
     description: string;
     inputSchema: JsonValue;
