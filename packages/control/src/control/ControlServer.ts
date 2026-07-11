@@ -83,6 +83,8 @@ export class ControlServer {
             configEditorService: new ControlConfigEditorService({
                 configStore: this.#configStore,
                 getConfig: () => this.#requireConfig(),
+                getMcpHost: () => this.#mcpHost,
+                getMcpInstanceGateway: () => instanceGateway,
                 homeDirectory: this.#homeDirectory,
                 instanceRegistry: this.#instanceRegistry,
                 setConfig

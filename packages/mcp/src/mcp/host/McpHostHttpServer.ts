@@ -24,6 +24,7 @@ function isRecord(value: unknown): value is Record<string, JsonValue> {
 export class McpHostHttpServer {
     readonly #app = express();
     readonly #auth?: McpAuthConfig;
+    readonly #bindings = new Map<string, McpEndpointBinding>();
     readonly #listenHost: string;
     readonly #listenPort: number;
     readonly #oauth?: McpOAuthProtectedResource;
@@ -85,6 +86,7 @@ export class McpHostHttpServer {
     }
 
     registerBinding(path: string, binding: McpEndpointBinding): void {
+        this.#bindings.set(path, binding);
         if (this.#registeredPaths.has(path)) {
             return;
         }
@@ -112,9 +114,18 @@ export class McpHostHttpServer {
         }
 
         this.#app.all(path, ...routeHandlers, async (request: Request, response: Response) => {
+            const currentBinding = this.#bindings.get(path);
+            if (currentBinding === undefined) {
+                response.status(404).json({ error: "Instance endpoint not found" });
+                return;
+            }
             const body = await this.#readJsonBody(request as IncomingMessage);
-            await binding.handleRequest(request, response, body);
+            await currentBinding.handleRequest(request, response, body);
         });
+    }
+
+    unregisterBinding(path: string): void {
+        this.#bindings.delete(path);
     }
 
     async #readJsonBody(request: IncomingMessage): Promise<JsonValue> {

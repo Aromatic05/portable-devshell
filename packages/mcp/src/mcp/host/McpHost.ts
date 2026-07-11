@@ -41,6 +41,7 @@ export class McpHost {
     readonly #httpServer: McpHostHttpServer;
     readonly #oauth?: McpOAuthProtectedResource;
     readonly #registry = new McpHostRouteRegistry();
+    readonly #retiredBindingClosures = new Set<Promise<void>>();
     #started = false;
 
     constructor(config: McpHostConfig) {
@@ -81,7 +82,10 @@ export class McpHost {
 
     async stop(): Promise<void> {
         await this.#httpServer.stop();
-        await Promise.all(this.#registry.list().map(async (binding) => await binding.binding.close()));
+        await Promise.all([
+            ...this.#registry.list().map(async (binding) => await binding.binding.close()),
+            ...this.#retiredBindingClosures
+        ]);
         this.#started = false;
     }
 
@@ -96,14 +100,38 @@ export class McpHost {
         );
         const path = instance.path ?? `/${instance.name}/mcp`;
 
-        this.#registry.register({
+        const previous = this.#registry.register({
             binding,
             path
         });
 
         if (this.#started) {
+            if (previous !== undefined && previous.path !== path) {
+                this.#httpServer.unregisterBinding(previous.path);
+            }
             this.#httpServer.registerBinding(path, binding);
         }
+        if (previous !== undefined) {
+            this.#retireBinding(previous.binding);
+        }
+    }
+
+    unregisterInstance(instanceName: string): void {
+        const previous = this.#registry.unregister(instanceName);
+        if (previous === undefined) {
+            return;
+        }
+        if (this.#started) {
+            this.#httpServer.unregisterBinding(previous.path);
+        }
+        this.#retireBinding(previous.binding);
+    }
+
+    #retireBinding(binding: McpEndpointBinding): void {
+        const closure = binding.close().finally(() => {
+            this.#retiredBindingClosures.delete(closure);
+        });
+        this.#retiredBindingClosures.add(closure);
     }
 
     get server(): McpHostHttpServer {

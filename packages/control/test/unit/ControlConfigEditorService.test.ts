@@ -303,3 +303,68 @@ test("file edit mode rebuild validation happens before persistence", async () =>
     assert.equal(writes.length, 0);
     assert.equal(config.instances[0]?.tools, undefined);
 });
+
+test("config editor reconciles instance MCP bindings without restarting control", async () => {
+    let config = createConfig();
+    const registry = new InstanceRegistryBuilder().build(config);
+    const registered: Array<Record<string, unknown>> = [];
+    const unregistered: string[] = [];
+    const gateway = {} as never;
+    const host = {
+        registerInstance(instance: Record<string, unknown>) {
+            registered.push(instance);
+        },
+        unregisterInstance(instanceName: string) {
+            unregistered.push(instanceName);
+        }
+    };
+    const service = new ControlConfigEditorService({
+        configStore: {
+            async write(nextConfig: unknown) {
+                config = nextConfig as typeof config;
+            }
+        },
+        getConfig: () => config,
+        getMcpHost: () => host as never,
+        getMcpInstanceGateway: () => gateway,
+        instanceRegistry: registry,
+        setConfig: (nextConfig) => {
+            config = nextConfig;
+        }
+    });
+
+    await service.updateInstanceConfig({
+        ...config.instances[0],
+        mcp: {
+            ...config.instances[0]?.mcp,
+            tools: {
+                capabilities: ["read", "write", "execute", "manage"],
+                groups: ["file", "bash", "artifact", "instance"]
+            }
+        }
+    });
+
+    assert.equal(registered.length, 1);
+    assert.equal(registered[0]?.gateway, gateway);
+    assert.deepEqual(registered[0]?.policy, {
+        capabilities: ["read", "write", "execute", "manage"],
+        groups: ["file", "bash", "artifact", "instance"]
+    });
+    assert.deepEqual(service.applyConfig(), {
+        affectedInstances: ["demo-local"],
+        affectedMcpEndpoints: ["/demo-local/mcp"],
+        appliedChanges: [{ kind: "instance.updated", target: "demo-local" }],
+        reloadRequired: true,
+        restartControlRequired: false
+    });
+
+    await service.disableInstance({ instanceName: "demo-local" });
+    assert.deepEqual(unregistered, ["demo-local"]);
+
+    await service.enableInstance({ instanceName: "demo-local" });
+    assert.equal(registered.length, 2);
+
+    await service.deleteInstance({ instanceName: "demo-local" });
+    assert.deepEqual(unregistered, ["demo-local", "demo-local"]);
+    assert.equal(registry.get("demo-local"), undefined);
+});

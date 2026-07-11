@@ -1,17 +1,31 @@
 import type { McpEndpointBinding } from "../../endpoint/McpEndpointBinding.js";
 
-export class McpHostRouteRegistry {
-    readonly #bindings = new Map<string, { binding: McpEndpointBinding; path: string }>();
+export interface McpHostRouteEntry {
+    binding: McpEndpointBinding;
+    path: string;
+}
 
-    register(entry: { binding: McpEndpointBinding; path: string }): void {
-        this.#bindings.set(entry.binding.instanceName, entry);
+export class McpHostRouteRegistry {
+    readonly #bindings = new Map<string, McpHostRouteEntry>();
+
+    register(entry: McpHostRouteEntry): McpHostRouteEntry | undefined {
+        const instanceName = entry.binding.instanceName;
+        const previous = this.#bindings.get(instanceName);
+        this.#bindings.set(instanceName, entry);
+        return previous;
+    }
+
+    unregister(instanceName: string): McpHostRouteEntry | undefined {
+        const previous = this.#bindings.get(instanceName);
+        this.#bindings.delete(instanceName);
+        return previous;
     }
 
     resolve(instanceName: string): McpEndpointBinding | undefined {
         return this.#bindings.get(instanceName)?.binding;
     }
 
-    list(): Array<{ binding: McpEndpointBinding; path: string }> {
+    list(): McpHostRouteEntry[] {
         return [...this.#bindings.values()];
     }
 }

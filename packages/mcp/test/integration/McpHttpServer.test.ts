@@ -420,3 +420,103 @@ function readSetCookieEntries(response: Response): string[] {
     const header = response.headers.get("set-cookie");
     return header === null ? [] : [header];
 }
+
+test("running host replaces and unregisters instance bindings without restart", async () => {
+    const host = createHost();
+    await host.start();
+
+    try {
+        const address = host.server.address;
+        assert.notEqual(address, null);
+        assert.equal(typeof address, "object");
+        const endpoint = `http://127.0.0.1:${address.port}/demo/mcp`;
+
+        assert.deepEqual(await initializeAndListTools(endpoint), ["bash_run"]);
+
+        host.registerInstance({
+            name: "demo",
+            policy: { capabilities: ["read"], groups: ["file"] },
+            worker: createToolWorker({ access: "read", group: "file", name: "file_read" })
+        });
+        assert.deepEqual(await initializeAndListTools(endpoint), ["file_read"]);
+
+        host.unregisterInstance("demo");
+        const missing = await fetch(endpoint, {
+            method: "POST",
+            headers: {
+                accept: "application/json, text/event-stream",
+                "content-type": "application/json"
+            },
+            body: JSON.stringify(await readFixture("mcp-initialize.json"))
+        });
+        assert.equal(missing.status, 404);
+    } finally {
+        await host.stop();
+    }
+});
+
+async function initializeAndListTools(endpoint: string): Promise<string[]> {
+    const initialize = await fetch(endpoint, {
+        method: "POST",
+        headers: {
+            accept: "application/json, text/event-stream",
+            "content-type": "application/json"
+        },
+        body: JSON.stringify(await readFixture("mcp-initialize.json"))
+    });
+    assert.equal(initialize.status, 200);
+    const initializeBody = await initialize.json() as { result?: { protocolVersion?: string } };
+    const sessionId = initialize.headers.get("mcp-session-id");
+    assert.equal(typeof sessionId, "string");
+    const headers = {
+        accept: "application/json, text/event-stream",
+        "content-type": "application/json",
+        "mcp-protocol-version": String(initializeBody.result?.protocolVersion ?? ""),
+        "mcp-session-id": String(sessionId)
+    };
+
+    const initialized = await fetch(endpoint, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+            jsonrpc: "2.0",
+            method: "notifications/initialized"
+        })
+    });
+    assert.equal(initialized.status, 202);
+
+    const listed = await fetch(endpoint, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+            id: "list-tools",
+            jsonrpc: "2.0",
+            method: "tools/list"
+        })
+    });
+    assert.equal(listed.status, 200);
+    const payload = await listed.json() as { result?: { tools?: Array<{ name: string }> } };
+    return payload.result?.tools?.map((tool) => tool.name) ?? [];
+}
+
+function createToolWorker(tool: { access: "execute" | "read" | "write"; group: string; name: string }) {
+    return {
+        async appendMcpSessionClosed(_sessionId: string) {},
+        async appendMcpSessionOpened(_sessionId: string) {},
+        async appendMcpToolCalled(_toolName: string, _context: { requestId?: string; sessionId?: string }) {},
+        snapshot() {
+            return { ready: true };
+        },
+        listTools() {
+            return [{
+                ...tool,
+                description: tool.name,
+                inputSchema: { type: "object" },
+                outputSchema: { type: "object" }
+            }];
+        },
+        async callTool(_toolName: string, _input: unknown, _context: { source: "mcp" }) {
+            return { ok: true };
+        }
+    } as never;
+}

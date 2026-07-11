@@ -5,9 +5,11 @@ import {
     type ApprovalPolicy,
     type JsonValue
 } from "@portable-devshell/shared";
+import type { McpHost, McpInstanceGateway } from "@portable-devshell/mcp";
 
 import { InstanceConfigMapper } from "../instance/InstanceConfigMapper.js";
 import type { InstanceRegistry } from "../instance/registry/InstanceRegistry.js";
+import { McpEndpointConfigMapper } from "../mcp/McpEndpointConfigMapper.js";
 import { ControlConfigStore } from "./config/ControlConfigStore.js";
 import type {
     ControlConfig,
@@ -20,9 +22,12 @@ import { ControlConfigValidator } from "./config/ControlConfigValidator.js";
 interface ControlConfigEditorServiceOptions {
     configStore: ControlConfigStore;
     getConfig: () => ControlConfig;
+    getMcpHost?: () => McpHost | undefined;
+    getMcpInstanceGateway?: () => McpInstanceGateway | undefined;
     homeDirectory?: string;
     instanceConfigMapper?: InstanceConfigMapper;
     instanceRegistry: InstanceRegistry;
+    mcpEndpointConfigMapper?: McpEndpointConfigMapper;
     setConfig: (config: ControlConfig) => void;
     validator?: ControlConfigValidator;
 }
@@ -51,9 +56,12 @@ const emptyApplyResult = (): ApplyResult => ({
 export class ControlConfigEditorService {
     readonly #configStore: ControlConfigStore;
     readonly #getConfig: () => ControlConfig;
+    readonly #getMcpHost: () => McpHost | undefined;
+    readonly #getMcpInstanceGateway: () => McpInstanceGateway | undefined;
     readonly #homeDirectory?: string;
     readonly #instanceConfigMapper: InstanceConfigMapper;
     readonly #instanceRegistry: InstanceRegistry;
+    readonly #mcpEndpointConfigMapper: McpEndpointConfigMapper;
     readonly #setConfig: (config: ControlConfig) => void;
     readonly #validator: ControlConfigValidator;
     #lastApplyResult: ApplyResult = emptyApplyResult();
@@ -61,9 +69,12 @@ export class ControlConfigEditorService {
     constructor(options: ControlConfigEditorServiceOptions) {
         this.#configStore = options.configStore;
         this.#getConfig = options.getConfig;
+        this.#getMcpHost = options.getMcpHost ?? (() => undefined);
+        this.#getMcpInstanceGateway = options.getMcpInstanceGateway ?? (() => undefined);
         this.#homeDirectory = options.homeDirectory;
         this.#instanceConfigMapper = options.instanceConfigMapper ?? new InstanceConfigMapper();
         this.#instanceRegistry = options.instanceRegistry;
+        this.#mcpEndpointConfigMapper = options.mcpEndpointConfigMapper ?? new McpEndpointConfigMapper();
         this.#setConfig = options.setConfig;
         this.#validator = options.validator ?? new ControlConfigValidator();
     }
@@ -116,6 +127,7 @@ export class ControlConfigEditorService {
             descriptor.mcpPath = instance.mcp.path ?? `/${instance.name}/mcp`;
             descriptor.worker.reconfigure(toWorkerReconfigureInput(instance));
         }
+        this.#syncMcpEndpoint(instance.name);
         this.#rememberApplyResult(buildApplyResult(currentConfig, nextConfig, [{ kind: "instance.updated", target: instance.name }]));
         return this.getConfigView();
     }
@@ -153,6 +165,7 @@ export class ControlConfigEditorService {
         });
 
         await this.#persistConfig(nextConfig);
+        this.#getMcpHost()?.unregisterInstance(instanceName);
         this.#instanceRegistry.delete(instanceName);
         this.#rememberApplyResult(buildApplyResult(currentConfig, nextConfig, [{ kind: "instance.deleted", target: instanceName }]));
         return this.getConfigView();
@@ -205,10 +218,32 @@ export class ControlConfigEditorService {
             descriptor.enabled = false;
         }
 
+        this.#syncMcpEndpoint(instanceName);
         this.#rememberApplyResult(
             buildApplyResult(currentConfig, nextConfig, [{ kind: enabled ? "instance.enabled" : "instance.disabled", target: instanceName }])
         );
         return this.getConfigView();
+    }
+
+    #syncMcpEndpoint(instanceName: string): void {
+        const host = this.#getMcpHost();
+        if (host === undefined) {
+            return;
+        }
+        const instance = this.#getConfig().instances.find((entry) => entry.name === instanceName);
+        const descriptor = this.#instanceRegistry.get(instanceName);
+        if (
+            instance === undefined ||
+            !instance.enabled ||
+            !instance.mcp.enabled ||
+            descriptor === undefined
+        ) {
+            host.unregisterInstance(instanceName);
+            return;
+        }
+        host.registerInstance(
+            this.#mcpEndpointConfigMapper.map(descriptor, this.#getMcpInstanceGateway())
+        );
     }
 
     #assertInstanceStopped(instanceName: string, operation: "delete" | "disable" | "update"): void {
@@ -317,7 +352,6 @@ function buildApplyResult(previous: ControlConfig, next: ControlConfig, appliedC
         affectedInstances.add(instanceName);
         if (hasMcpEndpointChange(previousInstance, nextInstance)) {
             affectedMcpEndpoints.add(nextInstance?.mcp.path ?? previousInstance?.mcp.path ?? `/${instanceName}/mcp`);
-            restartControlRequired = true;
         }
     }
 
