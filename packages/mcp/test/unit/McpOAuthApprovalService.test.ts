@@ -58,3 +58,23 @@ test("OAuth approvals expire after five-minute policy is exceeded", async () => 
         await rm(storageDir, { force: true, recursive: true });
     }
 });
+
+test("expired OAuth registration can be requested again for the same client", async () => {
+    const storageDir = await mkdtemp(join(tmpdir(), "portable-devshell-oauth-registration-retry-"));
+    let now = 0;
+    const service = new McpOAuthApprovalService(storageDir, { now: () => now, timeoutMs: 300_000 });
+
+    try {
+        await service.warmup();
+        const first = await service.registerClient({ clientId: "chatgpt", clientName: "ChatGPT", redirectUris: [] });
+        now = 300_001;
+        const second = await service.registerClient({ clientId: "chatgpt", clientName: "ChatGPT", redirectUris: [] });
+
+        assert.equal((await service.get(first.approvalId))?.status, "expired");
+        assert.notEqual(second.approvalId, first.approvalId);
+        assert.equal(second.kind, "registration");
+        assert.equal(second.status, "pending");
+    } finally {
+        await rm(storageDir, { force: true, recursive: true });
+    }
+});

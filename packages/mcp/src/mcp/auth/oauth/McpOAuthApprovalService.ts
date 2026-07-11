@@ -36,7 +36,10 @@ export class McpOAuthApprovalService {
     }
 
     async registerClient(input: OAuthApprovalInput): Promise<OAuthApprovalRequest> {
-        const existing = [...this.#requests.values()].find((request) => request.kind === "registration" && request.clientId === input.clientId);
+        await this.#expirePending();
+        const existing = [...this.#requests.values()].find(
+            (request) => request.kind === "registration" && request.clientId === input.clientId && request.status !== "expired"
+        );
 
         if (existing !== undefined) {
             return existing;

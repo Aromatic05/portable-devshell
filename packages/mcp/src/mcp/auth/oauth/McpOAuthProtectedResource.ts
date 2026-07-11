@@ -233,6 +233,7 @@ export class McpOAuthProtectedResource {
         response.status(200).type("html").send(renderInteractionPage({
             accountId: this.#accountId,
             approvalId: approval.approvalId,
+            approvalKind: approval.kind,
             approvalStatus: approval.status,
             clientName: readClientName(details.params.client_id, details.params.client_name),
             promptName,
@@ -432,6 +433,7 @@ function readTokenResource(audience: string | string[] | undefined): URL | undef
 function renderInteractionPage(input: {
     accountId: string;
     approvalId: string;
+    approvalKind: "authorization" | "registration";
     approvalStatus: "approved" | "pending";
     clientName: string;
     promptName: "consent" | "login";
@@ -451,6 +453,7 @@ function renderInteractionPage(input: {
     const title = input.promptName === "login" ? "Sign In" : "Authorize";
     const action = input.promptName === "login" ? "Continue as aromatic" : "Approve access";
     const waiting = input.approvalStatus === "pending";
+    const approvedAction = input.approvalKind === "registration" ? "window.location.reload();" : "form.submit();";
 
     return `<!doctype html>
 <html lang="en">
@@ -483,7 +486,10 @@ function renderInteractionPage(input: {
       async function checkApproval() {
         const response = await fetch("${escapeHtml(`/oauth/approvals/${input.approvalId}`)}", { cache: "no-store" });
         const payload = await response.json();
-        if (payload.status === "approved") { form.submit(); return; }
+        if (payload.status === "approved") {
+          ${approvedAction}
+          return;
+        }
         if (payload.status === "denied" || payload.status === "expired" || payload.status === "missing") {
           status.textContent = "Administrator approval was not granted.";
           return;
