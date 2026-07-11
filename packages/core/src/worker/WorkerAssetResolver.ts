@@ -15,7 +15,7 @@ export interface WorkerAsset {
     target: WorkerTarget;
     binaryPath: string;
     sha256: string;
-    source: "env" | "release" | "dev";
+    source: "env" | "release" | "dev" | "installed";
     searchedPaths: string[];
 }
 
@@ -87,32 +87,36 @@ export class WorkerAssetResolver {
             };
         }
 
-        if (!hostTargetMatches) {
-            return;
+        if (hostTargetMatches) {
+            let probeDir = this.#moduleDir;
+            for (let depth = 0; depth < 6; depth += 1) {
+                yield {
+                    binaryPath: resolve(probeDir, "target", target.rustTarget, "debug", "devshell-worker"),
+                    source: "dev"
+                };
+                yield {
+                    binaryPath: resolve(probeDir, "target", target.rustTarget, "release", "devshell-worker"),
+                    source: "dev"
+                };
+                if (target.os !== "linux") {
+                    yield {
+                        binaryPath: resolve(probeDir, "target/debug/devshell-worker"),
+                        source: "dev"
+                    };
+                    yield {
+                        binaryPath: resolve(probeDir, "target/release/devshell-worker"),
+                        source: "dev"
+                    };
+                }
+                probeDir = resolve(probeDir, "..");
+            }
         }
 
-        let probeDir = this.#moduleDir;
-        for (let depth = 0; depth < 6; depth += 1) {
-            yield {
-                binaryPath: resolve(probeDir, "target", target.rustTarget, "debug", "devshell-worker"),
-                source: "dev"
-            };
-            yield {
-                binaryPath: resolve(probeDir, "target", target.rustTarget, "release", "devshell-worker"),
-                source: "dev"
-            };
-            if (target.os !== "linux") {
-                yield {
-                    binaryPath: resolve(probeDir, "target/debug/devshell-worker"),
-                    source: "dev"
-                };
-                yield {
-                    binaryPath: resolve(probeDir, "target/release/devshell-worker"),
-                    source: "dev"
-                };
-            }
-            probeDir = resolve(probeDir, "..");
-        }
+        const devshellHome = process.env.PORTABLE_DEVSHELL_HOME ?? resolve(homedir(), ".devshell");
+        yield {
+            binaryPath: resolve(devshellHome, "bin", `devshell-worker-${target.key}`),
+            source: "installed"
+        };
     }
 
     async #resolveReleaseAsset(target: WorkerTarget, searchedPaths: string[]): Promise<WorkerAsset | undefined> {

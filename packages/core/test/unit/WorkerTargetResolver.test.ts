@@ -247,3 +247,29 @@ function restoreEnv(name: keyof NodeJS.ProcessEnv, value: string | undefined): v
 
     process.env[name] = value;
 }
+
+test("WorkerAssetResolver uses an installed target worker before release lookup", async (t) => {
+    const fixture = await createResolverFixture();
+    t.after(fixture.cleanup);
+
+    const target = supportedWorkerTargets.find((candidate) => candidate.key !== probeLocalWorkerTarget().key) ?? probeLocalWorkerTarget();
+    const devshellHome = join(fixture.root, "installed-home");
+    const installedPath = join(devshellHome, "bin", `devshell-worker-${target.key}`);
+    await writeExecutable(installedPath, "#!/bin/sh\necho installed\n");
+
+    const previousHome = process.env.PORTABLE_DEVSHELL_HOME;
+    const previousFetch = globalThis.fetch;
+    process.env.PORTABLE_DEVSHELL_HOME = devshellHome;
+    globalThis.fetch = async () => {
+        throw new Error("release lookup should not run for an installed worker");
+    };
+    t.after(() => restoreEnv("PORTABLE_DEVSHELL_HOME", previousHome));
+    t.after(() => {
+        globalThis.fetch = previousFetch;
+    });
+
+    const asset = await fixture.resolver.resolve(target);
+
+    assert.equal(asset.binaryPath, installedPath);
+    assert.equal(asset.source, "installed");
+});
