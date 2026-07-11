@@ -128,6 +128,7 @@ export class McpEndpointWorker {
         }
 
         const gateway = this.#requireGateway();
+        gateway.assertReady(routed.instance);
         const targetTool = gateway.listTools(routed.instance).find((tool) => tool.name === toolName);
         if (targetTool === undefined || !this.#filter.isAllowed(targetTool)) {
             throw this.#toolNotExposed(toolName, routed.instance);
@@ -141,7 +142,7 @@ export class McpEndpointWorker {
         switch (toolName) {
             case "instance_list":
                 assertNoArguments(input, toolName);
-                return await gateway.listInstances();
+                return { instances: await gateway.listInstances() };
             case "instance_status":
                 return await gateway.statusInstance(readInstanceName(input, toolName));
             case "instance_start":

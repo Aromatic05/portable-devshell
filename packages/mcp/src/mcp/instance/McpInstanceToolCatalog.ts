@@ -27,7 +27,7 @@ const instanceNameSchema: JsonValue = {
 };
 
 const genericOutputSchema: JsonValue = {
-    type: ["array", "object"]
+    type: "object"
 };
 
 export class McpInstanceToolCatalog {

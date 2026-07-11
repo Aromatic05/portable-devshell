@@ -6,7 +6,7 @@ import { dirname, resolve } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { McpEndpointBinding, McpEndpointWorker } from "@portable-devshell/mcp";
+import { McpEndpointBinding, McpEndpointWorker, type McpInstanceGateway } from "@portable-devshell/mcp";
 
 const fixturesDirectory = resolve(dirname(fileURLToPath(import.meta.url)), "../fixtures");
 type JsonValue = boolean | number | null | string | JsonValue[] | { [key: string]: JsonValue };
@@ -105,6 +105,69 @@ test("tools/call delegates to WorkerInstance.callTool", async () => {
             toolName: "bash_run"
         });
         assert.equal(response.body.result?.isError, false);
+    } finally {
+        await server.close();
+        await binding.close();
+    }
+});
+
+test("instance_list returns object structured content through SDK transport", async () => {
+    const harness = createWorkerHarness({ hasToolSchemaCache: false, ready: false, tools: [] });
+    const gateway: McpInstanceGateway = {
+        assertReady() {},
+        async callTool() {
+            return {};
+        },
+        async createSshInstance() {
+            return {};
+        },
+        async listInstances() {
+            return [{ name: "demo" }];
+        },
+        listTools() {
+            return [];
+        },
+        async startInstance() {
+            return {};
+        },
+        async statusInstance() {
+            return {};
+        },
+        async stopInstance() {
+            return {};
+        }
+    };
+    const binding = new McpEndpointBinding(
+        new McpEndpointWorker({
+            gateway,
+            instanceName: "demo",
+            policy: { capabilities: ["manage"], groups: ["instance"] },
+            worker: harness.worker
+        })
+    );
+    const server = await createBindingServer(binding);
+
+    try {
+        const session = await initialize(server.url);
+        const response = await postJson(
+            server.url,
+            {
+                id: "req-instance-list",
+                jsonrpc: "2.0",
+                method: "tools/call",
+                params: {
+                    arguments: {},
+                    name: "instance_list"
+                }
+            },
+            session.headers
+        );
+
+        assert.equal(response.status, 200);
+        assert.equal(response.body.error, undefined);
+        assert.deepEqual(response.body.result?.structuredContent, {
+            instances: [{ name: "demo" }]
+        });
     } finally {
         await server.close();
         await binding.close();

@@ -99,6 +99,34 @@ test("worker calls default to the endpoint instance and route explicit targets t
     assert.deepEqual(remoteCalls, [{ input: { command: "pwd" }, instance: "remote-server", toolName: "bash_run" }]);
 });
 
+test("remote worker calls check target readiness before tool exposure", async () => {
+    let listToolsCalled = false;
+    const notReady = Object.assign(new Error("not ready"), {
+        code: "core.instanceNotReady",
+        details: { instance: "remote-server" },
+        retryable: false
+    });
+    const gateway = createGateway({
+        assertReady() {
+            throw notReady;
+        },
+        listTools() {
+            listToolsCalled = true;
+            return [bashTool];
+        }
+    });
+    const endpoint = createManagedEndpoint(createWorker(), gateway);
+
+    await assert.rejects(
+        endpoint.callTool("bash_run", { command: "pwd", instance: "remote-server" }, context),
+        (error: unknown) => {
+            assert.equal((error as { code?: string }).code, "core.instanceNotReady");
+            return true;
+        }
+    );
+    assert.equal(listToolsCalled, false);
+});
+
 test("instance management tools delegate to the gateway without requiring the local worker to be ready", async () => {
     const calls: string[] = [];
     let createInput: McpSshInstanceCreateInput | undefined;
@@ -134,7 +162,7 @@ test("instance management tools delegate to the gateway without requiring the lo
         "instance_start",
         "instance_stop"
     ]);
-    await endpoint.callTool("instance_list", {}, context);
+    assert.deepEqual(await endpoint.callTool("instance_list", {}, context), { instances: [] });
     await endpoint.callTool("instance_status", { instance: "remote-server" }, context);
     await endpoint.callTool("instance_start", { instance: "remote-server" }, context);
     await endpoint.callTool("instance_stop", { instance: "remote-server" }, context);
@@ -209,6 +237,9 @@ function createWorker(options: {
 
 function createGateway(overrides: Partial<McpInstanceGateway> = {}): McpInstanceGateway {
     return {
+        assertReady(instance) {
+            overrides.assertReady?.(instance);
+        },
         async callTool(instance, toolName, input, callContext) {
             if (overrides.callTool !== undefined) {
                 return await overrides.callTool(instance, toolName, input, callContext);

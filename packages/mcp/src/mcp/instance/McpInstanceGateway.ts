@@ -10,6 +10,7 @@ export interface McpSshInstanceCreateInput {
 }
 
 export interface McpInstanceGateway {
+    assertReady(instance: string): void;
     callTool(instance: string, toolName: string, input: JsonValue, context: ToolCallContext): Promise<JsonValue>;
     createSshInstance(sourceInstance: string, input: McpSshInstanceCreateInput): Promise<JsonValue>;
     listInstances(): Promise<JsonValue>;

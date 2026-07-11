@@ -31,6 +31,18 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
         this.#instanceRegistry = options.instanceRegistry;
     }
 
+    assertReady(instance: string): void {
+        const descriptor = this.#requireDescriptor(instance);
+        if (!descriptor.worker.snapshot().ready) {
+            throw createError({
+                code: errorCodes.coreInstanceNotReady,
+                details: { instance },
+                message: `Instance ${instance} is not ready.`,
+                retryable: false
+            });
+        }
+    }
+
     async callTool(
         instance: string,
         toolName: string,
