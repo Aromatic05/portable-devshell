@@ -10,6 +10,8 @@ export * from "./mcp/connector/McpConnectorChatGpt.js";
 export * from "./mcp/connector/McpConnectorPlaceholder.js";
 export * from "./mcp/endpoint/McpEndpointBinding.js";
 export * from "./mcp/endpoint/McpEndpointWorker.js";
+export * from "./mcp/instance/McpInstanceGateway.js";
+export * from "./mcp/instance/McpInstanceToolCatalog.js";
 export * from "./mcp/host/McpHost.js";
 export * from "./mcp/host/McpHostHttpServer.js";
 export * from "./mcp/host/route/McpHostRouteMatcher.js";

@@ -9,7 +9,11 @@ export class McpToolFilter {
         this.#groups = new Set(policy.groups);
     }
 
+    isAllowed(tool: ToolDefinition): boolean {
+        return this.#groups.has(tool.group) && this.#capabilities.has(tool.access);
+    }
+
     filter(tools: readonly ToolDefinition[]): ToolDefinition[] {
-        return tools.filter((tool) => this.#groups.has(tool.group) && this.#capabilities.has(tool.access));
+        return tools.filter((tool) => this.isAllowed(tool));
     }
 }

@@ -1,5 +1,6 @@
 import type { JsonValue, ToolDefinition, ToolPolicy } from "@portable-devshell/shared";
 import { type McpAuthConfig } from "../auth/McpAuthConfig.js";
+import type { McpInstanceGateway } from "../instance/McpInstanceGateway.js";
 import { McpOAuthProtectedResource } from "../auth/oauth/McpOAuthProtectedResource.js";
 import type { McpOAuthApprovalService } from "../auth/oauth/McpOAuthApprovalService.js";
 import { McpAuthPublicExposureGuard, type McpExposureConfig } from "../auth/public/McpAuthPublicExposureGuard.js";
@@ -19,6 +20,7 @@ interface WorkerInstanceLike {
 }
 
 export interface McpHostInstanceConfig {
+    gateway?: McpInstanceGateway;
     policy: ToolPolicy;
     name: string;
     path?: string;
@@ -86,6 +88,7 @@ export class McpHost {
     registerInstance(instance: McpHostInstanceConfig): void {
         const binding = new McpEndpointBinding(
             new McpEndpointWorker({
+                gateway: instance.gateway,
                 policy: instance.policy,
                 instanceName: instance.name,
                 worker: instance.worker

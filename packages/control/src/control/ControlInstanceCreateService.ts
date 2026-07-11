@@ -9,7 +9,7 @@ import {
     type InstanceCreateSummary,
     type JsonValue
 } from "@portable-devshell/shared";
-import type { McpHost } from "@portable-devshell/mcp";
+import type { McpHost, McpInstanceGateway, McpSshInstanceCreateInput } from "@portable-devshell/mcp";
 
 import { InstanceConfigMapper } from "../instance/InstanceConfigMapper.js";
 import type { InstanceRegistry } from "../instance/registry/InstanceRegistry.js";
@@ -44,6 +44,7 @@ export interface ControlInstanceCreateServiceOptions {
     configStore: ControlConfigStore;
     getConfig: () => ControlConfig;
     getMcpHost: () => McpHost | undefined;
+    getMcpInstanceGateway?: () => McpInstanceGateway | undefined;
     homeDirectory?: string;
     instanceConfigMapper?: InstanceConfigMapper;
     instanceRegistry: InstanceRegistry;
@@ -56,6 +57,7 @@ export class ControlInstanceCreateService {
     readonly #configStore: ControlConfigStore;
     readonly #getConfig: () => ControlConfig;
     readonly #getMcpHost: () => McpHost | undefined;
+    readonly #getMcpInstanceGateway: () => McpInstanceGateway | undefined;
     readonly #homeDirectory?: string;
     readonly #instanceConfigMapper: InstanceConfigMapper;
     readonly #instanceRegistry: InstanceRegistry;
@@ -67,6 +69,7 @@ export class ControlInstanceCreateService {
         this.#configStore = options.configStore;
         this.#getConfig = options.getConfig;
         this.#getMcpHost = options.getMcpHost;
+        this.#getMcpInstanceGateway = options.getMcpInstanceGateway ?? (() => undefined);
         this.#homeDirectory = options.homeDirectory;
         this.#instanceConfigMapper = options.instanceConfigMapper ?? new InstanceConfigMapper();
         this.#instanceRegistry = options.instanceRegistry;
@@ -86,7 +89,53 @@ export class ControlInstanceCreateService {
     }
 
     async createInstance(params: JsonValue | undefined): Promise<InstanceCreateResult> {
-        const normalized = this.#normalizeDraft(params);
+        return await this.#createNormalized(this.#normalizeDraft(params));
+    }
+
+    async createSshInstanceFromMcp(
+        sourceInstanceName: string,
+        input: McpSshInstanceCreateInput
+    ): Promise<InstanceCreateResult> {
+        const source = this.#getConfig().instances.find((instance) => instance.name === sourceInstanceName);
+        if (source === undefined) {
+            throw createError({
+                code: errorCodes.instanceMissing,
+                details: { instance: sourceInstanceName },
+                message: `Source instance ${sourceInstanceName} was not found.`,
+                retryable: false
+            });
+        }
+
+        const normalized: ControlInstanceConfig = {
+            approvalPolicy:
+                source.approvalPolicy === undefined
+                    ? undefined
+                    : {
+                          mode: source.approvalPolicy.mode,
+                          rules: source.approvalPolicy.rules?.map((rule) => ({ ...rule }))
+                      },
+            enabled: true,
+            mcp: {
+                enabled: true,
+                path: `/${input.name}/mcp`,
+                tools: {
+                    capabilities: source.mcp.tools.capabilities.filter((capability) => capability !== "manage"),
+                    groups: source.mcp.tools.groups.filter((group) => group !== "instance")
+                }
+            },
+            name: input.name,
+            provider: "ssh",
+            security: source.security === undefined ? undefined : { ...source.security },
+            ssh: {
+                command: buildMcpSshCommand(input)
+            },
+            workspace: input.workspace
+        };
+
+        return await this.#createNormalized(normalized);
+    }
+
+    async #createNormalized(normalized: ControlInstanceConfig): Promise<InstanceCreateResult> {
         const nextConfig = this.#validateMergedConfig(normalized);
 
         await this.#configStore.write(nextConfig, this.#homeDirectory);
@@ -104,7 +153,9 @@ export class ControlInstanceCreateService {
         this.#instanceRegistry.add(descriptor);
 
         if (nextConfig.mcp.enabled && normalized.mcp.enabled) {
-            this.#getMcpHost()?.registerInstance(this.#mcpEndpointConfigMapper.map(descriptor));
+            this.#getMcpHost()?.registerInstance(
+                this.#mcpEndpointConfigMapper.map(descriptor, this.#getMcpInstanceGateway())
+            );
         }
 
         return {
@@ -178,6 +229,38 @@ export class ControlInstanceCreateService {
 
         return normalized;
     }
+}
+
+
+function buildMcpSshCommand(input: McpSshInstanceCreateInput): string {
+    assertSafeSshAtom(input.host, "host");
+    if (input.user !== undefined) {
+        assertSafeSshAtom(input.user, "user");
+    }
+
+    const args = ["ssh"];
+    if (input.port !== undefined) {
+        args.push("-p", String(input.port));
+    }
+    if (input.identityFile !== undefined) {
+        args.push("-i", input.identityFile);
+    }
+    args.push(input.user === undefined ? input.host : `${input.user}@${input.host}`);
+    return args.map(quoteCommandArgument).join(" ");
+}
+
+function assertSafeSshAtom(value: string, fieldName: string): void {
+    const hasUnsafeCharacter = [...value].some((character) => {
+        const codePoint = character.codePointAt(0) ?? 0;
+        return /\s/u.test(character) || codePoint < 32 || codePoint === 127;
+    });
+    if (value.startsWith("-") || hasUnsafeCharacter) {
+        throw invalidDraft(`${fieldName} must not contain whitespace, control characters, or begin with '-'.`);
+    }
+}
+
+function quoteCommandArgument(value: string): string {
+    return `'${value.replaceAll("'", `'\\''`)}'`;
 }
 
 function asDraftRecord(params: JsonValue | undefined): Record<string, JsonValue> {

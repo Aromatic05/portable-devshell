@@ -8,6 +8,7 @@ import type { ControlConfig } from "./config/ControlConfigTomlCodec.js";
 import { ControlPathHome } from "./path/ControlPathHome.js";
 import { InstanceRegistry } from "../instance/registry/InstanceRegistry.js";
 import { InstanceRegistryBuilder } from "../instance/registry/InstanceRegistryBuilder.js";
+import { McpInstanceGatewayControl } from "../mcp/McpInstanceGatewayControl.js";
 import { McpWiringService } from "../mcp/McpWiringService.js";
 import { ControlRpcServer } from "./rpc/ControlRpcServer.js";
 import { ControlSocketFile } from "./ControlSocketFile.js";
@@ -55,32 +56,43 @@ export class ControlServer {
 
         this.#config = config;
         this.#instanceRegistry = registry;
-        this.#mcpHost = this.#mcpWiringService.wire(config, registry, {
-            storageDir: new ControlPathHome(this.#homeDirectory).oauthDir
-        });
         const setConfig = (nextConfig: ControlConfig) => {
             this.#config = nextConfig;
         };
+        const instanceGatewayHolder: { value?: McpInstanceGatewayControl } = {};
+        const instanceCreateService = new ControlInstanceCreateService({
+            configStore: this.#configStore,
+            getConfig: () => this.#requireConfig(),
+            getMcpHost: () => this.#mcpHost,
+            getMcpInstanceGateway: () => instanceGatewayHolder.value,
+            homeDirectory: this.#homeDirectory,
+            instanceRegistry: this.#instanceRegistry,
+            setConfig
+        });
+        const instanceGateway = new McpInstanceGatewayControl({
+            createService: instanceCreateService,
+            getConfig: () => this.#requireConfig(),
+            instanceRegistry: this.#instanceRegistry
+        });
+        instanceGatewayHolder.value = instanceGateway;
+        this.#mcpHost = this.#mcpWiringService.wire(config, registry, {
+            gateway: instanceGateway,
+            storageDir: new ControlPathHome(this.#homeDirectory).oauthDir
+        });
         this.#rpcServer = new ControlRpcServer({
-                configEditorService: new ControlConfigEditorService({
+            configEditorService: new ControlConfigEditorService({
                 configStore: this.#configStore,
                 getConfig: () => this.#requireConfig(),
                 homeDirectory: this.#homeDirectory,
                 instanceRegistry: this.#instanceRegistry,
-                    setConfig
-                }),
-                getOAuthApprovals: () => this.#mcpHost?.oauthApprovals,
-                getMcpStatus: () => (this.#mcpHost as unknown as { status(): import("@portable-devshell/shared").JsonValue } | undefined)?.status() ?? { running: false, reason: "MCP runtime is disabled." },
-                instanceCreateService: new ControlInstanceCreateService({
-                configStore: this.#configStore,
-                getConfig: () => this.#requireConfig(),
-                getMcpHost: () => this.#mcpHost,
-                homeDirectory: this.#homeDirectory,
-                instanceRegistry: this.#instanceRegistry,
-                setConfig: (nextConfig) => {
-                    setConfig(nextConfig);
-                }
+                setConfig
             }),
+            getOAuthApprovals: () => this.#mcpHost?.oauthApprovals,
+            getMcpStatus: () =>
+                (this.#mcpHost as unknown as
+                    | { status(): import("@portable-devshell/shared").JsonValue }
+                    | undefined)?.status() ?? { running: false, reason: "MCP runtime is disabled." },
+            instanceCreateService,
             instanceRegistry: this.#instanceRegistry,
             shutdown: async () => {
                 await this.stop();

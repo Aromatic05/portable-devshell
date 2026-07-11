@@ -1,4 +1,4 @@
-import { McpHost, type McpAuthConfig } from "@portable-devshell/mcp";
+import { McpHost, type McpAuthConfig, type McpInstanceGateway } from "@portable-devshell/mcp";
 
 import type { ControlConfig } from "../control/config/ControlConfigTomlCodec.js";
 import type { InstanceRegistry } from "../instance/registry/InstanceRegistry.js";
@@ -11,7 +11,11 @@ export class McpWiringService {
         this.#mapper = options?.mapper ?? new McpEndpointConfigMapper();
     }
 
-    wire(config: ControlConfig, registry: InstanceRegistry, options?: { storageDir?: string }): McpHost | undefined {
+    wire(
+        config: ControlConfig,
+        registry: InstanceRegistry,
+        options?: { gateway?: McpInstanceGateway; storageDir?: string }
+    ): McpHost | undefined {
         if (!config.mcp.enabled) {
             return undefined;
         }
@@ -19,7 +23,7 @@ export class McpWiringService {
         const endpoints = registry
             .list()
             .filter((descriptor) => descriptor.mcpEnabled)
-            .map((descriptor) => this.#mapper.map(descriptor));
+            .map((descriptor) => this.#mapper.map(descriptor, options?.gateway));
 
         return new McpHost({
             auth: toMcpHostAuth(config),

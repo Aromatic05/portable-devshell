@@ -12,3 +12,4 @@ export * from "./instance/registry/InstanceRegistry.js";
 export * from "./instance/registry/InstanceRegistryBuilder.js";
 export * from "./mcp/McpEndpointConfigMapper.js";
 export * from "./mcp/McpWiringService.js";
+export * from "./mcp/McpInstanceGatewayControl.js";
