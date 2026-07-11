@@ -196,6 +196,48 @@ test("oauth2 exposes protected resource metadata and accepts a valid bearer toke
     }
 });
 
+test("oauth2 emits HTTPS endpoints behind a loopback reverse proxy", async () => {
+    const storageDir = await mkdtemp(join(tmpdir(), "portable-devshell-mcp-proxy-"));
+    const host = createHost({
+        auth: {
+            enabled: true,
+            oauth2: {
+                documentationUrl: "https://docs.example.com/aromatic",
+                requiredScopes: ["mcp"],
+                resourceName: "aromatic"
+            },
+            provider: "oauth2"
+        },
+        publicBaseUrl: "https://mcp.example.com",
+        storageDir
+    });
+
+    await host.start();
+
+    try {
+        const address = host.server.address;
+        assert.notEqual(address, null);
+        assert.equal(typeof address, "object");
+
+        const response = await fetch(`http://127.0.0.1:${address.port}/.well-known/openid-configuration`, {
+            headers: {
+                host: "mcp.example.com",
+                "x-forwarded-host": "mcp.example.com",
+                "x-forwarded-proto": "https"
+            }
+        });
+        assert.equal(response.status, 200);
+        const metadata = await response.json() as { authorization_endpoint: string; issuer: string; token_endpoint: string };
+
+        assert.equal(metadata.issuer, "https://mcp.example.com");
+        assert.equal(metadata.authorization_endpoint, "https://mcp.example.com/authorize");
+        assert.equal(metadata.token_endpoint, "https://mcp.example.com/token");
+    } finally {
+        await host.stop();
+        await rm(storageDir, { force: true, recursive: true });
+    }
+});
+
 async function readFixture(name: string): Promise<JsonValue> {
     return JSON.parse(await readFile(resolve(fixturesDirectory, name), "utf8")) as JsonValue;
 }
