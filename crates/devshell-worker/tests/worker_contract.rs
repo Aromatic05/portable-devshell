@@ -209,7 +209,7 @@ fn handshake_rejects_unsupported_protocol_versions() {
 }
 
 #[test]
-fn bash_run_returns_success_for_timeout_and_output_limit() {
+fn bash_run_returns_success_for_timeout_and_capture_truncation() {
     let env = TestEnv::new();
     let instance = "aromatic-timeout";
 
@@ -244,12 +244,13 @@ fn bash_run_returns_success_for_timeout_and_output_limit() {
             "method": "bash_run",
             "params": {
                 "command": "python3 - <<'PY'\nprint('x' * 2000)\nPY",
-                "maxOutputBytes": 128
+                "maxCaptureBytes": 128
             }
         }),
     );
     assert_eq!(output_limited["ok"], true);
-    assert_eq!(output_limited["result"]["termination"], "outputLimit");
+    assert_eq!(output_limited["result"]["termination"], "exited");
+    assert_eq!(output_limited["result"]["stdoutTruncated"], true);
     assert_eq!(output_limited["result"]["stdoutTruncated"], true);
 
     env.json_command(&["stop", "--instance", instance]);

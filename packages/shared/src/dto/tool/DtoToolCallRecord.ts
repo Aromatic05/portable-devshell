@@ -44,4 +44,4 @@ export interface ToolCallRecord {
     toolName: string;
 }
 
-export type ToolTermination = "exited" | "signaled" | "timeout" | "outputLimit";
+export type ToolTermination = "exited" | "signaled" | "timeout";

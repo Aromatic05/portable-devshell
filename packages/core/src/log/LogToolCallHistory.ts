@@ -70,7 +70,7 @@ export class ToolCallHistory {
     async completed(
         callId: string,
         completedAt: string,
-        result?: { exitCode?: number | null; stderrBytes?: number; stdoutBytes?: number; termSignal?: number; termination?: "exited" | "signaled" | "timeout" | "outputLimit" }
+        result?: { exitCode?: number | null; stderrBytes?: number; stdoutBytes?: number; termSignal?: number; termination?: "exited" | "signaled" | "timeout" }
     ): Promise<ToolCallRecord> {
         return await this.#finishRunning(callId, completedAt, "completed", undefined, result);
     }
@@ -79,7 +79,7 @@ export class ToolCallHistory {
         callId: string,
         error: string,
         completedAt: string,
-        result?: { exitCode?: number | null; stderrBytes?: number; stdoutBytes?: number; termSignal?: number; termination?: "exited" | "signaled" | "timeout" | "outputLimit" }
+        result?: { exitCode?: number | null; stderrBytes?: number; stdoutBytes?: number; termSignal?: number; termination?: "exited" | "signaled" | "timeout" }
     ): Promise<ToolCallRecord> {
         return await this.#finishRunning(callId, completedAt, "failed", error, result);
     }
@@ -141,7 +141,7 @@ export class ToolCallHistory {
         completedAt: string,
         status: Extract<ToolCallRecord["status"], "completed" | "failed">,
         error?: string,
-        result?: { exitCode?: number | null; stderrBytes?: number; stdoutBytes?: number; termSignal?: number; termination?: "exited" | "signaled" | "timeout" | "outputLimit" }
+        result?: { exitCode?: number | null; stderrBytes?: number; stdoutBytes?: number; termSignal?: number; termination?: "exited" | "signaled" | "timeout" }
     ): Promise<ToolCallRecord> {
         await this.#initialize();
         const startedRecord = this.#readActiveCall(callId);

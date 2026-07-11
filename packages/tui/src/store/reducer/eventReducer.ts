@@ -149,7 +149,7 @@ function applyToolCallEvent(state: TuiAppState, instance: string, data: Record<s
                 : existing?.status ?? "running",
         stderrBytes: typeof data.stderrBytes === "number" ? data.stderrBytes : existing?.stderrBytes,
         stdoutBytes: typeof data.stdoutBytes === "number" ? data.stdoutBytes : existing?.stdoutBytes,
-        termination: data.termination === "exited" || data.termination === "signaled" || data.termination === "timeout" || data.termination === "outputLimit" ? data.termination : existing?.termination,
+        termination: data.termination === "exited" || data.termination === "signaled" || data.termination === "timeout" ? data.termination : existing?.termination,
         toolName: typeof data.toolName === "string" ? data.toolName : existing?.toolName ?? ""
     };
 

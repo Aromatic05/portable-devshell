@@ -15,7 +15,7 @@ pub struct BashRunParams {
     #[serde(default)]
     pub timeout_ms: Option<u64>,
     #[serde(default)]
-    pub max_output_bytes: Option<usize>,
+    pub max_capture_bytes: Option<usize>,
     #[serde(default)]
     pub env: BTreeMap<String, Option<String>>,
 }
@@ -43,5 +43,4 @@ pub enum BashTermination {
     Exited,
     Signaled,
     Timeout,
-    OutputLimit,
 }

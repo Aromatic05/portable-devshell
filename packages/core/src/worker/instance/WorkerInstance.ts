@@ -1019,7 +1019,7 @@ function asBashToolResult(value: JsonValue): {
     stdout: string;
     stdoutBytes: number;
     termSignal?: number;
-    termination?: "exited" | "signaled" | "timeout" | "outputLimit";
+    termination?: "exited" | "signaled" | "timeout";
 } | undefined {
     if (typeof value !== "object" || value === null || Array.isArray(value)) {
         return undefined;
@@ -1038,7 +1038,7 @@ function asBashToolResult(value: JsonValue): {
         stdout: result.stdout,
         stdoutBytes: typeof result.stdoutBytes === "number" ? result.stdoutBytes : readByteLength(result.stdout),
         ...(typeof result.termSignal === "number" ? { termSignal: result.termSignal } : {}),
-        ...(termination === "exited" || termination === "signaled" || termination === "timeout" || termination === "outputLimit" ? { termination } : {})
+        ...(termination === "exited" || termination === "signaled" || termination === "timeout" ? { termination } : {})
     };
 }
 

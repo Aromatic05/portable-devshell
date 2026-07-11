@@ -1,9 +1,10 @@
+use std::collections::VecDeque;
 use std::io::{Read, Write};
 use std::ops::{Deref, DerefMut};
 use std::path::PathBuf;
 use std::process::{Child, ExitStatus};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -18,9 +19,9 @@ use crate::tools::bash::types::{BashRunOutput, BashRunParams, BashTermination};
 use crate::tools::{ToolAccess, ToolCall, ToolCatalogEntry, ToolError, ToolHandler, ToolName};
 
 const DEFAULT_TIMEOUT_MS: u64 = 30_000;
-const DEFAULT_MAX_OUTPUT_BYTES: usize = 4 * 1024 * 1024;
+const DEFAULT_MAX_CAPTURE_BYTES: usize = 4 * 1024 * 1024;
 const MAX_TIMEOUT_MS: u64 = 300_000;
-const MAX_OUTPUT_BYTES: usize = 16 * 1024 * 1024;
+const MAX_CAPTURE_BYTES: usize = 16 * 1024 * 1024;
 const MAX_STDIN_BYTES: usize = 4 * 1024 * 1024;
 
 pub struct BashRunTool {
@@ -56,17 +57,19 @@ impl ToolHandler for BashRunTool {
             ));
         }
         let timeout_ms = params.timeout_ms.unwrap_or(DEFAULT_TIMEOUT_MS);
-        let max_output = params.max_output_bytes.unwrap_or(DEFAULT_MAX_OUTPUT_BYTES);
-        if timeout_ms == 0 || max_output == 0 {
+        let max_capture = params
+            .max_capture_bytes
+            .unwrap_or(DEFAULT_MAX_CAPTURE_BYTES);
+        if timeout_ms == 0 || max_capture == 0 {
             return Err(ToolError::new(
                 "tool.invalidArguments",
-                "timeoutMs and maxOutputBytes must be positive",
+                "timeoutMs and maxCaptureBytes must be positive",
             ));
         }
-        if timeout_ms > MAX_TIMEOUT_MS || max_output > MAX_OUTPUT_BYTES {
+        if timeout_ms > MAX_TIMEOUT_MS || max_capture > MAX_CAPTURE_BYTES {
             return Err(ToolError::new(
                 "tool.invalidArguments",
-                "timeoutMs or maxOutputBytes exceeds the worker limit",
+                "timeoutMs or maxCaptureBytes exceeds the worker limit",
             ));
         }
         if params
@@ -116,22 +119,11 @@ impl ToolHandler for BashRunTool {
             .stderr
             .take()
             .ok_or_else(|| ToolError::new("bash.ioFailed", "missing stderr pipe"))?;
-        let limit = Arc::new(AtomicBool::new(false));
         let stdout_bytes = Arc::new(AtomicUsize::new(0));
         let stderr_bytes = Arc::new(AtomicUsize::new(0));
-        let stdout_thread = spawn_reader(
-            stdout,
-            Arc::clone(&stdout_bytes),
-            Arc::clone(&limit),
-            max_output,
-        );
-        let stderr_thread = spawn_reader(
-            stderr,
-            Arc::clone(&stderr_bytes),
-            Arc::clone(&limit),
-            max_output,
-        );
-        let termination = wait(&mut child, pid, Duration::from_millis(timeout_ms), &limit)?;
+        let stdout_thread = spawn_reader(stdout, Arc::clone(&stdout_bytes), max_capture);
+        let stderr_thread = spawn_reader(stderr, Arc::clone(&stderr_bytes), max_capture);
+        let termination = wait(&mut child, pid, Duration::from_millis(timeout_ms))?;
         let status = child
             .wait_and_reap()
             .map_err(|error| ToolError::new("bash.ioFailed", error.to_string()))?;
@@ -236,12 +228,14 @@ fn resolve_cwd(call: &ToolCall, raw: Option<&str>) -> Result<PathBuf, ToolError>
 fn spawn_reader(
     mut reader: impl Read + Send + 'static,
     bytes: Arc<AtomicUsize>,
-    limit_hit: Arc<AtomicBool>,
     max: usize,
 ) -> thread::JoinHandle<Result<StreamOutput, ToolError>> {
     thread::spawn(move || {
         let mut buffer = [0; 8192];
-        let mut output = Vec::new();
+        let head_limit = max / 2;
+        let tail_limit = max - head_limit;
+        let mut head = Vec::with_capacity(head_limit);
+        let mut tail = VecDeque::with_capacity(tail_limit);
         let mut truncated = false;
         loop {
             let count = reader
@@ -251,32 +245,35 @@ fn spawn_reader(
                 break;
             }
             bytes.fetch_add(count, Ordering::SeqCst);
-            let remaining = max.saturating_sub(output.len());
-            let kept = remaining.min(count);
-            output.extend_from_slice(&buffer[..kept]);
-            if kept < count {
+            let mut offset = 0;
+            if head.len() < head_limit {
+                let kept = (head_limit - head.len()).min(count);
+                head.extend_from_slice(&buffer[..kept]);
+                offset = kept;
+            }
+            for byte in &buffer[offset..count] {
+                if tail_limit == 0 {
+                    truncated = true;
+                    continue;
+                }
+                if tail.len() == tail_limit {
+                    tail.pop_front();
+                    truncated = true;
+                }
+                tail.push_back(*byte);
+            }
+            if offset < count && head.len() + tail.len() >= max {
                 truncated = true;
-                limit_hit.store(true, Ordering::SeqCst);
             }
         }
-        Ok(StreamOutput {
-            kept: output,
-            truncated,
-        })
+        let mut kept = head;
+        kept.extend(tail);
+        Ok(StreamOutput { kept, truncated })
     })
 }
-fn wait(
-    child: &mut Child,
-    pid: i32,
-    timeout: Duration,
-    limit: &AtomicBool,
-) -> Result<BashTermination, ToolError> {
+fn wait(child: &mut Child, pid: i32, timeout: Duration) -> Result<BashTermination, ToolError> {
     let started = Instant::now();
     loop {
-        if limit.load(Ordering::SeqCst) {
-            terminate(pid)?;
-            return Ok(BashTermination::OutputLimit);
-        }
         if started.elapsed() >= timeout {
             terminate(pid)?;
             return Ok(BashTermination::Timeout);
