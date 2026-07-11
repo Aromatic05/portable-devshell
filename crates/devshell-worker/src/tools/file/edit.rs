@@ -111,6 +111,7 @@ impl FileEditTool {
             SnapshotContent::Full(content) => content.clone(),
             SnapshotContent::Sparse => current.normalized(),
         };
+        validate_block_coverage(&path, &source, &section.operations, &snapshot.seen_lines)?;
         let operations = expand_block_operations(&path, &source, section.operations)?;
         validate_operations(&operations, &snapshot.seen_lines, snapshot.total_lines)?;
         let operations = if current.revision == snapshot.revision {
@@ -387,6 +388,35 @@ fn parse_line(value: &str) -> Result<usize, ToolError> {
     } else {
         Ok(line)
     }
+}
+
+fn validate_block_coverage(
+    path: &std::path::Path,
+    source: &str,
+    operations: &[FileEditOperation],
+    seen: &BTreeSet<usize>,
+) -> Result<(), ToolError> {
+    for operation in operations {
+        let start_line = match operation {
+            FileEditOperation::ReplaceBlock { start_line, .. }
+            | FileEditOperation::DeleteBlock { start_line }
+            | FileEditOperation::InsertBlockPost { start_line, .. } => *start_line,
+            _ => continue,
+        };
+        let (start, end) = structure::block_range(path, source, start_line)?.ok_or_else(|| {
+            ToolError::new(
+                "file.blockNotFound",
+                "no supported Tree-sitter block starts at this line",
+            )
+        })?;
+        if !(start..=end).all(|line| seen.contains(&line)) {
+            return Err(ToolError::new(
+                "file.invalidRange",
+                "Tree-sitter block is not fully covered by snapshot lines",
+            ));
+        }
+    }
+    Ok(())
 }
 
 fn expand_block_operations(
