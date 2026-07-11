@@ -27,14 +27,20 @@ const repoRoot = fileURLToPath(new URL("../", import.meta.url));
 const args = process.argv.slice(2);
 const explicitTarget = readOption("--target");
 const outputDirectory = readOption("--output-dir");
+const useZigbuild = args.includes("--zigbuild");
+
 const target = explicitTarget === undefined ? detectHostTarget() : resolveTarget(explicitTarget);
 const profile = outputDirectory === undefined ? "debug" : "release";
 const workerSource = resolveSourcePath(target, profile);
 
+if (useZigbuild && !target.key.startsWith("linux-")) {
+    throw new Error("--zigbuild is only supported for Linux worker targets");
+}
+
 run(
     "cargo",
     [
-        "build",
+        useZigbuild ? "zigbuild" : "build",
         "-p",
         "devshell-worker",
         "--manifest-path",
@@ -46,7 +52,7 @@ run(
     {
         env: {
             ...process.env,
-            ...buildCargoTargetEnv(target)
+            ...(useZigbuild ? {} : buildCargoTargetEnv(target))
         }
     }
 );

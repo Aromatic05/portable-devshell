@@ -42,7 +42,22 @@ jobs:
           rustup default stable
           rustup target add "${{ matrix.rust_target }}"
 
-      - name: Build worker release asset
+      - name: Install Zig toolchain
+        if: runner.os == 'Linux'
+        uses: mlugg/setup-zig@v2.2.1
+        with:
+          version: 0.14.1
+
+      - name: Install cargo-zigbuild
+        if: runner.os == 'Linux'
+        run: cargo install --locked cargo-zigbuild --version 0.23.0
+
+      - name: Build Linux worker release asset
+        if: runner.os == 'Linux'
+        run: node ./scripts/build-worker.mjs --target "${{ matrix.target }}" --output-dir ./release-assets --zigbuild
+
+      - name: Build macOS worker release asset
+        if: runner.os == 'macOS'
         run: node ./scripts/build-worker.mjs --target "${{ matrix.target }}" --output-dir ./release-assets
 
       - uses: actions/upload-artifact@v4
