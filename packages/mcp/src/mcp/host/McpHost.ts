@@ -46,7 +46,9 @@ export class McpHost {
         this.#auth = config.auth;
         this.#oauth =
             config.auth?.provider === "oauth2" && config.publicBaseUrl !== undefined && config.storageDir !== undefined
-                ? new McpOAuthProtectedResource(config.auth.oauth2, config.publicBaseUrl, config.storageDir)
+                ? new McpOAuthProtectedResource(config.auth.oauth2, config.publicBaseUrl, config.storageDir, {
+                      trustProxy: isLoopbackHost(config.listenHost)
+                  })
                 : undefined;
 
         for (const instance of config.instances) {
@@ -131,4 +133,8 @@ export class McpHost {
             running
         };
     }
+}
+
+function isLoopbackHost(host: string): boolean {
+    return host === "127.0.0.1" || host === "::1" || host === "localhost";
 }

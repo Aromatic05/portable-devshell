@@ -27,13 +27,15 @@ export class McpOAuthProtectedResource {
     readonly #approvals: McpOAuthApprovalService;
     readonly #registeredResources = new Set<string>();
     readonly #storageDir: string;
+    readonly #trustProxy: boolean;
     #provider?: Provider;
 
-    constructor(config: McpOAuth2Config, publicBaseUrl: string, storageDir: string) {
+    constructor(config: McpOAuth2Config, publicBaseUrl: string, storageDir: string, options?: { trustProxy?: boolean }) {
         this.#config = config;
         this.#issuerUrl = new URL(publicBaseUrl);
         this.#basePath = normalizeBasePath(this.#issuerUrl.pathname);
         this.#storageDir = storageDir;
+        this.#trustProxy = options?.trustProxy ?? false;
         this.#approvals = new McpOAuthApprovalService(storageDir);
     }
 
@@ -137,6 +139,7 @@ export class McpOAuthProtectedResource {
                 Session: () => 30 * 24 * 60 * 60
             }
         });
+        this.#provider.proxy = this.#trustProxy;
         this.#provider.on("registration_create.success", (_context, client) => {
             void this.#approvals.registerClient(toRegistrationApprovalInput(client));
         });
