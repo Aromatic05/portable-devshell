@@ -196,7 +196,6 @@ impl FileEditTool {
             revision: text.revision,
             header,
             diff: compact_diff(&before, &text.lines, first),
-            diagnostics: Vec::new(),
             added_lines: added,
             removed_lines: removed,
             first_changed_line: first,

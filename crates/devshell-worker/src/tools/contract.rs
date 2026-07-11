@@ -22,7 +22,6 @@ pub enum ToolAccess {
     Read,
     Write,
     Execute,
-    Session,
 }
 
 #[derive(Clone, Debug, Serialize)]

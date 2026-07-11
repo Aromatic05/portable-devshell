@@ -6,8 +6,6 @@ use crate::tools::ToolError;
 #[derive(Clone, Debug)]
 pub struct ResolvedPath {
     pub canonical: PathBuf,
-    pub display_path: String,
-    pub namespace: PathNamespace,
 }
 
 pub fn resolve_existing_target(
@@ -27,11 +25,7 @@ pub fn resolve_existing_target(
         )
     })?;
     require_workspace_containment(workspace, requested.namespace, &canonical)?;
-    Ok(ResolvedPath {
-        canonical,
-        display_path: requested.raw.clone(),
-        namespace: requested.namespace,
-    })
+    Ok(ResolvedPath { canonical })
 }
 
 pub fn resolve_create_target(
@@ -61,11 +55,7 @@ pub fn resolve_create_target(
         .iter()
         .rev()
         .fold(canonical_ancestor, |path, segment| path.join(segment));
-    Ok(ResolvedPath {
-        canonical,
-        display_path: requested.raw.clone(),
-        namespace: requested.namespace,
-    })
+    Ok(ResolvedPath { canonical })
 }
 
 fn require_workspace_containment(

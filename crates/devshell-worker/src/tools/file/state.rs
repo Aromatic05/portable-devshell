@@ -1,6 +1,5 @@
 use std::collections::{BTreeSet, HashMap, VecDeque};
 use std::fs;
-use std::io::{BufRead, BufReader};
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -23,16 +22,6 @@ pub struct TextFile {
 }
 
 #[derive(Clone)]
-pub struct TextMetadata {
-    pub bom: bool,
-    pub final_newline: bool,
-    pub line_ending: &'static str,
-    pub revision: String,
-    pub total_bytes: usize,
-    pub total_lines: usize,
-}
-
-#[derive(Clone)]
 pub enum SnapshotContent {
     Full(String),
     Sparse,
@@ -40,17 +29,11 @@ pub enum SnapshotContent {
 
 #[derive(Clone)]
 pub struct FileSnapshot {
-    pub id: String,
     pub canonical_path: String,
     pub revision: String,
     pub seen_lines: BTreeSet<usize>,
     pub total_lines: usize,
-    pub total_bytes: usize,
-    pub bom: bool,
-    pub line_ending: &'static str,
-    pub final_newline: bool,
     pub content: SnapshotContent,
-    pub created_at_ms: u128,
     pub last_accessed_at_ms: u128,
 }
 
@@ -92,58 +75,11 @@ impl SnapshotStore {
         self.snapshots.insert(
             id.clone(),
             FileSnapshot {
-                id: id.clone(),
                 canonical_path: key.0.clone(),
                 revision: key.1.clone(),
                 seen_lines: seen_lines.into_iter().collect(),
                 total_lines: text.lines.len(),
-                total_bytes: text.total_bytes,
-                bom: text.bom,
-                line_ending: text.line_ending,
-                final_newline: text.final_newline,
                 content,
-                created_at_ms: now,
-                last_accessed_at_ms: now,
-            },
-        );
-        self.by_content.insert(key, id.clone());
-        self.lru.push_back(id.clone());
-        self.evict();
-        id
-    }
-
-    pub fn remember_sparse(
-        &mut self,
-        path: &Path,
-        metadata: &TextMetadata,
-        seen_lines: impl IntoIterator<Item = usize>,
-    ) -> String {
-        let key = (path.display().to_string(), metadata.revision.clone());
-        let now = now_ms();
-        if let Some(id) = self.by_content.get(&key).cloned() {
-            if let Some(snapshot) = self.snapshots.get_mut(&id) {
-                snapshot.seen_lines.extend(seen_lines);
-                snapshot.last_accessed_at_ms = now;
-            }
-            self.touch(&id);
-            return id;
-        }
-
-        let id = Uuid::new_v4().to_string();
-        self.snapshots.insert(
-            id.clone(),
-            FileSnapshot {
-                id: id.clone(),
-                canonical_path: key.0.clone(),
-                revision: key.1.clone(),
-                seen_lines: seen_lines.into_iter().collect(),
-                total_lines: metadata.total_lines,
-                total_bytes: metadata.total_bytes,
-                bom: metadata.bom,
-                line_ending: metadata.line_ending,
-                final_newline: metadata.final_newline,
-                content: SnapshotContent::Sparse,
-                created_at_ms: now,
                 last_accessed_at_ms: now,
             },
         );
@@ -186,69 +122,6 @@ impl SnapshotStore {
 }
 
 impl TextFile {
-    pub fn inspect(path: &Path) -> Result<TextMetadata, ToolError> {
-        let file = fs::File::open(path).map_err(|error| {
-            ToolError::new(
-                "file.notFound",
-                format!("failed to read {}: {error}", path.display()),
-            )
-        })?;
-        let mut reader = BufReader::new(file);
-        let mut hasher = blake3::Hasher::new();
-        let mut buffer = Vec::new();
-        let mut first = true;
-        let mut bom = false;
-        let mut final_newline = false;
-        let mut line_ending = "\n";
-        let mut total_bytes = 0;
-        let mut total_lines = 0;
-
-        loop {
-            buffer.clear();
-            let count = reader
-                .read_until(b'\n', &mut buffer)
-                .map_err(|error| ToolError::new("file.writeFailed", error.to_string()))?;
-            if count == 0 {
-                break;
-            }
-            hasher.update(&buffer);
-            total_bytes += count;
-            if buffer.contains(&0) {
-                return Err(ToolError::new("file.notText", "file contains NUL bytes"));
-            }
-            let had_newline = buffer.last() == Some(&b'\n');
-            let mut content = buffer.as_slice();
-            if first && content.starts_with(&[0xEF, 0xBB, 0xBF]) {
-                bom = true;
-                content = &content[3..];
-            }
-            first = false;
-            let content = content.strip_suffix(b"\n").unwrap_or(content);
-            let content = content.strip_suffix(b"\r").unwrap_or(content);
-            std::str::from_utf8(content)
-                .map_err(|_| ToolError::new("file.notText", "file is not valid UTF-8"))?;
-            if had_newline || !content.is_empty() {
-                total_lines += 1;
-            }
-            if had_newline && total_lines == 1 {
-                line_ending = if buffer.get(buffer.len().saturating_sub(2)) == Some(&b'\r') {
-                    "\r\n"
-                } else {
-                    "\n"
-                };
-            }
-            final_newline = had_newline;
-        }
-        Ok(TextMetadata {
-            bom,
-            final_newline,
-            line_ending,
-            revision: hasher.finalize().to_hex().to_string(),
-            total_bytes,
-            total_lines,
-        })
-    }
-
     pub fn read(path: &Path) -> Result<Self, ToolError> {
         let bytes = fs::read(path).map_err(|error| {
             ToolError::new(

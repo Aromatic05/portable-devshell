@@ -30,7 +30,13 @@ impl ToolHandler for FileReadTool {
     fn catalog_entry(&self) -> ToolCatalogEntry {
         ToolCatalogEntry {
             name: self.name.as_str(),
-            description: "Read UTF-8 text using selectors such as `50`, `50-100`, `50+100`, `5-16,960-973`, or `raw`.".to_string(),
+            description: concat!(
+                "Read UTF-8 text and create a snapshot for later file_edit calls. Without selector, supported source files return a compact Tree-sitter structure summary; other files return the first 200 lines. ",
+                "Selectors use one-based lines: `50` reads a default window from line 50, `50-100` reads an inclusive range, `50+100` reads 100 lines, and comma joins sorted non-overlapping ranges such as `5-16,960-973`. ",
+                "Explicit ranges normally include one preceding and three following context lines. Add `:raw` to suppress context expansion, for example `50-100:raw`; selector `raw` reads the entire file. ",
+                "The first content line is `[path#snapshotId]` and can be copied directly into file_edit. Only complete source lines actually returned in content become editable snapshot coverage; omitted or truncated lines are not authorized for editing."
+            )
+            .to_string(),
             input_schema: serde_json::to_value(schema_for!(FileReadInput)).unwrap(),
             output_schema: serde_json::to_value(schema_for!(FileReadOutput)).unwrap(),
             access: ToolAccess::Read,

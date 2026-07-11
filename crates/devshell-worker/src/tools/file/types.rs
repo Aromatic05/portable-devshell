@@ -81,7 +81,6 @@ pub struct FileEditFileOutput {
     pub revision: String,
     pub header: String,
     pub diff: String,
-    pub diagnostics: Vec<String>,
     pub added_lines: usize,
     pub removed_lines: usize,
     pub first_changed_line: usize,
