@@ -26,6 +26,7 @@ pub fn run(args: InstanceArgs) -> Result<String, String> {
 
     ensure_dir(&instance_paths.instance_root, 0o700)?;
     ensure_dir(&instance_paths.logs_dir, 0o700)?;
+    ensure_dir(&instance_paths.artifacts_dir, 0o700)?;
     ensure_dir(&instance_paths.state_dir, 0o700)?;
     ensure_dir(&socket_paths.instance_runtime_dir, 0o700)?;
 

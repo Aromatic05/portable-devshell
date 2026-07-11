@@ -13,6 +13,8 @@ use schemars::schema_for;
 use crate::daemon::process_registry::ActiveProcessGuard;
 use crate::platform;
 use crate::security::path::{FilesystemCapability, parse_requested_path, resolve_existing_target};
+use crate::tools::artifact::store::{ArtifactDraft, ArtifactStore};
+use crate::tools::artifact::types::{ArtifactReference, ArtifactStream};
 use crate::tools::bash::backend::spawn_bash;
 use crate::tools::bash::group::bash_run_name;
 use crate::tools::bash::types::{BashRunOutput, BashRunParams, BashTermination};
@@ -26,11 +28,13 @@ const MAX_STDIN_BYTES: usize = 4 * 1024 * 1024;
 
 pub struct BashRunTool {
     name: ToolName,
+    artifacts: Arc<ArtifactStore>,
 }
 impl BashRunTool {
-    pub fn new() -> Self {
+    pub fn new(artifacts: Arc<ArtifactStore>) -> Self {
         Self {
             name: bash_run_name(),
+            artifacts,
         }
     }
 }
@@ -121,16 +125,32 @@ impl ToolHandler for BashRunTool {
             .ok_or_else(|| ToolError::new("bash.ioFailed", "missing stderr pipe"))?;
         let stdout_bytes = Arc::new(AtomicUsize::new(0));
         let stderr_bytes = Arc::new(AtomicUsize::new(0));
-        let stdout_thread = spawn_reader(stdout, Arc::clone(&stdout_bytes), max_capture);
-        let stderr_thread = spawn_reader(stderr, Arc::clone(&stderr_bytes), max_capture);
+        let (stdout_draft, stdout_warning) =
+            begin_artifact(&self.artifacts, ArtifactStream::Stdout);
+        let (stderr_draft, stderr_warning) =
+            begin_artifact(&self.artifacts, ArtifactStream::Stderr);
+        let stdout_thread = spawn_reader(
+            stdout,
+            Arc::clone(&stdout_bytes),
+            max_capture,
+            stdout_draft,
+            stdout_warning,
+        );
+        let stderr_thread = spawn_reader(
+            stderr,
+            Arc::clone(&stderr_bytes),
+            max_capture,
+            stderr_draft,
+            stderr_warning,
+        );
         let termination = wait(&mut child, pid, Duration::from_millis(timeout_ms))?;
         let status = child
             .wait_and_reap()
             .map_err(|error| ToolError::new("bash.ioFailed", error.to_string()))?;
-        let stdout = stdout_thread
+        let mut stdout = stdout_thread
             .join()
             .map_err(|_| ToolError::new("bash.ioFailed", "stdout reader panicked"))??;
-        let stderr = stderr_thread
+        let mut stderr = stderr_thread
             .join()
             .map_err(|_| ToolError::new("bash.ioFailed", "stderr reader panicked"))??;
         let term_signal = status.signal();
@@ -139,6 +159,19 @@ impl ToolHandler for BashRunTool {
         } else {
             termination
         };
+        let mut artifact_warnings = Vec::new();
+        let stdout_artifact = persist_artifact(
+            &self.artifacts,
+            &mut stdout,
+            "stdout",
+            &mut artifact_warnings,
+        );
+        let stderr_artifact = persist_artifact(
+            &self.artifacts,
+            &mut stderr,
+            "stderr",
+            &mut artifact_warnings,
+        );
         serde_json::to_value(BashRunOutput {
             exit_code: if matches!(termination, BashTermination::Exited) {
                 status.code()
@@ -156,6 +189,9 @@ impl ToolHandler for BashRunTool {
             stderr_bytes: stderr_bytes.load(Ordering::SeqCst),
             stdout_truncated: stdout.truncated,
             stderr_truncated: stderr.truncated,
+            stdout_artifact,
+            stderr_artifact,
+            artifact_warnings,
             duration_ms: started.elapsed().as_millis(),
             termination,
         })
@@ -214,6 +250,8 @@ impl Drop for ManagedBashChild {
 struct StreamOutput {
     kept: Vec<u8>,
     truncated: bool,
+    artifact_draft: Option<ArtifactDraft>,
+    artifact_warning: Option<String>,
 }
 fn resolve_cwd(call: &ToolCall, raw: Option<&str>) -> Result<PathBuf, ToolError> {
     let requested = parse_requested_path(raw.unwrap_or("./"))
@@ -229,6 +267,8 @@ fn spawn_reader(
     mut reader: impl Read + Send + 'static,
     bytes: Arc<AtomicUsize>,
     max: usize,
+    mut artifact_draft: Option<ArtifactDraft>,
+    mut artifact_warning: Option<String>,
 ) -> thread::JoinHandle<Result<StreamOutput, ToolError>> {
     thread::spawn(move || {
         let mut buffer = [0; 8192];
@@ -245,6 +285,12 @@ fn spawn_reader(
                 break;
             }
             bytes.fetch_add(count, Ordering::SeqCst);
+            if let Some(draft) = artifact_draft.as_mut() {
+                if let Err(error) = draft.write_chunk(&buffer[..count]) {
+                    artifact_draft = None;
+                    artifact_warning = Some(error.message);
+                }
+            }
             let mut offset = 0;
             if head.len() < head_limit {
                 let kept = (head_limit - head.len()).min(count);
@@ -268,9 +314,53 @@ fn spawn_reader(
         }
         let mut kept = head;
         kept.extend(tail);
-        Ok(StreamOutput { kept, truncated })
+        Ok(StreamOutput {
+            kept,
+            truncated,
+            artifact_draft,
+            artifact_warning,
+        })
     })
 }
+
+fn begin_artifact(
+    store: &ArtifactStore,
+    stream: ArtifactStream,
+) -> (Option<ArtifactDraft>, Option<String>) {
+    match store.begin(stream) {
+        Ok(draft) => (Some(draft), None),
+        Err(error) => (None, Some(error.message)),
+    }
+}
+
+fn persist_artifact(
+    store: &ArtifactStore,
+    output: &mut StreamOutput,
+    stream_name: &str,
+    warnings: &mut Vec<String>,
+) -> Option<ArtifactReference> {
+    if let Some(warning) = output.artifact_warning.take() {
+        warnings.push(format!("{stream_name} artifact unavailable: {warning}"));
+    }
+    if !output.truncated {
+        output.artifact_draft.take();
+        return None;
+    }
+    let Some(draft) = output.artifact_draft.take() else {
+        return None;
+    };
+    match store.persist(draft) {
+        Ok(reference) => Some(reference),
+        Err(error) => {
+            warnings.push(format!(
+                "{stream_name} artifact could not be persisted: {}",
+                error.message
+            ));
+            None
+        }
+    }
+}
+
 fn wait(child: &mut Child, pid: i32, timeout: Duration) -> Result<BashTermination, ToolError> {
     let started = Instant::now();
     loop {

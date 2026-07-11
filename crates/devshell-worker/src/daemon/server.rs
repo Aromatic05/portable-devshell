@@ -24,6 +24,7 @@ pub fn serve(instance: InstanceName) -> Result<(), String> {
     let instance_paths = InstancePaths::resolve(&instance)?;
     let socket_paths = SocketPaths::resolve(&instance)?;
     ensure_dir(&instance_paths.logs_dir, 0o700)?;
+    ensure_dir(&instance_paths.artifacts_dir, 0o700)?;
     ensure_dir(&instance_paths.state_dir, 0o700)?;
     ensure_dir(&socket_paths.instance_runtime_dir, 0o700)?;
     let _daemon_lock = InstanceLock::acquire_daemon(&instance_paths)?;
@@ -53,7 +54,7 @@ pub fn serve(instance: InstanceName) -> Result<(), String> {
         .set_nonblocking(true)
         .map_err(|error| format!("failed to set listener nonblocking: {error}"))?;
 
-    let tools = Arc::new(builtin_registry().map_err(|error| error.message)?);
+    let tools = Arc::new(builtin_registry(&instance_paths).map_err(|error| error.message)?);
     let router = Arc::new(RpcRouter::new(config.clone(), runtime, tools));
 
     while !router.shutdown_requested() {

@@ -1,3 +1,4 @@
+pub mod artifact;
 pub mod bash;
 pub mod catalog;
 pub mod contract;

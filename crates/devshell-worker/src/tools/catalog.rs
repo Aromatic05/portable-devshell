@@ -1,5 +1,8 @@
 use std::sync::Arc;
 
+use crate::storage::InstancePaths;
+use crate::tools::artifact::read::ArtifactReadTool;
+use crate::tools::artifact::store::ArtifactStore;
 use crate::tools::bash::run::BashRunTool;
 use crate::tools::file::FileToolState;
 use crate::tools::file::edit::FileEditTool;
@@ -10,10 +13,12 @@ use crate::tools::file::search::FileSearchTool;
 use crate::tools::file::write::FileWriteTool;
 use crate::tools::{ToolError, ToolRegistry};
 
-pub fn builtin_registry() -> Result<ToolRegistry, ToolError> {
+pub fn builtin_registry(instance_paths: &InstancePaths) -> Result<ToolRegistry, ToolError> {
     let mut registry = ToolRegistry::new();
     let files = FileToolState::new();
-    registry.register(Arc::new(BashRunTool::new()) as Arc<_>)?;
+    let artifacts = ArtifactStore::new(instance_paths.artifacts_dir.clone())?;
+    registry.register(Arc::new(BashRunTool::new(Arc::clone(&artifacts))) as Arc<_>)?;
+    registry.register(Arc::new(ArtifactReadTool::new(artifacts)) as Arc<_>)?;
     registry.register(Arc::new(FileReadTool::new(Arc::clone(&files))) as Arc<_>)?;
     registry.register(Arc::new(FileEditTool::new(Arc::clone(&files))) as Arc<_>)?;
     registry.register(Arc::new(FileWriteTool::new(Arc::clone(&files))) as Arc<_>)?;

@@ -123,6 +123,7 @@ fn handshake_tools_and_bash_run_flow_work_over_framed_rpc() {
             .map(|tool| tool["name"].as_str().unwrap())
             .collect::<Vec<_>>(),
         vec![
+            "artifact_read",
             "bash_run",
             "file_edit",
             "file_find",
@@ -251,7 +252,77 @@ fn bash_run_returns_success_for_timeout_and_capture_truncation() {
     assert_eq!(output_limited["ok"], true);
     assert_eq!(output_limited["result"]["termination"], "exited");
     assert_eq!(output_limited["result"]["stdoutTruncated"], true);
-    assert_eq!(output_limited["result"]["stdoutTruncated"], true);
+    assert_eq!(output_limited["result"]["stderrTruncated"], false);
+    assert!(output_limited["result"].get("stderrArtifact").is_none());
+    let handle = output_limited["result"]["stdoutArtifact"]["handle"]
+        .as_str()
+        .expect("truncated stdout must expose an artifact handle");
+    assert_eq!(
+        output_limited["result"]["stdoutArtifact"]["sourceBytes"],
+        2001
+    );
+    assert_eq!(
+        output_limited["result"]["stdoutArtifact"]["storedBytes"],
+        2001
+    );
+    assert_eq!(
+        output_limited["result"]["stdoutArtifact"]["artifactTruncated"],
+        false
+    );
+
+    let first = env.rpc(
+        instance,
+        &serde_json::json!({
+            "type": "request",
+            "id": "7",
+            "method": "artifact_read",
+            "params": {
+                "handle": handle,
+                "maxBytes": 1000
+            }
+        }),
+    );
+    assert_eq!(first["ok"], true, "{first}");
+    assert_eq!(first["result"]["returnedBytes"], 1000);
+    assert_eq!(first["result"]["eof"], false);
+    assert_eq!(first["result"]["nextOffsetBytes"], 1000);
+
+    let second = env.rpc(
+        instance,
+        &serde_json::json!({
+            "type": "request",
+            "id": "8",
+            "method": "artifact_read",
+            "params": {
+                "handle": handle,
+                "offsetBytes": first["result"]["nextOffsetBytes"],
+                "maxBytes": 2000
+            }
+        }),
+    );
+    assert_eq!(second["ok"], true, "{second}");
+    assert_eq!(second["result"]["returnedBytes"], 1001);
+    assert_eq!(second["result"]["eof"], true);
+    assert!(second["result"].get("nextOffsetBytes").is_none());
+    let restored = format!(
+        "{}{}",
+        first["result"]["content"].as_str().unwrap(),
+        second["result"]["content"].as_str().unwrap()
+    );
+    assert_eq!(restored, format!("{}\n", "x".repeat(2000)));
+
+    let compact = env.rpc(
+        instance,
+        &serde_json::json!({
+            "type": "request",
+            "id": "9",
+            "method": "bash_run",
+            "params": { "command": "printf compact" }
+        }),
+    );
+    assert_eq!(compact["ok"], true, "{compact}");
+    assert!(compact["result"].get("stdoutArtifact").is_none());
+    assert!(compact["result"].get("stderrArtifact").is_none());
 
     env.json_command(&["stop", "--instance", instance]);
 }
