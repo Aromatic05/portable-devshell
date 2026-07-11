@@ -31,17 +31,9 @@ pub struct ReturnedRange {
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct FileEditInput {
-    pub path: String,
-    pub snapshot_id: String,
-    pub operations: Vec<FileEditOperation>,
+    pub input: String,
 }
-#[derive(Debug, Deserialize, JsonSchema)]
-#[serde(
-    tag = "op",
-    rename_all = "camelCase",
-    rename_all_fields = "camelCase",
-    deny_unknown_fields
-)]
+#[derive(Clone, Debug)]
 pub enum FileEditOperation {
     Replace {
         start_line: usize,
@@ -57,9 +49,19 @@ pub enum FileEditOperation {
         line: Option<usize>,
         lines: Vec<String>,
     },
+    ReplaceBlock {
+        start_line: usize,
+        lines: Vec<String>,
+    },
+    DeleteBlock {
+        start_line: usize,
+    },
+    InsertBlockPost {
+        start_line: usize,
+        lines: Vec<String>,
+    },
 }
-#[derive(Debug, Deserialize, JsonSchema, PartialEq)]
-#[serde(rename_all = "camelCase")]
+#[derive(Clone, Debug, PartialEq)]
 pub enum InsertAt {
     Before,
     After,
@@ -69,9 +71,17 @@ pub enum InsertAt {
 #[derive(Debug, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct FileEditOutput {
+    pub files: Vec<FileEditFileOutput>,
+}
+#[derive(Debug, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct FileEditFileOutput {
     pub path: String,
     pub snapshot_id: String,
     pub revision: String,
+    pub header: String,
+    pub diff: String,
+    pub diagnostics: Vec<String>,
     pub added_lines: usize,
     pub removed_lines: usize,
     pub first_changed_line: usize,

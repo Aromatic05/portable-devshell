@@ -25,6 +25,12 @@ fn call(env: &TestEnv, instance: &str, id: &str, method: &str, params: Value) ->
     )
 }
 
+fn patch(path: &str, snapshot: &Value, commands: &str) -> Value {
+    json!({
+        "input": format!("[{path}#{}]\n{commands}", snapshot.as_str().unwrap())
+    })
+}
+
 #[test]
 fn file_tools_reject_intermediate_dot_segments() {
     let env = TestEnv::new();
@@ -98,19 +104,15 @@ fn file_edit_reports_the_actual_first_changed_line() {
         instance,
         "2",
         "file_edit",
-        json!({
-            "path": "./document.txt",
-            "snapshotId": read["result"]["snapshotId"],
-            "operations": [{
-                "op": "replace",
-                "startLine": 3,
-                "endLine": 3,
-                "lines": ["updated"],
-            }],
-        }),
+        patch(
+            "./document.txt",
+            &read["result"]["snapshotId"],
+            "SWAP 3:
++updated",
+        ),
     );
     assert_eq!(edited["ok"], true, "{edited}");
-    assert_eq!(edited["result"]["firstChangedLine"], 3);
+    assert_eq!(edited["result"]["files"][0]["firstChangedLine"], 3);
 
     env.json_command(&["stop", "--instance", instance]);
 }
@@ -309,16 +311,12 @@ fn file_edit_uses_the_first_actual_line_ending_when_writing_back() {
         instance,
         "2",
         "file_edit",
-        json!({
-            "path": "./document.txt",
-            "snapshotId": read["result"]["snapshotId"],
-            "operations": [{
-                "op": "replace",
-                "startLine": 1,
-                "endLine": 1,
-                "lines": ["updated"],
-            }],
-        }),
+        patch(
+            "./document.txt",
+            &read["result"]["snapshotId"],
+            "SWAP 1:
++updated",
+        ),
     );
     assert_eq!(edited["ok"], true);
     assert_eq!(
@@ -354,16 +352,12 @@ fn file_edit_updates_a_sparse_snapshot_without_losing_the_file_shape() {
         instance,
         "2",
         "file_edit",
-        json!({
-            "path": "./large.txt",
-            "snapshotId": read["result"]["snapshotId"],
-            "operations": [{
-                "op": "replace",
-                "startLine": 1,
-                "endLine": 1,
-                "lines": ["updated line"],
-            }],
-        }),
+        patch(
+            "./large.txt",
+            &read["result"]["snapshotId"],
+            "SWAP 1:
++updated line",
+        ),
     );
     assert_eq!(edited["ok"], true, "{edited}");
     assert_eq!(
@@ -397,16 +391,12 @@ fn file_edit_applies_eof_sentinel_to_all_eof_operations() {
         instance,
         "2",
         "file_edit",
-        json!({
-            "path": "./document.txt",
-            "snapshotId": document["result"]["snapshotId"],
-            "operations": [{
-                "op": "insert",
-                "at": "after",
-                "line": 1,
-                "lines": ["two", ""],
-            }],
-        }),
+        patch(
+            "./document.txt",
+            &document["result"]["snapshotId"],
+            "INS.POST 1:
++two",
+        ),
     );
     assert_eq!(inserted["ok"], true, "{inserted}");
     assert_eq!(
@@ -426,15 +416,8 @@ fn file_edit_applies_eof_sentinel_to_all_eof_operations() {
         instance,
         "4",
         "file_edit",
-        json!({
-            "path": "./empty.txt",
-            "snapshotId": empty["result"]["snapshotId"],
-            "operations": [{
-                "op": "insert",
-                "at": "head",
-                "lines": [""],
-            }],
-        }),
+        json!({ "input": format!("[./empty.txt#{}]
+INS.HEAD:", empty["result"]["snapshotId"].as_str().unwrap()) }),
     );
     assert_eq!(empty_insert["ok"], false, "{empty_insert}");
     assert_eq!(empty_insert["error"]["code"], "file.emptyOperation");
@@ -527,5 +510,180 @@ fn file_write_expected_revision_requires_an_existing_file() {
     );
     assert_eq!(result["ok"], false, "{result}");
     assert_eq!(result["error"]["code"], "file.notFound");
+    env.json_command(&["stop", "--instance", instance]);
+}
+
+#[test]
+fn file_edit_validates_all_sections_before_writing_any_file() {
+    let env = TestEnv::new();
+    let instance = "aromatic-edit-batch-validation";
+    fs::write(env.workspace().join("a.txt"), "alpha\n").unwrap();
+    fs::write(env.workspace().join("b.txt"), "beta\n").unwrap();
+    start(&env, instance);
+    let a = call(
+        &env,
+        instance,
+        "1",
+        "file_read",
+        json!({ "path": "./a.txt", "selector": "raw" }),
+    );
+    let b = call(
+        &env,
+        instance,
+        "2",
+        "file_read",
+        json!({ "path": "./b.txt", "selector": "raw" }),
+    );
+    fs::write(env.workspace().join("b.txt"), "changed externally\n").unwrap();
+    let input = format!(
+        "[./a.txt#{}]\nSWAP 1:\n+updated alpha\n\n[./b.txt#{}]\nSWAP 1:\n+updated beta",
+        a["result"]["snapshotId"].as_str().unwrap(),
+        b["result"]["snapshotId"].as_str().unwrap()
+    );
+    let edited = call(&env, instance, "3", "file_edit", json!({ "input": input }));
+    assert_eq!(edited["ok"], false, "{edited}");
+    assert_eq!(
+        fs::read_to_string(env.workspace().join("a.txt")).unwrap(),
+        "alpha\n"
+    );
+    env.json_command(&["stop", "--instance", instance]);
+}
+
+#[test]
+fn file_edit_applies_multiple_files_and_returns_fresh_headers() {
+    let env = TestEnv::new();
+    let instance = "aromatic-edit-batch";
+    fs::write(env.workspace().join("a.txt"), "alpha\n").unwrap();
+    fs::write(env.workspace().join("b.txt"), "beta\n").unwrap();
+    start(&env, instance);
+    let a = call(
+        &env,
+        instance,
+        "1",
+        "file_read",
+        json!({ "path": "./a.txt", "selector": "raw" }),
+    );
+    let b = call(
+        &env,
+        instance,
+        "2",
+        "file_read",
+        json!({ "path": "./b.txt", "selector": "raw" }),
+    );
+    let input = format!(
+        "[./a.txt#{}]\nSWAP 1:\n+updated alpha\n\n[./b.txt#{}]\nSWAP 1:\n+updated beta",
+        a["result"]["snapshotId"].as_str().unwrap(),
+        b["result"]["snapshotId"].as_str().unwrap()
+    );
+    let edited = call(&env, instance, "3", "file_edit", json!({ "input": input }));
+    assert_eq!(edited["ok"], true, "{edited}");
+    assert_eq!(edited["result"]["files"].as_array().unwrap().len(), 2);
+    assert!(
+        edited["result"]["files"][0]["header"]
+            .as_str()
+            .unwrap()
+            .starts_with("[./a.txt#")
+    );
+    assert_eq!(
+        fs::read_to_string(env.workspace().join("a.txt")).unwrap(),
+        "updated alpha\n"
+    );
+    assert_eq!(
+        fs::read_to_string(env.workspace().join("b.txt")).unwrap(),
+        "updated beta\n"
+    );
+    env.json_command(&["stop", "--instance", instance]);
+}
+
+#[test]
+fn file_edit_block_operations_use_tree_sitter_and_require_full_seen_lines() {
+    let env = TestEnv::new();
+    let instance = "aromatic-edit-block";
+    fs::write(
+        env.workspace().join("main.rs"),
+        "fn old() {\n    println!(\"old\");\n}\n",
+    )
+    .unwrap();
+    start(&env, instance);
+    let summary = call(
+        &env,
+        instance,
+        "1",
+        "file_read",
+        json!({ "path": "./main.rs" }),
+    );
+    let rejected = call(
+        &env,
+        instance,
+        "2",
+        "file_edit",
+        patch(
+            "./main.rs",
+            &summary["result"]["snapshotId"],
+            "SWAP.BLK 1:\n+fn new() {}",
+        ),
+    );
+    assert_eq!(rejected["ok"], false, "{rejected}");
+    assert_eq!(rejected["error"]["code"], "file.invalidRange");
+    let full = call(
+        &env,
+        instance,
+        "3",
+        "file_read",
+        json!({ "path": "./main.rs", "selector": "raw" }),
+    );
+    let edited = call(
+        &env,
+        instance,
+        "4",
+        "file_edit",
+        patch(
+            "./main.rs",
+            &full["result"]["snapshotId"],
+            "SWAP.BLK 1:\n+fn new() {}",
+        ),
+    );
+    assert_eq!(edited["ok"], true, "{edited}");
+    assert_eq!(
+        fs::read_to_string(env.workspace().join("main.rs")).unwrap(),
+        "fn new() {}\n"
+    );
+    env.json_command(&["stop", "--instance", instance]);
+}
+
+#[test]
+fn file_edit_recovers_a_full_snapshot_only_when_the_anchor_maps_exactly() {
+    let env = TestEnv::new();
+    let instance = "aromatic-edit-recovery";
+    fs::write(env.workspace().join("document.txt"), "alpha\nbeta\ngamma\n").unwrap();
+    start(&env, instance);
+    let read = call(
+        &env,
+        instance,
+        "1",
+        "file_read",
+        json!({ "path": "./document.txt", "selector": "raw" }),
+    );
+    fs::write(
+        env.workspace().join("document.txt"),
+        "prefix\nalpha\nbeta\ngamma\n",
+    )
+    .unwrap();
+    let edited = call(
+        &env,
+        instance,
+        "2",
+        "file_edit",
+        patch(
+            "./document.txt",
+            &read["result"]["snapshotId"],
+            "SWAP 2:\n+updated beta",
+        ),
+    );
+    assert_eq!(edited["ok"], true, "{edited}");
+    assert_eq!(
+        fs::read_to_string(env.workspace().join("document.txt")).unwrap(),
+        "prefix\nalpha\nupdated beta\ngamma\n"
+    );
     env.json_command(&["stop", "--instance", instance]);
 }
