@@ -124,7 +124,7 @@ impl ToolHandler for FileWriteTool {
         temp.persist(&path)
             .map_err(|error| ToolError::new("file.writeFailed", error.error.to_string()))?;
         let text = TextFile::read(&path)?;
-        let snapshot_id =
+        let snapshot =
             self.state
                 .snapshots
                 .lock()
@@ -133,7 +133,8 @@ impl ToolHandler for FileWriteTool {
         serde_json::to_value(FileWriteOutput {
             path: requested.raw,
             created: !existing,
-            snapshot_id,
+            snapshot_id: snapshot.id,
+            snapshot_tag: snapshot.tag,
             revision: text.revision,
             bytes_written: input.content.len(),
             total_lines: text.lines.len(),

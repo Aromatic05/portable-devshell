@@ -12,6 +12,7 @@ pub struct FileReadInput {
 pub struct FileReadOutput {
     pub path: String,
     pub snapshot_id: String,
+    pub snapshot_tag: String,
     pub revision: String,
     pub content: String,
     pub returned_ranges: Vec<ReturnedRange>,
@@ -28,11 +29,66 @@ pub struct ReturnedRange {
     pub end_line: usize,
 }
 
+#[derive(Clone, Copy, Debug, Default, Deserialize, JsonSchema, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FileEditMode {
+    #[default]
+    Text,
+    Replace,
+    Patch,
+    ApplyPatch,
+}
+
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct FileEditInput {
+pub struct FileEditTextInput {
     pub input: String,
 }
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct FileEditReplaceInput {
+    pub path: String,
+    pub edits: Vec<FileEditReplaceEntry>,
+}
+
+#[derive(Clone, Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct FileEditReplaceEntry {
+    pub old_text: String,
+    pub new_text: String,
+    pub all: Option<bool>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct FileEditPatchInput {
+    pub path: String,
+    pub edits: Vec<FileEditPatchEntry>,
+}
+
+#[derive(Clone, Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct FileEditPatchEntry {
+    pub op: Option<FileEditPatchOperation>,
+    pub rename: Option<String>,
+    pub diff: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, JsonSchema, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum FileEditPatchOperation {
+    Create,
+    Delete,
+    Update,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct FileEditApplyPatchInput {
+    pub input: String,
+}
+
 #[derive(Clone, Debug)]
 pub enum FileEditOperation {
     Replace {
@@ -61,6 +117,7 @@ pub enum FileEditOperation {
         lines: Vec<String>,
     },
 }
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum InsertAt {
     Before,
@@ -68,26 +125,56 @@ pub enum InsertAt {
     Head,
     Tail,
 }
+
 #[derive(Debug, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct FileEditOutput {
     pub files: Vec<FileEditFileOutput>,
+    pub applied_files: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub failed_file: Option<String>,
+    pub skipped_files: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub failure_message: Option<String>,
 }
+
+#[derive(Clone, Copy, Debug, JsonSchema, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum FileEditResultOperation {
+    Create,
+    Update,
+    Delete,
+    Move,
+}
+
 #[derive(Debug, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct FileEditFileOutput {
     pub path: String,
-    pub snapshot_id: String,
-    pub revision: String,
-    pub header: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub snapshot_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub snapshot_tag: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub revision: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub header: Option<String>,
+    pub operation: FileEditResultOperation,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub moved_from: Option<String>,
     pub diff: String,
     pub added_lines: usize,
     pub removed_lines: usize,
-    pub first_changed_line: usize,
-    pub content: String,
-    pub returned_ranges: Vec<ReturnedRange>,
-    pub total_lines: usize,
-    pub total_bytes: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub first_changed_line: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub total_lines: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub total_bytes: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub preview: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub preview_range: Option<ReturnedRange>,
     pub truncated: bool,
 }
 
@@ -104,6 +191,7 @@ pub struct FileWriteOutput {
     pub path: String,
     pub created: bool,
     pub snapshot_id: String,
+    pub snapshot_tag: String,
     pub revision: String,
     pub bytes_written: usize,
     pub total_lines: usize,
@@ -172,6 +260,7 @@ pub struct FileSearchOutput {
 pub struct FileSearchFile {
     pub path: String,
     pub snapshot_id: String,
+    pub snapshot_tag: String,
     pub revision: String,
     pub content: String,
     pub match_count: usize,

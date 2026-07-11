@@ -87,13 +87,13 @@ impl ToolHandler for FileReadTool {
                 end_line: *end,
             });
         }
-        let snapshot_id = self
+        let snapshot = self
             .state
             .snapshots
             .lock()
             .unwrap()
             .remember(&path, &text, seen);
-        let header = format!("[{}#{}]", requested.raw, snapshot_id);
+        let header = format!("[{}#{}]", requested.raw, snapshot.tag);
         let content = if content.is_empty() {
             header
         } else {
@@ -101,7 +101,8 @@ impl ToolHandler for FileReadTool {
         };
         serde_json::to_value(FileReadOutput {
             path: requested.raw,
-            snapshot_id,
+            snapshot_id: snapshot.id,
+            snapshot_tag: snapshot.tag,
             revision: text.revision,
             content,
             returned_ranges: returned,

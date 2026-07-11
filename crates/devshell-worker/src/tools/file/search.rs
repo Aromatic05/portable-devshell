@@ -86,16 +86,17 @@ impl ToolHandler for FileSearchTool {
             }
             let shown = shown_lines(&matches, text.lines.len(), context);
             let (body, seen) = format_content(&text.lines, &matches, &shown);
-            let snapshot_id =
-                self.state
-                    .snapshots
-                    .lock()
-                    .unwrap()
-                    .remember(&entry.path, &text, seen);
-            let content = format!("[{}#{}]\n{}", entry.display, snapshot_id, body);
+            let snapshot = self
+                .state
+                .snapshots
+                .lock()
+                .unwrap()
+                .remember(&entry.path, &text, seen);
+            let content = format!("[{}#{}]\n{}", entry.display, snapshot.tag, body);
             files.push(FileSearchFile {
                 path: entry.display,
-                snapshot_id,
+                snapshot_id: snapshot.id,
+                snapshot_tag: snapshot.tag,
                 revision: text.revision,
                 content,
                 match_count: matches.len(),
