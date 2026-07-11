@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createConnection } from "node:net";
+import { spawn } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
@@ -14,7 +15,12 @@ import { ControlConfigTomlCodec } from "../../dist/control/config/ControlConfigT
 import { ControlPathHome } from "../../dist/control/path/ControlPathHome.js";
 import { ControlPathRuntime } from "../../dist/control/path/ControlPathRuntime.js";
 
-test("control lifecycle smoke drives the frozen worker and persists Task 12 artifacts", async (t) => {
+if (process.env.PORTABLE_DEVSHELL_REAL_WORKER_CHILD !== "1") {
+    test("control lifecycle smoke drives the frozen worker in an isolated process", async () => {
+        await runIsolatedScenario();
+    });
+} else {
+    test("control lifecycle smoke drives the frozen worker and persists Task 12 artifacts", async (t) => {
     const homeDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-control-real-home-"));
     const xdgRuntimeDir = await mkdtemp(join(tmpdir(), "portable-devshell-control-real-runtime-"));
     const workspacePath = await mkdtemp(join(tmpdir(), "portable-devshell-control-real-workspace-"));
@@ -109,7 +115,42 @@ test("control lifecycle smoke drives the frozen worker and persists Task 12 arti
 
     const stopped = await manager.stop();
     assert.equal(stopped.running, false);
-});
+    });
+}
+
+async function runIsolatedScenario(): Promise<void> {
+    const registerPath = fileURLToPath(new URL("../../../mcp/test/RegisterWorkspacePackages.mjs", import.meta.url));
+    const testPath = fileURLToPath(import.meta.url);
+    await new Promise<void>((resolvePromise, rejectPromise) => {
+        const childEnv = {
+            ...process.env,
+            PORTABLE_DEVSHELL_REAL_WORKER_CHILD: "1"
+        };
+        delete childEnv.NODE_TEST_CONTEXT;
+        const child = spawn(process.execPath, ["--import", registerPath, "--test", testPath], {
+            env: childEnv,
+            stdio: ["ignore", "pipe", "pipe"]
+        });
+        let stdout = "";
+        let stderr = "";
+        child.stdout.setEncoding("utf8");
+        child.stderr.setEncoding("utf8");
+        child.stdout.on("data", (chunk: string) => {
+            stdout += chunk;
+        });
+        child.stderr.on("data", (chunk: string) => {
+            stderr += chunk;
+        });
+        child.once("error", rejectPromise);
+        child.once("exit", (code, signal) => {
+            if (code === 0) {
+                resolvePromise();
+                return;
+            }
+            rejectPromise(new Error(`isolated real-worker scenario failed with code ${String(code)} signal ${String(signal)}\n${stdout}${stderr}`));
+        });
+    });
+}
 
 function createGlobalConfig() {
     return {
@@ -212,7 +253,7 @@ async function request(
 
                 if (envelope.ok !== true) {
                     socket.destroy();
-                    reject(new Error(envelope.error?.message ?? "request failed"));
+                    reject(new Error(`${envelope.error?.message ?? "request failed"}: ${JSON.stringify(envelope.error?.details ?? {})}`));
                     return;
                 }
 

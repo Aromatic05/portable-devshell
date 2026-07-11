@@ -131,11 +131,6 @@ pub enum InsertAt {
 pub struct FileEditOutput {
     pub files: Vec<FileEditFileOutput>,
     pub applied_files: Vec<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub failed_file: Option<String>,
-    pub skipped_files: Vec<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub failure_message: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, JsonSchema, Serialize)]
@@ -255,7 +250,7 @@ pub struct FileSearchOutput {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub next_cursor: Option<String>,
 }
-#[derive(Debug, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct FileSearchFile {
     pub path: String,

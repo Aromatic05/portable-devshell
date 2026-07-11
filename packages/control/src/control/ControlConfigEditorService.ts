@@ -94,15 +94,19 @@ export class ControlConfigEditorService {
             ...currentConfig,
             instances: currentConfig.instances.map((entry) => (entry.name === instance.name ? instance : entry))
         });
-        await this.#persistConfig(nextConfig);
         const descriptor = this.#instanceRegistry.get(instance.name);
+        const rebuildRequired = descriptor !== undefined && requiresWorkerRebuild(existing, instance);
+        if (rebuildRequired) {
+            this.#assertInstanceStopped(instance.name, "update");
+        }
+
+        await this.#persistConfig(nextConfig);
 
         if (descriptor === undefined) {
             if (instance.enabled) {
                 this.#instanceRegistry.add(this.#instanceConfigMapper.map(instance));
             }
-        } else if (requiresWorkerRebuild(existing, instance)) {
-            this.#assertInstanceStopped(instance.name, "update");
+        } else if (rebuildRequired) {
             this.#instanceRegistry.add(this.#instanceConfigMapper.map(instance));
         } else {
             descriptor.allowTools = [...instance.mcp.allowTools];

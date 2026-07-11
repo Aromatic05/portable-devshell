@@ -17,6 +17,7 @@ const FILES_PER_PAGE: usize = 20;
 const MATCHES_PER_FILE: usize = 20;
 const SINGLE_FILE_MATCHES: usize = 200;
 const MAX_RENDERED_LINE_BYTES: usize = 4096;
+const MAX_SERIALIZED_OUTPUT_BYTES: usize = 1024 * 1024;
 
 pub struct FileSearchTool {
     name: ToolName,
@@ -141,20 +142,41 @@ impl ToolHandler for FileSearchTool {
                 break;
             }
         }
-        let next_cursor = (files.len() > offset + FILES_PER_PAGE).then(|| {
+        let total_files = files.len();
+        let mut page = Vec::new();
+        for file in files.into_iter().skip(offset).take(FILES_PER_PAGE) {
+            let mut candidate = page.clone();
+            candidate.push(file.clone());
+            let probe = FileSearchOutput {
+                files: candidate,
+                next_cursor: Some("00000000-0000-0000-0000-000000000000".to_string()),
+            };
+            let serialized = serde_json::to_vec(&probe)
+                .map_err(|error| ToolError::new("tool.internalError", error.to_string()))?;
+            if serialized.len() > MAX_SERIALIZED_OUTPUT_BYTES {
+                if page.is_empty() {
+                    return Err(ToolError::new(
+                        "file.outputTooLarge",
+                        "one search result file exceeds the serialized output budget",
+                    ));
+                }
+                break;
+            }
+            page.push(file);
+        }
+        let consumed = page.len();
+        let next_cursor = (total_files > offset + consumed).then(|| {
             self.state
                 .cursors
                 .lock()
                 .unwrap()
-                .issue(&query, offset + FILES_PER_PAGE)
+                .issue(&query, offset + consumed)
         });
-        let files = files
-            .into_iter()
-            .skip(offset)
-            .take(FILES_PER_PAGE)
-            .collect();
-        serde_json::to_value(FileSearchOutput { files, next_cursor })
-            .map_err(|error| ToolError::new("tool.internalError", error.to_string()))
+        serde_json::to_value(FileSearchOutput {
+            files: page,
+            next_cursor,
+        })
+        .map_err(|error| ToolError::new("tool.internalError", error.to_string()))
     }
 }
 

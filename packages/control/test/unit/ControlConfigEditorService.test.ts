@@ -174,6 +174,7 @@ test("config editor allows updating and disabling a running instance without dro
         defaultWorkspace: "/tmp/demo",
         effectiveSecurityMode: "workspace",
         env: {
+            DEVSHELL_WORKER_INTERNAL_FILE_EDIT_MODE: "text",
             DEVSHELL_WORKER_INTERNAL_SECURITY_MODE: "workspace",
             DEVSHELL_WORKER_SECURITY_MODE: "workspace"
         }
@@ -249,3 +250,56 @@ function createConfig() {
         }
     };
 }
+
+test("file edit mode rebuild validation happens before persistence", async () => {
+    let config = createConfig();
+    const writes: unknown[] = [];
+    const registry = new InstanceRegistry([
+        {
+            allowTools: ["bash_run"],
+            enabled: true,
+            mcpEnabled: true,
+            mcpPath: "/demo-local/mcp",
+            name: "demo-local",
+            worker: {
+                snapshot() {
+                    return {
+                        connectionState: "connected",
+                        daemonState: "running",
+                        effectiveSecurityMode: "disabled",
+                        lastSeq: 0,
+                        name: "demo-local",
+                        ready: true,
+                        status: "ready"
+                    };
+                }
+            }
+        }
+    ]);
+    const service = new ControlConfigEditorService({
+        configStore: {
+            async write(nextConfig: unknown) {
+                writes.push(nextConfig);
+                config = nextConfig as typeof config;
+            }
+        },
+        getConfig: () => config,
+        instanceRegistry: registry,
+        setConfig: (nextConfig) => {
+            config = nextConfig;
+        }
+    });
+
+    await assert.rejects(
+        service.updateInstanceConfig({
+            ...config.instances[0],
+            tools: { fileEdit: { mode: "replace" } }
+        }),
+        (error: unknown) => {
+            assert.equal((error as { code?: string }).code, "instance.conflict");
+            return true;
+        }
+    );
+    assert.equal(writes.length, 0);
+    assert.equal(config.instances[0]?.tools, undefined);
+});

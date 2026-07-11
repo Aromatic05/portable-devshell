@@ -11,6 +11,8 @@ use crate::tools::file::diff::{self, ParsedFilePatch};
 use crate::tools::file::state::{
     FULL_SNAPSHOT_LIMIT, FileSnapshot, SnapshotContent, TextFile, TextMetadata,
 };
+
+const NON_HASHLINE_FILE_LIMIT: usize = FULL_SNAPSHOT_LIMIT;
 use crate::tools::file::structure;
 use crate::tools::file::types::{
     FileEditApplyPatchInput, FileEditFileOutput, FileEditMode, FileEditOperation, FileEditOutput,
@@ -102,7 +104,7 @@ impl ToolHandler for FileEditTool {
             .collect::<Vec<_>>();
 
         let prepared = prepare_request(&call, &self.state, normalized)?;
-        let output = commit_prepared(&call, &self.state, prepared);
+        let output = commit_prepared(&call, &self.state, prepared)?;
         serde_json::to_value(output)
             .map_err(|error| ToolError::new("tool.internalError", error.to_string()))
     }
@@ -670,7 +672,7 @@ fn prepare_replace(
 ) -> Result<PreparedChange, ToolError> {
     let (requested, path) = resolve_existing(call, &input.path, true)?;
     let snapshot = state.snapshots.lock().unwrap().latest_for_path(&path)?;
-    let current = TextFile::read(&path)?;
+    let current = read_non_hashline_text(&path)?;
     if snapshot.revision != current.revision {
         return Err(revision_mismatch(
             "file changed since it was last read or searched",
@@ -690,6 +692,7 @@ fn prepare_replace(
         normalized = replace_unique_text(&normalized, &old, &new, edit.all.unwrap_or(false))?;
     }
     let after = TextFile::from_normalized(&current, &normalized)?;
+    ensure_non_hashline_size(&after)?;
     let first = first_changed_line(&before.lines, &after.lines);
     let (added, removed) = line_delta(&before.lines, &after.lines);
     Ok(PreparedChange {
@@ -727,7 +730,7 @@ fn prepare_patch_group(
     };
     let source_existed = source_path.symlink_metadata().is_ok();
     let before = source_existed
-        .then(|| TextFile::read(&source_path))
+        .then(|| read_non_hashline_text(&source_path))
         .transpose()?;
     if source_existed {
         require_recent_snapshot(state, &source_path)?;
@@ -819,6 +822,10 @@ fn prepare_patch_group(
         }
     }
 
+    if let Some(text) = &current {
+        ensure_non_hashline_size(text)?;
+    }
+
     let before_lines = before
         .as_ref()
         .map(|text| text.lines.clone())
@@ -857,9 +864,35 @@ fn prepare_patch_group(
     })
 }
 
+fn ensure_non_hashline_size(text: &TextFile) -> Result<(), ToolError> {
+    if text.total_bytes > NON_HASHLINE_FILE_LIMIT {
+        return Err(ToolError::new(
+            "file.tooLarge",
+            format!(
+                "non-hashline file_edit modes support files up to {NON_HASHLINE_FILE_LIMIT} bytes"
+            ),
+        ));
+    }
+    Ok(())
+}
+
+fn read_non_hashline_text(path: &Path) -> Result<TextFile, ToolError> {
+    let metadata =
+        fs::metadata(path).map_err(|error| ToolError::new("file.notFound", error.to_string()))?;
+    if metadata.len() > NON_HASHLINE_FILE_LIMIT as u64 {
+        return Err(ToolError::new(
+            "file.tooLarge",
+            format!(
+                "non-hashline file_edit modes support files up to {NON_HASHLINE_FILE_LIMIT} bytes"
+            ),
+        ));
+    }
+    TextFile::read(path)
+}
+
 fn require_recent_snapshot(state: &FileToolState, path: &Path) -> Result<(), ToolError> {
     let snapshot = state.snapshots.lock().unwrap().latest_for_path(path)?;
-    let current = TextFile::read(path)?;
+    let current = read_non_hashline_text(path)?;
     if snapshot.revision != current.revision {
         return Err(revision_mismatch(
             "file changed since it was last read or searched",
@@ -872,7 +905,7 @@ fn commit_prepared(
     call: &ToolCall,
     state: &FileToolState,
     changes: Vec<PreparedChange>,
-) -> FileEditOutput {
+) -> Result<FileEditOutput, ToolError> {
     let mut files = Vec::new();
     let mut applied_files = Vec::new();
     for (index, change) in changes.iter().enumerate() {
@@ -882,26 +915,22 @@ fn commit_prepared(
                 files.push(output);
             }
             Err(error) => {
-                return FileEditOutput {
-                    files,
-                    applied_files,
-                    failed_file: Some(change.source_display.clone()),
-                    skipped_files: changes[index + 1..]
+                let details = serde_json::json!({
+                    "appliedFiles": applied_files,
+                    "failedFile": change.source_display,
+                    "skippedFiles": changes[index + 1..]
                         .iter()
                         .map(|pending| pending.source_display.clone())
-                        .collect(),
-                    failure_message: Some(error.message),
-                };
+                        .collect::<Vec<_>>(),
+                });
+                return Err(error.with_details(details));
             }
         }
     }
-    FileEditOutput {
+    Ok(FileEditOutput {
         files,
         applied_files,
-        failed_file: None,
-        skipped_files: Vec::new(),
-        failure_message: None,
-    }
+    })
 }
 
 fn commit_change(

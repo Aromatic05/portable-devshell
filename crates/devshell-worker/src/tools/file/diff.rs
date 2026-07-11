@@ -65,7 +65,10 @@ pub fn parse_file_set(input: &str) -> Result<Vec<ParsedFilePatch>, ToolError> {
                     "binary patches are not supported by file_edit",
                 ));
             }
-            if file.old_mode() != file.new_mode()
+            if matches!(
+                file.operation(),
+                FileOperation::Modify { .. } | FileOperation::Rename { .. }
+            ) && file.old_mode() != file.new_mode()
                 && (file.old_mode().is_some() || file.new_mode().is_some())
             {
                 return Err(ToolError::new(
