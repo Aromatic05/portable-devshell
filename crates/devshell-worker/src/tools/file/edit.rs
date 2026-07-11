@@ -31,7 +31,16 @@ impl ToolHandler for FileEditTool {
     fn catalog_entry(&self) -> ToolCatalogEntry {
         ToolCatalogEntry {
             name: self.name.as_str(),
-            description: "Apply compact snapshot-anchored patches. Supports multiple `[path#snapshot]` sections, SWAP/DEL/INS operations, and Tree-sitter `.BLK` operations.".to_string(),
+            description: concat!(
+                "Apply compact snapshot-anchored text patches. Input is one or more sections beginning with the exact header returned by file_read/file_search: `[./path#snapshotId]`. ",
+                "Commands use one-based line numbers from that snapshot; all commands in a section refer to the original snapshot coordinates, not coordinates produced by earlier commands. ",
+                "Replacement and insertion bodies are consecutive lines prefixed with `+`. Supported commands: `SWAP N:` or `SWAP A-B:` followed by `+` lines; `DEL N` or `DEL A-B`; ",
+                "`INS.PRE N:`, `INS.POST N:`, `INS.HEAD:`, and `INS.TAIL:` followed by `+` lines. Tree-sitter commands are `SWAP.BLK N:`, `DEL.BLK N`, and `INS.BLK.POST N:`; N must be the first line of a supported syntax block. ",
+                "Every replaced/deleted block and every insertion anchor must be covered by snapshot lines actually returned to the caller; `.BLK` operations do not bypass this seen-lines rule. ",
+                "A file may appear once per request. All sections are parsed, authorized, snapshot-checked, and range-checked before any file is written; writes then occur in section order and are not rolled back if a later filesystem write fails. ",
+                "Example: `[./src/main.rs#SNAPSHOT]\nSWAP 10-12:\n+fn main() {\n+    run();\n+}\n\nINS.POST 20:\n+// inserted`."
+            )
+            .to_string(),
             input_schema: serde_json::to_value(schema_for!(FileEditInput)).unwrap(),
             output_schema: serde_json::to_value(schema_for!(FileEditOutput)).unwrap(),
             access: ToolAccess::Write,
