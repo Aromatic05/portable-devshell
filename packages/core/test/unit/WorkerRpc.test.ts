@@ -112,21 +112,16 @@ test("WorkerProtocolClient performs ping, handshake, and tools.list against froz
 
     assert.equal(commandResult.exitCode, 0);
 
-    t.after(async () => {
-        const bridge = new WorkerRpcBridge({
-            transport,
-            rpcOptions: { env, instanceName }
-        });
+    const bridge = new WorkerRpcBridge({
+        transport,
+        rpcOptions: { env, instanceName }
+    });
 
+    t.after(async () => {
         bridge.close();
         await transport.runWorkerCommand("stop", { env, instanceName });
         await rm(homeDirectory, { recursive: true, force: true });
         await rm(workspacePath, { recursive: true, force: true });
-    });
-
-    const bridge = new WorkerRpcBridge({
-        transport,
-        rpcOptions: { env, instanceName }
     });
     const protocolClient = new WorkerProtocolClient(new WorkerRpcClient(bridge));
 
@@ -144,9 +139,9 @@ test("WorkerProtocolClient performs ping, handshake, and tools.list against froz
     assert.equal(handshake.workspace, workspacePath);
     assert.equal(handshake.protocolVersion, 1);
     assert.equal("tools" in handshake, false);
-    assert.equal(tools.tools[0]?.name, "bash_run");
-    assert.notEqual(tools.tools[0]?.inputSchema, undefined);
-    bridge.close();
+    const bashRun = tools.tools.find((tool) => tool.name === "bash_run");
+    assert.notEqual(bashRun, undefined);
+    assert.notEqual(bashRun?.inputSchema, undefined);
 });
 
 function createRpcHarness(options?: { slowMethods?: Set<string> }): {

@@ -57,8 +57,9 @@ test("WorkerInstance completes lifecycle against frozen devshell-worker", async 
     assert.equal(started.ready, true);
     assert.equal(instance.handshake?.instance, instanceName);
     assert.equal(instance.handshake?.workspace, workspacePath);
-    assert.equal(instance.listTools()[0]?.name, "bash_run");
-    assert.notEqual(instance.listTools()[0]?.inputSchema, undefined);
+    const bashRun = instance.listTools().find((tool) => tool.name === "bash_run");
+    assert.notEqual(bashRun, undefined);
+    assert.notEqual(bashRun?.inputSchema, undefined);
 
     const replay = instance.subscribe(1);
     assert.equal(replay.kind, "events");

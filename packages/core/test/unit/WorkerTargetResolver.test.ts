@@ -46,9 +46,7 @@ test("WorkerAssetResolver prefers target-specific env var over release lookup", 
     const envPath = join(fixture.root, "env", "devshell-worker");
     await writeExecutable(envPath, "#!/bin/sh\necho env\n");
 
-    const previous = process.env.PORTABLE_DEVSHELL_WORKER_DARWIN_ARM64_PATH;
     process.env.PORTABLE_DEVSHELL_WORKER_DARWIN_ARM64_PATH = envPath;
-    t.after(() => restoreEnv("PORTABLE_DEVSHELL_WORKER_DARWIN_ARM64_PATH", previous));
 
     const asset = await fixture.resolver.resolve(target);
 
@@ -67,20 +65,10 @@ test("WorkerAssetResolver resolves release asset from configured release base ur
     const sha256 = createHash("sha256").update(contents).digest("hex");
     const assetName = `devshell-worker-${target.key}`;
     const requestUrls: string[] = [];
-    const previousBaseUrl = process.env.PORTABLE_DEVSHELL_WORKER_RELEASE_BASE_URL;
-    const previousTag = process.env.PORTABLE_DEVSHELL_WORKER_RELEASE_TAG;
-    const previousCacheDirectory = process.env.PORTABLE_DEVSHELL_WORKER_CACHE_DIR;
-    const previousFetch = globalThis.fetch;
     const releaseBaseUrl = "https://example.test/releases/download";
     process.env.PORTABLE_DEVSHELL_WORKER_RELEASE_BASE_URL = releaseBaseUrl;
     process.env.PORTABLE_DEVSHELL_WORKER_RELEASE_TAG = "v9.9.9";
     process.env.PORTABLE_DEVSHELL_WORKER_CACHE_DIR = join(fixture.root, "cache");
-    t.after(() => restoreEnv("PORTABLE_DEVSHELL_WORKER_RELEASE_BASE_URL", previousBaseUrl));
-    t.after(() => restoreEnv("PORTABLE_DEVSHELL_WORKER_RELEASE_TAG", previousTag));
-    t.after(() => restoreEnv("PORTABLE_DEVSHELL_WORKER_CACHE_DIR", previousCacheDirectory));
-    t.after(() => {
-        globalThis.fetch = previousFetch;
-    });
 
     globalThis.fetch = async (input) => {
         const url = String(input);
@@ -156,15 +144,7 @@ test("WorkerAssetResolver does not use host dev fallback for non-host target", a
     const hostTarget = probeLocalWorkerTarget();
     const nonHostTarget = supportedWorkerTargets.find((target) => target.key !== hostTarget.key);
     assert.notEqual(nonHostTarget, undefined);
-    const previousRepository = process.env.PORTABLE_DEVSHELL_WORKER_RELEASE_REPOSITORY;
-    const previousTag = process.env.PORTABLE_DEVSHELL_WORKER_RELEASE_TAG;
-    const previousFetch = globalThis.fetch;
     process.env.PORTABLE_DEVSHELL_WORKER_RELEASE_TAG = "v0.2.2";
-    t.after(() => restoreEnv("PORTABLE_DEVSHELL_WORKER_RELEASE_REPOSITORY", previousRepository));
-    t.after(() => restoreEnv("PORTABLE_DEVSHELL_WORKER_RELEASE_TAG", previousTag));
-    t.after(() => {
-        globalThis.fetch = previousFetch;
-    });
 
     await writeExecutable(join(fixture.root, "src", "worker", "target", "debug", "devshell-worker"), "#!/bin/sh\necho host\n");
     globalThis.fetch = async () => new Response("missing", { status: 404 });
@@ -185,15 +165,7 @@ test("WorkerAssetResolver uses the default release repository when release env i
     t.after(fixture.cleanup);
 
     const target = getWorkerTargetByKey("darwin-arm64");
-    const previousRepository = process.env.PORTABLE_DEVSHELL_WORKER_RELEASE_REPOSITORY;
-    const previousTag = process.env.PORTABLE_DEVSHELL_WORKER_RELEASE_TAG;
-    const previousFetch = globalThis.fetch;
     process.env.PORTABLE_DEVSHELL_WORKER_RELEASE_TAG = "v1.2.3";
-    t.after(() => restoreEnv("PORTABLE_DEVSHELL_WORKER_RELEASE_REPOSITORY", previousRepository));
-    t.after(() => restoreEnv("PORTABLE_DEVSHELL_WORKER_RELEASE_TAG", previousTag));
-    t.after(() => {
-        globalThis.fetch = previousFetch;
-    });
     delete process.env.PORTABLE_DEVSHELL_WORKER_RELEASE_REPOSITORY;
     delete process.env.PORTABLE_DEVSHELL_WORKER_RELEASE_BASE_URL;
 
@@ -217,18 +189,41 @@ test("WorkerAssetResolver uses the default release repository when release env i
 
 async function createResolverFixture(): Promise<{
     root: string;
+    devshellHome: string;
     resolver: WorkerAssetResolver;
     cleanup: () => Promise<void>;
 }> {
     const root = await mkdtemp(join(tmpdir(), "portable-devshell-resolver-"));
+    const devshellHome = join(root, "devshell-home");
     const modulePath = join(root, "src", "worker", "WorkerAssetResolver.js");
+    const previousFetch = globalThis.fetch;
+    const environmentNames = [
+        "PORTABLE_DEVSHELL_HOME",
+        "PORTABLE_DEVSHELL_WORKER_RELEASE_REPOSITORY",
+        "PORTABLE_DEVSHELL_WORKER_RELEASE_BASE_URL",
+        "PORTABLE_DEVSHELL_WORKER_RELEASE_TAG",
+        "PORTABLE_DEVSHELL_WORKER_CACHE_DIR",
+        ...supportedWorkerTargets.map((target) => `PORTABLE_DEVSHELL_WORKER_${target.key.replaceAll("-", "_").toUpperCase()}_PATH`)
+    ] as const;
+    const previousEnvironment = new Map(environmentNames.map((name) => [name, process.env[name]]));
+
+    for (const name of environmentNames) {
+        delete process.env[name];
+    }
+    process.env.PORTABLE_DEVSHELL_HOME = devshellHome;
+
     await mkdir(dirname(modulePath), { recursive: true });
     await writeFile(join(root, "package.json"), JSON.stringify({ name: "portable-devshell", version: "0.2.2" }), "utf8");
 
     return {
         root,
+        devshellHome,
         resolver: new WorkerAssetResolver(pathToFileURL(modulePath).href),
         cleanup: async () => {
+            globalThis.fetch = previousFetch;
+            for (const [name, value] of previousEnvironment) {
+                restoreEnv(name, value);
+            }
             await rm(root, { recursive: true, force: true });
         }
     };
@@ -253,20 +248,12 @@ test("WorkerAssetResolver uses an installed target worker before release lookup"
     t.after(fixture.cleanup);
 
     const target = supportedWorkerTargets.find((candidate) => candidate.key !== probeLocalWorkerTarget().key) ?? probeLocalWorkerTarget();
-    const devshellHome = join(fixture.root, "installed-home");
-    const installedPath = join(devshellHome, "bin", `devshell-worker-${target.key}`);
+    const installedPath = join(fixture.devshellHome, "bin", `devshell-worker-${target.key}`);
     await writeExecutable(installedPath, "#!/bin/sh\necho installed\n");
 
-    const previousHome = process.env.PORTABLE_DEVSHELL_HOME;
-    const previousFetch = globalThis.fetch;
-    process.env.PORTABLE_DEVSHELL_HOME = devshellHome;
     globalThis.fetch = async () => {
         throw new Error("release lookup should not run for an installed worker");
     };
-    t.after(() => restoreEnv("PORTABLE_DEVSHELL_HOME", previousHome));
-    t.after(() => {
-        globalThis.fetch = previousFetch;
-    });
 
     const asset = await fixture.resolver.resolve(target);
 
