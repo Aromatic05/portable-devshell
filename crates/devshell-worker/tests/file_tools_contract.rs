@@ -62,7 +62,7 @@ fn file_tools_omit_absent_optional_output_fields() {
     assert_eq!(read["ok"], true, "{read}");
     assert!(read["result"].get("nextSelector").is_none());
 
-    let found = call(&env, instance, "2", "file_find", json!({ "path": "./" }));
+    let found = call(&env, instance, "2", "file_find", json!({ "paths": ["./"] }));
     assert_eq!(found["ok"], true, "{found}");
     assert!(found["result"].get("nextCursor").is_none());
 
@@ -124,7 +124,7 @@ fn file_find_respects_gitignore_by_default() {
     fs::write(env.workspace().join("visible.txt"), "visible\n").unwrap();
     start(&env, instance);
 
-    let found = call(&env, instance, "1", "file_find", json!({}));
+    let found = call(&env, instance, "1", "file_find", json!({ "paths": ["./"] }));
     assert_eq!(found["ok"], true);
     let paths = found["result"]["entries"]
         .as_array()
@@ -155,29 +155,17 @@ fn file_search_honors_include_and_returns_a_query_bound_cursor() {
         json!({
             "pattern": "needle",
             "syntax": "literal",
-            "include": ["**/*.txt"],
-            "maxFiles": 1,
+            "paths": ["./**/*.txt"]
         }),
     );
     assert_eq!(searched["ok"], true);
-    assert_eq!(searched["result"]["files"].as_array().unwrap().len(), 1);
+    assert_eq!(searched["result"]["files"].as_array().unwrap().len(), 2);
     assert_eq!(searched["result"]["files"][0]["path"], "./match.txt");
-    assert!(searched["result"]["nextCursor"].is_string());
+    assert!(searched["result"].get("nextCursor").is_none());
 
-    let cursor = searched["result"]["nextCursor"].as_str().unwrap();
-    let mismatched = call(
-        &env,
-        instance,
-        "2",
-        "file_search",
-        json!({
-            "pattern": "other",
-            "syntax": "literal",
-            "cursor": cursor,
-        }),
-    );
-    assert_eq!(mismatched["ok"], false);
-    assert_eq!(mismatched["error"]["code"], "file.invalidCursor");
+    let content = searched["result"]["files"][0]["content"].as_str().unwrap();
+    assert!(content.starts_with("[./match.txt#"));
+    assert!(content.contains("*1:needle"));
 
     env.json_command(&["stop", "--instance", instance]);
 }

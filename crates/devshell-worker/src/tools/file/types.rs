@@ -103,13 +103,11 @@ pub struct FileWriteOutput {
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct FileFindInput {
-    pub path: Option<String>,
-    pub patterns: Option<Vec<String>>,
+    pub paths: Vec<String>,
     #[serde(rename = "type")]
     pub entry_type: Option<FindType>,
-    pub include_hidden: Option<bool>,
-    pub respect_gitignore: Option<bool>,
-    pub limit: Option<usize>,
+    pub hidden: Option<bool>,
+    pub gitignore: Option<bool>,
     pub cursor: Option<String>,
 }
 #[derive(Debug, Deserialize, JsonSchema, PartialEq, Serialize)]
@@ -123,6 +121,7 @@ pub enum FindType {
 #[serde(rename_all = "camelCase")]
 pub struct FileFindOutput {
     pub entries: Vec<FileFindEntry>,
+    pub content: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub next_cursor: Option<String>,
 }
@@ -138,16 +137,12 @@ pub struct FileFindEntry {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct FileSearchInput {
     pub pattern: String,
+    pub paths: Option<Vec<String>>,
     pub syntax: Option<SearchSyntax>,
-    pub path: Option<String>,
-    pub include: Option<Vec<String>>,
-    pub exclude: Option<Vec<String>>,
     pub case_sensitive: Option<bool>,
-    pub include_hidden: Option<bool>,
-    pub respect_gitignore: Option<bool>,
+    pub hidden: Option<bool>,
+    pub gitignore: Option<bool>,
     pub context: Option<usize>,
-    pub max_files: Option<usize>,
-    pub max_matches_per_file: Option<usize>,
     pub cursor: Option<String>,
 }
 #[derive(Debug, Deserialize, JsonSchema, PartialEq, Serialize)]

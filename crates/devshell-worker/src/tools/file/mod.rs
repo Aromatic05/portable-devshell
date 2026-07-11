@@ -1,4 +1,5 @@
 pub mod cursor;
+pub mod discover;
 pub mod edit;
 pub mod find;
 pub mod info;
