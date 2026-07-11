@@ -17,7 +17,7 @@ async function verifyRpcMethodsOverReusedConnection(): Promise<void> {
     const server = new ControlRpcServer({
         instanceRegistry: new InstanceRegistry([
             {
-                allowTools: [],
+                tools: { capabilities: ["read", "write", "execute"], groups: ["file", "bash", "artifact"] },
                 enabled: true,
                 mcpEnabled: false,
                 mcpPath: "",
@@ -249,7 +249,7 @@ async function verifyInteractiveStartRelay(): Promise<void> {
     const server = new ControlRpcServer({
         instanceRegistry: new InstanceRegistry([
             {
-                allowTools: [],
+                tools: { capabilities: ["read", "write", "execute"], groups: ["file", "bash", "artifact"] },
                 enabled: true,
                 mcpEnabled: false,
                 mcpPath: "",

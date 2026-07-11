@@ -30,6 +30,7 @@ impl ToolHandler for FileReadTool {
     }
     fn catalog_entry(&self) -> ToolCatalogEntry {
         ToolCatalogEntry {
+            group: self.name.group().to_string(),
             name: self.name.as_str(),
             description: concat!(
                 "Read UTF-8 text and create a snapshot for later file_edit calls. Without selector, supported source files return a compact Tree-sitter structure summary; other files return the first 200 lines. ",

@@ -8,7 +8,6 @@ export * from "./log/LogQuery.js";
 export * from "./log/LogToolCallHistory.js";
 export * from "./log/store/LogStoreInstance.js";
 export * from "./log/store/LogStoreJsonl.js";
-export * from "./tool/ToolAllowlist.js";
 export * from "./worker/WorkerBinary.js";
 export * from "./worker/WorkerAssetResolver.js";
 export * from "./worker/WorkerProcess.js";

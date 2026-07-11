@@ -42,6 +42,10 @@ impl ToolName {
         })
     }
 
+    pub fn group(&self) -> &str {
+        &self.group
+    }
+
     pub fn as_str(&self) -> String {
         format!("{}_{}", self.group, self.operation)
     }

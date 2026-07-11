@@ -109,7 +109,8 @@ export class ControlConfigEditorService {
         } else if (rebuildRequired) {
             this.#instanceRegistry.add(this.#instanceConfigMapper.map(instance));
         } else {
-            descriptor.allowTools = [...instance.mcp.allowTools];
+            descriptor.mcpCapabilities = [...instance.mcp.tools.capabilities];
+            descriptor.mcpGroups = [...instance.mcp.tools.groups];
             descriptor.enabled = instance.enabled;
             descriptor.mcpEnabled = instance.mcp.enabled;
             descriptor.mcpPath = instance.mcp.path ?? `/${instance.name}/mcp`;
@@ -265,9 +266,12 @@ function toConfigView(config: ControlConfig): Record<string, JsonValue> {
             ...(instance.logs === undefined ? {} : { logs: { ...instance.logs } }),
             ...(instance.tools === undefined ? {} : { tools: cloneToolsConfig(instance.tools) }),
             mcp: {
-                allowTools: [...instance.mcp.allowTools],
                 enabled: instance.mcp.enabled,
-                ...(instance.mcp.path === undefined ? {} : { path: instance.mcp.path })
+                ...(instance.mcp.path === undefined ? {} : { path: instance.mcp.path }),
+                tools: {
+                    capabilities: [...instance.mcp.tools.capabilities],
+                    groups: [...instance.mcp.tools.groups]
+                }
             },
             name: instance.name,
             ...(instance.podmanBinary === undefined ? {} : { podmanBinary: instance.podmanBinary }),
@@ -600,10 +604,14 @@ function readInstanceMcpConfig(
     fieldName: string
 ): ControlInstanceConfig["mcp"] {
     const mcp = readRecord(value, fieldName);
+    const tools = readRecord(mcp.tools, `${fieldName}.tools`);
     return {
-        allowTools: readStringArray(mcp.allowTools, `${fieldName}.allowTools`),
         enabled: readBoolean(mcp.enabled, current?.enabled ?? true, `${fieldName}.enabled`),
-        path: readOptionalString(mcp.path, `${fieldName}.path`) ?? `/${instanceName}/mcp`
+        path: readOptionalString(mcp.path, `${fieldName}.path`) ?? `/${instanceName}/mcp`,
+        tools: {
+            capabilities: readToolAccessArray(tools.capabilities, `${fieldName}.tools.capabilities`),
+            groups: readStringArray(tools.groups, `${fieldName}.tools.groups`)
+        }
     };
 }
 
@@ -788,6 +796,15 @@ function readOptionalInteger(value: JsonValue | undefined, fieldName: string): n
     return readInteger(value, fieldName);
 }
 
+function readToolAccessArray(value: JsonValue | undefined, fieldName: string): Array<"read" | "write" | "execute" | "manage"> {
+    return readStringArray(value, fieldName).map((entry) => {
+        if (entry === "read" || entry === "write" || entry === "execute" || entry === "manage") {
+            return entry;
+        }
+        throw invalidConfig(`${fieldName} must contain only read, write, execute, or manage.`);
+    });
+}
+
 function readStringArray(value: JsonValue | undefined, fieldName: string): string[] {
     const entries = readArray(value, fieldName);
     if (entries.some((entry) => typeof entry !== "string" || entry.trim().length === 0)) {
@@ -841,7 +858,10 @@ function cloneInstanceConfig(instance: ControlInstanceConfig): ControlInstanceCo
         logs: instance.logs === undefined ? undefined : { ...instance.logs },
         mcp: {
             ...instance.mcp,
-            allowTools: [...instance.mcp.allowTools]
+            tools: {
+                capabilities: [...instance.mcp.tools.capabilities],
+                groups: [...instance.mcp.tools.groups]
+            }
         },
         security: instance.security === undefined ? undefined : { ...instance.security },
         ssh: instance.ssh === undefined ? undefined : { ...instance.ssh },

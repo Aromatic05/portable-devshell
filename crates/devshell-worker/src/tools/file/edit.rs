@@ -66,6 +66,7 @@ impl ToolHandler for FileEditTool {
             ),
         };
         ToolCatalogEntry {
+            group: self.name.group().to_string(),
             name: self.name.as_str(),
             description,
             input_schema,

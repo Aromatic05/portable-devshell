@@ -13,7 +13,6 @@ import { WorkerRpcClient } from "../../worker/rpc/WorkerRpcClient.js";
 import { WorkerToolCatalog } from "../tool/WorkerToolCatalog.js";
 import { WorkerToolInvoker } from "../tool/WorkerToolInvoker.js";
 import { ToolCallScheduler } from "../tool/ToolCallScheduler.js";
-import { ToolAllowlist } from "../../tool/ToolAllowlist.js";
 import { InstancePaths } from "../../instance/InstancePaths.js";
 import { InstanceStateMachine } from "../../instance/state/InstanceStateMachine.js";
 import { WorkerInstance } from "./WorkerInstance.js";
@@ -27,8 +26,7 @@ export class WorkerInstanceFactory {
     create(config: WorkerInstanceConfig): WorkerInstance {
         const resolved = resolveWorkerInstanceConfig(config);
         const paths = new InstancePaths(resolved.name, resolved.homeDirectory);
-        const allowlist = new ToolAllowlist(resolved.allowTools);
-        const catalog = new WorkerToolCatalog(allowlist);
+        const catalog = new WorkerToolCatalog();
         const rpcBridge = this.#createRpcBridge(resolved);
         const rpcClient = new WorkerRpcClient(rpcBridge);
 

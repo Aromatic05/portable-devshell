@@ -33,6 +33,7 @@ export interface WorkerToolDefinition {
     access: "read" | "write" | "execute";
     name: string;
     description: string;
+    group: string;
     inputSchema: JsonValue;
     outputSchema: JsonValue;
 }

@@ -175,6 +175,7 @@ async function runInteractiveCreateFlow(t: { after(callback: () => Promise<void>
             "\n",
             "\n",
             "\n",
+            "\n",
             "\n"
         ]),
         stdout,
@@ -419,7 +420,7 @@ function createCreateConfig(): string {
 
 function createLocalInstanceConfig(name: string, workspacePath: string): string {
     return [
-        "version = 1",
+        "version = 2",
         `name = ${JSON.stringify(name)}`,
         "enabled = true",
         'provider = "local"',
@@ -427,7 +428,10 @@ function createLocalInstanceConfig(name: string, workspacePath: string): string 
         "",
         "[mcp]",
         "enabled = false",
-        'allowTools = ["bash_run"]',
+        "",
+        "[mcp.tools]",
+        'groups = ["file", "bash", "artifact"]',
+        'capabilities = ["read", "write", "execute"]',
         "",
         "[logs]",
         "eventBufferSize = 50",

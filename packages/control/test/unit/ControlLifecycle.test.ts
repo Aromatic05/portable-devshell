@@ -243,10 +243,7 @@ test("start keeps real worker config registered and does not auto-start worker",
         homePaths.instanceConfigFile("demo-local"),
         new ControlInstanceTomlCodec().encode({
             enabled: true,
-            mcp: {
-                allowTools: ["bash_run"],
-                enabled: true
-            },
+            mcp: { enabled: true, tools: { capabilities: ["read", "write", "execute"], groups: ["file", "bash", "artifact"] } },
             name: "demo-local",
             provider: "local",
             workspace: "/tmp/demo"

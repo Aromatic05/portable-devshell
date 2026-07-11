@@ -44,6 +44,7 @@ impl ToolHandler for BashRunTool {
     }
     fn catalog_entry(&self) -> ToolCatalogEntry {
         ToolCatalogEntry {
+            group: self.name.group().to_string(),
             name: self.name.as_str(),
             description: "Run a shell command in the worker environment.".to_string(),
             input_schema: serde_json::to_value(schema_for!(BashRunParams)).unwrap(),

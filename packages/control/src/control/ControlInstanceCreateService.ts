@@ -31,7 +31,8 @@ const instanceCreateSchema: InstanceCreateSchema = {
         modes: ["preset", "dockerfile", "compose", "existingImage", "existingStoppedContainer"],
         presets: containerPresets
     },
-    defaultAllowTools: ["bash_run"],
+    defaultMcpCapabilities: ["read", "write", "execute"],
+    defaultMcpGroups: ["file", "bash", "artifact"],
     defaultEnabled: true,
     defaultMcpEnabled: true,
     defaultProvider: "local",
@@ -147,9 +148,9 @@ export class ControlInstanceCreateService {
             dockerBinary: readOptionalString(draft.dockerBinary, "dockerBinary"),
             enabled: readBoolean(draft.enabled, instanceCreateSchema.defaultEnabled, "enabled"),
             mcp: {
-                allowTools: readAllowTools(draft.mcp),
                 enabled: readNestedBoolean(draft.mcp, "enabled", instanceCreateSchema.defaultMcpEnabled),
-                path: `/${name}/mcp`
+                path: `/${name}/mcp`,
+                tools: readMcpTools(draft.mcp)
             },
             name,
             podmanBinary: readOptionalString(draft.podmanBinary, "podmanBinary"),
@@ -243,23 +244,51 @@ function readNestedBoolean(
     return readBoolean(record[fieldName], fallback, `mcp.${fieldName}`);
 }
 
-function readAllowTools(recordValue: JsonValue | undefined): string[] {
+function readMcpTools(recordValue: JsonValue | undefined): ControlInstanceConfig["mcp"]["tools"] {
     if (recordValue === undefined) {
-        return [...instanceCreateSchema.defaultAllowTools];
+        return {
+            capabilities: [...instanceCreateSchema.defaultMcpCapabilities],
+            groups: [...instanceCreateSchema.defaultMcpGroups]
+        };
     }
 
-    const record = asOptionalRecord(recordValue, "mcp");
-    const value = record.allowTools;
+    const mcp = asOptionalRecord(recordValue, "mcp");
+    const toolsValue = mcp.tools;
+    if (toolsValue === undefined) {
+        return {
+            capabilities: [...instanceCreateSchema.defaultMcpCapabilities],
+            groups: [...instanceCreateSchema.defaultMcpGroups]
+        };
+    }
 
+    const tools = asOptionalRecord(toolsValue, "mcp.tools");
+    return {
+        capabilities: readToolAccessArray(tools.capabilities, "mcp.tools.capabilities", instanceCreateSchema.defaultMcpCapabilities),
+        groups: readStringArray(tools.groups, "mcp.tools.groups", instanceCreateSchema.defaultMcpGroups)
+    };
+}
+
+function readToolAccessArray(
+    value: JsonValue | undefined,
+    fieldName: string,
+    fallback: readonly ("read" | "write" | "execute" | "manage")[]
+): Array<"read" | "write" | "execute" | "manage"> {
+    return readStringArray(value, fieldName, fallback).map((entry) => {
+        if (entry === "read" || entry === "write" || entry === "execute" || entry === "manage") {
+            return entry;
+        }
+        throw invalidDraft(`${fieldName} must contain only read, write, execute, or manage.`);
+    });
+}
+
+function readStringArray(value: JsonValue | undefined, fieldName: string, fallback: readonly string[]): string[] {
     if (value === undefined) {
-        return [...instanceCreateSchema.defaultAllowTools];
+        return [...fallback];
     }
-
     if (!Array.isArray(value) || value.some((entry) => typeof entry !== "string" || entry.trim().length === 0)) {
-        throw invalidDraft("mcp.allowTools must be a string array.");
+        throw invalidDraft(`${fieldName} must be a string array.`);
     }
-
-    return [...new Set(value.filter((entry): entry is string => typeof entry === "string").map((entry) => entry.trim()))];
+    return [...new Set(value.map((entry) => String(entry).trim()))];
 }
 
 function readSecurityMode(value: JsonValue | undefined): string {
@@ -502,9 +531,12 @@ function toSummary(instance: ControlInstanceConfig): InstanceCreateSummary {
         ...(instance.podmanBinary === undefined ? {} : { podmanBinary: instance.podmanBinary }),
         enabled: instance.enabled,
         mcp: {
-            allowTools: [...instance.mcp.allowTools],
             enabled: instance.mcp.enabled,
-            path: instance.mcp.path ?? `/${instance.name}/mcp`
+            path: instance.mcp.path ?? `/${instance.name}/mcp`,
+            tools: {
+                capabilities: [...instance.mcp.tools.capabilities],
+                groups: [...instance.mcp.tools.groups]
+            }
         },
         name: instance.name,
         provider: instance.provider,

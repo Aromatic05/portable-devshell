@@ -65,7 +65,7 @@ test("session lifecycle emits MCP session events", async () => {
     }
 });
 
-test("tools/list uses allowlist filtering", async () => {
+test("tools/list uses group and capability filtering", async () => {
     const binding = createBinding();
     const server = await createBindingServer(binding);
 
@@ -163,7 +163,7 @@ test("tools/call still maps not ready to mcp.instanceNotReady", async () => {
 function createBinding(harness = createWorkerHarness()): McpEndpointBinding {
     return new McpEndpointBinding(
         new McpEndpointWorker({
-            allowlist: ["bash_run"],
+            policy: { capabilities: ["execute"], groups: ["bash"] },
             instanceName: "demo",
             worker: harness.worker
         })
@@ -276,7 +276,7 @@ function createWorkerHarness(options?: {
     const calls: Array<{ input: JsonValue; toolName: string }> = [];
     const events: Array<{ data: Record<string, JsonValue>; type: string }> = [];
     const tools = options?.tools ?? [
-        { access: "execute" as const, name: "bash_run", description: "Run shell", inputSchema: { type: "object", properties: { command: { type: "string" } } }, outputSchema: { type: "object" } },
+        { access: "execute" as const, group: "bash", name: "bash_run", description: "Run shell", inputSchema: { type: "object", properties: { command: { type: "string" } } }, outputSchema: { type: "object" } },
         { access: "read" as const, name: "read_logs", description: "Read logs", inputSchema: { type: "object" }, outputSchema: { type: "object" } }
     ];
     const hasToolSchemaCache = options?.hasToolSchemaCache ?? true;

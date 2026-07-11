@@ -153,7 +153,8 @@ function wizardFields(step: number, draft: Record<string, JsonValue>): Array<str
             return [
                 fieldLine("mcp.enabled", "mcp.enabled", readPath(draft, "mcp.enabled")),
                 `path preview        /${String(readPath(draft, "name") ?? "<name>")}/mcp`,
-                fieldLine("mcp.allowTools", "allowTools", readPath(draft, "mcp.allowTools"))
+                fieldLine("mcp.tools.groups", "groups", readPath(draft, "mcp.tools.groups")),
+                fieldLine("mcp.tools.capabilities", "capabilities", readPath(draft, "mcp.tools.capabilities"))
             ];
         case 4:
             return [fieldLine("security.mode", "security mode", readPath(draft, "security.mode")), "approval policy: not available in create schema"];
@@ -165,7 +166,7 @@ function wizardFields(step: number, draft: Record<string, JsonValue>): Array<str
 function defaultCreateDraft(): Record<string, JsonValue> {
     return {
         enabled: true,
-        mcp: { allowTools: ["bash_run"], enabled: true },
+        mcp: { enabled: true, tools: { capabilities: ["read", "write", "execute"], groups: ["file", "bash", "artifact"] } },
         name: "",
         provider: "local",
         security: { mode: "disabled" },

@@ -2,15 +2,16 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { errorCodes } from "@portable-devshell/shared";
-import { ToolAllowlist, WorkerToolCatalog } from "@portable-devshell/core";
+import { WorkerToolCatalog } from "@portable-devshell/core";
 
-test("WorkerToolCatalog filters tools through allowlist and resets on clear", () => {
-    const catalog = new WorkerToolCatalog(new ToolAllowlist(["bash_run"]));
+test("WorkerToolCatalog preserves the complete worker catalog and resets on clear", () => {
+    const catalog = new WorkerToolCatalog();
 
     const tools = catalog.refresh([
         {
             access: "execute",
             description: "Run a shell command.",
+            group: "bash",
             inputSchema: {
                 properties: {
                     command: { type: "string" }
@@ -23,22 +24,22 @@ test("WorkerToolCatalog filters tools through allowlist and resets on clear", ()
         },
         {
             access: "read",
-            description: "Should be filtered.",
+            description: "Read internal data.",
+            group: "internal",
             inputSchema: {},
             name: "internal_only",
             outputSchema: {}
         }
     ]);
 
-    assert.equal(tools.length, 1);
-    assert.equal(tools[0]?.name, "bash_run");
+    assert.deepEqual(tools.map((tool) => tool.name), ["bash_run", "internal_only"]);
 
     catalog.clear();
     assert.deepEqual(catalog.listTools(), []);
 });
 
 test("WorkerToolCatalog rejects invalid tool schema from tools.list", () => {
-    const catalog = new WorkerToolCatalog(new ToolAllowlist([]));
+    const catalog = new WorkerToolCatalog();
 
     assert.throws(
         () =>
@@ -46,6 +47,7 @@ test("WorkerToolCatalog rejects invalid tool schema from tools.list", () => {
                 {
                     access: "execute",
                     description: "Missing tool name.",
+                    group: "bash",
                     inputSchema: {},
                     name: "",
                     outputSchema: {}
@@ -59,13 +61,14 @@ test("WorkerToolCatalog rejects invalid tool schema from tools.list", () => {
 });
 
 test("WorkerToolCatalog identifies an incompatible Worker catalog", () => {
-    const catalog = new WorkerToolCatalog(new ToolAllowlist([]));
+    const catalog = new WorkerToolCatalog();
 
     assert.throws(
         () => catalog.refresh([
             {
+                access: "execute",
                 description: "Incomplete tool.",
-                inputSchema: {},
+                group: "bash",
                 name: "bash_run"
             } as never
         ]),

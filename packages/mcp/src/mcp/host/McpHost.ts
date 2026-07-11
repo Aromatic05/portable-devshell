@@ -1,4 +1,4 @@
-import type { JsonValue, ToolDefinition } from "@portable-devshell/shared";
+import type { JsonValue, ToolDefinition, ToolPolicy } from "@portable-devshell/shared";
 import { type McpAuthConfig } from "../auth/McpAuthConfig.js";
 import { McpOAuthProtectedResource } from "../auth/oauth/McpOAuthProtectedResource.js";
 import type { McpOAuthApprovalService } from "../auth/oauth/McpOAuthApprovalService.js";
@@ -19,7 +19,7 @@ interface WorkerInstanceLike {
 }
 
 export interface McpHostInstanceConfig {
-    allowlist: readonly string[];
+    policy: ToolPolicy;
     name: string;
     path?: string;
     worker: WorkerInstanceLike;
@@ -86,7 +86,7 @@ export class McpHost {
     registerInstance(instance: McpHostInstanceConfig): void {
         const binding = new McpEndpointBinding(
             new McpEndpointWorker({
-                allowlist: instance.allowlist,
+                policy: instance.policy,
                 instanceName: instance.name,
                 worker: instance.worker
             })

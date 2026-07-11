@@ -1,22 +1,15 @@
 import { createError, errorCodes, toolSchema, type ToolDefinition } from "@portable-devshell/shared";
 
 import type { WorkerToolDefinition } from "../../worker/protocol/WorkerProtocolClient.js";
-import { ToolAllowlist } from "../../tool/ToolAllowlist.js";
 
 export class WorkerToolCatalog {
-    readonly #allowlist: ToolAllowlist;
     #hasSchema = false;
     #tools = new Map<string, ToolDefinition>();
 
-    constructor(allowlist: ToolAllowlist) {
-        this.#allowlist = allowlist;
-    }
-
     refresh(tools: readonly WorkerToolDefinition[]): ToolDefinition[] {
-        const filteredTools = this.#allowlist.filter(tools);
         const nextTools = new Map<string, ToolDefinition>();
 
-        for (const tool of filteredTools) {
+        for (const tool of tools) {
             const parsed = toolSchema.safeParse(tool);
 
             if (!parsed.success) {

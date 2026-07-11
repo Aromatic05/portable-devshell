@@ -63,7 +63,7 @@ function instanceDraft(state: TuiAppState, instanceName: string): Record<string,
 
     return record ?? {
         enabled: true,
-        mcp: { allowTools: [], enabled: true, path: `/${instanceName}/mcp` },
+        mcp: { enabled: true, path: `/${instanceName}/mcp`, tools: { capabilities: ["read", "write", "execute"], groups: ["file", "bash", "artifact"] } },
         name: instanceName,
         provider: "local",
         security: { mode: "disabled" },

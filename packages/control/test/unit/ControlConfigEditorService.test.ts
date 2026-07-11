@@ -39,7 +39,7 @@ test("config editor accumulates apply summary across multiple updates", async ()
                     mode: "ask"
                 },
                 mcp: {
-                    allowTools: ["bash_run", "read_file"],
+                    tools: { capabilities: ["read", "write", "execute"], groups: ["file", "bash", "artifact"] },
                     enabled: true,
                     path: "/demo-local/mcp"
                 },
@@ -58,7 +58,7 @@ test("config editor accumulates apply summary across multiple updates", async ()
             mode: "ask"
         },
         mcp: {
-            allowTools: ["bash_run", "read_file"],
+            tools: { capabilities: ["read", "write", "execute"], groups: ["file", "bash", "artifact"] },
             enabled: true,
             path: "/demo-local/mcp"
         },
@@ -111,7 +111,7 @@ test("config editor allows updating and disabling a running instance without dro
     const reconfigureCalls: Array<Record<string, unknown>> = [];
     const registry = new InstanceRegistry([
         {
-            allowTools: ["bash_run"],
+            tools: { capabilities: ["read", "write", "execute"], groups: ["file", "bash", "artifact"] },
             enabled: true,
             mcpEnabled: true,
             mcpPath: "/demo-local/mcp",
@@ -153,7 +153,7 @@ test("config editor allows updating and disabling a running instance without dro
             mode: "ask"
         },
         mcp: {
-            allowTools: ["bash_run"],
+            tools: { capabilities: ["read", "write", "execute"], groups: ["file", "bash", "artifact"] },
             enabled: true,
             path: "/demo-local/mcp"
         },
@@ -186,7 +186,7 @@ test("config editor refuses deleting a running instance", async () => {
     let config = createConfig();
     const registry = new InstanceRegistry([
         {
-            allowTools: ["bash_run"],
+            tools: { capabilities: ["read", "write", "execute"], groups: ["file", "bash", "artifact"] },
             enabled: true,
             mcpEnabled: true,
             mcpPath: "/demo-local/mcp",
@@ -232,7 +232,7 @@ function createConfig() {
             {
                 enabled: true,
                 mcp: {
-                    allowTools: ["bash_run"],
+                    tools: { capabilities: ["read", "write", "execute"], groups: ["file", "bash", "artifact"] },
                     enabled: true,
                     path: "/demo-local/mcp"
                 },
@@ -256,7 +256,7 @@ test("file edit mode rebuild validation happens before persistence", async () =>
     const writes: unknown[] = [];
     const registry = new InstanceRegistry([
         {
-            allowTools: ["bash_run"],
+            tools: { capabilities: ["read", "write", "execute"], groups: ["file", "bash", "artifact"] },
             enabled: true,
             mcpEnabled: true,
             mcpPath: "/demo-local/mcp",

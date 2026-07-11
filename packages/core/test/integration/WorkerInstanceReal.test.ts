@@ -475,6 +475,7 @@ test("WorkerInstance reconnectRpc refreshes schema after an rpc disconnect", asy
             {
                 access: "execute",
                 description: "Run a shell command.",
+                group: "bash",
                 inputSchema: toolSchemaFor("cwd"),
                 name: "bash_run",
                 outputSchema: { type: "object" }
@@ -516,7 +517,7 @@ test("WorkerInstance reconnectRpc refreshes schema after an rpc disconnect", asy
 
 function createWorkerInstanceHarness(): {
     disconnect: () => void;
-    setTools: (tools: Array<{ access: "execute"; description: string; inputSchema: JsonValue; name: string; outputSchema: JsonValue }>) => void;
+    setTools: (tools: Array<{ access: "execute"; description: string; group: string; inputSchema: JsonValue; name: string; outputSchema: JsonValue }>) => void;
     transport: WorkerCommandTransport;
     requestedMethods: () => number;
     respond: (method: string, result: Record<string, JsonValue>) => void;
@@ -532,6 +533,7 @@ function createWorkerInstanceHarness(): {
         {
             access: "execute" as const,
             description: "Run a shell command.",
+            group: "bash",
             inputSchema: toolSchemaFor("command"),
             name: "bash_run",
             outputSchema: { type: "object" }

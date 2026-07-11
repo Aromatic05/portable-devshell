@@ -911,7 +911,8 @@ function createHarness(options: {
                 modes: ["preset", "dockerfile", "compose", "existingImage", "existingStoppedContainer"] as const,
                 presets: []
             },
-            defaultAllowTools: ["bash_run"],
+            defaultMcpCapabilities: ["read", "write", "execute"],
+            defaultMcpGroups: ["file", "bash", "artifact"],
             defaultEnabled: true,
             defaultMcpEnabled: true,
             defaultProvider: "local" as const,

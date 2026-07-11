@@ -17,7 +17,7 @@ test("route registry resolves per-instance binding", () => {
     const registry = new McpHostRouteRegistry();
     const binding = new McpEndpointBinding(
         new McpEndpointWorker({
-            allowlist: ["bash_run"],
+            policy: { capabilities: ["execute"], groups: ["bash"] },
             instanceName: "demo",
             worker: {
                 async appendMcpSessionClosed(_sessionId: string) {},
@@ -27,7 +27,7 @@ test("route registry resolves per-instance binding", () => {
                     return { ready: true };
                 },
                 listTools() {
-                    return [{ name: "bash_run", description: "Run shell", inputSchema: { type: "object" } }];
+                    return [{ access: "execute", group: "bash", name: "bash_run", description: "Run shell", inputSchema: { type: "object" }, outputSchema: { type: "object" } }];
                 },
                 async callTool(_toolName: string, _input: unknown, _context: { source: "mcp" }) {
                     return { exitCode: 0, stderr: "", stdout: "" };

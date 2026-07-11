@@ -19,7 +19,6 @@ test("MCP initialize tools/list and tools/call succeed against the frozen worker
     const workspacePath = await mkdtemp(join(tmpdir(), "portable-devshell-mcp-real-workspace-"));
     const workerBinaryPath = resolve(fileURLToPath(new URL("../../../../", import.meta.url)), "target/debug/devshell-worker");
     const instance = new WorkerInstanceFactory().create({
-        allowTools: ["bash_run"],
         defaultWorkspace: asWorkspacePath(workspacePath),
         env: { ...process.env, HOME: homeDirectory },
         homeDirectory,
@@ -36,7 +35,7 @@ test("MCP initialize tools/list and tools/call succeed against the frozen worker
         },
         instances: [
             {
-                allowlist: ["bash_run"],
+                policy: { capabilities: ["execute"], groups: ["bash"] },
                 name: instanceName,
                 worker: instance
             }
@@ -76,7 +75,7 @@ test("MCP initialize tools/list and tools/call succeed against the frozen worker
         }, sessionHeaders);
         assert.equal(list.error, undefined);
         assert.deepEqual(list.result?.tools.map((tool: { name: string }) => tool.name), ["bash_run"]);
-        assert.deepEqual(list.result?.tools[0]?.inputSchema, instance.listTools()[0]?.inputSchema);
+        assert.deepEqual(list.result?.tools[0]?.inputSchema, instance.listTools().find((tool) => tool.name === "bash_run")?.inputSchema);
 
         const call = await postJson(endpoint, await readFixture("mcp-tools-call.json"), sessionHeaders);
         assert.equal(call.error, undefined);
@@ -107,7 +106,6 @@ test("MCP tools/call waits for approval before invoking the worker tool", async 
     const workspacePath = await mkdtemp(join(tmpdir(), "portable-devshell-mcp-approval-workspace-"));
     const workerBinaryPath = resolve(fileURLToPath(new URL("../../../../", import.meta.url)), "target/debug/devshell-worker");
     const instance = new WorkerInstanceFactory().create({
-        allowTools: ["bash_run"],
         approvalPolicy: { mode: "ask" },
         defaultWorkspace: asWorkspacePath(workspacePath),
         env: { ...process.env, HOME: homeDirectory },
@@ -125,7 +123,7 @@ test("MCP tools/call waits for approval before invoking the worker tool", async 
         },
         instances: [
             {
-                allowlist: ["bash_run"],
+                policy: { capabilities: ["execute"], groups: ["bash"] },
                 name: instanceName,
                 worker: instance
             }

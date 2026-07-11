@@ -42,10 +42,7 @@ test("instance config mapper passes effective security mode, worker env, and app
         env: {
             DEMO: "1"
         },
-        mcp: {
-            allowTools: ["bash_run"],
-            enabled: true
-        },
+        mcp: { enabled: true, tools: { capabilities: ["read", "write", "execute"], groups: ["file", "bash", "artifact"] } },
         name: "demo-local",
         provider: "local",
         security: {

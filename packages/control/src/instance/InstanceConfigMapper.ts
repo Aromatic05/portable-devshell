@@ -15,7 +15,8 @@ export class InstanceConfigMapper {
         const worker = this.#workerInstanceFactory.create(this.#toWorkerConfig(instance));
 
         return {
-            allowTools: instance.mcp.allowTools,
+            mcpCapabilities: instance.mcp.tools.capabilities,
+            mcpGroups: instance.mcp.tools.groups,
             enabled: instance.enabled,
             mcpEnabled: instance.mcp.enabled,
             mcpPath: `/${instance.name}/mcp`,
@@ -28,7 +29,6 @@ export class InstanceConfigMapper {
         const effectiveSecurityMode = instance.security?.mode === "workspace" ? "workspace" : "disabled";
 
         return {
-            allowTools: instance.mcp.allowTools,
             defaultWorkspace: instance.workspace === undefined ? undefined : asWorkspacePath(instance.workspace),
             env: {
                 ...instance.env,

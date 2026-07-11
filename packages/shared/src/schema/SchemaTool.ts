@@ -31,17 +31,22 @@ export const toolSchema = {
             throw new Error("tool.description must be a string");
         }
 
+        if (typeof value.group !== "string" || value.group.length === 0) {
+            throw new Error("tool.group must be a non-empty string");
+        }
+
         if (!isRecord(value.inputSchema) || !isRecord(value.outputSchema)) {
             throw new Error("tool schemas must be JSON objects");
         }
 
-        if (value.access !== "read" && value.access !== "write" && value.access !== "execute") {
+        if (value.access !== "read" && value.access !== "write" && value.access !== "execute" && value.access !== "manage") {
             throw new Error("tool.access is invalid");
         }
 
         return {
             access: value.access,
             description: value.description,
+            group: value.group,
             inputSchema: value.inputSchema as JsonValue,
             name: value.name,
             outputSchema: value.outputSchema as JsonValue

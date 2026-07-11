@@ -664,7 +664,13 @@ export class CommandDispatcher {
             if (this.#store.getState().ui.formDrafts[key] === undefined) {
                 this.#store.setFormDraft(key, {
                     enabled: schema.defaultEnabled,
-                    mcp: { allowTools: [...schema.defaultAllowTools], enabled: schema.defaultMcpEnabled },
+                    mcp: {
+                        enabled: schema.defaultMcpEnabled,
+                        tools: {
+                            capabilities: [...schema.defaultMcpCapabilities],
+                            groups: [...schema.defaultMcpGroups]
+                        }
+                    },
                     name: "",
                     provider: schema.defaultProvider,
                     security: { mode: schema.defaultSecurityMode },
@@ -1096,7 +1102,7 @@ export class CommandDispatcher {
         const entry = Array.isArray(entries)
             ? entries.find((value) => asRecord(value)?.name === instanceName)
             : undefined;
-        return cloneRecord(asRecord(entry) ?? { enabled: true, mcp: { allowTools: [], enabled: true, path: `/${instanceName}/mcp` }, name: instanceName, provider: "local", security: { mode: "disabled" }, workspace: "" });
+        return cloneRecord(asRecord(entry) ?? { enabled: true, mcp: { enabled: true, path: `/${instanceName}/mcp`, tools: { capabilities: ["read", "write", "execute"], groups: ["file", "bash", "artifact"] } }, name: instanceName, provider: "local", security: { mode: "disabled" }, workspace: "" });
     }
 
     #mcpDraft(): Record<string, JsonValue> {
@@ -1297,7 +1303,7 @@ function clamp(value: number, min: number, max: number): number {
 function defaultCreateDraft(): Record<string, JsonValue> {
     return {
         enabled: true,
-        mcp: { allowTools: ["bash_run"], enabled: true },
+        mcp: { enabled: true, tools: { capabilities: ["read", "write", "execute"], groups: ["file", "bash", "artifact"] } },
         name: "",
         provider: "local",
         security: { mode: "disabled" },

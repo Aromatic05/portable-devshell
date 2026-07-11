@@ -27,6 +27,7 @@ impl ToolHandler for ArtifactReadTool {
 
     fn catalog_entry(&self) -> ToolCatalogEntry {
         ToolCatalogEntry {
+            group: self.name.group().to_string(),
             name: self.name.as_str(),
             description: "Read a paged stdout or stderr artifact by opaque handle. Use base64 encoding for lossless binary output.".to_string(),
             input_schema: serde_json::to_value(schema_for!(ArtifactReadInput)).unwrap(),

@@ -9,7 +9,6 @@ export interface WorkerInstanceConfig {
     name: InstanceName;
     transport: WorkerCommandTransport;
     defaultWorkspace?: WorkspacePath;
-    allowTools?: readonly string[];
     homeDirectory?: string;
     env?: NodeJS.ProcessEnv;
     eventBufferSize?: number;
@@ -20,7 +19,6 @@ export interface WorkerInstanceConfig {
 }
 
 export interface ResolvedWorkerInstanceConfig extends WorkerInstanceConfig {
-    allowTools: readonly string[];
     effectiveSecurityMode: EffectiveSecurityMode;
     eventBufferSize: number;
     handshake: WorkerHandshakeParams;
@@ -30,7 +28,6 @@ export interface ResolvedWorkerInstanceConfig extends WorkerInstanceConfig {
 export function resolveWorkerInstanceConfig(config: WorkerInstanceConfig): ResolvedWorkerInstanceConfig {
     return {
         ...config,
-        allowTools: config.allowTools ?? [],
         effectiveSecurityMode: config.effectiveSecurityMode ?? "disabled",
         eventBufferSize: config.eventBufferSize ?? 100,
         handshake: {

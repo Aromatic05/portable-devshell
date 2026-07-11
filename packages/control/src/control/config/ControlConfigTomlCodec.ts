@@ -10,7 +10,8 @@ import {
     type InstanceContainerDockerfileConfig,
     type InstanceContainerExistingImageConfig,
     type InstanceContainerMountConfig,
-    type InstanceContainerPresetConfig
+    type InstanceContainerPresetConfig,
+    type ToolAccess
 } from "@portable-devshell/shared";
 import { parse, stringify, type TomlTableWithoutBigInt } from "smol-toml";
 
@@ -47,9 +48,12 @@ export interface ControlInstanceToolsConfig {
 }
 
 export interface ControlInstanceMcpConfig {
-    allowTools: string[];
     enabled: boolean;
     path?: string;
+    tools: {
+        capabilities: ToolAccess[];
+        groups: string[];
+    };
 }
 
 export interface ControlInstanceSecurityConfig {
@@ -226,7 +230,7 @@ export class ControlInstanceTomlCodec {
 
     encode(instance: ControlInstanceConfig): string {
         return stringify({
-            version: 1,
+            version: 2,
             name: instance.name,
             enabled: instance.enabled,
             provider: instance.provider,
@@ -238,8 +242,11 @@ export class ControlInstanceTomlCodec {
             ...(instance.env === undefined || Object.keys(instance.env).length === 0 ? {} : { env: instance.env }),
             mcp: {
                 enabled: instance.mcp.enabled,
-                allowTools: [...instance.mcp.allowTools],
-                ...(instance.mcp.path === undefined ? {} : { path: instance.mcp.path })
+                ...(instance.mcp.path === undefined ? {} : { path: instance.mcp.path }),
+                tools: {
+                    capabilities: [...instance.mcp.tools.capabilities],
+                    groups: [...instance.mcp.tools.groups]
+                }
             },
             ...(instance.logs === undefined ? {} : { logs: withoutUndefined(instance.logs) }),
             ...(instance.approvalPolicy === undefined ? {} : { approvalPolicy: encodeApprovalPolicy(instance.approvalPolicy) }),
@@ -252,6 +259,10 @@ export class ControlInstanceTomlCodec {
 function parseInstanceDocument(document: TomlRecord): ControlInstanceConfig {
     const env = asOptionalRecord(document.env, "env");
     const mcp = asRecord(document.mcp, "mcp");
+    if (mcp.allowTools !== undefined) {
+        throw new Error("mcp.allowTools is no longer supported; use mcp.tools.groups and mcp.tools.capabilities");
+    }
+    const mcpTools = asRecord(mcp.tools, "mcp.tools");
     const logs = asOptionalRecord(document.logs, "logs");
     const approvalPolicy = asOptionalRecord(document.approvalPolicy, "approvalPolicy");
     const security = asOptionalRecord(document.security, "security");
@@ -275,8 +286,8 @@ function parseInstanceDocument(document: TomlRecord): ControlInstanceConfig {
         throw new Error("sshBinary is not supported; use ssh.command");
     }
 
-    if (asInteger(document.version, "version") !== 1) {
-        throw new Error("version must be 1");
+    if (asInteger(document.version, "version") !== 2) {
+        throw new Error("version must be 2");
     }
 
     return {
@@ -293,9 +304,12 @@ function parseInstanceDocument(document: TomlRecord): ControlInstanceConfig {
                       retentionDays: asOptionalInteger(logs.retentionDays, "logs.retentionDays")
                   },
         mcp: {
-            allowTools: asStringArray(mcp.allowTools, "mcp.allowTools"),
             enabled: asBoolean(mcp.enabled, "mcp.enabled"),
-            path: asOptionalString(mcp.path, "mcp.path")
+            path: asOptionalString(mcp.path, "mcp.path"),
+            tools: {
+                capabilities: asToolAccessArray(mcpTools.capabilities, "mcp.tools.capabilities"),
+                groups: asStringArray(mcpTools.groups, "mcp.tools.groups")
+            }
         },
         name: asString(document.name, "name"),
         podmanBinary: asOptionalString(document.podmanBinary, "podmanBinary"),
@@ -644,6 +658,15 @@ function asStringArray(value: unknown, fieldName: string): string[] {
     }
 
     return [...value];
+}
+
+function asToolAccessArray(value: unknown, fieldName: string): ToolAccess[] {
+    return asStringArray(value, fieldName).map((entry) => {
+        if (entry === "read" || entry === "write" || entry === "execute" || entry === "manage") {
+            return entry;
+        }
+        throw new Error(`${fieldName} must contain only read, write, execute, or manage`);
+    });
 }
 
 function asOptionalArray(value: unknown, fieldName: string): unknown[] | undefined {

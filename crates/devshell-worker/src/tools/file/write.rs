@@ -29,6 +29,7 @@ impl ToolHandler for FileWriteTool {
     }
     fn catalog_entry(&self) -> ToolCatalogEntry {
         ToolCatalogEntry {
+            group: self.name.group().to_string(),
             name: self.name.as_str(),
             description: "Create a new UTF-8 text file, or fully rewrite an existing file when expectedRevision is provided.".to_string(),
             input_schema: serde_json::to_value(schema_for!(FileWriteInput)).unwrap(),

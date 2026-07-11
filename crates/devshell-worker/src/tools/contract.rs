@@ -27,6 +27,7 @@ pub enum ToolAccess {
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ToolCatalogEntry {
+    pub group: String,
     pub name: String,
     pub description: String,
     pub input_schema: serde_json::Value,

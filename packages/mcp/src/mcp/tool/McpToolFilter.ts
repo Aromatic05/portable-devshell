@@ -1,19 +1,15 @@
-import type { ToolDefinition } from "@portable-devshell/shared";
+import type { ToolDefinition, ToolPolicy } from "@portable-devshell/shared";
 
 export class McpToolFilter {
-    readonly #allowlist: ReadonlySet<string>;
-    readonly #allowlistEnabled: boolean;
+    readonly #capabilities: ReadonlySet<string>;
+    readonly #groups: ReadonlySet<string>;
 
-    constructor(allowlist: readonly string[]) {
-        this.#allowlist = new Set(allowlist);
-        this.#allowlistEnabled = allowlist.length > 0;
+    constructor(policy: ToolPolicy) {
+        this.#capabilities = new Set(policy.capabilities);
+        this.#groups = new Set(policy.groups);
     }
 
     filter(tools: readonly ToolDefinition[]): ToolDefinition[] {
-        if (!this.#allowlistEnabled) {
-            return [];
-        }
-
-        return tools.filter((tool) => this.#allowlist.has(tool.name));
+        return tools.filter((tool) => this.#groups.has(tool.group) && this.#capabilities.has(tool.access));
     }
 }

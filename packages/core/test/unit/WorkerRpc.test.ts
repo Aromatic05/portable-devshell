@@ -269,6 +269,8 @@ function createResponse(method: string, id: string): WorkerRpcResponseEnvelope {
         result: {
             tools: [
                 {
+                    access: "execute",
+                    group: "bash",
                     name: "bash_run",
                     description: "Run a shell command.",
                     inputSchema: {
@@ -277,7 +279,8 @@ function createResponse(method: string, id: string): WorkerRpcResponseEnvelope {
                             command: { type: "string" }
                         },
                         required: ["command"]
-                    }
+                    },
+                    outputSchema: { type: "object" }
                 }
             ]
         }

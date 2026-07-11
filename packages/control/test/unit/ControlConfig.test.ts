@@ -53,7 +53,8 @@ test("valid config fixture is loaded", async () => {
         const config = await new ControlConfigStore().readOrCreate(homeDirectory);
 
         assert.equal(config.instances[0]?.name, "demo-local");
-        assert.equal(config.instances[0]?.mcp.allowTools[0], "bash_run");
+        assert.deepEqual(config.instances[0]?.mcp.tools.groups, ["file", "bash", "artifact"]);
+        assert.deepEqual(config.instances[0]?.mcp.tools.capabilities, ["read", "write", "execute"]);
         assert.equal(config.instances[0]?.logs?.eventBufferSize, 50);
         assert.equal(config.instances[0]?.approvalPolicy?.mode, "ask");
         assert.equal(config.instances[0]?.approvalPolicy?.rules?.[0]?.source, "mcp");
@@ -163,10 +164,7 @@ test("instance name without dash is rejected", () => {
 
     config.instances.push({
         enabled: true,
-        mcp: {
-            allowTools: ["bash_run"],
-            enabled: true
-        },
+        mcp: { enabled: true, tools: { capabilities: ["read", "write", "execute"], groups: ["file", "bash", "artifact"] } },
         name: "invalidname",
         provider: "local",
         workspace: "/tmp/demo"
@@ -193,10 +191,7 @@ test("instance security mode must be valid", () => {
 
     config.instances.push({
         enabled: true,
-        mcp: {
-            allowTools: ["bash_run"],
-            enabled: true
-        },
+        mcp: { enabled: true, tools: { capabilities: ["read", "write", "execute"], groups: ["file", "bash", "artifact"] } },
         name: "demo-local",
         provider: "local",
         security: {
@@ -218,10 +213,7 @@ test("ssh instance config requires ssh.command and rejects legacy host fields", 
                 instances: [
                     {
                         enabled: true,
-                        mcp: {
-                            allowTools: ["bash_run"],
-                            enabled: true
-                        },
+                        mcp: { enabled: true, tools: { capabilities: ["read", "write", "execute"], groups: ["file", "bash", "artifact"] } },
                         name: "demo-ssh",
                         provider: "ssh",
                         workspace: "/srv/workspace"
@@ -235,7 +227,7 @@ test("ssh instance config requires ssh.command and rejects legacy host fields", 
         () =>
             new ControlInstanceTomlCodec().decode(
                 [
-                    "version = 1",
+                    "version = 2",
                     'name = "demo-ssh"',
                     "enabled = true",
                     'provider = "ssh"',
@@ -244,7 +236,10 @@ test("ssh instance config requires ssh.command and rejects legacy host fields", 
                     "",
                     "[mcp]",
                     "enabled = true",
-                    'allowTools = ["bash_run"]',
+                    "",
+                    "[mcp.tools]",
+                    'groups = ["file", "bash", "artifact"]',
+                    'capabilities = ["read", "write", "execute"]',
                     ""
                 ].join("\n")
             ),
@@ -282,10 +277,7 @@ function createInstanceConfig(workspace: string) {
         logs: {
             eventBufferSize: 50
         },
-        mcp: {
-            allowTools: ["bash_run"],
-            enabled: true
-        },
+        mcp: { enabled: true, tools: { capabilities: ["read", "write", "execute"], groups: ["file", "bash", "artifact"] } },
         name: "demo-local",
         provider: "local" as const,
         security: {

@@ -1,4 +1,4 @@
-import { createError, errorCodes, type JsonValue, type ToolCallContext, type ToolDefinition } from "@portable-devshell/shared";
+import { createError, errorCodes, type JsonValue, type ToolCallContext, type ToolDefinition, type ToolPolicy } from "@portable-devshell/shared";
 
 import { McpToolDescriptionEnhancer } from "../tool/McpToolDescriptionEnhancer.js";
 import { McpToolFilter } from "../tool/McpToolFilter.js";
@@ -21,9 +21,9 @@ export class McpEndpointWorker {
     readonly #schemaAdapter: McpToolSchemaAdapter;
     readonly #worker: WorkerInstanceLike;
 
-    constructor(options: { allowlist: readonly string[]; instanceName: string; worker: WorkerInstanceLike }) {
+    constructor(options: { instanceName: string; policy: ToolPolicy; worker: WorkerInstanceLike }) {
         this.#descriptionEnhancer = new McpToolDescriptionEnhancer();
-        this.#filter = new McpToolFilter(options.allowlist);
+        this.#filter = new McpToolFilter(options.policy);
         this.#instanceName = options.instanceName;
         this.#schemaAdapter = new McpToolSchemaAdapter();
         this.#worker = options.worker;

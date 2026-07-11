@@ -9,20 +9,14 @@ test("disabled instances are skipped and registry does not auto start workers", 
     config.instances.push(
         {
             enabled: true,
-            mcp: {
-                allowTools: ["bash_run"],
-                enabled: true
-            },
+            mcp: { enabled: true, tools: { capabilities: ["read", "write", "execute"], groups: ["file", "bash", "artifact"] } },
             name: "demo-local",
             provider: "local",
             workspace: "/tmp/demo"
         },
         {
             enabled: false,
-            mcp: {
-                allowTools: ["bash_run"],
-                enabled: true
-            },
+            mcp: { enabled: true, tools: { capabilities: ["read", "write", "execute"], groups: ["file", "bash", "artifact"] } },
             name: "demo-disabled",
             provider: "local",
             workspace: "/tmp/disabled"
@@ -42,10 +36,7 @@ test("mcp endpoint path is generated and wiring only builds host configuration",
     config.mcp.enabled = true;
     config.instances.push({
         enabled: true,
-        mcp: {
-            allowTools: ["bash_run"],
-            enabled: true
-        },
+        mcp: { enabled: true, tools: { capabilities: ["read", "write", "execute"], groups: ["file", "bash", "artifact"] } },
         name: "demo-local",
         provider: "local",
         workspace: "/tmp/demo"
@@ -57,7 +48,10 @@ test("mcp endpoint path is generated and wiring only builds host configuration",
     assert.ok(descriptor !== undefined);
     assert.equal(descriptor.mcpPath, "/demo-local/mcp");
     assert.deepEqual(new McpEndpointConfigMapper().map(descriptor), {
-        allowlist: ["bash_run"],
+        policy: {
+            capabilities: ["read", "write", "execute"],
+            groups: ["file", "bash", "artifact"]
+        },
         name: "demo-local",
         path: "/demo-local/mcp",
         worker: descriptor.worker
@@ -74,7 +68,7 @@ test("stopOwned only stops workers started by this control and keeps failed owne
     const stopped: string[] = [];
     const registry = new (await import("../../dist/instance/registry/InstanceRegistry.js")).InstanceRegistry([
         {
-            allowTools: [],
+            tools: { capabilities: ["read", "write", "execute"], groups: ["file", "bash", "artifact"] },
             enabled: true,
             mcpEnabled: false,
             mcpPath: "",
@@ -86,7 +80,7 @@ test("stopOwned only stops workers started by this control and keeps failed owne
             } as never
         },
         {
-            allowTools: [],
+            tools: { capabilities: ["read", "write", "execute"], groups: ["file", "bash", "artifact"] },
             enabled: true,
             mcpEnabled: false,
             mcpPath: "",
@@ -99,7 +93,7 @@ test("stopOwned only stops workers started by this control and keeps failed owne
             } as never
         },
         {
-            allowTools: [],
+            tools: { capabilities: ["read", "write", "execute"], groups: ["file", "bash", "artifact"] },
             enabled: true,
             mcpEnabled: false,
             mcpPath: "",

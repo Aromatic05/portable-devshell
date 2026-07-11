@@ -134,8 +134,8 @@ function normalizeRecord(value: Record<string, JsonValue>): Record<string, JsonV
                 if ((key === "listenPort" || key === "retentionDays" || key === "eventBufferSize") && /^\d+$/.test(entry)) {
                     return [key, Number(entry)];
                 }
-                if (key === "allowTools") {
-                    return [key, entry.split(",").map((tool) => tool.trim()).filter((tool) => tool.length > 0)];
+                if (key === "groups" || key === "capabilities") {
+                    return [key, entry.split(",").map((item) => item.trim()).filter((item) => item.length > 0)];
                 }
             }
             return [key, entry];

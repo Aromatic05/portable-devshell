@@ -5,7 +5,10 @@ import type { InstanceDescriptor } from "../instance/InstanceDescriptor.js";
 export class McpEndpointConfigMapper {
     map(descriptor: InstanceDescriptor): McpHostInstanceConfig {
         return {
-            allowlist: descriptor.allowTools,
+            policy: {
+                capabilities: descriptor.mcpCapabilities,
+                groups: descriptor.mcpGroups
+            },
             name: descriptor.name,
             path: descriptor.mcpPath,
             worker: descriptor.worker

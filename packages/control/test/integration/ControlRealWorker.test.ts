@@ -176,10 +176,7 @@ function createInstanceConfig(workspacePath: string) {
         logs: {
             eventBufferSize: 50
         },
-        mcp: {
-            allowTools: ["bash_run"],
-            enabled: true
-        },
+        mcp: { enabled: true, tools: { capabilities: ["read", "write", "execute"], groups: ["file", "bash", "artifact"] } },
         name: "aromatic-pc",
         provider: "local" as const,
         workspace: workspacePath

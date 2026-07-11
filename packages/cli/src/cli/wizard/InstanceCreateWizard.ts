@@ -60,7 +60,8 @@ export class InstanceCreateWizard {
 
         this.#output.write("MCP\n");
         const mcpEnabled = await this.#confirm(lines, "MCP enabled", schema.defaultMcpEnabled);
-        const allowTools = await this.#allowTools(lines, schema.defaultAllowTools);
+        const mcpGroups = await this.#stringList(lines, "MCP tool groups", schema.defaultMcpGroups);
+        const mcpCapabilities = await this.#stringList(lines, "MCP capabilities", schema.defaultMcpCapabilities);
 
         this.#output.write("Security\n");
         const securityMode = await this.#optional(lines, "security mode", schema.defaultSecurityMode);
@@ -73,8 +74,11 @@ export class InstanceCreateWizard {
             ...(providerFields.ssh === undefined ? {} : { ssh: providerFields.ssh }),
             enabled,
             mcp: {
-                allowTools,
-                enabled: mcpEnabled
+                enabled: mcpEnabled,
+                tools: {
+                    capabilities: mcpCapabilities as InstanceCreateDraft["mcp"] extends { tools?: { capabilities?: infer T } } ? T : never,
+                    groups: mcpGroups
+                }
             },
             name,
             provider,
@@ -294,8 +298,8 @@ export class InstanceCreateWizard {
         return Object.keys(env).length === 0 ? undefined : env;
     }
 
-    async #allowTools(lines: AsyncIterator<string>, defaults: readonly string[]): Promise<string[]> {
-        const raw = await this.#optional(lines, "allowed tools (comma or space separated)", defaults.join(","));
+    async #stringList(lines: AsyncIterator<string>, label: string, defaults: readonly string[]): Promise<string[]> {
+        const raw = await this.#optional(lines, `${label} (comma or space separated)`, defaults.join(","));
 
         if (raw.trim().length === 0) {
             return [...defaults];
@@ -374,7 +378,8 @@ export class InstanceCreateWizard {
 
         this.#output.write(`mcp enabled: ${summary.mcp.enabled}\n`);
         this.#output.write(`mcp path: ${summary.mcp.path}\n`);
-        this.#output.write(`allowed tools: ${summary.mcp.allowTools.join(",")}\n`);
+        this.#output.write(`MCP groups: ${summary.mcp.tools.groups.join(",")}\n`);
+        this.#output.write(`MCP capabilities: ${summary.mcp.tools.capabilities.join(",")}\n`);
         this.#output.write(`security mode: ${summary.security.mode}\n`);
     }
 

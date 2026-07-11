@@ -27,6 +27,7 @@ impl ToolHandler for FileInfoTool {
     }
     fn catalog_entry(&self) -> ToolCatalogEntry {
         ToolCatalogEntry {
+            group: self.name.group().to_string(),
             name: self.name.as_str(),
             description: "Inspect multiple filesystem entries without following final symlinks."
                 .to_string(),
