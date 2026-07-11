@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashSet, VecDeque};
 use std::sync::Arc;
 
 use regex::RegexBuilder;
@@ -62,21 +62,15 @@ impl ToolHandler for FileSearchTool {
         let offset = input.cursor.as_deref().map_or(Ok(0), |cursor| {
             self.state.cursors.lock().unwrap().resolve(cursor, &query)
         })?;
-        let discovered = discover(&call, &paths, hidden, gitignore)?;
-        let file_count = discovered
-            .iter()
-            .filter(|entry| entry.entry_type == "file")
-            .count();
+        let discovered = discover_round_robin(&call, &paths, hidden, gitignore)?;
+        let file_count = discovered.len();
         let per_file = if file_count == 1 {
             SINGLE_FILE_MATCHES
         } else {
             MATCHES_PER_FILE
         };
         let mut files = Vec::new();
-        for entry in discovered
-            .into_iter()
-            .filter(|entry| entry.entry_type == "file")
-        {
+        for entry in discovered {
             let Ok(text) = TextFile::read(&entry.path) else {
                 continue;
             };
@@ -123,6 +117,44 @@ impl ToolHandler for FileSearchTool {
             .map_err(|error| ToolError::new("tool.internalError", error.to_string()))
     }
 }
+
+fn discover_round_robin(
+    call: &ToolCall,
+    paths: &[String],
+    hidden: bool,
+    gitignore: bool,
+) -> Result<Vec<crate::tools::file::discover::DiscoveredEntry>, ToolError> {
+    let mut groups = paths
+        .iter()
+        .map(|path| {
+            discover(call, std::slice::from_ref(path), hidden, gitignore).map(|entries| {
+                entries
+                    .into_iter()
+                    .filter(|entry| entry.entry_type == "file")
+                    .collect::<VecDeque<_>>()
+            })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let mut seen = HashSet::new();
+    let mut result = Vec::new();
+    loop {
+        let mut progressed = false;
+        for group in &mut groups {
+            while let Some(entry) = group.pop_front() {
+                if seen.insert(entry.display.clone()) {
+                    result.push(entry);
+                    progressed = true;
+                    break;
+                }
+            }
+        }
+        if !progressed {
+            break;
+        }
+    }
+    Ok(result)
+}
+
 fn shown_lines(matches: &[usize], total: usize, context: Option<usize>) -> Vec<usize> {
     let (before, after) = context.map_or((1, 3), |value| (value, value));
     let mut shown = BTreeSet::new();
