@@ -16,6 +16,7 @@ import { parse, stringify, type TomlTableWithoutBigInt } from "smol-toml";
 
 export type ControlProviderKind = "docker" | "local" | "podman" | "ssh";
 export type ControlMcpAuthMode = "none" | "oauth2" | "token";
+export type ControlFileEditMode = "text" | "replace" | "patch" | "apply_patch";
 
 export interface ControlInstanceLogsConfig {
     eventBufferSize?: number;
@@ -36,7 +37,12 @@ export interface ControlToolSchedulerConfig {
     byTool?: Record<string, ControlToolSchedulerToolLimitConfig>;
 }
 
+export interface ControlInstanceFileEditConfig {
+    mode?: ControlFileEditMode;
+}
+
 export interface ControlInstanceToolsConfig {
+    fileEdit?: ControlInstanceFileEditConfig;
     scheduler?: ControlToolSchedulerConfig;
 }
 
@@ -303,6 +309,7 @@ function parseInstanceDocument(document: TomlRecord): ControlInstanceConfig {
 
 function encodeToolsConfig(tools: ControlInstanceToolsConfig): TomlRecord {
     return {
+        ...(tools.fileEdit === undefined ? {} : { fileEdit: withoutUndefined(tools.fileEdit) }),
         ...(tools.scheduler === undefined ? {} : { scheduler: encodeToolSchedulerConfig(tools.scheduler) })
     };
 }
@@ -333,8 +340,13 @@ function encodeToolSchedulerByTool(byTool: Record<string, ControlToolSchedulerTo
 }
 
 function parseToolsConfig(tools: TomlRecord): ControlInstanceToolsConfig {
+    const fileEdit = asOptionalRecord(tools.fileEdit, "tools.fileEdit");
     const scheduler = asOptionalRecord(tools.scheduler, "tools.scheduler");
     return {
+        fileEdit:
+            fileEdit === undefined
+                ? undefined
+                : { mode: asOptionalFileEditMode(fileEdit.mode, "tools.fileEdit.mode") },
         scheduler: scheduler === undefined ? undefined : parseToolSchedulerConfig(scheduler)
     };
 }
@@ -667,6 +679,17 @@ function asProviderKind(value: string): ControlProviderKind {
     }
 
     throw new Error(`unsupported provider: ${value}`);
+}
+
+function asOptionalFileEditMode(value: unknown, fieldName: string): ControlFileEditMode | undefined {
+    if (value === undefined) {
+        return undefined;
+    }
+    const mode = asString(value, fieldName);
+    if (mode === "text" || mode === "replace" || mode === "patch" || mode === "apply_patch") {
+        return mode;
+    }
+    throw new Error(`${fieldName} must be one of text, replace, patch, apply_patch`);
 }
 
 function asAuthMode(value: string): ControlMcpAuthMode {

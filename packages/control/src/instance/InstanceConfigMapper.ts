@@ -32,6 +32,7 @@ export class InstanceConfigMapper {
             defaultWorkspace: instance.workspace === undefined ? undefined : asWorkspacePath(instance.workspace),
             env: {
                 ...instance.env,
+                DEVSHELL_WORKER_INTERNAL_FILE_EDIT_MODE: instance.tools?.fileEdit?.mode ?? "text",
                 DEVSHELL_WORKER_INTERNAL_SECURITY_MODE: effectiveSecurityMode,
                 DEVSHELL_WORKER_SECURITY_MODE: effectiveSecurityMode
             },

@@ -355,6 +355,7 @@ function toWorkerReconfigureInput(instance: ControlInstanceConfig): {
         effectiveSecurityMode,
         env: {
             ...instance.env,
+            DEVSHELL_WORKER_INTERNAL_FILE_EDIT_MODE: instance.tools?.fileEdit?.mode ?? "text",
             DEVSHELL_WORKER_INTERNAL_SECURITY_MODE: effectiveSecurityMode,
             DEVSHELL_WORKER_SECURITY_MODE: effectiveSecurityMode
         }
@@ -523,8 +524,25 @@ function readToolsConfig(
 
     const tools = readRecord(value, fieldName);
     return {
+        fileEdit: readFileEditConfig(tools.fileEdit, current?.fileEdit, `${fieldName}.fileEdit`),
         scheduler: readToolSchedulerConfig(tools.scheduler, current?.scheduler, `${fieldName}.scheduler`)
     };
+}
+
+function readFileEditConfig(
+    value: JsonValue | undefined,
+    current: NonNullable<ControlInstanceConfig["tools"]>["fileEdit"],
+    fieldName: string
+): NonNullable<ControlInstanceConfig["tools"]>["fileEdit"] {
+    if (value === undefined) {
+        return current;
+    }
+    const fileEdit = readRecord(value, fieldName);
+    const rawMode = readOptionalString(fileEdit.mode, `${fieldName}.mode`) ?? current?.mode ?? "text";
+    if (rawMode !== "text" && rawMode !== "replace" && rawMode !== "patch" && rawMode !== "apply_patch") {
+        throw invalidConfig(`${fieldName}.mode must be one of text, replace, patch, apply_patch`);
+    }
+    return { mode: rawMode };
 }
 
 function readToolSchedulerConfig(
@@ -829,6 +847,7 @@ function cloneInstanceConfig(instance: ControlInstanceConfig): ControlInstanceCo
 
 function cloneToolsConfig(tools: NonNullable<ControlInstanceConfig["tools"]>): NonNullable<ControlInstanceConfig["tools"]> {
     return {
+        fileEdit: tools.fileEdit === undefined ? undefined : { ...tools.fileEdit },
         scheduler:
             tools.scheduler === undefined
                 ? undefined
