@@ -61,7 +61,7 @@ export class RouteHandlerInstance {
                     snapshot
                 } as unknown as JsonValue;
             }
-            case "instance.start":
+            case "instance.start": {
                 if (!descriptor.enabled) {
                     throw createError({
                         code: errorCodes.instanceConflict,
@@ -70,8 +70,7 @@ export class RouteHandlerInstance {
                         retryable: false
                     });
                 }
-                return (
-                    await this.#startInteractive(
+                const result = await this.#startInteractive(
                         connection,
                         requestId,
                         descriptor.worker as unknown as {
@@ -81,8 +80,10 @@ export class RouteHandlerInstance {
                             ): Promise<unknown>;
                         },
                         readWorkspacePath(params)
-                    )
-                ) as unknown as JsonValue;
+                    );
+                this.#instanceRegistry.markOwned(descriptor.name);
+                return result as unknown as JsonValue;
+            }
             case "instance.stop":
                 return (await this.#stopInstance(descriptor)) as unknown as JsonValue;
             case "instance.readLogs":
@@ -145,6 +146,7 @@ export class RouteHandlerInstance {
 
     async #stopInstance(descriptor: { enabled: boolean; name: string; worker: { stop(): Promise<unknown> } }): Promise<unknown> {
         const result = await descriptor.worker.stop();
+        this.#instanceRegistry.clearOwned(descriptor.name);
 
         if (!descriptor.enabled) {
             this.#instanceRegistry.delete(descriptor.name);

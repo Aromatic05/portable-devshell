@@ -69,3 +69,56 @@ test("mcp endpoint path is generated and wiring only builds host configuration",
     assert.ok(host.server);
     assert.equal(descriptor.worker.snapshot().ready, false);
 });
+
+test("stopOwned only stops workers started by this control and keeps failed ownership", async () => {
+    const stopped: string[] = [];
+    const registry = new (await import("../../dist/instance/registry/InstanceRegistry.js")).InstanceRegistry([
+        {
+            allowTools: [],
+            enabled: true,
+            mcpEnabled: false,
+            mcpPath: "",
+            name: "owned-ok",
+            worker: {
+                async stop() {
+                    stopped.push("owned-ok");
+                }
+            } as never
+        },
+        {
+            allowTools: [],
+            enabled: true,
+            mcpEnabled: false,
+            mcpPath: "",
+            name: "owned-fail",
+            worker: {
+                async stop() {
+                    stopped.push("owned-fail");
+                    throw new Error("stop failed");
+                }
+            } as never
+        },
+        {
+            allowTools: [],
+            enabled: true,
+            mcpEnabled: false,
+            mcpPath: "",
+            name: "unowned",
+            worker: {
+                async stop() {
+                    stopped.push("unowned");
+                }
+            } as never
+        }
+    ]);
+
+    registry.markOwned("owned-ok");
+    registry.markOwned("owned-fail");
+
+    await assert.rejects(registry.stopOwned(), /Failed to stop 1 worker instance/u);
+    assert.deepEqual(stopped, ["owned-ok", "owned-fail"]);
+
+    stopped.length = 0;
+    await assert.rejects(registry.stopOwned(), /Failed to stop 1 worker instance/u);
+    assert.deepEqual(stopped, ["owned-fail"]);
+});

@@ -97,8 +97,9 @@ export class ControlServer {
     }
 
     async stop(): Promise<void> {
-        await this.#rpcServer?.stop();
         await this.#mcpHost?.stop();
+        await this.#instanceRegistry.stopOwned();
+        await this.#rpcServer?.stop();
         this.#config = undefined;
         this.#instanceRegistry = new InstanceRegistry([]);
         this.#rpcServer = undefined;
