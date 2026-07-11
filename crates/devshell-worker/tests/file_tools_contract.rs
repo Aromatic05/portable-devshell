@@ -403,7 +403,8 @@ fn file_edit_applies_eof_sentinel_to_all_eof_operations() {
             "./document.txt",
             &document["result"]["snapshotId"],
             "INS.POST 1:
-+two",
++two
++",
         ),
     );
     assert_eq!(inserted["ok"], true, "{inserted}");
@@ -579,7 +580,7 @@ fn file_edit_applies_multiple_files_and_returns_fresh_headers() {
         json!({ "path": "./b.txt", "selector": "raw" }),
     );
     let input = format!(
-        "[./a.txt#{}]\nSWAP 1:\n+updated alpha\n\n[./b.txt#{}]\nSWAP 1:\n+updated beta",
+        "[./a.txt#{}]\nSWAP 1:\n+updated alpha\n+\n\n[./b.txt#{}]\nSWAP 1:\n+updated beta\n+",
         a["result"]["snapshotId"].as_str().unwrap(),
         b["result"]["snapshotId"].as_str().unwrap()
     );
@@ -628,7 +629,7 @@ fn file_edit_block_operations_use_tree_sitter_and_require_full_seen_lines() {
         patch(
             "./main.rs",
             &summary["result"]["snapshotId"],
-            "SWAP.BLK 1:\n+fn new() {}",
+            "SWAP.BLK 1:\n+fn new() {}\n+",
         ),
     );
     assert_eq!(rejected["ok"], false, "{rejected}");
@@ -648,7 +649,7 @@ fn file_edit_block_operations_use_tree_sitter_and_require_full_seen_lines() {
         patch(
             "./main.rs",
             &full["result"]["snapshotId"],
-            "SWAP.BLK 1:\n+fn new() {}",
+            "SWAP.BLK 1:\n+fn new() {}\n+",
         ),
     );
     assert_eq!(edited["ok"], true, "{edited}");
@@ -660,7 +661,7 @@ fn file_edit_block_operations_use_tree_sitter_and_require_full_seen_lines() {
 }
 
 #[test]
-fn file_edit_recovers_a_full_snapshot_only_when_the_anchor_maps_exactly() {
+fn file_edit_three_way_merges_non_conflicting_full_snapshot_changes() {
     let env = TestEnv::new();
     let instance = "aromatic-edit-recovery";
     fs::write(env.workspace().join("document.txt"), "alpha\nbeta\ngamma\n").unwrap();
@@ -780,6 +781,58 @@ fn file_edit_patch_mode_applies_standard_unified_diff() {
 }
 
 #[test]
+fn patch_mode_accepts_common_unidiff_create_and_delete_paths() {
+    let env = TestEnv::new();
+    let instance = "aromatic-patch-create-delete";
+    fs::write(env.workspace().join("old.txt"), "old\n").unwrap();
+    start_with_mode(&env, instance, "patch");
+
+    let created = call(
+        &env,
+        instance,
+        "1",
+        "file_edit",
+        json!({
+            "path": "./new.txt",
+            "edits": [{
+                "op": "create",
+                "diff": "--- /dev/null\n+++ b/new.txt\n@@ -0,0 +1 @@\n+new\n"
+            }]
+        }),
+    );
+    assert_eq!(created["ok"], true, "{created}");
+    assert_eq!(
+        fs::read_to_string(env.workspace().join("new.txt")).unwrap(),
+        "new\n"
+    );
+
+    let read = call(
+        &env,
+        instance,
+        "2",
+        "file_read",
+        json!({ "path": "./old.txt", "selector": "raw" }),
+    );
+    assert_eq!(read["ok"], true, "{read}");
+    let deleted = call(
+        &env,
+        instance,
+        "3",
+        "file_edit",
+        json!({
+            "path": "./old.txt",
+            "edits": [{
+                "op": "delete",
+                "diff": "--- a/old.txt\n+++ /dev/null\n@@ -1 +0,0 @@\n-old\n"
+            }]
+        }),
+    );
+    assert_eq!(deleted["ok"], true, "{deleted}");
+    assert!(!env.workspace().join("old.txt").exists());
+    env.json_command(&["stop", "--instance", instance]);
+}
+
+#[test]
 fn file_edit_apply_patch_mode_handles_create_move_and_delete() {
     let env = TestEnv::new();
     let instance = "aromatic-apply-patch-mode";
@@ -863,7 +916,7 @@ fn file_edit_partial_commit_returns_rpc_error_with_batch_details() {
         json!({ "path": "./b.txt", "selector": "raw" }),
     );
     let input = format!(
-        "[./a.txt#{}]\nSWAP 1:\n+updated\n\n[./b.txt#{}]\nMV /proc/portable-devshell-forbidden",
+        "[./a.txt#{}]\nSWAP 1:\n+updated\n+\n\n[./b.txt#{}]\nMV /proc/portable-devshell-forbidden",
         a["result"]["snapshotId"].as_str().unwrap(),
         b["result"]["snapshotId"].as_str().unwrap()
     );
@@ -1028,7 +1081,7 @@ fn file_edit_hashline_remove_and_move_are_covered() {
         json!({ "path": "./remove.txt", "selector": "raw" }),
     );
     let input = format!(
-        "[./move.txt#{}]\nSWAP 1:\n+moved\nMV ./moved.txt\n\n[./remove.txt#{}]\nREM",
+        "[./move.txt#{}]\nSWAP 1:\n+moved\n+\nMV ./moved.txt\n\n[./remove.txt#{}]\nREM",
         moved["result"]["snapshotId"].as_str().unwrap(),
         removed["result"]["snapshotId"].as_str().unwrap()
     );
@@ -1081,5 +1134,401 @@ fn file_edit_rejects_duplicate_canonical_source_paths() {
         fs::read_to_string(env.workspace().join("real.txt")).unwrap(),
         "real\n"
     );
+    env.json_command(&["stop", "--instance", instance]);
+}
+
+#[test]
+fn file_edit_eof_sentinel_can_remove_an_existing_final_newline() {
+    let env = TestEnv::new();
+    let instance = "aromatic-eof-remove";
+    fs::write(env.workspace().join("small.txt"), "small\n").unwrap();
+    let mut large = String::from("first\n");
+    while large.len() <= 5 * 1024 * 1024 {
+        large.push_str("large-file-line\n");
+    }
+    fs::write(env.workspace().join("large.txt"), large).unwrap();
+    start(&env, instance);
+
+    let small = call(
+        &env,
+        instance,
+        "1",
+        "file_read",
+        json!({ "path": "./small.txt", "selector": "raw" }),
+    );
+    let small_edit = call(
+        &env,
+        instance,
+        "2",
+        "file_edit",
+        patch(
+            "./small.txt",
+            &small["result"]["snapshotId"],
+            "SWAP 1:\n+small",
+        ),
+    );
+    assert_eq!(small_edit["ok"], true, "{small_edit}");
+    assert_eq!(
+        fs::read(env.workspace().join("small.txt")).unwrap(),
+        b"small"
+    );
+
+    let first = call(
+        &env,
+        instance,
+        "3",
+        "file_read",
+        json!({ "path": "./large.txt", "selector": "1-1:raw" }),
+    );
+    let total = first["result"]["totalLines"].as_u64().unwrap();
+    let last = call(
+        &env,
+        instance,
+        "4",
+        "file_read",
+        json!({ "path": "./large.txt", "selector": format!("{total}-{total}:raw") }),
+    );
+    let large_edit = call(
+        &env,
+        instance,
+        "5",
+        "file_edit",
+        patch(
+            "./large.txt",
+            &last["result"]["snapshotId"],
+            &format!("SWAP {total}:\n+large-file-line"),
+        ),
+    );
+    assert_eq!(large_edit["ok"], true, "{large_edit}");
+    assert!(
+        !fs::read(env.workspace().join("large.txt"))
+            .unwrap()
+            .ends_with(b"\n")
+    );
+    env.json_command(&["stop", "--instance", instance]);
+}
+
+#[cfg(unix)]
+#[test]
+fn file_edit_move_reports_published_target_when_source_removal_fails() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let env = TestEnv::new();
+    let instance = "aromatic-move-partial";
+    let source_dir = env.workspace().join("readonly");
+    fs::create_dir(&source_dir).unwrap();
+    fs::write(source_dir.join("source.txt"), "before\n").unwrap();
+    start(&env, instance);
+    let read = call(
+        &env,
+        instance,
+        "1",
+        "file_read",
+        json!({ "path": "./readonly/source.txt", "selector": "raw" }),
+    );
+    fs::set_permissions(&source_dir, fs::Permissions::from_mode(0o555)).unwrap();
+    let edited = call(
+        &env,
+        instance,
+        "2",
+        "file_edit",
+        patch(
+            "./readonly/source.txt",
+            &read["result"]["snapshotId"],
+            "SWAP 1:\n+after\nMV ./target.txt",
+        ),
+    );
+    fs::set_permissions(&source_dir, fs::Permissions::from_mode(0o755)).unwrap();
+    assert_eq!(edited["ok"], false, "{edited}");
+    assert_eq!(edited["error"]["details"]["targetPublished"], true);
+    assert_eq!(edited["error"]["details"]["sourceExists"], true);
+    assert_eq!(edited["error"]["details"]["targetExists"], true);
+    assert_eq!(
+        fs::read_to_string(source_dir.join("source.txt")).unwrap(),
+        "before\n"
+    );
+    assert_eq!(
+        fs::read_to_string(env.workspace().join("target.txt")).unwrap(),
+        "after"
+    );
+    env.json_command(&["stop", "--instance", instance]);
+}
+
+#[test]
+fn sparse_preview_only_authorizes_lines_actually_returned() {
+    let env = TestEnv::new();
+    let instance = "aromatic-preview-seen";
+    let mut content = String::from("first\n");
+    content.push_str(&"x".repeat(300 * 1024));
+    content.push('\n');
+    while content.len() <= 5 * 1024 * 1024 {
+        content.push_str("filler\n");
+    }
+    fs::write(env.workspace().join("large.txt"), content).unwrap();
+    start(&env, instance);
+    let read = call(
+        &env,
+        instance,
+        "1",
+        "file_read",
+        json!({ "path": "./large.txt", "selector": "1-1:raw" }),
+    );
+    let edited = call(
+        &env,
+        instance,
+        "2",
+        "file_edit",
+        patch(
+            "./large.txt",
+            &read["result"]["snapshotId"],
+            "SWAP 1:\n+updated",
+        ),
+    );
+    assert_eq!(edited["ok"], true, "{edited}");
+    assert_eq!(edited["result"]["files"][0]["previewRange"]["endLine"], 1);
+    let unauthorized = call(
+        &env,
+        instance,
+        "3",
+        "file_edit",
+        patch(
+            "./large.txt",
+            &edited["result"]["files"][0]["snapshotId"],
+            "SWAP 2:\n+not-authorized",
+        ),
+    );
+    assert_eq!(unauthorized["ok"], false, "{unauthorized}");
+    assert_eq!(unauthorized["error"]["code"], "file.invalidRange");
+    env.json_command(&["stop", "--instance", instance]);
+}
+
+#[test]
+fn sparse_preview_failure_after_publish_is_best_effort() {
+    let env = TestEnv::new();
+    let instance = "aromatic-preview-best-effort";
+    let mut content = String::from("one\n");
+    content.push_str(&"x".repeat(300 * 1024));
+    content.push_str("\nthree\nfour\nfive\n");
+    while content.len() <= 5 * 1024 * 1024 {
+        content.push_str("filler\n");
+    }
+    fs::write(env.workspace().join("large.txt"), content).unwrap();
+    start(&env, instance);
+    let read = call(
+        &env,
+        instance,
+        "1",
+        "file_read",
+        json!({ "path": "./large.txt", "selector": "5-5:raw" }),
+    );
+    let edited = call(
+        &env,
+        instance,
+        "2",
+        "file_edit",
+        patch(
+            "./large.txt",
+            &read["result"]["snapshotId"],
+            "SWAP 5:\n+updated",
+        ),
+    );
+    assert_eq!(edited["ok"], true, "{edited}");
+    assert!(edited["result"]["files"][0]["preview"].is_null());
+    assert_eq!(edited["result"]["files"][0]["truncated"], true);
+    assert_eq!(
+        fs::read_to_string(env.workspace().join("large.txt"))
+            .unwrap()
+            .lines()
+            .nth(4),
+        Some("updated")
+    );
+    let unauthorized = call(
+        &env,
+        instance,
+        "3",
+        "file_edit",
+        patch(
+            "./large.txt",
+            &edited["result"]["files"][0]["snapshotId"],
+            "SWAP 5:\n+again",
+        ),
+    );
+    assert_eq!(unauthorized["ok"], false, "{unauthorized}");
+    assert_eq!(unauthorized["error"]["code"], "file.invalidRange");
+    env.json_command(&["stop", "--instance", instance]);
+}
+
+#[test]
+fn file_read_multi_range_next_selector_preserves_remaining_ranges() {
+    let env = TestEnv::new();
+    let instance = "aromatic-range-cursor";
+    let line = format!("{}\n", "x".repeat(200));
+    let mut content = String::new();
+    for _ in 0..20_000 {
+        content.push_str(&line);
+    }
+    fs::write(env.workspace().join("ranges.txt"), content).unwrap();
+    start(&env, instance);
+    let read = call(
+        &env,
+        instance,
+        "1",
+        "file_read",
+        json!({ "path": "./ranges.txt", "selector": "1-10000,19000-20000:raw" }),
+    );
+    assert_eq!(read["ok"], true, "{read}");
+    let next = read["result"]["nextSelector"].as_str().unwrap();
+    assert!(next.ends_with("-10000,19000-20000:raw"), "{next}");
+    env.json_command(&["stop", "--instance", instance]);
+}
+
+#[test]
+fn patch_mode_rejects_metadata_that_disagrees_with_outer_arguments() {
+    let env = TestEnv::new();
+    let instance = "aromatic-patch-metadata";
+    fs::write(env.workspace().join("a.txt"), "before\n").unwrap();
+    start_with_mode(&env, instance, "patch");
+    let read = call(
+        &env,
+        instance,
+        "1",
+        "file_read",
+        json!({ "path": "./a.txt", "selector": "raw" }),
+    );
+    assert_eq!(read["ok"], true, "{read}");
+    let edited = call(
+        &env,
+        instance,
+        "2",
+        "file_edit",
+        json!({
+            "path": "./a.txt",
+            "edits": [{
+                "op": "update",
+                "diff": "--- a/x.txt\n+++ b/y.txt\n@@ -1 +1 @@\n-before\n+after\n"
+            }]
+        }),
+    );
+    assert_eq!(edited["ok"], false, "{edited}");
+    assert_eq!(edited["error"]["code"], "file.invalidPatch");
+    assert_eq!(
+        fs::read_to_string(env.workspace().join("a.txt")).unwrap(),
+        "before\n"
+    );
+    env.json_command(&["stop", "--instance", instance]);
+}
+
+#[test]
+fn stale_hashline_edits_use_three_way_merge_and_reject_conflicts() {
+    let env = TestEnv::new();
+    let instance = "aromatic-three-way";
+    fs::write(env.workspace().join("merge.txt"), "same\nchange\nsame\n").unwrap();
+    start(&env, instance);
+    let read = call(
+        &env,
+        instance,
+        "1",
+        "file_read",
+        json!({ "path": "./merge.txt", "selector": "raw" }),
+    );
+    fs::write(
+        env.workspace().join("merge.txt"),
+        "prefix\nsame\nchange\nsame\n",
+    )
+    .unwrap();
+    let merged = call(
+        &env,
+        instance,
+        "2",
+        "file_edit",
+        patch(
+            "./merge.txt",
+            &read["result"]["snapshotId"],
+            "SWAP 2:\n+updated",
+        ),
+    );
+    assert_eq!(merged["ok"], true, "{merged}");
+    assert_eq!(
+        fs::read_to_string(env.workspace().join("merge.txt")).unwrap(),
+        "prefix\nsame\nupdated\nsame\n"
+    );
+
+    let conflict_read = call(
+        &env,
+        instance,
+        "3",
+        "file_read",
+        json!({ "path": "./merge.txt", "selector": "raw" }),
+    );
+    fs::write(
+        env.workspace().join("merge.txt"),
+        "prefix\nsame\nexternal\nsame\n",
+    )
+    .unwrap();
+    let conflict = call(
+        &env,
+        instance,
+        "4",
+        "file_edit",
+        patch(
+            "./merge.txt",
+            &conflict_read["result"]["snapshotId"],
+            "SWAP 3:\n+local",
+        ),
+    );
+    assert_eq!(conflict["ok"], false, "{conflict}");
+    assert_eq!(conflict["error"]["code"], "file.revisionMismatch");
+    env.json_command(&["stop", "--instance", instance]);
+}
+
+#[test]
+fn apply_patch_accepts_codex_envelope_and_normalizes_it_through_diffy() {
+    let env = TestEnv::new();
+    let instance = "aromatic-codex-patch";
+    fs::write(env.workspace().join("old.txt"), "old\n").unwrap();
+    fs::write(env.workspace().join("delete.txt"), "delete\n").unwrap();
+    start_with_mode(&env, instance, "apply_patch");
+    let old = call(
+        &env,
+        instance,
+        "1",
+        "file_read",
+        json!({ "path": "./old.txt", "selector": "raw" }),
+    );
+    let deleted = call(
+        &env,
+        instance,
+        "2",
+        "file_read",
+        json!({ "path": "./delete.txt", "selector": "raw" }),
+    );
+    assert_eq!(old["ok"], true, "{old}");
+    assert_eq!(deleted["ok"], true, "{deleted}");
+    let input = concat!(
+        "*** Begin Patch\n",
+        "*** Add File: new.txt\n",
+        "+new\n",
+        "*** Update File: old.txt\n",
+        "*** Move to: moved.txt\n",
+        "@@\n",
+        "-old\n",
+        "+moved\n",
+        "@@\n",
+        "+appended\n",
+        "*** Delete File: delete.txt\n",
+        "*** End Patch"
+    );
+    let edited = call(&env, instance, "3", "file_edit", json!({ "input": input }));
+    assert_eq!(edited["ok"], true, "{edited}");
+    assert_eq!(
+        fs::read_to_string(env.workspace().join("new.txt")).unwrap(),
+        "new\n"
+    );
+    assert_eq!(
+        fs::read_to_string(env.workspace().join("moved.txt")).unwrap(),
+        "moved\nappended\n"
+    );
+    assert!(!env.workspace().join("old.txt").exists());
+    assert!(!env.workspace().join("delete.txt").exists());
     env.json_command(&["stop", "--instance", instance]);
 }

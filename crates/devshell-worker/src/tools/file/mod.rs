@@ -1,9 +1,11 @@
+pub mod codex_patch;
 pub mod cursor;
 pub mod diff;
 pub mod discover;
 pub mod edit;
 pub mod find;
 pub mod info;
+pub mod publish;
 pub mod read;
 pub mod search;
 pub mod state;

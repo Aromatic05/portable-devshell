@@ -37,6 +37,7 @@ pub struct TextMetadata {
 pub struct SelectedLines {
     pub lines: Vec<(usize, String)>,
     pub next_line: Option<usize>,
+    pub metadata: TextMetadata,
 }
 
 #[derive(Clone)]
@@ -365,39 +366,66 @@ impl TextMetadata {
             )
         })?;
         let mut reader = BufReader::new(file);
+        let mut hasher = blake3::Hasher::new();
         let mut buffer = Vec::new();
         let mut line_no = 0usize;
         let mut range_index = 0usize;
         let mut rendered_bytes = 0usize;
         let mut lines = Vec::new();
+        let mut next_line = None;
+        let mut total_bytes = 0usize;
+        let mut total_lines = 0usize;
+        let mut bom = false;
+        let mut first = true;
+        let mut final_newline = false;
+        let mut line_ending = "\n";
         loop {
             buffer.clear();
-            if reader
+            let count = reader
                 .read_until(b'\n', &mut buffer)
-                .map_err(|error| ToolError::new("file.readFailed", error.to_string()))?
-                == 0
-            {
+                .map_err(|error| ToolError::new("file.readFailed", error.to_string()))?;
+            if count == 0 {
                 break;
             }
+            hasher.update(&buffer);
+            total_bytes += count;
+            if buffer.contains(&0) {
+                return Err(ToolError::new("file.notText", "file contains NUL bytes"));
+            }
             line_no += 1;
+            let had_newline = buffer.last() == Some(&b'\n');
+            let mut content = buffer.as_slice();
+            if first && content.starts_with(&[0xEF, 0xBB, 0xBF]) {
+                bom = true;
+                content = &content[3..];
+            }
+            first = false;
+            let without_lf = content.strip_suffix(b"\n").unwrap_or(content);
+            let without_eol = without_lf.strip_suffix(b"\r").unwrap_or(without_lf);
+            let text = std::str::from_utf8(without_eol)
+                .map_err(|_| ToolError::new("file.notText", "file is not valid UTF-8"))?;
+            if had_newline || !without_eol.is_empty() {
+                total_lines += 1;
+            }
+            if had_newline && total_lines == 1 {
+                line_ending = if without_lf.len() != without_eol.len() {
+                    "\r\n"
+                } else {
+                    "\n"
+                };
+            }
+            final_newline = had_newline;
+
             while range_index < ranges.len() && line_no > ranges[range_index].1 {
                 range_index += 1;
             }
-            if range_index >= ranges.len() {
-                break;
+            if next_line.is_some() || range_index >= ranges.len() {
+                continue;
             }
             let (start, end) = ranges[range_index];
             if line_no < start || line_no > end {
                 continue;
             }
-            let mut content = buffer.as_slice();
-            if line_no == 1 && content.starts_with(&[0xEF, 0xBB, 0xBF]) {
-                content = &content[3..];
-            }
-            content = content.strip_suffix(b"\n").unwrap_or(content);
-            content = content.strip_suffix(b"\r").unwrap_or(content);
-            let text = std::str::from_utf8(content)
-                .map_err(|_| ToolError::new("file.notText", "file is not valid UTF-8"))?;
             let line_bytes =
                 line_no.to_string().len() + 1 + text.len() + usize::from(!lines.is_empty());
             if rendered_bytes + line_bytes > max_rendered_bytes {
@@ -407,17 +435,23 @@ impl TextMetadata {
                         "one selected line exceeds the file_read output byte limit",
                     ));
                 }
-                return Ok(SelectedLines {
-                    lines,
-                    next_line: Some(line_no),
-                });
+                next_line = Some(line_no);
+                continue;
             }
             rendered_bytes += line_bytes;
             lines.push((line_no, text.to_string()));
         }
         Ok(SelectedLines {
             lines,
-            next_line: None,
+            next_line,
+            metadata: TextMetadata {
+                bom,
+                final_newline,
+                line_ending,
+                revision: hasher.finalize().to_hex().to_string(),
+                total_bytes,
+                total_lines,
+            },
         })
     }
 }

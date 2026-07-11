@@ -76,6 +76,17 @@ impl ToolHandler for FileReadTool {
             parse_selector(input.selector.as_deref(), metadata.total_lines)?
         };
         let selected = TextMetadata::read_selected(&path, &selector.ranges, MAX_CONTENT_BYTES)?;
+        if selected.metadata.revision != metadata.revision
+            || small_text
+                .as_ref()
+                .is_some_and(|text| text.revision != selected.metadata.revision)
+        {
+            return Err(ToolError::retryable(
+                "file.revisionMismatch",
+                "file changed while it was being read",
+            ));
+        }
+        let metadata = selected.metadata.clone();
         let mut content = String::new();
         let mut returned = Vec::new();
         let mut seen = Vec::new();
@@ -94,7 +105,11 @@ impl ToolHandler for FileReadTool {
         }
         if let Some(next_line) = selected.next_line {
             selector.truncated = true;
-            selector.next_selector = Some(format!("{next_line}:raw"));
+            selector.next_selector = remaining_selector(
+                &selector.ranges,
+                next_line,
+                selector.next_selector.as_deref(),
+            );
         }
         let snapshot = if let Some(text) = &small_text {
             self.state
@@ -137,6 +152,39 @@ struct ParsedSelector {
     next_selector: Option<String>,
 }
 
+fn remaining_selector(
+    ranges: &[(usize, usize)],
+    next_line: usize,
+    existing_tail: Option<&str>,
+) -> Option<String> {
+    let remaining = ranges
+        .iter()
+        .filter_map(|(start, end)| {
+            if *end < next_line {
+                None
+            } else {
+                Some(((*start).max(next_line), *end))
+            }
+        })
+        .collect::<Vec<_>>();
+    if remaining.is_empty() {
+        return existing_tail.map(ToOwned::to_owned);
+    }
+    let mut selector = format!(
+        "{}:raw",
+        remaining
+            .into_iter()
+            .map(|(start, end)| format!("{start}-{end}"))
+            .collect::<Vec<_>>()
+            .join(",")
+    );
+    if let Some(tail) = existing_tail {
+        selector.push_str(";next=");
+        selector.push_str(tail);
+    }
+    Some(selector)
+}
+
 fn parse_selector(selector: Option<&str>, total: usize) -> Result<ParsedSelector, ToolError> {
     let Some(selector) = selector else {
         let end = total.min(DEFAULT_LINE_COUNT);
@@ -147,6 +195,30 @@ fn parse_selector(selector: Option<&str>, total: usize) -> Result<ParsedSelector
         });
     };
     let selector = selector.trim();
+    let (selector, continuation) = if let Some((body, tail)) = selector.split_once(";next=") {
+        if body.is_empty() || tail.is_empty() || tail.contains(';') {
+            return Err(ToolError::new(
+                "file.invalidRange",
+                "selector continuation is invalid",
+            ));
+        }
+        let tail_raw = tail.ends_with(":raw");
+        let tail_start = parse_positive(tail.strip_suffix(":raw").unwrap_or(tail))?;
+        if tail_start > total {
+            return Err(ToolError::new(
+                "file.invalidRange",
+                "selector continuation starts beyond the end of the file",
+            ));
+        }
+        let tail = if tail_raw {
+            format!("{tail_start}:raw")
+        } else {
+            tail_start.to_string()
+        };
+        (body, Some(tail))
+    } else {
+        (selector, None)
+    };
     let raw_mode = selector.ends_with(":raw") || selector == "raw";
     let range_text = selector.strip_suffix(":raw").unwrap_or(selector);
     if range_text == "raw" {
@@ -227,16 +299,23 @@ fn parse_selector(selector: Option<&str>, total: usize) -> Result<ParsedSelector
         }
     }
 
-    let (truncated, next_selector) = match open_window {
+    if continuation.is_some() && open_window.is_some() {
+        return Err(ToolError::new(
+            "file.invalidRange",
+            "selector continuation cannot contain another open window",
+        ));
+    }
+    let open_next = match open_window {
         Some((_, end)) if end < total => {
             let suffix = if raw_mode { ":raw" } else { "" };
-            (true, Some(format!("{}{suffix}", end + 1)))
+            Some(format!("{}{suffix}", end + 1))
         }
-        _ => (false, None),
+        _ => None,
     };
+    let next_selector = continuation.or(open_next);
     Ok(ParsedSelector {
         ranges: expanded,
-        truncated,
+        truncated: next_selector.is_some(),
         next_selector,
     })
 }
@@ -266,4 +345,25 @@ fn coalesce_lines(lines: &[usize]) -> Vec<(usize, usize)> {
         }
     }
     ranges
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{parse_selector, remaining_selector};
+
+    #[test]
+    fn byte_pagination_preserves_the_current_window_before_the_next_window() {
+        let selector = parse_selector(Some("1"), 10_000).unwrap();
+        assert_eq!(selector.ranges, vec![(1, 203)]);
+        assert_eq!(selector.next_selector.as_deref(), Some("201"));
+
+        let next =
+            remaining_selector(&selector.ranges, 50, selector.next_selector.as_deref()).unwrap();
+        assert_eq!(next, "50-203:raw;next=201");
+
+        let continued = parse_selector(Some(&next), 10_000).unwrap();
+        assert_eq!(continued.ranges, vec![(50, 203)]);
+        assert_eq!(continued.next_selector.as_deref(), Some("201"));
+        assert!(continued.truncated);
+    }
 }

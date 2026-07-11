@@ -3,9 +3,9 @@ use std::io::Write;
 use std::sync::Arc;
 
 use schemars::schema_for;
-use tempfile::NamedTempFile;
 
 use crate::security::path::parse_requested_path;
+use crate::tools::file::publish::{self, PublishMode};
 use crate::tools::file::state::TextFile;
 use crate::tools::file::types::{FileWriteInput, FileWriteOutput};
 use crate::tools::file::{FileToolState, authorize, resolve_create};
@@ -79,9 +79,6 @@ impl ToolHandler for FileWriteTool {
                 ));
             }
         }
-        let parent = path
-            .parent()
-            .ok_or_else(|| ToolError::new("file.writeFailed", "target has no parent"))?;
         let metadata = if existing {
             Some(
                 fs::metadata(&path)
@@ -90,8 +87,7 @@ impl ToolHandler for FileWriteTool {
         } else {
             None
         };
-        let mut temp = NamedTempFile::new_in(parent)
-            .map_err(|error| ToolError::new("file.writeFailed", error.to_string()))?;
+        let mut temp = publish::new_temp(&path)?;
         temp.write_all(input.content.as_bytes())
             .map_err(|error| ToolError::new("file.writeFailed", error.to_string()))?;
         temp.flush()
@@ -121,8 +117,12 @@ impl ToolHandler for FileWriteTool {
                 ));
             }
         }
-        temp.persist(&path)
-            .map_err(|error| ToolError::new("file.writeFailed", error.error.to_string()))?;
+        let publish_mode = if input.expected_revision.is_some() {
+            PublishMode::Replace
+        } else {
+            PublishMode::NoClobber
+        };
+        publish::publish(temp, &path, publish_mode)?;
         let text = TextFile::read(&path)?;
         let snapshot =
             self.state

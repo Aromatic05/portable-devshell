@@ -91,7 +91,7 @@ impl ToolHandler for FileSearchTool {
         for group in discovered_groups {
             let mut matched = VecDeque::new();
             for entry in group {
-                let Ok((metadata, matches, shown)) =
+                let Ok((metadata, full_text, matches, shown)) =
                     search_stream(&entry.path, &matcher, per_file, context)
                 else {
                     continue;
@@ -100,10 +100,7 @@ impl ToolHandler for FileSearchTool {
                     continue;
                 }
                 let (body, seen) = format_streamed_content(&matches, &shown);
-                let snapshot = if metadata.total_bytes <= FULL_SNAPSHOT_LIMIT {
-                    let Ok(text) = TextFile::read(&entry.path) else {
-                        continue;
-                    };
+                let snapshot = if let Some(text) = full_text {
                     self.state
                         .snapshots
                         .lock()
@@ -185,8 +182,15 @@ fn search_stream(
     matcher: &regex::Regex,
     limit: usize,
     context: Option<usize>,
-) -> Result<(TextMetadata, Vec<usize>, BTreeMap<usize, String>), ToolError> {
-    let metadata = TextMetadata::inspect(path)?;
+) -> Result<
+    (
+        TextMetadata,
+        Option<TextFile>,
+        Vec<usize>,
+        BTreeMap<usize, String>,
+    ),
+    ToolError,
+> {
     let file =
         fs::File::open(path).map_err(|error| ToolError::new("file.notFound", error.to_string()))?;
     let mut reader = BufReader::new(file);
@@ -197,46 +201,98 @@ fn search_stream(
     let mut pending_after = 0usize;
     let mut buffer = Vec::new();
     let mut line_no = 0usize;
+    let mut hasher = blake3::Hasher::new();
+    let mut total_bytes = 0usize;
+    let mut total_lines = 0usize;
+    let mut bom = false;
+    let mut first = true;
+    let mut final_newline = false;
+    let mut line_ending = "\n";
+    let mut full_lines = Some(Vec::new());
     loop {
         buffer.clear();
-        if reader
+        let count = reader
             .read_until(b'\n', &mut buffer)
-            .map_err(|error| ToolError::new("file.readFailed", error.to_string()))?
-            == 0
-        {
+            .map_err(|error| ToolError::new("file.readFailed", error.to_string()))?;
+        if count == 0 {
             break;
+        }
+        hasher.update(&buffer);
+        total_bytes += count;
+        if total_bytes > FULL_SNAPSHOT_LIMIT {
+            full_lines = None;
+        }
+        if buffer.contains(&0) {
+            return Err(ToolError::new("file.notText", "file contains NUL bytes"));
         }
         line_no += 1;
+        let had_newline = buffer.last() == Some(&b'\n');
         let mut content = buffer.as_slice();
-        if line_no == 1 && content.starts_with(&[0xEF, 0xBB, 0xBF]) {
+        if first && content.starts_with(&[0xEF, 0xBB, 0xBF]) {
+            bom = true;
             content = &content[3..];
         }
-        content = content.strip_suffix(b"\n").unwrap_or(content);
-        content = content.strip_suffix(b"\r").unwrap_or(content);
-        let line = std::str::from_utf8(content)
+        first = false;
+        let without_lf = content.strip_suffix(b"\n").unwrap_or(content);
+        let without_eol = without_lf.strip_suffix(b"\r").unwrap_or(without_lf);
+        let line = std::str::from_utf8(without_eol)
             .map_err(|_| ToolError::new("file.notText", "file is not valid UTF-8"))?
             .to_string();
-        let is_match = matches.len() < limit && matcher.is_match(&line);
-        if is_match {
-            for (number, value) in &previous {
-                shown.entry(*number).or_insert_with(|| value.clone());
+        if had_newline || !without_eol.is_empty() {
+            total_lines += 1;
+        }
+        if had_newline && total_lines == 1 {
+            line_ending = if without_lf.len() != without_eol.len() {
+                "\r\n"
+            } else {
+                "\n"
+            };
+        }
+        final_newline = had_newline;
+        if let Some(lines) = &mut full_lines {
+            lines.push(line.clone());
+        }
+
+        if matches.len() < limit {
+            let is_match = matcher.is_match(&line);
+            if is_match {
+                for (number, value) in &previous {
+                    shown.entry(*number).or_insert_with(|| value.clone());
+                }
+                shown.insert(line_no, line.clone());
+                matches.push(line_no);
+                pending_after = after;
+            } else if pending_after > 0 {
+                shown.insert(line_no, line.clone());
+                pending_after -= 1;
             }
-            shown.insert(line_no, line.clone());
-            matches.push(line_no);
-            pending_after = after;
+            previous.push_back((line_no, line));
+            while previous.len() > before {
+                previous.pop_front();
+            }
         } else if pending_after > 0 {
-            shown.insert(line_no, line.clone());
+            shown.insert(line_no, line);
             pending_after -= 1;
         }
-        previous.push_back((line_no, line));
-        while previous.len() > before {
-            previous.pop_front();
-        }
-        if matches.len() == limit && pending_after == 0 {
-            break;
-        }
     }
-    Ok((metadata, matches, shown))
+    let revision = hasher.finalize().to_hex().to_string();
+    let metadata = TextMetadata {
+        bom,
+        final_newline,
+        line_ending,
+        revision: revision.clone(),
+        total_bytes,
+        total_lines,
+    };
+    let full_text = full_lines.map(|lines| TextFile {
+        bom,
+        final_newline,
+        line_ending,
+        lines,
+        revision,
+        total_bytes,
+    });
+    Ok((metadata, full_text, matches, shown))
 }
 
 fn format_streamed_content(

@@ -7,12 +7,15 @@ use std::sync::Arc;
 use schemars::schema_for;
 use tempfile::NamedTempFile;
 
+use crate::tools::file::codex_patch::{self, CodexPatchAction};
 use crate::tools::file::diff::{self, ParsedFilePatch};
+use crate::tools::file::publish::{self, PublishMode};
 use crate::tools::file::state::{
     FULL_SNAPSHOT_LIMIT, FileSnapshot, SnapshotContent, TextFile, TextMetadata,
 };
 
 const NON_HASHLINE_FILE_LIMIT: usize = FULL_SNAPSHOT_LIMIT;
+const MAX_SERIALIZED_OUTPUT_BYTES: usize = 1024 * 1024;
 use crate::tools::file::structure;
 use crate::tools::file::types::{
     FileEditApplyPatchInput, FileEditFileOutput, FileEditMode, FileEditOperation, FileEditOutput,
@@ -104,7 +107,8 @@ impl ToolHandler for FileEditTool {
             .collect::<Vec<_>>();
 
         let prepared = prepare_request(&call, &self.state, normalized)?;
-        let output = commit_prepared(&call, &self.state, prepared)?;
+        let mut output = commit_prepared(&call, &self.state, prepared)?;
+        enforce_output_budget(&mut output)?;
         serde_json::to_value(output)
             .map_err(|error| ToolError::new("tool.internalError", error.to_string()))
     }
@@ -120,7 +124,7 @@ fn text_description() -> String {
         "All line numbers are one-based coordinates from the original snapshot. Canonical commands only: `SWAP N:` or `SWAP N-M:` followed by `+` body lines; `DEL N` or `DEL N-M`; ",
         "`INS.PRE N:`, `INS.POST N:`, `INS.HEAD:`, `INS.TAIL:` followed by `+` lines; Tree-sitter `SWAP.BLK N:`, `DEL.BLK N`, `INS.BLK.POST N:`. ",
         "`REM` deletes the whole file and must be the only command. `MV ./new/path` moves the final edited content; at most one MV per section, and the destination must not exist. ",
-        "Every edited line and block must be fully covered by lines returned in the snapshot. All sections are parsed, permission-checked, conflict-checked, snapshot-checked, and rendered before any commit. Commits run in section order and are not transactional."
+        "Every edited line and block must be fully covered by lines returned in the snapshot. Full snapshots use diffy three-way merge when the file changed after reading; non-conflicting external changes are preserved and conflicts return retryable file.revisionMismatch. Sparse snapshots still require the current revision. All sections are parsed, permission-checked, conflict-checked, snapshot-checked, and rendered before any commit. Commits run in section order and are not transactional."
     )
     .to_string()
 }
@@ -145,8 +149,8 @@ fn patch_description() -> String {
 
 fn apply_patch_description() -> String {
     concat!(
-        "Apply a standard multi-file unified diff or git diff from `input`. Parsing, file operation detection, and hunk application are provided by diffy. ",
-        "Text create, delete, modify, and rename operations are supported; binary patches, copies, and file-mode changes are rejected. ",
+        "Apply either a standard multi-file unified/git diff or a Codex `*** Begin Patch` envelope from `input`. Standard diff parsing, unified diff generation, hunk application, and merge are provided by diffy. ",
+        "The Codex adapter parses Add/Delete/Update/Move markers, locates exact anchors/old lines, appends unanchored pure insertions, and accepts common heredoc wrappers before normalizing each change into a diffy unified patch. Text create, delete, modify, and rename operations are supported; binary patches, copies, and file-mode changes are rejected. ",
         "Patch paths are workspace-relative. All file operations are parsed and preflighted before sequential non-transactional commit."
     )
     .to_string()
@@ -185,6 +189,7 @@ struct PatchAction {
     op: FileEditPatchOperation,
     rename: Option<String>,
     diff: Option<String>,
+    codex: Option<CodexPatchAction>,
     strict_create: bool,
 }
 
@@ -259,7 +264,7 @@ fn patch_entry(
             if entry.diff.is_none() {
                 return Err(ToolError::new(
                     "file.invalidPatch",
-                    "create requires diff as complete file content",
+                    "create requires a complete unified diff from /dev/null",
                 ));
             }
         }
@@ -280,13 +285,75 @@ fn patch_entry(
             }
         }
     }
+    if let Some(patch) = entry.diff.as_deref() {
+        validate_patch_metadata(&path, op, entry.rename.as_deref(), patch)?;
+    }
     Ok(PatchAction {
         path,
         op,
         rename: entry.rename,
         diff: entry.diff,
+        codex: None,
         strict_create,
     })
+}
+
+fn validate_patch_metadata(
+    path: &str,
+    op: FileEditPatchOperation,
+    rename: Option<&str>,
+    patch: &str,
+) -> Result<(), ToolError> {
+    let parsed = diff::parse_file_set(patch)?;
+    if parsed.len() != 1 {
+        return Err(ToolError::new(
+            "file.invalidPatch",
+            "patch mode accepts exactly one file per diff",
+        ));
+    }
+    let valid = match (&parsed[0], op) {
+        (
+            ParsedFilePatch::Create {
+                path: patch_path, ..
+            },
+            FileEditPatchOperation::Create,
+        ) => rename.is_none() && patch_path_matches(patch_path, path),
+        (
+            ParsedFilePatch::Delete {
+                path: patch_path, ..
+            },
+            FileEditPatchOperation::Delete,
+        ) => rename.is_none() && patch_path_matches(patch_path, path),
+        (
+            ParsedFilePatch::Update {
+                path: patch_path,
+                move_to,
+                ..
+            },
+            FileEditPatchOperation::Update,
+        ) => {
+            patch_path_matches(patch_path, path)
+                && match (rename, move_to.as_deref()) {
+                    (Some(expected), Some(actual)) => patch_path_matches(actual, expected),
+                    (Some(_), None) => false,
+                    (None, Some(actual)) => patch_path_matches(actual, path),
+                    (None, None) => true,
+                }
+        }
+        _ => false,
+    };
+    if valid {
+        Ok(())
+    } else {
+        Err(ToolError::new(
+            "file.invalidPatch",
+            "patch headers do not match outer path, op, or rename",
+        ))
+    }
+}
+
+fn patch_path_matches(actual: &str, expected: &str) -> bool {
+    actual.strip_prefix("./").unwrap_or(actual) == expected.strip_prefix("./").unwrap_or(expected)
 }
 
 fn validate_request_paths(request: &NormalizedRequest) -> Result<(), ToolError> {
@@ -767,8 +834,19 @@ fn prepare_patch_group(
                     revision: String::new(),
                     total_bytes: 0,
                 });
-                let normalized =
-                    apply_context_patch("", action.diff.as_deref().unwrap_or_default())?;
+                let normalized = match &action.codex {
+                    Some(CodexPatchAction::Add { content, .. }) => {
+                        let patch = diff::render("", content);
+                        apply_context_patch("", &patch)?
+                    }
+                    Some(_) => {
+                        return Err(ToolError::new(
+                            "file.invalidPatch",
+                            "Codex action does not match create operation",
+                        ));
+                    }
+                    None => apply_context_patch("", action.diff.as_deref().unwrap_or_default())?,
+                };
                 current = Some(TextFile::from_normalized(&template, &normalized)?);
                 declared_create = true;
             }
@@ -785,10 +863,23 @@ fn prepare_patch_group(
                 let existing = current.as_ref().ok_or_else(|| {
                     ToolError::new("file.notFound", "delete target does not exist")
                 })?;
-                let normalized = apply_context_patch(
-                    &existing.normalized(),
-                    action.diff.as_deref().unwrap_or_default(),
-                )?;
+                let existing_content = existing.normalized();
+                let normalized = match &action.codex {
+                    Some(CodexPatchAction::Delete { .. }) => {
+                        let patch = diff::render(&existing_content, "");
+                        apply_context_patch(&existing_content, &patch)?
+                    }
+                    Some(_) => {
+                        return Err(ToolError::new(
+                            "file.invalidPatch",
+                            "Codex action does not match delete operation",
+                        ));
+                    }
+                    None => apply_context_patch(
+                        &existing_content,
+                        action.diff.as_deref().unwrap_or_default(),
+                    )?,
+                };
                 if !normalized.is_empty() {
                     return Err(ToolError::new(
                         "file.invalidPatch",
@@ -801,11 +892,25 @@ fn prepare_patch_group(
                 let existing = current.as_ref().ok_or_else(|| {
                     ToolError::new("file.notFound", "update target does not exist")
                 })?;
-                let normalized = match action.diff.as_deref() {
-                    Some(diff) if !diff.is_empty() => {
-                        apply_context_patch(&existing.normalized(), diff)?
+                let existing_content = existing.normalized();
+                let normalized = match &action.codex {
+                    Some(CodexPatchAction::Update { chunks, .. }) => {
+                        let candidate = codex_patch::apply_update(&existing_content, chunks)?;
+                        let patch = diff::render(&existing_content, &candidate);
+                        apply_context_patch(&existing_content, &patch)?
                     }
-                    _ => existing.normalized(),
+                    Some(_) => {
+                        return Err(ToolError::new(
+                            "file.invalidPatch",
+                            "Codex action does not match update operation",
+                        ));
+                    }
+                    None => match action.diff.as_deref() {
+                        Some(diff) if !diff.is_empty() => {
+                            apply_context_patch(&existing_content, diff)?
+                        }
+                        _ => existing_content,
+                    },
                 };
                 current = Some(TextFile::from_normalized(existing, &normalized)?);
                 if let Some(rename) = &action.rename {
@@ -901,6 +1006,51 @@ fn require_recent_snapshot(state: &FileToolState, path: &Path) -> Result<(), Too
     Ok(())
 }
 
+fn enforce_output_budget(output: &mut FileEditOutput) -> Result<(), ToolError> {
+    if serde_json::to_vec(output)
+        .map_err(|error| ToolError::new("tool.internalError", error.to_string()))?
+        .len()
+        <= MAX_SERIALIZED_OUTPUT_BYTES
+    {
+        return Ok(());
+    }
+    for file in &mut output.files {
+        file.preview = None;
+        file.preview_range = None;
+        file.truncated = true;
+    }
+    if serde_json::to_vec(output)
+        .map_err(|error| ToolError::new("tool.internalError", error.to_string()))?
+        .len()
+        <= MAX_SERIALIZED_OUTPUT_BYTES
+    {
+        return Ok(());
+    }
+    for file in &mut output.files {
+        if !file.diff.is_empty() {
+            file.diff = format!(
+                "[diff omitted: output budget exceeded; addedLines={}, removedLines={}]",
+                file.added_lines, file.removed_lines
+            );
+            file.truncated = true;
+        }
+    }
+    if serde_json::to_vec(output)
+        .map_err(|error| ToolError::new("tool.internalError", error.to_string()))?
+        .len()
+        > MAX_SERIALIZED_OUTPUT_BYTES
+    {
+        return Err(ToolError::new(
+            "file.outputTooLarge",
+            "file_edit metadata exceeds the serialized output budget",
+        )
+        .with_details(serde_json::json!({
+            "appliedFiles": output.applied_files,
+        })));
+    }
+    Ok(())
+}
+
 fn commit_prepared(
     call: &ToolCall,
     state: &FileToolState,
@@ -914,16 +1064,36 @@ fn commit_prepared(
                 applied_files.push(output.path.clone());
                 files.push(output);
             }
-            Err(error) => {
-                let details = serde_json::json!({
-                    "appliedFiles": applied_files,
-                    "failedFile": change.source_display,
-                    "skippedFiles": changes[index + 1..]
-                        .iter()
-                        .map(|pending| pending.source_display.clone())
-                        .collect::<Vec<_>>(),
-                });
-                return Err(error.with_details(details));
+            Err(mut error) => {
+                let mut details = match error.details.take() {
+                    Some(serde_json::Value::Object(details)) => details,
+                    Some(details) => {
+                        let mut values = serde_json::Map::new();
+                        values.insert("causeDetails".to_string(), details);
+                        values
+                    }
+                    None => serde_json::Map::new(),
+                };
+                details.insert(
+                    "appliedFiles".to_string(),
+                    serde_json::to_value(&applied_files).unwrap(),
+                );
+                details.insert(
+                    "failedFile".to_string(),
+                    serde_json::Value::String(change.source_display.clone()),
+                );
+                details.insert(
+                    "skippedFiles".to_string(),
+                    serde_json::to_value(
+                        changes[index + 1..]
+                            .iter()
+                            .map(|pending| pending.source_display.clone())
+                            .collect::<Vec<_>>(),
+                    )
+                    .unwrap(),
+                );
+                error.details = Some(serde_json::Value::Object(details));
+                return Err(error);
             }
         }
     }
@@ -966,36 +1136,41 @@ fn commit_change(
         }
         FileEditResultOperation::Move => {
             let source = change.source_path.as_ref().unwrap();
-            reject_existing_target(&change.target_path)?;
-            if let Some(operations) = &change.stream_operations {
-                if operations.is_empty() {
-                    fs::rename(source, &change.target_path)
-                        .map_err(|error| ToolError::new("file.writeFailed", error.to_string()))?;
-                } else {
-                    stream_rewrite(
-                        source,
-                        &change.target_path,
-                        operations,
-                        change.sparse_metadata.as_ref().unwrap(),
-                    )?;
-                    fs::remove_file(source)
-                        .map_err(|error| ToolError::new("file.writeFailed", error.to_string()))?;
-                }
-                let metadata = TextMetadata::inspect(&change.target_path)?;
-                let mut snapshots = state.snapshots.lock().unwrap();
-                snapshots.migrate_path(source, &change.target_path);
-                let snapshot = snapshots.remember_sparse(
+            let temp = if let Some(operations) = &change.stream_operations {
+                stream_rewrite_to_temp(
+                    source,
                     &change.target_path,
-                    &metadata,
-                    preview_seen(change.first_changed_line, metadata.total_lines),
-                );
-                drop(snapshots);
-                return render_sparse_output(change, &metadata, snapshot.id, snapshot.tag);
-            }
-            let after = change.after.as_ref().unwrap();
-            atomic_write(source, &after.encoded(), change.before.as_ref())?;
-            fs::rename(source, &change.target_path)
+                    operations,
+                    change.sparse_metadata.as_ref().unwrap(),
+                )?
+            } else {
+                let after = change.after.as_ref().unwrap();
+                prepare_temp_bytes(
+                    &change.target_path,
+                    &after.encoded(),
+                    change.before.as_ref(),
+                )?
+            };
+            temp.as_file()
+                .set_permissions(
+                    fs::metadata(source)
+                        .map_err(|error| ToolError::new("file.writeFailed", error.to_string()))?
+                        .permissions(),
+                )
                 .map_err(|error| ToolError::new("file.writeFailed", error.to_string()))?;
+            publish::publish(temp, &change.target_path, PublishMode::NoClobber)?;
+            publish::remove_source_after_publish(source, &change.target_path)?;
+
+            if change.stream_operations.is_some() {
+                let metadata = TextMetadata::inspect(&change.target_path)?;
+                state
+                    .snapshots
+                    .lock()
+                    .unwrap()
+                    .migrate_path(source, &change.target_path);
+                return render_sparse_output(state, change, &metadata);
+            }
+
             let text = TextFile::read(&change.target_path)?;
             let mut snapshots = state.snapshots.lock().unwrap();
             snapshots.migrate_path(source, &change.target_path);
@@ -1008,28 +1183,30 @@ fn commit_change(
             Ok(render_output(change, &text, snapshot.id, snapshot.tag))
         }
         FileEditResultOperation::Create | FileEditResultOperation::Update => {
+            let publish_mode = if matches!(change.operation, FileEditResultOperation::Create) {
+                PublishMode::NoClobber
+            } else {
+                PublishMode::Replace
+            };
             if let Some(operations) = &change.stream_operations {
                 let source = change.source_path.as_ref().unwrap();
-                stream_rewrite(
+                let temp = stream_rewrite_to_temp(
                     source,
                     &change.target_path,
                     operations,
                     change.sparse_metadata.as_ref().unwrap(),
                 )?;
+                publish::publish(temp, &change.target_path, publish_mode)?;
                 let metadata = TextMetadata::inspect(&change.target_path)?;
-                let snapshot = state.snapshots.lock().unwrap().remember_sparse(
-                    &change.target_path,
-                    &metadata,
-                    preview_seen(change.first_changed_line, metadata.total_lines),
-                );
-                return render_sparse_output(change, &metadata, snapshot.id, snapshot.tag);
+                return render_sparse_output(state, change, &metadata);
             }
             let after = change.after.as_ref().unwrap();
-            atomic_write(
+            let temp = prepare_temp_bytes(
                 &change.target_path,
                 &after.encoded(),
                 change.before.as_ref(),
             )?;
+            publish::publish(temp, &change.target_path, publish_mode)?;
             let text = TextFile::read(&change.target_path)?;
             let snapshot = state.snapshots.lock().unwrap().remember(
                 &change.target_path,
@@ -1042,47 +1219,76 @@ fn commit_change(
 }
 
 fn render_sparse_output(
+    state: &FileToolState,
     change: &PreparedChange,
     metadata: &TextMetadata,
-    snapshot_id: String,
-    snapshot_tag: String,
 ) -> Result<FileEditFileOutput, ToolError> {
-    let header = format!("[{}#{}]", change.target_display, snapshot_tag);
-    let seen = preview_seen(change.first_changed_line, metadata.total_lines);
-    let (preview, preview_range, truncated) =
-        if let (Some(start), Some(end)) = (seen.first().copied(), seen.last().copied()) {
-            let selected =
-                TextMetadata::read_selected(&change.target_path, &[(start, end)], 256 * 1024)?;
-            let body = selected
+    let requested_seen = preview_seen(change.first_changed_line, metadata.total_lines);
+    let selected = if let (Some(start), Some(end)) = (
+        requested_seen.first().copied(),
+        requested_seen.last().copied(),
+    ) {
+        TextMetadata::read_selected(&change.target_path, &[(start, end)], 256 * 1024).ok()
+    } else {
+        None
+    };
+    let effective_metadata = selected
+        .as_ref()
+        .map(|value| value.metadata.clone())
+        .or_else(|| TextMetadata::inspect(&change.target_path).ok())
+        .unwrap_or_else(|| metadata.clone());
+    let actual_seen = selected
+        .as_ref()
+        .map(|value| {
+            value
                 .lines
                 .iter()
-                .map(|(line, text)| format!("{line}:{text}"))
+                .map(|(line, _)| *line)
                 .collect::<Vec<_>>()
-                .join("\n");
-            (
-                Some(if body.is_empty() {
-                    header.clone()
-                } else {
-                    format!("{header}\n{body}")
-                }),
-                Some(ReturnedRange {
-                    start_line: start,
-                    end_line: selected
-                        .lines
-                        .last()
-                        .map(|(line, _)| *line)
-                        .unwrap_or(start),
-                }),
-                selected.next_line.is_some() || end < metadata.total_lines,
-            )
-        } else {
-            (Some(header.clone()), None, false)
-        };
+        })
+        .unwrap_or_default();
+    let snapshot = state.snapshots.lock().unwrap().remember_sparse(
+        &change.target_path,
+        &effective_metadata,
+        actual_seen,
+    );
+    let header = format!("[{}#{}]", change.target_display, snapshot.tag);
+    let (preview, preview_range, truncated) = if let Some(selected) = selected {
+        let body = selected
+            .lines
+            .iter()
+            .map(|(line, text)| format!("{line}:{text}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let preview_range =
+            selected
+                .lines
+                .first()
+                .zip(selected.lines.last())
+                .map(|((start, _), (end, _))| ReturnedRange {
+                    start_line: *start,
+                    end_line: *end,
+                });
+        (
+            Some(if body.is_empty() {
+                header.clone()
+            } else {
+                format!("{header}\n{body}")
+            }),
+            preview_range,
+            selected.next_line.is_some()
+                || requested_seen
+                    .last()
+                    .is_some_and(|end| *end < effective_metadata.total_lines),
+        )
+    } else {
+        (None, None, true)
+    };
     Ok(FileEditFileOutput {
         path: change.target_display.clone(),
-        snapshot_id: Some(snapshot_id),
-        snapshot_tag: Some(snapshot_tag),
-        revision: Some(metadata.revision.clone()),
+        snapshot_id: Some(snapshot.id),
+        snapshot_tag: Some(snapshot.tag),
+        revision: Some(effective_metadata.revision.clone()),
         header: Some(header),
         operation: change.operation,
         moved_from: matches!(change.operation, FileEditResultOperation::Move)
@@ -1091,20 +1297,20 @@ fn render_sparse_output(
         added_lines: change.added_lines,
         removed_lines: change.removed_lines,
         first_changed_line: change.first_changed_line,
-        total_lines: Some(metadata.total_lines),
-        total_bytes: Some(metadata.total_bytes),
+        total_lines: Some(effective_metadata.total_lines),
+        total_bytes: Some(effective_metadata.total_bytes),
         preview,
         preview_range,
         truncated,
     })
 }
 
-fn stream_rewrite(
+fn stream_rewrite_to_temp(
     source: &Path,
     target: &Path,
     operations: &[FileEditOperation],
     metadata: &TextMetadata,
-) -> Result<(), ToolError> {
+) -> Result<NamedTempFile, ToolError> {
     let parent = target
         .parent()
         .ok_or_else(|| ToolError::new("file.writeFailed", "target has no parent"))?;
@@ -1139,7 +1345,7 @@ fn stream_rewrite(
                     if explicit_final_newline {
                         body.pop();
                     }
-                    final_newline = explicit_final_newline || metadata.final_newline;
+                    final_newline = explicit_final_newline;
                 }
                 replacements.insert(*start_line, (*end_line, body));
             }
@@ -1168,7 +1374,7 @@ fn stream_rewrite(
                     if explicit_final_newline {
                         body.pop();
                     }
-                    final_newline = explicit_final_newline || metadata.final_newline;
+                    final_newline = explicit_final_newline;
                 }
                 insertions.insert(boundary, body);
             }
@@ -1253,9 +1459,7 @@ fn stream_rewrite(
     temp.as_file()
         .set_permissions(permissions)
         .map_err(|error| ToolError::new("file.writeFailed", error.to_string()))?;
-    temp.persist(target)
-        .map_err(|error| ToolError::new("file.writeFailed", error.error.to_string()))?;
-    Ok(())
+    Ok(temp)
 }
 
 fn render_output(
@@ -1310,12 +1514,11 @@ fn verify_expected_state(call: &ToolCall, change: &PreparedChange) -> Result<(),
     Ok(())
 }
 
-fn atomic_write(path: &Path, bytes: &[u8], existing: Option<&TextFile>) -> Result<(), ToolError> {
-    let parent = path
-        .parent()
-        .ok_or_else(|| ToolError::new("file.writeFailed", "target has no parent"))?;
-    fs::create_dir_all(parent)
-        .map_err(|error| ToolError::new("file.writeFailed", error.to_string()))?;
+fn prepare_temp_bytes(
+    path: &Path,
+    bytes: &[u8],
+    existing: Option<&TextFile>,
+) -> Result<NamedTempFile, ToolError> {
     let permissions = if existing.is_some() && path.exists() {
         Some(
             fs::metadata(path)
@@ -1325,8 +1528,7 @@ fn atomic_write(path: &Path, bytes: &[u8], existing: Option<&TextFile>) -> Resul
     } else {
         None
     };
-    let mut temp = NamedTempFile::new_in(parent)
-        .map_err(|error| ToolError::new("file.writeFailed", error.to_string()))?;
+    let mut temp = publish::new_temp(path)?;
     temp.write_all(bytes)
         .map_err(|error| ToolError::new("file.writeFailed", error.to_string()))?;
     temp.flush()
@@ -1336,9 +1538,7 @@ fn atomic_write(path: &Path, bytes: &[u8], existing: Option<&TextFile>) -> Resul
             .set_permissions(permissions)
             .map_err(|error| ToolError::new("file.writeFailed", error.to_string()))?;
     }
-    temp.persist(path)
-        .map_err(|error| ToolError::new("file.writeFailed", error.error.to_string()))?;
-    Ok(())
+    Ok(temp)
 }
 
 fn preview_seen(first: Option<usize>, total: usize) -> Vec<usize> {
@@ -1565,6 +1765,35 @@ fn parse_line(value: &str) -> Result<usize, ToolError> {
 }
 
 fn parse_apply_patch(input: &str) -> Result<Vec<PatchAction>, ToolError> {
+    if codex_patch::is_codex_envelope(input) {
+        return codex_patch::parse(input)?
+            .into_iter()
+            .map(|action| {
+                let (path, op, rename) = match &action {
+                    CodexPatchAction::Add { path, .. } => {
+                        (path.clone(), FileEditPatchOperation::Create, None)
+                    }
+                    CodexPatchAction::Delete { path } => {
+                        (path.clone(), FileEditPatchOperation::Delete, None)
+                    }
+                    CodexPatchAction::Update { path, move_to, .. } => (
+                        path.clone(),
+                        FileEditPatchOperation::Update,
+                        move_to.clone(),
+                    ),
+                };
+                Ok(PatchAction {
+                    path,
+                    op,
+                    rename,
+                    diff: None,
+                    codex: Some(action),
+                    strict_create: true,
+                })
+            })
+            .collect();
+    }
+
     diff::parse_file_set(input)?
         .into_iter()
         .map(|patch| match patch {
@@ -1573,6 +1802,7 @@ fn parse_apply_patch(input: &str) -> Result<Vec<PatchAction>, ToolError> {
                 op: FileEditPatchOperation::Create,
                 rename: None,
                 diff: Some(patch),
+                codex: None,
                 strict_create: true,
             }),
             ParsedFilePatch::Delete { path, patch } => Ok(PatchAction {
@@ -1580,6 +1810,7 @@ fn parse_apply_patch(input: &str) -> Result<Vec<PatchAction>, ToolError> {
                 op: FileEditPatchOperation::Delete,
                 rename: None,
                 diff: Some(patch),
+                codex: None,
                 strict_create: true,
             }),
             ParsedFilePatch::Update {
@@ -1591,6 +1822,7 @@ fn parse_apply_patch(input: &str) -> Result<Vec<PatchAction>, ToolError> {
                 op: FileEditPatchOperation::Update,
                 rename: move_to,
                 diff: Some(patch),
+                codex: None,
                 strict_create: true,
             }),
         })
@@ -1857,6 +2089,11 @@ fn apply_line_operations(
                 end_line, lines, ..
             } if *end_line == original_total => Some(lines),
             FileEditOperation::Insert {
+                at: InsertAt::Head,
+                lines,
+                ..
+            } if original_total == 0 => Some(lines),
+            FileEditOperation::Insert {
                 at: InsertAt::Tail,
                 lines,
                 ..
@@ -1874,7 +2111,7 @@ fn apply_line_operations(
                     "multiple operations control the end-of-file newline",
                 ));
             }
-            eof_newline = Some(lines.last().is_some_and(String::is_empty) || text.final_newline);
+            eof_newline = Some(lines.last().is_some_and(String::is_empty));
         }
     }
 
@@ -1906,14 +2143,19 @@ fn apply_line_operations(
                 text.lines.drain(start_line - 1..*end_line);
             }
             FileEditOperation::Insert { at, line, lines } => {
+                let boundary = match at {
+                    InsertAt::Head => 0,
+                    InsertAt::Tail => original_total,
+                    InsertAt::Before => line.unwrap() - 1,
+                    InsertAt::After => line.unwrap(),
+                };
                 let index = match at {
                     InsertAt::Head => 0,
                     InsertAt::Tail => text.lines.len(),
                     InsertAt::Before => line.unwrap() - 1,
                     InsertAt::After => line.unwrap(),
                 };
-                let controls_eof = matches!(at, InsertAt::Tail)
-                    || matches!(at, InsertAt::After) && line == &Some(original_total);
+                let controls_eof = boundary == original_total;
                 let mut insertion = lines.clone();
                 if controls_eof && insertion.last().is_some_and(String::is_empty) {
                     insertion.pop();
@@ -1962,4 +2204,45 @@ fn compact_diff(before: &[String], after: &[String], _first: usize) -> String {
     let before = before.join("\n");
     let after = after.join("\n");
     diff::render(&before, &after)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        FileEditFileOutput, FileEditOutput, FileEditResultOperation, MAX_SERIALIZED_OUTPUT_BYTES,
+        enforce_output_budget,
+    };
+
+    #[test]
+    fn output_budget_omits_large_preview_and_diff_without_expensive_file_edits() {
+        let oversized = "x".repeat(MAX_SERIALIZED_OUTPUT_BYTES + 4096);
+        let mut output = FileEditOutput {
+            applied_files: vec!["./large.txt".to_string()],
+            files: vec![FileEditFileOutput {
+                path: "./large.txt".to_string(),
+                snapshot_id: Some("snapshot".to_string()),
+                snapshot_tag: Some("AABBCCDD".to_string()),
+                revision: Some("revision".to_string()),
+                header: Some("[./large.txt#AABBCCDD]".to_string()),
+                operation: FileEditResultOperation::Update,
+                moved_from: None,
+                diff: oversized.clone(),
+                added_lines: 1,
+                removed_lines: 1,
+                first_changed_line: Some(1),
+                total_lines: Some(1),
+                total_bytes: Some(oversized.len()),
+                preview: Some(oversized),
+                preview_range: None,
+                truncated: false,
+            }],
+        };
+
+        enforce_output_budget(&mut output).unwrap();
+
+        assert!(serde_json::to_vec(&output).unwrap().len() <= MAX_SERIALIZED_OUTPUT_BYTES);
+        assert!(output.files[0].preview.is_none());
+        assert!(output.files[0].diff.starts_with("[diff omitted:"));
+        assert!(output.files[0].truncated);
+    }
 }

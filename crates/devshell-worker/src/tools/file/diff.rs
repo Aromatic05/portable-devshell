@@ -86,17 +86,43 @@ pub fn parse_file_set(input: &str) -> Result<Vec<ParsedFilePatch>, ToolError> {
                 file.operation().clone()
             };
             match operation {
-                FileOperation::Create(path) => Ok(ParsedFilePatch::Create {
-                    path: workspace_path(path.as_ref())?,
-                    patch,
-                }),
-                FileOperation::Delete(path) => Ok(ParsedFilePatch::Delete {
-                    path: workspace_path(path.as_ref())?,
-                    patch,
-                }),
+                FileOperation::Create(path) => {
+                    let path = path.as_ref();
+                    let path = if git_format {
+                        path
+                    } else {
+                        path.strip_prefix("b/").unwrap_or(path)
+                    };
+                    Ok(ParsedFilePatch::Create {
+                        path: workspace_path(path)?,
+                        patch,
+                    })
+                }
+                FileOperation::Delete(path) => {
+                    let path = path.as_ref();
+                    let path = if git_format {
+                        path
+                    } else {
+                        path.strip_prefix("a/").unwrap_or(path)
+                    };
+                    Ok(ParsedFilePatch::Delete {
+                        path: workspace_path(path)?,
+                        patch,
+                    })
+                }
                 FileOperation::Modify { original, modified } => {
-                    let path = workspace_path(original.as_ref())?;
-                    let target = workspace_path(modified.as_ref())?;
+                    let original = original.as_ref();
+                    let modified = modified.as_ref();
+                    let (original, modified) = if !git_format {
+                        match (original.strip_prefix("a/"), modified.strip_prefix("b/")) {
+                            (Some(old), Some(new)) if old == new => (old, new),
+                            _ => (original, modified),
+                        }
+                    } else {
+                        (original, modified)
+                    };
+                    let path = workspace_path(original)?;
+                    let target = workspace_path(modified)?;
                     Ok(ParsedFilePatch::Update {
                         move_to: (path != target).then_some(target),
                         path,
@@ -130,4 +156,92 @@ fn workspace_path(path: &str) -> Result<String, ToolError> {
     } else {
         format!("./{path}")
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ParsedFilePatch, merge_changes, parse_file_set};
+
+    #[test]
+    fn three_way_merge_handles_repeated_text_when_changes_do_not_overlap() {
+        let merged = merge_changes(
+            "same\nleft\nsame\nright\n",
+            "prefix\nsame\nleft\nsame\nright\n",
+            "same\nupdated\nsame\nright\n",
+        )
+        .unwrap();
+
+        assert_eq!(merged, "prefix\nsame\nupdated\nsame\nright\n");
+    }
+
+    #[test]
+    fn three_way_merge_rejects_editing_a_block_moved_by_the_current_file() {
+        let error = merge_changes(
+            "head\nblock-a\nblock-b\ntail\n",
+            "head\ntail\nblock-a\nblock-b\n",
+            "head\nblock-a\nupdated\ntail\n",
+        )
+        .unwrap_err();
+
+        assert_eq!(error.code, "file.revisionMismatch");
+        assert!(error.retryable);
+    }
+
+    #[test]
+    fn unidiff_only_strips_a_b_when_headers_form_a_matching_pair() {
+        let conventional = parse_file_set(concat!(
+            "--- a/x.txt\n",
+            "+++ b/x.txt\n",
+            "@@ -1 +1 @@\n",
+            "-old\n",
+            "+new\n"
+        ))
+        .unwrap();
+        let ParsedFilePatch::Update { path, move_to, .. } = &conventional[0] else {
+            panic!("expected update");
+        };
+        assert_eq!(path, "./x.txt");
+        assert!(move_to.is_none());
+
+        let real_a_directory = parse_file_set(concat!(
+            "--- a/x.txt\n",
+            "+++ a/x.txt\n",
+            "@@ -1 +1 @@\n",
+            "-old\n",
+            "+new\n"
+        ))
+        .unwrap();
+        let ParsedFilePatch::Update { path, move_to, .. } = &real_a_directory[0] else {
+            panic!("expected update");
+        };
+        assert_eq!(path, "./a/x.txt");
+        assert!(move_to.is_none());
+    }
+
+    #[test]
+    fn unidiff_create_and_delete_strip_conventional_side_prefixes() {
+        let created = parse_file_set(concat!(
+            "--- /dev/null\n",
+            "+++ b/new.txt\n",
+            "@@ -0,0 +1 @@\n",
+            "+new\n"
+        ))
+        .unwrap();
+        let ParsedFilePatch::Create { path, .. } = &created[0] else {
+            panic!("expected create");
+        };
+        assert_eq!(path, "./new.txt");
+
+        let deleted = parse_file_set(concat!(
+            "--- a/old.txt\n",
+            "+++ /dev/null\n",
+            "@@ -1 +0,0 @@\n",
+            "-old\n"
+        ))
+        .unwrap();
+        let ParsedFilePatch::Delete { path, .. } = &deleted[0] else {
+            panic!("expected delete");
+        };
+        assert_eq!(path, "./old.txt");
+    }
 }
