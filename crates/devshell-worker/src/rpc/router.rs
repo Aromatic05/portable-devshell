@@ -76,11 +76,7 @@ impl RpcRouter {
         self.active_tool_calls.acquire()
     }
 
-    pub fn dispatch_tool(
-        &self,
-        request: RpcRequest,
-        _permit: ToolCallPermit,
-    ) -> RpcResponse {
+    pub fn dispatch_tool(&self, request: RpcRequest, _permit: ToolCallPermit) -> RpcResponse {
         let result = self.dispatch_tool_inner(&request);
         Self::response(request.id, result)
     }
@@ -110,10 +106,7 @@ impl RpcRouter {
         })
     }
 
-    fn response(
-        id: String,
-        result: Result<serde_json::Value, RpcError>,
-    ) -> RpcResponse {
+    fn response(id: String, result: Result<serde_json::Value, RpcError>) -> RpcResponse {
         match result {
             Ok(result) => RpcResponse::success(id, result),
             Err(error) => RpcResponse::failure(id, error),

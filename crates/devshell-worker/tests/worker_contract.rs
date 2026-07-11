@@ -444,6 +444,36 @@ fn status_reports_stale_and_start_recovers_from_stale_runtime_files() {
 }
 
 #[test]
+fn stop_terminates_unresponsive_live_daemon_before_clearing_runtime_files() {
+    let env = TestEnv::new();
+    let instance = "aromatic-unresponsive";
+
+    env.command()
+        .current_dir(env.workspace())
+        .args(["start", "--instance", instance])
+        .assert()
+        .success();
+
+    let pid_path = env.instance_root(instance).join("state/worker.pid");
+    let pid: i32 = fs::read_to_string(&pid_path)
+        .unwrap()
+        .trim()
+        .parse()
+        .unwrap();
+    fs::remove_file(env.socket_file(instance)).unwrap();
+
+    let stale = env.json_command(&["status", "--instance", instance]);
+    assert_eq!(stale["state"], "stale");
+    assert!(process_is_running(pid));
+
+    let stopped = env.json_command(&["stop", "--instance", instance]);
+    assert_eq!(stopped["stopped"], true);
+    wait_until_process_exits(pid);
+    assert!(!pid_path.exists());
+    assert!(!env.socket_file(instance).exists());
+}
+
+#[test]
 fn gc_skips_invalid_markers_and_responsive_instances() {
     let env = TestEnv::new();
     let running = "aromatic-running";
@@ -594,4 +624,26 @@ fn read_rpc_frame(reader: &mut impl Read) -> Value {
     let mut payload = vec![0_u8; u32::from_be_bytes(length) as usize];
     reader.read_exact(&mut payload).unwrap();
     serde_json::from_slice(&payload).unwrap()
+}
+
+fn process_is_running(pid: i32) -> bool {
+    use nix::errno::Errno;
+    use nix::sys::signal::kill;
+    use nix::unistd::Pid;
+
+    match kill(Pid::from_raw(pid), None) {
+        Ok(()) | Err(Errno::EPERM) => true,
+        Err(_) => false,
+    }
+}
+
+fn wait_until_process_exits(pid: i32) {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while Instant::now() < deadline {
+        if !process_is_running(pid) {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(25));
+    }
+    panic!("worker daemon process {pid} did not exit");
 }

@@ -21,10 +21,7 @@ impl ActiveProcessRegistry {
         Self::default()
     }
 
-    pub fn register(
-        self: &Arc<Self>,
-        process_group: i32,
-    ) -> Result<ActiveProcessGuard, String> {
+    pub fn register(self: &Arc<Self>, process_group: i32) -> Result<ActiveProcessGuard, String> {
         let mut state = self
             .state
             .lock()

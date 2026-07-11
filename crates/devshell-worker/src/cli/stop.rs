@@ -29,10 +29,11 @@ pub fn run(args: InstanceArgs) -> Result<String, String> {
             )?;
             true
         }
-        DaemonState::Stale => {
-            process::clear_runtime_files(&instance_paths, &socket_paths.socket_file)?;
-            true
-        }
+        DaemonState::Stale => shutdown::stop_stale_daemon(
+            &instance_paths,
+            &socket_paths,
+            std::time::Duration::from_secs(5),
+        )?,
         DaemonState::Stopped => false,
     };
 

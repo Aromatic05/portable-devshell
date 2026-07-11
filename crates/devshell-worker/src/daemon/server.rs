@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use crate::daemon::log_writer::append_log;
 use crate::daemon::process;
-use crate::instance::{InstanceName, read_config};
+use crate::instance::{InstanceLock, InstanceName, read_config};
 use crate::rpc::codec::{decode_request_frame, read_frame, write_response};
 use crate::rpc::error::RpcError;
 use crate::rpc::response::RpcResponse;
@@ -26,6 +26,7 @@ pub fn serve(instance: InstanceName) -> Result<(), String> {
     ensure_dir(&instance_paths.logs_dir, 0o700)?;
     ensure_dir(&instance_paths.state_dir, 0o700)?;
     ensure_dir(&socket_paths.instance_runtime_dir, 0o700)?;
+    let _daemon_lock = InstanceLock::acquire_daemon(&instance_paths)?;
     let config = read_config(&instance_paths, &instance)?;
     let runtime = process::read_runtime_context()?;
     let runtime_guard = RuntimeFilesGuard::new(instance_paths.clone(), socket_paths.clone());

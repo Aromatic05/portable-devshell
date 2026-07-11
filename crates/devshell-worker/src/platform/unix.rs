@@ -10,6 +10,21 @@ pub fn process_is_running(pid: u32) -> bool {
     }
 }
 
+pub fn terminate_process(pid: u32, force: bool) -> Result<(), String> {
+    let signal = if force {
+        Signal::SIGKILL
+    } else {
+        Signal::SIGTERM
+    };
+    match kill(Pid::from_raw(pid as i32), signal) {
+        Ok(()) => Ok(()),
+        Err(Errno::ESRCH) => Ok(()),
+        Err(error) => Err(format!(
+            "failed to terminate process {pid} with {signal:?}: {error}"
+        )),
+    }
+}
+
 pub fn terminate_process_group(pid: i32, force: bool) -> Result<(), String> {
     let signal = if force {
         Signal::SIGKILL

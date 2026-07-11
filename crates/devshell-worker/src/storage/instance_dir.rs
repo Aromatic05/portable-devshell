@@ -12,6 +12,7 @@ pub struct InstancePaths {
     pub state_dir: PathBuf,
     pub pid_file: PathBuf,
     pub lock_file: PathBuf,
+    pub daemon_lock_file: PathBuf,
 }
 
 impl InstancePaths {
@@ -24,6 +25,7 @@ impl InstancePaths {
             config_file: config_path(&instance_root),
             log_file: logs_dir.join("worker.log"),
             pid_file: state_dir.join("worker.pid"),
+            daemon_lock_file: state_dir.join("worker-daemon.lock"),
             lock_file: state_dir.join("worker.lock"),
             instance_root,
             logs_dir,
