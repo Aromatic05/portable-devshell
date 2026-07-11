@@ -225,6 +225,10 @@ impl SnapshotStore {
         if self.snapshots.contains_key(reference) {
             return Ok(reference.to_string());
         }
+        let normalized_id = reference.to_ascii_lowercase();
+        if self.snapshots.contains_key(&normalized_id) {
+            return Ok(normalized_id);
+        }
         self.by_tag
             .get(&reference.to_ascii_uppercase())
             .cloned()

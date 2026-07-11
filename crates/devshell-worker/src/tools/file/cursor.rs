@@ -1,5 +1,6 @@
-use std::collections::{HashMap, VecDeque};
+use std::num::NonZeroUsize;
 
+use lru::LruCache;
 use uuid::Uuid;
 
 use crate::tools::ToolError;
@@ -11,32 +12,32 @@ struct Cursor {
     query: String,
 }
 
-#[derive(Default)]
 pub struct CursorStore {
-    cursors: HashMap<String, Cursor>,
-    order: VecDeque<String>,
+    cursors: LruCache<String, Cursor>,
+}
+
+impl Default for CursorStore {
+    fn default() -> Self {
+        Self {
+            cursors: LruCache::new(NonZeroUsize::new(MAX_CURSORS).unwrap()),
+        }
+    }
 }
 
 impl CursorStore {
     pub fn issue(&mut self, query: &serde_json::Value, offset: usize) -> String {
         let id = Uuid::new_v4().to_string();
-        self.cursors.insert(
+        self.cursors.put(
             id.clone(),
             Cursor {
                 offset,
                 query: query.to_string(),
             },
         );
-        self.order.push_back(id.clone());
-        while self.order.len() > MAX_CURSORS {
-            if let Some(expired) = self.order.pop_front() {
-                self.cursors.remove(&expired);
-            }
-        }
         id
     }
 
-    pub fn resolve(&self, id: &str, query: &serde_json::Value) -> Result<usize, ToolError> {
+    pub fn resolve(&mut self, id: &str, query: &serde_json::Value) -> Result<usize, ToolError> {
         let cursor = self
             .cursors
             .get(id)

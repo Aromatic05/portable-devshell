@@ -4,10 +4,10 @@ use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use regex::Regex;
 use schemars::schema_for;
 use tempfile::NamedTempFile;
 
+use crate::tools::file::diff::{self, ParsedFilePatch};
 use crate::tools::file::state::{
     FULL_SNAPSHOT_LIMIT, FileSnapshot, SnapshotContent, TextFile, TextMetadata,
 };
@@ -134,18 +134,18 @@ fn replace_description() -> String {
 
 fn patch_description() -> String {
     concat!(
-        "Apply JSON patch entries to one path. Input: `{path, edits:[{op?,rename?,diff?}]}`. op defaults to update. ",
-        "For update, diff contains one or more `@@` or `@@ unique anchor` hunks; every hunk body line starts with space, `+`, or `-`, and context plus removed lines must match uniquely. ",
-        "create uses diff as complete file content; delete takes no diff; update may include rename to move the final content to a missing destination. Entries execute sequentially in memory and commit after full preflight."
+        "Apply standard unified diffs to one path. Input: `{path, edits:[{op?,rename?,diff?}]}`. op defaults to update. ",
+        "diff must be a complete unified patch with `---`, `+++`, and `@@ -old,+new @@` headers; parsing and application are provided by diffy. ",
+        "create and delete patches use /dev/null headers; update may include rename to move the final content to a missing destination. Entries execute sequentially in memory and commit after full preflight."
     )
     .to_string()
 }
 
 fn apply_patch_description() -> String {
     concat!(
-        "Apply a Codex-style file patch envelope in `input`. It must begin with `*** Begin Patch` and end with `*** End Patch`. ",
-        "Supported sections: `*** Add File: path` with `+` content lines; `*** Delete File: path`; `*** Update File: path`, optional `*** Move to: new/path`, then `@@ [anchor]` hunks using space/+/-. ",
-        "Paths are relative to the workspace. All file operations are parsed and preflighted before sequential non-transactional commit."
+        "Apply a standard multi-file unified diff or git diff from `input`. Parsing, file operation detection, and hunk application are provided by diffy. ",
+        "Text create, delete, modify, and rename operations are supported; binary patches, copies, and file-mode changes are rejected. ",
+        "Patch paths are workspace-relative. All file operations are parsed and preflighted before sequential non-transactional commit."
     )
     .to_string()
 }
@@ -262,10 +262,10 @@ fn patch_entry(
             }
         }
         FileEditPatchOperation::Delete => {
-            if entry.diff.is_some() || entry.rename.is_some() {
+            if entry.rename.is_some() || entry.diff.as_deref().unwrap_or_default().is_empty() {
                 return Err(ToolError::new(
                     "file.invalidPatch",
-                    "delete does not accept diff or rename",
+                    "delete requires a unified diff to /dev/null and does not accept rename",
                 ));
             }
         }
@@ -571,27 +571,32 @@ fn prepare_text_section(
     )?;
     let operations = expand_block_operations(&source_path, &source, section.operations)?;
     validate_operations(&operations, &snapshot.seen_lines, snapshot.total_lines)?;
-    let operations = if current.revision == snapshot.revision {
-        operations
-    } else {
-        match &snapshot.content {
-            SnapshotContent::Full(old) => remap_exact(&operations, old, &current.lines)?,
-            SnapshotContent::Sparse => {
-                return Err(revision_mismatch(
-                    "sparse snapshot changed and cannot be recovered",
-                ));
-            }
-        }
-    };
-    validate_geometry(&operations, current.lines.len())?;
-
     let before = current.clone();
-    let mut after = current.clone();
-    let (added, removed, first) = if operations.is_empty() {
-        (0, 0, None)
+    let (after, added, removed, first) = if current.revision == snapshot.revision {
+        validate_geometry(&operations, current.lines.len())?;
+        let mut after = current.clone();
+        if operations.is_empty() {
+            (after, 0, 0, None)
+        } else {
+            let (added, removed, first) = apply_line_operations(&mut after, &operations)?;
+            (after, added, removed, Some(first))
+        }
     } else {
-        let (added, removed, first) = apply_line_operations(&mut after, &operations)?;
-        (added, removed, Some(first))
+        let SnapshotContent::Full(old) = &snapshot.content else {
+            return Err(revision_mismatch(
+                "sparse snapshot changed and cannot be recovered",
+            ));
+        };
+        let mut expected = TextFile::from_normalized(&current, old)?;
+        validate_geometry(&operations, expected.lines.len())?;
+        if !operations.is_empty() {
+            apply_line_operations(&mut expected, &operations)?;
+        }
+        let merged = diff::merge_changes(old, &current.normalized(), &expected.normalized())?;
+        let after = TextFile::from_normalized(&current, &merged)?;
+        let first = first_changed_line(&before.lines, &after.lines);
+        let (added, removed) = line_delta(&before.lines, &after.lines);
+        (after, added, removed, first)
     };
 
     Ok(PreparedChange {
@@ -759,10 +764,9 @@ fn prepare_patch_group(
                     revision: String::new(),
                     total_bytes: 0,
                 });
-                current = Some(TextFile::from_normalized(
-                    &template,
-                    action.diff.as_deref().unwrap_or_default(),
-                )?);
+                let normalized =
+                    apply_context_patch("", action.diff.as_deref().unwrap_or_default())?;
+                current = Some(TextFile::from_normalized(&template, &normalized)?);
                 declared_create = true;
             }
             FileEditPatchOperation::Delete => {
@@ -773,6 +777,19 @@ fn prepare_patch_group(
                     return Err(ToolError::new(
                         "file.notFound",
                         "delete target does not exist",
+                    ));
+                }
+                let existing = current.as_ref().ok_or_else(|| {
+                    ToolError::new("file.notFound", "delete target does not exist")
+                })?;
+                let normalized = apply_context_patch(
+                    &existing.normalized(),
+                    action.diff.as_deref().unwrap_or_default(),
+                )?;
+                if !normalized.is_empty() {
+                    return Err(ToolError::new(
+                        "file.invalidPatch",
+                        "delete patch did not produce an empty file",
                     ));
                 }
                 current = None;
@@ -1089,10 +1106,11 @@ fn stream_rewrite(
                         ));
                     }
                     eof_controller = true;
-                    final_newline = body.last().is_some_and(String::is_empty);
-                    if final_newline {
+                    let explicit_final_newline = body.last().is_some_and(String::is_empty);
+                    if explicit_final_newline {
                         body.pop();
                     }
+                    final_newline = explicit_final_newline || metadata.final_newline;
                 }
                 replacements.insert(*start_line, (*end_line, body));
             }
@@ -1117,10 +1135,11 @@ fn stream_rewrite(
                         ));
                     }
                     eof_controller = true;
-                    final_newline = body.last().is_some_and(String::is_empty);
-                    if final_newline {
+                    let explicit_final_newline = body.last().is_some_and(String::is_empty);
+                    if explicit_final_newline {
                         body.pop();
                     }
+                    final_newline = explicit_final_newline || metadata.final_newline;
                 }
                 insertions.insert(boundary, body);
             }
@@ -1517,300 +1536,40 @@ fn parse_line(value: &str) -> Result<usize, ToolError> {
 }
 
 fn parse_apply_patch(input: &str) -> Result<Vec<PatchAction>, ToolError> {
-    let mut lines = input.trim().lines().collect::<Vec<_>>();
-    if lines
-        .first()
-        .is_some_and(|line| matches!(line.trim(), "<<EOF" | "<<'EOF'" | "<<\"EOF\""))
-        && lines.last().is_some_and(|line| line.trim() == "EOF")
-    {
-        lines = lines[1..lines.len() - 1].to_vec();
-    }
-    if lines.first().map(|line| line.trim()) != Some("*** Begin Patch") {
-        return Err(ToolError::new(
-            "file.invalidPatch",
-            "first line must be *** Begin Patch",
-        ));
-    }
-    if lines.last().map(|line| line.trim()) != Some("*** End Patch") {
-        return Err(ToolError::new(
-            "file.invalidPatch",
-            "last line must be *** End Patch",
-        ));
-    }
-
-    let mut actions = Vec::new();
-    let mut index = 1;
-    while index + 1 < lines.len() {
-        if lines[index].trim().is_empty() {
-            index += 1;
-            continue;
-        }
-        let line = lines[index].trim();
-        if let Some(path) = line.strip_prefix("*** Add File: ") {
-            let path = normalize_apply_path(path)?;
-            index += 1;
-            let mut content = Vec::new();
-            while index + 1 < lines.len() && lines[index].starts_with('+') {
-                content.push(lines[index][1..].to_string());
-                index += 1;
-            }
-            actions.push(PatchAction {
+    diff::parse_file_set(input)?
+        .into_iter()
+        .map(|patch| match patch {
+            ParsedFilePatch::Create { path, patch } => Ok(PatchAction {
                 path,
                 op: FileEditPatchOperation::Create,
                 rename: None,
-                diff: Some(format!("{}\n", content.join("\n"))),
+                diff: Some(patch),
                 strict_create: true,
-            });
-            continue;
-        }
-        if let Some(path) = line.strip_prefix("*** Delete File: ") {
-            actions.push(PatchAction {
-                path: normalize_apply_path(path)?,
+            }),
+            ParsedFilePatch::Delete { path, patch } => Ok(PatchAction {
+                path,
                 op: FileEditPatchOperation::Delete,
                 rename: None,
-                diff: None,
+                diff: Some(patch),
                 strict_create: true,
-            });
-            index += 1;
-            continue;
-        }
-        if let Some(path) = line.strip_prefix("*** Update File: ") {
-            let path = normalize_apply_path(path)?;
-            index += 1;
-            let rename = if index + 1 < lines.len() {
-                lines[index]
-                    .trim()
-                    .strip_prefix("*** Move to: ")
-                    .map(normalize_apply_path)
-                    .transpose()?
-            } else {
-                None
-            };
-            if rename.is_some() {
-                index += 1;
-            }
-            let mut diff = Vec::new();
-            while index + 1 < lines.len()
-                && !lines[index].starts_with("*** Add File: ")
-                && !lines[index].starts_with("*** Delete File: ")
-                && !lines[index].starts_with("*** Update File: ")
-            {
-                diff.push(lines[index]);
-                index += 1;
-            }
-            if diff.is_empty() && rename.is_none() {
-                return Err(ToolError::new(
-                    "file.invalidPatch",
-                    "Update File requires hunks or Move to",
-                ));
-            }
-            actions.push(PatchAction {
+            }),
+            ParsedFilePatch::Update {
+                path,
+                move_to,
+                patch,
+            } => Ok(PatchAction {
                 path,
                 op: FileEditPatchOperation::Update,
-                rename,
-                diff: Some(diff.join("\n")),
+                rename: move_to,
+                diff: Some(patch),
                 strict_create: true,
-            });
-            continue;
-        }
-        return Err(ToolError::new(
-            "file.invalidPatch",
-            format!("invalid apply_patch section header: {line}"),
-        ));
-    }
-    if actions.is_empty() {
-        return Err(ToolError::new(
-            "file.emptyOperation",
-            "apply_patch contains no file operations",
-        ));
-    }
-    Ok(actions)
-}
-
-fn normalize_apply_path(path: &str) -> Result<String, ToolError> {
-    let path = path.trim();
-    if path.starts_with('/') {
-        return Err(ToolError::new(
-            "file.invalidPath",
-            "apply_patch paths must be relative",
-        ));
-    }
-    Ok(if path.starts_with("./") {
-        path.to_string()
-    } else {
-        format!("./{path}")
-    })
-}
-
-#[derive(Clone)]
-struct ContextHunk {
-    anchor: Option<String>,
-    lines: Vec<(char, String)>,
-}
-
-fn apply_context_patch(content: &str, diff: &str) -> Result<String, ToolError> {
-    let hunks = parse_context_hunks(diff)?;
-    let mut lines = split_lines(content);
-    for hunk in hunks {
-        let old = hunk
-            .lines
-            .iter()
-            .filter_map(|(kind, line)| (*kind != '+').then_some(line.clone()))
-            .collect::<Vec<_>>();
-        if old.is_empty() {
-            return Err(ToolError::new(
-                "file.invalidPatch",
-                "update hunk needs context or removed lines",
-            ));
-        }
-        let start = find_unique_hunk(&lines, &old, hunk.anchor.as_deref())?;
-        let mut source_index = start;
-        let mut replacement = Vec::new();
-        for (kind, line) in &hunk.lines {
-            match kind {
-                ' ' => {
-                    replacement.push(lines[source_index].clone());
-                    source_index += 1;
-                }
-                '-' => source_index += 1,
-                '+' => replacement.push(line.clone()),
-                _ => unreachable!(),
-            }
-        }
-        lines.splice(start..start + old.len(), replacement);
-    }
-    Ok(join_lines(&lines, content.ends_with('\n')))
-}
-
-fn parse_context_hunks(diff: &str) -> Result<Vec<ContextHunk>, ToolError> {
-    let mut hunks = Vec::new();
-    let mut current: Option<ContextHunk> = None;
-    for raw in diff.lines() {
-        if raw == "*** End of File" {
-            continue;
-        }
-        if let Some(header) = raw.strip_prefix("@@") {
-            if let Some(hunk) = current.take() {
-                validate_hunk(&hunk)?;
-                hunks.push(hunk);
-            }
-            current = Some(ContextHunk {
-                anchor: (!header.trim().is_empty()).then(|| header.trim().to_string()),
-                lines: Vec::new(),
-            });
-            continue;
-        }
-        let Some(hunk) = current.as_mut() else {
-            if raw.trim().is_empty() {
-                continue;
-            }
-            return Err(ToolError::new(
-                "file.invalidPatch",
-                "patch body must begin with @@",
-            ));
-        };
-        let mut chars = raw.chars();
-        let kind = chars
-            .next()
-            .ok_or_else(|| ToolError::new("file.invalidPatch", "empty hunk line is invalid"))?;
-        if !matches!(kind, ' ' | '+' | '-') {
-            return Err(ToolError::new(
-                "file.invalidPatch",
-                "hunk lines must begin with space, +, or -",
-            ));
-        }
-        hunk.lines.push((kind, chars.collect()));
-    }
-    if let Some(hunk) = current {
-        validate_hunk(&hunk)?;
-        hunks.push(hunk);
-    }
-    if hunks.is_empty() {
-        return Err(ToolError::new(
-            "file.invalidPatch",
-            "patch contains no @@ hunks",
-        ));
-    }
-    Ok(hunks)
-}
-
-fn validate_hunk(hunk: &ContextHunk) -> Result<(), ToolError> {
-    if hunk.lines.is_empty() || !hunk.lines.iter().any(|(kind, _)| matches!(kind, '+' | '-')) {
-        return Err(ToolError::new(
-            "file.invalidPatch",
-            "each hunk must contain at least one changed line",
-        ));
-    }
-    Ok(())
-}
-
-fn find_unique_hunk(
-    lines: &[String],
-    needle: &[String],
-    anchor: Option<&str>,
-) -> Result<usize, ToolError> {
-    let minimum_start = if let Some(anchor) = anchor {
-        let positions = lines
-            .iter()
-            .enumerate()
-            .filter_map(|(index, line)| line.contains(anchor).then_some(index))
-            .collect::<Vec<_>>();
-        match positions.as_slice() {
-            [position] => *position,
-            [] => {
-                return Err(ToolError::new(
-                    "file.patchNoMatch",
-                    "patch anchor was not found",
-                ));
-            }
-            _ => {
-                return Err(ToolError::new(
-                    "file.patchAmbiguous",
-                    "patch anchor matches multiple lines; use a more specific anchor",
-                ));
-            }
-        }
-    } else {
-        0
-    };
-
-    let exact = hunk_hits(lines, needle, minimum_start, false);
-    let hits = if exact.is_empty() {
-        hunk_hits(lines, needle, minimum_start, true)
-    } else {
-        exact
-    };
-    match hits.as_slice() {
-        [start] => Ok(*start),
-        [] => Err(ToolError::new(
-            "file.patchNoMatch",
-            "no exact or whitespace-normalized match found for patch hunk",
-        )),
-        _ => Err(ToolError::new(
-            "file.patchAmbiguous",
-            "patch hunk matches multiple locations; add more context or a unique anchor",
-        )),
-    }
-}
-
-fn hunk_hits(lines: &[String], needle: &[String], minimum_start: usize, trim: bool) -> Vec<usize> {
-    if needle.len() > lines.len() {
-        return Vec::new();
-    }
-    (minimum_start..=lines.len() - needle.len())
-        .filter(|start| {
-            lines[*start..*start + needle.len()]
-                .iter()
-                .zip(needle)
-                .all(|(actual, expected)| {
-                    if trim {
-                        actual.trim() == expected.trim()
-                    } else {
-                        actual == expected
-                    }
-                })
+            }),
         })
         .collect()
+}
+
+fn apply_context_patch(content: &str, patch: &str) -> Result<String, ToolError> {
+    diff::apply_patch(content, patch)
 }
 
 fn replace_unique_text(
@@ -1819,23 +1578,14 @@ fn replace_unique_text(
     new: &str,
     all: bool,
 ) -> Result<String, ToolError> {
-    let exact = content
+    let matches = content
         .match_indices(old)
         .map(|(start, value)| start..start + value.len())
         .collect::<Vec<_>>();
-    let matches = if exact.is_empty() {
-        let regex = whitespace_tolerant_regex(old)?;
-        regex
-            .find_iter(content)
-            .map(|matched| matched.start()..matched.end())
-            .collect::<Vec<_>>()
-    } else {
-        exact
-    };
     if matches.is_empty() {
         return Err(ToolError::new(
             "file.textNotFound",
-            "oldText was not found exactly or with whitespace-only normalization",
+            "oldText was not found exactly",
         ));
     }
     if !all && matches.len() != 1 {
@@ -1860,55 +1610,8 @@ fn replace_unique_text(
     Ok(output)
 }
 
-fn whitespace_tolerant_regex(value: &str) -> Result<Regex, ToolError> {
-    let mut pattern = String::new();
-    let mut literal = String::new();
-    let mut in_whitespace = false;
-    for character in value.chars() {
-        if character.is_whitespace() {
-            if !literal.is_empty() {
-                pattern.push_str(&regex::escape(&literal));
-                literal.clear();
-            }
-            if !in_whitespace {
-                pattern.push_str(r"\s+");
-                in_whitespace = true;
-            }
-        } else {
-            in_whitespace = false;
-            literal.push(character);
-        }
-    }
-    if !literal.is_empty() {
-        pattern.push_str(&regex::escape(&literal));
-    }
-    Regex::new(&pattern)
-        .map_err(|error| ToolError::new("file.invalidReplacement", error.to_string()))
-}
-
 fn normalize_newlines(value: &str) -> String {
     value.replace("\r\n", "\n").replace('\r', "\n")
-}
-
-fn split_lines(value: &str) -> Vec<String> {
-    if value.is_empty() {
-        Vec::new()
-    } else {
-        value
-            .strip_suffix('\n')
-            .unwrap_or(value)
-            .split('\n')
-            .map(ToOwned::to_owned)
-            .collect()
-    }
-}
-
-fn join_lines(lines: &[String], final_newline: bool) -> String {
-    let mut value = lines.join("\n");
-    if final_newline && !lines.is_empty() {
-        value.push('\n');
-    }
-    value
 }
 
 fn ensure_snapshot_path(snapshot: &FileSnapshot, path: &Path) -> Result<(), ToolError> {
@@ -2109,92 +1812,6 @@ fn checked_lines(lines: &[String]) -> Result<(), ToolError> {
     Ok(())
 }
 
-fn remap_exact(
-    operations: &[FileEditOperation],
-    old: &str,
-    current: &[String],
-) -> Result<Vec<FileEditOperation>, ToolError> {
-    let old_lines = split_lines(old);
-    operations
-        .iter()
-        .map(|operation| match operation {
-            FileEditOperation::Replace {
-                start_line,
-                end_line,
-                lines,
-            } => {
-                let (start, end) = map_segment(&old_lines, current, *start_line, *end_line)?;
-                Ok(FileEditOperation::Replace {
-                    start_line: start,
-                    end_line: end,
-                    lines: lines.clone(),
-                })
-            }
-            FileEditOperation::Delete {
-                start_line,
-                end_line,
-            } => {
-                let (start, end) = map_segment(&old_lines, current, *start_line, *end_line)?;
-                Ok(FileEditOperation::Delete {
-                    start_line: start,
-                    end_line: end,
-                })
-            }
-            FileEditOperation::Insert {
-                at: InsertAt::Head,
-                lines,
-                ..
-            } if old_lines.first() == current.first() => Ok(FileEditOperation::Insert {
-                at: InsertAt::Head,
-                line: None,
-                lines: lines.clone(),
-            }),
-            FileEditOperation::Insert {
-                at: InsertAt::Tail,
-                lines,
-                ..
-            } if old_lines.last() == current.last() => Ok(FileEditOperation::Insert {
-                at: InsertAt::Tail,
-                line: None,
-                lines: lines.clone(),
-            }),
-            FileEditOperation::Insert {
-                at,
-                line: Some(line),
-                lines,
-            } => {
-                let (mapped, _) = map_segment(&old_lines, current, *line, *line)?;
-                Ok(FileEditOperation::Insert {
-                    at: at.clone(),
-                    line: Some(mapped),
-                    lines: lines.clone(),
-                })
-            }
-            _ => Err(revision_mismatch(
-                "snapshot patch cannot be mapped exactly to the current file",
-            )),
-        })
-        .collect()
-}
-
-fn map_segment(
-    old: &[String],
-    current: &[String],
-    start: usize,
-    end: usize,
-) -> Result<(usize, usize), ToolError> {
-    let needle = &old[start - 1..end];
-    let hits = (0..=current.len().saturating_sub(needle.len()))
-        .filter(|index| current[*index..*index + needle.len()] == *needle)
-        .collect::<Vec<_>>();
-    if hits.len() != 1 {
-        return Err(revision_mismatch(
-            "snapshot patch cannot be mapped exactly to the current file",
-        ));
-    }
-    Ok((hits[0] + 1, hits[0] + needle.len()))
-}
-
 fn revision_mismatch(message: &str) -> ToolError {
     ToolError::retryable("file.revisionMismatch", message)
 }
@@ -2228,7 +1845,7 @@ fn apply_line_operations(
                     "multiple operations control the end-of-file newline",
                 ));
             }
-            eof_newline = Some(lines.last().is_some_and(String::is_empty));
+            eof_newline = Some(lines.last().is_some_and(String::is_empty) || text.final_newline);
         }
     }
 
@@ -2312,21 +1929,8 @@ fn line_delta(before: &[String], after: &[String]) -> (usize, usize) {
     )
 }
 
-fn compact_diff(before: &[String], after: &[String], first: usize) -> String {
-    let start = first.saturating_sub(2).max(1);
-    let end = before.len().max(after.len()).min(first.saturating_add(20));
-    let mut output = Vec::new();
-    for line in start..=end {
-        match (before.get(line - 1), after.get(line - 1)) {
-            (Some(left), Some(right)) if left == right => output.push(format!(" {line}:{left}")),
-            (Some(left), Some(right)) => {
-                output.push(format!("-{line}:{left}"));
-                output.push(format!("+{line}:{right}"));
-            }
-            (Some(left), None) => output.push(format!("-{line}:{left}")),
-            (None, Some(right)) => output.push(format!("+{line}:{right}")),
-            _ => {}
-        }
-    }
-    output.join("\n")
+fn compact_diff(before: &[String], after: &[String], _first: usize) -> String {
+    let before = before.join("\n");
+    let after = after.join("\n");
+    diff::render(&before, &after)
 }
