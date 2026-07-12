@@ -19,3 +19,4 @@ export * from "./mcp/host/route/McpHostRouteRegistry.js";
 export * from "./mcp/tool/McpToolDescriptionEnhancer.js";
 export * from "./mcp/tool/McpToolFilter.js";
 export * from "./mcp/tool/McpToolSchemaAdapter.js";
+export * from "./mcp/todo/McpTodoToolCatalog.js";

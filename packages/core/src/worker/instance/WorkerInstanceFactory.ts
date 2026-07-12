@@ -1,4 +1,4 @@
-import type { ApprovalRequest, InstanceEvent, ToolCallRecord } from "@portable-devshell/shared";
+import type { ApprovalRequest, InstanceEvent, ToolCallAssociation, ToolCallRecord } from "@portable-devshell/shared";
 import type { InstanceLogEntry } from "../../log/store/LogStoreInstance.js";
 
 import { ApprovalManager, ApprovalStore } from "../../approval/ApprovalInfra.js";
@@ -23,7 +23,10 @@ import {
 } from "./WorkerInstanceConfig.js";
 
 export class WorkerInstanceFactory {
-    create(config: WorkerInstanceConfig): WorkerInstance {
+    create(
+        config: WorkerInstanceConfig,
+        options: { toolCallAssociationProvider?: () => ToolCallAssociation | undefined } = {}
+    ): WorkerInstance {
         const resolved = resolveWorkerInstanceConfig(config);
         const paths = new InstancePaths(resolved.name, resolved.homeDirectory);
         const catalog = new WorkerToolCatalog();
@@ -49,6 +52,7 @@ export class WorkerInstanceFactory {
                 store: new ApprovalStore(new JsonlStore<ApprovalRequest>(paths.approvalsFile)),
                 timeout: resolved.approvalTimeout
             }),
+            toolCallAssociationProvider: options.toolCallAssociationProvider,
             toolCallHistory: new ToolCallHistory(resolved.name, new JsonlStore<ToolCallRecord>(paths.toolCallsFile)),
             toolCallScheduler: new ToolCallScheduler(resolved.toolScheduler),
             toolInvoker: new WorkerToolInvoker(rpcClient, catalog)

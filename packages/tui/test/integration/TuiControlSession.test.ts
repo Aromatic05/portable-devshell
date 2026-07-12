@@ -196,6 +196,14 @@ function createServer(socketPath: string, worker: FakeWorker, getConfigVersion: 
                 mcpEnabled: false,
                 mcpPath: "",
                 name: "alpha",
+                todo: {
+                    async read() {
+                        return { items: [], revision: 0, summary: { completed: 0, total: 0 } };
+                    },
+                    summary() {
+                        return undefined;
+                    }
+                },
                 worker: worker as unknown as WorkerInstance
             }
         ]),

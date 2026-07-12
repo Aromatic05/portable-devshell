@@ -27,7 +27,11 @@ export type InstanceEventType =
     | "approval.requested"
     | "approval.approved"
     | "approval.denied"
-    | "approval.expired";
+    | "approval.expired"
+    | "todo.created"
+    | "todo.updated"
+    | "todo.completed"
+    | "todo.archived";
 
 export interface InstanceEvent {
     at: string;

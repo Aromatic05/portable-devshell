@@ -13,6 +13,7 @@ import { CliCommandInstanceLogs } from "./command/instance/CliCommandInstanceLog
 import { CliCommandInstanceStart } from "./command/instance/CliCommandInstanceStart.js";
 import { CliCommandInstanceStatus } from "./command/instance/CliCommandInstanceStatus.js";
 import { CliCommandInstanceStop } from "./command/instance/CliCommandInstanceStop.js";
+import { CliCommandInstanceTodo } from "./command/instance/CliCommandInstanceTodo.js";
 import { CliCommandWatchLogs } from "./command/watch/CliCommandWatchLogs.js";
 import { CliCommandWatchStatus } from "./command/watch/CliCommandWatchStatus.js";
 import { cliExitCodes } from "./exit/CliExitCode.js";
@@ -24,6 +25,7 @@ import { renderInstanceList } from "./render/instance/CliRenderInstanceList.js";
 import { renderInstanceCreateResult } from "./render/instance/CliRenderInstanceCreate.js";
 import { renderInstanceLogs } from "./render/instance/CliRenderInstanceLogs.js";
 import { renderInstanceSnapshot } from "./render/instance/CliRenderInstanceSnapshot.js";
+import { renderTodo } from "./render/instance/CliRenderTodo.js";
 import { renderToolCall } from "./render/tool/CliRenderToolCall.js";
 import { renderToolResult } from "./render/tool/CliRenderToolResult.js";
 import { InstanceCreateWizard } from "./wizard/InstanceCreateWizard.js";
@@ -144,6 +146,17 @@ export class CliMain {
                 }
 
                 this.#stdout.write(renderInstanceLogs(await new CliCommandInstanceLogs().execute(this.#createClient(), command.instance)));
+                return;
+            case "instance.todo":
+                await new CliCommandInstanceTodo().execute(
+                    this.#createClient(),
+                    command.instance,
+                    command.follow,
+                    async (todo) => {
+                        this.#stdout.write(renderTodo(todo));
+                    },
+                    this.#followEventLimit
+                );
                 return;
             case "instance.call":
                 this.#stdout.write(renderToolCall(command.instance, command.toolName));

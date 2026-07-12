@@ -189,6 +189,8 @@ export class TuiToolAuditModel {
             requestId: readOptionalString(data.requestId) ?? current?.requestId,
             sessionId: readOptionalString(data.sessionId) ?? current?.sessionId,
             source: readToolCallSource(data.source) ?? current?.source ?? "tui",
+            taskId: readOptionalString(data.taskId) ?? current?.taskId,
+            todoItemId: readOptionalString(data.todoItemId) ?? current?.todoItemId,
             startedAt: readOptionalString(data.startedAt) ?? current?.startedAt ?? new Date(0).toISOString(),
             status: readToolCallStatus(data.status) ?? current?.status ?? "running",
             stderrBytes: readOptionalNumber(data.stderrBytes) ?? current?.stderrBytes,

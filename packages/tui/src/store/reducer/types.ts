@@ -1,4 +1,4 @@
-import type { ApprovalRequest, ControlError, ControlEventEnvelope, InstanceSnapshot, JsonValue, OAuthApprovalRequest, ToolCallRecord } from "@portable-devshell/shared";
+import type { ApprovalRequest, ControlError, ControlEventEnvelope, InstanceSnapshot, JsonValue, OAuthApprovalRequest, TodoReadResult, ToolCallRecord } from "@portable-devshell/shared";
 
 import type { TuiEditorState, TuiInteractionState, TuiUiIntent } from "../../interaction/TuiInteractionTypes.js";
 import type { AuditPageState, FocusScope, PageId, SidebarCursor, SidebarFocus, TuiUiState } from "../../model/TuiUiTypes.js";
@@ -86,6 +86,7 @@ export interface TuiAppState {
     panelErrors: Record<string, ControlError>;
     relayByCommand: Record<string, TuiRelayRecord>;
     snapshotsByInstance: Record<string, InstanceSnapshot>;
+    todoByInstance: Record<string, TodoReadResult>;
     toolCallsByInstance: Record<string, ToolCallRecord[]>;
     ui: TuiUiState;
 }
@@ -130,6 +131,7 @@ export type TuiAppAction =
     | { required: boolean; type: "control.setRestartRequired" }
     | { type: "ui.bumpRedrawNonce" }
     | { snapshot: InstanceSnapshot; type: "snapshot.replace" }
+    | { instance: string; todo: TodoReadResult; type: "todo.replace" }
     | { instance: string; records: ToolCallRecord[]; type: "toolCall.replace" }
     | { maxEvents?: number; rawEvent: TuiRawEventRecord; type: "event.append" }
     | { type: "restore.pop" }

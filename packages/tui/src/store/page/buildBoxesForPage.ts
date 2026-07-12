@@ -9,6 +9,7 @@ import { buildHelpPageBoxes } from "./help.js";
 import { buildInstancesPageBoxes } from "./instances.js";
 import { buildLogsPageBoxes } from "./logs.js";
 import { buildOAuthPageBoxes } from "./oauth.js";
+import { buildTodoPageBoxes } from "./todo.js";
 import { makeBox } from "./PageBoxSupport.js";
 
 export function buildBoxesForPage(state: TuiAppState, page: PageId, instanceName: string | undefined): BoxModel[] {
@@ -18,6 +19,8 @@ export function buildBoxesForPage(state: TuiAppState, page: PageId, instanceName
                 return buildHelpPageBoxes(state);
             case "instances":
                 return buildInstancesPageBoxes(state);
+            case "todo":
+                return instanceName === undefined ? [] : buildTodoPageBoxes(state, instanceName);
             case "config":
                 return instanceName === undefined ? [] : buildConfigPageBoxes(state, instanceName);
             case "connector":
@@ -31,7 +34,7 @@ export function buildBoxesForPage(state: TuiAppState, page: PageId, instanceName
         }
     })();
 
-    if (page !== "instances" && page !== "config" && page !== "audit") {
+    if (page !== "instances" && page !== "todo" && page !== "config" && page !== "audit") {
         return boxes;
     }
 
@@ -44,7 +47,7 @@ export function buildBoxesForPage(state: TuiAppState, page: PageId, instanceName
     return [filterStatusBox(state, page, instanceName, query, filtered.length, boxes.length), ...filtered];
 }
 
-function filterStatusBox(state: TuiAppState, page: "instances" | "config" | "audit", instanceName: string | undefined, query: string, visible: number, total: number): BoxModel {
+function filterStatusBox(state: TuiAppState, page: "instances" | "todo" | "config" | "audit", instanceName: string | undefined, query: string, visible: number, total: number): BoxModel {
     return makeBox(state, page, instanceName, {
         detailLines: [
             `Query              ${query}`,

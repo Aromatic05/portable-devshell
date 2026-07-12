@@ -11,6 +11,7 @@ import {
     type JsonValue,
     type ToolCallContext,
     type ToolCallApprovalDecision,
+    type ToolCallAssociation,
     type ToolCallQuery,
     type ToolCallRecord,
     type WorkspacePath
@@ -44,6 +45,7 @@ interface WorkerInstanceDependencies {
     protocolClient: WorkerProtocolClient;
     rpcBridge: WorkerRpcBridge;
     stateMachine: InstanceStateMachine;
+    toolCallAssociationProvider?: () => ToolCallAssociation | undefined;
     toolCallHistory: ToolCallHistory;
     toolCallScheduler: ToolCallScheduler;
     toolInvoker: WorkerToolInvoker;
@@ -59,6 +61,7 @@ export class WorkerInstance {
     readonly #protocolClient: WorkerProtocolClient;
     readonly #rpcBridge: WorkerRpcBridge;
     readonly #stateMachine: InstanceStateMachine;
+    readonly #toolCallAssociationProvider?: () => ToolCallAssociation | undefined;
     readonly #toolCallHistory: ToolCallHistory;
     readonly #toolCallScheduler: ToolCallScheduler;
     readonly #toolInvoker: WorkerToolInvoker;
@@ -77,6 +80,7 @@ export class WorkerInstance {
         this.#protocolClient = dependencies.protocolClient;
         this.#rpcBridge = dependencies.rpcBridge;
         this.#stateMachine = dependencies.stateMachine;
+        this.#toolCallAssociationProvider = dependencies.toolCallAssociationProvider;
         this.#toolCallHistory = dependencies.toolCallHistory;
         this.#toolCallScheduler = dependencies.toolCallScheduler;
         this.#toolInvoker = dependencies.toolInvoker;
@@ -90,6 +94,10 @@ export class WorkerInstance {
             ...this.#stateMachine.snapshot(),
             effectiveSecurityMode: this.#config.effectiveSecurityMode
         };
+    }
+
+    async appendControlEvent(type: InstanceEventInput["type"], data?: JsonValue) {
+        return await this.#appendEvent(type, data);
     }
 
     listTools() {
@@ -306,11 +314,14 @@ export class WorkerInstance {
         const callId = randomUUID();
         const startedAt = new Date().toISOString();
         const inputSummary = toInputSummary(input);
+        const association = this.#toolCallAssociationProvider?.();
         const eventContext = {
             callId,
             requestId: context.requestId,
             sessionId: context.sessionId,
             source: context.source,
+            taskId: association?.taskId,
+            todoItemId: association?.todoItemId,
             toolName
         } as const;
 
@@ -331,7 +342,7 @@ export class WorkerInstance {
         let approvalState: { approvalId?: string; decision?: ToolCallApprovalDecision };
 
         try {
-            await this.#toolCallHistory.started(callId, toolName, inputSummary, context, startedAt, "queued");
+            await this.#toolCallHistory.started(callId, toolName, inputSummary, context, startedAt, "queued", association);
             await this.#appendEvent(
                 "toolCall.queued",
                 toEventData({

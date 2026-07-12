@@ -1,3 +1,4 @@
+import type { ActiveTodoSummary } from "./DtoTodo.js";
 import type { InstanceName } from "../../type/identity/TypeIdentityInstanceName.js";
 
 export type DaemonState = "running" | "starting" | "stopped" | "stale" | "stopping" | "failed";
@@ -8,6 +9,7 @@ export type RuntimeStatus = "ready" | "running" | "stale" | "stopped" | "failed"
 export type EffectiveSecurityMode = "disabled" | "workspace";
 
 export interface InstanceSnapshot {
+    activeTodo?: ActiveTodoSummary;
     connectionState: ConnectionState;
     daemonState: DaemonState;
     effectiveSecurityMode?: EffectiveSecurityMode;

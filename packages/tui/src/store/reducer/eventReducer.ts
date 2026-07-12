@@ -137,6 +137,8 @@ function applyToolCallEvent(state: TuiAppState, instance: string, data: Record<s
         requestId: typeof data.requestId === "string" ? data.requestId : existing?.requestId,
         sessionId: typeof data.sessionId === "string" ? data.sessionId : existing?.sessionId,
         source: data.source === "cli" || data.source === "tui" || data.source === "mcp" ? data.source : existing?.source ?? "tui",
+        taskId: typeof data.taskId === "string" ? data.taskId : existing?.taskId,
+        todoItemId: typeof data.todoItemId === "string" ? data.todoItemId : existing?.todoItemId,
         startedAt: typeof data.startedAt === "string" ? data.startedAt : existing?.startedAt ?? new Date(0).toISOString(),
         status:
             data.status === "pendingApproval" ||

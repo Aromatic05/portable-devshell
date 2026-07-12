@@ -9,6 +9,7 @@ export class InstancePaths {
     readonly controlWorkerDir: string;
     readonly eventsFile: string;
     readonly toolCallsFile: string;
+    readonly todoFile: string;
     readonly logsFile: string;
     readonly workerConfigFile: string;
     readonly workerLogFile: string;
@@ -20,6 +21,7 @@ export class InstancePaths {
         this.approvalsFile = join(this.controlWorkerDir, "approvals.jsonl");
         this.eventsFile = join(this.controlWorkerDir, "events.jsonl");
         this.toolCallsFile = join(this.controlWorkerDir, "tool-calls.jsonl");
+        this.todoFile = join(this.controlWorkerDir, "todo.json");
         this.logsFile = join(this.controlWorkerDir, "logs.jsonl");
         this.workerConfigFile = join(this.instanceRootDir, "config.toml");
         this.workerLogFile = join(this.instanceRootDir, "logs", "worker.log");

@@ -22,6 +22,7 @@ async function verifyRpcMethodsOverReusedConnection(): Promise<void> {
                 mcpEnabled: false,
                 mcpPath: "",
                 name: "alpha",
+                todo: createFakeTodo(),
                 worker: worker as unknown as WorkerInstance
             }
         ]),
@@ -212,6 +213,101 @@ async function verifyRpcMethodsOverReusedConnection(): Promise<void> {
     }
 }
 
+
+async function verifyTodoRpc(): Promise<void> {
+    const runtimeDir = await mkdtemp(join(tmpdir(), "portable-devshell-control-todo-"));
+    const socketPath = join(runtimeDir, "control.sock");
+    const worker = new FakeWorker("alpha");
+    const todo = createFakeTodo({
+        items: [
+            { content: "Inspect", id: "inspect", status: "completed" },
+            { content: "Implement", id: "implement", status: "in_progress" }
+        ],
+        revision: 2,
+        summary: { completed: 1, currentItemId: "implement", total: 2 },
+        taskId: "task-1",
+        title: "Todo RPC"
+    });
+    const server = new ControlRpcServer({
+        instanceRegistry: new InstanceRegistry([
+            {
+                enabled: true,
+                mcpCapabilities: ["read", "write", "execute"],
+                mcpEnabled: false,
+                mcpGroups: ["file", "bash", "artifact", "todo"],
+                mcpPath: "",
+                name: "alpha",
+                todo,
+                worker: worker as unknown as WorkerInstance
+            }
+        ]),
+        socketPath
+    });
+
+    await server.start();
+    const client = await RpcClient.connect(socketPath);
+
+    try {
+        await client.identifyClient("cli");
+        const snapshot = await client.request("instance.getSnapshot", { instance: "alpha", kind: "instance" });
+        assert.equal(snapshot.result.snapshot.activeTodo.taskId, "task-1");
+        assert.equal(snapshot.result.snapshot.activeTodo.currentItem, "Implement");
+
+        const read = await client.request("instance.todo.get", { instance: "alpha", kind: "instance" });
+        assert.equal(read.result.lastSeq, 0);
+        assert.equal(read.result.todo.revision, 2);
+        assert.equal(read.result.todo.summary.currentItemId, "implement");
+
+        const subscribed = await client.request(
+            "instance.todo.subscribe",
+            { instance: "alpha", kind: "instance" },
+            { fromSeq: 1 }
+        );
+        assert.equal(subscribed.result.lastSeq, 0);
+        assert.deepEqual(subscribed.result.events, []);
+
+        worker.emit("toolCall.completed", { toolName: "bash_run" });
+        worker.emit("todo.updated", { revision: 3, taskId: "task-1" });
+        const streamed = await client.nextEvent();
+        assert.equal(streamed.event, "todo.updated");
+        assert.equal(streamed.seq, 2);
+    } finally {
+        client.close();
+        await server.stop().catch(() => undefined);
+        await rm(runtimeDir, { force: true, recursive: true });
+    }
+}
+
+function createFakeTodo(todo = {
+    items: [],
+    revision: 0,
+    summary: { completed: 0, total: 0 }
+}) {
+    return {
+        async read() {
+            return todo;
+        },
+        summary() {
+            if (!("taskId" in todo) || typeof todo.taskId !== "string") {
+                return undefined;
+            }
+            const currentItemId = todo.summary.currentItemId;
+            const currentItem = currentItemId === undefined
+                ? undefined
+                : todo.items.find((item) => item.id === currentItemId)?.content;
+            return {
+                completed: todo.summary.completed,
+                currentItem,
+                revision: todo.revision,
+                status: currentItem === undefined ? "pending" : "in_progress",
+                taskId: todo.taskId,
+                title: "title" in todo ? todo.title : undefined,
+                total: todo.summary.total
+            };
+        }
+    };
+}
+
 async function verifyShutdownToleratesClientDisconnect(): Promise<void> {
     const runtimeDir = await mkdtemp(join(tmpdir(), "portable-devshell-control-"));
     const socketPath = join(runtimeDir, "control.sock");
@@ -264,6 +360,7 @@ async function verifyInteractiveStartRelay(): Promise<void> {
                 mcpEnabled: false,
                 mcpPath: "",
                 name: "alpha",
+                todo: createFakeTodo(),
                 worker: worker as unknown as WorkerInstance
             }
         ]),
@@ -710,5 +807,6 @@ class FakeWorker {
 }
 
 await verifyRpcMethodsOverReusedConnection();
+await verifyTodoRpc();
 await verifyShutdownToleratesClientDisconnect();
 await verifyInteractiveStartRelay();

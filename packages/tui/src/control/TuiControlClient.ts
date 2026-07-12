@@ -12,7 +12,8 @@ import {
     type JsonValue,
     type OAuthApprovalRequest,
     type ToolCallQuery,
-    type ToolCallRecord
+    type ToolCallRecord,
+    type TodoRpcEnvelope
 } from "@portable-devshell/shared";
 
 import {
@@ -72,6 +73,7 @@ export interface TuiControlClientLike {
     getInstanceCreateSchema(): Promise<InstanceCreateSchema>;
     getApproval(instance: string, approvalId: string): Promise<ApprovalRequest>;
     getSnapshot(instance: string): Promise<TuiControlSnapshotEnvelope>;
+    getTodo(instance: string): Promise<TodoRpcEnvelope>;
     listApprovals(instance: string): Promise<ApprovalRequest[]>;
     listInstances(): Promise<TuiControlListInstanceEntry[]>;
     listOAuthApprovals?(): Promise<OAuthApprovalRequest[]>;
@@ -170,6 +172,10 @@ export class TuiControlClient implements TuiControlClientLike {
 
     async getSnapshot(instance: string): Promise<TuiControlSnapshotEnvelope> {
         return (await this.#request("instance.getSnapshot", createInstanceTarget(instance))) as unknown as TuiControlSnapshotEnvelope;
+    }
+
+    async getTodo(instance: string): Promise<TodoRpcEnvelope> {
+        return (await this.#request("instance.todo.get", createInstanceTarget(instance))) as unknown as TodoRpcEnvelope;
     }
 
     async refreshStatus(instance: string): Promise<TuiControlSnapshotEnvelope> {

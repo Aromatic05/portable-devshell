@@ -3,6 +3,11 @@ import type { InstanceName } from "../../type/identity/TypeIdentityInstanceName.
 export type ToolCallSource = "cli" | "tui" | "mcp";
 export type ControlClientKind = ToolCallSource | "unknown";
 
+export interface ToolCallAssociation {
+    taskId: string;
+    todoItemId: string;
+}
+
 export interface ToolCallContext {
     purpose?: string;
     requestId?: string;
@@ -35,6 +40,8 @@ export interface ToolCallRecord {
     requestId?: string;
     sessionId?: string;
     source: ToolCallSource;
+    taskId?: string;
+    todoItemId?: string;
     startedAt: string;
     status: ToolCallStatus;
     stderrBytes?: number;

@@ -85,6 +85,10 @@ export class TuiControlSession {
         await this.#reloadLogs(instance);
     }
 
+    async refreshTodo(instance: string): Promise<void> {
+        await this.#reloadTodo(instance);
+    }
+
     async refreshLogs(): Promise<void> {
         const instances = this.#readRuntimeInstances();
 
@@ -132,10 +136,16 @@ export class TuiControlSession {
     async #reloadRuntimeInstance(instance: string): Promise<void> {
         const snapshotEnvelope = await this.#client.getSnapshot(instance);
         this.#store.replaceSnapshot(snapshotEnvelope.snapshot);
+        await this.#reloadTodo(instance);
         await this.#reloadLogs(instance);
         await this.#reloadToolCalls(instance);
         await this.#reloadApprovals(instance);
         this.#subscribeInstance(instance, nextSubscribeSeq(snapshotEnvelope));
+    }
+
+    async #reloadTodo(instance: string): Promise<void> {
+        const envelope = await this.#client.getTodo(instance);
+        this.#store.replaceTodo(instance, envelope.todo);
     }
 
     async #reloadLogs(instance: string): Promise<void> {
@@ -195,6 +205,9 @@ export class TuiControlSession {
             },
             onInstanceEvent: (message) => {
                 this.#store.applyEvent(message.envelope);
+                if (message.envelope.event.startsWith("todo.")) {
+                    void this.#reloadTodo(instance).catch(() => undefined);
+                }
                 const state = this.#store.getState();
                 if (message.envelope.event === "log.appended" && state.ui.selectedPage === "logs" && state.ui.selectedInstance === instance && state.ui.logsFollowByInstance[instance] !== false) {
                     this.#store.setScrollOffset(`logs:${instance}:main`, Number.MAX_SAFE_INTEGER);

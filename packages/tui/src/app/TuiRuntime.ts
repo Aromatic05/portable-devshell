@@ -138,6 +138,11 @@ export class TuiRuntime {
                     case "help":
                         await this.session.refresh();
                         return;
+                    case "todo":
+                        if (instance !== undefined) {
+                            await this.session.refreshTodo(instance);
+                        }
+                        return;
                     case "config":
                     case "connector":
                         await this.session.refreshConfig();
@@ -452,8 +457,8 @@ export class TuiRuntime {
 
     async #handleHitTarget(target: TuiHitTarget): Promise<void> {
         if (target.kind === "page") {
-            await this.commandDispatcher.dispatch({ page: target.id as "instances" | "config" | "connector" | "audit" | "logs" | "help", type: "page.select" });
-            this.focusManager.setFocus({ id: target.id as "instances" | "config" | "connector" | "audit" | "logs" | "help", kind: "page" });
+            await this.commandDispatcher.dispatch({ page: target.id as "instances" | "todo" | "config" | "connector" | "oauth" | "audit" | "logs" | "help", type: "page.select" });
+            this.focusManager.setFocus({ id: target.id as "instances" | "todo" | "config" | "connector" | "oauth" | "audit" | "logs" | "help", kind: "page" });
             return;
         }
         if (target.kind === "instance") {

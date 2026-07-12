@@ -32,7 +32,7 @@ const instanceCreateSchema: InstanceCreateSchema = {
         presets: containerPresets
     },
     defaultMcpCapabilities: ["read", "write", "execute"],
-    defaultMcpGroups: ["file", "bash", "artifact", "tmux"],
+    defaultMcpGroups: ["file", "bash", "artifact", "tmux", "todo"],
     defaultEnabled: true,
     defaultMcpEnabled: true,
     defaultProvider: "local",

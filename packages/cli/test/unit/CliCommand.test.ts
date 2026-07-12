@@ -673,9 +673,9 @@ test("CliMain recovers watch status when subscribe returns stream.gap", async ()
     assert.equal(await cli.run(["watch", "status", "demo-local"]), 0);
     assert.equal(
         stdout.flush(),
-        "instance: demo-local\nstatus: stopped\nready: false\ndaemonState: stopped\nconnectionState: disconnected\nlastSeq: 1\n" +
-            "instance: demo-local\nstatus: ready\nready: true\ndaemonState: running\nconnectionState: connected\nlastSeq: 3\n" +
-            "instance: demo-local\nstatus: ready\nready: true\ndaemonState: running\nconnectionState: connected\nlastSeq: 4\n"
+        "instance: demo-local\nstatus: stopped\nready: false\ndaemonState: stopped\nconnectionState: disconnected\nlastSeq: 1\nTodo: none\n" +
+            "instance: demo-local\nstatus: ready\nready: true\ndaemonState: running\nconnectionState: connected\nlastSeq: 3\nTodo: none\n" +
+            "instance: demo-local\nstatus: ready\nready: true\ndaemonState: running\nconnectionState: connected\nlastSeq: 4\nTodo: none\n"
     );
     assert.equal(stderr.flush(), "");
 });
@@ -823,3 +823,63 @@ function createBuffer(): { flush: () => string; write: (chunk: string) => void }
         }
     };
 }
+
+test("CliMain reads and follows Todo through control RPC", async () => {
+    const stdout = createBuffer();
+    const stderr = createBuffer();
+    let reads = 0;
+    let closed = false;
+    const cli = new CliMain({
+        createClient: () => ({
+            async getTodo() {
+                reads += 1;
+                return reads === 1
+                    ? {
+                          lastSeq: 0,
+                          todo: {
+                              items: [{ content: "Inspect", id: "inspect", status: "in_progress" }],
+                              revision: 1,
+                              summary: { completed: 0, currentItemId: "inspect", total: 1 },
+                              taskId: "task-1",
+                              title: "Todo follow"
+                          }
+                      }
+                    : {
+                          lastSeq: 1,
+                          todo: {
+                              items: [{ content: "Inspect", id: "inspect", status: "completed" }],
+                              revision: 2,
+                              summary: { completed: 1, total: 1 },
+                              taskId: "task-1",
+                              title: "Todo follow"
+                          }
+                      };
+            },
+            async subscribeTodo() {
+                return {
+                    close() {
+                        closed = true;
+                    },
+                    async nextEvent() {
+                        return {
+                            event: "todo.completed",
+                            payload: {},
+                            seq: 1,
+                            target: { instance: "demo-local", kind: "instance" },
+                            type: "event"
+                        };
+                    }
+                };
+            }
+        } as never),
+        followEventLimit: 1,
+        stderr,
+        stdout
+    });
+
+    assert.equal(await cli.run(["instance", "todo", "demo-local", "--follow"]), 0);
+    assert.match(stdout.flush(), /Progress: 0\/1[\s\S]*Progress: 1\/1/u);
+    assert.equal(reads, 2);
+    assert.equal(closed, true);
+    assert.equal(stderr.flush(), "");
+});

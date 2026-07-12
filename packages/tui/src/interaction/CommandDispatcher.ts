@@ -622,7 +622,7 @@ export class CommandDispatcher {
                 return await this.dispatch({ approvalId: actionId.slice("approval.open:".length), instance: state.ui.selectedInstance, type: "approval.open" });
             }
 
-            if (button === "clear-filter" && (state.ui.selectedPage === "instances" || state.ui.selectedPage === "config" || state.ui.selectedPage === "audit")) {
+            if (button === "clear-filter" && (state.ui.selectedPage === "instances" || state.ui.selectedPage === "todo" || state.ui.selectedPage === "config" || state.ui.selectedPage === "audit")) {
                 this.#store.setSearchQuery(state.ui.selectedPage, "");
                 this.#syncMainFocus();
                 return true;
@@ -1102,7 +1102,7 @@ export class CommandDispatcher {
         const entry = Array.isArray(entries)
             ? entries.find((value) => asRecord(value)?.name === instanceName)
             : undefined;
-        return cloneRecord(asRecord(entry) ?? { enabled: true, mcp: { enabled: true, path: `/${instanceName}/mcp`, tools: { capabilities: ["read", "write", "execute"], groups: ["file", "bash", "artifact", "tmux"] } }, name: instanceName, provider: "local", security: { mode: "disabled" }, workspace: "" });
+        return cloneRecord(asRecord(entry) ?? { enabled: true, mcp: { enabled: true, path: `/${instanceName}/mcp`, tools: { capabilities: ["read", "write", "execute"], groups: ["file", "bash", "artifact", "tmux", "todo"] } }, name: instanceName, provider: "local", security: { mode: "disabled" }, workspace: "" });
     }
 
     #mcpDraft(): Record<string, JsonValue> {
@@ -1303,7 +1303,7 @@ function clamp(value: number, min: number, max: number): number {
 function defaultCreateDraft(): Record<string, JsonValue> {
     return {
         enabled: true,
-        mcp: { enabled: true, tools: { capabilities: ["read", "write", "execute"], groups: ["file", "bash", "artifact", "tmux"] } },
+        mcp: { enabled: true, tools: { capabilities: ["read", "write", "execute"], groups: ["file", "bash", "artifact", "tmux", "todo"] } },
         name: "",
         provider: "local",
         security: { mode: "disabled" },

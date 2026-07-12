@@ -16,7 +16,7 @@ test("instance create schema exposes supported container modes without running c
         "existingStoppedContainer"
     ]);
     assert.equal(schema.container.presets.some((entry) => entry.preset === "arch"), true);
-    assert.deepEqual(schema.defaultMcpGroups, ["file", "bash", "artifact", "tmux"]);
+    assert.deepEqual(schema.defaultMcpGroups, ["file", "bash", "artifact", "tmux", "todo"]);
 });
 
 test("instance create validates docker preset drafts into container config", () => {

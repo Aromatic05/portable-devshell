@@ -247,8 +247,8 @@ export class KeyDispatcher {
     }
 }
 
-function isShortcutDigit(input: string): input is "1" | "2" | "3" | "4" | "5" | "6" | "7" {
-    return input === "1" || input === "2" || input === "3" || input === "4" || input === "5" || input === "6" || input === "7";
+function isShortcutDigit(input: string): input is "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" {
+    return input === "1" || input === "2" || input === "3" || input === "4" || input === "5" || input === "6" || input === "7" || input === "8";
 }
 
 function shiftedInstanceIndex(press: TuiKeyPress): number | undefined {

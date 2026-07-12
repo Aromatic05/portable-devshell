@@ -7,6 +7,14 @@ export function renderInstanceSnapshot(snapshot: CliInstanceSnapshotEnvelope["sn
         `ready: ${snapshot.ready}`,
         `daemonState: ${snapshot.daemonState}`,
         `connectionState: ${snapshot.connectionState}`,
-        `lastSeq: ${snapshot.lastSeq}`
+        `lastSeq: ${snapshot.lastSeq}`,
+        renderTodoSummary(snapshot.activeTodo)
     ].join("\n") + "\n";
+}
+
+function renderTodoSummary(todo: import("@portable-devshell/shared").ActiveTodoSummary | undefined): string {
+    if (todo === undefined) {
+        return "Todo: none";
+    }
+    return `Todo: ${todo.completed}/${todo.total} completed${todo.currentItem === undefined ? "" : ` — ${todo.currentItem}`}`;
 }

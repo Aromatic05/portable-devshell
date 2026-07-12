@@ -1,4 +1,4 @@
-import { asInstanceName, createError, errorCodes, type ControlEventEnvelope, type JsonValue } from "@portable-devshell/shared";
+import { asInstanceName, createError, errorCodes, type ActiveTodoSummary, type ControlEventEnvelope, type JsonValue } from "@portable-devshell/shared";
 
 import type { CliControlConnection } from "./CliControlConnection.js";
 import type {
@@ -94,6 +94,7 @@ export class CliControlStream {
 export interface CliInstanceSnapshotEnvelope {
     lastSeq: number;
     snapshot: {
+        activeTodo?: ActiveTodoSummary;
         connectionState: string;
         daemonState: string;
         lastErrorCode?: string;

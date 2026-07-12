@@ -12,6 +12,7 @@ export type CliParsedCommand =
     | { kind: "instance.create" }
     | { kind: "instance.list" }
     | { follow: boolean; instance: string; kind: "instance.logs" }
+    | { follow: boolean; instance: string; kind: "instance.todo" }
     | { instance: string; kind: "instance.start" }
     | { instance: string; kind: "instance.status" }
     | { instance: string; kind: "instance.stop" }
@@ -62,6 +63,13 @@ export class CliParser {
                     follow: argv.includes("-f"),
                     instance: this.#required(argv[1], "instance name is required"),
                     kind: "instance.logs"
+                };
+            case "todo":
+                this.#expectTodoArgs(argv);
+                return {
+                    follow: argv.includes("--follow") || argv.includes("-f"),
+                    instance: this.#required(argv[1], "instance name is required"),
+                    kind: "instance.todo"
                 };
             case "call":
                 if (argv.length !== 4) {
@@ -140,6 +148,17 @@ export class CliParser {
             instance: this.#required(argv[1], "instance name is required"),
             kind
         } as Extract<CliParsedCommand, { kind: typeof kind }>;
+    }
+
+
+    #expectTodoArgs(argv: readonly string[]): void {
+        if (argv.length === 2) {
+            return;
+        }
+        if (argv.length === 3 && (argv[2] === "--follow" || argv[2] === "-f")) {
+            return;
+        }
+        throw CliRenderError.usage("instance todo requires <instance> [--follow]");
     }
 
     #expectLogsArgs(argv: readonly string[]): void {

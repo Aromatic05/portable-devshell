@@ -23,6 +23,7 @@ export function createInitialTuiAppState(): TuiAppState {
         rawEvents: [],
         relayByCommand: {},
         snapshotsByInstance: {},
+        todoByInstance: {},
         toolCallsByInstance: {},
         ui: {
             controlRestartRequired: false,

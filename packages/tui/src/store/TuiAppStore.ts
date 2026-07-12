@@ -1,4 +1,4 @@
-import { type ApprovalRequest, type ControlError, type ControlEventEnvelope, type InstanceSnapshot, type JsonValue, type OAuthApprovalRequest, type ToolCallRecord } from "@portable-devshell/shared";
+import { type ApprovalRequest, type ControlError, type ControlEventEnvelope, type InstanceSnapshot, type JsonValue, type OAuthApprovalRequest, type TodoReadResult, type ToolCallRecord } from "@portable-devshell/shared";
 
 import { type TuiEditorState, type TuiUiIntent } from "../interaction/TuiInteractionTypes.js";
 import type { AuditPageState, FocusScope, PageId, SidebarCursor, SidebarFocus } from "../model/TuiUiTypes.js";
@@ -280,6 +280,10 @@ export class TuiAppStore {
             instances,
             type: "instance.replaceList"
         });
+    }
+
+    replaceTodo(instance: string, todo: TodoReadResult): void {
+        this.dispatch({ instance, todo, type: "todo.replace" });
     }
 
     replaceSnapshot(snapshot: InstanceSnapshot): void {

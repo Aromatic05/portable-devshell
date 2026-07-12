@@ -6,7 +6,8 @@ import type {
     InstanceCreateSummary,
     JsonValue,
     ToolCallQuery,
-    ToolCallRecord
+    ToolCallRecord,
+    TodoRpcEnvelope
 } from "@portable-devshell/shared";
 
 import { CliControlConnection, type CliControlConnectionOptions } from "./CliControlConnection.js";
@@ -33,6 +34,7 @@ export interface CliControlClientLike {
     createInstance(draft: InstanceCreateDraft): Promise<InstanceCreateResult>;
     getInstanceCreateSchema(): Promise<InstanceCreateSchema>;
     getSnapshot(instance: string): Promise<CliInstanceSnapshotEnvelope>;
+    getTodo(instance: string): Promise<TodoRpcEnvelope>;
     listInstances(): Promise<CliInstanceListEntry[]>;
     readLogs(instance: string, query?: { fromSeq?: number; limit?: number }): Promise<CliInstanceLogEntry[]>;
     readToolCalls(instance: string, query?: ToolCallQuery): Promise<ToolCallRecord[]>;
@@ -40,6 +42,7 @@ export interface CliControlClientLike {
     startInstance(instance: string, relay?: CliControlTerminalRelay): Promise<CliInstanceSnapshotEnvelope["snapshot"]>;
     stopInstance(instance: string): Promise<CliInstanceSnapshotEnvelope["snapshot"]>;
     subscribe(instance: string, fromSeq: number): Promise<CliControlStream>;
+    subscribeTodo(instance: string, fromSeq: number): Promise<CliControlStream>;
     validateInstanceCreateDraft(draft: InstanceCreateDraft): Promise<InstanceCreateSummary>;
 }
 
@@ -68,6 +71,10 @@ export class CliControlClient implements CliControlClientLike {
 
     async getSnapshot(instance: string): Promise<CliInstanceSnapshotEnvelope> {
         return asInstanceSnapshotEnvelope(await this.#request("instance.getSnapshot", createInstanceTarget(instance)));
+    }
+
+    async getTodo(instance: string): Promise<TodoRpcEnvelope> {
+        return (await this.#request("instance.todo.get", createInstanceTarget(instance))) as unknown as TodoRpcEnvelope;
     }
 
     async refreshStatus(instance: string): Promise<CliInstanceSnapshotEnvelope> {
@@ -128,6 +135,16 @@ export class CliControlClient implements CliControlClientLike {
             lastSeq: number;
         };
 
+        return new CliControlStream(connection, result.events);
+    }
+
+
+    async subscribeTodo(instance: string, fromSeq: number): Promise<CliControlStream> {
+        const connection = new CliControlConnection(this.#connectionOptions);
+        const result = (await connection.request("instance.todo.subscribe", createInstanceTarget(instance), { fromSeq })) as unknown as {
+            events: ControlEventEnvelope[];
+            lastSeq: number;
+        };
         return new CliControlStream(connection, result.events);
     }
 

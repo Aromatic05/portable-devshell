@@ -9,6 +9,7 @@ import {
 
 import type { McpInstanceGateway, McpSshInstanceCreateInput } from "../instance/McpInstanceGateway.js";
 import { McpInstanceToolCatalog, type McpInstanceToolName } from "../instance/McpInstanceToolCatalog.js";
+import { McpTodoToolCatalog, type McpTodoToolName } from "../todo/McpTodoToolCatalog.js";
 import { McpToolDescriptionEnhancer } from "../tool/McpToolDescriptionEnhancer.js";
 import { McpToolFilter } from "../tool/McpToolFilter.js";
 import { McpToolSchemaAdapter, McpToolSchemaUnavailableError, type McpTool } from "../tool/McpToolSchemaAdapter.js";
@@ -30,6 +31,8 @@ export class McpEndpointWorker {
     readonly #instanceName: string;
     readonly #instanceTools = new McpInstanceToolCatalog();
     readonly #managementEnabled: boolean;
+    readonly #todoEnabled: boolean;
+    readonly #todoTools = new McpTodoToolCatalog();
     readonly #schemaAdapter: McpToolSchemaAdapter;
     readonly #worker: WorkerInstanceLike;
 
@@ -47,6 +50,7 @@ export class McpEndpointWorker {
             options.gateway !== undefined &&
             options.policy.groups.includes("instance") &&
             options.policy.capabilities.includes("manage");
+        this.#todoEnabled = options.gateway !== undefined && options.policy.groups.includes("todo");
         this.#schemaAdapter = new McpToolSchemaAdapter();
         this.#worker = options.worker;
     }
@@ -67,14 +71,17 @@ export class McpEndpointWorker {
     }
 
     listTools(): McpTool[] {
+        const todoTools = this.#todoEnabled
+            ? this.#todoTools.list().map((tool) => this.#adaptTool(tool))
+            : [];
         const managementTools = this.#managementEnabled
             ? this.#instanceTools.list().filter((tool) => this.#filter.isAllowed(tool)).map((tool) => this.#adaptTool(tool))
             : [];
         const hasWorkerSchema = this.#worker.snapshot().ready || this.#worker.hasToolSchemaCache?.() === true;
 
         if (!hasWorkerSchema) {
-            if (managementTools.length > 0) {
-                return managementTools;
+            if (todoTools.length > 0 || managementTools.length > 0) {
+                return [...todoTools, ...managementTools];
             }
             throw new McpToolSchemaUnavailableError(this.#instanceName);
         }
@@ -82,10 +89,14 @@ export class McpEndpointWorker {
         const workerTools = this.#filter
             .filter(this.#worker.listTools())
             .map((tool) => this.#adaptTool(this.#managementEnabled ? withInstanceTarget(tool) : tool));
-        return [...workerTools, ...managementTools];
+        return [...workerTools, ...todoTools, ...managementTools];
     }
 
     getTool(toolName: string): ToolDefinition | undefined {
+        const todoTool = this.#todoEnabled ? this.#todoTools.get(toolName) : undefined;
+        if (todoTool !== undefined) {
+            return todoTool;
+        }
         const managementTool = this.#managementEnabled ? this.#instanceTools.get(toolName) : undefined;
         if (managementTool !== undefined && this.#filter.isAllowed(managementTool)) {
             return managementTool;
@@ -106,6 +117,15 @@ export class McpEndpointWorker {
             requestId: context.requestId,
             sessionId: context.sessionId
         });
+
+        if (this.#todoTools.isTodoTool(toolName)) {
+            if (!this.#todoEnabled) {
+                throw this.#toolNotExposed(toolName);
+            }
+            const tool = this.#todoTools.get(toolName)!;
+            this.#adaptTool(tool);
+            return await this.#callTodoTool(toolName, input, context);
+        }
 
         if (this.#managementEnabled && this.#instanceTools.isInstanceTool(toolName)) {
             const tool = this.#instanceTools.get(toolName)!;
@@ -137,6 +157,17 @@ export class McpEndpointWorker {
         return await gateway.callTool(routed.instance, toolName, routed.input, context);
     }
 
+    async #callTodoTool(toolName: McpTodoToolName, input: JsonValue, context: ToolCallContext): Promise<JsonValue> {
+        const gateway = this.#requireGatewayForControlTool();
+        switch (toolName) {
+            case "todo_read":
+                assertNoArguments(input, toolName);
+                return await gateway.readTodo(this.#instanceName);
+            case "todo_write":
+                return await gateway.writeTodo(this.#instanceName, input, context);
+        }
+    }
+
     async #callInstanceTool(toolName: McpInstanceToolName, input: JsonValue): Promise<JsonValue> {
         const gateway = this.#requireGateway();
         switch (toolName) {
@@ -156,6 +187,13 @@ export class McpEndpointWorker {
 
     #adaptTool(tool: ToolDefinition): McpTool {
         return this.#schemaAdapter.toMcpTool(tool, this.#descriptionEnhancer.enhance(tool.description));
+    }
+
+    #requireGatewayForControlTool(): McpInstanceGateway {
+        if (this.#gateway !== undefined) {
+            return this.#gateway;
+        }
+        throw this.#toolNotExposed("todo");
     }
 
     #requireGateway(): McpInstanceGateway {

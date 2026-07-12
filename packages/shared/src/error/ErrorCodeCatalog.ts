@@ -35,6 +35,8 @@ export const errorCodes = {
     mcpPublicAuthRequired: "mcp.publicAuthRequired",
     streamGap: "stream.gap",
     targetInvalid: "control.invalidTarget",
+    todoInvalid: "todo.invalid",
+    todoRevisionConflict: "todo.revisionConflict",
     toolSchemaInvalid: "core.toolSchemaUnavailable"
 } as const;
 

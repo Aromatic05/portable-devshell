@@ -12,6 +12,7 @@ const pageEntries: Array<{ id: PageId; label: string }> = [
     { id: "oauth", label: "oauth" },
     { id: "audit", label: "audit" },
     { id: "logs", label: "logs" },
+    { id: "todo", label: "todo" },
     { id: "help", label: "help" }
 ];
 
@@ -155,7 +156,7 @@ export function selectFooterShortcuts(state: TuiAppState): string[] {
     switch (state.interaction.focusScope) {
         case "sidebarPages":
         case "sidebarInstances":
-            return ["tab", "enter", "1-7", "shift+1-9", "r", "↑↓", "esc"];
+            return ["tab", "enter", "1-8", "shift+1-9", "r", "↑↓", "esc"];
         case "mainBoxes":
             return ["tab", "enter", "space", "r", "↑↓", ...(isSearchablePage(state.ui.selectedPage) ? ["/"] : []), "esc"];
         case "boxDetail":
@@ -227,7 +228,7 @@ export function selectHelpLines(state: TuiAppState): string[] {
 }
 
 function isSearchablePage(page: PageId): boolean {
-    return page === "instances" || page === "config" || page === "audit" || page === "logs";
+    return page === "instances" || page === "todo" || page === "config" || page === "audit" || page === "logs";
 }
 
 function pageTitle(page: PageId): string {

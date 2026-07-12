@@ -53,13 +53,15 @@ export class RouteHandlerInstance {
         }
 
         switch (method) {
-            case "instance.getSnapshot":
+            case "instance.getSnapshot": {
+                const snapshot = withTodoSummary(descriptor.worker.snapshot(), descriptor.todo.summary());
                 return {
-                    lastSeq: descriptor.worker.snapshot().lastSeq,
-                    snapshot: descriptor.worker.snapshot()
+                    lastSeq: snapshot.lastSeq,
+                    snapshot
                 } as unknown as JsonValue;
+            }
             case "instance.refreshStatus": {
-                const snapshot = await descriptor.worker.refreshStatus();
+                const snapshot = withTodoSummary(await descriptor.worker.refreshStatus(), descriptor.todo.summary());
                 return {
                     lastSeq: snapshot.lastSeq,
                     snapshot
@@ -105,6 +107,19 @@ export class RouteHandlerInstance {
                         decidedBy: readApprovalDecisionBy(connection, descriptor.name)
                     })
                 ) as unknown as JsonValue;
+            case "instance.todo.get":
+                return {
+                    lastSeq: descriptor.worker.snapshot().lastSeq,
+                    todo: await descriptor.todo.read()
+                } as unknown as JsonValue;
+            case "instance.todo.subscribe":
+                return await this.#streamSubscriptionManager.subscribe(
+                    connection,
+                    descriptor.name,
+                    descriptor.worker,
+                    readFromSeq(params),
+                    (event) => event.type.startsWith("todo.")
+                );
             case "instance.subscribe":
                 return await this.#streamSubscriptionManager.subscribe(
                     connection,
@@ -158,6 +173,13 @@ export class RouteHandlerInstance {
 
         return result;
     }
+}
+
+function withTodoSummary<T extends { lastSeq: number }>(snapshot: T, activeTodo: import("@portable-devshell/shared").ActiveTodoSummary | undefined): T & { activeTodo?: import("@portable-devshell/shared").ActiveTodoSummary } {
+    return {
+        ...snapshot,
+        ...(activeTodo === undefined ? {} : { activeTodo })
+    };
 }
 
 function readConnectionSource(connection: ControlRpcConnection, instanceName: string): ToolCallSource {

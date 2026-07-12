@@ -26,7 +26,9 @@ export const controlMethods = {
     instanceRefreshStatus: "instance.refreshStatus",
     instanceStart: "instance.start",
     instanceStop: "instance.stop",
-    instanceSubscribe: "instance.subscribe"
+    instanceSubscribe: "instance.subscribe",
+    instanceTodoGet: "instance.todo.get",
+    instanceTodoSubscribe: "instance.todo.subscribe"
 } as const;
 
 export type ControlMethod = (typeof controlMethods)[keyof typeof controlMethods];

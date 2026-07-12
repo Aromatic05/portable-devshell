@@ -258,6 +258,9 @@ function createGateway(overrides: Partial<McpInstanceGateway> = {}): McpInstance
         listTools(instance) {
             return overrides.listTools?.(instance) ?? [bashTool];
         },
+        async readTodo(instance) {
+            return await (overrides.readTodo?.(instance) ?? Promise.resolve({ items: [], revision: 0, summary: { completed: 0, total: 0 } }));
+        },
         async startInstance(instance) {
             return await (overrides.startInstance?.(instance) ?? Promise.resolve({ instance }));
         },
@@ -266,6 +269,50 @@ function createGateway(overrides: Partial<McpInstanceGateway> = {}): McpInstance
         },
         async stopInstance(instance) {
             return await (overrides.stopInstance?.(instance) ?? Promise.resolve({ instance }));
+        },
+        async writeTodo(instance, input, callContext) {
+            return await (overrides.writeTodo?.(instance, input, callContext) ?? Promise.resolve({ items: [], revision: 1, summary: { completed: 0, total: 0 } }));
         }
     };
 }
+
+test("todo tools are control-side, group-controlled, capability-free, and available while the worker is stopped", async () => {
+    const calls: string[] = [];
+    const gateway = createGateway({
+        async readTodo(instance) {
+            calls.push(`read:${instance}`);
+            return { items: [], revision: 0, summary: { completed: 0, total: 0 } };
+        },
+        async writeTodo(instance, input, callContext) {
+            calls.push(`write:${instance}:${callContext.sessionId}:${String((input as { revision?: number }).revision)}`);
+            return { items: [], revision: 1, summary: { completed: 0, total: 0 } };
+        }
+    });
+    const endpoint = new McpEndpointWorker({
+        gateway,
+        instanceName: "main-pc",
+        policy: { capabilities: [], groups: ["todo"] },
+        worker: createWorker({ hasSchema: false, ready: false })
+    });
+
+    assert.deepEqual(endpoint.listTools().map((tool) => tool.name), ["todo_read", "todo_write"]);
+    assert.deepEqual(await endpoint.callTool("todo_read", {}, context), {
+        items: [],
+        revision: 0,
+        summary: { completed: 0, total: 0 }
+    });
+    await endpoint.callTool("todo_write", { revision: 0, todos: [] }, context);
+    assert.deepEqual(calls, ["read:main-pc", "write:main-pc:session-1:0"]);
+
+    const hidden = new McpEndpointWorker({
+        gateway,
+        instanceName: "main-pc",
+        policy: { capabilities: ["read", "write"], groups: [] },
+        worker: createWorker({ hasSchema: false, ready: false })
+    });
+    assert.throws(() => hidden.listTools(), /schema/u);
+    await assert.rejects(hidden.callTool("todo_read", {}, context), (error: unknown) => {
+        assert.equal((error as { code?: string }).code, "core.toolSchemaUnavailable");
+        return true;
+    });
+});

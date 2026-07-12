@@ -66,9 +66,13 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
                 mcpEnabled: descriptor.mcpEnabled,
                 name: descriptor.name,
                 provider: config?.provider,
-                snapshot: descriptor.worker.snapshot()
+                snapshot: withTodoSummary(descriptor.worker.snapshot(), descriptor.todo.summary())
             };
         }) as unknown as JsonValue;
+    }
+
+    async readTodo(instance: string): Promise<JsonValue> {
+        return (await this.#requireDescriptor(instance).todo.read()) as unknown as JsonValue;
     }
 
     listTools(instance: string): ToolDefinition[] {
@@ -98,7 +102,7 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
             mcpEnabled: descriptor.mcpEnabled,
             name: descriptor.name,
             provider: config?.provider,
-            snapshot: descriptor.worker.snapshot()
+            snapshot: withTodoSummary(descriptor.worker.snapshot(), descriptor.todo.summary())
         } as unknown as JsonValue;
     }
 
@@ -107,6 +111,14 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
         const snapshot = await descriptor.worker.stop();
         this.#instanceRegistry.clearOwned(instance);
         return snapshot as unknown as JsonValue;
+    }
+
+    async writeTodo(instance: string, input: JsonValue, context: ToolCallContext): Promise<JsonValue> {
+        const descriptor = this.#requireDescriptor(instance);
+        return (await descriptor.todo.write(
+            input as unknown as import("@portable-devshell/shared").TodoWriteInput,
+            context.sessionId ?? "mcp-session-unknown"
+        )) as unknown as JsonValue;
     }
 
     #requireDescriptor(instance: string) {
@@ -121,4 +133,11 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
             retryable: false
         });
     }
+}
+
+function withTodoSummary<T extends object>(snapshot: T, activeTodo: import("@portable-devshell/shared").ActiveTodoSummary | undefined): T & { activeTodo?: import("@portable-devshell/shared").ActiveTodoSummary } {
+    return {
+        ...snapshot,
+        ...(activeTodo === undefined ? {} : { activeTodo })
+    };
 }

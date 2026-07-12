@@ -22,7 +22,7 @@ test("Prompt 3 urgent fix uses page + instance coordinates with a two-stage Tab 
     const sidebar = selectSidebarModel(harness.store.getState());
     assert.deepEqual(
         sidebar.pages.map((item) => item.label),
-        ["instances", "config", "connector", "oauth", "audit", "logs", "help"]
+        ["instances", "config", "connector", "oauth", "audit", "logs", "todo", "help"]
     );
     assert.deepEqual(
         sidebar.instances.map((item) => item.label),
@@ -54,7 +54,7 @@ test("Prompt 3 urgent fix uses page + instance coordinates with a two-stage Tab 
     await harness.press("", { return: true });
     assert.equal(harness.store.getState().ui.selectedPage, "config");
 
-    for (let index = 0; index < 7; index += 1) {
+    for (let index = 0; index < 8; index += 1) {
         await harness.press("", { downArrow: true });
     }
     assert.equal(harness.store.getState().interaction.sidebarCursor?.kind, "instance");
@@ -70,13 +70,13 @@ test("Prompt 3 urgent fix uses page + instance coordinates with a two-stage Tab 
     assert.equal(harness.store.getState().ui.selectedInstance, "beta");
 });
 
-test("page shortcuts include 7 and reload works on every page", async () => {
+test("page shortcuts include Todo and Help and reload works on every page", async () => {
     const harness = createHarness();
 
-    await harness.press("7");
+    await harness.press("8");
     assert.equal(harness.store.getState().ui.selectedPage, "help");
 
-    for (const shortcut of ["1", "2", "3", "4", "5", "6", "7"]) {
+    for (const shortcut of ["1", "2", "3", "4", "5", "6", "7", "8"]) {
         await harness.press(shortcut);
         await harness.press("r");
     }
@@ -88,6 +88,7 @@ test("page shortcuts include 7 and reload works on every page", async () => {
         { instance: "alpha", page: "oauth" },
         { instance: "alpha", page: "audit" },
         { instance: "alpha", page: "logs" },
+        { instance: "alpha", page: "todo" },
         { instance: "alpha", page: "help" }
     ]);
 });
@@ -157,6 +158,29 @@ test("audit structured filters and persistent filter controls work", async () =>
     harness.store.setSelectedDetailLine("audit:alpha:audit-filter-status", "audit-filter-status:button:clear-filter");
     await harness.dispatch({ type: "focus.activate" });
     assert.equal(harness.store.getState().ui.searchQueries.audit, "");
+});
+
+
+test("Todo uses a dedicated instance-scoped page and does not appear in Instances boxes", async () => {
+    const harness = createHarness();
+
+    const instanceBoxes = selectMainScreenModel(harness.store.getState()).boxes;
+    assert.equal(instanceBoxes.some((box) => box.collapsedLines.some((line) => line.text.includes("Todo"))), false);
+
+    await harness.press("7");
+    const todoPage = selectMainScreenModel(harness.store.getState());
+    assert.equal(todoPage.activePage.page, "todo");
+    assert.equal(todoPage.activePage.instance, "alpha");
+    assert.deepEqual(todoPage.boxes.map((box) => box.id), [
+        "todo-summary",
+        "todo-item:inspect",
+        "todo-item:implement",
+        "todo-item:verify"
+    ]);
+    assert.deepEqual(todoPage.boxes[0]?.collapsedLines.map((line) => line.text), [
+        "progress=1/3  revision=2",
+        "Current: Implement Todo"
+    ]);
 });
 
 test("shifted number shortcuts switch the selected instance without coupling Instances box focus", async () => {
@@ -518,7 +542,7 @@ test("connector editor presents unavailable endpoints and control runtime limits
     assert.equal(logs.boxes[0]?.collapsedLines[0]?.text, "follow=on  visible=20  total=20");
     assert.equal(logs.boxes.some((box) => box.title === "Source"), false);
 
-    await harness.press("7");
+    await harness.press("8");
     assert.equal(selectHelpLines(harness.store.getState()).some((line) => line.includes("directly inside each expanded instance box")), true);
 });
 
@@ -1019,6 +1043,17 @@ function seedPrompt3State(store: TuiAppStore) {
         ready: false,
         status: "stopped"
     } as never);
+    store.replaceTodo("alpha", {
+        items: [
+            { content: "Inspect", id: "inspect", status: "completed" },
+            { content: "Implement Todo", detail: "Adding dedicated TUI page", id: "implement", status: "in_progress" },
+            { content: "Verify", id: "verify", status: "pending" }
+        ],
+        revision: 2,
+        summary: { completed: 1, currentItemId: "implement", total: 3 },
+        taskId: "task-1",
+        title: "Todo support"
+    });
     store.replaceToolCalls("alpha", [
         {
             callId: "call-1",

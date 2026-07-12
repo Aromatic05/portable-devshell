@@ -10,7 +10,7 @@ import type { PageId } from "../model/TuiUiTypes.js";
 import type { TuiAppState } from "../store/TuiReducers.js";
 import { selectMainBoxFlowMetrics, selectMainScreenModel } from "../store/TuiSelectors.js";
 
-export const orderedPages: PageId[] = ["instances", "config", "connector", "oauth", "audit", "logs", "help"];
+export const orderedPages: PageId[] = ["instances", "config", "connector", "oauth", "audit", "logs", "todo", "help"];
 
 export interface ScreenRouterProps {
     boxInnerWidth: number;

@@ -28,7 +28,7 @@ test("renderers format control, instance, and tool outputs", async () => {
             ready: false,
             status: "stopped"
         }),
-        "instance: demo-local\nstatus: stopped\nready: false\ndaemonState: stopped\nconnectionState: disconnected\nlastSeq: 0\n"
+        "instance: demo-local\nstatus: stopped\nready: false\ndaemonState: stopped\nconnectionState: disconnected\nlastSeq: 0\nTodo: none\n"
     );
     assert.equal(
         renderInstanceLogs([{ at: "", instanceName: "demo-local", message: "hello\n", seq: 1, stream: "stdout" }]),

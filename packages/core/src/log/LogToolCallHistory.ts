@@ -3,6 +3,7 @@ import {
     type ToolCallContext,
     type ToolCallQuery,
     type ToolCallApprovalDecision,
+    type ToolCallAssociation,
     type ToolCallRecord
 } from "@portable-devshell/shared";
 
@@ -18,6 +19,8 @@ interface ActiveToolCall {
     source: ToolCallContext["source"];
     startedAt: string;
     status: ToolCallRecord["status"];
+    taskId?: string;
+    todoItemId?: string;
     toolName: string;
 }
 
@@ -38,7 +41,8 @@ export class ToolCallHistory {
         inputSummary: string,
         context: ToolCallContext,
         startedAt: string,
-        status: ToolCallRecord["status"] = "running"
+        status: ToolCallRecord["status"] = "running",
+        association?: ToolCallAssociation
     ): Promise<void> {
         await this.#initialize();
         this.#activeCalls.set(callId, {
@@ -49,6 +53,8 @@ export class ToolCallHistory {
             source: context.source,
             startedAt,
             status,
+            taskId: association?.taskId,
+            todoItemId: association?.todoItemId,
             toolName
         });
     }

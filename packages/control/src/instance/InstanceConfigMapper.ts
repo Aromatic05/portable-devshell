@@ -1,8 +1,9 @@
-import { WorkerInstanceFactory, WorkerTransportFactory, type WorkerInstanceConfig, type WorkerTransportFactoryOptions } from "@portable-devshell/core";
+import { InstancePaths, WorkerInstanceFactory, WorkerTransportFactory, type WorkerInstance, type WorkerInstanceConfig, type WorkerTransportFactoryOptions } from "@portable-devshell/core";
 import { asInstanceName, asWorkspacePath } from "@portable-devshell/shared";
 
 import type { ControlInstanceConfig } from "../control/config/ControlConfigTomlCodec.js";
 import type { InstanceDescriptor } from "./InstanceDescriptor.js";
+import { TodoService } from "../todo/TodoService.js";
 
 export class InstanceConfigMapper {
     readonly #workerInstanceFactory: WorkerInstanceFactory;
@@ -12,7 +13,20 @@ export class InstanceConfigMapper {
     }
 
     map(instance: ControlInstanceConfig): InstanceDescriptor {
-        const worker = this.#workerInstanceFactory.create(this.#toWorkerConfig(instance));
+        const name = asInstanceName(instance.name);
+        const paths = new InstancePaths(name, process.env.HOME);
+        const workerHolder: { value?: WorkerInstance } = {};
+        const todo = new TodoService({
+            appendEvent: async (type, data) => {
+                await workerHolder.value?.appendControlEvent(type, data);
+            },
+            filePath: paths.todoFile,
+            instanceName: instance.name
+        });
+        const worker = this.#workerInstanceFactory.create(this.#toWorkerConfig(instance), {
+            toolCallAssociationProvider: () => todo.currentAssociation()
+        });
+        workerHolder.value = worker;
 
         return {
             mcpCapabilities: instance.mcp.tools.capabilities,
@@ -21,6 +35,7 @@ export class InstanceConfigMapper {
             mcpEnabled: instance.mcp.enabled,
             mcpPath: `/${instance.name}/mcp`,
             name: instance.name,
+            todo,
             worker
         };
     }

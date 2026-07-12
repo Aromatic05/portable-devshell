@@ -163,6 +163,7 @@ export function tuiAppReducer(state: TuiAppState, action: TuiAppAction): TuiAppS
                 lastStatusChangeAtByInstance: pruneByInstanceNames(state.lastStatusChangeAtByInstance, action.instances),
                 logsByInstance: pruneByInstances(state.logsByInstance, action.instances),
                 snapshotsByInstance: pruneByInstances(state.snapshotsByInstance, action.instances),
+                todoByInstance: pruneByInstances(state.todoByInstance, action.instances),
                 toolCallsByInstance: pruneByInstances(state.toolCallsByInstance, action.instances)
             }));
         case "log.append": {
@@ -380,6 +381,14 @@ export function tuiAppReducer(state: TuiAppState, action: TuiAppAction): TuiAppS
                     [action.snapshot.name]: action.snapshot
                 }
             });
+        case "todo.replace":
+            return {
+                ...state,
+                todoByInstance: {
+                    ...state.todoByInstance,
+                    [action.instance]: action.todo
+                }
+            };
         case "toolCall.replace":
             return withDerivedState({
                 ...state,

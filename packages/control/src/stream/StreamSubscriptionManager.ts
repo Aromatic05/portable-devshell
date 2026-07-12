@@ -1,4 +1,4 @@
-import { createError, createInstanceTarget, errorCodes, type JsonValue } from "@portable-devshell/shared";
+import { createError, createInstanceTarget, errorCodes, type InstanceEvent, type JsonValue } from "@portable-devshell/shared";
 
 import type { ControlRpcConnection } from "../control/rpc/ControlRpcConnection.js";
 import type { StreamSubscriptionInstance } from "./subscription/StreamSubscriptionInstance.js";
@@ -12,7 +12,13 @@ export class StreamSubscriptionManager {
         this.#pollIntervalMs = pollIntervalMs;
     }
 
-    async subscribe(connection: ControlRpcConnection, instanceName: string, instance: StreamSubscriptionInstance["instance"], fromSeq: number): Promise<JsonValue> {
+    async subscribe(
+        connection: ControlRpcConnection,
+        instanceName: string,
+        instance: StreamSubscriptionInstance["instance"],
+        fromSeq: number,
+        eventFilter?: (event: InstanceEvent) => boolean
+    ): Promise<JsonValue> {
         const slice = instance.subscribe(fromSeq);
 
         if (slice.kind === "gap") {
@@ -32,6 +38,7 @@ export class StreamSubscriptionManager {
         this.#subscriptions.set(this.#key(connection.id, instanceName), {
             connection,
             connectionId: connection.id,
+            eventFilter,
             instance,
             instanceName,
             nextSeq: slice.lastSeq + 1
@@ -39,7 +46,7 @@ export class StreamSubscriptionManager {
         this.#ensurePolling();
 
         return {
-            events: slice.events,
+            events: eventFilter === undefined ? slice.events : slice.events.filter(eventFilter),
             lastSeq: slice.lastSeq
         } as unknown as JsonValue;
     }
@@ -97,6 +104,9 @@ export class StreamSubscriptionManager {
             }
 
             for (const event of slice.events) {
+                if (subscription.eventFilter !== undefined && !subscription.eventFilter(event)) {
+                    continue;
+                }
                 await subscription.connection.sendEvent({
                     event: event.type,
                     payload: event as unknown as JsonValue,

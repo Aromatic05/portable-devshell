@@ -24,6 +24,8 @@ export function buildAuditPageBoxes(state: TuiAppState, instanceName: string): B
                       `startedAt ${record.startedAt}`,
                       `completedAt ${record.completedAt ?? "-"}`,
                       `source ${record.source}`,
+                      `task ${record.taskId ?? "-"}`,
+                      `todo item ${record.todoItemId ?? "-"}`,
                       `input ${record.inputSummary || "-"}`
                   ],
                   id: `audit-${record.callId}`,

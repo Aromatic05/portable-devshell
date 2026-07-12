@@ -83,7 +83,15 @@ test("InstanceLogStore and ToolCallHistory persist per-instance records", async 
         assert.equal(logEntry.toolName, "bash_run");
         assert.deepEqual(await logStore.read({ fromSeq: 1 }), [logEntry]);
 
-        await history.started("call-1", "bash_run", "{\"command\":\"pwd\"}", { source: "cli" }, "2026-07-07T00:00:01.000Z");
+        await history.started(
+            "call-1",
+            "bash_run",
+            "{\"command\":\"pwd\"}",
+            { source: "cli" },
+            "2026-07-07T00:00:01.000Z",
+            "running",
+            { taskId: "task-1", todoItemId: "implement" }
+        );
 
         await history.started("call-2", "bash_run", "{\"command\":\"ls\"}", { source: "cli" }, "2026-07-07T00:00:02.000Z");
         assert.deepEqual((await history.read({ status: "running" })).map((record) => record.callId), ["call-1", "call-2"]);
@@ -99,6 +107,8 @@ test("InstanceLogStore and ToolCallHistory persist per-instance records", async 
         assert.equal(completed.termination, "exited");
         assert.equal(completed.inputSummary, "{\"command\":\"pwd\"}");
         assert.equal(completed.source, "cli");
+        assert.equal(completed.taskId, "task-1");
+        assert.equal(completed.todoItemId, "implement");
 
         const completedSecond = await history.completed(
             "call-2",
