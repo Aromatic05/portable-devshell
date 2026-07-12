@@ -143,8 +143,8 @@ function createInstance(
             handshake: {
                 clientName: "portable-devshell",
                 clientVersion: "0.1.0",
-                maxProtocolVersion: 1,
-                minProtocolVersion: 1
+                maxProtocolVersion: 2,
+                minProtocolVersion: 2
             },
             name: asInstanceName("demo-local")
         } as never,
@@ -156,7 +156,7 @@ function createInstance(
             read: async () => []
         } as never,
         protocolClient: {
-            handshake: async () => ({ instance: "demo-local", protocolVersion: 1, workspace: "/tmp/workspace", workerVersion: "0.0.0" }),
+            handshake: async () => ({ instance: "demo-local", protocolVersion: 2, workspace: "/tmp/workspace", workerVersion: "0.0.0" }),
             listTools: commands.listTools ?? (async () => ({ tools: [] })),
             ping: async () => ({ pong: true })
         } as never,

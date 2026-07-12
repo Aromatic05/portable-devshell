@@ -11,7 +11,7 @@ use crate::tools::file::FileToolState;
 use crate::tools::file::discover::discover;
 use crate::tools::file::state::{FULL_SNAPSHOT_LIMIT, TextFile, TextMetadata};
 use crate::tools::file::types::{FileSearchFile, FileSearchInput, FileSearchOutput, SearchSyntax};
-use crate::tools::{ToolAccess, ToolCall, ToolCatalogEntry, ToolError, ToolHandler, ToolName};
+use crate::tools::{ToolCall, ToolCapability, ToolCatalogEntry, ToolError, ToolHandler, ToolName};
 
 const FILES_PER_PAGE: usize = 20;
 const MATCHES_PER_FILE: usize = 20;
@@ -36,7 +36,7 @@ impl ToolHandler for FileSearchTool {
         &self.name
     }
     fn catalog_entry(&self) -> ToolCatalogEntry {
-        ToolCatalogEntry { group: self.name.group().to_string(), name: self.name.as_str(), description: "Search text within exact paths, directories, and globs, returning copyable snapshot headers and edit anchors.".to_string(), input_schema: serde_json::to_value(schema_for!(FileSearchInput)).unwrap(), output_schema: serde_json::to_value(schema_for!(FileSearchOutput)).unwrap(), access: ToolAccess::Read }
+        ToolCatalogEntry { group: self.name.group().to_string(), name: self.name.as_str(), description: "Search text within exact paths, directories, and globs, returning copyable snapshot headers and edit anchors.".to_string(), input_schema: serde_json::to_value(schema_for!(FileSearchInput)).unwrap(), output_schema: serde_json::to_value(schema_for!(FileSearchOutput)).unwrap(), required_capabilities: vec![ToolCapability::Read] }
     }
     fn call(&self, call: ToolCall) -> Result<serde_json::Value, ToolError> {
         let input: FileSearchInput = serde_json::from_value(call.params.clone())

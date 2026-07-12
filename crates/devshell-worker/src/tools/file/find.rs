@@ -7,7 +7,7 @@ use serde_json::json;
 use crate::tools::file::FileToolState;
 use crate::tools::file::discover::discover;
 use crate::tools::file::types::{FileFindEntry, FileFindInput, FileFindOutput, FindType};
-use crate::tools::{ToolAccess, ToolCall, ToolCatalogEntry, ToolError, ToolHandler, ToolName};
+use crate::tools::{ToolCall, ToolCapability, ToolCatalogEntry, ToolError, ToolHandler, ToolName};
 
 const PAGE_SIZE: usize = 200;
 
@@ -28,7 +28,7 @@ impl ToolHandler for FileFindTool {
         &self.name
     }
     fn catalog_entry(&self) -> ToolCatalogEntry {
-        ToolCatalogEntry { group: self.name.group().to_string(), name: self.name.as_str(), description: "Find exact paths, directories, and globs. Returns structured entries plus a compact hierarchical tree. Hidden development files are included by default; .git is always excluded.".to_string(), input_schema: serde_json::to_value(schema_for!(FileFindInput)).unwrap(), output_schema: serde_json::to_value(schema_for!(FileFindOutput)).unwrap(), access: ToolAccess::Read }
+        ToolCatalogEntry { group: self.name.group().to_string(), name: self.name.as_str(), description: "Find exact paths, directories, and globs. Returns structured entries plus a compact hierarchical tree. Hidden development files are included by default; .git is always excluded.".to_string(), input_schema: serde_json::to_value(schema_for!(FileFindInput)).unwrap(), output_schema: serde_json::to_value(schema_for!(FileFindOutput)).unwrap(), required_capabilities: vec![ToolCapability::Read] }
     }
     fn call(&self, call: ToolCall) -> Result<serde_json::Value, ToolError> {
         let input: FileFindInput = serde_json::from_value(call.params.clone())

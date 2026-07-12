@@ -18,7 +18,7 @@ pub struct ToolCall {
 
 #[derive(Clone, Copy, Debug, JsonSchema, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub enum ToolAccess {
+pub enum ToolCapability {
     Read,
     Write,
     Execute,
@@ -32,7 +32,7 @@ pub struct ToolCatalogEntry {
     pub description: String,
     pub input_schema: serde_json::Value,
     pub output_schema: serde_json::Value,
-    pub access: ToolAccess,
+    pub required_capabilities: Vec<ToolCapability>,
 }
 
 pub trait ToolHandler: Send + Sync {

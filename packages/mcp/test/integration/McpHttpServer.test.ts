@@ -272,7 +272,7 @@ function createHost(overrides?: {
                         return { ready: true };
                     },
                     listTools() {
-                        return [{ access: "execute", group: "bash", name: "bash_run", description: "Run shell", inputSchema: { type: "object" }, outputSchema: { type: "object" } }];
+                        return [{ requiredCapabilities: ["execute"], group: "bash", name: "bash_run", description: "Run shell", inputSchema: { type: "object" }, outputSchema: { type: "object" } }];
                     },
                     async callTool(_toolName: string, _input: unknown, _context: { source: "mcp" }) {
                         return { exitCode: 0, stderr: "", stdout: "ok\n" };
@@ -436,7 +436,7 @@ test("running host replaces and unregisters instance bindings without restart", 
         host.registerInstance({
             name: "demo",
             policy: { capabilities: ["read"], groups: ["file"] },
-            worker: createToolWorker({ access: "read", group: "file", name: "file_read" })
+            worker: createToolWorker({ requiredCapabilities: ["read"], group: "file", name: "file_read" })
         });
         assert.deepEqual(await initializeAndListTools(endpoint), ["file_read"]);
 
@@ -499,7 +499,7 @@ async function initializeAndListTools(endpoint: string): Promise<string[]> {
     return payload.result?.tools?.map((tool) => tool.name) ?? [];
 }
 
-function createToolWorker(tool: { access: "execute" | "read" | "write"; group: string; name: string }) {
+function createToolWorker(tool: { requiredCapabilities: readonly ("execute" | "read" | "write")[]; group: string; name: string }) {
     return {
         async appendMcpSessionClosed(_sessionId: string) {},
         async appendMcpSessionOpened(_sessionId: string) {},

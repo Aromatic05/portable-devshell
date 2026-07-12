@@ -5,11 +5,11 @@ Todo 用于记录 Agent 当前任务的计划和进度。它由 TypeScript contr
 ## MCP 工具
 
 ```text
-todo_read   access=read
-todo_write  access=write
+todo_read   group=todo  requiredCapabilities=[]
+todo_write  group=todo  requiredCapabilities=[]
 ```
 
-工具是否暴露只由 instance 的 `mcp.tools.groups` 中是否包含 `todo` 控制，不要求任何 capability。默认新建 instance 会启用 `todo` group。
+工具是否暴露只由 instance 的 `mcp.tools.groups` 中是否包含 `todo` 控制。两个工具的 `requiredCapabilities` 都为空，因此不要求任何 capability。默认新建 instance 会启用 `todo` group。
 
 `todo_read` 不接受参数，返回当前 active task 的完整列表、revision 和 control 计算的摘要。
 

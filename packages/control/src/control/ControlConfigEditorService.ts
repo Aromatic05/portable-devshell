@@ -643,7 +643,7 @@ function readInstanceMcpConfig(
         enabled: readBoolean(mcp.enabled, current?.enabled ?? true, `${fieldName}.enabled`),
         path: readOptionalString(mcp.path, `${fieldName}.path`) ?? `/${instanceName}/mcp`,
         tools: {
-            capabilities: readToolAccessArray(tools.capabilities, `${fieldName}.tools.capabilities`),
+            capabilities: readToolCapabilityArray(tools.capabilities, `${fieldName}.tools.capabilities`),
             groups: readStringArray(tools.groups, `${fieldName}.tools.groups`)
         }
     };
@@ -830,7 +830,7 @@ function readOptionalInteger(value: JsonValue | undefined, fieldName: string): n
     return readInteger(value, fieldName);
 }
 
-function readToolAccessArray(value: JsonValue | undefined, fieldName: string): Array<"read" | "write" | "execute" | "manage"> {
+function readToolCapabilityArray(value: JsonValue | undefined, fieldName: string): Array<"read" | "write" | "execute" | "manage"> {
     return readStringArray(value, fieldName).map((entry) => {
         if (entry === "read" || entry === "write" || entry === "execute" || entry === "manage") {
             return entry;

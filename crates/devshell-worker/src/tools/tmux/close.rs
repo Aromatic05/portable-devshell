@@ -5,7 +5,7 @@ use schemars::schema_for;
 use crate::tools::tmux::group::tmux_close_name;
 use crate::tools::tmux::state::TmuxState;
 use crate::tools::tmux::types::{TmuxCloseOutput, TmuxCloseParams};
-use crate::tools::{ToolAccess, ToolCall, ToolCatalogEntry, ToolError, ToolHandler, ToolName};
+use crate::tools::{ToolCall, ToolCapability, ToolCatalogEntry, ToolError, ToolHandler, ToolName};
 
 pub struct TmuxCloseTool {
     name: ToolName,
@@ -33,7 +33,7 @@ impl ToolHandler for TmuxCloseTool {
             description: "Close one managed tmux pane. Without force the pane must be idle. The final managed pane cannot be closed.".to_string(),
             input_schema: serde_json::to_value(schema_for!(TmuxCloseParams)).unwrap(),
             output_schema: serde_json::to_value(schema_for!(TmuxCloseOutput)).unwrap(),
-            access: ToolAccess::Execute,
+            required_capabilities: vec![ToolCapability::Execute],
         }
     }
 

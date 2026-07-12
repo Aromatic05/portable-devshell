@@ -31,8 +31,8 @@ export function resolveWorkerInstanceConfig(config: WorkerInstanceConfig): Resol
         effectiveSecurityMode: config.effectiveSecurityMode ?? "disabled",
         eventBufferSize: config.eventBufferSize ?? 100,
         handshake: {
-            minProtocolVersion: 1,
-            maxProtocolVersion: 1,
+            minProtocolVersion: 2,
+            maxProtocolVersion: 2,
             clientName: "portable-devshell",
             clientVersion: "0.0.0",
             ...config.handshake

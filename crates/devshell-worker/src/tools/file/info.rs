@@ -7,7 +7,7 @@ use schemars::schema_for;
 use crate::security::path::parse_requested_path;
 use crate::tools::file::types::{FileInfoEntry, FileInfoInput, FileInfoOutput};
 use crate::tools::file::{FileToolState, authorize, resolve_info};
-use crate::tools::{ToolAccess, ToolCall, ToolCatalogEntry, ToolError, ToolHandler, ToolName};
+use crate::tools::{ToolCall, ToolCapability, ToolCatalogEntry, ToolError, ToolHandler, ToolName};
 
 pub struct FileInfoTool {
     name: ToolName,
@@ -33,7 +33,7 @@ impl ToolHandler for FileInfoTool {
                 .to_string(),
             input_schema: serde_json::to_value(schema_for!(FileInfoInput)).unwrap(),
             output_schema: serde_json::to_value(schema_for!(FileInfoOutput)).unwrap(),
-            access: ToolAccess::Read,
+            required_capabilities: vec![ToolCapability::Read],
         }
     }
     fn call(&self, call: ToolCall) -> Result<serde_json::Value, ToolError> {

@@ -5,7 +5,7 @@ use schemars::schema_for;
 use crate::tools::tmux::group::tmux_list_name;
 use crate::tools::tmux::state::TmuxState;
 use crate::tools::tmux::types::{TmuxListOutput, TmuxListParams};
-use crate::tools::{ToolAccess, ToolCall, ToolCatalogEntry, ToolError, ToolHandler, ToolName};
+use crate::tools::{ToolCall, ToolCapability, ToolCatalogEntry, ToolError, ToolHandler, ToolName};
 
 pub struct TmuxListTool {
     name: ToolName,
@@ -33,7 +33,7 @@ impl ToolHandler for TmuxListTool {
             description: "List managed tmux panes with stable pane identity, status, cwd, foreground command, and capacity.".to_string(),
             input_schema: serde_json::to_value(schema_for!(TmuxListParams)).unwrap(),
             output_schema: serde_json::to_value(schema_for!(TmuxListOutput)).unwrap(),
-            access: ToolAccess::Read,
+            required_capabilities: vec![ToolCapability::Read],
         }
     }
 

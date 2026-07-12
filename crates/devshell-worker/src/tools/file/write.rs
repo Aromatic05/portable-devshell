@@ -9,7 +9,7 @@ use crate::tools::file::publish::{self, PublishMode};
 use crate::tools::file::state::TextFile;
 use crate::tools::file::types::{FileWriteInput, FileWriteOutput};
 use crate::tools::file::{FileToolState, authorize, resolve_create};
-use crate::tools::{ToolAccess, ToolCall, ToolCatalogEntry, ToolError, ToolHandler, ToolName};
+use crate::tools::{ToolCall, ToolCapability, ToolCatalogEntry, ToolError, ToolHandler, ToolName};
 
 pub struct FileWriteTool {
     name: ToolName,
@@ -34,7 +34,7 @@ impl ToolHandler for FileWriteTool {
             description: "Create a new UTF-8 text file, or fully rewrite an existing file when expectedRevision is provided.".to_string(),
             input_schema: serde_json::to_value(schema_for!(FileWriteInput)).unwrap(),
             output_schema: serde_json::to_value(schema_for!(FileWriteOutput)).unwrap(),
-            access: ToolAccess::Write,
+            required_capabilities: vec![ToolCapability::Write],
         }
     }
     fn call(&self, call: ToolCall) -> Result<serde_json::Value, ToolError> {

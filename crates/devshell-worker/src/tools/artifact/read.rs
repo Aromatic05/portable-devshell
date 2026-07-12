@@ -4,7 +4,7 @@ use schemars::schema_for;
 
 use crate::tools::artifact::store::ArtifactStore;
 use crate::tools::artifact::types::{ArtifactReadInput, ArtifactReadOutput};
-use crate::tools::{ToolAccess, ToolCall, ToolCatalogEntry, ToolError, ToolHandler, ToolName};
+use crate::tools::{ToolCall, ToolCapability, ToolCatalogEntry, ToolError, ToolHandler, ToolName};
 
 pub struct ArtifactReadTool {
     name: ToolName,
@@ -32,7 +32,7 @@ impl ToolHandler for ArtifactReadTool {
             description: "Read a paged stdout or stderr artifact by opaque handle. Use base64 encoding for lossless binary output.".to_string(),
             input_schema: serde_json::to_value(schema_for!(ArtifactReadInput)).unwrap(),
             output_schema: serde_json::to_value(schema_for!(ArtifactReadOutput)).unwrap(),
-            access: ToolAccess::Read,
+            required_capabilities: vec![ToolCapability::Read],
         }
     }
 

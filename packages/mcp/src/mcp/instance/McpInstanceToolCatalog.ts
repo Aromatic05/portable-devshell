@@ -110,7 +110,7 @@ export class McpInstanceToolCatalog {
 
 function definition(name: McpInstanceToolName, description: string, inputSchema: JsonValue): ToolDefinition {
     return {
-        access: "manage",
+        requiredCapabilities: ["manage"],
         description,
         group: "instance",
         inputSchema,

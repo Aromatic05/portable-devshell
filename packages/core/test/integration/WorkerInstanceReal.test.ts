@@ -473,7 +473,7 @@ test("WorkerInstance reconnectRpc refreshes schema after an rpc disconnect", asy
 
         harness.setTools([
             {
-                access: "execute",
+                requiredCapabilities: ["execute"],
                 description: "Run a shell command.",
                 group: "bash",
                 inputSchema: toolSchemaFor("cwd"),
@@ -517,7 +517,7 @@ test("WorkerInstance reconnectRpc refreshes schema after an rpc disconnect", asy
 
 function createWorkerInstanceHarness(): {
     disconnect: () => void;
-    setTools: (tools: Array<{ access: "execute"; description: string; group: string; inputSchema: JsonValue; name: string; outputSchema: JsonValue }>) => void;
+    setTools: (tools: Array<{ requiredCapabilities: ["execute"]; description: string; group: string; inputSchema: JsonValue; name: string; outputSchema: JsonValue }>) => void;
     transport: WorkerCommandTransport;
     requestedMethods: () => number;
     respond: (method: string, result: Record<string, JsonValue>) => void;
@@ -531,7 +531,7 @@ function createWorkerInstanceHarness(): {
     let commandStatus: "running" | "stale" | "stopped" = "stopped";
     let tools = [
         {
-            access: "execute" as const,
+            requiredCapabilities: ["execute"] as const,
             description: "Run a shell command.",
             group: "bash",
             inputSchema: toolSchemaFor("command"),
@@ -700,7 +700,7 @@ function isRequestFrame(value: unknown): value is { id: string; method: string }
 function createLifecycleResponse(
     method: string,
     id: string,
-    tools: Array<{ access: "execute"; description: string; inputSchema: JsonValue; name: string; outputSchema: JsonValue }>
+    tools: Array<{ requiredCapabilities: ["execute"]; description: string; inputSchema: JsonValue; name: string; outputSchema: JsonValue }>
 ): WorkerRpcResponseEnvelope {
     if (method === "worker.ping") {
         return {
@@ -719,7 +719,7 @@ function createLifecycleResponse(
                 capabilities: { cancel: false, streaming: false, tools: true },
                 instance: "task-6-harness",
                 platform: { arch: "x64", os: "linux" },
-                protocolVersion: 1,
+                protocolVersion: 2,
                 workerVersion: "0.1.0",
                 workspace: "/tmp/workspace"
             },

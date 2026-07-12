@@ -346,12 +346,12 @@ function readMcpTools(recordValue: JsonValue | undefined): ControlInstanceConfig
 
     const tools = asOptionalRecord(toolsValue, "mcp.tools");
     return {
-        capabilities: readToolAccessArray(tools.capabilities, "mcp.tools.capabilities", instanceCreateSchema.defaultMcpCapabilities),
+        capabilities: readToolCapabilityArray(tools.capabilities, "mcp.tools.capabilities", instanceCreateSchema.defaultMcpCapabilities),
         groups: readStringArray(tools.groups, "mcp.tools.groups", instanceCreateSchema.defaultMcpGroups)
     };
 }
 
-function readToolAccessArray(
+function readToolCapabilityArray(
     value: JsonValue | undefined,
     fieldName: string,
     fallback: readonly ("read" | "write" | "execute" | "manage")[]

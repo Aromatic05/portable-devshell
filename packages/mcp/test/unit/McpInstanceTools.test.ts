@@ -13,7 +13,7 @@ import {
 } from "@portable-devshell/mcp";
 
 const bashTool: ToolDefinition = {
-    access: "execute",
+    requiredCapabilities: ["execute"],
     description: "Run a shell command.",
     group: "bash",
     inputSchema: {

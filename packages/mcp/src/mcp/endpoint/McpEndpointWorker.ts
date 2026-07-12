@@ -11,8 +11,12 @@ import type { McpInstanceGateway, McpSshInstanceCreateInput } from "../instance/
 import { McpInstanceToolCatalog, type McpInstanceToolName } from "../instance/McpInstanceToolCatalog.js";
 import { McpTodoToolCatalog, type McpTodoToolName } from "../todo/McpTodoToolCatalog.js";
 import { McpToolDescriptionEnhancer } from "../tool/McpToolDescriptionEnhancer.js";
-import { McpToolFilter } from "../tool/McpToolFilter.js";
 import { McpToolSchemaAdapter, McpToolSchemaUnavailableError, type McpTool } from "../tool/McpToolSchemaAdapter.js";
+import {
+    McpEndpointToolCatalog,
+    type McpEndpointToolEntry,
+    type McpEndpointToolSource
+} from "./McpEndpointToolCatalog.js";
 
 interface WorkerInstanceLike {
     appendMcpSessionClosed(sessionId: string): Promise<void>;
@@ -25,15 +29,13 @@ interface WorkerInstanceLike {
 }
 
 export class McpEndpointWorker {
-    readonly #descriptionEnhancer: McpToolDescriptionEnhancer;
-    readonly #filter: McpToolFilter;
+    readonly #catalog: McpEndpointToolCatalog;
+    readonly #descriptionEnhancer = new McpToolDescriptionEnhancer();
     readonly #gateway?: McpInstanceGateway;
     readonly #instanceName: string;
     readonly #instanceTools = new McpInstanceToolCatalog();
-    readonly #managementEnabled: boolean;
-    readonly #todoEnabled: boolean;
+    readonly #schemaAdapter = new McpToolSchemaAdapter();
     readonly #todoTools = new McpTodoToolCatalog();
-    readonly #schemaAdapter: McpToolSchemaAdapter;
     readonly #worker: WorkerInstanceLike;
 
     constructor(options: {
@@ -42,16 +44,9 @@ export class McpEndpointWorker {
         policy: ToolPolicy;
         worker: WorkerInstanceLike;
     }) {
-        this.#descriptionEnhancer = new McpToolDescriptionEnhancer();
-        this.#filter = new McpToolFilter(options.policy);
+        this.#catalog = new McpEndpointToolCatalog(options.policy);
         this.#gateway = options.gateway;
         this.#instanceName = options.instanceName;
-        this.#managementEnabled =
-            options.gateway !== undefined &&
-            options.policy.groups.includes("instance") &&
-            options.policy.capabilities.includes("manage");
-        this.#todoEnabled = options.gateway !== undefined && options.policy.groups.includes("todo");
-        this.#schemaAdapter = new McpToolSchemaAdapter();
         this.#worker = options.worker;
     }
 
@@ -71,37 +66,23 @@ export class McpEndpointWorker {
     }
 
     listTools(): McpTool[] {
-        const todoTools = this.#todoEnabled
-            ? this.#todoTools.list().map((tool) => this.#adaptTool(tool))
-            : [];
-        const managementTools = this.#managementEnabled
-            ? this.#instanceTools.list().filter((tool) => this.#filter.isAllowed(tool)).map((tool) => this.#adaptTool(tool))
-            : [];
-        const hasWorkerSchema = this.#worker.snapshot().ready || this.#worker.hasToolSchemaCache?.() === true;
-
-        if (!hasWorkerSchema) {
-            if (todoTools.length > 0 || managementTools.length > 0) {
-                return [...todoTools, ...managementTools];
-            }
+        const { exposed, hasWorkerSchema } = this.#resolveCatalog();
+        if (!hasWorkerSchema && exposed.length === 0) {
             throw new McpToolSchemaUnavailableError(this.#instanceName);
         }
 
-        const workerTools = this.#filter
-            .filter(this.#worker.listTools())
-            .map((tool) => this.#adaptTool(this.#managementEnabled ? withInstanceTarget(tool) : tool));
-        return [...workerTools, ...todoTools, ...managementTools];
+        const instanceRoutingEnabled = exposed.some((entry) => entry.owner === "instance");
+        return exposed.map((entry) =>
+            this.#adaptTool(
+                entry.owner === "worker" && instanceRoutingEnabled
+                    ? withInstanceTarget(entry.definition)
+                    : entry.definition
+            )
+        );
     }
 
     getTool(toolName: string): ToolDefinition | undefined {
-        const todoTool = this.#todoEnabled ? this.#todoTools.get(toolName) : undefined;
-        if (todoTool !== undefined) {
-            return todoTool;
-        }
-        const managementTool = this.#managementEnabled ? this.#instanceTools.get(toolName) : undefined;
-        if (managementTool !== undefined && this.#filter.isAllowed(managementTool)) {
-            return managementTool;
-        }
-        return this.#filter.filter(this.#worker.listTools()).find((tool) => tool.name === toolName);
+        return this.#resolveCatalog().exposed.find((entry) => entry.definition.name === toolName)?.definition;
     }
 
     async appendSessionOpened(sessionId: string): Promise<void> {
@@ -118,47 +99,85 @@ export class McpEndpointWorker {
             sessionId: context.sessionId
         });
 
-        if (this.#todoTools.isTodoTool(toolName)) {
-            if (!this.#todoEnabled) {
+        const { merged, exposed } = this.#resolveCatalog();
+        const known = merged.find((entry) => entry.definition.name === toolName);
+        const selected = exposed.find((entry) => entry.definition.name === toolName);
+
+        if (known?.owner === "todo") {
+            if (selected === undefined) {
                 throw this.#toolNotExposed(toolName);
             }
-            const tool = this.#todoTools.get(toolName)!;
-            this.#adaptTool(tool);
-            return await this.#callTodoTool(toolName, input, context);
+            this.#adaptTool(selected.definition);
+            return await this.#callTodoTool(toolName as McpTodoToolName, input, context);
         }
 
-        if (this.#managementEnabled && this.#instanceTools.isInstanceTool(toolName)) {
-            const tool = this.#instanceTools.get(toolName)!;
-            if (!this.#filter.isAllowed(tool)) {
+        if (known?.owner === "instance") {
+            if (selected === undefined) {
                 throw this.#toolNotExposed(toolName);
             }
-            this.#adaptTool(tool);
-            return await this.#callInstanceTool(toolName, input);
+            this.#adaptTool(selected.definition);
+            return await this.#callInstanceTool(toolName as McpInstanceToolName, input);
         }
 
-        const routed = readRoutedInput(input, this.#managementEnabled, this.#instanceName);
+        const instanceRoutingEnabled = exposed.some((entry) => entry.owner === "instance");
+        const routed = readRoutedInput(input, instanceRoutingEnabled, this.#instanceName);
+
         if (routed.instance === this.#instanceName) {
             this.assertReady();
-            const tool = this.getTool(toolName);
-            if (tool === undefined || this.#instanceTools.isInstanceTool(toolName)) {
+            if (selected === undefined || selected.owner !== "worker") {
                 throw this.#toolNotExposed(toolName);
             }
-            this.#adaptTool(tool);
+            this.#adaptTool(selected.definition);
             return await this.#worker.callTool(toolName, routed.input, context);
         }
 
         const gateway = this.#requireGateway();
         gateway.assertReady(routed.instance);
         const targetTool = gateway.listTools(routed.instance).find((tool) => tool.name === toolName);
-        if (targetTool === undefined || !this.#filter.isAllowed(targetTool)) {
+        if (targetTool === undefined || !this.#catalog.isAllowed(targetTool)) {
             throw this.#toolNotExposed(toolName, routed.instance);
         }
         this.#adaptTool(targetTool);
         return await gateway.callTool(routed.instance, toolName, routed.input, context);
     }
 
+    #resolveCatalog(): {
+        exposed: McpEndpointToolEntry[];
+        hasWorkerSchema: boolean;
+        merged: McpEndpointToolEntry[];
+    } {
+        const hasWorkerSchema = this.#worker.snapshot().ready || this.#worker.hasToolSchemaCache?.() === true;
+        const sources: McpEndpointToolSource[] = [];
+
+        if (hasWorkerSchema) {
+            sources.push({
+                owner: "worker",
+                tools: this.#worker.listTools()
+            });
+        }
+        if (this.#gateway !== undefined) {
+            sources.push(
+                {
+                    owner: "todo",
+                    tools: this.#todoTools.list()
+                },
+                {
+                    owner: "instance",
+                    tools: this.#instanceTools.list()
+                }
+            );
+        }
+
+        const merged = this.#catalog.merge(sources);
+        return {
+            exposed: this.#catalog.filter(merged),
+            hasWorkerSchema,
+            merged
+        };
+    }
+
     async #callTodoTool(toolName: McpTodoToolName, input: JsonValue, context: ToolCallContext): Promise<JsonValue> {
-        const gateway = this.#requireGatewayForControlTool();
+        const gateway = this.#requireGateway();
         switch (toolName) {
             case "todo_read":
                 assertNoArguments(input, toolName);
@@ -189,21 +208,14 @@ export class McpEndpointWorker {
         return this.#schemaAdapter.toMcpTool(tool, this.#descriptionEnhancer.enhance(tool.description));
     }
 
-    #requireGatewayForControlTool(): McpInstanceGateway {
-        if (this.#gateway !== undefined) {
-            return this.#gateway;
-        }
-        throw this.#toolNotExposed("todo");
-    }
-
     #requireGateway(): McpInstanceGateway {
-        if (this.#gateway !== undefined && this.#managementEnabled) {
+        if (this.#gateway !== undefined) {
             return this.#gateway;
         }
         throw createError({
             code: errorCodes.coreToolSchemaUnavailable,
             details: { instance: this.#instanceName },
-            message: `Instance management is not exposed by ${this.#instanceName}.`,
+            message: `Control tools are not available for ${this.#instanceName}.`,
             retryable: false
         });
     }
@@ -240,7 +252,7 @@ function withInstanceTarget(tool: ToolDefinition): ToolDefinition {
     };
 }
 
-function readRoutedInput(input: JsonValue, managementEnabled: boolean, defaultInstance: string): { input: JsonValue; instance: string } {
+function readRoutedInput(input: JsonValue, instanceRoutingEnabled: boolean, defaultInstance: string): { input: JsonValue; instance: string } {
     if (!isRecord(input)) {
         return { input, instance: defaultInstance };
     }
@@ -248,8 +260,8 @@ function readRoutedInput(input: JsonValue, managementEnabled: boolean, defaultIn
     if (target === undefined) {
         return { input, instance: defaultInstance };
     }
-    if (!managementEnabled) {
-        throw invalidArguments("The instance argument is only available when instance management is enabled.");
+    if (!instanceRoutingEnabled) {
+        throw invalidArguments("The instance argument is only available when instance management is exposed.");
     }
     if (typeof target !== "string" || target.trim().length === 0) {
         throw invalidArguments("instance must be a non-empty string.");

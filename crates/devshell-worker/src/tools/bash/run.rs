@@ -18,7 +18,7 @@ use crate::tools::artifact::types::{ArtifactReference, ArtifactStream};
 use crate::tools::bash::backend::spawn_bash;
 use crate::tools::bash::group::bash_run_name;
 use crate::tools::bash::types::{BashRunOutput, BashRunParams, BashTermination};
-use crate::tools::{ToolAccess, ToolCall, ToolCatalogEntry, ToolError, ToolHandler, ToolName};
+use crate::tools::{ToolCall, ToolCapability, ToolCatalogEntry, ToolError, ToolHandler, ToolName};
 
 const DEFAULT_TIMEOUT_MS: u64 = 30_000;
 const DEFAULT_MAX_CAPTURE_BYTES: usize = 4 * 1024 * 1024;
@@ -49,7 +49,7 @@ impl ToolHandler for BashRunTool {
             description: "Run a shell command in the worker environment.".to_string(),
             input_schema: serde_json::to_value(schema_for!(BashRunParams)).unwrap(),
             output_schema: serde_json::to_value(schema_for!(BashRunOutput)).unwrap(),
-            access: ToolAccess::Execute,
+            required_capabilities: vec![ToolCapability::Execute],
         }
     }
     fn call(&self, call: ToolCall) -> Result<serde_json::Value, ToolError> {

@@ -9,6 +9,7 @@ export * from "./mcp/auth/public/McpAuthPublicExposureGuard.js";
 export * from "./mcp/connector/McpConnectorChatGpt.js";
 export * from "./mcp/connector/McpConnectorPlaceholder.js";
 export * from "./mcp/endpoint/McpEndpointBinding.js";
+export * from "./mcp/endpoint/McpEndpointToolCatalog.js";
 export * from "./mcp/endpoint/McpEndpointWorker.js";
 export * from "./mcp/instance/McpInstanceGateway.js";
 export * from "./mcp/instance/McpInstanceToolCatalog.js";

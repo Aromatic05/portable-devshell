@@ -6,7 +6,7 @@ use crate::tools::file::state::{FULL_SNAPSHOT_LIMIT, TextFile, TextMetadata};
 use crate::tools::file::structure;
 use crate::tools::file::types::{FileReadInput, FileReadOutput, ReturnedRange};
 use crate::tools::file::{FileToolState, resolve_existing};
-use crate::tools::{ToolAccess, ToolCall, ToolCatalogEntry, ToolError, ToolHandler, ToolName};
+use crate::tools::{ToolCall, ToolCapability, ToolCatalogEntry, ToolError, ToolHandler, ToolName};
 
 const DEFAULT_LINE_COUNT: usize = 200;
 const MAX_RANGES: usize = 16;
@@ -41,7 +41,7 @@ impl ToolHandler for FileReadTool {
             .to_string(),
             input_schema: serde_json::to_value(schema_for!(FileReadInput)).unwrap(),
             output_schema: serde_json::to_value(schema_for!(FileReadOutput)).unwrap(),
-            access: ToolAccess::Read,
+            required_capabilities: vec![ToolCapability::Read],
         }
     }
     fn call(&self, call: ToolCall) -> Result<serde_json::Value, ToolError> {

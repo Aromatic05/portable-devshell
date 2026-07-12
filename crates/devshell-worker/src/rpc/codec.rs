@@ -6,7 +6,7 @@ use crate::rpc::error::RpcError;
 use crate::rpc::request::RpcRequest;
 use crate::rpc::response::RpcResponse;
 
-pub const PROTOCOL_VERSION: u32 = 1;
+pub const PROTOCOL_VERSION: u32 = 2;
 pub const MAX_FRAME_SIZE: usize = 16 * 1024 * 1024;
 
 pub fn encode_json<T: serde::Serialize>(value: &T) -> Result<Vec<u8>, String> {

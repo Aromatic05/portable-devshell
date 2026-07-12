@@ -23,7 +23,7 @@ use crate::tools::file::types::{
     FileEditResultOperation, FileEditTextInput, InsertAt, ReturnedRange,
 };
 use crate::tools::file::{FileToolState, resolve_create, resolve_existing};
-use crate::tools::{ToolAccess, ToolCall, ToolCatalogEntry, ToolError, ToolHandler, ToolName};
+use crate::tools::{ToolCall, ToolCapability, ToolCatalogEntry, ToolError, ToolHandler, ToolName};
 
 pub struct FileEditTool {
     name: ToolName,
@@ -71,7 +71,7 @@ impl ToolHandler for FileEditTool {
             description,
             input_schema,
             output_schema: serde_json::to_value(schema_for!(FileEditOutput)).unwrap(),
-            access: ToolAccess::Write,
+            required_capabilities: vec![ToolCapability::Write],
         }
     }
 

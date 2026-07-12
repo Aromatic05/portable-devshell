@@ -9,7 +9,7 @@ test("WorkerToolCatalog preserves the complete worker catalog and resets on clea
 
     const tools = catalog.refresh([
         {
-            access: "execute",
+            requiredCapabilities: ["execute"],
             description: "Run a shell command.",
             group: "bash",
             inputSchema: {
@@ -23,7 +23,7 @@ test("WorkerToolCatalog preserves the complete worker catalog and resets on clea
             outputSchema: { type: "object" }
         },
         {
-            access: "read",
+            requiredCapabilities: ["read"],
             description: "Read internal data.",
             group: "internal",
             inputSchema: {},
@@ -45,7 +45,7 @@ test("WorkerToolCatalog rejects invalid tool schema from tools.list", () => {
         () =>
             catalog.refresh([
                 {
-                    access: "execute",
+                    requiredCapabilities: ["execute"],
                     description: "Missing tool name.",
                     group: "bash",
                     inputSchema: {},
@@ -66,7 +66,7 @@ test("WorkerToolCatalog identifies an incompatible Worker catalog", () => {
     assert.throws(
         () => catalog.refresh([
             {
-                access: "execute",
+                requiredCapabilities: ["execute"],
                 description: "Incomplete tool.",
                 group: "bash",
                 name: "bash_run"
@@ -79,4 +79,51 @@ test("WorkerToolCatalog identifies an incompatible Worker catalog", () => {
             return true;
         }
     );
+});
+
+
+test("WorkerToolCatalog accepts empty and multiple required capability lists", () => {
+    const catalog = new WorkerToolCatalog();
+    const tools = catalog.refresh([
+        {
+            description: "No capability required.",
+            group: "todo",
+            inputSchema: {},
+            name: "todo_read",
+            outputSchema: {},
+            requiredCapabilities: []
+        },
+        {
+            description: "Requires read and write.",
+            group: "file",
+            inputSchema: {},
+            name: "file_sync",
+            outputSchema: {},
+            requiredCapabilities: ["read", "write"]
+        }
+    ]);
+
+    assert.deepEqual(tools.map((tool) => tool.requiredCapabilities), [[], ["read", "write"]]);
+});
+
+test("WorkerToolCatalog rejects legacy access and duplicate required capabilities", () => {
+    const catalog = new WorkerToolCatalog();
+
+    assert.throws(() => catalog.refresh([{
+        access: "read",
+        description: "Legacy tool.",
+        group: "file",
+        inputSchema: {},
+        name: "file_read",
+        outputSchema: {}
+    } as never]));
+
+    assert.throws(() => catalog.refresh([{
+        description: "Invalid tool.",
+        group: "file",
+        inputSchema: {},
+        name: "file_read",
+        outputSchema: {},
+        requiredCapabilities: ["read", "read"]
+    } as never]));
 });

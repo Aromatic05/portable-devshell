@@ -1,4 +1,4 @@
-import type { ToolAccess } from "../tool/DtoToolDefinition.js";
+import type { ToolCapability } from "../tool/DtoToolDefinition.js";
 import type { InstanceSnapshot } from "./DtoInstanceSnapshot.js";
 
 export type InstanceContainerMode =
@@ -104,7 +104,7 @@ export interface InstanceCreateSchema {
     defaultProvider: "local" | "ssh" | "docker" | "podman";
     defaultEnabled: boolean;
     defaultMcpEnabled: boolean;
-    defaultMcpCapabilities: readonly ToolAccess[];
+    defaultMcpCapabilities: readonly ToolCapability[];
     defaultMcpGroups: readonly string[];
     defaultSecurityMode: string;
 }
@@ -116,7 +116,7 @@ export interface InstanceCreateDraft {
     mcp?: {
         enabled?: boolean;
         tools?: {
-            capabilities?: ToolAccess[];
+            capabilities?: ToolCapability[];
             groups?: string[];
         };
     };
@@ -140,7 +140,7 @@ export interface InstanceCreateSummary {
         enabled: boolean;
         path: string;
         tools: {
-            capabilities: ToolAccess[];
+            capabilities: ToolCapability[];
             groups: string[];
         };
     };

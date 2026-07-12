@@ -32,15 +32,15 @@ test("WorkerRpcBridge reuses one spawned rpc process across multiple calls", asy
 
     const ping = await protocolClient.ping();
     const handshake = await protocolClient.handshake({
-        minProtocolVersion: 1,
-        maxProtocolVersion: 1,
+        minProtocolVersion: 2,
+        maxProtocolVersion: 2,
         clientName: "portable-devshell",
         clientVersion: "0.1.0"
     });
     const tools = await protocolClient.listTools();
 
     assert.equal(ping.pong, true);
-    assert.equal(handshake.protocolVersion, 1);
+    assert.equal(handshake.protocolVersion, 2);
     assert.equal("tools" in handshake, false);
     assert.equal(tools.tools[0]?.name, "bash_run");
     assert.equal(harness.spawnCount, 1);
@@ -127,8 +127,8 @@ test("WorkerProtocolClient performs ping, handshake, and tools.list against froz
 
     const ping = await protocolClient.ping();
     const handshake = await protocolClient.handshake({
-        minProtocolVersion: 1,
-        maxProtocolVersion: 1,
+        minProtocolVersion: 2,
+        maxProtocolVersion: 2,
         clientName: "portable-devshell",
         clientVersion: "0.1.0"
     });
@@ -137,7 +137,7 @@ test("WorkerProtocolClient performs ping, handshake, and tools.list against froz
     assert.equal(ping.pong, true);
     assert.equal(handshake.instance, instanceName);
     assert.equal(handshake.workspace, workspacePath);
-    assert.equal(handshake.protocolVersion, 1);
+    assert.equal(handshake.protocolVersion, 2);
     assert.equal("tools" in handshake, false);
     const bashRun = tools.tools.find((tool) => tool.name === "bash_run");
     assert.notEqual(bashRun, undefined);
@@ -255,7 +255,7 @@ function createResponse(method: string, id: string): WorkerRpcResponseEnvelope {
                 instance: "task-4-bridge",
                 workspace: "/tmp/workspace",
                 workerVersion: "0.1.0",
-                protocolVersion: 1,
+                protocolVersion: 2,
                 platform: { os: "linux", arch: "x64" },
                 capabilities: { tools: true, streaming: false, cancel: false }
             }
@@ -269,7 +269,7 @@ function createResponse(method: string, id: string): WorkerRpcResponseEnvelope {
         result: {
             tools: [
                 {
-                    access: "execute",
+                    requiredCapabilities: ["execute"],
                     group: "bash",
                     name: "bash_run",
                     description: "Run a shell command.",

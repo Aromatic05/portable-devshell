@@ -82,8 +82,8 @@ fn handshake_tools_and_bash_run_flow_work_over_framed_rpc() {
             "id": "1",
             "method": "worker.handshake",
             "params": {
-                "minProtocolVersion": 1,
-                "maxProtocolVersion": 1,
+                "minProtocolVersion": 2,
+                "maxProtocolVersion": 2,
                 "clientName": "portable-devshell",
                 "clientVersion": "0.1.0"
             }
@@ -91,7 +91,7 @@ fn handshake_tools_and_bash_run_flow_work_over_framed_rpc() {
     );
     assert_eq!(handshake["type"], "response");
     assert_eq!(handshake["ok"], true);
-    assert_eq!(handshake["result"]["protocolVersion"], 1);
+    assert_eq!(handshake["result"]["protocolVersion"], 2);
     assert_eq!(
         handshake["result"]["workerVersion"],
         env!("CARGO_PKG_VERSION")
@@ -152,10 +152,14 @@ fn handshake_tools_and_bash_run_flow_work_over_framed_rpc() {
         assert!(tool["description"].is_string());
         assert!(tool["inputSchema"].is_object());
         assert!(tool["outputSchema"].is_object());
-        assert!(matches!(
-            tool["access"].as_str(),
-            Some("read" | "write" | "execute" | "session")
-        ));
+        let required_capabilities = tool["requiredCapabilities"].as_array().unwrap();
+        assert!(!required_capabilities.is_empty());
+        assert!(
+            required_capabilities.iter().all(|capability| matches!(
+                capability.as_str(),
+                Some("read" | "write" | "execute")
+            ))
+        );
     }
 
     let bash_run = env.rpc(
@@ -208,8 +212,8 @@ fn handshake_rejects_unsupported_protocol_versions() {
             "id": "4",
             "method": "worker.handshake",
             "params": {
-                "minProtocolVersion": 2,
-                "maxProtocolVersion": 3
+                "minProtocolVersion": 1,
+                "maxProtocolVersion": 1
             }
         }),
     );
@@ -219,7 +223,7 @@ fn handshake_rejects_unsupported_protocol_versions() {
         "worker.protocolVersionUnsupported"
     );
     assert_eq!(handshake["error"]["retryable"], false);
-    assert_eq!(handshake["error"]["details"]["workerProtocolVersion"], 1);
+    assert_eq!(handshake["error"]["details"]["workerProtocolVersion"], 2);
 
     env.json_command(&["stop", "--instance", instance]);
 }

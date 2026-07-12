@@ -7,7 +7,7 @@ import { WorkerToolCatalog, WorkerToolInvoker } from "@portable-devshell/core";
 test("WorkerToolInvoker enforces all JSON Schema constraints for input and output", async () => {
     const catalog = new WorkerToolCatalog();
     catalog.refresh([{
-        access: "read",
+        requiredCapabilities: ["read"],
         description: "Read a file.",
         group: "file",
         inputSchema: {

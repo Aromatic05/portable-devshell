@@ -30,7 +30,7 @@ export interface WorkerHandshakeResult {
 }
 
 export interface WorkerToolDefinition {
-    access: "read" | "write" | "execute";
+    requiredCapabilities: readonly ("read" | "write" | "execute")[];
     name: string;
     description: string;
     group: string;

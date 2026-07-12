@@ -11,7 +11,7 @@ import {
     type InstanceContainerExistingImageConfig,
     type InstanceContainerMountConfig,
     type InstanceContainerPresetConfig,
-    type ToolAccess
+    type ToolCapability
 } from "@portable-devshell/shared";
 import { parse, stringify, type TomlTableWithoutBigInt } from "smol-toml";
 
@@ -51,7 +51,7 @@ export interface ControlInstanceMcpConfig {
     enabled: boolean;
     path?: string;
     tools: {
-        capabilities: ToolAccess[];
+        capabilities: ToolCapability[];
         groups: string[];
     };
 }
@@ -307,7 +307,7 @@ function parseInstanceDocument(document: TomlRecord): ControlInstanceConfig {
             enabled: asBoolean(mcp.enabled, "mcp.enabled"),
             path: asOptionalString(mcp.path, "mcp.path"),
             tools: {
-                capabilities: asToolAccessArray(mcpTools.capabilities, "mcp.tools.capabilities"),
+                capabilities: asToolCapabilityArray(mcpTools.capabilities, "mcp.tools.capabilities"),
                 groups: asStringArray(mcpTools.groups, "mcp.tools.groups")
             }
         },
@@ -660,7 +660,7 @@ function asStringArray(value: unknown, fieldName: string): string[] {
     return [...value];
 }
 
-function asToolAccessArray(value: unknown, fieldName: string): ToolAccess[] {
+function asToolCapabilityArray(value: unknown, fieldName: string): ToolCapability[] {
     return asStringArray(value, fieldName).map((entry) => {
         if (entry === "read" || entry === "write" || entry === "execute" || entry === "manage") {
             return entry;

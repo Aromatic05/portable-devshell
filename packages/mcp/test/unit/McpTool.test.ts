@@ -1,25 +1,94 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { McpToolDescriptionEnhancer, McpToolFilter, McpToolSchemaAdapter } from "@portable-devshell/mcp";
+import {
+    McpEndpointToolCatalog,
+    McpToolDescriptionEnhancer,
+    McpToolFilter,
+    McpToolSchemaAdapter
+} from "@portable-devshell/mcp";
+import type { ToolDefinition } from "@portable-devshell/shared";
 
-test("McpToolFilter applies group and capability policy against worker tool cache", () => {
-    const filter = new McpToolFilter({ capabilities: ["execute"], groups: ["bash"] });
-    const filtered = filter.filter([
-        { access: "execute", group: "bash", name: "bash_run", description: "Run shell", inputSchema: { type: "object" }, outputSchema: { type: "object" } },
-        { access: "read", group: "file", name: "file_read", description: "Read file", inputSchema: { type: "object" }, outputSchema: { type: "object" } }
+const bashRun: ToolDefinition = {
+    description: "Run shell",
+    group: "bash",
+    inputSchema: { type: "object" },
+    name: "bash_run",
+    outputSchema: { type: "object" },
+    requiredCapabilities: ["execute"]
+};
+
+const todoRead: ToolDefinition = {
+    description: "Read Todo",
+    group: "todo",
+    inputSchema: { type: "object" },
+    name: "todo_read",
+    outputSchema: { type: "object" },
+    requiredCapabilities: []
+};
+
+const fileSync: ToolDefinition = {
+    description: "Read and write a file",
+    group: "file",
+    inputSchema: { type: "object" },
+    name: "file_sync",
+    outputSchema: { type: "object" },
+    requiredCapabilities: ["read", "write"]
+};
+
+test("McpToolFilter requires the group and every required capability", () => {
+    const partial = new McpToolFilter({
+        capabilities: ["execute", "read"],
+        groups: ["bash", "file", "todo"]
+    });
+    assert.deepEqual(partial.filter([bashRun, todoRead, fileSync]).map((tool) => tool.name), [
+        "bash_run",
+        "todo_read"
     ]);
 
-    assert.deepEqual(filtered.map((tool) => tool.name), ["bash_run"]);
+    const complete = new McpToolFilter({
+        capabilities: ["read", "write"],
+        groups: ["file"]
+    });
+    assert.deepEqual(complete.filter([bashRun, todoRead, fileSync]).map((tool) => tool.name), ["file_sync"]);
 });
 
-test("McpToolFilter returns no tools when policy is empty", () => {
-    const filter = new McpToolFilter({ capabilities: [], groups: [] });
-    const filtered = filter.filter([
-        { access: "execute", group: "bash", name: "bash_run", description: "Run shell", inputSchema: { type: "object" }, outputSchema: { type: "object" } }
+test("McpToolFilter allows capability-free tools only when their group is enabled", () => {
+    assert.equal(new McpToolFilter({ capabilities: [], groups: ["todo"] }).isAllowed(todoRead), true);
+    assert.equal(new McpToolFilter({ capabilities: [], groups: [] }).isAllowed(todoRead), false);
+});
+
+test("McpEndpointToolCatalog merges worker and control tools before applying one policy", () => {
+    const catalog = new McpEndpointToolCatalog({
+        capabilities: ["execute"],
+        groups: ["bash", "todo"]
+    });
+    const merged = catalog.merge([
+        { owner: "worker", tools: [bashRun] },
+        { owner: "todo", tools: [todoRead] },
+        { owner: "instance", tools: [] }
     ]);
 
-    assert.deepEqual(filtered, []);
+    assert.deepEqual(catalog.filter(merged).map((entry) => `${entry.owner}:${entry.definition.name}`), [
+        "worker:bash_run",
+        "todo:todo_read"
+    ]);
+});
+
+test("McpEndpointToolCatalog rejects duplicate names across providers", () => {
+    const catalog = new McpEndpointToolCatalog({ capabilities: [], groups: ["todo"] });
+
+    assert.throws(
+        () =>
+            catalog.merge([
+                { owner: "worker", tools: [todoRead] },
+                { owner: "todo", tools: [todoRead] }
+            ]),
+        (error: unknown) => {
+            assert.equal((error as { code?: string }).code, "core.toolSchemaUnavailable");
+            return true;
+        }
+    );
 });
 
 test("McpToolDescriptionEnhancer appends MCP exposure note", () => {
@@ -30,7 +99,7 @@ test("McpToolDescriptionEnhancer appends MCP exposure note", () => {
 test("McpToolSchemaAdapter rejects missing schema", () => {
     const adapter = new McpToolSchemaAdapter();
     assert.throws(
-        () => adapter.toMcpTool({ access: "execute", group: "bash", name: "bash_run", description: "Run shell", inputSchema: undefined, outputSchema: {} } as never, "Run shell"),
+        () => adapter.toMcpTool({ ...bashRun, inputSchema: undefined } as never, "Run shell"),
         /Tool schema unavailable/u
     );
 });

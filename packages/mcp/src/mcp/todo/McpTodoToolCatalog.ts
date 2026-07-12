@@ -29,7 +29,7 @@ const outputSchema: JsonValue = { type: "object" };
 export class McpTodoToolCatalog {
     readonly #definitions: readonly ToolDefinition[] = [
         {
-            access: "read",
+            requiredCapabilities: [],
             description:
                 "Read the complete active todo plan for the current task.",
             group: "todo",
@@ -42,7 +42,7 @@ export class McpTodoToolCatalog {
             outputSchema,
         },
         {
-            access: "write",
+            requiredCapabilities: [],
             description:
                 "Replace the complete active todo plan. Always read first and pass the current revision. Revision conflicts are never overwritten silently.",
             group: "todo",

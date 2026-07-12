@@ -5,7 +5,7 @@ use schemars::schema_for;
 use crate::tools::tmux::group::tmux_inspect_name;
 use crate::tools::tmux::state::TmuxState;
 use crate::tools::tmux::types::{TmuxInspectParams, TmuxPaneOperationOutput};
-use crate::tools::{ToolAccess, ToolCall, ToolCatalogEntry, ToolError, ToolHandler, ToolName};
+use crate::tools::{ToolCall, ToolCapability, ToolCatalogEntry, ToolError, ToolHandler, ToolName};
 
 pub struct TmuxInspectTool {
     name: ToolName,
@@ -33,7 +33,7 @@ impl ToolHandler for TmuxInspectTool {
             description: "Inspect terminal history without consuming unread output. Select one pane with pane or inspect every managed pane with panes=all.".to_string(),
             input_schema: serde_json::to_value(schema_for!(TmuxInspectParams)).unwrap(),
             output_schema: serde_json::to_value(schema_for!(TmuxPaneOperationOutput)).unwrap(),
-            access: ToolAccess::Read,
+            required_capabilities: vec![ToolCapability::Read],
         }
     }
 

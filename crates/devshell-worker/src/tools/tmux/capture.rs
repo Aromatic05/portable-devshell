@@ -5,7 +5,7 @@ use schemars::schema_for;
 use crate::tools::tmux::group::tmux_capture_name;
 use crate::tools::tmux::state::TmuxState;
 use crate::tools::tmux::types::{TmuxCaptureParams, TmuxPaneOperationOutput};
-use crate::tools::{ToolAccess, ToolCall, ToolCatalogEntry, ToolError, ToolHandler, ToolName};
+use crate::tools::{ToolCall, ToolCapability, ToolCatalogEntry, ToolError, ToolHandler, ToolName};
 
 pub struct TmuxCaptureTool {
     name: ToolName,
@@ -33,7 +33,7 @@ impl ToolHandler for TmuxCaptureTool {
             description: "Consume unread output from one managed tmux pane. Positive line values return the oldest unread lines, zero discards unread output, and negative values return only the requested tail.".to_string(),
             input_schema: serde_json::to_value(schema_for!(TmuxCaptureParams)).unwrap(),
             output_schema: serde_json::to_value(schema_for!(TmuxPaneOperationOutput)).unwrap(),
-            access: ToolAccess::Read,
+            required_capabilities: vec![ToolCapability::Read],
         }
     }
 

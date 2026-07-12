@@ -1138,11 +1138,29 @@ tools/call 返回 mcp.instanceNotReady。
 
 ### 15.3 Tool schema
 
-MCP 暴露工具集合：
+MCP 工具统一使用以下定义模型：
 
 ```text
-exposedTools = worker.tools.list 返回 schema ∩ instance 配置 allowlist
+ToolDefinition {
+  name
+  group
+  requiredCapabilities[]
+  description
+  inputSchema
+  outputSchema
+}
 ```
+
+worker 工具和 control 工具必须先合并为同一个 catalog。工具名冲突属于 schema 错误，不允许覆盖。合并完成后使用同一条策略过滤：
+
+```text
+allTools = workerTools + controlTools
+exposedTools = allTools
+  where tool.group in instance.mcp.tools.groups
+  and every tool.requiredCapabilities in instance.mcp.tools.capabilities
+```
+
+`requiredCapabilities = []` 表示该工具只受 group 控制，不需要 capability。不得为某个 control 工具另写绕过统一 catalog 的启用特判。
 
 工具名：
 

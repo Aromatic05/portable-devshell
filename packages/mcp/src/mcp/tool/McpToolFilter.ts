@@ -10,7 +10,10 @@ export class McpToolFilter {
     }
 
     isAllowed(tool: ToolDefinition): boolean {
-        return this.#groups.has(tool.group) && this.#capabilities.has(tool.access);
+        return (
+            this.#groups.has(tool.group) &&
+            tool.requiredCapabilities.every((capability) => this.#capabilities.has(capability))
+        );
     }
 
     filter(tools: readonly ToolDefinition[]): ToolDefinition[] {
