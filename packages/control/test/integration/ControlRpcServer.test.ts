@@ -56,6 +56,10 @@ async function verifyRpcMethodsOverReusedConnection(): Promise<void> {
 
         const logs = await client.request("instance.readLogs", { instance: "alpha", kind: "instance" }, { fromSeq: 1 });
         assert.equal(logs.result.length, 1);
+        assert.deepEqual(worker.lastReadLogsQuery, { fromSeq: 1, limit: 100 });
+
+        await client.request("instance.readLogs", { instance: "alpha", kind: "instance" }, { limit: 1_000 });
+        assert.deepEqual(worker.lastReadLogsQuery, { fromSeq: undefined, limit: 100 });
 
         const toolCalls = await client.request("instance.readToolCalls", { instance: "alpha", kind: "instance" }, { limit: 1 });
         assert.deepEqual(toolCalls.result, [
@@ -461,6 +465,7 @@ class FakeWorker {
     #interactiveStartEnabled = false;
     #lastApprovalDecision?: { approvalId: string; decidedBy: string; decision: string; reason?: string; remember?: boolean };
     #refreshCount = 0;
+    #lastReadLogsQuery?: { fromSeq?: number; limit?: number };
     #lastReadToolCallsQuery?: Record<string, unknown>;
     #lastInteractiveInput?: string;
     #lastToolCall?: { requestId?: string; sessionId?: string; source: string };
@@ -510,6 +515,10 @@ class FakeWorker {
 
     get lastReadToolCallsQuery() {
         return this.#lastReadToolCallsQuery;
+    }
+
+    get lastReadLogsQuery() {
+        return this.#lastReadLogsQuery;
     }
 
     get lastInteractiveInput() {
@@ -566,7 +575,8 @@ class FakeWorker {
         return this.snapshot();
     }
 
-    async readLogs(query: { fromSeq?: number }) {
+    async readLogs(query: { fromSeq?: number; limit?: number }) {
+        this.#lastReadLogsQuery = query;
         return this.#logs.filter((entry) => entry.seq >= (query.fromSeq ?? 1));
     }
 

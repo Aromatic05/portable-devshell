@@ -51,6 +51,7 @@ test("TuiControlSession pulls instances, snapshots, subscribes, and recovers fro
     assert.equal(session.store.getState().configView?.version, 7);
     assert.equal(worker.snapshotCallCount >= 2, true);
     assert.deepEqual(worker.subscribeFromSeqs, [2]);
+    assert.deepEqual(worker.logReadQueries, [{ fromSeq: undefined, limit: 100 }]);
     assert.equal(session.store.getState().logsByInstance.alpha?.length, 1);
     assert.equal(session.store.getState().toolCallsByInstance.alpha?.length, 1);
     assert.equal(session.store.getState().approvalsByInstance.alpha?.length, 1);
@@ -211,6 +212,7 @@ class FakeWorker {
     readonly #toolCalls: ToolCallRecord[];
     snapshotCallCount = 0;
     subscribeFromSeqs: number[] = [];
+    logReadQueries: Array<{ limit?: number }> = [];
     callToolCount = 0;
     decisions: Array<{ approvalId: string; decision: string }> = [];
 
@@ -289,7 +291,8 @@ class FakeWorker {
         };
     }
 
-    async readLogs() {
+    async readLogs(query?: { limit?: number }) {
+        this.logReadQueries.push(query ?? {});
         return this.#logs;
     }
 
