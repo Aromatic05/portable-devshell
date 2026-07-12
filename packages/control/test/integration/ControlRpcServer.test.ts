@@ -61,6 +61,12 @@ async function verifyRpcMethodsOverReusedConnection(): Promise<void> {
         await client.request("instance.readLogs", { instance: "alpha", kind: "instance" }, { limit: 1_000 });
         assert.deepEqual(worker.lastReadLogsQuery, { fromSeq: undefined, limit: 100 });
 
+        worker.setLogMessage("x".repeat(17 * 1024 * 1024));
+        const oversizedLogs = await client.request("instance.readLogs", { instance: "alpha", kind: "instance" });
+        assert.equal(oversizedLogs.result.length, 1);
+        assert.match(oversizedLogs.result[0].message, /^\n\[log output truncated\]\n/u);
+        assert.equal(Buffer.byteLength(oversizedLogs.result[0].message, "utf8") < 1024 * 1024, true);
+
         const toolCalls = await client.request("instance.readToolCalls", { instance: "alpha", kind: "instance" }, { limit: 1 });
         assert.deepEqual(toolCalls.result, [
             {
@@ -523,6 +529,16 @@ class FakeWorker {
 
     get lastInteractiveInput() {
         return this.#lastInteractiveInput;
+    }
+
+    setLogMessage(message: string): void {
+        this.#logs = [{
+            at: new Date().toISOString(),
+            instanceName: this.#name,
+            message,
+            seq: 1,
+            stream: "stdout"
+        }];
     }
 
     enableInteractiveStart(): void {
