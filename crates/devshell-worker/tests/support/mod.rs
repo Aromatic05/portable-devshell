@@ -27,6 +27,10 @@ impl TestEnv {
         }
     }
 
+    pub fn home(&self) -> &Path {
+        self._home_guard.path()
+    }
+
     pub fn workspace(&self) -> &Path {
         &self.workspace_root
     }

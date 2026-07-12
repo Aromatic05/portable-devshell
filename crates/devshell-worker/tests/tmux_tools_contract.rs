@@ -97,6 +97,18 @@ fn tmux_tools_are_worker_native_and_document_caret_input() {
         assert!(names.contains(&expected), "missing {expected}: {names:?}");
     }
 
+    let create = catalog
+        .iter()
+        .find(|tool| tool["name"] == "tmux_create")
+        .expect("tmux_create catalog entry");
+    let name_schema = &create["inputSchema"]["properties"]["name"];
+    assert_eq!(
+        name_schema["pattern"], "^[A-Za-z0-9][A-Za-z0-9._]{0,63}$",
+        "{name_schema}"
+    );
+    assert_eq!(name_schema["minLength"], 1, "{name_schema}");
+    assert_eq!(name_schema["maxLength"], 64, "{name_schema}");
+
     let send = catalog
         .iter()
         .find(|tool| tool["name"] == "tmux_send")
@@ -108,6 +120,72 @@ fn tmux_tools_are_worker_native_and_document_caret_input() {
             "missing {notation}: {description}"
         );
     }
+
+    env.json_command(&["stop", "--instance", instance]);
+    kill_tmux_server(&env, instance);
+}
+
+#[test]
+fn first_command_discards_delayed_initial_prompt_output() {
+    if !tmux_available()
+        || !Command::new("zsh")
+            .arg("--version")
+            .output()
+            .is_ok_and(|output| output.status.success())
+    {
+        return;
+    }
+
+    let env = TestEnv::new();
+    std::fs::write(
+        env.home().join(".zshrc"),
+        r#"
+devshell_test_prompt() {
+  if [[ ! -f "$HOME/.devshell-test-prompt-ready" ]]; then
+    : >"$HOME/.devshell-test-prompt-ready"
+    sleep 0.2
+    print -rn -- initial-prompt-noise
+  fi
+}
+PROMPT='$(devshell_test_prompt)%# '
+"#,
+    )
+    .unwrap();
+
+    let instance = "aromatic-tmux-initial-prompt";
+    env.command_with_env("SHELL", "/bin/zsh")
+        .current_dir(env.workspace())
+        .args(["start", "--instance", instance])
+        .assert()
+        .success();
+
+    let sent = call(
+        &env,
+        instance,
+        "1",
+        "tmux_send",
+        json!({
+            "pane": "main",
+            "input": "printf '\\x4f\\x4b\\n'^M",
+            "wait": "block",
+            "timeMs": 3000,
+            "line": 80
+        }),
+    );
+    assert_eq!(sent["ok"], true, "{sent}");
+    let output = sent["result"]["panes"][0]["output"].as_array().unwrap();
+    assert!(
+        output
+            .iter()
+            .any(|line| line.as_str().is_some_and(|line| line == "OK")),
+        "{sent}"
+    );
+    assert!(
+        output.iter().all(|line| !line
+            .as_str()
+            .is_some_and(|line| line.contains("initial-prompt-noise"))),
+        "{sent}"
+    );
 
     env.json_command(&["stop", "--instance", instance]);
     kill_tmux_server(&env, instance);
@@ -136,7 +214,7 @@ fn tmux_panes_support_send_capture_inspect_create_and_close() {
         "tmux_send",
         json!({
             "pane": "main",
-            "input": "printf 'tmux-ready\\n'^M",
+            "input": "printf '\\x54\\x4d\\x55\\x58\\x2d\\x52\\x45\\x41\\x44\\x59\\n'^M",
             "wait": "block",
             "timeMs": 3000,
             "line": 80
@@ -148,9 +226,7 @@ fn tmux_panes_support_send_capture_inspect_create_and_close() {
             .as_array()
             .unwrap()
             .iter()
-            .any(|line| line
-                .as_str()
-                .is_some_and(|line| line.contains("tmux-ready"))),
+            .any(|line| line.as_str().is_some_and(|line| line == "TMUX-READY")),
         "{sent}"
     );
 
@@ -211,6 +287,20 @@ fn tmux_panes_support_send_capture_inspect_create_and_close() {
     );
     assert_eq!(inspected["ok"], true, "{inspected}");
     assert_eq!(inspected["result"]["panes"].as_array().unwrap().len(), 2);
+    let main = inspected["result"]["panes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|pane| pane["name"] == "main")
+        .expect("main pane inspection");
+    assert!(
+        main["lines"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|line| line.as_str() == Some("TMUX-READY")),
+        "{inspected}"
+    );
 
     let closed = call(
         &env,

@@ -69,6 +69,10 @@ pub enum TmuxPanePosition {
 #[serde(deny_unknown_fields)]
 #[serde(rename_all = "camelCase")]
 pub struct TmuxCreateParams {
+    #[schemars(
+        length(min = 1, max = 64),
+        regex(pattern = r"^[A-Za-z0-9][A-Za-z0-9._]{0,63}$")
+    )]
     pub name: String,
     #[serde(default)]
     pub relative_to: Option<String>,

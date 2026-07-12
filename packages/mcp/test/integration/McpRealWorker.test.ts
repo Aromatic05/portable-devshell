@@ -35,7 +35,7 @@ test("MCP initialize tools/list and tools/call succeed against the frozen worker
         },
         instances: [
             {
-                policy: { capabilities: ["execute"], groups: ["bash"] },
+                policy: { capabilities: ["execute"], groups: ["bash", "tmux"] },
                 name: instanceName,
                 worker: instance
             }
@@ -74,8 +74,22 @@ test("MCP initialize tools/list and tools/call succeed against the frozen worker
             method: "tools/list"
         }, sessionHeaders);
         assert.equal(list.error, undefined);
-        assert.deepEqual(list.result?.tools.map((tool: { name: string }) => tool.name), ["bash_run"]);
-        assert.deepEqual(list.result?.tools[0]?.inputSchema, instance.listTools().find((tool) => tool.name === "bash_run")?.inputSchema);
+        const tools = list.result?.tools as Array<{ inputSchema: Record<string, unknown>; name: string }>;
+        const bash = tools.find((tool) => tool.name === "bash_run");
+        const tmuxCreate = tools.find((tool) => tool.name === "tmux_create");
+        assert.notEqual(bash, undefined);
+        assert.notEqual(tmuxCreate, undefined);
+        assert.deepEqual(bash?.inputSchema, instance.listTools().find((tool) => tool.name === "bash_run")?.inputSchema);
+        assert.deepEqual(tmuxCreate?.inputSchema, instance.listTools().find((tool) => tool.name === "tmux_create")?.inputSchema);
+        assert.deepEqual(
+            (tmuxCreate?.inputSchema.properties as Record<string, unknown>).name,
+            {
+                maxLength: 64,
+                minLength: 1,
+                pattern: "^[A-Za-z0-9][A-Za-z0-9._]{0,63}$",
+                type: "string"
+            }
+        );
 
         const call = await postJson(endpoint, await readFixture("mcp-tools-call.json"), sessionHeaders);
         assert.equal(call.error, undefined);

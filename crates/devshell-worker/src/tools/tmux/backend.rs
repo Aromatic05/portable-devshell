@@ -166,6 +166,7 @@ impl TmuxBackend {
         self.mark_pane(&tmux_pane_id, &pane)?;
         self.persist_pane(&pane)?;
         self.wait_until_ready(&pane.pane_id, Duration::from_secs(3))?;
+        self.discard_initial_prompt_output(&pane.pane_id, Duration::from_secs(3))?;
         Ok(())
     }
 
@@ -239,10 +240,17 @@ impl TmuxBackend {
             "-S".into(),
             start.to_string(),
             "-E".into(),
-            end.to_string(),
+            "-".into(),
         ])?;
         let sanitized = sanitize_terminal_output(&raw);
-        Ok(sanitized.lines().map(ToOwned::to_owned).collect())
+        let mut lines = sanitized.lines().map(ToOwned::to_owned).collect::<Vec<_>>();
+        while lines.last().is_some_and(String::is_empty) {
+            lines.pop();
+        }
+
+        let logical_start = lines.len().saturating_sub(start.unsigned_abs() as usize);
+        let logical_end = lines.len().saturating_sub(end.unsigned_abs() as usize);
+        Ok(lines[logical_start.min(logical_end)..logical_end].to_vec())
     }
 
     pub fn send_input(&self, tmux_pane_id: &str, input: &str) -> Result<(), ToolError> {
@@ -313,6 +321,13 @@ impl TmuxBackend {
             return Err(error);
         }
         if let Err(error) = self.wait_until_ready(&pane.pane_id, Duration::from_secs(3)) {
+            let _ = self.run(&["kill-pane".into(), "-t".into(), tmux_pane_id.clone()]);
+            let _ = self.remove_pane_record(&pane.pane_id);
+            return Err(error);
+        }
+        if let Err(error) =
+            self.discard_initial_prompt_output(&pane.pane_id, Duration::from_secs(3))
+        {
             let _ = self.run(&["kill-pane".into(), "-t".into(), tmux_pane_id.clone()]);
             let _ = self.remove_pane_record(&pane.pane_id);
             return Err(error);
@@ -482,6 +497,43 @@ impl TmuxBackend {
             "tmux.paneNotReady",
             format!("pane {pane_id} did not report shell readiness"),
         ))
+    }
+
+    fn discard_initial_prompt_output(
+        &self,
+        pane_id: &str,
+        timeout: Duration,
+    ) -> Result<(), ToolError> {
+        const QUIET_PERIOD: Duration = Duration::from_millis(100);
+        const POLL_INTERVAL: Duration = Duration::from_millis(25);
+
+        let deadline = std::time::Instant::now() + timeout;
+        let mut previous_lines: Option<Vec<String>> = None;
+        let mut unchanged_since = std::time::Instant::now();
+
+        loop {
+            let workspace = self.capture_workspace()?;
+            let pane = workspace
+                .panes
+                .iter()
+                .find(|pane| pane.id == pane_id)
+                .ok_or_else(|| ToolError::new("tmux.paneNotFound", "created pane disappeared"))?;
+            let shell_idle = matches!(pane.command.as_str(), "bash" | "zsh");
+
+            if previous_lines.as_ref() == Some(&pane.lines) && shell_idle {
+                if unchanged_since.elapsed() >= QUIET_PERIOD {
+                    return Ok(());
+                }
+            } else {
+                previous_lines = Some(pane.lines.clone());
+                unchanged_since = std::time::Instant::now();
+            }
+
+            if std::time::Instant::now() >= deadline {
+                return Ok(());
+            }
+            thread::sleep(POLL_INTERVAL);
+        }
     }
 
     fn read_status(&self, pane_id: &str) -> Option<PaneStatusRecord> {
