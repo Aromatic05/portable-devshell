@@ -308,10 +308,7 @@ function limitLogResponse<TLog extends { message: string }>(logs: TLog[]): TLog[
 }
 
 function truncateLogMessage<TLog extends { message: string }>(log: TLog, availableBytes: number): string {
-    const emptyLogBytes = Buffer.byteLength(JSON.stringify({ ...log, message: "" }), "utf8");
-    const messageBudget = availableBytes - emptyLogBytes;
-
-    if (messageBudget <= Buffer.byteLength(LOG_TRUNCATION_MARKER, "utf8")) {
+    if (Buffer.byteLength(JSON.stringify({ ...log, message: LOG_TRUNCATION_MARKER }), "utf8") > availableBytes) {
         return LOG_TRUNCATION_MARKER;
     }
 
@@ -322,7 +319,7 @@ function truncateLogMessage<TLog extends { message: string }>(log: TLog, availab
         const middle = Math.floor((start + end) / 2);
         const message = `${LOG_TRUNCATION_MARKER}${log.message.slice(middle)}`;
 
-        if (Buffer.byteLength(message, "utf8") <= messageBudget) {
+        if (Buffer.byteLength(JSON.stringify({ ...log, message }), "utf8") <= availableBytes) {
             end = middle;
         } else {
             start = middle + 1;
