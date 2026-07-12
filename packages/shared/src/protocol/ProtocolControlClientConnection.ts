@@ -38,6 +38,7 @@ export class ProtocolControlClientConnection<TStreamMessage, TError extends Erro
     #connected = false;
     #connectionClosed = false;
     #counter = 0;
+    #socketError?: Error;
     #socket?: Socket;
     #writer?: FrameWriter;
 
@@ -110,6 +111,7 @@ export class ProtocolControlClientConnection<TStreamMessage, TError extends Erro
         }
 
         const socket = this.#socketFactory(this.#socketPath);
+        this.#socketError = undefined;
         this.#socket = socket;
         this.#writer = new FrameWriter(socket);
 
@@ -132,12 +134,13 @@ export class ProtocolControlClientConnection<TStreamMessage, TError extends Erro
         socket.once("close", () => {
             this.#connected = false;
             this.#connectionClosed = true;
-            this.#failPending(new Error("control connection closed"));
+            this.#failPending(this.#createConnectionClosedError());
             this.#pushStreamMessage(this.#connectionClosedMessage);
         });
         socket.once("error", (error) => {
             this.#connected = false;
             this.#connectionClosed = true;
+            this.#socketError = error;
             this.#failPending(error);
             this.#pushStreamMessage(this.#connectionClosedMessage);
         });
@@ -230,6 +233,16 @@ export class ProtocolControlClientConnection<TStreamMessage, TError extends Erro
 
         this.#pending.clear();
         this.#relayOutputs.clear();
+    }
+
+    #createConnectionClosedError(): Error {
+        if (this.#socketError === undefined) {
+            return new Error("control connection closed");
+        }
+
+        return new Error(`control connection closed: ${this.#socketError.message}`, {
+            cause: this.#socketError
+        });
     }
 
     #pushStreamMessage(message: TStreamMessage): void {
