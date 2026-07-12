@@ -7,6 +7,7 @@ use crate::socket::xdg_runtime_dir::xdg_runtime_dir;
 pub struct SocketPaths {
     pub instance_runtime_dir: PathBuf,
     pub socket_file: PathBuf,
+    pub tmux_socket_file: PathBuf,
 }
 
 impl SocketPaths {
@@ -16,6 +17,7 @@ impl SocketPaths {
             .join(instance.as_str());
         Ok(Self {
             socket_file: instance_runtime_dir.join("worker.sock"),
+            tmux_socket_file: instance_runtime_dir.join("tmux.sock"),
             instance_runtime_dir,
         })
     }

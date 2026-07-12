@@ -76,6 +76,8 @@ allowTools = ["bash_run"]
 - tool call 历史: `~/.devshell/<instance>/control-worker/tool-calls.jsonl`
 - event 历史: `~/.devshell/<instance>/control-worker/events.jsonl`
 - 结构化日志: `~/.devshell/<instance>/control-worker/logs.jsonl`
+- tmux 持久元数据: `~/.devshell/<instance>/tmux/`
+- tmux server socket: `$XDG_RUNTIME_DIR/devshell-worker/<instance>/tmux.sock`
 
 ## Worker 目标与安装路径
 

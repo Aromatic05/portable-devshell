@@ -42,6 +42,13 @@ impl TestEnv {
             .join("worker.sock")
     }
 
+    pub fn tmux_socket_file(&self, instance: &str) -> PathBuf {
+        self.runtime_root
+            .join("devshell-worker")
+            .join(instance)
+            .join("tmux.sock")
+    }
+
     pub fn fallback_socket_file(&self, instance: &str) -> PathBuf {
         self.home_root
             .join("runtime")

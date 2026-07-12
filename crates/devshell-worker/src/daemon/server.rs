@@ -54,8 +54,10 @@ pub fn serve(instance: InstanceName) -> Result<(), String> {
         .set_nonblocking(true)
         .map_err(|error| format!("failed to set listener nonblocking: {error}"))?;
 
-    let tools =
-        Arc::new(builtin_registry(&instance_paths, &config).map_err(|error| error.message)?);
+    let tools = Arc::new(
+        builtin_registry(&instance_paths, &socket_paths, &config, &runtime)
+            .map_err(|error| error.message)?,
+    );
     let router = Arc::new(RpcRouter::new(config.clone(), runtime, tools));
 
     while !router.shutdown_requested() {

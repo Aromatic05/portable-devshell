@@ -1,6 +1,8 @@
 use std::sync::Arc;
 
+use crate::daemon::process::WorkerRuntimeContext;
 use crate::instance::WorkerConfig;
+use crate::socket::SocketPaths;
 use crate::storage::InstancePaths;
 use crate::tools::artifact::read::ArtifactReadTool;
 use crate::tools::artifact::store::ArtifactStore;
@@ -12,11 +14,14 @@ use crate::tools::file::info::FileInfoTool;
 use crate::tools::file::read::FileReadTool;
 use crate::tools::file::search::FileSearchTool;
 use crate::tools::file::write::FileWriteTool;
+use crate::tools::tmux::register_tools as register_tmux_tools;
 use crate::tools::{ToolError, ToolRegistry};
 
 pub fn builtin_registry(
     instance_paths: &InstancePaths,
+    socket_paths: &SocketPaths,
     config: &WorkerConfig,
+    runtime: &WorkerRuntimeContext,
 ) -> Result<ToolRegistry, ToolError> {
     let mut registry = ToolRegistry::new();
     let files = FileToolState::new();
@@ -32,5 +37,6 @@ pub fn builtin_registry(
     registry.register(Arc::new(FileFindTool::new(Arc::clone(&files))) as Arc<_>)?;
     registry.register(Arc::new(FileSearchTool::new(Arc::clone(&files))) as Arc<_>)?;
     registry.register(Arc::new(FileInfoTool::new(files)) as Arc<_>)?;
+    register_tmux_tools(&mut registry, instance_paths, socket_paths, runtime)?;
     Ok(registry)
 }

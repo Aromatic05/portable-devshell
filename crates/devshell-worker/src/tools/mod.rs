@@ -6,6 +6,7 @@ pub mod error;
 pub mod file;
 pub mod name;
 pub mod registry;
+pub mod tmux;
 
 pub use catalog::builtin_registry;
 pub use contract::{ToolAccess, ToolCall, ToolCatalogEntry, ToolHandler};

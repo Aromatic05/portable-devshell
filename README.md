@@ -9,6 +9,7 @@
 - 通过 HTTP 暴露 MCP，每个 instance 对应一个 `/<instance>/mcp` endpoint。
 - 支持本地 `localhost` MCP，也支持带 OAuth 的公网 MCP。
 - 支持 `local`、`ssh`、`docker`、`podman` 四种 provider。
+- worker 原生提供 `bash`、`file`、`artifact` 和 `tmux` 工具组。
 
 ## 如何快速开始
 

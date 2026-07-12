@@ -166,7 +166,7 @@ function wizardFields(step: number, draft: Record<string, JsonValue>): Array<str
 function defaultCreateDraft(): Record<string, JsonValue> {
     return {
         enabled: true,
-        mcp: { enabled: true, tools: { capabilities: ["read", "write", "execute"], groups: ["file", "bash", "artifact"] } },
+        mcp: { enabled: true, tools: { capabilities: ["read", "write", "execute"], groups: ["file", "bash", "artifact", "tmux"] } },
         name: "",
         provider: "local",
         security: { mode: "disabled" },

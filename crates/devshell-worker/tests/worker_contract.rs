@@ -2,7 +2,7 @@ mod support;
 
 use std::fs;
 use std::io::{Read, Write};
-use std::process::Stdio;
+use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
 use serde_json::Value;
@@ -117,21 +117,36 @@ fn handshake_tools_and_bash_run_flow_work_over_framed_rpc() {
     );
     assert_eq!(tools["ok"], true);
     let catalog = tools["result"]["tools"].as_array().unwrap();
+    let mut expected_tools = vec![
+        "artifact_read",
+        "bash_run",
+        "file_edit",
+        "file_find",
+        "file_info",
+        "file_read",
+        "file_search",
+        "file_write",
+    ];
+    if Command::new("tmux")
+        .arg("-V")
+        .output()
+        .is_ok_and(|output| output.status.success())
+    {
+        expected_tools.extend([
+            "tmux_capture",
+            "tmux_close",
+            "tmux_create",
+            "tmux_inspect",
+            "tmux_list",
+            "tmux_send",
+        ]);
+    }
     assert_eq!(
         catalog
             .iter()
             .map(|tool| tool["name"].as_str().unwrap())
             .collect::<Vec<_>>(),
-        vec![
-            "artifact_read",
-            "bash_run",
-            "file_edit",
-            "file_find",
-            "file_info",
-            "file_read",
-            "file_search",
-            "file_write",
-        ]
+        expected_tools
     );
     for tool in catalog {
         assert!(tool["description"].is_string());

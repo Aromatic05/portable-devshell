@@ -1102,7 +1102,7 @@ export class CommandDispatcher {
         const entry = Array.isArray(entries)
             ? entries.find((value) => asRecord(value)?.name === instanceName)
             : undefined;
-        return cloneRecord(asRecord(entry) ?? { enabled: true, mcp: { enabled: true, path: `/${instanceName}/mcp`, tools: { capabilities: ["read", "write", "execute"], groups: ["file", "bash", "artifact"] } }, name: instanceName, provider: "local", security: { mode: "disabled" }, workspace: "" });
+        return cloneRecord(asRecord(entry) ?? { enabled: true, mcp: { enabled: true, path: `/${instanceName}/mcp`, tools: { capabilities: ["read", "write", "execute"], groups: ["file", "bash", "artifact", "tmux"] } }, name: instanceName, provider: "local", security: { mode: "disabled" }, workspace: "" });
     }
 
     #mcpDraft(): Record<string, JsonValue> {
@@ -1303,7 +1303,7 @@ function clamp(value: number, min: number, max: number): number {
 function defaultCreateDraft(): Record<string, JsonValue> {
     return {
         enabled: true,
-        mcp: { enabled: true, tools: { capabilities: ["read", "write", "execute"], groups: ["file", "bash", "artifact"] } },
+        mcp: { enabled: true, tools: { capabilities: ["read", "write", "execute"], groups: ["file", "bash", "artifact", "tmux"] } },
         name: "",
         provider: "local",
         security: { mode: "disabled" },
