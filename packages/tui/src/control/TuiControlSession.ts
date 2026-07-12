@@ -11,6 +11,8 @@ import type { TuiControlStreamMessage } from "./TuiControlStream.js";
 import { TuiAppStore } from "../store/TuiAppStore.js";
 import type { TuiInstanceListEntry, TuiLogEntry } from "../store/TuiReducers.js";
 
+const LOG_READ_LIMIT = 100;
+
 export interface TuiControlSessionOptions {
     client?: TuiControlClientLike;
     store?: TuiAppStore;
@@ -137,7 +139,7 @@ export class TuiControlSession {
     }
 
     async #reloadLogs(instance: string): Promise<void> {
-        const logs = await this.#client.readLogs(instance);
+        const logs = await this.#client.readLogs(instance, { limit: LOG_READ_LIMIT });
         this.#store.replaceLogs(instance, logs.map(mapLogEntry));
     }
 
