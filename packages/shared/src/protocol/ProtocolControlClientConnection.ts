@@ -31,7 +31,10 @@ export class ProtocolControlClientConnection<TStreamMessage, TError extends Erro
     readonly #requestIdPrefix: string;
     readonly #socketFactory: (path: string) => Socket;
     readonly #socketPath: string;
-    readonly #pending = new Map<string, { reject: (error: unknown) => void; resolve: (value: JsonValue) => void }>();
+    readonly #pending = new Map<
+        string,
+        { method: string; reject: (error: unknown) => void; resolve: (value: JsonValue) => void }
+    >();
     readonly #relayOutputs = new Map<string, (chunk: string) => void>();
     readonly #streamMessages: TStreamMessage[] = [];
     readonly #streamWaiters: Array<{ resolve: (value: TStreamMessage) => void }> = [];
@@ -162,7 +165,7 @@ export class ProtocolControlClientConnection<TStreamMessage, TError extends Erro
     ): Promise<JsonValue> {
         const id = `${this.#requestIdPrefix}-${++this.#counter}`;
         const response = new Promise<JsonValue>((resolve, reject) => {
-            this.#pending.set(id, { reject, resolve });
+            this.#pending.set(id, { method, reject, resolve });
         });
 
         if (onRelayOutput !== undefined) {
@@ -236,13 +239,22 @@ export class ProtocolControlClientConnection<TStreamMessage, TError extends Erro
     }
 
     #createConnectionClosedError(): Error {
+        const methods = [...new Set([...this.#pending.values()].map((pending) => pending.method))];
+
         if (this.#socketError === undefined) {
-            return new Error("control connection closed");
+            return new Error(
+                methods.length === 0
+                    ? "control connection closed"
+                    : `control connection closed while waiting for ${methods.join(", ")}`
+            );
         }
 
-        return new Error(`control connection closed: ${this.#socketError.message}`, {
+        return new Error(
+            `control connection closed while waiting for ${methods.length === 0 ? "a response" : methods.join(", ")}: ${this.#socketError.message}`,
+            {
             cause: this.#socketError
-        });
+            }
+        );
     }
 
     #pushStreamMessage(message: TStreamMessage): void {
