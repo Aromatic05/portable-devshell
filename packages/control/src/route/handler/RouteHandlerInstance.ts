@@ -12,6 +12,8 @@ import type { InstanceRegistry } from "../../instance/registry/InstanceRegistry.
 import type { StreamSubscriptionManager } from "../../stream/StreamSubscriptionManager.js";
 import type { ControlRpcConnection, ControlRpcRelaySession } from "../../control/rpc/ControlRpcConnection.js";
 
+const MAX_LOG_READ_LIMIT = 100;
+
 function isRecord(value: JsonValue | undefined): value is Record<string, JsonValue> {
     return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -263,13 +265,13 @@ function readWorkspacePath(params?: JsonValue): string | undefined {
 }
 
 function readLogQuery(params?: JsonValue): { fromSeq?: number; limit?: number } {
-    if (!isRecord(params)) {
-        return {};
-    }
+    const limit = isRecord(params) && typeof params.limit === "number" && Number.isInteger(params.limit)
+        ? Math.min(Math.max(params.limit, 1), MAX_LOG_READ_LIMIT)
+        : MAX_LOG_READ_LIMIT;
 
     return {
-        fromSeq: typeof params.fromSeq === "number" ? params.fromSeq : undefined,
-        limit: typeof params.limit === "number" ? params.limit : undefined
+        fromSeq: isRecord(params) && typeof params.fromSeq === "number" ? params.fromSeq : undefined,
+        limit
     };
 }
 
