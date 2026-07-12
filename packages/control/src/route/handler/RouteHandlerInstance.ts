@@ -13,6 +13,8 @@ import type { StreamSubscriptionManager } from "../../stream/StreamSubscriptionM
 import type { ControlRpcConnection, ControlRpcRelaySession } from "../../control/rpc/ControlRpcConnection.js";
 
 const MAX_LOG_READ_LIMIT = 100;
+const MAX_LOG_RESPONSE_BYTES = 1024 * 1024;
+const LOG_TRUNCATION_MARKER = "\n[log output truncated]\n";
 
 function isRecord(value: JsonValue | undefined): value is Record<string, JsonValue> {
     return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -89,7 +91,7 @@ export class RouteHandlerInstance {
             case "instance.stop":
                 return (await this.#stopInstance(descriptor)) as unknown as JsonValue;
             case "instance.readLogs":
-                return (await descriptor.worker.readLogs(readLogQuery(params))) as unknown as JsonValue;
+                return limitLogResponse(await descriptor.worker.readLogs(readLogQuery(params))) as unknown as JsonValue;
             case "instance.readToolCalls":
                 return (await descriptor.worker.readToolCalls(readToolCallQuery(params))) as unknown as JsonValue;
             case "instance.listApprovals":
@@ -273,6 +275,61 @@ function readLogQuery(params?: JsonValue): { fromSeq?: number; limit?: number } 
         fromSeq: isRecord(params) && typeof params.fromSeq === "number" ? params.fromSeq : undefined,
         limit
     };
+}
+
+function limitLogResponse<TLog extends { message: string }>(logs: TLog[]): TLog[] {
+    const response: TLog[] = [];
+    let responseBytes = 2;
+
+    for (const log of logs) {
+        const separatorBytes = response.length === 0 ? 0 : 1;
+        const logBytes = Buffer.byteLength(JSON.stringify(log), "utf8");
+
+        if (responseBytes + separatorBytes + logBytes <= MAX_LOG_RESPONSE_BYTES) {
+            response.push(log);
+            responseBytes += separatorBytes + logBytes;
+            continue;
+        }
+
+        const compactLog = {
+            ...log,
+            message: truncateLogMessage(log, MAX_LOG_RESPONSE_BYTES - responseBytes - separatorBytes)
+        };
+        const compactLogBytes = Buffer.byteLength(JSON.stringify(compactLog), "utf8");
+
+        if (responseBytes + separatorBytes + compactLogBytes <= MAX_LOG_RESPONSE_BYTES) {
+            response.push(compactLog);
+        }
+
+        return response;
+    }
+
+    return response;
+}
+
+function truncateLogMessage<TLog extends { message: string }>(log: TLog, availableBytes: number): string {
+    const emptyLogBytes = Buffer.byteLength(JSON.stringify({ ...log, message: "" }), "utf8");
+    const messageBudget = availableBytes - emptyLogBytes;
+
+    if (messageBudget <= Buffer.byteLength(LOG_TRUNCATION_MARKER, "utf8")) {
+        return LOG_TRUNCATION_MARKER;
+    }
+
+    let start = 0;
+    let end = log.message.length;
+
+    while (start < end) {
+        const middle = Math.floor((start + end) / 2);
+        const message = `${LOG_TRUNCATION_MARKER}${log.message.slice(middle)}`;
+
+        if (Buffer.byteLength(message, "utf8") <= messageBudget) {
+            end = middle;
+        } else {
+            start = middle + 1;
+        }
+    }
+
+    return `${LOG_TRUNCATION_MARKER}${log.message.slice(start)}`;
 }
 
 function readFromSeq(params?: JsonValue): number {
