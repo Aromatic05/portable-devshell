@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { renderExpandableBoxLines, wrapTerminalText } from "../../dist/component/ExpandableBox.js";
+import { isTerminalSizeSupported, mainInnerWidth, tuiLayoutMetrics } from "../../dist/app/TuiRootLayout.js";
 import {
     buildFocusGraphForState,
     buildTuiHitRegions,
@@ -313,6 +314,18 @@ test("box rendering wraps Unicode text by terminal display width", () => {
     assert.equal(lines.length, 4);
     assert.equal(lines[1]?.text, "│ 012345678901234567890123 │");
     assert.equal(lines[2]?.text, "│ 45                       │");
+});
+
+test("narrow terminals use compact navigation and reject unsupported sizes", () => {
+    assert.equal(tuiLayoutMetrics(120).mode, "full");
+    assert.equal(tuiLayoutMetrics(80).mode, "compact");
+    assert.equal(mainInnerWidth(80), 76);
+    assert.equal(isTerminalSizeSupported(80, 20), true);
+    assert.equal(isTerminalSizeSupported(59, 20), false);
+    assert.equal(isTerminalSizeSupported(80, 13), false);
+
+    const harness = createHarness();
+    assert.deepEqual(buildTuiHitRegions(harness.store.getState(), { columns: 59, rows: 20 }), []);
 });
 
 test("main box focus activates the main panel from the sidebar", () => {

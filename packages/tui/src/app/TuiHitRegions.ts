@@ -1,6 +1,6 @@
 import { selectErrorMessage, selectMainBoxFlowMetrics, selectMainScreenModel, selectSearchModel, selectSidebarModel } from "../store/TuiSelectors.js";
 import type { TuiAppState } from "../store/TuiReducers.js";
-import { mainInnerWidth, tuiLayoutMetrics } from "./TuiRootLayout.js";
+import { isTerminalSizeSupported, mainInnerWidth, tuiLayoutMetrics } from "./TuiRootLayout.js";
 
 export type TuiHitTarget =
     | { boxId: string; kind: "boxBody"; lineId?: string }
@@ -20,29 +20,35 @@ export interface TuiHitRegion {
 export function buildTuiHitRegions(state: TuiAppState, viewport: { columns: number; rows: number }): TuiHitRegion[] {
     const regions: TuiHitRegion[] = [];
     const layout = tuiLayoutMetrics(viewport.columns);
+    if (!isTerminalSizeSupported(viewport.columns, viewport.rows)) {
+        return regions;
+    }
     const sidebar = selectSidebarModel(state);
     const main = selectMainScreenModel(state);
     const metrics = selectMainBoxFlowMetrics(state, mainInnerWidth(viewport.columns));
     const search = selectSearchModel(state);
     const globalErrorHeight = blockHeight(selectErrorMessage(state));
     const toolFormHeight = state.interaction.toolForm?.open === true ? 6 : 0;
-    const mainX = layout.outerGap + layout.sidebarWidth + layout.panelGap + 2;
-    const mainWidth = Math.max(0, layout.mainPanelWidth - 2);
-    const contentY = 5;
+    const compact = layout.mode === "compact";
+    const mainX = compact ? 2 : layout.outerGap + layout.sidebarWidth + layout.panelGap + 2;
+    const mainWidth = compact ? Math.max(0, viewport.columns - 4) : Math.max(0, layout.mainPanelWidth - 2);
+    const contentY = compact ? 6 : 5;
     let sidebarY = contentY;
 
-    for (const page of sidebar.pages) {
-        regions.push({ height: 1, target: { id: page.id, kind: "page" }, width: layout.sidebarWidth - 2, x: layout.outerGap + 2, y: sidebarY++ });
-    }
-    sidebarY += 1;
-    for (const instance of sidebar.instances) {
-        regions.push({ height: 1, target: { id: instance.id, kind: "instance" }, width: layout.sidebarWidth - 2, x: layout.outerGap + 2, y: sidebarY++ });
+    if (!compact) {
+        for (const page of sidebar.pages) {
+            regions.push({ height: 1, target: { id: page.id, kind: "page" }, width: layout.sidebarWidth - 2, x: layout.outerGap + 2, y: sidebarY++ });
+        }
+        sidebarY += 1;
+        for (const instance of sidebar.instances) {
+            regions.push({ height: 1, target: { id: instance.id, kind: "instance" }, width: layout.sidebarWidth - 2, x: layout.outerGap + 2, y: sidebarY++ });
+        }
     }
 
     let mainY = contentY + globalErrorHeight + (search.open ? 1 : 0) + toolFormHeight;
     mainY += 1;
     mainY += blockHeight(main.errorLines);
-    const viewportRows = Math.max(0, viewport.rows - 7 - globalErrorHeight - (search.open ? 1 : 0) - (state.connection.status === "connecting" ? 1 : 0));
+    const viewportRows = Math.max(0, viewport.rows - (compact ? 10 : 7) - globalErrorHeight - (search.open ? 1 : 0) - (state.connection.status === "connecting" ? 1 : 0));
     const boxViewportRows = Math.max(0, viewportRows - 1 - (main.statusLine === undefined ? 0 : 1) - (main.emptyState === undefined ? 0 : 1));
     const scrollOffset = state.ui.scrollOffsets[metrics.scrollKey] ?? 0;
     const visibleEnd = Math.min(metrics.totalLines, scrollOffset + boxViewportRows);

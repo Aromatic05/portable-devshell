@@ -18,7 +18,7 @@ import {
     selectSidebarModel
 } from "../store/TuiSelectors.js";
 import type { TuiRuntime } from "./TuiRuntime.js";
-import { mainInnerWidth, TuiRootLayout } from "./TuiRootLayout.js";
+import { mainInnerWidth, tuiLayoutMetrics, TuiRootLayout } from "./TuiRootLayout.js";
 
 export interface TuiAppProps {
     runtime: TuiRuntime;
@@ -37,10 +37,11 @@ export function TuiApp(props: TuiAppProps) {
     const toolForm = state.interaction.toolForm;
     const auditDetailOpen = state.ui.selectedPage === "audit" && state.interaction.auditPage.mode !== "list";
     const footer = selectFooterModel(state);
+    const layout = tuiLayoutMetrics(props.runtime.columns);
     const boxInnerWidth = mainInnerWidth(props.runtime.columns);
     const viewportRows = Math.max(
         0,
-        props.runtime.rows - 7 - (errorLines?.length ?? 0) - (search.open ? 1 : 0) - (connection.status === "connecting" ? 1 : 0)
+        props.runtime.rows - (layout.mode === "compact" ? 10 : 7) - (errorLines?.length ?? 0) - (search.open ? 1 : 0) - (connection.status === "connecting" ? 1 : 0)
     );
 
     useInput((input, key) => {
@@ -80,7 +81,7 @@ export function TuiApp(props: TuiAppProps) {
                 </Box>
             }
             rows={props.runtime.rows}
-            sidebar={<Sidebar model={selectSidebarModel(state)} />}
+            sidebar={<Sidebar compact={layout.mode === "compact"} model={selectSidebarModel(state)} />}
         />
     );
 }

@@ -4,10 +4,20 @@ import { Box, Text } from "ink";
 import type { SidebarModel } from "../store/TuiSelectors.js";
 
 export interface SidebarProps {
+    compact?: boolean;
     model: SidebarModel;
 }
 
 export function Sidebar(props: SidebarProps) {
+    if (props.compact === true) {
+        return (
+            <Box flexDirection="column" height={2} overflow="hidden" width="100%">
+                <Text>{props.model.pages.map((item, index) => compactPageLabel(item, index)).join(" ")}</Text>
+                <Text>{props.model.instances.map(compactInstanceLabel).join(" ")}</Text>
+            </Box>
+        );
+    }
+
     return (
         <Box borderStyle="single" flexDirection="column" paddingX={1} width="100%">
             <SidebarSection items={props.model.pages} />
@@ -15,6 +25,15 @@ export function Sidebar(props: SidebarProps) {
             <SidebarSection items={props.model.instances} />
         </Box>
     );
+}
+
+function compactPageLabel(item: SidebarModel["pages"][number], index: number): string {
+    const label = item.id === "instances" ? "inst" : item.id === "connector" ? "conn" : item.label;
+    return `${item.focused ? ">" : item.selected ? "*" : ""}${index + 1}:${label}`;
+}
+
+function compactInstanceLabel(item: SidebarModel["instances"][number], index: number): string {
+    return `${item.focused ? ">" : item.selected ? "*" : ""}S${index + 1}:${item.label}`;
 }
 
 function SidebarSection(props: { items: SidebarModel["pages"] }) {
