@@ -160,12 +160,15 @@ export class TuiToolAuditModel {
 
     upsertEvent(instance: string, eventType: string, data: Record<string, JsonValue>): void {
         if (
+            eventType !== "toolCall.queued" &&
             eventType !== "toolCall.pendingApproval" &&
             eventType !== "toolCall.running" &&
             eventType !== "toolCall.completed" &&
             eventType !== "toolCall.failed" &&
             eventType !== "toolCall.denied" &&
-            eventType !== "toolCall.expired"
+            eventType !== "toolCall.expired" &&
+            eventType !== "toolCall.queueTimeout" &&
+            eventType !== "toolCall.cancelled"
         ) {
             return;
         }
@@ -184,6 +187,7 @@ export class TuiToolAuditModel {
             decision: readApprovalDecision(data.decision) ?? current?.decision,
             error: readOptionalString(data.errorCode) ?? current?.error,
             exitCode: readOptionalNumberOrNull(data.exitCode) ?? current?.exitCode,
+            input: data.input ?? current?.input,
             inputSummary: readOptionalString(data.inputSummary) ?? current?.inputSummary ?? "",
             instance: asInstanceName(instance),
             requestId: readOptionalString(data.requestId) ?? current?.requestId,
@@ -383,12 +387,15 @@ function readOptionalNumberOrNull(value: JsonValue | undefined): number | null |
 
 function readToolCallStatus(value: JsonValue | undefined): ToolCallStatus | undefined {
     if (
+        value === "queued" ||
         value === "pendingApproval" ||
         value === "running" ||
         value === "completed" ||
         value === "failed" ||
         value === "denied" ||
-        value === "expired"
+        value === "expired" ||
+        value === "queueTimeout" ||
+        value === "cancelled"
     ) {
         return value;
     }

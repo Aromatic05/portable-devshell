@@ -158,6 +158,7 @@ function applyToolCallEvent(state: TuiAppState, instance: string, data: Record<s
         decision: data.decision === "approved" || data.decision === "denied" || data.decision === "expired" ? data.decision : existing?.decision,
         error: typeof data.errorCode === "string" ? data.errorCode : existing?.error,
         exitCode: typeof data.exitCode === "number" || data.exitCode === null ? data.exitCode : existing?.exitCode,
+        input: data.input ?? existing?.input,
         inputSummary: typeof data.inputSummary === "string" ? data.inputSummary : existing?.inputSummary ?? "",
         instance: asInstanceName(instance),
         requestId: typeof data.requestId === "string" ? data.requestId : existing?.requestId,
@@ -167,12 +168,15 @@ function applyToolCallEvent(state: TuiAppState, instance: string, data: Record<s
         todoItemId: typeof data.todoItemId === "string" ? data.todoItemId : existing?.todoItemId,
         startedAt: typeof data.startedAt === "string" ? data.startedAt : existing?.startedAt ?? new Date(0).toISOString(),
         status:
+            data.status === "queued" ||
             data.status === "pendingApproval" ||
             data.status === "running" ||
             data.status === "completed" ||
             data.status === "failed" ||
             data.status === "denied" ||
-            data.status === "expired"
+            data.status === "expired" ||
+            data.status === "queueTimeout" ||
+            data.status === "cancelled"
                 ? data.status
                 : existing?.status ?? "running",
         stderrBytes: typeof data.stderrBytes === "number" ? data.stderrBytes : existing?.stderrBytes,

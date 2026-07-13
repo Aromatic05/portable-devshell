@@ -40,12 +40,15 @@ export function isStatusEvent(event: string): boolean {
 
 export function isToolCallEvent(event: string): boolean {
     return (
+        event === "toolCall.queued" ||
         event === "toolCall.pendingApproval" ||
         event === "toolCall.running" ||
         event === "toolCall.completed" ||
         event === "toolCall.failed" ||
         event === "toolCall.denied" ||
         event === "toolCall.expired"
+        || event === "toolCall.queueTimeout"
+        || event === "toolCall.cancelled"
     );
 }
 
