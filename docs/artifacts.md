@@ -181,13 +181,12 @@ The user must explicitly tell an Agent to use `host`; the feature is not discove
 
 A path source with `instance = "host"` is read from the machine running the control server. Artifact handles cannot use `host` because handles belong to worker Artifact stores.
 
-Host source access follows the effective existing `security.mode` and approval policy of the calling MCP endpoint:
+Host source access uses the effective existing `security.mode` of the managed authority instance:
 
-- unrestricted mode adds no extra path restriction.
-- restricted mode applies the configured read-path policy locally in Control.
-- approval mode requires the existing approval flow.
+- `disabled`: adds no workspace boundary, while still rejecting symbolic links and non-file/non-directory sources.
+- `workspace`: is accepted only when the authority instance uses the local provider and the requested host path resolves inside that local workspace. A remote/container workspace is not treated as a host path and is rejected.
 
-All host source access is audited.
+The authority instance is the current MCP endpoint by default. CLI/TUI operations that use `host` must also provide or infer a real managed authority instance. Host access events are written through that authority instance; `host` itself never becomes an instance.
 
 ### `host` as target
 
@@ -212,3 +211,31 @@ control.artifact.cancelTransfer
 ```
 
 These operations do not add more MCP tools.
+
+## CLI
+
+CLI commands use the normal reusable Control RPC client:
+
+```text
+devshell artifact share <instance> <artifact:<handle>|path:<path>> [--expires-in <seconds>] [--authority <instance>]
+devshell artifact shares
+devshell artifact revoke <shareId>
+
+devshell artifact transfer <source-instance> <artifact:<handle>|path:<path>> <target-instance> <target-path> [--overwrite] [--authority <instance>]
+devshell artifact transfer status <transferId>
+devshell artifact transfer cancel <transferId>
+devshell artifact transfers
+```
+
+The explicit `artifact:` and `path:` prefixes prevent a path from being mistaken for an Artifact handle. `start` prints the queued transfer record and does not wait for completion.
+
+## TUI
+
+Artifact activity is part of each existing instance box on the Instances page; it does not create a new top-level page. The collapsed box shows share/transfer counts. The expanded box shows recent records and offers:
+
+```text
+Revoke share
+Cancel transfer
+```
+
+Both actions open the existing confirmation dialog with Cancel focused by default. TUI startup pulls the persisted share and transfer lists from Control, then upserts complete records from per-instance `artifact.*` stream events.

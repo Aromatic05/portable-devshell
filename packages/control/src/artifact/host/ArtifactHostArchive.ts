@@ -20,7 +20,7 @@ import { createZstdCompress, createZstdDecompress } from "node:zlib";
 import { createBLAKE3 } from "hash-wasm";
 import { extract, pack, type Headers, type Pack } from "tar-stream";
 
-import { createError, errorCodes } from "@portable-devshell/shared";
+import { createError } from "@portable-devshell/shared";
 
 import { createArtifactHasher, updateManifestHash } from "./ArtifactHostHash.js";
 
