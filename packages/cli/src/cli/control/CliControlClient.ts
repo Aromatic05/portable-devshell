@@ -1,4 +1,10 @@
 import type {
+    ArtifactShareInput,
+    ArtifactShareResult,
+    ArtifactShareRevokeResult,
+    ArtifactTransferRecord,
+    ArtifactTransferResult,
+    ArtifactTransferStartInput,
     ControlEventEnvelope,
     InstanceCreateDraft,
     InstanceCreateResult,
@@ -48,6 +54,13 @@ export interface CliControlClientLike {
     subscribe(instance: string, fromSeq: number): Promise<CliControlStream>;
     subscribeTodo(instance: string, fromSeq: number): Promise<CliControlStream>;
     validateInstanceCreateDraft(draft: InstanceCreateDraft): Promise<InstanceCreateSummary>;
+    cancelArtifactTransfer?(transferId: string): Promise<ArtifactTransferResult>;
+    createArtifactShare?(defaultInstance: string, input: ArtifactShareInput): Promise<ArtifactShareResult>;
+    getArtifactTransfer?(transferId: string): Promise<ArtifactTransferRecord>;
+    listArtifactShares?(): Promise<ArtifactShareResult[]>;
+    listArtifactTransfers?(): Promise<ArtifactTransferRecord[]>;
+    revokeArtifactShare?(shareId: string): Promise<ArtifactShareRevokeResult>;
+    startArtifactTransfer?(defaultInstance: string, input: ArtifactTransferStartInput): Promise<ArtifactTransferResult>;
 }
 
 export class CliControlClient implements CliControlClientLike {
@@ -55,6 +68,40 @@ export class CliControlClient implements CliControlClientLike {
 
     constructor(options: CliControlConnectionOptions = {}) {
         this.#connectionOptions = options;
+    }
+
+    async createArtifactShare(defaultInstance: string, input: ArtifactShareInput): Promise<ArtifactShareResult> {
+        return (await this.#request("control.artifact.createShare", createControlTarget(), {
+            ...input,
+            defaultInstance
+        } as unknown as JsonValue)) as unknown as ArtifactShareResult;
+    }
+
+    async listArtifactShares(): Promise<ArtifactShareResult[]> {
+        return (await this.#request("control.artifact.listShares", createControlTarget())) as unknown as ArtifactShareResult[];
+    }
+
+    async revokeArtifactShare(shareId: string): Promise<ArtifactShareRevokeResult> {
+        return (await this.#request("control.artifact.revokeShare", createControlTarget(), { shareId })) as unknown as ArtifactShareRevokeResult;
+    }
+
+    async startArtifactTransfer(defaultInstance: string, input: ArtifactTransferStartInput): Promise<ArtifactTransferResult> {
+        return (await this.#request("control.artifact.startTransfer", createControlTarget(), {
+            ...input,
+            defaultInstance
+        } as unknown as JsonValue)) as unknown as ArtifactTransferResult;
+    }
+
+    async getArtifactTransfer(transferId: string): Promise<ArtifactTransferRecord> {
+        return (await this.#request("control.artifact.getTransfer", createControlTarget(), { transferId })) as unknown as ArtifactTransferRecord;
+    }
+
+    async listArtifactTransfers(): Promise<ArtifactTransferRecord[]> {
+        return (await this.#request("control.artifact.listTransfers", createControlTarget())) as unknown as ArtifactTransferRecord[];
+    }
+
+    async cancelArtifactTransfer(transferId: string): Promise<ArtifactTransferResult> {
+        return (await this.#request("control.artifact.cancelTransfer", createControlTarget(), { transferId })) as unknown as ArtifactTransferResult;
     }
 
     async listInstances(): Promise<CliInstanceListEntry[]> {

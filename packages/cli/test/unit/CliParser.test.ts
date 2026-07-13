@@ -40,3 +40,11 @@ test("Cli package exposes the Task 11 bin and runtime dependency contract", asyn
     assert.equal(packageJson.dependencies?.["@portable-devshell/shared"], "workspace:*");
     assert.equal(packageJson.dependencies?.["@portable-devshell/tui"], "workspace:*");
 });
+
+test("CliParser routes artifact arguments through the normal command pipeline", () => {
+    const parser = new CliParser();
+    assert.deepEqual(parser.parse(["artifact", "transfer", "status", "transfer-1"]), {
+        args: ["transfer", "status", "transfer-1"],
+        kind: "artifact"
+    });
+});

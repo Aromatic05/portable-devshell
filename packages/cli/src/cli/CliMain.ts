@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { CliParser, type CliParsedCommand } from "./CliParser.js";
+import { executeArtifactCommand, type ArtifactCliClient } from "./artifact/ArtifactCommand.js";
 import { CliControlClient, type CliControlClientLike } from "./control/CliControlClient.js";
 import { CliCommandControlLogs } from "./command/control/CliCommandControlLogs.js";
 import { CliCommandControlStart, type CliLifecycleManagerLike } from "./command/control/CliCommandControlStart.js";
@@ -102,6 +103,9 @@ export class CliMain {
                 return;
             case "control.logs":
                 this.#stdout.write(renderControlLogs(await new CliCommandControlLogs().execute(await this.#lifecycle())));
+                return;
+            case "artifact":
+                await executeArtifactCommand(command.args, requireArtifactClient(this.#createClient()), this.#stdout);
                 return;
             case "tui":
                 await this.#startTui();
@@ -272,4 +276,19 @@ function splitGlobalFlags(argv: readonly string[]): { commandArgs: string[]; deb
     }
 
     return { commandArgs, debug, verbose };
+}
+
+function requireArtifactClient(client: CliControlClientLike): ArtifactCliClient {
+    if (
+        client.cancelArtifactTransfer === undefined ||
+        client.createArtifactShare === undefined ||
+        client.getArtifactTransfer === undefined ||
+        client.listArtifactShares === undefined ||
+        client.listArtifactTransfers === undefined ||
+        client.revokeArtifactShare === undefined ||
+        client.startArtifactTransfer === undefined
+    ) {
+        throw new Error("Artifact control methods are unavailable in this CLI client.");
+    }
+    return client as CliControlClientLike & ArtifactCliClient;
 }
