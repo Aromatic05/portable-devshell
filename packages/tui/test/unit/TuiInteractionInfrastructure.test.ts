@@ -510,6 +510,23 @@ test("audit retains realtime input and renders patch lines structurally", async 
     assert.equal(audit.expandedLines.some((line) => line.text.includes("-old") && line.tone === "danger"), true);
 });
 
+test("audit renders legacy records without an input summary", async () => {
+    const harness = createHarness();
+    harness.store.replaceToolCalls("alpha", [{
+        callId: "legacy-call",
+        instance: "alpha",
+        source: "mcp",
+        startedAt: "2026-07-14T00:00:00.000Z",
+        status: "completed",
+        toolName: "bash_run"
+    } as never]);
+
+    await harness.press("5");
+
+    const audit = selectMainScreenModel(harness.store.getState()).boxes.find((box) => box.id === "audit-legacy-call")!;
+    assert.equal(audit.expandedLines.some((line) => line.text === "-"), true);
+});
+
 test("connector discard confirms and clears its per-instance MCP draft", async () => {
     const harness = createHarness();
 
