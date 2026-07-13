@@ -648,7 +648,7 @@ test("Prompt 3 detail line selection clamps to a valid line after data replaceme
     await harness.press("", { downArrow: true });
 
     const key = "logs:alpha:logs";
-    assert.equal(harness.store.getState().interaction.selectedDetailLineIds[key], "logs:2026-07-09T00:00:01.000Z");
+    assert.equal(harness.store.getState().interaction.selectedDetailLineIds[key], "logs:log:2");
     harness.store.replaceLogs("alpha", []);
 
     const logsBox = selectMainScreenModel(harness.store.getState()).boxes.find((box) => box.id === "logs");
@@ -684,7 +684,7 @@ test("connector editor presents unavailable endpoints and control runtime limits
     const logs = selectMainScreenModel(harness.store.getState());
     assert.equal(logs.activePage.page, "logs");
     assert.equal(logs.activePage.instance, "alpha");
-    assert.equal(logs.boxes[0]?.collapsedLines[0]?.text, "follow=on  visible=20  total=20");
+    assert.equal(logs.boxes[0]?.collapsedLines[0]?.text, "follow=on  visible=20  new=0");
     assert.equal(logs.boxes.some((box) => box.title === "Source"), false);
 
     await harness.press("8");
@@ -950,6 +950,7 @@ test("approval detail defaults to Back and requires explicit approval confirmati
 
     await harness.press("", { downArrow: true });
     await harness.press("", { downArrow: true });
+    await harness.press("", { downArrow: true });
     await harness.press("", { return: true });
     assert.equal(harness.store.getState().interaction.focusScope, "confirm");
     assert.equal(harness.store.getState().interaction.confirmDialog.title, "Confirm Approval");
@@ -959,6 +960,21 @@ test("approval detail defaults to Back and requires explicit approval confirmati
     await harness.press("", { return: true });
     assert.deepEqual(harness.approvalDecisions(), [{ approvalId: "approval-1", decision: "approve", instance: "alpha" }]);
     assert.equal(harness.store.getState().interaction.auditPage.mode, "list");
+});
+
+test("approval detail opens the associated structured input before a decision", async () => {
+    const harness = createHarness();
+
+    await harness.press("5");
+    await harness.press("", { tab: true });
+    await harness.press("", { return: true });
+    await harness.press("", { downArrow: true });
+    await harness.press("", { return: true });
+
+    assert.equal(harness.store.getState().interaction.focusScope, "textDetail");
+    assert.equal(harness.store.getState().interaction.textDetail.title, "bash_run · approval input");
+    assert.match(harness.store.getState().interaction.textDetail.body, /cmd:/u);
+    assert.deepEqual(harness.approvalDecisions(), []);
 });
 
 test("approval detail Back restores the audit list focus and scroll position", async () => {
