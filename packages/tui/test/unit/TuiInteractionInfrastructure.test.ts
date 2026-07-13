@@ -316,6 +316,21 @@ test("box rendering wraps Unicode text by terminal display width", () => {
     assert.equal(lines[2]?.text, "│ 45                       │");
 });
 
+test("box borders encode result status and retain severity while focused", () => {
+    const base = {
+        collapsedLines: [{ text: "summary" }] as const,
+        expanded: false,
+        expandedKey: "test",
+        expandedLines: [],
+        id: "test",
+        title: "Result"
+    };
+
+    assert.equal(renderExpandableBoxLines({ ...base, focused: false, status: "ready" }, 24)[0]?.color, "green");
+    assert.equal(renderExpandableBoxLines({ ...base, focused: false, status: "failed" }, 24)[0]?.color, "red");
+    assert.equal(renderExpandableBoxLines({ ...base, focused: true, severity: "danger", status: "pending" }, 24)[0]?.color, "red");
+});
+
 test("narrow terminals use compact navigation and reject unsupported sizes", () => {
     assert.equal(tuiLayoutMetrics(120).mode, "full");
     assert.equal(tuiLayoutMetrics(80).mode, "compact");
