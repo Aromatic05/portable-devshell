@@ -2,7 +2,7 @@ import type { JsonValue } from "@portable-devshell/shared";
 
 import type { BoxLine } from "../../component/ExpandableBox.js";
 
-export function auditInputLines(input: JsonValue | undefined, fallback: string): Array<{ id: string; text: string; tone?: BoxLine["tone"] }> {
+export function auditInputLines(input: JsonValue | undefined, fallback: string | undefined): Array<{ id: string; text: string; tone?: BoxLine["tone"] }> {
     return formatValue(input ?? parseFallback(fallback), 0, undefined).map((text, index) => ({
         id: `input:${index}`,
         text,
@@ -10,11 +10,11 @@ export function auditInputLines(input: JsonValue | undefined, fallback: string):
     }));
 }
 
-export function auditInputText(input: JsonValue | undefined, fallback: string): string {
+export function auditInputText(input: JsonValue | undefined, fallback: string | undefined): string {
     return formatValue(input ?? parseFallback(fallback), 0, undefined).join("\n");
 }
 
-export function auditInputSummary(input: JsonValue | undefined, fallback: string): string {
+export function auditInputSummary(input: JsonValue | undefined, fallback: string | undefined): string {
     const value = input ?? parseFallback(fallback);
     if (typeof value === "object" && value !== null && !Array.isArray(value)) {
         return Object.entries(value)
@@ -41,7 +41,10 @@ function formatValue(value: JsonValue, depth: number, label: string | undefined)
     return [prefix, ...Object.entries(value).flatMap(([key, entry]) => formatValue(entry, depth + 1, key))];
 }
 
-function parseFallback(value: string): JsonValue {
+function parseFallback(value: string | undefined): JsonValue {
+    if (value === undefined || value.length === 0) {
+        return "-";
+    }
     try {
         return JSON.parse(value) as JsonValue;
     } catch {
