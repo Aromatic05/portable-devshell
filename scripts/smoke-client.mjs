@@ -10,7 +10,7 @@ if (workerArgument === undefined) {
 }
 
 const repositoryRoot = fileURLToPath(new URL("../", import.meta.url));
-const cli = resolve(repositoryRoot, "packages", "cli", "dist", "cli", "CliMain.js");
+const cli = process.env.PORTABLE_DEVSHELL_CLI_PATH ?? resolve(repositoryRoot, "packages", "cli", "dist", "cli", "CliMain.js");
 const worker = isAbsolute(workerArgument) ? workerArgument : resolve(process.cwd(), workerArgument);
 const root = await mkdtemp(resolve(tmpdir(), "portable-devshell-client-smoke-"));
 const home = resolve(root, "user");
@@ -140,7 +140,7 @@ try {
         stage("cleanup control");
         runCli(["stop"], true);
     }
-    await rm(root, { force: true, recursive: true });
+    await rm(root, { force: true, maxRetries: 10, recursive: true, retryDelay: 100 });
 }
 
 function runCli(args, ignoreFailure = false) {

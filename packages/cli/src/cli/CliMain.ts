@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import { isCliEntrypoint } from "./CliEntrypoint.js";
 import { CliParser, type CliParsedCommand } from "./CliParser.js";
 import { executeArtifactCommand, type ArtifactCliClient } from "./artifact/ArtifactCommand.js";
 import { CliControlClient, type CliControlClientLike } from "./control/CliControlClient.js";
@@ -255,7 +256,7 @@ export class CliMain {
     }
 }
 
-if (import.meta.url === new URL(process.argv[1] ?? "", "file://").href) {
+if (isCliEntrypoint(import.meta.url, process.argv[1])) {
     const exitCode = await new CliMain().run(process.argv.slice(2));
     process.exit(exitCode);
 }
