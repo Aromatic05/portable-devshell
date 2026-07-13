@@ -1,6 +1,6 @@
 import { selectErrorMessage, selectMainBoxFlowMetrics, selectMainScreenModel, selectSearchModel, selectSidebarModel } from "../store/TuiSelectors.js";
 import type { TuiAppState } from "../store/TuiReducers.js";
-import { tuiLayoutMetrics } from "./TuiRootLayout.js";
+import { mainInnerWidth, tuiLayoutMetrics } from "./TuiRootLayout.js";
 
 export type TuiHitTarget =
     | { boxId: string; kind: "boxBody"; lineId?: string }
@@ -22,7 +22,7 @@ export function buildTuiHitRegions(state: TuiAppState, viewport: { columns: numb
     const layout = tuiLayoutMetrics(viewport.columns);
     const sidebar = selectSidebarModel(state);
     const main = selectMainScreenModel(state);
-    const metrics = selectMainBoxFlowMetrics(state);
+    const metrics = selectMainBoxFlowMetrics(state, mainInnerWidth(viewport.columns));
     const search = selectSearchModel(state);
     const globalErrorHeight = blockHeight(selectErrorMessage(state));
     const toolFormHeight = state.interaction.toolForm?.open === true ? 6 : 0;

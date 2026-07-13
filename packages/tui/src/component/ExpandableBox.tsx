@@ -1,5 +1,6 @@
 import React from "react";
 import { Box, Text } from "ink";
+import stringWidth from "string-width";
 
 import type { ExpandableBoxStatus } from "../model/TuiUiTypes.js";
 
@@ -66,16 +67,16 @@ export function renderExpandableBoxLines(box: BoxModel, requestedInnerWidth: num
             key: `${box.id}-top`,
             text: titleLine
         },
-        ...bodyLines.map((line, index) => {
+        ...bodyLines.flatMap((line, index) => {
             const selected = box.expanded && box.focused && box.selectedDetailLineId === line.id;
 
-            return {
+            return wrapTerminalText(line.text, innerWidth).map((wrapped, wrappedIndex) => ({
                 backgroundColor: selected ? "cyan" : undefined,
                 color: selected ? "black" : lineColor(line.tone),
                 dimColor: !selected && (line.tone === "muted" || line.disabled === true),
-                key: `${box.id}-${line.id ?? index}`,
-                text: renderBodyLine(line.text, innerWidth)
-            };
+                key: `${box.id}-${line.id ?? index}-${wrappedIndex}`,
+                text: renderBodyLine(wrapped, innerWidth)
+            }));
         }),
         {
             color: borderColor,
@@ -85,32 +86,39 @@ export function renderExpandableBoxLines(box: BoxModel, requestedInnerWidth: num
     ];
 }
 
-export function measureExpandableBoxHeight(box: BoxModel): number {
-    return (box.expanded ? box.expandedLines.length : box.collapsedLines.length) + 2;
+export function measureExpandableBoxHeight(box: BoxModel, requestedInnerWidth = 80): number {
+    const innerWidth = Math.max(24, requestedInnerWidth);
+    const bodyLines = box.expanded ? box.expandedLines : box.collapsedLines;
+    return bodyLines.reduce((height, line) => height + wrapTerminalText(line.text, innerWidth).length, 2);
 }
 
 function renderTopBorder(title: string, innerWidth: number, frame: { horizontal: string; topLeft: string; topRight: string }): string {
     const maxTitleWidth = Math.max(1, innerWidth - 1);
     const normalizedTitle = truncateTitle(title, maxTitleWidth);
-    const suffixWidth = Math.max(0, innerWidth - normalizedTitle.length - 1);
+    const suffixWidth = Math.max(0, innerWidth - stringWidth(normalizedTitle) - 1);
     return `${frame.topLeft}${frame.horizontal} ${normalizedTitle}${suffixWidth > 0 ? ` ${frame.horizontal.repeat(suffixWidth)}` : ""}${frame.topRight}`;
 }
 
 function renderBodyLine(text: string, innerWidth: number): string {
-    const normalized = padRight(truncateTitle(text, innerWidth), innerWidth);
+    const normalized = padRight(truncateTerminalText(text, innerWidth), innerWidth);
     return `│ ${normalized} │`;
 }
 
 function padRight(text: string, width: number): string {
-    if (text.length >= width) {
+    const textWidth = stringWidth(text);
+    if (textWidth >= width) {
         return text;
     }
 
-    return `${text}${" ".repeat(width - text.length)}`;
+    return `${text}${" ".repeat(width - textWidth)}`;
 }
 
 function truncateTitle(text: string, width: number): string {
-    if (text.length <= width) {
+    return truncateTerminalText(text, width);
+}
+
+function truncateTerminalText(text: string, width: number): string {
+    if (stringWidth(text) <= width) {
         return text;
     }
 
@@ -118,7 +126,55 @@ function truncateTitle(text: string, width: number): string {
         return "…";
     }
 
-    return `${text.slice(0, width - 1)}…`;
+    return `${takeTerminalWidth(text, width - 1)}…`;
+}
+
+export function wrapTerminalText(text: string, width: number): string[] {
+    const safeWidth = Math.max(1, width);
+    const output: string[] = [];
+
+    for (const sourceLine of text.split(/\r?\n/u)) {
+        if (sourceLine.length === 0) {
+            output.push("");
+            continue;
+        }
+
+        let current = "";
+        for (const token of sourceLine.match(/\s+|\S+/gu) ?? []) {
+            if (stringWidth(current + token) <= safeWidth) {
+                current += token;
+                continue;
+            }
+
+            if (current.length > 0) {
+                output.push(current.trimEnd());
+                current = token.trimStart();
+            } else {
+                current = token;
+            }
+
+            while (stringWidth(current) > safeWidth) {
+                const chunk = takeTerminalWidth(current, safeWidth);
+                output.push(chunk);
+                current = current.slice(chunk.length);
+            }
+        }
+
+        output.push(current.trimEnd());
+    }
+
+    return output;
+}
+
+function takeTerminalWidth(text: string, width: number): string {
+    let output = "";
+    for (const segment of new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(text)) {
+        if (stringWidth(output + segment.segment) > width) {
+            break;
+        }
+        output += segment.segment;
+    }
+    return output.length === 0 ? text.slice(0, 1) : output;
 }
 
 function lineColor(tone: BoxLineTone | undefined): string | undefined {

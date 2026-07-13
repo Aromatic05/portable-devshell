@@ -41,7 +41,7 @@ export function ScreenRouter(props: ScreenRouterProps) {
         return <ApprovalDetail approval={approval} mode={auditPage.mode} selectedAction={auditPage.selectedAction} />;
     }
     const model = selectMainScreenModel(props.state);
-    const flow = selectMainBoxFlowMetrics(props.state);
+    const flow = selectMainBoxFlowMetrics(props.state, props.boxInnerWidth);
     const scrollOffset = props.state.ui.scrollOffsets[flow.scrollKey] ?? 0;
     const boxViewportRows = Math.max(0, props.viewportRows - 1 - (model.statusLine === undefined ? 0 : 1) - (model.emptyState === undefined ? 0 : 1));
     const renderedLines = model.boxes.flatMap((box) => renderExpandableBoxLines(box, props.boxInnerWidth));

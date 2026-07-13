@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { renderExpandableBoxLines } from "../../dist/component/ExpandableBox.js";
+import { renderExpandableBoxLines, wrapTerminalText } from "../../dist/component/ExpandableBox.js";
 import {
     buildFocusGraphForState,
     buildTuiHitRegions,
@@ -294,6 +294,25 @@ test("space expands a box without blocking main box navigation", async () => {
     }
     assert.equal(harness.store.getState().interaction.focusScope, "mainBoxes");
     assert.equal(harness.store.getState().ui.mainFocusId, "instance:beta");
+});
+
+test("box rendering wraps Unicode text by terminal display width", () => {
+    assert.deepEqual(wrapTerminalText("配置 😀 long-value", 8), ["配置 😀", "long-val", "ue"]);
+
+    const lines = renderExpandableBoxLines({
+        collapsedLines: [{ text: "01234567890123456789012345" }],
+        expanded: false,
+        expandedKey: "test",
+        expandedLines: [],
+        focused: false,
+        id: "test",
+        status: "normal",
+        title: "测试"
+    }, 24);
+
+    assert.equal(lines.length, 4);
+    assert.equal(lines[1]?.text, "│ 012345678901234567890123 │");
+    assert.equal(lines[2]?.text, "│ 45                       │");
 });
 
 test("main box focus activates the main panel from the sidebar", () => {

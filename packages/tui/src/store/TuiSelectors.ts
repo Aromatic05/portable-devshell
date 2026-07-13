@@ -116,14 +116,14 @@ export function selectMainBoxIds(state: TuiAppState): string[] {
     return selectMainScreenModel(state).boxes.map((box) => box.id);
 }
 
-export function selectMainBoxFlowMetrics(state: TuiAppState): MainBoxFlowMetrics {
+export function selectMainBoxFlowMetrics(state: TuiAppState, boxInnerWidth = 80): MainBoxFlowMetrics {
     const model = selectMainScreenModel(state);
     let cursor = 0;
     const boxRanges: Record<string, { end: number; start: number }> = {};
 
     for (const box of model.boxes) {
         const start = cursor;
-        cursor += measureExpandableBoxHeight(box);
+        cursor += measureExpandableBoxHeight(box, boxInnerWidth);
         boxRanges[box.id] = { end: cursor, start };
     }
 

@@ -41,7 +41,7 @@ importers:
     dependencies:
       '@portable-devshell/control':
         specifier: workspace:*
-        version: link:../control
+        version: file:packages/control
       '@portable-devshell/shared':
         specifier: workspace:*
         version: link:../shared
@@ -136,6 +136,9 @@ importers:
       string-argv:
         specifier: ^0.3.2
         version: 0.3.2
+      string-width:
+        specifier: ^7.2.0
+        version: 7.2.0
 
 packages:
 
@@ -382,6 +385,18 @@ packages:
     peerDependenciesMeta:
       '@cfworker/json-schema':
         optional: true
+
+  '@portable-devshell/control@file:packages/control':
+    resolution: {directory: packages/control, type: directory}
+
+  '@portable-devshell/core@file:packages/core':
+    resolution: {directory: packages/core, type: directory}
+
+  '@portable-devshell/mcp@file:packages/mcp':
+    resolution: {directory: packages/mcp, type: directory}
+
+  '@portable-devshell/shared@file:packages/shared':
+    resolution: {directory: packages/shared, type: directory}
 
   '@types/accepts@1.3.7':
     resolution: {integrity: sha512-Pay9fq2lM2wXPWbteBsRAGiWH2hig4ZE2asK+mm7kUzlxRTfL961rj89I6zV/E3PcIkDqyuBEcMxFT7rccugeQ==}
@@ -1716,6 +1731,46 @@ snapshots:
       zod-to-json-schema: 3.25.2(zod@3.25.76)
     transitivePeerDependencies:
       - supports-color
+
+  '@portable-devshell/control@file:packages/control':
+    dependencies:
+      '@portable-devshell/core': file:packages/core
+      '@portable-devshell/mcp': file:packages/mcp(zod@3.25.76)
+      '@portable-devshell/shared': file:packages/shared
+      hash-wasm: 4.12.0
+      smol-toml: 1.7.0
+      tar-stream: 3.2.0
+      ws: 8.21.0
+    transitivePeerDependencies:
+      - '@cfworker/json-schema'
+      - bare-abort-controller
+      - bare-buffer
+      - bufferutil
+      - react-native-b4a
+      - supports-color
+      - utf-8-validate
+      - zod
+
+  '@portable-devshell/core@file:packages/core':
+    dependencies:
+      '@portable-devshell/shared': file:packages/shared
+      ajv: 8.20.0
+      string-argv: 0.3.2
+
+  '@portable-devshell/mcp@file:packages/mcp(zod@3.25.76)':
+    dependencies:
+      '@modelcontextprotocol/sdk': 1.29.0(zod@3.25.76)
+      '@portable-devshell/shared': file:packages/shared
+      '@types/oidc-provider': 9.5.0
+      express: 5.2.1
+      jose: 6.2.3
+      oidc-provider: 9.9.1
+    transitivePeerDependencies:
+      - '@cfworker/json-schema'
+      - supports-color
+      - zod
+
+  '@portable-devshell/shared@file:packages/shared': {}
 
   '@types/accepts@1.3.7':
     dependencies:
