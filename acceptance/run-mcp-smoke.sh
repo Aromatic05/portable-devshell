@@ -9,7 +9,7 @@ fixture_workspace="$repo_root/acceptance/fixtures/workspace"
 
 if [ ! -x "$worker_binary" ]; then
     echo "building worker binary: $worker_binary" >&2
-    cargo build -p devshell-worker --manifest-path "$repo_root/Cargo.toml"
+    cargo build --locked -p devshell-worker --manifest-path "$repo_root/Cargo.toml"
 fi
 
 if [ ! -x "$worker_binary" ]; then
@@ -71,7 +71,7 @@ const { writeFileSync } = require("node:fs");
 writeFileSync(
   process.env.OUTPUT_INSTANCE_CONFIG,
   [
-    "version = 1",
+    "version = 2",
     'name = "aromatic-pc"',
     "enabled = true",
     'provider = "local"',
@@ -79,7 +79,10 @@ writeFileSync(
     "",
     "[mcp]",
     "enabled = true",
-    'allowTools = ["bash_run"]',
+    "",
+    "[mcp.tools]",
+    'groups = ["bash"]',
+    'capabilities = ["execute"]',
     "",
     "[logs]",
     "eventBufferSize = 50",

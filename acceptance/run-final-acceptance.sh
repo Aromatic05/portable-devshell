@@ -7,9 +7,9 @@ cd "$repo_root"
 
 pnpm build
 pnpm typecheck
+cargo build --locked --workspace
 pnpm test
-cargo test --manifest-path "$repo_root/Cargo.toml"
-cargo build --manifest-path "$repo_root/Cargo.toml"
+cargo test --locked --workspace
 
 bash "$repo_root/acceptance/run-real-worker-smoke.sh"
 bash "$repo_root/acceptance/run-mcp-smoke.sh"

@@ -1,0 +1,30 @@
+name: ci
+
+on:
+    pull_request:
+    push:
+        branches:
+            - main
+
+permissions:
+    contents: read
+
+jobs:
+    acceptance:
+        runs-on: ubuntu-24.04
+        steps:
+            - uses: actions/checkout@v4
+            - uses: pnpm/action-setup@v4
+              with:
+                  version: 10.13.1
+            - uses: actions/setup-node@v4
+              with:
+                  node-version: 22
+                  cache: pnpm
+            - name: 安装 Rust 工具链
+              run: |
+                  rustup toolchain install stable --profile minimal
+                  rustup default stable
+            - run: pnpm install --frozen-lockfile
+            - run: pnpm lint
+            - run: bash acceptance/run-final-acceptance.sh

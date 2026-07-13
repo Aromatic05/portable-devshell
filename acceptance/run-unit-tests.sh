@@ -6,7 +6,7 @@ worker_binary="$repo_root/target/debug/devshell-worker"
 
 if [ ! -x "$worker_binary" ]; then
     echo "building worker binary: $worker_binary" >&2
-    cargo build -p devshell-worker --manifest-path "$repo_root/Cargo.toml"
+    cargo build --locked -p devshell-worker --manifest-path "$repo_root/Cargo.toml"
 fi
 
 if [ ! -x "$worker_binary" ]; then
