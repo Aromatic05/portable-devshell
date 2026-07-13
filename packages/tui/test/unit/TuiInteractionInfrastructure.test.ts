@@ -93,6 +93,20 @@ test("page shortcuts include Todo and Help and reload works on every page", asyn
     ]);
 });
 
+test("Help describes the implemented navigation and editing actions", () => {
+    const harness = createHarness();
+    harness.store.setSelectedPage("help");
+
+    const help = selectMainScreenModel(harness.store.getState()).boxes;
+    const actionLines = help.find((box) => box.id === "help-readonly")?.expandedLines.map((line) => line.text) ?? [];
+    const navigationLines = help.find((box) => box.id === "help-navigation")?.expandedLines.map((line) => line.text) ?? [];
+
+    assert.equal(actionLines.some((line) => line.includes("Use a to open")), false);
+    assert.equal(actionLines.some((line) => line.includes("create, attach, start, restart, stop, or delete")), true);
+    assert.equal(actionLines.some((line) => line.includes("Ctrl+S")), true);
+    assert.equal(navigationLines.some((line) => line.includes("1-8 switch pages")), true);
+});
+
 test("search filters instances, config, audit, and logs only", async () => {
     const harness = createHarness();
 

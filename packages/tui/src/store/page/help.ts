@@ -23,7 +23,11 @@ export function buildHelpPageBoxes(state: TuiAppState): BoxModel[] {
                 "Tab cycles sidebar and main boxes.",
                 "Shift+Tab reverses that cycle.",
                 "Up/Down moves sidebar focus without selecting.",
-                "Ctrl+[ returns from detail, search, menus, and main focus."
+                "Enter selects the focused item or activates its action.",
+                "Space expands or collapses the focused box.",
+                "1-8 switch pages; Shift+1-0 switch instances.",
+                "r reloads the current page and / opens search where available.",
+                "? opens this page; Ctrl+[ returns from detail, search, menus, and main focus."
             ],
             id: "help-navigation",
             status: "normal",
@@ -32,15 +36,15 @@ export function buildHelpPageBoxes(state: TuiAppState): BoxModel[] {
         }),
         makeBox(state, "help", undefined, {
             detailLines: [
-                "Use a to open explicit actions for the selected instance.",
-                "Stop Worker always opens a confirmation dialog with Cancel focused.",
-                "Approval detail offers Approve, Deny, and Back; Enter never approves a list item.",
-                "Create and save actions remain unavailable."
+                "Expand an instance to create, attach, start, restart, stop, or delete.",
+                "Configuration and Connector fields can be edited and saved with Ctrl+S.",
+                "Stop, delete, and other destructive actions open a confirmation dialog with Cancel focused.",
+                "Approval detail starts with Back focused; Enter never approves a list item."
             ],
             id: "help-readonly",
-            status: "disabled",
-            summaryLines: ["explicit action boundaries", "no automatic worker start"],
-            title: "Action Boundaries"
+            status: "normal",
+            summaryLines: ["explicit actions and confirmations", "create and save are available"],
+            title: "Actions & Safety"
         }),
         makeBox(state, "help", undefined, {
             detailLines: buildHelpLines(state),
