@@ -10,12 +10,15 @@ export type CliParsedCommand =
     | { kind: "tui" }
     | { input: JsonValue; instance: string; kind: "instance.call"; toolName: string }
     | { kind: "instance.create" }
+    | { instance: string; kind: "instance.deviceCode" }
     | { kind: "instance.list" }
     | { follow: boolean; instance: string; kind: "instance.logs" }
     | { follow: boolean; instance: string; kind: "instance.todo" }
     | { instance: string; kind: "instance.start" }
     | { instance: string; kind: "instance.status" }
     | { instance: string; kind: "instance.stop" }
+    | { instance: string; kind: "instance.revokeToken" }
+    | { instance: string; kind: "instance.rotateToken" }
     | { instance: string; kind: "watch.logs" }
     | { instance: string; kind: "watch.status" };
 
@@ -49,6 +52,8 @@ export class CliParser {
         switch (argv[0]) {
             case "create":
                 return this.#expectNoExtra(argv, { kind: "instance.create" });
+            case "device-code":
+                return this.#expectReverseInstanceCommand(argv, "instance.deviceCode");
             case "list":
                 return this.#expectNoExtra(argv, { kind: "instance.list" });
             case "status":
@@ -57,6 +62,10 @@ export class CliParser {
                 return this.#expectInstanceCommand(argv, "instance.start");
             case "stop":
                 return this.#expectInstanceCommand(argv, "instance.stop");
+            case "rotate-token":
+                return this.#expectReverseInstanceCommand(argv, "instance.rotateToken");
+            case "revoke-token":
+                return this.#expectReverseInstanceCommand(argv, "instance.revokeToken");
             case "logs":
                 this.#expectLogsArgs(argv);
                 return {
@@ -142,6 +151,20 @@ export class CliParser {
     ): Extract<CliParsedCommand, { kind: typeof kind }> {
         if (argv.length !== 2) {
             throw CliRenderError.usage(`${kind.split(".")[1]} requires <instance>`);
+        }
+
+        return {
+            instance: this.#required(argv[1], "instance name is required"),
+            kind
+        } as Extract<CliParsedCommand, { kind: typeof kind }>;
+    }
+
+    #expectReverseInstanceCommand(
+        argv: readonly string[],
+        kind: "instance.deviceCode" | "instance.rotateToken" | "instance.revokeToken"
+    ): Extract<CliParsedCommand, { kind: typeof kind }> {
+        if (argv.length !== 2) {
+            throw CliRenderError.usage(`${argv[0]} requires <instance>`);
         }
 
         return {

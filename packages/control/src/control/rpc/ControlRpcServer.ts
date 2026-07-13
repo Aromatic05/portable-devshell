@@ -7,6 +7,7 @@ import type { McpOAuthApprovalService } from "@portable-devshell/mcp";
 import type { InstanceRegistry } from "../../instance/registry/InstanceRegistry.js";
 import type { ControlConfigEditorService } from "../ControlConfigEditorService.js";
 import type { ControlInstanceCreateService } from "../ControlInstanceCreateService.js";
+import type { ReverseControlService } from "../../reverse/ReverseControlService.js";
 import { RouteMethodRegistry } from "../../route/RouteMethodRegistry.js";
 import { RouteHandlerControl } from "../../route/handler/RouteHandlerControl.js";
 import { RouteHandlerInstance } from "../../route/handler/RouteHandlerInstance.js";
@@ -23,6 +24,7 @@ export interface ControlRpcServerOptions {
     getMcpStatus?: () => JsonValue;
     shutdown?: () => Promise<void> | void;
     restart?: () => Promise<void> | void;
+    reverseControlService?: ReverseControlService;
     socketPath: string;
 }
 
@@ -48,9 +50,10 @@ export class ControlRpcServer {
             new RouteHandlerControl({
                 configEditorService: options.configEditorService,
                 getOAuthApprovals: options.getOAuthApprovals,
-            getMcpStatus: options.getMcpStatus,
+                getMcpStatus: options.getMcpStatus,
                 instanceRegistry: this.#instanceRegistry,
-                instanceCreateService: options.instanceCreateService
+                instanceCreateService: options.instanceCreateService,
+                reverseControlService: options.reverseControlService
             })
         );
         this.#instanceRouter = new RouteRouterInstance(

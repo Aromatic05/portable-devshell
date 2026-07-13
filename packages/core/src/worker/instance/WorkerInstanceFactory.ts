@@ -35,7 +35,10 @@ export class WorkerInstanceFactory {
 
         return new WorkerInstance({
             catalog,
-            commandClient: new WorkerCommandClient(resolved.transport, resolved.name, resolved.env),
+            commandClient:
+                resolved.transport === undefined
+                    ? undefined
+                    : new WorkerCommandClient(resolved.transport, resolved.name, resolved.env),
             config: resolved,
             eventBuffer: new InstanceEventBuffer(
                 resolved.name,
@@ -60,12 +63,22 @@ export class WorkerInstanceFactory {
     }
 
     #createRpcBridge(config: ResolvedWorkerInstanceConfig): WorkerRpcBridge {
+        const rpcOptions = {
+            env: config.env,
+            instanceName: config.name
+        };
+
+        if (config.managementMode === "selfManaged") {
+            return new WorkerRpcBridge({
+                connector: config.rpcConnector,
+                preservePendingOnDisconnect: true,
+                rpcOptions
+            });
+        }
+
         return new WorkerRpcBridge({
             transport: config.transport,
-            rpcOptions: {
-                env: config.env,
-                instanceName: config.name
-            }
+            rpcOptions
         });
     }
 }

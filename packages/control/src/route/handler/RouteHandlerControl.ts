@@ -5,6 +5,7 @@ import type { ControlConfigEditorService } from "../../control/ControlConfigEdit
 import type { ControlInstanceCreateService } from "../../control/ControlInstanceCreateService.js";
 import type { ControlRpcConnection } from "../../control/rpc/ControlRpcConnection.js";
 import type { InstanceRegistry } from "../../instance/registry/InstanceRegistry.js";
+import type { ReverseControlService } from "../../reverse/ReverseControlService.js";
 
 export interface RouteHandlerControlOptions {
     configEditorService?: ControlConfigEditorService;
@@ -12,6 +13,7 @@ export interface RouteHandlerControlOptions {
     instanceRegistry: InstanceRegistry;
     getOAuthApprovals?: () => McpOAuthApprovalService | undefined;
     getMcpStatus?: () => JsonValue;
+    reverseControlService?: ReverseControlService;
 }
 
 export class RouteHandlerControl {
@@ -20,6 +22,7 @@ export class RouteHandlerControl {
     readonly #instanceRegistry: InstanceRegistry;
     readonly #getOAuthApprovals: () => McpOAuthApprovalService | undefined;
     readonly #getMcpStatus: () => JsonValue;
+    readonly #reverseControlService?: ReverseControlService;
 
     constructor(options: RouteHandlerControlOptions) {
         this.#configEditorService = options.configEditorService;
@@ -27,6 +30,7 @@ export class RouteHandlerControl {
         this.#instanceRegistry = options.instanceRegistry;
         this.#getOAuthApprovals = options.getOAuthApprovals ?? (() => undefined);
         this.#getMcpStatus = options.getMcpStatus ?? (() => ({ running: false, reason: "MCP runtime is disabled." }));
+        this.#reverseControlService = options.reverseControlService;
     }
 
     async handle(connection: ControlRpcConnection, method: string, params?: JsonValue): Promise<JsonValue> {
@@ -74,6 +78,12 @@ export class RouteHandlerControl {
                 return this.#requireInstanceCreateService().validateDraft(params) as unknown as JsonValue;
             case "control.createInstance":
                 return (await this.#requireInstanceCreateService().createInstance(params)) as unknown as JsonValue;
+            case "control.createReverseDeviceCode":
+                return (await this.#requireReverseControlService().createDeviceCode(readInstanceName(params))) as unknown as JsonValue;
+            case "control.rotateReverseDeviceToken":
+                return (await this.#requireReverseControlService().rotateDeviceToken(readInstanceName(params))) as unknown as JsonValue;
+            case "control.revokeReverseDeviceToken":
+                return (await this.#requireReverseControlService().revokeDeviceToken(readInstanceName(params))) as unknown as JsonValue;
             case "control.updateInstanceConfig":
                 return await this.#requireConfigEditorService().updateInstanceConfig(params);
             case "control.updateMcpConfig":
@@ -139,6 +149,18 @@ export class RouteHandlerControl {
             retryable: false
         });
     }
+    #requireReverseControlService(): ReverseControlService {
+        if (this.#reverseControlService !== undefined) {
+            return this.#reverseControlService;
+        }
+
+        throw createError({
+            code: errorCodes.envelopeInvalid,
+            message: "Reverse connection management is not available.",
+            retryable: false
+        });
+    }
+
 }
 
 function isRecord(value: JsonValue | undefined): value is Record<string, JsonValue> {
@@ -171,6 +193,17 @@ function readDeclaredClientKind(params?: JsonValue): "cli" | "tui" {
         message: "control.identifyClient requires clientKind to be cli or tui.",
         retryable: false
     });
+}
+
+function readInstanceName(params?: JsonValue): string {
+    if (!isRecord(params) || typeof params.instance !== "string" || params.instance.length === 0) {
+        throw createError({
+            code: errorCodes.targetInvalid,
+            message: "Reverse connection method requires instance.",
+            retryable: false
+        });
+    }
+    return params.instance;
 }
 
 function readOAuthApprovalId(params?: JsonValue): string {

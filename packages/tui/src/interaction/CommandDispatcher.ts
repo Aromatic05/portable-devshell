@@ -19,7 +19,7 @@ export interface CommandDispatcherOptions {
     onToolCall(instance: string, toolName: string, input: string): Promise<boolean>;
     onApplyConfig?(): Promise<JsonValue>;
     onControlRestart?(): Promise<void>;
-    onCreateInstance?(draft: InstanceCreateDraft): Promise<void>;
+    onCreateInstance?(draft: InstanceCreateDraft): Promise<string | undefined>;
     onGetInstanceCreateSchema?(): Promise<InstanceCreateSchema>;
     onInstanceConfigUpdate?(instance: Record<string, JsonValue>): Promise<void>;
     onInstanceDangerAction?(action: "delete", instance: string): Promise<void>;
@@ -44,7 +44,7 @@ export class CommandDispatcher {
     readonly #onToolCall: CommandDispatcherOptions["onToolCall"];
     readonly #onApplyConfig: () => Promise<JsonValue>;
     readonly #onControlRestart: () => Promise<void>;
-    readonly #onCreateInstance: (draft: InstanceCreateDraft) => Promise<void>;
+    readonly #onCreateInstance: (draft: InstanceCreateDraft) => Promise<string | undefined>;
     readonly #onGetInstanceCreateSchema: () => Promise<InstanceCreateSchema>;
     readonly #onInstanceConfigUpdate: (instance: Record<string, JsonValue>) => Promise<void>;
     readonly #onInstanceDangerAction: (action: "delete", instance: string) => Promise<void>;
@@ -1005,10 +1005,12 @@ export class CommandDispatcher {
             return false;
         }
         try {
-            await this.#onCreateInstance(normalizeDraftForSave(this.#editorDraft(editor.key, defaultCreateDraft())) as unknown as InstanceCreateDraft);
+            const status = await this.#onCreateInstance(
+                normalizeDraftForSave(this.#editorDraft(editor.key, defaultCreateDraft())) as unknown as InstanceCreateDraft
+            );
             this.#store.clearFormDraft(editor.key);
             this.#closeEditor();
-            this.#store.setScreenStatus("instances", "Created through control RPC.");
+            this.#store.setScreenStatus("instances", status ?? "Created through control RPC.");
             return true;
         } catch (error) {
             this.#store.setEditor({ ...editor, error: readErrorMessage(error) });

@@ -12,6 +12,9 @@ import { McpInstanceGatewayControl } from "../mcp/McpInstanceGatewayControl.js";
 import { McpWiringService } from "../mcp/McpWiringService.js";
 import { ControlRpcServer } from "./rpc/ControlRpcServer.js";
 import { ControlSocketFile } from "./ControlSocketFile.js";
+import { ReverseConnectionGateway } from "../reverse/ReverseConnectionGateway.js";
+import { ReverseControlService } from "../reverse/ReverseControlService.js";
+import { ReverseCredentialStore } from "../reverse/ReverseCredentialStore.js";
 
 export interface ControlServerOptions {
     configStore?: ControlConfigStore;
@@ -30,6 +33,7 @@ export class ControlServer {
     #config?: ControlConfig;
     #instanceRegistry = new InstanceRegistry([]);
     #mcpHost?: McpHost;
+    #reverseGateway?: ReverseConnectionGateway;
     #rpcServer?: ControlRpcServer;
 
     constructor(options: ControlServerOptions = {}) {
@@ -79,6 +83,29 @@ export class ControlServer {
             gateway: instanceGateway,
             storageDir: new ControlPathHome(this.#homeDirectory).oauthDir
         });
+        const reverseCredentialStore = new ReverseCredentialStore(this.#homeDirectory);
+        let reverseControlService: ReverseControlService | undefined;
+        if (config.instances.some((instance) => instance.provider === "reverse")) {
+            if (this.#mcpHost === undefined || config.mcp.publicBaseUrl === undefined) {
+                throw createError({
+                    code: errorCodes.controlConfigValidationFailed,
+                    message: "Reverse instances require enabled MCP HTTP host and mcp.publicBaseUrl.",
+                    retryable: false
+                });
+            }
+            reverseControlService = new ReverseControlService({
+                credentialStore: reverseCredentialStore,
+                instanceRegistry: this.#instanceRegistry,
+                publicBaseUrl: config.mcp.publicBaseUrl
+            });
+            this.#reverseGateway = new ReverseConnectionGateway({
+                credentialStore: reverseCredentialStore,
+                instanceRegistry: this.#instanceRegistry,
+                publicBaseUrl: config.mcp.publicBaseUrl
+            });
+            this.#reverseGateway.install(this.#mcpHost.server);
+            reverseControlService.setDisconnectHandler((instance) => this.#reverseGateway?.disconnect(instance));
+        }
         this.#rpcServer = new ControlRpcServer({
             configEditorService: new ControlConfigEditorService({
                 configStore: this.#configStore,
@@ -96,6 +123,7 @@ export class ControlServer {
                     | undefined)?.status() ?? { running: false, reason: "MCP runtime is disabled." },
             instanceCreateService,
             instanceRegistry: this.#instanceRegistry,
+            reverseControlService,
             shutdown: async () => {
                 await this.stop();
             },
@@ -111,12 +139,14 @@ export class ControlServer {
     }
 
     async stop(): Promise<void> {
+        this.#reverseGateway?.stop();
         await this.#mcpHost?.stop();
         await this.#instanceRegistry.stopOwned();
         await this.#rpcServer?.stop();
         this.#config = undefined;
         this.#instanceRegistry = new InstanceRegistry([]);
         this.#rpcServer = undefined;
+        this.#reverseGateway = undefined;
         this.#mcpHost = undefined;
     }
 

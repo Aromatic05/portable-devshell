@@ -92,12 +92,12 @@ export class InstanceCreateWizard {
         while (true) {
             const value = (await this.#optional(lines, `provider (${schema.providers.join(" | ")})`, schema.defaultProvider)).trim();
 
-            if (value === "local" || value === "ssh" || value === "docker" || value === "podman") {
+            if (value === "local" || value === "ssh" || value === "docker" || value === "podman" || value === "reverse") {
                 return value;
             }
 
-            this.#output.write("provider must be one of local, ssh, docker, podman.\n");
-        }
+            this.#output.write("provider must be one of local, ssh, docker, podman, reverse.\n");
+    }
     }
 
     async #providerFields(
@@ -117,6 +117,8 @@ export class InstanceCreateWizard {
 
         switch (provider) {
             case "local":
+                return {};
+            case "reverse":
                 return {};
             case "ssh":
                 return {

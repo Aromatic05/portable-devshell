@@ -8,6 +8,7 @@ use std::time::Duration;
 use crate::daemon::log_writer::append_log;
 use crate::daemon::process;
 use crate::instance::{InstanceLock, InstanceName, read_config};
+use crate::reverse::connector::ReverseConnector;
 use crate::rpc::codec::{decode_request_frame, read_frame, write_response};
 use crate::rpc::error::RpcError;
 use crate::rpc::response::RpcResponse;
@@ -59,6 +60,15 @@ pub fn serve(instance: InstanceName) -> Result<(), String> {
             .map_err(|error| error.message)?,
     );
     let router = Arc::new(RpcRouter::new(config.clone(), runtime, tools));
+    let _reverse_connector = config.reverse.clone().map(|reverse| {
+        ReverseConnector::new(
+            instance.clone(),
+            instance_paths.clone(),
+            reverse,
+            Arc::clone(&router),
+        )
+        .spawn()
+    });
 
     while !router.shutdown_requested() {
         if test_flag_enabled(FAIL_ACCEPT_LOOP_ENV) {

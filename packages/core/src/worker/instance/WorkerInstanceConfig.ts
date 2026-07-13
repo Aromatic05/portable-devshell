@@ -2,12 +2,14 @@ import type { ApprovalPolicy, ApprovalTimeout, EffectiveSecurityMode, InstanceNa
 
 import type { WorkerCommandTransport } from "../command/WorkerCommandTransport.js";
 import type { WorkerHandshakeParams } from "../../worker/protocol/WorkerProtocolClient.js";
+import type { WorkerRpcConnector } from "../rpc/WorkerRpcChannel.js";
 import { resolveToolSchedulerLimits, type ToolSchedulerLimits } from "../tool/ToolCallScheduler.js";
 
-export interface WorkerInstanceConfig {
+export type WorkerManagementMode = "controllerManaged" | "selfManaged";
+
+interface WorkerInstanceConfigCommon {
     effectiveSecurityMode?: EffectiveSecurityMode;
     name: InstanceName;
-    transport: WorkerCommandTransport;
     defaultWorkspace?: WorkspacePath;
     homeDirectory?: string;
     env?: NodeJS.ProcessEnv;
@@ -18,14 +20,38 @@ export interface WorkerInstanceConfig {
     toolScheduler?: Partial<ToolSchedulerLimits>;
 }
 
-export interface ResolvedWorkerInstanceConfig extends WorkerInstanceConfig {
+export type WorkerInstanceConfig =
+    | (WorkerInstanceConfigCommon & {
+          managementMode?: "controllerManaged";
+          rpcConnector?: never;
+          transport: WorkerCommandTransport;
+      })
+    | (WorkerInstanceConfigCommon & {
+          managementMode: "selfManaged";
+          rpcConnector: WorkerRpcConnector;
+          transport?: never;
+      });
+
+export interface ResolvedWorkerInstanceConfig extends WorkerInstanceConfigCommon {
     effectiveSecurityMode: EffectiveSecurityMode;
     eventBufferSize: number;
     handshake: WorkerHandshakeParams;
+    managementMode: WorkerManagementMode;
+    rpcConnector?: WorkerRpcConnector;
     toolScheduler: ToolSchedulerLimits;
+    transport?: WorkerCommandTransport;
 }
 
 export function resolveWorkerInstanceConfig(config: WorkerInstanceConfig): ResolvedWorkerInstanceConfig {
+    const managementMode = config.managementMode ?? "controllerManaged";
+
+    if (managementMode === "controllerManaged" && config.transport === undefined) {
+        throw new TypeError("controller-managed worker requires a command transport");
+    }
+    if (managementMode === "selfManaged" && config.rpcConnector === undefined) {
+        throw new TypeError("self-managed worker requires an inbound RPC connector");
+    }
+
     return {
         ...config,
         effectiveSecurityMode: config.effectiveSecurityMode ?? "disabled",
@@ -37,6 +63,7 @@ export function resolveWorkerInstanceConfig(config: WorkerInstanceConfig): Resol
             clientVersion: "0.0.0",
             ...config.handshake
         },
+        managementMode,
         toolScheduler: resolveToolSchedulerLimits(config.toolScheduler)
     };
 }

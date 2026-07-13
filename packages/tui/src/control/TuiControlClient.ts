@@ -13,6 +13,7 @@ import {
     type OAuthApprovalRequest,
     type ToolCallQuery,
     type ToolCallRecord,
+    type ReverseDeviceCodeResult,
     type TodoRpcEnvelope
 } from "@portable-devshell/shared";
 
@@ -65,6 +66,7 @@ export interface TuiControlDecisionOptions {
 export interface TuiControlClientLike {
     applyConfig(): Promise<JsonValue>;
     createInstance(draft: InstanceCreateDraft): Promise<InstanceCreateResult>;
+    createReverseDeviceCode(instance: string): Promise<ReverseDeviceCodeResult>;
     deleteInstance(instanceName: string): Promise<Record<string, JsonValue>>;
     disableInstance(instanceName: string): Promise<Record<string, JsonValue>>;
     enableInstance(instanceName: string): Promise<Record<string, JsonValue>>;
@@ -156,6 +158,12 @@ export class TuiControlClient implements TuiControlClientLike {
 
     async createInstance(draft: InstanceCreateDraft): Promise<InstanceCreateResult> {
         return (await this.#request("control.createInstance", createControlTarget(), draft as unknown as JsonValue)) as unknown as InstanceCreateResult;
+    }
+
+    async createReverseDeviceCode(instance: string): Promise<ReverseDeviceCodeResult> {
+        return (await this.#request("control.createReverseDeviceCode", createControlTarget(), {
+            instance
+        })) as unknown as ReverseDeviceCodeResult;
     }
 
     async enableInstance(instanceName: string): Promise<Record<string, JsonValue>> {

@@ -12,6 +12,9 @@ export interface WorkerHandshakeParams {
 export interface WorkerPingResult {
     pong: boolean;
 }
+export interface WorkerStopResult {
+    stopping: boolean;
+}
 
 export interface WorkerHandshakeResult {
     instance: string;
@@ -61,6 +64,10 @@ export class WorkerProtocolClient {
 
     async listTools(): Promise<WorkerToolsListResult> {
         return asObjectResult<WorkerToolsListResult>(await this.#rpcClient.request("tools.list", {}));
+    }
+
+    async stop(): Promise<WorkerStopResult> {
+        return asObjectResult<WorkerStopResult>(await this.#rpcClient.request("worker.stop", {}));
     }
 }
 

@@ -7,6 +7,7 @@ import type {
     JsonValue,
     ToolCallQuery,
     ToolCallRecord,
+    ReverseDeviceCodeResult,
     TodoRpcEnvelope
 } from "@portable-devshell/shared";
 
@@ -32,12 +33,15 @@ export interface CliControlTerminalRelay {
 export interface CliControlClientLike {
     callTool(instance: string, toolName: string, input: JsonValue): Promise<CliCommandResult>;
     createInstance(draft: InstanceCreateDraft): Promise<InstanceCreateResult>;
+    createReverseDeviceCode(instance: string): Promise<ReverseDeviceCodeResult>;
     getInstanceCreateSchema(): Promise<InstanceCreateSchema>;
     getSnapshot(instance: string): Promise<CliInstanceSnapshotEnvelope>;
     getTodo(instance: string): Promise<TodoRpcEnvelope>;
     listInstances(): Promise<CliInstanceListEntry[]>;
     readLogs(instance: string, query?: { fromSeq?: number; limit?: number }): Promise<CliInstanceLogEntry[]>;
     readToolCalls(instance: string, query?: ToolCallQuery): Promise<ToolCallRecord[]>;
+    revokeReverseDeviceToken(instance: string): Promise<{ instance: string; revoked: true }>;
+    rotateReverseDeviceToken(instance: string): Promise<{ deviceToken: string; instance: string }>;
     refreshStatus(instance: string): Promise<CliInstanceSnapshotEnvelope>;
     startInstance(instance: string, relay?: CliControlTerminalRelay): Promise<CliInstanceSnapshotEnvelope["snapshot"]>;
     stopInstance(instance: string): Promise<CliInstanceSnapshotEnvelope["snapshot"]>;
@@ -67,6 +71,24 @@ export class CliControlClient implements CliControlClientLike {
 
     async createInstance(draft: InstanceCreateDraft): Promise<InstanceCreateResult> {
         return (await this.#request("control.createInstance", createControlTarget(), draft as unknown as JsonValue)) as unknown as InstanceCreateResult;
+    }
+
+    async createReverseDeviceCode(instance: string): Promise<ReverseDeviceCodeResult> {
+        return (await this.#request("control.createReverseDeviceCode", createControlTarget(), {
+            instance
+        })) as unknown as ReverseDeviceCodeResult;
+    }
+
+    async rotateReverseDeviceToken(instance: string): Promise<{ deviceToken: string; instance: string }> {
+        return (await this.#request("control.rotateReverseDeviceToken", createControlTarget(), {
+            instance
+        })) as unknown as { deviceToken: string; instance: string };
+    }
+
+    async revokeReverseDeviceToken(instance: string): Promise<{ instance: string; revoked: true }> {
+        return (await this.#request("control.revokeReverseDeviceToken", createControlTarget(), {
+            instance
+        })) as unknown as { instance: string; revoked: true };
     }
 
     async getSnapshot(instance: string): Promise<CliInstanceSnapshotEnvelope> {

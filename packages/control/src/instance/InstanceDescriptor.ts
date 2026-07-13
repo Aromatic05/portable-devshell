@@ -1,4 +1,4 @@
-import type { WorkerInstance } from "@portable-devshell/core";
+import type { WorkerInstance, WorkerRpcInboundConnector } from "@portable-devshell/core";
 import type { ToolCapability } from "@portable-devshell/shared";
 import type { TodoService } from "../todo/TodoService.js";
 
@@ -9,6 +9,9 @@ export interface InstanceDescriptor {
     mcpGroups: readonly string[];
     mcpPath: string;
     name: string;
+    provider: "docker" | "local" | "podman" | "reverse" | "ssh";
+    reverseConnector?: WorkerRpcInboundConnector;
     todo: TodoService;
     worker: WorkerInstance;
+    workspace?: string;
 }

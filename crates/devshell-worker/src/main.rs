@@ -2,6 +2,7 @@ mod cli;
 mod daemon;
 mod instance;
 mod platform;
+mod reverse;
 mod rpc;
 mod security;
 mod socket;

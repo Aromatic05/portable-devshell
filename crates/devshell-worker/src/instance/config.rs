@@ -1,4 +1,6 @@
-use std::fs;
+use std::fs::{self, OpenOptions};
+use std::io::Write;
+use std::os::unix::fs::OpenOptionsExt;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
@@ -17,6 +19,17 @@ pub struct WorkerConfig {
     pub created_at: u64,
     #[serde(default)]
     pub tools: WorkerToolsConfig,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reverse: Option<WorkerReverseConfig>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkerReverseConfig {
+    pub controller_url: String,
+    pub device_token: String,
+    #[serde(default)]
+    pub generation: u64,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
@@ -44,12 +57,20 @@ pub fn build_config(instance: &InstanceName) -> Result<WorkerConfig, String> {
         instance: instance.as_str().to_string(),
         created_at,
         tools: WorkerToolsConfig::default(),
+        reverse: None,
     })
 }
 
 pub fn write_config(paths: &InstancePaths, config: &WorkerConfig) -> Result<(), String> {
     let body = toml::to_string(config).map_err(|error| error.to_string())?;
-    fs::write(&paths.config_file, body)
+    let mut file = OpenOptions::new()
+        .create(true)
+        .truncate(true)
+        .write(true)
+        .mode(0o600)
+        .open(&paths.config_file)
+        .map_err(|error| format!("failed to open {}: {error}", paths.config_file.display()))?;
+    file.write_all(body.as_bytes())
         .map_err(|error| format!("failed to write {}: {error}", paths.config_file.display()))?;
     Ok(())
 }

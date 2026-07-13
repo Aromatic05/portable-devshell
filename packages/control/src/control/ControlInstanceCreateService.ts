@@ -37,7 +37,7 @@ const instanceCreateSchema: InstanceCreateSchema = {
     defaultMcpEnabled: true,
     defaultProvider: "local",
     defaultSecurityMode: "disabled",
-    providers: ["local", "ssh", "docker", "podman"]
+    providers: ["local", "ssh", "docker", "podman", "reverse"]
 };
 
 export interface ControlInstanceCreateServiceOptions {
@@ -215,6 +215,7 @@ export class ControlInstanceCreateService {
 
         switch (provider) {
             case "local":
+            case "reverse":
                 break;
             case "ssh":
                 normalized.ssh = {
@@ -272,11 +273,11 @@ function asDraftRecord(params: JsonValue | undefined): Record<string, JsonValue>
 }
 
 function readProvider(value: JsonValue | undefined): ControlProviderKind {
-    if (value === "local" || value === "ssh" || value === "docker" || value === "podman") {
+    if (value === "local" || value === "ssh" || value === "docker" || value === "podman" || value === "reverse") {
         return value;
     }
 
-    throw invalidDraft("provider must be one of local, ssh, docker, podman.");
+    throw invalidDraft("provider must be one of local, ssh, docker, podman, reverse.");
 }
 
 function readRequiredString(value: JsonValue | undefined, fieldName: string): string {

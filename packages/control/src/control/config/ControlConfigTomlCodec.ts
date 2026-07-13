@@ -15,7 +15,7 @@ import {
 } from "@portable-devshell/shared";
 import { parse, stringify, type TomlTableWithoutBigInt } from "smol-toml";
 
-export type ControlProviderKind = "docker" | "local" | "podman" | "ssh";
+export type ControlProviderKind = "docker" | "local" | "podman" | "reverse" | "ssh";
 export type ControlMcpAuthMode = "none" | "oauth2" | "token";
 export type ControlFileEditMode = "text" | "replace" | "patch" | "apply_patch";
 
@@ -697,7 +697,7 @@ function asStringRecord(value: TomlRecord, fieldName: string): Record<string, st
 }
 
 function asProviderKind(value: string): ControlProviderKind {
-    if (value === "local" || value === "ssh" || value === "docker" || value === "podman") {
+    if (value === "local" || value === "ssh" || value === "docker" || value === "podman" || value === "reverse") {
         return value;
     }
 

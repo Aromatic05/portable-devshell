@@ -1,6 +1,6 @@
 import type { InstanceSnapshot, JsonValue } from "@portable-devshell/shared";
 
-export type AttachShellProvider = "local" | "ssh" | "docker" | "podman";
+export type AttachShellProvider = "local" | "ssh" | "docker" | "podman" | "reverse";
 
 export interface AttachShellCommand {
     args: string[];

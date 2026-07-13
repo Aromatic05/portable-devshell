@@ -1,5 +1,6 @@
 import type { ActiveTodoSummary } from "./DtoTodo.js";
 import type { InstanceName } from "../../type/identity/TypeIdentityInstanceName.js";
+import type { ReverseInstanceStatus } from "../reverse/DtoReverseConnection.js";
 
 export type DaemonState = "running" | "starting" | "stopped" | "stale" | "stopping" | "failed";
 
@@ -17,6 +18,7 @@ export interface InstanceSnapshot {
     lastErrorCode?: string;
     name: InstanceName;
     pid?: number;
+    reverse?: ReverseInstanceStatus;
     ready: boolean;
     status: RuntimeStatus;
 }

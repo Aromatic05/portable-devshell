@@ -100,8 +100,8 @@ export interface InstanceCreateSchema {
         ];
         presets: readonly InstanceContainerPresetSchema[];
     };
-    providers: readonly ["local", "ssh", "docker", "podman"];
-    defaultProvider: "local" | "ssh" | "docker" | "podman";
+    providers: readonly ["local", "ssh", "docker", "podman", "reverse"];
+    defaultProvider: "local" | "ssh" | "docker" | "podman" | "reverse";
     defaultEnabled: boolean;
     defaultMcpEnabled: boolean;
     defaultMcpCapabilities: readonly ToolCapability[];
@@ -122,7 +122,7 @@ export interface InstanceCreateDraft {
     };
     name: string;
     podmanBinary?: string;
-    provider: "local" | "ssh" | "docker" | "podman";
+    provider: "local" | "ssh" | "docker" | "podman" | "reverse";
     security?: {
         mode?: string;
     };
@@ -146,7 +146,7 @@ export interface InstanceCreateSummary {
     };
     name: string;
     podmanBinary?: string;
-    provider: "local" | "ssh" | "docker" | "podman";
+    provider: "local" | "ssh" | "docker" | "podman" | "reverse";
     security: {
         mode: string;
     };

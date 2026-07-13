@@ -20,6 +20,10 @@ export class AttachShellCommandResolver {
             case "docker":
             case "podman":
                 return this.#container(provider, configured, input);
+            case "reverse":
+                throw new AttachShellResolutionError(
+                    "Reverse instances are self-managed and do not support direct Attach Shell."
+                );
         }
     }
 
@@ -97,7 +101,7 @@ function readInstanceConfig(configView: AttachShellResolutionInput["configView"]
 
 function readProvider(configured: Record<string, unknown> | undefined, fallback: string | undefined): AttachShellProvider {
     const value = typeof configured?.provider === "string" ? configured.provider : fallback;
-    if (value === "local" || value === "ssh" || value === "docker" || value === "podman") {
+    if (value === "local" || value === "ssh" || value === "docker" || value === "podman" || value === "reverse") {
         return value;
     }
 

@@ -30,6 +30,15 @@ export class ControlConfigValidator {
                 names.add(instance.name);
             }
 
+            if (config.instances.some((instance) => instance.provider === "reverse")) {
+                if (!config.mcp.enabled) {
+                    throw new Error("mcp.enabled must be true when reverse instances are configured");
+                }
+                if (config.mcp.publicBaseUrl === undefined) {
+                    throw new Error("mcp.publicBaseUrl is required when reverse instances are configured");
+                }
+            }
+
             this.#publicExposureGuard.assertSafe({
                 auth: toMcpGuardAuth(config.mcp.auth.mode),
                 listenHost: config.mcp.listenHost,
@@ -81,6 +90,17 @@ export class ControlConfigValidator {
             case "local":
                 if (instance.container !== undefined) {
                     throw new Error(`local instance ${instance.name} does not support container`);
+                }
+                return;
+            case "reverse":
+                if (instance.container !== undefined) {
+                    throw new Error(`reverse instance ${instance.name} does not support container`);
+                }
+                if (instance.ssh !== undefined) {
+                    throw new Error(`reverse instance ${instance.name} does not support ssh`);
+                }
+                if (instance.dockerBinary !== undefined || instance.podmanBinary !== undefined) {
+                    throw new Error(`reverse instance ${instance.name} does not support container binaries`);
                 }
                 return;
             case "ssh":

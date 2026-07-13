@@ -1,4 +1,5 @@
-import { createServer, type IncomingMessage, type Server } from "node:http";
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import type { Duplex } from "node:stream";
 
 import express, { type NextFunction, type Request, type RequestHandler, type Response } from "express";
 
@@ -32,6 +33,10 @@ export class McpHostHttpServer {
     readonly #publicBaseUrl?: string;
     readonly #registeredPaths = new Set<string>();
     readonly #tokenProvider = new McpAuthProviderToken();
+    readonly #upgradeHandlers = new Map<
+        string,
+        (request: IncomingMessage, socket: Duplex, head: Buffer) => void | Promise<void>
+    >();
     #server?: Server;
 
     constructor(options: McpHostHttpServerOptions) {
@@ -55,6 +60,17 @@ export class McpHostHttpServer {
         }
 
         this.#server = createServer(this.#app);
+        this.#server.on("upgrade", (request, socket, head) => {
+            const pathname = readRequestPathname(request);
+            const handler = pathname === undefined ? undefined : this.#upgradeHandlers.get(pathname);
+            if (handler === undefined) {
+                socket.end("HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n");
+                return;
+            }
+            void Promise.resolve(handler(request, socket, head)).catch(() => {
+                socket.destroy();
+            });
+        });
 
         await new Promise<void>((resolve, reject) => {
             this.#server?.once("error", reject);
@@ -83,6 +99,33 @@ export class McpHostHttpServer {
 
     get address() {
         return this.#server?.address();
+    }
+
+    registerRawRoute(
+        method: "get" | "post",
+        path: string,
+        handler: (request: IncomingMessage, response: ServerResponse) => void | Promise<void>
+    ): void {
+        this.#app[method](path, (request: Request, response: Response) => {
+            void Promise.resolve(handler(request as IncomingMessage, response as unknown as ServerResponse)).catch(
+                (error: unknown) => {
+                    if (!response.headersSent) {
+                        response.status(500).json({
+                            error: error instanceof Error ? error.message : "Internal server error"
+                        });
+                        return;
+                    }
+                    response.end();
+                }
+            );
+        });
+    }
+
+    registerUpgradeHandler(
+        path: string,
+        handler: (request: IncomingMessage, socket: Duplex, head: Buffer) => void | Promise<void>
+    ): void {
+        this.#upgradeHandlers.set(path, handler);
     }
 
     registerBinding(path: string, binding: McpEndpointBinding): void {
@@ -158,6 +201,17 @@ export class McpHostHttpServer {
         url.search = "";
         url.hash = "";
         return url;
+    }
+}
+
+function readRequestPathname(request: IncomingMessage): string | undefined {
+    if (request.url === undefined) {
+        return undefined;
+    }
+    try {
+        return new URL(request.url, "http://localhost").pathname;
+    } catch {
+        return undefined;
     }
 }
 

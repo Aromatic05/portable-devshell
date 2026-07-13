@@ -712,11 +712,17 @@ function readVersion(value: JsonValue | undefined, current: number): number {
 
 function readProvider(value: JsonValue | undefined, fieldName: string): ControlInstanceConfig["provider"] {
     const provider = readRequiredString(value, fieldName);
-    if (provider === "local" || provider === "ssh" || provider === "docker" || provider === "podman") {
+    if (
+        provider === "local" ||
+        provider === "ssh" ||
+        provider === "docker" ||
+        provider === "podman" ||
+        provider === "reverse"
+    ) {
         return provider;
     }
 
-    throw invalidConfig(`${fieldName} must be one of local, ssh, docker, podman.`);
+    throw invalidConfig(`${fieldName} must be one of local, ssh, docker, podman, reverse.`);
 }
 
 function readMcpAuthMode(value: JsonValue | undefined, fieldName: string): ControlMcpAuthMode {

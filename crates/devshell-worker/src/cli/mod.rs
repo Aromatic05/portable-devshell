@@ -1,3 +1,4 @@
+pub mod enroll;
 pub mod gc;
 pub mod logs;
 pub mod rpc;
@@ -16,6 +17,7 @@ struct Cli {
 
 #[derive(Subcommand, Debug)]
 enum Command {
+    Enroll(EnrollArgs),
     Start(InstanceArgs),
     Stop(InstanceArgs),
     Status(InstanceArgs),
@@ -31,6 +33,14 @@ pub struct InstanceArgs {
 }
 
 #[derive(Args, Debug)]
+pub struct EnrollArgs {
+    #[arg(long)]
+    pub controller: String,
+    #[arg(long)]
+    pub device_code: String,
+}
+
+#[derive(Args, Debug)]
 pub struct GcArgs {
     #[arg(long, default_value_t = false)]
     pub dry_run: bool,
@@ -39,6 +49,7 @@ pub struct GcArgs {
 pub fn run() -> Result<String, String> {
     let cli = Cli::parse();
     match cli.command {
+        Command::Enroll(args) => enroll::run(args),
         Command::Start(args) => start::run(args),
         Command::Stop(args) => stop::run(args),
         Command::Status(args) => status::run(args),

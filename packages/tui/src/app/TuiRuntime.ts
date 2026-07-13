@@ -92,8 +92,14 @@ export class TuiRuntime {
                 await this.session.reconnect();
             },
             onCreateInstance: async (draft) => {
-                await this.#client.createInstance(draft);
+                const result = await this.#client.createInstance(draft);
+                let status: string | undefined;
+                if (draft.provider === "reverse") {
+                    const code = await this.#client.createReverseDeviceCode(result.name);
+                    status = `Reverse instance created. Run: devshell-worker enroll --controller ${code.controllerUrl} --device-code ${code.deviceCode} (expires ${code.expiresAt})`;
+                }
                 await this.session.refresh();
+                return status;
             },
             onGetInstanceCreateSchema: async () => await this.#client.getInstanceCreateSchema(),
             onInstanceConfigUpdate: async (instance) => {

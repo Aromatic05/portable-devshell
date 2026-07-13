@@ -20,13 +20,14 @@ export function buildInstancesPageBoxes(state: TuiAppState): BoxModel[] {
                 "ssh         remote host",
                 "docker      container-backed devshell",
                 "podman      rootless/container-backed devshell",
+                "reverse     self-managed outbound worker",
                 "",
                 "Actions",
                 buttonLine("create", "Create")
             ],
             id: "create-instance",
             status: "normal",
-            summaryLines: ["create local / ssh / docker / podman devshell"],
+            summaryLines: ["create local / ssh / docker / podman / reverse devshell"],
             title: "Create Instance"
         }),
         ...state.instances.map((entry) => {
@@ -45,6 +46,22 @@ export function buildInstancesPageBoxes(state: TuiAppState): BoxModel[] {
                     formatField("workspace", entry.defaultWorkspace ?? "-"),
                     formatField("runtime", instanceRuntimeSummary(snapshot)),
                     formatField("approvals", String(approvals.length)),
+                    ...(snapshot?.reverse === undefined
+                        ? []
+                        : [
+                              formatField("management", snapshot.reverse.managementMode),
+                              formatField("enrollment", snapshot.reverse.enrollmentState),
+                              formatField("availability", snapshot.reverse.availability),
+                              formatField("transport", snapshot.reverse.transport ?? "-"),
+                              formatField("generation", String(snapshot.reverse.generation ?? "-")),
+                              formatField("last seen", snapshot.reverse.lastSeenAt ?? "-"),
+                              ...(snapshot.reverse.lastErrorCode === undefined
+                                  ? []
+                                  : [
+                                        formatField("last error", snapshot.reverse.lastErrorCode),
+                                        formatField("error detail", snapshot.reverse.lastErrorMessage ?? "-")
+                                    ])
+                          ]),
                     "",
                     "Actions",
                     buttonLine("attach-shell", "Attach Shell", !lifecycle.attach),
@@ -86,13 +103,15 @@ function lifecycleAvailability(
     const daemon = snapshot?.daemonState;
     const running = daemon === "running" || snapshot?.ready === true;
     const transitional = busy || daemon === "starting" || daemon === "stopping";
-    const restart = running;
+    const selfManaged = snapshot?.reverse?.managementMode === "selfManaged";
+    const reverseOnline = snapshot?.reverse?.availability === "online";
+    const restart = !selfManaged && running;
 
     return {
-        attach: enabled && running && !transitional,
+        attach: enabled && !selfManaged && running && !transitional,
         restart,
-        startOrRestart: enabled && !transitional,
-        stop: enabled && running && !transitional
+        startOrRestart: enabled && !selfManaged && !transitional,
+        stop: enabled && (selfManaged ? reverseOnline : running) && !transitional
     };
 }
 

@@ -859,10 +859,14 @@ test("Attach Shell is invoked directly from the expanded instance box", async ()
 async function openCreateWizard(harness: ReturnType<typeof createHarness>): Promise<void> {
     await harness.press("", { tab: true });
     await harness.press(" ");
-    for (let index = 0; index < 9; index += 1) {
-        await harness.press("", { downArrow: true });
-    }
-    await harness.press("", { return: true });
+    const createBox = selectMainScreenModel(harness.store.getState()).boxes.find(
+        (box) => box.id === "create-instance"
+    );
+    const createButton = createBox?.expandedLines.find((line) => line.id?.endsWith(":button:create"));
+    assert.ok(createBox?.expandedKey);
+    assert.ok(createButton?.id);
+    harness.store.setSelectedDetailLine(createBox.expandedKey, createButton.id);
+    await harness.dispatch({ type: "focus.activate" });
 }
 
 function createHarness(options: {

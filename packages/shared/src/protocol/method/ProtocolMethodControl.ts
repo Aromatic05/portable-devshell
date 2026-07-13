@@ -1,6 +1,7 @@
 export const controlMethods = {
     controlApplyConfig: "control.applyConfig",
     controlCreateInstance: "control.createInstance",
+    controlCreateReverseDeviceCode: "control.createReverseDeviceCode",
     controlDeleteInstance: "control.deleteInstance",
     controlDisableInstance: "control.disableInstance",
     controlEnableInstance: "control.enableInstance",
@@ -10,6 +11,8 @@ export const controlMethods = {
     controlListInstances: "control.listInstances",
     controlPing: "control.ping",
     controlRestart: "control.restart",
+    controlRevokeReverseDeviceToken: "control.revokeReverseDeviceToken",
+    controlRotateReverseDeviceToken: "control.rotateReverseDeviceToken",
     controlShutdown: "control.shutdown",
     controlStatus: "control.status",
     controlUpdateInstanceConfig: "control.updateInstanceConfig",

@@ -1,4 +1,4 @@
-import { InstancePaths, WorkerInstanceFactory, WorkerTransportFactory, type WorkerInstance, type WorkerInstanceConfig, type WorkerTransportFactoryOptions } from "@portable-devshell/core";
+import { InstancePaths, WorkerInstanceFactory, WorkerRpcInboundConnector, WorkerTransportFactory, type WorkerInstance, type WorkerInstanceConfig, type WorkerTransportFactoryOptions } from "@portable-devshell/core";
 import { asInstanceName, asWorkspacePath } from "@portable-devshell/shared";
 
 import type { ControlInstanceConfig } from "../control/config/ControlConfigTomlCodec.js";
@@ -15,6 +15,7 @@ export class InstanceConfigMapper {
     map(instance: ControlInstanceConfig): InstanceDescriptor {
         const name = asInstanceName(instance.name);
         const paths = new InstancePaths(name, process.env.HOME);
+        const reverseConnector = instance.provider === "reverse" ? new WorkerRpcInboundConnector() : undefined;
         const workerHolder: { value?: WorkerInstance } = {};
         const todo = new TodoService({
             appendEvent: async (type, data) => {
@@ -23,7 +24,7 @@ export class InstanceConfigMapper {
             filePath: paths.todoFile,
             instanceName: instance.name
         });
-        const worker = this.#workerInstanceFactory.create(this.#toWorkerConfig(instance), {
+        const worker = this.#workerInstanceFactory.create(this.#toWorkerConfig(instance, reverseConnector), {
             toolCallAssociationProvider: () => todo.currentAssociation()
         });
         workerHolder.value = worker;
@@ -35,15 +36,21 @@ export class InstanceConfigMapper {
             mcpEnabled: instance.mcp.enabled,
             mcpPath: `/${instance.name}/mcp`,
             name: instance.name,
+            provider: instance.provider,
+            ...(reverseConnector === undefined ? {} : { reverseConnector }),
             todo,
-            worker
+            worker,
+            workspace: instance.workspace
         };
     }
 
-    #toWorkerConfig(instance: ControlInstanceConfig): WorkerInstanceConfig {
-        const effectiveSecurityMode = instance.security?.mode === "workspace" ? "workspace" : "disabled";
-
-        return {
+    #toWorkerConfig(
+        instance: ControlInstanceConfig,
+        reverseConnector?: WorkerRpcInboundConnector
+    ): WorkerInstanceConfig {
+        const effectiveSecurityMode: "disabled" | "workspace" =
+            instance.security?.mode === "workspace" ? "workspace" : "disabled";
+        const common = {
             defaultWorkspace: instance.workspace === undefined ? undefined : asWorkspacePath(instance.workspace),
             env: {
                 ...instance.env,
@@ -56,7 +63,20 @@ export class InstanceConfigMapper {
             toolScheduler: instance.tools?.scheduler,
             effectiveSecurityMode,
             homeDirectory: process.env.HOME,
-            name: asInstanceName(instance.name),
+            name: asInstanceName(instance.name)
+        };
+
+        if (instance.provider === "reverse") {
+            return {
+                ...common,
+                managementMode: "selfManaged",
+                rpcConnector: reverseConnector ?? fail(`reverse instance ${instance.name} requires connector`)
+            };
+        }
+
+        return {
+            ...common,
+            managementMode: "controllerManaged",
             transport: WorkerTransportFactory.create(this.#toTransportOptions(instance))
         };
     }
@@ -87,6 +107,8 @@ export class InstanceConfigMapper {
                     remoteCwd: instance.workspace,
                     type: "podman"
                 };
+            case "reverse":
+                throw new Error(`reverse instance ${instance.name} does not use command transport`);
         }
     }
 }

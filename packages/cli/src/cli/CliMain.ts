@@ -13,6 +13,11 @@ import { CliCommandInstanceLogs } from "./command/instance/CliCommandInstanceLog
 import { CliCommandInstanceStart } from "./command/instance/CliCommandInstanceStart.js";
 import { CliCommandInstanceStatus } from "./command/instance/CliCommandInstanceStatus.js";
 import { CliCommandInstanceStop } from "./command/instance/CliCommandInstanceStop.js";
+import {
+    CliCommandInstanceDeviceCode,
+    CliCommandInstanceRevokeToken,
+    CliCommandInstanceRotateToken
+} from "./command/instance/CliCommandInstanceReverse.js";
 import { CliCommandInstanceTodo } from "./command/instance/CliCommandInstanceTodo.js";
 import { CliCommandWatchLogs } from "./command/watch/CliCommandWatchLogs.js";
 import { CliCommandWatchStatus } from "./command/watch/CliCommandWatchStatus.js";
@@ -25,6 +30,11 @@ import { renderInstanceList } from "./render/instance/CliRenderInstanceList.js";
 import { renderInstanceCreateResult } from "./render/instance/CliRenderInstanceCreate.js";
 import { renderInstanceLogs } from "./render/instance/CliRenderInstanceLogs.js";
 import { renderInstanceSnapshot } from "./render/instance/CliRenderInstanceSnapshot.js";
+import {
+    renderReverseDeviceCode,
+    renderReverseTokenRevocation,
+    renderReverseTokenRotation
+} from "./render/instance/CliRenderInstanceReverse.js";
 import { renderTodo } from "./render/instance/CliRenderTodo.js";
 import { renderToolCall } from "./render/tool/CliRenderToolCall.js";
 import { renderToolResult } from "./render/tool/CliRenderToolResult.js";
@@ -114,6 +124,27 @@ export class CliMain {
 
                 return;
             }
+            case "instance.deviceCode":
+                this.#stdout.write(
+                    renderReverseDeviceCode(
+                        await new CliCommandInstanceDeviceCode().execute(this.#createClient(), command.instance)
+                    )
+                );
+                return;
+            case "instance.rotateToken":
+                this.#stdout.write(
+                    renderReverseTokenRotation(
+                        await new CliCommandInstanceRotateToken().execute(this.#createClient(), command.instance)
+                    )
+                );
+                return;
+            case "instance.revokeToken":
+                this.#stdout.write(
+                    renderReverseTokenRevocation(
+                        await new CliCommandInstanceRevokeToken().execute(this.#createClient(), command.instance)
+                    )
+                );
+                return;
             case "instance.status":
                 this.#stdout.write(
                     renderInstanceSnapshot((await new CliCommandInstanceStatus().execute(this.#createClient(), command.instance)).snapshot)
