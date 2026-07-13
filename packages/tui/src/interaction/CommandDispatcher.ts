@@ -250,7 +250,10 @@ export class CommandDispatcher {
                 const follow = this.#store.getState().ui.logsFollowByInstance[instance] === false;
                 this.#store.setLogsFollow(instance, follow);
                 if (follow) {
+                    this.#store.setLogsPausedAtSeq(instance, undefined);
                     this.#setMainColumnOffset(this.#maxMainScrollOffset());
+                } else {
+                    this.#store.setLogsPausedAtSeq(instance, this.#store.getState().logsByInstance[instance]?.at(-1)?.seq);
                 }
                 this.#store.setScreenStatus("logs", follow ? "Following new log entries." : "Log follow paused.");
                 return true;
@@ -661,6 +664,18 @@ export class CommandDispatcher {
                     case "clear-buffer":
                         return await this.dispatch({ type: "logs.clearBuffer" });
                 }
+            }
+            if (state.ui.selectedPage === "logs" && actionId?.startsWith("log:")) {
+                const entry = state.logsByInstance[state.ui.selectedInstance ?? ""]?.find((candidate) => candidate.seq === Number(actionId.slice("log:".length)));
+                if (entry?.callId === undefined) {
+                    this.#store.setScreenStatus("logs", "This log entry has no linked tool call.");
+                    return false;
+                }
+                this.#store.setSelectedPage("audit");
+                this.#store.setFocusScope("mainBoxes");
+                this.#store.setMainFocusId(`audit-${entry.callId}`);
+                this.#ensureMainFocusVisible();
+                return true;
             }
             if (button !== undefined && state.ui.selectedPage === "instances") {
                 return await this.#activateInstanceButton(boxId, button);
@@ -1260,6 +1275,20 @@ export class CommandDispatcher {
         }
         if (auditPage.selectedAction === "back") {
             return await this.dispatch({ type: "approval.back" });
+        }
+        if (auditPage.selectedAction === "input" && auditPage.mode === "approvalDetail") {
+            const approval = state.approvalsByInstance[instance]?.find((candidate) => candidate.approvalId === auditPage.approvalId);
+            const toolCall = approval === undefined
+                ? undefined
+                : state.toolCallsByInstance[instance]?.find((candidate) => candidate.callId === approval.callId);
+            if (approval === undefined) {
+                return false;
+            }
+            return await this.dispatch({
+                body: auditInputText(toolCall?.input, approval.inputSummary),
+                title: `${approval.toolName} · approval input`,
+                type: "textDetail.open"
+            });
         }
         if (auditPage.selectedAction === "approve" && auditPage.mode === "approvalDetail") {
             return await this.dispatch({

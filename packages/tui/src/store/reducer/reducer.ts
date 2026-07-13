@@ -387,6 +387,17 @@ export function tuiAppReducer(state: TuiAppState, action: TuiAppAction): TuiAppS
                     }
                 }
             };
+        case "logs.setPausedAtSeq":
+            return {
+                ...state,
+                ui: {
+                    ...state.ui,
+                    logsPausedAtSeqByInstance: {
+                        ...state.ui.logsPausedAtSeqByInstance,
+                        [action.instance]: action.seq
+                    }
+                }
+            };
         case "ui.bumpRedrawNonce":
             return {
                 ...state,

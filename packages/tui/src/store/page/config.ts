@@ -13,6 +13,7 @@ export function buildConfigPageBoxes(state: TuiAppState, instanceName: string): 
     const unsaved = dirty ? " [UNSAVED]" : "";
     const restartRequired = requiresRestart(fallback, draft);
     const running = snapshot?.daemonState === "running" || snapshot?.ready === true;
+    const changes = draftDiff(fallback, draft);
 
     return [
         makeBox(state, "config", instanceName, {
@@ -107,6 +108,7 @@ export function buildConfigPageBoxes(state: TuiAppState, instanceName: string): 
             detailLines: [
                 `Apply mode          ${restartRequired ? "restart required" : "hot apply"}`,
                 ...(restartRequired && running ? ["Save Only is unavailable until the instance is stopped."] : []),
+                ...(dirty ? ["", "Pending changes", ...changes] : ["", "No pending changes."]),
                 "",
                 "Actions",
                 buttonLine("reload", "Reload"),
@@ -121,6 +123,33 @@ export function buildConfigPageBoxes(state: TuiAppState, instanceName: string): 
             title: `Actions${unsaved}`
         })
     ];
+}
+
+function draftDiff(previous: Record<string, JsonValue>, next: Record<string, JsonValue>): string[] {
+    const paths = collectChangedPaths(previous, next);
+    return paths.length === 0
+        ? ["No semantic changes detected."]
+        : paths.map((path) => `~ ${path}: ${display(readPath(previous, path))} → ${display(readPath(next, path))}`);
+}
+
+function collectChangedPaths(previous: Record<string, JsonValue>, next: Record<string, JsonValue>, prefix = ""): string[] {
+    const keys = new Set([...Object.keys(previous), ...Object.keys(next)]);
+    return [...keys].sort().flatMap((key) => {
+        const path = prefix.length === 0 ? key : `${prefix}.${key}`;
+        const before = previous[key];
+        const after = next[key];
+        if (isRecord(before) && isRecord(after)) return collectChangedPaths(before, after, path);
+        return JSON.stringify(before) === JSON.stringify(after) ? [] : [path];
+    });
+}
+
+function isRecord(value: JsonValue | undefined): value is Record<string, JsonValue> {
+    return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function display(value: JsonValue | undefined): string {
+    if (value === undefined) return "<unset>";
+    return typeof value === "string" ? JSON.stringify(value) : JSON.stringify(value);
 }
 
 function providerLines(draft: Record<string, JsonValue>): Array<{ id: string; text: string }> {

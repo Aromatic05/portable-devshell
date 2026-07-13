@@ -1,6 +1,6 @@
 import React from "react";
 import { Box, Text } from "ink";
-import type { ApprovalRequest } from "@portable-devshell/shared";
+import type { ApprovalRequest, ToolCallRecord } from "@portable-devshell/shared";
 
 import { renderExpandableBoxLines } from "../component/ExpandableBox.js";
 import { ErrorBanner } from "../component/ErrorBanner.js";
@@ -38,7 +38,16 @@ export function ScreenRouter(props: ScreenRouterProps) {
         const approval = (props.state.approvalsByInstance[props.state.ui.selectedInstance ?? ""] ?? []).find(
             (candidate) => candidate.approvalId === auditPage.approvalId
         );
-        return <ApprovalDetail approval={approval} mode={auditPage.mode} selectedAction={auditPage.selectedAction} />;
+        const toolCall = approval === undefined
+            ? undefined
+            : (props.state.toolCallsByInstance[approval.instance] ?? []).find((candidate) => candidate.callId === approval.callId);
+        const relatedCalls = approval === undefined
+            ? []
+            : (props.state.toolCallsByInstance[approval.instance] ?? [])
+                .filter((candidate) => candidate.callId !== approval.callId)
+                .sort((left, right) => Math.abs(Date.parse(left.startedAt) - Date.parse(approval.createdAt)) - Math.abs(Date.parse(right.startedAt) - Date.parse(approval.createdAt)))
+                .slice(0, 3);
+        return <ApprovalDetail approval={approval} mode={auditPage.mode} relatedCalls={relatedCalls} selectedAction={auditPage.selectedAction} toolCall={toolCall} />;
     }
     const model = selectMainScreenModel(props.state);
     const flow = selectMainBoxFlowMetrics(props.state, props.boxInnerWidth);
@@ -65,21 +74,25 @@ export function ScreenRouter(props: ScreenRouterProps) {
     );
 }
 
-function ApprovalDetail(props: { approval?: ApprovalRequest; mode: "approvalDetail" | "denyConfirm"; selectedAction?: "approve" | "deny" | "back" }) {
+function ApprovalDetail(props: { approval?: ApprovalRequest; mode: "approvalDetail" | "denyConfirm"; relatedCalls: ToolCallRecord[]; selectedAction?: "approve" | "deny" | "back" | "input"; toolCall?: ToolCallRecord }) {
     if (props.approval === undefined) {
         return <Text color="yellow">Approval is no longer pending. Back returns to the audit list.</Text>;
     }
 
     const fields = [
         ["instance", props.approval.instance],
+        ["approval", props.approval.approvalId],
+        ["call", props.approval.callId],
         ["source", props.approval.source],
         ["tool", props.approval.toolName],
         ["risk", props.approval.riskLevel],
-        ["reason", props.approval.reason],
-        ["input", props.approval.inputSummary],
-        ["requested time", props.approval.createdAt]
+        ["policy reason", props.approval.reason],
+        ["requested time", props.approval.createdAt],
+        ["expires", props.approval.expiresAt],
+        ["remaining", remainingTime(props.approval.expiresAt)],
+        ["input summary", props.toolCall?.inputSummary ?? props.approval.inputSummary]
     ] as const;
-    const actions = props.mode === "approvalDetail" ? (["back", "deny", "approve"] as const) : (["back", "deny"] as const);
+    const actions = props.mode === "approvalDetail" ? (["back", "input", "deny", "approve"] as const) : (["back", "deny"] as const);
 
     return (
         <Box flexDirection="column">
@@ -87,6 +100,8 @@ function ApprovalDetail(props: { approval?: ApprovalRequest; mode: "approvalDeta
             {fields.map(([label, value]) => (
                 <Text key={label}>{`${label}: ${value}`}</Text>
             ))}
+            <Text color="cyan">Input is available in structured full detail.</Text>
+            {props.relatedCalls.length === 0 ? undefined : <Text dimColor>{`Nearby history: ${props.relatedCalls.map((call) => `${call.toolName}/${call.status}`).join(" · ")}`}</Text>}
             {props.mode === "denyConfirm" ? <Text color="yellow">Deny this approval?</Text> : undefined}
             <Box marginTop={1}>
                 {actions.map((action) => (
@@ -95,6 +110,17 @@ function ApprovalDetail(props: { approval?: ApprovalRequest; mode: "approvalDeta
             </Box>
         </Box>
     );
+}
+
+function remainingTime(expiresAt: string): string {
+    const milliseconds = Date.parse(expiresAt) - Date.now();
+    if (!Number.isFinite(milliseconds) || milliseconds <= 0) {
+        return "expired";
+    }
+
+    const seconds = Math.ceil(milliseconds / 1_000);
+    const minutes = Math.floor(seconds / 60);
+    return minutes > 0 ? `${minutes}m ${seconds % 60}s` : `${seconds}s`;
 }
 
 function clamp(value: number, min: number, max: number): number {
@@ -117,6 +143,7 @@ export function buildFocusGraphForState(state: TuiAppState): FocusGraph {
         case "approvalDetail":
             return buildLinearGraph([
                 { id: "back", kind: "approvalAction" as const },
+                { id: "input", kind: "approvalAction" as const },
                 { id: "deny", kind: "approvalAction" as const },
                 { id: "approve", kind: "approvalAction" as const }
             ]);
@@ -186,6 +213,9 @@ function wrapText(value: string, width: number): string[] {
 
 function detailLineColor(line: string): string | undefined {
     const value = line.trimStart();
+    if (/^(command|path|target|cwd):/u.test(value)) {
+        return "yellow";
+    }
     if (value.startsWith("+++") || value.startsWith("+")) {
         return "green";
     }

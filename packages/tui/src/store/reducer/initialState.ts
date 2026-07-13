@@ -34,6 +34,7 @@ export function createInitialTuiAppState(): TuiAppState {
             focusScope: "sidebarPages",
             formDrafts: {},
             logsFollowByInstance: {},
+            logsPausedAtSeqByInstance: {},
             mainFocusId: undefined,
             scrollOffsets: {},
             searchQueries: {},

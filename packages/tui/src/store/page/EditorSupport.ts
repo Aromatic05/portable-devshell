@@ -15,7 +15,7 @@ export function editorDraft(state: TuiAppState, key: string, fallback: Record<st
 }
 
 export function fieldLine(id: string, label: string, value: JsonValue | undefined): { id: string; text: string } {
-    return { id: `field:${id}`, text: `${label.padEnd(18, " ")} [ ${displayValue(value)} ]` };
+    return { id: `field:${id}`, text: `${label.padEnd(18, " ")} [ ${displayValue(value)} ]  (${valueType(value)})` };
 }
 
 export function choiceLine(id: string, label: string, value: JsonValue | undefined): { id: string; text: string } {
@@ -57,6 +57,14 @@ export function displayValue(value: JsonValue | undefined): string {
         return JSON.stringify(value);
     }
     return String(value);
+}
+
+function valueType(value: JsonValue | undefined): string {
+    if (Array.isArray(value)) return "comma-separated list";
+    if (value === undefined) return "text";
+    if (value === null) return "JSON null";
+    if (typeof value === "object") return "JSON";
+    return typeof value;
 }
 
 export function readPath(record: Record<string, JsonValue>, path: string): JsonValue | undefined {

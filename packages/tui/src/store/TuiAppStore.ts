@@ -271,6 +271,10 @@ export class TuiAppStore {
         this.dispatch({ follow, instance, type: "logs.setFollow" });
     }
 
+    setLogsPausedAtSeq(instance: string, seq: number | undefined): void {
+        this.dispatch({ instance, ...(seq === undefined ? {} : { seq }), type: "logs.setPausedAtSeq" });
+    }
+
     setScrollOffset(key: string, offset: number): void {
         this.dispatch({
             key,

@@ -23,7 +23,7 @@ export type AuditPageState = {
     listFocusId?: string;
     listScrollOffset?: number;
     mode: AuditPageMode;
-    selectedAction?: "approve" | "deny" | "back";
+    selectedAction?: "approve" | "deny" | "back" | "input";
 };
 
 export type SidebarCursor = { id: PageId; kind: "page" } | { id: string; kind: "instance" };
@@ -42,6 +42,7 @@ export type TuiUiState = {
     formDrafts: Record<string, unknown>;
     dirtyForms: Record<string, boolean>;
     logsFollowByInstance: Record<string, boolean>;
+    logsPausedAtSeqByInstance: Record<string, number | undefined>;
     controlRestartRequired: boolean;
 };
 

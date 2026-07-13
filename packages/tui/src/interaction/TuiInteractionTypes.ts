@@ -22,7 +22,7 @@ export type FocusItem =
     | { boxId: string; kind: "line"; id: string }
     | { kind: "field"; id: string }
     | { kind: "button"; id: "save" | "cancel" | string }
-    | { kind: "approvalAction"; id: "approve" | "deny" | "back" };
+    | { kind: "approvalAction"; id: "approve" | "deny" | "back" | "input" };
 
 export type TuiMode = FocusScope;
 
