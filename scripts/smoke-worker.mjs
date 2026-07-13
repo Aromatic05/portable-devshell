@@ -1,5 +1,5 @@
 import { spawn, spawnSync } from "node:child_process";
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { isAbsolute, resolve } from "node:path";
 
@@ -92,6 +92,9 @@ try {
     stage("stop worker");
     runWorker(["stop", "--instance", instance]);
     process.stdout.write("worker smoke passed\n");
+} catch (error) {
+    await reportFailure(error);
+    throw error;
 } finally {
     spawnSync(worker, ["stop", "--instance", instance], {
         cwd: workspace,
@@ -116,6 +119,32 @@ function runWorker(args) {
             `${worker} ${args.join(" ")} failed (${result.status ?? "unknown"})\n${result.error?.stack ?? ""}\n${result.stdout ?? ""}${result.stderr ?? ""}`
         );
     }
+}
+
+async function reportFailure(error) {
+    let workerLog = "";
+    try {
+        workerLog = await readFile(
+            resolve(env.PORTABLE_DEVSHELL_HOME, instance, "logs", "worker.log"),
+            "utf8"
+        );
+    } catch {
+        // The daemon may fail before the log file exists.
+    }
+    const rendered = [
+        error instanceof Error ? error.stack ?? error.message : String(error),
+        workerLog.length > 0 ? `worker.log:\n${workerLog}` : "worker.log was unavailable"
+    ].join("\n\n");
+    process.stderr.write(
+        `::error title=Windows worker smoke::${escapeWorkflowCommand(rendered)}\n`
+    );
+}
+
+function escapeWorkflowCommand(value) {
+    return value
+        .replaceAll("%", "%25")
+        .replaceAll("\r", "%0D")
+        .replaceAll("\n", "%0A");
 }
 
 function stage(message) {
