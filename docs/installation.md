@@ -9,7 +9,7 @@ macOS x86-64
 macOS arm64
 ```
 
-主程序需要 Node.js 22 或更高版本。发布包已经包含 TypeScript 应用依赖和对应平台的 worker；使用发布包时不需要 pnpm 或 Rust。
+主程序需要 Node.js 24 或更高版本。发布包已经包含 TypeScript 应用依赖和对应平台的 worker；使用发布包时不需要 pnpm 或 Rust。
 
 ## 从 GitHub Release 安装
 
@@ -52,7 +52,7 @@ PORTABLE_DEVSHELL_RELEASE_BASE_URL=https://mirror.example.com/portable-devshell/
 
 源码安装需要：
 
-- Node.js 22 或更高版本
+- Node.js 24 或更高版本
 - pnpm 10.13.1
 - rustup 和稳定版 Rust
 

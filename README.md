@@ -16,7 +16,7 @@
 
 ## 安装
 
-发布包支持 Linux 和 macOS 的 x86-64、arm64，主程序需要 Node.js 22 或更高版本。安装器会预置四个平台的 worker，因为 control 主机与受管目标环境可以不是同一平台。
+发布包支持 Linux 和 macOS 的 x86-64、arm64，主程序需要 Node.js 24 或更高版本。安装器会预置四个平台的 worker，因为 control 主机与受管目标环境可以不是同一平台。
 
 ```bash
 curl -fLO https://github.com/Aromatic05/portable-devshell/releases/latest/download/install-release.sh

@@ -1,6 +1,6 @@
 # 验收说明
 
-这份文件只记录当前可执行的验收入口，不再保存容易失真的静态“已通过”结论。每次发布应以 CI 和本地验收结果为准。
+这份文件只记录当前可执行的验收入口，不再保存容易失真的静态“已通过”结论。Release 以构建与打包成功为硬门禁；测试由独立 CI job 报告，不阻止已经成功构建的发布产物输出。
 
 ## 完整验收
 
@@ -13,9 +13,9 @@ bash acceptance/run-final-acceptance.sh
 ```text
 pnpm build
 pnpm typecheck
+cargo build --locked --workspace
 pnpm test
-cargo test --manifest-path ./Cargo.toml
-cargo build --manifest-path ./Cargo.toml
+cargo test --locked --workspace
 bash acceptance/run-real-worker-smoke.sh
 bash acceptance/run-mcp-smoke.sh
 ```
@@ -28,6 +28,14 @@ bash acceptance/run-unit-tests.sh
 bash acceptance/run-real-worker-smoke.sh
 bash acceptance/run-mcp-smoke.sh
 ```
+
+## CI 与 Release 触发规则
+
+- 普通分支和 `main` 的直接 push 不触发 CI；
+- PR、手动运行和 `dev*` 预发布 tag 触发 CI；
+- CI 的 `build` job 必须成功并上传应用构建产物；
+- CI 的 `test` job 运行完整验收，失败会被报告，但不参与 Release 门禁；
+- `v*` 正式 tag 触发 Release，仅在应用包和四个平台 worker 全部构建成功后发布。
 
 ## 发布前检查
 

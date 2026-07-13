@@ -9,7 +9,7 @@ macOS x86-64
 macOS arm64
 ```
 
-主程序需要 Node.js 22 或更高版本。当前不提供 Windows 发行包。
+主程序需要 Node.js 24 或更高版本。当前不提供 Windows 发行包。
 
 ## 配置路径
 
