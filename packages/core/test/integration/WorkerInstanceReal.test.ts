@@ -229,6 +229,8 @@ test("WorkerInstance rejects not-ready and schedules concurrent tool calls while
 
         assert.deepEqual(firstQueued?.data, {
             callId: records[0]?.callId,
+            input: { command: "pwd" },
+            inputSummary: "{\"command\":\"pwd\"}",
             queuedAt: firstQueued?.data.queuedAt,
             source: "cli",
             startedAt: firstQueued?.data.startedAt,
@@ -237,6 +239,8 @@ test("WorkerInstance rejects not-ready and schedules concurrent tool calls while
         });
         assert.deepEqual(firstRunning?.data, {
             callId: records[0]?.callId,
+            input: { command: "pwd" },
+            inputSummary: "{\"command\":\"pwd\"}",
             source: "cli",
             startedAt: firstQueued?.data.startedAt,
             status: "running",
@@ -246,6 +250,8 @@ test("WorkerInstance rejects not-ready and schedules concurrent tool calls while
             callId: records[2]?.callId,
             completedAt: failedEvent?.data.completedAt,
             errorCode: errorCodes.coreToolSchemaUnavailable,
+            input: { command: "false" },
+            inputSummary: "{\"command\":\"false\"}",
             source: "cli",
             startedAt: failedEvent?.data.startedAt,
             status: "failed",
