@@ -70,8 +70,8 @@ require_command tar
 require_command install
 
 node_major=$(node -p 'Number(process.versions.node.split(".")[0])')
-if [ "$node_major" -lt 22 ]; then
-    echo "portable-devshell 需要 Node.js 22 或更高版本，当前版本为 $(node --version)。" >&2
+if [ "$node_major" -lt 24 ]; then
+    echo "portable-devshell 需要 Node.js 24 或更高版本，当前版本为 $(node --version)。" >&2
     exit 1
 fi
 

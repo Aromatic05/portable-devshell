@@ -38,7 +38,7 @@ try {
     await chmod(resolve(appDirectory, "dist", "cli", "CliMain.js"), 0o755);
     await writeFile(
         resolve(appDirectory, "portable-devshell-install.json"),
-        `${JSON.stringify({ minimumNodeMajor: 22, version }, null, 2)}\n`,
+        `${JSON.stringify({ minimumNodeMajor: 24, version }, null, 2)}\n`,
         "utf8",
     );
 

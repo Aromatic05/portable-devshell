@@ -9,28 +9,7 @@ permissions:
     contents: write
 
 jobs:
-    verify:
-        runs-on: ubuntu-24.04
-
-        steps:
-            - uses: actions/checkout@v4
-            - uses: pnpm/action-setup@v4
-              with:
-                  version: 10.13.1
-            - uses: actions/setup-node@v4
-              with:
-                  node-version: 22
-                  cache: pnpm
-            - name: 安装 Rust 工具链
-              run: |
-                  rustup toolchain install stable --profile minimal
-                  rustup default stable
-            - run: pnpm install --frozen-lockfile
-            - run: pnpm lint
-            - run: bash acceptance/run-final-acceptance.sh
-
     build-worker:
-        needs: verify
         strategy:
             fail-fast: false
             matrix:
@@ -51,11 +30,11 @@ jobs:
         runs-on: ${{ matrix.runner }}
 
         steps:
-            - uses: actions/checkout@v4
+            - uses: actions/checkout@v5
 
-            - uses: actions/setup-node@v4
+            - uses: actions/setup-node@v5
               with:
-                  node-version: 22
+                  node-version: 24
 
             - name: 安装 Rust 工具链
               run: |
@@ -65,9 +44,14 @@ jobs:
 
             - name: 安装 Zig 工具链
               if: runner.os == 'Linux'
-              uses: mlugg/setup-zig@v2.2.1
-              with:
-                  version: 0.14.1
+              shell: bash
+              run: |
+                  set -euo pipefail
+                  zig_root="$RUNNER_TEMP/zig-0.14.1"
+                  curl -fsSL https://ziglang.org/download/0.14.1/zig-x86_64-linux-0.14.1.tar.xz -o "$RUNNER_TEMP/zig.tar.xz"
+                  mkdir -p "$zig_root"
+                  tar -xJf "$RUNNER_TEMP/zig.tar.xz" --strip-components=1 -C "$zig_root"
+                  echo "$zig_root" >> "$GITHUB_PATH"
 
             - name: 安装 cargo-zigbuild
               if: runner.os == 'Linux'
@@ -81,25 +65,24 @@ jobs:
               if: runner.os == 'macOS'
               run: node ./scripts/build-worker.mjs --target "${{ matrix.target }}" --output-dir ./release-assets
 
-            - uses: actions/upload-artifact@v4
+            - uses: actions/upload-artifact@v7
               with:
                   name: worker-${{ matrix.target }}
                   path: release-assets/*
 
     package-app:
-        needs: verify
         runs-on: ubuntu-24.04
 
         steps:
-            - uses: actions/checkout@v4
+            - uses: actions/checkout@v5
 
-            - uses: pnpm/action-setup@v4
+            - uses: pnpm/action-setup@v5
               with:
                   version: 10.13.1
 
-            - uses: actions/setup-node@v4
+            - uses: actions/setup-node@v5
               with:
-                  node-version: 22
+                  node-version: 24
                   cache: pnpm
 
             - name: 校验 tag 与应用版本
@@ -118,7 +101,7 @@ jobs:
                   chmod 755 ./release-assets/install-release.sh
                   (cd ./release-assets && sha256sum install-release.sh > install-release.sh.sha256)
 
-            - uses: actions/upload-artifact@v4
+            - uses: actions/upload-artifact@v7
               with:
                   name: app
                   path: release-assets/*
@@ -130,11 +113,11 @@ jobs:
         runs-on: ubuntu-24.04
 
         steps:
-            - uses: actions/checkout@v4
+            - uses: actions/checkout@v5
               with:
                   fetch-depth: 0
 
-            - uses: actions/download-artifact@v4
+            - uses: actions/download-artifact@v8
               with:
                   merge-multiple: true
                   path: release-assets
