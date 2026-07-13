@@ -3,6 +3,7 @@ import type { InstanceCreateDraft, InstanceCreateSchema, InstanceCreateSummary, 
 import { editableProviderChoices } from "../platform/TuiProviderAvailability.js";
 import type { TuiAppStore } from "../store/TuiAppStore.js";
 import { asRecord, cloneRecord, editorDraft, normalizeDraftForSave, readPath, setPath } from "../store/page/EditorSupport.js";
+import { auditInputText } from "../store/page/AuditInputPresentation.js";
 import { selectMainBoxFlowMetrics, selectMainBoxIds, selectMainScreenModel, selectMainScrollKey } from "../store/TuiSelectors.js";
 import { TuiFocusManager } from "./TuiFocusManager.js";
 import type { TuiEditorState, TuiUiIntent } from "./TuiInteractionTypes.js";
@@ -635,6 +636,19 @@ export class CommandDispatcher {
 
             if (state.ui.selectedPage === "audit" && state.ui.selectedInstance !== undefined && actionId?.startsWith("approval.open:")) {
                 return await this.dispatch({ approvalId: actionId.slice("approval.open:".length), instance: state.ui.selectedInstance, type: "approval.open" });
+            }
+
+            if (state.ui.selectedPage === "audit" && state.ui.selectedInstance !== undefined && actionId?.startsWith("input.open:")) {
+                const callId = actionId.slice("input.open:".length);
+                const record = state.toolCallsByInstance[state.ui.selectedInstance]?.find((candidate) => candidate.callId === callId);
+                if (record === undefined) {
+                    return false;
+                }
+                return await this.dispatch({
+                    body: auditInputText(record.input, record.inputSummary),
+                    title: `${record.toolName} · input`,
+                    type: "textDetail.open"
+                });
             }
 
             if (button === "clear-filter" && (state.ui.selectedPage === "instances" || state.ui.selectedPage === "todo" || state.ui.selectedPage === "config" || state.ui.selectedPage === "audit")) {

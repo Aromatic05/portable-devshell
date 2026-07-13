@@ -28,7 +28,7 @@ export function ScreenRouter(props: ScreenRouterProps) {
         return (
             <Box flexDirection="column">
                 <Text bold>{textDetail.title}</Text>
-                {lines.slice(offset, offset + viewport).map((line, index) => <Text key={`${offset + index}:${line}`}>{line}</Text>)}
+                {lines.slice(offset, offset + viewport).map((line, index) => <Text color={detailLineColor(line)} key={`${offset + index}:${line}`}>{line}</Text>)}
                 <Text dimColor>{`line ${Math.min(offset + 1, Math.max(lines.length, 1))}-${Math.min(offset + viewport, lines.length)} / ${lines.length} · Esc/Enter back`}</Text>
             </Box>
         );
@@ -182,4 +182,18 @@ function wrapText(value: string, width: number): string[] {
         }
     }
     return output.length === 0 ? [""] : output;
+}
+
+function detailLineColor(line: string): string | undefined {
+    const value = line.trimStart();
+    if (value.startsWith("+++") || value.startsWith("+")) {
+        return "green";
+    }
+    if (value.startsWith("---") || value.startsWith("-")) {
+        return "red";
+    }
+    if (value.startsWith("@@") || value.startsWith("***")) {
+        return "cyan";
+    }
+    return undefined;
 }
