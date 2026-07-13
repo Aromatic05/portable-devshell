@@ -31,7 +31,12 @@ fn run() -> Result<String, String> {
             .into_string()
             .map_err(|_| "internal daemon instance name is not valid utf-8".to_string())?;
         let instance = InstanceName::parse(&raw_instance)?;
-        daemon::server::serve(instance)?;
+        if let Err(error) = daemon::server::serve(instance.clone()) {
+            if let Ok(paths) = storage::InstancePaths::resolve(&instance) {
+                let _ = daemon::log_writer::append_log(&paths, &format!("daemon failed: {error}"));
+            }
+            return Err(error);
+        }
         return Ok(String::new());
     }
 

@@ -1,14 +1,24 @@
-use std::fs::{self, OpenOptions};
+#[cfg(windows)]
+use std::ffi::OsStr;
+use std::fs;
+#[cfg(unix)]
+use std::fs::OpenOptions;
 use std::path::{Path, PathBuf};
+#[cfg(unix)]
 use std::process::{Command, Stdio};
 
 use crate::instance::InstanceName;
-use crate::platform::{configure_daemon_command, process_is_running};
+#[cfg(unix)]
+use crate::platform::configure_daemon_command;
+use crate::platform::process_is_running;
+#[cfg(windows)]
+use crate::platform::spawn_daemon_process;
 use crate::rpc::bridge::send_request;
 use crate::rpc::request::RpcRequest;
 use crate::security::SecurityMode;
 use crate::socket::SocketPaths;
 use crate::storage::InstancePaths;
+#[cfg(unix)]
 use crate::storage::permissions::ensure_file_mode;
 
 pub const INTERNAL_INSTANCE_ENV: &str = "DEVSHELL_WORKER_INTERNAL_INSTANCE";
@@ -42,35 +52,56 @@ pub fn spawn(
     paths: &InstancePaths,
     runtime: &WorkerRuntimeContext,
 ) -> Result<(), String> {
-    let log_file = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&paths.log_file)
-        .map_err(|error| format!("failed to open {}: {error}", paths.log_file.display()))?;
-    ensure_file_mode(&paths.log_file, 0o600)?;
-    let stdout_file = log_file
-        .try_clone()
-        .map_err(|error| format!("failed to clone {}: {error}", paths.log_file.display()))?;
+    #[cfg(unix)]
+    {
+        let log_file = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&paths.log_file)
+            .map_err(|error| format!("failed to open {}: {error}", paths.log_file.display()))?;
+        ensure_file_mode(&paths.log_file, 0o600)?;
+        let stdout_file = log_file
+            .try_clone()
+            .map_err(|error| format!("failed to clone {}: {error}", paths.log_file.display()))?;
 
-    let mut command = Command::new(std::env::current_exe().map_err(|error| error.to_string())?);
-    command
-        .env(INTERNAL_INSTANCE_ENV, instance.as_str())
-        .env(INTERNAL_WORKSPACE_ENV, &runtime.workspace)
-        .env(
-            INTERNAL_SECURITY_MODE_ENV,
-            match runtime.security_mode {
-                SecurityMode::Disabled => "disabled",
-                SecurityMode::Workspace => "workspace",
-            },
+        let mut command = Command::new(std::env::current_exe().map_err(|error| error.to_string())?);
+        command
+            .env(INTERNAL_INSTANCE_ENV, instance.as_str())
+            .env(INTERNAL_WORKSPACE_ENV, &runtime.workspace)
+            .env(
+                INTERNAL_SECURITY_MODE_ENV,
+                match runtime.security_mode {
+                    SecurityMode::Disabled => "disabled",
+                    SecurityMode::Workspace => "workspace",
+                },
+            )
+            .stdin(Stdio::null())
+            .stdout(Stdio::from(stdout_file))
+            .stderr(Stdio::from(log_file));
+        configure_daemon_command(&mut command);
+        command
+            .spawn()
+            .map_err(|error| format!("failed to spawn daemon process: {error}"))?;
+        Ok(())
+    }
+    #[cfg(windows)]
+    {
+        let _ = paths;
+        let executable = std::env::current_exe().map_err(|error| error.to_string())?;
+        let security_mode = OsStr::new(match runtime.security_mode {
+            SecurityMode::Disabled => "disabled",
+            SecurityMode::Workspace => "workspace",
+        });
+        spawn_daemon_process(
+            &executable,
+            &runtime.workspace,
+            &[
+                (INTERNAL_INSTANCE_ENV, OsStr::new(instance.as_str())),
+                (INTERNAL_WORKSPACE_ENV, runtime.workspace.as_os_str()),
+                (INTERNAL_SECURITY_MODE_ENV, security_mode),
+            ],
         )
-        .stdin(Stdio::null())
-        .stdout(Stdio::from(stdout_file))
-        .stderr(Stdio::from(log_file));
-    configure_daemon_command(&mut command);
-    command
-        .spawn()
-        .map_err(|error| format!("failed to spawn daemon process: {error}"))?;
-    Ok(())
+    }
 }
 
 pub fn capture_workspace() -> Result<PathBuf, String> {

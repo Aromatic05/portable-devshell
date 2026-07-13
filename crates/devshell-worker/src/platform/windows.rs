@@ -1,10 +1,16 @@
-use std::process::Command;
-
+use std::ffi::{OsStr, OsString};
+use std::mem::size_of;
+use std::os::windows::ffi::OsStrExt;
 use std::os::windows::process::CommandExt;
+use std::path::Path;
+use std::process::Command;
+use std::ptr;
+
 use windows_sys::Win32::Foundation::{CloseHandle, STILL_ACTIVE};
 use windows_sys::Win32::System::Threading::{
-    CREATE_NEW_PROCESS_GROUP, CREATE_NO_WINDOW, DETACHED_PROCESS, GetExitCodeProcess, OpenProcess,
-    PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_TERMINATE, TerminateProcess,
+    CREATE_NEW_PROCESS_GROUP, CREATE_NO_WINDOW, CREATE_UNICODE_ENVIRONMENT, CreateProcessW,
+    DETACHED_PROCESS, GetExitCodeProcess, OpenProcess, PROCESS_INFORMATION,
+    PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_TERMINATE, STARTUPINFOW, TerminateProcess,
 };
 
 pub fn process_is_running(pid: u32) -> bool {
@@ -65,10 +71,89 @@ pub fn terminate_process_group(pid: i32, force: bool) -> Result<(), String> {
     ))
 }
 
-pub fn configure_daemon_command(command: &mut Command) {
-    command.creation_flags(DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW);
+pub fn spawn_daemon_process(
+    executable: &Path,
+    current_directory: &Path,
+    environment_overrides: &[(&str, &OsStr)],
+) -> Result<(), String> {
+    let application_name = null_terminated(executable.as_os_str());
+    let mut command_line = quoted_command_line(executable.as_os_str());
+    let current_directory = null_terminated(current_directory.as_os_str());
+    let environment = environment_block(environment_overrides);
+    let mut startup_info = STARTUPINFOW {
+        cb: size_of::<STARTUPINFOW>() as u32,
+        ..Default::default()
+    };
+    let mut process_information = PROCESS_INFORMATION::default();
+    let result = unsafe {
+        CreateProcessW(
+            application_name.as_ptr(),
+            command_line.as_mut_ptr(),
+            ptr::null(),
+            ptr::null(),
+            0,
+            DETACHED_PROCESS
+                | CREATE_NEW_PROCESS_GROUP
+                | CREATE_NO_WINDOW
+                | CREATE_UNICODE_ENVIRONMENT,
+            environment.as_ptr().cast(),
+            current_directory.as_ptr(),
+            &mut startup_info,
+            &mut process_information,
+        )
+    };
+    if result == 0 {
+        return Err(format!(
+            "failed to spawn detached daemon process: {}",
+            std::io::Error::last_os_error()
+        ));
+    }
+    unsafe {
+        CloseHandle(process_information.hThread);
+        CloseHandle(process_information.hProcess);
+    }
+    Ok(())
 }
 
 pub fn configure_child_process(command: &mut Command) {
     command.creation_flags(CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW);
+}
+
+fn null_terminated(value: &OsStr) -> Vec<u16> {
+    value.encode_wide().chain(Some(0)).collect()
+}
+
+fn quoted_command_line(executable: &OsStr) -> Vec<u16> {
+    let mut command_line = Vec::new();
+    command_line.push('"' as u16);
+    command_line.extend(executable.encode_wide());
+    command_line.push('"' as u16);
+    command_line.push(0);
+    command_line
+}
+
+fn environment_block(overrides: &[(&str, &OsStr)]) -> Vec<u16> {
+    let mut environment = std::env::vars_os().collect::<Vec<(OsString, OsString)>>();
+    for (key, value) in overrides {
+        environment.retain(|(existing, _)| !existing.to_string_lossy().eq_ignore_ascii_case(key));
+        environment.push((OsString::from(key), value.to_os_string()));
+    }
+    environment.sort_by(|(left, _), (right, _)| {
+        left.to_string_lossy()
+            .to_ascii_uppercase()
+            .cmp(&right.to_string_lossy().to_ascii_uppercase())
+    });
+
+    let mut block = Vec::new();
+    for (key, value) in environment {
+        block.extend(key.encode_wide());
+        block.push('=' as u16);
+        block.extend(value.encode_wide());
+        block.push(0);
+    }
+    if block.is_empty() {
+        block.push(0);
+    }
+    block.push(0);
+    block
 }
