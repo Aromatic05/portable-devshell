@@ -328,7 +328,11 @@ test("box borders encode result status and retain severity while focused", () =>
 
     assert.equal(renderExpandableBoxLines({ ...base, focused: false, status: "ready" }, 24)[0]?.color, "green");
     assert.equal(renderExpandableBoxLines({ ...base, focused: false, status: "failed" }, 24)[0]?.color, "red");
-    assert.equal(renderExpandableBoxLines({ ...base, focused: true, severity: "danger", status: "pending" }, 24)[0]?.color, "red");
+    const focused = renderExpandableBoxLines({ ...base, focused: true, severity: "danger", status: "pending" }, 24)[0]!;
+    assert.equal(focused.backgroundColor, "magenta");
+    assert.equal(focused.color, "white");
+    assert.match(focused.text, /Result \[… pending\]/u);
+    assert.equal(renderExpandableBoxLines({ ...base, focused: true, severity: "danger", status: "pending" }, 24)[1]?.backgroundColor, "magenta");
 });
 
 test("narrow terminals use compact navigation and reject unsupported sizes", () => {
@@ -468,6 +472,7 @@ test("config choices use angle selectors and switch with arrow keys", async () =
     assert.equal(general?.expandedLines.some((line) => line.text.endsWith("<local>")), true);
     assert.equal(security?.expandedLines.some((line) => line.text.endsWith("<disabled>")), true);
     assert.equal(security?.expandedLines.some((line) => line.text.endsWith("<ask>")), true);
+    assert.equal(security?.status, "warning");
 
     await harness.press("", { downArrow: true });
     await harness.press("", { rightArrow: true });
