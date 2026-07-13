@@ -483,7 +483,7 @@ test("config exposes container and tool scheduler settings", async () => {
     assert.equal(runtime.expandedLines.some((line) => line.text.includes("3000")), true);
 });
 
-test("audit retains realtime input and renders patch lines structurally", async () => {
+test("audit retains realtime input and opens the patch in a dedicated detail screen", async () => {
     const harness = createHarness();
     const patch = "*** Begin Patch\n*** Update File: src/example.ts\n-old\n+new\n*** End Patch";
 
@@ -505,9 +505,14 @@ test("audit retains realtime input and renders patch lines structurally", async 
 
     const audit = selectMainScreenModel(harness.store.getState()).boxes.find((box) => box.id === "audit-live-patch")!;
     assert.equal((harness.store.getState().toolCallsByInstance.alpha ?? []).find((record) => record.callId === "live-patch")?.input !== undefined, true);
-    assert.equal(audit.expandedLines.some((line) => line.text.includes("*** Begin Patch") && line.tone === "accent"), true);
-    assert.equal(audit.expandedLines.some((line) => line.text.includes("+new") && line.tone === "success"), true);
-    assert.equal(audit.expandedLines.some((line) => line.text.includes("-old") && line.tone === "danger"), true);
+    assert.equal(audit.expandedLines.some((line) => line.text.includes("*** Begin Patch")), false);
+    assert.equal(audit.expandedLines.some((line) => line.text === "[ View Full Input ]"), false);
+
+    harness.store.setFocusScope("mainBoxes");
+    harness.store.setMainFocusId("audit-live-patch");
+    await harness.dispatch({ type: "focus.activate" });
+    assert.equal(harness.store.getState().interaction.textDetail.open, true);
+    assert.equal(harness.store.getState().interaction.textDetail.body.includes("*** Begin Patch"), true);
 });
 
 test("audit renders legacy records without an input summary", async () => {
@@ -524,7 +529,7 @@ test("audit renders legacy records without an input summary", async () => {
     await harness.press("5");
 
     const audit = selectMainScreenModel(harness.store.getState()).boxes.find((box) => box.id === "audit-legacy-call")!;
-    assert.equal(audit.expandedLines.some((line) => line.text === "-"), true);
+    assert.equal(audit.expandedLines.some((line) => line.text === "-"), false);
 });
 
 test("connector discard confirms and clears its per-instance MCP draft", async () => {
