@@ -26,6 +26,7 @@ export * from "./protocol/frame/ProtocolFrameReader.js";
 export * from "./protocol/frame/ProtocolFrameWriter.js";
 export * from "./protocol/method/ProtocolMethodControl.js";
 export * from "./protocol/stream/ProtocolStreamTypes.js";
+export * from "./runtime/RuntimeControlPath.js";
 export * from "./schema/SchemaConfig.js";
 export * from "./schema/SchemaEnvelope.js";
 export * from "./schema/SchemaTool.js";

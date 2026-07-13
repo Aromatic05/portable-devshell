@@ -23,7 +23,6 @@ export class TuiControlConnection {
         this.#connection = new ProtocolControlClientConnection({
             clientKind: "tui",
             connectionClosedMessage: { kind: "connection.closed" },
-            createRuntimeDirError: (message) => new Error(message),
             mapConnectionError,
             mapRemoteError: toRemoteError,
             mapStreamMessage: toStreamMessage,

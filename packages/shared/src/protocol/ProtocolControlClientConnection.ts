@@ -1,5 +1,5 @@
 import { createConnection, type Socket } from "node:net";
-import { join } from "node:path";
+import { resolveControlSocketPath } from "../runtime/RuntimeControlPath.js";
 
 import type { ControlEventEnvelope, ControlRelayInputEnvelope, ControlResponseEnvelope } from "./envelope/ProtocolEnvelopeControl.js";
 import type { ControlTarget } from "./envelope/ProtocolEnvelopeTarget.js";
@@ -10,7 +10,6 @@ import type { JsonValue } from "../type/TypeJsonValue.js";
 export interface ProtocolControlClientConnectionOptions<TStreamMessage, TError extends Error> {
     clientKind: "cli" | "tui";
     connectionClosedMessage: TStreamMessage;
-    createRuntimeDirError(message: string): TError;
     mapConnectionError(error: unknown): TError;
     mapRemoteError(response: ControlResponseEnvelope): TError;
     mapStreamMessage(event: ControlEventEnvelope): TStreamMessage;
@@ -23,7 +22,6 @@ export interface ProtocolControlClientConnectionOptions<TStreamMessage, TError e
 export class ProtocolControlClientConnection<TStreamMessage, TError extends Error> {
     readonly #clientKind: "cli" | "tui";
     readonly #connectionClosedMessage: TStreamMessage;
-    readonly #createRuntimeDirError: (message: string) => TError;
     readonly #mapConnectionError: (error: unknown) => TError;
     readonly #mapRemoteError: (response: ControlResponseEnvelope) => TError;
     readonly #mapStreamMessage: (event: ControlEventEnvelope) => TStreamMessage;
@@ -48,7 +46,6 @@ export class ProtocolControlClientConnection<TStreamMessage, TError extends Erro
     constructor(options: ProtocolControlClientConnectionOptions<TStreamMessage, TError>) {
         this.#clientKind = options.clientKind;
         this.#connectionClosedMessage = options.connectionClosedMessage;
-        this.#createRuntimeDirError = options.createRuntimeDirError;
         this.#mapConnectionError = options.mapConnectionError;
         this.#mapRemoteError = options.mapRemoteError;
         this.#mapStreamMessage = options.mapStreamMessage;
@@ -273,11 +270,7 @@ export class ProtocolControlClientConnection<TStreamMessage, TError extends Erro
     }
 
     #resolveDefaultSocketPath(xdgRuntimeDir = process.env.XDG_RUNTIME_DIR): string {
-        if (xdgRuntimeDir === undefined || xdgRuntimeDir.length === 0) {
-            throw this.#createRuntimeDirError("XDG_RUNTIME_DIR is not set.");
-        }
-
-        return join(xdgRuntimeDir, "portable-devshell", "control.sock");
+        return resolveControlSocketPath(xdgRuntimeDir);
     }
 }
 

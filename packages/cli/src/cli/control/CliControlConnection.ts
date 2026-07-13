@@ -26,7 +26,6 @@ export class CliControlConnection {
         this.#connection = new ProtocolControlClientConnection({
             clientKind: options.clientKind ?? "cli",
             connectionClosedMessage: { kind: "connection.closed" },
-            createRuntimeDirError: (message) => new CliRenderError("control.notRunning", message),
             mapConnectionError,
             mapRemoteError: toRemoteError,
             mapStreamMessage: toStreamMessage,

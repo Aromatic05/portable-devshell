@@ -1,4 +1,4 @@
-import { mkdir, rm } from "node:fs/promises";
+import { chmod, mkdir, rm } from "node:fs/promises";
 
 import { ControlPathRuntime } from "./path/ControlPathRuntime.js";
 
@@ -13,7 +13,8 @@ export class ControlSocketFile {
     }
 
     async ensureRuntimeDir(): Promise<void> {
-        await mkdir(this.runtimeDir, { recursive: true });
+        await mkdir(this.runtimeDir, { mode: 0o700, recursive: true });
+        await chmod(this.runtimeDir, 0o700);
     }
 
     async remove(): Promise<void> {

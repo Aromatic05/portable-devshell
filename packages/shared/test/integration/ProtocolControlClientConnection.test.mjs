@@ -38,7 +38,6 @@ test("ProtocolControlClientConnection identifies the request interrupted by a cl
     const connection = new ProtocolControlClientConnection({
         clientKind: "tui",
         connectionClosedMessage: "closed",
-        createRuntimeDirError: (message) => new Error(message),
         mapConnectionError: (error) => (error instanceof Error ? error : new Error(String(error))),
         mapRemoteError: () => new Error("remote error"),
         mapStreamMessage: () => "event",

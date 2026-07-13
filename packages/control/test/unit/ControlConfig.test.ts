@@ -28,6 +28,10 @@ test("default config is generated at the fixed control config path", async () =>
         assert.deepEqual(config, createDefaultControlConfig());
         assert.equal(paths.configFile, join(homeDirectory, ".devshell", "control", "config.toml"));
         assert.equal(new ControlPathRuntime("/tmp/runtime-task-8").socketFile, "/tmp/runtime-task-8/portable-devshell/control.sock");
+        assert.equal(
+            new ControlPathRuntime("").socketFile,
+            join(tmpdir(), `portable-devshell-${typeof process.getuid === "function" ? process.getuid() : process.env.USER ?? process.env.USERNAME ?? "user"}`, "control.sock")
+        );
 
         await access(paths.configFile);
         const source = await readFile(paths.configFile, "utf8");
