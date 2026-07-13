@@ -48,6 +48,49 @@ test("WorkerRpcBridge reuses one spawned rpc process across multiple calls", asy
     bridge.close();
 });
 
+test("WorkerProtocolClient routes artifact payload and receive lifecycle through internal RPC methods", async () => {
+    const harness = createRpcHarness();
+    const bridge = new WorkerRpcBridge({
+        transport: harness.transport,
+        rpcOptions: { instanceName: "artifact-rpc" }
+    });
+    const client = new WorkerProtocolClient(new WorkerRpcClient(bridge));
+
+    const opened = await client.openArtifactPayload({
+        expiresAtMs: Date.now() + 60_000,
+        path: "./result.bin"
+    });
+    const chunk = await client.readArtifactPayload({
+        maxBytes: 1024,
+        offsetBytes: 0,
+        payloadId: opened.payloadId
+    });
+    const receive = await client.beginArtifactReceive({
+        descriptor: opened.descriptor,
+        overwrite: false,
+        targetPath: "./copy.bin"
+    });
+    await client.writeArtifactReceive({
+        content: chunk.content,
+        offsetBytes: 0,
+        receiveId: receive.receiveId
+    });
+    await client.finishArtifactReceive(receive.receiveId);
+    await client.abortArtifactReceive(receive.receiveId);
+    await client.closeArtifactPayload(opened.payloadId);
+
+    assert.deepEqual(harness.requestMethods, [
+        "artifact.payload.open",
+        "artifact.payload.read",
+        "artifact.receive.begin",
+        "artifact.receive.write",
+        "artifact.receive.finish",
+        "artifact.receive.abort",
+        "artifact.payload.close"
+    ]);
+    bridge.close();
+});
+
 test("WorkerRpcBridge rejects pending calls when the rpc bridge disconnects", async () => {
     const harness = createRpcHarness({
         slowMethods: new Set(["tools.list"])
@@ -260,6 +303,77 @@ function createResponse(method: string, id: string): WorkerRpcResponseEnvelope {
                 capabilities: { tools: true, streaming: false, cancel: false }
             }
         };
+    }
+
+    if (method === "artifact.payload.open") {
+        return {
+            type: "response",
+            id,
+            ok: true,
+            result: {
+                payloadId: "payload-1",
+                expiresAtMs: Date.now() + 60_000,
+                descriptor: {
+                    type: "file",
+                    name: "result.bin",
+                    mediaType: "application/octet-stream",
+                    payloadBytes: 3,
+                    payloadBlake3: "a".repeat(64)
+                }
+            }
+        };
+    }
+
+    if (method === "artifact.payload.read") {
+        return {
+            type: "response",
+            id,
+            ok: true,
+            result: {
+                payloadId: "payload-1",
+                offsetBytes: 0,
+                returnedBytes: 3,
+                totalBytes: 3,
+                content: "YWJj",
+                encoding: "base64",
+                eof: true
+            }
+        };
+    }
+
+    if (method === "artifact.receive.begin") {
+        return {
+            type: "response",
+            id,
+            ok: true,
+            result: { receiveId: "receive-1", nextOffsetBytes: 0 }
+        };
+    }
+
+    if (method === "artifact.receive.write") {
+        return {
+            type: "response",
+            id,
+            ok: true,
+            result: { receiveId: "receive-1", receivedBytes: 3, nextOffsetBytes: 3 }
+        };
+    }
+
+    if (method === "artifact.receive.finish") {
+        return {
+            type: "response",
+            id,
+            ok: true,
+            result: { receiveId: "receive-1", targetPath: "/tmp/copy.bin", bytes: 3, blake3: "a".repeat(64) }
+        };
+    }
+
+    if (method === "artifact.receive.abort") {
+        return { type: "response", id, ok: true, result: { receiveId: "receive-1", aborted: true } };
+    }
+
+    if (method === "artifact.payload.close") {
+        return { type: "response", id, ok: true, result: { payloadId: "payload-1", closed: true } };
     }
 
     return {

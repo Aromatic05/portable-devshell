@@ -1,6 +1,7 @@
 import { createError, errorCodes } from "@portable-devshell/shared";
 import type { McpHost } from "@portable-devshell/mcp";
 
+import { ArtifactService } from "../artifact/ArtifactService.js";
 import { ControlInstanceCreateService } from "./ControlInstanceCreateService.js";
 import { ControlConfigEditorService } from "./ControlConfigEditorService.js";
 import { ControlConfigStore } from "./config/ControlConfigStore.js";
@@ -30,6 +31,7 @@ export class ControlServer {
     readonly #instanceRegistryBuilder: InstanceRegistryBuilder;
     readonly #mcpWiringService: McpWiringService;
     readonly #socketFile: ControlSocketFile;
+    #artifactService?: ArtifactService;
     #config?: ControlConfig;
     #instanceRegistry = new InstanceRegistry([]);
     #mcpHost?: McpHost;
@@ -79,6 +81,13 @@ export class ControlServer {
             instanceRegistry: this.#instanceRegistry
         });
         instanceGatewayHolder.value = instanceGateway;
+        const controlPaths = new ControlPathHome(this.#homeDirectory);
+        this.#artifactService = new ArtifactService({
+            resolveEndpoint: (name) => this.#instanceRegistry.get(name)?.worker,
+            shareUrl: (token) => artifactShareUrl(this.#requireConfig(), token),
+            storageDir: controlPaths.artifactsDir
+        });
+        await this.#artifactService.initialize();
         this.#mcpHost = this.#mcpWiringService.wire(config, registry, {
             gateway: instanceGateway,
             storageDir: new ControlPathHome(this.#homeDirectory).oauthDir
@@ -107,6 +116,7 @@ export class ControlServer {
             reverseControlService.setDisconnectHandler((instance) => this.#reverseGateway?.disconnect(instance));
         }
         this.#rpcServer = new ControlRpcServer({
+            artifactService: this.#artifactService,
             configEditorService: new ControlConfigEditorService({
                 configStore: this.#configStore,
                 getConfig: () => this.#requireConfig(),
@@ -141,9 +151,11 @@ export class ControlServer {
     async stop(): Promise<void> {
         this.#reverseGateway?.stop();
         await this.#mcpHost?.stop();
+        await this.#artifactService?.stop();
         await this.#instanceRegistry.stopOwned();
         await this.#rpcServer?.stop();
         this.#config = undefined;
+        this.#artifactService = undefined;
         this.#instanceRegistry = new InstanceRegistry([]);
         this.#rpcServer = undefined;
         this.#reverseGateway = undefined;
@@ -161,4 +173,28 @@ export class ControlServer {
             retryable: false
         });
     }
+}
+
+function artifactShareUrl(config: ControlConfig, token: string): string {
+    if (!config.mcp.enabled) {
+        throw createError({
+            code: errorCodes.controlConfigValidationFailed,
+            message: "Artifact sharing requires the MCP HTTP host to be enabled.",
+            retryable: false
+        });
+    }
+    const localHost = normalizeArtifactHttpHost(config.mcp.listenHost);
+    const base = new URL(config.mcp.publicBaseUrl ?? `http://${localHost}:${config.mcp.listenPort}`);
+    const prefix = base.pathname === "/" ? "" : base.pathname.replace(/\/+$/u, "");
+    base.pathname = `${prefix}/artifacts/share/${encodeURIComponent(token)}`;
+    base.search = "";
+    base.hash = "";
+    return base.toString();
+}
+
+function normalizeArtifactHttpHost(host: string): string {
+    if (host === "0.0.0.0" || host === "::") {
+        return "127.0.0.1";
+    }
+    return host.includes(":") && !host.startsWith("[") ? `[${host}]` : host;
 }

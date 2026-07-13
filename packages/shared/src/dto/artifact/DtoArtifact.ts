@@ -39,7 +39,7 @@ export interface ArtifactSourceDescriptor {
     handle?: string;
     instance: string;
     path?: string;
-    type: ArtifactSourceType;
+    type?: ArtifactSourceType;
 }
 
 export interface ArtifactTargetDescriptor {

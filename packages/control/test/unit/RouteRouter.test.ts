@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import type { WorkerInstance } from "@portable-devshell/core";
+import type { ArtifactService } from "../../dist/artifact/ArtifactService.js";
 
 import { InstanceRegistry } from "../../dist/instance/registry/InstanceRegistry.js";
 import { RouteMethodRegistry } from "../../dist/route/RouteMethodRegistry.js";
@@ -19,6 +20,11 @@ test("RouteMethodRegistry resolves control and instance methods", () => {
     assert.equal(registry.resolve("control.restart"), "control");
     assert.equal(registry.resolve("control.listInstances"), "control");
     assert.equal(registry.resolve("control.createInstance"), "control");
+    assert.equal(registry.resolve("control.artifact.createShare"), "control");
+    assert.equal(registry.resolve("control.artifact.revokeShare"), "control");
+    assert.equal(registry.resolve("control.artifact.startTransfer"), "control");
+    assert.equal(registry.resolve("control.artifact.getTransfer"), "control");
+    assert.equal(registry.resolve("control.artifact.cancelTransfer"), "control");
     assert.equal(registry.resolve("instance.callTool"), "instance");
     assert.equal(registry.resolve("instance.readToolCalls"), "instance");
     assert.equal(registry.resolve("instance.listApprovals"), "instance");
@@ -125,4 +131,65 @@ test("Route routers dispatch by target and return instance not found / invalid t
     );
 });
 
+
+test("artifact control route accepts an explicit source instance", async () => {
+    const calls: unknown[] = [];
+    const artifactService = {
+        async startTransfer(input: unknown, defaultInstance: string) {
+            calls.push({ defaultInstance, input });
+            return {
+                operation: "start",
+                transfer: {
+                    createdAt: "2026-07-13T00:00:00.000Z",
+                    source: { instance: defaultInstance, path: "./result.bin" },
+                    status: "queued",
+                    target: { instance: "target-b", path: "/tmp/result.bin" },
+                    transferId: "transfer-1",
+                    transferredBytes: 0,
+                    updatedAt: "2026-07-13T00:00:00.000Z"
+                }
+            };
+        }
+    } as unknown as ArtifactService;
+    const router = new RouteRouterControl(
+        new RouteHandlerControl({
+            artifactService,
+            instanceRegistry: new InstanceRegistry([])
+        })
+    );
+
+    const result = await router.route(
+        {
+            clientKind: "cli",
+            id: "artifact-route",
+            identifyClient() {}
+        } as never,
+        {
+            id: "artifact-start",
+            method: "control.artifact.startTransfer",
+            params: {
+                instance: "source-a",
+                sourcePath: "./result.bin",
+                targetInstance: "target-b",
+                targetPath: "/tmp/result.bin"
+            },
+            target: { kind: "control" },
+            type: "request"
+        }
+    );
+
+    assert.equal((result as { transfer: { status: string } }).transfer.status, "queued");
+    assert.deepEqual(calls, [
+        {
+            defaultInstance: "source-a",
+            input: {
+                instance: "source-a",
+                operation: "start",
+                sourcePath: "./result.bin",
+                targetInstance: "target-b",
+                targetPath: "/tmp/result.bin"
+            }
+        }
+    ]);
+});
 void (0 as unknown as WorkerInstance);

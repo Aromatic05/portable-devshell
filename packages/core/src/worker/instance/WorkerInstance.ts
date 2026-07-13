@@ -29,7 +29,19 @@ import { InstanceLogStore } from "../../log/store/LogStoreInstance.js";
 import { ToolCallHistory } from "../../log/LogToolCallHistory.js";
 import { WorkerCommandClient } from "../../worker/command/WorkerCommandClient.js";
 import type { WorkerCommandInteractiveSession } from "../../worker/command/WorkerCommandTransport.js";
-import { WorkerProtocolClient, type WorkerHandshakeResult } from "../../worker/protocol/WorkerProtocolClient.js";
+import {
+    WorkerProtocolClient,
+    type WorkerArtifactPayloadOpenInput,
+    type WorkerArtifactPayloadOpenResult,
+    type WorkerArtifactPayloadReadInput,
+    type WorkerArtifactPayloadReadResult,
+    type WorkerArtifactReceiveBeginInput,
+    type WorkerArtifactReceiveBeginResult,
+    type WorkerArtifactReceiveFinishResult,
+    type WorkerArtifactReceiveWriteInput,
+    type WorkerArtifactReceiveWriteResult,
+    type WorkerHandshakeResult
+} from "../../worker/protocol/WorkerProtocolClient.js";
 import { WorkerRpcBridge } from "../../worker/rpc/WorkerRpcBridge.js";
 import type { WorkerRpcChannel } from "../../worker/rpc/WorkerRpcChannel.js";
 import { WorkerToolCatalog } from "../tool/WorkerToolCatalog.js";
@@ -179,6 +191,41 @@ export class WorkerInstance {
 
     hasToolSchemaCache(): boolean {
         return this.#catalog.hasSchema();
+    }
+
+    async openArtifactPayload(input: WorkerArtifactPayloadOpenInput): Promise<WorkerArtifactPayloadOpenResult> {
+        this.#assertReady();
+        return await this.#protocolClient.openArtifactPayload(input);
+    }
+
+    async readArtifactPayload(input: WorkerArtifactPayloadReadInput): Promise<WorkerArtifactPayloadReadResult> {
+        this.#assertReady();
+        return await this.#protocolClient.readArtifactPayload(input);
+    }
+
+    async closeArtifactPayload(payloadId: string): Promise<void> {
+        this.#assertReady();
+        await this.#protocolClient.closeArtifactPayload(payloadId);
+    }
+
+    async beginArtifactReceive(input: WorkerArtifactReceiveBeginInput): Promise<WorkerArtifactReceiveBeginResult> {
+        this.#assertReady();
+        return await this.#protocolClient.beginArtifactReceive(input);
+    }
+
+    async writeArtifactReceive(input: WorkerArtifactReceiveWriteInput): Promise<WorkerArtifactReceiveWriteResult> {
+        this.#assertReady();
+        return await this.#protocolClient.writeArtifactReceive(input);
+    }
+
+    async finishArtifactReceive(receiveId: string): Promise<WorkerArtifactReceiveFinishResult> {
+        this.#assertReady();
+        return await this.#protocolClient.finishArtifactReceive(receiveId);
+    }
+
+    async abortArtifactReceive(receiveId: string): Promise<void> {
+        this.#assertReady();
+        await this.#protocolClient.abortArtifactReceive(receiveId);
     }
 
     async start(workspacePath?: WorkspacePath | string): Promise<InstanceSnapshot> {
@@ -402,15 +449,20 @@ export class WorkerInstance {
         }
     }
 
-    async callTool(toolName: string, input: JsonValue, context: ToolCallContext): Promise<JsonValue> {
-        if (!this.snapshot().ready) {
-            throw createError({
-                code: errorCodes.coreInstanceNotReady,
-                message: `Instance ${this.#config.name} is not ready.`,
-                retryable: false,
-                details: { instanceName: this.#config.name }
-            });
+    #assertReady(): void {
+        if (this.snapshot().ready) {
+            return;
         }
+        throw createError({
+            code: errorCodes.coreInstanceNotReady,
+            message: `Instance ${this.#config.name} is not ready.`,
+            retryable: false,
+            details: { instanceName: this.#config.name }
+        });
+    }
+
+    async callTool(toolName: string, input: JsonValue, context: ToolCallContext): Promise<JsonValue> {
+        this.#assertReady();
 
         const callId = randomUUID();
         const startedAt = new Date().toISOString();

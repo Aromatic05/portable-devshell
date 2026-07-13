@@ -1,6 +1,13 @@
-import { createError, errorCodes, type JsonValue } from "@portable-devshell/shared";
+import {
+    createError,
+    errorCodes,
+    type ArtifactShareInput,
+    type ArtifactTransferStartInput,
+    type JsonValue
+} from "@portable-devshell/shared";
 import type { McpOAuthApprovalService } from "@portable-devshell/mcp";
 
+import type { ArtifactService } from "../../artifact/ArtifactService.js";
 import type { ControlConfigEditorService } from "../../control/ControlConfigEditorService.js";
 import type { ControlInstanceCreateService } from "../../control/ControlInstanceCreateService.js";
 import type { ControlRpcConnection } from "../../control/rpc/ControlRpcConnection.js";
@@ -8,6 +15,7 @@ import type { InstanceRegistry } from "../../instance/registry/InstanceRegistry.
 import type { ReverseControlService } from "../../reverse/ReverseControlService.js";
 
 export interface RouteHandlerControlOptions {
+    artifactService?: ArtifactService;
     configEditorService?: ControlConfigEditorService;
     instanceCreateService?: ControlInstanceCreateService;
     instanceRegistry: InstanceRegistry;
@@ -17,6 +25,7 @@ export interface RouteHandlerControlOptions {
 }
 
 export class RouteHandlerControl {
+    readonly #artifactService?: ArtifactService;
     readonly #configEditorService?: ControlConfigEditorService;
     readonly #instanceCreateService?: ControlInstanceCreateService;
     readonly #instanceRegistry: InstanceRegistry;
@@ -25,6 +34,7 @@ export class RouteHandlerControl {
     readonly #reverseControlService?: ReverseControlService;
 
     constructor(options: RouteHandlerControlOptions) {
+        this.#artifactService = options.artifactService;
         this.#configEditorService = options.configEditorService;
         this.#instanceCreateService = options.instanceCreateService;
         this.#instanceRegistry = options.instanceRegistry;
@@ -104,6 +114,24 @@ export class RouteHandlerControl {
                     readOAuthApprovalDecision(params),
                     readOAuthApprovalDecidedBy(connection)
                 )) as unknown as JsonValue;
+            case "control.artifact.createShare": {
+                const input = readArtifactShareInput(params);
+                return (await this.#requireArtifactService().createShare(input, readDefaultInstance(params))) as unknown as JsonValue;
+            }
+            case "control.artifact.listShares":
+                return this.#requireArtifactService().listShares() as unknown as JsonValue;
+            case "control.artifact.revokeShare":
+                return (await this.#requireArtifactService().revokeShare(readShareId(params))) as unknown as JsonValue;
+            case "control.artifact.startTransfer": {
+                const input = readArtifactTransferStartInput(params);
+                return (await this.#requireArtifactService().startTransfer(input, readDefaultInstance(params))) as unknown as JsonValue;
+            }
+            case "control.artifact.getTransfer":
+                return this.#requireArtifactService().getTransfer(readTransferId(params)) as unknown as JsonValue;
+            case "control.artifact.listTransfers":
+                return this.#requireArtifactService().listTransfers() as unknown as JsonValue;
+            case "control.artifact.cancelTransfer":
+                return (await this.#requireArtifactService().cancelTransfer(readTransferId(params))) as unknown as JsonValue;
             default:
                 throw createError({
                     code: errorCodes.envelopeInvalid,
@@ -111,6 +139,17 @@ export class RouteHandlerControl {
                     retryable: false
                 });
         }
+    }
+
+    #requireArtifactService(): ArtifactService {
+        if (this.#artifactService !== undefined) {
+            return this.#artifactService;
+        }
+        throw createError({
+            code: errorCodes.envelopeInvalid,
+            message: "Artifact service is not available.",
+            retryable: false
+        });
     }
 
     #requireInstanceCreateService(): ControlInstanceCreateService {
@@ -240,4 +279,107 @@ function readOAuthApprovalDecidedBy(connection: ControlRpcConnection): "cli" | "
         message: "Connection must identify as cli or tui before deciding OAuth approvals.",
         retryable: false
     });
+}
+
+function readArtifactShareInput(params?: JsonValue): ArtifactShareInput {
+    if (!isRecord(params)) {
+        throw invalidArtifactParams("control.artifact.createShare requires parameters.");
+    }
+    const rawExpiresInSeconds = params.expiresInSeconds;
+    let expiresInSeconds: number | undefined;
+    if (rawExpiresInSeconds !== undefined) {
+        if (
+            typeof rawExpiresInSeconds !== "number" ||
+            !Number.isInteger(rawExpiresInSeconds) ||
+            rawExpiresInSeconds < 1
+        ) {
+            throw invalidArtifactParams("expiresInSeconds must be a positive integer.");
+        }
+        expiresInSeconds = rawExpiresInSeconds;
+    }
+    const instance = readOptionalString(params.instance, "instance");
+    const handle = readOptionalString(params.handle, "handle");
+    const path = readOptionalString(params.path, "path");
+    if ((handle === undefined) === (path === undefined)) {
+        throw invalidArtifactParams("Exactly one of handle or path is required.");
+    }
+    return handle === undefined
+        ? { ...(expiresInSeconds === undefined ? {} : { expiresInSeconds }), ...(instance === undefined ? {} : { instance }), path: path! }
+        : { ...(expiresInSeconds === undefined ? {} : { expiresInSeconds }), handle, ...(instance === undefined ? {} : { instance }) };
+}
+
+function readArtifactTransferStartInput(params?: JsonValue): ArtifactTransferStartInput {
+    if (!isRecord(params)) {
+        throw invalidArtifactParams("control.artifact.startTransfer requires parameters.");
+    }
+    const instance = readOptionalString(params.instance, "instance");
+    const handle = readOptionalString(params.handle, "handle");
+    const sourcePath = readOptionalString(params.sourcePath, "sourcePath");
+    const targetInstance = readRequiredString(params.targetInstance, "targetInstance");
+    const targetPath = readRequiredString(params.targetPath, "targetPath");
+    if ((handle === undefined) === (sourcePath === undefined)) {
+        throw invalidArtifactParams("Exactly one of handle or sourcePath is required.");
+    }
+    if (params.overwrite !== undefined && typeof params.overwrite !== "boolean") {
+        throw invalidArtifactParams("overwrite must be a boolean.");
+    }
+    const common = {
+        operation: "start" as const,
+        ...(instance === undefined ? {} : { instance }),
+        ...(params.overwrite === undefined ? {} : { overwrite: params.overwrite }),
+        targetInstance,
+        targetPath
+    };
+    return handle === undefined ? { ...common, sourcePath: sourcePath! } : { ...common, handle };
+}
+
+function readDefaultInstance(params?: JsonValue): string {
+    if (!isRecord(params)) {
+        throw invalidArtifactParams("Artifact request requires a source instance.");
+    }
+    const explicitDefault = readOptionalString(params.defaultInstance, "defaultInstance");
+    const sourceInstance = readOptionalString(params.instance, "instance");
+    if (explicitDefault !== undefined) {
+        return explicitDefault;
+    }
+    if (sourceInstance !== undefined) {
+        return sourceInstance;
+    }
+    throw invalidArtifactParams("Artifact request requires instance or defaultInstance.");
+}
+
+function readShareId(params?: JsonValue): string {
+    if (!isRecord(params)) {
+        throw invalidArtifactParams("Artifact share request requires shareId.");
+    }
+    return readRequiredString(params.shareId, "shareId");
+}
+
+function readTransferId(params?: JsonValue): string {
+    if (!isRecord(params)) {
+        throw invalidArtifactParams("Artifact transfer request requires transferId.");
+    }
+    return readRequiredString(params.transferId, "transferId");
+}
+
+function readRequiredString(value: JsonValue | undefined, field: string): string {
+    const result = readOptionalString(value, field);
+    if (result === undefined) {
+        throw invalidArtifactParams(`${field} is required.`);
+    }
+    return result;
+}
+
+function readOptionalString(value: JsonValue | undefined, field: string): string | undefined {
+    if (value === undefined) {
+        return undefined;
+    }
+    if (typeof value !== "string" || value.length === 0) {
+        throw invalidArtifactParams(`${field} must be a non-empty string.`);
+    }
+    return value;
+}
+
+function invalidArtifactParams(message: string) {
+    return createError({ code: errorCodes.targetInvalid, message, retryable: false });
 }

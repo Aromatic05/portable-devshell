@@ -1,7 +1,8 @@
+import type { ArtifactEventType } from "../artifact/DtoArtifact.js";
 import type { JsonValue } from "../../type/TypeJsonValue.js";
 import type { InstanceName } from "../../type/identity/TypeIdentityInstanceName.js";
 
-export type InstanceEventType =
+export type InstanceEventType = ArtifactEventType
     | "instance.started"
     | "instance.stopped"
     | "instance.statusChanged"

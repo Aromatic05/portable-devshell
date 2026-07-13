@@ -1,3 +1,4 @@
+export * from "./artifact/ArtifactService.js";
 export * from "./control/ControlLifecycleManager.js";
 export * from "./control/ControlConfigEditorService.js";
 export * from "./control/config/ControlConfigDefaults.js";

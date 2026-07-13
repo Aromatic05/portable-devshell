@@ -3,6 +3,7 @@ import { createServer, type Server, type Socket } from "node:net";
 
 import { createError, errorCodes, toControlErrorBody, type ControlErrorBody, type JsonValue } from "@portable-devshell/shared";
 import type { McpOAuthApprovalService } from "@portable-devshell/mcp";
+import type { ArtifactService } from "../../artifact/ArtifactService.js";
 
 import type { InstanceRegistry } from "../../instance/registry/InstanceRegistry.js";
 import type { ControlConfigEditorService } from "../ControlConfigEditorService.js";
@@ -17,6 +18,7 @@ import { StreamSubscriptionManager } from "../../stream/StreamSubscriptionManage
 import { ControlRpcConnection, type RpcRequestEnvelope } from "./ControlRpcConnection.js";
 
 export interface ControlRpcServerOptions {
+    artifactService?: ArtifactService;
     configEditorService?: ControlConfigEditorService;
     instanceCreateService?: ControlInstanceCreateService;
     instanceRegistry: InstanceRegistry;
@@ -48,6 +50,7 @@ export class ControlRpcServer {
         this.#socketPath = options.socketPath;
         this.#controlRouter = new RouteRouterControl(
             new RouteHandlerControl({
+                artifactService: options.artifactService,
                 configEditorService: options.configEditorService,
                 getOAuthApprovals: options.getOAuthApprovals,
                 getMcpStatus: options.getMcpStatus,
