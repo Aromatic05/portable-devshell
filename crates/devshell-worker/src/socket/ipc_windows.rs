@@ -99,10 +99,6 @@ impl LocalIpcStream {
         Ok(())
     }
 
-    pub fn shutdown_write(&self) -> IoResult<()> {
-        Ok(())
-    }
-
     pub fn shutdown_both(&self) -> IoResult<()> {
         Ok(())
     }
