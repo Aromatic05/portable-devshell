@@ -40,6 +40,7 @@ impl Default for ArtifactPolicy {
 
 pub struct ArtifactStore {
     root: PathBuf,
+    leases_dir: PathBuf,
     temp_dir: PathBuf,
     policy: ArtifactPolicy,
     guard: Mutex<()>,
@@ -53,6 +54,15 @@ pub struct ArtifactDraft {
     artifact_truncated: bool,
     hasher: blake3::Hasher,
     stream_limit_bytes: usize,
+}
+
+#[derive(Clone, Debug)]
+pub struct ArtifactLease {
+    pub blake3: String,
+    pub data_path: PathBuf,
+    pub lease_id: String,
+    pub stored_bytes: usize,
+    pub stream: ArtifactStream,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -69,6 +79,15 @@ struct ArtifactMetadata {
     expires_at_ms: u128,
 }
 
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ArtifactLeaseMetadata {
+    version: u32,
+    lease_id: String,
+    handle: String,
+    expires_at_ms: u128,
+}
+
 struct ArtifactRecord {
     metadata: ArtifactMetadata,
     metadata_path: PathBuf,
@@ -81,14 +100,19 @@ impl ArtifactStore {
     }
 
     fn with_policy(root: PathBuf, policy: ArtifactPolicy) -> Result<Arc<Self>, ToolError> {
+        let leases_dir = root.join("leases");
         let temp_dir = root.join("tmp");
         fs::create_dir_all(&temp_dir)
             .map_err(|error| ToolError::new("artifact.storageFailed", error.to_string()))?;
+        fs::create_dir_all(&leases_dir)
+            .map_err(|error| ToolError::new("artifact.storageFailed", error.to_string()))?;
         set_private_dir(&root)?;
         set_private_dir(&temp_dir)?;
+        set_private_dir(&leases_dir)?;
         clear_temp_dir(&temp_dir)?;
         let store = Arc::new(Self {
             root,
+            leases_dir,
             temp_dir,
             policy,
             guard: Mutex::new(()),
@@ -175,6 +199,110 @@ impl ArtifactStore {
         })
     }
 
+    pub fn acquire_lease(
+        &self,
+        handle: &str,
+        expires_at_ms: u128,
+    ) -> Result<ArtifactLease, ToolError> {
+        validate_handle(handle)?;
+        let now = now_ms();
+        if expires_at_ms <= now {
+            return Err(ToolError::new(
+                "artifact.invalidLease",
+                "artifact lease must expire in the future",
+            ));
+        }
+
+        let _guard = self
+            .guard
+            .lock()
+            .map_err(|_| ToolError::new("artifact.storageFailed", "artifact lock poisoned"))?;
+        self.gc_locked(0)?;
+        let metadata = self.load_metadata(handle)?;
+        if metadata.expires_at_ms <= now {
+            return Err(ToolError::new(
+                "artifact.expired",
+                "artifact reference has expired",
+            ));
+        }
+
+        let lease_id = Uuid::new_v4().to_string();
+        let lease_metadata = ArtifactLeaseMetadata {
+            version: METADATA_VERSION,
+            lease_id: lease_id.clone(),
+            handle: handle.to_string(),
+            expires_at_ms,
+        };
+        write_json_metadata(
+            &self.leases_dir,
+            &self.lease_path(&lease_id),
+            &lease_metadata,
+        )?;
+
+        Ok(ArtifactLease {
+            blake3: metadata.blake3,
+            data_path: self.data_path(handle),
+            lease_id,
+            stored_bytes: metadata.stored_bytes,
+            stream: metadata.stream,
+        })
+    }
+
+    pub fn release_lease(&self, lease_id: &str) -> Result<(), ToolError> {
+        validate_handle(lease_id)?;
+        let _guard = self
+            .guard
+            .lock()
+            .map_err(|_| ToolError::new("artifact.storageFailed", "artifact lock poisoned"))?;
+        match fs::remove_file(self.lease_path(lease_id)) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => {
+                return Err(ToolError::new("artifact.storageFailed", error.to_string()));
+            }
+        }
+        self.gc_locked(0)
+    }
+
+    pub fn resolve_lease(&self, lease_id: &str) -> Result<ArtifactLease, ToolError> {
+        validate_handle(lease_id)?;
+        let _guard = self
+            .guard
+            .lock()
+            .map_err(|_| ToolError::new("artifact.storageFailed", "artifact lock poisoned"))?;
+        self.gc_locked(0)?;
+        let path = self.lease_path(lease_id);
+        let bytes = fs::read(path).map_err(|_| {
+            ToolError::new("artifact.leaseNotFound", "artifact lease is unavailable")
+        })?;
+        let lease: ArtifactLeaseMetadata = serde_json::from_slice(&bytes)
+            .map_err(|_| ToolError::new("artifact.leaseNotFound", "artifact lease is invalid"))?;
+        if lease.version != METADATA_VERSION
+            || lease.lease_id != lease_id
+            || lease.expires_at_ms <= now_ms()
+        {
+            return Err(ToolError::new(
+                "artifact.leaseNotFound",
+                "artifact lease is unavailable",
+            ));
+        }
+        let metadata = self.load_metadata(&lease.handle)?;
+        let data_path = self.data_path(&lease.handle);
+        if !data_path.is_file() {
+            return Err(ToolError::new(
+                "artifact.contentUnavailable",
+                "artifact content is unavailable",
+            ));
+        }
+        Ok(ArtifactLease {
+            blake3: metadata.blake3,
+            data_path,
+            lease_id: lease.lease_id,
+            stored_bytes: metadata.stored_bytes,
+            stream: metadata.stream,
+        })
+    }
+
     pub fn read(&self, input: ArtifactReadInput) -> Result<ArtifactReadOutput, ToolError> {
         validate_handle(&input.handle)?;
         let max_bytes = input.max_bytes.unwrap_or(DEFAULT_READ_BYTES);
@@ -193,6 +321,12 @@ impl ArtifactStore {
             .map_err(|_| ToolError::new("artifact.storageFailed", "artifact lock poisoned"))?;
         self.gc_locked(0)?;
         let metadata = self.load_metadata(&input.handle)?;
+        if metadata.expires_at_ms <= now_ms() {
+            return Err(ToolError::new(
+                "artifact.expired",
+                "artifact reference has expired",
+            ));
+        }
         if offset > metadata.stored_bytes as u64 {
             return Err(ToolError::new(
                 "artifact.invalidOffset",
@@ -254,25 +388,24 @@ impl ArtifactStore {
 
     fn gc_locked(&self, incoming_bytes: usize) -> Result<(), ToolError> {
         let now = now_ms();
-        let mut records = self.records()?;
+        let leases = self.leases(now)?;
+        let leased_handles = leases
+            .iter()
+            .map(|lease| lease.handle.as_str())
+            .collect::<std::collections::HashSet<_>>();
+        let records = self.records()?;
         for record in &records {
-            if record.metadata.expires_at_ms <= now {
+            if record.metadata.expires_at_ms <= now
+                && !leased_handles.contains(record.metadata.handle.as_str())
+            {
                 remove_record(record);
             }
         }
-        records.retain(|record| record.metadata.expires_at_ms > now);
-        records.sort_by_key(|record| record.metadata.created_at_ms);
-        let mut total = records
+        let total = records
             .iter()
+            .filter(|record| record.data_path.is_file())
             .map(|record| record.metadata.stored_bytes)
             .sum::<usize>();
-        for record in records {
-            if total.saturating_add(incoming_bytes) <= self.policy.instance_quota_bytes {
-                break;
-            }
-            remove_record(&record);
-            total = total.saturating_sub(record.metadata.stored_bytes);
-        }
         if total.saturating_add(incoming_bytes) > self.policy.instance_quota_bytes {
             return Err(ToolError::new(
                 "artifact.quotaExceeded",
@@ -280,6 +413,37 @@ impl ArtifactStore {
             ));
         }
         Ok(())
+    }
+
+    fn leases(&self, now: u128) -> Result<Vec<ArtifactLeaseMetadata>, ToolError> {
+        let mut leases = Vec::new();
+        for entry in fs::read_dir(&self.leases_dir)
+            .map_err(|error| ToolError::new("artifact.storageFailed", error.to_string()))?
+        {
+            let entry = entry
+                .map_err(|error| ToolError::new("artifact.storageFailed", error.to_string()))?;
+            let path = entry.path();
+            if path.extension().and_then(|value| value.to_str()) != Some("json") {
+                continue;
+            }
+            let lease = fs::read(&path)
+                .ok()
+                .and_then(|bytes| serde_json::from_slice::<ArtifactLeaseMetadata>(&bytes).ok());
+            let Some(lease) = lease else {
+                let _ = fs::remove_file(&path);
+                continue;
+            };
+            if lease.version != METADATA_VERSION
+                || validate_handle(&lease.lease_id).is_err()
+                || validate_handle(&lease.handle).is_err()
+                || lease.expires_at_ms <= now
+            {
+                let _ = fs::remove_file(&path);
+                continue;
+            }
+            leases.push(lease);
+        }
+        Ok(leases)
     }
 
     fn records(&self) -> Result<Vec<ArtifactRecord>, ToolError> {
@@ -336,6 +500,10 @@ impl ArtifactStore {
     fn metadata_path(&self, handle: &str) -> PathBuf {
         self.root.join(format!("{handle}.json"))
     }
+
+    fn lease_path(&self, lease_id: &str) -> PathBuf {
+        self.leases_dir.join(format!("{lease_id}.json"))
+    }
 }
 
 impl ArtifactDraft {
@@ -373,6 +541,14 @@ fn write_metadata(
     root: &Path,
     target: &Path,
     metadata: &ArtifactMetadata,
+) -> Result<(), ToolError> {
+    write_json_metadata(root, target, metadata)
+}
+
+fn write_json_metadata<T: Serialize>(
+    root: &Path,
+    target: &Path,
+    metadata: &T,
 ) -> Result<(), ToolError> {
     let mut temp = Builder::new()
         .prefix("metadata-")
@@ -435,7 +611,7 @@ fn now_ms() -> u128 {
 mod tests {
     use std::time::Duration;
 
-    use super::{ArtifactPolicy, ArtifactStore};
+    use super::{ArtifactPolicy, ArtifactStore, now_ms};
     use crate::tools::artifact::types::{ArtifactEncoding, ArtifactReadInput, ArtifactStream};
 
     fn store(policy: ArtifactPolicy) -> (tempfile::TempDir, std::sync::Arc<ArtifactStore>) {
@@ -478,7 +654,7 @@ mod tests {
     }
 
     #[test]
-    fn enforces_stream_limit_and_evicts_oldest_artifact_for_quota() {
+    fn quota_never_evicts_an_active_artifact_reference() {
         let (_root, store) = store(ArtifactPolicy {
             stream_limit_bytes: 8,
             instance_quota_bytes: 12,
@@ -490,10 +666,10 @@ mod tests {
         assert_eq!(first.stored_bytes, 8);
         assert!(first.artifact_truncated);
 
-        std::thread::sleep(Duration::from_millis(2));
         let mut second = store.begin(ArtifactStream::Stderr).unwrap();
         second.write_chunk(b"abcdefgh").unwrap();
-        let second = store.persist(second).unwrap();
+        let error = store.persist(second).unwrap_err();
+        assert_eq!(error.code, "artifact.quotaExceeded");
         assert!(
             store
                 .read(ArtifactReadInput {
@@ -502,17 +678,37 @@ mod tests {
                     max_bytes: None,
                     encoding: None,
                 })
-                .is_err()
-        );
-        assert!(
-            store
-                .read(ArtifactReadInput {
-                    handle: second.handle,
-                    offset_bytes: None,
-                    max_bytes: None,
-                    encoding: None,
-                })
                 .is_ok()
         );
+    }
+
+    #[test]
+    fn expired_reference_is_unreadable_while_payload_lease_keeps_content() {
+        let (_root, store) = store(ArtifactPolicy {
+            stream_limit_bytes: 32,
+            instance_quota_bytes: 64,
+            ttl: Duration::from_millis(20),
+        });
+        let mut draft = store.begin(ArtifactStream::Stdout).unwrap();
+        draft.write_chunk(b"leased content").unwrap();
+        let reference = store.persist(draft).unwrap();
+        let lease = store
+            .acquire_lease(&reference.handle, now_ms() + 60_000)
+            .unwrap();
+
+        std::thread::sleep(Duration::from_millis(30));
+        let error = store
+            .read(ArtifactReadInput {
+                handle: reference.handle.clone(),
+                offset_bytes: None,
+                max_bytes: None,
+                encoding: None,
+            })
+            .unwrap_err();
+        assert_eq!(error.code, "artifact.expired");
+        assert!(store.data_path(&reference.handle).is_file());
+
+        store.release_lease(&lease.lease_id).unwrap();
+        assert!(!store.data_path(&reference.handle).exists());
     }
 }

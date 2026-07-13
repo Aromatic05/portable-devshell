@@ -700,6 +700,89 @@ fn long_tool_call_does_not_block_control_requests_on_the_same_rpc_connection() {
     env.json_command(&["stop", "--instance", instance]);
 }
 
+#[test]
+fn internal_artifact_payload_rpc_is_persistent_and_not_listed_as_a_tool() {
+    let env = TestEnv::new();
+    let instance = "artifact-payload";
+    fs::write(env.workspace().join("payload.txt"), b"rpc payload").unwrap();
+    env.command()
+        .current_dir(env.workspace())
+        .args(["start", "--instance", instance])
+        .assert()
+        .success();
+
+    let tools = env.rpc(
+        instance,
+        &serde_json::json!({
+            "type": "request",
+            "id": "payload-tools",
+            "method": "tools.list",
+            "params": {}
+        }),
+    );
+    let names = tools["result"]["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|tool| tool["name"].as_str().unwrap())
+        .collect::<Vec<_>>();
+    assert!(!names.contains(&"artifact.payload.open"));
+    assert!(!names.contains(&"artifact.payload.read"));
+    assert!(!names.contains(&"artifact.payload.close"));
+
+    let expires_at_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis()
+        + 60_000;
+    let opened = env.rpc(
+        instance,
+        &serde_json::json!({
+            "type": "request",
+            "id": "payload-open",
+            "method": "artifact.payload.open",
+            "params": {
+                "path": "./payload.txt",
+                "expiresAtMs": expires_at_ms
+            }
+        }),
+    );
+    assert_eq!(opened["ok"], true, "{opened}");
+    assert_eq!(opened["result"]["descriptor"]["type"], "file");
+    let payload_id = opened["result"]["payloadId"].as_str().unwrap();
+
+    let read = env.rpc(
+        instance,
+        &serde_json::json!({
+            "type": "request",
+            "id": "payload-read",
+            "method": "artifact.payload.read",
+            "params": {
+                "payloadId": payload_id,
+                "offsetBytes": 0,
+                "maxBytes": 1024
+            }
+        }),
+    );
+    assert_eq!(read["ok"], true, "{read}");
+    assert_eq!(read["result"]["content"], "cnBjIHBheWxvYWQ=");
+    assert_eq!(read["result"]["eof"], true);
+
+    let closed = env.rpc(
+        instance,
+        &serde_json::json!({
+            "type": "request",
+            "id": "payload-close",
+            "method": "artifact.payload.close",
+            "params": { "payloadId": payload_id }
+        }),
+    );
+    assert_eq!(closed["ok"], true, "{closed}");
+    assert_eq!(closed["result"]["closed"], true);
+
+    env.json_command(&["stop", "--instance", instance]);
+}
+
 fn write_rpc_frame(writer: &mut impl Write, value: &Value) {
     let payload = serde_json::to_vec(value).unwrap();
     writer

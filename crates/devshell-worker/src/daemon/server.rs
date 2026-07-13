@@ -16,6 +16,8 @@ use crate::rpc::router::RpcRouter;
 use crate::socket::SocketPaths;
 use crate::storage::InstancePaths;
 use crate::storage::permissions::{ensure_dir, ensure_file_mode};
+use crate::tools::artifact::payload::ArtifactPayloadStore;
+use crate::tools::artifact::store::ArtifactStore;
 use crate::tools::builtin_registry;
 
 const FAIL_AFTER_BIND_ENV: &str = "DEVSHELL_WORKER_TEST_FAIL_AFTER_BIND";
@@ -55,11 +57,24 @@ pub fn serve(instance: InstanceName) -> Result<(), String> {
         .set_nonblocking(true)
         .map_err(|error| format!("failed to set listener nonblocking: {error}"))?;
 
+    let artifacts =
+        ArtifactStore::new(instance_paths.artifacts_dir.clone()).map_err(|error| error.message)?;
+    let payloads = ArtifactPayloadStore::new(
+        instance_paths.artifacts_dir.join("payloads"),
+        Arc::clone(&artifacts),
+    )
+    .map_err(|error| error.message)?;
     let tools = Arc::new(
-        builtin_registry(&instance_paths, &socket_paths, &config, &runtime)
-            .map_err(|error| error.message)?,
+        builtin_registry(
+            &instance_paths,
+            &socket_paths,
+            &config,
+            &runtime,
+            Arc::clone(&artifacts),
+        )
+        .map_err(|error| error.message)?,
     );
-    let router = Arc::new(RpcRouter::new(config.clone(), runtime, tools));
+    let router = Arc::new(RpcRouter::new(config.clone(), runtime, tools, payloads));
     let _reverse_connector = config.reverse.clone().map(|reverse| {
         ReverseConnector::new(
             instance.clone(),

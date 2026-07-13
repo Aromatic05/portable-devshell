@@ -22,12 +22,12 @@ pub fn builtin_registry(
     socket_paths: &SocketPaths,
     config: &WorkerConfig,
     runtime: &WorkerRuntimeContext,
+    artifacts: Arc<ArtifactStore>,
 ) -> Result<ToolRegistry, ToolError> {
     let mut registry = ToolRegistry::new();
     let files = FileToolState::new();
-    let artifacts = ArtifactStore::new(instance_paths.artifacts_dir.clone())?;
     registry.register(Arc::new(BashRunTool::new(Arc::clone(&artifacts))) as Arc<_>)?;
-    registry.register(Arc::new(ArtifactReadTool::new(artifacts)) as Arc<_>)?;
+    registry.register(Arc::new(ArtifactReadTool::new(Arc::clone(&artifacts))) as Arc<_>)?;
     registry.register(Arc::new(FileReadTool::new(Arc::clone(&files))) as Arc<_>)?;
     registry.register(Arc::new(FileEditTool::new(
         Arc::clone(&files),
