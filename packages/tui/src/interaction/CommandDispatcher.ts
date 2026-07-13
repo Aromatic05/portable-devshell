@@ -507,7 +507,25 @@ export class CommandDispatcher {
             return (direction === "up" || direction === "down") && this.#focusManager.move(direction);
         }
         if (scope === "boxDetail" || scope === "form" || scope === "wizard") {
+            if (direction === "left" && scope === "boxDetail") {
+                const cursor = this.#store.getState().interaction.sidebarCursor;
+                this.#store.setFocusScope(cursor?.kind === "instance" ? "sidebarInstances" : "sidebarPages");
+                return true;
+            }
             return (direction === "up" || direction === "down") && this.#focusManager.move(direction);
+        }
+        if ((scope === "sidebarPages" || scope === "sidebarInstances") && direction === "right") {
+            if (selectMainBoxIds(this.#store.getState()).length === 0) {
+                return false;
+            }
+            this.#store.setFocusScope("mainBoxes");
+            this.#syncMainFocus();
+            return true;
+        }
+        if (scope === "mainBoxes" && direction === "left") {
+            const cursor = this.#store.getState().interaction.sidebarCursor;
+            this.#store.setFocusScope(cursor?.kind === "instance" ? "sidebarInstances" : "sidebarPages");
+            return true;
         }
         const moved = this.#focusManager.move(direction);
         if (moved && scope === "mainBoxes") {

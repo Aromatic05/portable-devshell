@@ -29,11 +29,11 @@ export function Sidebar(props: SidebarProps) {
 
 function compactPageLabel(item: SidebarModel["pages"][number], index: number): string {
     const label = item.id === "instances" ? "inst" : item.id === "connector" ? "conn" : item.label;
-    return `${item.selected ? "▶ " : "  "}${index + 1}:${label}`;
+    return `${item.selected ? "▶" : " "}${index + 1}:${label}`;
 }
 
 function compactInstanceLabel(item: SidebarModel["instances"][number], index: number): string {
-    return `${item.selected ? "▶ " : "  "}S${index + 1}:${item.label}`;
+    return `${item.selected ? "▶" : " "}S${index + 1}:${item.label}`;
 }
 
 function SidebarSection(props: { items: SidebarModel["pages"] }) {
@@ -41,7 +41,7 @@ function SidebarSection(props: { items: SidebarModel["pages"] }) {
         <Box flexDirection="column">
             {props.items.map((item, index) => (
                 <Text bold={item.selected} inverse={item.focused} key={`${item.id}-${index}`}>
-                    {`${item.selected ? "▶ " : "  "}${item.label}`}
+                    {`${item.selected ? "▶" : " "}${item.label}`}
                 </Text>
             ))}
         </Box>
