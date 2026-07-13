@@ -927,10 +927,14 @@ export class CommandDispatcher {
             case "enabled":
             case "mcp.enabled":
                 return [true, false];
+            case "container.mode":
+                return ["preset", "dockerfile", "compose", "existingImage", "existingStoppedContainer"];
             case "security.mode":
                 return ["disabled", "workspace"];
             case "approvalPolicy.mode":
                 return ["disabled", "allow", "ask", "deny"];
+            case "tools.fileEdit.mode":
+                return ["text", "replace", "patch", "apply_patch"];
             default:
                 return undefined;
         }
