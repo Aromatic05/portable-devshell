@@ -1,3 +1,5 @@
+use std::process::Command;
+
 use nix::errno::Errno;
 use nix::sys::signal::{Signal, kill};
 use nix::unistd::Pid;
@@ -39,3 +41,5 @@ pub fn terminate_process_group(pid: i32, force: bool) -> Result<(), String> {
         )),
     }
 }
+
+pub fn configure_daemon_command(_command: &mut Command) {}

@@ -591,13 +591,8 @@ fn clear_temp_dir(path: &Path) -> Result<(), ToolError> {
 }
 
 fn set_private_dir(path: &Path) -> Result<(), ToolError> {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(path, fs::Permissions::from_mode(0o700))
-            .map_err(|error| ToolError::new("artifact.storageFailed", error.to_string()))?;
-    }
-    Ok(())
+    crate::storage::permissions::ensure_dir(path, 0o700)
+        .map_err(|error| ToolError::new("artifact.storageFailed", error))
 }
 
 fn now_ms() -> u128 {

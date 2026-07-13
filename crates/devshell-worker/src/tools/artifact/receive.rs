@@ -5,6 +5,7 @@ pub use store::*;
 #[cfg(test)]
 mod tests {
     use std::fs;
+    #[cfg(unix)]
     use std::os::unix::fs::PermissionsExt;
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -122,11 +123,14 @@ mod tests {
         fs::create_dir_all(source.join("assets")).unwrap();
         fs::write(source.join("index.html"), b"index").unwrap();
         fs::write(source.join("assets/app.js"), b"app").unwrap();
-        fs::set_permissions(
-            source.join("assets/app.js"),
-            fs::Permissions::from_mode(0o755),
-        )
-        .unwrap();
+        #[cfg(unix)]
+        {
+            fs::set_permissions(
+                source.join("assets/app.js"),
+                fs::Permissions::from_mode(0o755),
+            )
+            .unwrap();
+        }
 
         let artifacts = ArtifactStore::new(root.path().join("artifacts")).unwrap();
         let payloads = ArtifactPayloadStore::new(root.path().join("payloads"), artifacts).unwrap();

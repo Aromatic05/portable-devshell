@@ -1,30 +1,32 @@
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-
-const runtimeDirectoryName = "portable-devshell";
+import {
+    resolveUnixControlRuntimeDirectory,
+    resolveUnixControlSocketPath
+} from "./RuntimeControlPathUnix.js";
+import {
+    resolveWindowsControlPipePath,
+    resolveWindowsControlRuntimeDirectory
+} from "./RuntimeControlPathWindows.js";
 
 export function resolveControlRuntimeDirectory(
-    xdgRuntimeDir = process.env.XDG_RUNTIME_DIR,
+    xdgRuntimeDir: string | undefined = undefined,
+    platform = process.platform,
+    environment: NodeJS.ProcessEnv = process.env
 ): string {
-    if (xdgRuntimeDir !== undefined && xdgRuntimeDir.length > 0) {
-        return join(xdgRuntimeDir, runtimeDirectoryName);
-    }
-
-    return join(tmpdir(), `${runtimeDirectoryName}-${resolveUserIdentity()}`);
+    return platform === "win32"
+        ? resolveWindowsControlRuntimeDirectory(xdgRuntimeDir, environment)
+        : resolveUnixControlRuntimeDirectory(xdgRuntimeDir ?? environment.XDG_RUNTIME_DIR, environment);
 }
 
 export function resolveControlSocketPath(
-    xdgRuntimeDir = process.env.XDG_RUNTIME_DIR,
+    xdgRuntimeDir: string | undefined = undefined,
+    platform = process.platform,
+    environment: NodeJS.ProcessEnv = process.env
 ): string {
-    return join(resolveControlRuntimeDirectory(xdgRuntimeDir), "control.sock");
+    return platform === "win32"
+        ? resolveWindowsControlPipePath(environment)
+        : resolveUnixControlSocketPath(xdgRuntimeDir ?? environment.XDG_RUNTIME_DIR, environment);
 }
 
-function resolveUserIdentity(): string {
-    if (typeof process.getuid === "function") {
-        return String(process.getuid());
-    }
-
-    const name = process.env.USER ?? process.env.USERNAME ?? "user";
-    const normalized = name.replaceAll(/[^A-Za-z0-9._-]/gu, "-");
-    return normalized.length === 0 ? "user" : normalized;
+export function isWindowsNamedPipePath(path: string): boolean {
+    return path.startsWith("\\\\.\\pipe\\");
 }

@@ -1,4 +1,5 @@
 import { parseArgsStringToArgv } from "string-argv";
+import { isAttachShellSupported } from "./AttachShellAvailability.js";
 
 import {
     AttachShellResolutionError,
@@ -11,6 +12,12 @@ export class AttachShellCommandResolver {
     resolve(input: AttachShellResolutionInput): AttachShellCommand {
         const configured = readInstanceConfig(input.configView, input.instance.name);
         const provider = readProvider(configured, input.instance.provider);
+
+        if (provider !== "reverse" && !isAttachShellSupported(provider)) {
+            throw new AttachShellResolutionError(
+                `Attach Shell is not supported for ${provider} instances on Windows.`
+            );
+        }
 
         switch (provider) {
             case "local":

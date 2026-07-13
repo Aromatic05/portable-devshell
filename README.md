@@ -16,7 +16,7 @@
 
 ## 安装
 
-发布包支持 Linux 和 macOS 的 x86-64、arm64，主程序需要 Node.js 24 或更高版本。安装器会预置四个平台的 worker，因为 control 主机与受管目标环境可以不是同一平台。
+发布包支持 Linux、macOS 和 Windows 的 x86-64、arm64，主程序需要 Node.js 24 或更高版本。安装器会预置六个平台的 worker，因为 control 主机与受管目标环境可以不是同一平台。
 
 ```bash
 curl -fLO https://github.com/Aromatic05/portable-devshell/releases/latest/download/install-release.sh
@@ -29,6 +29,17 @@ else
 fi
 
 sh install-release.sh
+```
+
+Windows PowerShell：
+
+```powershell
+Invoke-WebRequest https://github.com/Aromatic05/portable-devshell/releases/latest/download/install-release.ps1 -OutFile install-release.ps1
+Invoke-WebRequest https://github.com/Aromatic05/portable-devshell/releases/latest/download/install-release.ps1.sha256 -OutFile install-release.ps1.sha256
+$expected = ((Get-Content install-release.ps1.sha256 -TotalCount 1) -split '\s+')[0].ToLowerInvariant()
+$actual = (Get-FileHash -Algorithm SHA256 install-release.ps1).Hash.ToLowerInvariant()
+if ($actual -ne $expected) { throw "SHA-256 verification failed" }
+powershell -ExecutionPolicy Bypass -File .\install-release.ps1
 ```
 
 从源码安装：
@@ -119,6 +130,7 @@ requiredScopes = ["mcp"]
 - [文档索引](docs/README.md)
 - [安装与升级](docs/installation.md)
 - [快速开始](docs/quickstart.md)
+- [Windows 支持](docs/windows.md)
 - [当前架构](docs/architecture.md)
 - [MCP](docs/mcp.md)
 - [OAuth](docs/oauth.md)

@@ -107,6 +107,8 @@ function normalizeNodeOs(rawOs: string): WorkerTargetOs | undefined {
             return "linux";
         case "darwin":
             return "darwin";
+        case "win32":
+            return "windows";
         default:
             return undefined;
     }

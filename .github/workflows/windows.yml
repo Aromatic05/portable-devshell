@@ -1,0 +1,88 @@
+name: windows
+
+on:
+    push:
+        branches:
+            - main
+    pull_request:
+
+permissions:
+    contents: read
+
+jobs:
+    windows-x64:
+        runs-on: windows-2022
+        steps:
+            - uses: actions/checkout@v5
+
+            - uses: pnpm/action-setup@v5
+              with:
+                  version: 10.13.1
+
+            - uses: actions/setup-node@v5
+              with:
+                  node-version: 24
+                  cache: pnpm
+
+            - name: 安装 Rust 工具链
+              run: |
+                  rustup toolchain install stable --profile minimal
+                  rustup default stable
+                  rustup target add x86_64-pc-windows-msvc
+
+            - name: 安装依赖
+              run: pnpm install --frozen-lockfile
+
+            - name: 校验 TypeScript client
+              run: |
+                  pnpm build
+                  pnpm typecheck
+                  pnpm lint
+
+            - name: 校验 PowerShell 安装器语法
+              shell: pwsh
+              run: |
+                  $tokens = $null
+                  $errors = $null
+                  [System.Management.Automation.Language.Parser]::ParseFile(
+                      (Resolve-Path ./scripts/install-release.ps1),
+                      [ref]$tokens,
+                      [ref]$errors
+                  ) | Out-Null
+                  if ($errors.Count -gt 0) {
+                      $errors | ForEach-Object { Write-Error $_ }
+                      exit 1
+                  }
+
+            - name: 编译 Windows x64 worker
+              run: cargo check -p devshell-worker --target x86_64-pc-windows-msvc
+
+            - name: 构建 Windows x64 发布资产
+              run: node ./scripts/build-worker.mjs --target windows-x64 --output-dir ./release-assets
+
+            - name: Windows worker daemon 与 PowerShell smoke
+              run: node ./scripts/smoke-worker.mjs ./release-assets/devshell-worker-windows-x64.exe
+
+            - name: Windows control、CLI 与 local instance smoke
+              run: node ./scripts/smoke-client.mjs ./release-assets/devshell-worker-windows-x64.exe
+
+    windows-arm64:
+        runs-on: windows-2022
+        steps:
+            - uses: actions/checkout@v5
+
+            - uses: actions/setup-node@v5
+              with:
+                  node-version: 24
+
+            - name: 安装 Rust 工具链
+              run: |
+                  rustup toolchain install stable --profile minimal
+                  rustup default stable
+                  rustup target add aarch64-pc-windows-msvc
+
+            - name: 编译 Windows ARM64 worker
+              run: cargo check -p devshell-worker --target aarch64-pc-windows-msvc
+
+            - name: 构建 Windows ARM64 发布资产
+              run: node ./scripts/build-worker.mjs --target windows-arm64 --output-dir ./release-assets

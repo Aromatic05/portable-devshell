@@ -1,7 +1,6 @@
 use std::fs::{self, OpenOptions};
 use std::io::{BufRead, BufReader, Write};
 use std::num::NonZeroUsize;
-use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -24,6 +23,7 @@ use crate::rpc::codec::{decode_request_frame, encode_json};
 use crate::rpc::response::RpcResponse;
 use crate::rpc::router::RpcRouter;
 use crate::storage::InstancePaths;
+use crate::storage::permissions::ensure_file_mode;
 
 const WSS_FAILURES_BEFORE_SSE: u32 = 3;
 const MAX_RECONNECT_BACKOFF: Duration = Duration::from_secs(30);
@@ -315,7 +315,6 @@ impl ReverseConnector {
             .create(true)
             .truncate(true)
             .write(true)
-            .mode(0o600)
             .open(&temporary)
             .map_err(|error| format!("failed to open {}: {error}", temporary.display()))?;
         writeln!(file, "{generation}")
@@ -324,8 +323,7 @@ impl ReverseConnector {
             .map_err(|error| format!("failed to sync {}: {error}", temporary.display()))?;
         fs::rename(&temporary, &generation_file)
             .map_err(|error| format!("failed to replace {}: {error}", generation_file.display()))?;
-        fs::set_permissions(&generation_file, fs::Permissions::from_mode(0o600))
-            .map_err(|error| format!("failed to protect {}: {error}", generation_file.display()))?;
+        ensure_file_mode(&generation_file, 0o600)?;
         self.config.generation = generation;
         Ok(generation)
     }

@@ -149,10 +149,11 @@ WSS
 ~/.devshell/workers/
 ```
 
-control socket 优先位于：
+control IPC endpoint：
 
 ```text
-$XDG_RUNTIME_DIR/portable-devshell/control.sock
+Linux/macOS    $XDG_RUNTIME_DIR/portable-devshell/control.sock
+Windows        \\.\pipe\portable-devshell-control-<user>
 ```
 
-当 `XDG_RUNTIME_DIR` 不存在时，使用当前用户专属的临时目录，因此 macOS 不需要额外手动设置该变量。
+当 `XDG_RUNTIME_DIR` 不存在时，Unix 使用当前用户专属的临时目录，因此 macOS 不需要额外设置该变量。Windows control 和 worker 使用 Named Pipe，但承载的仍是同一套四字节长度前缀 JSON RPC frame。

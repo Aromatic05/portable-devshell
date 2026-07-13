@@ -4,6 +4,7 @@
 
 - [installation.md](installation.md)：发布包安装、源码安装、升级、PATH 和卸载。
 - [quickstart.md](quickstart.md)：创建第一个 instance，启动 worker，并验证工具调用。
+- [windows.md](windows.md)：Windows client、Named Pipe、PowerShell worker 和能力边界。
 - [clients.md](clients.md)：接入 Codex、Claude Code 和 ChatGPT Connector。
 
 ## 运行与配置

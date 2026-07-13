@@ -88,6 +88,8 @@ export type InstanceContainerConfig =
     | InstanceContainerExistingImageConfig
     | InstanceContainerExistingStoppedContainerConfig;
 
+export type InstanceCreateProvider = "local" | "ssh" | "docker" | "podman" | "reverse";
+
 export interface InstanceCreateSchema {
     container: {
         defaultMode: InstanceContainerMode;
@@ -100,8 +102,8 @@ export interface InstanceCreateSchema {
         ];
         presets: readonly InstanceContainerPresetSchema[];
     };
-    providers: readonly ["local", "ssh", "docker", "podman", "reverse"];
-    defaultProvider: "local" | "ssh" | "docker" | "podman" | "reverse";
+    providers: readonly InstanceCreateProvider[];
+    defaultProvider: InstanceCreateProvider;
     defaultEnabled: boolean;
     defaultMcpEnabled: boolean;
     defaultMcpCapabilities: readonly ToolCapability[];
@@ -122,7 +124,7 @@ export interface InstanceCreateDraft {
     };
     name: string;
     podmanBinary?: string;
-    provider: "local" | "ssh" | "docker" | "podman" | "reverse";
+    provider: InstanceCreateProvider;
     security?: {
         mode?: string;
     };
@@ -146,7 +148,7 @@ export interface InstanceCreateSummary {
     };
     name: string;
     podmanBinary?: string;
-    provider: "local" | "ssh" | "docker" | "podman" | "reverse";
+    provider: InstanceCreateProvider;
     security: {
         mode: string;
     };

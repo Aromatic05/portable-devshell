@@ -1,4 +1,4 @@
-import { InstancePaths, WorkerInstanceFactory, WorkerRpcInboundConnector, WorkerTransportFactory, type WorkerInstance, type WorkerInstanceConfig, type WorkerTransportFactoryOptions } from "@portable-devshell/core";
+import { InstancePaths, WorkerInstanceFactory, WorkerRpcInboundConnector, WorkerTransportFactory, resolveWorkerHomeDirectory, type WorkerInstance, type WorkerInstanceConfig, type WorkerTransportFactoryOptions } from "@portable-devshell/core";
 import { asInstanceName, asWorkspacePath } from "@portable-devshell/shared";
 
 import type { ControlInstanceConfig } from "../control/config/ControlConfigTomlCodec.js";
@@ -14,7 +14,8 @@ export class InstanceConfigMapper {
 
     map(instance: ControlInstanceConfig): InstanceDescriptor {
         const name = asInstanceName(instance.name);
-        const paths = new InstancePaths(name, process.env.HOME);
+        const homeDirectory = resolveWorkerHomeDirectory();
+        const paths = new InstancePaths(name, homeDirectory);
         const reverseConnector = instance.provider === "reverse" ? new WorkerRpcInboundConnector() : undefined;
         const workerHolder: { value?: WorkerInstance } = {};
         const todo = new TodoService({
@@ -24,7 +25,7 @@ export class InstanceConfigMapper {
             filePath: paths.todoFile,
             instanceName: instance.name
         });
-        const worker = this.#workerInstanceFactory.create(this.#toWorkerConfig(instance, reverseConnector), {
+        const worker = this.#workerInstanceFactory.create(this.#toWorkerConfig(instance, reverseConnector, homeDirectory), {
             toolCallAssociationProvider: () => todo.currentAssociation()
         });
         workerHolder.value = worker;
@@ -46,7 +47,8 @@ export class InstanceConfigMapper {
 
     #toWorkerConfig(
         instance: ControlInstanceConfig,
-        reverseConnector?: WorkerRpcInboundConnector
+        reverseConnector: WorkerRpcInboundConnector | undefined,
+        homeDirectory: string
     ): WorkerInstanceConfig {
         const effectiveSecurityMode: "disabled" | "workspace" =
             instance.security?.mode === "workspace" ? "workspace" : "disabled";
@@ -62,7 +64,7 @@ export class InstanceConfigMapper {
             approvalPolicy: instance.approvalPolicy,
             toolScheduler: instance.tools?.scheduler,
             effectiveSecurityMode,
-            homeDirectory: process.env.HOME,
+            homeDirectory,
             name: asInstanceName(instance.name)
         };
 

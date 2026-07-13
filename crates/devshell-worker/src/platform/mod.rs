@@ -1,3 +1,14 @@
-pub mod unix;
+#[cfg(unix)]
+mod unix;
+#[cfg(windows)]
+mod windows;
 
-pub use unix::{process_is_running, terminate_process, terminate_process_group};
+#[cfg(unix)]
+pub use unix::{
+    configure_daemon_command, process_is_running, terminate_process, terminate_process_group,
+};
+#[cfg(windows)]
+pub use windows::{
+    configure_child_process, configure_daemon_command, process_is_running, terminate_process,
+    terminate_process_group,
+};

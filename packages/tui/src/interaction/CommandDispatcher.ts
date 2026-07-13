@@ -1,5 +1,6 @@
 import type { InstanceCreateDraft, InstanceCreateSchema, InstanceCreateSummary, JsonValue } from "@portable-devshell/shared";
 
+import { editableProviderChoices } from "../platform/TuiProviderAvailability.js";
 import type { TuiAppStore } from "../store/TuiAppStore.js";
 import { asRecord, cloneRecord, editorDraft, normalizeDraftForSave, readPath, setPath } from "../store/page/EditorSupport.js";
 import { selectMainBoxFlowMetrics, selectMainBoxIds, selectMainScreenModel, selectMainScrollKey } from "../store/TuiSelectors.js";
@@ -908,12 +909,21 @@ export class CommandDispatcher {
     }
 
     #choiceValues(editor: TuiEditorState, field: string): readonly JsonValue[] | undefined {
+        if (editor.kind === "create") {
+            if (field === "provider") {
+                return editor.schema?.providers;
+            }
+            if (field === "container.mode") {
+                return editor.schema?.container.modes;
+            }
+            return undefined;
+        }
         if (editor.kind !== "config") {
             return undefined;
         }
         switch (field) {
             case "provider":
-                return ["local", "ssh", "docker", "podman"];
+                return editableProviderChoices();
             case "enabled":
             case "mcp.enabled":
                 return [true, false];

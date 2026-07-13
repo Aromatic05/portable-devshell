@@ -1,4 +1,3 @@
-import { unlink } from "node:fs/promises";
 import { createServer, type Server, type Socket } from "node:net";
 
 import { createError, errorCodes, toControlErrorBody, type ControlErrorBody, type JsonValue } from "@portable-devshell/shared";
@@ -15,6 +14,7 @@ import { RouteHandlerInstance } from "../../route/handler/RouteHandlerInstance.j
 import { RouteRouterControl } from "../../route/router/RouteRouterControl.js";
 import { RouteRouterInstance } from "../../route/router/RouteRouterInstance.js";
 import { StreamSubscriptionManager } from "../../stream/StreamSubscriptionManager.js";
+import { removeControlIpcEndpoint } from "../platform/ControlIpcEndpoint.js";
 import { ControlRpcConnection, type RpcRequestEnvelope } from "./ControlRpcConnection.js";
 
 export interface ControlRpcServerOptions {
@@ -68,7 +68,7 @@ export class ControlRpcServer {
     }
 
     async start(): Promise<void> {
-        await unlink(this.#socketPath).catch(() => undefined);
+        await removeControlIpcEndpoint(this.#socketPath);
 
         this.#server = createServer((socket) => {
             this.#attachConnection(socket);
@@ -120,7 +120,7 @@ export class ControlRpcServer {
         });
 
         this.#server = undefined;
-        await unlink(this.#socketPath).catch(() => undefined);
+        await removeControlIpcEndpoint(this.#socketPath);
     }
 
     #attachConnection(socket: Socket): void {

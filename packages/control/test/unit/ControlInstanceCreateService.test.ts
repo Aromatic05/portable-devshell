@@ -19,6 +19,11 @@ test("instance create schema exposes supported container modes without running c
     assert.deepEqual(schema.defaultMcpGroups, ["file", "bash", "artifact", "tmux", "todo"]);
 });
 
+test("Windows instance create schema exposes only supported providers", () => {
+    const schema = createService("win32").getSchema();
+    assert.deepEqual(schema.providers, ["local", "ssh", "reverse"]);
+});
+
 test("instance create validates docker preset drafts into container config", () => {
     const service = createService();
 
@@ -66,7 +71,7 @@ test("instance create validates existing stopped container drafts with adoptLife
     });
 });
 
-function createService() {
+function createService(platform?: NodeJS.Platform) {
     let config = createDefaultControlConfig();
 
     return new ControlInstanceCreateService({
@@ -81,6 +86,7 @@ function createService() {
         getConfig: () => config,
         getMcpHost: () => undefined,
         instanceRegistry: new InstanceRegistry([]),
+        platform,
         setConfig: (nextConfig) => {
             config = nextConfig;
         }

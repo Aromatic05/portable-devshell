@@ -15,6 +15,7 @@ import {
 import type { WorkerCommandName, WorkerCommandOptions, WorkerRpcOptions } from "../../command/WorkerCommandOptions.js";
 import { createWorkerRpcProcess, type WorkerRpcProcess } from "../../WorkerProcess.js";
 import { LocalWorkerInstaller } from "../../install/LocalWorkerInstaller.js";
+import { resolveWorkerHomeDirectory } from "../../platform/WorkerHomeDirectory.js";
 import { probeLocalWorkerTarget } from "../../target/WorkerTargetProbe.js";
 
 export interface LocalWorkerTransportOptions {
@@ -94,14 +95,8 @@ export class LocalWorkerTransport implements WorkerCommandTransport {
             return this.#workerBinary.executable;
         }
 
-        const homeDirectory = env?.HOME ?? process.env.HOME;
+        const homeDirectory = resolveWorkerHomeDirectory(env ?? process.env);
 
-        if (homeDirectory === undefined || homeDirectory.length === 0) {
-            throw this.#createProviderError(
-                this.#createCommandContext("resolveExecutable", ["devshell-worker"]),
-                new Error("HOME is required to install the local worker")
-            );
-        }
 
         const target = probeLocalWorkerTarget("local", "resolveExecutable");
         const asset = await this.#resolver.resolve(target).catch((error) => {

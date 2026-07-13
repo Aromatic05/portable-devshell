@@ -1,15 +1,15 @@
 use std::fs::{self, OpenOptions};
-use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use crate::instance::InstanceName;
-use crate::platform::process_is_running;
+use crate::platform::{configure_daemon_command, process_is_running};
 use crate::rpc::bridge::send_request;
 use crate::rpc::request::RpcRequest;
 use crate::security::SecurityMode;
 use crate::socket::SocketPaths;
 use crate::storage::InstancePaths;
+use crate::storage::permissions::ensure_file_mode;
 
 pub const INTERNAL_INSTANCE_ENV: &str = "DEVSHELL_WORKER_INTERNAL_INSTANCE";
 pub const INTERNAL_WORKSPACE_ENV: &str = "DEVSHELL_WORKER_INTERNAL_WORKSPACE";
@@ -45,14 +45,15 @@ pub fn spawn(
     let log_file = OpenOptions::new()
         .create(true)
         .append(true)
-        .mode(0o600)
         .open(&paths.log_file)
         .map_err(|error| format!("failed to open {}: {error}", paths.log_file.display()))?;
+    ensure_file_mode(&paths.log_file, 0o600)?;
     let stdout_file = log_file
         .try_clone()
         .map_err(|error| format!("failed to clone {}: {error}", paths.log_file.display()))?;
 
-    Command::new(std::env::current_exe().map_err(|error| error.to_string())?)
+    let mut command = Command::new(std::env::current_exe().map_err(|error| error.to_string())?);
+    command
         .env(INTERNAL_INSTANCE_ENV, instance.as_str())
         .env(INTERNAL_WORKSPACE_ENV, &runtime.workspace)
         .env(
@@ -64,7 +65,9 @@ pub fn spawn(
         )
         .stdin(Stdio::null())
         .stdout(Stdio::from(stdout_file))
-        .stderr(Stdio::from(log_file))
+        .stderr(Stdio::from(log_file));
+    configure_daemon_command(&mut command);
+    command
         .spawn()
         .map_err(|error| format!("failed to spawn daemon process: {error}"))?;
     Ok(())
@@ -147,14 +150,20 @@ pub fn clear_runtime_files(
     socket_path: &Path,
 ) -> Result<(), String> {
     clear_pid(instance_paths)?;
-    remove_if_exists(socket_path)
+    remove_ipc_endpoint_if_exists(socket_path)
 }
 
 pub fn is_running(paths: &InstancePaths, socket_path: &Path) -> bool {
+    #[cfg(windows)]
+    let _ = socket_path;
     let Some(pid) = read_pid(paths) else {
         return false;
     };
-    socket_path.exists() && process_is_running(pid)
+    #[cfg(windows)]
+    let endpoint_ready = true;
+    #[cfg(unix)]
+    let endpoint_ready = socket_path.exists();
+    endpoint_ready && process_is_running(pid)
 }
 
 pub fn daemon_is_responsive(socket_paths: &SocketPaths) -> bool {
@@ -181,7 +190,7 @@ pub fn daemon_state(instance_paths: &InstancePaths, socket_paths: &SocketPaths) 
 
 pub fn has_runtime_residue(instance_paths: &InstancePaths, socket_paths: &SocketPaths) -> bool {
     instance_paths.pid_file.exists()
-        || socket_paths.socket_file.exists()
+        || unix_socket_exists(&socket_paths.socket_file)
         || read_pid(instance_paths)
             .map(process_is_running)
             .unwrap_or(false)
@@ -193,4 +202,22 @@ pub fn remove_if_exists(path: &Path) -> Result<(), String> {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
         Err(error) => Err(format!("failed to remove {}: {error}", path.display())),
     }
+}
+
+#[cfg(unix)]
+fn unix_socket_exists(path: &Path) -> bool {
+    path.exists()
+}
+
+#[cfg(windows)]
+fn unix_socket_exists(_path: &Path) -> bool {
+    false
+}
+
+pub fn remove_ipc_endpoint_if_exists(path: &Path) -> Result<(), String> {
+    #[cfg(windows)]
+    if path.to_string_lossy().starts_with(r"\\.\pipe\") {
+        return Ok(());
+    }
+    remove_if_exists(path)
 }

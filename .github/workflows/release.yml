@@ -26,6 +26,12 @@ jobs:
                     - runner: macos-14
                       target: darwin-x64
                       rust_target: x86_64-apple-darwin
+                    - runner: windows-2022
+                      target: windows-x64
+                      rust_target: x86_64-pc-windows-msvc
+                    - runner: windows-2022
+                      target: windows-arm64
+                      rust_target: aarch64-pc-windows-msvc
 
         runs-on: ${{ matrix.runner }}
 
@@ -35,7 +41,6 @@ jobs:
             - uses: actions/setup-node@v5
               with:
                   node-version: 24
-                  package-manager-cache: false
 
             - name: 安装 Rust 工具链
               run: |
@@ -64,6 +69,10 @@ jobs:
 
             - name: 构建 macOS worker
               if: runner.os == 'macOS'
+              run: node ./scripts/build-worker.mjs --target "${{ matrix.target }}" --output-dir ./release-assets
+
+            - name: 构建 Windows worker
+              if: runner.os == 'Windows'
               run: node ./scripts/build-worker.mjs --target "${{ matrix.target }}" --output-dir ./release-assets
 
             - uses: actions/upload-artifact@v7
@@ -101,6 +110,11 @@ jobs:
                   cp ./scripts/install-release.sh ./release-assets/install-release.sh
                   chmod 755 ./release-assets/install-release.sh
                   (cd ./release-assets && sha256sum install-release.sh > install-release.sh.sha256)
+                  cp ./scripts/install-release.ps1 ./release-assets/install-release.ps1
+                  sha256sum ./release-assets/install-release.ps1 > ./release-assets/install-release.ps1.sha256
+
+            - name: 验证应用归档无符号链接且可运行
+              run: pnpm smoke:package -- ./release-assets/portable-devshell-app.tar.gz
 
             - uses: actions/upload-artifact@v7
               with:

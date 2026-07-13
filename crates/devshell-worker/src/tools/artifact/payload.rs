@@ -1,6 +1,9 @@
+use std::ffi::OsStr;
 use std::fs::{self, File, Metadata};
 use std::io::{Read, Seek, SeekFrom, Write};
+#[cfg(unix)]
 use std::os::unix::ffi::OsStrExt;
+#[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -570,9 +573,7 @@ fn collect_directory_entries_from(
         .collect::<Result<Vec<_>, _>>()
         .map_err(|error| ToolError::new("artifact.readFailed", error.to_string()))?;
     children.sort_by(|left, right| {
-        left.file_name()
-            .as_bytes()
-            .cmp(right.file_name().as_bytes())
+        os_sort_key(&left.file_name()).cmp(&os_sort_key(&right.file_name()))
     });
     for child in children {
         let absolute_path = child.path();
@@ -614,7 +615,7 @@ fn collect_directory_entries_from(
             absolute_path: absolute_path.clone(),
             relative_path,
             entry_type,
-            mode: metadata.permissions().mode() & 0o777,
+            mode: metadata_mode(&metadata, entry_type),
             modified_at_seconds: modified_at_seconds(&metadata),
             size,
         });
@@ -821,8 +822,35 @@ fn clear_temp_dir(path: &Path) -> Result<(), ToolError> {
 }
 
 fn set_private_dir(path: &Path) -> Result<(), ToolError> {
-    fs::set_permissions(path, fs::Permissions::from_mode(0o700))
-        .map_err(|error| ToolError::new("artifact.storageFailed", error.to_string()))
+    crate::storage::permissions::ensure_dir(path, 0o700)
+        .map_err(|error| ToolError::new("artifact.storageFailed", error))
+}
+
+#[cfg(unix)]
+fn metadata_mode(metadata: &Metadata, _entry_type: DirectoryEntryType) -> u32 {
+    metadata.permissions().mode() & 0o777
+}
+
+#[cfg(windows)]
+fn metadata_mode(_metadata: &Metadata, entry_type: DirectoryEntryType) -> u32 {
+    match entry_type {
+        DirectoryEntryType::Directory => 0o755,
+        DirectoryEntryType::File => 0o644,
+    }
+}
+
+#[cfg(unix)]
+fn os_sort_key(value: &OsStr) -> Vec<u8> {
+    value.as_bytes().to_vec()
+}
+
+#[cfg(windows)]
+fn os_sort_key(value: &OsStr) -> Vec<u8> {
+    use std::os::windows::ffi::OsStrExt;
+    value
+        .encode_wide()
+        .flat_map(u16::to_be_bytes)
+        .collect::<Vec<_>>()
 }
 
 fn now_ms() -> u128 {

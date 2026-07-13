@@ -15,8 +15,9 @@ use crate::platform;
 use crate::security::path::{FilesystemCapability, parse_requested_path, resolve_existing_target};
 use crate::tools::artifact::store::{ArtifactDraft, ArtifactStore};
 use crate::tools::artifact::types::{ArtifactReference, ArtifactStream};
-use crate::tools::bash::backend::spawn_bash;
+use crate::tools::bash::backend::spawn_shell;
 use crate::tools::bash::group::bash_run_name;
+use crate::tools::bash::runtime::ShellRuntime;
 use crate::tools::bash::types::{BashRunOutput, BashRunParams, BashTermination};
 use crate::tools::{ToolCall, ToolCapability, ToolCatalogEntry, ToolError, ToolHandler, ToolName};
 
@@ -29,13 +30,15 @@ const MAX_STDIN_BYTES: usize = 4 * 1024 * 1024;
 pub struct BashRunTool {
     name: ToolName,
     artifacts: Arc<ArtifactStore>,
+    shell: ShellRuntime,
 }
 impl BashRunTool {
-    pub fn new(artifacts: Arc<ArtifactStore>) -> Self {
-        Self {
+    pub fn new(artifacts: Arc<ArtifactStore>) -> Result<Self, ToolError> {
+        Ok(Self {
             name: bash_run_name(),
             artifacts,
-        }
+            shell: ShellRuntime::detect()?,
+        })
     }
 }
 impl ToolHandler for BashRunTool {
@@ -46,7 +49,7 @@ impl ToolHandler for BashRunTool {
         ToolCatalogEntry {
             group: self.name.group().to_string(),
             name: self.name.as_str(),
-            description: "Run a shell command in the worker environment.".to_string(),
+            description: self.shell.catalog_description(),
             input_schema: serde_json::to_value(schema_for!(BashRunParams)).unwrap(),
             output_schema: serde_json::to_value(schema_for!(BashRunOutput)).unwrap(),
             required_capabilities: vec![ToolCapability::Execute],
@@ -92,12 +95,7 @@ impl ToolHandler for BashRunTool {
             .map_err(|error| ToolError::new(error.code, error.message))?;
         let cwd = resolve_cwd(&call, params.cwd.as_deref())?;
         let started = Instant::now();
-        let mut child = spawn_bash(
-            &PathBuf::from("/bin/bash"),
-            &params.command,
-            &cwd,
-            &params.env,
-        )?;
+        let mut child = spawn_shell(&self.shell, &params.command, &cwd, &params.env)?;
         let pid = child.id() as i32;
         let process_guard = match call.process_registry.register(pid) {
             Ok(process_guard) => process_guard,
@@ -389,5 +387,17 @@ impl ExitSignal for std::process::ExitStatus {
     fn signal(&self) -> Option<i32> {
         use std::os::unix::process::ExitStatusExt;
         ExitStatusExt::signal(self)
+    }
+}
+
+#[cfg(windows)]
+trait ExitSignal {
+    fn signal(&self) -> Option<i32>;
+}
+
+#[cfg(windows)]
+impl ExitSignal for std::process::ExitStatus {
+    fn signal(&self) -> Option<i32> {
+        None
     }
 }

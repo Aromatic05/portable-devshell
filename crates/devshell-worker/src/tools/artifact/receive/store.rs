@@ -1,6 +1,7 @@
 use std::collections::HashSet;
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, Write};
+#[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Component, Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -102,10 +103,8 @@ pub struct ArtifactReceiveStore {
 
 impl ArtifactReceiveStore {
     pub fn new(root: PathBuf) -> Result<Arc<Self>, ToolError> {
-        fs::create_dir_all(&root)
-            .map_err(|error| ToolError::new("artifact.storageFailed", error.to_string()))?;
-        fs::set_permissions(&root, fs::Permissions::from_mode(0o700))
-            .map_err(|error| ToolError::new("artifact.storageFailed", error.to_string()))?;
+        crate::storage::permissions::ensure_dir(&root, 0o700)
+            .map_err(|error| ToolError::new("artifact.storageFailed", error))?;
         let store = Arc::new(Self {
             root,
             guard: Mutex::new(()),
@@ -620,8 +619,7 @@ fn extract_directory(
         output
             .sync_all()
             .map_err(|error| ToolError::new("artifact.receiveFailed", error.to_string()))?;
-        fs::set_permissions(&output_path, fs::Permissions::from_mode(mode))
-            .map_err(|error| ToolError::new("artifact.receiveFailed", error.to_string()))?;
+        set_mode(&output_path, mode)?;
         filetime::set_file_mtime(
             &output_path,
             FileTime::from_unix_time(modified_at_seconds as i64, 0),
@@ -646,8 +644,7 @@ fn extract_directory(
             .cmp(&left.3.matches('/').count())
     });
     for (path, mode, modified_at_seconds, _) in directory_metadata {
-        fs::set_permissions(&path, fs::Permissions::from_mode(mode))
-            .map_err(|error| ToolError::new("artifact.receiveFailed", error.to_string()))?;
+        set_mode(&path, mode)?;
         filetime::set_file_mtime(
             &path,
             FileTime::from_unix_time(modified_at_seconds as i64, 0),
@@ -851,6 +848,17 @@ fn sync_tree(root: &Path) -> Result<(), ToolError> {
             .and_then(|file| file.sync_all())
             .map_err(|error| ToolError::new("artifact.receiveFailed", error.to_string()))?;
     }
+    Ok(())
+}
+
+#[cfg(unix)]
+fn set_mode(path: &Path, mode: u32) -> Result<(), ToolError> {
+    fs::set_permissions(path, fs::Permissions::from_mode(mode))
+        .map_err(|error| ToolError::new("artifact.receiveFailed", error.to_string()))
+}
+
+#[cfg(windows)]
+fn set_mode(_path: &Path, _mode: u32) -> Result<(), ToolError> {
     Ok(())
 }
 

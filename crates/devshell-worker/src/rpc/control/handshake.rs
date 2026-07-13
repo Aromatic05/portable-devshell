@@ -6,6 +6,7 @@ use crate::rpc::codec::PROTOCOL_VERSION;
 use crate::rpc::error::RpcError;
 use crate::rpc::request::RpcRequest;
 use crate::rpc::router::ControlHandler;
+use crate::tools::bash::runtime::ShellRuntime;
 
 pub struct HandshakeHandler {
     config: WorkerConfig,
@@ -45,6 +46,7 @@ impl ControlHandler for HandshakeHandler {
             })));
         }
 
+        let shell = ShellRuntime::detect().ok();
         Ok(json!({
             "instance": self.config.instance,
             "workspace": self.runtime.workspace,
@@ -52,7 +54,12 @@ impl ControlHandler for HandshakeHandler {
             "protocolVersion": PROTOCOL_VERSION,
             "platform": {
                 "os": self.runtime.platform.os,
-                "arch": self.runtime.platform.arch
+                "arch": self.runtime.platform.arch,
+                "shell": shell.as_ref().map(|shell| json!({
+                    "kind": shell.kind,
+                    "executable": shell.executable,
+                    "version": shell.version
+                }))
             },
             "capabilities": {
                 "tools": true,

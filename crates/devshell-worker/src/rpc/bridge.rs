@@ -1,14 +1,13 @@
 use std::io;
-use std::net::Shutdown;
-use std::os::unix::net::UnixStream;
 use std::path::Path;
 
 use crate::rpc::codec::{read_frame, read_response, write_frame, write_request_frame};
 use crate::rpc::request::RpcRequest;
 use crate::rpc::response::RpcResponse;
+use crate::socket::LocalIpcStream;
 
 pub fn run_bridge(socket_file: &Path) -> Result<String, String> {
-    let socket = UnixStream::connect(socket_file)
+    let socket = LocalIpcStream::connect(socket_file)
         .map_err(|error| format!("failed to connect {}: {error}", socket_file.display()))?;
     let socket_reader = socket
         .try_clone()
@@ -22,7 +21,7 @@ pub fn run_bridge(socket_file: &Path) -> Result<String, String> {
             write_frame(&mut socket_writer, &frame)?;
         }
         socket_writer
-            .shutdown(Shutdown::Write)
+            .shutdown_write()
             .map_err(|error| format!("failed to half-close rpc socket: {error}"))?;
         Ok(())
     });
@@ -39,16 +38,19 @@ pub fn run_bridge(socket_file: &Path) -> Result<String, String> {
         .join()
         .map_err(|_| "stdin bridge thread panicked".to_string())?
         .map_err(|error| format!("stdin bridge failed: {error}"))?;
+    #[cfg(unix)]
     forward_stdout
         .join()
         .map_err(|_| "stdout bridge thread panicked".to_string())?
         .map_err(|error| format!("stdout bridge failed: {error}"))?;
+    #[cfg(windows)]
+    drop(forward_stdout);
 
     Ok(String::new())
 }
 
 pub fn send_request(socket_file: &Path, request: &RpcRequest) -> Result<RpcResponse, String> {
-    let mut stream = UnixStream::connect(socket_file)
+    let mut stream = LocalIpcStream::connect(socket_file)
         .map_err(|error| format!("failed to connect {}: {error}", socket_file.display()))?;
     write_request_frame(&mut stream, request)?;
     read_response(&mut stream)?

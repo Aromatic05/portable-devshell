@@ -43,15 +43,18 @@ verify_sha256() {
 
 install_worker() {
     target=$1
-    asset="devshell-worker-$target"
+    case "$target" in
+        windows-*) asset="devshell-worker-$target.exe"; binary_name="devshell-worker.exe" ;;
+        *) asset="devshell-worker-$target"; binary_name="devshell-worker" ;;
+    esac
     sha=$(read_sha "$temporary/$asset.sha256")
     worker_directory="$devshell_home/workers/$target/$sha"
 
     mkdir -p -m 700 "$worker_directory"
-    install -m 755 "$temporary/$asset" "$worker_directory/devshell-worker"
-    printf '%s\n' "$sha" > "$worker_directory/devshell-worker.sha256"
-    chmod 600 "$worker_directory/devshell-worker.sha256"
-    ln -sfn "../workers/$target/$sha/devshell-worker" "$worker_bin_directory/$asset"
+    install -m 755 "$temporary/$asset" "$worker_directory/$binary_name"
+    printf '%s\n' "$sha" > "$worker_directory/$binary_name.sha256"
+    chmod 600 "$worker_directory/$binary_name.sha256"
+    ln -sfn "../workers/$target/$sha/$binary_name" "$worker_bin_directory/$asset"
 }
 
 repository=${PORTABLE_DEVSHELL_RELEASE_REPOSITORY:-Aromatic05/portable-devshell}
@@ -62,7 +65,7 @@ data_home=${XDG_DATA_HOME:-"$home/.local/share"}
 install_root=${PORTABLE_DEVSHELL_INSTALL_ROOT:-"$data_home/portable-devshell"}
 bin_directory=${PORTABLE_DEVSHELL_BIN_DIR:-"$home/.local/bin"}
 devshell_home=${PORTABLE_DEVSHELL_HOME:-"$home/.devshell"}
-targets="linux-x64 linux-arm64 darwin-x64 darwin-arm64"
+targets="linux-x64 linux-arm64 darwin-x64 darwin-arm64 windows-x64 windows-arm64"
 
 require_command curl
 require_command node
@@ -108,7 +111,10 @@ download "$release_base/portable-devshell-app.tar.gz.sha256" "$temporary/app.sha
 verify_sha256 "$temporary/app.tar.gz" "$temporary/app.sha256"
 
 for target in $targets; do
-    asset="devshell-worker-$target"
+    case "$target" in
+        windows-*) asset="devshell-worker-$target.exe" ;;
+        *) asset="devshell-worker-$target" ;;
+    esac
     download "$release_base/$asset" "$temporary/$asset"
     download "$release_base/$asset.sha256" "$temporary/$asset.sha256"
     verify_sha256 "$temporary/$asset" "$temporary/$asset.sha256"

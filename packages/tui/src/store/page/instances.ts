@@ -1,5 +1,6 @@
 import type { JsonValue } from "@portable-devshell/shared";
 
+import { isAttachShellSupported } from "../../attach/AttachShellAvailability.js";
 import { buildArtifactActivityView } from "../../component/ArtifactActivityBox.js";
 import type { BoxModel } from "../../component/ExpandableBox.js";
 import type { TuiAppState } from "../TuiReducers.js";
@@ -34,7 +35,7 @@ export function buildInstancesPageBoxes(state: TuiAppState): BoxModel[] {
         ...state.instances.map((entry) => {
             const snapshot = state.snapshotsByInstance[entry.name];
             const approvals = (state.approvalsByInstance[entry.name] ?? []).filter((approval) => approval.status === "pending");
-            const lifecycle = lifecycleAvailability(state, entry.name, entry.enabled, snapshot);
+            const lifecycle = lifecycleAvailability(state, entry.name, entry.enabled, entry.provider, snapshot);
             const artifactActivity = buildArtifactActivityView(
                 entry.name,
                 state.artifactShares,
@@ -106,6 +107,7 @@ function lifecycleAvailability(
     state: TuiAppState,
     instance: string,
     enabled: boolean,
+    provider: string | undefined,
     snapshot: TuiAppState["snapshotsByInstance"][string] | undefined
 ): { attach: boolean; restart: boolean; startOrRestart: boolean; stop: boolean } {
     const busy = state.commandRecords.some((record) => record.targetInstance === instance && record.status === "running");
@@ -117,7 +119,7 @@ function lifecycleAvailability(
     const restart = !selfManaged && running;
 
     return {
-        attach: enabled && !selfManaged && running && !transitional,
+        attach: enabled && isAttachShellSupported(provider) && !selfManaged && running && !transitional,
         restart,
         startOrRestart: enabled && !selfManaged && !transitional,
         stop: enabled && (selfManaged ? reverseOnline : running) && !transitional

@@ -20,6 +20,14 @@ const TARGETS = {
     "darwin-arm64": {
         key: "darwin-arm64",
         rustTarget: "aarch64-apple-darwin"
+    },
+    "windows-x64": {
+        key: "windows-x64",
+        rustTarget: "x86_64-pc-windows-msvc"
+    },
+    "windows-arm64": {
+        key: "windows-arm64",
+        rustTarget: "aarch64-pc-windows-msvc"
     }
 };
 
@@ -62,7 +70,7 @@ if (!existsSync(workerSource)) {
 }
 
 if (outputDirectory !== undefined) {
-    const outputPath = resolve(outputDirectory, `devshell-worker-${target.key}`);
+    const outputPath = resolve(outputDirectory, workerAssetName(target));
     const shaPath = `${outputPath}.sha256`;
     const bytes = copyWorker(workerSource, outputPath);
     writeFileSync(shaPath, `${createHash("sha256").update(bytes).digest("hex")}\n`, "utf8");
@@ -109,15 +117,25 @@ function readOption(name) {
 }
 
 function resolveSourcePath(target, profile) {
-    return resolve(repoRoot, "target", target.rustTarget, profile, "devshell-worker");
+    return resolve(repoRoot, "target", target.rustTarget, profile, workerBinaryName(target));
 }
 
 function copyWorker(sourcePath, outputPath) {
     const bytes = readFileSync(sourcePath);
     mkdirSync(dirname(outputPath), { recursive: true });
     copyFileSync(sourcePath, outputPath);
-    chmodSync(outputPath, 0o755);
+    if (!outputPath.endsWith(".exe")) chmodSync(outputPath, 0o755);
     return bytes;
+}
+
+function workerBinaryName(target) {
+    return target.key.startsWith("windows-") ? "devshell-worker.exe" : "devshell-worker";
+}
+
+function workerAssetName(target) {
+    return target.key.startsWith("windows-")
+        ? `devshell-worker-${target.key}.exe`
+        : `devshell-worker-${target.key}`;
 }
 
 function detectHostTarget() {
@@ -166,6 +184,8 @@ function normalizeOs(platform) {
             return "linux";
         case "darwin":
             return "darwin";
+        case "win32":
+            return "windows";
         default:
             throw new Error(`unsupported host platform: ${platform}`);
     }

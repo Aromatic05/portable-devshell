@@ -54,6 +54,9 @@ export class ControlDaemon {
 
         if (options.homeDirectory !== undefined) {
             env.HOME = options.homeDirectory;
+            if (process.platform === "win32") {
+                env.USERPROFILE = options.homeDirectory;
+            }
         }
 
         if (options.xdgRuntimeDir !== undefined) {

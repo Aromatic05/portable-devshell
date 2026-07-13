@@ -1,3 +1,4 @@
+#[cfg(unix)]
 use std::fs;
 use std::io::Write;
 use std::sync::Arc;
@@ -80,6 +81,7 @@ impl ToolHandler for FileWriteTool {
                 ));
             }
         }
+        #[cfg(unix)]
         let metadata = if existing {
             Some(
                 fs::metadata(&path)
@@ -93,6 +95,7 @@ impl ToolHandler for FileWriteTool {
             .map_err(|error| ToolError::new("file.writeFailed", error.to_string()))?;
         temp.flush()
             .map_err(|error| ToolError::new("file.writeFailed", error.to_string()))?;
+        #[cfg(unix)]
         if let Some(metadata) = metadata {
             #[cfg(unix)]
             {

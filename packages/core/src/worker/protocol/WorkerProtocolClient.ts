@@ -16,6 +16,12 @@ export interface WorkerStopResult {
     stopping: boolean;
 }
 
+export interface WorkerShellRuntime {
+    executable: string;
+    kind: "bash" | "powershell" | string;
+    version: string;
+}
+
 export interface WorkerHandshakeResult {
     instance: string;
     workspace: string;
@@ -24,6 +30,7 @@ export interface WorkerHandshakeResult {
     platform: {
         os: string;
         arch: string;
+        shell?: WorkerShellRuntime;
     };
     capabilities: {
         tools: boolean;

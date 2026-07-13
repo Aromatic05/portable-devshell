@@ -1,6 +1,4 @@
 use std::fs;
-use std::net::Shutdown;
-use std::os::unix::net::{UnixListener, UnixStream};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
@@ -13,7 +11,7 @@ use crate::rpc::codec::{decode_request_frame, read_frame, write_response};
 use crate::rpc::error::RpcError;
 use crate::rpc::response::RpcResponse;
 use crate::rpc::router::RpcRouter;
-use crate::socket::SocketPaths;
+use crate::socket::{LocalIpcListener, LocalIpcStream, SocketPaths};
 use crate::storage::InstancePaths;
 use crate::storage::permissions::{ensure_dir, ensure_file_mode};
 use crate::tools::artifact::payload::ArtifactPayloadStore;
@@ -36,11 +34,11 @@ pub fn serve(instance: InstanceName) -> Result<(), String> {
     let runtime = process::read_runtime_context()?;
     let runtime_guard = RuntimeFilesGuard::new(instance_paths.clone(), socket_paths.clone());
 
-    process::remove_if_exists(&socket_paths.socket_file)?;
+    process::remove_ipc_endpoint_if_exists(&socket_paths.socket_file)?;
     process::write_pid(&instance_paths, std::process::id())?;
     append_log(&instance_paths, "daemon starting")?;
 
-    let listener = match UnixListener::bind(&socket_paths.socket_file) {
+    let listener = match LocalIpcListener::bind(&socket_paths.socket_file) {
         Ok(listener) => listener,
         Err(error) => {
             let _ = process::clear_runtime_files(&instance_paths, &socket_paths.socket_file);
@@ -99,7 +97,7 @@ pub fn serve(instance: InstanceName) -> Result<(), String> {
             return Err("forced accept loop failure for testing".to_string());
         }
         match listener.accept() {
-            Ok((stream, _)) => {
+            Ok(stream) => {
                 stream
                     .set_nonblocking(false)
                     .map_err(|error| format!("failed to set accepted stream blocking: {error}"))?;
@@ -127,7 +125,7 @@ pub fn serve(instance: InstanceName) -> Result<(), String> {
     Ok(())
 }
 
-fn handle_connection(stream: UnixStream, router: Arc<RpcRouter>) -> Result<(), String> {
+fn handle_connection(stream: LocalIpcStream, router: Arc<RpcRouter>) -> Result<(), String> {
     let mut reader = stream
         .try_clone()
         .map_err(|error| format!("failed to clone rpc connection: {error}"))?;
@@ -161,7 +159,7 @@ fn handle_connection(stream: UnixStream, router: Arc<RpcRouter>) -> Result<(), S
                 write_serialized_response(&writer, &response)?;
                 if router.shutdown_requested() {
                     if let Ok(stream) = writer.lock() {
-                        let _ = stream.shutdown(Shutdown::Both);
+                        let _ = stream.shutdown_both();
                     }
                     return Ok(());
                 }
@@ -189,7 +187,7 @@ fn handle_connection(stream: UnixStream, router: Arc<RpcRouter>) -> Result<(), S
 }
 
 fn write_serialized_response(
-    writer: &Arc<Mutex<UnixStream>>,
+    writer: &Arc<Mutex<LocalIpcStream>>,
     response: &RpcResponse,
 ) -> Result<(), String> {
     let mut stream = writer

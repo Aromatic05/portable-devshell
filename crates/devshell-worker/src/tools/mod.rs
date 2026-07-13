@@ -6,6 +6,7 @@ pub mod error;
 pub mod file;
 pub mod name;
 pub mod registry;
+#[cfg(unix)]
 pub mod tmux;
 
 pub use catalog::builtin_registry;

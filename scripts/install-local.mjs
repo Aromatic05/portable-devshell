@@ -1,8 +1,8 @@
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
-import { chmod, lstat, mkdir, readFile, rename, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, copyFile, lstat, mkdir, readFile, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { resolve } from "node:path";
+import { delimiter, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 
@@ -19,7 +19,11 @@ const version = requireString(packageJson.version, "package.json version");
 const releaseTag = process.env.PORTABLE_DEVSHELL_WORKER_RELEASE_TAG || `v${version}`;
 const releaseBaseUrl = resolveReleaseBaseUrl();
 const home = process.env.HOME || homedir();
-const dataHome = process.env.XDG_DATA_HOME || resolve(home, ".local", "share");
+const dataHome =
+    process.env.XDG_DATA_HOME ||
+    (process.platform === "win32"
+        ? process.env.LOCALAPPDATA || resolve(home, "AppData", "Local")
+        : resolve(home, ".local", "share"));
 const installRoot = process.env.PORTABLE_DEVSHELL_INSTALL_ROOT || resolve(dataHome, "portable-devshell");
 const binDirectory = process.env.PORTABLE_DEVSHELL_BIN_DIR || resolve(home, ".local", "bin");
 const devshellHome = process.env.PORTABLE_DEVSHELL_HOME || resolve(home, ".devshell");
@@ -28,12 +32,14 @@ const versionDirectory = resolve(versionsDirectory, version);
 const stagingDirectory = resolve(installRoot, `.staging-${version}-${process.pid}`);
 const backupDirectory = resolve(installRoot, `.backup-${version}-${process.pid}`);
 const currentLink = resolve(installRoot, "current");
-const commandLink = resolve(binDirectory, "devshell");
+const commandLink = resolve(binDirectory, process.platform === "win32" ? "devshell.cmd" : "devshell");
 const targets = [
     { key: "linux-x64", rustTarget: "x86_64-unknown-linux-musl" },
     { key: "linux-arm64", rustTarget: "aarch64-unknown-linux-musl" },
     { key: "darwin-x64", rustTarget: "x86_64-apple-darwin" },
-    { key: "darwin-arm64", rustTarget: "aarch64-apple-darwin" }
+    { key: "darwin-arm64", rustTarget: "aarch64-apple-darwin" },
+    { key: "windows-x64", rustTarget: "x86_64-pc-windows-msvc" },
+    { key: "windows-arm64", rustTarget: "aarch64-pc-windows-msvc" }
 ];
 
 await rm(stagingDirectory, { force: true, recursive: true });
@@ -43,7 +49,7 @@ await mkdir(installRoot, { mode: 0o700, recursive: true });
 try {
     runPnpm(["build"]);
     runPnpm(["--filter", "@portable-devshell/cli", "--prod", "deploy", stagingDirectory]);
-    await chmod(resolve(stagingDirectory, "dist", "cli", "CliMain.js"), 0o755);
+    if (process.platform !== "win32") await chmod(resolve(stagingDirectory, "dist", "cli", "CliMain.js"), 0o755);
 
     const installedWorkers = {};
     for (const target of targets) {
@@ -66,9 +72,7 @@ try {
 
     try {
         await rename(stagingDirectory, versionDirectory);
-        await replaceSymlink(currentLink, `versions/${version}`);
-        await mkdir(binDirectory, { recursive: true });
-        await replaceSymlink(commandLink, resolve(currentLink, "dist", "cli", "CliMain.js"));
+        await activateApplication(versionDirectory);
     } catch (error) {
         await rm(versionDirectory, { force: true, recursive: true });
         if (await pathExists(backupDirectory)) {
@@ -83,7 +87,7 @@ try {
             `已安装 portable-devshell ${version}。`,
             `命令：${commandLink}`,
             `Worker：${targets.map((target) => target.key).join(", ")}`,
-            process.env.PATH?.split(":").includes(binDirectory)
+            process.env.PATH?.split(delimiter).includes(binDirectory)
                 ? ""
                 : `提示：${binDirectory} 不在 PATH 中，请将它加入 shell 配置。`
         ]
@@ -123,7 +127,7 @@ async function installWorkerRemoteFirst(target) {
 }
 
 async function installReleaseWorker(target) {
-    const assetName = `devshell-worker-${target.key}`;
+    const assetName = workerAssetName(target);
     const releaseDirectory = `${releaseBaseUrl}/${releaseTag}`;
     const expectedSha = await fetchSha256(`${releaseDirectory}/${assetName}.sha256`);
     const payload = Buffer.from(await fetchBytes(`${releaseDirectory}/${assetName}`));
@@ -152,7 +156,7 @@ async function installSourceWorker(target) {
             ...(target.key.startsWith("linux-") && hasCommand("cargo-zigbuild") ? ["--zigbuild"] : [])
         ]);
 
-        const assetName = `devshell-worker-${target.key}`;
+        const assetName = workerAssetName(target);
         const payload = await readFile(resolve(outputDirectory, assetName));
         return await installWorkerBytes(target, payload, undefined, "local-build");
     } finally {
@@ -162,28 +166,31 @@ async function installSourceWorker(target) {
 
 async function installWorkerBytes(target, payload, expectedSha, source) {
     const sha256 = expectedSha ?? createHash("sha256").update(payload).digest("hex");
-    const assetName = `devshell-worker-${target.key}`;
+    const assetName = workerAssetName(target);
+    const binaryName = workerBinaryName(target);
     const installDirectory = resolve(devshellHome, "workers", target.key, sha256);
-    const binaryPath = resolve(installDirectory, "devshell-worker");
-    const shaPath = resolve(installDirectory, "devshell-worker.sha256");
+    const binaryPath = resolve(installDirectory, binaryName);
+    const shaPath = resolve(installDirectory, `${binaryName}.sha256`);
 
     await mkdir(installDirectory, { mode: 0o700, recursive: true });
     if ((await readInstalledSha(binaryPath, shaPath)) !== sha256) {
         const temporaryBinary = `${binaryPath}.tmp-${process.pid}`;
         const temporarySha = `${shaPath}.tmp-${process.pid}`;
-        await writeFile(temporaryBinary, payload, { mode: 0o755 });
-        await chmod(temporaryBinary, 0o755);
-        await writeFile(temporarySha, `${sha256}\n`, { mode: 0o600 });
+        await writeFile(temporaryBinary, payload, target.key.startsWith("windows-") ? {} : { mode: 0o755 });
+        if (!target.key.startsWith("windows-")) await chmod(temporaryBinary, 0o755);
+        await writeFile(temporarySha, `${sha256}\n`, target.key.startsWith("windows-") ? {} : { mode: 0o600 });
         await rename(temporaryBinary, binaryPath);
         await rename(temporarySha, shaPath);
     }
 
     const workerBinDirectory = resolve(devshellHome, "bin");
     await mkdir(workerBinDirectory, { mode: 0o700, recursive: true });
-    await replaceSymlink(
-        resolve(workerBinDirectory, assetName),
-        `../workers/${target.key}/${sha256}/devshell-worker`
-    );
+    const activePath = resolve(workerBinDirectory, assetName);
+    if (process.platform === "win32") {
+        await copyFile(binaryPath, activePath);
+    } else {
+        await replaceSymlink(activePath, `../workers/${target.key}/${sha256}/${binaryName}`);
+    }
 
     return { path: binaryPath, sha256, source };
 }
@@ -191,7 +198,26 @@ async function installWorkerBytes(target, payload, expectedSha, source) {
 async function activateHostWorker() {
     const hostTarget = resolveHostTarget();
     const workerBinDirectory = resolve(devshellHome, "bin");
-    await replaceSymlink(resolve(workerBinDirectory, "devshell-worker"), `devshell-worker-${hostTarget}`);
+    if (process.platform === "win32") {
+        await copyFile(
+            resolve(workerBinDirectory, workerAssetName({ key: hostTarget })),
+            resolve(workerBinDirectory, "devshell-worker.exe")
+        );
+    } else {
+        await replaceSymlink(resolve(workerBinDirectory, "devshell-worker"), `devshell-worker-${hostTarget}`);
+    }
+}
+
+async function activateApplication(versionDirectory) {
+    await mkdir(binDirectory, { recursive: true });
+    if (process.platform === "win32") {
+        await replaceSymlink(currentLink, versionDirectory, "junction");
+        const cliPath = resolve(currentLink, "dist", "cli", "CliMain.js");
+        await writeFile(commandLink, `@echo off\r\nnode "${cliPath}" %*\r\n`, "utf8");
+    } else {
+        await replaceSymlink(currentLink, `versions/${version}`);
+        await replaceSymlink(commandLink, resolve(currentLink, "dist", "cli", "CliMain.js"));
+    }
 }
 
 async function stopInstalledControl() {
@@ -257,15 +283,25 @@ async function readInstalledSha(binaryPath, shaPath) {
     }
 }
 
-async function replaceSymlink(path, target) {
+function workerBinaryName(target) {
+    return target.key.startsWith("windows-") ? "devshell-worker.exe" : "devshell-worker";
+}
+
+function workerAssetName(target) {
+    return target.key.startsWith("windows-")
+        ? `devshell-worker-${target.key}.exe`
+        : `devshell-worker-${target.key}`;
+}
+
+async function replaceSymlink(path, target, type = undefined) {
     const temporary = `${path}.tmp-${process.pid}`;
-    await rm(temporary, { force: true });
-    await symlink(target, temporary);
+    await rm(temporary, { force: true, recursive: type === "junction" });
+    await symlink(target, temporary, type);
     await rename(temporary, path).catch(async (error) => {
         if (error?.code !== "EEXIST" && error?.code !== "ENOTEMPTY") {
             throw error;
         }
-        await rm(path, { force: true });
+        await rm(path, { force: true, recursive: type === "junction" });
         await rename(temporary, path);
     });
 }
@@ -292,7 +328,14 @@ function resolveReleaseBaseUrl() {
 }
 
 function resolveHostTarget() {
-    const os = process.platform === "linux" ? "linux" : process.platform === "darwin" ? "darwin" : undefined;
+    const os =
+        process.platform === "linux"
+            ? "linux"
+            : process.platform === "darwin"
+              ? "darwin"
+              : process.platform === "win32"
+                ? "windows"
+                : undefined;
     const arch = process.arch === "x64" ? "x64" : process.arch === "arm64" ? "arm64" : undefined;
     if (!os || !arch) {
         throw new Error(`Unsupported installation host: ${process.platform}-${process.arch}.`);

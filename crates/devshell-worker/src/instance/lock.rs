@@ -1,13 +1,18 @@
-use std::fs::OpenOptions;
-use std::os::fd::AsRawFd;
 use std::path::Path;
 
-use nix::libc;
+#[cfg(unix)]
+#[path = "lock_unix.rs"]
+mod platform;
+#[cfg(windows)]
+#[path = "lock_windows.rs"]
+mod platform;
+
+use platform::PlatformInstanceLock;
 
 use crate::storage::InstancePaths;
 
 pub struct InstanceLock {
-    file: std::fs::File,
+    _platform: PlatformInstanceLock,
 }
 
 impl InstanceLock {
@@ -26,32 +31,10 @@ impl InstanceLock {
     }
 
     fn acquire_path(path: &Path, nonblocking: bool) -> Result<Option<Self>, String> {
-        let file = OpenOptions::new()
-            .create(true)
-            .read(true)
-            .write(true)
-            .open(path)
-            .map_err(|error| format!("failed to open {}: {error}", path.display()))?;
-        let operation = libc::LOCK_EX | if nonblocking { libc::LOCK_NB } else { 0 };
-        let result = unsafe { libc::flock(file.as_raw_fd(), operation) };
-
-        if result == 0 {
-            return Ok(Some(Self { file }));
-        }
-
-        let error = std::io::Error::last_os_error();
-        if nonblocking && error.kind() == std::io::ErrorKind::WouldBlock {
-            return Ok(None);
-        }
-
-        Err(format!("failed to lock {}: {error}", path.display()))
-    }
-}
-
-impl Drop for InstanceLock {
-    fn drop(&mut self) {
-        unsafe {
-            libc::flock(self.file.as_raw_fd(), libc::LOCK_UN);
-        }
+        Ok(
+            PlatformInstanceLock::acquire(path, nonblocking)?.map(|platform| Self {
+                _platform: platform,
+            }),
+        )
     }
 }

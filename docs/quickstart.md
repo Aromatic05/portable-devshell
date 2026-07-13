@@ -16,7 +16,7 @@ devshell status
 ~/.devshell/control/instances/
 ```
 
-Linux 优先使用 `$XDG_RUNTIME_DIR/portable-devshell/control.sock`。当 `XDG_RUNTIME_DIR` 不存在时，会自动使用当前用户专属的临时目录；macOS 不需要额外设置环境变量。
+Linux 优先使用 `$XDG_RUNTIME_DIR/portable-devshell/control.sock`。当 `XDG_RUNTIME_DIR` 不存在时，会自动使用当前用户专属的临时目录；macOS 不需要额外设置环境变量。Windows 使用 `\\.\pipe\portable-devshell-control-<user>`。
 
 ## 2. 创建第一个 instance
 

@@ -7,9 +7,11 @@ Linux x86-64
 Linux arm64
 macOS x86-64
 macOS arm64
+Windows x86-64
+Windows arm64
 ```
 
-主程序需要 Node.js 24 或更高版本。当前不提供 Windows 发行包。
+主程序需要 Node.js 24 或更高版本。Windows 提供完整 client 和基础能力 worker；Windows worker 使用 PowerShell，不提供 tmux 或本地 Attach Shell。
 
 ## 配置路径
 
@@ -31,15 +33,21 @@ control 日志             ~/.devshell/control/logs/control.log
 $XDG_RUNTIME_DIR/portable-devshell/control.sock
 ```
 
+Windows control 使用当前用户专属 Named Pipe：
+
+```text
+\\.\pipe\portable-devshell-control-<user>
+```
+
 当 `XDG_RUNTIME_DIR` 未设置时，control 与客户端使用同一套用户专属临时目录解析规则：
 
 ```text
 <TMPDIR>/portable-devshell-<uid>/control.sock
 ```
 
-因此 macOS 不需要手动设置 `XDG_RUNTIME_DIR`。
+因此 macOS 不需要手动设置 `XDG_RUNTIME_DIR`。Windows 不使用 Unix socket；每个 worker instance 使用 `\\.\pipe\devshell-worker-<user>-<instance>`。
 
-worker 和 tmux 仍维护各 instance 的独立运行目录与 socket。
+worker 和 tmux 在 Unix 上仍维护各 instance 的独立运行目录与 socket；Windows worker 不注册 tmux 工具。
 
 ## 全局配置
 
@@ -193,7 +201,7 @@ PORTABLE_DEVSHELL_RELEASE_REPOSITORY
 PORTABLE_DEVSHELL_RELEASE_BASE_URL
 ```
 
-安装时会准备全部四个 worker target。`~/.devshell/bin/devshell-worker` 只用于 control 主机上的默认执行；远程安装和 provider 选择使用带 target 后缀的 worker，不应把这个默认软链理解为全部受管环境的平台。
+安装时会准备全部六个 worker target。Unix 的 `~/.devshell/bin/devshell-worker` 和 Windows 的 `%USERPROFILE%\.devshell\bin\devshell-worker.exe` 只用于 control 主机上的默认执行；远程安装和 provider 选择使用带 target 后缀的 worker，不应把默认入口理解为全部受管环境的平台。
 
 ## 进一步阅读
 

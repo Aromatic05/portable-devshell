@@ -29,6 +29,30 @@ test("LocalWorkerInstaller installs into target-specific directory and refreshes
     assert.equal(await readlink(executable), `../workers/${target.key}/${sha256}/devshell-worker`);
 });
 
+test("LocalWorkerInstaller installs a Windows executable without requiring symlink privileges", async (t) => {
+    const homeDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-home-"));
+    const workerDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-worker-"));
+    t.after(async () => {
+        await rm(homeDirectory, { recursive: true, force: true });
+        await rm(workerDirectory, { recursive: true, force: true });
+    });
+
+    const binaryPath = join(workerDirectory, "devshell-worker.exe");
+    const contents = Buffer.from("windows-worker", "utf8");
+    const sha256 = createHash("sha256").update(contents).digest("hex");
+    await writeFile(binaryPath, contents);
+
+    const target = getWorkerTargetByKey("windows-arm64");
+    const installer = new LocalWorkerInstaller();
+    const executable = await installer.ensure(homeDirectory, createAsset(binaryPath, sha256, target), target);
+
+    assert.equal(executable, join(homeDirectory, ".devshell", "workers", target.key, sha256, "devshell-worker.exe"));
+    assert.equal(
+        await readFile(join(homeDirectory, ".devshell", "workers", target.key, sha256, "devshell-worker.exe"), "utf8"),
+        contents.toString("utf8")
+    );
+});
+
 test("LocalWorkerInstaller rejects asset target mismatch", async (t) => {
     const homeDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-home-"));
     const workerDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-worker-"));

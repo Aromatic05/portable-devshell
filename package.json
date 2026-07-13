@@ -14,12 +14,15 @@
         "build:worker:debug:linux-arm64": "node ./scripts/build-worker.mjs --target linux-arm64",
         "build:worker:debug:darwin-x64": "node ./scripts/build-worker.mjs --target darwin-x64",
         "build:worker:debug:darwin-arm64": "node ./scripts/build-worker.mjs --target darwin-arm64",
+        "build:worker:debug:windows-x64": "node ./scripts/build-worker.mjs --target windows-x64",
+        "build:worker:debug:windows-arm64": "node ./scripts/build-worker.mjs --target windows-arm64",
         "lint": "eslint .",
         "lint:fix": "eslint . --fix",
         "test": "pnpm -r --filter './packages/*' test",
         "typecheck": "pnpm -r --filter './packages/*' typecheck",
         "install:local": "node ./scripts/install-local.mjs",
-        "package:app": "node ./scripts/package-app.mjs"
+        "package:app": "node ./scripts/package-app.mjs",
+        "smoke:package": "node ./scripts/smoke-package.mjs"
     },
     "devDependencies": {
         "@types/react": "^18.3.11",

@@ -1,15 +1,21 @@
 import { createHash } from "node:crypto";
 import { accessSync, constants, readFileSync } from "node:fs";
-import { chmod, mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { createError, errorCodes } from "@portable-devshell/shared";
+import { ensureWorkerExecutablePermissions } from "./platform/WorkerExecutablePermissions.js";
 
 import type { WorkerTarget } from "./target/WorkerTarget.js";
 import { supportedWorkerTargetKeys } from "./target/WorkerTarget.js";
 import { probeLocalWorkerTarget } from "./target/WorkerTargetProbe.js";
+import {
+    workerAssetFileName,
+    workerBinaryFileName,
+    workerInstalledAliasFileName
+} from "./target/WorkerTargetBinary.js";
 
 export interface WorkerAsset {
     target: WorkerTarget;
@@ -91,20 +97,20 @@ export class WorkerAssetResolver {
             let probeDir = this.#moduleDir;
             for (let depth = 0; depth < 6; depth += 1) {
                 yield {
-                    binaryPath: resolve(probeDir, "target", target.rustTarget, "debug", "devshell-worker"),
+                    binaryPath: resolve(probeDir, "target", target.rustTarget, "debug", workerBinaryFileName(target)),
                     source: "dev"
                 };
                 yield {
-                    binaryPath: resolve(probeDir, "target", target.rustTarget, "release", "devshell-worker"),
+                    binaryPath: resolve(probeDir, "target", target.rustTarget, "release", workerBinaryFileName(target)),
                     source: "dev"
                 };
                 if (target.os !== "linux") {
                     yield {
-                        binaryPath: resolve(probeDir, "target/debug/devshell-worker"),
+                        binaryPath: resolve(probeDir, "target", "debug", workerBinaryFileName(target)),
                         source: "dev"
                     };
                     yield {
-                        binaryPath: resolve(probeDir, "target/release/devshell-worker"),
+                        binaryPath: resolve(probeDir, "target", "release", workerBinaryFileName(target)),
                         source: "dev"
                     };
                 }
@@ -114,7 +120,7 @@ export class WorkerAssetResolver {
 
         const devshellHome = process.env.PORTABLE_DEVSHELL_HOME ?? resolve(homedir(), ".devshell");
         yield {
-            binaryPath: resolve(devshellHome, "bin", `devshell-worker-${target.key}`),
+            binaryPath: resolve(devshellHome, "bin", workerInstalledAliasFileName(target)),
             source: "installed"
         };
     }
@@ -127,7 +133,7 @@ export class WorkerAssetResolver {
             return undefined;
         }
 
-        const assetBaseName = `devshell-worker-${target.key}`;
+        const assetBaseName = workerAssetFileName(target);
         const releaseDirectoryUrl = `${releaseBaseUrl}/${releaseTag}`;
         const shaUrl = `${releaseDirectoryUrl}/${assetBaseName}.sha256`;
         const binaryUrl = `${releaseDirectoryUrl}/${assetBaseName}`;
@@ -135,8 +141,8 @@ export class WorkerAssetResolver {
 
         const expectedSha = await this.#fetchReleaseSha256(target, shaUrl, searchedPaths);
         const cacheDirectory = resolve(this.#resolveCacheDirectory(), releaseTag, target.key, expectedSha);
-        const binaryPath = resolve(cacheDirectory, "devshell-worker");
-        const shaPath = resolve(cacheDirectory, "devshell-worker.sha256");
+        const binaryPath = resolve(cacheDirectory, workerBinaryFileName(target));
+        const shaPath = resolve(cacheDirectory, `${workerBinaryFileName(target)}.sha256`);
         const cachedSha = await readInstalledSha(binaryPath, shaPath);
 
         if (cachedSha === expectedSha) {
@@ -171,7 +177,7 @@ export class WorkerAssetResolver {
         const tmpBinaryPath = `${binaryPath}.tmp`;
         const tmpShaPath = `${shaPath}.tmp`;
         await writeFile(tmpBinaryPath, payload, { mode: 0o755 });
-        await chmod(tmpBinaryPath, 0o755);
+        await ensureWorkerExecutablePermissions(tmpBinaryPath, target);
         await writeFile(tmpShaPath, `${expectedSha}\n`, { mode: 0o600 });
         await rename(tmpBinaryPath, binaryPath);
         await rename(tmpShaPath, shaPath);

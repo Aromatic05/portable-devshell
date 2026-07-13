@@ -1,6 +1,12 @@
-export type WorkerTargetOs = "linux" | "darwin";
+export type WorkerTargetOs = "linux" | "darwin" | "windows";
 export type WorkerTargetArch = "x64" | "arm64";
-export type WorkerTargetKey = "linux-x64" | "linux-arm64" | "darwin-x64" | "darwin-arm64";
+export type WorkerTargetKey =
+    | "linux-x64"
+    | "linux-arm64"
+    | "darwin-x64"
+    | "darwin-arm64"
+    | "windows-x64"
+    | "windows-arm64";
 
 export interface WorkerTarget {
     os: WorkerTargetOs;
@@ -33,6 +39,18 @@ export const supportedWorkerTargets = Object.freeze<readonly WorkerTarget[]>([
         arch: "arm64",
         key: "darwin-arm64",
         rustTarget: "aarch64-apple-darwin"
+    },
+    {
+        os: "windows",
+        arch: "x64",
+        key: "windows-x64",
+        rustTarget: "x86_64-pc-windows-msvc"
+    },
+    {
+        os: "windows",
+        arch: "arm64",
+        key: "windows-arm64",
+        rustTarget: "aarch64-pc-windows-msvc"
     }
 ]);
 

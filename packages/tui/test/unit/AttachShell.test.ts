@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import test from "node:test";
 
-import { AttachShellCommandResolver, AttachShellResolutionError, AttachShellRunner } from "../../dist/index.js";
+import { AttachShellCommandResolver, AttachShellResolutionError, AttachShellRunner, editableProviderChoices, isAttachShellSupported } from "../../dist/index.js";
 
 test("Attach Shell resolves a local login shell from control-provided instance data", () => {
     const command = new AttachShellCommandResolver().resolve({
@@ -16,6 +16,19 @@ test("Attach Shell resolves a local login shell from control-provided instance d
         cwd: "/workspace/alpha",
         fallbackCommands: [{ args: ["-l"], command: "bash" }, { args: ["-l"], command: "sh" }]
     });
+});
+
+test("Windows supports Attach Shell only for SSH instances", () => {
+    assert.equal(isAttachShellSupported("local", "win32"), false);
+    assert.equal(isAttachShellSupported("docker", "win32"), false);
+    assert.equal(isAttachShellSupported("podman", "win32"), false);
+    assert.equal(isAttachShellSupported("reverse", "win32"), false);
+    assert.equal(isAttachShellSupported("ssh", "win32"), true);
+});
+
+test("Windows config choices do not advertise Docker or Podman providers", () => {
+    assert.deepEqual(editableProviderChoices("win32"), ["local", "ssh"]);
+    assert.deepEqual(editableProviderChoices("linux"), ["local", "ssh", "docker", "podman"]);
 });
 
 test("Attach Shell keeps the configured ssh command intact", () => {

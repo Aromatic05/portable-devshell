@@ -17,6 +17,7 @@ import { McpEndpointConfigMapper } from "../mcp/McpEndpointConfigMapper.js";
 import { ControlConfigStore } from "./config/ControlConfigStore.js";
 import type { ControlConfig, ControlInstanceConfig, ControlProviderKind } from "./config/ControlConfigTomlCodec.js";
 import { ControlConfigValidator } from "./config/ControlConfigValidator.js";
+import { instanceCreateProviders } from "./platform/ControlInstanceCreatePlatform.js";
 
 const containerPresets = [
     { image: "archlinux:latest", preset: "arch" },
@@ -48,6 +49,7 @@ export interface ControlInstanceCreateServiceOptions {
     homeDirectory?: string;
     instanceConfigMapper?: InstanceConfigMapper;
     instanceRegistry: InstanceRegistry;
+    platform?: NodeJS.Platform;
     mcpEndpointConfigMapper?: McpEndpointConfigMapper;
     setConfig: (config: ControlConfig) => void;
     validator?: ControlConfigValidator;
@@ -62,6 +64,7 @@ export class ControlInstanceCreateService {
     readonly #instanceConfigMapper: InstanceConfigMapper;
     readonly #instanceRegistry: InstanceRegistry;
     readonly #mcpEndpointConfigMapper: McpEndpointConfigMapper;
+    readonly #platform: NodeJS.Platform;
     readonly #setConfig: (config: ControlConfig) => void;
     readonly #validator: ControlConfigValidator;
 
@@ -74,12 +77,16 @@ export class ControlInstanceCreateService {
         this.#instanceConfigMapper = options.instanceConfigMapper ?? new InstanceConfigMapper();
         this.#instanceRegistry = options.instanceRegistry;
         this.#mcpEndpointConfigMapper = options.mcpEndpointConfigMapper ?? new McpEndpointConfigMapper();
+        this.#platform = options.platform ?? process.platform;
         this.#setConfig = options.setConfig;
         this.#validator = options.validator ?? new ControlConfigValidator();
     }
 
     getSchema(): InstanceCreateSchema {
-        return instanceCreateSchema;
+        return {
+            ...instanceCreateSchema,
+            providers: instanceCreateProviders(this.#platform)
+        };
     }
 
     validateDraft(params: JsonValue | undefined): InstanceCreateSummary {

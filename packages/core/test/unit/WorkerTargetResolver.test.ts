@@ -19,6 +19,8 @@ test("WorkerTargetMapper maps supported uname values to canonical keys", () => {
     assert.equal(mapUnameWorkerTarget({ provider: "ssh", operation: "probeTarget", rawOs: "Linux", rawArch: "aarch64" }).key, "linux-arm64");
     assert.equal(mapUnameWorkerTarget({ provider: "ssh", operation: "probeTarget", rawOs: "Darwin", rawArch: "arm64" }).key, "darwin-arm64");
     assert.equal(mapUnameWorkerTarget({ provider: "ssh", operation: "probeTarget", rawOs: "Darwin", rawArch: "x86_64" }).key, "darwin-x64");
+    assert.equal(probeLocalWorkerTarget("local", "resolveExecutable", "win32", "x64").key, "windows-x64");
+    assert.equal(probeLocalWorkerTarget("local", "resolveExecutable", "win32", "arm64").key, "windows-arm64");
 });
 
 test("WorkerTargetMapper rejects unsupported uname values with structured error", () => {
@@ -31,7 +33,9 @@ test("WorkerTargetMapper rejects unsupported uname values with structured error"
                 "linux-x64",
                 "linux-arm64",
                 "darwin-x64",
-                "darwin-arm64"
+                "darwin-arm64",
+                "windows-x64",
+                "windows-arm64"
             ]);
             return true;
         }

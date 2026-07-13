@@ -10,6 +10,7 @@ export * from "./control/config/ControlConfigTomlCodec.js";
 export * from "./control/config/ControlConfigValidator.js";
 export * from "./control/path/ControlPathHome.js";
 export * from "./control/path/ControlPathRuntime.js";
+export * from "./control/platform/ControlIpcEndpoint.js";
 export * from "./instance/InstanceConfigMapper.js";
 export * from "./instance/InstanceDescriptor.js";
 export * from "./instance/registry/InstanceRegistry.js";

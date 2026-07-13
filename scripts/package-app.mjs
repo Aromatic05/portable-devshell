@@ -29,6 +29,7 @@ const assetPath = resolve(outputDirectory, "portable-devshell-app.tar.gz");
 try {
     await mkdir(outputDirectory, { recursive: true });
     runPnpm([
+        "--config.node-linker=hoisted",
         "--filter",
         "@portable-devshell/cli",
         "--prod",
@@ -42,7 +43,7 @@ try {
         "utf8",
     );
 
-    run("tar", ["-czf", assetPath, "-C", appDirectory, "."]);
+    run("tar", ["--dereference", "-czf", assetPath, "-C", appDirectory, "."]);
     const sha256 = createHash("sha256")
         .update(await readFile(assetPath))
         .digest("hex");

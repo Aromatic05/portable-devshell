@@ -1,12 +1,12 @@
 use std::fs::{self, OpenOptions};
 use std::io::Write;
-use std::os::unix::fs::OpenOptionsExt;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 
 use crate::instance::InstanceName;
 use crate::storage::InstancePaths;
+use crate::storage::permissions::ensure_file_mode;
 use crate::tools::file::types::FileEditMode;
 
 const FILE_EDIT_MODE_ENV: &str = "DEVSHELL_WORKER_INTERNAL_FILE_EDIT_MODE";
@@ -67,9 +67,9 @@ pub fn write_config(paths: &InstancePaths, config: &WorkerConfig) -> Result<(), 
         .create(true)
         .truncate(true)
         .write(true)
-        .mode(0o600)
         .open(&paths.config_file)
         .map_err(|error| format!("failed to open {}: {error}", paths.config_file.display()))?;
+    ensure_file_mode(&paths.config_file, 0o600)?;
     file.write_all(body.as_bytes())
         .map_err(|error| format!("failed to write {}: {error}", paths.config_file.display()))?;
     Ok(())
