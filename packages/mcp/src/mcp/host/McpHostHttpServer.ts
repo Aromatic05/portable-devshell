@@ -102,7 +102,7 @@ export class McpHostHttpServer {
     }
 
     registerRawRoute(
-        method: "get" | "post",
+        method: "get" | "head" | "post",
         path: string,
         handler: (request: IncomingMessage, response: ServerResponse) => void | Promise<void>
     ): void {

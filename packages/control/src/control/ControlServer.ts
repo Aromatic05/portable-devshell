@@ -1,6 +1,7 @@
 import { createError, errorCodes } from "@portable-devshell/shared";
 import type { McpHost } from "@portable-devshell/mcp";
 
+import { ArtifactHttpRoute, artifactShareRoute } from "../artifact/ArtifactHttpRoute.js";
 import { ArtifactService } from "../artifact/ArtifactService.js";
 import { ControlInstanceCreateService } from "./ControlInstanceCreateService.js";
 import { ControlConfigEditorService } from "./ControlConfigEditorService.js";
@@ -92,6 +93,11 @@ export class ControlServer {
             gateway: instanceGateway,
             storageDir: new ControlPathHome(this.#homeDirectory).oauthDir
         });
+        if (this.#mcpHost !== undefined) {
+            new ArtifactHttpRoute(this.#artifactService, {
+                publicBaseUrl: config.mcp.publicBaseUrl
+            }).install(this.#mcpHost.server);
+        }
         const reverseCredentialStore = new ReverseCredentialStore(this.#homeDirectory);
         let reverseControlService: ReverseControlService | undefined;
         if (config.instances.some((instance) => instance.provider === "reverse")) {
@@ -185,8 +191,7 @@ function artifactShareUrl(config: ControlConfig, token: string): string {
     }
     const localHost = normalizeArtifactHttpHost(config.mcp.listenHost);
     const base = new URL(config.mcp.publicBaseUrl ?? `http://${localHost}:${config.mcp.listenPort}`);
-    const prefix = base.pathname === "/" ? "" : base.pathname.replace(/\/+$/u, "");
-    base.pathname = `${prefix}/artifacts/share/${encodeURIComponent(token)}`;
+    base.pathname = `${artifactShareRoute(base.toString())}/${encodeURIComponent(token)}`;
     base.search = "";
     base.hash = "";
     return base.toString();

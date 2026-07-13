@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -270,4 +270,39 @@ test("artifact share persists its payload lease and revoke closes it", async (t)
     assert.equal(revoked.revoked, true);
     assert.deepEqual(source.closedPayloads, ["payload-1"]);
     assert.equal(service.listShares()[0]?.state, "revoked");
+});
+
+test("expired share is closed and unavailable after restart", async (t) => {
+    const storageDir = await mkdtemp(join(tmpdir(), "artifact-share-expired-"));
+    t.after(() => rm(storageDir, { force: true, recursive: true }));
+    const source = new MemoryArtifactEndpoint(Buffer.from("expired"));
+    const options = {
+        resolveEndpoint: resolver({ "source-a": source }),
+        shareUrl: (token: string) => `https://example.test/artifacts/share/${token}`,
+        storageDir
+    };
+    const service = new ArtifactService(options);
+    await service.initialize();
+    const share = await service.createShare({ path: "./expired.bin" }, "source-a");
+    await service.stop();
+
+    const recordPath = join(storageDir, "shares", `${share.shareId}.json`);
+    const record = JSON.parse(await readFile(recordPath, "utf8")) as {
+        result: { expiresAtMs: number };
+    };
+    record.result.expiresAtMs = Date.now() - 1;
+    await writeFile(recordPath, `${JSON.stringify(record)}\n`, { mode: 0o600 });
+
+    const restarted = new ArtifactService(options);
+    await restarted.initialize();
+    assert.equal(restarted.listShares()[0]?.state, "expired");
+    assert.deepEqual(source.closedPayloads, ["payload-1"]);
+    await assert.rejects(
+        restarted.resolveShare(new URL(share.url).pathname.split("/").at(-1)!),
+        (error: unknown) =>
+            typeof error === "object" &&
+            error !== null &&
+            "code" in error &&
+            error.code === "artifact.shareExpired"
+    );
 });

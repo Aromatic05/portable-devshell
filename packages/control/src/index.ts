@@ -1,5 +1,6 @@
 export * from "./artifact/ArtifactService.js";
 export * from "./control/ControlLifecycleManager.js";
+export * from "./artifact/ArtifactHttpRoute.js";
 export * from "./control/ControlConfigEditorService.js";
 export * from "./control/config/ControlConfigDefaults.js";
 export * from "./control/config/ControlConfigStore.js";
