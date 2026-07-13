@@ -8,7 +8,7 @@
     },
     "scripts": {
         "dev": "node ./scripts/dev.mjs",
-        "build": "pnpm -r --filter './packages/*' build",
+        "build": "pnpm -r --filter \"./packages/*\" build",
         "build:worker:debug": "node ./scripts/build-worker.mjs",
         "build:worker:debug:linux-x64": "node ./scripts/build-worker.mjs --target linux-x64",
         "build:worker:debug:linux-arm64": "node ./scripts/build-worker.mjs --target linux-arm64",
@@ -18,8 +18,8 @@
         "build:worker:debug:windows-arm64": "node ./scripts/build-worker.mjs --target windows-arm64",
         "lint": "eslint .",
         "lint:fix": "eslint . --fix",
-        "test": "pnpm -r --filter './packages/*' test",
-        "typecheck": "pnpm -r --filter './packages/*' typecheck",
+        "test": "pnpm -r --filter \"./packages/*\" test",
+        "typecheck": "pnpm -r --filter \"./packages/*\" typecheck",
         "install:local": "node ./scripts/install-local.mjs",
         "package:app": "node ./scripts/package-app.mjs",
         "smoke:package": "node ./scripts/smoke-package.mjs"
