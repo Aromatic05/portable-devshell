@@ -102,6 +102,17 @@ export PATH="$tmp_bin:$PATH"
 export HOME="$tmp_home"
 export XDG_RUNTIME_DIR="$tmp_runtime"
 
+worker_env_name=$(node <<'EOF'
+const platform = { linux: "LINUX", darwin: "DARWIN" }[process.platform];
+const arch = { x64: "X64", arm64: "ARM64" }[process.arch];
+if (platform === undefined || arch === undefined) {
+  process.exit(1);
+}
+process.stdout.write(`PORTABLE_DEVSHELL_WORKER_${platform}_${arch}_PATH`);
+EOF
+)
+export "$worker_env_name=$worker_binary"
+
 devshell start >/dev/null
 devshell instance start aromatic-pc >/dev/null
 
