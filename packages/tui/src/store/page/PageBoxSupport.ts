@@ -36,6 +36,7 @@ export function makeBox(
         disabled?: boolean;
         expandedKey?: string;
         id: string;
+        severity?: BoxLine["tone"];
         status?: ExpandableBoxStatus;
         summaryLines: string[];
         title: string;
@@ -64,6 +65,7 @@ export function makeBox(
                 state.interaction.focusScope === "form" ||
                 state.interaction.focusScope === "wizard"),
         id: input.id,
+        severity: input.severity,
         selectedDetailLineId: expandedLines.some((line) => line.id === selectedDetailLineId) ? selectedDetailLineId : expandedLines[0]?.id,
         status: input.status ?? "normal",
         title: input.title

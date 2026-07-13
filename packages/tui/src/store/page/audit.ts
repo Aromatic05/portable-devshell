@@ -50,6 +50,7 @@ function approvalBox(state: TuiAppState, instanceName: string, approval: Approva
             { id: `approval.open:${approval.approvalId}`, text: "[ Review ]", tone: "accent" }
         ],
         id: `approval-${approval.approvalId}`,
+        severity: approval.riskLevel === "high" ? "danger" : approval.riskLevel === "medium" ? "warning" : "accent",
         status: "pending",
         summaryLines: [compactSummary(["risk", approval.riskLevel], ["tool", approval.toolName], ["source", approval.source])],
         title: `Pending Approval ${index + 1} · ${approval.toolName}`

@@ -34,7 +34,7 @@ export function buildLogsPageBoxes(state: TuiAppState, instanceName: string): Bo
                 buttonLine("clear-buffer", "Clear Buffer", logs.length === 0)
             ],
             id: "logs-controls",
-            status: following ? "running" : "warning",
+            status: stderr > 0 ? "warning" : following ? "running" : "warning",
             summaryLines: [compactSummary(["follow", following ? "on" : "paused"], ["visible", String(filtered.length)], ["new", String(unseen)])],
             title: "Log Controls & Statistics"
         }),
@@ -47,7 +47,7 @@ export function buildLogsPageBoxes(state: TuiAppState, instanceName: string): Bo
                       tone: entry.stream === "stderr" ? "danger" as const : "muted" as const
                   })),
             id: "logs",
-            status: "normal",
+            status: stderr > 0 ? "warning" : "normal",
             summaryLines: [compactSummary(["entries", String(filtered.length)], ["stream", `stdout:${stdout}/stderr:${stderr}`])],
             title: query.length === 0 ? "Logs" : `Logs · filter: ${query}`
         })

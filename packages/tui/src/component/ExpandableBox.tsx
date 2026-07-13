@@ -21,6 +21,7 @@ export interface BoxModel {
     focused: boolean;
     id: string;
     expandedKey: string;
+    severity?: BoxLineTone;
     selectedDetailLineId?: string;
     status: ExpandableBoxStatus;
     title: string;
@@ -57,7 +58,7 @@ export function renderExpandableBoxLines(box: BoxModel, requestedInnerWidth: num
     const frame = box.focused
         ? { bottomLeft: "╰", bottomRight: "╯", horizontal: "─", topLeft: "╭", topRight: "╮" }
         : { bottomLeft: "└", bottomRight: "┘", horizontal: "─", topLeft: "┌", topRight: "┐" };
-    const borderColor = box.focused ? "cyan" : box.disabled ? "gray" : "white";
+    const borderColor = box.disabled ? "gray" : lineColor(box.severity) ?? statusColor(box.status);
     const titleLine = renderTopBorder(`${box.title} · ${box.status}`, innerWidth, frame);
     const bottomBorder = `${frame.bottomLeft}${frame.horizontal.repeat(innerWidth + 2)}${frame.bottomRight}`;
 
@@ -189,5 +190,23 @@ function lineColor(tone: BoxLineTone | undefined): string | undefined {
             return "red";
         default:
             return undefined;
+    }
+}
+
+function statusColor(status: ExpandableBoxStatus): string {
+    switch (status) {
+        case "ready":
+            return "green";
+        case "running":
+            return "cyan";
+        case "pending":
+        case "warning":
+            return "yellow";
+        case "failed":
+            return "red";
+        case "disabled":
+            return "gray";
+        case "normal":
+            return "white";
     }
 }
