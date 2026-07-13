@@ -459,6 +459,30 @@ test("config separates MCP tool access and requires restart when it changes", as
     assert.equal(actions.expandedLines.some((line) => line.text === "Apply mode          restart required"), true);
 });
 
+test("config exposes container and tool scheduler settings", async () => {
+    const harness = createHarness();
+
+    await harness.press("2");
+    harness.store.setFormDraft("config:alpha", {
+        container: { build: { context: "/workspace/alpha", dockerfile: "Dockerfile.dev" }, mode: "dockerfile", preset: "ubuntu" },
+        enabled: true,
+        mcp: { enabled: true, path: "/alpha/mcp", tools: { capabilities: ["read"], groups: ["file"] } },
+        name: "alpha",
+        provider: "docker",
+        security: { mode: "disabled" },
+        tools: { fileEdit: { mode: "patch" }, scheduler: { maxRunning: 2, queueDepth: 8, queueTimeoutMs: 3000 } },
+        workspace: "/workspace/alpha"
+    });
+
+    const boxes = selectMainScreenModel(harness.store.getState()).boxes;
+    const provider = boxes.find((box) => box.id === "provider")!;
+    const runtime = boxes.find((box) => box.id === "tool-runtime")!;
+    assert.equal(provider.expandedLines.some((line) => line.text.includes("Dockerfile.dev")), true);
+    assert.equal(provider.expandedLines.some((line) => line.text.includes("/workspace/alpha")), true);
+    assert.equal(runtime.expandedLines.some((line) => line.text.includes("2")), true);
+    assert.equal(runtime.expandedLines.some((line) => line.text.includes("3000")), true);
+});
+
 test("connector discard confirms and clears its per-instance MCP draft", async () => {
     const harness = createHarness();
 
