@@ -18,7 +18,9 @@
         "@portable-devshell/core": "workspace:*",
         "@portable-devshell/mcp": "workspace:*",
         "@portable-devshell/shared": "workspace:*",
+        "hash-wasm": "^4.12.0",
         "smol-toml": "1.7.0",
+        "tar-stream": "^3.2.0",
         "ws": "8.21.0"
     },
     "scripts": {
@@ -27,6 +29,7 @@
         "test": "tsc -b --force && node --import ../mcp/test/RegisterWorkspacePackages.mjs --test test/unit/*.test.ts test/integration/*.test.ts"
     },
     "devDependencies": {
+        "@types/tar-stream": "^3.1.4",
         "@types/ws": "8.18.1"
     }
 }

@@ -1,7 +1,10 @@
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { createError, errorCodes } from "@portable-devshell/shared";
 import type { McpHost } from "@portable-devshell/mcp";
 
 import { ArtifactHttpRoute, artifactShareRoute } from "../artifact/ArtifactHttpRoute.js";
+import { ArtifactHostBridge } from "../artifact/host/ArtifactHostBridge.js";
 import { ArtifactService } from "../artifact/ArtifactService.js";
 import { ControlInstanceCreateService } from "./ControlInstanceCreateService.js";
 import { ControlConfigEditorService } from "./ControlConfigEditorService.js";
@@ -32,6 +35,7 @@ export class ControlServer {
     readonly #instanceRegistryBuilder: InstanceRegistryBuilder;
     readonly #mcpWiringService: McpWiringService;
     readonly #socketFile: ControlSocketFile;
+    #artifactHostBridge?: ArtifactHostBridge;
     #artifactService?: ArtifactService;
     #config?: ControlConfig;
     #instanceRegistry = new InstanceRegistry([]);
@@ -82,9 +86,16 @@ export class ControlServer {
             instanceRegistry: this.#instanceRegistry
         });
         instanceGatewayHolder.value = instanceGateway;
-        const controlPaths = new ControlPathHome(this.#homeDirectory);
+        const homeDirectory = this.#homeDirectory ?? homedir();
+        const controlPaths = new ControlPathHome(homeDirectory);
+        this.#artifactHostBridge = new ArtifactHostBridge({
+            homeDirectory,
+            storageDir: join(controlPaths.artifactsDir, "host")
+        });
+        await this.#artifactHostBridge.initialize();
         this.#artifactService = new ArtifactService({
-            resolveEndpoint: (name) => this.#instanceRegistry.get(name)?.worker,
+            resolveEndpoint: (name, authorityInstance) =>
+                this.#resolveArtifactEndpoint(name, authorityInstance),
             shareUrl: (token) => artifactShareUrl(this.#requireConfig(), token),
             storageDir: controlPaths.artifactsDir
         });
@@ -162,10 +173,33 @@ export class ControlServer {
         await this.#rpcServer?.stop();
         this.#config = undefined;
         this.#artifactService = undefined;
+        this.#artifactHostBridge = undefined;
         this.#instanceRegistry = new InstanceRegistry([]);
         this.#rpcServer = undefined;
         this.#reverseGateway = undefined;
         this.#mcpHost = undefined;
+    }
+
+    #resolveArtifactEndpoint(name: string, authorityInstance?: string) {
+        if (name !== "host") {
+            return this.#instanceRegistry.get(name)?.worker;
+        }
+        if (authorityInstance === undefined || this.#artifactHostBridge === undefined) {
+            return undefined;
+        }
+        const authority = this.#instanceRegistry.get(authorityInstance);
+        if (authority === undefined) {
+            return undefined;
+        }
+        const snapshot = authority.worker.snapshot();
+        return this.#artifactHostBridge.endpointFor({
+            appendControlEvent: async (type, data) =>
+                await authority.worker.appendControlEvent(type, data),
+            authorityInstance,
+            provider: authority.provider,
+            securityMode: snapshot.effectiveSecurityMode ?? "disabled",
+            workspace: authority.workspace
+        });
     }
 
     #requireConfig(): ControlConfig {

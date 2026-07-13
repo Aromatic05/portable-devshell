@@ -23,7 +23,7 @@ interface ArtifactTransferExecutorOptions {
     isRunActive: (generation: number) => boolean;
     onTerminal: (record: ArtifactTransferRecord) => void;
     persistTransfer: (transfer: StoredArtifactTransfer) => Promise<void>;
-    resolveEndpoint: (instance: string) => ArtifactServiceEndpoint | undefined;
+    resolveEndpoint: (instance: string, authorityInstance?: string) => ArtifactServiceEndpoint | undefined;
     schedule: ArtifactServiceSchedule;
 }
 
@@ -68,8 +68,8 @@ export class ArtifactTransferExecutor {
     }
 
     async cleanupResources(transfer: StoredArtifactTransfer): Promise<void> {
-        const sourceEndpoint = this.#resolveEndpoint(transfer.record.source.instance);
-        const targetEndpoint = this.#resolveEndpoint(transfer.record.target.instance);
+        const sourceEndpoint = this.#resolveEndpoint(transfer.record.source.instance, transfer.defaultInstance);
+        const targetEndpoint = this.#resolveEndpoint(transfer.record.target.instance, transfer.defaultInstance);
         if (transfer.receiveId !== undefined && targetEndpoint !== undefined) {
             await targetEndpoint.abortArtifactReceive(transfer.receiveId).catch(() => undefined);
             transfer.receiveId = undefined;
@@ -91,8 +91,8 @@ export class ArtifactTransferExecutor {
         let targetEndpoint: ArtifactServiceEndpoint | undefined;
         try {
             this.#throwIfCancelled(transfer);
-            sourceEndpoint = this.#requireEndpoint(transfer.record.source.instance);
-            targetEndpoint = this.#requireEndpoint(transfer.record.target.instance);
+            sourceEndpoint = this.#requireEndpoint(transfer.record.source.instance, transfer.defaultInstance);
+            targetEndpoint = this.#requireEndpoint(transfer.record.target.instance, transfer.defaultInstance);
             const startedAt = new Date().toISOString();
             transfer.record.status = "preparing";
             transfer.record.startedAt = startedAt;
@@ -266,8 +266,8 @@ export class ArtifactTransferExecutor {
         }
     }
 
-    #requireEndpoint(instance: string): ArtifactServiceEndpoint {
-        const endpoint = this.#resolveEndpoint(instance);
+    #requireEndpoint(instance: string, authorityInstance: string): ArtifactServiceEndpoint {
+        const endpoint = this.#resolveEndpoint(instance, authorityInstance);
         if (endpoint !== undefined) {
             return endpoint;
         }

@@ -38,13 +38,14 @@ export interface ArtifactServiceEndpoint {
 
 export interface ArtifactServiceOptions {
     chunkBytes?: number;
-    resolveEndpoint: (instance: string) => ArtifactServiceEndpoint | undefined;
+    resolveEndpoint: (instance: string, authorityInstance?: string) => ArtifactServiceEndpoint | undefined;
     schedule?: ArtifactServiceSchedule;
     shareUrl: (token: string) => string;
     storageDir: string;
 }
 
 export interface StoredArtifactShare {
+    authorityInstance: string;
     payloadClosed: boolean;
     payloadId: string;
     result: ArtifactShareResult;

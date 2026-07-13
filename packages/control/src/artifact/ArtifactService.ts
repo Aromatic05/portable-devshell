@@ -48,7 +48,7 @@ export type {
 
 export class ArtifactService {
     readonly #recordStore: ArtifactRecordStore;
-    readonly #resolveEndpoint: (instance: string) => ArtifactServiceEndpoint | undefined;
+    readonly #resolveEndpoint: (instance: string, authorityInstance?: string) => ArtifactServiceEndpoint | undefined;
     readonly #shareUrl: (token: string) => string;
     readonly #shares = new Map<string, StoredArtifactShare>();
     readonly #shareIdsByToken = new Map<string, string>();
@@ -85,6 +85,7 @@ export class ArtifactService {
         this.#shareIdsByToken.clear();
         this.#transfers.clear();
         for (const share of await this.#recordStore.loadShares()) {
+            share.authorityInstance ??= share.sourceInstance;
             this.#shares.set(share.result.shareId, share);
             this.#shareIdsByToken.set(share.token, share.result.shareId);
         }
@@ -155,7 +156,7 @@ export class ArtifactService {
     async createShare(input: ArtifactShareInput, defaultInstance: string): Promise<ArtifactShareResult> {
         this.#assertInitialized();
         const sourceInstance = readSourceInstance(input.instance, defaultInstance);
-        const endpoint = this.#requireEndpoint(sourceInstance);
+        const endpoint = this.#requireEndpoint(sourceInstance, defaultInstance);
         const expiresInSeconds = input.expiresInSeconds ?? DEFAULT_ARTIFACT_SHARE_TTL_SECONDS;
         if (
             !Number.isInteger(expiresInSeconds) ||
@@ -185,6 +186,7 @@ export class ArtifactService {
             url: this.#shareUrl(token)
         };
         const stored: StoredArtifactShare = {
+            authorityInstance: defaultInstance,
             payloadClosed: false,
             payloadId: opened.payloadId,
             result,
@@ -226,7 +228,7 @@ export class ArtifactService {
             share.result.state = "revoked";
             await this.#recordStore.persistShare(share);
             await this.#closeSharePayload(share);
-            const endpoint = this.#resolveEndpoint(share.sourceInstance);
+            const endpoint = this.#resolveEndpoint(share.sourceInstance, share.authorityInstance);
             if (endpoint !== undefined) {
                 await this.#emitToEndpoint(endpoint, "artifact.shareRevoked", share.result);
             }
@@ -275,7 +277,11 @@ export class ArtifactService {
         maxBytes: number
     ): Promise<WorkerArtifactPayloadReadResult> {
         const access = await this.resolveShare(token);
-        const endpoint = this.#requireEndpoint(access.sourceInstance);
+        const share = this.#shares.get(access.share.shareId);
+        const endpoint = this.#requireEndpoint(
+            access.sourceInstance,
+            share?.authorityInstance ?? access.sourceInstance
+        );
         return await endpoint.readArtifactPayload({
             maxBytes,
             offsetBytes,
@@ -301,8 +307,8 @@ export class ArtifactService {
         this.#assertInitialized();
         validateTransferStart(input);
         const sourceInstance = readSourceInstance(input.instance, defaultInstance);
-        this.#requireEndpoint(sourceInstance);
-        this.#requireEndpoint(input.targetInstance);
+        this.#requireEndpoint(sourceInstance, defaultInstance);
+        this.#requireEndpoint(input.targetInstance, defaultInstance);
         const now = new Date().toISOString();
         const transferId = randomUUID();
         const sourceInput = readTransferPayloadSourceInput(input);
@@ -398,8 +404,14 @@ export class ArtifactService {
     }
 
     async #emitTransferEvent(transfer: StoredArtifactTransfer, type: ArtifactEventType): Promise<void> {
-        const sourceEndpoint = this.#resolveEndpoint(transfer.record.source.instance);
-        const targetEndpoint = this.#resolveEndpoint(transfer.record.target.instance);
+        const sourceEndpoint = this.#resolveEndpoint(
+            transfer.record.source.instance,
+            transfer.defaultInstance
+        );
+        const targetEndpoint = this.#resolveEndpoint(
+            transfer.record.target.instance,
+            transfer.defaultInstance
+        );
         const data = toJsonValue(transfer.record);
         if (sourceEndpoint !== undefined) {
             await this.#emitToEndpoint(sourceEndpoint, type, data);
@@ -423,7 +435,7 @@ export class ArtifactService {
             await this.#recordStore.persistShare(share);
         }
         await this.#closeSharePayload(share);
-        const endpoint = this.#resolveEndpoint(share.sourceInstance);
+        const endpoint = this.#resolveEndpoint(share.sourceInstance, share.authorityInstance);
         if (endpoint !== undefined) {
             await this.#emitToEndpoint(endpoint, "artifact.shareExpired", share.result);
         }
@@ -433,7 +445,7 @@ export class ArtifactService {
         if (share.payloadClosed) {
             return;
         }
-        const endpoint = this.#resolveEndpoint(share.sourceInstance);
+        const endpoint = this.#resolveEndpoint(share.sourceInstance, share.authorityInstance);
         if (endpoint === undefined) {
             return;
         }
@@ -446,8 +458,8 @@ export class ArtifactService {
         }
     }
 
-    #requireEndpoint(instance: string): ArtifactServiceEndpoint {
-        const endpoint = this.#resolveEndpoint(instance);
+    #requireEndpoint(instance: string, authorityInstance: string): ArtifactServiceEndpoint {
+        const endpoint = this.#resolveEndpoint(instance, authorityInstance);
         if (endpoint !== undefined) {
             return endpoint;
         }
