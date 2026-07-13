@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { isAbsolute, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -87,6 +87,7 @@ await writeFile(
     "utf8"
 );
 
+let currentStage = "initialization";
 let controlStarted = false;
 let instanceStarted = false;
 try {
@@ -127,6 +128,9 @@ try {
     runCli(["stop"]);
     controlStarted = false;
     process.stdout.write("client smoke passed\n");
+} catch (error) {
+    await reportFailure(error);
+    throw error;
 } finally {
     if (instanceStarted) {
         stage("cleanup instance");
@@ -159,7 +163,38 @@ function runCli(args, ignoreFailure = false) {
     };
 }
 
+async function reportFailure(error) {
+    const logs = [];
+    for (const [label, path] of [
+        ["control.log", resolve(devshellHome, "control", "logs", "control.log")],
+        ["worker.log", resolve(devshellHome, instance, "logs", "worker.log")],
+        ["core logs", resolve(devshellHome, instance, "control-worker", "logs.jsonl")]
+    ]) {
+        try {
+            logs.push(`${label}:\n${await readFile(path, "utf8")}`);
+        } catch {
+            logs.push(`${label} was unavailable`);
+        }
+    }
+    const rendered = [
+        `stage: ${currentStage}`,
+        error instanceof Error ? error.stack ?? error.message : String(error),
+        ...logs
+    ].join("\n\n");
+    process.stderr.write(
+        `::error title=Windows client smoke::${escapeWorkflowCommand(rendered)}\n`
+    );
+}
+
+function escapeWorkflowCommand(value) {
+    return value
+        .replaceAll("%", "%25")
+        .replaceAll("\r", "%0D")
+        .replaceAll("\n", "%0A");
+}
+
 function stage(message) {
+    currentStage = message;
     process.stdout.write(`[smoke-client] ${message}\n`);
 }
 
