@@ -1,71 +1,106 @@
 # portable-devshell
 
-`portable-devshell` 用来把一个本地、SSH 或容器里的工作区包装成可启动的 instance，并通过 MCP 暴露给 `Codex`、`Claude Code`、`ChatGPT Connector` 等客户端。
+`portable-devshell` 把本地、SSH、容器或反向连接设备中的工作区统一成可管理的 instance，并通过 MCP 暴露给 Codex、Claude Code、ChatGPT Connector 等客户端。
 
-## 有哪些功能
+它采用一个长期运行的 TypeScript control daemon 管理多个 instance；每个目标环境运行独立的 Rust worker daemon。CLI、TUI 和 MCP 共用同一套状态、审批、审计和工具调用链。
 
-- 用一个 control daemon 统一管理多个 instance。
-- 每个 instance 绑定一个 workspace，可单独启动、停止、查看状态和日志。
-- 通过 HTTP 暴露 MCP，每个 instance 对应一个 `/<instance>/mcp` endpoint。
-- 支持本地 `localhost` MCP，也支持带 OAuth 的公网 MCP。
-- 支持 `local`、`ssh`、`docker`、`podman` 四种 provider。
-- worker 原生提供 `bash`、`file`、`artifact` 和 `tmux` 工具组。
+## 主要能力
 
-## 如何快速开始
+- `local`、`ssh`、`docker`、`podman`、`reverse` 五种 provider。
+- 每个 instance 独立 workspace、生命周期、日志、审批策略和 MCP endpoint。
+- 克制的系统级工具面：`bash`、`file`、`tmux`、`artifact`、`todo`，以及可选实例管理。
+- WSS 反向连接，SSE + HTTPS POST 回退。
+- OAuth 2.1、动态客户端注册、持久化密钥、刷新与撤销。
+- 文件与目录分享、断点读取、跨实例异步传输和 BLAKE3 校验。
+- 全屏 TUI：实例、配置、Connector、OAuth、审计、日志和 Todo。
 
-从源码仓库运行时，先构建 TypeScript CLI 和 Rust worker：
+## 安装
 
-```bash
-pnpm install
-pnpm build
-cargo build -p devshell-worker --manifest-path ./Cargo.toml
-```
-
-然后启动 control daemon。第一次启动会自动创建默认配置：
+发布包支持 Linux 和 macOS 的 x86-64、arm64，主程序需要 Node.js 22 或更高版本。安装器会预置四个平台的 worker，因为 control 主机与受管目标环境可以不是同一平台。
 
 ```bash
-node packages/cli/dist/cli/CliMain.js start
+curl -fLO https://github.com/Aromatic05/portable-devshell/releases/latest/download/install-release.sh
+curl -fLO https://github.com/Aromatic05/portable-devshell/releases/latest/download/install-release.sh.sha256
+
+if command -v sha256sum >/dev/null 2>&1; then
+  sha256sum -c install-release.sh.sha256
+else
+  shasum -a 256 -c install-release.sh.sha256
+fi
+
+sh install-release.sh
 ```
 
-接着创建一个 instance，并按提示填写 `name`、`workspace`、`provider`、`MCP enabled` 等字段：
+从源码安装：
 
 ```bash
-node packages/cli/dist/cli/CliMain.js instance create
+corepack enable
+pnpm install --frozen-lockfile
+pnpm install:local
 ```
 
-最后启动 instance：
+完整说明见 [docs/installation.md](docs/installation.md)。
+
+## 第一次启动
 
 ```bash
-node packages/cli/dist/cli/CliMain.js instance start <instance>
+devshell start
+devshell instance create
+devshell instance start demo-local
+devshell instance status demo-local
 ```
 
-更完整的首次启动说明见 [docs/quickstart.md](docs/quickstart.md)。
+实例名必须包含连字符，例如 `demo-local`。第一次使用建议选择：
 
-## 如何启动 MCP
+```text
+provider: local
+workspace: 当前项目目录
+MCP enabled: yes
+```
 
-要让某个 instance 暴露 MCP，需要同时满足两件事：
+验证 worker 调用：
 
-- 全局 `mcp.enabled = true`
-- 该 instance 自己的 `[mcp] enabled = true`
+```bash
+devshell instance call demo-local bash_run '{"command":"pwd"}'
+```
 
-默认 endpoint 形如：
+打开 TUI：
+
+```bash
+devshell tui
+```
+
+完整上手流程见 [docs/quickstart.md](docs/quickstart.md)。
+
+## MCP
+
+全局 MCP 和实例 MCP 都启用后，默认 endpoint 为：
 
 ```text
 http://127.0.0.1:17890/<instance>/mcp
 ```
 
-详细配置、验证方法和示例见 [docs/mcp.md](docs/mcp.md)。
-
-## 如何启用 OAuth
-
-如果你要把 MCP 暴露到公网，建议直接使用 `mcp.auth.mode = "oauth2"`。`portable-devshell` 会同时提供 OAuth 保护资源元数据和授权服务器。
-
-最小示例：
+实例工具策略使用 group 和 capability：
 
 ```toml
 [mcp]
 enabled = true
-listenHost = "0.0.0.0"
+
+[mcp.tools]
+groups = ["file", "bash", "artifact", "tmux", "todo"]
+capabilities = ["read", "write", "execute"]
+```
+
+详细说明见 [docs/mcp.md](docs/mcp.md)。
+
+## 公网与 OAuth
+
+公网暴露必须启用认证。常用配置：
+
+```toml
+[mcp]
+enabled = true
+listenHost = "127.0.0.1"
 listenPort = 17890
 publicBaseUrl = "https://devshell.example.com"
 
@@ -77,44 +112,15 @@ resourceName = "portable-devshell"
 requiredScopes = ["mcp"]
 ```
 
-完整字段和调试入口见 [docs/oauth.md](docs/oauth.md)。
+通过 Nginx、FRP 或 Cloudflare Tunnel 暴露同一 HTTP host。详细说明见 [docs/oauth.md](docs/oauth.md) 和 [docs/chatgpt-connector-tunnels.md](docs/chatgpt-connector-tunnels.md)。
 
-## 如何接入 Codex
+## 文档
 
-把某个 instance 的 MCP endpoint 加到 Codex 的 MCP 配置里即可，例如：
-
-```toml
-[mcp_servers.portable_devshell]
-url = "http://127.0.0.1:17890/<instance>/mcp"
-```
-
-如果 endpoint 开了 OAuth，再执行一次登录即可。详细步骤见 [docs/clients.md#codex](docs/clients.md#codex)。
-
-## 如何接入 Claude Code
-
-Claude Code 可以直接把这个 endpoint 作为远程 HTTP MCP server 添加进去：
-
-```bash
-claude mcp add --transport http portable-devshell http://127.0.0.1:17890/<instance>/mcp
-```
-
-如果 endpoint 开了 OAuth，再执行登录。详细步骤见 [docs/clients.md#claude-code](docs/clients.md#claude-code)。
-
-## 如何接入 ChatGPT Connector
-
-ChatGPT Connector 需要一个可从 ChatGPT 访问的 HTTPS MCP endpoint。把公网地址填成：
-
-```text
-https://devshell.example.com/<instance>/mcp
-```
-
-如果启用了 OAuth，ChatGPT 会按 MCP/OAuth 流程完成授权。详细步骤见 [docs/clients.md#chatgpt-connector](docs/clients.md#chatgpt-connector)。
-
-## 更多文档
-
-- [docs/README.md](docs/README.md)
-- [docs/quickstart.md](docs/quickstart.md)
-- [docs/mcp.md](docs/mcp.md)
-- [docs/oauth.md](docs/oauth.md)
-- [docs/clients.md](docs/clients.md)
-- [docs/reference.md](docs/reference.md)
+- [文档索引](docs/README.md)
+- [安装与升级](docs/installation.md)
+- [快速开始](docs/quickstart.md)
+- [当前架构](docs/architecture.md)
+- [MCP](docs/mcp.md)
+- [OAuth](docs/oauth.md)
+- [客户端接入](docs/clients.md)
+- [参考信息](docs/reference.md)

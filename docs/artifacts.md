@@ -1,10 +1,10 @@
-# Artifact sharing and transfer contract
+# Artifact 分享与传输契约
 
-Version: 1
+版本：1
 
-## Tool surface
+## MCP 工具面
 
-The MCP tool surface is fixed:
+Artifact 只占用三个 MCP 工具名：
 
 ```text
 artifact_read
@@ -12,20 +12,20 @@ artifact_share
 artifact_transfer
 ```
 
-`artifact_read` remains a worker tool and only reads stdout/stderr artifacts created by `bash_run`.
+`artifact_read` 是 worker 工具，只读取 `bash_run` 为 stdout 或 stderr 创建的 Artifact。
 
-`artifact_share` and `artifact_transfer` are control-owned tools merged into the MCP endpoint catalog. Regular files, directories, share payloads, and transfer payloads never receive Artifact handles and never become readable through `artifact_read`.
+`artifact_share` 和 `artifact_transfer` 由 control 提供，并合并到实例 MCP endpoint 的工具 catalog。普通文件、目录、分享 payload 和传输 payload 不会获得 Artifact handle，也不能通过 `artifact_read` 读取。
 
-## Artifact content and references
+## 内容、引用与租约
 
-Artifact bytes are stored independently from the expiring handle that exposes them.
+Artifact 字节内容与对外暴露的短期 handle 分离保存：
 
 ```text
 ArtifactContent
   contentId
   bytes
   blake3
-  referenceCount derived from persisted leases
+  referenceCount 由持久化租约推导
 
 ArtifactReference
   handle
@@ -41,41 +41,46 @@ ArtifactLease
   expiresAt
 ```
 
-An expired or revoked Artifact reference becomes inaccessible immediately. `artifact_read` must reject it even if the content still exists. Physical content is removed only after every persisted lease is gone. Share and transfer tasks acquire their own leases atomically before returning success.
+Artifact 引用过期或被撤销后立即不可访问，即使底层内容尚未删除，`artifact_read` 也必须拒绝读取。只有所有持久化租约都消失后，物理内容才可以删除。分享和传输任务必须先原子取得自己的租约，再返回成功。
 
-Reference counts are reconstructed from persisted leases after restart. A bare mutable counter is not authoritative.
+control 重启后从持久化租约重建引用计数；单独维护的可变计数器不具有权威性。
 
-## Sharing
+## 分享
 
-`artifact_share` accepts exactly one source:
+`artifact_share` 必须且只能接受一种来源：
 
 ```text
 handle
 path
 ```
 
-The source instance defaults to the current MCP endpoint instance. A share is created only after its payload is stable.
+来源 instance 默认是当前 MCP endpoint 对应的 instance。只有 payload 已经稳定后才能创建分享：
 
-- stdout/stderr Artifact: acquire a content lease.
-- regular file: create a reflink snapshot, falling back to a copy.
-- directory: create one deterministic `.tar.zst` payload.
+- stdout/stderr Artifact：取得内容租约；
+- 普通文件：优先创建 reflink 快照，不支持时复制；
+- 目录：生成一个确定性的 `.tar.zst` payload。
 
-Shares have TTL and explicit revocation. Version 1 has no download-count limit.
+分享支持 TTL 和显式撤销。版本 1 不限制下载次数。
 
-The existing local MCP/OAuth HTTP listener also serves:
+现有 MCP/OAuth HTTP listener 同时提供：
 
 ```text
 GET  /artifacts/share/<token>
 HEAD /artifacts/share/<token>
 ```
 
-The listener remains local and is exposed through the same reverse proxy or tunnel as MCP/OAuth. Tokens are high-entropy capability URLs. Logs must not record complete tokens. Responses support HTTP Range, set `Cache-Control: private, no-store`, and set `Referrer-Policy: no-referrer`.
+listener 仍只需要监听本地地址，通过与 MCP/OAuth 相同的反向代理或隧道对外暴露。token 是高熵 capability URL，日志不得记录完整 token。响应支持 HTTP Range，并设置：
 
-`HEAD` never changes share state. Revocation is available through control RPC, CLI, and TUI, not through a fourth MCP tool.
+```text
+Cache-Control: private, no-store
+Referrer-Policy: no-referrer
+```
 
-## Asynchronous transfer
+`HEAD` 不改变分享状态。撤销通过 control RPC、CLI 或 TUI 完成，不新增第四个 MCP 工具。
 
-`artifact_transfer` is asynchronous and supports three operations:
+## 异步传输
+
+`artifact_transfer` 是异步工具，支持三种操作：
 
 ```text
 start
@@ -83,7 +88,7 @@ status
 cancel
 ```
 
-`start` returns immediately with a transfer record in `queued` state. Transfer states are:
+`start` 立即返回 `queued` 状态的传输记录。完整状态为：
 
 ```text
 queued
@@ -98,107 +103,107 @@ cancelled
 interrupted
 ```
 
-After a control restart:
+control 重启后的恢复规则：
 
-- `queued` transfers remain queued and can be scheduled again.
-- transfers that had started become `interrupted` and their temporary receive state is cleaned.
-- terminal records remain terminal.
-- an interrupted commit is recovered or rolled back from its commit journal before cleanup.
+- `queued` 任务保持排队状态，可以重新调度；
+- 已经开始执行但未结束的任务进入 `interrupted`，并清理临时接收状态；
+- 终态记录保持不变；
+- 如果 commit 被中断，必须先依据 commit journal 恢复或回滚，再进行清理。
 
-The transfer source lease is released only after the task reaches a terminal state.
+来源租约只在任务进入终态后释放。
 
-## File transfer
+## 普通文件传输
 
-A regular file is transferred byte-for-byte. User-owned archives such as `.zip`, `.tar.gz`, and `.zst` remain ordinary files and are never unpacked or recompressed.
+普通文件按字节原样传输。用户自己的 `.zip`、`.tar.gz`、`.zst` 等归档仍被视为普通文件，不会自动解包或重新压缩。
 
-The receiver writes to a temporary file in the target parent directory, verifies byte count and BLAKE3, calls `fsync`, renames into place, and syncs the parent directory.
+接收端在目标父目录中创建临时文件，校验字节数和 BLAKE3，调用 `fsync`，原子 rename 到最终路径，并同步父目录。
 
-## Directory payload
+## 目录载荷
 
-A directory is represented during sharing or transfer as a deterministic `.tar.zst` payload. Directory transfer restores a directory at the target path; it does not leave the archive there.
+目录在分享或传输过程中表示为确定性的 `.tar.zst` payload。目录传输完成后还原为目标目录，不会把归档文件留在目标位置。
 
-Allowed source members:
+允许的来源成员：
 
 ```text
-regular files
-directories
-empty directories
-hidden files and directories
+普通文件
+目录
+空目录
+隐藏文件和隐藏目录
 ```
 
-Rejected members:
+拒绝的成员：
 
 ```text
-symbolic links
-device files
+符号链接
+设备文件
 FIFO
-Unix sockets
-non-UTF-8 paths
-tar hard-link entries
-absolute paths
-empty path components
-. and .. components
+Unix socket
+非 UTF-8 路径
+tar hard-link 条目
+绝对路径
+空路径组件
+. 和 .. 路径组件
 ```
 
-Multiple source paths that reference the same inode are serialized as independent regular files.
+多个来源路径即使指向同一个 inode，也分别序列化为独立普通文件。
 
-Archive entries are relative to the source directory, use `/` separators, and are ordered by path bytes. The source directory name itself is not included.
+归档条目相对于来源目录，统一使用 `/` 分隔，并按路径字节排序。归档不包含来源目录自身的名称。
 
-Preserved metadata:
+保留的元数据：
 
 ```text
-regular permission bits, including executable bits
-modification time rounded to seconds
-empty directories
+普通权限位，包括可执行位
+精确到秒的修改时间
+空目录
 ```
 
-Discarded metadata:
+丢弃的元数据：
 
 ```text
-uid/gid and user/group names
-setuid/setgid/sticky bits
+uid/gid 与用户组名称
+setuid/setgid/sticky 位
 ACL
 xattr
-platform-specific extended metadata
+平台特有扩展元数据
 ```
 
-Sparse files are transferred as complete regular files in version 1.
+版本 1 将稀疏文件作为完整普通文件传输。
 
-Every directory payload has two independent checksums:
+目录 payload 有两个独立校验值：
 
-- `payloadBlake3`: checksum of the exact `.tar.zst` bytes.
-- `manifestBlake3`: checksum of a canonical length-prefixed binary manifest of restored entries.
+- `payloadBlake3`：精确 `.tar.zst` 字节的校验值；
+- `manifestBlake3`：还原条目的规范长度前缀二进制 manifest 校验值。
 
-Each manifest entry contains entry type, relative path, mode, size, modification time, and file BLAKE3 for regular files. The receiver verifies both checksums before commit.
+每个 manifest 条目包含类型、相对路径、mode、大小、修改时间；普通文件还包含自己的 BLAKE3。接收端必须在 commit 前同时验证两个校验值。
 
-## Hidden `host` pseudo-instance
+## 隐藏的 `host` 伪 instance
 
-Only Artifact source and target resolution recognizes the exact string `host`. It is not a valid managed instance name, is not returned by instance discovery, is not described in MCP schemas, and has no MCP endpoint or lifecycle operations.
+只有 Artifact 来源和目标解析认识精确字符串 `host`。它不是合法的受管 instance 名，不出现在实例发现结果中，不写入 MCP schema，也没有 MCP endpoint 或生命周期操作。
 
-The user must explicitly tell an Agent to use `host`; the feature is not discoverable from tool descriptions. This knowledge boundary does not replace security enforcement.
+用户必须显式要求 Agent 使用 `host`。工具说明不会主动暴露这一能力，但这种知识边界不能替代实际安全校验。
 
-### `host` as source
+### `host` 作为来源
 
-A path source with `instance = "host"` is read from the machine running the control server. Artifact handles cannot use `host` because handles belong to worker Artifact stores.
+当 path 来源的 `instance = "host"` 时，路径从运行 control 的机器读取。Artifact handle 不能使用 `host`，因为 handle 属于具体 worker 的 Artifact store。
 
-Host source access uses the effective existing `security.mode` of the managed authority instance:
+host 来源访问使用受管 authority instance 的有效 `security.mode`：
 
-- `disabled`: adds no workspace boundary, while still rejecting symbolic links and non-file/non-directory sources.
-- `workspace`: is accepted only when the authority instance uses the local provider and the requested host path resolves inside that local workspace. A remote/container workspace is not treated as a host path and is rejected.
+- `disabled`：不增加 workspace 边界，但仍拒绝符号链接以及非文件、非目录来源；
+- `workspace`：仅当 authority instance 使用 local provider，且请求路径位于该本地 workspace 内时允许。远程或容器 workspace 不能被当作 host 路径。
 
-The authority instance is the current MCP endpoint by default. CLI/TUI operations that use `host` must also provide or infer a real managed authority instance. Host access events are written through that authority instance; `host` itself never becomes an instance.
+当前 MCP endpoint 对应的 instance 默认充当 authority instance。CLI/TUI 使用 `host` 时也必须提供或推导出一个真实受管 authority instance。host 访问事件写入该 authority instance；`host` 本身永远不会成为 instance。
 
-### `host` as target
+### `host` 作为目标
 
-A target with `targetInstance = "host"` is always redirected to the control user's `~/Download` directory.
+当 `targetInstance = "host"` 时，目标始终重定向到 control 用户的 `~/Download` 目录。
 
-`targetPath` only proposes the final basename. Parent components are discarded, and the final object is always a direct child of `~/Download`. Invalid basenames use the source default name.
+`targetPath` 只用于建议最终 basename，父路径组件会被丢弃，最终对象必须是 `~/Download` 的直接子项。basename 无效时使用来源默认名称。
 
-The host receiver writes and extracts relative to an opened Download root, rejects final symlink targets, verifies content, and commits through temporary entries inside that root.
+host 接收端相对于已打开的 Download 根目录写入或解包，拒绝最终符号链接目标，校验内容，并通过根目录内的临时项完成 commit。
 
-## Control RPC
+## Control RPC 接口
 
-Control exposes lifecycle operations for CLI/TUI:
+CLI 和 TUI 使用以下生命周期操作：
 
 ```text
 control.artifact.createShare
@@ -210,11 +215,9 @@ control.artifact.listTransfers
 control.artifact.cancelTransfer
 ```
 
-These operations do not add more MCP tools.
+这些 RPC 不增加新的 MCP 工具名。
 
 ## CLI
-
-CLI commands use the normal reusable Control RPC client:
 
 ```text
 devshell artifact share <instance> <artifact:<handle>|path:<path>> [--expires-in <seconds>] [--authority <instance>]
@@ -227,15 +230,15 @@ devshell artifact transfer cancel <transferId>
 devshell artifact transfers
 ```
 
-The explicit `artifact:` and `path:` prefixes prevent a path from being mistaken for an Artifact handle. `start` prints the queued transfer record and does not wait for completion.
+显式的 `artifact:` 和 `path:` 前缀避免普通路径被误判为 Artifact handle。启动传输后，CLI 输出排队记录，不等待任务完成。
 
 ## TUI
 
-Artifact activity is part of each existing instance box on the Instances page; it does not create a new top-level page. The collapsed box shows share/transfer counts. The expanded box shows recent records and offers:
+Artifact 活动显示在 Instances 页对应 instance box 内，不新增顶层页面。折叠状态显示分享和传输数量；展开后显示最近记录，并提供：
 
 ```text
-Revoke share
-Cancel transfer
+撤销分享
+取消传输
 ```
 
-Both actions open the existing confirmation dialog with Cancel focused by default. TUI startup pulls the persisted share and transfer lists from Control, then upserts complete records from per-instance `artifact.*` stream events.
+两个操作都使用现有确认对话框，默认焦点位于取消按钮。TUI 启动时从 control 拉取已持久化的分享和传输列表，之后通过每实例 `artifact.*` stream event 更新完整记录。

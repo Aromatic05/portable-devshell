@@ -1,17 +1,18 @@
-# 启用 OAuth
+# OAuth 与公网暴露
 
-如果你准备把 `portable-devshell` 的 MCP 暴露给公网客户端，推荐直接使用 `mcp.auth.mode = "oauth2"`。
+把 MCP 暴露到公网时，推荐使用内置 OAuth 2.1 provider。公网地址不可用“难以猜测的 URL”代替认证。
 
-## 什么时候必须开认证
+## 推荐拓扑
 
-下面两种情况都属于公网暴露：
+control 仍监听本机回环地址，由反向代理或隧道提供公网 HTTPS：
 
-- `listenHost = "0.0.0.0"`
-- `publicBaseUrl` 不是 `localhost`
+```text
+MCP client → HTTPS proxy/tunnel → 127.0.0.1:17890 → portable-devshell
+```
 
-这时不能继续用 `mcp.auth.mode = "none"`。
+这样不需要直接把 control 的 HTTP 端口暴露到公网。
 
-## 全局配置示例
+## 全局配置
 
 编辑 `~/.devshell/control/config.toml`：
 
@@ -23,7 +24,7 @@ logLevel = "info"
 
 [mcp]
 enabled = true
-listenHost = "0.0.0.0"
+listenHost = "127.0.0.1"
 listenPort = 17890
 publicBaseUrl = "https://devshell.example.com"
 
@@ -33,70 +34,97 @@ mode = "oauth2"
 [mcp.auth.oauth2]
 resourceName = "portable-devshell"
 requiredScopes = ["mcp"]
-documentationUrl = "https://docs.example.com/portable-devshell"
+documentationUrl = "https://devshell.example.com/docs"
 ```
 
-至少需要保证：
+必需条件：
 
-- `mcp.enabled = true`
-- `mcp.publicBaseUrl` 可从外部访问
-- `mcp.auth.mode = "oauth2"`
-- `mcp.auth.oauth2.resourceName` 已设置
+- `mcp.enabled = true`；
+- `publicBaseUrl` 与客户端实际访问的 HTTPS 根地址一致；
+- `mcp.auth.mode = "oauth2"`；
+- `resourceName` 非空。
 
-`documentationUrl` 可选，但建议填一个你自己的使用说明页。
+`documentationUrl` 可选。
 
-## 实例仍然要单独打开 MCP
+## 实例配置
 
-OAuth 只保护 HTTP host，本身不会替你暴露实例。
-
-目标实例仍然需要在 `~/.devshell/control/instances/<instance>.toml` 里打开：
+每个要暴露的实例仍需单独启用 MCP：
 
 ```toml
+version = 2
+name = "demo-local"
+enabled = true
+provider = "local"
+workspace = "/absolute/path/to/workspace"
+
 [mcp]
 enabled = true
-allowTools = ["bash_run"]
+
+[mcp.tools]
+groups = ["file", "bash", "artifact", "tmux", "todo"]
+capabilities = ["read", "write", "execute"]
 ```
 
-## 重启 control 并启动实例
+## 重启与审批
 
 ```bash
-node packages/cli/dist/cli/CliMain.js stop
-node packages/cli/dist/cli/CliMain.js start
-node packages/cli/dist/cli/CliMain.js instance start <instance>
+devshell stop
+devshell start
+devshell instance start demo-local
+devshell tui
 ```
 
-## 会出现哪些 URL
+进入 TUI 的 `OAuth` 页面处理动态客户端注册和授权请求。待审批请求有过期时间；不要把审批留在后台长期无人处理。
+
+## URL
 
 假设：
 
-- `publicBaseUrl = "https://devshell.example.com"`
-- instance 名称是 `demo`
+```text
+publicBaseUrl = https://devshell.example.com
+instance = demo-local
+```
 
-那么你会得到：
+主要入口为：
 
-- MCP endpoint: `https://devshell.example.com/demo/mcp`
-- protected resource metadata: `https://devshell.example.com/.well-known/oauth-protected-resource/demo/mcp`
-- authorization server metadata: `https://devshell.example.com/.well-known/openid-configuration`
+```text
+MCP endpoint
+https://devshell.example.com/demo-local/mcp
 
-客户端第一次连接时，会先发现这些元数据，再进入浏览器登录流程。
+受保护资源元数据
+https://devshell.example.com/.well-known/oauth-protected-resource/demo-local/mcp
 
-## 认证流程说明
+OpenID/OAuth 元数据
+https://devshell.example.com/.well-known/openid-configuration
+```
 
-- `portable-devshell` 自己暴露受保护资源元数据
-- 同一个 `publicBaseUrl` 下也会提供 OAuth / OIDC 授权服务器元数据
-- 用户登录和授权在浏览器里完成
-- 客户端拿到 access token 后，再访问 `/<instance>/mcp`
+OAuth provider 还提供注册、授权、token、撤销、JWKS 和会话相关 endpoint。
 
-## 调试建议
+## 持久化
 
-如果客户端连不上，先按这个顺序检查：
+OAuth 客户端、授权状态、token 数据和签名密钥保存在：
 
-1. `https://devshell.example.com/demo/mcp` 是否可访问
-2. `https://devshell.example.com/.well-known/oauth-protected-resource/demo/mcp` 是否返回 JSON
-3. `https://devshell.example.com/.well-known/openid-configuration` 是否返回 JSON
-4. instance 是否已经 `ready`
+```text
+~/.devshell/control/oauth/
+```
 
-## 下一步
+升级时不要删除该目录，否则已有客户端和授权状态会失效。
 
-- 想接入 Codex、Claude Code、ChatGPT：见 [clients.md](clients.md)
-- 想看路径、配置文件和 worker 细节：见 [reference.md](reference.md)
+## 代理要求
+
+反向代理必须：
+
+- 保留 `Authorization` header；
+- 正确转发 method、query 和 request body；
+- 不缓存 OAuth 与 MCP 响应；
+- 保持 `publicBaseUrl` 对应的 scheme、host 和 path；
+- 支持 MCP 的流式 HTTP 响应。
+
+具体示例见 [chatgpt-connector-tunnels.md](chatgpt-connector-tunnels.md)。
+
+## 安全边界
+
+- 默认工具策略不包含 `instance + manage`；
+- 不要在公网 endpoint 无条件开放实例管理；
+- 高风险工具可使用 `approvalPolicy.mode = "ask"`；
+- 公网配置为 `mode = "none"` 时，control 会拒绝启动。

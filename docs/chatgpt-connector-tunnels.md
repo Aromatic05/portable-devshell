@@ -1,6 +1,6 @@
-# 通过 FRP 或 Cloudflare Tunnel 接入 ChatGPT Connector
+# 通过 FRP 或 Cloudflare Tunnel 接入 ChatGPT
 
-ChatGPT 只能连接公网 HTTPS MCP endpoint。本项目的每个 instance 使用独立路径：
+ChatGPT 开发者模式应用只能连接公网 HTTPS MCP endpoint。旧资料中的 ChatGPT Connector 指同一类接入能力。本项目的每个 instance 使用独立路径：
 
 ```text
 https://<public-host>/<instance>/mcp
@@ -8,10 +8,10 @@ https://<public-host>/<instance>/mcp
 
 本指南提供两种部署方式：
 
-| 方式 | 适用场景 | TLS 终止位置 |
-| --- | --- | --- |
-| FRP + VPS + Nginx | 已有可控 VPS，或域名不在 Cloudflare | VPS Nginx |
-| Cloudflare Tunnel | 域名已托管在 Cloudflare，不想维护入站端口或 VPS | Cloudflare |
+| 方式              | 适用场景                                        | TLS 终止位置 |
+| ----------------- | ----------------------------------------------- | ------------ |
+| FRP + VPS + Nginx | 已有可控 VPS，或域名不在 Cloudflare             | VPS Nginx    |
+| Cloudflare Tunnel | 域名已托管在 Cloudflare，不想维护入站端口或 VPS | Cloudflare   |
 
 两种方式都应保留本项目的 OAuth 2.1 认证；不要以“公网地址难以猜测”代替认证。
 
@@ -21,9 +21,18 @@ https://<public-host>/<instance>/mcp
 
 ```toml
 # ~/.devshell/control/instances/<instance>.toml
+version = 2
+name = "demo-local"
+enabled = true
+provider = "local"
+workspace = "/absolute/path/to/workspace"
+
 [mcp]
 enabled = true
-allowTools = ["bash_run"]
+
+[mcp.tools]
+groups = ["file", "bash", "artifact", "tmux", "todo"]
+capabilities = ["read", "write", "execute"]
 ```
 
 控制端配置公共基址并启用 OAuth：
@@ -47,12 +56,12 @@ requiredScopes = ["mcp"]
 修改全局配置后重启 control 并启动目标 instance：
 
 ```bash
-pnpm dev stop
-pnpm dev start
-pnpm dev instance start <instance>
+devshell stop
+devshell start
+devshell instance start <instance>
 ```
 
-OAuth 审批不在 Connector 配置页处理。运行 `pnpm dev tui`，进入 `OAuth` 面板：先批准动态注册请求，再批准授权请求。每个待审批请求 5 分钟后过期。
+OAuth 审批不在 Connector 配置页处理。运行 `devshell tui`，进入 `OAuth` 面板：先批准动态注册请求，再批准授权请求。每个待审批请求 5 分钟后过期。
 
 ## 方式一：FRP + VPS + Nginx
 
@@ -155,9 +164,9 @@ tunnel: <tunnel-uuid>
 credentials-file: /home/<user>/.cloudflared/<tunnel-uuid>.json
 
 ingress:
-  - hostname: dev.example.com
-    service: http://127.0.0.1:17890
-  - service: http_status:404
+    - hostname: dev.example.com
+      service: http://127.0.0.1:17890
+    - service: http_status:404
 ```
 
 以 systemd 系统服务安装并启动 `cloudflared`：
@@ -171,7 +180,7 @@ sudo systemctl enable --now cloudflared
 
 不要给这个 MCP hostname 叠加需要浏览器登录的 Cloudflare Access 策略：ChatGPT 无法完成 Cloudflare 的交互式 Access 登录。这里的访问控制应由项目自身的 OAuth 和 OAuth 面板审批承担。
 
-## 验证与 ChatGPT 创建
+## 验证并在 ChatGPT 中创建应用
 
 先验证公开发现与认证挑战：
 
@@ -183,7 +192,7 @@ curl -i https://dev.example.com/<instance>/mcp
 
 前两条应返回 JSON；最后一条应返回 `401`，并带有包含 `resource_metadata` 的 `WWW-Authenticate` 头。OIDC discovery 中所有 endpoint 都必须是 `https://dev.example.com/...`。
 
-然后在 ChatGPT 的开发者模式创建连接，填入：
+然后在 ChatGPT 的开发者模式中创建应用，填入：
 
 ```text
 https://dev.example.com/<instance>/mcp

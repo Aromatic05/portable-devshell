@@ -1,48 +1,56 @@
-# Reverse worker connection protocol
+# 反向 Worker 连接协议
 
-Version: 1
+版本：1
 
-## Topology
+## 拓扑
 
-A reverse instance is created by the control server before enrollment. The control server issues a short-lived, single-use device code for that instance. The target machine runs `devshell-worker enroll`, exchanges the device code for an instance-scoped device token, stores the credential under `~/.devshell/<instance>/`, installs the worker using the existing user-level layout, and starts the worker daemon.
+reverse instance 必须先由 control 创建。control 为该 instance 签发一个短期、单次使用的 device code。目标机器运行 `devshell-worker enroll`，用 device code 换取 instance 专属 device token，将凭据保存到 `~/.devshell/<instance>/`，按照现有用户级目录安装 worker，并启动 worker daemon。
 
-The daemon owns the outbound connection for its whole lifetime. It prefers WSS and falls back to SSE downstream plus HTTPS POST upstream. Both transports carry the existing four-byte big-endian length-prefixed JSON RPC frame. No second RPC protocol is introduced.
+worker daemon 在整个生命周期内持有出站连接。首选 WSS，失败后回退到 SSE 下行加 HTTPS POST 上行。两种 transport 都承载现有的四字节大端长度前缀 JSON RPC frame，不引入第二套 RPC 协议。
 
-## Identity
+## 身份模型
 
-- One worker daemon maps to one instance.
-- One instance maps to one workspace and one device credential.
-- Device codes are short-lived and can be consumed once.
-- Device tokens are random bearer credentials. The controller stores only a SHA-256 hash.
-- Device tokens are never accepted in URL query strings.
-- A token can be rotated or revoked.
+- 一个 worker daemon 对应一个 instance；
+- 一个 instance 对应一个 workspace 和一份设备凭据；
+- device code 有较短有效期，只能消费一次；
+- device token 是随机 bearer credential，control 只保存其 SHA-256；
+- device token 不接受 URL query string 传递；
+- token 可以轮换或撤销。
 
-## Lifecycle
+## 生命周期
 
-Reverse instances are `selfManaged`. The worker manages its own daemon lifecycle through the existing `start`, `stop`, `status`, and `rpc` commands. Enrollment invokes the installed worker's `start --instance <name>` command in the configured workspace, and `start` daemonizes the worker itself. The controller cannot start an offline reverse worker. While online, the controller may request a graceful shutdown, but a subsequent start must run on the remote machine.
+reverse instance 是 `selfManaged`。worker 仍通过既有 `start`、`stop`、`status` 和 `rpc` 命令管理自己的 daemon 生命周期。注册完成后，安装好的 worker 在配置 workspace 中执行：
 
-The instance exposes reverse state separately from the existing daemon and RPC axes:
+```text
+devshell-worker start --instance <name>
+```
 
-- enrollment: `pending | enrolled | revoked`
-- availability: `offline | online`
-- transport: `wss | sse` when online
-- generation: monotonically increasing positive integer for the active logical connection
+`start` 由 worker 自行 daemonize。control 无法启动一台离线 reverse worker；在线时可以请求优雅停止，但再次启动必须在目标机器上发生。
 
-## Enrollment
+reverse 状态与原有 daemon/RPC 状态轴分开：
 
-1. `control.createReverseDeviceCode(instance)` creates a single-use code.
-2. The worker sends `POST /reverse/v1/enroll` with the code and platform metadata.
-3. The controller atomically consumes the code and returns the instance name, workspace, controller URL, and a new device token.
-4. The worker writes the instance configuration and credential using mode `0600` under `~/.devshell/<instance>/`.
-5. The worker installs the current binary into the existing `~/.devshell/workers/<target>/<sha256>/` layout, updates `~/.devshell/bin/devshell-worker`, and invokes `devshell-worker start --instance <instance>` in the enrolled workspace.
-6. Reusing an expired or consumed code fails.
+```text
+enrollment    pending | enrolled | revoked
+availability  offline | online
+transport     wss | sse
+ generation   当前逻辑连接的单调递增正整数
+```
 
-CLI flow:
+## 注册流程
+
+1. `control.createReverseDeviceCode(instance)` 创建单次 device code；
+2. worker 向 `POST /reverse/v1/enroll` 提交 code 和平台元数据；
+3. control 原子消费 code，返回 instance 名、workspace、controller URL 和新 device token；
+4. worker 以 `0600` 权限把实例配置和凭据写入 `~/.devshell/<instance>/`；
+5. worker 把当前二进制安装到 `~/.devshell/workers/<target>/<sha256>/`，更新 `~/.devshell/bin/devshell-worker`，再启动 daemon；
+6. 重复使用、已经过期或已消费的 code 必须失败。
+
+CLI 流程：
 
 ```text
 devshell instance create
-# choose provider: reverse
-# CLI prints the generated device code and exact enrollment command
+# provider 选择 reverse
+# CLI 输出 device code 和完整注册命令
 
 devshell instance device-code <instance>
 devshell instance rotate-token <instance>
@@ -51,84 +59,104 @@ devshell instance revoke-token <instance>
 devshell-worker enroll --controller <publicBaseUrl> --device-code <code>
 ```
 
-Enrollment finishes by invoking the installed worker's existing `start --instance <instance>` command. That command performs daemonization and owns the runtime socket, pid, logs, status, and shutdown lifecycle.
+注册的最后一步仍调用已有 `start --instance`，由 worker 负责 runtime socket、pid、日志、状态和停止流程。
 
-## WSS transport
+## WSS 传输
 
-Endpoint: `GET /reverse/v1/connect`
+endpoint：
 
-Required headers:
+```text
+GET /reverse/v1/connect
+```
 
-- `Authorization: Bearer <device token>`
-- `X-Devshell-Instance: <instance name>`
-- `X-Devshell-Generation: <positive integer>`
-- `Sec-WebSocket-Protocol: devshell-worker-rpc.v1`
+必需 header：
 
-Each binary WebSocket message contains exactly one complete existing length-prefixed RPC frame. Text messages are rejected. A newly authenticated higher generation atomically replaces the old active connection. Frames from a retired generation are ignored and its connection is closed.
+```text
+Authorization: Bearer <device token>
+X-Devshell-Instance: <instance name>
+X-Devshell-Generation: <positive integer>
+Sec-WebSocket-Protocol: devshell-worker-rpc.v1
+```
 
-## SSE + POST fallback
+每个二进制 WebSocket message 恰好包含一个完整的现有长度前缀 RPC frame。文本 message 被拒绝。
 
-Downstream endpoint: `GET /reverse/v1/events`
+经过认证、generation 更高的新连接会原子替换旧连接。来自已退役 generation 的 frame 被忽略，并关闭对应连接。
 
-Required headers are the same instance, generation, and authorization headers. A client may send `Last-Event-ID` or `X-Devshell-Downstream-Ack` to continue downstream sequence numbering for that channel. Reconnection normally creates a higher generation, and pending RPC requests are replayed by request ID rather than by replaying raw SSE events.
+## SSE + POST 回退传输
 
-SSE event format:
+下行 endpoint：
+
+```text
+GET /reverse/v1/events
+```
+
+使用与 WSS 相同的 instance、generation 和 authorization header。客户端可发送 `Last-Event-ID` 或 `X-Devshell-Downstream-Ack`，继续该 channel 的下行 sequence。重连通常创建更高 generation；未完成 RPC 按 request ID 重放，而不是重放原始 SSE event。
+
+SSE event：
 
 ```text
 id: <downstream sequence>
 event: frame
-data: <base64 of one complete length-prefixed RPC frame>
+data: <一个完整长度前缀 RPC frame 的 base64>
 ```
 
-Upstream endpoint: `POST /reverse/v1/frames`
+上行 endpoint：
 
-Body:
+```text
+POST /reverse/v1/frames
+```
+
+请求体：
 
 ```json
 {
-  "generation": 4,
-  "frames": [
-    { "seq": 18, "frame": "<base64>" }
-  ]
+    "generation": 4,
+    "frames": [{ "seq": 18, "frame": "<base64>" }]
 }
 ```
 
-The response returns the highest contiguous upstream sequence accepted. Duplicate sequence numbers are acknowledged without being delivered twice. Frames from a non-active generation are rejected. The gateway accepts a batch; the current worker uploads one response frame per POST.
+响应返回已经接受的最高连续上行 sequence。重复 sequence 只确认，不重复投递；非活动 generation 的 frame 被拒绝。gateway 接受批量 frame，当前 worker 实现每次 POST 上传一个响应 frame。
 
-SSE responses disable transformation and proxy buffering and send comment heartbeats. The worker switches transports through a new generation; WSS and SSE are never simultaneously active for the same generation.
+SSE 响应禁用转换和代理缓冲，并发送 comment heartbeat。worker 通过新 generation 切换 transport；同一 generation 不会同时保持 WSS 和 SSE 活动。
 
-## Reconnect and request replay
+## 重连与请求重放
 
-The controller preserves pending reverse RPC requests across transport loss. After a higher generation attaches, pending requests are replayed with their original RPC request IDs. The worker daemon serializes reverse request dispatch and keeps a bounded cache of completed request results keyed by request ID plus the complete request digest. An identical replay returns the cached response instead of executing the operation again.
+control 在 transport 断开后保留未完成的 reverse RPC。更高 generation 接入后，以原始 RPC request ID 重放请求。
 
-The active generation is persisted under the instance `state/` directory before connecting. It remains monotonic across daemon restarts and clock rollback. A token rotation, revocation, or successful re-enrollment immediately closes the old active channel.
+worker daemon 串行分发 reverse 请求，并维护有界的已完成结果缓存。缓存 key 包含 request ID 和完整请求 digest；内容完全相同的重放直接返回缓存响应，不再次执行操作。
 
-This provides at-most-once execution for identical replayed requests and allows safe recovery after a response is lost.
+活动 generation 在连接前持久化到 instance 的 `state/` 目录，即使 daemon 重启或时钟回退也保持单调递增。token 轮换、撤销或重新注册成功后，旧活动 channel 立即关闭。
 
-## Default operational parameters
+该模型为内容完全相同的重放请求提供至多一次执行语义，并允许响应丢失后的安全恢复。
 
-- device code lifetime: 10 minutes
-- WSS heartbeat: 20 seconds
-- idle connection considered dead after: 60 seconds without traffic or pong when no RPC request is pending
-- WSS failure threshold before SSE fallback: 3 consecutive failures
-- reconnect backoff: exponential from 1 second to 30 seconds
-- SSE comment heartbeat: 15 seconds
-- HTTPS POST timeout: 30 seconds
-- maximum enrollment/upstream JSON body: 1 MiB
-- worker completed request-result cache: 1024 entries
+## 默认运行参数
 
-These are implementation defaults, not wire-level compatibility requirements.
+```text
+device code 有效期                    10 分钟
+WSS heartbeat                         20 秒
+空闲连接死亡判定                      无流量或 pong 60 秒，且没有未完成 RPC
+切换到 SSE 前的连续 WSS 失败阈值       3 次
+重连退避                              1 秒指数增长到 30 秒
+SSE comment heartbeat                 15 秒
+HTTPS POST timeout                    30 秒
+注册/上行 JSON body 上限              1 MiB
+worker 已完成请求结果缓存             1024 条
+```
 
-## Error codes
+这些是实现默认值，不属于 wire-level 兼容性要求。
 
-- `reverse.instanceNotReverse`
-- `reverse.deviceCodeExpired`
-- `reverse.deviceCodeInvalid`
-- `reverse.deviceCodeConsumed`
-- `reverse.deviceTokenInvalid`
-- `reverse.deviceTokenRevoked`
-- `reverse.connectionSuperseded`
-- `reverse.generationInvalid`
-- `reverse.frameInvalid`
-- `reverse.transportUnavailable`
-- `reverse.selfManagedOffline`
+## 错误码
+
+```text
+reverse.instanceNotReverse
+reverse.deviceCodeExpired
+reverse.deviceCodeInvalid
+reverse.deviceCodeConsumed
+reverse.deviceTokenInvalid
+reverse.deviceTokenRevoked
+reverse.connectionSuperseded
+reverse.generationInvalid
+reverse.frameInvalid
+reverse.transportUnavailable
+reverse.selfManagedOffline
+```

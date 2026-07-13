@@ -1,19 +1,23 @@
-# 启动 MCP
+# MCP 配置与工具策略
 
-`portable-devshell` 的 MCP 是按 instance 暴露的。每个已启用的 instance 都对应一个独立 endpoint：
+`portable-devshell` 按 instance 暴露 MCP。默认路径为：
 
 ```text
 /<instance>/mcp
 ```
 
-它不是实例管理 API；你要管理 instance，仍然用 CLI 和 control daemon。
+例如：
 
-## 需要打开的两层开关
+```text
+http://127.0.0.1:17890/demo-local/mcp
+```
 
-要让某个 instance 真正暴露 MCP，需要同时打开：
+## 两层开关
 
-1. 全局 MCP 开关
-2. 该 instance 自己的 MCP 开关
+endpoint 出现需要同时满足：
+
+1. 全局 `mcp.enabled = true`；
+2. 实例 `[mcp].enabled = true`。
 
 ## 全局配置
 
@@ -35,59 +39,97 @@ publicBaseUrl = "http://127.0.0.1:17890"
 mode = "none"
 ```
 
-这个配置适合本机 `localhost` 调试。
+这只适合 localhost。公网暴露必须启用认证。
 
 ## 实例配置
 
-编辑 `~/.devshell/control/instances/<instance>.toml`：
+编辑 `~/.devshell/control/instances/demo-local.toml`：
 
 ```toml
-version = 1
-name = "demo"
+version = 2
+name = "demo-local"
 enabled = true
 provider = "local"
-workspace = "/path/to/workspace"
+workspace = "/absolute/path/to/workspace"
 
 [mcp]
 enabled = true
-allowTools = ["bash_run"]
+
+[mcp.tools]
+groups = ["file", "bash", "artifact", "tmux", "todo"]
+capabilities = ["read", "write", "execute"]
 ```
 
-只有同时满足全局 `[mcp] enabled = true` 和实例 `[mcp] enabled = true`，`/<instance>/mcp` 才会出现。
+工具策略只通过 `[mcp.tools]` 下的 `groups` 和 `capabilities` 表达。
 
-## 重新启动 control
+## 工具组与能力
 
-改完全局配置后，重启 control daemon：
+工具是否出现，需要同时满足所属 group 已启用、所需 capability 已授予。
 
-```bash
-node packages/cli/dist/cli/CliMain.js stop
-node packages/cli/dist/cli/CliMain.js start
+| Group      | 主要工具                                                                                 | 常见 capability   |
+| ---------- | ---------------------------------------------------------------------------------------- | ----------------- |
+| `bash`     | `bash_run`                                                                               | `execute`         |
+| `file`     | `file_read`、`file_edit`、`file_write`、`file_find`、`file_search`、`file_info`          | `read`、`write`   |
+| `artifact` | `artifact_read`、`artifact_share`、`artifact_transfer`                                   | `read`、`write`   |
+| `tmux`     | `tmux_send`、`tmux_capture`、`tmux_inspect`、`tmux_list`、`tmux_create`、`tmux_close`    | `read`、`execute` |
+| `todo`     | `todo_read`、`todo_write`                                                                | 无硬性 capability |
+| `instance` | `instance_list`、`instance_status`、`instance_create`、`instance_start`、`instance_stop` | `manage`          |
+
+默认创建的实例不包含 `instance` group，也不授予 `manage`。
+
+## 可选实例管理与跨实例路由
+
+只有显式配置：
+
+```toml
+[mcp.tools]
+groups = ["file", "bash", "artifact", "tmux", "todo", "instance"]
+capabilities = ["read", "write", "execute", "manage"]
 ```
 
-然后启动目标 instance：
+当前 endpoint 才会暴露实例管理工具。此时其他 worker 工具还会获得可选 `instance` 参数，用于把调用路由到另一个受管实例。
 
-```bash
-node packages/cli/dist/cli/CliMain.js instance start <instance>
+这是高权限能力，不应默认用于公网 endpoint。
+
+## 自定义路径
+
+实例可以覆盖默认路径：
+
+```toml
+[mcp]
+enabled = true
+path = "/custom/mcp"
 ```
 
-## Endpoint 规则
+路径必须在同一个 MCP HTTP host 上保持唯一。
 
-- 默认 URL: `http://127.0.0.1:17890/<instance>/mcp`
-- 如果实例显式配置了 `[mcp] path = "/custom/mcp"`，就会使用自定义 path
-- 只有启用了 MCP 的 instance 会被注册到 HTTP host
+## 应用配置
 
-## 最小验证
-
-先确认实例已就绪：
+手动修改全局配置后重启 control：
 
 ```bash
-node packages/cli/dist/cli/CliMain.js instance status <instance>
+devshell stop
+devshell start
 ```
 
-然后发一个最小 `initialize` 请求：
+然后启动实例：
 
 ```bash
-curl -i http://127.0.0.1:17890/<instance>/mcp \
+devshell instance start demo-local
+```
+
+## 手动验证
+
+先确认实例就绪：
+
+```bash
+devshell instance status demo-local
+```
+
+发送 MCP `initialize`：
+
+```bash
+curl -i http://127.0.0.1:17890/demo-local/mcp \
   -H 'accept: application/json, text/event-stream' \
   -H 'content-type: application/json' \
   -d '{
@@ -105,11 +147,12 @@ curl -i http://127.0.0.1:17890/<instance>/mcp \
   }'
 ```
 
-正常情况下会返回 `200`，并带上 `mcp-session-id` 响应头。
+正常情况下返回 `200`，并包含 `mcp-session-id`。
 
-## 本地和公网的区别
+## 本地与公网
 
-- `listenHost = "127.0.0.1"`: 适合本机调试和本地客户端
-- `listenHost = "0.0.0.0"` 或公网 `publicBaseUrl`: 视为公网暴露，必须配认证
+- `127.0.0.1` + localhost `publicBaseUrl`：可使用 `mode = "none"`；
+- `0.0.0.0` 或非 localhost `publicBaseUrl`：必须启用认证；
+- 给 ChatGPT Connector 使用时，必须通过公网 HTTPS 地址访问。
 
-如果你要给 `Codex`、`Claude Code`、`ChatGPT Connector` 使用公网地址，继续看 [oauth.md](oauth.md)。
+公网配置见 [oauth.md](oauth.md)。

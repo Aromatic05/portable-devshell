@@ -1,18 +1,47 @@
 # 参考信息
 
-这份文档收纳不适合放在首页的路径、布局和运行细节。
+## 支持平台
 
-## 配置文件路径
+```text
+Linux x86-64
+Linux arm64
+macOS x86-64
+macOS arm64
+```
 
-- 全局配置: `~/.devshell/control/config.toml`
-- 实例配置目录: `~/.devshell/control/instances/`
-- 单个实例配置: `~/.devshell/control/instances/<instance>.toml`
-- OAuth 持久化目录: `~/.devshell/control/oauth/`
-- control runtime socket: `$XDG_RUNTIME_DIR/portable-devshell/control.sock`
+主程序需要 Node.js 22 或更高版本。当前不提供 Windows 发行包。
 
-`node packages/cli/dist/cli/CliMain.js start` 第一次启动时，如果全局配置不存在，会自动创建默认文件。
+## 配置路径
 
-## 全局配置示例
+```text
+全局配置                 ~/.devshell/control/config.toml
+实例配置目录             ~/.devshell/control/instances/
+单个实例配置             ~/.devshell/control/instances/<instance>.toml
+OAuth 持久化             ~/.devshell/control/oauth/
+control 日志             ~/.devshell/control/logs/control.log
+```
+
+第一次执行 `devshell start` 会创建默认全局配置。
+
+## 运行目录
+
+优先使用：
+
+```text
+$XDG_RUNTIME_DIR/portable-devshell/control.sock
+```
+
+当 `XDG_RUNTIME_DIR` 未设置时，control 与客户端使用同一套用户专属临时目录解析规则：
+
+```text
+<TMPDIR>/portable-devshell-<uid>/control.sock
+```
+
+因此 macOS 不需要手动设置 `XDG_RUNTIME_DIR`。
+
+worker 和 tmux 仍维护各 instance 的独立运行目录与 socket。
+
+## 全局配置
 
 ```toml
 version = 1
@@ -21,7 +50,7 @@ version = 1
 logLevel = "info"
 
 [mcp]
-enabled = true
+enabled = false
 listenHost = "127.0.0.1"
 listenPort = 17890
 publicBaseUrl = "http://127.0.0.1:17890"
@@ -30,106 +59,146 @@ publicBaseUrl = "http://127.0.0.1:17890"
 mode = "none"
 ```
 
-支持的认证模式：
+认证模式：
 
-- `none`
-- `token`
-- `oauth2`
+```text
+none
+token
+oauth2
+```
 
-如果 `mode = "oauth2"`，还需要提供 `[mcp.auth.oauth2]`。
+公网建议只使用 `oauth2`。
 
-## 实例配置示例
+## 本地实例配置
 
 ```toml
-version = 1
-name = "demo"
+version = 2
+name = "demo-local"
 enabled = true
 provider = "local"
-workspace = "/path/to/workspace"
+workspace = "/absolute/path/to/workspace"
 
 [mcp]
 enabled = true
-allowTools = ["bash_run"]
+path = "/demo-local/mcp"
+
+[mcp.tools]
+groups = ["file", "bash", "artifact", "tmux", "todo"]
+capabilities = ["read", "write", "execute"]
+
+[security]
+mode = "workspace"
 ```
 
-常见字段：
+常用字段：
 
-- `provider`: `local`、`ssh`、`docker`、`podman`
-- `workspace`: 工作区路径
-- `[mcp].enabled`: 是否把这个实例暴露成 MCP endpoint
-- `[mcp].allowTools`: 允许通过 MCP 暴露的工具名列表
-- `[mcp].path`: 可选，自定义 endpoint path
+- `version`：实例配置固定为 `2`；
+- `name`：必须包含连字符；
+- `provider`：`local`、`ssh`、`docker`、`podman`、`reverse`；
+- `workspace`：worker 启动和工具运行的工作区；
+- `[mcp].enabled`：是否注册 MCP endpoint；
+- `[mcp].path`：可选，自定义 endpoint；
+- `[mcp.tools].groups`：启用的工具组；
+- `[mcp.tools].capabilities`：授予的 `read`、`write`、`execute`、`manage`；
+- `[security].mode`：`disabled` 或 `workspace`。
 
-## Endpoint 规则
+实例配置只接受当前 schema；建议通过交互式创建或 TUI 生成后再按需编辑。
 
-- 默认是每实例一个 endpoint: `/<instance>/mcp`
-- 如果实例配置了 `[mcp].path`，会改用自定义 path
-- MCP host 只注册启用了 MCP 的实例
-- MCP 只暴露工具调用入口，不暴露实例管理接口
+## SSH 实例
 
-## 运行时文件布局
+```toml
+version = 2
+name = "demo-ssh"
+enabled = true
+provider = "ssh"
+workspace = "/srv/project"
 
-常见运行时数据会出现在这些位置：
+[ssh]
+command = "ssh user@example-host"
 
-- control 日志: `~/.devshell/control/logs/control.log`
-- instance 日志目录: `~/.devshell/<instance>/control-worker/`
-- tool call 历史: `~/.devshell/<instance>/control-worker/tool-calls.jsonl`
-- event 历史: `~/.devshell/<instance>/control-worker/events.jsonl`
-- 结构化日志: `~/.devshell/<instance>/control-worker/logs.jsonl`
-- tmux 持久元数据: `~/.devshell/<instance>/tmux/`
-- tmux server socket: `$XDG_RUNTIME_DIR/devshell-worker/<instance>/tmux.sock`
+[mcp]
+enabled = true
 
-## Worker 目标与安装路径
+[mcp.tools]
+groups = ["file", "bash", "artifact", "tmux", "todo"]
+capabilities = ["read", "write", "execute"]
+```
 
-当前支持的 worker target：
+worker 由 control 自动检测、上传并安装到远端用户目录。
 
-- `linux-x64`
-- `linux-arm64`
-- `darwin-x64`
-- `darwin-arm64`
+## 容器实例
 
-对应的 Rust target：
+容器 provider 支持：
 
-- `linux-x64` -> `x86_64-unknown-linux-musl`
-- `linux-arm64` -> `aarch64-unknown-linux-musl`
-- `darwin-x64` -> `x86_64-apple-darwin`
-- `darwin-arm64` -> `aarch64-apple-darwin`
+```text
+发行版预设
+Dockerfile
+Compose
+已有镜像
+已有但已停止的容器
+```
 
-本地安装目录：
+不把任意正在运行的容器作为首选创建模型。具体字段建议通过 `devshell instance create` 或 TUI 生成，避免手写复杂容器配置。
 
-- worker 实体文件: `~/.devshell/workers/<target>/<sha256>/devshell-worker`
-- 激活软链: `~/.devshell/bin/devshell-worker`
+## 工具调度
 
-release 缓存目录：
+实例可在 `[tools.scheduler]` 下配置全局和按 session 的并发、队列限制。当前实现支持排队，不再采用旧设计中的固定单并发无队列模型。
 
-- 默认: `~/.devshell/release-cache/workers/<tag>/<target>/<sha256>/devshell-worker`
+## 实例状态与数据
+
+```text
+实例事件与审计     ~/.devshell/<instance>/control-worker/
+worker 配置与状态   ~/.devshell/<instance>/
+tmux 元数据          ~/.devshell/<instance>/tmux/
+worker 实体          ~/.devshell/workers/<target>/<sha256>/devshell-worker
+各 target 软链       ~/.devshell/bin/devshell-worker-<target>
+本机默认软链          ~/.devshell/bin/devshell-worker
+```
+
+## Worker 目标
+
+| portable-devshell target | Rust target                  |
+| ------------------------ | ---------------------------- |
+| `linux-x64`              | `x86_64-unknown-linux-musl`  |
+| `linux-arm64`            | `aarch64-unknown-linux-musl` |
+| `darwin-x64`             | `x86_64-apple-darwin`        |
+| `darwin-arm64`           | `aarch64-apple-darwin`       |
 
 ## Worker 覆盖变量
 
-如果你要强制指定某个平台的 worker，可用这些环境变量：
+```text
+PORTABLE_DEVSHELL_WORKER_LINUX_X64_PATH
+PORTABLE_DEVSHELL_WORKER_LINUX_ARM64_PATH
+PORTABLE_DEVSHELL_WORKER_DARWIN_X64_PATH
+PORTABLE_DEVSHELL_WORKER_DARWIN_ARM64_PATH
+```
 
-- `PORTABLE_DEVSHELL_WORKER_LINUX_X64_PATH`
-- `PORTABLE_DEVSHELL_WORKER_LINUX_ARM64_PATH`
-- `PORTABLE_DEVSHELL_WORKER_DARWIN_X64_PATH`
-- `PORTABLE_DEVSHELL_WORKER_DARWIN_ARM64_PATH`
-
-控制 release 下载行为的环境变量：
-
-- `PORTABLE_DEVSHELL_WORKER_RELEASE_REPOSITORY`
-- `PORTABLE_DEVSHELL_WORKER_RELEASE_BASE_URL`
-- `PORTABLE_DEVSHELL_WORKER_RELEASE_TAG`
-- `PORTABLE_DEVSHELL_WORKER_CACHE_DIR`
-
-默认 release repository 是：
+Release 下载相关变量：
 
 ```text
-Aromatic05/portable-devshell
+PORTABLE_DEVSHELL_WORKER_RELEASE_REPOSITORY
+PORTABLE_DEVSHELL_WORKER_RELEASE_BASE_URL
+PORTABLE_DEVSHELL_WORKER_RELEASE_TAG
+PORTABLE_DEVSHELL_WORKER_CACHE_DIR
 ```
+
+安装相关变量：
+
+```text
+PORTABLE_DEVSHELL_INSTALL_ROOT
+PORTABLE_DEVSHELL_BIN_DIR
+PORTABLE_DEVSHELL_HOME
+PORTABLE_DEVSHELL_VERSION
+PORTABLE_DEVSHELL_RELEASE_REPOSITORY
+PORTABLE_DEVSHELL_RELEASE_BASE_URL
+```
+
+安装时会准备全部四个 worker target。`~/.devshell/bin/devshell-worker` 只用于 control 主机上的默认执行；远程安装和 provider 选择使用带 target 后缀的 worker，不应把这个默认软链理解为全部受管环境的平台。
 
 ## 进一步阅读
 
-- 用户上手: [quickstart.md](quickstart.md)
-- MCP 暴露: [mcp.md](mcp.md)
-- OAuth: [oauth.md](oauth.md)
-- 客户端接入: [clients.md](clients.md)
-- 内部设计: [portable-devshell-ts-design.md](portable-devshell-ts-design.md)
+- [installation.md](installation.md)
+- [architecture.md](architecture.md)
+- [mcp.md](mcp.md)
+- [oauth.md](oauth.md)
+- [reverse-connections.md](reverse-connections.md)

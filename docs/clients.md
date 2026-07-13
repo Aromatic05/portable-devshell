@@ -1,100 +1,113 @@
 # 接入客户端
 
-下面的例子都假设你已经有一个可用的 MCP endpoint：
+下面示例使用名为 `demo-local` 的 instance：
 
-- 本地调试：`http://127.0.0.1:17890/demo/mcp`
-- 公网接入：`https://devshell.example.com/demo/mcp`
+```text
+本地 endpoint    http://127.0.0.1:17890/demo-local/mcp
+公网 endpoint    https://devshell.example.com/demo-local/mcp
+```
 
-如果你要从 ChatGPT 或其他云端客户端接入，请优先使用公网 HTTPS 地址。
+本地客户端可以直接使用回环地址；ChatGPT 等云端客户端必须使用公网 HTTPS 地址。
 
 ## Codex
 
-Codex 支持 streamable HTTP MCP server，可以直接指向 `portable-devshell` 的 instance endpoint。
-
-在 `~/.codex/config.toml` 或项目内 `.codex/config.toml` 添加：
+Codex 支持 Streamable HTTP MCP。编辑 `~/.codex/config.toml`，或项目目录中的 `.codex/config.toml`：
 
 ```toml
 [mcp_servers.portable_devshell]
-url = "http://127.0.0.1:17890/demo/mcp"
+url = "http://127.0.0.1:17890/demo-local/mcp"
 ```
 
-如果你用的是公网地址，就把 `url` 换成 HTTPS endpoint。
-
-如果 endpoint 开了 OAuth，登录一次：
+使用公网 OAuth endpoint 时，把 URL 改为 HTTPS 地址，然后执行：
 
 ```bash
 codex mcp login portable_devshell
 ```
 
-补充说明：
+检查配置和连接状态：
 
-- Codex 的 CLI 和 IDE extension 共用同一份 MCP 配置
-- 如果你的 OAuth 回调必须固定端口，Codex 官方支持 `mcp_oauth_callback_port` 和 `mcp_oauth_callback_url`
+```bash
+codex mcp list
+codex mcp get portable_devshell
+```
 
-官方文档：
-
-- https://developers.openai.com/codex/mcp
+Codex CLI、IDE 扩展与桌面端共用 MCP 配置。OAuth 回调端口有固定要求时，可在 Codex 配置中设置 `mcp_oauth_callback_port` 或 `mcp_oauth_callback_url`。
 
 ## Claude Code
 
-Claude Code 推荐把远程 MCP server 作为 HTTP transport 添加：
+使用推荐的 HTTP transport 添加 endpoint：
 
 ```bash
-claude mcp add --transport http portable-devshell http://127.0.0.1:17890/demo/mcp
+claude mcp add --transport http portable-devshell http://127.0.0.1:17890/demo-local/mcp
 ```
 
-如果要跨项目复用，可以再加 `--scope user`。
+希望跨项目复用时加入用户级 scope：
 
-如果 endpoint 开了 OAuth，可以用任意一种方式完成登录：
+```bash
+claude mcp add --transport http --scope user portable-devshell https://devshell.example.com/demo-local/mcp
+```
+
+OAuth endpoint 可以执行：
 
 ```bash
 claude mcp login portable-devshell
 ```
 
-或者在 Claude Code 里打开：
+也可以在 Claude Code 中输入：
 
 ```text
 /mcp
 ```
 
-然后跟着浏览器授权流程走完。
+然后按浏览器授权流程完成登录。需要固定 OAuth 回调端口时，可使用 `--callback-port`。
 
-补充说明：
+## ChatGPT 开发者模式应用
 
-- Claude Code 的 HTTP transport 支持 OAuth
-- 如果服务端要求固定回调端口，Claude Code 官方支持 `--callback-port`
-
-官方文档：
-
-- https://code.claude.com/docs/en/mcp
-
-## ChatGPT Connector
-
-这里沿用“ChatGPT Connector”这个叫法，但 OpenAI 当前文档中的入口已经放在 `Apps & Connectors` 下。
+ChatGPT 当前把远程 MCP 接入作为开发者模式下的 App/Plugin。旧资料中可能仍称为 ChatGPT Connector，本文中的两种称呼指同一类接入能力。
 
 前提：
 
-- 必须是公网 HTTPS endpoint
-- 推荐启用 OAuth
-- 如果是本地开发，可以先用 Secure MCP Tunnel 或你自己的公网隧道
+- endpoint 必须可从公网访问；
+- 必须使用 HTTPS；
+- 推荐启用 `portable-devshell` 内置 OAuth；
+- instance 已启动，并且 MCP endpoint 能返回 OAuth 元数据。
 
-创建步骤：
+接入步骤：
 
-1. 在 ChatGPT 打开 `Settings -> Apps & Connectors -> Advanced settings`
-2. 启用 developer mode
-3. 进入 `Settings -> Connectors -> Create`
-4. 填写连接信息
+1. 在 ChatGPT 的 `Settings → Security and login` 中启用 Developer mode；
+2. 打开 `Settings → Plugins`，创建新的开发者应用；
+3. 填写名称、说明和公网 MCP URL；
+4. 完成 OAuth 注册和授权；
+5. 回到 `portable-devshell` TUI 的 `OAuth` 页面批准待处理请求；
+6. 在 ChatGPT 中刷新应用工具列表。
 
-建议这样填写：
+推荐填写：
 
-- Connector name: `portable-devshell demo`
-- Description: 说明这个 instance 对应哪个 workspace、开放了哪些工具
-- Connector URL: `https://devshell.example.com/demo/mcp`
+```text
+名称        portable-devshell demo-local
+说明        demo-local 工作区的开发环境工具
+MCP URL     https://devshell.example.com/demo-local/mcp
+```
 
-如果 endpoint 开了 OAuth，ChatGPT 会根据 `portable-devshell` 暴露的 metadata 自动进入授权流程。
+不要填写 control 的根地址，也不要省略 instance path。
 
-后续刷新工具列表时，在 Connector 详情页点 `Refresh` 即可重新抓取工具元数据。
+## 工具没有出现
 
-官方文档：
+依次检查：
 
-- https://developers.openai.com/apps-sdk/deploy/connect-chatgpt
+```bash
+devshell status
+devshell instance status demo-local
+devshell instance logs demo-local
+```
+
+然后确认：
+
+1. 全局 `mcp.enabled = true`；
+2. 实例 `[mcp].enabled = true`；
+3. `[mcp.tools].groups` 包含目标工具所属 group；
+4. `[mcp.tools].capabilities` 包含工具要求的 capability；
+5. 客户端已刷新 MCP 工具列表；
+6. OAuth 注册和授权请求已经在 TUI 中批准。
+
+工具策略见 [mcp.md](mcp.md)，公网配置见 [oauth.md](oauth.md)。

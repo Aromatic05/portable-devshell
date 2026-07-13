@@ -1,109 +1,176 @@
 # 快速开始
 
-这份文档面向“直接从当前源码仓库跑起来”的场景。
+这份文档假设你已经安装了 `devshell`。安装方式见 [installation.md](installation.md)。
 
-## 前提
-
-- 已安装 `pnpm`
-- 已安装 Rust toolchain
-- 当前 shell 里有 `XDG_RUNTIME_DIR`
-
-如果 `XDG_RUNTIME_DIR` 为空，control daemon 无法创建运行时 socket。
-
-## 1. 构建 CLI 和 worker
+## 1. 启动 control daemon
 
 ```bash
-pnpm install
-pnpm build
-cargo build -p devshell-worker --manifest-path ./Cargo.toml
+devshell start
+devshell status
 ```
 
-CLI 入口是：
+第一次启动会自动创建：
 
 ```text
-node packages/cli/dist/cli/CliMain.js
+~/.devshell/control/config.toml
+~/.devshell/control/instances/
 ```
 
-下面示例都直接用这个入口。
+Linux 优先使用 `$XDG_RUNTIME_DIR/portable-devshell/control.sock`。当 `XDG_RUNTIME_DIR` 不存在时，会自动使用当前用户专属的临时目录；macOS 不需要额外设置环境变量。
 
-## 2. 启动 control daemon
-
-```bash
-node packages/cli/dist/cli/CliMain.js start
-```
-
-第一次启动时，如果 `~/.devshell/control/config.toml` 不存在，会自动写入默认配置。
-
-可以马上确认 control 是否正常：
-
-```bash
-node packages/cli/dist/cli/CliMain.js status
-```
-
-## 3. 创建第一个 instance
+## 2. 创建第一个 instance
 
 运行交互式向导：
 
 ```bash
-node packages/cli/dist/cli/CliMain.js instance create
+devshell instance create
 ```
 
-建议第一次先用下面这组值：
-
-- `provider`: `local`
-- `workspace`: 你的项目目录
-- `MCP enabled`: `yes`
-- `allowed tools`: 先保留默认值，或最小化为 `bash_run`
-
-向导会把实例配置写到：
+第一次使用建议填写：
 
 ```text
-~/.devshell/control/instances/<name>.toml
+name: demo-local
+provider: local
+workspace: 当前项目的绝对路径
+MCP enabled: yes
 ```
 
-## 4. 启动 instance
+实例名必须包含连字符。`demo` 无效，`demo-local` 有效。
+
+向导默认启用这些 MCP group：
+
+```text
+file
+bash
+artifact
+tmux
+todo
+```
+
+默认 capability：
+
+```text
+read
+write
+execute
+```
+
+## 3. 启动 instance
 
 ```bash
-node packages/cli/dist/cli/CliMain.js instance start <name>
+devshell instance start demo-local
+devshell instance status demo-local
 ```
 
-查看状态：
+看到 `ready: true` 表示 worker daemon、RPC 和工具 schema 已经就绪。
+
+## 4. 验证工具调用
 
 ```bash
-node packages/cli/dist/cli/CliMain.js instance status <name>
+devshell instance call demo-local bash_run '{"command":"pwd"}'
 ```
 
-如果输出里出现 `status: ready` 或 `ready: true`，说明 worker 和控制链路已经起来了。
-
-## 5. 做一次最小调用
+查看实例日志：
 
 ```bash
-node packages/cli/dist/cli/CliMain.js instance call <name> bash_run '{"command":"pwd"}'
+devshell instance logs demo-local
 ```
 
-再看一次实例日志：
+持续跟踪日志：
 
 ```bash
-node packages/cli/dist/cli/CliMain.js instance logs <name>
+devshell instance logs demo-local --follow
 ```
 
-## 6. 停止服务
-
-停止某个 instance：
+## 5. 打开 TUI
 
 ```bash
-node packages/cli/dist/cli/CliMain.js instance stop <name>
+devshell tui
 ```
 
-停止 control daemon：
+TUI 可以查看实例、编辑配置、处理工具审批和 OAuth 审批、检查审计记录、日志与 Todo。
+
+## 6. 接入 MCP
+
+默认全局配置中的 MCP 是关闭的。编辑：
+
+```text
+~/.devshell/control/config.toml
+```
+
+设置：
+
+```toml
+[mcp]
+enabled = true
+listenHost = "127.0.0.1"
+listenPort = 17890
+publicBaseUrl = "http://127.0.0.1:17890"
+
+[mcp.auth]
+mode = "none"
+```
+
+确认实例配置中已经启用 MCP：
+
+```toml
+[mcp]
+enabled = true
+
+[mcp.tools]
+groups = ["file", "bash", "artifact", "tmux", "todo"]
+capabilities = ["read", "write", "execute"]
+```
+
+重启 control：
 
 ```bash
-node packages/cli/dist/cli/CliMain.js stop
+devshell stop
+devshell start
+devshell instance start demo-local
 ```
 
-## 下一步
+endpoint 为：
 
-- 想把 instance 暴露成 MCP：见 [mcp.md](mcp.md)
-- 想打开公网并接 OAuth：见 [oauth.md](oauth.md)
-- 想接入 Codex、Claude Code、ChatGPT：见 [clients.md](clients.md)
-- 想手写配置文件或查路径：见 [reference.md](reference.md)
+```text
+http://127.0.0.1:17890/demo-local/mcp
+```
+
+更完整的工具策略和验证方法见 [mcp.md](mcp.md)。
+
+## 7. 停止
+
+```bash
+devshell instance stop demo-local
+devshell stop
+```
+
+## 常见问题
+
+### 找不到 `devshell`
+
+```bash
+export PATH="$HOME/.local/bin:$PATH"
+```
+
+### instance 启动失败
+
+先看：
+
+```bash
+devshell instance status demo-local
+devshell instance logs demo-local
+devshell logs
+```
+
+常见原因包括 workspace 不存在、SSH 命令不可用、容器未创建成功，或目标平台 worker 下载失败。
+
+### 手写配置后启动失败
+
+实例配置版本必须是 `2`，并使用 `[mcp.tools]` 配置工具组和能力。
+
+下一步：
+
+- 公网和 OAuth：[oauth.md](oauth.md)
+- 客户端接入：[clients.md](clients.md)
+- 路径与完整配置：[reference.md](reference.md)
