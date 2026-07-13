@@ -1,4 +1,5 @@
 import type { InstanceName } from "../../type/identity/TypeIdentityInstanceName.js";
+import type { JsonValue } from "../../type/TypeJsonValue.js";
 
 export type ToolCallSource = "cli" | "tui" | "mcp";
 export type ControlClientKind = ToolCallSource | "unknown";
@@ -35,6 +36,7 @@ export interface ToolCallRecord {
     error?: string;
     exitCode?: number | null;
     inputSummary: string;
+    input?: JsonValue;
     instance: InstanceName;
     approvalId?: string;
     requestId?: string;

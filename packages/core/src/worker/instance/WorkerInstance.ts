@@ -470,6 +470,8 @@ export class WorkerInstance {
         const association = this.#toolCallAssociationProvider?.();
         const eventContext = {
             callId,
+            input,
+            inputSummary,
             requestId: context.requestId,
             sessionId: context.sessionId,
             source: context.source,
@@ -495,7 +497,7 @@ export class WorkerInstance {
         let approvalState: { approvalId?: string; decision?: ToolCallApprovalDecision };
 
         try {
-            await this.#toolCallHistory.started(callId, toolName, inputSummary, context, startedAt, "queued", association);
+            await this.#toolCallHistory.started(callId, toolName, inputSummary, context, startedAt, "queued", association, input);
             await this.#appendEvent(
                 "toolCall.queued",
                 toEventData({
@@ -1262,7 +1264,7 @@ function toInputSummary(input: JsonValue): string {
         return String(input);
     })();
 
-    return summary.length <= 400 ? summary : `${summary.slice(0, 400)}...`;
+    return summary;
 }
 
 function asCommandResult(error: unknown): CommandResult | undefined {

@@ -1,5 +1,6 @@
 import {
     type InstanceName,
+    type JsonValue,
     type ToolCallContext,
     type ToolCallQuery,
     type ToolCallApprovalDecision,
@@ -14,6 +15,7 @@ interface ActiveToolCall {
     callId: string;
     decision?: ToolCallApprovalDecision;
     inputSummary: string;
+    input?: JsonValue;
     requestId?: string;
     sessionId?: string;
     source: ToolCallContext["source"];
@@ -42,12 +44,14 @@ export class ToolCallHistory {
         context: ToolCallContext,
         startedAt: string,
         status: ToolCallRecord["status"] = "running",
-        association?: ToolCallAssociation
+        association?: ToolCallAssociation,
+        input?: JsonValue
     ): Promise<void> {
         await this.#initialize();
         this.#activeCalls.set(callId, {
             callId,
             inputSummary,
+            input,
             requestId: context.requestId,
             sessionId: context.sessionId,
             source: context.source,
