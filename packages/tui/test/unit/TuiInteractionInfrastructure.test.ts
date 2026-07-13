@@ -401,11 +401,13 @@ test("config choices use angle selectors and switch with arrow keys", async () =
         workspace: "/workspace/alpha"
     });
 
-    const configuration = selectMainScreenModel(harness.store.getState()).boxes.find((box) => box.id === "configuration");
-    assert.equal(configuration?.expandedLines.some((line) => line.text.endsWith("<local>")), true);
-    assert.equal(configuration?.expandedLines.some((line) => line.text.endsWith("<disabled>")), true);
-    assert.equal(configuration?.expandedLines.some((line) => line.text.endsWith("<ask>")), true);
+    const general = selectMainScreenModel(harness.store.getState()).boxes.find((box) => box.id === "configuration");
+    const security = selectMainScreenModel(harness.store.getState()).boxes.find((box) => box.id === "security");
+    assert.equal(general?.expandedLines.some((line) => line.text.endsWith("<local>")), true);
+    assert.equal(security?.expandedLines.some((line) => line.text.endsWith("<disabled>")), true);
+    assert.equal(security?.expandedLines.some((line) => line.text.endsWith("<ask>")), true);
 
+    await harness.press("", { downArrow: true });
     await harness.press("", { rightArrow: true });
     assert.equal((harness.store.getState().ui.formDrafts["config:alpha"] as { provider?: unknown }).provider, "ssh");
     await harness.press("", { leftArrow: true });
@@ -421,18 +423,40 @@ test("config exposes reload, save-only, and save-and-restart semantics", async (
     await harness.press("", { downArrow: true });
     await harness.press("", { return: true });
 
-    const configuration = selectMainScreenModel(harness.store.getState()).boxes.find((box) => box.id === "configuration")!;
-    assert.equal(configuration.expandedLines.some((line) => line.text === "[ Reload ]"), true);
-    assert.equal(configuration.expandedLines.some((line) => line.text === "[ Save Only ]"), true);
-    assert.equal(configuration.expandedLines.some((line) => line.text === "[ Save & Restart ]"), true);
+    const actions = selectMainScreenModel(harness.store.getState()).boxes.find((box) => box.id === "configuration-actions")!;
+    assert.equal(actions.expandedLines.some((line) => line.text === "[ Reload ]"), true);
+    assert.equal(actions.expandedLines.some((line) => line.text === "[ Save Only ]"), true);
+    assert.equal(actions.expandedLines.some((line) => line.text === "[ Save & Restart ]"), true);
 
     harness.store.setFormDraft("config:alpha", {
         ...(harness.store.getState().ui.formDrafts["config:alpha"] as Record<string, unknown>),
         provider: "ssh"
     });
-    const changed = selectMainScreenModel(harness.store.getState()).boxes.find((box) => box.id === "configuration")!;
+    const changed = selectMainScreenModel(harness.store.getState()).boxes.find((box) => box.id === "configuration-actions")!;
     assert.equal(changed.expandedLines.find((line) => line.text === "[ Save Only ]")?.disabled, true);
     assert.equal(changed.expandedLines.some((line) => line.text === "Apply mode          restart required"), true);
+});
+
+test("config separates MCP tool access and requires restart when it changes", async () => {
+    const harness = createHarness();
+
+    await harness.press("2");
+    await harness.press("", { tab: true });
+    await harness.press(" ");
+    await harness.press("", { downArrow: true });
+    await harness.press("", { return: true });
+    harness.store.setFormDraft("config:alpha", {
+        ...(harness.store.getState().ui.formDrafts["config:alpha"] as Record<string, unknown>),
+        mcp: { enabled: true, path: "/alpha/mcp", tools: { capabilities: ["read"], groups: ["file"] } }
+    });
+
+    const boxes = selectMainScreenModel(harness.store.getState()).boxes;
+    const mcpTools = boxes.find((box) => box.id === "mcp-tools")!;
+    const actions = boxes.find((box) => box.id === "configuration-actions")!;
+    assert.equal(mcpTools.title, "MCP Tool Access");
+    assert.equal(mcpTools.expandedLines.some((line) => line.text.includes("file")), true);
+    assert.equal(mcpTools.expandedLines.some((line) => line.text.includes("read")), true);
+    assert.equal(actions.expandedLines.some((line) => line.text === "Apply mode          restart required"), true);
 });
 
 test("connector discard confirms and clears its per-instance MCP draft", async () => {
