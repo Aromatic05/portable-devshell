@@ -11,7 +11,11 @@ const worker = isAbsolute(workerArgument) ? workerArgument : resolve(process.cwd
 const root = await mkdtemp(resolve(tmpdir(), "portable-devshell-worker-smoke-"));
 const workspace = resolve(root, "workspace");
 const instance = `windows-smoke-${process.pid}`;
-const env = { ...process.env, PORTABLE_DEVSHELL_HOME: resolve(root, "home") };
+const env = {
+    ...process.env,
+    DEVSHELL_WORKER_DIAGNOSTIC_RPC: "1",
+    PORTABLE_DEVSHELL_HOME: resolve(root, "home")
+};
 delete env.DEVSHELL_WORKER_INTERNAL_INSTANCE;
 delete env.DEVSHELL_WORKER_INTERNAL_WORKSPACE;
 delete env.DEVSHELL_WORKER_INTERNAL_SECURITY_MODE;
