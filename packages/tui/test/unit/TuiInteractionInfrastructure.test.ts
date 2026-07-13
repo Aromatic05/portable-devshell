@@ -357,6 +357,18 @@ test("main box focus activates the main panel from the sidebar", () => {
     assert.equal(harness.store.getState().ui.mainFocusId, "instance:alpha");
 });
 
+test("left and right arrows switch between the sidebar and main panel", async () => {
+    const harness = createHarness();
+
+    await harness.press("", { rightArrow: true });
+    assert.equal(harness.store.getState().interaction.focusScope, "mainBoxes");
+    assert.match(selectFooterText(harness.store.getState()), /← sidebar/u);
+
+    await harness.press("", { leftArrow: true });
+    assert.equal(harness.store.getState().interaction.focusScope, "sidebarPages");
+    assert.match(selectFooterText(harness.store.getState()), /→ main/u);
+});
+
 test("Create flow uses a wizard with focusable fields and command buttons", async () => {
     const harness = createHarness();
 
