@@ -3,7 +3,6 @@ import type { ApprovalRequest } from "@portable-devshell/shared";
 import type { BoxModel } from "../../component/ExpandableBox.js";
 import type { TuiAppState } from "../TuiReducers.js";
 import { buildSelectedInstancePageContext, compactSummary, formatField, makeBox, toolCallStatus } from "./PageBoxSupport.js";
-import { auditInputLines, auditInputSummary } from "./AuditInputPresentation.js";
 
 export function buildAuditPageBoxes(state: TuiAppState, instanceName: string): BoxModel[] {
     const { approvals, toolCalls } = buildSelectedInstancePageContext(state, instanceName);
@@ -26,14 +25,11 @@ export function buildAuditPageBoxes(state: TuiAppState, instanceName: string): B
                       `completedAt ${record.completedAt ?? "-"}`,
                       `source ${record.source}`,
                       `task ${record.taskId ?? "-"}`,
-                      `todo item ${record.todoItemId ?? "-"}`,
-                      "Input",
-                      ...auditInputLines(record.input, record.inputSummary),
-                      { id: `input.open:${record.callId}`, text: "[ View Full Input ]", tone: "accent" as const }
+                      `todo item ${record.todoItemId ?? "-"}`
                   ],
                   id: `audit-${record.callId}`,
                   status: toolCallStatus(record),
-                  summaryLines: [compactSummary(["status", record.status], ["source", record.source], ["input", auditInputSummary(record.input, record.inputSummary)])],
+                  summaryLines: [compactSummary(["status", record.status], ["source", record.source], ["time", record.startedAt])],
                   title: `${record.toolName} · ${record.status}`
               })
           );

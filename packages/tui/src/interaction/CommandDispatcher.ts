@@ -546,6 +546,10 @@ export class CommandDispatcher {
             if (state.ui.selectedPage === "audit" && state.ui.selectedInstance !== undefined && approvalId !== undefined) {
                 return await this.dispatch({ approvalId, instance: state.ui.selectedInstance, type: "approval.open" });
             }
+            const callId = focused?.kind === "box" ? this.#auditCallIdFromBox(focused.id) : undefined;
+            if (state.ui.selectedPage === "audit" && state.ui.selectedInstance !== undefined && callId !== undefined) {
+                return this.#openAuditInput(state.ui.selectedInstance, callId);
+            }
             return await this.dispatch({ type: "screen.toggle" });
         }
         if (scope === "boxDetail") {
@@ -636,19 +640,6 @@ export class CommandDispatcher {
 
             if (state.ui.selectedPage === "audit" && state.ui.selectedInstance !== undefined && actionId?.startsWith("approval.open:")) {
                 return await this.dispatch({ approvalId: actionId.slice("approval.open:".length), instance: state.ui.selectedInstance, type: "approval.open" });
-            }
-
-            if (state.ui.selectedPage === "audit" && state.ui.selectedInstance !== undefined && actionId?.startsWith("input.open:")) {
-                const callId = actionId.slice("input.open:".length);
-                const record = state.toolCallsByInstance[state.ui.selectedInstance]?.find((candidate) => candidate.callId === callId);
-                if (record === undefined) {
-                    return false;
-                }
-                return await this.dispatch({
-                    body: auditInputText(record.input, record.inputSummary),
-                    title: `${record.toolName} · input`,
-                    type: "textDetail.open"
-                });
             }
 
             if (button === "clear-filter" && (state.ui.selectedPage === "instances" || state.ui.selectedPage === "todo" || state.ui.selectedPage === "config" || state.ui.selectedPage === "audit")) {
@@ -1222,6 +1213,22 @@ export class CommandDispatcher {
             selectedAction: "back"
         });
         this.#store.setFocusScope("approvalDetail");
+    }
+
+    #auditCallIdFromBox(boxId: string): string | undefined {
+        return boxId.startsWith("audit-") ? boxId.slice("audit-".length) : undefined;
+    }
+
+    async #openAuditInput(instance: string, callId: string): Promise<boolean> {
+        const record = this.#store.getState().toolCallsByInstance[instance]?.find((candidate) => candidate.callId === callId);
+        if (record === undefined) {
+            return false;
+        }
+        return await this.dispatch({
+            body: auditInputText(record.input, record.inputSummary),
+            title: `${record.toolName} · input`,
+            type: "textDetail.open"
+        });
     }
 
     #openDenyConfirm(): void {
