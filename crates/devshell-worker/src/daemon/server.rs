@@ -166,12 +166,20 @@ fn handle_connection(stream: LocalIpcStream, router: Arc<RpcRouter>) -> Result<(
             }
             Ok(request) => match router.acquire_tool_permit() {
                 Ok(permit) => {
-                    let router = Arc::clone(&router);
-                    let writer = Arc::clone(&writer);
-                    thread::spawn(move || {
+                    #[cfg(unix)]
+                    {
+                        let router = Arc::clone(&router);
+                        let writer = Arc::clone(&writer);
+                        thread::spawn(move || {
+                            let response = router.dispatch_tool(request, permit);
+                            let _ = write_serialized_response(&writer, &response);
+                        });
+                    }
+                    #[cfg(windows)]
+                    {
                         let response = router.dispatch_tool(request, permit);
-                        let _ = write_serialized_response(&writer, &response);
-                    });
+                        write_serialized_response(&writer, &response)?;
+                    }
                 }
                 Err(error) => {
                     let response = RpcResponse::failure(request.id, error);
