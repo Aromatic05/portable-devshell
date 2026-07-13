@@ -483,6 +483,33 @@ test("config exposes container and tool scheduler settings", async () => {
     assert.equal(runtime.expandedLines.some((line) => line.text.includes("3000")), true);
 });
 
+test("audit retains realtime input and renders patch lines structurally", async () => {
+    const harness = createHarness();
+    const patch = "*** Begin Patch\n*** Update File: src/example.ts\n-old\n+new\n*** End Patch";
+
+    harness.store.applyEvent({
+        event: "toolCall.queued",
+        payload: { at: "2026-07-14T00:00:00.000Z", data: { callId: "live-patch", input: { input: patch }, inputSummary: JSON.stringify({ input: patch }), source: "mcp", startedAt: "2026-07-14T00:00:00.000Z", status: "queued", toolName: "file_edit" } },
+        seq: 21,
+        target: { instance: "alpha" as never, kind: "instance" },
+        type: "event"
+    });
+    harness.store.applyEvent({
+        event: "toolCall.completed",
+        payload: { at: "2026-07-14T00:00:01.000Z", data: { callId: "live-patch", completedAt: "2026-07-14T00:00:01.000Z", source: "mcp", startedAt: "2026-07-14T00:00:00.000Z", status: "completed", toolName: "file_edit" } },
+        seq: 22,
+        target: { instance: "alpha" as never, kind: "instance" },
+        type: "event"
+    });
+    await harness.press("5");
+
+    const audit = selectMainScreenModel(harness.store.getState()).boxes.find((box) => box.id === "audit-live-patch")!;
+    assert.equal((harness.store.getState().toolCallsByInstance.alpha ?? []).find((record) => record.callId === "live-patch")?.input !== undefined, true);
+    assert.equal(audit.expandedLines.some((line) => line.text.includes("*** Begin Patch") && line.tone === "accent"), true);
+    assert.equal(audit.expandedLines.some((line) => line.text.includes("+new") && line.tone === "success"), true);
+    assert.equal(audit.expandedLines.some((line) => line.text.includes("-old") && line.tone === "danger"), true);
+});
+
 test("connector discard confirms and clears its per-instance MCP draft", async () => {
     const harness = createHarness();
 
