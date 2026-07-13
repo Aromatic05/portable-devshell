@@ -1,10 +1,11 @@
 name: windows
 
 on:
+    workflow_dispatch:
+    pull_request:
     push:
         tags:
-            - dev
-    workflow_dispatch:
+            - "dev*"
 
 permissions:
     contents: read
