@@ -9,6 +9,8 @@ import type { TuiEditorState, TuiUiIntent } from "./TuiInteractionTypes.js";
 export interface CommandDispatcherOptions {
     focusManager: TuiFocusManager;
     onApprovalDecision(instance: string, approvalId: string, decision: "approve" | "deny"): Promise<void>;
+    onArtifactRevokeShare?(shareId: string): Promise<void>;
+    onArtifactCancelTransfer?(transferId: string): Promise<void>;
     onInstanceAction(action: "refresh" | "restart" | "start" | "stop", instance: string): Promise<void>;
     onAttachShell(instance: string): Promise<void>;
     mainViewportRows(): number;
@@ -34,6 +36,8 @@ export interface CommandDispatcherOptions {
 export class CommandDispatcher {
     readonly #focusManager: TuiFocusManager;
     readonly #onApprovalDecision: CommandDispatcherOptions["onApprovalDecision"];
+    readonly #onArtifactRevokeShare: (shareId: string) => Promise<void>;
+    readonly #onArtifactCancelTransfer: (transferId: string) => Promise<void>;
     readonly #onInstanceAction: CommandDispatcherOptions["onInstanceAction"];
     readonly #onAttachShell: CommandDispatcherOptions["onAttachShell"];
     readonly #mainViewportRows: () => number;
@@ -58,6 +62,8 @@ export class CommandDispatcher {
     constructor(options: CommandDispatcherOptions) {
         this.#focusManager = options.focusManager;
         this.#onApprovalDecision = options.onApprovalDecision;
+        this.#onArtifactRevokeShare = options.onArtifactRevokeShare ?? unavailable;
+        this.#onArtifactCancelTransfer = options.onArtifactCancelTransfer ?? unavailable;
         this.#onInstanceAction = options.onInstanceAction;
         this.#onAttachShell = options.onAttachShell;
         this.#mainViewportRows = options.mainViewportRows;
@@ -310,6 +316,14 @@ export class CommandDispatcher {
                 return true;
             case "instance.delete":
                 await this.#onInstanceDangerAction("delete", intent.instance);
+                return true;
+            case "artifact.revokeShare":
+                await this.#onArtifactRevokeShare(intent.shareId);
+                this.#store.setScreenStatus("instances", `Artifact share ${intent.shareId} revoked.`);
+                return true;
+            case "artifact.cancelTransfer":
+                await this.#onArtifactCancelTransfer(intent.transferId);
+                this.#store.setScreenStatus("instances", `Artifact transfer ${intent.transferId} cancellation requested.`);
                 return true;
             case "approval.open":
                 this.#openApprovalDetail(intent.approvalId);
@@ -719,6 +733,26 @@ export class CommandDispatcher {
                 return await this.#openCreateWizard();
             }
             return false;
+        }
+        if (button.startsWith("artifact-revoke:")) {
+            const shareId = button.slice("artifact-revoke:".length);
+            return await this.dispatch({
+                body: `Revoke artifact share ${shareId}? Existing download links will stop working.`,
+                confirmIntent: { shareId, type: "artifact.revokeShare" },
+                confirmLabel: "Revoke",
+                title: "Confirm Share Revocation",
+                type: "overlay.openConfirm"
+            });
+        }
+        if (button.startsWith("artifact-cancel:")) {
+            const transferId = button.slice("artifact-cancel:".length);
+            return await this.dispatch({
+                body: `Cancel artifact transfer ${transferId}? Partial receive data will be cleaned up.`,
+                confirmIntent: { transferId, type: "artifact.cancelTransfer" },
+                confirmLabel: "Cancel Transfer",
+                title: "Confirm Transfer Cancellation",
+                type: "overlay.openConfirm"
+            });
         }
         switch (button) {
             case "attach-shell":

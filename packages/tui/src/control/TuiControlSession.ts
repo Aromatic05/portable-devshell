@@ -89,6 +89,28 @@ export class TuiControlSession {
         await this.#reloadTodo(instance);
     }
 
+    async refreshArtifacts(): Promise<void> {
+        if (this.#client.listArtifactShares === undefined || this.#client.listArtifactTransfers === undefined) {
+            this.#store.replaceArtifactShares([]);
+            this.#store.replaceArtifactTransfers([]);
+            return;
+        }
+        try {
+            const [shares, transfers] = await Promise.all([
+                this.#client.listArtifactShares(),
+                this.#client.listArtifactTransfers()
+            ]);
+            this.#store.replaceArtifactShares(shares);
+            this.#store.replaceArtifactTransfers(transfers);
+        } catch (error) {
+            if (readErrorCode(error) !== "control.methodNotFound") {
+                throw error;
+            }
+            this.#store.replaceArtifactShares([]);
+            this.#store.replaceArtifactTransfers([]);
+        }
+    }
+
     async refreshLogs(): Promise<void> {
         const instances = this.#readRuntimeInstances();
 
@@ -112,6 +134,7 @@ export class TuiControlSession {
             this.#store.replaceInstances(mergeInstances(configView, runtimeInstances));
             this.#store.setConfigView(configView);
             await this.#reloadOAuthApprovals(configView);
+            await this.refreshArtifacts();
             await this.#reloadAllInstances(runtimeInstances);
             this.#store.setConnectionState("connected");
         } catch (error) {

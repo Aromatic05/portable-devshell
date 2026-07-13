@@ -3,6 +3,8 @@ import type { TuiAppState } from "./types.js";
 
 export function createInitialTuiAppState(): TuiAppState {
     return {
+        artifactShares: [],
+        artifactTransfers: [],
         approvalsByInstance: {},
         commandRecords: [],
         connection: {

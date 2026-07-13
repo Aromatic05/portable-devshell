@@ -133,6 +133,8 @@ export type TuiUiIntent =
     | { instance: string; type: "instance.stop" }
     | { instance: string; type: "instance.attachShell" }
     | { instance: string; type: "instance.delete" }
+    | { shareId: string; type: "artifact.revokeShare" }
+    | { transferId: string; type: "artifact.cancelTransfer" }
     | { approvalId: string; instance: string; type: "approval.open" }
     | { approvalId: string; decision: "approve" | "deny"; instance: string; type: "approval.decide" }
     | { approvalId: string; decision: "approve" | "deny"; type: "oauthApproval.decide" }

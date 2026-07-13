@@ -1,4 +1,4 @@
-import { asInstanceName, type ApprovalRequest, type JsonValue, type ToolCallRecord } from "@portable-devshell/shared";
+import { asInstanceName, artifactShareStates, artifactTransferStatuses, type ApprovalRequest, type ArtifactShareResult, type ArtifactTransferRecord, type JsonValue, type ToolCallRecord } from "@portable-devshell/shared";
 
 import { asRecord, isApprovalEvent, isStatusEvent, isToolCallEvent, mergeLogEntry, upsertApproval, upsertToolCall } from "./helpers.js";
 import type { TuiAppState, TuiRawEventRecord } from "./types.js";
@@ -19,6 +19,32 @@ export function applyEventRecord(state: TuiAppState, rawEvent: TuiRawEventRecord
 
     if (data === undefined) {
         return state;
+    }
+
+    if (rawEvent.event !== "artifact.shareDownloaded" && rawEvent.event.startsWith("artifact.share")) {
+        const share = readArtifactShare(data);
+        if (share !== undefined) {
+            state = {
+                ...state,
+                artifactShares: [
+                    share,
+                    ...state.artifactShares.filter((entry) => entry.shareId !== share.shareId)
+                ].sort((left, right) => right.expiresAtMs - left.expiresAtMs)
+            };
+        }
+    }
+
+    if (rawEvent.event.startsWith("artifact.transfer")) {
+        const transfer = readArtifactTransfer(data);
+        if (transfer !== undefined) {
+            state = {
+                ...state,
+                artifactTransfers: [
+                    transfer,
+                    ...state.artifactTransfers.filter((entry) => entry.transferId !== transfer.transferId)
+                ].sort((left, right) => right.createdAt.localeCompare(left.createdAt))
+            };
+        }
     }
 
     if (isStatusEvent(rawEvent.event)) {
@@ -224,4 +250,42 @@ function applyApprovalEvent(state: TuiAppState, instance: string, data: Record<s
             [instance]: upsertApproval(current, next)
         }
     };
+}
+
+function readArtifactShare(data: Record<string, JsonValue>): ArtifactShareResult | undefined {
+    if (
+        typeof data.shareId !== "string" ||
+        typeof data.blake3 !== "string" ||
+        typeof data.bytes !== "number" ||
+        typeof data.downloadName !== "string" ||
+        typeof data.expiresAtMs !== "number" ||
+        typeof data.mediaType !== "string" ||
+        typeof data.url !== "string" ||
+        !artifactShareStates.includes(data.state as ArtifactShareResult["state"]) ||
+        typeof data.source !== "object" ||
+        data.source === null ||
+        Array.isArray(data.source)
+    ) {
+        return undefined;
+    }
+    return structuredClone(data) as unknown as ArtifactShareResult;
+}
+
+function readArtifactTransfer(data: Record<string, JsonValue>): ArtifactTransferRecord | undefined {
+    if (
+        typeof data.transferId !== "string" ||
+        typeof data.createdAt !== "string" ||
+        typeof data.updatedAt !== "string" ||
+        typeof data.transferredBytes !== "number" ||
+        !artifactTransferStatuses.includes(data.status as ArtifactTransferRecord["status"]) ||
+        typeof data.source !== "object" ||
+        data.source === null ||
+        Array.isArray(data.source) ||
+        typeof data.target !== "object" ||
+        data.target === null ||
+        Array.isArray(data.target)
+    ) {
+        return undefined;
+    }
+    return structuredClone(data) as unknown as ArtifactTransferRecord;
 }

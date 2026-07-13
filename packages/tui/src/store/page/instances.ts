@@ -1,5 +1,6 @@
 import type { JsonValue } from "@portable-devshell/shared";
 
+import { buildArtifactActivityView } from "../../component/ArtifactActivityBox.js";
 import type { BoxModel } from "../../component/ExpandableBox.js";
 import type { TuiAppState } from "../TuiReducers.js";
 import { compactSummary, formatField, makeBox, runtimeStatus, shortenPath } from "./PageBoxSupport.js";
@@ -34,6 +35,11 @@ export function buildInstancesPageBoxes(state: TuiAppState): BoxModel[] {
             const snapshot = state.snapshotsByInstance[entry.name];
             const approvals = (state.approvalsByInstance[entry.name] ?? []).filter((approval) => approval.status === "pending");
             const lifecycle = lifecycleAvailability(state, entry.name, entry.enabled, snapshot);
+            const artifactActivity = buildArtifactActivityView(
+                entry.name,
+                state.artifactShares,
+                state.artifactTransfers
+            );
 
             return makeBox(state, "instances", entry.name, {
                 detailLines: [
@@ -63,6 +69,8 @@ export function buildInstancesPageBoxes(state: TuiAppState): BoxModel[] {
                                     ])
                           ]),
                     "",
+                    ...artifactActivity.detailLines,
+                    "",
                     "Actions",
                     buttonLine("attach-shell", "Attach Shell", !lifecycle.attach),
                     buttonLine(lifecycle.restart ? "restart" : "start", lifecycle.restart ? "Restart" : "Start", !lifecycle.startOrRestart),
@@ -77,7 +85,8 @@ export function buildInstancesPageBoxes(state: TuiAppState): BoxModel[] {
                         ["provider", entry.provider ?? "unknown"],
                         ["workspace", shortenPath(entry.defaultWorkspace ?? "-")],
                         ["approvals", String(approvals.length)]
-                    )
+                    ),
+                    artifactActivity.summary
                 ],
                 title: entry.name
             });

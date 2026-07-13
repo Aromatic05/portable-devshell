@@ -1,6 +1,10 @@
 import {
     asInstanceName,
     type ApprovalDecision,
+    type ArtifactShareResult,
+    type ArtifactShareRevokeResult,
+    type ArtifactTransferRecord,
+    type ArtifactTransferResult,
     type ApprovalRequest,
     type CommandResult,
     type ControlEventEnvelope,
@@ -77,6 +81,10 @@ export interface TuiControlClientLike {
     getSnapshot(instance: string): Promise<TuiControlSnapshotEnvelope>;
     getTodo(instance: string): Promise<TodoRpcEnvelope>;
     listApprovals(instance: string): Promise<ApprovalRequest[]>;
+    listArtifactShares?(): Promise<ArtifactShareResult[]>;
+    listArtifactTransfers?(): Promise<ArtifactTransferRecord[]>;
+    revokeArtifactShare?(shareId: string): Promise<ArtifactShareRevokeResult>;
+    cancelArtifactTransfer?(transferId: string): Promise<ArtifactTransferResult>;
     listInstances(): Promise<TuiControlListInstanceEntry[]>;
     listOAuthApprovals?(): Promise<OAuthApprovalRequest[]>;
     ping(): Promise<{ pong: boolean }>;
@@ -106,6 +114,22 @@ export class TuiControlClient implements TuiControlClientLike {
 
     constructor(options: TuiControlConnectionOptions = {}) {
         this.#connectionOptions = options;
+    }
+
+    async listArtifactShares(): Promise<ArtifactShareResult[]> {
+        return (await this.#request("control.artifact.listShares", createControlTarget())) as unknown as ArtifactShareResult[];
+    }
+
+    async listArtifactTransfers(): Promise<ArtifactTransferRecord[]> {
+        return (await this.#request("control.artifact.listTransfers", createControlTarget())) as unknown as ArtifactTransferRecord[];
+    }
+
+    async revokeArtifactShare(shareId: string): Promise<ArtifactShareRevokeResult> {
+        return (await this.#request("control.artifact.revokeShare", createControlTarget(), { shareId })) as unknown as ArtifactShareRevokeResult;
+    }
+
+    async cancelArtifactTransfer(transferId: string): Promise<ArtifactTransferResult> {
+        return (await this.#request("control.artifact.cancelTransfer", createControlTarget(), { transferId })) as unknown as ArtifactTransferResult;
     }
 
     async restartControl(): Promise<Record<string, JsonValue>> {

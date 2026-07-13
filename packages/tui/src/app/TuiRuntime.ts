@@ -75,6 +75,14 @@ export class TuiRuntime {
             onApprovalDecision: async (instance, approvalId, decision) => {
                 await this.#decideApproval(instance, approvalId, decision);
             },
+            onArtifactRevokeShare: async (shareId) => {
+                await this.#client.revokeArtifactShare(shareId);
+                await this.session.refreshArtifacts();
+            },
+            onArtifactCancelTransfer: async (transferId) => {
+                await this.#client.cancelArtifactTransfer(transferId);
+                await this.session.refreshArtifacts();
+            },
             onInstanceAction: async (action, instance) => {
                 await this.#runInstanceAction(action, instance);
             },

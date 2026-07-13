@@ -1,4 +1,4 @@
-import { type ApprovalRequest, type ControlError, type ControlEventEnvelope, type InstanceSnapshot, type JsonValue, type OAuthApprovalRequest, type TodoReadResult, type ToolCallRecord } from "@portable-devshell/shared";
+import { type ApprovalRequest, type ArtifactShareResult, type ArtifactTransferRecord, type ControlError, type ControlEventEnvelope, type InstanceSnapshot, type JsonValue, type OAuthApprovalRequest, type TodoReadResult, type ToolCallRecord } from "@portable-devshell/shared";
 
 import { type TuiEditorState, type TuiUiIntent } from "../interaction/TuiInteractionTypes.js";
 import type { AuditPageState, FocusScope, PageId, SidebarCursor, SidebarFocus } from "../model/TuiUiTypes.js";
@@ -52,6 +52,22 @@ export class TuiAppStore {
         for (const listener of this.#listeners) {
             listener();
         }
+    }
+
+    replaceArtifactShares(shares: ArtifactShareResult[]): void {
+        this.dispatch({ shares, type: "artifact.share.replace" });
+    }
+
+    upsertArtifactShare(share: ArtifactShareResult): void {
+        this.dispatch({ share, type: "artifact.share.upsert" });
+    }
+
+    replaceArtifactTransfers(transfers: ArtifactTransferRecord[]): void {
+        this.dispatch({ transfers, type: "artifact.transfer.replace" });
+    }
+
+    upsertArtifactTransfer(transfer: ArtifactTransferRecord): void {
+        this.dispatch({ transfer, type: "artifact.transfer.upsert" });
     }
 
     setControlRestartRequired(required: boolean): void {

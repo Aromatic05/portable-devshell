@@ -1,4 +1,4 @@
-import type { ApprovalRequest, ControlError, ControlEventEnvelope, InstanceSnapshot, JsonValue, OAuthApprovalRequest, TodoReadResult, ToolCallRecord } from "@portable-devshell/shared";
+import type { ApprovalRequest, ArtifactShareResult, ArtifactTransferRecord, ControlError, ControlEventEnvelope, InstanceSnapshot, JsonValue, OAuthApprovalRequest, TodoReadResult, ToolCallRecord } from "@portable-devshell/shared";
 
 import type { TuiEditorState, TuiInteractionState, TuiUiIntent } from "../../interaction/TuiInteractionTypes.js";
 import type { AuditPageState, FocusScope, PageId, SidebarCursor, SidebarFocus, TuiUiState } from "../../model/TuiUiTypes.js";
@@ -70,6 +70,8 @@ export interface TuiRelayRecord {
 }
 
 export interface TuiAppState {
+    artifactShares: ArtifactShareResult[];
+    artifactTransfers: ArtifactTransferRecord[];
     approvalsByInstance: Record<string, ApprovalRequest[]>;
     commandRecords: TuiCommandRecord[];
     configView?: Record<string, JsonValue>;
@@ -92,6 +94,10 @@ export interface TuiAppState {
 }
 
 export type TuiAppAction =
+    | { shares: ArtifactShareResult[]; type: "artifact.share.replace" }
+    | { share: ArtifactShareResult; type: "artifact.share.upsert" }
+    | { transfers: ArtifactTransferRecord[]; type: "artifact.transfer.replace" }
+    | { transfer: ArtifactTransferRecord; type: "artifact.transfer.upsert" }
     | { approvals: ApprovalRequest[]; instance: string; type: "approval.replace" }
     | { approvals: OAuthApprovalRequest[]; type: "oauthApproval.replace" }
     | { command: TuiCommandRecord; type: "command.upsert" }
