@@ -69,7 +69,7 @@ export function buildConfigPageBoxes(state: TuiAppState, instanceName: string): 
                 ...editorErrorLine(state, "config", "security", ["security", "approvalPolicy"])
             ],
             id: "security",
-            status: configStatus(state, ["security", "approvalPolicy"], "normal"),
+            status: securityStatus(state, draft),
             summaryLines: [
                 compactSummary(
                     ["security", stringValue(readPath(draft, "security.mode"), "disabled")],
@@ -135,6 +135,29 @@ export function buildConfigPageBoxes(state: TuiAppState, instanceName: string): 
 function configStatus(state: TuiAppState, fields: readonly string[], fallback: "disabled" | "normal"): "disabled" | "failed" | "normal" {
     const error = state.interaction.editor?.kind === "config" ? state.interaction.editor.error : undefined;
     return error !== undefined && fields.some((field) => error.includes(field)) ? "failed" : fallback;
+}
+
+function securityStatus(state: TuiAppState, draft: Record<string, JsonValue>): "disabled" | "failed" | "normal" | "ready" | "warning" {
+    const validation = configStatus(state, ["security", "approvalPolicy"], "normal");
+    if (validation === "failed") {
+        return validation;
+    }
+
+    const securityMode = readPath(draft, "security.mode");
+    const approvalMode = readPath(draft, "approvalPolicy.mode");
+    if (approvalMode === "deny") {
+        return "failed";
+    }
+    if (approvalMode === "ask" || securityMode === "disabled") {
+        return "warning";
+    }
+    if (approvalMode === "allow" && securityMode === "workspace") {
+        return "ready";
+    }
+    if (approvalMode === "disabled") {
+        return "disabled";
+    }
+    return "normal";
 }
 
 function draftDiff(previous: Record<string, JsonValue>, next: Record<string, JsonValue>): string[] {

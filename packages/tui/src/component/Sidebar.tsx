@@ -12,8 +12,8 @@ export function Sidebar(props: SidebarProps) {
     if (props.compact === true) {
         return (
             <Box flexDirection="column" height={2} overflow="hidden" width="100%">
-                <Text>{props.model.pages.map((item, index) => compactPageLabel(item, index)).join(" ")}</Text>
-                <Text>{props.model.instances.map(compactInstanceLabel).join(" ")}</Text>
+                <CompactSidebarLine items={props.model.pages} kind="page" />
+                <CompactSidebarLine items={props.model.instances} kind="instance" />
             </Box>
         );
     }
@@ -29,11 +29,11 @@ export function Sidebar(props: SidebarProps) {
 
 function compactPageLabel(item: SidebarModel["pages"][number], index: number): string {
     const label = item.id === "instances" ? "inst" : item.id === "connector" ? "conn" : item.label;
-    return `${item.focused ? ">" : item.selected ? "*" : ""}${index + 1}:${label}`;
+    return `${item.selected ? "▶ " : "  "}${index + 1}:${label}`;
 }
 
 function compactInstanceLabel(item: SidebarModel["instances"][number], index: number): string {
-    return `${item.focused ? ">" : item.selected ? "*" : ""}S${index + 1}:${item.label}`;
+    return `${item.selected ? "▶ " : "  "}S${index + 1}:${item.label}`;
 }
 
 function SidebarSection(props: { items: SidebarModel["pages"] }) {
@@ -41,9 +41,21 @@ function SidebarSection(props: { items: SidebarModel["pages"] }) {
         <Box flexDirection="column">
             {props.items.map((item, index) => (
                 <Text bold={item.selected} inverse={item.focused} key={`${item.id}-${index}`}>
-                    {item.label}
+                    {`${item.selected ? "▶ " : "  "}${item.label}`}
                 </Text>
             ))}
         </Box>
+    );
+}
+
+function CompactSidebarLine(props: { items: SidebarModel["pages"] | SidebarModel["instances"]; kind: "instance" | "page" }) {
+    return (
+        <Text>
+            {props.items.map((item, index) => (
+                <Text bold={item.selected} inverse={item.focused} key={item.id}>
+                    {`${props.kind === "page" ? compactPageLabel(item as SidebarModel["pages"][number], index) : compactInstanceLabel(item as SidebarModel["instances"][number], index)} `}
+                </Text>
+            ))}
+        </Text>
     );
 }

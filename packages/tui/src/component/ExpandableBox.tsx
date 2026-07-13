@@ -59,12 +59,13 @@ export function renderExpandableBoxLines(box: BoxModel, requestedInnerWidth: num
         ? { bottomLeft: "╰", bottomRight: "╯", horizontal: "─", topLeft: "╭", topRight: "╮" }
         : { bottomLeft: "└", bottomRight: "┘", horizontal: "─", topLeft: "┌", topRight: "┐" };
     const borderColor = box.disabled ? "gray" : lineColor(box.severity) ?? statusColor(box.status);
-    const titleLine = renderTopBorder(`${box.title} · ${box.status}`, innerWidth, frame);
+    const titleLine = renderTopBorder(`${box.title} [${statusMarker(box.status)} ${box.status}]`, innerWidth, frame);
     const bottomBorder = `${frame.bottomLeft}${frame.horizontal.repeat(innerWidth + 2)}${frame.bottomRight}`;
 
     return [
         {
-            color: borderColor,
+            backgroundColor: box.focused ? "magenta" : undefined,
+            color: box.focused ? "white" : borderColor,
             key: `${box.id}-top`,
             text: titleLine
         },
@@ -72,15 +73,16 @@ export function renderExpandableBoxLines(box: BoxModel, requestedInnerWidth: num
             const selected = box.expanded && box.focused && box.selectedDetailLineId === line.id;
 
             return wrapTerminalText(line.text, innerWidth).map((wrapped, wrappedIndex) => ({
-                backgroundColor: selected ? "cyan" : undefined,
-                color: selected ? "black" : lineColor(line.tone),
-                dimColor: !selected && (line.tone === "muted" || line.disabled === true),
+                backgroundColor: selected ? "cyan" : box.focused ? "magenta" : undefined,
+                color: selected ? "black" : box.focused ? "white" : lineColor(line.tone),
+                dimColor: !selected && !box.focused && (line.tone === "muted" || line.disabled === true),
                 key: `${box.id}-${line.id ?? index}-${wrappedIndex}`,
                 text: renderBodyLine(wrapped, innerWidth)
             }));
         }),
         {
-            color: borderColor,
+            backgroundColor: box.focused ? "magenta" : undefined,
+            color: box.focused ? "white" : borderColor,
             key: `${box.id}-bottom`,
             text: bottomBorder
         }
@@ -208,5 +210,24 @@ function statusColor(status: ExpandableBoxStatus): string {
             return "gray";
         case "normal":
             return "white";
+    }
+}
+
+function statusMarker(status: ExpandableBoxStatus): string {
+    switch (status) {
+        case "ready":
+            return "✓";
+        case "running":
+            return "●";
+        case "pending":
+            return "…";
+        case "warning":
+            return "!";
+        case "failed":
+            return "×";
+        case "disabled":
+            return "−";
+        case "normal":
+            return "·";
     }
 }
