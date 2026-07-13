@@ -442,6 +442,7 @@ test("config validation errors render in the active field box", async () => {
 
     const configuration = selectMainScreenModel(harness.store.getState()).boxes.find((box) => box.id === "configuration");
     assert.equal(configuration?.expandedLines.some((line) => line.text === "error: workspace must be an absolute path"), true);
+    assert.equal(configuration?.status, "failed");
 });
 
 test("config choices use angle selectors and switch with arrow keys", async () => {
@@ -485,6 +486,7 @@ test("config exposes reload, save-only, and save-and-restart semantics", async (
     await harness.press("", { return: true });
 
     const actions = selectMainScreenModel(harness.store.getState()).boxes.find((box) => box.id === "configuration-actions")!;
+    assert.equal(actions.status, "ready");
     assert.equal(actions.expandedLines.some((line) => line.text === "[ Reload ]"), true);
     assert.equal(actions.expandedLines.some((line) => line.text === "[ Save Only ]"), true);
     assert.equal(actions.expandedLines.some((line) => line.text === "[ Save & Restart ]"), true);
@@ -494,6 +496,7 @@ test("config exposes reload, save-only, and save-and-restart semantics", async (
         provider: "ssh"
     });
     const changed = selectMainScreenModel(harness.store.getState()).boxes.find((box) => box.id === "configuration-actions")!;
+    assert.equal(changed.status, "warning");
     assert.equal(changed.expandedLines.find((line) => line.text === "[ Save Only ]")?.disabled, true);
     assert.equal(changed.expandedLines.some((line) => line.text === "Apply mode          restart required"), true);
 });
