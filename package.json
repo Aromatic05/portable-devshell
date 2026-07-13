@@ -15,7 +15,8 @@
         "lint:fix": "eslint . --fix",
         "test": "pnpm -r --filter './packages/*' test",
         "typecheck": "pnpm -r --filter './packages/*' typecheck",
-        "install:local": "node ./scripts/install-local.mjs"
+        "install:local": "node ./scripts/install-local.mjs",
+        "package:app": "node ./scripts/package-app.mjs"
     },
     "devDependencies": {
         "@types/react": "^18.3.11",

@@ -1,0 +1,151 @@
+name: release
+
+on:
+    push:
+        tags:
+            - "v*"
+
+permissions:
+    contents: write
+
+jobs:
+    verify:
+        runs-on: ubuntu-24.04
+
+        steps:
+            - uses: actions/checkout@v4
+            - uses: pnpm/action-setup@v4
+              with:
+                  version: 10.13.1
+            - uses: actions/setup-node@v4
+              with:
+                  node-version: 22
+                  cache: pnpm
+            - name: 安装 Rust 工具链
+              run: |
+                  rustup toolchain install stable --profile minimal
+                  rustup default stable
+            - run: pnpm install --frozen-lockfile
+            - run: pnpm lint
+            - run: bash acceptance/run-final-acceptance.sh
+
+    build-worker:
+        needs: verify
+        strategy:
+            fail-fast: false
+            matrix:
+                include:
+                    - runner: ubuntu-24.04
+                      target: linux-x64
+                      rust_target: x86_64-unknown-linux-musl
+                    - runner: ubuntu-24.04
+                      target: linux-arm64
+                      rust_target: aarch64-unknown-linux-musl
+                    - runner: macos-14
+                      target: darwin-arm64
+                      rust_target: aarch64-apple-darwin
+                    - runner: macos-14
+                      target: darwin-x64
+                      rust_target: x86_64-apple-darwin
+
+        runs-on: ${{ matrix.runner }}
+
+        steps:
+            - uses: actions/checkout@v4
+
+            - uses: actions/setup-node@v4
+              with:
+                  node-version: 22
+
+            - name: 安装 Rust 工具链
+              run: |
+                  rustup toolchain install stable --profile minimal
+                  rustup default stable
+                  rustup target add "${{ matrix.rust_target }}"
+
+            - name: 安装 Zig 工具链
+              if: runner.os == 'Linux'
+              uses: mlugg/setup-zig@v2.2.1
+              with:
+                  version: 0.14.1
+
+            - name: 安装 cargo-zigbuild
+              if: runner.os == 'Linux'
+              run: cargo install --locked cargo-zigbuild --version 0.23.0
+
+            - name: 构建 Linux worker
+              if: runner.os == 'Linux'
+              run: node ./scripts/build-worker.mjs --target "${{ matrix.target }}" --output-dir ./release-assets --zigbuild
+
+            - name: 构建 macOS worker
+              if: runner.os == 'macOS'
+              run: node ./scripts/build-worker.mjs --target "${{ matrix.target }}" --output-dir ./release-assets
+
+            - uses: actions/upload-artifact@v4
+              with:
+                  name: worker-${{ matrix.target }}
+                  path: release-assets/*
+
+    package-app:
+        needs: verify
+        runs-on: ubuntu-24.04
+
+        steps:
+            - uses: actions/checkout@v4
+
+            - uses: pnpm/action-setup@v4
+              with:
+                  version: 10.13.1
+
+            - uses: actions/setup-node@v4
+              with:
+                  node-version: 22
+                  cache: pnpm
+
+            - name: 校验 tag 与应用版本
+              run: |
+                  node -e 'const version=require("./package.json").version; const tag=process.env.GITHUB_REF_NAME; if(tag!==`v${version}`){throw new Error(`tag ${tag} does not match package version ${version}`)}'
+
+            - name: 安装依赖并构建应用
+              run: |
+                  pnpm install --frozen-lockfile
+                  pnpm build
+
+            - name: 打包可分发应用
+              run: |
+                  pnpm package:app -- --output-dir ./release-assets
+                  cp ./scripts/install-release.sh ./release-assets/install-release.sh
+                  chmod 755 ./release-assets/install-release.sh
+                  (cd ./release-assets && sha256sum install-release.sh > install-release.sh.sha256)
+
+            - uses: actions/upload-artifact@v4
+              with:
+                  name: app
+                  path: release-assets/*
+
+    publish:
+        needs:
+            - build-worker
+            - package-app
+        runs-on: ubuntu-24.04
+
+        steps:
+            - uses: actions/checkout@v4
+              with:
+                  fetch-depth: 0
+
+            - uses: actions/download-artifact@v4
+              with:
+                  merge-multiple: true
+                  path: release-assets
+
+            - name: 发布 GitHub Release
+              env:
+                  GH_TOKEN: ${{ github.token }}
+              run: |
+                  tag="${GITHUB_REF_NAME}"
+                  if gh release view "$tag" >/dev/null 2>&1; then
+                    gh release upload "$tag" release-assets/* --clobber
+                  else
+                    gh release create "$tag" release-assets/* --generate-notes --title "$tag"
+                  fi

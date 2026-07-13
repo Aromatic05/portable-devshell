@@ -5,6 +5,14 @@ import { homedir } from "node:os";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+
+class WorkerReleaseIntegrityError extends Error {
+    constructor(message) {
+        super(message);
+        this.name = "WorkerReleaseIntegrityError";
+    }
+}
+
 const repoRoot = fileURLToPath(new URL("../", import.meta.url));
 const packageJson = JSON.parse(await readFile(resolve(repoRoot, "package.json"), "utf8"));
 const version = requireString(packageJson.version, "package.json version");
@@ -21,7 +29,12 @@ const stagingDirectory = resolve(installRoot, `.staging-${version}-${process.pid
 const backupDirectory = resolve(installRoot, `.backup-${version}-${process.pid}`);
 const currentLink = resolve(installRoot, "current");
 const commandLink = resolve(binDirectory, "devshell");
-const targets = ["linux-x64", "linux-arm64", "darwin-x64", "darwin-arm64"];
+const targets = [
+    { key: "linux-x64", rustTarget: "x86_64-unknown-linux-musl" },
+    { key: "linux-arm64", rustTarget: "aarch64-unknown-linux-musl" },
+    { key: "darwin-x64", rustTarget: "x86_64-apple-darwin" },
+    { key: "darwin-arm64", rustTarget: "aarch64-apple-darwin" }
+];
 
 await rm(stagingDirectory, { force: true, recursive: true });
 await rm(backupDirectory, { force: true, recursive: true });
@@ -34,8 +47,9 @@ try {
 
     const installedWorkers = {};
     for (const target of targets) {
-        installedWorkers[target] = await installWorker(target);
+        installedWorkers[target.key] = await installWorkerRemoteFirst(target);
     }
+    await activateHostWorker();
 
     await writeFile(
         resolve(stagingDirectory, "portable-devshell-install.json"),
@@ -64,33 +78,102 @@ try {
     }
 
     await rm(backupDirectory, { force: true, recursive: true });
-    process.stdout.write(`Installed portable-devshell ${version}.\nCommand: ${commandLink}\n`);
+    process.stdout.write(
+        [
+            `已安装 portable-devshell ${version}。`,
+            `命令：${commandLink}`,
+            `Worker：${targets.map((target) => target.key).join(", ")}`,
+            process.env.PATH?.split(":").includes(binDirectory)
+                ? ""
+                : `提示：${binDirectory} 不在 PATH 中，请将它加入 shell 配置。`
+        ]
+            .filter(Boolean)
+            .join("\n") + "\n"
+    );
 } catch (error) {
     await rm(stagingDirectory, { force: true, recursive: true });
     throw error;
 }
 
-async function installWorker(target) {
-    const assetName = `devshell-worker-${target}`;
+async function installWorkerRemoteFirst(target) {
+    try {
+        return await installReleaseWorker(target);
+    } catch (releaseError) {
+        if (releaseError instanceof WorkerReleaseIntegrityError) {
+            throw releaseError;
+        }
+
+        process.stderr.write(
+            `Release 中无法取得 ${target.key}，尝试本地构建。\n${formatError(releaseError)}\n`
+        );
+
+        try {
+            return await installSourceWorker(target);
+        } catch (buildError) {
+            throw new Error(
+                [
+                    `无法安装 ${target.key} worker。`,
+                    `Release 下载失败：${formatError(releaseError)}`,
+                    `本地构建失败：${formatError(buildError)}`
+                ].join("\n"),
+                { cause: buildError }
+            );
+        }
+    }
+}
+
+async function installReleaseWorker(target) {
+    const assetName = `devshell-worker-${target.key}`;
     const releaseDirectory = `${releaseBaseUrl}/${releaseTag}`;
     const expectedSha = await fetchSha256(`${releaseDirectory}/${assetName}.sha256`);
-    const installDirectory = resolve(devshellHome, "workers", target, expectedSha);
+    const payload = Buffer.from(await fetchBytes(`${releaseDirectory}/${assetName}`));
+    const actualSha = createHash("sha256").update(payload).digest("hex");
+    if (actualSha !== expectedSha) {
+        throw new WorkerReleaseIntegrityError(
+            `Checksum mismatch for ${assetName}: expected ${expectedSha}, got ${actualSha}.`
+        );
+    }
+
+    return await installWorkerBytes(target, payload, expectedSha, "release");
+}
+
+async function installSourceWorker(target) {
+    const outputDirectory = resolve(installRoot, `.worker-build-${target.key}-${process.pid}`);
+    await rm(outputDirectory, { force: true, recursive: true });
+
+    try {
+        run("rustup", ["target", "add", target.rustTarget]);
+        runNode([
+            "./scripts/build-worker.mjs",
+            "--target",
+            target.key,
+            "--output-dir",
+            outputDirectory,
+            ...(target.key.startsWith("linux-") && hasCommand("cargo-zigbuild") ? ["--zigbuild"] : [])
+        ]);
+
+        const assetName = `devshell-worker-${target.key}`;
+        const payload = await readFile(resolve(outputDirectory, assetName));
+        return await installWorkerBytes(target, payload, undefined, "local-build");
+    } finally {
+        await rm(outputDirectory, { force: true, recursive: true });
+    }
+}
+
+async function installWorkerBytes(target, payload, expectedSha, source) {
+    const sha256 = expectedSha ?? createHash("sha256").update(payload).digest("hex");
+    const assetName = `devshell-worker-${target.key}`;
+    const installDirectory = resolve(devshellHome, "workers", target.key, sha256);
     const binaryPath = resolve(installDirectory, "devshell-worker");
     const shaPath = resolve(installDirectory, "devshell-worker.sha256");
 
     await mkdir(installDirectory, { mode: 0o700, recursive: true });
-    if ((await readInstalledSha(binaryPath, shaPath)) !== expectedSha) {
-        const payload = Buffer.from(await fetchBytes(`${releaseDirectory}/${assetName}`));
-        const actualSha = createHash("sha256").update(payload).digest("hex");
-        if (actualSha !== expectedSha) {
-            throw new Error(`Checksum mismatch for ${assetName}: expected ${expectedSha}, got ${actualSha}.`);
-        }
-
+    if ((await readInstalledSha(binaryPath, shaPath)) !== sha256) {
         const temporaryBinary = `${binaryPath}.tmp-${process.pid}`;
         const temporarySha = `${shaPath}.tmp-${process.pid}`;
         await writeFile(temporaryBinary, payload, { mode: 0o755 });
         await chmod(temporaryBinary, 0o755);
-        await writeFile(temporarySha, `${expectedSha}\n`, { mode: 0o600 });
+        await writeFile(temporarySha, `${sha256}\n`, { mode: 0o600 });
         await rename(temporaryBinary, binaryPath);
         await rename(temporarySha, shaPath);
     }
@@ -99,14 +182,16 @@ async function installWorker(target) {
     await mkdir(workerBinDirectory, { mode: 0o700, recursive: true });
     await replaceSymlink(
         resolve(workerBinDirectory, assetName),
-        `../workers/${target}/${expectedSha}/devshell-worker`
+        `../workers/${target.key}/${sha256}/devshell-worker`
     );
 
-    if (target === hostTarget()) {
-        await replaceSymlink(resolve(workerBinDirectory, "devshell-worker"), assetName);
-    }
+    return { path: binaryPath, sha256, source };
+}
 
-    return { path: binaryPath, sha256: expectedSha };
+async function activateHostWorker() {
+    const hostTarget = resolveHostTarget();
+    const workerBinDirectory = resolve(devshellHome, "bin");
+    await replaceSymlink(resolve(workerBinDirectory, "devshell-worker"), `devshell-worker-${hostTarget}`);
 }
 
 async function stopInstalledControl() {
@@ -126,18 +211,30 @@ async function stopInstalledControl() {
 }
 
 function runPnpm(args) {
-    const command = process.platform === "win32" ? "pnpm.cmd" : "pnpm";
+    run(process.platform === "win32" ? "pnpm.cmd" : "pnpm", args);
+}
+
+function runNode(args) {
+    run(process.execPath, args);
+}
+
+function run(command, args) {
     const result = spawnSync(command, args, { cwd: repoRoot, env: process.env, stdio: "inherit" });
     if (result.status !== 0) {
-        throw new Error(`pnpm ${args.join(" ")} failed with exit code ${result.status ?? "unknown"}.`);
+        throw new Error(`${command} ${args.join(" ")} failed with exit code ${result.status ?? "unknown"}.`);
     }
+}
+
+function hasCommand(command) {
+    const result = spawnSync(command, ["--version"], { cwd: repoRoot, env: process.env, stdio: "ignore" });
+    return result.status === 0;
 }
 
 async function fetchSha256(url) {
     const text = Buffer.from(await fetchBytes(url)).toString("utf8");
     const sha = text.trim().split(/\s+/u)[0] || "";
     if (!/^[a-f0-9]{64}$/u.test(sha)) {
-        throw new Error(`Invalid SHA-256 document from ${url}.`);
+        throw new WorkerReleaseIntegrityError(`Invalid SHA-256 document from ${url}.`);
     }
     return sha;
 }
@@ -194,13 +291,17 @@ function resolveReleaseBaseUrl() {
     return `https://github.com/${repository.replace(/^\/+|\/+$/gu, "")}/releases/download`;
 }
 
-function hostTarget() {
+function resolveHostTarget() {
     const os = process.platform === "linux" ? "linux" : process.platform === "darwin" ? "darwin" : undefined;
     const arch = process.arch === "x64" ? "x64" : process.arch === "arm64" ? "arm64" : undefined;
     if (!os || !arch) {
         throw new Error(`Unsupported installation host: ${process.platform}-${process.arch}.`);
     }
     return `${os}-${arch}`;
+}
+
+function formatError(error) {
+    return error instanceof Error ? error.message : String(error);
 }
 
 function requireString(value, name) {
