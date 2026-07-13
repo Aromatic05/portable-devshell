@@ -150,7 +150,6 @@ export class ApprovalManager {
             const timeout = setTimeout(() => {
                 void this.#expire(request.approvalId).then(resolve);
             }, this.#timeoutMs);
-            timeout.unref?.();
             this.#pending.set(request.approvalId, {
                 request,
                 resolve,
