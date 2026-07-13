@@ -483,7 +483,7 @@ test("config exposes container and tool scheduler settings", async () => {
     assert.equal(runtime.expandedLines.some((line) => line.text.includes("3000")), true);
 });
 
-test("audit retains realtime input and opens the patch in a dedicated detail screen", async () => {
+test("audit keeps input in its original box line and opens structured patch details", async () => {
     const harness = createHarness();
     const patch = "*** Begin Patch\n*** Update File: src/example.ts\n-old\n+new\n*** End Patch";
 
@@ -505,11 +505,13 @@ test("audit retains realtime input and opens the patch in a dedicated detail scr
 
     const audit = selectMainScreenModel(harness.store.getState()).boxes.find((box) => box.id === "audit-live-patch")!;
     assert.equal((harness.store.getState().toolCallsByInstance.alpha ?? []).find((record) => record.callId === "live-patch")?.input !== undefined, true);
-    assert.equal(audit.expandedLines.some((line) => line.text.includes("*** Begin Patch")), false);
+    assert.equal(audit.expandedLines.some((line) => line.text.includes("*** Begin Patch")), true);
     assert.equal(audit.expandedLines.some((line) => line.text === "[ View Full Input ]"), false);
 
-    harness.store.setFocusScope("mainBoxes");
+    harness.store.toggleExpanded(audit.expandedKey);
+    harness.store.setFocusScope("boxDetail");
     harness.store.setMainFocusId("audit-live-patch");
+    harness.store.setSelectedDetailLine(audit.expandedKey, "audit-live-patch:input");
     await harness.dispatch({ type: "focus.activate" });
     assert.equal(harness.store.getState().interaction.textDetail.open, true);
     assert.equal(harness.store.getState().interaction.textDetail.body.includes("*** Begin Patch"), true);
@@ -529,7 +531,7 @@ test("audit renders legacy records without an input summary", async () => {
     await harness.press("5");
 
     const audit = selectMainScreenModel(harness.store.getState()).boxes.find((box) => box.id === "audit-legacy-call")!;
-    assert.equal(audit.expandedLines.some((line) => line.text === "-"), false);
+    assert.equal(audit.expandedLines.some((line) => line.text === "input -"), true);
 });
 
 test("connector discard confirms and clears its per-instance MCP draft", async () => {
