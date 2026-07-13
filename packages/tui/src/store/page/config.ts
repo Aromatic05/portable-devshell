@@ -17,19 +17,89 @@ export function buildConfigPageBoxes(state: TuiAppState, instanceName: string): 
     return [
         makeBox(state, "config", instanceName, {
             detailLines: [
-                "Instance configuration",
+                fieldLine("enabled", "enabled", readPath(draft, "enabled")),
                 choiceLine("provider", "provider", readPath(draft, "provider")),
                 fieldLine("workspace", "defaultWorkspace", readPath(draft, "workspace")),
+                ...editorErrorLine(state, "config", "configuration", ["enabled", "provider", "workspace"])
+            ],
+            id: "configuration",
+            status: instance?.enabled === false ? "disabled" : "normal",
+            summaryLines: [
+                compactSummary(
+                    ["provider", stringValue(readPath(draft, "provider"), "unknown")],
+                    ["workspace", shortenPath(stringValue(readPath(draft, "workspace"), "unavailable"))]
+                )
+            ],
+            title: "General"
+        }),
+        makeBox(state, "config", instanceName, {
+            detailLines: [
+                ...providerLines(draft),
+                ...editorErrorLine(state, "config", "provider", ["provider", "ssh", "container", "dockerBinary", "podmanBinary"])
+            ],
+            id: "provider",
+            summaryLines: [compactSummary(["provider", stringValue(readPath(draft, "provider"), "unknown")])],
+            title: "Provider"
+        }),
+        makeBox(state, "config", instanceName, {
+            detailLines: [
+                fieldLine("mcp.enabled", "mcp.enabled", readPath(draft, "mcp.enabled")),
+                fieldLine("mcp.path", "mcp.path", readPath(draft, "mcp.path")),
+                fieldLine("mcp.tools.groups", "groups", readPath(draft, "mcp.tools.groups")),
+                fieldLine("mcp.tools.capabilities", "capabilities", readPath(draft, "mcp.tools.capabilities")),
+                ...editorErrorLine(state, "config", "mcp-tools", ["mcp", "groups", "capabilities"])
+            ],
+            id: "mcp-tools",
+            summaryLines: [
+                compactSummary(
+                    ["enabled", stringValue(readPath(draft, "mcp.enabled"), "false")],
+                    ["groups", stringValue(readPath(draft, "mcp.tools.groups"), "none")]
+                )
+            ],
+            title: "MCP Tool Access"
+        }),
+        makeBox(state, "config", instanceName, {
+            detailLines: [
                 "",
-                "Security",
                 choiceLine("security.mode", "security.mode", readPath(draft, "security.mode")),
                 choiceLine("approvalPolicy.mode", "approvalPolicy.mode", readPath(draft, "approvalPolicy.mode")),
-                "",
-                "Logs",
+                ...editorErrorLine(state, "config", "security", ["security", "approvalPolicy"])
+            ],
+            id: "security",
+            summaryLines: [
+                compactSummary(
+                    ["security", stringValue(readPath(draft, "security.mode"), "disabled")],
+                    ["approval", stringValue(readPath(draft, "approvalPolicy.mode"), "disabled")]
+                )
+            ],
+            title: "Security & Approval"
+        }),
+        makeBox(state, "config", instanceName, {
+            detailLines: [
+                choiceLine("tools.fileEdit.mode", "fileEdit.mode", readPath(draft, "tools.fileEdit.mode")),
+                ...editorErrorLine(state, "config", "tool-runtime", ["tools", "fileEdit"])
+            ],
+            id: "tool-runtime",
+            summaryLines: [compactSummary(["fileEdit", stringValue(readPath(draft, "tools.fileEdit.mode"), "text")])],
+            title: "Tool Runtime"
+        }),
+        makeBox(state, "config", instanceName, {
+            detailLines: [
                 fieldLine("logs.retentionDays", "retentionDays", readPath(draft, "logs.retentionDays")),
                 fieldLine("logs.eventBufferSize", "eventBufferSize", readPath(draft, "logs.eventBufferSize")),
-                ...editorErrorLine(state, "config", "configuration", ["provider", "workspace", "security", "approvalPolicy", "logs"]),
-                "",
+                ...editorErrorLine(state, "config", "logs", ["logs"])
+            ],
+            id: "logs",
+            summaryLines: [
+                compactSummary(
+                    ["retention", stringValue(readPath(draft, "logs.retentionDays"), "default")],
+                    ["buffer", stringValue(readPath(draft, "logs.eventBufferSize"), "default")]
+                )
+            ],
+            title: "Logs"
+        }),
+        makeBox(state, "config", instanceName, {
+            detailLines: [
                 `Apply mode          ${restartRequired ? "restart required" : "hot apply"}`,
                 ...(restartRequired && running ? ["Save Only is unavailable until the instance is stopped."] : []),
                 "",
@@ -40,18 +110,31 @@ export function buildConfigPageBoxes(state: TuiAppState, instanceName: string): 
                 buttonLine("cancel", "Cancel"),
                 buttonLine("delete", "Delete")
             ],
-            id: "configuration",
-            status: dirty ? "warning" : instance?.enabled === false ? "disabled" : "normal",
-            summaryLines: [
-                compactSummary(
-                    ["provider", stringValue(readPath(draft, "provider"), "unknown")],
-                    ["workspace", shortenPath(stringValue(readPath(draft, "workspace"), "unavailable"))],
-                    ["apply", restartRequired ? "restart" : "hot"]
-                )
-            ],
-            title: `Configuration${unsaved}`
+            id: "configuration-actions",
+            status: dirty ? "warning" : "normal",
+            summaryLines: [compactSummary(["apply", restartRequired ? "restart" : "hot"])],
+            title: `Actions${unsaved}`
         })
     ];
+}
+
+function providerLines(draft: Record<string, JsonValue>): Array<{ id: string; text: string }> {
+    const provider = readPath(draft, "provider");
+    if (provider === "ssh") {
+        return [fieldLine("ssh.command", "ssh.command", readPath(draft, "ssh.command"))];
+    }
+    if (provider === "docker" || provider === "podman") {
+        return [
+            fieldLine("container.mode", "container.mode", readPath(draft, "container.mode")),
+            fieldLine("container.image", "container.image", readPath(draft, "container.image")),
+            fieldLine("container.containerName", "container.name", readPath(draft, "container.containerName")),
+            fieldLine("container.compose.file", "compose.file", readPath(draft, "container.compose.file")),
+            fieldLine("container.compose.service", "compose.service", readPath(draft, "container.compose.service")),
+            fieldLine("dockerBinary", "dockerBinary", readPath(draft, "dockerBinary")),
+            fieldLine("podmanBinary", "podmanBinary", readPath(draft, "podmanBinary"))
+        ];
+    }
+    return ["No provider-specific settings."].map((text, index) => ({ id: `provider-info:${index}`, text }));
 }
 
 function instanceDraft(state: TuiAppState, instanceName: string): Record<string, JsonValue> {
@@ -72,7 +155,7 @@ function instanceDraft(state: TuiAppState, instanceName: string): Record<string,
 }
 
 function requiresRestart(previous: Record<string, JsonValue>, next: Record<string, JsonValue>): boolean {
-    return ["provider", "ssh", "container", "dockerBinary", "podmanBinary", "logs"].some(
+    return ["provider", "ssh", "container", "dockerBinary", "podmanBinary", "logs", "mcp"].some(
         (path) => JSON.stringify(readPath(previous, path)) !== JSON.stringify(readPath(next, path))
     );
 }

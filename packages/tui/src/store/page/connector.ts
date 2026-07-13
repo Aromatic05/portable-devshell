@@ -21,9 +21,7 @@ export function buildConnectorPageBoxes(state: TuiAppState, instanceName: string
             detailLines: [
                 fieldLine("instance.mcp.enabled", "mcp.enabled", readPath(instanceDraft, "mcp.enabled")),
                 fieldLine("instance.mcp.path", "mcp.path", readPath(instanceDraft, "mcp.path")),
-                fieldLine("instance.mcp.tools.groups", "groups", readPath(instanceDraft, "mcp.tools.groups")),
-                fieldLine("instance.mcp.tools.capabilities", "capabilities", readPath(instanceDraft, "mcp.tools.capabilities")),
-                ...editorErrorLine(state, "connector", "mcp-endpoint", ["mcp", "tools"]),
+                ...editorErrorLine(state, "connector", "mcp-endpoint", ["mcp"]),
                 `MCP runtime        ${runtime.runtime}`,
                 `Public endpoint    ${runtime.publicEndpoint}`,
                 `Reason             ${runtime.reason}`
