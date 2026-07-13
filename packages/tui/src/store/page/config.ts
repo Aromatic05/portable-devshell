@@ -77,6 +77,11 @@ export function buildConfigPageBoxes(state: TuiAppState, instanceName: string): 
         makeBox(state, "config", instanceName, {
             detailLines: [
                 choiceLine("tools.fileEdit.mode", "fileEdit.mode", readPath(draft, "tools.fileEdit.mode")),
+                fieldLine("tools.scheduler.maxRunning", "maxRunning", readPath(draft, "tools.scheduler.maxRunning")),
+                fieldLine("tools.scheduler.maxRunningPerSession", "perSession", readPath(draft, "tools.scheduler.maxRunningPerSession")),
+                fieldLine("tools.scheduler.queueDepth", "queueDepth", readPath(draft, "tools.scheduler.queueDepth")),
+                fieldLine("tools.scheduler.queueDepthPerSession", "queuePerSession", readPath(draft, "tools.scheduler.queueDepthPerSession")),
+                fieldLine("tools.scheduler.queueTimeoutMs", "queueTimeoutMs", readPath(draft, "tools.scheduler.queueTimeoutMs")),
                 ...editorErrorLine(state, "config", "tool-runtime", ["tools", "fileEdit"])
             ],
             id: "tool-runtime",
@@ -126,8 +131,11 @@ function providerLines(draft: Record<string, JsonValue>): Array<{ id: string; te
     if (provider === "docker" || provider === "podman") {
         return [
             fieldLine("container.mode", "container.mode", readPath(draft, "container.mode")),
+            fieldLine("container.preset", "container.preset", readPath(draft, "container.preset")),
             fieldLine("container.image", "container.image", readPath(draft, "container.image")),
             fieldLine("container.containerName", "container.name", readPath(draft, "container.containerName")),
+            fieldLine("container.build.context", "build.context", readPath(draft, "container.build.context")),
+            fieldLine("container.build.dockerfile", "build.dockerfile", readPath(draft, "container.build.dockerfile")),
             fieldLine("container.compose.file", "compose.file", readPath(draft, "container.compose.file")),
             fieldLine("container.compose.service", "compose.service", readPath(draft, "container.compose.service")),
             fieldLine("dockerBinary", "dockerBinary", readPath(draft, "dockerBinary")),

@@ -131,7 +131,7 @@ function normalizeRecord(value: Record<string, JsonValue>): Record<string, JsonV
                 if (entry === "true" || entry === "false") {
                     return [key, entry === "true"];
                 }
-                if ((key === "listenPort" || key === "retentionDays" || key === "eventBufferSize") && /^\d+$/.test(entry)) {
+                if ((key === "listenPort" || key === "retentionDays" || key === "eventBufferSize" || key === "maxRunning" || key === "queueDepth" || key === "queueTimeoutMs" || key === "maxRunningPerSession" || key === "queueDepthPerSession") && /^\d+$/.test(entry)) {
                     return [key, Number(entry)];
                 }
                 if (key === "groups" || key === "capabilities") {
