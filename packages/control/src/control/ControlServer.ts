@@ -13,6 +13,7 @@ import type { ControlConfig } from "./config/ControlConfigTomlCodec.js";
 import { ControlPathHome } from "./path/ControlPathHome.js";
 import { InstanceRegistry } from "../instance/registry/InstanceRegistry.js";
 import { InstanceRegistryBuilder } from "../instance/registry/InstanceRegistryBuilder.js";
+import { withArtifactGateway } from "../mcp/McpArtifactGateway.js";
 import { McpInstanceGatewayControl } from "../mcp/McpInstanceGatewayControl.js";
 import { McpWiringService } from "../mcp/McpWiringService.js";
 import { ControlRpcServer } from "./rpc/ControlRpcServer.js";
@@ -101,8 +102,8 @@ export class ControlServer {
         });
         await this.#artifactService.initialize();
         this.#mcpHost = this.#mcpWiringService.wire(config, registry, {
-            gateway: instanceGateway,
-            storageDir: new ControlPathHome(this.#homeDirectory).oauthDir
+            gateway: withArtifactGateway(instanceGateway, this.#artifactService),
+            storageDir: controlPaths.oauthDir
         });
         if (this.#mcpHost !== undefined) {
             new ArtifactHttpRoute(this.#artifactService, {

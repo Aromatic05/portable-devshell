@@ -7,7 +7,7 @@ import {
 
 import { McpToolFilter } from "../tool/McpToolFilter.js";
 
-export type McpEndpointToolOwner = "worker" | "instance" | "todo";
+export type McpEndpointToolOwner = "worker" | "artifact" | "instance" | "todo";
 
 export interface McpEndpointToolEntry {
     definition: ToolDefinition;

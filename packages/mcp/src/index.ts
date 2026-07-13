@@ -1,3 +1,4 @@
+export * from "./mcp/artifact/McpArtifactToolCatalog.js";
 export * from "./mcp/auth/McpAuthConfig.js";
 export * from "./mcp/auth/McpAuthMiddleware.js";
 export * from "./mcp/auth/provider/McpAuthProviderNone.js";

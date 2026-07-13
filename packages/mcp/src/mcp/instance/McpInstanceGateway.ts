@@ -1,3 +1,9 @@
+import type {
+    ArtifactShareInput,
+    ArtifactTransferCancelInput,
+    ArtifactTransferLookupInput,
+    ArtifactTransferStartInput
+} from "@portable-devshell/shared";
 import type { JsonValue, ToolCallContext, ToolDefinition } from "@portable-devshell/shared";
 
 export interface McpSshInstanceCreateInput {
@@ -20,4 +26,10 @@ export interface McpInstanceGateway {
     statusInstance(instance: string): Promise<JsonValue>;
     stopInstance(instance: string): Promise<JsonValue>;
     writeTodo(instance: string, input: JsonValue, context: ToolCallContext): Promise<JsonValue>;
+
+    shareArtifact?(defaultInstance: string, input: ArtifactShareInput): Promise<JsonValue>;
+    transferArtifact?(
+        defaultInstance: string,
+        input: ArtifactTransferStartInput | ArtifactTransferLookupInput | ArtifactTransferCancelInput
+    ): Promise<JsonValue>;
 }

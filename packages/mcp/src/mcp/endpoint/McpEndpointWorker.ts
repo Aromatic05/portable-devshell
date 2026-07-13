@@ -7,6 +7,14 @@ import {
     type ToolPolicy
 } from "@portable-devshell/shared";
 
+import type {
+    ArtifactShareInput,
+    ArtifactTransferCancelInput,
+    ArtifactTransferLookupInput,
+    ArtifactTransferStartInput
+} from "@portable-devshell/shared";
+
+import { McpArtifactToolCatalog, type McpArtifactToolName } from "../artifact/McpArtifactToolCatalog.js";
 import type { McpInstanceGateway, McpSshInstanceCreateInput } from "../instance/McpInstanceGateway.js";
 import { McpInstanceToolCatalog, type McpInstanceToolName } from "../instance/McpInstanceToolCatalog.js";
 import { McpTodoToolCatalog, type McpTodoToolName } from "../todo/McpTodoToolCatalog.js";
@@ -29,6 +37,7 @@ interface WorkerInstanceLike {
 }
 
 export class McpEndpointWorker {
+    readonly #artifactTools = new McpArtifactToolCatalog();
     readonly #catalog: McpEndpointToolCatalog;
     readonly #descriptionEnhancer = new McpToolDescriptionEnhancer();
     readonly #gateway?: McpInstanceGateway;
@@ -111,6 +120,14 @@ export class McpEndpointWorker {
             return await this.#callTodoTool(toolName as McpTodoToolName, input, context);
         }
 
+        if (known?.owner === "artifact") {
+            if (selected === undefined) {
+                throw this.#toolNotExposed(toolName);
+            }
+            this.#adaptTool(selected.definition);
+            return await this.#callArtifactTool(toolName as McpArtifactToolName, input);
+        }
+
         if (known?.owner === "instance") {
             if (selected === undefined) {
                 throw this.#toolNotExposed(toolName);
@@ -156,6 +173,12 @@ export class McpEndpointWorker {
             });
         }
         if (this.#gateway !== undefined) {
+            if (this.#gateway.shareArtifact !== undefined && this.#gateway.transferArtifact !== undefined) {
+                sources.push({
+                    owner: "artifact",
+                    tools: this.#artifactTools.list()
+                });
+            }
             sources.push(
                 {
                     owner: "todo",
@@ -174,6 +197,22 @@ export class McpEndpointWorker {
             hasWorkerSchema,
             merged
         };
+    }
+
+    async #callArtifactTool(toolName: McpArtifactToolName, input: JsonValue): Promise<JsonValue> {
+        const gateway = this.#requireGateway();
+        switch (toolName) {
+            case "artifact_share":
+                if (gateway.shareArtifact === undefined) {
+                    throw this.#toolNotExposed(toolName);
+                }
+                return await gateway.shareArtifact(this.#instanceName, readArtifactShareInput(input));
+            case "artifact_transfer":
+                if (gateway.transferArtifact === undefined) {
+                    throw this.#toolNotExposed(toolName);
+                }
+                return await gateway.transferArtifact(this.#instanceName, readArtifactTransferInput(input));
+        }
     }
 
     async #callTodoTool(toolName: McpTodoToolName, input: JsonValue, context: ToolCallContext): Promise<JsonValue> {
@@ -268,6 +307,76 @@ function readRoutedInput(input: JsonValue, instanceRoutingEnabled: boolean, defa
     }
     const { instance: _ignored, ...workerInput } = input;
     return { input: workerInput, instance: target.trim() };
+}
+
+function readArtifactShareInput(input: JsonValue): ArtifactShareInput {
+    if (!isRecord(input)) {
+        throw invalidArguments("artifact_share requires an object input.");
+    }
+    const handle = optionalString(input.handle, "handle");
+    const path = optionalString(input.path, "path");
+    if ((handle === undefined) === (path === undefined)) {
+        throw invalidArguments("artifact_share requires exactly one of handle or path.");
+    }
+    const instance = optionalString(input.instance, "instance");
+    const expiresInSeconds = input.expiresInSeconds;
+    if (
+        expiresInSeconds !== undefined &&
+        (typeof expiresInSeconds !== "number" || !Number.isInteger(expiresInSeconds) || expiresInSeconds < 60)
+    ) {
+        throw invalidArguments("expiresInSeconds must be an integer greater than or equal to 60.");
+    }
+    const common = {
+        ...(expiresInSeconds === undefined ? {} : { expiresInSeconds }),
+        ...(instance === undefined ? {} : { instance })
+    };
+    if (handle !== undefined) {
+        return { ...common, handle };
+    }
+    if (path === undefined) {
+        throw invalidArguments("artifact_share requires path when handle is omitted.");
+    }
+    return { ...common, path };
+}
+
+function readArtifactTransferInput(
+    input: JsonValue
+): ArtifactTransferStartInput | ArtifactTransferLookupInput | ArtifactTransferCancelInput {
+    if (!isRecord(input)) {
+        throw invalidArguments("artifact_transfer requires an object input.");
+    }
+    if (input.operation === "status" || input.operation === "cancel") {
+        const transferId = requiredString(input.transferId, "transferId");
+        return { operation: input.operation, transferId };
+    }
+    if (input.operation !== "start") {
+        throw invalidArguments("artifact_transfer operation must be start, status, or cancel.");
+    }
+    const handle = optionalString(input.handle, "handle");
+    const sourcePath = optionalString(input.sourcePath, "sourcePath");
+    if ((handle === undefined) === (sourcePath === undefined)) {
+        throw invalidArguments("artifact_transfer start requires exactly one of handle or sourcePath.");
+    }
+    const instance = optionalString(input.instance, "instance");
+    const targetInstance = requiredString(input.targetInstance, "targetInstance");
+    const targetPath = requiredString(input.targetPath, "targetPath");
+    if (input.overwrite !== undefined && typeof input.overwrite !== "boolean") {
+        throw invalidArguments("overwrite must be a boolean.");
+    }
+    const common = {
+        ...(instance === undefined ? {} : { instance }),
+        operation: "start" as const,
+        overwrite: input.overwrite === true,
+        targetInstance,
+        targetPath
+    };
+    if (handle !== undefined) {
+        return { ...common, handle };
+    }
+    if (sourcePath === undefined) {
+        throw invalidArguments("artifact_transfer start requires sourcePath when handle is omitted.");
+    }
+    return { ...common, sourcePath };
 }
 
 function assertNoArguments(input: JsonValue, toolName: string): void {
