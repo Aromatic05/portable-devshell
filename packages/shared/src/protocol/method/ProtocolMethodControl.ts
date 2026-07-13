@@ -1,4 +1,11 @@
 export const controlMethods = {
+    controlArtifactCancelTransfer: "control.artifact.cancelTransfer",
+    controlArtifactCreateShare: "control.artifact.createShare",
+    controlArtifactGetTransfer: "control.artifact.getTransfer",
+    controlArtifactListShares: "control.artifact.listShares",
+    controlArtifactListTransfers: "control.artifact.listTransfers",
+    controlArtifactRevokeShare: "control.artifact.revokeShare",
+    controlArtifactStartTransfer: "control.artifact.startTransfer",
     controlApplyConfig: "control.applyConfig",
     controlCreateInstance: "control.createInstance",
     controlCreateReverseDeviceCode: "control.createReverseDeviceCode",
