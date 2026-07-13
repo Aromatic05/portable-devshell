@@ -40,7 +40,7 @@ function SidebarSection(props: { items: SidebarModel["pages"] }) {
     return (
         <Box flexDirection="column">
             {props.items.map((item, index) => (
-                <Text backgroundColor={item.focused ? "cyan" : undefined} bold={item.selected} color={item.selected ? "green" : item.focused ? "black" : undefined} key={`${item.id}-${index}`}>
+                <Text bold={item.selected} inverse={item.focused} key={`${item.id}-${index}`}>
                     {item.label}
                 </Text>
             ))}

@@ -24,7 +24,7 @@ export function buildConfigPageBoxes(state: TuiAppState, instanceName: string): 
                 ...editorErrorLine(state, "config", "configuration", ["enabled", "provider", "workspace"])
             ],
             id: "configuration",
-            status: instance?.enabled === false ? "disabled" : "normal",
+            status: configStatus(state, ["enabled", "provider", "workspace"], instance?.enabled === false ? "disabled" : "normal"),
             summaryLines: [
                 compactSummary(
                     ["provider", stringValue(readPath(draft, "provider"), "unknown")],
@@ -39,6 +39,7 @@ export function buildConfigPageBoxes(state: TuiAppState, instanceName: string): 
                 ...editorErrorLine(state, "config", "provider", ["provider", "ssh", "container", "dockerBinary", "podmanBinary"])
             ],
             id: "provider",
+            status: configStatus(state, ["provider", "ssh", "container", "dockerBinary", "podmanBinary"], "normal"),
             summaryLines: [compactSummary(["provider", stringValue(readPath(draft, "provider"), "unknown")])],
             title: "Provider"
         }),
@@ -51,6 +52,7 @@ export function buildConfigPageBoxes(state: TuiAppState, instanceName: string): 
                 ...editorErrorLine(state, "config", "mcp-tools", ["mcp", "groups", "capabilities"])
             ],
             id: "mcp-tools",
+            status: configStatus(state, ["mcp", "groups", "capabilities"], "normal"),
             summaryLines: [
                 compactSummary(
                     ["enabled", stringValue(readPath(draft, "mcp.enabled"), "false")],
@@ -67,6 +69,7 @@ export function buildConfigPageBoxes(state: TuiAppState, instanceName: string): 
                 ...editorErrorLine(state, "config", "security", ["security", "approvalPolicy"])
             ],
             id: "security",
+            status: configStatus(state, ["security", "approvalPolicy"], "normal"),
             summaryLines: [
                 compactSummary(
                     ["security", stringValue(readPath(draft, "security.mode"), "disabled")],
@@ -86,6 +89,7 @@ export function buildConfigPageBoxes(state: TuiAppState, instanceName: string): 
                 ...editorErrorLine(state, "config", "tool-runtime", ["tools", "fileEdit"])
             ],
             id: "tool-runtime",
+            status: configStatus(state, ["tools", "fileEdit"], "normal"),
             summaryLines: [compactSummary(["fileEdit", stringValue(readPath(draft, "tools.fileEdit.mode"), "text")])],
             title: "Tool Runtime"
         }),
@@ -96,6 +100,7 @@ export function buildConfigPageBoxes(state: TuiAppState, instanceName: string): 
                 ...editorErrorLine(state, "config", "logs", ["logs"])
             ],
             id: "logs",
+            status: configStatus(state, ["logs"], "normal"),
             summaryLines: [
                 compactSummary(
                     ["retention", stringValue(readPath(draft, "logs.retentionDays"), "default")],
@@ -108,7 +113,9 @@ export function buildConfigPageBoxes(state: TuiAppState, instanceName: string): 
             detailLines: [
                 `Apply mode          ${restartRequired ? "restart required" : "hot apply"}`,
                 ...(restartRequired && running ? ["Save Only is unavailable until the instance is stopped."] : []),
-                ...(dirty ? ["", "Pending changes", ...changes] : ["", "No pending changes."]),
+                ...(dirty
+                    ? ["", { id: "pending-changes", text: "Pending changes", tone: "warning" as const }, ...changes.map((change, index) => ({ id: `pending-change:${index}`, text: change, tone: "warning" as const }))]
+                    : ["", { id: "no-pending-changes", text: "No pending changes. Hot apply is available.", tone: "success" as const }]),
                 "",
                 "Actions",
                 buttonLine("reload", "Reload"),
@@ -118,11 +125,16 @@ export function buildConfigPageBoxes(state: TuiAppState, instanceName: string): 
                 buttonLine("delete", "Delete")
             ],
             id: "configuration-actions",
-            status: dirty ? "warning" : "normal",
+            status: dirty ? "warning" : restartRequired ? "warning" : "ready",
             summaryLines: [compactSummary(["apply", restartRequired ? "restart" : "hot"])],
             title: `Actions${unsaved}`
         })
     ];
+}
+
+function configStatus(state: TuiAppState, fields: readonly string[], fallback: "disabled" | "normal"): "disabled" | "failed" | "normal" {
+    const error = state.interaction.editor?.kind === "config" ? state.interaction.editor.error : undefined;
+    return error !== undefined && fields.some((field) => error.includes(field)) ? "failed" : fallback;
 }
 
 function draftDiff(previous: Record<string, JsonValue>, next: Record<string, JsonValue>): string[] {
