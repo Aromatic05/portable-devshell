@@ -176,14 +176,14 @@ impl TmuxBackend {
             "-t".into(),
             TMUX_SESSION.into(),
             "-F".into(),
-            "#{pane_id}\t#{@devshell_worker_pane_id}\t#{@devshell_worker_pane_name}\t#{@devshell_worker_pane_incarnation_id}\t#{@devshell_worker_created_at}\t#{pane_active}\t#{pane_current_path}\t#{pane_current_command}".into(),
+            "#{pane_id}|#{@devshell_worker_pane_id}|#{@devshell_worker_pane_name}|#{@devshell_worker_pane_incarnation_id}|#{@devshell_worker_created_at}|#{pane_active}".into(),
         ])?;
         let mut panes = Vec::new();
         let mut total_panes = 0;
         let mut foreign_panes = 0;
         for line in raw.lines().filter(|line| !line.trim().is_empty()) {
             total_panes += 1;
-            let fields = line.split('\t').collect::<Vec<_>>();
+            let fields = line.split('|').collect::<Vec<_>>();
             let Some(tmux_pane_id) = fields.first().copied() else {
                 continue;
             };
@@ -211,8 +211,8 @@ impl TmuxBackend {
                 pane_incarnation_id: pane_incarnation_id.to_string(),
                 created_at_ms,
                 active: fields.get(5).copied() == Some("1"),
-                cwd: fields.get(6).copied().unwrap_or_default().to_string(),
-                command: fields.get(7).copied().unwrap_or_default().to_string(),
+                cwd: self.read_pane_format(tmux_pane_id, "#{pane_current_path}")?,
+                command: self.read_pane_format(tmux_pane_id, "#{pane_current_command}")?,
                 lines,
                 status: status.as_ref().map(status_text),
                 status_seq: status.map(|record| record.seq),
@@ -224,6 +224,23 @@ impl TmuxBackend {
             total_panes,
             foreign_panes,
         })
+    }
+
+    fn read_pane_format(&self, tmux_pane_id: &str, format: &str) -> Result<String, ToolError> {
+        let mut value = self.run(&[
+            "display-message".into(),
+            "-p".into(),
+            "-t".into(),
+            tmux_pane_id.into(),
+            format.into(),
+        ])?;
+        if value.ends_with('\n') {
+            value.pop();
+            if value.ends_with('\r') {
+                value.pop();
+            }
+        }
+        Ok(value)
     }
 
     pub fn capture_lines(
@@ -300,10 +317,7 @@ impl TmuxBackend {
             "-c".to_string(),
             cwd.to_string_lossy().to_string(),
         ];
-        if let Some(size) = size_percent {
-            args.push("-p".to_string());
-            args.push(size.to_string());
-        }
+        append_split_size(&mut args, size_percent);
         args.push(launch.command);
         let tmux_pane_id = self.run(&args)?.trim().to_string();
         if tmux_pane_id.is_empty() {
@@ -625,6 +639,13 @@ pub fn validate_pane_name(name: &str) -> Result<(), ToolError> {
     Ok(())
 }
 
+fn append_split_size(args: &mut Vec<String>, size_percent: Option<u8>) {
+    if let Some(size) = size_percent {
+        args.push("-l".to_string());
+        args.push(format!("{size}%"));
+    }
+}
+
 fn session_exists(socket: &Path) -> bool {
     socket.exists()
         && Command::new("tmux")
@@ -690,4 +711,16 @@ fn atomic_write_json<T: Serialize>(path: &Path, value: &T) -> Result<(), ToolErr
 
 fn storage_error(error: std::io::Error) -> ToolError {
     ToolError::new("tmux.storageFailed", error.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::append_split_size;
+
+    #[test]
+    fn split_size_uses_tmux_length_percentage_syntax() {
+        let mut args = Vec::new();
+        append_split_size(&mut args, Some(40));
+        assert_eq!(args, ["-l", "40%"]);
+    }
 }
