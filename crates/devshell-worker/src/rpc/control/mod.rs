@@ -16,6 +16,7 @@ use crate::rpc::router::{ActiveToolCallRegistry, ControlHandler};
 use crate::security::SecurityPolicy;
 use crate::tools::ToolRegistry;
 use crate::tools::artifact::payload::ArtifactPayloadStore;
+use crate::tools::artifact::receive::ArtifactReceiveStore;
 
 pub fn register_control_handlers(
     handlers: &mut HashMap<String, Arc<dyn ControlHandler>>,
@@ -27,7 +28,32 @@ pub fn register_control_handlers(
     tools: Arc<ToolRegistry>,
     policy: Arc<dyn SecurityPolicy>,
     payloads: Arc<ArtifactPayloadStore>,
+    receives: Arc<ArtifactReceiveStore>,
 ) {
+    handlers.insert(
+        "artifact.receive.begin".to_string(),
+        Arc::new(artifact_payload::ArtifactReceiveBeginHandler::new(
+            Arc::clone(&receives),
+            Arc::clone(&policy),
+            std::path::PathBuf::from(&runtime.workspace),
+        )),
+    );
+    handlers.insert(
+        "artifact.receive.write".to_string(),
+        Arc::new(artifact_payload::ArtifactReceiveWriteHandler::new(
+            Arc::clone(&receives),
+        )),
+    );
+    handlers.insert(
+        "artifact.receive.finish".to_string(),
+        Arc::new(artifact_payload::ArtifactReceiveFinishHandler::new(
+            Arc::clone(&receives),
+        )),
+    );
+    handlers.insert(
+        "artifact.receive.abort".to_string(),
+        Arc::new(artifact_payload::ArtifactReceiveAbortHandler::new(receives)),
+    );
     handlers.insert(
         "artifact.payload.open".to_string(),
         Arc::new(artifact_payload::ArtifactPayloadOpenHandler::new(

@@ -329,6 +329,7 @@ dependencies = [
  "blake3",
  "clap",
  "diffy",
+ "filetime",
  "globset",
  "ignore",
  "lru",

@@ -729,6 +729,10 @@ fn internal_artifact_payload_rpc_is_persistent_and_not_listed_as_a_tool() {
     assert!(!names.contains(&"artifact.payload.open"));
     assert!(!names.contains(&"artifact.payload.read"));
     assert!(!names.contains(&"artifact.payload.close"));
+    assert!(!names.contains(&"artifact.receive.begin"));
+    assert!(!names.contains(&"artifact.receive.write"));
+    assert!(!names.contains(&"artifact.receive.finish"));
+    assert!(!names.contains(&"artifact.receive.abort"));
 
     let expires_at_ms = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -767,6 +771,52 @@ fn internal_artifact_payload_rpc_is_persistent_and_not_listed_as_a_tool() {
     assert_eq!(read["ok"], true, "{read}");
     assert_eq!(read["result"]["content"], "cnBjIHBheWxvYWQ=");
     assert_eq!(read["result"]["eof"], true);
+
+    let descriptor = opened["result"]["descriptor"].clone();
+    let begun = env.rpc(
+        instance,
+        &serde_json::json!({
+            "type": "request",
+            "id": "receive-begin",
+            "method": "artifact.receive.begin",
+            "params": {
+                "descriptor": descriptor,
+                "overwrite": false,
+                "targetPath": "./received.txt"
+            }
+        }),
+    );
+    assert_eq!(begun["ok"], true, "{begun}");
+    let receive_id = begun["result"]["receiveId"].as_str().unwrap();
+    let written = env.rpc(
+        instance,
+        &serde_json::json!({
+            "type": "request",
+            "id": "receive-write",
+            "method": "artifact.receive.write",
+            "params": {
+                "receiveId": receive_id,
+                "offsetBytes": 0,
+                "content": read["result"]["content"]
+            }
+        }),
+    );
+    assert_eq!(written["ok"], true, "{written}");
+    assert_eq!(written["result"]["nextOffsetBytes"], 11);
+    let finished = env.rpc(
+        instance,
+        &serde_json::json!({
+            "type": "request",
+            "id": "receive-finish",
+            "method": "artifact.receive.finish",
+            "params": { "receiveId": receive_id }
+        }),
+    );
+    assert_eq!(finished["ok"], true, "{finished}");
+    assert_eq!(
+        fs::read(env.workspace().join("received.txt")).unwrap(),
+        b"rpc payload"
+    );
 
     let closed = env.rpc(
         instance,

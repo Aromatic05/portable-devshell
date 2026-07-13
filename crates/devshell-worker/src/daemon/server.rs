@@ -17,6 +17,7 @@ use crate::socket::SocketPaths;
 use crate::storage::InstancePaths;
 use crate::storage::permissions::{ensure_dir, ensure_file_mode};
 use crate::tools::artifact::payload::ArtifactPayloadStore;
+use crate::tools::artifact::receive::ArtifactReceiveStore;
 use crate::tools::artifact::store::ArtifactStore;
 use crate::tools::builtin_registry;
 
@@ -64,6 +65,8 @@ pub fn serve(instance: InstanceName) -> Result<(), String> {
         Arc::clone(&artifacts),
     )
     .map_err(|error| error.message)?;
+    let receives = ArtifactReceiveStore::new(instance_paths.artifacts_dir.join("receives"))
+        .map_err(|error| error.message)?;
     let tools = Arc::new(
         builtin_registry(
             &instance_paths,
@@ -74,7 +77,13 @@ pub fn serve(instance: InstanceName) -> Result<(), String> {
         )
         .map_err(|error| error.message)?,
     );
-    let router = Arc::new(RpcRouter::new(config.clone(), runtime, tools, payloads));
+    let router = Arc::new(RpcRouter::new(
+        config.clone(),
+        runtime,
+        tools,
+        payloads,
+        receives,
+    ));
     let _reverse_connector = config.reverse.clone().map(|reverse| {
         ReverseConnector::new(
             instance.clone(),

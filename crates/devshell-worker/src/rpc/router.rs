@@ -13,6 +13,7 @@ use crate::rpc::request::RpcRequest;
 use crate::rpc::response::RpcResponse;
 use crate::security::{SecurityPolicy, build_security_policy};
 use crate::tools::artifact::payload::ArtifactPayloadStore;
+use crate::tools::artifact::receive::ArtifactReceiveStore;
 use crate::tools::{ToolCall, ToolName, ToolRegistry};
 
 const MAX_CONCURRENT_TOOL_CALLS: usize = 8;
@@ -33,6 +34,7 @@ impl RpcRouter {
         runtime: WorkerRuntimeContext,
         tools: Arc<ToolRegistry>,
         payloads: Arc<ArtifactPayloadStore>,
+        receives: Arc<ArtifactReceiveStore>,
     ) -> Self {
         let active_processes = Arc::new(ActiveProcessRegistry::new());
         let active_tool_calls = Arc::new(ActiveToolCallRegistry::new());
@@ -49,6 +51,7 @@ impl RpcRouter {
             Arc::clone(&tools),
             Arc::clone(&policy),
             payloads,
+            receives,
         );
 
         Self {
