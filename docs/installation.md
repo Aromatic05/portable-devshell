@@ -33,7 +33,7 @@ sh install-release.sh
 安装指定版本：
 
 ```bash
-PORTABLE_DEVSHELL_VERSION=0.3.0 sh install-release.sh
+PORTABLE_DEVSHELL_VERSION=0.4.0 sh install-release.sh
 ```
 
 安装其他仓库的构建：
@@ -45,7 +45,7 @@ PORTABLE_DEVSHELL_RELEASE_REPOSITORY=owner/repository sh install-release.sh
 使用镜像或自建 Release 资产目录：
 
 ```bash
-PORTABLE_DEVSHELL_RELEASE_BASE_URL=https://mirror.example.com/portable-devshell/v0.3.0 sh install-release.sh
+PORTABLE_DEVSHELL_RELEASE_BASE_URL=https://mirror.example.com/portable-devshell/v0.4.0 sh install-release.sh
 ```
 
 ## 从源码安装
