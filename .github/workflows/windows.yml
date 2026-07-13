@@ -61,9 +61,11 @@ jobs:
               run: node ./scripts/build-worker.mjs --target windows-x64 --output-dir ./release-assets
 
             - name: Windows worker daemon 与 PowerShell smoke
+              timeout-minutes: 3
               run: node ./scripts/smoke-worker.mjs ./release-assets/devshell-worker-windows-x64.exe
 
             - name: Windows control、CLI 与 local instance smoke
+              timeout-minutes: 3
               run: node ./scripts/smoke-client.mjs ./release-assets/devshell-worker-windows-x64.exe
 
     windows-arm64:
@@ -74,6 +76,7 @@ jobs:
             - uses: actions/setup-node@v5
               with:
                   node-version: 24
+                  package-manager-cache: false
 
             - name: 安装 Rust 工具链
               run: |

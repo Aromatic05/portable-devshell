@@ -18,7 +18,9 @@ delete env.DEVSHELL_WORKER_INTERNAL_SECURITY_MODE;
 await mkdir(workspace, { recursive: true });
 
 try {
+    stage("start worker");
     runWorker(["start", "--instance", instance]);
+    stage("open rpc bridge");
     const bridge = spawn(worker, ["rpc", "--instance", instance], {
         cwd: workspace,
         env,
@@ -26,12 +28,14 @@ try {
     });
     const rpc = createRpcClient(bridge);
     try {
+        stage("worker.handshake");
         const handshake = await rpc.request("worker.handshake", {
             clientName: "portable-devshell-smoke",
             clientVersion: "0.0.0",
             maxProtocolVersion: 2,
             minProtocolVersion: 2
         });
+        stage("tools.list");
         const tools = await rpc.request("tools.list", {});
         const names = tools.tools.map((tool) => tool.name);
         if (!names.includes("bash_run")) throw new Error("bash_run is missing from tools.list");
@@ -48,6 +52,7 @@ try {
             }
         }
 
+        stage("file_write");
         const written = await rpc.request("file_write", {
             content: "portable-devshell-file-smoke\n",
             path: "./portable-devshell-smoke.txt"
@@ -55,11 +60,13 @@ try {
         if (typeof written.revision !== "string" || written.revision.length === 0) {
             throw new Error(`file_write smoke failed: ${JSON.stringify(written)}`);
         }
+        stage("file_read");
         const read = await rpc.request("file_read", { path: "./portable-devshell-smoke.txt" });
         if (typeof read.content !== "string" || !read.content.includes("portable-devshell-file-smoke")) {
             throw new Error(`file_read smoke failed: ${JSON.stringify(read)}`);
         }
 
+        stage("bash_run");
         const command =
             handshake.platform.os === "windows"
                 ? "Write-Output 'portable-devshell-smoke'"
@@ -73,6 +80,7 @@ try {
             throw new Error(`bash_run smoke failed: ${JSON.stringify(result)}`);
         }
     } finally {
+        stage("close rpc bridge");
         bridge.stdin.end();
         await Promise.race([
             new Promise((done) => bridge.once("exit", done)),
@@ -81,20 +89,37 @@ try {
         if (bridge.exitCode === null) bridge.kill();
     }
 
+    stage("stop worker");
     runWorker(["stop", "--instance", instance]);
     process.stdout.write("worker smoke passed\n");
 } finally {
-    spawnSync(worker, ["stop", "--instance", instance], { cwd: workspace, env, stdio: "ignore" });
+    spawnSync(worker, ["stop", "--instance", instance], {
+        cwd: workspace,
+        env,
+        stdio: "ignore",
+        timeout: 10_000,
+        windowsHide: true
+    });
     await rm(root, { force: true, recursive: true });
 }
 
 function runWorker(args) {
-    const result = spawnSync(worker, args, { cwd: workspace, env, encoding: "utf8" });
-    if (result.status !== 0) {
+    const result = spawnSync(worker, args, {
+        cwd: workspace,
+        env,
+        encoding: "utf8",
+        timeout: 30_000,
+        windowsHide: true
+    });
+    if (result.error !== undefined || result.status !== 0) {
         throw new Error(
-            `${worker} ${args.join(" ")} failed (${result.status ?? "unknown"})\n${result.stdout ?? ""}${result.stderr ?? ""}`
+            `${worker} ${args.join(" ")} failed (${result.status ?? "unknown"})\n${result.error?.stack ?? ""}\n${result.stdout ?? ""}${result.stderr ?? ""}`
         );
     }
+}
+
+function stage(message) {
+    process.stdout.write(`[smoke-worker] ${message}\n`);
 }
 
 function createRpcClient(child) {

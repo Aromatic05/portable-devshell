@@ -90,22 +90,27 @@ await writeFile(
 let controlStarted = false;
 let instanceStarted = false;
 try {
+    stage("start control");
     runCli(["start"]);
     controlStarted = true;
 
+    stage("control status");
     const status = runCli(["status"]);
     if (!status.stdout.includes("control: running")) {
         throw new Error(`control status did not report running:\n${status.stdout}${status.stderr}`);
     }
 
+    stage("start instance");
     runCli(["instance", "start", instance]);
     instanceStarted = true;
 
+    stage("instance status");
     const instanceStatus = runCli(["instance", "status", instance]);
     if (!instanceStatus.stdout.includes("ready: true")) {
         throw new Error(`instance status did not report ready:\n${instanceStatus.stdout}${instanceStatus.stderr}`);
     }
 
+    stage("bash_run through client");
     const command =
         process.platform === "win32"
             ? "Write-Output 'portable-devshell-client-smoke'"
@@ -115,16 +120,20 @@ try {
         throw new Error(`client tool call did not return expected output:\n${call.stdout}${call.stderr}`);
     }
 
+    stage("stop instance");
     runCli(["instance", "stop", instance]);
     instanceStarted = false;
+    stage("stop control");
     runCli(["stop"]);
     controlStarted = false;
     process.stdout.write("client smoke passed\n");
 } finally {
     if (instanceStarted) {
+        stage("cleanup instance");
         runCli(["instance", "stop", instance], true);
     }
     if (controlStarted) {
+        stage("cleanup control");
         runCli(["stop"], true);
     }
     await rm(root, { force: true, recursive: true });
@@ -134,11 +143,13 @@ function runCli(args, ignoreFailure = false) {
     const result = spawnSync(process.execPath, [cli, ...args], {
         cwd: workspace,
         encoding: "utf8",
-        env
+        env,
+        timeout: 45_000,
+        windowsHide: true
     });
-    if (!ignoreFailure && result.status !== 0) {
+    if (!ignoreFailure && (result.error !== undefined || result.status !== 0)) {
         throw new Error(
-            `devshell ${args.join(" ")} failed (${result.status ?? "unknown"})\n${result.stdout ?? ""}${result.stderr ?? ""}`
+            `devshell ${args.join(" ")} failed (${result.status ?? "unknown"})\n${result.error?.stack ?? ""}\n${result.stdout ?? ""}${result.stderr ?? ""}`
         );
     }
     return {
@@ -146,6 +157,10 @@ function runCli(args, ignoreFailure = false) {
         stderr: result.stderr ?? "",
         stdout: result.stdout ?? ""
     };
+}
+
+function stage(message) {
+    process.stdout.write(`[smoke-client] ${message}\n`);
 }
 
 function resolveTargetKey(platform, architecture) {
