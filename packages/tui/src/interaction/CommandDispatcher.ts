@@ -546,10 +546,6 @@ export class CommandDispatcher {
             if (state.ui.selectedPage === "audit" && state.ui.selectedInstance !== undefined && approvalId !== undefined) {
                 return await this.dispatch({ approvalId, instance: state.ui.selectedInstance, type: "approval.open" });
             }
-            const callId = focused?.kind === "box" ? this.#auditCallIdFromBox(focused.id) : undefined;
-            if (state.ui.selectedPage === "audit" && state.ui.selectedInstance !== undefined && callId !== undefined) {
-                return this.#openAuditInput(state.ui.selectedInstance, callId);
-            }
             return await this.dispatch({ type: "screen.toggle" });
         }
         if (scope === "boxDetail") {
@@ -640,6 +636,11 @@ export class CommandDispatcher {
 
             if (state.ui.selectedPage === "audit" && state.ui.selectedInstance !== undefined && actionId?.startsWith("approval.open:")) {
                 return await this.dispatch({ approvalId: actionId.slice("approval.open:".length), instance: state.ui.selectedInstance, type: "approval.open" });
+            }
+
+            const callId = boxId === undefined ? undefined : this.#auditCallIdFromBox(boxId);
+            if (state.ui.selectedPage === "audit" && state.ui.selectedInstance !== undefined && callId !== undefined && selectedLine?.text.startsWith("input ") === true) {
+                return await this.#openAuditInput(state.ui.selectedInstance, callId);
             }
 
             if (button === "clear-filter" && (state.ui.selectedPage === "instances" || state.ui.selectedPage === "todo" || state.ui.selectedPage === "config" || state.ui.selectedPage === "audit")) {
