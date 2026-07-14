@@ -90,8 +90,9 @@ file_edit
 file_find
 file_search
 file_info
-tmux_send
-tmux_capture
+tmux_run
+tmux_input
+tmux_read
 tmux_inspect
 tmux_list
 tmux_create
