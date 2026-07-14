@@ -69,7 +69,7 @@ capabilities = ["read", "write", "execute"]
 | Group      | 主要工具                                                                                 | 常见 capability   |
 | ---------- | ---------------------------------------------------------------------------------------- | ----------------- |
 | `bash`     | `bash_run`                                                                               | `execute`         |
-| `file`     | `file_read`、`file_edit`、`file_write`、`file_find`、`file_search`、`file_info`          | `read`、`write`   |
+| `file`     | `file_read`、`file_edit`、`file_find`、`file_search`、`file_info`          | `read`、`write`   |
 | `artifact` | `artifact_read`、`artifact_share`、`artifact_transfer`                                   | `read`、`write`   |
 | `tmux`     | `tmux_send`、`tmux_capture`、`tmux_inspect`、`tmux_list`、`tmux_create`、`tmux_close`    | `read`、`execute` |
 | `todo`     | `todo_read`、`todo_write`                                                                | 无硬性 capability |

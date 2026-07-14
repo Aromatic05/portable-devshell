@@ -87,7 +87,6 @@ bash_run
 artifact_read
 file_read
 file_edit
-file_write
 file_find
 file_search
 file_info

@@ -17,6 +17,7 @@
 
 ## 工具与协议
 
+- [file-tools.md](file-tools.md)：文件读取视图、隐式快照和有序 change set 编辑。
 - [tmux.md](tmux.md)：长任务、交互式进程和多 pane 工作流。
 - [artifacts.md](artifacts.md)：Artifact 读取、分享和跨实例传输。
 - [todo.md](todo.md)：Agent Todo 状态、revision 和事件。
