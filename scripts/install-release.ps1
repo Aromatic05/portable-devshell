@@ -28,6 +28,64 @@ function Assert-Sha256([string]$File, [string]$ShaFile) {
     if ($actual -ne $expected) { throw "SHA-256 校验失败：$File" }
 }
 
+function Test-ControlProcessRunning([int]$ControlProcessId) {
+    return $null -ne (Get-Process -Id $ControlProcessId -ErrorAction SilentlyContinue)
+}
+
+function Wait-ControlProcessExit([int]$ControlProcessId, [int]$TimeoutMilliseconds) {
+    $deadline = [DateTime]::UtcNow.AddMilliseconds($TimeoutMilliseconds)
+    while ([DateTime]::UtcNow -lt $deadline) {
+        if (-not (Test-ControlProcessRunning $ControlProcessId)) { return $true }
+        Start-Sleep -Milliseconds 100
+    }
+    return -not (Test-ControlProcessRunning $ControlProcessId)
+}
+
+function Stop-InstalledControl([string]$CurrentCli, [string]$DevshellHome) {
+    $pidFile = Join-Path $DevshellHome "control\control.pid"
+    if (Test-Path -LiteralPath $CurrentCli) {
+        & node $CurrentCli stop *> $null
+        if ($LASTEXITCODE -eq 0 -and -not (Test-Path -LiteralPath $pidFile)) { return }
+        Write-Warning "当前 CLI 未能完整停止 control，尝试使用经过验证的 PID 恢复。"
+    }
+
+    if (-not (Test-Path -LiteralPath $pidFile)) { return }
+
+    $pidSource = (Get-Content -Raw -LiteralPath $pidFile).Trim()
+    $controlProcessId = 0
+    if (-not [int]::TryParse($pidSource, [ref]$controlProcessId) -or $controlProcessId -le 0) {
+        throw "control PID 文件无效：$pidFile"
+    }
+
+    if (-not (Test-ControlProcessRunning $controlProcessId)) {
+        Remove-Item -Force -ErrorAction SilentlyContinue -LiteralPath $pidFile
+        return
+    }
+
+    $processInfo = Get-CimInstance Win32_Process -Filter "ProcessId = $controlProcessId" -ErrorAction SilentlyContinue
+    $commandLine = if ($null -eq $processInfo) { "" } else { [string]$processInfo.CommandLine }
+    if (-not $commandLine.Contains("ControlDaemon.js") -or -not $commandLine.ToLowerInvariant().Contains("portable-devshell")) {
+        throw "拒绝终止 PID ${controlProcessId}：PID 文件指向的进程不是可验证的 portable-devshell ControlDaemon.js。"
+    }
+
+    try {
+        Stop-Process -Id $controlProcessId -ErrorAction Stop
+    } catch {
+        if (Test-ControlProcessRunning $controlProcessId) { throw }
+    }
+    if (-not (Wait-ControlProcessExit $controlProcessId 5000)) {
+        try {
+            Stop-Process -Id $controlProcessId -Force -ErrorAction Stop
+        } catch {
+            if (Test-ControlProcessRunning $controlProcessId) { throw }
+        }
+        if (-not (Wait-ControlProcessExit $controlProcessId 2000)) {
+            throw "经过验证的 control PID $controlProcessId 无法终止。"
+        }
+    }
+    Remove-Item -Force -ErrorAction SilentlyContinue -LiteralPath $pidFile
+}
+
 function Get-WorkerAssetName([string]$Target) {
     if ($Target.StartsWith("windows-")) { return "devshell-worker-$Target.exe" }
     return "devshell-worker-$Target"
@@ -103,10 +161,7 @@ try {
     Copy-Item -Recurse -Force -LiteralPath $appDirectory -Destination $stagingDirectory
 
     $currentCli = Join-Path $currentDirectory "dist\cli\CliMain.js"
-    if (Test-Path -LiteralPath $currentCli) {
-        & node $currentCli stop *> $null
-        if ($LASTEXITCODE -ne 0) { throw "无法停止当前 control daemon，安装已取消。" }
-    }
+    Stop-InstalledControl $currentCli $devshellHome
 
     foreach ($target in $targets) { Install-Worker $target $temporary $devshellHome }
     $hostAsset = Get-WorkerAssetName $hostTarget

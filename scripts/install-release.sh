@@ -41,6 +41,95 @@ verify_sha256() {
     fi
 }
 
+cleanup_control_runtime() {
+    pid_file=$1
+    rm -f "$pid_file"
+    if [ -n "${XDG_RUNTIME_DIR:-}" ]; then
+        runtime_directory="$XDG_RUNTIME_DIR/portable-devshell"
+    else
+        runtime_identity=$(node -p 'typeof process.getuid === "function" ? process.getuid() : (process.env.USER || process.env.USERNAME || "user")')
+        runtime_directory="${TMPDIR:-/tmp}/portable-devshell-$runtime_identity"
+    fi
+    rm -f "$runtime_directory/control.sock"
+}
+
+control_process_running() {
+    kill -0 "$1" >/dev/null 2>&1
+}
+
+wait_for_control_exit() {
+    pid=$1
+    remaining=$2
+    while [ "$remaining" -gt 0 ]; do
+        if ! control_process_running "$pid"; then
+            return 0
+        fi
+        sleep 1
+        remaining=$((remaining - 1))
+    done
+    ! control_process_running "$pid"
+}
+
+stop_installed_control() {
+    current_cli=$1
+    pid_file="$devshell_home/control/control.pid"
+
+    if [ -f "$current_cli" ]; then
+        if node "$current_cli" stop >/dev/null 2>&1 && [ ! -f "$pid_file" ]; then
+            return 0
+        fi
+        echo "当前 CLI 未能完整停止 control，尝试使用经过验证的 PID 恢复。" >&2
+    fi
+
+    if [ ! -f "$pid_file" ]; then
+        return 0
+    fi
+
+    IFS= read -r control_pid < "$pid_file" || control_pid=
+    case "$control_pid" in
+        ''|*[!0-9]*) echo "control PID 文件无效：$pid_file" >&2; return 1 ;;
+    esac
+    if [ "$control_pid" -le 0 ]; then
+        echo "control PID 文件无效：$pid_file" >&2
+        return 1
+    fi
+
+    if ! control_process_running "$control_pid"; then
+        cleanup_control_runtime "$pid_file"
+        return 0
+    fi
+
+    command_line=$(ps -p "$control_pid" -o command= 2>/dev/null || true)
+    case "$command_line" in
+        *ControlDaemon.js*) ;;
+        *) echo "拒绝终止 PID $control_pid：PID 文件指向的进程不是可验证的 ControlDaemon.js。" >&2; return 1 ;;
+    esac
+    case "$command_line" in
+        *portable-devshell*) ;;
+        *) echo "拒绝终止 PID $control_pid：进程命令行不属于 portable-devshell。" >&2; return 1 ;;
+    esac
+
+    if ! kill -TERM "$control_pid" 2>/dev/null; then
+        if ! control_process_running "$control_pid"; then
+            cleanup_control_runtime "$pid_file"
+            return 0
+        fi
+        echo "无法向经过验证的 control PID $control_pid 发送终止信号。" >&2
+        return 1
+    fi
+    if ! wait_for_control_exit "$control_pid" 5; then
+        if ! kill -KILL "$control_pid" 2>/dev/null && control_process_running "$control_pid"; then
+            echo "无法强制终止经过验证的 control PID $control_pid。" >&2
+            return 1
+        fi
+        if ! wait_for_control_exit "$control_pid" 2; then
+            echo "经过验证的 control PID $control_pid 无法终止。" >&2
+            return 1
+        fi
+    fi
+    cleanup_control_runtime "$pid_file"
+}
+
 install_worker() {
     target=$1
     case "$target" in
@@ -142,11 +231,9 @@ mkdir -p -m 700 "$install_root" "$versions_directory" "$worker_bin_directory" "$
 cp -R "$temporary/app/." "$staging_directory/"
 chmod 755 "$staging_directory/dist/cli/CliMain.js"
 
-if [ -x "$current_link/dist/cli/CliMain.js" ]; then
-    if ! "$current_link/dist/cli/CliMain.js" stop >/dev/null 2>&1; then
-        echo "无法停止当前 control daemon，安装已取消。" >&2
-        exit 1
-    fi
+if ! stop_installed_control "$current_link/dist/cli/CliMain.js"; then
+    echo "无法安全停止当前 control daemon，安装已取消。" >&2
+    exit 1
 fi
 
 for target in $targets; do

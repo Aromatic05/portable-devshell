@@ -1,8 +1,8 @@
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { chmod, copyFile, lstat, mkdir, readFile, rename, rm, symlink, writeFile } from "node:fs/promises";
-import { homedir } from "node:os";
-import { delimiter, resolve } from "node:path";
+import { homedir, tmpdir } from "node:os";
+import { delimiter, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 
@@ -222,18 +222,118 @@ async function activateApplication(versionDirectory) {
 
 async function stopInstalledControl() {
     const currentCli = resolve(currentLink, "dist", "cli", "CliMain.js");
-    if (!(await pathExists(currentCli))) {
+    const pidFile = resolve(devshellHome, "control", "control.pid");
+    if (await pathExists(currentCli)) {
+        const result = spawnSync(process.execPath, [currentCli, "stop"], {
+            cwd: home,
+            encoding: "utf8",
+            env: process.env
+        });
+        if (result.status === 0 && !(await pathExists(pidFile))) {
+            return;
+        }
+        process.stderr.write(
+            `Installed CLI did not fully stop control; attempting verified PID recovery.\n${result.stderr || result.stdout || ""}`
+        );
+    }
+
+    if (!(await pathExists(pidFile))) {
         return;
     }
 
-    const result = spawnSync(process.execPath, [currentCli, "stop"], {
-        cwd: home,
-        encoding: "utf8",
-        env: process.env
-    });
-    if (result.status !== 0) {
-        throw new Error(`Failed to stop the installed control before activation.\n${result.stderr || result.stdout}`);
+    const pidSource = (await readFile(pidFile, "utf8")).trim();
+    const pid = Number.parseInt(pidSource, 10);
+    if (!/^[1-9][0-9]*$/u.test(pidSource) || !Number.isSafeInteger(pid)) {
+        throw new Error(`Cannot recover control shutdown because ${pidFile} contains an invalid PID.`);
     }
+
+    if (!isProcessRunning(pid)) {
+        await cleanupControlRuntime(pidFile);
+        return;
+    }
+
+    const commandLine = readProcessCommandLine(pid);
+    if (!isPortableDevshellControlCommand(commandLine)) {
+        throw new Error(
+            `Refusing to terminate PID ${pid}: the process named by ${pidFile} is not a verified portable-devshell ControlDaemon.js process.`
+        );
+    }
+
+    if (signalProcess(pid, "SIGTERM") && !(await waitForProcessExit(pid, 5_000))) {
+        if (signalProcess(pid, "SIGKILL") && !(await waitForProcessExit(pid, 2_000))) {
+            throw new Error(`Verified portable-devshell control PID ${pid} did not terminate.`);
+        }
+    }
+    await cleanupControlRuntime(pidFile);
+}
+
+function readProcessCommandLine(pid) {
+    if (process.platform === "win32") {
+        const result = spawnSync(
+            "powershell.exe",
+            [
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                `(Get-CimInstance Win32_Process -Filter 'ProcessId = ${pid}').CommandLine`
+            ],
+            { encoding: "utf8", windowsHide: true }
+        );
+        return result.status === 0 ? result.stdout.trim() : "";
+    }
+
+    const result = spawnSync("ps", ["-p", String(pid), "-o", "command="], { encoding: "utf8" });
+    return result.status === 0 ? result.stdout.trim() : "";
+}
+
+function isPortableDevshellControlCommand(commandLine) {
+    return commandLine.includes("ControlDaemon.js") && commandLine.toLowerCase().includes("portable-devshell");
+}
+
+function signalProcess(pid, signal) {
+    try {
+        process.kill(pid, signal);
+        return true;
+    } catch (error) {
+        if (error?.code === "ESRCH") {
+            return false;
+        }
+        throw error;
+    }
+}
+
+function isProcessRunning(pid) {
+    try {
+        process.kill(pid, 0);
+        return true;
+    } catch (error) {
+        if (error?.code === "ESRCH") {
+            return false;
+        }
+        throw error;
+    }
+}
+
+async function waitForProcessExit(pid, timeoutMs) {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+        if (!isProcessRunning(pid)) {
+            return true;
+        }
+        await new Promise((resolveDelay) => setTimeout(resolveDelay, 100));
+    }
+    return !isProcessRunning(pid);
+}
+
+async function cleanupControlRuntime(pidFile) {
+    await rm(pidFile, { force: true });
+    if (process.platform === "win32") {
+        return;
+    }
+    const runtimeDirectory = process.env.XDG_RUNTIME_DIR
+        ? join(process.env.XDG_RUNTIME_DIR, "portable-devshell")
+        : join(tmpdir(), `portable-devshell-${typeof process.getuid === "function" ? process.getuid() : process.env.USER ?? process.env.USERNAME ?? "user"}`);
+    await rm(join(runtimeDirectory, "control.sock"), { force: true });
 }
 
 function runPnpm(args) {
