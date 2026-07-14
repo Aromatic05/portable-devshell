@@ -53,6 +53,12 @@ interface ToolSchedulerEntry {
 
 const terminalStates = new Set<ToolSchedulerEntryState>(["completed", "failed", "cancelled", "queueTimeout"]);
 
+const urgentToolNames = new Set(["tmux_input", "tmux_inspect", "tmux_list"]);
+
+function isUrgentTool(toolName: string): boolean {
+    return urgentToolNames.has(toolName);
+}
+
 export const defaultToolSchedulerLimits: ToolSchedulerLimits = {
     byTool: {
         bash_run: {
@@ -127,13 +133,17 @@ export class ToolCallScheduler {
         const toolLimit = this.#toolLimit(request.toolName);
         const fullReasons: string[] = [];
 
-        if (snapshot.accepted >= this.#limits.maxRunning + this.#limits.queueDepth) {
+        const urgentAllowance = isUrgentTool(request.toolName) ? 1 : 0;
+        if (snapshot.accepted >= this.#limits.maxRunning + this.#limits.queueDepth + urgentAllowance) {
             fullReasons.push("instance");
         }
         if (snapshot.toolAccepted >= toolLimit.maxRunning + toolLimit.queueDepth) {
             fullReasons.push("tool");
         }
-        if (request.sessionId !== undefined && snapshot.sessionAccepted >= this.#limits.maxRunningPerSession + this.#limits.queueDepthPerSession) {
+        if (
+            request.sessionId !== undefined
+            && snapshot.sessionAccepted >= this.#limits.maxRunningPerSession + this.#limits.queueDepthPerSession + urgentAllowance
+        ) {
             fullReasons.push("session");
         }
         if (fullReasons.length === 0) {
@@ -197,7 +207,12 @@ export class ToolCallScheduler {
 
     #drain(): void {
         for (;;) {
-            const index = this.#waiting.findIndex((entry) => entry.state === "queued" && this.#canRun(entry.request));
+            let index = this.#waiting.findIndex(
+                (entry) => entry.state === "queued" && isUrgentTool(entry.request.toolName) && this.#canRun(entry.request)
+            );
+            if (index === -1) {
+                index = this.#waiting.findIndex((entry) => entry.state === "queued" && this.#canRun(entry.request));
+            }
             if (index === -1) {
                 return;
             }
@@ -290,13 +305,17 @@ export class ToolCallScheduler {
     #canRun(request: ToolSchedulerRequest): boolean {
         const snapshot = this.#snapshot(request);
         const toolLimit = this.#toolLimit(request.toolName);
-        if (snapshot.running >= this.#limits.maxRunning) {
+        const urgentAllowance = isUrgentTool(request.toolName) ? 1 : 0;
+        if (snapshot.running >= this.#limits.maxRunning + urgentAllowance) {
             return false;
         }
         if (snapshot.toolRunning >= toolLimit.maxRunning) {
             return false;
         }
-        if (request.sessionId !== undefined && snapshot.sessionRunning >= this.#limits.maxRunningPerSession) {
+        if (
+            request.sessionId !== undefined
+            && snapshot.sessionRunning >= this.#limits.maxRunningPerSession + urgentAllowance
+        ) {
             return false;
         }
         return true;

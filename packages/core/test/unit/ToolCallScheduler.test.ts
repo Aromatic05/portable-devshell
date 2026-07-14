@@ -89,3 +89,77 @@ async function waitFor(condition: () => boolean): Promise<void> {
 
     throw new Error("condition was not reached");
 }
+
+test("ToolCallScheduler admits one urgent tmux operation beyond normal instance and session limits", async () => {
+    const instanceName = asInstanceName("scheduler-urgent");
+    const scheduler = new ToolCallScheduler({
+        byTool: {},
+        maxRunning: 2,
+        maxRunningPerSession: 2,
+        queueDepth: 2,
+        queueDepthPerSession: 2,
+        queueTimeoutMs: 1_000
+    });
+    const first = createDeferred<string>();
+    const second = createDeferred<string>();
+    const urgent = createDeferred<string>();
+    const started: string[] = [];
+
+    const run = (callId: string, toolName: string, deferred: ReturnType<typeof createDeferred<string>>) =>
+        scheduler
+            .reserve({ callId, instanceName, sessionId: "session-1", source: "mcp", toolName })
+            .run(async () => {
+                started.push(callId);
+                return await deferred.promise;
+            });
+
+    const firstCall = run("normal-1", "tmux_run", first);
+    const secondCall = run("normal-2", "tmux_read", second);
+    await waitFor(() => started.length === 2);
+
+    const urgentCall = run("urgent", "tmux_input", urgent);
+    await waitFor(() => started.includes("urgent"));
+    assert.deepEqual(started, ["normal-1", "normal-2", "urgent"]);
+
+    urgent.resolve("interrupted");
+    first.resolve("first");
+    second.resolve("second");
+    assert.deepEqual(await Promise.all([firstCall, secondCall, urgentCall]), ["first", "second", "interrupted"]);
+});
+
+test("ToolCallScheduler prioritizes queued urgent tmux operations", async () => {
+    const instanceName = asInstanceName("scheduler-priority");
+    const scheduler = new ToolCallScheduler({
+        byTool: {},
+        maxRunning: 1,
+        maxRunningPerSession: 10,
+        queueDepth: 4,
+        queueDepthPerSession: 10,
+        queueTimeoutMs: 1_000
+    });
+    const blocker = createDeferred<string>();
+    const normal = createDeferred<string>();
+    const urgent = createDeferred<string>();
+    const started: string[] = [];
+    const reserve = (callId: string, toolName: string, deferred: ReturnType<typeof createDeferred<string>>) =>
+        scheduler
+            .reserve({ callId, instanceName, source: "mcp", toolName })
+            .run(async () => {
+                started.push(callId);
+                return await deferred.promise;
+            });
+
+    const blockerCall = reserve("blocker", "bash_run", blocker);
+    await waitFor(() => started.length === 1);
+    const normalCall = reserve("normal", "tmux_read", normal);
+    const urgentCall = reserve("urgent", "tmux_input", urgent);
+    await waitFor(() => started.includes("urgent"));
+    assert.deepEqual(started, ["blocker", "urgent"]);
+
+    urgent.resolve("urgent");
+    blocker.resolve("blocker");
+    await blockerCall;
+    await waitFor(() => started.includes("normal"));
+    normal.resolve("normal");
+    assert.deepEqual(await Promise.all([normalCall, urgentCall]), ["normal", "urgent"]);
+});
