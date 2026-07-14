@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use crate::tools::ToolError;
 
 const BASH_INTEGRATION: &str = include_str!("assets/bash.sh");
+const FISH_INTEGRATION: &str = include_str!("assets/fish.fish");
 const ZSH_INTEGRATION: &str = include_str!("assets/zsh.sh");
 
 pub struct ShellLaunch {
@@ -19,6 +20,7 @@ pub fn prepare_shell_launch(
     fs::create_dir_all(status_dir).map_err(io_error)?;
     let shell = managed_shell();
     match shell.file_name().and_then(|name| name.to_str()) {
+        Some("fish") => prepare_fish(shell_root, status_dir, pane_id, &shell),
         Some("zsh") => prepare_zsh(shell_root, status_dir, pane_id, &shell),
         _ => prepare_bash(shell_root, status_dir, pane_id, &shell),
     }
@@ -31,7 +33,7 @@ fn managed_shell() -> PathBuf {
         .and_then(|path| path.file_name())
         .and_then(|name| name.to_str())
     {
-        Some("bash" | "zsh") => configured.unwrap(),
+        Some("bash" | "fish" | "zsh") => configured.unwrap(),
         _ => PathBuf::from("/bin/bash"),
     }
 }
@@ -61,6 +63,26 @@ fn prepare_bash(
             quote(pane_id),
             quote(shell.to_string_lossy().as_ref()),
             quote(rc.to_string_lossy().as_ref())
+        ),
+    })
+}
+
+fn prepare_fish(
+    root: &Path,
+    status_dir: &Path,
+    pane_id: &str,
+    shell: &Path,
+) -> Result<ShellLaunch, ToolError> {
+    let integration = root.join("fish-integration.fish");
+    fs::write(&integration, FISH_INTEGRATION).map_err(io_error)?;
+    Ok(ShellLaunch {
+        command: format!(
+            "exec env -u TMUX -u TMUX_TMPDIR DEVSHELL_TMUX_PANE_STATUS_DIR={} DEVSHELL_TMUX_PANE_ID={} DEVSHELL_TMUX_FISH_INTEGRATION={} {} -C {} -i",
+            quote(status_dir.to_string_lossy().as_ref()),
+            quote(pane_id),
+            quote(integration.to_string_lossy().as_ref()),
+            quote(shell.to_string_lossy().as_ref()),
+            quote("source \"$DEVSHELL_TMUX_FISH_INTEGRATION\"")
         ),
     })
 }

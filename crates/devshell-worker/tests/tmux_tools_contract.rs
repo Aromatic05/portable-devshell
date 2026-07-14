@@ -494,6 +494,61 @@ fn bash_shell_preserves_task_identity_through_exit() {
 }
 
 #[test]
+fn fish_shell_preserves_task_identity_through_exit() {
+    let fish = Command::new("sh")
+        .args(["-c", "command -v fish"])
+        .output()
+        .ok()
+        .filter(|output| output.status.success())
+        .and_then(|output| String::from_utf8(output.stdout).ok())
+        .map(|path| path.trim().to_string())
+        .filter(|path| !path.is_empty());
+    let Some(fish) = fish.filter(|_| tmux_available()) else {
+        return;
+    };
+    let env = TestEnv::new();
+    let fish_config_dir = env.home().join(".config/fish");
+    std::fs::create_dir_all(&fish_config_dir).unwrap();
+    std::fs::write(
+        fish_config_dir.join("config.fish"),
+        "set -gx DEVSHELL_FISH_CONFIG_MARKER loaded\n",
+    )
+    .unwrap();
+    let instance = "aromatic-tmux-fish";
+    env.command_with_env("SHELL", &fish)
+        .current_dir(env.workspace())
+        .args(["start", "--instance", instance])
+        .assert()
+        .success();
+    let run = call(
+        &env,
+        instance,
+        "1",
+        "tmux_run",
+        json!({
+            "pane": "main",
+            "command": "test \"$DEVSHELL_FISH_CONFIG_MARKER\" = loaded; and printf 'FISH-OK\\n'",
+            "wait": "block",
+            "timeMs": 3000,
+            "line": 80
+        }),
+        "session-fish",
+        "run-fish",
+    );
+    assert_eq!(run["ok"], true, "{run}");
+    assert_eq!(run["result"]["task"]["status"], "0", "{run}");
+    assert!(
+        run["result"]["output"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|line| line.as_str() == Some("FISH-OK")),
+        "{run}"
+    );
+    stop(&env, instance);
+}
+
+#[test]
 fn closing_owner_session_keeps_running_task_locked_until_exit() {
     if !tmux_available() {
         return;

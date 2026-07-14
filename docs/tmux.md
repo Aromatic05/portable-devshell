@@ -14,7 +14,7 @@ tmux_create
 tmux_close
 ```
 
-一个 portable-devshell instance 对应一个独立 tmux server 和一个固定受管 session。tmux runtime 按需启动，并始终包含一个名为 `main` 的 pane。
+一个 portable-devshell instance 对应一个独立 tmux server 和一个固定受管 session。tmux runtime 按需启动，并始终包含一个名为 `main` 的 pane。受管交互 shell 支持 Bash、Zsh 和 Fish，并在读取用户原有 shell 配置后注入 task 状态 hook。
 
 ## Pane 与 task
 
