@@ -80,17 +80,21 @@ export function buildConfigPageBoxes(state: TuiAppState, instanceName: string): 
         }),
         makeBox(state, "config", instanceName, {
             detailLines: [
-                choiceLine("tools.fileEdit.mode", "fileEdit.mode", readPath(draft, "tools.fileEdit.mode")),
                 fieldLine("tools.scheduler.maxRunning", "maxRunning", readPath(draft, "tools.scheduler.maxRunning")),
                 fieldLine("tools.scheduler.maxRunningPerSession", "perSession", readPath(draft, "tools.scheduler.maxRunningPerSession")),
                 fieldLine("tools.scheduler.queueDepth", "queueDepth", readPath(draft, "tools.scheduler.queueDepth")),
                 fieldLine("tools.scheduler.queueDepthPerSession", "queuePerSession", readPath(draft, "tools.scheduler.queueDepthPerSession")),
                 fieldLine("tools.scheduler.queueTimeoutMs", "queueTimeoutMs", readPath(draft, "tools.scheduler.queueTimeoutMs")),
-                ...editorErrorLine(state, "config", "tool-runtime", ["tools", "fileEdit"])
+                ...editorErrorLine(state, "config", "tool-runtime", ["tools", "scheduler"])
             ],
             id: "tool-runtime",
-            status: configStatus(state, ["tools", "fileEdit"], "normal"),
-            summaryLines: [compactSummary(["fileEdit", stringValue(readPath(draft, "tools.fileEdit.mode"), "text")])],
+            status: configStatus(state, ["tools", "scheduler"], "normal"),
+            summaryLines: [
+                compactSummary(
+                    ["maxRunning", stringValue(readPath(draft, "tools.scheduler.maxRunning"), "default")],
+                    ["queueDepth", stringValue(readPath(draft, "tools.scheduler.queueDepth"), "default")]
+                )
+            ],
             title: "Tool Runtime"
         }),
         makeBox(state, "config", instanceName, {

@@ -147,25 +147,8 @@ function readToolsConfig(
 
     const tools = readRecord(value, fieldName);
     return {
-        fileEdit: readFileEditConfig(tools.fileEdit, current?.fileEdit, `${fieldName}.fileEdit`),
         scheduler: readToolSchedulerConfig(tools.scheduler, current?.scheduler, `${fieldName}.scheduler`)
     };
-}
-
-function readFileEditConfig(
-    value: JsonValue | undefined,
-    current: NonNullable<ControlInstanceConfig["tools"]>["fileEdit"],
-    fieldName: string
-): NonNullable<ControlInstanceConfig["tools"]>["fileEdit"] {
-    if (value === undefined) {
-        return current;
-    }
-    const fileEdit = readRecord(value, fieldName);
-    const rawMode = readOptionalString(fileEdit.mode, `${fieldName}.mode`) ?? current?.mode ?? "text";
-    if (rawMode !== "text" && rawMode !== "replace" && rawMode !== "patch" && rawMode !== "apply_patch") {
-        throw invalidConfig(`${fieldName}.mode must be one of text, replace, patch, apply_patch`);
-    }
-    return { mode: rawMode };
 }
 
 function readToolSchedulerConfig(

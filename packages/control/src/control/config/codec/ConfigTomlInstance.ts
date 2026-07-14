@@ -16,7 +16,6 @@ import {
     asBoolean,
     asInteger,
     asOptionalArray,
-    asOptionalFileEditMode,
     asOptionalInteger,
     asOptionalRecord,
     asOptionalString,
@@ -151,7 +150,6 @@ function parseInstanceDocument(document: TomlRecord): ControlInstanceConfig {
 
 function encodeToolsConfig(tools: ControlInstanceToolsConfig): TomlRecord {
     return {
-        ...(tools.fileEdit === undefined ? {} : { fileEdit: withoutUndefined(tools.fileEdit) }),
         ...(tools.scheduler === undefined ? {} : { scheduler: encodeToolSchedulerConfig(tools.scheduler) })
     };
 }
@@ -182,13 +180,8 @@ function encodeToolSchedulerByTool(byTool: Record<string, ControlToolSchedulerTo
 }
 
 function parseToolsConfig(tools: TomlRecord): ControlInstanceToolsConfig {
-    const fileEdit = asOptionalRecord(tools.fileEdit, "tools.fileEdit");
     const scheduler = asOptionalRecord(tools.scheduler, "tools.scheduler");
     return {
-        fileEdit:
-            fileEdit === undefined
-                ? undefined
-                : { mode: asOptionalFileEditMode(fileEdit.mode, "tools.fileEdit.mode") },
         scheduler: scheduler === undefined ? undefined : parseToolSchedulerConfig(scheduler)
     };
 }

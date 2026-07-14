@@ -551,7 +551,7 @@ test("config exposes container and tool scheduler settings", async () => {
         name: "alpha",
         provider: "docker",
         security: { mode: "disabled" },
-        tools: { fileEdit: { mode: "patch" }, scheduler: { maxRunning: 2, queueDepth: 8, queueTimeoutMs: 3000 } },
+        tools: { scheduler: { maxRunning: 2, queueDepth: 8, queueTimeoutMs: 3000 } },
         workspace: "/workspace/alpha"
     });
 

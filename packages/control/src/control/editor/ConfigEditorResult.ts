@@ -89,7 +89,6 @@ export function toWorkerReconfigureInput(instance: ControlInstanceConfig): {
         effectiveSecurityMode,
         env: {
             ...instance.env,
-            DEVSHELL_WORKER_INTERNAL_FILE_EDIT_MODE: instance.tools?.fileEdit?.mode ?? "text",
             DEVSHELL_WORKER_INTERNAL_SECURITY_MODE: effectiveSecurityMode,
             DEVSHELL_WORKER_SECURITY_MODE: effectiveSecurityMode
         }

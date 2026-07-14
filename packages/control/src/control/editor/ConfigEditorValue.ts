@@ -34,7 +34,6 @@ export function cloneInstanceConfig(instance: ControlInstanceConfig): ControlIns
 
 export function cloneToolsConfig(tools: NonNullable<ControlInstanceConfig["tools"]>): NonNullable<ControlInstanceConfig["tools"]> {
     return {
-        fileEdit: tools.fileEdit === undefined ? undefined : { ...tools.fileEdit },
         scheduler:
             tools.scheduler === undefined
                 ? undefined

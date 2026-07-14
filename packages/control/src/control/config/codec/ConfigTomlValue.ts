@@ -7,7 +7,7 @@ import type {
 } from "@portable-devshell/shared";
 import type { TomlTableWithoutBigInt } from "smol-toml";
 
-import type { ControlFileEditMode, ControlMcpAuthMode, ControlProviderKind } from "./ConfigTomlTypes.js";
+import type { ControlMcpAuthMode, ControlProviderKind } from "./ConfigTomlTypes.js";
 
 export type TomlRecord = TomlTableWithoutBigInt;
 
@@ -133,17 +133,6 @@ export function asProviderKind(value: string): ControlProviderKind {
     }
 
     throw new Error(`unsupported provider: ${value}`);
-}
-
-export function asOptionalFileEditMode(value: unknown, fieldName: string): ControlFileEditMode | undefined {
-    if (value === undefined) {
-        return undefined;
-    }
-    const mode = asString(value, fieldName);
-    if (mode === "text" || mode === "replace" || mode === "patch" || mode === "apply_patch") {
-        return mode;
-    }
-    throw new Error(`${fieldName} must be one of text, replace, patch, apply_patch`);
 }
 
 export function asAuthMode(value: string): ControlMcpAuthMode {

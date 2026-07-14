@@ -7,7 +7,7 @@ import {
 } from "@portable-devshell/shared";
 import { McpAuthPublicExposureGuard } from "@portable-devshell/mcp";
 
-import type { ControlConfig, ControlFileEditMode, ControlInstanceConfig, ControlMcpOAuth2Config } from "./codec/ConfigTomlCodec.js";
+import type { ControlConfig, ControlInstanceConfig, ControlMcpOAuth2Config } from "./codec/ConfigTomlCodec.js";
 
 export class ControlConfigValidator {
     readonly #publicExposureGuard = new McpAuthPublicExposureGuard();
@@ -78,7 +78,6 @@ export class ControlConfigValidator {
 
         this.#validateSecurityMode(instance.security?.mode);
         this.#validateApprovalPolicy(instance.approvalPolicy);
-        this.#validateFileEditMode(instance.tools?.fileEdit?.mode);
         this.#validateToolScheduler(instance.tools?.scheduler);
 
         const expectedPath = `/${instance.name}/mcp`;
@@ -244,15 +243,6 @@ export class ControlConfigValidator {
             }
         }
     }
-    #validateFileEditMode(mode: ControlFileEditMode | undefined): void {
-        if (mode === undefined) {
-            return;
-        }
-        if (mode !== "text" && mode !== "replace" && mode !== "patch" && mode !== "apply_patch") {
-            throw new Error("tools.fileEdit.mode must be one of text, replace, patch, apply_patch");
-        }
-    }
-
     #validateToolScheduler(scheduler: NonNullable<ControlInstanceConfig["tools"]>["scheduler"]): void {
         if (scheduler === undefined) {
             return;

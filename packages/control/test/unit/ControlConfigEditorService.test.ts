@@ -174,7 +174,6 @@ test("config editor allows updating and disabling a running instance without dro
         defaultWorkspace: "/tmp/demo",
         effectiveSecurityMode: "workspace",
         env: {
-            DEVSHELL_WORKER_INTERNAL_FILE_EDIT_MODE: "text",
             DEVSHELL_WORKER_INTERNAL_SECURITY_MODE: "workspace",
             DEVSHELL_WORKER_SECURITY_MODE: "workspace"
         }
@@ -251,7 +250,7 @@ function createConfig() {
     };
 }
 
-test("file edit mode rebuild validation happens before persistence", async () => {
+test("tool scheduler rebuild validation happens before persistence", async () => {
     let config = createConfig();
     const writes: unknown[] = [];
     const registry = new InstanceRegistry([
@@ -293,7 +292,7 @@ test("file edit mode rebuild validation happens before persistence", async () =>
     await assert.rejects(
         service.updateInstanceConfig({
             ...config.instances[0],
-            tools: { fileEdit: { mode: "replace" } }
+            tools: { scheduler: { maxRunning: 2 } }
         }),
         (error: unknown) => {
             assert.equal((error as { code?: string }).code, "instance.conflict");

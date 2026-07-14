@@ -65,7 +65,6 @@ test("instance config mapper passes effective security mode, worker env, and app
     });
     assert.deepEqual(capturedConfig?.env, {
         DEMO: "1",
-        DEVSHELL_WORKER_INTERNAL_FILE_EDIT_MODE: "text",
         DEVSHELL_WORKER_INTERNAL_SECURITY_MODE: "workspace",
         DEVSHELL_WORKER_SECURITY_MODE: "workspace"
     });

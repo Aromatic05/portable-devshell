@@ -246,8 +246,6 @@ export class CommandDispatcherEditor {
                 return ["disabled", "workspace"];
             case "approvalPolicy.mode":
                 return ["disabled", "allow", "ask", "deny"];
-            case "tools.fileEdit.mode":
-                return ["text", "replace", "patch", "apply_patch"];
             default:
                 return undefined;
         }

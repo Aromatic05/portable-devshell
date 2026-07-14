@@ -207,6 +207,39 @@ test("instance security mode must be valid", () => {
     assert.throws(() => validator.validate(config), /security\.mode must be one of disabled, workspace/u);
 });
 
+test("legacy tools.fileEdit config is ignored and removed on encode", () => {
+    const codec = new ControlInstanceTomlCodec();
+    const decoded = codec.decode(
+        [
+            "version = 2",
+            'name = "demo-local"',
+            "enabled = true",
+            'provider = "local"',
+            'workspace = "/tmp/demo"',
+            "",
+            "[mcp]",
+            "enabled = true",
+            "",
+            "[mcp.tools]",
+            'groups = ["file"]',
+            'capabilities = ["read", "write"]',
+            "",
+            "[tools.fileEdit]",
+            'mode = "patch"',
+            "",
+            "[tools.scheduler]",
+            "maxRunning = 2",
+            ""
+        ].join("\n")
+    );
+
+    assert.equal(decoded.tools?.scheduler?.maxRunning, 2);
+    assert.equal("fileEdit" in (decoded.tools ?? {}), false);
+    const encoded = codec.encode(decoded);
+    assert.doesNotMatch(encoded, /fileEdit/u);
+    assert.match(encoded, /\[tools\.scheduler\]/u);
+});
+
 test("ssh instance config requires ssh.command and rejects legacy host fields", () => {
     const validator = new ControlConfigValidator();
 

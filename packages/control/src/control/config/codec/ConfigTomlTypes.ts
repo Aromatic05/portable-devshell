@@ -2,7 +2,6 @@ import type { ApprovalPolicy, InstanceContainerConfig, ToolCapability } from "@p
 
 export type ControlProviderKind = "docker" | "local" | "podman" | "reverse" | "ssh";
 export type ControlMcpAuthMode = "none" | "oauth2" | "token";
-export type ControlFileEditMode = "text" | "replace" | "patch" | "apply_patch";
 
 export interface ControlInstanceLogsConfig {
     eventBufferSize?: number;
@@ -23,12 +22,7 @@ export interface ControlToolSchedulerConfig {
     byTool?: Record<string, ControlToolSchedulerToolLimitConfig>;
 }
 
-export interface ControlInstanceFileEditConfig {
-    mode?: ControlFileEditMode;
-}
-
 export interface ControlInstanceToolsConfig {
-    fileEdit?: ControlInstanceFileEditConfig;
     scheduler?: ControlToolSchedulerConfig;
 }
 
