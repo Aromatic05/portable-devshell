@@ -8,7 +8,7 @@ import { WorkerToolCatalog } from "./WorkerToolCatalog.js";
 export class WorkerToolInvoker {
     readonly #rpcClient: WorkerRpcClient;
     readonly #catalog: WorkerToolCatalog;
-    readonly #validator = new Ajv2020({ allErrors: true, strict: false });
+    readonly #validator = createWorkerSchemaValidator();
     readonly #validators = new Map<string, ValidateFunction>();
 
     constructor(rpcClient: WorkerRpcClient, catalog: WorkerToolCatalog) {
@@ -87,4 +87,12 @@ export class WorkerToolInvoker {
 
 function formatErrors(errors: ErrorObject[] | null | undefined): string[] {
     return (errors ?? []).map((error) => `${error.instancePath || "/"} ${error.message ?? error.keyword}`);
+}
+
+function createWorkerSchemaValidator(): Ajv2020 {
+    const validator = new Ajv2020({ allErrors: true, strict: false });
+    for (const format of ["int32", "uint", "uint64", "uint128"]) {
+        validator.addFormat(format, true);
+    }
+    return validator;
 }

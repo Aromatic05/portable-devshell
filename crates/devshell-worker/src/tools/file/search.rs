@@ -179,21 +179,20 @@ impl ToolHandler for FileSearchTool {
     }
 }
 
+type SearchStreamResult = (
+    TextMetadata,
+    Option<TextFile>,
+    Vec<usize>,
+    BTreeMap<usize, String>,
+);
+
 fn search_stream(
     path: &std::path::Path,
     matcher: &regex::Regex,
     limit: usize,
     context: Option<usize>,
     cancellation: &crate::tools::ToolCancellation,
-) -> Result<
-    (
-        TextMetadata,
-        Option<TextFile>,
-        Vec<usize>,
-        BTreeMap<usize, String>,
-    ),
-    ToolError,
-> {
+) -> Result<SearchStreamResult, ToolError> {
     let file =
         fs::File::open(path).map_err(|error| ToolError::new("file.notFound", error.to_string()))?;
     let mut reader = BufReader::new(file);

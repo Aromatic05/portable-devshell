@@ -304,11 +304,11 @@ fn spawn_reader(
                 break;
             }
             bytes.fetch_add(count, Ordering::SeqCst);
-            if let Some(draft) = artifact_draft.as_mut() {
-                if let Err(error) = draft.write_chunk(&buffer[..count]) {
-                    artifact_draft = None;
-                    artifact_warning = Some(error.message);
-                }
+            if let Some(draft) = artifact_draft.as_mut()
+                && let Err(error) = draft.write_chunk(&buffer[..count])
+            {
+                artifact_draft = None;
+                artifact_warning = Some(error.message);
             }
             let mut offset = 0;
             if head.len() < head_limit {
@@ -365,9 +365,7 @@ fn persist_artifact(
         output.artifact_draft.take();
         return None;
     }
-    let Some(draft) = output.artifact_draft.take() else {
-        return None;
-    };
+    let draft = output.artifact_draft.take()?;
     match store.persist(draft) {
         Ok(reference) => Some(reference),
         Err(error) => {

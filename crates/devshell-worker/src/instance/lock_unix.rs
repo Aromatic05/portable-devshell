@@ -12,6 +12,7 @@ impl PlatformInstanceLock {
     pub fn acquire(path: &Path, nonblocking: bool) -> Result<Option<Self>, String> {
         let file = OpenOptions::new()
             .create(true)
+            .truncate(false)
             .read(true)
             .write(true)
             .open(path)

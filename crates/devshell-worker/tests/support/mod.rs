@@ -12,6 +12,7 @@ pub struct TestEnv {
     workspace_root: PathBuf,
 }
 
+#[allow(dead_code)]
 impl TestEnv {
     pub fn new() -> Self {
         let home = tempfile::tempdir().unwrap();
@@ -126,7 +127,7 @@ impl TestEnv {
     pub fn raw_rpc(&self, instance: &str, payload: &[u8]) -> Value {
         let mut input = Vec::with_capacity(4 + payload.len());
         input.extend_from_slice(&(payload.len() as u32).to_be_bytes());
-        input.extend_from_slice(&payload);
+        input.extend_from_slice(payload);
 
         let output = self
             .command()

@@ -42,7 +42,7 @@ impl CursorStore {
             .cursors
             .get(id)
             .ok_or_else(|| ToolError::new("file.invalidCursor", "cursor is not available"))?;
-        if cursor.query != query.to_string() {
+        if cursor.query != *query {
             return Err(ToolError::new(
                 "file.invalidCursor",
                 "cursor does not match this query",

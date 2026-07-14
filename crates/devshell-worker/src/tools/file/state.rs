@@ -254,17 +254,17 @@ impl SnapshotStore {
     ) -> SnapshotReference {
         let key = (path.display().to_string(), text.revision.clone());
         let now = now_ms();
-        if let Some(id) = self.by_content.get(&key).cloned() {
-            if let Some(snapshot) = self.snapshots.get_mut(&id) {
-                snapshot.seen_lines.extend(seen_lines);
-                snapshot.last_accessed_at_ms = now;
-                let reference = SnapshotReference {
-                    id: snapshot.id.clone(),
-                    tag: snapshot.tag.clone(),
-                };
-                self.touch(&id);
-                return reference;
-            }
+        if let Some(id) = self.by_content.get(&key).cloned()
+            && let Some(snapshot) = self.snapshots.get_mut(&id)
+        {
+            snapshot.seen_lines.extend(seen_lines);
+            snapshot.last_accessed_at_ms = now;
+            let reference = SnapshotReference {
+                id: snapshot.id.clone(),
+                tag: snapshot.tag.clone(),
+            };
+            self.touch(&id);
+            return reference;
         }
 
         let normalized = text.normalized();
@@ -305,17 +305,17 @@ impl SnapshotStore {
     ) -> SnapshotReference {
         let key = (path.display().to_string(), metadata.revision.clone());
         let now = now_ms();
-        if let Some(id) = self.by_content.get(&key).cloned() {
-            if let Some(snapshot) = self.snapshots.get_mut(&id) {
-                snapshot.seen_lines.extend(seen_lines);
-                snapshot.last_accessed_at_ms = now;
-                let reference = SnapshotReference {
-                    id: snapshot.id.clone(),
-                    tag: snapshot.tag.clone(),
-                };
-                self.touch(&id);
-                return reference;
-            }
+        if let Some(id) = self.by_content.get(&key).cloned()
+            && let Some(snapshot) = self.snapshots.get_mut(&id)
+        {
+            snapshot.seen_lines.extend(seen_lines);
+            snapshot.last_accessed_at_ms = now;
+            let reference = SnapshotReference {
+                id: snapshot.id.clone(),
+                tag: snapshot.tag.clone(),
+            };
+            self.touch(&id);
+            return reference;
         }
         let (id, tag) = self.new_identity();
         self.snapshots.insert(
