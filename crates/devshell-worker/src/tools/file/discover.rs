@@ -20,6 +20,7 @@ pub fn discover(
     hidden: bool,
     gitignore: bool,
 ) -> Result<Vec<DiscoveredEntry>, ToolError> {
+    call.check_cancelled()?;
     if specs.is_empty() {
         return Err(ToolError::new(
             "tool.invalidArguments",
@@ -28,6 +29,7 @@ pub fn discover(
     }
     let mut found = BTreeMap::<String, DiscoveredEntry>::new();
     for spec in specs {
+        call.check_cancelled()?;
         if has_glob(spec) {
             discover_glob(call, spec, hidden, gitignore, &mut found)?;
         } else {
@@ -54,7 +56,7 @@ fn discover_exact(
     if !metadata.is_dir() {
         return Ok(());
     }
-    walk(&path, &requested.raw, None, hidden, gitignore, found)
+    walk(call, &path, &requested.raw, None, hidden, gitignore, found)
 }
 
 fn discover_glob(
@@ -89,6 +91,7 @@ fn discover_glob(
         .map_err(|error| ToolError::new("file.invalidPattern", error.to_string()))?
         .compile_matcher();
     walk(
+        call,
         &root,
         &root_requested.raw,
         Some(&matcher),
@@ -99,6 +102,7 @@ fn discover_glob(
 }
 
 fn walk(
+    call: &ToolCall,
     root: &Path,
     display_root: &str,
     matcher: Option<&globset::GlobMatcher>,
@@ -116,6 +120,7 @@ fn walk(
         .ignore(gitignore)
         .require_git(false);
     for entry in builder.build() {
+        call.check_cancelled()?;
         let entry = entry.map_err(|error| ToolError::new("file.readFailed", error.to_string()))?;
         let path = entry.path();
         if path == root {

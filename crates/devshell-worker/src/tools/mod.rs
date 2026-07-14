@@ -10,7 +10,7 @@ pub mod registry;
 pub mod tmux;
 
 pub use catalog::builtin_registry;
-pub use contract::{ToolCall, ToolCapability, ToolCatalogEntry, ToolHandler};
+pub use contract::{ToolCall, ToolCancellation, ToolCapability, ToolCatalogEntry, ToolHandler};
 pub use error::ToolError;
 pub use name::ToolName;
 pub use registry::ToolRegistry;

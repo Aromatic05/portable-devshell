@@ -39,6 +39,7 @@ impl ToolHandler for FileSearchTool {
         ToolCatalogEntry { group: self.name.group().to_string(), name: self.name.as_str(), description: "Search text within exact paths, directories, and globs. Complete returned source lines establish implicit, session-scoped edit coverage for later file_edit calls.".to_string(), input_schema: serde_json::to_value(schema_for!(FileSearchInput)).unwrap(), output_schema: serde_json::to_value(schema_for!(FileSearchOutput)).unwrap(), required_capabilities: vec![ToolCapability::Read] }
     }
     fn call(&self, call: ToolCall) -> Result<serde_json::Value, ToolError> {
+        call.check_cancelled()?;
         let input: FileSearchInput = serde_json::from_value(call.params.clone())
             .map_err(|error| ToolError::new("tool.invalidArguments", error.to_string()))?;
         let paths = input.paths.unwrap_or_else(|| vec!["./".to_string()]);
@@ -91,9 +92,10 @@ impl ToolHandler for FileSearchTool {
         for group in discovered_groups {
             let mut matched = VecDeque::new();
             for entry in group {
+                call.check_cancelled()?;
                 let ordinal = self.state.next_snapshot_ordinal();
                 let Ok((metadata, full_text, matches, shown)) =
-                    search_stream(&entry.path, &matcher, per_file, context)
+                    search_stream(&entry.path, &matcher, per_file, context, &call.cancellation)
                 else {
                     continue;
                 };
@@ -141,6 +143,7 @@ impl ToolHandler for FileSearchTool {
         let total_files = files.len();
         let mut page = Vec::new();
         for file in files.into_iter().skip(offset).take(FILES_PER_PAGE) {
+            call.check_cancelled()?;
             let mut candidate = page.clone();
             candidate.push(file.clone());
             let probe = FileSearchOutput {
@@ -181,6 +184,7 @@ fn search_stream(
     matcher: &regex::Regex,
     limit: usize,
     context: Option<usize>,
+    cancellation: &crate::tools::ToolCancellation,
 ) -> Result<
     (
         TextMetadata,
@@ -209,6 +213,7 @@ fn search_stream(
     let mut line_ending = "\n";
     let mut full_lines = Some(Vec::new());
     loop {
+        cancellation.check()?;
         buffer.clear();
         let count = reader
             .read_until(b'\n', &mut buffer)

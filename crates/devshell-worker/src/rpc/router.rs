@@ -17,7 +17,7 @@ use crate::tools::artifact::receive::ArtifactReceiveStore;
 use crate::tools::file::FileToolState;
 #[cfg(unix)]
 use crate::tools::tmux::state::TmuxState;
-use crate::tools::{ToolCall, ToolName, ToolRegistry};
+use crate::tools::{ToolCall, ToolCancellation, ToolName, ToolRegistry};
 
 const MAX_CONCURRENT_TOOL_CALLS: usize = 8;
 const MAX_STANDARD_TOOL_CALLS: usize = 6;
@@ -87,12 +87,12 @@ impl RpcRouter {
         Self::response(request.id, result)
     }
 
-    pub fn acquire_tool_permit(&self, method: &str) -> Result<ToolCallPermit, RpcError> {
-        self.active_tool_calls.acquire(method)
+    pub fn acquire_tool_permit(&self, request: &RpcRequest) -> Result<ToolCallPermit, RpcError> {
+        self.active_tool_calls.acquire(request)
     }
 
-    pub fn dispatch_tool(&self, request: RpcRequest, _permit: ToolCallPermit) -> RpcResponse {
-        let result = self.dispatch_tool_inner(&request);
+    pub fn dispatch_tool(&self, request: RpcRequest, permit: ToolCallPermit) -> RpcResponse {
+        let result = self.dispatch_tool_inner(&request, permit.cancellation());
         Self::response(request.id, result)
     }
 
@@ -100,7 +100,11 @@ impl RpcRouter {
         self.shutdown_requested.load(Ordering::SeqCst)
     }
 
-    fn dispatch_tool_inner(&self, request: &RpcRequest) -> Result<serde_json::Value, RpcError> {
+    fn dispatch_tool_inner(
+        &self,
+        request: &RpcRequest,
+        cancellation: ToolCancellation,
+    ) -> Result<serde_json::Value, RpcError> {
         let tool_name = ToolName::parse(&request.method)
             .map_err(|message| RpcError::new("rpc.methodNotFound", message))?;
         let tool = self
@@ -119,6 +123,7 @@ impl RpcRouter {
                 .unwrap_or_else(|| request.id.clone()),
             policy: Arc::clone(&self.policy),
             process_registry: Arc::clone(&self.active_processes),
+            cancellation,
         })
         .map_err(|error| {
             let mut rpc_error = RpcError::new(error.code, error.message);
@@ -145,8 +150,28 @@ pub struct ActiveToolCallRegistry {
 #[derive(Default)]
 struct ActiveToolCallState {
     active: usize,
+    calls: HashMap<ActiveToolCallKey, ToolCancellation>,
     standard_active: usize,
     stopping: bool,
+}
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+struct ActiveToolCallKey {
+    rpc_request_id: String,
+    session_id: String,
+}
+
+impl ActiveToolCallKey {
+    fn from_request(request: &RpcRequest) -> Self {
+        Self {
+            rpc_request_id: request.id.clone(),
+            session_id: request
+                .context
+                .as_ref()
+                .and_then(|context| context.session_id.clone())
+                .unwrap_or_else(|| "worker-default".to_string()),
+        }
+    }
 }
 
 impl ActiveToolCallRegistry {
@@ -154,8 +179,8 @@ impl ActiveToolCallRegistry {
         Self::default()
     }
 
-    pub fn acquire(self: &Arc<Self>, method: &str) -> Result<ToolCallPermit, RpcError> {
-        let urgent = is_urgent_tool(method);
+    pub fn acquire(self: &Arc<Self>, request: &RpcRequest) -> Result<ToolCallPermit, RpcError> {
+        let urgent = is_urgent_tool(&request.method);
         let mut state = self.state.lock().map_err(|_| {
             RpcError::new(
                 "worker.toolSchedulerFailed",
@@ -188,14 +213,43 @@ impl ActiveToolCallRegistry {
             return Err(error);
         }
 
+        let key = ActiveToolCallKey::from_request(request);
+        if state.calls.contains_key(&key) {
+            return Err(RpcError::new(
+                "worker.duplicateRpcRequest",
+                "A tool call with the same session and RPC request id is already active.",
+            ));
+        }
+        let cancellation = ToolCancellation::default();
+        state.calls.insert(key.clone(), cancellation.clone());
         state.active += 1;
         if !urgent {
             state.standard_active += 1;
         }
         Ok(ToolCallPermit {
+            cancellation,
+            key,
             registry: Arc::clone(self),
             urgent,
         })
+    }
+
+    pub fn cancel(&self, session_id: &str, rpc_request_id: &str) -> Result<bool, RpcError> {
+        let state = self.state.lock().map_err(|_| {
+            RpcError::new(
+                "worker.toolSchedulerFailed",
+                "Active tool call registry lock poisoned.",
+            )
+        })?;
+        let key = ActiveToolCallKey {
+            rpc_request_id: rpc_request_id.to_string(),
+            session_id: session_id.to_string(),
+        };
+        let Some(cancellation) = state.calls.get(&key) else {
+            return Ok(false);
+        };
+        cancellation.cancel();
+        Ok(true)
     }
 
     pub fn begin_stop(&self) -> Result<(), String> {
@@ -241,10 +295,11 @@ impl ActiveToolCallRegistry {
         Ok(())
     }
 
-    fn release(&self, urgent: bool) {
+    fn release(&self, key: &ActiveToolCallKey, urgent: bool) {
         let Ok(mut state) = self.state.lock() else {
             return;
         };
+        state.calls.remove(key);
         state.active = state.active.saturating_sub(1);
         if !urgent {
             state.standard_active = state.standard_active.saturating_sub(1);
@@ -256,13 +311,21 @@ impl ActiveToolCallRegistry {
 }
 
 pub struct ToolCallPermit {
+    cancellation: ToolCancellation,
+    key: ActiveToolCallKey,
     registry: Arc<ActiveToolCallRegistry>,
     urgent: bool,
 }
 
+impl ToolCallPermit {
+    fn cancellation(&self) -> ToolCancellation {
+        self.cancellation.clone()
+    }
+}
+
 impl Drop for ToolCallPermit {
     fn drop(&mut self) {
-        self.registry.release(self.urgent);
+        self.registry.release(&self.key, self.urgent);
     }
 }
 
@@ -279,18 +342,55 @@ mod tests {
     use std::sync::Arc;
 
     use super::ActiveToolCallRegistry;
+    use crate::rpc::request::RpcRequest;
 
     #[test]
     fn urgent_tmux_tools_use_reserved_worker_capacity() {
         let registry = Arc::new(ActiveToolCallRegistry::new());
         let standard = (0..6)
-            .map(|_| registry.acquire("tmux_run").unwrap())
+            .map(|index| {
+                registry
+                    .acquire(&RpcRequest::request(
+                        format!("standard-{index}"),
+                        "tmux_run",
+                        serde_json::json!({}),
+                    ))
+                    .unwrap()
+            })
             .collect::<Vec<_>>();
-        assert!(registry.acquire("bash_run").is_err());
-        let urgent_one = registry.acquire("tmux_input").unwrap();
-        let urgent_two = registry.acquire("tmux_inspect").unwrap();
-        assert!(registry.acquire("tmux_list").is_err());
+        assert!(
+            registry
+                .acquire(&RpcRequest::request("2", "bash_run", serde_json::json!({})))
+                .is_err()
+        );
+        let urgent_one = registry
+            .acquire(&RpcRequest::request(
+                "3",
+                "tmux_input",
+                serde_json::json!({}),
+            ))
+            .unwrap();
+        let urgent_two = registry
+            .acquire(&RpcRequest::request(
+                "4",
+                "tmux_inspect",
+                serde_json::json!({}),
+            ))
+            .unwrap();
+        assert!(
+            registry
+                .acquire(&RpcRequest::request(
+                    "5",
+                    "tmux_list",
+                    serde_json::json!({})
+                ))
+                .is_err()
+        );
         drop((standard, urgent_one, urgent_two));
-        assert!(registry.acquire("bash_run").is_ok());
+        assert!(
+            registry
+                .acquire(&RpcRequest::request("2", "bash_run", serde_json::json!({})))
+                .is_ok()
+        );
     }
 }

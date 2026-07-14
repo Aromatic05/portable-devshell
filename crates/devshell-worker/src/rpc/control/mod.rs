@@ -3,6 +3,7 @@ pub mod handshake;
 pub mod ping;
 pub mod status;
 pub mod stop;
+pub mod tool_call;
 pub mod tool_session;
 pub mod tools_list;
 
@@ -78,6 +79,12 @@ pub fn register_control_handlers(
     handlers.insert(
         "artifact.payload.close".to_string(),
         Arc::new(artifact_payload::ArtifactPayloadCloseHandler::new(payloads)),
+    );
+    handlers.insert(
+        "tool.call.cancel".to_string(),
+        Arc::new(tool_call::ToolCallCancelHandler::new(Arc::clone(
+            &active_tool_calls,
+        ))),
     );
     handlers.insert(
         "tool.session.close".to_string(),

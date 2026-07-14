@@ -31,6 +31,7 @@ impl ToolHandler for FileFindTool {
         ToolCatalogEntry { group: self.name.group().to_string(), name: self.name.as_str(), description: "Find exact paths, directories, and globs. Returns structured entries plus a compact hierarchical tree. Hidden development files are included by default; .git is always excluded.".to_string(), input_schema: serde_json::to_value(schema_for!(FileFindInput)).unwrap(), output_schema: serde_json::to_value(schema_for!(FileFindOutput)).unwrap(), required_capabilities: vec![ToolCapability::Read] }
     }
     fn call(&self, call: ToolCall) -> Result<serde_json::Value, ToolError> {
+        call.check_cancelled()?;
         let input: FileFindInput = serde_json::from_value(call.params.clone())
             .map_err(|error| ToolError::new("tool.invalidArguments", error.to_string()))?;
         let hidden = input.hidden.unwrap_or(true);
@@ -52,18 +53,26 @@ impl ToolHandler for FileFindTool {
                 .as_slice(),
             hidden,
             gitignore,
-        )?
-        .into_iter()
-        .filter(|entry| match kind {
-            FindType::Any => entry.entry_type != "other",
-            FindType::File => entry.entry_type == "file",
-            FindType::Directory => entry.entry_type == "directory",
-        })
-        .map(|entry| FileFindEntry {
-            path: entry.display,
-            entry_type: entry.entry_type.to_string(),
-        })
-        .collect::<Vec<_>>();
+        )?;
+        call.check_cancelled()?;
+        let mut filtered = Vec::new();
+        for (index, entry) in entries.into_iter().enumerate() {
+            if index % 256 == 0 {
+                call.check_cancelled()?;
+            }
+            let matches = match kind {
+                FindType::Any => entry.entry_type != "other",
+                FindType::File => entry.entry_type == "file",
+                FindType::Directory => entry.entry_type == "directory",
+            };
+            if matches {
+                filtered.push(FileFindEntry {
+                    path: entry.display,
+                    entry_type: entry.entry_type.to_string(),
+                });
+            }
+        }
+        let entries = filtered;
         let next_cursor = (entries.len() > offset + PAGE_SIZE).then(|| {
             self.state
                 .cursors

@@ -61,9 +61,11 @@ impl ToolHandler for FileEditTool {
     }
 
     fn call(&self, call: ToolCall) -> Result<serde_json::Value, ToolError> {
+        call.check_cancelled()?;
         let input: FileChangeSetInput = serde_json::from_value(call.params.clone())
             .map_err(|error| ToolError::new("tool.invalidArguments", error.to_string()))?;
         let parsed = parse_change_set(&input.changes)?;
+        call.check_cancelled()?;
         let prepared = self.preflight(&call, parsed)?;
         let mut output = self.execute(&call, prepared);
         enforce_output_budget(&mut output)?;
@@ -130,6 +132,7 @@ impl FileEditTool {
         let mut prepared = Vec::with_capacity(operations.len());
 
         for operation in operations {
+            call.check_cancelled()?;
             match operation {
                 ParsedOperation::Write { path, content } => {
                     ensure_text(&content)?;
@@ -308,6 +311,11 @@ impl FileEditTool {
             let index = offset + 1;
             if failed {
                 outputs.push(not_executed(index, &operation));
+                continue;
+            }
+            if let Err(error) = call.check_cancelled() {
+                outputs.push(failed_output(index, &operation, error));
+                failed = true;
                 continue;
             }
             let bound = match bind_local_snapshot(operation.clone(), &local_snapshots) {

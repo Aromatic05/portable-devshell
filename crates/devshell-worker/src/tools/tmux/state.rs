@@ -69,6 +69,7 @@ impl TmuxState {
         call: &ToolCall,
         params: TmuxRunParams,
     ) -> Result<TmuxTaskOperationOutput, ToolError> {
+        call.check_cancelled()?;
         require_execute(call)?;
         self.closed_sessions.require_open(call)?;
         if params.command.is_empty()
@@ -177,7 +178,16 @@ impl TmuxState {
             task_id
         };
 
-        if !self.wait_for_task_start(&task_id, Duration::from_millis(START_CONFIRM_TIME_MS))? {
+        let start_confirmed =
+            self.wait_for_task_start(&task_id, Duration::from_millis(START_CONFIRM_TIME_MS), call)?;
+        if start_confirmed.is_none() {
+            return Err(ToolError::new(
+                "tool.cancelled",
+                "tmux_run wait was cancelled; the tmux task was left running.",
+            )
+            .with_details(serde_json::json!({ "task": task_id })));
+        }
+        if start_confirmed == Some(false) {
             let pane_id = {
                 let mut tasks = self.tasks.lock().map_err(|_| lock_error("tmux tasks"))?;
                 let pane_id = tasks.tasks.get(&task_id).map(|task| task.pane_id.clone());
@@ -199,6 +209,13 @@ impl TmuxState {
         if wait == TmuxWaitMode::Block {
             let deadline = Instant::now() + Duration::from_millis(time_ms);
             while Instant::now() < deadline {
+                if call.cancellation.is_cancelled() {
+                    return Err(ToolError::new(
+                        "tool.cancelled",
+                        "tmux_run wait was cancelled; the tmux task was left running.",
+                    )
+                    .with_details(serde_json::json!({ "task": task_id })));
+                }
                 self.refresh_task(&task_id)?;
                 if self.task_is_terminal(&task_id)? {
                     break;
@@ -216,6 +233,7 @@ impl TmuxState {
             self.refresh_task(&task_id)?;
         }
 
+        call.check_cancelled()?;
         self.task_output(call, "run", &task_id, line)
     }
 
@@ -233,6 +251,7 @@ impl TmuxState {
         call: &ToolCall,
         params: TmuxInputParams,
     ) -> Result<TmuxTaskOperationOutput, ToolError> {
+        call.check_cancelled()?;
         require_execute(call)?;
         self.closed_sessions.require_open(call)?;
         if params.input.is_empty() {
@@ -284,6 +303,7 @@ impl TmuxState {
 
         let deadline = Instant::now() + Duration::from_millis(time_ms);
         loop {
+            call.check_cancelled()?;
             self.refresh_task(&params.task)?;
             let (unread, terminal) = {
                 let tasks = self.tasks.lock().map_err(|_| lock_error("tmux tasks"))?;
@@ -295,6 +315,7 @@ impl TmuxState {
             }
             thread::sleep(Duration::from_millis(50));
         }
+        call.check_cancelled()?;
         self.task_output(call, "input", &params.task, line)
     }
 
@@ -303,12 +324,14 @@ impl TmuxState {
         call: &ToolCall,
         params: TmuxReadParams,
     ) -> Result<TmuxTaskOperationOutput, ToolError> {
+        call.check_cancelled()?;
         require_read(call)?;
         self.closed_sessions.require_open(call)?;
         let time_ms = validate_time_allow_zero(params.time_ms.unwrap_or(DEFAULT_READ_TIME_MS))?;
         let line = params.line.unwrap_or(DEFAULT_LINE);
         let deadline = Instant::now() + Duration::from_millis(time_ms);
         loop {
+            call.check_cancelled()?;
             self.refresh_task(&params.task)?;
             let ready = {
                 let tasks = self.tasks.lock().map_err(|_| lock_error("tmux tasks"))?;
@@ -320,6 +343,7 @@ impl TmuxState {
             }
             thread::sleep(Duration::from_millis(50));
         }
+        call.check_cancelled()?;
         self.task_output(call, "read", &params.task, line)
     }
 
@@ -328,6 +352,7 @@ impl TmuxState {
         call: &ToolCall,
         params: TmuxInspectParams,
     ) -> Result<TmuxPaneOperationOutput, ToolError> {
+        call.check_cancelled()?;
         require_read(call)?;
         self.closed_sessions.require_open(call)?;
         if params.pane.is_some() && params.panes.is_some() {
@@ -371,11 +396,13 @@ impl TmuxState {
     }
 
     pub fn list(&self, call: &ToolCall) -> Result<TmuxListOutput, ToolError> {
+        call.check_cancelled()?;
         require_read(call)?;
         self.closed_sessions.require_open(call)?;
         self.ensure_session()?;
         let workspace = self.backend.capture_workspace()?;
         self.refresh_tasks_with_workspace(&workspace)?;
+        call.check_cancelled()?;
         let tasks = self.tasks.lock().map_err(|_| lock_error("tmux tasks"))?;
         let panes = workspace
             .panes
@@ -397,6 +424,7 @@ impl TmuxState {
         call: &ToolCall,
         params: TmuxCreateParams,
     ) -> Result<TmuxCreateOutput, ToolError> {
+        call.check_cancelled()?;
         self.replays
             .execute(call, "tmux_create", || self.create_once(call, params))
     }
@@ -468,6 +496,7 @@ impl TmuxState {
         call: &ToolCall,
         params: TmuxCloseParams,
     ) -> Result<TmuxCloseOutput, ToolError> {
+        call.check_cancelled()?;
         self.replays
             .execute(call, "tmux_close", || self.close_once(call, params))
     }
@@ -597,9 +626,17 @@ impl TmuxState {
         }
     }
 
-    fn wait_for_task_start(&self, task_id: &str, timeout: Duration) -> Result<bool, ToolError> {
+    fn wait_for_task_start(
+        &self,
+        task_id: &str,
+        timeout: Duration,
+        call: &ToolCall,
+    ) -> Result<Option<bool>, ToolError> {
         let deadline = Instant::now() + timeout;
         loop {
+            if call.cancellation.is_cancelled() {
+                return Ok(None);
+            }
             self.refresh_task(task_id)?;
             let state = self
                 .tasks
@@ -611,10 +648,13 @@ impl TmuxState {
                 .state
                 .clone();
             if !matches!(state, TaskState::Pending) {
-                return Ok(matches!(state, TaskState::Running | TaskState::Exited(_)));
+                return Ok(Some(matches!(
+                    state,
+                    TaskState::Running | TaskState::Exited(_)
+                )));
             }
             if Instant::now() >= deadline {
-                return Ok(false);
+                return Ok(Some(false));
             }
             thread::sleep(Duration::from_millis(25));
         }

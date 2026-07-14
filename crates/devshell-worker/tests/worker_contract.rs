@@ -701,6 +701,78 @@ fn long_tool_call_does_not_block_control_requests_on_the_same_rpc_connection() {
 }
 
 #[test]
+fn tool_call_cancel_terminates_a_running_bash_process_group() {
+    let env = TestEnv::new();
+    let instance = "aromatic-cancel-rpc";
+    let marker = env.workspace().join("cancelled-command-finished");
+
+    env.command()
+        .current_dir(env.workspace())
+        .args(["start", "--instance", instance])
+        .assert()
+        .success();
+
+    let mut bridge = env
+        .std_command()
+        .args(["rpc", "--instance", instance])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut stdin = bridge.stdin.take().unwrap();
+    let mut stdout = bridge.stdout.take().unwrap();
+
+    write_rpc_frame(
+        &mut stdin,
+        &serde_json::json!({
+            "type": "request",
+            "id": "cancel-me",
+            "method": "bash_run",
+            "params": {
+                "command": format!("sleep 5; printf done > {}", marker.display()),
+                "timeoutMs": 10000
+            },
+            "context": {
+                "sessionId": "cancel-session",
+                "requestId": "mcp-cancel-me",
+                "source": "mcp"
+            }
+        }),
+    );
+    std::thread::sleep(Duration::from_millis(100));
+    let cancel_started = Instant::now();
+    write_rpc_frame(
+        &mut stdin,
+        &serde_json::json!({
+            "type": "request",
+            "id": "cancel-control",
+            "method": "tool.call.cancel",
+            "params": {
+                "rpcRequestId": "cancel-me",
+                "sessionId": "cancel-session",
+                "reason": "client timeout"
+            }
+        }),
+    );
+
+    let first = read_rpc_frame(&mut stdout);
+    assert_eq!(first["id"], "cancel-control", "{first}");
+    assert_eq!(first["ok"], true, "{first}");
+    assert_eq!(first["result"]["cancelled"], true, "{first}");
+
+    let second = read_rpc_frame(&mut stdout);
+    assert_eq!(second["id"], "cancel-me", "{second}");
+    assert_eq!(second["ok"], false, "{second}");
+    assert_eq!(second["error"]["code"], "tool.cancelled", "{second}");
+    assert!(cancel_started.elapsed() < Duration::from_secs(2));
+    assert!(!marker.exists());
+
+    drop(stdin);
+    bridge.wait().unwrap();
+    env.json_command(&["stop", "--instance", instance]);
+}
+
+#[test]
 fn internal_artifact_payload_rpc_is_persistent_and_not_listed_as_a_tool() {
     let env = TestEnv::new();
     let instance = "artifact-payload";

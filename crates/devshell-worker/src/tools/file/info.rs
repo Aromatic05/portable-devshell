@@ -37,6 +37,7 @@ impl ToolHandler for FileInfoTool {
         }
     }
     fn call(&self, call: ToolCall) -> Result<serde_json::Value, ToolError> {
+        call.check_cancelled()?;
         let input: FileInfoInput = serde_json::from_value(call.params.clone())
             .map_err(|error| ToolError::new("tool.invalidArguments", error.to_string()))?;
         if input.paths.is_empty() {
@@ -47,6 +48,7 @@ impl ToolHandler for FileInfoTool {
         }
         let mut entries = Vec::with_capacity(input.paths.len());
         for raw_path in input.paths {
+            call.check_cancelled()?;
             let requested = parse_requested_path(&raw_path)?;
             authorize(&call, requested.namespace, false)?;
             let raw = requested.path(&call.workspace);

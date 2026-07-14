@@ -56,6 +56,7 @@ impl ToolHandler for BashRunTool {
         }
     }
     fn call(&self, call: ToolCall) -> Result<serde_json::Value, ToolError> {
+        call.check_cancelled()?;
         let params: BashRunParams = serde_json::from_value(call.params.clone())
             .map_err(|error| ToolError::new("tool.invalidArguments", error.to_string()))?;
         if params.command.trim().is_empty() {
@@ -142,7 +143,12 @@ impl ToolHandler for BashRunTool {
             stderr_draft,
             stderr_warning,
         );
-        let termination = wait(&mut child, pid, Duration::from_millis(timeout_ms))?;
+        let wait_outcome = wait(
+            &mut child,
+            pid,
+            Duration::from_millis(timeout_ms),
+            &call.cancellation,
+        )?;
         let status = child
             .wait_and_reap()
             .map_err(|error| ToolError::new("bash.ioFailed", error.to_string()))?;
@@ -153,10 +159,12 @@ impl ToolHandler for BashRunTool {
             .join()
             .map_err(|_| ToolError::new("bash.ioFailed", "stderr reader panicked"))??;
         let term_signal = status.signal();
-        let termination = if termination == BashTermination::Exited && term_signal.is_some() {
-            BashTermination::Signaled
-        } else {
-            termination
+        let termination = match wait_outcome {
+            BashWaitOutcome::Cancelled => BashTermination::Signaled,
+            BashWaitOutcome::Termination(BashTermination::Exited) if term_signal.is_some() => {
+                BashTermination::Signaled
+            }
+            BashWaitOutcome::Termination(termination) => termination,
         };
         let mut artifact_warnings = Vec::new();
         let stdout_artifact = persist_artifact(
@@ -171,6 +179,18 @@ impl ToolHandler for BashRunTool {
             "stderr",
             &mut artifact_warnings,
         );
+        if matches!(wait_outcome, BashWaitOutcome::Cancelled) {
+            return Err(ToolError::new(
+                "tool.cancelled",
+                "bash_run was cancelled and its process group was terminated.",
+            )
+            .with_details(serde_json::json!({
+                "durationMs": started.elapsed().as_millis(),
+                "stderrBytes": stderr_bytes.load(Ordering::SeqCst),
+                "stdoutBytes": stdout_bytes.load(Ordering::SeqCst),
+                "termSignal": term_signal,
+            })));
+        }
         serde_json::to_value(BashRunOutput {
             exit_code: if matches!(termination, BashTermination::Exited) {
                 status.code()
@@ -360,15 +380,32 @@ fn persist_artifact(
     }
 }
 
-fn wait(child: &mut Child, pid: i32, timeout: Duration) -> Result<BashTermination, ToolError> {
+#[derive(Clone, Copy, Debug)]
+enum BashWaitOutcome {
+    Cancelled,
+    Termination(BashTermination),
+}
+
+fn wait(
+    child: &mut Child,
+    pid: i32,
+    timeout: Duration,
+    cancellation: &crate::tools::ToolCancellation,
+) -> Result<BashWaitOutcome, ToolError> {
     let started = Instant::now();
     loop {
+        if cancellation.is_cancelled() {
+            terminate(pid)?;
+            return Ok(BashWaitOutcome::Cancelled);
+        }
         if started.elapsed() >= timeout {
             terminate(pid)?;
-            return Ok(BashTermination::Timeout);
+            return Ok(BashWaitOutcome::Termination(BashTermination::Timeout));
         }
         match child.try_wait() {
-            Ok(Some(_)) => return Ok(BashTermination::Exited),
+            Ok(Some(_)) => {
+                return Ok(BashWaitOutcome::Termination(BashTermination::Exited));
+            }
             Ok(None) => thread::sleep(Duration::from_millis(10)),
             Err(error) => return Err(ToolError::new("bash.ioFailed", error.to_string())),
         }

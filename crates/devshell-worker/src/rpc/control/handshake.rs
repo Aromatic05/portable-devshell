@@ -64,7 +64,7 @@ impl ControlHandler for HandshakeHandler {
             "capabilities": {
                 "tools": true,
                 "streaming": false,
-                "cancel": false
+                "cancel": true
             }
         }))
     }

@@ -47,6 +47,7 @@ impl ToolHandler for FileReadTool {
         }
     }
     fn call(&self, call: ToolCall) -> Result<serde_json::Value, ToolError> {
+        call.check_cancelled()?;
         let input: FileReadInput = serde_json::from_value(call.params.clone())
             .map_err(|error| ToolError::new("tool.invalidArguments", error.to_string()))?;
         if input.view == FileReadView::Outline && input.selector.is_some() {
@@ -93,6 +94,7 @@ impl FileReadTool {
             ));
         }
         let text = TextFile::read(path)?;
+        call.check_cancelled()?;
         if text.revision != metadata.revision {
             return Err(ToolError::retryable(
                 "file.revisionMismatch",
@@ -105,6 +107,7 @@ impl FileReadTool {
                 "no supported syntax outline is available for this file",
             )
         })?;
+        call.check_cancelled()?;
         self.remember(
             call,
             path,
@@ -154,6 +157,7 @@ impl FileReadTool {
             parse_selector(input.selector.as_deref(), metadata.total_lines)?
         };
         let selected = TextMetadata::read_selected(path, &selector.ranges, MAX_CONTENT_BYTES)?;
+        call.check_cancelled()?;
         if selected.metadata.revision != metadata.revision {
             return Err(ToolError::retryable(
                 "file.revisionMismatch",
@@ -162,7 +166,10 @@ impl FileReadTool {
         }
         let mut content = String::new();
         let mut seen = Vec::new();
-        for (line_no, line) in &selected.lines {
+        for (offset, (line_no, line)) in selected.lines.iter().enumerate() {
+            if offset % 256 == 0 {
+                call.check_cancelled()?;
+            }
             if !content.is_empty() {
                 content.push('\n');
             }
@@ -178,8 +185,10 @@ impl FileReadTool {
             );
         }
 
+        call.check_cancelled()?;
         if metadata.total_bytes <= FULL_SNAPSHOT_LIMIT {
             let text = TextFile::read(path)?;
+            call.check_cancelled()?;
             if text.revision != metadata.revision {
                 return Err(ToolError::retryable(
                     "file.revisionMismatch",

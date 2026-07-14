@@ -44,7 +44,7 @@ pub struct BashRunOutput {
     pub termination: BashTermination,
 }
 
-#[derive(Debug, PartialEq, Serialize, JsonSchema)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub enum BashTermination {
     Exited,

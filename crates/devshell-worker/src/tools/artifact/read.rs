@@ -37,9 +37,12 @@ impl ToolHandler for ArtifactReadTool {
     }
 
     fn call(&self, call: ToolCall) -> Result<serde_json::Value, ToolError> {
-        let input: ArtifactReadInput = serde_json::from_value(call.params)
+        call.check_cancelled()?;
+        let input: ArtifactReadInput = serde_json::from_value(call.params.clone())
             .map_err(|error| ToolError::new("tool.invalidArguments", error.to_string()))?;
-        serde_json::to_value(self.store.read(input)?)
+        let output = self.store.read(input)?;
+        call.check_cancelled()?;
+        serde_json::to_value(output)
             .map_err(|error| ToolError::new("tool.internalError", error.to_string()))
     }
 }
