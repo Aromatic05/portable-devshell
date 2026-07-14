@@ -29,12 +29,13 @@ const cliToolCallContext = { source: "cli" } as const;
 test("WorkerInstance completes lifecycle against frozen devshell-worker", async (t) => {
     const workspacePath = await mkdtemp(join(tmpdir(), "portable-devshell-instance-"));
     const homeDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-instance-home-"));
+    const runtimeDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-instance-runtime-"));
     const instanceName = asInstanceName(`task-6-${process.pid}`);
     const repoRoot = fileURLToPath(new URL("../../../../", import.meta.url));
     const factory = new WorkerInstanceFactory();
     const instance = factory.create({
         defaultWorkspace: asWorkspacePath(workspacePath),
-        env: { ...process.env, HOME: homeDirectory },
+        env: { ...process.env, HOME: homeDirectory, XDG_RUNTIME_DIR: runtimeDirectory },
         homeDirectory,
         name: instanceName,
         transport: new LocalWorkerTransport({
@@ -44,10 +45,11 @@ test("WorkerInstance completes lifecycle against frozen devshell-worker", async 
     });
 
     t.after(async () => {
-        await instance.close();
         await instance.stop().catch(() => undefined);
+        await instance.close();
         await rm(workspacePath, { force: true, recursive: true });
         await rm(homeDirectory, { force: true, recursive: true });
+        await rm(runtimeDirectory, { force: true, recursive: true });
     });
 
     const started = await instance.start();

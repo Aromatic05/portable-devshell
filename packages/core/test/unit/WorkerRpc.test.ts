@@ -144,8 +144,9 @@ test("WorkerRpcBridge surfaces spawn failures as structured rpc spawn errors", a
 test("WorkerProtocolClient performs ping, handshake, and tools.list against frozen devshell-worker", async (t) => {
     const workspacePath = await mkdtemp(join(tmpdir(), "portable-devshell-core-rpc-"));
     const homeDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-core-rpc-home-"));
+    const runtimeDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-core-rpc-runtime-"));
     const instanceName = `task-4-${process.pid}`;
-    const env = { ...process.env, HOME: homeDirectory };
+    const env = { ...process.env, HOME: homeDirectory, XDG_RUNTIME_DIR: runtimeDirectory };
     const repoRoot = fileURLToPath(new URL("../../../../", import.meta.url));
     const transport = new LocalWorkerTransport({
         workerBinary: new WorkerBinary(resolve(repoRoot, "target/debug/devshell-worker")),
@@ -165,6 +166,7 @@ test("WorkerProtocolClient performs ping, handshake, and tools.list against froz
         await transport.runWorkerCommand("stop", { env, instanceName });
         await rm(homeDirectory, { recursive: true, force: true });
         await rm(workspacePath, { recursive: true, force: true });
+        await rm(runtimeDirectory, { recursive: true, force: true });
     });
     const protocolClient = new WorkerProtocolClient(new WorkerRpcClient(bridge));
 

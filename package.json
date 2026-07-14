@@ -18,7 +18,7 @@
         "build:worker:debug:windows-arm64": "node ./scripts/build-worker.mjs --target windows-arm64",
         "lint": "eslint .",
         "lint:fix": "eslint . --fix",
-        "test": "pnpm -r --filter \"./packages/*\" test",
+        "test": "pnpm -r --workspace-concurrency=1 --filter \"./packages/*\" test",
         "typecheck": "pnpm -r --filter \"./packages/*\" typecheck",
         "install:local": "node ./scripts/install-local.mjs",
         "package:app": "node ./scripts/package-app.mjs",

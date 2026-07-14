@@ -924,8 +924,9 @@ test("podman transport rejects already running existing stopped containers", asy
 test("local transport executes frozen devshell-worker start status logs stop rpc", async (t) => {
     const workspacePath = await mkdtemp(join(tmpdir(), "portable-devshell-core-"));
     const homeDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-core-home-"));
+    const runtimeDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-core-runtime-"));
     const instanceName = `task-3-${process.pid}`;
-    const env = { ...process.env, HOME: homeDirectory };
+    const env = { ...process.env, HOME: homeDirectory, XDG_RUNTIME_DIR: runtimeDirectory };
     const repoRoot = fileURLToPath(new URL("../../../../", import.meta.url));
     const transport = new LocalWorkerTransport({
         workerBinary: new WorkerBinary(resolve(repoRoot, "target/debug/devshell-worker")),
@@ -936,6 +937,7 @@ test("local transport executes frozen devshell-worker start status logs stop rpc
         await transport.runWorkerCommand("stop", { env, instanceName });
         await rm(homeDirectory, { recursive: true, force: true });
         await rm(workspacePath, { recursive: true, force: true });
+        await rm(runtimeDirectory, { recursive: true, force: true });
     });
 
     await transport.installWorker();
