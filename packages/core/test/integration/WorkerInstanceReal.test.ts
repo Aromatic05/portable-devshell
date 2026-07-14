@@ -356,6 +356,65 @@ test("WorkerInstance waits for approval before invoking tools and persists appro
     }
 });
 
+test("WorkerInstance cancels a pending approval when the caller aborts", async () => {
+    const homeDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-instance-approval-cancel-"));
+    const harness = createWorkerInstanceHarness();
+    const instance = new WorkerInstanceFactory().create({
+        approvalPolicy: { mode: "ask" },
+        homeDirectory,
+        name: asInstanceName("task-6-approval-cancel"),
+        transport: harness.transport
+    });
+
+    try {
+        await instance.start("/tmp/workspace");
+        const beforeInvokeCount = harness.requestedMethods();
+        const controller = new AbortController();
+        const callPromise = instance.callTool(
+            "bash_run",
+            { command: "pwd" },
+            { requestId: "req-cancel-approval", sessionId: "session-cancel", source: "mcp" },
+            controller.signal
+        );
+
+        await new Promise((resolve) => setTimeout(resolve, 25));
+        const approvalId = (await instance.listApprovals())[0]?.approvalId ?? "";
+        assert.notEqual(approvalId, "");
+        controller.abort("client timeout");
+        await assert.rejects(
+            instance.decideApproval(approvalId, {
+                decidedBy: "cli",
+                decision: "approve"
+            }),
+            (error: unknown) => {
+                assert.equal((error as { code?: string }).code, errorCodes.coreApprovalAlreadyDecided);
+                return true;
+            }
+        );
+
+        await assert.rejects(callPromise, (error: unknown) => {
+            assert.equal((error as { code?: string }).code, errorCodes.coreToolCallCancelled);
+            return true;
+        });
+        assert.equal(harness.requestedMethods(), beforeInvokeCount);
+        assert.equal((await instance.getApproval(approvalId)).status, "cancelled");
+        assert.deepEqual(
+            (await instance.readToolCalls()).map((record) => record.status),
+            ["cancelled"]
+        );
+
+        const replay = instance.subscribe(1);
+        assert.equal(replay.kind, "events");
+        const eventTypes = replay.events.map((event) => event.type);
+        assert.equal(eventTypes.includes("approval.cancelled"), true);
+        assert.equal(eventTypes.includes("toolCall.cancelled"), true);
+        assert.equal(eventTypes.includes("toolCall.running"), false);
+    } finally {
+        await instance.close();
+        await rm(homeDirectory, { force: true, recursive: true });
+    }
+});
+
 test("WorkerInstance denies and expires approval-gated calls without invoking tools", async () => {
     const homeDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-instance-approval-fail-"));
     const harness = createWorkerInstanceHarness();
@@ -724,7 +783,7 @@ function createLifecycleResponse(
             id,
             ok: true,
             result: {
-                capabilities: { cancel: false, streaming: false, tools: true },
+                capabilities: { cancel: true, streaming: false, tools: true },
                 instance: "task-6-harness",
                 platform: { arch: "x64", os: "linux" },
                 protocolVersion: 2,

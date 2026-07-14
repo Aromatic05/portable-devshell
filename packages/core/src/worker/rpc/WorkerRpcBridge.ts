@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+
 import type { JsonValue } from "@portable-devshell/shared";
 
 import type { WorkerCommandTransport } from "../command/WorkerCommandTransport.js";
@@ -11,6 +13,7 @@ import type {
 import { WorkerRpcProcessConnector } from "./WorkerRpcProcessChannel.js";
 
 interface PendingResponse {
+    cleanup(): void;
     reject: (error: unknown) => void;
     request: WorkerRpcRequestEnvelope;
     resolve: (response: WorkerRpcResponseEnvelope) => void;
@@ -63,15 +66,40 @@ export class WorkerRpcBridge {
         };
     }
 
-    async request(request: WorkerRpcRequestEnvelope): Promise<WorkerRpcResponseEnvelope> {
+    async request(request: WorkerRpcRequestEnvelope, signal?: AbortSignal): Promise<WorkerRpcResponseEnvelope> {
+        this.#throwIfCancelled(request, signal);
         const channel = await this.#ensureChannel();
+        this.#throwIfCancelled(request, signal);
 
         return await new Promise<WorkerRpcResponseEnvelope>((resolve, reject) => {
-            const pending: PendingResponse = { reject, request, resolve };
+            let removeAbortListener: () => void = () => {};
+            const pending: PendingResponse = {
+                cleanup: () => removeAbortListener(),
+                reject,
+                request,
+                resolve
+            };
+            const onAbort = () => {
+                if (this.#pending.get(request.id) !== pending) {
+                    return;
+                }
+                this.#pending.delete(request.id);
+                pending.cleanup();
+                reject(WorkerRpcError.cancelled(this.#cancellationDetails(request, signal?.reason), signal?.reason));
+                this.#enqueueCancellation(request, signal?.reason);
+            };
+            if (signal !== undefined) {
+                signal.addEventListener("abort", onAbort, { once: true });
+                removeAbortListener = () => signal.removeEventListener("abort", onAbort);
+            }
             this.#pending.set(request.id, pending);
             void channel.send(request as unknown as JsonValue).catch((error: unknown) => {
                 if (!this.#preservePendingOnDisconnect) {
-                    this.#pending.delete(request.id);
+                    const active = this.#pending.get(request.id);
+                    if (active === pending) {
+                        this.#pending.delete(request.id);
+                        pending.cleanup();
+                    }
                 }
                 this.#disconnectChannel(channel, this.#createDisconnectError(error));
             });
@@ -140,6 +168,7 @@ export class WorkerRpcBridge {
             return;
         }
         this.#pending.delete(message.id);
+        pending.cleanup();
         pending.resolve(message);
     }
 
@@ -168,8 +197,67 @@ export class WorkerRpcBridge {
     #rejectPending(error: WorkerRpcError): void {
         for (const [requestId, pending] of this.#pending) {
             this.#pending.delete(requestId);
+            pending.cleanup();
             pending.reject(error);
         }
+    }
+
+    #throwIfCancelled(request: WorkerRpcRequestEnvelope, signal: AbortSignal | undefined): void {
+        if (signal?.aborted !== true) {
+            return;
+        }
+        throw WorkerRpcError.cancelled(this.#cancellationDetails(request, signal.reason), signal.reason);
+    }
+
+    #enqueueCancellation(request: WorkerRpcRequestEnvelope, reason: unknown): void {
+        const sessionId = request.context?.sessionId;
+        if (sessionId === undefined || request.method === "tool.call.cancel") {
+            return;
+        }
+        const cancellation: WorkerRpcRequestEnvelope = {
+            type: "request",
+            id: `cancel-${randomUUID()}`,
+            method: "tool.call.cancel",
+            params: {
+                reason: readAbortReason(reason),
+                rpcRequestId: request.id,
+                sessionId
+            },
+            context: {
+                sessionId,
+                source: request.context?.source
+            }
+        };
+        const pending: PendingResponse = {
+            cleanup: () => undefined,
+            reject: () => undefined,
+            request: cancellation,
+            resolve: () => undefined
+        };
+        this.#pending.set(cancellation.id, pending);
+        const channel = this.#channel;
+        if (channel === undefined) {
+            if (!this.#preservePendingOnDisconnect) {
+                this.#pending.delete(cancellation.id);
+            }
+            return;
+        }
+        void channel.send(cancellation as unknown as JsonValue).catch((error: unknown) => {
+            if (!this.#preservePendingOnDisconnect) {
+                this.#pending.delete(cancellation.id);
+            }
+            this.#disconnectChannel(channel, this.#createDisconnectError(error));
+        });
+    }
+
+    #cancellationDetails(request: WorkerRpcRequestEnvelope, reason: unknown): JsonValue {
+        return {
+            instanceName: this.#rpcOptions.instanceName,
+            method: request.method,
+            reason: readAbortReason(reason),
+            rpcRequestId: request.id,
+            sessionId: request.context?.sessionId
+        } as JsonValue;
     }
 
     #createDisconnectError(cause: unknown): WorkerRpcError {
@@ -197,4 +285,14 @@ function isWorkerRpcResponseEnvelope(value: JsonValue): value is WorkerRpcRespon
 
     const candidate = value as Record<string, JsonValue>;
     return candidate.type === "response" && typeof candidate.id === "string" && typeof candidate.ok === "boolean";
+}
+
+function readAbortReason(reason: unknown): string {
+    if (typeof reason === "string" && reason.length > 0) {
+        return reason;
+    }
+    if (reason instanceof Error && reason.message.length > 0) {
+        return reason.message;
+    }
+    return "client cancelled";
 }

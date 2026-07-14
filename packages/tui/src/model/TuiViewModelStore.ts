@@ -86,7 +86,8 @@ export class TuiViewModelStore {
                 envelope.event === "approval.requested" ||
                 envelope.event === "approval.approved" ||
                 envelope.event === "approval.denied" ||
-                envelope.event === "approval.expired"
+                envelope.event === "approval.expired" ||
+                envelope.event === "approval.cancelled"
             ) {
                 this.#approvalInbox.upsertEvent(instance, data);
             }

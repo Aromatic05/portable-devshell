@@ -420,7 +420,7 @@ function readApprovalDecision(value: JsonValue | undefined): ToolCallApprovalDec
 }
 
 function readApprovalStatus(value: JsonValue | undefined): ApprovalRequest["status"] | undefined {
-    if (value === "pending" || value === "approved" || value === "denied" || value === "expired") {
+    if (value === "pending" || value === "approved" || value === "denied" || value === "expired" || value === "cancelled") {
         return value;
     }
 

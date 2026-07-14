@@ -33,6 +33,7 @@ export type InstanceEventType = ArtifactEventType
     | "approval.approved"
     | "approval.denied"
     | "approval.expired"
+    | "approval.cancelled"
     | "todo.created"
     | "todo.updated"
     | "todo.completed"

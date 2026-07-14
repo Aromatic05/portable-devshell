@@ -66,8 +66,9 @@ export class WorkerInstanceTool {
         this.#toolInvoker = options.toolInvoker;
     }
 
-    async call(toolName: string, input: JsonValue, context: ToolCallContext): Promise<JsonValue> {
+    async call(toolName: string, input: JsonValue, context: ToolCallContext, signal?: AbortSignal): Promise<JsonValue> {
         this.#assertReady();
+        throwIfAborted(signal);
 
         const callId = randomUUID();
         const startedAt = new Date().toISOString();
@@ -88,13 +89,16 @@ export class WorkerInstanceTool {
         let reservation: ToolSchedulerReservation;
 
         try {
-            reservation = this.#toolCallScheduler.reserve({
-                callId,
-                instanceName: this.#instanceName,
-                sessionId: context.sessionId,
-                source: context.source,
-                toolName
-            });
+            reservation = this.#toolCallScheduler.reserve(
+                {
+                    callId,
+                    instanceName: this.#instanceName,
+                    sessionId: context.sessionId,
+                    source: context.source,
+                    toolName
+                },
+                signal
+            );
         } catch (error) {
             throw normalizeToolSchedulerError(error);
         }
@@ -119,7 +123,8 @@ export class WorkerInstanceTool {
                 inputSummary,
                 context,
                 startedAt,
-                () => reservation.markPendingApproval()
+                () => reservation.markPendingApproval(),
+                signal
             );
         } catch (error) {
             reservation.release();
@@ -149,7 +154,7 @@ export class WorkerInstanceTool {
                         status: "running"
                     })
                 );
-                return await this.#toolInvoker.invoke(toolName, input, context);
+                return await this.#toolInvoker.invoke(toolName, input, context, signal);
             });
             toolExecutionSucceeded = true;
             const bashResult = toolName === "bash_run" ? asBashToolResult(result) : undefined;
@@ -189,7 +194,8 @@ export class WorkerInstanceTool {
                 throw error;
             }
             const finishedAt = new Date().toISOString();
-            const errorCode = getErrorCode(error, errorCodes.coreProviderFailed);
+            const rawErrorCode = getErrorCode(error, errorCodes.coreProviderFailed);
+            const errorCode = rawErrorCode === "tool.cancelled" ? errorCodes.coreToolCallCancelled : rawErrorCode;
             const result = asCommandResult(error);
             const nonRunningStatus = readNonRunningSchedulerStatus(errorCode);
 
@@ -402,7 +408,7 @@ function readNonRunningSchedulerStatus(errorCode: string): "queueTimeout" | "can
         return "queueTimeout";
     }
 
-    if (errorCode === errorCodes.coreToolCallCancelled) {
+    if (errorCode === errorCodes.coreToolCallCancelled || errorCode === "tool.cancelled") {
         return "cancelled";
     }
 
@@ -415,13 +421,14 @@ function normalizeToolSchedulerError(error: unknown): unknown {
     if (
         errorCode !== errorCodes.coreToolSchedulerFull &&
         errorCode !== errorCodes.coreToolQueueTimeout &&
-        errorCode !== errorCodes.coreToolCallCancelled
+        errorCode !== errorCodes.coreToolCallCancelled &&
+        errorCode !== "tool.cancelled"
     ) {
         return error;
     }
 
     return createError({
-        code: errorCode,
+        code: errorCode === "tool.cancelled" ? errorCodes.coreToolCallCancelled : errorCode,
         cause: error,
         message: error instanceof Error ? error.message : "Tool scheduler rejected the tool call.",
         retryable: true,
@@ -450,3 +457,17 @@ function readTail(value: string): string {
     return value.slice(-160);
 }
 
+function throwIfAborted(signal: AbortSignal | undefined): void {
+    if (signal?.aborted !== true) {
+        return;
+    }
+    throw createError({
+        code: errorCodes.coreToolCallCancelled,
+        cause: signal.reason,
+        message: "Tool call was cancelled by the client.",
+        retryable: true,
+        details: {
+            reason: typeof signal.reason === "string" ? signal.reason : "client cancelled"
+        }
+    });
+}

@@ -49,6 +49,8 @@ interface ToolSchedulerEntry {
     settled: boolean;
     state: ToolSchedulerEntryState;
     timeout?: NodeJS.Timeout;
+    removeAbortListener?: () => void;
+    cancellationReason?: unknown;
 }
 
 const terminalStates = new Set<ToolSchedulerEntryState>(["completed", "failed", "cancelled", "queueTimeout"]);
@@ -102,7 +104,10 @@ export class ToolCallScheduler {
         this.#limits = limits;
     }
 
-    reserve(request: ToolSchedulerRequest): ToolSchedulerReservation {
+    reserve(request: ToolSchedulerRequest, signal?: AbortSignal): ToolSchedulerReservation {
+        if (signal?.aborted === true) {
+            throw this.#cancelledErrorForRequest(request, signal.reason);
+        }
         if (this.#entries.has(request.callId)) {
             throw new Error(`Tool call ${request.callId} is already reserved.`);
         }
@@ -114,6 +119,14 @@ export class ToolCallScheduler {
             state: "reserved"
         };
         this.#entries.set(request.callId, entry);
+        if (signal !== undefined) {
+            const onAbort = () => {
+                entry.cancellationReason = signal.reason;
+                this.#cancel(entry);
+            };
+            signal.addEventListener("abort", onAbort, { once: true });
+            entry.removeAbortListener = () => signal.removeEventListener("abort", onAbort);
+        }
 
         return {
             markPendingApproval: () => {
@@ -270,20 +283,27 @@ export class ToolCallScheduler {
             entry.reject?.(error);
         }
 
+        entry.removeAbortListener?.();
+        entry.removeAbortListener = undefined;
         entry.resolve = undefined;
         entry.reject = undefined;
         entry.run = undefined;
     }
 
     #cancelledError(entry: ToolSchedulerEntry) {
+        return this.#cancelledErrorForRequest(entry.request, entry.cancellationReason);
+    }
+
+    #cancelledErrorForRequest(request: ToolSchedulerRequest, reason: unknown) {
         return createError({
             code: errorCodes.coreToolCallCancelled,
             message: "Tool call was cancelled before it started.",
             retryable: true,
             details: {
-                callId: entry.request.callId,
-                instance: entry.request.instanceName,
-                toolName: entry.request.toolName
+                callId: request.callId,
+                instance: request.instanceName,
+                reason: readCancellationReason(reason),
+                toolName: request.toolName
             }
         });
     }
@@ -376,4 +396,14 @@ export function resolveToolSchedulerLimits(input?: Partial<ToolSchedulerLimits>)
         queueDepthPerSession: input?.queueDepthPerSession ?? defaultToolSchedulerLimits.queueDepthPerSession,
         queueTimeoutMs: input?.queueTimeoutMs ?? defaultToolSchedulerLimits.queueTimeoutMs
     };
+}
+
+function readCancellationReason(reason: unknown): string {
+    if (typeof reason === "string" && reason.length > 0) {
+        return reason;
+    }
+    if (reason instanceof Error && reason.message.length > 0) {
+        return reason.message;
+    }
+    return "client cancelled";
 }

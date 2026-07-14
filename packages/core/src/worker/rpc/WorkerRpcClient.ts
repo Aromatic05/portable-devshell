@@ -15,7 +15,12 @@ export class WorkerRpcClient {
         this.#bridge = bridge;
     }
 
-    async request(method: string, params: JsonValue = {}, context?: WorkerRpcRequestContext): Promise<JsonValue> {
+    async request(
+        method: string,
+        params: JsonValue = {},
+        context?: WorkerRpcRequestContext,
+        signal?: AbortSignal
+    ): Promise<JsonValue> {
         const request: WorkerRpcRequestEnvelope = {
             type: "request",
             id: String(this.#nextRequestId++),
@@ -26,7 +31,7 @@ export class WorkerRpcClient {
                 sessionId: context?.sessionId ?? this.#sessionId
             }
         };
-        const response = await this.#bridge.request(request);
+        const response = await this.#bridge.request(request, signal);
 
         if (response.ok) {
             return response.result;

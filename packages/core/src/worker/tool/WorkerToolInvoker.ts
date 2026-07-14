@@ -16,7 +16,12 @@ export class WorkerToolInvoker {
         this.#catalog = catalog;
     }
 
-    async invoke(toolName: string, input: JsonValue, context?: ToolCallContext): Promise<JsonValue> {
+    async invoke(
+        toolName: string,
+        input: JsonValue,
+        context?: ToolCallContext,
+        signal?: AbortSignal
+    ): Promise<JsonValue> {
         const tool = this.#catalog.getTool(toolName);
 
         if (tool === undefined) {
@@ -29,7 +34,7 @@ export class WorkerToolInvoker {
         }
 
         this.#validate(tool.inputSchema, input, toolName, "input");
-        const result = await this.#rpcClient.request(toolName, input, context);
+        const result = await this.#rpcClient.request(toolName, input, context, signal);
         this.#validate(tool.outputSchema, result, toolName, "output");
         return result;
     }

@@ -365,8 +365,8 @@ export class WorkerInstance {
         });
     }
 
-    async callTool(toolName: string, input: JsonValue, context: ToolCallContext): Promise<JsonValue> {
-        return await this.#tool.call(toolName, input, context);
+    async callTool(toolName: string, input: JsonValue, context: ToolCallContext, signal?: AbortSignal): Promise<JsonValue> {
+        return await this.#tool.call(toolName, input, context, signal);
     }
 
     async listApprovals(): Promise<ApprovalRequest[]> {

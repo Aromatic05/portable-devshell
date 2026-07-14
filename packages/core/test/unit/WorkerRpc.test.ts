@@ -7,7 +7,7 @@ import { PassThrough } from "node:stream";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { FrameReader, FrameWriter, type JsonValue } from "@portable-devshell/shared";
+import { FrameReader, FrameWriter, errorCodes, type JsonValue } from "@portable-devshell/shared";
 import {
     LocalWorkerTransport,
     WorkerBinary,
@@ -108,6 +108,39 @@ test("WorkerRpcClient uses one connection-scoped session id unless a caller supp
     assert.equal(implicit[0], implicit[1]);
     assert.equal(harness.requestContexts[2]?.sessionId, "mcp-session");
     assert.equal(harness.requestContexts[2]?.source, "mcp");
+    bridge.close();
+});
+
+test("WorkerRpcClient propagates abort as tool.call.cancel", async () => {
+    const harness = createRpcHarness({ slowMethods: new Set(["bash_run"]) });
+    const bridge = new WorkerRpcBridge({
+        transport: harness.transport,
+        rpcOptions: { instanceName: "rpc-cancel" }
+    });
+    const client = new WorkerRpcClient(bridge);
+    const controller = new AbortController();
+
+    const pending = client.request(
+        "bash_run",
+        { command: "sleep 30" },
+        { requestId: "mcp-call", sessionId: "mcp-session", source: "mcp" },
+        controller.signal
+    );
+    await harness.waitForMethod("bash_run");
+    controller.abort("client timeout");
+
+    await assert.rejects(pending, (error: unknown) => {
+        assert.equal((error as { code?: string }).code, errorCodes.coreToolCallCancelled);
+        return true;
+    });
+    await harness.waitForMethod("tool.call.cancel");
+    const cancel = harness.requests.find((request) => request.method === "tool.call.cancel");
+    const original = harness.requests.find((request) => request.method === "bash_run");
+    assert.deepEqual(cancel?.params, {
+        reason: "client timeout",
+        rpcRequestId: original?.id,
+        sessionId: "mcp-session"
+    });
     bridge.close();
 });
 
@@ -214,11 +247,13 @@ function createRpcHarness(options?: { slowMethods?: Set<string> }): {
     spawnCount: number;
     requestMethods: string[];
     requestContexts: Array<{ sessionId?: string; source?: string } | undefined>;
+    requests: Array<{ id: string; method: string; params?: JsonValue; context?: { sessionId?: string; source?: string } }>;
     disconnect: () => void;
     waitForMethod: (method: string) => Promise<void>;
 } {
     const requestMethods: string[] = [];
     const requestContexts: Array<{ sessionId?: string; source?: string } | undefined> = [];
+    const requests: Array<{ id: string; method: string; params?: JsonValue; context?: { sessionId?: string; source?: string } }> = [];
     const slowMethods = options?.slowMethods ?? new Set<string>();
     const stdout = new PassThrough();
     const stdin = new PassThrough();
@@ -261,6 +296,7 @@ function createRpcHarness(options?: { slowMethods?: Set<string> }): {
 
             requestMethods.push(frame.method);
             requestContexts.push(frame.context);
+            requests.push(frame);
             methodWaiters.get(frame.method)?.splice(0).forEach((resolve) => resolve());
 
             if (slowMethods.has(frame.method)) {
@@ -278,6 +314,7 @@ function createRpcHarness(options?: { slowMethods?: Set<string> }): {
         },
         requestMethods,
         requestContexts,
+        requests,
         disconnect() {
             stdout.end();
             exitResolve?.({ code: 1, signal: null });
@@ -299,6 +336,7 @@ function createRpcHarness(options?: { slowMethods?: Set<string> }): {
 function isRequestFrame(value: unknown): value is {
     id: string;
     method: string;
+    params?: JsonValue;
     context?: { sessionId?: string; source?: string };
 } {
     if (typeof value !== "object" || value === null || Array.isArray(value)) {
@@ -330,7 +368,7 @@ function createResponse(method: string, id: string): WorkerRpcResponseEnvelope {
                 workerVersion: "0.1.0",
                 protocolVersion: 2,
                 platform: { os: "linux", arch: "x64" },
-                capabilities: { tools: true, streaming: false, cancel: false }
+                capabilities: { tools: true, streaming: false, cancel: true }
             }
         };
     }

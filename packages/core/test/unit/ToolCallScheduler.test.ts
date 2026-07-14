@@ -68,6 +68,47 @@ test("ToolCallScheduler rejects requests that exceed the bounded queue", () => {
     );
 });
 
+test("ToolCallScheduler cancels a queued request when its abort signal fires", async () => {
+    const instanceName = asInstanceName("scheduler-cancel");
+    const scheduler = new ToolCallScheduler({
+        byTool: {},
+        maxRunning: 1,
+        maxRunningPerSession: 2,
+        queueDepth: 2,
+        queueDepthPerSession: 2,
+        queueTimeoutMs: 1_000
+    });
+    const blocker = createDeferred<string>();
+    const started: string[] = [];
+    const running = scheduler
+        .reserve({ callId: "running", instanceName, sessionId: "session-1", source: "mcp", toolName: "bash_run" })
+        .run(async () => {
+            started.push("running");
+            return await blocker.promise;
+        });
+    await waitFor(() => started.length === 1);
+
+    const controller = new AbortController();
+    const queued = scheduler
+        .reserve(
+            { callId: "queued", instanceName, sessionId: "session-1", source: "mcp", toolName: "bash_run" },
+            controller.signal
+        )
+        .run(async () => {
+            started.push("queued");
+            return "unexpected";
+        });
+    controller.abort("client cancelled");
+
+    await assert.rejects(queued, (error: unknown) => {
+        assert.equal((error as { code?: string }).code, errorCodes.coreToolCallCancelled);
+        return true;
+    });
+    assert.deepEqual(started, ["running"]);
+    blocker.resolve("done");
+    assert.equal(await running, "done");
+});
+
 function createDeferred<T>(): { promise: Promise<T>; reject: (error: unknown) => void; resolve: (value: T) => void } {
     let resolve!: (value: T) => void;
     let reject!: (error: unknown) => void;

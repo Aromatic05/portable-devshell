@@ -2,7 +2,7 @@ import type { JsonValue } from "../../type/TypeJsonValue.js";
 import type { InstanceName } from "../../type/identity/TypeIdentityInstanceName.js";
 import type { ToolCallSource } from "./DtoToolCallRecord.js";
 
-export type ApprovalStatus = "pending" | "approved" | "denied" | "expired";
+export type ApprovalStatus = "pending" | "approved" | "denied" | "expired" | "cancelled";
 export type ApprovalDecisionValue = "approve" | "deny";
 export type ApprovalDecisionBy = "cli" | "tui" | "policy";
 export type ApprovalPolicyMode = "disabled" | "allow" | "ask" | "deny";
@@ -56,5 +56,5 @@ export interface ApprovalTimeout {
 export interface ApprovalEvent {
     decision?: ApprovalDecision;
     request: ApprovalRequest;
-    type: "approval.requested" | "approval.approved" | "approval.denied" | "approval.expired";
+    type: "approval.requested" | "approval.approved" | "approval.denied" | "approval.expired" | "approval.cancelled";
 }

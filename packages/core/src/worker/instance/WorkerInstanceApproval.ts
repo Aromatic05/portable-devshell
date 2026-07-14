@@ -51,7 +51,8 @@ export class WorkerInstanceApproval {
         inputSummary: string,
         context: ToolCallContext,
         startedAt: string,
-        onPendingApproval: () => void
+        onPendingApproval: () => void,
+        signal?: AbortSignal
     ): Promise<{ approvalId?: string; decision?: ToolCallApprovalDecision }> {
         let evaluation: Awaited<ReturnType<ApprovalManager["evaluate"]>>;
 
@@ -96,7 +97,21 @@ export class WorkerInstanceApproval {
             })
         );
 
-        const resolution = await evaluation.awaitDecision;
+        const onAbort = () => {
+            void this.#approvalManager.cancel(evaluation.request.approvalId, readAbortReason(signal?.reason));
+        };
+        if (signal?.aborted === true) {
+            await this.#approvalManager.cancel(evaluation.request.approvalId, readAbortReason(signal.reason));
+        } else {
+            signal?.addEventListener("abort", onAbort, { once: true });
+        }
+
+        let resolution: Awaited<typeof evaluation.awaitDecision>;
+        try {
+            resolution = await evaluation.awaitDecision;
+        } finally {
+            signal?.removeEventListener("abort", onAbort);
+        }
 
         if (resolution.status === "approved") {
             const approvedRequest = await this.#approvalManager.getApproval(evaluation.request.approvalId);
@@ -111,6 +126,12 @@ export class WorkerInstanceApproval {
             const deniedRequest = await this.#approvalManager.getApproval(evaluation.request.approvalId);
             await this.#appendEvent("approval.denied", toApprovalEventData(deniedRequest, resolution.decision));
             return await this.#denyToolCall(callId, toolName, context, startedAt, resolution.error, evaluation.request.approvalId);
+        }
+
+        if (resolution.status === "cancelled") {
+            const cancelledRequest = await this.#approvalManager.getApproval(evaluation.request.approvalId);
+            await this.#appendEvent("approval.cancelled", toApprovalEventData(cancelledRequest));
+            return await this.#cancelToolCall(callId, toolName, context, startedAt, resolution.error, evaluation.request.approvalId);
         }
 
         const expiredRequest = await this.#approvalManager.getApproval(evaluation.request.approvalId);
@@ -178,6 +199,37 @@ export class WorkerInstanceApproval {
         throw error;
     }
 
+    async #cancelToolCall(
+        callId: string,
+        toolName: string,
+        context: ToolCallContext,
+        startedAt: string,
+        error: unknown,
+        approvalId: string
+    ): Promise<never> {
+        const completedAt = new Date().toISOString();
+        const errorCode = getErrorCode(error, errorCodes.coreToolCallCancelled);
+
+        await this.#toolCallHistory.cancelled(callId, errorCode, completedAt);
+        await this.#appendEvent(
+            "toolCall.cancelled",
+            toEventData({
+                approvalId,
+                callId,
+                completedAt,
+                errorCode,
+                requestId: context.requestId,
+                sessionId: context.sessionId,
+                source: context.source,
+                startedAt,
+                status: "cancelled",
+                toolName
+            })
+        );
+
+        throw error;
+    }
+
     async #expireToolCall(
         callId: string,
         toolName: string,
@@ -209,4 +261,14 @@ export class WorkerInstanceApproval {
         throw error;
     }
 
+}
+
+function readAbortReason(reason: unknown): string {
+    if (typeof reason === "string" && reason.length > 0) {
+        return reason;
+    }
+    if (reason instanceof Error && reason.message.length > 0) {
+        return reason.message;
+    }
+    return "client cancelled";
 }

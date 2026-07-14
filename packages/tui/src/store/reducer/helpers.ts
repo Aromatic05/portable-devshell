@@ -53,7 +53,7 @@ export function isToolCallEvent(event: string): boolean {
 }
 
 export function isApprovalEvent(event: string): boolean {
-    return event === "approval.requested" || event === "approval.approved" || event === "approval.denied" || event === "approval.expired";
+    return event === "approval.requested" || event === "approval.approved" || event === "approval.denied" || event === "approval.expired" || event === "approval.cancelled";
 }
 
 export function asRecord(value: JsonValue | undefined): Record<string, JsonValue> | undefined {
