@@ -35,6 +35,10 @@ test("renderers format control, instance, and tool outputs", async () => {
         "[1] stdout hello\n"
     );
     assert.equal(renderToolResult({ exitCode: 0, stderr: "", stdout: "ok\n" }), "exitCode: 0\nstdout:\nok\n");
+    assert.equal(
+        renderToolResult({ kind: "list", panes: [] }),
+        '{\n  "kind": "list",\n  "panes": []\n}\n'
+    );
 });
 
 test("renderCliError suggests starting control when it is not running", () => {

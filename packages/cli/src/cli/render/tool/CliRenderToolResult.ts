@@ -1,6 +1,16 @@
-import type { CliCommandResult } from "../../control/CliControlStream.js";
+import type { JsonValue } from "@portable-devshell/shared";
 
-export function renderToolResult(result: CliCommandResult): string {
+interface CommandResultLike {
+    exitCode: number | null;
+    stderr: string;
+    stdout: string;
+}
+
+export function renderToolResult(result: JsonValue): string {
+    if (!isCommandResult(result)) {
+        return `${JSON.stringify(result, null, 2)}\n`;
+    }
+
     const sections = [`exitCode: ${result.exitCode}`];
 
     if (result.stdout.length > 0) {
@@ -12,4 +22,17 @@ export function renderToolResult(result: CliCommandResult): string {
     }
 
     return `${sections.join("\n")}\n`;
+}
+
+function isCommandResult(value: JsonValue): value is JsonValue & CommandResultLike {
+    if (typeof value !== "object" || value === null || Array.isArray(value)) {
+        return false;
+    }
+
+    const candidate = value as Record<string, JsonValue>;
+    return (
+        (typeof candidate.exitCode === "number" || candidate.exitCode === null) &&
+        typeof candidate.stdout === "string" &&
+        typeof candidate.stderr === "string"
+    );
 }

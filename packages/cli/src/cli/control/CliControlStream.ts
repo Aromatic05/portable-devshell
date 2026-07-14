@@ -110,14 +110,6 @@ export interface CliInstanceLogEntry {
     stream: "stderr" | "stdout";
 }
 
-export interface CliCommandResult {
-    exitCode: number | null;
-    signal?: string;
-    stderr: string;
-    stdout: string;
-    timedOut?: boolean;
-}
-
 export function asInstanceSnapshotEnvelope(value: JsonValue): CliInstanceSnapshotEnvelope {
     return value as unknown as CliInstanceSnapshotEnvelope;
 }
@@ -128,10 +120,6 @@ export function asInstanceList(value: JsonValue): CliInstanceListEntry[] {
 
 export function asLogEntries(value: JsonValue): CliInstanceLogEntry[] {
     return value as unknown as CliInstanceLogEntry[];
-}
-
-export function asCommandResult(value: JsonValue): CliCommandResult {
-    return value as unknown as CliCommandResult;
 }
 
 function toStreamMessage(event: ControlEventEnvelope): CliControlStreamMessage {

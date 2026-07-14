@@ -20,12 +20,10 @@ import type {
 import { CliControlConnection, type CliControlConnectionOptions } from "./CliControlConnection.js";
 import { createControlTarget, createInstanceTarget } from "./CliControlRequest.js";
 import {
-    asCommandResult,
     asInstanceList,
     asInstanceSnapshotEnvelope,
     asLogEntries,
     CliControlStream,
-    type CliCommandResult,
     type CliInstanceListEntry,
     type CliInstanceLogEntry,
     type CliInstanceSnapshotEnvelope
@@ -37,7 +35,7 @@ export interface CliControlTerminalRelay {
 }
 
 export interface CliControlClientLike {
-    callTool(instance: string, toolName: string, input: JsonValue): Promise<CliCommandResult>;
+    callTool(instance: string, toolName: string, input: JsonValue): Promise<JsonValue>;
     createInstance(draft: InstanceCreateDraft): Promise<InstanceCreateResult>;
     createReverseDeviceCode(instance: string): Promise<ReverseDeviceCodeResult>;
     getInstanceCreateSchema(): Promise<InstanceCreateSchema>;
@@ -188,13 +186,11 @@ export class CliControlClient implements CliControlClientLike {
         return (await this.#request("instance.readToolCalls", createInstanceTarget(instance), query as JsonValue | undefined)) as unknown as ToolCallRecord[];
     }
 
-    async callTool(instance: string, toolName: string, input: JsonValue): Promise<CliCommandResult> {
-        return asCommandResult(
-            await this.#request("instance.callTool", createInstanceTarget(instance), {
-                input,
-                toolName
-            })
-        );
+    async callTool(instance: string, toolName: string, input: JsonValue): Promise<JsonValue> {
+        return await this.#request("instance.callTool", createInstanceTarget(instance), {
+            input,
+            toolName
+        });
     }
 
     async subscribe(instance: string, fromSeq: number): Promise<CliControlStream> {
