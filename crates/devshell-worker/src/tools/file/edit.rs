@@ -970,8 +970,11 @@ fn atomic_move_no_replace(source: &Path, target: &Path) -> Result<(), ToolError>
         .map_err(|_| ToolError::new("file.invalidPath", "source path contains NUL"))?;
     let target = CString::new(target.as_os_str().as_bytes())
         .map_err(|_| ToolError::new("file.invalidPath", "target path contains NUL"))?;
+    // libc exposes renameat2 only for glibc targets. Invoke the Linux syscall
+    // directly so the same no-replace operation also works in static musl builds.
     let result = unsafe {
-        nix::libc::renameat2(
+        nix::libc::syscall(
+            nix::libc::SYS_renameat2,
             nix::libc::AT_FDCWD,
             source.as_ptr(),
             nix::libc::AT_FDCWD,
