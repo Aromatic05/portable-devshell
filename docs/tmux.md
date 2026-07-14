@@ -84,6 +84,12 @@ nonblock  shell 确认 task 已启动后返回
 }
 ```
 
+## 取消等待
+
+取消 `tmux_run` 只终止当前 RPC 等待，不向终端发送信号，也不结束已经启动的 task。返回取消后，task 仍由原 session 持有，可以继续使用 `tmux_read`、`tmux_input` 或后续 `tmux_inspect` 观察。
+
+取消 `tmux_read` 会停止等待且不消费本次尚未返回的 task 输出。需要真正中断前台程序时，调用 `tmux_input` 向对应 task 发送 `^C`。
+
 ## 交互输入
 
 ```json

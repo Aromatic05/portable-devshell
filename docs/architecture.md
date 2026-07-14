@@ -58,7 +58,7 @@ worker.handshake
 tools.list
 ```
 
-工具 schema 由目标 worker 提供，因此不同平台或版本可以暴露不同能力。
+工具 schema 由目标 worker 提供，因此不同平台或版本可以暴露不同能力。当前 handshake 声明 `cancel = true`，内部 `tool.call.cancel` RPC 按 session ID 与 worker RPC request ID 定位活动调用。
 
 ## MCP 模型
 
@@ -126,7 +126,7 @@ ask
 deny
 ```
 
-工具调度器支持全局与按 session 的并发和队列限制。它不是早期设计中的“每实例固定单并发且无队列”模型。
+工具调度器支持全局与按 session 的并发和队列限制。它不是早期设计中的“每实例固定单并发且无队列”模型。MCP AbortSignal 会取消排队或等待审批的调用；运行中的调用继续通过 worker RPC 传播到工具自身的安全取消点。
 
 ## 反向连接
 

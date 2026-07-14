@@ -176,6 +176,12 @@ Patch B
 
 这些依赖使用调用内局部快照链，不会在子操作之间误用其他并发调用发布的新快照。
 
+## 取消语义
+
+`file_read`、`file_find`、`file_search` 和 `file_info` 会在目录遍历、文件读取及结果组装的安全点响应取消。
+
+`file_edit` 的取消是协作式的：解析和完整预检阶段可以直接停止；开始执行后只在子操作边界检查取消。当前正在进行的原子 Write/Patch/Rewrite/Delete/Move 不会被截断，先前已经成功的子操作也不会回滚。取消发生后，当前 section 返回取消错误，后续 section 标记为 `notExecuted`。
+
 ## 正文中的控制标记
 
 Write/Rewrite 只在行首遇到完整控制行时结束，例如：

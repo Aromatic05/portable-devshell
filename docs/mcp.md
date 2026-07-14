@@ -149,6 +149,23 @@ curl -i http://127.0.0.1:17890/demo-local/mcp \
 
 正常情况下返回 `200`，并包含 `mcp-session-id`。
 
+## 请求取消
+
+MCP `notifications/cancelled` 会沿当前工具调用链传播到 control、worker RPC 和目标 worker。同步 HTTP `tools/call` 在客户端或网关提前断开响应连接时也会触发同一取消链路，不要求客户端额外发送取消通知。取消不是回滚协议，各工具按自身语义处理：
+
+```text
+排队 / 等待审批    立即取消，不进入 worker 执行
+bash_run           终止对应进程组
+file_read/search   在扫描或读取安全点停止
+file_edit          在预检和子操作边界停止；已完成的原子子操作不回滚
+artifact_read      在读取前后停止
+control 侧工具     立即停止 MCP 等待；已经开始的生命周期或原子操作继续完成
+tmux_run           停止等待，已经启动的 task 继续运行
+tmux_read          停止等待且不消费尚未返回的输出
+```
+
+worker handshake 返回 `cancel = true`。本地 RPC、WSS 和 SSE + HTTPS POST 反向连接都允许取消请求在长工具运行期间到达 worker。工具调用历史使用 `cancelled`，等待审批时还会产生 `approval.cancelled`。
+
 ## 本地与公网
 
 - `127.0.0.1` + localhost `publicBaseUrl`：可使用 `mode = "none"`；

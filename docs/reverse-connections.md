@@ -123,7 +123,7 @@ SSE 响应禁用转换和代理缓冲，并发送 comment heartbeat。worker 通
 
 control 在 transport 断开后保留未完成的 reverse RPC。更高 generation 接入后，以原始 RPC request ID 重放请求。
 
-worker daemon 串行分发 reverse 请求，并维护有界的已完成结果缓存。缓存 key 包含 request ID 和完整请求 digest；内容完全相同的重放直接返回缓存响应，不再次执行操作。
+worker daemon 并发执行 reverse 工具请求，并由接收循环继续处理控制请求，因此 `tool.call.cancel` 不会被长工具阻塞。WSS 周期性冲刷异步响应；SSE 使用独立 HTTPS POST 上行线程。worker 同时维护活动请求集合和有界的已完成结果缓存：活动期间的相同 frame 会合并，完成后的相同 frame 直接返回缓存响应，不再次执行操作。缓存 key 包含 request ID 和完整请求 digest。
 
 活动 generation 在连接前持久化到 instance 的 `state/` 目录，即使 daemon 重启或时钟回退也保持单调递增。token 轮换、撤销或重新注册成功后，旧活动 channel 立即关闭。
 
