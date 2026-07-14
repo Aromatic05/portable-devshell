@@ -8,10 +8,10 @@ import test from "node:test";
 import { LocalWorkerInstaller, getWorkerTargetByKey, type WorkerAsset } from "@portable-devshell/core";
 
 test("LocalWorkerInstaller installs into target-specific directory and refreshes symlink", async (t) => {
-    const homeDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-home-"));
+    const devshellHomeDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-home-"));
     const workerDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-worker-"));
     t.after(async () => {
-        await rm(homeDirectory, { recursive: true, force: true });
+        await rm(devshellHomeDirectory, { recursive: true, force: true });
         await rm(workerDirectory, { recursive: true, force: true });
     });
 
@@ -22,18 +22,22 @@ test("LocalWorkerInstaller installs into target-specific directory and refreshes
 
     const target = getWorkerTargetByKey("darwin-arm64");
     const installer = new LocalWorkerInstaller();
-    const executable = await installer.ensure(homeDirectory, createAsset(binaryPath, sha256, target), target);
+    const executable = await installer.ensure(devshellHomeDirectory, createAsset(binaryPath, sha256, target), target);
 
-    assert.equal(executable, join(homeDirectory, ".devshell", "bin", "devshell-worker"));
-    assert.equal(await readFile(join(homeDirectory, ".devshell", "workers", target.key, sha256, "devshell-worker"), "utf8"), contents.toString("utf8"));
-    assert.equal(await readlink(executable), `../workers/${target.key}/${sha256}/devshell-worker`);
+    assert.equal(executable, join(devshellHomeDirectory, "bin", "devshell-worker"));
+    assert.equal(await readFile(join(devshellHomeDirectory, "workers", target.key, sha256, "devshell-worker"), "utf8"), contents.toString("utf8"));
+    assert.equal(await readlink(executable), `devshell-worker-${target.key}`);
+    assert.equal(
+        await readlink(join(devshellHomeDirectory, "bin", `devshell-worker-${target.key}`)),
+        `../workers/${target.key}/${sha256}/devshell-worker`
+    );
 });
 
 test("LocalWorkerInstaller installs a Windows executable without requiring symlink privileges", async (t) => {
-    const homeDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-home-"));
+    const devshellHomeDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-home-"));
     const workerDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-worker-"));
     t.after(async () => {
-        await rm(homeDirectory, { recursive: true, force: true });
+        await rm(devshellHomeDirectory, { recursive: true, force: true });
         await rm(workerDirectory, { recursive: true, force: true });
     });
 
@@ -44,20 +48,24 @@ test("LocalWorkerInstaller installs a Windows executable without requiring symli
 
     const target = getWorkerTargetByKey("windows-arm64");
     const installer = new LocalWorkerInstaller();
-    const executable = await installer.ensure(homeDirectory, createAsset(binaryPath, sha256, target), target);
+    const executable = await installer.ensure(devshellHomeDirectory, createAsset(binaryPath, sha256, target), target);
 
-    assert.equal(executable, join(homeDirectory, ".devshell", "workers", target.key, sha256, "devshell-worker.exe"));
+    assert.equal(executable, join(devshellHomeDirectory, "workers", target.key, sha256, "devshell-worker.exe"));
     assert.equal(
-        await readFile(join(homeDirectory, ".devshell", "workers", target.key, sha256, "devshell-worker.exe"), "utf8"),
+        await readFile(join(devshellHomeDirectory, "workers", target.key, sha256, "devshell-worker.exe"), "utf8"),
+        contents.toString("utf8")
+    );
+    assert.equal(
+        await readFile(join(devshellHomeDirectory, "bin", `devshell-worker-${target.key}.exe`), "utf8"),
         contents.toString("utf8")
     );
 });
 
 test("LocalWorkerInstaller rejects asset target mismatch", async (t) => {
-    const homeDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-home-"));
+    const devshellHomeDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-home-"));
     const workerDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-worker-"));
     t.after(async () => {
-        await rm(homeDirectory, { recursive: true, force: true });
+        await rm(devshellHomeDirectory, { recursive: true, force: true });
         await rm(workerDirectory, { recursive: true, force: true });
     });
 
@@ -70,7 +78,7 @@ test("LocalWorkerInstaller rejects asset target mismatch", async (t) => {
     const requestedTarget = getWorkerTargetByKey("linux-x64");
     const assetTarget = getWorkerTargetByKey("darwin-arm64");
 
-    await assert.rejects(installer.ensure(homeDirectory, createAsset(binaryPath, sha256, assetTarget), requestedTarget), (error: unknown) => {
+    await assert.rejects(installer.ensure(devshellHomeDirectory, createAsset(binaryPath, sha256, assetTarget), requestedTarget), (error: unknown) => {
         assert.ok(typeof error === "object" && error !== null);
         assert.equal((error as { code?: string }).code, "core.workerProvisionFailed");
         assert.deepEqual((error as { details?: Record<string, unknown> }).details, {

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawn as nodeSpawn, type ChildProcess, type SpawnOptions } from "node:child_process";
 import { EventEmitter } from "node:events";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readlink, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { PassThrough } from "node:stream";
@@ -15,7 +15,8 @@ import {
     RemoteWorkerInstaller,
     SshWorkerTransport,
     WorkerBinary,
-    getWorkerTargetByKey
+    getWorkerTargetByKey,
+    probeLocalWorkerTarget
 } from "@portable-devshell/core";
 import { createError, errorCodes } from "@portable-devshell/shared";
 
@@ -76,6 +77,36 @@ test("local transport runs installWorker probe", async () => {
         args: ["--version"],
         options: { cwd: undefined, env: sanitizedWorkerEnv(), stdio: ["ignore", "pipe", "pipe"] }
     });
+});
+
+test("local transport honors command PORTABLE_DEVSHELL_HOME for worker lookup and installation", async (t) => {
+    const root = await mkdtemp(join(tmpdir(), "portable-devshell-custom-home-"));
+    const devshellHome = join(root, "custom-devshell-home");
+    const worker = await createDummyWorkerBinary("custom-home");
+    t.after(async () => {
+        await worker.cleanup();
+        await rm(root, { recursive: true, force: true });
+    });
+
+    const target = probeLocalWorkerTarget();
+    const workerPathEnvironmentName = `PORTABLE_DEVSHELL_WORKER_${target.key.replaceAll("-", "_").toUpperCase()}_PATH`;
+    const recorder = createSpawnRecorder();
+    const transport = new LocalWorkerTransport({ spawnFunction: recorder.spawn });
+    const result = await transport.runWorkerCommand("status", {
+        env: {
+            PORTABLE_DEVSHELL_HOME: devshellHome,
+            [workerPathEnvironmentName]: worker.path
+        },
+        instanceName: "custom-home-local"
+    });
+
+    assert.equal(result.exitCode, 0);
+    assert.equal(recorder.calls[0]?.command, join(devshellHome, "bin", "devshell-worker"));
+    assert.equal(await readlink(join(devshellHome, "bin", "devshell-worker")), `devshell-worker-${target.key}`);
+    assert.match(
+        await readlink(join(devshellHome, "bin", `devshell-worker-${target.key}`)),
+        new RegExp(`^\\.\\./workers/${target.key}/[a-f0-9]{64}/devshell-worker(?:\\.exe)?$`, "u")
+    );
 });
 
 test("provider installWorker failures keep diagnostic details across local ssh docker and podman", async () => {

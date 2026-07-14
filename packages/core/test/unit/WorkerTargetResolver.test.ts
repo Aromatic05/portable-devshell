@@ -264,3 +264,66 @@ test("WorkerAssetResolver uses an installed target worker before release lookup"
     assert.equal(asset.binaryPath, installedPath);
     assert.equal(asset.source, "installed");
 });
+
+test("WorkerAssetResolver derives the release tag from an installed app manifest", async (t) => {
+    const root = await mkdtemp(join(tmpdir(), "portable-devshell-installed-resolver-"));
+    const appRoot = join(root, "app");
+    const modulePath = join(
+        appRoot,
+        "node_modules",
+        ".pnpm",
+        "@portable-devshell+core@file+fixture",
+        "node_modules",
+        "@portable-devshell",
+        "core",
+        "dist",
+        "worker",
+        "WorkerAssetResolver.js"
+    );
+    const environmentNames = [
+        "PORTABLE_DEVSHELL_HOME",
+        "PORTABLE_DEVSHELL_WORKER_RELEASE_REPOSITORY",
+        "PORTABLE_DEVSHELL_WORKER_RELEASE_BASE_URL",
+        "PORTABLE_DEVSHELL_WORKER_RELEASE_TAG",
+        "PORTABLE_DEVSHELL_WORKER_CACHE_DIR"
+    ] as const;
+    const previousEnvironment = new Map(environmentNames.map((name) => [name, process.env[name]]));
+    const previousFetch = globalThis.fetch;
+    const requestUrls: string[] = [];
+
+    t.after(async () => {
+        globalThis.fetch = previousFetch;
+        for (const [name, value] of previousEnvironment) {
+            restoreEnv(name, value);
+        }
+        await rm(root, { recursive: true, force: true });
+    });
+
+    for (const name of environmentNames) {
+        delete process.env[name];
+    }
+    process.env.PORTABLE_DEVSHELL_HOME = join(root, "devshell-home");
+    process.env.PORTABLE_DEVSHELL_WORKER_RELEASE_BASE_URL = "https://example.test/releases/download";
+    process.env.PORTABLE_DEVSHELL_WORKER_CACHE_DIR = join(root, "cache");
+
+    await mkdir(dirname(modulePath), { recursive: true });
+    await writeFile(join(appRoot, "portable-devshell-install.json"), JSON.stringify({ version: "7.8.9" }), "utf8");
+
+    globalThis.fetch = async (input) => {
+        requestUrls.push(String(input));
+        return new Response("missing", { status: 404 });
+    };
+
+    const target = getWorkerTargetByKey("darwin-arm64");
+    const resolver = new WorkerAssetResolver(pathToFileURL(modulePath).href);
+
+    await assert.rejects(resolver.resolve(target), (error: unknown) => {
+        assert.ok(typeof error === "object" && error !== null);
+        assert.equal((error as { code?: string }).code, "core.workerAssetUnavailable");
+        return true;
+    });
+    assert.equal(
+        requestUrls[0],
+        "https://example.test/releases/download/v7.8.9/devshell-worker-darwin-arm64.sha256"
+    );
+});

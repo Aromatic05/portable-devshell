@@ -15,7 +15,7 @@ import {
 import type { WorkerCommandName, WorkerCommandOptions, WorkerRpcOptions } from "../../command/WorkerCommandOptions.js";
 import { createWorkerRpcProcess, type WorkerRpcProcess } from "../../WorkerProcess.js";
 import { LocalWorkerInstaller } from "../../install/LocalWorkerInstaller.js";
-import { resolveWorkerHomeDirectory } from "../../platform/WorkerHomeDirectory.js";
+import { resolveWorkerDevshellHomeDirectory } from "../../platform/WorkerHomeDirectory.js";
 import { probeLocalWorkerTarget } from "../../target/WorkerTargetProbe.js";
 
 export interface LocalWorkerTransportOptions {
@@ -95,11 +95,11 @@ export class LocalWorkerTransport implements WorkerCommandTransport {
             return this.#workerBinary.executable;
         }
 
-        const homeDirectory = resolveWorkerHomeDirectory(env ?? process.env);
-
+        const environment = this.#mergeEnv(env);
+        const devshellHomeDirectory = resolveWorkerDevshellHomeDirectory(environment);
 
         const target = probeLocalWorkerTarget("local", "resolveExecutable");
-        const asset = await this.#resolver.resolve(target).catch((error) => {
+        const asset = await this.#resolver.resolve(target, environment).catch((error) => {
             if (error instanceof ControlError) {
                 throw error;
             }
@@ -107,7 +107,7 @@ export class LocalWorkerTransport implements WorkerCommandTransport {
             throw this.#createProviderError(this.#createCommandContext("resolveExecutable", ["devshell-worker"]), error);
         });
 
-        return await this.#installer.ensure(homeDirectory, asset, target).catch((error) => {
+        return await this.#installer.ensure(devshellHomeDirectory, asset, target).catch((error) => {
             throw this.#createProviderError(this.#createCommandContext("resolveExecutable", ["devshell-worker"]), error, {
                 errorCode: errorCodes.coreWorkerProvisionFailed
             });

@@ -9,7 +9,7 @@ export class LocalWorkerInstaller {
     readonly #unix = new LocalWorkerInstallerUnix();
     readonly #windows = new LocalWorkerInstallerWindows();
 
-    async ensure(homeDirectory: string, asset: WorkerAsset, target: WorkerTarget): Promise<string> {
+    async ensure(devshellHomeDirectory: string, asset: WorkerAsset, target: WorkerTarget): Promise<string> {
         if (asset.target.key !== target.key) {
             throw createError({
                 code: errorCodes.coreWorkerProvisionFailed,
@@ -23,7 +23,7 @@ export class LocalWorkerInstaller {
         }
 
         return target.os === "windows"
-            ? await this.#windows.ensure(homeDirectory, asset, target)
-            : await this.#unix.ensure(homeDirectory, asset, target);
+            ? await this.#windows.ensure(devshellHomeDirectory, asset, target)
+            : await this.#unix.ensure(devshellHomeDirectory, asset, target);
     }
 }

@@ -1,19 +1,22 @@
 import { createHash } from "node:crypto";
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 
 import type { WorkerAsset } from "../WorkerAssetResolver.js";
 import type { WorkerTarget } from "../target/WorkerTarget.js";
-import { workerBinaryFileName } from "../target/WorkerTargetBinary.js";
+import { workerBinaryFileName, workerInstalledAliasFileName } from "../target/WorkerTargetBinary.js";
 
 export class LocalWorkerInstallerWindows {
-    async ensure(homeDirectory: string, asset: WorkerAsset, target: WorkerTarget): Promise<string> {
+    async ensure(devshellHomeDirectory: string, asset: WorkerAsset, target: WorkerTarget): Promise<string> {
         const binaryName = workerBinaryFileName(target);
-        const installDir = resolve(homeDirectory, ".devshell", "workers", target.key, asset.sha256);
+        const installDir = resolve(devshellHomeDirectory, "workers", target.key, asset.sha256);
+        const binDir = resolve(devshellHomeDirectory, "bin");
         const binaryPath = resolve(installDir, binaryName);
         const shaPath = resolve(installDir, `${binaryName}.sha256`);
+        const aliasPath = resolve(binDir, workerInstalledAliasFileName(target));
 
         await mkdir(installDir, { recursive: true });
+        await mkdir(binDir, { recursive: true });
 
         if ((await readInstalledSha(binaryPath, shaPath)) !== asset.sha256) {
             const bytes = await readFile(asset.binaryPath);
@@ -24,6 +27,8 @@ export class LocalWorkerInstallerWindows {
             await rename(tmpBinaryPath, binaryPath);
             await rename(tmpShaPath, shaPath);
         }
+
+        await copyFile(binaryPath, aliasPath);
 
         return binaryPath;
     }

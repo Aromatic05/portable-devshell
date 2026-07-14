@@ -1,4 +1,5 @@
 import { homedir } from "node:os";
+import { resolve } from "node:path";
 
 export function resolveWorkerHomeDirectory(environment: NodeJS.ProcessEnv = process.env): string {
     const configured = environment.HOME ?? environment.USERPROFILE;
@@ -11,4 +12,13 @@ export function resolveWorkerHomeDirectory(environment: NodeJS.ProcessEnv = proc
         throw new Error("the current user home directory is unavailable");
     }
     return systemHome;
+}
+
+export function resolveWorkerDevshellHomeDirectory(environment: NodeJS.ProcessEnv = process.env): string {
+    const configured = environment.PORTABLE_DEVSHELL_HOME;
+    if (configured !== undefined && configured.length > 0) {
+        return configured;
+    }
+
+    return resolve(resolveWorkerHomeDirectory(environment), ".devshell");
 }

@@ -4,15 +4,16 @@ import { resolve } from "node:path";
 
 import type { WorkerAsset } from "../WorkerAssetResolver.js";
 import type { WorkerTarget } from "../target/WorkerTarget.js";
-import { workerBinaryFileName } from "../target/WorkerTargetBinary.js";
+import { workerBinaryFileName, workerInstalledAliasFileName } from "../target/WorkerTargetBinary.js";
 
 export class LocalWorkerInstallerUnix {
-    async ensure(homeDirectory: string, asset: WorkerAsset, target: WorkerTarget): Promise<string> {
+    async ensure(devshellHomeDirectory: string, asset: WorkerAsset, target: WorkerTarget): Promise<string> {
         const binaryName = workerBinaryFileName(target);
-        const installDir = resolve(homeDirectory, ".devshell", "workers", target.key, asset.sha256);
-        const binDir = resolve(homeDirectory, ".devshell", "bin");
+        const installDir = resolve(devshellHomeDirectory, "workers", target.key, asset.sha256);
+        const binDir = resolve(devshellHomeDirectory, "bin");
         const binaryPath = resolve(installDir, binaryName);
         const shaPath = resolve(installDir, `${binaryName}.sha256`);
+        const targetSymlinkPath = resolve(binDir, workerInstalledAliasFileName(target));
         const symlinkPath = resolve(binDir, "devshell-worker");
 
         await mkdir(installDir, { recursive: true, mode: 0o700 });
@@ -31,13 +32,17 @@ export class LocalWorkerInstallerUnix {
             await rename(tmpShaPath, shaPath);
         }
 
-        await this.#refreshSymlink(symlinkPath, target.key, asset.sha256, binaryName);
+        await this.#refreshSymlink(
+            targetSymlinkPath,
+            `../workers/${target.key}/${asset.sha256}/${binaryName}`
+        );
+        await this.#refreshSymlink(symlinkPath, workerInstalledAliasFileName(target));
         return symlinkPath;
     }
 
-    async #refreshSymlink(symlinkPath: string, targetKey: string, sha256: string, binaryName: string): Promise<void> {
+    async #refreshSymlink(symlinkPath: string, target: string): Promise<void> {
         await rm(symlinkPath, { force: true });
-        await symlink(`../workers/${targetKey}/${sha256}/${binaryName}`, symlinkPath);
+        await symlink(target, symlinkPath);
     }
 }
 

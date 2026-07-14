@@ -1,12 +1,12 @@
 import { createHash } from "node:crypto";
 import { accessSync, constants, readFileSync } from "node:fs";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
-import { homedir } from "node:os";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { createError, errorCodes } from "@portable-devshell/shared";
 import { ensureWorkerExecutablePermissions } from "./platform/WorkerExecutablePermissions.js";
+import { resolveWorkerDevshellHomeDirectory } from "./platform/WorkerHomeDirectory.js";
 
 import type { WorkerTarget } from "./target/WorkerTarget.js";
 import { supportedWorkerTargetKeys } from "./target/WorkerTarget.js";
@@ -38,10 +38,10 @@ export class WorkerAssetResolver {
         this.#moduleDir = dirname(fileURLToPath(moduleUrl));
     }
 
-    async resolve(target: WorkerTarget): Promise<WorkerAsset> {
+    async resolve(target: WorkerTarget, environment: NodeJS.ProcessEnv = process.env): Promise<WorkerAsset> {
         const searchedPaths: string[] = [];
 
-        for (const candidate of this.#candidatePaths(target)) {
+        for (const candidate of this.#candidatePaths(target, environment)) {
             searchedPaths.push(candidate.binaryPath);
 
             if (!isReadableFile(candidate.binaryPath)) {
@@ -57,7 +57,7 @@ export class WorkerAssetResolver {
             };
         }
 
-        const releaseAsset = await this.#resolveReleaseAsset(target, searchedPaths);
+        const releaseAsset = await this.#resolveReleaseAsset(target, searchedPaths, environment);
         if (releaseAsset !== undefined) {
             return releaseAsset;
         }
@@ -80,11 +80,11 @@ export class WorkerAssetResolver {
         });
     }
 
-    *#candidatePaths(target: WorkerTarget): Iterable<{ binaryPath: string; source: WorkerAsset["source"] }> {
+    *#candidatePaths(target: WorkerTarget, environment: NodeJS.ProcessEnv): Iterable<{ binaryPath: string; source: WorkerAsset["source"] }> {
         const hostTarget = probeLocalWorkerTarget("local", "resolveExecutable");
         const hostTargetMatches = hostTarget.key === target.key;
         const targetEnvVarName = toTargetEnvVarName(target);
-        const targetEnvPath = process.env[targetEnvVarName];
+        const targetEnvPath = environment[targetEnvVarName];
 
         if (targetEnvPath !== undefined && targetEnvPath.length > 0) {
             yield {
@@ -118,16 +118,20 @@ export class WorkerAssetResolver {
             }
         }
 
-        const devshellHome = process.env.PORTABLE_DEVSHELL_HOME ?? resolve(homedir(), ".devshell");
+        const devshellHome = resolveWorkerDevshellHomeDirectory(environment);
         yield {
             binaryPath: resolve(devshellHome, "bin", workerInstalledAliasFileName(target)),
             source: "installed"
         };
     }
 
-    async #resolveReleaseAsset(target: WorkerTarget, searchedPaths: string[]): Promise<WorkerAsset | undefined> {
-        const releaseBaseUrl = this.#resolveReleaseBaseUrl();
-        const releaseTag = this.#resolveReleaseTag();
+    async #resolveReleaseAsset(
+        target: WorkerTarget,
+        searchedPaths: string[],
+        environment: NodeJS.ProcessEnv
+    ): Promise<WorkerAsset | undefined> {
+        const releaseBaseUrl = this.#resolveReleaseBaseUrl(environment);
+        const releaseTag = this.#resolveReleaseTag(environment);
 
         if (releaseBaseUrl === undefined || releaseTag === undefined) {
             return undefined;
@@ -140,7 +144,7 @@ export class WorkerAssetResolver {
         searchedPaths.push(shaUrl, binaryUrl);
 
         const expectedSha = await this.#fetchReleaseSha256(target, shaUrl, searchedPaths);
-        const cacheDirectory = resolve(this.#resolveCacheDirectory(), releaseTag, target.key, expectedSha);
+        const cacheDirectory = resolve(this.#resolveCacheDirectory(environment), releaseTag, target.key, expectedSha);
         const binaryPath = resolve(cacheDirectory, workerBinaryFileName(target));
         const shaPath = resolve(cacheDirectory, `${workerBinaryFileName(target)}.sha256`);
         const cachedSha = await readInstalledSha(binaryPath, shaPath);
@@ -276,32 +280,40 @@ export class WorkerAssetResolver {
         return Buffer.from(await response.arrayBuffer());
     }
 
-    #resolveReleaseBaseUrl(): string | undefined {
-        const explicitBaseUrl = process.env[releaseBaseUrlEnvVar];
+    #resolveReleaseBaseUrl(environment: NodeJS.ProcessEnv): string | undefined {
+        const explicitBaseUrl = environment[releaseBaseUrlEnvVar];
         if (explicitBaseUrl !== undefined && explicitBaseUrl.length > 0) {
             return explicitBaseUrl.replace(/\/+$/u, "");
         }
 
-        const repository = process.env[releaseRepositoryEnvVar] ?? defaultReleaseRepository;
+        const repository = environment[releaseRepositoryEnvVar] ?? defaultReleaseRepository;
         return repository.length > 0 ? `https://github.com/${repository.replace(/^\/+|\/+$/gu, "")}/releases/download` : undefined;
     }
 
-    #resolveReleaseTag(): string | undefined {
-        const explicitTag = process.env[releaseTagEnvVar];
+    #resolveReleaseTag(environment: NodeJS.ProcessEnv): string | undefined {
+        const explicitTag = environment[releaseTagEnvVar];
         if (explicitTag !== undefined && explicitTag.length > 0) {
             return explicitTag;
         }
 
         let probeDir = this.#moduleDir;
-        for (let depth = 0; depth < 8; depth += 1) {
+        for (let depth = 0; depth < 12; depth += 1) {
             const packageJsonPath = resolve(probeDir, "package.json");
             if (isReadableFile(packageJsonPath)) {
-                const raw = readPackageJsonField(packageJsonPath, "name");
+                const raw = readJsonField(packageJsonPath, "name");
                 if (raw === "portable-devshell") {
-                    const version = readPackageJsonField(packageJsonPath, "version");
+                    const version = readJsonField(packageJsonPath, "version");
                     if (typeof version === "string" && version.length > 0) {
                         return `v${version}`;
                     }
+                }
+            }
+
+            const installManifestPath = resolve(probeDir, "portable-devshell-install.json");
+            if (isReadableFile(installManifestPath)) {
+                const version = readJsonField(installManifestPath, "version");
+                if (typeof version === "string" && version.length > 0) {
+                    return `v${version}`;
                 }
             }
 
@@ -311,11 +323,11 @@ export class WorkerAssetResolver {
         return undefined;
     }
 
-    #resolveCacheDirectory(): string {
-        const explicitCacheDirectory = process.env[cacheDirectoryEnvVar];
+    #resolveCacheDirectory(environment: NodeJS.ProcessEnv): string {
+        const explicitCacheDirectory = environment[cacheDirectoryEnvVar];
         return explicitCacheDirectory !== undefined && explicitCacheDirectory.length > 0
             ? explicitCacheDirectory
-            : resolve(homedir(), ".devshell", "release-cache", "workers");
+            : resolve(resolveWorkerDevshellHomeDirectory(environment), "release-cache", "workers");
     }
 
     #supportedEnvVarNames(target: WorkerTarget): string[] {
@@ -346,7 +358,7 @@ async function readInstalledSha(binaryPath: string, shaPath: string): Promise<st
     }
 }
 
-function readPackageJsonField(path: string, field: string): unknown {
+function readJsonField(path: string, field: string): unknown {
     try {
         const parsed = JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>;
         return parsed[field];
