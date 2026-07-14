@@ -64,6 +64,11 @@ export class RemoteWorkerInstaller {
             throw this.#createProviderError(this.#createContext("resolveExecutable", ["devshell-worker"]), error);
         });
         const homeDirectory = await this.#resolveHomeDirectory();
+
+        if (await this.#isRemoteWorkerCurrent(homeDirectory, target.key, asset.sha256)) {
+            return buildRemoteExecutablePath(homeDirectory);
+        }
+
         const binary = await readFile(asset.binaryPath).catch((error) => {
             throw this.#createProviderError(this.#createContext("resolveExecutable", ["devshell-worker"]), error);
         });
@@ -82,6 +87,33 @@ export class RemoteWorkerInstaller {
         }
 
         return buildRemoteExecutablePath(homeDirectory);
+    }
+
+    async #isRemoteWorkerCurrent(homeDirectory: string, targetKey: string, sha256: string): Promise<boolean> {
+        const commandLine = buildInspectScript(homeDirectory, targetKey, sha256);
+        const context = this.#createContext("installWorker", ["sh", "-lc", commandLine]);
+        const child = this.#spawnShell(commandLine, ["ignore", "pipe", "pipe"], context);
+        const result = await waitForCommandResult(child, this.#createProviderError, context);
+
+        if (result.exitCode !== 0) {
+            throw this.#createProviderError(context, new Error(result.stderr || result.stdout || "worker install check failed"), {
+                errorCode: errorCodes.coreWorkerProvisionFailed,
+                result
+            });
+        }
+
+        const status = result.stdout.trim();
+        if (status === "ready") {
+            return true;
+        }
+        if (status === "missing") {
+            return false;
+        }
+
+        throw this.#createProviderError(context, new Error(`unexpected worker install check result: ${status || "empty"}`), {
+            errorCode: errorCodes.coreWorkerProvisionFailed,
+            result
+        });
     }
 
     async #resolveHomeDirectory(): Promise<string> {
@@ -103,6 +135,34 @@ export class RemoteWorkerInstaller {
     }
 }
 
+function buildInspectScript(homeDirectory: string, targetKey: string, sha256: string): string {
+    const installDirectory = `${homeDirectory}/.devshell/workers/${targetKey}/${sha256}`;
+    const binaryPath = `${installDirectory}/devshell-worker`;
+    const shaPath = `${installDirectory}/devshell-worker.sha256`;
+    const symlinkPath = buildRemoteExecutablePath(homeDirectory);
+    const symlinkTarget = `../workers/${targetKey}/${sha256}/devshell-worker`;
+
+    return [
+        "set -eu",
+        `binary_path=${shellEscape(binaryPath)}`,
+        `sha_path=${shellEscape(shaPath)}`,
+        `symlink_path=${shellEscape(symlinkPath)}`,
+        `symlink_target=${shellEscape(symlinkTarget)}`,
+        `expected_sha=${shellEscape(sha256)}`,
+        'installed_sha=""',
+        'if [ -f "$sha_path" ]; then',
+        '  installed_sha="$(cat "$sha_path")"',
+        "fi",
+        'if [ "$installed_sha" = "$expected_sha" ] && [ -f "$binary_path" ]; then',
+        '  mkdir -p "$(dirname "$symlink_path")"',
+        '  ln -snf "$symlink_target" "$symlink_path"',
+        "  printf '%s' ready",
+        "else",
+        "  printf '%s' missing",
+        "fi"
+    ].join("\n");
+}
+
 function buildInstallScript(homeDirectory: string, targetKey: string, sha256: string): string {
     const installDirectory = `${homeDirectory}/.devshell/workers/${targetKey}/${sha256}`;
     const binaryPath = `${installDirectory}/devshell-worker`;
@@ -118,20 +178,14 @@ function buildInstallScript(homeDirectory: string, targetKey: string, sha256: st
         `symlink_path=${shellEscape(symlinkPath)}`,
         `symlink_target=${shellEscape(symlinkTarget)}`,
         `expected_sha=${shellEscape(sha256)}`,
+        'tmp_binary_path="${binary_path}.tmp.$$"',
+        'tmp_sha_path="${sha_path}.tmp.$$"',
         'mkdir -p "$install_dir" "$(dirname "$symlink_path")"',
-        'installed_sha=""',
-        'if [ -f "$sha_path" ]; then',
-        '  installed_sha="$(cat "$sha_path")"',
-        "fi",
-        'if [ "$installed_sha" = "$expected_sha" ] && [ -f "$binary_path" ]; then',
-        "  cat >/dev/null",
-        "else",
-        '  cat > "$binary_path.tmp"',
-        '  chmod 755 "$binary_path.tmp"',
-        '  printf \'%s\\n\' "$expected_sha" > "$sha_path.tmp"',
-        '  mv "$binary_path.tmp" "$binary_path"',
-        '  mv "$sha_path.tmp" "$sha_path"',
-        "fi",
+        'cat > "$tmp_binary_path"',
+        'chmod 755 "$tmp_binary_path"',
+        'printf \'%s\\n\' "$expected_sha" > "$tmp_sha_path"',
+        'mv "$tmp_binary_path" "$binary_path"',
+        'mv "$tmp_sha_path" "$sha_path"',
         'ln -snf "$symlink_target" "$symlink_path"'
     ].join("\n");
 }

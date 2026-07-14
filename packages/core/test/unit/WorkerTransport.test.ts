@@ -331,13 +331,18 @@ test("ssh transport probes remote target before installing default worker", asyn
         }
 
         if (callIndex === 2) {
+            closeRecordedChild(child, { stdout: "missing" });
+            return true;
+        }
+
+        if (callIndex === 3) {
             child.stdin.once("finish", () => {
                 closeRecordedChild(child);
             });
             return true;
         }
 
-        if (callIndex === 3) {
+        if (callIndex === 4) {
             closeRecordedChild(child, { stdout: "running\n" });
             return true;
         }
@@ -383,8 +388,12 @@ test("ssh transport probes remote target before installing default worker", asyn
     });
     assert.equal(recorder.calls[2]?.command, "ssh-bin");
     assert.equal(recorder.calls[2]?.args[8]?.includes("/home/dev/.devshell/workers/darwin-arm64/"), true);
-    assert.equal(recorder.calls[2]?.args[8]?.includes('ln -snf "$symlink_target" "$symlink_path"'), true);
-    assert.deepEqual(recorder.calls[3], {
+    assert.equal(recorder.calls[2]?.args[8]?.includes("missing"), true);
+    assert.deepEqual(recorder.calls[2]?.options.stdio, ["ignore", "pipe", "pipe"]);
+    assert.equal(recorder.calls[3]?.command, "ssh-bin");
+    assert.equal(recorder.calls[3]?.args[8]?.includes("tmp_binary_path"), true);
+    assert.deepEqual(recorder.calls[3]?.options.stdio, ["pipe", "pipe", "pipe"]);
+    assert.deepEqual(recorder.calls[4], {
         command: "ssh-bin",
         args: [
             "-oBatchMode=yes",
@@ -399,7 +408,47 @@ test("ssh transport probes remote target before installing default worker", asyn
         ],
         options: { cwd: undefined, env: undefined, stdio: ["ignore", "pipe", "pipe"] }
     });
-    assert.deepEqual(Buffer.concat(recorder.children[2]?.stdinChunks ?? []), worker.contents);
+    assert.deepEqual(Buffer.concat(recorder.children[3]?.stdinChunks ?? []), worker.contents);
+});
+
+test("ssh transport reuses a matching remote worker without uploading the binary", async (t) => {
+    const worker = await createDummyWorkerBinary();
+    t.after(worker.cleanup);
+    const previousWorkerPath = process.env.PORTABLE_DEVSHELL_WORKER_DARWIN_ARM64_PATH;
+    process.env.PORTABLE_DEVSHELL_WORKER_DARWIN_ARM64_PATH = worker.path;
+    t.after(() => {
+        restoreEnv("PORTABLE_DEVSHELL_WORKER_DARWIN_ARM64_PATH", previousWorkerPath);
+    });
+
+    const recorder = createSpawnRecorder((_call, child, callIndex) => {
+        if (callIndex === 0) {
+            closeRecordedChild(child, { stdout: "Darwin\narm64\n" });
+            return true;
+        }
+        if (callIndex === 1) {
+            closeRecordedChild(child, { stdout: "/home/dev" });
+            return true;
+        }
+        if (callIndex === 2) {
+            closeRecordedChild(child, { stdout: "ready" });
+            return true;
+        }
+
+        closeRecordedChild(child, { stdout: "running\n" });
+        return true;
+    });
+    const transport = new SshWorkerTransport({
+        command: "ssh-bin devbox",
+        spawnFunction: recorder.spawn
+    });
+
+    await transport.installWorker();
+
+    assert.equal(recorder.calls.length, 4);
+    assert.deepEqual(recorder.calls[2]?.options.stdio, ["ignore", "pipe", "pipe"]);
+    assert.equal(recorder.calls[2]?.args[8]?.includes("ready"), true);
+    assert.equal(Buffer.concat(recorder.children[2]?.stdinChunks ?? []).length, 0);
+    assert.equal(recorder.calls.some((call) => call.args.some((arg) => arg.includes("tmp_binary_path"))), false);
 });
 
 test("remote installer surfaces missing target-specific asset as structured error", async () => {
@@ -455,17 +504,22 @@ test("ssh transport reinstalls default worker when target asset changes", async 
     });
 
     const recorder = createSpawnRecorder((_call, child, callIndex) => {
-        if (callIndex === 0 || callIndex === 4) {
+        if (callIndex === 0 || callIndex === 5) {
             closeRecordedChild(child, { stdout: "Darwin\narm64\n" });
             return true;
         }
 
-        if (callIndex === 1 || callIndex === 5) {
+        if (callIndex === 1 || callIndex === 6) {
             closeRecordedChild(child, { stdout: "/home/dev" });
             return true;
         }
 
-        if (callIndex === 2 || callIndex === 6) {
+        if (callIndex === 2 || callIndex === 7) {
+            closeRecordedChild(child, { stdout: "missing" });
+            return true;
+        }
+
+        if (callIndex === 3 || callIndex === 8) {
             child.stdin.once("finish", () => {
                 closeRecordedChild(child);
             });
@@ -484,9 +538,9 @@ test("ssh transport reinstalls default worker when target asset changes", async 
     process.env.PORTABLE_DEVSHELL_WORKER_DARWIN_ARM64_PATH = secondWorker.path;
     await transport.installWorker();
 
-    assert.equal(Buffer.concat(recorder.children[2]?.stdinChunks ?? []).equals(firstWorker.contents), true);
-    assert.equal(Buffer.concat(recorder.children[6]?.stdinChunks ?? []).equals(secondWorker.contents), true);
-    assert.notEqual(recorder.calls[2]?.args[8], recorder.calls[6]?.args[8]);
+    assert.equal(Buffer.concat(recorder.children[3]?.stdinChunks ?? []).equals(firstWorker.contents), true);
+    assert.equal(Buffer.concat(recorder.children[8]?.stdinChunks ?? []).equals(secondWorker.contents), true);
+    assert.notEqual(recorder.calls[3]?.args[8], recorder.calls[8]?.args[8]);
 });
 
 test("ssh transport appends interactive-auth hint when batch mode authentication fails", async () => {
@@ -663,7 +717,7 @@ test("docker transport installs default worker before exec command", async (t) =
         restoreEnv("PORTABLE_DEVSHELL_WORKER_LINUX_ARM64_PATH", previousWorkerPath);
     });
 
-    const recorder = createSpawnRecorder((call, child, callIndex) => {
+    const recorder = createSpawnRecorder((_call, child, callIndex) => {
         if (callIndex === 0) {
             closeRecordedChild(child, { stdout: "running\n" });
             return true;
@@ -680,6 +734,11 @@ test("docker transport installs default worker before exec command", async (t) =
         }
 
         if (callIndex === 3) {
+            closeRecordedChild(child, { stdout: "missing" });
+            return true;
+        }
+
+        if (callIndex === 4) {
             child.stdin.once("finish", () => {
                 closeRecordedChild(child);
             });
@@ -714,7 +773,10 @@ test("docker transport installs default worker before exec command", async (t) =
         options: { cwd: undefined, env: undefined, stdio: ["ignore", "pipe", "pipe"] }
     });
     assert.equal(recorder.calls[3]?.args[5]?.includes("/home/dev/.devshell/workers/linux-arm64/"), true);
-    assert.deepEqual(recorder.calls[4], {
+    assert.deepEqual(recorder.calls[3]?.options.stdio, ["ignore", "pipe", "pipe"]);
+    assert.equal(recorder.calls[4]?.args[5]?.includes('cat > "$tmp_binary_path"'), true);
+    assert.deepEqual(recorder.calls[4]?.options.stdio, ["pipe", "pipe", "pipe"]);
+    assert.deepEqual(recorder.calls[5], {
         command: "docker-bin",
         args: [
             "exec",
@@ -727,7 +789,7 @@ test("docker transport installs default worker before exec command", async (t) =
         ],
         options: { cwd: undefined, env: undefined, stdio: ["ignore", "pipe", "pipe"] }
     });
-    assert.deepEqual(Buffer.concat(recorder.children[3]?.stdinChunks ?? []), worker.contents);
+    assert.deepEqual(Buffer.concat(recorder.children[4]?.stdinChunks ?? []), worker.contents);
 });
 
 test("podman transport builds exec command", async () => {
@@ -807,7 +869,7 @@ test("podman transport installs default worker before spawning rpc", async (t) =
         restoreEnv("PORTABLE_DEVSHELL_WORKER_LINUX_ARM64_PATH", previousWorkerPath);
     });
 
-    const recorder = createSpawnRecorder((call, child, callIndex) => {
+    const recorder = createSpawnRecorder((_call, child, callIndex) => {
         if (callIndex === 0) {
             closeRecordedChild(child, { stdout: "running\n" });
             return true;
@@ -824,7 +886,12 @@ test("podman transport installs default worker before spawning rpc", async (t) =
         }
 
         if (callIndex === 3) {
-            child.stdin.once("end", () => {
+            closeRecordedChild(child, { stdout: "missing" });
+            return true;
+        }
+
+        if (callIndex === 4) {
+            child.stdin.once("finish", () => {
                 closeRecordedChild(child);
             });
             return true;
@@ -844,9 +911,9 @@ test("podman transport installs default worker before spawning rpc", async (t) =
         rpcProcess.kill("SIGTERM");
     });
 
-    assert.equal(rpcProcess.stdin, recorder.children[4]?.stdin);
-    assert.equal(rpcProcess.stdout, recorder.children[4]?.stdout);
-    assert.equal(rpcProcess.stderr, recorder.children[4]?.stderr);
+    assert.equal(rpcProcess.stdin, recorder.children[5]?.stdin);
+    assert.equal(rpcProcess.stdout, recorder.children[5]?.stdout);
+    assert.equal(rpcProcess.stderr, recorder.children[5]?.stderr);
     assert.deepEqual(recorder.calls[0], {
         command: "podman-bin",
         args: ["inspect", "--type", "container", "--format", "{{.State.Status}}", "worker-container"],
@@ -863,7 +930,10 @@ test("podman transport installs default worker before spawning rpc", async (t) =
         options: { cwd: undefined, env: undefined, stdio: ["ignore", "pipe", "pipe"] }
     });
     assert.equal(recorder.calls[3]?.args[5]?.includes("/home/dev/.devshell/workers/linux-arm64/"), true);
-    assert.deepEqual(recorder.calls[4], {
+    assert.deepEqual(recorder.calls[3]?.options.stdio, ["ignore", "pipe", "pipe"]);
+    assert.equal(recorder.calls[4]?.args[5]?.includes('cat > "$tmp_binary_path"'), true);
+    assert.deepEqual(recorder.calls[4]?.options.stdio, ["pipe", "pipe", "pipe"]);
+    assert.deepEqual(recorder.calls[5], {
         command: "podman-bin",
         args: [
             "exec",
@@ -876,7 +946,7 @@ test("podman transport installs default worker before spawning rpc", async (t) =
         ],
         options: { cwd: undefined, env: undefined, stdio: ["pipe", "pipe", "pipe"] }
     });
-    assert.deepEqual(Buffer.concat(recorder.children[3]?.stdinChunks ?? []), worker.contents);
+    assert.deepEqual(Buffer.concat(recorder.children[4]?.stdinChunks ?? []), worker.contents);
     assert.equal(rpcProcess.kill("SIGTERM"), true);
     assert.deepEqual(await rpcProcess.exit, { code: null, signal: "SIGTERM" });
 });
