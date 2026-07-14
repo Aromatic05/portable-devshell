@@ -130,8 +130,8 @@ test("WorkerAssetResolver allows host target to use dev fallback", async (t) => 
     const hostTarget = probeLocalWorkerTarget();
     const fallbackPath =
         hostTarget.os === "linux"
-            ? join(fixture.root, "src", "worker", "target", hostTarget.rustTarget, "debug", "devshell-worker")
-            : join(fixture.root, "src", "worker", "target", "debug", "devshell-worker");
+            ? join(fixture.root, "target", hostTarget.rustTarget, "debug", "devshell-worker")
+            : join(fixture.root, "target", "debug", "devshell-worker");
     await writeExecutable(fallbackPath, "#!/bin/sh\necho host\n");
 
     const asset = await fixture.resolver.resolve(hostTarget);
@@ -139,6 +139,46 @@ test("WorkerAssetResolver allows host target to use dev fallback", async (t) => 
     assert.equal(asset.binaryPath, fallbackPath);
     assert.equal(asset.source, "dev");
     assert.equal(asset.searchedPaths.includes(fallbackPath), true);
+});
+
+test("WorkerAssetResolver discovers a host dev worker through pnpm's nested module layout", async (t) => {
+    const root = await mkdtemp(join(tmpdir(), "portable-devshell-pnpm-resolver-"));
+    const devshellHome = join(root, "devshell-home");
+    const modulePath = join(
+        root,
+        "node_modules",
+        ".pnpm",
+        "@portable-devshell+core@file+packages+core",
+        "node_modules",
+        "@portable-devshell",
+        "core",
+        "dist",
+        "worker",
+        "WorkerAssetResolver.js"
+    );
+    const hostTarget = probeLocalWorkerTarget();
+    const devPath = join(root, "target", hostTarget.rustTarget, "debug", hostTarget.os === "windows" ? "devshell-worker.exe" : "devshell-worker");
+    const installedPath = join(
+        devshellHome,
+        "bin",
+        hostTarget.os === "windows" ? `devshell-worker-${hostTarget.key}.exe` : `devshell-worker-${hostTarget.key}`
+    );
+    const previousHome = process.env.PORTABLE_DEVSHELL_HOME;
+    t.after(async () => {
+        restoreEnv("PORTABLE_DEVSHELL_HOME", previousHome);
+        await rm(root, { recursive: true, force: true });
+    });
+
+    process.env.PORTABLE_DEVSHELL_HOME = devshellHome;
+    await mkdir(dirname(modulePath), { recursive: true });
+    await writeFile(join(root, "package.json"), JSON.stringify({ name: "portable-devshell", version: "0.4.1" }), "utf8");
+    await writeExecutable(devPath, "dev-worker");
+    await writeExecutable(installedPath, "installed-worker");
+
+    const asset = await new WorkerAssetResolver(pathToFileURL(modulePath).href).resolve(hostTarget);
+
+    assert.equal(asset.binaryPath, devPath);
+    assert.equal(asset.source, "dev");
 });
 
 test("WorkerAssetResolver does not use host dev fallback for non-host target", async (t) => {

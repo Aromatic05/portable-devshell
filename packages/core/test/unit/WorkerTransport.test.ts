@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn as nodeSpawn, type ChildProcess, type SpawnOptions } from "node:child_process";
+import { createHash } from "node:crypto";
 import { EventEmitter } from "node:events";
 import { mkdtemp, readlink, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -107,6 +108,69 @@ test("local transport honors command PORTABLE_DEVSHELL_HOME for worker lookup an
         await readlink(join(devshellHome, "bin", `devshell-worker-${target.key}`)),
         new RegExp(`^\\.\\./workers/${target.key}/[a-f0-9]{64}/devshell-worker(?:\\.exe)?$`, "u")
     );
+});
+
+test("local start upgrades a changed worker while status keeps the active worker stable", async (t) => {
+    const root = await mkdtemp(join(tmpdir(), "portable-devshell-local-upgrade-"));
+    const devshellHome = join(root, "devshell-home");
+    const oldWorker = await createDummyWorkerBinary("old");
+    const newWorker = await createDummyWorkerBinary("new");
+    t.after(async () => {
+        await oldWorker.cleanup();
+        await newWorker.cleanup();
+        await rm(root, { recursive: true, force: true });
+    });
+
+    const target = probeLocalWorkerTarget();
+    const workerPathEnvironmentName = `PORTABLE_DEVSHELL_WORKER_${target.key.replaceAll("-", "_").toUpperCase()}_PATH`;
+    const oldSha = createHash("sha256").update(oldWorker.contents).digest("hex");
+    const newSha = createHash("sha256").update(newWorker.contents).digest("hex");
+    let daemonSha = oldSha;
+    const recorder = createSpawnRecorder((call, child) => {
+        if (call.args[0] !== "status") {
+            return false;
+        }
+        closeRecordedChild(child, {
+            stdout: JSON.stringify({ state: "running", workerSha256: daemonSha, workspace: "/tmp/workspace" })
+        });
+        return true;
+    });
+    const transport = new LocalWorkerTransport({ spawnFunction: recorder.spawn });
+    const baseOptions = {
+        instanceName: "local-upgrade",
+        workspacePath: "/tmp/workspace"
+    };
+    const oldEnv = {
+        PORTABLE_DEVSHELL_HOME: devshellHome,
+        [workerPathEnvironmentName]: oldWorker.path
+    };
+    const newEnv = {
+        PORTABLE_DEVSHELL_HOME: devshellHome,
+        [workerPathEnvironmentName]: newWorker.path
+    };
+
+    await transport.runWorkerCommand("status", { ...baseOptions, env: oldEnv });
+    const targetAlias = join(devshellHome, "bin", `devshell-worker-${target.key}`);
+    assert.match(await readlink(targetAlias), new RegExp(`/${oldSha}/`, "u"));
+
+    recorder.calls.length = 0;
+    await transport.runWorkerCommand("status", { ...baseOptions, env: newEnv });
+    assert.deepEqual(recorder.calls.map((call) => call.args[0]), ["status"]);
+    assert.match(await readlink(targetAlias), new RegExp(`/${oldSha}/`, "u"));
+
+    recorder.calls.length = 0;
+    await transport.runWorkerCommand("start", { ...baseOptions, env: newEnv });
+    assert.deepEqual(recorder.calls.map((call) => call.args[0]), ["status", "stop", "start"]);
+    assert.match(await readlink(targetAlias), new RegExp(`/${newSha}/`, "u"));
+
+    recorder.calls.length = 0;
+    await transport.runWorkerCommand("start", { ...baseOptions, env: newEnv });
+    assert.deepEqual(recorder.calls.map((call) => call.args[0]), ["status", "stop", "start"]);
+
+    daemonSha = newSha;
+    recorder.calls.length = 0;
+    await transport.runWorkerCommand("start", { ...baseOptions, env: newEnv });
+    assert.deepEqual(recorder.calls.map((call) => call.args[0]), ["status", "start"]);
 });
 
 test("provider installWorker failures keep diagnostic details across local ssh docker and podman", async () => {

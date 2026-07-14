@@ -94,27 +94,25 @@ export class WorkerAssetResolver {
         }
 
         if (hostTargetMatches) {
-            let probeDir = this.#moduleDir;
-            for (let depth = 0; depth < 6; depth += 1) {
+            for (const projectRoot of findPortableDevshellProjectRoots(this.#moduleDir)) {
                 yield {
-                    binaryPath: resolve(probeDir, "target", target.rustTarget, "debug", workerBinaryFileName(target)),
+                    binaryPath: resolve(projectRoot, "target", target.rustTarget, "debug", workerBinaryFileName(target)),
                     source: "dev"
                 };
                 yield {
-                    binaryPath: resolve(probeDir, "target", target.rustTarget, "release", workerBinaryFileName(target)),
+                    binaryPath: resolve(projectRoot, "target", target.rustTarget, "release", workerBinaryFileName(target)),
                     source: "dev"
                 };
                 if (target.os !== "linux") {
                     yield {
-                        binaryPath: resolve(probeDir, "target", "debug", workerBinaryFileName(target)),
+                        binaryPath: resolve(projectRoot, "target", "debug", workerBinaryFileName(target)),
                         source: "dev"
                     };
                     yield {
-                        binaryPath: resolve(probeDir, "target", "release", workerBinaryFileName(target)),
+                        binaryPath: resolve(projectRoot, "target", "release", workerBinaryFileName(target)),
                         source: "dev"
                     };
                 }
-                probeDir = resolve(probeDir, "..");
             }
         }
 
@@ -333,6 +331,22 @@ export class WorkerAssetResolver {
     #supportedEnvVarNames(target: WorkerTarget): string[] {
         return [toTargetEnvVarName(target)];
     }
+}
+
+function findPortableDevshellProjectRoots(start: string): string[] {
+    const roots: string[] = [];
+    let probeDir = start;
+    for (let depth = 0; depth < 16; depth += 1) {
+        if (readJsonField(resolve(probeDir, "package.json"), "name") === "portable-devshell") {
+            roots.push(probeDir);
+        }
+        const parent = resolve(probeDir, "..");
+        if (parent === probeDir) {
+            break;
+        }
+        probeDir = parent;
+    }
+    return roots;
 }
 
 function isReadableFile(path: string): boolean {

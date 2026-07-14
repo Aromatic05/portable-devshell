@@ -3,11 +3,16 @@ import { chmod, mkdir, readFile, rename, rm, symlink, writeFile } from "node:fs/
 import { resolve } from "node:path";
 
 import type { WorkerAsset } from "../WorkerAssetResolver.js";
+import type { LocalWorkerInstallResult } from "./LocalWorkerInstaller.js";
 import type { WorkerTarget } from "../target/WorkerTarget.js";
 import { workerBinaryFileName, workerInstalledAliasFileName } from "../target/WorkerTargetBinary.js";
 
 export class LocalWorkerInstallerUnix {
-    async ensure(devshellHomeDirectory: string, asset: WorkerAsset, target: WorkerTarget): Promise<string> {
+    async ensureInstalled(
+        devshellHomeDirectory: string,
+        asset: WorkerAsset,
+        target: WorkerTarget
+    ): Promise<LocalWorkerInstallResult> {
         const binaryName = workerBinaryFileName(target);
         const installDir = resolve(devshellHomeDirectory, "workers", target.key, asset.sha256);
         const binDir = resolve(devshellHomeDirectory, "bin");
@@ -15,11 +20,12 @@ export class LocalWorkerInstallerUnix {
         const shaPath = resolve(installDir, `${binaryName}.sha256`);
         const targetSymlinkPath = resolve(binDir, workerInstalledAliasFileName(target));
         const symlinkPath = resolve(binDir, "devshell-worker");
+        const targetSymlink = `../workers/${target.key}/${asset.sha256}/${binaryName}`;
+        const installedSha = await readInstalledSha(binaryPath, shaPath);
 
         await mkdir(installDir, { recursive: true, mode: 0o700 });
         await mkdir(binDir, { recursive: true, mode: 0o700 });
 
-        const installedSha = await readInstalledSha(binaryPath, shaPath);
         if (installedSha !== asset.sha256) {
             const tmpBinaryPath = `${binaryPath}.tmp`;
             const tmpShaPath = `${shaPath}.tmp`;
@@ -32,12 +38,9 @@ export class LocalWorkerInstallerUnix {
             await rename(tmpShaPath, shaPath);
         }
 
-        await this.#refreshSymlink(
-            targetSymlinkPath,
-            `../workers/${target.key}/${asset.sha256}/${binaryName}`
-        );
+        await this.#refreshSymlink(targetSymlinkPath, targetSymlink);
         await this.#refreshSymlink(symlinkPath, workerInstalledAliasFileName(target));
-        return symlinkPath;
+        return { executablePath: symlinkPath, sha256: asset.sha256 };
     }
 
     async #refreshSymlink(symlinkPath: string, target: string): Promise<void> {

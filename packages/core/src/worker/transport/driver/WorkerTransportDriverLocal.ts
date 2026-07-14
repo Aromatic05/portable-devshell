@@ -1,4 +1,6 @@
 import { spawn } from "node:child_process";
+import { accessSync, constants } from "node:fs";
+import { resolve } from "node:path";
 
 import { ControlError, errorCodes } from "@portable-devshell/shared";
 
@@ -14,8 +16,9 @@ import {
 } from "../../command/WorkerCommandTransport.js";
 import type { WorkerCommandName, WorkerCommandOptions, WorkerRpcOptions } from "../../command/WorkerCommandOptions.js";
 import { createWorkerRpcProcess, type WorkerRpcProcess } from "../../WorkerProcess.js";
-import { LocalWorkerInstaller } from "../../install/LocalWorkerInstaller.js";
+import { LocalWorkerInstaller, type LocalWorkerInstallResult } from "../../install/LocalWorkerInstaller.js";
 import { resolveWorkerDevshellHomeDirectory } from "../../platform/WorkerHomeDirectory.js";
+import { workerInstalledAliasFileName } from "../../target/WorkerTargetBinary.js";
 import { probeLocalWorkerTarget } from "../../target/WorkerTargetProbe.js";
 
 export interface LocalWorkerTransportOptions {
@@ -56,26 +59,36 @@ export class LocalWorkerTransport implements WorkerCommandTransport {
     }
 
     async runWorkerCommand(command: WorkerCommandName, options: WorkerCommandOptions) {
-        const workerCommand = new WorkerBinary(await this.#resolveExecutable(options.env)).buildCommand(
-            command,
-            options.instanceName,
-            options.extraArgs
-        );
-        const context = this.#createCommandContext(command, [workerCommand.command, ...workerCommand.args], {
-            cwd: command === "start" ? options.workspacePath : undefined,
-            instance: options.instanceName
-        });
-        const child = this.#spawnCommand(context, {
-            cwd: context.cwd,
-            env: this.#mergeEnv(options.env),
-            stdio: ["ignore", "pipe", "pipe"]
-        });
+        if (command === "start" && this.#workerBinary.executable === "devshell-worker") {
+            const installed = await this.#provisionExecutable(options.env);
+            const statusResult = await this.#runResolvedCommand(installed.executablePath, "status", {
+                instanceName: options.instanceName,
+                env: options.env
+            });
+            const daemon = readDaemonIdentity(statusResult.exitCode, statusResult.stdout);
+            if (!daemon.known || (daemon.running && daemon.workerSha256 !== installed.sha256)) {
+                const stopResult = await this.#runResolvedCommand(installed.executablePath, "stop", {
+                    instanceName: options.instanceName,
+                    env: options.env
+                });
+                if (stopResult.exitCode !== 0) {
+                    throw this.#createProviderError(
+                        this.#createCommandContext("upgradeWorker", [installed.executablePath, "stop", "--instance", options.instanceName], {
+                            instance: options.instanceName
+                        }),
+                        new Error(stopResult.stderr || stopResult.stdout || "existing worker could not be stopped"),
+                        { errorCode: errorCodes.coreWorkerProvisionFailed, result: stopResult }
+                    );
+                }
+            }
+            return await this.#runResolvedCommand(installed.executablePath, command, options);
+        }
 
-        return await waitForCommandResult(child, this.#createProviderError, context);
+        return await this.#runResolvedCommand(await this.#resolveActiveExecutable(options.env), command, options);
     }
 
     async spawnWorkerRpc(options: WorkerRpcOptions): Promise<WorkerRpcProcess> {
-        const workerCommand = new WorkerBinary(await this.#resolveExecutable(options.env)).buildCommand("rpc", options.instanceName);
+        const workerCommand = new WorkerBinary(await this.#resolveActiveExecutable(options.env)).buildCommand("rpc", options.instanceName);
         const context = this.#createCommandContext("spawnWorkerRpc", [workerCommand.command, ...workerCommand.args], {
             instance: options.instanceName
         });
@@ -91,8 +104,30 @@ export class LocalWorkerTransport implements WorkerCommandTransport {
     }
 
     async #resolveExecutable(env?: NodeJS.ProcessEnv): Promise<string> {
+        return (await this.#provisionExecutable(env)).executablePath;
+    }
+
+    async #resolveActiveExecutable(env?: NodeJS.ProcessEnv): Promise<string> {
         if (this.#workerBinary.executable !== "devshell-worker") {
             return this.#workerBinary.executable;
+        }
+
+        const environment = this.#mergeEnv(env);
+        const devshellHomeDirectory = resolveWorkerDevshellHomeDirectory(environment);
+        const target = probeLocalWorkerTarget("local", "resolveExecutable");
+        const activeExecutable =
+            target.os === "windows"
+                ? resolve(devshellHomeDirectory, "bin", workerInstalledAliasFileName(target))
+                : resolve(devshellHomeDirectory, "bin", "devshell-worker");
+        if (isReadableFile(activeExecutable)) {
+            return activeExecutable;
+        }
+        return (await this.#provisionExecutable(env)).executablePath;
+    }
+
+    async #provisionExecutable(env?: NodeJS.ProcessEnv): Promise<LocalWorkerInstallResult> {
+        if (this.#workerBinary.executable !== "devshell-worker") {
+            return { executablePath: this.#workerBinary.executable, sha256: "" };
         }
 
         const environment = this.#mergeEnv(env);
@@ -107,11 +142,29 @@ export class LocalWorkerTransport implements WorkerCommandTransport {
             throw this.#createProviderError(this.#createCommandContext("resolveExecutable", ["devshell-worker"]), error);
         });
 
-        return await this.#installer.ensure(devshellHomeDirectory, asset, target).catch((error) => {
+        return await this.#installer.ensureInstalled(devshellHomeDirectory, asset, target).catch((error) => {
             throw this.#createProviderError(this.#createCommandContext("resolveExecutable", ["devshell-worker"]), error, {
                 errorCode: errorCodes.coreWorkerProvisionFailed
             });
         });
+    }
+
+    async #runResolvedCommand(
+        executable: string,
+        command: WorkerCommandName,
+        options: WorkerCommandOptions
+    ): Promise<Awaited<ReturnType<WorkerCommandTransport["runWorkerCommand"]>>> {
+        const workerCommand = new WorkerBinary(executable).buildCommand(command, options.instanceName, options.extraArgs);
+        const context = this.#createCommandContext(command, [workerCommand.command, ...workerCommand.args], {
+            cwd: command === "start" ? options.workspacePath : undefined,
+            instance: options.instanceName
+        });
+        const child = this.#spawnCommand(context, {
+            cwd: context.cwd,
+            env: this.#mergeEnv(options.env),
+            stdio: ["ignore", "pipe", "pipe"]
+        });
+        return await waitForCommandResult(child, this.#createProviderError, context);
     }
 
     #mergeEnv(env: NodeJS.ProcessEnv | undefined): NodeJS.ProcessEnv {
@@ -158,4 +211,36 @@ export class LocalWorkerTransport implements WorkerCommandTransport {
         cause: unknown,
         options?: { errorCode?: string; result?: { exitCode?: number | null; signal?: string; stderr?: string; stdout?: string } }
     ) => createProviderError(context, cause, options);
+}
+
+function isReadableFile(path: string): boolean {
+    try {
+        accessSync(path, constants.R_OK);
+        return true;
+    } catch {
+        return false;
+    }
+}
+
+
+function readDaemonIdentity(
+    exitCode: number | null,
+    stdout: string
+): { known: boolean; running: boolean; workerSha256?: string } {
+    if (exitCode !== 0) {
+        return { known: false, running: false };
+    }
+    try {
+        const parsed = JSON.parse(stdout) as Record<string, unknown>;
+        if (parsed.state !== "running" && parsed.state !== "stale" && parsed.state !== "stopped") {
+            return { known: false, running: false };
+        }
+        return {
+            known: true,
+            running: parsed.state === "running",
+            workerSha256: typeof parsed.workerSha256 === "string" ? parsed.workerSha256 : undefined
+        };
+    } catch {
+        return { known: false, running: false };
+    }
 }
