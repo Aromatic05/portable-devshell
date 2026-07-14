@@ -14,6 +14,7 @@ use crate::rpc::response::RpcResponse;
 use crate::security::{SecurityPolicy, build_security_policy};
 use crate::tools::artifact::payload::ArtifactPayloadStore;
 use crate::tools::artifact::receive::ArtifactReceiveStore;
+use crate::tools::file::FileToolState;
 use crate::tools::{ToolCall, ToolName, ToolRegistry};
 
 const MAX_CONCURRENT_TOOL_CALLS: usize = 8;
@@ -33,6 +34,7 @@ impl RpcRouter {
         config: WorkerConfig,
         runtime: WorkerRuntimeContext,
         tools: Arc<ToolRegistry>,
+        files: Arc<FileToolState>,
         payloads: Arc<ArtifactPayloadStore>,
         receives: Arc<ArtifactReceiveStore>,
     ) -> Self {
@@ -50,6 +52,7 @@ impl RpcRouter {
             Arc::clone(&active_tool_calls),
             Arc::clone(&tools),
             Arc::clone(&policy),
+            files,
             payloads,
             receives,
         );
@@ -98,9 +101,13 @@ impl RpcRouter {
             .tools
             .find(&tool_name)
             .map_err(|error| RpcError::new(error.code, error.message))?;
+        let context = request.context.as_ref();
         tool.call(ToolCall {
             workspace: PathBuf::from(&self.runtime.workspace),
             params: request.params.clone(),
+            session_id: context
+                .and_then(|value| value.session_id.clone())
+                .unwrap_or_else(|| "worker-default".to_string()),
             policy: Arc::clone(&self.policy),
             process_registry: Arc::clone(&self.active_processes),
         })

@@ -1,5 +1,13 @@
 use serde::{Deserialize, Serialize};
 
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RpcRequestContext {
+    pub request_id: Option<String>,
+    pub session_id: Option<String>,
+    pub source: Option<String>,
+}
+
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RpcRequest {
@@ -9,6 +17,8 @@ pub struct RpcRequest {
     pub method: String,
     #[serde(default)]
     pub params: serde_json::Value,
+    #[serde(default)]
+    pub context: Option<RpcRequestContext>,
 }
 
 impl RpcRequest {
@@ -22,6 +32,7 @@ impl RpcRequest {
             id: id.into(),
             method: method.into(),
             params,
+            context: None,
         }
     }
 }

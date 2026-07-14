@@ -12,6 +12,7 @@ use serde::Serialize;
 pub struct ToolCall {
     pub workspace: PathBuf,
     pub params: serde_json::Value,
+    pub session_id: String,
     pub policy: Arc<dyn SecurityPolicy>,
     pub process_registry: Arc<ActiveProcessRegistry>,
 }

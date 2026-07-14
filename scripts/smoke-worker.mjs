@@ -56,13 +56,12 @@ try {
             }
         }
 
-        stage("file_write");
-        const written = await rpc.request("file_write", {
-            content: "portable-devshell-file-smoke\n",
-            path: "./portable-devshell-smoke.txt"
+        stage("file_edit");
+        const written = await rpc.request("file_edit", {
+            changes: "*** Begin Edit\n*** Write File: ./portable-devshell-smoke.txt\nportable-devshell-file-smoke\n*** End Edit"
         });
-        if (typeof written.revision !== "string" || written.revision.length === 0) {
-            throw new Error(`file_write smoke failed: ${JSON.stringify(written)}`);
+        if (written.complete !== true || written.operations?.[0]?.status !== "applied") {
+            throw new Error(`file_edit smoke failed: ${JSON.stringify(written)}`);
         }
         stage("file_read");
         const read = await rpc.request("file_read", { path: "./portable-devshell-smoke.txt" });

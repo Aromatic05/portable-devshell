@@ -36,7 +36,7 @@ impl ToolHandler for FileSearchTool {
         &self.name
     }
     fn catalog_entry(&self) -> ToolCatalogEntry {
-        ToolCatalogEntry { group: self.name.group().to_string(), name: self.name.as_str(), description: "Search text within exact paths, directories, and globs, returning copyable snapshot headers and edit anchors.".to_string(), input_schema: serde_json::to_value(schema_for!(FileSearchInput)).unwrap(), output_schema: serde_json::to_value(schema_for!(FileSearchOutput)).unwrap(), required_capabilities: vec![ToolCapability::Read] }
+        ToolCatalogEntry { group: self.name.group().to_string(), name: self.name.as_str(), description: "Search text within exact paths, directories, and globs. Complete returned source lines establish implicit, session-scoped edit coverage for later file_edit calls.".to_string(), input_schema: serde_json::to_value(schema_for!(FileSearchInput)).unwrap(), output_schema: serde_json::to_value(schema_for!(FileSearchOutput)).unwrap(), required_capabilities: vec![ToolCapability::Read] }
     }
     fn call(&self, call: ToolCall) -> Result<serde_json::Value, ToolError> {
         let input: FileSearchInput = serde_json::from_value(call.params.clone())
@@ -91,6 +91,7 @@ impl ToolHandler for FileSearchTool {
         for group in discovered_groups {
             let mut matched = VecDeque::new();
             for entry in group {
+                let ordinal = self.state.next_snapshot_ordinal();
                 let Ok((metadata, full_text, matches, shown)) =
                     search_stream(&entry.path, &matcher, per_file, context)
                 else {
@@ -100,26 +101,24 @@ impl ToolHandler for FileSearchTool {
                     continue;
                 }
                 let (body, seen) = format_streamed_content(&matches, &shown);
-                let snapshot = if let Some(text) = full_text {
+                if let Some(text) = full_text {
+                    self.state.session_snapshots.lock().unwrap().remember_full(
+                        &call.session_id,
+                        &entry.path,
+                        &text,
+                        seen,
+                        ordinal,
+                    );
+                } else {
                     self.state
-                        .snapshots
+                        .session_snapshots
                         .lock()
                         .unwrap()
-                        .remember(&entry.path, &text, seen)
-                } else {
-                    self.state.snapshots.lock().unwrap().remember_sparse(
-                        &entry.path,
-                        &metadata,
-                        seen,
-                    )
-                };
-                let content = format!("[{}#{}]\n{}", entry.display, snapshot.tag, body);
+                        .remember_sparse(&call.session_id, &entry.path, &metadata, seen, ordinal);
+                }
                 matched.push_back(FileSearchFile {
                     path: entry.display,
-                    snapshot_id: snapshot.id,
-                    snapshot_tag: snapshot.tag,
-                    revision: metadata.revision,
-                    content,
+                    content: body,
                     match_count: matches.len(),
                 });
             }

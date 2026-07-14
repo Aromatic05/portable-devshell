@@ -13,10 +13,14 @@ use crate::tools::file::find::FileFindTool;
 use crate::tools::file::info::FileInfoTool;
 use crate::tools::file::read::FileReadTool;
 use crate::tools::file::search::FileSearchTool;
-use crate::tools::file::write::FileWriteTool;
 #[cfg(unix)]
 use crate::tools::tmux::register_tools as register_tmux_tools;
 use crate::tools::{ToolError, ToolRegistry};
+
+pub struct BuiltinTools {
+    pub files: Arc<FileToolState>,
+    pub registry: ToolRegistry,
+}
 
 pub fn builtin_registry(
     instance_paths: &InstancePaths,
@@ -24,23 +28,20 @@ pub fn builtin_registry(
     config: &WorkerConfig,
     runtime: &WorkerRuntimeContext,
     artifacts: Arc<ArtifactStore>,
-) -> Result<ToolRegistry, ToolError> {
+) -> Result<BuiltinTools, ToolError> {
+    let _ = config;
     let mut registry = ToolRegistry::new();
     let files = FileToolState::new();
     registry.register(Arc::new(BashRunTool::new(Arc::clone(&artifacts))?) as Arc<_>)?;
     registry.register(Arc::new(ArtifactReadTool::new(Arc::clone(&artifacts))) as Arc<_>)?;
     registry.register(Arc::new(FileReadTool::new(Arc::clone(&files))) as Arc<_>)?;
-    registry.register(Arc::new(FileEditTool::new(
-        Arc::clone(&files),
-        config.tools.file_edit.mode,
-    )) as Arc<_>)?;
-    registry.register(Arc::new(FileWriteTool::new(Arc::clone(&files))) as Arc<_>)?;
+    registry.register(Arc::new(FileEditTool::new(Arc::clone(&files))) as Arc<_>)?;
     registry.register(Arc::new(FileFindTool::new(Arc::clone(&files))) as Arc<_>)?;
     registry.register(Arc::new(FileSearchTool::new(Arc::clone(&files))) as Arc<_>)?;
-    registry.register(Arc::new(FileInfoTool::new(files)) as Arc<_>)?;
+    registry.register(Arc::new(FileInfoTool::new(Arc::clone(&files))) as Arc<_>)?;
     #[cfg(unix)]
     register_tmux_tools(&mut registry, instance_paths, socket_paths, runtime)?;
     #[cfg(windows)]
     let _ = (instance_paths, socket_paths, runtime);
-    Ok(registry)
+    Ok(BuiltinTools { files, registry })
 }

@@ -65,20 +65,20 @@ pub fn serve(instance: InstanceName) -> Result<(), String> {
     .map_err(|error| error.message)?;
     let receives = ArtifactReceiveStore::new(instance_paths.artifacts_dir.join("receives"))
         .map_err(|error| error.message)?;
-    let tools = Arc::new(
-        builtin_registry(
-            &instance_paths,
-            &socket_paths,
-            &config,
-            &runtime,
-            Arc::clone(&artifacts),
-        )
-        .map_err(|error| error.message)?,
-    );
+    let builtin_tools = builtin_registry(
+        &instance_paths,
+        &socket_paths,
+        &config,
+        &runtime,
+        Arc::clone(&artifacts),
+    )
+    .map_err(|error| error.message)?;
+    let tools = Arc::new(builtin_tools.registry);
     let router = Arc::new(RpcRouter::new(
         config.clone(),
         runtime,
         tools,
+        builtin_tools.files,
         payloads,
         receives,
     ));

@@ -1,4 +1,5 @@
 pub mod artifact_payload;
+pub mod file_session;
 pub mod handshake;
 pub mod ping;
 pub mod status;
@@ -17,7 +18,9 @@ use crate::security::SecurityPolicy;
 use crate::tools::ToolRegistry;
 use crate::tools::artifact::payload::ArtifactPayloadStore;
 use crate::tools::artifact::receive::ArtifactReceiveStore;
+use crate::tools::file::FileToolState;
 
+#[allow(clippy::too_many_arguments)]
 pub fn register_control_handlers(
     handlers: &mut HashMap<String, Arc<dyn ControlHandler>>,
     config: WorkerConfig,
@@ -27,6 +30,7 @@ pub fn register_control_handlers(
     active_tool_calls: Arc<ActiveToolCallRegistry>,
     tools: Arc<ToolRegistry>,
     policy: Arc<dyn SecurityPolicy>,
+    files: Arc<FileToolState>,
     payloads: Arc<ArtifactPayloadStore>,
     receives: Arc<ArtifactReceiveStore>,
 ) {
@@ -71,6 +75,10 @@ pub fn register_control_handlers(
     handlers.insert(
         "artifact.payload.close".to_string(),
         Arc::new(artifact_payload::ArtifactPayloadCloseHandler::new(payloads)),
+    );
+    handlers.insert(
+        "file.session.close".to_string(),
+        Arc::new(file_session::FileSessionCloseHandler::new(files)),
     );
     handlers.insert(
         "worker.handshake".to_string(),

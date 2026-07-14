@@ -4,11 +4,13 @@ use schemars::schema_for;
 
 use crate::tools::file::state::{FULL_SNAPSHOT_LIMIT, TextFile, TextMetadata};
 use crate::tools::file::structure;
-use crate::tools::file::types::{FileReadInput, FileReadOutput, ReturnedRange};
+use crate::tools::file::types::{FileReadInput, FileReadOutput, FileReadView, ReturnedRange};
 use crate::tools::file::{FileToolState, resolve_existing};
 use crate::tools::{ToolCall, ToolCapability, ToolCatalogEntry, ToolError, ToolHandler, ToolName};
 
 const DEFAULT_LINE_COUNT: usize = 200;
+const AUTO_CONTENT_MAX_LINES: usize = 300;
+const AUTO_CONTENT_MAX_BYTES: usize = 64 * 1024;
 const MAX_RANGES: usize = 16;
 const MAX_CONTENT_BYTES: usize = 1024 * 1024;
 
@@ -33,10 +35,10 @@ impl ToolHandler for FileReadTool {
             group: self.name.group().to_string(),
             name: self.name.as_str(),
             description: concat!(
-                "Read UTF-8 text and create a snapshot for later file_edit calls. Without selector, supported source files return a compact Tree-sitter structure summary; other files return the first 200 lines. ",
-                "Selectors use one-based lines: `50` reads a default window from line 50, `50-100` reads an inclusive range, `50+100` reads 100 lines, and comma joins sorted non-overlapping ranges such as `5-16,960-973`. ",
-                "Explicit ranges normally include one preceding and three following context lines. Add `:raw` to suppress context expansion, for example `50-100:raw`; selector `raw` starts at the full-file range but remains subject to the output byte limit and returns nextSelector when pagination is required. ",
-                "The first content line is `[path#snapshotTag]` and can be copied directly into file_edit. Only complete source lines actually returned in content become editable snapshot coverage; omitted or truncated lines are not authorized for editing."
+                "Read UTF-8 text and establish an implicit, session-scoped edit snapshot. ",
+                "view defaults to auto: small files return complete content, large supported source files return a compact Tree-sitter outline with symbol ranges and hierarchy, and other large files return the first 200 lines. ",
+                "Use view=content with selector for exact one-based ranges such as `50-100`, `50+100`, or `5-16,960-973`; add `:raw` to suppress context expansion. ",
+                "Use view=outline to force structural navigation. Snapshot identifiers and revisions are managed internally and never need to be copied into file_edit."
             )
             .to_string(),
             input_schema: serde_json::to_value(schema_for!(FileReadInput)).unwrap(),
@@ -47,49 +49,118 @@ impl ToolHandler for FileReadTool {
     fn call(&self, call: ToolCall) -> Result<serde_json::Value, ToolError> {
         let input: FileReadInput = serde_json::from_value(call.params.clone())
             .map_err(|error| ToolError::new("tool.invalidArguments", error.to_string()))?;
+        if input.view == FileReadView::Outline && input.selector.is_some() {
+            return Err(ToolError::new(
+                "tool.invalidArguments",
+                "selector cannot be combined with view=outline",
+            ));
+        }
+
+        let ordinal = self.state.next_snapshot_ordinal();
         let (requested, path) = resolve_existing(&call, &input.path, false)?;
         if !path.is_file() {
             return Err(ToolError::new("file.notFile", "path is not a file"));
         }
         let metadata = TextMetadata::inspect(&path)?;
-        let small_text = if metadata.total_bytes <= FULL_SNAPSHOT_LIMIT {
-            Some(TextFile::read(&path)?)
-        } else {
-            None
-        };
-        let mut selector = if input.selector.is_none() {
-            if let Some(text) = &small_text {
-                if let Some(summary) =
-                    structure::summarize(&path, &text.normalized(), text.lines.len())?
-                {
-                    ParsedSelector {
-                        truncated: summary.lines.len() < text.lines.len(),
-                        next_selector: summary.next_selector,
-                        ranges: coalesce_lines(&summary.lines),
-                    }
-                } else {
-                    parse_selector(None, metadata.total_lines)?
-                }
-            } else {
-                parse_selector(None, metadata.total_lines)?
+        let resolved_view = resolve_view(&input, &path, &metadata);
+
+        let output = match resolved_view {
+            FileReadView::Outline => {
+                self.read_outline(&call, requested.raw, &path, &metadata, ordinal)?
             }
-        } else {
-            parse_selector(input.selector.as_deref(), metadata.total_lines)?
+            FileReadView::Content | FileReadView::Auto => {
+                self.read_content(&call, requested.raw, &path, &metadata, &input, ordinal)?
+            }
         };
-        let selected = TextMetadata::read_selected(&path, &selector.ranges, MAX_CONTENT_BYTES)?;
-        if selected.metadata.revision != metadata.revision
-            || small_text
-                .as_ref()
-                .is_some_and(|text| text.revision != selected.metadata.revision)
-        {
+        serde_json::to_value(output)
+            .map_err(|error| ToolError::new("tool.internalError", error.to_string()))
+    }
+}
+
+impl FileReadTool {
+    fn read_outline(
+        &self,
+        call: &ToolCall,
+        requested: String,
+        path: &std::path::Path,
+        metadata: &TextMetadata,
+        ordinal: u64,
+    ) -> Result<FileReadOutput, ToolError> {
+        if metadata.total_bytes > FULL_SNAPSHOT_LIMIT {
+            return Err(ToolError::new(
+                "file.outlineTooLarge",
+                "outline view is limited to files that fit in a full snapshot",
+            ));
+        }
+        let text = TextFile::read(path)?;
+        if text.revision != metadata.revision {
             return Err(ToolError::retryable(
                 "file.revisionMismatch",
                 "file changed while it was being read",
             ));
         }
-        let metadata = selected.metadata.clone();
+        let outline = structure::outline(path, &text.normalized())?.ok_or_else(|| {
+            ToolError::new(
+                "file.outlineUnavailable",
+                "no supported syntax outline is available for this file",
+            )
+        })?;
+        self.remember(
+            call,
+            path,
+            &text,
+            metadata,
+            outline.seen_lines.clone(),
+            ordinal,
+        );
+        Ok(FileReadOutput {
+            path: requested,
+            view: FileReadView::Outline,
+            content: outline.content,
+            returned_ranges: to_returned_ranges(&outline.seen_lines),
+            total_lines: metadata.total_lines,
+            total_bytes: metadata.total_bytes,
+            truncated: outline.truncated,
+            next_selector: None,
+            language: Some(outline.language),
+            parse_status: Some(outline.parse_status),
+        })
+    }
+
+    fn read_content(
+        &self,
+        call: &ToolCall,
+        requested: String,
+        path: &std::path::Path,
+        metadata: &TextMetadata,
+        input: &FileReadInput,
+        ordinal: u64,
+    ) -> Result<FileReadOutput, ToolError> {
+        let full_auto = input.view == FileReadView::Auto
+            && input.selector.is_none()
+            && metadata.total_lines <= AUTO_CONTENT_MAX_LINES
+            && metadata.total_bytes <= AUTO_CONTENT_MAX_BYTES;
+        let mut selector = if full_auto {
+            ParsedSelector {
+                ranges: if metadata.total_lines == 0 {
+                    Vec::new()
+                } else {
+                    vec![(1, metadata.total_lines)]
+                },
+                truncated: false,
+                next_selector: None,
+            }
+        } else {
+            parse_selector(input.selector.as_deref(), metadata.total_lines)?
+        };
+        let selected = TextMetadata::read_selected(path, &selector.ranges, MAX_CONTENT_BYTES)?;
+        if selected.metadata.revision != metadata.revision {
+            return Err(ToolError::retryable(
+                "file.revisionMismatch",
+                "file changed while it was being read",
+            ));
+        }
         let mut content = String::new();
-        let mut returned = Vec::new();
         let mut seen = Vec::new();
         for (line_no, line) in &selected.lines {
             if !content.is_empty() {
@@ -97,12 +168,6 @@ impl ToolHandler for FileReadTool {
             }
             content.push_str(&format!("{line_no}:{line}"));
             seen.push(*line_no);
-        }
-        for (start, end) in coalesce_lines(&seen) {
-            returned.push(ReturnedRange {
-                start_line: start,
-                end_line: end,
-            });
         }
         if let Some(next_line) = selected.next_line {
             selector.truncated = true;
@@ -112,39 +177,104 @@ impl ToolHandler for FileReadTool {
                 selector.next_selector.as_deref(),
             );
         }
-        let snapshot = if let Some(text) = &small_text {
-            self.state
-                .snapshots
-                .lock()
-                .unwrap()
-                .remember(&path, text, seen)
+
+        if metadata.total_bytes <= FULL_SNAPSHOT_LIMIT {
+            let text = TextFile::read(path)?;
+            if text.revision != metadata.revision {
+                return Err(ToolError::retryable(
+                    "file.revisionMismatch",
+                    "file changed while it was being read",
+                ));
+            }
+            self.state.session_snapshots.lock().unwrap().remember_full(
+                &call.session_id,
+                path,
+                &text,
+                seen.clone(),
+                ordinal,
+            );
         } else {
             self.state
-                .snapshots
+                .session_snapshots
                 .lock()
                 .unwrap()
-                .remember_sparse(&path, &metadata, seen)
-        };
-        let header = format!("[{}#{}]", requested.raw, snapshot.tag);
-        let content = if content.is_empty() {
-            header
-        } else {
-            format!("{header}\n{content}")
-        };
-        serde_json::to_value(FileReadOutput {
-            path: requested.raw,
-            snapshot_id: snapshot.id,
-            snapshot_tag: snapshot.tag,
-            revision: metadata.revision,
+                .remember_sparse(&call.session_id, path, metadata, seen.clone(), ordinal);
+        }
+
+        Ok(FileReadOutput {
+            path: requested,
+            view: FileReadView::Content,
             content,
-            returned_ranges: returned,
+            returned_ranges: to_returned_ranges(&seen),
             total_lines: metadata.total_lines,
             total_bytes: metadata.total_bytes,
             truncated: selector.truncated,
             next_selector: selector.next_selector,
+            language: None,
+            parse_status: None,
         })
-        .map_err(|error| ToolError::new("tool.internalError", error.to_string()))
     }
+
+    fn remember(
+        &self,
+        call: &ToolCall,
+        path: &std::path::Path,
+        text: &TextFile,
+        metadata: &TextMetadata,
+        seen: Vec<usize>,
+        ordinal: u64,
+    ) {
+        if metadata.total_bytes <= FULL_SNAPSHOT_LIMIT {
+            self.state.session_snapshots.lock().unwrap().remember_full(
+                &call.session_id,
+                path,
+                text,
+                seen,
+                ordinal,
+            );
+        } else {
+            self.state
+                .session_snapshots
+                .lock()
+                .unwrap()
+                .remember_sparse(&call.session_id, path, metadata, seen, ordinal);
+        }
+    }
+}
+
+fn resolve_view(
+    input: &FileReadInput,
+    path: &std::path::Path,
+    metadata: &TextMetadata,
+) -> FileReadView {
+    if input.selector.is_some() {
+        return FileReadView::Content;
+    }
+    match input.view {
+        FileReadView::Content => FileReadView::Content,
+        FileReadView::Outline => FileReadView::Outline,
+        FileReadView::Auto => {
+            if metadata.total_lines <= AUTO_CONTENT_MAX_LINES
+                && metadata.total_bytes <= AUTO_CONTENT_MAX_BYTES
+            {
+                FileReadView::Content
+            } else if metadata.total_bytes <= FULL_SNAPSHOT_LIMIT && structure::supports(path) {
+                FileReadView::Outline
+            } else {
+                FileReadView::Content
+            }
+        }
+    }
+}
+
+fn to_returned_ranges(lines: &[usize]) -> Vec<ReturnedRange> {
+    coalesce_lines(lines)
+        .into_iter()
+        .map(|(start_line, end_line)| ReturnedRange {
+            start_line,
+            end_line,
+        })
+        .collect()
 }
 
 struct ParsedSelector {
@@ -270,7 +400,7 @@ fn parse_selector(selector: Option<&str>, total: usize) -> Result<ParsedSelector
             ));
         }
         if is_open_window {
-            if requested.len() != 0 || range_text.contains(',') {
+            if !requested.is_empty() || range_text.contains(',') {
                 return Err(ToolError::new(
                     "file.invalidRange",
                     "open-ended selectors such as `50` cannot be combined with other ranges",

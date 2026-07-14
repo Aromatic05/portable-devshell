@@ -1,20 +1,22 @@
 pub mod codex_patch;
+pub mod context_patch;
 pub mod cursor;
 pub mod diff;
 pub mod discover;
 pub mod edit;
 pub mod find;
 pub mod info;
+mod legacy_edit;
 pub mod publish;
 pub mod read;
 pub mod search;
 pub mod state;
 pub mod structure;
 pub mod types;
-pub mod write;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use crate::security::path::{
@@ -26,6 +28,8 @@ use crate::tools::{ToolCall, ToolError};
 pub struct FileToolState {
     pub cursors: Mutex<cursor::CursorStore>,
     pub snapshots: Mutex<state::SnapshotStore>,
+    pub session_snapshots: Mutex<state::SessionSnapshotStore>,
+    snapshot_ordinal: AtomicU64,
     write_locks: Mutex<HashMap<PathBuf, Arc<Mutex<()>>>>,
 }
 impl FileToolState {
@@ -33,8 +37,14 @@ impl FileToolState {
         Arc::new(Self {
             cursors: Mutex::new(cursor::CursorStore::default()),
             snapshots: Mutex::new(state::SnapshotStore::default()),
+            session_snapshots: Mutex::new(state::SessionSnapshotStore::default()),
+            snapshot_ordinal: AtomicU64::new(1),
             write_locks: Mutex::new(HashMap::new()),
         })
+    }
+
+    pub fn next_snapshot_ordinal(&self) -> u64 {
+        self.snapshot_ordinal.fetch_add(1, Ordering::Relaxed)
     }
 
     pub fn write_lock(&self, path: &Path) -> Arc<Mutex<()>> {

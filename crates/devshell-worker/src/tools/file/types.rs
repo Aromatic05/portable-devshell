@@ -1,19 +1,35 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+#[derive(Clone, Copy, Debug, Default, Deserialize, JsonSchema, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum FileReadView {
+    #[default]
+    Auto,
+    Content,
+    Outline,
+}
+
+#[derive(Clone, Copy, Debug, JsonSchema, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum FileParseStatus {
+    Complete,
+    Partial,
+}
+
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct FileReadInput {
     pub path: String,
+    #[serde(default)]
+    pub view: FileReadView,
     pub selector: Option<String>,
 }
 #[derive(Debug, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct FileReadOutput {
     pub path: String,
-    pub snapshot_id: String,
-    pub snapshot_tag: String,
-    pub revision: String,
+    pub view: FileReadView,
     pub content: String,
     pub returned_ranges: Vec<ReturnedRange>,
     pub total_lines: usize,
@@ -21,6 +37,10 @@ pub struct FileReadOutput {
     pub truncated: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub next_selector: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub language: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parse_status: Option<FileParseStatus>,
 }
 #[derive(Clone, Debug, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
@@ -175,11 +195,87 @@ pub struct FileEditFileOutput {
 
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct FileChangeSetInput {
+    pub changes: String,
+}
+
+#[derive(Clone, Copy, Debug, JsonSchema, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum FileChangeAction {
+    Write,
+    Patch,
+    Rewrite,
+    Delete,
+    Move,
+}
+
+#[derive(Clone, Copy, Debug, JsonSchema, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum FileChangeStatus {
+    Applied,
+    Failed,
+    NotExecuted,
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct FileChangeError {
+    pub code: String,
+    pub message: String,
+    pub retryable: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub details: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct FileChangeOperationOutput {
+    pub index: usize,
+    pub action: FileChangeAction,
+    pub path: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub moved_from: Option<String>,
+    pub status: FileChangeStatus,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub merged: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub added_lines: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub removed_lines: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub first_changed_line: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub total_lines: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub total_bytes: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub diff: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub preview: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub preview_range: Option<ReturnedRange>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<FileChangeError>,
+    pub truncated: bool,
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct FileChangeSetOutput {
+    pub complete: bool,
+    pub operations: Vec<FileChangeOperationOutput>,
+}
+
+// Legacy file_write DTOs remain only so archived code and historical fixtures can compile.
+#[allow(dead_code)]
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct FileWriteInput {
     pub path: String,
     pub content: String,
     pub expected_revision: Option<String>,
 }
+#[allow(dead_code)]
 #[derive(Debug, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct FileWriteOutput {
@@ -254,9 +350,6 @@ pub struct FileSearchOutput {
 #[serde(rename_all = "camelCase")]
 pub struct FileSearchFile {
     pub path: String,
-    pub snapshot_id: String,
-    pub snapshot_tag: String,
-    pub revision: String,
     pub content: String,
     pub match_count: usize,
 }

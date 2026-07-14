@@ -125,7 +125,6 @@ fn handshake_tools_and_bash_run_flow_work_over_framed_rpc() {
         "file_info",
         "file_read",
         "file_search",
-        "file_write",
     ];
     if Command::new("tmux")
         .arg("-V")
