@@ -9,7 +9,7 @@ export * from "./attach/AttachShellRunner.js";
 export * from "./platform/TuiProviderAvailability.js";
 export * from "./attach/AttachShellTypes.js";
 export * from "./app/TuiHitRegions.js";
-export * from "./interaction/CommandDispatcher.js";
+export * from "./interaction/dispatcher/CommandDispatcher.js";
 export * from "./interaction/FocusGraph.js";
 export * from "./interaction/KeyDispatcher.js";
 export * from "./interaction/TuiFocusManager.js";

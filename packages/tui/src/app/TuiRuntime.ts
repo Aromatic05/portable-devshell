@@ -11,7 +11,7 @@ import { AttachShellCommandResolver } from "../attach/AttachShellCommandResolver
 import { AttachShellRunner } from "../attach/AttachShellRunner.js";
 import { TuiControlClient } from "../control/TuiControlClient.js";
 import { TuiControlSession } from "../control/TuiControlSession.js";
-import { CommandDispatcher } from "../interaction/CommandDispatcher.js";
+import { CommandDispatcher } from "../interaction/dispatcher/CommandDispatcher.js";
 import { KeyDispatcher } from "../interaction/KeyDispatcher.js";
 import { TuiFocusManager } from "../interaction/TuiFocusManager.js";
 import { RenderScheduler } from "../render/RenderScheduler.js";
