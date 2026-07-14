@@ -65,6 +65,28 @@ test("session lifecycle emits MCP session events", async () => {
     }
 });
 
+test("session close also releases snapshots on routed instances", async () => {
+    const harness = createWorkerHarness();
+    const released: string[] = [];
+    const endpoint = new McpEndpointWorker({
+        gateway: {
+            async closeFileSession(sessionId: string) {
+                released.push(sessionId);
+            }
+        } as never,
+        instanceName: "demo-local",
+        policy: { capabilities: ["read"], groups: ["file"] },
+        worker: harness.worker
+    });
+
+    await endpoint.appendSessionClosed("session-routed");
+
+    assert.deepEqual(released, ["session-routed"]);
+    assert.deepEqual(harness.events, [
+        { data: { sessionId: "session-routed" }, type: "mcp.sessionClosed" }
+    ]);
+});
+
 test("tools/list uses group and capability filtering", async () => {
     const binding = createBinding();
     const server = await createBindingServer(binding);

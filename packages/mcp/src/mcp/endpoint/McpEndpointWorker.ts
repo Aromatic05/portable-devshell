@@ -100,6 +100,7 @@ export class McpEndpointWorker {
 
     async appendSessionClosed(sessionId: string): Promise<void> {
         await this.#worker.appendMcpSessionClosed(sessionId);
+        await this.#gateway?.closeFileSession?.(sessionId);
     }
 
     async callTool(toolName: string, input: JsonValue, context: ToolCallContext): Promise<JsonValue> {

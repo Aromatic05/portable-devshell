@@ -51,3 +51,34 @@ test("cross-instance readiness check accepts a ready target", () => {
 
     assert.doesNotThrow(() => gateway.assertReady("remote-server"));
 });
+
+test("closing an MCP file session releases snapshots on every managed worker", async () => {
+    const released: string[] = [];
+    const registry = new InstanceRegistry(
+        ["local-one", "remote-two"].map((name) => ({
+            enabled: true,
+            mcpCapabilities: ["read", "write"],
+            mcpEnabled: true,
+            mcpGroups: ["file"],
+            mcpPath: `/${name}/mcp`,
+            name,
+            worker: {
+                async releaseFileSession(sessionId: string) {
+                    released.push(`${name}:${sessionId}`);
+                }
+            }
+        })) as never
+    );
+    const gateway = new McpInstanceGatewayControl({
+        createService: {} as never,
+        getConfig: () => createDefaultControlConfig(),
+        instanceRegistry: registry
+    });
+
+    await gateway.closeFileSession("session-shared");
+
+    assert.deepEqual(released.sort(), [
+        "local-one:session-shared",
+        "remote-two:session-shared"
+    ]);
+});
