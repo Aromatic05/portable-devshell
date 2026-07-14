@@ -13,6 +13,7 @@ export function parseWorkerStatus(
     daemonState: "running" | "stale" | "stopped";
     pid?: number;
     workspacePath?: string;
+    workerSha256?: string;
 } {
     let parsed: unknown;
 
@@ -62,7 +63,8 @@ export function parseWorkerStatus(
     return {
         daemonState: state,
         pid: typeof candidate.pid === "number" ? candidate.pid : undefined,
-        workspacePath: typeof candidate.workspace === "string" ? candidate.workspace : undefined
+        workspacePath: typeof candidate.workspace === "string" ? candidate.workspace : undefined,
+        workerSha256: typeof candidate.workerSha256 === "string" ? candidate.workerSha256 : undefined
     };
 }
 

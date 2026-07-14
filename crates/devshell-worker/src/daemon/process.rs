@@ -38,6 +38,7 @@ pub struct WorkerRuntimeContext {
     pub workspace: PathBuf,
     pub platform: PlatformInfo,
     pub security_mode: SecurityMode,
+    pub worker_sha256: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -145,7 +146,18 @@ pub fn read_runtime_context() -> Result<WorkerRuntimeContext, String> {
             arch: std::env::consts::ARCH,
         },
         security_mode: read_security_mode_from_env(),
+        worker_sha256: current_worker_sha256(),
     })
+}
+
+pub fn current_worker_sha256() -> Option<String> {
+    let executable = std::env::current_exe().ok()?.canonicalize().ok()?;
+    let candidate = executable.parent()?.file_name()?.to_str()?;
+    if candidate.len() == 64 && candidate.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        Some(candidate.to_ascii_lowercase())
+    } else {
+        None
+    }
 }
 
 pub fn current_security_mode() -> SecurityMode {

@@ -88,6 +88,7 @@ fn start_daemon(
             arch: std::env::consts::ARCH,
         },
         security_mode: process::current_security_mode(),
+        worker_sha256: process::current_worker_sha256(),
     };
     process::spawn(instance, instance_paths, &runtime)?;
     if let Err(error) = readiness::wait_until_ready(socket_paths, std::time::Duration::from_secs(5))

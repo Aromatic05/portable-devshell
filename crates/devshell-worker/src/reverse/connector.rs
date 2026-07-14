@@ -810,6 +810,7 @@ mod tests {
                     arch: std::env::consts::ARCH,
                 },
                 security_mode: SecurityMode::Disabled,
+                worker_sha256: Some("0".repeat(64)),
             },
             Arc::new(registry),
             FileToolState::new(),

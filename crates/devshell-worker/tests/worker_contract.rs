@@ -96,6 +96,7 @@ fn handshake_tools_and_bash_run_flow_work_over_framed_rpc() {
         handshake["result"]["workerVersion"],
         env!("CARGO_PKG_VERSION")
     );
+    assert!(handshake["result"]["workerSha256"].is_null());
     assert_eq!(
         handshake["result"]["workspace"],
         env.workspace()
@@ -530,6 +531,7 @@ fn status_reports_stale_and_start_recovers_from_stale_runtime_files() {
     let running_status = env.json_command(&["status", "--instance", instance]);
     assert_eq!(running_status["state"], "running");
     assert_eq!(running_status["running"], true);
+    assert!(running_status["workerSha256"].is_null());
 
     env.json_command(&["stop", "--instance", instance]);
 }

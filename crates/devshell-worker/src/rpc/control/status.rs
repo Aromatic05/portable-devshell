@@ -23,6 +23,7 @@ impl ControlHandler for StatusHandler {
             "workspace": self.runtime.workspace,
             "protocolVersion": PROTOCOL_VERSION,
             "workerVersion": env!("CARGO_PKG_VERSION"),
+            "workerSha256": self.runtime.worker_sha256,
             "securityMode": match self.runtime.security_mode {
                 crate::security::SecurityMode::Disabled => "disabled",
                 crate::security::SecurityMode::Workspace => "workspace",

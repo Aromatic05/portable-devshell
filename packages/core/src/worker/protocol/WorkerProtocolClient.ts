@@ -26,6 +26,7 @@ export interface WorkerHandshakeResult {
     instance: string;
     workspace: string;
     workerVersion: string;
+    workerSha256?: string;
     protocolVersion: number;
     platform: {
         os: string;

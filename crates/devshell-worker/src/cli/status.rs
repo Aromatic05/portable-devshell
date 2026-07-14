@@ -16,6 +16,8 @@ struct StatusResponse {
     running: bool,
     pid: Option<u32>,
     workspace: Option<String>,
+    #[serde(rename = "workerSha256")]
+    worker_sha256: Option<String>,
 }
 
 pub fn run(args: InstanceArgs) -> Result<String, String> {
@@ -24,17 +26,25 @@ pub fn run(args: InstanceArgs) -> Result<String, String> {
     let socket_paths = SocketPaths::resolve(&instance)?;
     let pid = process::read_pid(&instance_paths);
     let daemon_state = process::daemon_state(&instance_paths, &socket_paths);
-    let workspace = if daemon_state == DaemonState::Running {
+    let daemon_status = if daemon_state == DaemonState::Running {
         send_request(
             &socket_paths.socket_file,
             &RpcRequest::request("status-1", "worker.status", serde_json::json!({})),
         )?
         .result
-        .and_then(|result| result.get("workspace").cloned())
-        .and_then(|value| value.as_str().map(ToString::to_string))
     } else {
         None
     };
+    let workspace = daemon_status
+        .as_ref()
+        .and_then(|result| result.get("workspace"))
+        .and_then(serde_json::Value::as_str)
+        .map(ToString::to_string);
+    let worker_sha256 = daemon_status
+        .as_ref()
+        .and_then(|result| result.get("workerSha256"))
+        .and_then(serde_json::Value::as_str)
+        .map(ToString::to_string);
 
     let (state, running) = match daemon_state {
         DaemonState::Running => ("running", true),
@@ -49,6 +59,7 @@ pub fn run(args: InstanceArgs) -> Result<String, String> {
         running,
         pid,
         workspace,
+        worker_sha256,
     })
     .map_err(|error| error.to_string())
 }

@@ -51,6 +51,7 @@ impl ControlHandler for HandshakeHandler {
             "instance": self.config.instance,
             "workspace": self.runtime.workspace,
             "workerVersion": env!("CARGO_PKG_VERSION"),
+            "workerSha256": self.runtime.worker_sha256,
             "protocolVersion": PROTOCOL_VERSION,
             "platform": {
                 "os": self.runtime.platform.os,
