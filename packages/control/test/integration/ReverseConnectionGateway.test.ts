@@ -324,7 +324,7 @@ function responseFor(method: string): JsonValue {
             return { pong: true };
         case "worker.handshake":
             return {
-                capabilities: { cancel: false, streaming: false, tools: true },
+                capabilities: { cancel: true, streaming: false, tools: true },
                 instance: "reverse-test",
                 platform: { arch: "x64", os: "test" },
                 protocolVersion: 2,
