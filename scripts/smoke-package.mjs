@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { lstat, mkdir, mkdtemp, readdir, rm } from "node:fs/promises";
+import { lstat, mkdir, mkdtemp, readdir, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { isAbsolute, resolve } from "node:path";
 
@@ -22,7 +22,8 @@ try {
     await assertNoSymlinks(app);
 
     const cli = resolve(app, "dist", "cli", "CliMain.js");
-    const result = spawnSync(process.execPath, [cli, "status"], {
+    const command = await createInstalledCommand(root, cli);
+    const result = spawnSync(command.executable, [...command.args, "status"], {
         encoding: "utf8",
         env: {
             ...process.env,
@@ -45,6 +46,18 @@ try {
     process.stdout.write("package smoke passed\n");
 } finally {
     await rm(root, { force: true, recursive: true });
+}
+
+async function createInstalledCommand(root, cli) {
+    if (process.platform === "win32") {
+        return { executable: process.execPath, args: [cli] };
+    }
+
+    const bin = resolve(root, "bin");
+    const command = resolve(bin, "devshell");
+    await mkdir(bin, { recursive: true });
+    await symlink(cli, command);
+    return { executable: command, args: [] };
 }
 
 async function assertNoSymlinks(directory) {
