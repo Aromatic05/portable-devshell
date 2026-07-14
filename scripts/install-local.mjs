@@ -152,8 +152,7 @@ async function installSourceWorker(target) {
             "--target",
             target.key,
             "--output-dir",
-            outputDirectory,
-            ...(target.key.startsWith("linux-") && hasCommand("cargo-zigbuild") ? ["--zigbuild"] : [])
+            outputDirectory
         ]);
 
         const assetName = workerAssetName(target);
@@ -351,10 +350,6 @@ function run(command, args) {
     }
 }
 
-function hasCommand(command) {
-    const result = spawnSync(command, ["--version"], { cwd: repoRoot, env: process.env, stdio: "ignore" });
-    return result.status === 0;
-}
 
 async function fetchSha256(url) {
     const text = Buffer.from(await fetchBytes(url)).toString("utf8");

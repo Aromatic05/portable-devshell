@@ -66,7 +66,7 @@ jobs:
 
             - name: 构建 Linux worker
               if: runner.os == 'Linux'
-              run: node ./scripts/build-worker.mjs --target "${{ matrix.target }}" --output-dir ./release-assets --zigbuild
+              run: node ./scripts/build-worker.mjs --target "${{ matrix.target }}" --output-dir ./release-assets
 
             - name: 构建 macOS worker
               if: runner.os == 'macOS'

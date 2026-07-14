@@ -35,20 +35,21 @@ const repoRoot = fileURLToPath(new URL("../", import.meta.url));
 const args = process.argv.slice(2);
 const explicitTarget = readOption("--target");
 const outputDirectory = readOption("--output-dir");
-const useZigbuild = args.includes("--zigbuild");
+
+if (args.includes("--zigbuild")) {
+    throw new Error("--zigbuild was removed because Linux targets always use cargo zigbuild");
+}
 
 const target = explicitTarget === undefined ? detectHostTarget() : resolveTarget(explicitTarget);
 const profile = outputDirectory === undefined ? "debug" : "release";
 const workerSource = resolveSourcePath(target, profile);
-
-if (useZigbuild && !target.key.startsWith("linux-")) {
-    throw new Error("--zigbuild is only supported for Linux worker targets");
-}
+const cargoSubcommand = target.key.startsWith("linux-") ? "zigbuild" : "build";
 
 run(
     "cargo",
     [
-        useZigbuild ? "zigbuild" : "build",
+        cargoSubcommand,
+        "--locked",
         "-p",
         "devshell-worker",
         "--manifest-path",
@@ -57,12 +58,7 @@ run(
         target.rustTarget,
         ...(profile === "release" ? ["--release"] : [])
     ],
-    {
-        env: {
-            ...process.env,
-            ...(useZigbuild ? {} : buildCargoTargetEnv(target))
-        }
-    }
+    { env: process.env }
 );
 
 if (!existsSync(workerSource)) {
@@ -86,20 +82,6 @@ function run(command, args, options = {}) {
     if (result.status !== 0) {
         process.exit(result.status ?? 1);
     }
-}
-
-function buildCargoTargetEnv(target) {
-    if (target.key !== "linux-x64" && target.key !== "linux-arm64") {
-        return {};
-    }
-
-    const rustLld = resolveRustLld();
-    const envKey =
-        target.key === "linux-x64"
-            ? "CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER"
-            : "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER";
-
-    return rustLld === undefined ? {} : { [envKey]: rustLld };
 }
 
 function readOption(name) {
@@ -149,33 +131,6 @@ function resolveTarget(key) {
     }
 
     return target;
-}
-
-function resolveRustLld() {
-    const sysrootResult = spawnSync("rustc", ["--print", "sysroot"], {
-        cwd: repoRoot,
-        encoding: "utf8"
-    });
-    const versionResult = spawnSync("rustc", ["-vV"], {
-        cwd: repoRoot,
-        encoding: "utf8"
-    });
-
-    if (sysrootResult.status !== 0 || versionResult.status !== 0) {
-        return undefined;
-    }
-
-    const sysroot = sysrootResult.stdout.trim();
-    const hostLine = versionResult.stdout
-        .split("\n")
-        .find((line) => line.startsWith("host: "));
-
-    if (sysroot.length === 0 || hostLine === undefined) {
-        return undefined;
-    }
-
-    const rustLld = resolve(sysroot, "lib", "rustlib", hostLine.slice("host: ".length).trim(), "bin", "rust-lld");
-    return existsSync(rustLld) ? rustLld : undefined;
 }
 
 function normalizeOs(platform) {

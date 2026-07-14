@@ -27,7 +27,19 @@ jobs:
                   rustup toolchain install stable --profile minimal
                   rustup default stable
                   rustup target add x86_64-unknown-linux-musl
+            - name: 安装 Zig 工具链
+              shell: bash
+              run: |
+                  set -euo pipefail
+                  zig_root="$RUNNER_TEMP/zig-0.14.1"
+                  curl -fsSL https://ziglang.org/download/0.14.1/zig-x86_64-linux-0.14.1.tar.xz -o "$RUNNER_TEMP/zig.tar.xz"
+                  mkdir -p "$zig_root"
+                  tar -xJf "$RUNNER_TEMP/zig.tar.xz" --strip-components=1 -C "$zig_root"
+                  echo "$zig_root" >> "$GITHUB_PATH"
+            - name: 安装 cargo-zigbuild
+              run: cargo install --locked cargo-zigbuild --version 0.23.0
             - run: pnpm install --frozen-lockfile
+            - run: node --test ./scripts/build-worker.test.mjs
             - run: pnpm lint
             - run: pnpm build
             - run: cargo build --locked --workspace
