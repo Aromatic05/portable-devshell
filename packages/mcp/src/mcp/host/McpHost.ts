@@ -13,7 +13,12 @@ interface WorkerInstanceLike {
     appendMcpSessionClosed(sessionId: string): Promise<void>;
     appendMcpSessionOpened(sessionId: string): Promise<void>;
     appendMcpToolCalled(toolName: string, context: { requestId?: string; sessionId?: string }): Promise<void>;
-    callTool(toolName: string, input: JsonValue, context: { requestId?: string; sessionId?: string; source: "mcp" }): Promise<JsonValue>;
+    callTool(
+        toolName: string,
+        input: JsonValue,
+        context: { requestId?: string; sessionId?: string; source: "mcp" },
+        signal?: AbortSignal
+    ): Promise<JsonValue>;
     hasToolSchemaCache?(): boolean;
     listTools(): ToolDefinition[];
     snapshot(): { ready?: boolean };

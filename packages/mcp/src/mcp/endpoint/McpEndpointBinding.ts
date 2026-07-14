@@ -15,6 +15,7 @@ interface McpEndpointSession {
 }
 
 export class McpEndpointBinding {
+    readonly #requestSignals = new Map<string, AbortController>();
     readonly #sessions = new Map<string, McpEndpointSession>();
     readonly #worker: McpEndpointWorker;
 
@@ -47,7 +48,7 @@ export class McpEndpointBinding {
                 return;
             }
 
-            await session.transport.handleRequest(request, response, body);
+            await this.#handleSessionRequest(sessionId, session, request, response, body);
             return;
         }
 
@@ -58,6 +59,42 @@ export class McpEndpointBinding {
 
         const session = await this.#createSession();
         await session.transport.handleRequest(request, response, body);
+    }
+
+    async #handleSessionRequest(
+        sessionId: string,
+        session: McpEndpointSession,
+        request: IncomingMessage,
+        response: ServerResponse,
+        body: JsonValue
+    ): Promise<void> {
+        const requestId = getRequestId(body);
+        if (requestId === null) {
+            await session.transport.handleRequest(request, response, body);
+            return;
+        }
+
+        const key = requestSignalKey(sessionId, String(requestId));
+        const controller = new AbortController();
+        const abortRequest = () => controller.abort("MCP HTTP request was aborted");
+        const closeResponse = () => {
+            if (!response.writableEnded) {
+                controller.abort("MCP HTTP response closed before completion");
+            }
+        };
+        request.once("aborted", abortRequest);
+        response.once("close", closeResponse);
+        this.#requestSignals.set(key, controller);
+
+        try {
+            await session.transport.handleRequest(request, response, body);
+        } finally {
+            if (this.#requestSignals.get(key) === controller) {
+                this.#requestSignals.delete(key);
+            }
+            request.off("aborted", abortRequest);
+            response.off("close", closeResponse);
+        }
     }
 
     async #createSession(): Promise<McpEndpointSession> {
@@ -116,13 +153,60 @@ export class McpEndpointBinding {
                     sessionId: extra.sessionId,
                     source: "mcp"
                 };
-                const result = await this.#worker.callTool(request.params.name, (request.params.arguments ?? {}) as JsonValue, context);
-                return toCallToolResult(result);
+                const requestSignal =
+                    extra.sessionId === undefined
+                        ? undefined
+                        : this.#requestSignals.get(requestSignalKey(extra.sessionId, String(extra.requestId)))?.signal;
+                const combined = combineAbortSignals(extra.signal, requestSignal);
+                try {
+                    const result = await this.#worker.callTool(
+                        request.params.name,
+                        (request.params.arguments ?? {}) as JsonValue,
+                        context,
+                        combined.signal
+                    );
+                    return toCallToolResult(result);
+                } finally {
+                    combined.cleanup();
+                }
             } catch (error) {
                 throw toMcpError(error);
             }
         });
     }
+}
+
+function requestSignalKey(sessionId: string, requestId: string): string {
+    return `${sessionId}:${requestId}`;
+}
+
+function combineAbortSignals(primary: AbortSignal, secondary: AbortSignal | undefined): {
+    cleanup(): void;
+    signal: AbortSignal;
+} {
+    if (secondary === undefined) {
+        return { cleanup: () => undefined, signal: primary };
+    }
+
+    const controller = new AbortController();
+    const abortFromPrimary = () => controller.abort(primary.reason);
+    const abortFromSecondary = () => controller.abort(secondary.reason);
+    primary.addEventListener("abort", abortFromPrimary, { once: true });
+    secondary.addEventListener("abort", abortFromSecondary, { once: true });
+
+    if (primary.aborted) {
+        abortFromPrimary();
+    } else if (secondary.aborted) {
+        abortFromSecondary();
+    }
+
+    return {
+        cleanup() {
+            primary.removeEventListener("abort", abortFromPrimary);
+            secondary.removeEventListener("abort", abortFromSecondary);
+        },
+        signal: controller.signal
+    };
 }
 
 function asHeaderValue(value: string | string[] | undefined): string | undefined {

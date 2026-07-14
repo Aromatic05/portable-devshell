@@ -47,10 +47,11 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
         instance: string,
         toolName: string,
         input: JsonValue,
-        context: ToolCallContext
+        context: ToolCallContext,
+        signal?: AbortSignal
     ): Promise<JsonValue> {
         const descriptor = this.#requireDescriptor(instance);
-        return await descriptor.worker.callTool(toolName, input, context);
+        return await descriptor.worker.callTool(toolName, input, context, signal);
     }
 
     async closeToolSession(sessionId: string): Promise<void> {

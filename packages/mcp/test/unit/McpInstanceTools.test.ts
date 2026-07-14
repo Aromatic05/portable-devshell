@@ -127,6 +127,34 @@ test("remote worker calls check target readiness before tool exposure", async ()
     assert.equal(listToolsCalled, false);
 });
 
+test("cancelling an instance lifecycle tool stops MCP waiting while the operation continues", async () => {
+    let resolveStart!: (value: JsonValue) => void;
+    const start = new Promise<JsonValue>((resolve) => {
+        resolveStart = resolve;
+    });
+    const gateway = createGateway({
+        async startInstance() {
+            return await start;
+        }
+    });
+    const endpoint = createManagedEndpoint(createWorker({ hasSchema: false, ready: false }), gateway);
+    const controller = new AbortController();
+    const pending = endpoint.callTool(
+        "instance_start",
+        { instance: "remote-server" },
+        context,
+        controller.signal
+    );
+
+    controller.abort("gateway timeout");
+    await assert.rejects(pending, (error: unknown) => {
+        assert.equal((error as { code?: string }).code, "core.toolCallCancelled");
+        return true;
+    });
+    resolveStart({ instance: "remote-server", state: "running" });
+    await start;
+});
+
 test("instance management tools delegate to the gateway without requiring the local worker to be ready", async () => {
     const calls: string[] = [];
     let createInput: McpSshInstanceCreateInput | undefined;

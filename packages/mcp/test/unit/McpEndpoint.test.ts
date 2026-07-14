@@ -133,6 +133,139 @@ test("tools/call delegates to WorkerInstance.callTool", async () => {
     }
 });
 
+test("notifications/cancelled aborts an in-flight tools/call handler", async () => {
+    let observedSignal: AbortSignal | undefined;
+    let markStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+        markStarted = resolve;
+    });
+    const harness = createWorkerHarness({
+        async callHandler(_toolName, _input, _context, signal) {
+            observedSignal = signal;
+            markStarted();
+            return await new Promise<CommandResult>((_resolve, reject) => {
+                const onAbort = () => {
+                    const error = new Error("client timeout");
+                    Object.assign(error, {
+                        code: "core.toolCallCancelled",
+                        retryable: true
+                    });
+                    reject(error);
+                };
+                if (signal?.aborted === true) {
+                    onAbort();
+                    return;
+                }
+                signal?.addEventListener("abort", onAbort, { once: true });
+            });
+        }
+    });
+    const binding = createBinding(harness);
+    const server = await createBindingServer(binding);
+
+    try {
+        const session = await initialize(server.url);
+        const requestController = new AbortController();
+        const pendingCall = fetch(server.url, {
+            body: JSON.stringify({
+                id: "req-cancel-tool",
+                jsonrpc: "2.0",
+                method: "tools/call",
+                params: {
+                    arguments: { command: "sleep 30" },
+                    name: "bash_run"
+                }
+            }),
+            headers: {
+                accept: "application/json, text/event-stream",
+                "content-type": "application/json",
+                ...session.headers
+            },
+            method: "POST",
+            signal: requestController.signal
+        }).catch(() => undefined);
+
+        await started;
+        const cancelled = await postRawJson(
+            server.url,
+            {
+                jsonrpc: "2.0",
+                method: "notifications/cancelled",
+                params: {
+                    reason: "client timeout",
+                    requestId: "req-cancel-tool"
+                }
+            },
+            session.headers
+        );
+        assert.equal(cancelled.status, 202);
+        await waitFor(() => observedSignal?.aborted === true);
+        assert.equal(observedSignal?.reason, "client timeout");
+
+        requestController.abort();
+        await pendingCall;
+    } finally {
+        await server.close();
+        await binding.close();
+    }
+});
+
+test("closing the HTTP request aborts an in-flight tools/call handler", async () => {
+    let observedSignal: AbortSignal | undefined;
+    let markStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+        markStarted = resolve;
+    });
+    const harness = createWorkerHarness({
+        async callHandler(_toolName, _input, _context, signal) {
+            observedSignal = signal;
+            markStarted();
+            return await new Promise<CommandResult>((_resolve, reject) => {
+                const onAbort = () => reject(new Error("request disconnected"));
+                if (signal?.aborted === true) {
+                    onAbort();
+                    return;
+                }
+                signal?.addEventListener("abort", onAbort, { once: true });
+            });
+        }
+    });
+    const binding = createBinding(harness);
+    const server = await createBindingServer(binding);
+
+    try {
+        const session = await initialize(server.url);
+        const requestController = new AbortController();
+        const pendingCall = fetch(server.url, {
+            body: JSON.stringify({
+                id: "req-disconnect-tool",
+                jsonrpc: "2.0",
+                method: "tools/call",
+                params: {
+                    arguments: { command: "sleep 30" },
+                    name: "bash_run"
+                }
+            }),
+            headers: {
+                accept: "application/json, text/event-stream",
+                "content-type": "application/json",
+                ...session.headers
+            },
+            method: "POST",
+            signal: requestController.signal
+        }).catch(() => undefined);
+
+        await started;
+        requestController.abort("gateway timeout");
+        await pendingCall;
+        await waitFor(() => observedSignal?.aborted === true);
+        assert.equal(observedSignal?.reason, "MCP HTTP response closed before completion");
+    } finally {
+        await server.close();
+        await binding.close();
+    }
+});
+
 test("instance_list returns object structured content through SDK transport", async () => {
     const harness = createWorkerHarness({ hasToolSchemaCache: false, ready: false, tools: [] });
     const gateway: McpInstanceGateway = {
@@ -353,6 +486,12 @@ async function readFixture(name: string): Promise<JsonValue> {
 }
 
 function createWorkerHarness(options?: {
+    callHandler?: (
+        toolName: string,
+        input: JsonValue,
+        context: { requestId?: string; sessionId?: string; source: string },
+        signal?: AbortSignal
+    ) => Promise<CommandResult>;
     hasToolSchemaCache?: boolean;
     ready?: boolean;
     result?: CommandResult;
@@ -404,7 +543,12 @@ function createWorkerHarness(options?: {
             listTools() {
                 return tools;
             },
-            async callTool(toolName: string, input: JsonValue, context: { requestId?: string; sessionId?: string; source: string }) {
+            async callTool(
+                toolName: string,
+                input: JsonValue,
+                context: { requestId?: string; sessionId?: string; source: string },
+                signal?: AbortSignal
+            ) {
                 if (!ready) {
                     const error = new Error("not ready");
                     Object.assign(error, {
@@ -416,8 +560,20 @@ function createWorkerHarness(options?: {
                 }
 
                 calls.push({ toolName, input, ...context });
-                return result;
+                return options?.callHandler === undefined
+                    ? result
+                    : await options.callHandler(toolName, input, context, signal);
             }
         }
     } as const;
+}
+
+async function waitFor(condition: () => boolean): Promise<void> {
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+        if (condition()) {
+            return;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    throw new Error("condition was not reached");
 }

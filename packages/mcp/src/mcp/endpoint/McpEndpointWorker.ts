@@ -30,7 +30,7 @@ interface WorkerInstanceLike {
     appendMcpSessionClosed(sessionId: string): Promise<void>;
     appendMcpSessionOpened(sessionId: string): Promise<void>;
     appendMcpToolCalled(toolName: string, context: { requestId?: string; sessionId?: string }): Promise<void>;
-    callTool(toolName: string, input: JsonValue, context: ToolCallContext): Promise<JsonValue>;
+    callTool(toolName: string, input: JsonValue, context: ToolCallContext, signal?: AbortSignal): Promise<JsonValue>;
     hasToolSchemaCache?(): boolean;
     listTools(): ToolDefinition[];
     snapshot(): { ready?: boolean };
@@ -103,11 +103,13 @@ export class McpEndpointWorker {
         await this.#gateway?.closeToolSession?.(sessionId);
     }
 
-    async callTool(toolName: string, input: JsonValue, context: ToolCallContext): Promise<JsonValue> {
+    async callTool(toolName: string, input: JsonValue, context: ToolCallContext, signal?: AbortSignal): Promise<JsonValue> {
+        throwIfAborted(signal);
         await this.#worker.appendMcpToolCalled(toolName, {
             requestId: context.requestId,
             sessionId: context.sessionId
         });
+        throwIfAborted(signal);
 
         const { merged, exposed } = this.#resolveCatalog();
         const known = merged.find((entry) => entry.definition.name === toolName);
@@ -118,7 +120,7 @@ export class McpEndpointWorker {
                 throw this.#toolNotExposed(toolName);
             }
             this.#adaptTool(selected.definition);
-            return await this.#callTodoTool(toolName as McpTodoToolName, input, context);
+            return await this.#callTodoTool(toolName as McpTodoToolName, input, context, signal);
         }
 
         if (known?.owner === "artifact") {
@@ -126,7 +128,7 @@ export class McpEndpointWorker {
                 throw this.#toolNotExposed(toolName);
             }
             this.#adaptTool(selected.definition);
-            return await this.#callArtifactTool(toolName as McpArtifactToolName, input);
+            return await this.#callArtifactTool(toolName as McpArtifactToolName, input, signal);
         }
 
         if (known?.owner === "instance") {
@@ -134,7 +136,7 @@ export class McpEndpointWorker {
                 throw this.#toolNotExposed(toolName);
             }
             this.#adaptTool(selected.definition);
-            return await this.#callInstanceTool(toolName as McpInstanceToolName, input);
+            return await this.#callInstanceTool(toolName as McpInstanceToolName, input, signal);
         }
 
         const instanceRoutingEnabled = exposed.some((entry) => entry.owner === "instance");
@@ -146,7 +148,7 @@ export class McpEndpointWorker {
                 throw this.#toolNotExposed(toolName);
             }
             this.#adaptTool(selected.definition);
-            return await this.#worker.callTool(toolName, routed.input, context);
+            return await this.#worker.callTool(toolName, routed.input, context, signal);
         }
 
         const gateway = this.#requireGateway();
@@ -156,7 +158,7 @@ export class McpEndpointWorker {
             throw this.#toolNotExposed(toolName, routed.instance);
         }
         this.#adaptTool(targetTool);
-        return await gateway.callTool(routed.instance, toolName, routed.input, context);
+        return await gateway.callTool(routed.instance, toolName, routed.input, context, signal);
     }
 
     #resolveCatalog(): {
@@ -200,47 +202,60 @@ export class McpEndpointWorker {
         };
     }
 
-    async #callArtifactTool(toolName: McpArtifactToolName, input: JsonValue): Promise<JsonValue> {
+    async #callArtifactTool(
+        toolName: McpArtifactToolName,
+        input: JsonValue,
+        signal?: AbortSignal
+    ): Promise<JsonValue> {
         const gateway = this.#requireGateway();
         switch (toolName) {
             case "artifact_share":
                 if (gateway.shareArtifact === undefined) {
                     throw this.#toolNotExposed(toolName);
                 }
-                return await gateway.shareArtifact(this.#instanceName, readArtifactShareInput(input));
+                return await waitForAbortable(gateway.shareArtifact(this.#instanceName, readArtifactShareInput(input)), signal);
             case "artifact_transfer":
                 if (gateway.transferArtifact === undefined) {
                     throw this.#toolNotExposed(toolName);
                 }
-                return await gateway.transferArtifact(this.#instanceName, readArtifactTransferInput(input));
+                return await waitForAbortable(gateway.transferArtifact(this.#instanceName, readArtifactTransferInput(input)), signal);
         }
     }
 
-    async #callTodoTool(toolName: McpTodoToolName, input: JsonValue, context: ToolCallContext): Promise<JsonValue> {
+    async #callTodoTool(
+        toolName: McpTodoToolName,
+        input: JsonValue,
+        context: ToolCallContext,
+        signal?: AbortSignal
+    ): Promise<JsonValue> {
         const gateway = this.#requireGateway();
         switch (toolName) {
             case "todo_read":
                 assertNoArguments(input, toolName);
-                return await gateway.readTodo(this.#instanceName);
+                return await waitForAbortable(gateway.readTodo(this.#instanceName), signal);
             case "todo_write":
-                return await gateway.writeTodo(this.#instanceName, input, context);
+                return await waitForAbortable(gateway.writeTodo(this.#instanceName, input, context), signal);
         }
     }
 
-    async #callInstanceTool(toolName: McpInstanceToolName, input: JsonValue): Promise<JsonValue> {
+    async #callInstanceTool(
+        toolName: McpInstanceToolName,
+        input: JsonValue,
+        signal?: AbortSignal
+    ): Promise<JsonValue> {
         const gateway = this.#requireGateway();
         switch (toolName) {
             case "instance_list":
                 assertNoArguments(input, toolName);
-                return { instances: await gateway.listInstances() };
+                return { instances: await waitForAbortable(gateway.listInstances(), signal) };
             case "instance_status":
-                return await gateway.statusInstance(readInstanceName(input, toolName));
+                return await waitForAbortable(gateway.statusInstance(readInstanceName(input, toolName)), signal);
             case "instance_start":
-                return await gateway.startInstance(readInstanceName(input, toolName));
+                return await waitForAbortable(gateway.startInstance(readInstanceName(input, toolName)), signal);
             case "instance_stop":
-                return await gateway.stopInstance(readInstanceName(input, toolName));
+                return await waitForAbortable(gateway.stopInstance(readInstanceName(input, toolName)), signal);
             case "instance_create":
-                return await gateway.createSshInstance(this.#instanceName, readSshCreateInput(input));
+                return await waitForAbortable(gateway.createSshInstance(this.#instanceName, readSshCreateInput(input)), signal);
         }
     }
 
@@ -444,4 +459,35 @@ function invalidArguments(message: string) {
 
 function isRecord(value: JsonValue | undefined): value is Record<string, JsonValue> {
     return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function throwIfAborted(signal: AbortSignal | undefined): void {
+    if (signal?.aborted === true) {
+        throw cancellationError(signal.reason);
+    }
+}
+
+async function waitForAbortable<T>(operation: Promise<T>, signal: AbortSignal | undefined): Promise<T> {
+    throwIfAborted(signal);
+    if (signal === undefined) {
+        return await operation;
+    }
+
+    return await new Promise<T>((resolve, reject) => {
+        const onAbort = () => reject(cancellationError(signal.reason));
+        signal.addEventListener("abort", onAbort, { once: true });
+        void operation.then(resolve, reject).finally(() => signal.removeEventListener("abort", onAbort));
+    });
+}
+
+function cancellationError(reason: unknown) {
+    return createError({
+        code: errorCodes.coreToolCallCancelled,
+        cause: reason,
+        message: "MCP tool call was cancelled by the client.",
+        retryable: true,
+        details: {
+            reason: typeof reason === "string" ? reason : "client cancelled"
+        }
+    });
 }
