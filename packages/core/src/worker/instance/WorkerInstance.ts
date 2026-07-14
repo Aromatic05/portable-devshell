@@ -1,21 +1,14 @@
-import { randomUUID } from "node:crypto";
-
 import {
     type ApprovalDecision,
     type ApprovalRequest,
-    asWorkspacePath,
     createError,
     errorCodes,
-    type CommandDiagnostic,
-    type CommandResult,
     type JsonValue,
-    type ToolCallContext,
-    type ToolCallApprovalDecision,
     type ToolCallAssociation,
+    type ToolCallContext,
     type ToolCallQuery,
     type ToolCallRecord,
     type ReverseEnrollmentState,
-    type ReverseInstanceStatus,
     type ReverseTransport,
     type WorkspacePath
 } from "@portable-devshell/shared";
@@ -24,9 +17,7 @@ import type { ApprovalManager } from "../../approval/ApprovalInfra.js";
 import type { EventStreamGap, EventStreamSlice, InstanceEventInput } from "../../log/LogEventBuffer.js";
 import { InstanceEventBuffer } from "../../log/LogEventBuffer.js";
 import type { LogQuery } from "../../log/LogQuery.js";
-import type { InstanceLogEntry } from "../../log/store/LogStoreInstance.js";
-import { InstanceLogStore } from "../../log/store/LogStoreInstance.js";
-import { ToolCallHistory } from "../../log/LogToolCallHistory.js";
+import { InstanceLogStore, type InstanceLogEntry } from "../../log/store/LogStoreInstance.js";
 import { WorkerCommandClient } from "../../worker/command/WorkerCommandClient.js";
 import type { WorkerCommandInteractiveSession } from "../../worker/command/WorkerCommandTransport.js";
 import {
@@ -46,10 +37,26 @@ import { WorkerRpcBridge } from "../../worker/rpc/WorkerRpcBridge.js";
 import type { WorkerRpcChannel } from "../../worker/rpc/WorkerRpcChannel.js";
 import { WorkerToolCatalog } from "../tool/WorkerToolCatalog.js";
 import { WorkerToolInvoker } from "../tool/WorkerToolInvoker.js";
-import { ToolCallScheduler, type ToolSchedulerReservation } from "../tool/ToolCallScheduler.js";
+import { ToolCallScheduler } from "../tool/ToolCallScheduler.js";
+import { ToolCallHistory } from "../../log/LogToolCallHistory.js";
 import { InstanceStateMachine, type InstanceStateUpdate } from "../../instance/state/InstanceStateMachine.js";
 import type { InstanceSnapshot } from "../../instance/state/InstanceStateSnapshot.js";
 import type { ResolvedWorkerInstanceConfig } from "./WorkerInstanceConfig.js";
+import {
+    getErrorCode,
+    toJsonDetails,
+    withInstanceDetails,
+    wrapWorkerCommandError
+} from "./WorkerInstanceError.js";
+import {
+    createConnectionChangedEventData,
+    createReadyChangedEventData,
+    createStatusChangedEventData,
+    toEventData
+} from "./WorkerInstanceEvent.js";
+import { normalizeLifecycleStatus, parseWorkerStatus } from "./WorkerInstanceStatus.js";
+import { WorkerInstanceTool } from "./WorkerInstanceTool.js";
+import { WorkerInstanceConnection } from "./WorkerInstanceConnection.js";
 
 interface WorkerInstanceDependencies {
     approvalManager: ApprovalManager;
@@ -70,22 +77,13 @@ interface WorkerInstanceDependencies {
 export class WorkerInstance {
     readonly #approvalManager: ApprovalManager;
     readonly #catalog: WorkerToolCatalog;
+    readonly #connection: WorkerInstanceConnection;
     readonly #commandClient?: WorkerCommandClient;
     readonly #config: ResolvedWorkerInstanceConfig;
     readonly #eventBuffer: InstanceEventBuffer;
-    readonly #logStore: InstanceLogStore;
     readonly #protocolClient: WorkerProtocolClient;
-    readonly #rpcBridge: WorkerRpcBridge;
     readonly #stateMachine: InstanceStateMachine;
-    readonly #toolCallAssociationProvider?: () => ToolCallAssociation | undefined;
-    readonly #toolCallHistory: ToolCallHistory;
-    readonly #toolCallScheduler: ToolCallScheduler;
-    readonly #toolInvoker: WorkerToolInvoker;
-    #handshake?: WorkerHandshakeResult;
-    #intentionalRpcCloseDepth = 0;
-    #reconnectPromise?: Promise<InstanceSnapshot>;
-    #reverseStatus?: ReverseInstanceStatus;
-    #workspacePath?: WorkspacePath;
+    readonly #tool: WorkerInstanceTool;
 
     constructor(dependencies: WorkerInstanceDependencies) {
         this.#approvalManager = dependencies.approvalManager;
@@ -93,23 +91,27 @@ export class WorkerInstance {
         this.#commandClient = dependencies.commandClient;
         this.#config = dependencies.config;
         this.#eventBuffer = dependencies.eventBuffer;
-        this.#logStore = dependencies.logStore;
         this.#protocolClient = dependencies.protocolClient;
-        this.#rpcBridge = dependencies.rpcBridge;
         this.#stateMachine = dependencies.stateMachine;
-        this.#toolCallAssociationProvider = dependencies.toolCallAssociationProvider;
-        this.#toolCallHistory = dependencies.toolCallHistory;
-        this.#toolCallScheduler = dependencies.toolCallScheduler;
-        this.#toolInvoker = dependencies.toolInvoker;
-        if (this.#config.managementMode === "selfManaged") {
-            this.#reverseStatus = {
-                availability: "offline",
-                enrollmentState: "pending",
-                managementMode: "selfManaged"
-            };
-        }
-        this.#rpcBridge.onDisconnect((error) => {
-            void this.#handleRpcDisconnect(error);
+        this.#tool = new WorkerInstanceTool({
+            approvalManager: this.#approvalManager,
+            appendEvent: (type, data) => this.#appendEvent(type, data),
+            assertReady: () => this.#assertReady(),
+            instanceName: this.#config.name,
+            logStore: dependencies.logStore,
+            toolCallAssociationProvider: dependencies.toolCallAssociationProvider,
+            toolCallHistory: dependencies.toolCallHistory,
+            toolCallScheduler: dependencies.toolCallScheduler,
+            toolInvoker: dependencies.toolInvoker
+        });
+        this.#connection = new WorkerInstanceConnection({
+            appendEvent: (type, data) => this.#appendEvent(type, data),
+            applyStateUpdate: (update) => this.#applyStateUpdate(update),
+            catalog: this.#catalog,
+            config: this.#config,
+            protocolClient: this.#protocolClient,
+            rpcBridge: dependencies.rpcBridge,
+            snapshot: () => this.snapshot()
         });
     }
 
@@ -117,7 +119,7 @@ export class WorkerInstance {
         return {
             ...this.#stateMachine.snapshot(),
             effectiveSecurityMode: this.#config.effectiveSecurityMode,
-            ...(this.#reverseStatus === undefined ? {} : { reverse: { ...this.#reverseStatus } })
+            ...(this.#connection.snapshotReverse() === undefined ? {} : { reverse: this.#connection.snapshotReverse() })
         };
     }
 
@@ -126,59 +128,14 @@ export class WorkerInstance {
     }
 
     async setReverseEnrollmentState(enrollmentState: ReverseEnrollmentState): Promise<InstanceSnapshot> {
-        this.#requireSelfManaged();
-        this.#reverseStatus = {
-            ...(this.#reverseStatus ?? {
-                availability: "offline",
-                managementMode: "selfManaged"
-            }),
-            enrollmentState
-        };
-        await this.#appendEvent("reverse.enrollmentChanged", toEventData({ enrollmentState }));
-        return this.snapshot();
+        return await this.#connection.setReverseEnrollmentState(enrollmentState);
     }
 
     async acceptReverseChannel(
         channel: WorkerRpcChannel,
         input: { connectedAt?: string; generation: number; transport: ReverseTransport }
     ): Promise<InstanceSnapshot> {
-        this.#requireSelfManaged();
-        const previousGeneration = this.#reverseStatus?.generation ?? 0;
-        if (!Number.isInteger(input.generation) || input.generation <= previousGeneration) {
-            channel.close();
-            throw createError({
-                code: errorCodes.reverseGenerationInvalid,
-                details: {
-                    generation: input.generation,
-                    instance: this.#config.name,
-                    previousGeneration
-                },
-                message: `Reverse connection generation must be greater than ${previousGeneration}.`,
-                retryable: true
-            });
-        }
-
-        const connectedAt = input.connectedAt ?? new Date().toISOString();
-        this.#config.rpcConnector?.attach?.(channel);
-        await this.#rpcBridge.replaceChannel(channel);
-        this.#reverseStatus = {
-            availability: "online",
-            connectedAt,
-            enrollmentState: "enrolled",
-            generation: input.generation,
-            lastSeenAt: connectedAt,
-            managementMode: "selfManaged",
-            transport: input.transport
-        };
-        await this.#appendEvent(
-            "reverse.connected",
-            toEventData({ generation: input.generation, transport: input.transport })
-        );
-        await this.#appendEvent(
-            "reverse.transportChanged",
-            toEventData({ generation: input.generation, transport: input.transport })
-        );
-        return await this.#refreshRunningStatus(undefined, "connecting");
+        return await this.#connection.acceptReverseChannel(channel, input);
     }
 
     async appendControlEvent(type: InstanceEventInput["type"], data?: JsonValue) {
@@ -266,7 +223,7 @@ export class WorkerInstance {
             });
         }
 
-        this.#workspacePath = asWorkspacePath(resolvedWorkspacePath);
+        this.#connection.setWorkspacePath(resolvedWorkspacePath);
         await this.#applyStateUpdate({
             connectionState: "disconnected",
             daemonState: "starting",
@@ -300,65 +257,12 @@ export class WorkerInstance {
         }
 
         await this.#applyStateUpdate({ connectionState: "connecting" });
-
-        try {
-            await this.#rpcBridge.connect();
-            await this.#protocolClient.ping();
-            this.#handshake = await this.#protocolClient.handshake(this.#config.handshake);
-            const tools = await this.#protocolClient.listTools();
-            const refreshedTools = this.#catalog.refresh(tools.tools);
-            await this.#appendEvent("worker.rpcConnected");
-            await this.#appendEvent(
-                "worker.schemaRefreshed",
-                toEventData({ toolCount: refreshedTools.length })
-            );
-            await this.#appendEvent("instance.started", {
-                workspace: this.#handshake.workspace,
-                workerVersion: this.#handshake.workerVersion
-            });
-
-            await this.#applyStateUpdate({
-                daemonState: "running",
-                lastErrorCode: undefined
-            });
-            return await this.#applyStateUpdate({
-                connectionState: "connected",
-            });
-        } catch (error) {
-            const wrappedError = wrapWorkerCommandError(
-                error,
-                errorCodes.coreWorkerHandshakeFailed,
-                `Worker handshake failed for instance ${this.#config.name}.`,
-                this.#config.name
-            );
-            this.#closeRpcBridge();
-            await this.#applyStateUpdate({
-                connectionState: "disconnected",
-                daemonState: "running",
-                lastErrorCode: getErrorCode(wrappedError, errorCodes.coreWorkerHandshakeFailed)
-            });
-
-            if (wrappedError !== error) {
-                throw wrappedError;
-            }
-
-            if (isKnownErrorCode(error)) {
-                throw error;
-            }
-
-            throw createError({
-                code: errorCodes.coreWorkerHandshakeFailed,
-                cause: error,
-                message: `Worker handshake failed for instance ${this.#config.name}.`,
-                retryable: false,
-                details: { instance: this.#config.name }
-            });
-        }
+        return await this.#connection.connectStarted();
     }
 
     async stop(): Promise<InstanceSnapshot> {
         if (this.#config.managementMode === "selfManaged") {
-            return await this.#stopSelfManaged();
+            return await this.#connection.stopSelfManaged();
         }
 
         let stopErrorCode: string | undefined;
@@ -389,8 +293,8 @@ export class WorkerInstance {
             });
             throw wrappedError;
         } finally {
-            this.#closeRpcBridge();
-            this.#handshake = undefined;
+            this.#connection.closeBridge();
+            this.#connection.clearHandshake();
         }
 
         await this.#appendEvent("instance.stopped");
@@ -406,9 +310,9 @@ export class WorkerInstance {
 
     async refreshStatus(): Promise<InstanceSnapshot> {
         if (this.#config.managementMode === "selfManaged") {
-            if (!this.#rpcBridge.connected) {
-                this.#markReverseOffline();
-                this.#handshake = undefined;
+            if (!this.#connection.connected) {
+                this.#connection.markReverseOffline();
+                this.#connection.clearHandshake();
                 return await this.#applyStateUpdate({
                     connectionState: "disconnected",
                     daemonState: "stopped",
@@ -417,20 +321,20 @@ export class WorkerInstance {
                 });
             }
 
-            return await this.#refreshRunningStatus(undefined);
+            return await this.#connection.refreshRunningStatus(undefined);
         }
 
         const status = await this.#readWorkerStatus();
 
         if (status.workspacePath !== undefined) {
-            this.#workspacePath = asWorkspacePath(status.workspacePath);
+            this.#connection.setWorkspacePath(status.workspacePath);
         }
 
         switch (status.daemonState) {
             case "stopped":
             case "stale":
-                this.#closeRpcBridge();
-                this.#handshake = undefined;
+                this.#connection.closeBridge();
+                this.#connection.clearHandshake();
                 return await this.#applyStateUpdate({
                     connectionState: "disconnected",
                     daemonState: status.daemonState,
@@ -438,7 +342,7 @@ export class WorkerInstance {
                     pid: status.pid
                 });
             case "running":
-                return await this.#refreshRunningStatus(status.pid);
+                return await this.#connection.refreshRunningStatus(status.pid);
             default:
                 return await this.#applyStateUpdate({
                     connectionState: "failed",
@@ -462,207 +366,30 @@ export class WorkerInstance {
     }
 
     async callTool(toolName: string, input: JsonValue, context: ToolCallContext): Promise<JsonValue> {
-        this.#assertReady();
-
-        const callId = randomUUID();
-        const startedAt = new Date().toISOString();
-        const inputSummary = toInputSummary(input);
-        const association = this.#toolCallAssociationProvider?.();
-        const eventContext = {
-            callId,
-            input,
-            inputSummary,
-            requestId: context.requestId,
-            sessionId: context.sessionId,
-            source: context.source,
-            taskId: association?.taskId,
-            todoItemId: association?.todoItemId,
-            toolName
-        } as const;
-
-        let reservation: ToolSchedulerReservation;
-
-        try {
-            reservation = this.#toolCallScheduler.reserve({
-                callId,
-                instanceName: this.#config.name,
-                sessionId: context.sessionId,
-                source: context.source,
-                toolName
-            });
-        } catch (error) {
-            throw normalizeToolSchedulerError(error);
-        }
-
-        let approvalState: { approvalId?: string; decision?: ToolCallApprovalDecision };
-
-        try {
-            await this.#toolCallHistory.started(callId, toolName, inputSummary, context, startedAt, "queued", association, input);
-            await this.#appendEvent(
-                "toolCall.queued",
-                toEventData({
-                    ...eventContext,
-                    queuedAt: startedAt,
-                    startedAt,
-                    status: "queued"
-                })
-            );
-
-            approvalState = await this.#prepareToolCallApproval(
-                callId,
-                toolName,
-                inputSummary,
-                context,
-                startedAt,
-                () => reservation.markPendingApproval()
-            );
-        } catch (error) {
-            reservation.release();
-            if (this.#toolCallHistory.hasActive(callId)) {
-                const failedAt = new Date().toISOString();
-                const errorCode = getErrorCode(error, errorCodes.coreProviderFailed);
-                await this.#toolCallHistory.failed(callId, errorCode, failedAt).catch(() => undefined);
-            }
-            throw error;
-        }
-
-        const runningContext = {
-            ...eventContext,
-            ...(approvalState.approvalId === undefined ? {} : { approvalId: approvalState.approvalId })
-        };
-
-        let toolExecutionSucceeded = false;
-        try {
-            const result = await reservation.run(async () => {
-                await this.#toolCallHistory.running(callId, approvalState.decision);
-                await this.#appendEvent(
-                    "toolCall.running",
-                    toEventData({
-                        ...runningContext,
-                        ...(approvalState.decision === undefined ? {} : { decision: approvalState.decision }),
-                        startedAt,
-                        status: "running"
-                    })
-                );
-                return await this.#toolInvoker.invoke(toolName, input);
-            });
-            toolExecutionSucceeded = true;
-            const bashResult = toolName === "bash_run" ? asBashToolResult(result) : undefined;
-            const completedAt = new Date().toISOString();
-            await this.#toolCallHistory.completed(
-                callId,
-                completedAt,
-                bashResult === undefined ? undefined : {
-                    exitCode: bashResult.exitCode,
-                    stderrBytes: bashResult.stderrBytes,
-                    stdoutBytes: bashResult.stdoutBytes,
-                    termSignal: bashResult.termSignal,
-                    termination: bashResult.termination
-                }
-            );
-            if (bashResult !== undefined) {
-                await this.#appendToolLogs(bashResult, runningContext);
-            }
-            await this.#appendEvent(
-                "toolCall.completed",
-                toEventData({
-                    ...runningContext,
-                    completedAt,
-                    ...(approvalState.decision === undefined ? {} : { decision: approvalState.decision }),
-                    exitCode: bashResult?.exitCode,
-                    startedAt,
-                    status: "completed",
-                    stderrBytes: bashResult?.stderrBytes,
-                    stdoutBytes: bashResult?.stdoutBytes,
-                    termSignal: bashResult?.termSignal,
-                    termination: bashResult?.termination
-                })
-            );
-            return result;
-        } catch (error) {
-            if (toolExecutionSucceeded) {
-                throw error;
-            }
-            const finishedAt = new Date().toISOString();
-            const errorCode = getErrorCode(error, errorCodes.coreProviderFailed);
-            const result = asCommandResult(error);
-            const nonRunningStatus = readNonRunningSchedulerStatus(errorCode);
-
-            if (nonRunningStatus !== undefined) {
-                if (nonRunningStatus === "queueTimeout") {
-                    await this.#toolCallHistory.queueTimeout(callId, errorCode, finishedAt);
-                } else {
-                    await this.#toolCallHistory.cancelled(callId, errorCode, finishedAt);
-                }
-                const eventType = nonRunningStatus === "queueTimeout" ? "toolCall.queueTimeout" : "toolCall.cancelled";
-                await this.#appendEvent(
-                    eventType,
-                    toEventData({
-                        ...runningContext,
-                        completedAt: finishedAt,
-                        errorCode,
-                        ...(approvalState.decision === undefined ? {} : { decision: approvalState.decision }),
-                        startedAt,
-                        status: nonRunningStatus
-                    })
-                );
-                throw normalizeToolSchedulerError(error);
-            }
-
-            if (result !== undefined) {
-                await this.#appendToolLogs(result, runningContext);
-            }
-            await this.#toolCallHistory.failed(
-                callId,
-                errorCode,
-                finishedAt,
-                result === undefined
-                    ? undefined
-                    : {
-                          exitCode: result.exitCode,
-                          stderrBytes: readByteLength(result.stderr),
-                          stdoutBytes: readByteLength(result.stdout)
-                      }
-            );
-            await this.#appendEvent(
-                "toolCall.failed",
-                toEventData({
-                    ...runningContext,
-                    completedAt: finishedAt,
-                    ...(approvalState.decision === undefined ? {} : { decision: approvalState.decision }),
-                    errorCode,
-                    exitCode: result?.exitCode,
-                    startedAt,
-                    status: "failed",
-                    stderrBytes: result === undefined ? undefined : readByteLength(result.stderr),
-                    stdoutBytes: result === undefined ? undefined : readByteLength(result.stdout)
-                })
-            );
-            throw error;
-        }
+        return await this.#tool.call(toolName, input, context);
     }
 
     async listApprovals(): Promise<ApprovalRequest[]> {
-        return await this.#approvalManager.listApprovals();
+        return await this.#tool.listApprovals();
     }
 
     async getApproval(approvalId: string): Promise<ApprovalRequest> {
-        return await this.#approvalManager.getApproval(approvalId);
+        return await this.#tool.getApproval(approvalId);
     }
 
     async decideApproval(
         approvalId: string,
         input: { decision: ApprovalDecision["decision"]; decidedBy: ApprovalDecision["decidedBy"]; policyPatch?: JsonValue; reason?: string; remember?: boolean }
     ): Promise<ApprovalRequest> {
-        return await this.#approvalManager.decideApproval(approvalId, input);
+        return await this.#tool.decideApproval(approvalId, input);
     }
 
     async readLogs(query: LogQuery = {}): Promise<InstanceLogEntry[]> {
-        return await this.#logStore.read(query);
+        return await this.#tool.readLogs(query);
     }
 
     async readToolCalls(query: ToolCallQuery = {}): Promise<ToolCallRecord[]> {
-        return await this.#toolCallHistory.read(query);
+        return await this.#tool.readToolCalls(query);
     }
 
     reconfigure(input: {
@@ -703,181 +430,19 @@ export class WorkerInstance {
     }
 
     async close(): Promise<void> {
-        this.#closeRpcBridge();
-        this.#handshake = undefined;
-        if (this.#config.managementMode === "selfManaged") {
-            this.#markReverseOffline();
-        }
-        await this.#applyStateUpdate({
-            connectionState: "disconnected",
-            lastErrorCode: undefined
-        });
+        await this.#connection.close();
     }
 
     get handshake(): WorkerHandshakeResult | undefined {
-        return this.#handshake;
+        return this.#connection.handshake;
     }
 
     get workspacePath(): WorkspacePath | undefined {
-        return this.#workspacePath;
+        return this.#connection.workspacePath;
     }
 
     async reconnectRpc(): Promise<InstanceSnapshot> {
-        if (this.#config.managementMode === "selfManaged" && !this.#rpcBridge.connected) {
-            throw createError({
-                code: errorCodes.reverseTransportUnavailable,
-                details: { instance: this.#config.name },
-                message: `Reverse instance ${this.#config.name} is offline.`,
-                retryable: true
-            });
-        }
-        if (this.#reconnectPromise !== undefined) {
-            return await this.#reconnectPromise;
-        }
-
-        this.#reconnectPromise = this.#refreshRunningStatus(this.snapshot().pid, "reconnecting").finally(() => {
-            this.#reconnectPromise = undefined;
-        });
-        return await this.#reconnectPromise;
-    }
-
-    async #refreshRunningStatus(
-        pid?: number,
-        connectionState: "connecting" | "reconnecting" = this.snapshot().connectionState === "disconnected" ? "connecting" : "reconnecting"
-    ): Promise<InstanceSnapshot> {
-        const shouldEmitRpcLifecycleEvents = this.snapshot().connectionState !== "connected";
-
-        await this.#applyStateUpdate({
-            connectionState,
-            daemonState: "running",
-            lastErrorCode: undefined,
-            pid
-        });
-
-        try {
-            await this.#rpcBridge.connect();
-            await this.#protocolClient.ping();
-            this.#handshake = await this.#protocolClient.handshake(this.#config.handshake);
-            const tools = await this.#protocolClient.listTools();
-            const refreshedTools = this.#catalog.refresh(tools.tools);
-            this.#workspacePath = asWorkspacePath(this.#handshake.workspace);
-            if (this.#reverseStatus !== undefined) {
-                this.#reverseStatus = {
-                    ...this.#reverseStatus,
-                    availability: "online",
-                    lastErrorCode: undefined,
-                    lastErrorMessage: undefined,
-                    lastSeenAt: new Date().toISOString()
-                };
-            }
-
-            if (shouldEmitRpcLifecycleEvents) {
-                await this.#appendEvent("worker.rpcConnected");
-                await this.#appendEvent(
-                    "worker.schemaRefreshed",
-                    toEventData({ toolCount: refreshedTools.length })
-                );
-            }
-
-            return await this.#applyStateUpdate({
-                connectionState: "connected",
-                daemonState: "running",
-                lastErrorCode: undefined,
-                pid
-            });
-        } catch (error) {
-            const wrappedError = wrapWorkerCommandError(
-                error,
-                errorCodes.coreWorkerHandshakeFailed,
-                `Worker handshake failed for instance ${this.#config.name}.`,
-                this.#config.name
-            );
-            this.#closeRpcBridge();
-            this.#handshake = undefined;
-            if (this.#config.managementMode === "selfManaged") {
-                this.#markReverseOffline(wrappedError);
-            }
-            await this.#applyStateUpdate({
-                connectionState: "failed",
-                daemonState: "running",
-                lastErrorCode: getErrorCode(wrappedError, errorCodes.coreWorkerHandshakeFailed),
-                pid
-            });
-
-            if (wrappedError !== error) {
-                throw wrappedError;
-            }
-
-            if (isKnownErrorCode(error)) {
-                throw error;
-            }
-
-            throw createError({
-                code: errorCodes.coreWorkerHandshakeFailed,
-                cause: error,
-                message: `Worker handshake failed for instance ${this.#config.name}.`,
-                retryable: false,
-                details: { instance: this.#config.name }
-            });
-        }
-    }
-
-    async #stopSelfManaged(): Promise<InstanceSnapshot> {
-        this.#requireSelfManaged();
-        if (!this.#rpcBridge.connected) {
-            throw createError({
-                code: errorCodes.reverseSelfManagedOffline,
-                details: { instance: this.#config.name },
-                message: `Reverse instance ${this.#config.name} is offline.`,
-                retryable: true
-            });
-        }
-
-        await this.#applyStateUpdate({
-            connectionState: "connected",
-            daemonState: "stopping",
-            lastErrorCode: undefined
-        });
-
-        try {
-            await this.#protocolClient.stop();
-        } catch (error) {
-            await this.#applyStateUpdate({
-                connectionState: "failed",
-                daemonState: "failed",
-                lastErrorCode: getErrorCode(error, errorCodes.coreWorkerStopFailed)
-            });
-            throw error;
-        } finally {
-            this.#closeRpcBridge();
-            this.#handshake = undefined;
-            this.#markReverseOffline();
-        }
-
-        await this.#appendEvent("instance.stopped");
-        return await this.#applyStateUpdate({
-            connectionState: "disconnected",
-            daemonState: "stopped",
-            lastErrorCode: undefined,
-            pid: undefined
-        });
-    }
-
-    #markReverseOffline(error?: unknown): void {
-        const current = this.#reverseStatus;
-        this.#reverseStatus = {
-            availability: "offline",
-            enrollmentState: current?.enrollmentState ?? "pending",
-            ...(current?.generation === undefined ? {} : { generation: current.generation }),
-            ...(error === undefined
-                ? {}
-                : {
-                      lastErrorCode: getErrorCode(error, errorCodes.coreWorkerRpcDisconnected),
-                      lastErrorMessage: readReverseErrorMessage(error)
-                  }),
-            lastSeenAt: new Date().toISOString(),
-            managementMode: "selfManaged"
-        };
+        return await this.#connection.reconnectRpc();
     }
 
     #requireCommandClient(): WorkerCommandClient {
@@ -889,19 +454,6 @@ export class WorkerInstance {
             code: errorCodes.coreProviderFailed,
             details: { instance: this.#config.name },
             message: `Instance ${this.#config.name} does not have a controller-managed command transport.`,
-            retryable: false
-        });
-    }
-
-    #requireSelfManaged(): void {
-        if (this.#config.managementMode === "selfManaged") {
-            return;
-        }
-
-        throw createError({
-            code: errorCodes.reverseInstanceNotReverse,
-            details: { instance: this.#config.name },
-            message: `Instance ${this.#config.name} is not a reverse instance.`,
             retryable: false
         });
     }
@@ -957,65 +509,6 @@ export class WorkerInstance {
         }
     }
 
-    async #handleRpcDisconnect(error: unknown): Promise<void> {
-        if (this.#intentionalRpcCloseDepth > 0) {
-            return;
-        }
-        if (this.#config.managementMode === "selfManaged") {
-            this.#markReverseOffline(error);
-            this.#handshake = undefined;
-            await this.#appendEvent(
-                "worker.rpcDisconnected",
-                toEventData({ errorCode: getErrorCode(error, errorCodes.coreWorkerRpcDisconnected) })
-            );
-            await this.#appendEvent(
-                "reverse.disconnected",
-                toEventData({ errorCode: getErrorCode(error, errorCodes.coreWorkerRpcDisconnected) })
-            );
-            await this.#applyStateUpdate({
-                connectionState: "disconnected",
-                daemonState: "stopped",
-                lastErrorCode: getErrorCode(error, errorCodes.coreWorkerRpcDisconnected),
-                pid: undefined
-            });
-            return;
-        }
-
-        const daemonState = this.snapshot().daemonState;
-        await this.#appendEvent(
-            "worker.rpcDisconnected",
-            toEventData({ errorCode: getErrorCode(error, errorCodes.coreWorkerRpcDisconnected) })
-        );
-
-        this.#handshake = undefined;
-        await this.#applyStateUpdate({
-            connectionState: daemonState === "running" ? "reconnecting" : "disconnected",
-            daemonState,
-            lastErrorCode: getErrorCode(error, errorCodes.coreWorkerRpcDisconnected)
-        });
-
-        if (daemonState !== "running") {
-            return;
-        }
-
-        try {
-            await this.reconnectRpc();
-        } catch {
-            return;
-        }
-    }
-
-    #closeRpcBridge(): void {
-        this.#intentionalRpcCloseDepth += 1;
-
-        try {
-            this.#rpcBridge.close();
-            this.#config.rpcConnector?.detach?.();
-        } finally {
-            this.#intentionalRpcCloseDepth -= 1;
-        }
-    }
-
     async #appendEvent(type: InstanceEventInput["type"], data?: JsonValue) {
         const event = await this.#eventBuffer.append({
             at: new Date().toISOString(),
@@ -1024,211 +517,6 @@ export class WorkerInstance {
         });
         this.#stateMachine.apply({ lastSeq: event.seq });
         return event;
-    }
-
-    async #prepareToolCallApproval(
-        callId: string,
-        toolName: string,
-        inputSummary: string,
-        context: ToolCallContext,
-        startedAt: string,
-        onPendingApproval: () => void
-    ): Promise<{ approvalId?: string; decision?: ToolCallApprovalDecision }> {
-        let evaluation: Awaited<ReturnType<ApprovalManager["evaluate"]>>;
-
-        try {
-            evaluation = await this.#approvalManager.evaluate({
-                callId,
-                context,
-                inputSummary,
-                toolName
-            });
-        } catch (error) {
-            return await this.#failToolCallBeforeInvoke(callId, toolName, context, startedAt, error);
-        }
-
-        if (evaluation.decision === "allow") {
-            return {};
-        }
-
-        if (evaluation.decision === "deny") {
-            return await this.#denyToolCall(callId, toolName, context, startedAt, evaluation.error);
-        }
-
-        onPendingApproval();
-        await this.#toolCallHistory.pendingApproval(callId, evaluation.request.approvalId);
-        await this.#appendEvent("approval.requested", toApprovalEventData(evaluation.request));
-        await this.#appendEvent(
-            "toolCall.pendingApproval",
-            toEventData({
-                approvalId: evaluation.request.approvalId,
-                callId,
-                createdAt: evaluation.request.createdAt,
-                expiresAt: evaluation.request.expiresAt,
-                inputSummary,
-                reason: evaluation.request.reason,
-                requestId: context.requestId,
-                riskLevel: evaluation.request.riskLevel,
-                sessionId: context.sessionId,
-                source: context.source,
-                startedAt,
-                status: "pendingApproval",
-                toolName
-            })
-        );
-
-        const resolution = await evaluation.awaitDecision;
-
-        if (resolution.status === "approved") {
-            const approvedRequest = await this.#approvalManager.getApproval(evaluation.request.approvalId);
-            await this.#appendEvent("approval.approved", toApprovalEventData(approvedRequest, resolution.decision));
-            return {
-                approvalId: evaluation.request.approvalId,
-                decision: "approved"
-            };
-        }
-
-        if (resolution.status === "denied") {
-            const deniedRequest = await this.#approvalManager.getApproval(evaluation.request.approvalId);
-            await this.#appendEvent("approval.denied", toApprovalEventData(deniedRequest, resolution.decision));
-            return await this.#denyToolCall(callId, toolName, context, startedAt, resolution.error, evaluation.request.approvalId);
-        }
-
-        const expiredRequest = await this.#approvalManager.getApproval(evaluation.request.approvalId);
-        await this.#appendEvent("approval.expired", toApprovalEventData(expiredRequest));
-        return await this.#expireToolCall(callId, toolName, context, startedAt, resolution.error, evaluation.request.approvalId);
-    }
-
-    async #failToolCallBeforeInvoke(
-        callId: string,
-        toolName: string,
-        context: ToolCallContext,
-        startedAt: string,
-        error: unknown
-    ): Promise<never> {
-        const completedAt = new Date().toISOString();
-        const errorCode = getErrorCode(error, errorCodes.coreProviderFailed);
-
-        await this.#toolCallHistory.failed(callId, errorCode, completedAt);
-        await this.#appendEvent(
-            "toolCall.failed",
-            toEventData({
-                callId,
-                completedAt,
-                errorCode,
-                requestId: context.requestId,
-                sessionId: context.sessionId,
-                source: context.source,
-                startedAt,
-                status: "failed",
-                toolName
-            })
-        );
-
-        throw error;
-    }
-
-    async #denyToolCall(
-        callId: string,
-        toolName: string,
-        context: ToolCallContext,
-        startedAt: string,
-        error: unknown,
-        approvalId?: string
-    ): Promise<never> {
-        const completedAt = new Date().toISOString();
-        const errorCode = getErrorCode(error, errorCodes.coreApprovalDenied);
-
-        await this.#toolCallHistory.denied(callId, errorCode, completedAt);
-        await this.#appendEvent(
-            "toolCall.denied",
-            toEventData({
-                ...(approvalId === undefined ? {} : { approvalId }),
-                callId,
-                completedAt,
-                errorCode,
-                requestId: context.requestId,
-                sessionId: context.sessionId,
-                source: context.source,
-                startedAt,
-                status: "denied",
-                toolName
-            })
-        );
-
-        throw error;
-    }
-
-    async #expireToolCall(
-        callId: string,
-        toolName: string,
-        context: ToolCallContext,
-        startedAt: string,
-        error: unknown,
-        approvalId: string
-    ): Promise<never> {
-        const completedAt = new Date().toISOString();
-        const errorCode = getErrorCode(error, errorCodes.coreApprovalExpired);
-
-        await this.#toolCallHistory.expired(callId, errorCode, completedAt);
-        await this.#appendEvent(
-            "toolCall.expired",
-            toEventData({
-                approvalId,
-                callId,
-                completedAt,
-                errorCode,
-                requestId: context.requestId,
-                sessionId: context.sessionId,
-                source: context.source,
-                startedAt,
-                status: "expired",
-                toolName
-            })
-        );
-
-        throw error;
-    }
-
-    async #appendToolLogs(
-        result: Pick<CommandResult, "stderr" | "stdout">,
-        context: {
-            callId: string;
-            requestId?: string;
-            sessionId?: string;
-            source: ToolCallContext["source"];
-            toolName: string;
-        }
-    ): Promise<void> {
-        const at = new Date().toISOString();
-
-        if (result.stdout.length > 0) {
-            await this.#logStore.append("stdout", result.stdout, at, context);
-            await this.#appendEvent(
-                "log.appended",
-                toEventData({
-                    ...context,
-                    bytes: readByteLength(result.stdout),
-                    preview: readPreview(result.stdout),
-                    stream: "stdout",
-                    tail: readTail(result.stdout)
-                })
-            );
-        }
-
-        if (result.stderr.length > 0) {
-            await this.#logStore.append("stderr", result.stderr, at, context);
-            await this.#appendEvent(
-                "log.appended",
-                toEventData({
-                    ...context,
-                    bytes: readByteLength(result.stderr),
-                    preview: readPreview(result.stderr),
-                    stream: "stderr",
-                    tail: readTail(result.stderr)
-                })
-            );
-        }
     }
 
     async #applyStateUpdate(update: InstanceStateUpdate): Promise<InstanceSnapshot> {
@@ -1251,348 +539,6 @@ export class WorkerInstance {
     }
 }
 
-function toInputSummary(input: JsonValue): string {
-    const summary = (() => {
-        if (Array.isArray(input)) {
-            return input.map((value) => JSON.stringify(value) ?? "null").join(" ");
-        }
-
-        if (typeof input === "object" && input !== null) {
-            return JSON.stringify(input) ?? "null";
-        }
-
-        return String(input);
-    })();
-
-    return summary;
-}
-
-function asCommandResult(error: unknown): CommandResult | undefined {
-    if (typeof error !== "object" || error === null || Array.isArray(error)) {
-        return undefined;
-    }
-
-    const candidate = error as Record<string, unknown>;
-
-    if (
-        typeof candidate.stdout === "string" &&
-        typeof candidate.stderr === "string" &&
-        (typeof candidate.exitCode === "number" || candidate.exitCode === null)
-    ) {
-        return {
-            details: readCommandDiagnostic(candidate.details),
-            exitCode: candidate.exitCode as number | null,
-            signal: typeof candidate.signal === "string" ? candidate.signal : undefined,
-            stderr: candidate.stderr,
-            stdout: candidate.stdout,
-            timedOut: candidate.timedOut === true
-        };
-    }
-
-    const details = readCommandDiagnostic(candidate.details);
-
-    if (details === undefined || (typeof details.exitCode !== "number" && details.exitCode !== null)) {
-        return undefined;
-    }
-
-    return {
-        details,
-        exitCode: details.exitCode ?? null,
-        signal: details.signal,
-        stderr: "",
-        stdout: "",
-        timedOut: candidate.timedOut === true
-    };
-}
-
-function asBashToolResult(value: JsonValue): {
-    exitCode?: number | null;
-    stderr: string;
-    stderrBytes: number;
-    stdout: string;
-    stdoutBytes: number;
-    termSignal?: number;
-    termination?: "exited" | "signaled" | "timeout";
-} | undefined {
-    if (typeof value !== "object" || value === null || Array.isArray(value)) {
-        return undefined;
-    }
-
-    const result = value as Record<string, JsonValue>;
-    if (typeof result.stdout !== "string" || typeof result.stderr !== "string") {
-        return undefined;
-    }
-
-    const termination = result.termination;
-    return {
-        ...(typeof result.exitCode === "number" || result.exitCode === null ? { exitCode: result.exitCode } : {}),
-        stderr: result.stderr,
-        stderrBytes: typeof result.stderrBytes === "number" ? result.stderrBytes : readByteLength(result.stderr),
-        stdout: result.stdout,
-        stdoutBytes: typeof result.stdoutBytes === "number" ? result.stdoutBytes : readByteLength(result.stdout),
-        ...(typeof result.termSignal === "number" ? { termSignal: result.termSignal } : {}),
-        ...(termination === "exited" || termination === "signaled" || termination === "timeout" ? { termination } : {})
-    };
-}
-
-function getErrorCode(error: unknown, fallback: string): string {
-    if (typeof error === "object" && error !== null && "code" in error && typeof error.code === "string") {
-        return error.code;
-    }
-
-    return fallback;
-}
-
-function readReverseErrorMessage(error: unknown): string {
-    if (typeof error === "object" && error !== null && "details" in error) {
-        const details = error.details;
-        if (typeof details === "object" && details !== null && !Array.isArray(details)) {
-            const causeMessage = (details as Record<string, unknown>).causeMessage;
-            if (typeof causeMessage === "string" && causeMessage.length > 0) {
-                return causeMessage;
-            }
-        }
-    }
-    return error instanceof Error ? error.message : String(error);
-}
-
-function isKnownErrorCode(error: unknown): boolean {
-    return typeof error === "object" && error !== null && "code" in error && typeof error.code === "string";
-}
-
-function readNonRunningSchedulerStatus(errorCode: string): "queueTimeout" | "cancelled" | undefined {
-    if (errorCode === errorCodes.coreToolQueueTimeout) {
-        return "queueTimeout";
-    }
-
-    if (errorCode === errorCodes.coreToolCallCancelled) {
-        return "cancelled";
-    }
-
-    return undefined;
-}
-
-function normalizeToolSchedulerError(error: unknown): unknown {
-    const errorCode = getErrorCode(error, errorCodes.coreProviderFailed);
-
-    if (
-        errorCode !== errorCodes.coreToolSchedulerFull &&
-        errorCode !== errorCodes.coreToolQueueTimeout &&
-        errorCode !== errorCodes.coreToolCallCancelled
-    ) {
-        return error;
-    }
-
-    return createError({
-        code: errorCode,
-        cause: error,
-        message: error instanceof Error ? error.message : "Tool scheduler rejected the tool call.",
-        retryable: true,
-        details: readErrorDetails(error)
-    });
-}
-
-function readErrorDetails(error: unknown): JsonValue {
-    if (typeof error !== "object" || error === null || Array.isArray(error) || !("details" in error)) {
-        return {};
-    }
-
-    const details = (error as { details?: unknown }).details;
-    return details === undefined ? {} : (details as JsonValue);
-}
-
 function isInteractiveSession(value: unknown): value is WorkerCommandInteractiveSession {
     return typeof value === "object" && value !== null && "readInput" in value && "writeOutput" in value;
-}
-
-function toEventData(
-    record: Record<string, JsonValue | undefined>
-): Record<string, JsonValue> {
-    return Object.fromEntries(Object.entries(record).filter(([, value]) => value !== undefined)) as Record<string, JsonValue>;
-}
-
-function toApprovalEventData(request: ApprovalRequest, decision?: ApprovalDecision): Record<string, JsonValue> {
-    return toEventData({
-        approvalId: request.approvalId,
-        callId: request.callId,
-        createdAt: request.createdAt,
-        decidedAt: decision?.decidedAt,
-        decidedBy: decision?.decidedBy,
-        decision: decision?.decision,
-        expiresAt: request.expiresAt,
-        inputSummary: request.inputSummary,
-        reason: decision?.reason ?? request.reason,
-        requestId: request.requestId,
-        remember: decision?.remember,
-        riskLevel: request.riskLevel,
-        sessionId: request.sessionId,
-        source: request.source,
-        status: request.status,
-        toolName: request.toolName
-    });
-}
-
-function createStatusChangedEventData(previous: InstanceSnapshot, next: InstanceSnapshot): Record<string, JsonValue> {
-    return toEventData({
-        connectionState: next.connectionState,
-        daemonState: next.daemonState,
-        lastErrorCode: next.lastErrorCode,
-        pid: next.pid,
-        previousDaemonState: previous.daemonState,
-        previousStatus: previous.status,
-        ready: next.ready,
-        status: next.status
-    });
-}
-
-function createConnectionChangedEventData(previous: InstanceSnapshot, next: InstanceSnapshot): Record<string, JsonValue> {
-    return toEventData({
-        connectionState: next.connectionState,
-        daemonState: next.daemonState,
-        lastErrorCode: next.lastErrorCode,
-        pid: next.pid,
-        previousConnectionState: previous.connectionState,
-        ready: next.ready,
-        status: next.status
-    });
-}
-
-function createReadyChangedEventData(previous: InstanceSnapshot, next: InstanceSnapshot): Record<string, JsonValue> {
-    return toEventData({
-        connectionState: next.connectionState,
-        daemonState: next.daemonState,
-        lastErrorCode: next.lastErrorCode,
-        pid: next.pid,
-        previousReady: previous.ready,
-        ready: next.ready,
-        status: next.status
-    });
-}
-
-function readByteLength(value: string): number {
-    return Buffer.byteLength(value, "utf8");
-}
-
-function readPreview(value: string): string {
-    return value.slice(0, 160);
-}
-
-function readTail(value: string): string {
-    return value.slice(-160);
-}
-
-function normalizeLifecycleStatus(status: InstanceSnapshot["status"]): "failed" | "running" | "stale" | "stopped" {
-    return status === "ready" ? "running" : status;
-}
-
-function parseWorkerStatus(
-    stdout: string,
-    instanceName: string
-): {
-    daemonState: "running" | "stale" | "stopped";
-    pid?: number;
-    workspacePath?: string;
-} {
-    let parsed: unknown;
-
-    try {
-        parsed = JSON.parse(stdout) as unknown;
-    } catch (error) {
-        throw createError({
-            code: errorCodes.coreWorkerStatusFailed,
-            cause: error,
-            message: `Worker status returned an invalid payload for instance ${instanceName}.`,
-            retryable: false,
-            details: {
-                instance: instanceName,
-                stdoutTail: stdout.length <= 4000 ? stdout : stdout.slice(-4000)
-            }
-        });
-    }
-
-    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-        throw createError({
-            code: errorCodes.coreWorkerStatusFailed,
-            message: `Worker status returned an invalid payload for instance ${instanceName}.`,
-            retryable: false,
-            details: {
-                instance: instanceName,
-                stdoutTail: stdout.length <= 4000 ? stdout : stdout.slice(-4000)
-            }
-        });
-    }
-
-    const candidate = parsed as Record<string, unknown>;
-    const state = candidate.state;
-
-    if (state !== "running" && state !== "stale" && state !== "stopped") {
-        throw createError({
-            code: errorCodes.coreWorkerStatusFailed,
-            message: `Worker status returned an unknown state for instance ${instanceName}.`,
-            retryable: false,
-            details: {
-                instance: instanceName,
-                state: String(state),
-                stdoutTail: stdout.length <= 4000 ? stdout : stdout.slice(-4000)
-            }
-        });
-    }
-
-    return {
-        daemonState: state,
-        pid: typeof candidate.pid === "number" ? candidate.pid : undefined,
-        workspacePath: typeof candidate.workspace === "string" ? candidate.workspace : undefined
-    };
-}
-
-function withInstanceDetails(details: CommandDiagnostic | undefined, instance: string): CommandDiagnostic {
-    return {
-        ...(details ?? {}),
-        instance
-    };
-}
-
-function wrapWorkerCommandError(error: unknown, code: string, message: string, instance: string): unknown {
-    if (
-        !isKnownErrorCode(error) ||
-        getErrorCode(error, code) === code ||
-        getErrorCode(error, code) !== errorCodes.coreProviderFailed
-    ) {
-        return error;
-    }
-
-    return createError({
-        code,
-        cause: error,
-        message,
-        retryable: false,
-        details: toJsonDetails(withInstanceDetails(readCommandDiagnostic((error as { details?: unknown }).details), instance))
-    });
-}
-
-function toJsonDetails(details: CommandDiagnostic): JsonValue {
-    return Object.fromEntries(Object.entries(details).filter(([, value]) => value !== undefined)) as JsonValue;
-}
-
-function readCommandDiagnostic(value: unknown): CommandDiagnostic | undefined {
-    if (typeof value !== "object" || value === null || Array.isArray(value)) {
-        return undefined;
-    }
-
-    const candidate = value as Record<string, unknown>;
-
-    return {
-        ...(typeof candidate.causeCode === "string" ? { causeCode: candidate.causeCode } : {}),
-        ...(typeof candidate.causeMessage === "string" ? { causeMessage: candidate.causeMessage } : {}),
-        ...(Array.isArray(candidate.command) ? { command: candidate.command.filter((entry): entry is string => typeof entry === "string") } : {}),
-        ...(typeof candidate.commandDisplay === "string" ? { commandDisplay: candidate.commandDisplay } : {}),
-        ...(typeof candidate.cwd === "string" ? { cwd: candidate.cwd } : {}),
-        ...(typeof candidate.exitCode === "number" || candidate.exitCode === null ? { exitCode: candidate.exitCode as number | null } : {}),
-        ...(typeof candidate.instance === "string" ? { instance: candidate.instance } : {}),
-        ...(typeof candidate.operation === "string" ? { operation: candidate.operation } : {}),
-        ...(typeof candidate.provider === "string" ? { provider: candidate.provider } : {}),
-        ...(typeof candidate.signal === "string" ? { signal: candidate.signal } : {}),
-        ...(typeof candidate.stderrTail === "string" ? { stderrTail: candidate.stderrTail } : {}),
-        ...(typeof candidate.stdoutTail === "string" ? { stdoutTail: candidate.stdoutTail } : {})
-    };
 }
