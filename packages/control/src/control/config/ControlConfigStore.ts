@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { createError, errorCodes } from "@portable-devshell/shared";
 
 import { createDefaultControlConfig } from "./ControlConfigDefaults.js";
-import { ControlConfigTomlCodec, ControlInstanceTomlCodec, type ControlConfig, type ControlGlobalConfig, type ControlInstanceConfig } from "./ControlConfigTomlCodec.js";
+import { ControlConfigTomlCodec, ControlInstanceTomlCodec, type ControlConfig, type ControlGlobalConfig, type ControlInstanceConfig } from "./codec/ConfigTomlCodec.js";
 import { ControlConfigValidator } from "./ControlConfigValidator.js";
 import { ControlPathHome } from "../path/ControlPathHome.js";
 

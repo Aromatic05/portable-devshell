@@ -5,7 +5,7 @@ import type { McpOAuthApprovalService } from "@portable-devshell/mcp";
 import type { ArtifactService } from "../../artifact/ArtifactService.js";
 
 import type { InstanceRegistry } from "../../instance/registry/InstanceRegistry.js";
-import type { ControlConfigEditorService } from "../ControlConfigEditorService.js";
+import type { ControlConfigEditorService } from "../editor/ConfigEditorService.js";
 import type { ControlInstanceCreateService } from "../ControlInstanceCreateService.js";
 import type { ReverseControlService } from "../../reverse/ReverseControlService.js";
 import { RouteMethodRegistry } from "../../route/RouteMethodRegistry.js";

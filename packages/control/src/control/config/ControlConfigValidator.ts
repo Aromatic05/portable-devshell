@@ -7,7 +7,7 @@ import {
 } from "@portable-devshell/shared";
 import { McpAuthPublicExposureGuard } from "@portable-devshell/mcp";
 
-import type { ControlConfig, ControlFileEditMode, ControlInstanceConfig, ControlMcpOAuth2Config } from "./ControlConfigTomlCodec.js";
+import type { ControlConfig, ControlFileEditMode, ControlInstanceConfig, ControlMcpOAuth2Config } from "./codec/ConfigTomlCodec.js";
 
 export class ControlConfigValidator {
     readonly #publicExposureGuard = new McpAuthPublicExposureGuard();

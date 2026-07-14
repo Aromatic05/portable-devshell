@@ -1,4 +1,4 @@
-import type { ControlConfig } from "../../control/config/ControlConfigTomlCodec.js";
+import type { ControlConfig } from "../../control/config/codec/ConfigTomlCodec.js";
 import { InstanceConfigMapper } from "../InstanceConfigMapper.js";
 import { InstanceRegistry } from "./InstanceRegistry.js";
 

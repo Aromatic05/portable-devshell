@@ -1,7 +1,7 @@
 import { InstancePaths, WorkerInstanceFactory, WorkerRpcInboundConnector, WorkerTransportFactory, resolveWorkerHomeDirectory, type WorkerInstance, type WorkerInstanceConfig, type WorkerTransportFactoryOptions } from "@portable-devshell/core";
 import { asInstanceName, asWorkspacePath } from "@portable-devshell/shared";
 
-import type { ControlInstanceConfig } from "../control/config/ControlConfigTomlCodec.js";
+import type { ControlInstanceConfig } from "../control/config/codec/ConfigTomlCodec.js";
 import type { InstanceDescriptor } from "./InstanceDescriptor.js";
 import { TodoService } from "../todo/TodoService.js";
 

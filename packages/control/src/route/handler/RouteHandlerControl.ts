@@ -8,7 +8,7 @@ import {
 import type { McpOAuthApprovalService } from "@portable-devshell/mcp";
 
 import type { ArtifactService } from "../../artifact/ArtifactService.js";
-import type { ControlConfigEditorService } from "../../control/ControlConfigEditorService.js";
+import type { ControlConfigEditorService } from "../../control/editor/ConfigEditorService.js";
 import type { ControlInstanceCreateService } from "../../control/ControlInstanceCreateService.js";
 import type { ControlRpcConnection } from "../../control/rpc/ControlRpcConnection.js";
 import type { InstanceRegistry } from "../../instance/registry/InstanceRegistry.js";

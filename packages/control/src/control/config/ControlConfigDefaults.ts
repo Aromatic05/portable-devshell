@@ -1,4 +1,4 @@
-import type { ControlConfig } from "./ControlConfigTomlCodec.js";
+import type { ControlConfig } from "./codec/ConfigTomlCodec.js";
 
 export function createDefaultControlConfig(): ControlConfig {
     return {

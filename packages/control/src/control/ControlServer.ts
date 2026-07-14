@@ -7,9 +7,9 @@ import { ArtifactHttpRoute, artifactShareRoute } from "../artifact/ArtifactHttpR
 import { ArtifactHostBridge } from "../artifact/host/ArtifactHostBridge.js";
 import { ArtifactService } from "../artifact/ArtifactService.js";
 import { ControlInstanceCreateService } from "./ControlInstanceCreateService.js";
-import { ControlConfigEditorService } from "./ControlConfigEditorService.js";
+import { ControlConfigEditorService } from "./editor/ConfigEditorService.js";
 import { ControlConfigStore } from "./config/ControlConfigStore.js";
-import type { ControlConfig } from "./config/ControlConfigTomlCodec.js";
+import type { ControlConfig } from "./config/codec/ConfigTomlCodec.js";
 import { ControlPathHome } from "./path/ControlPathHome.js";
 import { InstanceRegistry } from "../instance/registry/InstanceRegistry.js";
 import { InstanceRegistryBuilder } from "../instance/registry/InstanceRegistryBuilder.js";

@@ -13,7 +13,7 @@ import { ControlServer } from "../../dist/control/ControlServer.js";
 import {
     ControlConfigTomlCodec,
     ControlInstanceTomlCodec
-} from "../../dist/control/config/ControlConfigTomlCodec.js";
+} from "../../dist/control/config/codec/ConfigTomlCodec.js";
 import { ControlPathHome } from "../../dist/control/path/ControlPathHome.js";
 import { ReverseCredentialStore } from "../../dist/reverse/ReverseCredentialStore.js";
 

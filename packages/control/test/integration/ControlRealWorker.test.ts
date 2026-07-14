@@ -10,8 +10,8 @@ import { fileURLToPath } from "node:url";
 import { FrameReader, FrameWriter, type JsonValue } from "@portable-devshell/shared";
 
 import { ControlLifecycleManager } from "../../dist/control/ControlLifecycleManager.js";
-import { ControlInstanceTomlCodec } from "../../dist/control/config/ControlConfigTomlCodec.js";
-import { ControlConfigTomlCodec } from "../../dist/control/config/ControlConfigTomlCodec.js";
+import { ControlInstanceTomlCodec } from "../../dist/control/config/codec/ConfigTomlCodec.js";
+import { ControlConfigTomlCodec } from "../../dist/control/config/codec/ConfigTomlCodec.js";
 import { ControlPathHome } from "../../dist/control/path/ControlPathHome.js";
 import { ControlPathRuntime } from "../../dist/control/path/ControlPathRuntime.js";
 

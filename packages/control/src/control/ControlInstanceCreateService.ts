@@ -15,7 +15,7 @@ import { InstanceConfigMapper } from "../instance/InstanceConfigMapper.js";
 import type { InstanceRegistry } from "../instance/registry/InstanceRegistry.js";
 import { McpEndpointConfigMapper } from "../mcp/McpEndpointConfigMapper.js";
 import { ControlConfigStore } from "./config/ControlConfigStore.js";
-import type { ControlConfig, ControlInstanceConfig, ControlProviderKind } from "./config/ControlConfigTomlCodec.js";
+import type { ControlConfig, ControlInstanceConfig, ControlProviderKind } from "./config/codec/ConfigTomlCodec.js";
 import { ControlConfigValidator } from "./config/ControlConfigValidator.js";
 import { instanceCreateProviders } from "./platform/ControlInstanceCreatePlatform.js";
 
