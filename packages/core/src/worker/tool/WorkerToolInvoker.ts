@@ -1,6 +1,6 @@
 import { Ajv2020, type AnySchema, type ErrorObject, type ValidateFunction } from "ajv/dist/2020.js";
 
-import { createError, errorCodes, type JsonValue } from "@portable-devshell/shared";
+import { createError, errorCodes, type JsonValue, type ToolCallContext } from "@portable-devshell/shared";
 
 import { WorkerRpcClient } from "../../worker/rpc/WorkerRpcClient.js";
 import { WorkerToolCatalog } from "./WorkerToolCatalog.js";
@@ -16,7 +16,7 @@ export class WorkerToolInvoker {
         this.#catalog = catalog;
     }
 
-    async invoke(toolName: string, input: JsonValue): Promise<JsonValue> {
+    async invoke(toolName: string, input: JsonValue, context?: ToolCallContext): Promise<JsonValue> {
         const tool = this.#catalog.getTool(toolName);
 
         if (tool === undefined) {
@@ -29,7 +29,7 @@ export class WorkerToolInvoker {
         }
 
         this.#validate(tool.inputSchema, input, toolName, "input");
-        const result = await this.#rpcClient.request(toolName, input);
+        const result = await this.#rpcClient.request(toolName, input, context);
         this.#validate(tool.outputSchema, result, toolName, "output");
         return result;
     }

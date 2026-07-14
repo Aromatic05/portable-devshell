@@ -91,6 +91,26 @@ test("WorkerProtocolClient routes artifact payload and receive lifecycle through
     bridge.close();
 });
 
+test("WorkerRpcClient uses one connection-scoped session id unless a caller supplies an MCP session", async () => {
+    const harness = createRpcHarness();
+    const bridge = new WorkerRpcBridge({
+        transport: harness.transport,
+        rpcOptions: { instanceName: "session-context" }
+    });
+    const client = new WorkerRpcClient(bridge);
+
+    await client.request("worker.ping", {});
+    await client.request("tools.list", {});
+    await client.request("worker.status", {}, { sessionId: "mcp-session", source: "mcp" });
+
+    const implicit = harness.requestContexts.slice(0, 2).map((context) => context?.sessionId);
+    assert.equal(typeof implicit[0], "string");
+    assert.equal(implicit[0], implicit[1]);
+    assert.equal(harness.requestContexts[2]?.sessionId, "mcp-session");
+    assert.equal(harness.requestContexts[2]?.source, "mcp");
+    bridge.close();
+});
+
 test("WorkerRpcBridge rejects pending calls when the rpc bridge disconnects", async () => {
     const harness = createRpcHarness({
         slowMethods: new Set(["tools.list"])
@@ -193,10 +213,12 @@ function createRpcHarness(options?: { slowMethods?: Set<string> }): {
     transport: WorkerCommandTransport;
     spawnCount: number;
     requestMethods: string[];
+    requestContexts: Array<{ sessionId?: string; source?: string } | undefined>;
     disconnect: () => void;
     waitForMethod: (method: string) => Promise<void>;
 } {
     const requestMethods: string[] = [];
+    const requestContexts: Array<{ sessionId?: string; source?: string } | undefined> = [];
     const slowMethods = options?.slowMethods ?? new Set<string>();
     const stdout = new PassThrough();
     const stdin = new PassThrough();
@@ -238,6 +260,7 @@ function createRpcHarness(options?: { slowMethods?: Set<string> }): {
             }
 
             requestMethods.push(frame.method);
+            requestContexts.push(frame.context);
             methodWaiters.get(frame.method)?.splice(0).forEach((resolve) => resolve());
 
             if (slowMethods.has(frame.method)) {
@@ -254,6 +277,7 @@ function createRpcHarness(options?: { slowMethods?: Set<string> }): {
             return spawnCount;
         },
         requestMethods,
+        requestContexts,
         disconnect() {
             stdout.end();
             exitResolve?.({ code: 1, signal: null });
@@ -272,7 +296,11 @@ function createRpcHarness(options?: { slowMethods?: Set<string> }): {
     };
 }
 
-function isRequestFrame(value: unknown): value is { id: string; method: string } {
+function isRequestFrame(value: unknown): value is {
+    id: string;
+    method: string;
+    context?: { sessionId?: string; source?: string };
+} {
     if (typeof value !== "object" || value === null || Array.isArray(value)) {
         return false;
     }

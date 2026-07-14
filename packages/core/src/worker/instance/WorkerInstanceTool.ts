@@ -149,7 +149,7 @@ export class WorkerInstanceTool {
                         status: "running"
                     })
                 );
-                return await this.#toolInvoker.invoke(toolName, input);
+                return await this.#toolInvoker.invoke(toolName, input, context);
             });
             toolExecutionSucceeded = true;
             const bashResult = toolName === "bash_run" ? asBashToolResult(result) : undefined;

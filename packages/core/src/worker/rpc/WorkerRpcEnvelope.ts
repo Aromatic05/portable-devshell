@@ -1,10 +1,17 @@
 import type { ControlErrorBody, JsonValue } from "@portable-devshell/shared";
 
+export interface WorkerRpcRequestContext {
+    requestId?: string;
+    sessionId?: string;
+    source?: string;
+}
+
 export interface WorkerRpcRequestEnvelope {
     type: "request";
     id: string;
     method: string;
     params: JsonValue;
+    context?: WorkerRpcRequestContext;
 }
 
 export type WorkerRpcErrorBody = ControlErrorBody;
