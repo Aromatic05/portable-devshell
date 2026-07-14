@@ -369,7 +369,7 @@ impl ReverseDispatcher {
         let response = if self.router.is_control_method(&request.method) {
             self.router.dispatch_control(request)
         } else {
-            match self.router.acquire_tool_permit() {
+            match self.router.acquire_tool_permit(&request.method) {
                 Ok(permit) => self.router.dispatch_tool(request, permit),
                 Err(error) => RpcResponse::failure(request.id, error),
             }

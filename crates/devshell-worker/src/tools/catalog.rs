@@ -19,6 +19,8 @@ use crate::tools::{ToolError, ToolRegistry};
 
 pub struct BuiltinTools {
     pub files: Arc<FileToolState>,
+    #[cfg(unix)]
+    pub tmux: Option<Arc<crate::tools::tmux::state::TmuxState>>,
     pub registry: ToolRegistry,
 }
 
@@ -40,8 +42,13 @@ pub fn builtin_registry(
     registry.register(Arc::new(FileSearchTool::new(Arc::clone(&files))) as Arc<_>)?;
     registry.register(Arc::new(FileInfoTool::new(Arc::clone(&files))) as Arc<_>)?;
     #[cfg(unix)]
-    register_tmux_tools(&mut registry, instance_paths, socket_paths, runtime)?;
+    let tmux = register_tmux_tools(&mut registry, instance_paths, socket_paths, runtime)?;
     #[cfg(windows)]
     let _ = (instance_paths, socket_paths, runtime);
-    Ok(BuiltinTools { files, registry })
+    Ok(BuiltinTools {
+        files,
+        #[cfg(unix)]
+        tmux,
+        registry,
+    })
 }

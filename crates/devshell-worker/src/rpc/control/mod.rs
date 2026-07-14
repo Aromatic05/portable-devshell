@@ -1,9 +1,9 @@
 pub mod artifact_payload;
-pub mod file_session;
 pub mod handshake;
 pub mod ping;
 pub mod status;
 pub mod stop;
+pub mod tool_session;
 pub mod tools_list;
 
 use std::collections::HashMap;
@@ -19,6 +19,8 @@ use crate::tools::ToolRegistry;
 use crate::tools::artifact::payload::ArtifactPayloadStore;
 use crate::tools::artifact::receive::ArtifactReceiveStore;
 use crate::tools::file::FileToolState;
+#[cfg(unix)]
+use crate::tools::tmux::state::TmuxState;
 
 #[allow(clippy::too_many_arguments)]
 pub fn register_control_handlers(
@@ -33,6 +35,7 @@ pub fn register_control_handlers(
     files: Arc<FileToolState>,
     payloads: Arc<ArtifactPayloadStore>,
     receives: Arc<ArtifactReceiveStore>,
+    #[cfg(unix)] tmux: Option<Arc<TmuxState>>,
 ) {
     handlers.insert(
         "artifact.receive.begin".to_string(),
@@ -77,8 +80,12 @@ pub fn register_control_handlers(
         Arc::new(artifact_payload::ArtifactPayloadCloseHandler::new(payloads)),
     );
     handlers.insert(
-        "file.session.close".to_string(),
-        Arc::new(file_session::FileSessionCloseHandler::new(files)),
+        "tool.session.close".to_string(),
+        Arc::new(tool_session::ToolSessionCloseHandler::new(
+            files,
+            #[cfg(unix)]
+            tmux,
+        )),
     );
     handlers.insert(
         "worker.handshake".to_string(),

@@ -15,9 +15,12 @@ use crate::security::{SecurityPolicy, build_security_policy};
 use crate::tools::artifact::payload::ArtifactPayloadStore;
 use crate::tools::artifact::receive::ArtifactReceiveStore;
 use crate::tools::file::FileToolState;
+#[cfg(unix)]
+use crate::tools::tmux::state::TmuxState;
 use crate::tools::{ToolCall, ToolName, ToolRegistry};
 
 const MAX_CONCURRENT_TOOL_CALLS: usize = 8;
+const MAX_STANDARD_TOOL_CALLS: usize = 6;
 
 pub struct RpcRouter {
     active_processes: Arc<ActiveProcessRegistry>,
@@ -37,6 +40,7 @@ impl RpcRouter {
         files: Arc<FileToolState>,
         payloads: Arc<ArtifactPayloadStore>,
         receives: Arc<ArtifactReceiveStore>,
+        #[cfg(unix)] tmux: Option<Arc<TmuxState>>,
     ) -> Self {
         let active_processes = Arc::new(ActiveProcessRegistry::new());
         let active_tool_calls = Arc::new(ActiveToolCallRegistry::new());
@@ -55,6 +59,8 @@ impl RpcRouter {
             files,
             payloads,
             receives,
+            #[cfg(unix)]
+            tmux,
         );
 
         Self {
@@ -81,8 +87,8 @@ impl RpcRouter {
         Self::response(request.id, result)
     }
 
-    pub fn acquire_tool_permit(&self) -> Result<ToolCallPermit, RpcError> {
-        self.active_tool_calls.acquire()
+    pub fn acquire_tool_permit(&self, method: &str) -> Result<ToolCallPermit, RpcError> {
+        self.active_tool_calls.acquire(method)
     }
 
     pub fn dispatch_tool(&self, request: RpcRequest, _permit: ToolCallPermit) -> RpcResponse {
@@ -108,6 +114,9 @@ impl RpcRouter {
             session_id: context
                 .and_then(|value| value.session_id.clone())
                 .unwrap_or_else(|| "worker-default".to_string()),
+            request_id: context
+                .and_then(|value| value.request_id.clone())
+                .unwrap_or_else(|| request.id.clone()),
             policy: Arc::clone(&self.policy),
             process_registry: Arc::clone(&self.active_processes),
         })
@@ -136,6 +145,7 @@ pub struct ActiveToolCallRegistry {
 #[derive(Default)]
 struct ActiveToolCallState {
     active: usize,
+    standard_active: usize,
     stopping: bool,
 }
 
@@ -144,7 +154,8 @@ impl ActiveToolCallRegistry {
         Self::default()
     }
 
-    pub fn acquire(self: &Arc<Self>) -> Result<ToolCallPermit, RpcError> {
+    pub fn acquire(self: &Arc<Self>, method: &str) -> Result<ToolCallPermit, RpcError> {
+        let urgent = is_urgent_tool(method);
         let mut state = self.state.lock().map_err(|_| {
             RpcError::new(
                 "worker.toolSchedulerFailed",
@@ -159,7 +170,9 @@ impl ActiveToolCallRegistry {
             ));
         }
 
-        if state.active >= MAX_CONCURRENT_TOOL_CALLS {
+        if state.active >= MAX_CONCURRENT_TOOL_CALLS
+            || (!urgent && state.standard_active >= MAX_STANDARD_TOOL_CALLS)
+        {
             let mut error = RpcError::new(
                 "worker.toolConcurrencyLimit",
                 "Worker tool concurrency limit reached.",
@@ -167,14 +180,21 @@ impl ActiveToolCallRegistry {
             error.retryable = true;
             error.details = Some(serde_json::json!({
                 "maxConcurrentToolCalls": MAX_CONCURRENT_TOOL_CALLS,
+                "maxStandardToolCalls": MAX_STANDARD_TOOL_CALLS,
                 "runningToolCalls": state.active,
+                "runningStandardToolCalls": state.standard_active,
+                "urgent": urgent,
             }));
             return Err(error);
         }
 
         state.active += 1;
+        if !urgent {
+            state.standard_active += 1;
+        }
         Ok(ToolCallPermit {
             registry: Arc::clone(self),
+            urgent,
         })
     }
 
@@ -221,11 +241,14 @@ impl ActiveToolCallRegistry {
         Ok(())
     }
 
-    fn release(&self) {
+    fn release(&self, urgent: bool) {
         let Ok(mut state) = self.state.lock() else {
             return;
         };
         state.active = state.active.saturating_sub(1);
+        if !urgent {
+            state.standard_active = state.standard_active.saturating_sub(1);
+        }
         if state.active == 0 {
             self.idle.notify_all();
         }
@@ -234,14 +257,40 @@ impl ActiveToolCallRegistry {
 
 pub struct ToolCallPermit {
     registry: Arc<ActiveToolCallRegistry>,
+    urgent: bool,
 }
 
 impl Drop for ToolCallPermit {
     fn drop(&mut self) {
-        self.registry.release();
+        self.registry.release(self.urgent);
     }
+}
+
+fn is_urgent_tool(method: &str) -> bool {
+    matches!(method, "tmux_input" | "tmux_inspect" | "tmux_list")
 }
 
 pub trait ControlHandler: Send + Sync {
     fn handle(&self, request: &RpcRequest) -> Result<serde_json::Value, RpcError>;
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use super::ActiveToolCallRegistry;
+
+    #[test]
+    fn urgent_tmux_tools_use_reserved_worker_capacity() {
+        let registry = Arc::new(ActiveToolCallRegistry::new());
+        let standard = (0..6)
+            .map(|_| registry.acquire("tmux_run").unwrap())
+            .collect::<Vec<_>>();
+        assert!(registry.acquire("bash_run").is_err());
+        let urgent_one = registry.acquire("tmux_input").unwrap();
+        let urgent_two = registry.acquire("tmux_inspect").unwrap();
+        assert!(registry.acquire("tmux_list").is_err());
+        drop((standard, urgent_one, urgent_two));
+        assert!(registry.acquire("bash_run").is_ok());
+    }
 }

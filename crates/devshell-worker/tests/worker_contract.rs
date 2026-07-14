@@ -132,12 +132,13 @@ fn handshake_tools_and_bash_run_flow_work_over_framed_rpc() {
         .is_ok_and(|output| output.status.success())
     {
         expected_tools.extend([
-            "tmux_capture",
             "tmux_close",
             "tmux_create",
+            "tmux_input",
             "tmux_inspect",
             "tmux_list",
-            "tmux_send",
+            "tmux_read",
+            "tmux_run",
         ]);
     }
     assert_eq!(

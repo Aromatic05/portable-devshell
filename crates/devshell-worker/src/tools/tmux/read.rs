@@ -2,26 +2,26 @@ use std::sync::Arc;
 
 use schemars::schema_for;
 
-use crate::tools::tmux::group::tmux_capture_name;
+use crate::tools::tmux::group::tmux_read_name;
 use crate::tools::tmux::state::TmuxState;
-use crate::tools::tmux::types::{TmuxCaptureParams, TmuxPaneOperationOutput};
+use crate::tools::tmux::types::{TmuxReadParams, TmuxTaskOperationOutput};
 use crate::tools::{ToolCall, ToolCapability, ToolCatalogEntry, ToolError, ToolHandler, ToolName};
 
-pub struct TmuxCaptureTool {
+pub struct TmuxReadTool {
     name: ToolName,
     state: Arc<TmuxState>,
 }
 
-impl TmuxCaptureTool {
+impl TmuxReadTool {
     pub fn new(state: Arc<TmuxState>) -> Self {
         Self {
-            name: tmux_capture_name(),
+            name: tmux_read_name(),
             state,
         }
     }
 }
 
-impl ToolHandler for TmuxCaptureTool {
+impl ToolHandler for TmuxReadTool {
     fn name(&self) -> &ToolName {
         &self.name
     }
@@ -30,9 +30,9 @@ impl ToolHandler for TmuxCaptureTool {
         ToolCatalogEntry {
             group: self.name.group().to_string(),
             name: self.name.as_str(),
-            description: "Consume unread output from one managed tmux pane. Positive line values return the oldest unread lines, zero discards unread output, and negative values return only the requested tail.".to_string(),
-            input_schema: serde_json::to_value(schema_for!(TmuxCaptureParams)).unwrap(),
-            output_schema: serde_json::to_value(schema_for!(TmuxPaneOperationOutput)).unwrap(),
+            description: "Consume unread line-oriented output from one tmux task owned by the current MCP/RPC session. task is required. Positive line values return oldest unread lines, zero discards unread output, and negative values return only the requested tail. Use tmux_inspect for curses or terminal-screen state.".to_string(),
+            input_schema: serde_json::to_value(schema_for!(TmuxReadParams)).unwrap(),
+            output_schema: serde_json::to_value(schema_for!(TmuxTaskOperationOutput)).unwrap(),
             required_capabilities: vec![ToolCapability::Read],
         }
     }
@@ -40,7 +40,7 @@ impl ToolHandler for TmuxCaptureTool {
     fn call(&self, call: ToolCall) -> Result<serde_json::Value, ToolError> {
         let params = serde_json::from_value(call.params.clone())
             .map_err(|error| ToolError::new("tool.invalidArguments", error.to_string()))?;
-        serde_json::to_value(self.state.capture(&call, params)?)
+        serde_json::to_value(self.state.read(&call, params)?)
             .map_err(|error| ToolError::new("tool.internalError", error.to_string()))
     }
 }

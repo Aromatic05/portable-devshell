@@ -130,8 +130,8 @@ export class WorkerProtocolClient {
         return asObjectResult<WorkerToolsListResult>(await this.#rpcClient.request("tools.list", {}));
     }
 
-    async closeFileSession(sessionId: string): Promise<void> {
-        await this.#rpcClient.request("file.session.close", { sessionId });
+    async closeToolSession(sessionId: string): Promise<void> {
+        await this.#rpcClient.request("tool.session.close", { sessionId });
     }
 
     async openArtifactPayload(input: WorkerArtifactPayloadOpenInput): Promise<WorkerArtifactPayloadOpenResult> {

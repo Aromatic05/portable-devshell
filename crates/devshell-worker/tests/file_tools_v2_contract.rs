@@ -454,9 +454,9 @@ fn file_edit_three_way_merges_non_conflicting_external_changes() {
 }
 
 #[test]
-fn closing_file_session_releases_implicit_snapshots() {
+fn closing_tool_session_releases_implicit_file_snapshots() {
     let env = TestEnv::new();
-    let instance = "aromatic-file-session-close";
+    let instance = "aromatic-tool-session-close";
     fs::write(env.workspace().join("document.txt"), "old\n").unwrap();
     start(&env, instance);
 
@@ -474,7 +474,7 @@ fn closing_file_session_releases_implicit_snapshots() {
         instance,
         "2",
         "session-a",
-        "file.session.close",
+        "tool.session.close",
         json!({ "sessionId": "session-a" }),
     );
     assert_eq!(closed["ok"], true, "{closed}");

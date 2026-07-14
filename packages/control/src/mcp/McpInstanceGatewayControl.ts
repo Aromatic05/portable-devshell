@@ -53,10 +53,10 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
         return await descriptor.worker.callTool(toolName, input, context);
     }
 
-    async closeFileSession(sessionId: string): Promise<void> {
+    async closeToolSession(sessionId: string): Promise<void> {
         await Promise.all(
             this.#instanceRegistry.list().map(async (descriptor) => {
-                await descriptor.worker.releaseFileSession(sessionId);
+                await descriptor.worker.releaseToolSession(sessionId);
             })
         );
     }

@@ -1,4 +1,4 @@
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct ToolError {
     pub code: String,
     pub message: String,

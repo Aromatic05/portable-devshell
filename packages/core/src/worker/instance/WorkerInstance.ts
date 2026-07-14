@@ -411,12 +411,12 @@ export class WorkerInstance {
 
     async appendMcpSessionClosed(sessionId: string): Promise<void> {
         await this.#appendEvent("mcp.sessionClosed", toEventData({ sessionId }));
-        await this.releaseFileSession(sessionId);
+        await this.releaseToolSession(sessionId);
     }
 
-    async releaseFileSession(sessionId: string): Promise<void> {
+    async releaseToolSession(sessionId: string): Promise<void> {
         if (this.snapshot().ready) {
-            await this.#protocolClient.closeFileSession(sessionId).catch(() => undefined);
+            await this.#protocolClient.closeToolSession(sessionId).catch(() => undefined);
         }
     }
 

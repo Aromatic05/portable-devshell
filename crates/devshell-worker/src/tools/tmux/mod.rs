@@ -1,14 +1,19 @@
 pub mod backend;
-pub mod capture;
 pub mod close;
 pub mod codec;
 pub mod create;
 pub mod group;
+pub mod input;
 pub mod inspect;
 pub mod list;
-pub mod send;
+pub mod output;
+pub mod read;
+pub mod replay;
+pub mod run;
+pub mod session;
 pub mod shell;
 pub mod state;
+pub mod task;
 pub mod types;
 
 use std::sync::Arc;
@@ -17,12 +22,13 @@ use crate::daemon::process::WorkerRuntimeContext;
 use crate::socket::SocketPaths;
 use crate::storage::InstancePaths;
 use crate::tools::tmux::backend::TmuxBackend;
-use crate::tools::tmux::capture::TmuxCaptureTool;
 use crate::tools::tmux::close::TmuxCloseTool;
 use crate::tools::tmux::create::TmuxCreateTool;
+use crate::tools::tmux::input::TmuxInputTool;
 use crate::tools::tmux::inspect::TmuxInspectTool;
 use crate::tools::tmux::list::TmuxListTool;
-use crate::tools::tmux::send::TmuxSendTool;
+use crate::tools::tmux::read::TmuxReadTool;
+use crate::tools::tmux::run::TmuxRunTool;
 use crate::tools::tmux::state::TmuxState;
 use crate::tools::{ToolError, ToolRegistry};
 
@@ -31,20 +37,21 @@ pub fn register_tools(
     instance_paths: &InstancePaths,
     socket_paths: &SocketPaths,
     runtime: &WorkerRuntimeContext,
-) -> Result<(), ToolError> {
+) -> Result<Option<Arc<TmuxState>>, ToolError> {
     if !TmuxBackend::available() {
-        return Ok(());
+        return Ok(None);
     }
     let state = Arc::new(TmuxState::new(TmuxBackend::new(
         instance_paths,
         socket_paths,
         runtime,
     )?));
-    registry.register(Arc::new(TmuxSendTool::new(Arc::clone(&state))) as Arc<_>)?;
-    registry.register(Arc::new(TmuxCaptureTool::new(Arc::clone(&state))) as Arc<_>)?;
+    registry.register(Arc::new(TmuxRunTool::new(Arc::clone(&state))) as Arc<_>)?;
+    registry.register(Arc::new(TmuxInputTool::new(Arc::clone(&state))) as Arc<_>)?;
+    registry.register(Arc::new(TmuxReadTool::new(Arc::clone(&state))) as Arc<_>)?;
     registry.register(Arc::new(TmuxInspectTool::new(Arc::clone(&state))) as Arc<_>)?;
     registry.register(Arc::new(TmuxListTool::new(Arc::clone(&state))) as Arc<_>)?;
     registry.register(Arc::new(TmuxCreateTool::new(Arc::clone(&state))) as Arc<_>)?;
-    registry.register(Arc::new(TmuxCloseTool::new(state)) as Arc<_>)?;
-    Ok(())
+    registry.register(Arc::new(TmuxCloseTool::new(Arc::clone(&state))) as Arc<_>)?;
+    Ok(Some(state))
 }

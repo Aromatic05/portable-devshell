@@ -35,6 +35,7 @@ pub struct BackendPane {
     pub lines: Vec<String>,
     pub status: Option<String>,
     pub status_seq: Option<u64>,
+    pub status_task_id: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -68,6 +69,8 @@ struct PaneStatusRecord {
     state: String,
     exit_code: i32,
     seq: u64,
+    #[serde(default)]
+    task_id: Option<String>,
 }
 
 pub struct TmuxBackend {
@@ -215,7 +218,8 @@ impl TmuxBackend {
                 command: self.read_pane_format(tmux_pane_id, "#{pane_current_command}")?,
                 lines,
                 status: status.as_ref().map(status_text),
-                status_seq: status.map(|record| record.seq),
+                status_seq: status.as_ref().map(|record| record.seq),
+                status_task_id: status.and_then(|record| record.task_id),
             });
         }
         panes.sort_by_key(|pane| pane.created_at_ms);
@@ -268,6 +272,32 @@ impl TmuxBackend {
         let logical_start = lines.len().saturating_sub(start.unsigned_abs() as usize);
         let logical_end = lines.len().saturating_sub(end.unsigned_abs() as usize);
         Ok(lines[logical_start.min(logical_end)..logical_end].to_vec())
+    }
+
+    pub fn prepare_task(&self, pane_id: &str, task_id: &str) -> Result<(), ToolError> {
+        let path = self.pending_task_path(pane_id);
+        atomic_write_bytes(&path, format!("{task_id}\n").as_bytes())
+    }
+
+    pub fn clear_pending_task(&self, pane_id: &str) {
+        let _ = fs::remove_file(self.pending_task_path(pane_id));
+    }
+
+    pub fn send_command(&self, tmux_pane_id: &str, command: &str) -> Result<(), ToolError> {
+        self.run(&[
+            "send-keys".into(),
+            "-t".into(),
+            tmux_pane_id.into(),
+            "-l".into(),
+            command.into(),
+        ])?;
+        self.run(&[
+            "send-keys".into(),
+            "-t".into(),
+            tmux_pane_id.into(),
+            "Enter".into(),
+        ])?;
+        Ok(())
     }
 
     pub fn send_input(&self, tmux_pane_id: &str, input: &str) -> Result<(), ToolError> {
@@ -559,6 +589,11 @@ impl TmuxBackend {
         self.status_dir.join(format!("{}.json", escape_id(pane_id)))
     }
 
+    fn pending_task_path(&self, pane_id: &str) -> PathBuf {
+        self.status_dir
+            .join(format!("{}.pending", escape_id(pane_id)))
+    }
+
     fn persist_pane(&self, pane: &PaneRecord) -> Result<(), ToolError> {
         atomic_write_json(&self.panes_dir.join(format!("{}.json", pane.pane_id)), pane)
     }
@@ -629,11 +664,11 @@ pub fn validate_pane_name(name: &str) -> Result<(), ToolError> {
         || bytes
             .iter()
             .skip(1)
-            .any(|byte| !byte.is_ascii_alphanumeric() && !matches!(*byte, b'.' | b'_'))
+            .any(|byte| !byte.is_ascii_alphanumeric() && !matches!(*byte, b'.' | b'_' | b'-'))
     {
         return Err(ToolError::new(
             "tmux.invalidPaneName",
-            "name must match [A-Za-z0-9][A-Za-z0-9._]{0,63}",
+            "name must match [A-Za-z0-9][A-Za-z0-9._-]{0,63}",
         ));
     }
     Ok(())
@@ -685,6 +720,25 @@ fn now_ms() -> u128 {
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_millis()
+}
+
+fn atomic_write_bytes(path: &Path, bytes: &[u8]) -> Result<(), ToolError> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| ToolError::new("tmux.storageFailed", "tmux state path has no parent"))?;
+    ensure_dir(parent, 0o700).map_err(|error| ToolError::new("tmux.storageFailed", error))?;
+    let temporary = path.with_extension(format!("tmp.{}", std::process::id()));
+    let mut file = fs::OpenOptions::new()
+        .create(true)
+        .truncate(true)
+        .write(true)
+        .mode(0o600)
+        .open(&temporary)
+        .map_err(storage_error)?;
+    file.write_all(bytes).map_err(storage_error)?;
+    file.sync_all().map_err(storage_error)?;
+    fs::rename(&temporary, path).map_err(storage_error)?;
+    Ok(())
 }
 
 fn atomic_write_json<T: Serialize>(path: &Path, value: &T) -> Result<(), ToolError> {

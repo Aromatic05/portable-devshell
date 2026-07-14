@@ -65,12 +65,12 @@ test("session lifecycle emits MCP session events", async () => {
     }
 });
 
-test("session close also releases snapshots on routed instances", async () => {
+test("session close also releases routed worker tool state", async () => {
     const harness = createWorkerHarness();
     const released: string[] = [];
     const endpoint = new McpEndpointWorker({
         gateway: {
-            async closeFileSession(sessionId: string) {
+            async closeToolSession(sessionId: string) {
                 released.push(sessionId);
             }
         } as never,

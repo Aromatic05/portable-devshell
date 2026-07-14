@@ -6,16 +6,15 @@ use serde::{Deserialize, Serialize};
 pub enum TmuxWaitMode {
     Block,
     Nonblock,
-    Interactive,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 #[serde(rename_all = "camelCase")]
-pub struct TmuxSendParams {
+pub struct TmuxRunParams {
     #[serde(default)]
     pub pane: Option<String>,
-    pub input: String,
+    pub command: String,
     #[serde(default)]
     pub wait: Option<TmuxWaitMode>,
     #[serde(default)]
@@ -27,9 +26,22 @@ pub struct TmuxSendParams {
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 #[serde(rename_all = "camelCase")]
-pub struct TmuxCaptureParams {
+pub struct TmuxInputParams {
+    pub task: String,
+    pub input: String,
     #[serde(default)]
-    pub pane: Option<String>,
+    pub time_ms: Option<u64>,
+    #[serde(default)]
+    pub line: Option<i64>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
+pub struct TmuxReadParams {
+    pub task: String,
+    #[serde(default)]
+    pub time_ms: Option<u64>,
     #[serde(default)]
     pub line: Option<i64>,
 }
@@ -71,7 +83,7 @@ pub enum TmuxPanePosition {
 pub struct TmuxCreateParams {
     #[schemars(
         length(min = 1, max = 64),
-        regex(pattern = r"^[A-Za-z0-9][A-Za-z0-9._]{0,63}$")
+        regex(pattern = r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
     )]
     pub name: String,
     #[serde(default)]
@@ -93,7 +105,19 @@ pub struct TmuxCloseParams {
     pub force: bool,
 }
 
-#[derive(Clone, Debug, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct TmuxTaskView {
+    pub id: String,
+    pub pane_id: String,
+    pub status: String,
+    pub started_at: u128,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub finished_at: Option<u128>,
+    pub owner_connected: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct TmuxPaneView {
     pub id: String,
@@ -104,20 +128,23 @@ pub struct TmuxPaneView {
     pub cwd: String,
     pub command: String,
     pub created_at: u128,
+    pub locked: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub output: Option<Vec<String>>,
+    pub owned_by_current_session: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub task: Option<TmuxTaskView>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub lines: Option<Vec<String>>,
 }
 
-#[derive(Clone, Debug, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct TmuxCapacity {
     pub used: usize,
     pub max: usize,
 }
 
-#[derive(Clone, Debug, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct TmuxWarning {
     pub pane: Option<String>,
@@ -125,7 +152,19 @@ pub struct TmuxWarning {
     pub message: String,
 }
 
-#[derive(Debug, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct TmuxTaskOperationOutput {
+    pub kind: String,
+    pub task: TmuxTaskView,
+    pub pane: TmuxPaneView,
+    pub output: Vec<String>,
+    pub warnings: Vec<TmuxWarning>,
+    pub observation_epoch: String,
+    pub observation_reset: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct TmuxPaneOperationOutput {
     pub kind: String,
@@ -135,7 +174,7 @@ pub struct TmuxPaneOperationOutput {
     pub observation_reset: bool,
 }
 
-#[derive(Debug, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct TmuxListOutput {
     pub kind: String,
@@ -146,7 +185,7 @@ pub struct TmuxListOutput {
     pub observation_reset: bool,
 }
 
-#[derive(Debug, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct TmuxCreateOutput {
     pub kind: String,
@@ -157,7 +196,7 @@ pub struct TmuxCreateOutput {
     pub observation_reset: bool,
 }
 
-#[derive(Debug, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct TmuxCloseOutput {
     pub kind: String,

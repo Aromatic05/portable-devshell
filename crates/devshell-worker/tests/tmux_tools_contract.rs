@@ -22,7 +22,15 @@ fn start(env: &TestEnv, instance: &str) {
         .success();
 }
 
-fn call(env: &TestEnv, instance: &str, id: &str, method: &str, params: Value) -> Value {
+fn call(
+    env: &TestEnv,
+    instance: &str,
+    id: &str,
+    method: &str,
+    params: Value,
+    session: &str,
+    request_id: &str,
+) -> Value {
     env.rpc(
         instance,
         &json!({
@@ -30,333 +38,586 @@ fn call(env: &TestEnv, instance: &str, id: &str, method: &str, params: Value) ->
             "id": id,
             "method": method,
             "params": params,
+            "context": {
+                "sessionId": session,
+                "requestId": request_id,
+                "source": "mcp"
+            }
         }),
     )
 }
 
 fn kill_tmux_server(env: &TestEnv, instance: &str) {
     let socket = env.tmux_socket_file(instance);
-    if !socket.exists() {
-        return;
+    if socket.exists() {
+        let _ = Command::new("tmux")
+            .args(["-S", socket.to_string_lossy().as_ref(), "kill-server"])
+            .status();
     }
-    let _ = Command::new("tmux")
-        .args(["-S", socket.to_string_lossy().as_ref(), "kill-server"])
-        .status();
 }
 
-fn wait_for_idle(env: &TestEnv, instance: &str, pane: &str) -> Value {
+fn stop(env: &TestEnv, instance: &str) {
+    env.json_command(&["stop", "--instance", instance]);
+    kill_tmux_server(env, instance);
+}
+
+fn wait_for_terminal(env: &TestEnv, instance: &str, task: &str, session: &str) -> Value {
     let deadline = Instant::now() + Duration::from_secs(5);
     loop {
         let response = call(
             env,
             instance,
             "wait",
-            "tmux_capture",
-            json!({ "pane": pane, "line": 200 }),
+            "tmux_read",
+            json!({ "task": task, "line": 200, "timeMs": 200 }),
+            session,
+            "wait-task",
         );
         assert_eq!(response["ok"], true, "{response}");
-        let status = response["result"]["panes"][0]["status"]
+        let status = response["result"]["task"]["status"]
             .as_str()
             .unwrap_or("unknown");
-        if status == "idle" || status.parse::<i32>().is_ok() {
+        if status != "running" {
             return response;
         }
-        assert!(
-            Instant::now() < deadline,
-            "pane did not become idle: {response}"
-        );
-        thread::sleep(Duration::from_millis(50));
+        assert!(Instant::now() < deadline, "task did not finish: {response}");
     }
 }
 
 #[test]
-fn tmux_tools_are_worker_native_and_document_caret_input() {
+fn tmux_catalog_exposes_task_scoped_tools() {
     if !tmux_available() {
         return;
     }
-
     let env = TestEnv::new();
     let instance = "aromatic-tmux-catalog";
     start(&env, instance);
-
-    let tools = call(&env, instance, "1", "tools.list", json!({}));
-    assert_eq!(tools["ok"], true, "{tools}");
+    let tools = call(
+        &env,
+        instance,
+        "1",
+        "tools.list",
+        json!({}),
+        "catalog",
+        "tools",
+    );
     let catalog = tools["result"]["tools"].as_array().unwrap();
     let names = catalog
         .iter()
         .map(|tool| tool["name"].as_str().unwrap())
         .collect::<Vec<_>>();
     for expected in [
-        "tmux_capture",
         "tmux_close",
         "tmux_create",
+        "tmux_input",
         "tmux_inspect",
         "tmux_list",
-        "tmux_send",
+        "tmux_read",
+        "tmux_run",
     ] {
         assert!(names.contains(&expected), "missing {expected}: {names:?}");
     }
-
-    let create = catalog
+    assert!(!names.contains(&"tmux_send"));
+    assert!(!names.contains(&"tmux_capture"));
+    let run = catalog
         .iter()
-        .find(|tool| tool["name"] == "tmux_create")
-        .expect("tmux_create catalog entry");
-    let name_schema = &create["inputSchema"]["properties"]["name"];
-    assert_eq!(
-        name_schema["pattern"], "^[A-Za-z0-9][A-Za-z0-9._]{0,63}$",
-        "{name_schema}"
-    );
-    assert_eq!(name_schema["minLength"], 1, "{name_schema}");
-    assert_eq!(name_schema["maxLength"], 64, "{name_schema}");
-
-    let send = catalog
+        .find(|tool| tool["name"] == "tmux_run")
+        .unwrap();
+    assert_eq!(run["inputSchema"]["required"], json!(["command"]));
+    let input = catalog
         .iter()
-        .find(|tool| tool["name"] == "tmux_send")
-        .expect("tmux_send catalog entry");
-    let description = send["description"].as_str().unwrap();
-    for notation in ["^M", "^C", "^D", "^I"] {
-        assert!(
-            description.contains(notation),
-            "missing {notation}: {description}"
-        );
-    }
-
-    env.json_command(&["stop", "--instance", instance]);
-    kill_tmux_server(&env, instance);
+        .find(|tool| tool["name"] == "tmux_input")
+        .unwrap();
+    assert_eq!(input["inputSchema"]["required"], json!(["task", "input"]));
+    stop(&env, instance);
 }
 
 #[test]
-fn first_command_discards_delayed_initial_prompt_output() {
+fn tmux_run_returns_a_task_and_preserves_clean_first_output() {
+    if !tmux_available() {
+        return;
+    }
+    let env = TestEnv::new();
+    let instance = "aromatic-tmux-run";
+    start(&env, instance);
+    let run = call(
+        &env,
+        instance,
+        "1",
+        "tmux_run",
+        json!({
+            "pane": "main",
+            "command": "printf '\\x4f\\x4b\\n'",
+            "wait": "block",
+            "timeMs": 3000,
+            "line": 80
+        }),
+        "session-a",
+        "run-ok",
+    );
+    assert_eq!(run["ok"], true, "{run}");
+    assert_eq!(run["result"]["task"]["status"], "0", "{run}");
+    assert!(
+        run["result"]["output"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|line| line.as_str() == Some("OK")),
+        "{run}"
+    );
+    stop(&env, instance);
+}
+
+#[test]
+fn tmux_task_lock_controls_input_read_and_close_but_not_inspect() {
+    if !tmux_available() {
+        return;
+    }
+    let env = TestEnv::new();
+    let instance = "aromatic-tmux-lock";
+    start(&env, instance);
+    let created = call(
+        &env,
+        instance,
+        "0",
+        "tmux_create",
+        json!({ "name": "server" }),
+        "session-a",
+        "create-server",
+    );
+    assert_eq!(created["ok"], true, "{created}");
+    let run = call(
+        &env,
+        instance,
+        "1",
+        "tmux_run",
+        json!({ "pane": "server", "command": "sleep 10", "wait": "nonblock" }),
+        "session-a",
+        "run-sleep",
+    );
+    assert_eq!(run["ok"], true, "{run}");
+    let task = run["result"]["task"]["id"].as_str().unwrap();
+
+    let denied_read = call(
+        &env,
+        instance,
+        "2",
+        "tmux_read",
+        json!({ "task": task }),
+        "session-b",
+        "read-foreign",
+    );
+    assert_eq!(
+        denied_read["error"]["code"], "tmux.taskLocked",
+        "{denied_read}"
+    );
+    let denied_input = call(
+        &env,
+        instance,
+        "3",
+        "tmux_input",
+        json!({ "task": task, "input": "^C" }),
+        "session-b",
+        "input-foreign",
+    );
+    assert_eq!(
+        denied_input["error"]["code"], "tmux.taskLocked",
+        "{denied_input}"
+    );
+    let inspect = call(
+        &env,
+        instance,
+        "4",
+        "tmux_inspect",
+        json!({ "pane": "server", "start": -20, "end": 0 }),
+        "session-b",
+        "inspect-foreign",
+    );
+    assert_eq!(inspect["ok"], true, "{inspect}");
+    let denied_close = call(
+        &env,
+        instance,
+        "5",
+        "tmux_close",
+        json!({ "pane": "server", "force": true }),
+        "session-b",
+        "close-foreign",
+    );
+    assert_eq!(
+        denied_close["error"]["code"], "tmux.taskLocked",
+        "{denied_close}"
+    );
+
+    let interrupted = call(
+        &env,
+        instance,
+        "6",
+        "tmux_input",
+        json!({ "task": task, "input": "^C", "timeMs": 1000 }),
+        "session-a",
+        "input-owner",
+    );
+    assert_eq!(interrupted["ok"], true, "{interrupted}");
+    let finished = wait_for_terminal(&env, instance, task, "session-a");
+    assert_ne!(finished["result"]["task"]["status"], "running");
+    stop(&env, instance);
+}
+
+#[test]
+fn tmux_run_without_pane_reuses_idle_then_creates_auto_pane() {
+    if !tmux_available() {
+        return;
+    }
+    let env = TestEnv::new();
+    let instance = "aromatic-tmux-auto";
+    start(&env, instance);
+    let first = call(
+        &env,
+        instance,
+        "1",
+        "tmux_run",
+        json!({ "command": "sleep 10", "wait": "nonblock" }),
+        "session-a",
+        "run-main",
+    );
+    assert_eq!(first["result"]["pane"]["name"], "main", "{first}");
+    let first_task = first["result"]["task"]["id"].as_str().unwrap();
+
+    let second = call(
+        &env,
+        instance,
+        "2",
+        "tmux_run",
+        json!({ "command": "printf AUTO\\n", "wait": "block", "timeMs": 3000 }),
+        "session-b",
+        "run-auto",
+    );
+    assert_eq!(second["ok"], true, "{second}");
+    assert_eq!(second["result"]["pane"]["name"], "auto-1", "{second}");
+
+    let replay = call(
+        &env,
+        instance,
+        "3",
+        "tmux_run",
+        json!({ "command": "printf AUTO\\n", "wait": "block", "timeMs": 3000 }),
+        "session-b",
+        "run-auto",
+    );
+    assert_eq!(
+        replay["result"]["task"]["id"],
+        second["result"]["task"]["id"]
+    );
+    let conflict = call(
+        &env,
+        instance,
+        "3b",
+        "tmux_run",
+        json!({ "command": "printf DIFFERENT\\n", "wait": "block", "timeMs": 3000 }),
+        "session-b",
+        "run-auto",
+    );
+    assert_eq!(
+        conflict["error"]["code"], "tmux.requestIdConflict",
+        "{conflict}"
+    );
+
+    let _ = call(
+        &env,
+        instance,
+        "4",
+        "tmux_input",
+        json!({ "task": first_task, "input": "^C" }),
+        "session-a",
+        "stop-main",
+    );
+    let _ = wait_for_terminal(&env, instance, first_task, "session-a");
+    stop(&env, instance);
+}
+
+#[test]
+fn concurrent_duplicate_run_requests_share_one_in_flight_execution() {
+    if !tmux_available() {
+        return;
+    }
+    let env = TestEnv::new();
+    let instance = "aromatic-tmux-replay-race";
+    start(&env, instance);
+
+    let (first, second) = thread::scope(|scope| {
+        let first = scope.spawn(|| {
+            call(
+                &env,
+                instance,
+                "1",
+                "tmux_run",
+                json!({ "pane": "main", "command": "sleep 10", "wait": "nonblock" }),
+                "session-a",
+                "same-run-request",
+            )
+        });
+        let second = scope.spawn(|| {
+            call(
+                &env,
+                instance,
+                "2",
+                "tmux_run",
+                json!({ "pane": "main", "command": "sleep 10", "wait": "nonblock" }),
+                "session-a",
+                "same-run-request",
+            )
+        });
+        (first.join().unwrap(), second.join().unwrap())
+    });
+
+    assert_eq!(first["ok"], true, "{first}");
+    assert_eq!(second["ok"], true, "{second}");
+    assert_eq!(
+        first["result"]["task"]["id"],
+        second["result"]["task"]["id"]
+    );
+    let task = first["result"]["task"]["id"].as_str().unwrap();
+    let interrupted = call(
+        &env,
+        instance,
+        "3",
+        "tmux_input",
+        json!({ "task": task, "input": "^C", "timeMs": 1000 }),
+        "session-a",
+        "stop-replayed-task",
+    );
+    assert_eq!(interrupted["ok"], true, "{interrupted}");
+    let _ = wait_for_terminal(&env, instance, task, "session-a");
+    stop(&env, instance);
+}
+
+#[test]
+fn block_wait_does_not_prevent_same_session_interrupt() {
+    if !tmux_available() {
+        return;
+    }
+    let env = TestEnv::new();
+    let instance = "aromatic-tmux-concurrent";
+    start(&env, instance);
+
+    thread::scope(|scope| {
+        let block = scope.spawn(|| {
+            call(
+                &env,
+                instance,
+                "1",
+                "tmux_run",
+                json!({ "pane": "main", "command": "sleep 10", "wait": "block", "timeMs": 5000 }),
+                "session-a",
+                "block-run",
+            )
+        });
+
+        let deadline = Instant::now() + Duration::from_secs(3);
+        let task = loop {
+            let listed = call(
+                &env,
+                instance,
+                "2",
+                "tmux_list",
+                json!({}),
+                "session-a",
+                "list-running",
+            );
+            if let Some(task) = listed["result"]["panes"][0]["task"]["id"].as_str() {
+                break task.to_string();
+            }
+            assert!(Instant::now() < deadline, "task did not appear: {listed}");
+            thread::sleep(Duration::from_millis(25));
+        };
+        let interrupted = call(
+            &env,
+            instance,
+            "3",
+            "tmux_input",
+            json!({ "task": task, "input": "^C", "timeMs": 1000 }),
+            "session-a",
+            "interrupt-block",
+        );
+        assert_eq!(interrupted["ok"], true, "{interrupted}");
+        let result = block.join().unwrap();
+        assert_eq!(result["ok"], true, "{result}");
+        assert_ne!(result["result"]["task"]["status"], "running", "{result}");
+    });
+
+    stop(&env, instance);
+}
+
+#[test]
+fn bash_shell_preserves_task_identity_through_exit() {
     if !tmux_available()
-        || !Command::new("zsh")
+        || !Command::new("bash")
             .arg("--version")
             .output()
             .is_ok_and(|output| output.status.success())
     {
         return;
     }
-
     let env = TestEnv::new();
-    std::fs::write(
-        env.home().join(".zshrc"),
-        r#"
-devshell_test_prompt() {
-  if [[ ! -f "$HOME/.devshell-test-prompt-ready" ]]; then
-    : >"$HOME/.devshell-test-prompt-ready"
-    sleep 0.2
-    print -rn -- initial-prompt-noise
-  fi
-}
-PROMPT='$(devshell_test_prompt)%# '
-"#,
-    )
-    .unwrap();
-
-    let instance = "aromatic-tmux-initial-prompt";
-    env.command_with_env("SHELL", "/bin/zsh")
+    let instance = "aromatic-tmux-bash";
+    env.command_with_env("SHELL", "/bin/bash")
         .current_dir(env.workspace())
         .args(["start", "--instance", instance])
         .assert()
         .success();
-
-    let sent = call(
+    let run = call(
         &env,
         instance,
         "1",
-        "tmux_send",
+        "tmux_run",
         json!({
             "pane": "main",
-            "input": "printf '\\x4f\\x4b\\n'^M",
+            "command": "printf 'BASH-OK\\n'",
             "wait": "block",
             "timeMs": 3000,
             "line": 80
         }),
+        "session-bash",
+        "run-bash",
     );
-    assert_eq!(sent["ok"], true, "{sent}");
-    let output = sent["result"]["panes"][0]["output"].as_array().unwrap();
+    assert_eq!(run["ok"], true, "{run}");
+    assert_eq!(run["result"]["task"]["status"], "0", "{run}");
     assert!(
-        output
+        run["result"]["output"]
+            .as_array()
+            .unwrap()
             .iter()
-            .any(|line| line.as_str().is_some_and(|line| line == "OK")),
-        "{sent}"
+            .any(|line| line.as_str() == Some("BASH-OK")),
+        "{run}"
     );
-    assert!(
-        output.iter().all(|line| !line
-            .as_str()
-            .is_some_and(|line| line.contains("initial-prompt-noise"))),
-        "{sent}"
-    );
-
-    env.json_command(&["stop", "--instance", instance]);
-    kill_tmux_server(&env, instance);
+    stop(&env, instance);
 }
 
 #[test]
-fn tmux_panes_support_send_capture_inspect_create_and_close() {
+fn closing_owner_session_keeps_running_task_locked_until_exit() {
     if !tmux_available() {
         return;
     }
-
     let env = TestEnv::new();
-    let instance = "aromatic-tmux-tools";
+    let instance = "aromatic-tmux-session-close";
     start(&env, instance);
-
-    let listed = call(&env, instance, "1", "tmux_list", json!({}));
-    assert_eq!(listed["ok"], true, "{listed}");
-    assert_eq!(listed["result"]["panes"].as_array().unwrap().len(), 1);
-    assert_eq!(listed["result"]["panes"][0]["name"], "main");
-    assert_eq!(listed["result"]["capacity"]["used"], 1);
-
-    let sent = call(
+    let run = call(
         &env,
         instance,
-        "2",
-        "tmux_send",
-        json!({
-            "pane": "main",
-            "input": "printf '\\x54\\x4d\\x55\\x58\\x2d\\x52\\x45\\x41\\x44\\x59\\n'^M",
-            "wait": "block",
-            "timeMs": 3000,
-            "line": 80
-        }),
+        "1",
+        "tmux_run",
+        json!({ "pane": "main", "command": "sleep 1", "wait": "nonblock" }),
+        "session-a",
+        "run-before-close",
     );
-    assert_eq!(sent["ok"], true, "{sent}");
-    assert!(
-        sent["result"]["panes"][0]["output"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|line| line.as_str().is_some_and(|line| line == "TMUX-READY")),
-        "{sent}"
-    );
-
-    let created = call(
-        &env,
-        instance,
-        "3",
-        "tmux_create",
-        json!({
-            "name": "server",
-            "relativeTo": "main",
-            "position": "right",
-            "sizePercent": 40,
-            "cwd": "./"
-        }),
-    );
-    assert_eq!(created["ok"], true, "{created}");
-    assert_eq!(created["result"]["pane"]["name"], "server");
-
-    let nonblock = call(
-        &env,
-        instance,
-        "4",
-        "tmux_send",
-        json!({
-            "pane": "server",
-            "input": "sleep 10^M",
-            "wait": "nonblock",
-            "timeMs": 100,
-            "line": 20
-        }),
-    );
-    assert_eq!(nonblock["ok"], true, "{nonblock}");
-    assert_eq!(nonblock["result"]["panes"][0]["status"], "running");
-
-    let interrupted = call(
-        &env,
-        instance,
-        "5",
-        "tmux_send",
-        json!({
-            "pane": "server",
-            "input": "^C",
-            "wait": "interactive",
-            "timeMs": 1000,
-            "line": 20
-        }),
-    );
-    assert_eq!(interrupted["ok"], true, "{interrupted}");
-    let _ = wait_for_idle(&env, instance, "server");
-
-    let inspected = call(
-        &env,
-        instance,
-        "6",
-        "tmux_inspect",
-        json!({ "panes": "all", "start": -20, "end": 0 }),
-    );
-    assert_eq!(inspected["ok"], true, "{inspected}");
-    assert_eq!(inspected["result"]["panes"].as_array().unwrap().len(), 2);
-    let main = inspected["result"]["panes"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|pane| pane["name"] == "main")
-        .expect("main pane inspection");
-    assert!(
-        main["lines"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|line| line.as_str() == Some("TMUX-READY")),
-        "{inspected}"
-    );
-
+    assert_eq!(run["ok"], true, "{run}");
+    let task = run["result"]["task"]["id"].as_str().unwrap();
     let closed = call(
         &env,
         instance,
-        "7",
-        "tmux_close",
-        json!({ "pane": "server", "force": false }),
+        "2",
+        "tool.session.close",
+        json!({ "sessionId": "session-a" }),
+        "control",
+        "close-session",
     );
     assert_eq!(closed["ok"], true, "{closed}");
 
-    let final_list = call(&env, instance, "8", "tmux_list", json!({}));
-    assert_eq!(final_list["result"]["panes"].as_array().unwrap().len(), 1);
-    assert_eq!(final_list["result"]["panes"][0]["name"], "main");
+    let listed = call(
+        &env,
+        instance,
+        "3",
+        "tmux_list",
+        json!({}),
+        "session-b",
+        "list-locked",
+    );
+    assert_eq!(listed["result"]["panes"][0]["locked"], true, "{listed}");
+    assert_eq!(
+        listed["result"]["panes"][0]["task"]["ownerConnected"], false,
+        "{listed}"
+    );
+    let stale_owner = call(
+        &env,
+        instance,
+        "4",
+        "tmux_input",
+        json!({ "task": task, "input": "^C" }),
+        "session-a",
+        "input-after-close",
+    );
+    assert_eq!(
+        stale_owner["error"]["code"], "tmux.sessionClosed",
+        "{stale_owner}"
+    );
+    let late_run = call(
+        &env,
+        instance,
+        "4b",
+        "tmux_run",
+        json!({ "command": "echo LATE", "wait": "block", "timeMs": 1000 }),
+        "session-a",
+        "late-run-after-close",
+    );
+    assert_eq!(
+        late_run["error"]["code"], "tmux.sessionClosed",
+        "{late_run}"
+    );
 
-    env.json_command(&["stop", "--instance", instance]);
-    kill_tmux_server(&env, instance);
+    thread::sleep(Duration::from_millis(1200));
+    let after = call(
+        &env,
+        instance,
+        "5",
+        "tmux_list",
+        json!({}),
+        "session-b",
+        "list-after-exit",
+    );
+    assert_eq!(after["result"]["panes"][0]["locked"], false, "{after}");
+    stop(&env, instance);
 }
 
 #[test]
-fn worker_restart_adopts_the_existing_tmux_runtime() {
+fn worker_restart_adopts_existing_panes() {
     if !tmux_available() {
         return;
     }
-
     let env = TestEnv::new();
     let instance = "aromatic-tmux-adopt";
     start(&env, instance);
-
     let created = call(
         &env,
         instance,
         "1",
         "tmux_create",
         json!({ "name": "persistent" }),
+        "session-a",
+        "create-persistent",
     );
-    assert_eq!(created["ok"], true, "{created}");
     let pane_id = created["result"]["pane"]["id"]
         .as_str()
         .unwrap()
         .to_string();
-
     env.json_command(&["stop", "--instance", instance]);
     assert!(env.tmux_socket_file(instance).exists());
-
     start(&env, instance);
-    let listed = call(&env, instance, "2", "tmux_list", json!({}));
-    assert_eq!(listed["ok"], true, "{listed}");
+    let listed = call(
+        &env,
+        instance,
+        "2",
+        "tmux_list",
+        json!({}),
+        "session-b",
+        "list-adopt",
+    );
     let persistent = listed["result"]["panes"]
         .as_array()
         .unwrap()
         .iter()
         .find(|pane| pane["name"] == "persistent")
-        .expect("persistent pane after worker restart");
+        .unwrap();
     assert_eq!(persistent["id"], pane_id);
     assert_eq!(listed["result"]["observationReset"], true);
-
-    env.json_command(&["stop", "--instance", instance]);
-    kill_tmux_server(&env, instance);
+    stop(&env, instance);
 }

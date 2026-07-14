@@ -81,6 +81,8 @@ pub fn serve(instance: InstanceName) -> Result<(), String> {
         builtin_tools.files,
         payloads,
         receives,
+        #[cfg(unix)]
+        builtin_tools.tmux,
     ));
     let _reverse_connector = config.reverse.clone().map(|reverse| {
         ReverseConnector::new(
@@ -164,7 +166,7 @@ fn handle_connection(stream: LocalIpcStream, router: Arc<RpcRouter>) -> Result<(
                     return Ok(());
                 }
             }
-            Ok(request) => match router.acquire_tool_permit() {
+            Ok(request) => match router.acquire_tool_permit(&request.method) {
                 Ok(permit) => {
                     #[cfg(unix)]
                     {
