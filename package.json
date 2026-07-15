@@ -1,6 +1,6 @@
 {
     "name": "portable-devshell",
-    "version": "0.4.1",
+    "version": "0.4.2",
     "private": true,
     "packageManager": "pnpm@10.13.1",
     "engines": {
@@ -9,15 +9,11 @@
     "scripts": {
         "dev": "node ./scripts/dev.mjs",
         "build": "pnpm -r --filter \"./packages/*\" build",
-        "build:worker:debug": "node ./scripts/build-worker.mjs",
-        "build:worker:debug:linux-x64": "node ./scripts/build-worker.mjs --target linux-x64",
-        "build:worker:debug:linux-arm64": "node ./scripts/build-worker.mjs --target linux-arm64",
-        "build:worker:debug:darwin-x64": "node ./scripts/build-worker.mjs --target darwin-x64",
-        "build:worker:debug:darwin-arm64": "node ./scripts/build-worker.mjs --target darwin-arm64",
-        "build:worker:debug:windows-x64": "node ./scripts/build-worker.mjs --target windows-x64",
-        "build:worker:debug:windows-arm64": "node ./scripts/build-worker.mjs --target windows-arm64",
+        "build:worker": "node ./scripts/build-worker.mjs",
         "lint": "eslint .",
         "lint:fix": "eslint . --fix",
+        "version:set": "node ./scripts/version-state.mjs set",
+        "version:check": "node ./scripts/version-state.mjs check-development",
         "test": "pnpm -r --workspace-concurrency=1 --filter \"./packages/*\" test",
         "typecheck": "pnpm -r --filter \"./packages/*\" typecheck",
         "install:local": "node ./scripts/install-local.mjs",

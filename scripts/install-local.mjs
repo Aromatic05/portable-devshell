@@ -149,7 +149,6 @@ async function installSourceWorker(target) {
         run("rustup", ["target", "add", target.rustTarget]);
         runNode([
             "./scripts/build-worker.mjs",
-            "--target",
             target.key,
             "--output-dir",
             outputDirectory

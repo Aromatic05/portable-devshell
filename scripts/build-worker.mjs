@@ -37,16 +37,13 @@ const TARGETS = {
 
 const repoRoot = fileURLToPath(new URL("../", import.meta.url));
 const args = process.argv.slice(2);
-const explicitTarget = readOption("--target");
-const outputDirectory = readOption("--output-dir");
-
-if (args.includes("--zigbuild")) {
-    throw new Error("--zigbuild was removed because Linux targets always use cargo zigbuild");
-}
+const explicitTarget = args[0] !== undefined && !args[0].startsWith("--") ? args[0] : undefined;
+const optionArgs = explicitTarget === undefined ? args : args.slice(1);
+const outputDirectory = readOption(optionArgs, "--output-dir");
+assertNoUnknownOptions(optionArgs, ["--output-dir"]);
 
 const target = explicitTarget === undefined ? detectHostTarget() : resolveTarget(explicitTarget);
-const profile = outputDirectory === undefined ? "debug" : "release";
-const workerSource = resolveSourcePath(target, profile);
+const workerSource = resolveSourcePath(target, "release");
 const cargoSubcommand = target.key.startsWith("linux-") ? "zigbuild" : "build";
 const buildEnvironment = target.key.startsWith("linux-") ? ensureZigBuild(process.env) : process.env;
 
@@ -61,7 +58,7 @@ run(
         resolve(repoRoot, "Cargo.toml"),
         "--target",
         target.rustTarget,
-        ...(profile === "release" ? ["--release"] : [])
+        "--release"
     ],
     { env: buildEnvironment }
 );
@@ -151,18 +148,29 @@ function run(command, args, options = {}) {
     }
 }
 
-function readOption(name) {
-    const index = args.indexOf(name);
+function readOption(values, name) {
+    const index = values.indexOf(name);
     if (index === -1) {
         return undefined;
     }
 
-    const value = args[index + 1];
+    const value = values[index + 1];
     if (value === undefined || value.startsWith("--")) {
         throw new Error(`${name} requires a value`);
     }
 
     return value;
+}
+
+function assertNoUnknownOptions(values, supportedOptions) {
+    for (let index = 0; index < values.length; index += 1) {
+        const value = values[index];
+        if (!value.startsWith("--")) continue;
+        if (!supportedOptions.includes(value)) {
+            throw new Error(`unsupported option: ${value}`);
+        }
+        index += 1;
+    }
 }
 
 function resolveSourcePath(target, profile) {

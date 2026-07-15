@@ -38,7 +38,7 @@ for (const target of [
             try {
                 const result = spawnSync(
                     process.execPath,
-                    [fixture.script, "--target", target.key],
+                    [fixture.script, target.key],
                     {
                         cwd: fixture.root,
                         encoding: "utf8",
@@ -57,6 +57,7 @@ for (const target of [
                     .split("\n");
                 assert.equal(cargoArgs[0], target.cargoSubcommand);
                 assert.ok(cargoArgs.includes("--locked"));
+                assert.ok(cargoArgs.includes("--release"));
                 assert.equal(
                     valueAfter(cargoArgs, "--target"),
                     target.rustTarget,
@@ -69,14 +70,48 @@ for (const target of [
 }
 
 test(
-    "build-worker rejects the removed --zigbuild switch",
+    "build-worker defaults to the host target when no target is provided",
     { skip },
     async () => {
         const fixture = await createFixture("x86_64-unknown-linux-musl");
         try {
             const result = spawnSync(
                 process.execPath,
-                [fixture.script, "--target", "linux-x64", "--zigbuild"],
+                [fixture.script],
+                {
+                    cwd: fixture.root,
+                    encoding: "utf8",
+                    env: {
+                        ...process.env,
+                        BUILD_WORKER_TEST_ROOT: fixture.root,
+                        BUILD_WORKER_TEST_TARGET: "x86_64-unknown-linux-musl",
+                        PATH: `${fixture.binDirectory}${delimiter}${process.env.PATH ?? ""}`,
+                    },
+                },
+            );
+
+            assert.equal(result.status, 0, result.stderr || result.stdout);
+            const cargoArgs = (await readFile(fixture.argsPath, "utf8"))
+                .trim()
+                .split("\n");
+            assert.equal(cargoArgs[0], "zigbuild");
+            assert.equal(valueAfter(cargoArgs, "--target"), "x86_64-unknown-linux-musl");
+            assert.ok(cargoArgs.includes("--release"));
+        } finally {
+            await rm(fixture.root, { force: true, recursive: true });
+        }
+    },
+);
+
+test(
+    "build-worker rejects --target because targets are positional",
+    { skip },
+    async () => {
+        const fixture = await createFixture("x86_64-unknown-linux-musl");
+        try {
+            const result = spawnSync(
+                process.execPath,
+                [fixture.script, "--target", "linux-x64"],
                 {
                     cwd: fixture.root,
                     encoding: "utf8",
@@ -88,10 +123,7 @@ test(
             );
 
             assert.notEqual(result.status, 0);
-            assert.match(
-                result.stderr,
-                /Linux targets always use cargo zigbuild/u,
-            );
+            assert.match(result.stderr, /unsupported option: --target/u);
         } finally {
             await rm(fixture.root, { force: true, recursive: true });
         }

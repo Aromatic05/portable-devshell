@@ -15,6 +15,8 @@ jobs:
         runs-on: ubuntu-24.04
         steps:
             - uses: actions/checkout@v5
+              with:
+                  fetch-depth: 0
             - uses: pnpm/action-setup@v5
               with:
                   version: 10.13.1
@@ -38,12 +40,13 @@ jobs:
                   echo "$zig_root" >> "$GITHUB_PATH"
             - name: 安装 cargo-zigbuild
               run: cargo install --locked cargo-zigbuild --version 0.23.0
+            - run: node ./scripts/version-state.mjs check-development
+            - run: node --test ./scripts/*.test.mjs
             - run: pnpm install --frozen-lockfile
-            - run: node --test ./scripts/build-worker.test.mjs
             - run: pnpm lint
             - run: pnpm build
             - run: cargo build --locked --workspace
-            - run: pnpm build:worker:debug:linux-x64
+            - run: pnpm build:worker linux-x64
             - run: pnpm package:app -- --output-dir ./ci-artifacts
             - uses: actions/upload-artifact@v7
               with:
@@ -55,6 +58,8 @@ jobs:
         runs-on: ubuntu-24.04
         steps:
             - uses: actions/checkout@v5
+              with:
+                  fetch-depth: 0
             - uses: pnpm/action-setup@v5
               with:
                   version: 10.13.1
