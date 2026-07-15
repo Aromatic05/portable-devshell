@@ -31,9 +31,15 @@ pub enum ArtifactEncoding {
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ArtifactReadInput {
+    #[schemars(length(min = 1))]
     pub handle: String,
+    /// Byte offset. Defaults to 0.
+    #[schemars(range(min = 0))]
     pub offset_bytes: Option<u64>,
+    /// Maximum bytes to return. Defaults to 65536.
+    #[schemars(range(min = 1, max = 1048576))]
     pub max_bytes: Option<usize>,
+    /// Output encoding. Defaults to utf8.
     pub encoding: Option<ArtifactEncoding>,
 }
 

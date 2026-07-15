@@ -30,7 +30,7 @@ impl ToolHandler for TmuxReadTool {
         ToolCatalogEntry {
             group: self.name.group().to_string(),
             name: self.name.as_str(),
-            description: "Consume unread line-oriented output from one tmux task owned by the current context. task is required. Positive line values return oldest unread lines, zero discards unread output, and negative values return only the requested tail. Use tmux_inspect for curses or terminal-screen state.".to_string(),
+            description: "Consume unread line-oriented output from a task. Positive line values return the oldest unread lines, zero discards unread output, and negative values return only the requested tail.".to_string(),
             input_schema: serde_json::to_value(schema_for!(TmuxReadParams)).unwrap(),
             output_schema: serde_json::to_value(schema_for!(TmuxTaskOperationOutput)).unwrap(),
             required_capabilities: vec![ToolCapability::Read],

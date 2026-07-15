@@ -30,7 +30,7 @@ impl ToolHandler for TmuxCreateTool {
         ToolCatalogEntry {
             group: self.name.group().to_string(),
             name: self.name.as_str(),
-            description: "Create a managed tmux pane without executing an initial command. cwd uses the worker path model: ./ is workspace-relative and / is absolute. Use tmux_run after creation.".to_string(),
+            description: "Create an empty managed pane. Use tmux_run to start a task in it.".to_string(),
             input_schema: serde_json::to_value(schema_for!(TmuxCreateParams)).unwrap(),
             output_schema: serde_json::to_value(schema_for!(TmuxCreateOutput)).unwrap(),
             required_capabilities: vec![ToolCapability::Execute],

@@ -29,8 +29,7 @@ impl ToolHandler for FileInfoTool {
         ToolCatalogEntry {
             group: self.name.group().to_string(),
             name: self.name.as_str(),
-            description: "Inspect multiple filesystem entries without following final symlinks."
-                .to_string(),
+            description: "Inspect file metadata without following the final symbolic link.".to_string(),
             input_schema: serde_json::to_value(schema_for!(FileInfoInput)).unwrap(),
             output_schema: serde_json::to_value(schema_for!(FileInfoOutput)).unwrap(),
             required_capabilities: vec![ToolCapability::Read],

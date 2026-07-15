@@ -90,7 +90,7 @@ test("MCP initialize tools/list and tools/call succeed against the frozen worker
             Object.fromEntries(Object.entries(workerTmuxSchema).filter(([key]) => key !== "properties" && key !== "required"))
         );
         assert.deepEqual((bash?.inputSchema.properties as Record<string, unknown>).ctxId, {
-            description: "Invocation context returned by environ_info.",
+            description: "Session context ID.",
             minLength: 1,
             type: "string"
         });

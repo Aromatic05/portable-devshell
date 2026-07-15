@@ -30,7 +30,7 @@ impl ToolHandler for TmuxListTool {
         ToolCatalogEntry {
             group: self.name.group().to_string(),
             name: self.name.as_str(),
-            description: "List managed tmux panes with stable pane identity, status, cwd, foreground command, and capacity.".to_string(),
+            description: "List managed panes, running tasks, and pane capacity.".to_string(),
             input_schema: serde_json::to_value(schema_for!(TmuxListParams)).unwrap(),
             output_schema: serde_json::to_value(schema_for!(TmuxListOutput)).unwrap(),
             required_capabilities: vec![ToolCapability::Read],

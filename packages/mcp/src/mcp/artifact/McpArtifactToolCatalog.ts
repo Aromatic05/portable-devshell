@@ -10,8 +10,7 @@ export class McpArtifactToolCatalog {
 
 function artifactShareTool(): ToolDefinition {
     return {
-        description:
-            "Create a temporary browser download link for a stdout or stderr artifact, regular file, or directory.",
+        description: "Create a temporary browser download link for an artifact, file, or directory.",
         group: "artifact",
         inputSchema: {
             additionalProperties: false,
@@ -20,30 +19,21 @@ function artifactShareTool(): ToolDefinition {
                 { not: { required: ["handle"] }, required: ["path"] }
             ],
             properties: {
-                expiresInSeconds: {
-                    minimum: 60,
-                    type: "integer"
-                },
-                handle: {
-                    minLength: 1,
-                    type: "string"
-                },
-                instance: {
-                    description:
-                        "Optional source instance. Defaults to the current endpoint instance.",
-                    minLength: 1,
-                    type: "string"
-                },
-                path: {
-                    minLength: 1,
-                    type: "string"
-                }
+                expiresInSeconds: { minimum: 60, type: "integer" },
+                handle: { minLength: 1, type: "string" },
+                path: { minLength: 1, type: "string" }
             },
             type: "object"
         },
         name: "artifact_share",
         outputSchema: {
             additionalProperties: true,
+            properties: {
+                expiresAtMs: { minimum: 0, type: "integer" },
+                shareId: { minLength: 1, type: "string" },
+                url: { minLength: 1, type: "string" }
+            },
+            required: ["shareId", "url", "expiresAtMs"],
             type: "object"
         },
         requiredCapabilities: ["read", "write"]
@@ -51,9 +41,10 @@ function artifactShareTool(): ToolDefinition {
 }
 
 function artifactTransferTool(): ToolDefinition {
+    const nonStartFields = ["handle", "sourcePath", "targetInstance", "targetPath", "overwrite"]
+        .map((field) => ({ required: [field] }));
     return {
-        description:
-            "Start, inspect, or cancel an asynchronous transfer of a stdout or stderr artifact, regular file, or directory between managed destinations.",
+        description: "Start, inspect, or cancel an asynchronous file or artifact transfer between managed instances.",
         group: "artifact",
         inputSchema: {
             additionalProperties: false,
@@ -63,45 +54,40 @@ function artifactTransferTool(): ToolDefinition {
                         { not: { required: ["sourcePath"] }, required: ["handle"] },
                         { not: { required: ["handle"] }, required: ["sourcePath"] }
                     ],
-                    properties: {
-                        handle: { minLength: 1, type: "string" },
-                        instance: {
-                            description:
-                                "Optional source instance. Defaults to the current endpoint instance.",
-                            minLength: 1,
-                            type: "string"
-                        },
-                        operation: { const: "start" },
-                        overwrite: { default: false, type: "boolean" },
-                        sourcePath: { minLength: 1, type: "string" },
-                        targetInstance: { minLength: 1, type: "string" },
-                        targetPath: { minLength: 1, type: "string" }
-                    },
-                    required: ["operation", "targetInstance", "targetPath"],
-                    type: "object"
+                    properties: { operation: { const: "start" } },
+                    required: ["operation", "targetInstance", "targetPath"]
                 },
                 {
-                    properties: {
-                        operation: { const: "status" },
-                        transferId: { minLength: 1, type: "string" }
-                    },
-                    required: ["operation", "transferId"],
-                    type: "object"
+                    not: { anyOf: nonStartFields },
+                    properties: { operation: { const: "status" } },
+                    required: ["operation", "transferId"]
                 },
                 {
-                    properties: {
-                        operation: { const: "cancel" },
-                        transferId: { minLength: 1, type: "string" }
-                    },
-                    required: ["operation", "transferId"],
-                    type: "object"
+                    not: { anyOf: nonStartFields },
+                    properties: { operation: { const: "cancel" } },
+                    required: ["operation", "transferId"]
                 }
             ],
+            properties: {
+                handle: { minLength: 1, type: "string" },
+                operation: { enum: ["start", "status", "cancel"], type: "string" },
+                overwrite: { default: false, type: "boolean" },
+                sourcePath: { minLength: 1, type: "string" },
+                targetInstance: { minLength: 1, type: "string" },
+                targetPath: { minLength: 1, type: "string" },
+                transferId: { minLength: 1, type: "string" }
+            },
+            required: ["operation"],
             type: "object"
         },
         name: "artifact_transfer",
         outputSchema: {
-            additionalProperties: true,
+            additionalProperties: false,
+            properties: {
+                operation: { enum: ["start", "status", "cancel"], type: "string" },
+                transfer: { type: "object" }
+            },
+            required: ["operation", "transfer"],
             type: "object"
         },
         requiredCapabilities: ["read", "write"]

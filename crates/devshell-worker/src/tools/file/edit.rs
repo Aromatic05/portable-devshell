@@ -48,12 +48,7 @@ impl ToolHandler for FileEditTool {
         ToolCatalogEntry {
             group: self.name.group().to_string(),
             name: self.name.as_str(),
-            description: concat!(
-                "Apply an ordered multi-file change set. Input is one `*** Begin Edit` / `*** End Edit` envelope containing `*** Write File:`, `*** Patch File:`, `*** Rewrite File:`, `*** Delete File:`, and `*** Move File:` sections. ",
-                "Write and Rewrite bodies are literal UTF-8 text. Patch bodies use exact context hunks beginning with `@@`, `@@ BOF`, or `@@ EOF`, followed by space, `-`, and `+` lines. ",
-                "Existing files must have been read or searched in the same MCP session; revisions and snapshots are resolved automatically. The envelope is statically preflighted before writing. Each child operation commits atomically in order; on the first runtime failure, prior operations remain applied and later operations are reported as notExecuted."
-            )
-            .to_string(),
+            description: "Apply an ordered multi-file change set. changes must contain one *** Begin Edit / *** End Edit envelope with Write File, Patch File, Rewrite File, Delete File, or Move File sections. Patch hunks use @@, @@ BOF, or @@ EOF with space, -, and + line prefixes. Existing files must be read or searched first. If an operation fails, earlier operations remain applied and later operations are not executed.".to_string(),
             input_schema: serde_json::to_value(schema_for!(FileChangeSetInput)).unwrap(),
             output_schema: serde_json::to_value(schema_for!(FileChangeSetOutput)).unwrap(),
             required_capabilities: vec![ToolCapability::Write],

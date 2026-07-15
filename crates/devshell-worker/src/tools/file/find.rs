@@ -28,7 +28,7 @@ impl ToolHandler for FileFindTool {
         &self.name
     }
     fn catalog_entry(&self) -> ToolCatalogEntry {
-        ToolCatalogEntry { group: self.name.group().to_string(), name: self.name.as_str(), description: "Find exact paths, directories, and globs. Returns structured entries plus a compact hierarchical tree. Hidden development files are included by default; .git is always excluded.".to_string(), input_schema: serde_json::to_value(schema_for!(FileFindInput)).unwrap(), output_schema: serde_json::to_value(schema_for!(FileFindOutput)).unwrap(), required_capabilities: vec![ToolCapability::Read] }
+        ToolCatalogEntry { group: self.name.group().to_string(), name: self.name.as_str(), description: "Find files and directories by exact path or glob.".to_string(), input_schema: serde_json::to_value(schema_for!(FileFindInput)).unwrap(), output_schema: serde_json::to_value(schema_for!(FileFindOutput)).unwrap(), required_capabilities: vec![ToolCapability::Read] }
     }
     fn call(&self, call: ToolCall) -> Result<serde_json::Value, ToolError> {
         call.check_cancelled()?;

@@ -25,9 +25,36 @@ export class McpToolSchemaAdapter {
 
         return {
             description,
-            inputSchema: tool.inputSchema,
+            inputSchema: normalizeSchema(tool.inputSchema),
             name: tool.name,
-            outputSchema: tool.outputSchema
+            outputSchema: normalizeSchema(tool.outputSchema)
         };
     }
+}
+
+function normalizeSchema(value: JsonValue): JsonValue {
+    if (Array.isArray(value)) {
+        return value.map(normalizeSchema);
+    }
+    if (value === null || typeof value !== "object") {
+        return value;
+    }
+
+    const source = value as Record<string, JsonValue>;
+    const numeric = isNumericType(source.type);
+    const normalized: Record<string, JsonValue> = {};
+    for (const [key, entry] of Object.entries(source)) {
+        if (numeric && key === "format") {
+            continue;
+        }
+        normalized[key] = normalizeSchema(entry);
+    }
+    return normalized;
+}
+
+function isNumericType(value: JsonValue | undefined): boolean {
+    if (value === "integer" || value === "number") {
+        return true;
+    }
+    return Array.isArray(value) && value.some((entry) => entry === "integer" || entry === "number");
 }

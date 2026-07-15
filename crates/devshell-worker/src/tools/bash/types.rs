@@ -15,8 +15,12 @@ pub struct BashRunParams {
     #[serde(default)]
     pub stdin: Option<String>,
     #[serde(default)]
+    /// Command timeout in milliseconds. Defaults to 30000.
+    #[schemars(range(min = 1, max = 100000))]
     pub timeout_ms: Option<u64>,
     #[serde(default)]
+    /// Maximum captured bytes per output stream. Defaults to 4194304.
+    #[schemars(range(min = 1, max = 16777216))]
     pub max_capture_bytes: Option<usize>,
     #[serde(default)]
     pub env: BTreeMap<String, Option<String>>,

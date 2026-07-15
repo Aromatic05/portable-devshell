@@ -237,7 +237,12 @@ test("only environ_info omits ctxId across the complete 24-tool endpoint catalog
     const tools = endpoint.listTools();
     assert.equal(tools.length, 24);
     assert.equal(tools[0]?.name, "environ_info");
+    assert.equal(
+        tools[0]?.description,
+        "Initialize the session context and return the target environment. Call once at the start of each session and include the returned ctxId in every later tool call. Reuse it until a tool explicitly reports that it has expired, then call environ_info again. If it is lost or rejected as invalid, stop and ask the user for instructions."
+    );
     for (const tool of tools) {
+        assert.doesNotMatch(tool.description, /Pass the ctxId returned by environ_info|Exposed by portable-devshell MCP|Set instance to route/u);
         const schema = tool.inputSchema as { properties?: Record<string, unknown>; required?: string[] };
         if (tool.name === "environ_info") {
             assert.equal(schema.properties?.ctxId, undefined);

@@ -23,7 +23,7 @@ use crate::tools::{ToolCall, ToolCapability, ToolCatalogEntry, ToolError, ToolHa
 
 const DEFAULT_TIMEOUT_MS: u64 = 30_000;
 const DEFAULT_MAX_CAPTURE_BYTES: usize = 4 * 1024 * 1024;
-const MAX_TIMEOUT_MS: u64 = 300_000;
+const MAX_TIMEOUT_MS: u64 = 100_000;
 const MAX_CAPTURE_BYTES: usize = 16 * 1024 * 1024;
 const MAX_STDIN_BYTES: usize = 4 * 1024 * 1024;
 
@@ -75,10 +75,16 @@ impl ToolHandler for BashRunTool {
                 "timeoutMs and maxCaptureBytes must be positive",
             ));
         }
-        if timeout_ms > MAX_TIMEOUT_MS || max_capture > MAX_CAPTURE_BYTES {
+        if timeout_ms > MAX_TIMEOUT_MS {
             return Err(ToolError::new(
                 "tool.invalidArguments",
-                "timeoutMs or maxCaptureBytes exceeds the worker limit",
+                "timeoutMs cannot exceed 100000; use tmux_run for long-running commands",
+            ));
+        }
+        if max_capture > MAX_CAPTURE_BYTES {
+            return Err(ToolError::new(
+                "tool.invalidArguments",
+                "maxCaptureBytes exceeds the worker limit",
             ));
         }
         if params

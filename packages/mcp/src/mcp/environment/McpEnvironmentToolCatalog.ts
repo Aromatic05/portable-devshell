@@ -5,7 +5,7 @@ export const mcpEnvironmentToolName = "environ_info" as const;
 export class McpEnvironmentToolCatalog {
     list(): ToolDefinition[] {
         return [{
-            description: "Create a persistent invocation context and return the essential target environment.",
+            description: "Initialize the session context and return the target environment. Call once at the start of each session and include the returned ctxId in every later tool call. Reuse it until a tool explicitly reports that it has expired, then call environ_info again. If it is lost or rejected as invalid, stop and ask the user for instructions.",
             group: "environment",
             inputSchema: {
                 additionalProperties: false,
@@ -16,8 +16,8 @@ export class McpEnvironmentToolCatalog {
             outputSchema: {
                 additionalProperties: false,
                 properties: {
-                    ctxId: { minLength: 1, type: "string" },
-                    expiresAt: { minLength: 1, type: "string" },
+                    ctxId: { description: "Session context ID.", minLength: 1, type: "string" },
+                    expiresAt: { description: "Context expiration time.", minLength: 1, type: "string" },
                     instance: { minLength: 1, type: "string" },
                     platform: { type: "object" },
                     workspace: { minLength: 1, type: "string" }

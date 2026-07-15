@@ -30,7 +30,7 @@ impl ToolHandler for TmuxCloseTool {
         ToolCatalogEntry {
             group: self.name.group().to_string(),
             name: self.name.as_str(),
-            description: "Close one managed tmux pane. Without force the pane must be idle. The final managed pane cannot be closed.".to_string(),
+            description: "Close a managed pane. A running pane requires force, and the final pane cannot be closed.".to_string(),
             input_schema: serde_json::to_value(schema_for!(TmuxCloseParams)).unwrap(),
             output_schema: serde_json::to_value(schema_for!(TmuxCloseOutput)).unwrap(),
             required_capabilities: vec![ToolCapability::Execute],

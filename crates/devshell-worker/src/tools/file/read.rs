@@ -34,13 +34,7 @@ impl ToolHandler for FileReadTool {
         ToolCatalogEntry {
             group: self.name.group().to_string(),
             name: self.name.as_str(),
-            description: concat!(
-                "Read UTF-8 text and establish an implicit, context-scoped edit snapshot. ",
-                "view defaults to auto: small files return complete content, large supported source files return a compact Tree-sitter outline with symbol ranges and hierarchy, and other large files return the first 200 lines. ",
-                "Use view=content with selector for exact one-based ranges such as `50-100`, `50+100`, or `5-16,960-973`; add `:raw` to suppress context expansion. ",
-                "Use view=outline to force structural navigation. Snapshot identifiers and revisions are managed internally and never need to be copied into file_edit."
-            )
-            .to_string(),
+            description: "Read UTF-8 text. All file tools use ./ for workspace-relative paths and / for absolute paths. Use view=content with selector for exact ranges, or view=outline for structural navigation. Returned content ranges prepare those lines for file_edit; outline alone does not prepare source lines for patching.".to_string(),
             input_schema: serde_json::to_value(schema_for!(FileReadInput)).unwrap(),
             output_schema: serde_json::to_value(schema_for!(FileReadOutput)).unwrap(),
             required_capabilities: vec![ToolCapability::Read],

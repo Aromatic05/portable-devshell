@@ -19,14 +19,14 @@ impl ShellRuntime {
         #[cfg(windows)]
         {
             return format!(
-                "Run a command using {} {} on Windows. The command must use PowerShell syntax, not POSIX shell syntax.",
+                "Run a short, non-interactive command using {} {}. Use PowerShell syntax. Use tmux_run for long-running or interactive commands.",
                 self.display_name(),
                 self.version
             );
         }
         #[cfg(not(windows))]
         {
-            "Run a shell command in the worker environment.".to_string()
+            "Run a short, non-interactive shell command. Use tmux_run for long-running or interactive commands.".to_string()
         }
     }
 

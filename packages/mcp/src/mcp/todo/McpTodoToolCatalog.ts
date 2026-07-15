@@ -4,6 +4,13 @@ export type McpTodoToolName = "todo_read" | "todo_write";
 
 const todoItemSchema: JsonValue = {
     additionalProperties: false,
+    allOf: [{
+        if: {
+            properties: { status: { enum: ["blocked", "failed"] } },
+            required: ["status"]
+        },
+        then: { required: ["detail"] }
+    }],
     properties: {
         content: { minLength: 1, type: "string" },
         detail: { minLength: 1, type: "string" },
@@ -30,8 +37,7 @@ export class McpTodoToolCatalog {
     readonly #definitions: readonly ToolDefinition[] = [
         {
             requiredCapabilities: [],
-            description:
-                "Read the complete active todo plan for the current task.",
+            description: "Read the current todo plan. Use todo tools only for multi-step tasks.",
             group: "todo",
             inputSchema: {
                 additionalProperties: false,
@@ -43,8 +49,7 @@ export class McpTodoToolCatalog {
         },
         {
             requiredCapabilities: [],
-            description:
-                "Replace the complete active todo plan. Always read first and pass the current revision. Revision conflicts are never overwritten silently.",
+            description: "Replace the entire todo plan; this is not a patch. Always call todo_read first and pass its current revision. Allow at most one in_progress item. blocked and failed items require detail. Update the plan promptly when progress changes.",
             group: "todo",
             inputSchema: {
                 additionalProperties: false,
@@ -52,7 +57,14 @@ export class McpTodoToolCatalog {
                     revision: { minimum: 0, type: "integer" },
                     title: { minLength: 1, type: "string" },
                     todos: {
+                        contains: {
+                            properties: { status: { const: "in_progress" } },
+                            required: ["status"],
+                            type: "object"
+                        },
                         items: todoItemSchema,
+                        maxContains: 1,
+                        minContains: 0,
                         type: "array",
                     },
                 },

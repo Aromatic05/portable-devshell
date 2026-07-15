@@ -91,9 +91,10 @@ test("McpEndpointToolCatalog rejects duplicate names across providers", () => {
     );
 });
 
-test("McpToolDescriptionEnhancer appends MCP exposure note", () => {
+test("McpToolDescriptionEnhancer preserves only the supplied description", () => {
     const enhancer = new McpToolDescriptionEnhancer();
-    assert.match(enhancer.enhance("Run shell"), /Run shell/u);
+    assert.equal(enhancer.enhance("  Run shell  "), "Run shell");
+    assert.equal(enhancer.enhance(undefined), "");
 });
 
 test("McpToolSchemaAdapter rejects missing schema", () => {
@@ -102,4 +103,25 @@ test("McpToolSchemaAdapter rejects missing schema", () => {
         () => adapter.toMcpTool({ ...bashRun, inputSchema: undefined } as never, "Run shell"),
         /Tool schema unavailable/u
     );
+});
+
+test("McpToolSchemaAdapter removes non-standard numeric formats", () => {
+    const adapter = new McpToolSchemaAdapter();
+    const tool = adapter.toMcpTool({
+        ...bashRun,
+        inputSchema: {
+            properties: {
+                line: { format: "int64", type: "integer" },
+                nested: { items: { format: "uint8", type: ["integer", "null"] }, type: "array" }
+            },
+            type: "object"
+        }
+    }, "Run shell");
+    assert.deepEqual(tool.inputSchema, {
+        properties: {
+            line: { type: "integer" },
+            nested: { items: { type: ["integer", "null"] }, type: "array" }
+        },
+        type: "object"
+    });
 });

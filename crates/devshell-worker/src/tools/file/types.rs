@@ -20,6 +20,7 @@ pub enum FileParseStatus {
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct FileReadInput {
+    #[schemars(length(min = 1))]
     pub path: String,
     #[serde(default)]
     pub view: FileReadView,
@@ -291,6 +292,7 @@ pub struct FileWriteOutput {
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct FileFindInput {
+    #[schemars(length(min = 1))]
     pub paths: Vec<String>,
     #[serde(rename = "type")]
     pub entry_type: Option<FindType>,
@@ -324,12 +326,19 @@ pub struct FileFindEntry {
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct FileSearchInput {
+    #[schemars(length(min = 1))]
     pub pattern: String,
+    /// Paths to search. Defaults to ["./"].
     pub paths: Option<Vec<String>>,
+    /// Pattern syntax. Defaults to regex.
     pub syntax: Option<SearchSyntax>,
+    /// Case-sensitive matching. Defaults to true.
     pub case_sensitive: Option<bool>,
+    /// Include hidden files. Defaults to true.
     pub hidden: Option<bool>,
+    /// Respect ignore files. Defaults to true.
     pub gitignore: Option<bool>,
+    #[schemars(range(min = 0, max = 20))]
     pub context: Option<usize>,
     pub cursor: Option<String>,
 }
@@ -357,6 +366,7 @@ pub struct FileSearchFile {
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct FileInfoInput {
+    #[schemars(length(min = 1))]
     pub paths: Vec<String>,
 }
 #[derive(Debug, Serialize, JsonSchema)]

@@ -153,6 +153,17 @@ fn handshake_tools_and_bash_run_flow_work_over_framed_rpc() {
         assert!(tool["description"].is_string());
         assert!(tool["inputSchema"].is_object());
         assert!(tool["outputSchema"].is_object());
+        let serialized = serde_json::to_string(tool).unwrap();
+        assert!(
+            !serialized.contains("\"format\":\"uint8\""),
+            "{} contains uint8: {serialized}",
+            tool["name"]
+        );
+        assert!(
+            !serialized.contains("\"format\":\"int64\""),
+            "{} contains int64: {serialized}",
+            tool["name"]
+        );
         let required_capabilities = tool["requiredCapabilities"].as_array().unwrap();
         assert!(!required_capabilities.is_empty());
         assert!(
@@ -162,6 +173,14 @@ fn handshake_tools_and_bash_run_flow_work_over_framed_rpc() {
             ))
         );
     }
+    let bash_schema = catalog
+        .iter()
+        .find(|tool| tool["name"] == "bash_run")
+        .unwrap();
+    assert_eq!(
+        bash_schema["inputSchema"]["properties"]["timeoutMs"]["maximum"],
+        100_000
+    );
 
     let bash_run = env.rpc(
         instance,
@@ -256,6 +275,22 @@ fn bash_run_returns_success_for_timeout_and_capture_truncation() {
     assert_eq!(timed_out["result"]["termination"], "timeout");
     assert!(timed_out["result"].get("exitCode").is_none());
     assert!(timed_out["result"].get("termSignal").is_none());
+
+    let too_long = env.rpc(
+        instance,
+        &serde_json::json!({
+            "type": "request",
+            "id": "5-limit",
+            "method": "bash_run",
+            "params": {
+                "command": "true",
+                "timeoutMs": 100001
+            }
+        }),
+    );
+    assert_eq!(too_long["ok"], false);
+    assert_eq!(too_long["error"]["code"], "tool.invalidArguments");
+    assert!(too_long["error"]["message"].as_str().unwrap().contains("tmux_run"));
 
     let output_limited = env.rpc(
         instance,

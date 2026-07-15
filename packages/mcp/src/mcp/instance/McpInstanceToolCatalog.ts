@@ -17,7 +17,7 @@ const instanceNameSchema: JsonValue = {
     additionalProperties: false,
     properties: {
         instance: {
-            description: "Target portable-devshell instance name.",
+            description: "Managed instance name returned by instance_list.",
             minLength: 1,
             type: "string"
         }
@@ -34,7 +34,7 @@ export class McpInstanceToolCatalog {
     readonly #definitions: readonly ToolDefinition[] = [
         definition(
             "instance_list",
-            "List instances managed by this portable-devshell control server.",
+            "List managed instances and obtain names for cross-instance tool calls. Only use names returned here in another tool's instance field.",
             emptyObjectSchema
         ),
         definition(
@@ -44,7 +44,7 @@ export class McpInstanceToolCatalog {
         ),
         definition(
             "instance_create",
-            "Create a new SSH-only instance. The new endpoint inherits this endpoint's MCP tool groups and capabilities, excluding the instance group and manage capability.",
+            "Create an SSH instance. Use only when explicitly requested by the user.",
             {
                 additionalProperties: false,
                 properties: {
@@ -61,6 +61,7 @@ export class McpInstanceToolCatalog {
                     name: {
                         description: "New portable-devshell instance name.",
                         minLength: 1,
+                        pattern: "^[A-Za-z0-9]+(?:-[A-Za-z0-9]+)+$",
                         type: "string"
                     },
                     port: {
@@ -85,12 +86,12 @@ export class McpInstanceToolCatalog {
         ),
         definition(
             "instance_start",
-            "Start one managed instance using its configured workspace.",
+            "Start a managed instance. Use only when explicitly requested by the user.",
             instanceNameSchema
         ),
         definition(
             "instance_stop",
-            "Stop one managed instance.",
+            "Stop a managed instance. Use only when explicitly requested by the user.",
             instanceNameSchema
         )
     ];

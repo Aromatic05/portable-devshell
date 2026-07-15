@@ -81,6 +81,17 @@ test("management-enabled endpoint exposes five instance tools and augments worke
         (tools.find((tool) => tool.name === "bash_run")?.inputSchema as { properties?: Record<string, unknown> }).properties?.instance,
         undefined
     );
+    assert.equal(
+        ((tools.find((tool) => tool.name === "bash_run")?.inputSchema as { properties?: Record<string, { description?: string }> }).properties?.instance)?.description,
+        "Managed instance name returned by instance_list."
+    );
+    assert.equal(
+        tools.find((tool) => tool.name === "instance_list")?.description,
+        "List managed instances and obtain names for cross-instance tool calls. Only use names returned here in another tool's instance field."
+    );
+    for (const tool of tools) {
+        assert.doesNotMatch(tool.description, /Pass the ctxId returned by environ_info|Exposed by portable-devshell MCP|Set instance to route/u);
+    }
 });
 
 test("worker calls default to the endpoint instance and route explicit targets through the gateway", async () => {

@@ -251,11 +251,12 @@ fn bash_run_rejects_values_over_worker_hard_limits() {
         "bash_run",
         json!({
             "command": "true",
-            "timeoutMs": 300_001,
+            "timeoutMs": 100_001,
         }),
     );
     assert_eq!(response["ok"], false);
     assert_eq!(response["error"]["code"], "tool.invalidArguments");
+    assert!(response["error"]["message"].as_str().unwrap().contains("tmux_run"));
 
     env.json_command(&["stop", "--instance", instance]);
 }

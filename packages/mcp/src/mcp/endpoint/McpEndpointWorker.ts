@@ -115,7 +115,7 @@ export class McpEndpointWorker {
         const instanceRoutingEnabled = exposed.some((entry) => entry.owner === "instance");
         return exposed.map((entry) =>
             this.#adaptTool(
-                entry.owner === "worker" && instanceRoutingEnabled
+                (entry.owner === "worker" || entry.owner === "artifact") && instanceRoutingEnabled
                     ? withInstanceTarget(entry.definition)
                     : entry.definition
             )
@@ -439,13 +439,12 @@ function withCtxId(tool: ToolDefinition): ToolDefinition {
         : [];
     return {
         ...tool,
-        description: `${tool.description} Pass the ctxId returned by environ_info.`,
         inputSchema: {
             ...tool.inputSchema,
             properties: {
                 ...properties,
                 ctxId: {
-                    description: "Invocation context returned by environ_info.",
+                    description: "Session context ID.",
                     minLength: 1,
                     type: "string"
                 }
@@ -474,13 +473,12 @@ function withInstanceTarget(tool: ToolDefinition): ToolDefinition {
     const properties = isRecord(tool.inputSchema.properties) ? tool.inputSchema.properties : {};
     return {
         ...tool,
-        description: `${tool.description} Set instance to route the call to another managed instance; omit it to use the current instance.`,
         inputSchema: {
             ...tool.inputSchema,
             properties: {
                 ...properties,
                 instance: {
-                    description: "Optional target portable-devshell instance. Defaults to the current endpoint instance.",
+                    description: "Managed instance name returned by instance_list.",
                     minLength: 1,
                     type: "string"
                 }

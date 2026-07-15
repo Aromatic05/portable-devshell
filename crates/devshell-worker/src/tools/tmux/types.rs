@@ -16,11 +16,14 @@ pub struct TmuxRunParams {
     pub pane: Option<String>,
     pub command: String,
     #[serde(default)]
+    /// Wait mode. Defaults to block.
     pub wait: Option<TmuxWaitMode>,
     #[serde(default)]
+    /// Maximum time this call waits for output or completion. Defaults to 30000 and does not stop the task.
     #[schemars(range(min = 0, max = 300000))]
     pub time_ms: Option<u64>,
     #[serde(default)]
+    /// Output lines to consume. Defaults to 80.
     pub line: Option<i64>,
 }
 
@@ -31,9 +34,11 @@ pub struct TmuxInputParams {
     pub task: String,
     pub input: String,
     #[serde(default)]
+    /// Maximum time this call waits for new output. Defaults to 1000.
     #[schemars(range(min = 0, max = 300000))]
     pub time_ms: Option<u64>,
     #[serde(default)]
+    /// Output lines to consume. Defaults to 80.
     pub line: Option<i64>,
 }
 
@@ -43,9 +48,11 @@ pub struct TmuxInputParams {
 pub struct TmuxReadParams {
     pub task: String,
     #[serde(default)]
+    /// Maximum time this call waits for new output. Defaults to 0.
     #[schemars(range(min = 0, max = 300000))]
     pub time_ms: Option<u64>,
     #[serde(default)]
+    /// Output lines to consume. Defaults to 80.
     pub line: Option<i64>,
 }
 
@@ -64,8 +71,12 @@ pub struct TmuxInspectParams {
     #[serde(default)]
     pub panes: Option<TmuxInspectAll>,
     #[serde(default)]
+    /// History start offset. Defaults to -80 and must be less than end.
+    #[schemars(range(max = -1))]
     pub start: Option<i64>,
     #[serde(default)]
+    /// History end offset. Defaults to 0. At most 200 lines may be requested.
+    #[schemars(range(max = 0))]
     pub end: Option<i64>,
 }
 
@@ -94,6 +105,7 @@ pub struct TmuxCreateParams {
     #[serde(default)]
     pub position: Option<TmuxPanePosition>,
     #[serde(default)]
+    #[schemars(range(min = 10, max = 90))]
     pub size_percent: Option<u8>,
     #[serde(default)]
     pub cwd: Option<String>,

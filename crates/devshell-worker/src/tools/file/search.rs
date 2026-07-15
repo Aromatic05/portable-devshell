@@ -60,7 +60,7 @@ impl ToolHandler for FileSearchTool {
         &self.name
     }
     fn catalog_entry(&self) -> ToolCatalogEntry {
-        ToolCatalogEntry { group: self.name.group().to_string(), name: self.name.as_str(), description: "Search text within exact paths, directories, and globs. Complete returned source lines establish implicit, context-scoped edit coverage for later file_edit calls.".to_string(), input_schema: serde_json::to_value(schema_for!(FileSearchInput)).unwrap(), output_schema: serde_json::to_value(schema_for!(FileSearchOutput)).unwrap(), required_capabilities: vec![ToolCapability::Read] }
+        ToolCatalogEntry { group: self.name.group().to_string(), name: self.name.as_str(), description: "Search text in files, directories, or globs. Returned source lines prepare those lines for file_edit.".to_string(), input_schema: serde_json::to_value(schema_for!(FileSearchInput)).unwrap(), output_schema: serde_json::to_value(schema_for!(FileSearchOutput)).unwrap(), required_capabilities: vec![ToolCapability::Read] }
     }
     fn call(&self, call: ToolCall) -> Result<serde_json::Value, ToolError> {
         call.check_cancelled()?;

@@ -51,6 +51,10 @@ test("artifact endpoint exposes worker read plus control share and transfer whil
         "artifact_share",
         "artifact_transfer"
     ]);
+    for (const tool of endpoint.listTools()) {
+        const schema = tool.inputSchema as { properties?: Record<string, unknown> };
+        assert.equal(schema.properties?.instance, undefined, tool.name);
+    }
     assert.deepEqual(await endpoint.callTool("artifact_share", withContext({ path: "./dist" }), context), {
         shareId: "share-1"
     });
