@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn as nodeSpawn } from "node:child_process";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { PassThrough } from "node:stream";
@@ -454,8 +454,8 @@ test("WorkerInstance waits for approval before invoking tools and persists appro
         assert.equal(approved.decision?.decision, "approve");
         assert.equal(approved.decision?.decidedBy, "cli");
 
-        const approvalsFile = await readFile(join(homeDirectory, ".devshell", "task-6-approval", "control-worker", "approvals.jsonl"), "utf8");
-        assert.match(approvalsFile, new RegExp(approvalId, "u"));
+        const database = await stat(join(homeDirectory, ".devshell", "task-6-approval", "control-worker", "audit.sqlite3"));
+        assert.equal(database.size > 0, true);
 
         const replay = instance.subscribe(1);
         assert.equal(replay.kind, "events");

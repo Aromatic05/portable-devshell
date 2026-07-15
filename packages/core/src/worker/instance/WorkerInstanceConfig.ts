@@ -4,6 +4,10 @@ import type { WorkerCommandTransport } from "../command/WorkerCommandTransport.j
 import type { WorkerHandshakeParams } from "../../worker/protocol/WorkerProtocolClient.js";
 import type { WorkerRpcConnector } from "../rpc/WorkerRpcChannel.js";
 import { resolveToolSchedulerLimits, type ToolSchedulerLimits } from "../tool/ToolCallScheduler.js";
+import {
+    resolveAuditStorageLimits,
+    type AuditStorageLimits
+} from "../../audit/AuditStorageLimits.js";
 
 export type WorkerManagementMode = "controllerManaged" | "selfManaged";
 
@@ -14,6 +18,7 @@ interface WorkerInstanceConfigCommon {
     homeDirectory?: string;
     env?: NodeJS.ProcessEnv;
     eventBufferSize?: number;
+    auditStorage?: Partial<AuditStorageLimits>;
     handshake?: Partial<WorkerHandshakeParams>;
     approvalPolicy?: ApprovalPolicy;
     approvalTimeout?: ApprovalTimeout;
@@ -33,6 +38,7 @@ export type WorkerInstanceConfig =
       });
 
 export interface ResolvedWorkerInstanceConfig extends WorkerInstanceConfigCommon {
+    auditStorage: AuditStorageLimits;
     effectiveSecurityMode: EffectiveSecurityMode;
     eventBufferSize: number;
     handshake: WorkerHandshakeParams;
@@ -54,6 +60,7 @@ export function resolveWorkerInstanceConfig(config: WorkerInstanceConfig): Resol
 
     return {
         ...config,
+        auditStorage: resolveAuditStorageLimits(config.auditStorage),
         effectiveSecurityMode: config.effectiveSecurityMode ?? "disabled",
         eventBufferSize: config.eventBufferSize ?? 100,
         handshake: {

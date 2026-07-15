@@ -5,6 +5,7 @@ import {
     type InstanceContainerConfig,
     type InstanceContainerMountConfig
 } from "@portable-devshell/shared";
+import { minimumAuditStorageBytes } from "@portable-devshell/core";
 import { McpAuthPublicExposureGuard } from "@portable-devshell/mcp";
 
 import type { ControlConfig, ControlInstanceConfig, ControlMcpOAuth2Config } from "./codec/ConfigTomlCodec.js";
@@ -78,6 +79,7 @@ export class ControlConfigValidator {
 
         this.#validateSecurityMode(instance.security?.mode);
         this.#validateApprovalPolicy(instance.approvalPolicy);
+        this.#validateLogs(instance.logs);
         this.#validateToolScheduler(instance.tools?.scheduler);
 
         const expectedPath = `/${instance.name}/mcp`;
@@ -243,6 +245,18 @@ export class ControlConfigValidator {
             }
         }
     }
+
+    #validateLogs(logs: ControlInstanceConfig["logs"]): void {
+        if (logs === undefined) {
+            return;
+        }
+        this.#validatePositiveInteger(logs.eventBufferSize, "logs.eventBufferSize");
+        if (logs.maxBytes !== undefined && (!Number.isSafeInteger(logs.maxBytes) || logs.maxBytes < minimumAuditStorageBytes)) {
+            throw new Error(`logs.maxBytes must be an integer of at least ${minimumAuditStorageBytes}`);
+        }
+        this.#validatePositiveInteger(logs.retentionDays, "logs.retentionDays");
+    }
+
     #validateToolScheduler(scheduler: NonNullable<ControlInstanceConfig["tools"]>["scheduler"]): void {
         if (scheduler === undefined) {
             return;

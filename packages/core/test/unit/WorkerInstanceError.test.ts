@@ -129,6 +129,9 @@ function createInstance(
             },
             listApprovals: async () => []
         } as never,
+        auditDatabase: {
+            close: () => undefined
+        } as never,
         catalog: {
             hasSchema: () => false,
             listTools: () => [],

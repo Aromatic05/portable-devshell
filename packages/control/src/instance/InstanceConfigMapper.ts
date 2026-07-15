@@ -60,6 +60,10 @@ export class InstanceConfigMapper {
                 DEVSHELL_WORKER_SECURITY_MODE: effectiveSecurityMode
             },
             eventBufferSize: instance.logs?.eventBufferSize,
+            auditStorage: {
+                maxBytes: instance.logs?.maxBytes,
+                retentionDays: instance.logs?.retentionDays
+            },
             approvalPolicy: instance.approvalPolicy,
             toolScheduler: instance.tools?.scheduler,
             effectiveSecurityMode,

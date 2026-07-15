@@ -547,6 +547,7 @@ test("config exposes container and tool scheduler settings", async () => {
     harness.store.setFormDraft("config:alpha", {
         container: { build: { context: "/workspace/alpha", dockerfile: "Dockerfile.dev" }, mode: "dockerfile", preset: "ubuntu" },
         enabled: true,
+        logs: { eventBufferSize: 100, maxBytes: 67_108_864, retentionDays: 7 },
         mcp: { enabled: true, path: "/alpha/mcp", tools: { capabilities: ["read"], groups: ["file"] } },
         name: "alpha",
         provider: "docker",
@@ -558,10 +559,13 @@ test("config exposes container and tool scheduler settings", async () => {
     const boxes = selectMainScreenModel(harness.store.getState()).boxes;
     const provider = boxes.find((box) => box.id === "provider")!;
     const runtime = boxes.find((box) => box.id === "tool-runtime")!;
+    const logs = boxes.find((box) => box.id === "logs")!;
     assert.equal(provider.expandedLines.some((line) => line.text.includes("Dockerfile.dev")), true);
     assert.equal(provider.expandedLines.some((line) => line.text.includes("/workspace/alpha")), true);
     assert.equal(runtime.expandedLines.some((line) => line.text.includes("2")), true);
     assert.equal(runtime.expandedLines.some((line) => line.text.includes("3000")), true);
+    assert.equal(logs.expandedLines.some((line) => line.text.includes("67108864")), true);
+    assert.equal(logs.expandedLines.some((line) => line.text.includes("retentionDays")), true);
 });
 
 test("audit truncates input and output previews while opening complete structured details", async () => {

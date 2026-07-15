@@ -128,6 +128,7 @@ function parseInstanceDocument(document: TomlRecord): ControlInstanceConfig {
                 ? undefined
                 : {
                       eventBufferSize: asOptionalInteger(logs.eventBufferSize, "logs.eventBufferSize"),
+                      maxBytes: asOptionalInteger(logs.maxBytes, "logs.maxBytes"),
                       retentionDays: asOptionalInteger(logs.retentionDays, "logs.retentionDays")
                   },
         mcp: {

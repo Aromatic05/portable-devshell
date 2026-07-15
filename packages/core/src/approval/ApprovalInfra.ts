@@ -14,7 +14,7 @@ import {
     type ToolCallContext
 } from "@portable-devshell/shared";
 
-import { JsonlStore } from "../log/store/LogStoreJsonl.js";
+import type { AuditRecordStore } from "../audit/AuditRecordStore.js";
 
 export class ApprovalError extends Error {
     readonly code: string;
@@ -30,9 +30,9 @@ export class ApprovalError extends Error {
 }
 
 export class ApprovalStore {
-    readonly #store: JsonlStore<ApprovalRequest>;
+    readonly #store: AuditRecordStore<ApprovalRequest>;
 
-    constructor(store: JsonlStore<ApprovalRequest>) {
+    constructor(store: AuditRecordStore<ApprovalRequest>) {
         this.#store = store;
     }
 

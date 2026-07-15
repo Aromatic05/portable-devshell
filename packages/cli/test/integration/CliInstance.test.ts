@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { access, mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { access, mkdtemp, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { createServer, type Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -140,7 +140,8 @@ async function runRealWorkerSmoke(): Promise<void> {
         assert.equal(stdout.flush(), "control: stopped\n");
         assert.equal(stderr.flush(), "");
 
-        assert.match(await readFile(join(homeDirectory, ".devshell", "aromatic-pc", "control-worker", "tool-calls.jsonl"), "utf8"), /bash_run/u);
+        const auditDatabase = await stat(join(homeDirectory, ".devshell", "aromatic-pc", "control-worker", "audit.sqlite3"));
+        assert.equal(auditDatabase.size > 0, true);
     } finally {
         if (!controlStopped) {
             await cli.run(["stop"]).catch(() => undefined);

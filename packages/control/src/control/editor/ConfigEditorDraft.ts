@@ -132,6 +132,7 @@ function readLogsConfig(
     const logs = readRecord(value, fieldName);
     return {
         eventBufferSize: readOptionalInteger(logs.eventBufferSize, `${fieldName}.eventBufferSize`),
+        maxBytes: readOptionalInteger(logs.maxBytes, `${fieldName}.maxBytes`),
         retentionDays: readOptionalInteger(logs.retentionDays, `${fieldName}.retentionDays`)
     };
 }

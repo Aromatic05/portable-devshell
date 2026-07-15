@@ -60,6 +60,8 @@ test("valid config fixture is loaded", async () => {
         assert.deepEqual(config.instances[0]?.mcp.tools.groups, ["file", "bash", "artifact"]);
         assert.deepEqual(config.instances[0]?.mcp.tools.capabilities, ["read", "write", "execute"]);
         assert.equal(config.instances[0]?.logs?.eventBufferSize, 50);
+        assert.equal(config.instances[0]?.logs?.maxBytes, 33_554_432);
+        assert.equal(config.instances[0]?.logs?.retentionDays, 14);
         assert.equal(config.instances[0]?.approvalPolicy?.mode, "ask");
         assert.equal(config.instances[0]?.approvalPolicy?.rules?.[0]?.source, "mcp");
         assert.equal(config.instances[0]?.security?.mode, "workspace");
@@ -207,6 +209,17 @@ test("instance security mode must be valid", () => {
     assert.throws(() => validator.validate(config), /security\.mode must be one of disabled, workspace/u);
 });
 
+test("instance audit storage limits must be positive integers", () => {
+    const config = createDefaultControlConfig();
+    const instance = createInstanceConfig("/tmp/demo");
+    instance.logs.maxBytes = 0;
+
+    assert.throws(
+        () => new ControlConfigValidator().validate({ ...config, instances: [instance] }),
+        /logs\.maxBytes must be an integer of at least 1048576/u
+    );
+});
+
 test("legacy tools.fileEdit config is ignored and removed on encode", () => {
     const codec = new ControlInstanceTomlCodec();
     const decoded = codec.decode(
@@ -312,7 +325,9 @@ function createInstanceConfig(workspace: string) {
             DEMO: "1"
         },
         logs: {
-            eventBufferSize: 50
+            eventBufferSize: 50,
+            maxBytes: 33_554_432,
+            retentionDays: 14
         },
         mcp: { enabled: true, tools: { capabilities: ["read", "write", "execute"], groups: ["file", "bash", "artifact"] } },
         name: "demo-local",

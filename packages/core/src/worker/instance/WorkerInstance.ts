@@ -14,6 +14,7 @@ import {
 } from "@portable-devshell/shared";
 
 import type { ApprovalManager } from "../../approval/ApprovalInfra.js";
+import type { AuditDatabase } from "../../audit/AuditDatabase.js";
 import type { EventStreamGap, EventStreamSlice, InstanceEventInput } from "../../log/LogEventBuffer.js";
 import { InstanceEventBuffer } from "../../log/LogEventBuffer.js";
 import type { LogQuery } from "../../log/LogQuery.js";
@@ -60,6 +61,7 @@ import { WorkerInstanceConnection } from "./WorkerInstanceConnection.js";
 
 interface WorkerInstanceDependencies {
     approvalManager: ApprovalManager;
+    auditDatabase: AuditDatabase;
     catalog: WorkerToolCatalog;
     commandClient?: WorkerCommandClient;
     config: ResolvedWorkerInstanceConfig;
@@ -76,6 +78,7 @@ interface WorkerInstanceDependencies {
 
 export class WorkerInstance {
     readonly #approvalManager: ApprovalManager;
+    readonly #auditDatabase: AuditDatabase;
     readonly #catalog: WorkerToolCatalog;
     readonly #connection: WorkerInstanceConnection;
     readonly #commandClient?: WorkerCommandClient;
@@ -87,6 +90,7 @@ export class WorkerInstance {
 
     constructor(dependencies: WorkerInstanceDependencies) {
         this.#approvalManager = dependencies.approvalManager;
+        this.#auditDatabase = dependencies.auditDatabase;
         this.#catalog = dependencies.catalog;
         this.#commandClient = dependencies.commandClient;
         this.#config = dependencies.config;
@@ -446,7 +450,11 @@ export class WorkerInstance {
     }
 
     async close(): Promise<void> {
-        await this.#connection.close();
+        try {
+            await this.#connection.close();
+        } finally {
+            this.#auditDatabase.close();
+        }
     }
 
     get handshake(): WorkerHandshakeResult | undefined {

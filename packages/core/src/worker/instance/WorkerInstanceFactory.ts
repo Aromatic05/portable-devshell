@@ -2,8 +2,8 @@ import type { ApprovalRequest, InstanceEvent, ToolCallAssociation, ToolCallRecor
 import type { InstanceLogEntry } from "../../log/store/LogStoreInstance.js";
 
 import { ApprovalManager, ApprovalStore } from "../../approval/ApprovalInfra.js";
+import { AuditDatabase } from "../../audit/AuditDatabase.js";
 import { InstanceEventBuffer } from "../../log/LogEventBuffer.js";
-import { JsonlStore } from "../../log/store/LogStoreJsonl.js";
 import { InstanceLogStore } from "../../log/store/LogStoreInstance.js";
 import { ToolCallHistory } from "../../log/LogToolCallHistory.js";
 import { WorkerCommandClient } from "../../worker/command/WorkerCommandClient.js";
@@ -32,8 +32,28 @@ export class WorkerInstanceFactory {
         const catalog = new WorkerToolCatalog();
         const rpcBridge = this.#createRpcBridge(resolved);
         const rpcClient = new WorkerRpcClient(rpcBridge);
+        const auditDatabase = new AuditDatabase(paths.auditDatabaseFile, resolved.auditStorage);
+        const eventStore = auditDatabase.store<InstanceEvent>("events", {
+            legacyFile: paths.legacyEventsFile,
+            sequence: (record) => record.seq,
+            timestamp: (record) => record.at
+        });
+        const logStore = auditDatabase.store<InstanceLogEntry>("logs", {
+            legacyFile: paths.legacyLogsFile,
+            sequence: (record) => record.seq,
+            timestamp: (record) => record.at
+        });
+        const approvalStore = auditDatabase.store<ApprovalRequest>("approvals", {
+            legacyFile: paths.legacyApprovalsFile,
+            timestamp: (record) => record.decision?.decidedAt ?? record.createdAt
+        });
+        const toolCallStore = auditDatabase.store<ToolCallRecord>("toolCalls", {
+            legacyFile: paths.legacyToolCallsFile,
+            timestamp: (record) => record.completedAt ?? record.startedAt
+        });
 
         return new WorkerInstance({
+            auditDatabase,
             catalog,
             commandClient:
                 resolved.transport === undefined
@@ -43,20 +63,20 @@ export class WorkerInstanceFactory {
             eventBuffer: new InstanceEventBuffer(
                 resolved.name,
                 resolved.eventBufferSize,
-                new JsonlStore<InstanceEvent>(paths.eventsFile)
+                eventStore
             ),
-            logStore: new InstanceLogStore(resolved.name, new JsonlStore<InstanceLogEntry>(paths.logsFile)),
+            logStore: new InstanceLogStore(resolved.name, logStore),
             protocolClient: new WorkerProtocolClient(rpcClient),
             rpcBridge,
             stateMachine: new InstanceStateMachine(resolved.name),
             approvalManager: new ApprovalManager({
                 instanceName: resolved.name,
                 policy: resolved.approvalPolicy,
-                store: new ApprovalStore(new JsonlStore<ApprovalRequest>(paths.approvalsFile)),
+                store: new ApprovalStore(approvalStore),
                 timeout: resolved.approvalTimeout
             }),
             toolCallAssociationProvider: options.toolCallAssociationProvider,
-            toolCallHistory: new ToolCallHistory(resolved.name, new JsonlStore<ToolCallRecord>(paths.toolCallsFile)),
+            toolCallHistory: new ToolCallHistory(resolved.name, toolCallStore),
             toolCallScheduler: new ToolCallScheduler(resolved.toolScheduler),
             toolInvoker: new WorkerToolInvoker(rpcClient, catalog)
         });

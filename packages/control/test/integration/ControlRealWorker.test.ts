@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { createConnection } from "node:net";
 import { spawn } from "node:child_process";
 import { tmpdir } from "node:os";
@@ -108,9 +108,8 @@ if (process.env.PORTABLE_DEVSHELL_REAL_WORKER_CHILD !== "1") {
     const instanceStopped = await request(runtimePaths.socketFile, "instance.stop", { instance: "aromatic-pc", kind: "instance" });
     assert.equal(instanceStopped.ready, false);
 
-    assert.match(await readFile(join(homeDirectory, ".devshell", "aromatic-pc", "control-worker", "tool-calls.jsonl"), "utf8"), /bash_run/u);
-    assert.match(await readFile(join(homeDirectory, ".devshell", "aromatic-pc", "control-worker", "events.jsonl"), "utf8"), /toolCall\.completed/u);
-    assert.match(await readFile(join(homeDirectory, ".devshell", "aromatic-pc", "control-worker", "logs.jsonl"), "utf8"), /portable-devshell-control/u);
+    const auditDatabase = await stat(join(homeDirectory, ".devshell", "aromatic-pc", "control-worker", "audit.sqlite3"));
+    assert.equal(auditDatabase.size > 0, true);
     assert.match(await readFile(join(homeDirectory, ".devshell", "control", "logs", "control.log"), "utf8"), /control server started/u);
 
     const stopped = await manager.stop();
@@ -174,7 +173,9 @@ function createInstanceConfig(workspacePath: string) {
     return {
         enabled: true,
         logs: {
-            eventBufferSize: 50
+            eventBufferSize: 50,
+            maxBytes: 16 * 1024 * 1024,
+            retentionDays: 7
         },
         mcp: { enabled: true, tools: { capabilities: ["read", "write", "execute"], groups: ["file", "bash", "artifact"] } },
         name: "aromatic-pc",

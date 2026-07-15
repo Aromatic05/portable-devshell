@@ -1,6 +1,6 @@
 import { errorCodes, type InstanceEvent, type InstanceName, type JsonValue } from "@portable-devshell/shared";
 
-import { JsonlStore } from "./store/LogStoreJsonl.js";
+import type { AuditRecordStore } from "../audit/AuditRecordStore.js";
 
 export interface InstanceEventInput {
     at: string;
@@ -25,12 +25,12 @@ export interface EventStreamSlice {
 export class InstanceEventBuffer {
     readonly #instanceName: InstanceName;
     readonly #capacity: number;
-    readonly #store?: JsonlStore<InstanceEvent>;
+    readonly #store?: AuditRecordStore<InstanceEvent>;
     #initialized = false;
     #events: InstanceEvent[] = [];
     #lastSeq = 0;
 
-    constructor(instanceName: InstanceName, capacity: number, store?: JsonlStore<InstanceEvent>) {
+    constructor(instanceName: InstanceName, capacity: number, store?: AuditRecordStore<InstanceEvent>) {
         this.#instanceName = instanceName;
         this.#capacity = capacity;
         this.#store = store;
@@ -90,7 +90,7 @@ export class InstanceEventBuffer {
 
         const records = await this.#store.readAll();
         this.#events = records.slice(-this.#capacity);
-        this.#lastSeq = records.at(-1)?.seq ?? 0;
+        this.#lastSeq = Math.max(records.at(-1)?.seq ?? 0, await this.#store.readHighWater?.() ?? 0);
         this.#initialized = true;
     }
 }

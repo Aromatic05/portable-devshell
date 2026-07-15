@@ -42,6 +42,11 @@ test("instance config mapper passes effective security mode, worker env, and app
         env: {
             DEMO: "1"
         },
+        logs: {
+            eventBufferSize: 250,
+            maxBytes: 33_554_432,
+            retentionDays: 14
+        },
         mcp: { enabled: true, tools: { capabilities: ["read", "write", "execute"], groups: ["file", "bash", "artifact"] } },
         name: "demo-local",
         provider: "local",
@@ -52,6 +57,11 @@ test("instance config mapper passes effective security mode, worker env, and app
     });
 
     assert.equal(capturedConfig?.effectiveSecurityMode, "workspace");
+    assert.equal(capturedConfig?.eventBufferSize, 250);
+    assert.deepEqual(capturedConfig?.auditStorage, {
+        maxBytes: 33_554_432,
+        retentionDays: 14
+    });
     assert.deepEqual(capturedConfig?.approvalPolicy, {
         mode: "ask",
         rules: [

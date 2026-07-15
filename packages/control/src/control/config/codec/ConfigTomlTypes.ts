@@ -5,6 +5,7 @@ export type ControlMcpAuthMode = "none" | "oauth2" | "token";
 
 export interface ControlInstanceLogsConfig {
     eventBufferSize?: number;
+    maxBytes?: number;
     retentionDays?: number;
 }
 

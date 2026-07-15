@@ -1,4 +1,7 @@
 export * from "./approval/ApprovalInfra.js";
+export * from "./audit/AuditDatabase.js";
+export * from "./audit/AuditRecordStore.js";
+export * from "./audit/AuditStorageLimits.js";
 export * from "./instance/InstancePaths.js";
 export * from "./instance/state/InstanceStateMachine.js";
 export * from "./instance/state/InstanceStateRuntime.js";
@@ -7,7 +10,6 @@ export * from "./log/LogEventBuffer.js";
 export * from "./log/LogQuery.js";
 export * from "./log/LogToolCallHistory.js";
 export * from "./log/store/LogStoreInstance.js";
-export * from "./log/store/LogStoreJsonl.js";
 export * from "./worker/WorkerBinary.js";
 export * from "./worker/WorkerAssetResolver.js";
 export * from "./worker/WorkerProcess.js";

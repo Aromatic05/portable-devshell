@@ -1,7 +1,7 @@
 import type { InstanceName } from "@portable-devshell/shared";
 
+import type { AuditRecordStore } from "../../audit/AuditRecordStore.js";
 import type { LogQuery } from "../LogQuery.js";
-import { JsonlStore } from "./LogStoreJsonl.js";
 
 export interface InstanceLogEntry {
     at: string;
@@ -18,11 +18,11 @@ export interface InstanceLogEntry {
 
 export class InstanceLogStore {
     readonly #instanceName: InstanceName;
-    readonly #store: JsonlStore<InstanceLogEntry>;
+    readonly #store: AuditRecordStore<InstanceLogEntry>;
     #initialized = false;
     #lastSeq = 0;
 
-    constructor(instanceName: InstanceName, store: JsonlStore<InstanceLogEntry>) {
+    constructor(instanceName: InstanceName, store: AuditRecordStore<InstanceLogEntry>) {
         this.#instanceName = instanceName;
         this.#store = store;
     }
@@ -67,7 +67,7 @@ export class InstanceLogStore {
         }
 
         const records = await this.#store.readAll();
-        this.#lastSeq = records.at(-1)?.seq ?? 0;
+        this.#lastSeq = Math.max(records.at(-1)?.seq ?? 0, await this.#store.readHighWater?.() ?? 0);
         this.#initialized = true;
     }
 }

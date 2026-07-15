@@ -100,6 +100,7 @@ export function buildConfigPageBoxes(state: TuiAppState, instanceName: string): 
         makeBox(state, "config", instanceName, {
             detailLines: [
                 fieldLine("logs.retentionDays", "retentionDays", readPath(draft, "logs.retentionDays")),
+                fieldLine("logs.maxBytes", "maxBytes", readPath(draft, "logs.maxBytes")),
                 fieldLine("logs.eventBufferSize", "eventBufferSize", readPath(draft, "logs.eventBufferSize")),
                 ...editorErrorLine(state, "config", "logs", ["logs"])
             ],
@@ -108,6 +109,7 @@ export function buildConfigPageBoxes(state: TuiAppState, instanceName: string): 
             summaryLines: [
                 compactSummary(
                     ["retention", stringValue(readPath(draft, "logs.retentionDays"), "default")],
+                    ["maxBytes", stringValue(readPath(draft, "logs.maxBytes"), "default")],
                     ["buffer", stringValue(readPath(draft, "logs.eventBufferSize"), "default")]
                 )
             ],

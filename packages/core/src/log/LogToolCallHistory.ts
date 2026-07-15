@@ -8,7 +8,7 @@ import {
     type ToolCallRecord
 } from "@portable-devshell/shared";
 
-import { JsonlStore } from "./store/LogStoreJsonl.js";
+import type { AuditRecordStore } from "../audit/AuditRecordStore.js";
 
 interface ActiveToolCall {
     approvalId?: string;
@@ -37,11 +37,11 @@ interface ToolCallCompletionResult {
 
 export class ToolCallHistory {
     readonly #instanceName: InstanceName;
-    readonly #store: JsonlStore<ToolCallRecord>;
+    readonly #store: AuditRecordStore<ToolCallRecord>;
     readonly #activeCalls = new Map<string, ActiveToolCall>();
     #initialized = false;
 
-    constructor(instanceName: InstanceName, store: JsonlStore<ToolCallRecord>) {
+    constructor(instanceName: InstanceName, store: AuditRecordStore<ToolCallRecord>) {
         this.#instanceName = instanceName;
         this.#store = store;
     }

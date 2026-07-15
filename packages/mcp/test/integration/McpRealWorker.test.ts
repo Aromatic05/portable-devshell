@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn as nodeSpawn } from "node:child_process";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import test from "node:test";
@@ -119,7 +119,8 @@ test("MCP initialize tools/list and tools/call succeed against the frozen worker
         const toolCalls = await instance.readToolCalls();
         assert.equal(toolCalls.some((record) => record.toolName === "bash_run" && record.status === "completed"), true);
         assert.equal(toolCalls.some((record) => record.source === "mcp"), true);
-        assert.match(await readFile(join(homeDirectory, ".devshell", instanceName, "control-worker", "tool-calls.jsonl"), "utf8"), /bash_run/u);
+        const auditDatabase = await stat(join(homeDirectory, ".devshell", instanceName, "control-worker", "audit.sqlite3"));
+        assert.equal(auditDatabase.size > 0, true);
 
         const replay = instance.subscribe(1);
         assert.equal(replay.kind, "events");

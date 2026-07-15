@@ -152,10 +152,31 @@ Compose
 
 实例可在 `[tools.scheduler]` 下配置全局和按 session 的并发、队列限制。当前实现支持排队，不再采用旧设计中的固定单并发无队列模型。
 
+## 审计存储
+
+每个实例的结构化 events、logs、tool calls 和 approvals 统一保存在：
+
+```text
+~/.devshell/<instance>/control-worker/audit.sqlite3
+```
+
+可以在实例配置中限制保留时间和存储容量：
+
+```toml
+[logs]
+retentionDays = 7
+maxBytes = 67108864
+eventBufferSize = 100
+```
+
+`retentionDays` 默认 7 天，`maxBytes` 默认 64 MiB、最小 1 MiB。超过保留时间的记录会被删除；SQLite 数据库文件超过容量上限时，从最旧的审计记录开始淘汰并回收数据库页。`eventBufferSize` 只控制内存中的事件 replay 窗口，不控制 SQLite 持久化容量。
+
+升级时，旧的 `events.jsonl`、`logs.jsonl`、`tool-calls.jsonl` 和 `approvals.jsonl` 会在首次打开实例时事务导入 SQLite，导入成功后删除旧文件。
+
 ## 实例状态与数据
 
 ```text
-实例事件与审计     ~/.devshell/<instance>/control-worker/
+实例事件与审计     ~/.devshell/<instance>/control-worker/audit.sqlite3
 worker 配置与状态   ~/.devshell/<instance>/
 tmux 元数据          ~/.devshell/<instance>/tmux/
 worker 实体          ~/.devshell/workers/<target>/<sha256>/devshell-worker
