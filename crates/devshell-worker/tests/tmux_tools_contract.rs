@@ -31,6 +31,43 @@ fn call(
     ctx_id: &str,
     request_id: &str,
 ) -> Value {
+    call_with_identity(
+        env,
+        instance,
+        id,
+        method,
+        params,
+        CallIdentity {
+            ctx_id,
+            operation_id: None,
+            request_id,
+        },
+    )
+}
+
+#[derive(Clone, Copy)]
+struct CallIdentity<'a> {
+    ctx_id: &'a str,
+    operation_id: Option<&'a str>,
+    request_id: &'a str,
+}
+
+fn call_with_identity(
+    env: &TestEnv,
+    instance: &str,
+    id: &str,
+    method: &str,
+    params: Value,
+    identity: CallIdentity<'_>,
+) -> Value {
+    let mut context = json!({
+        "ctxId": identity.ctx_id,
+        "requestId": identity.request_id,
+        "source": "mcp"
+    });
+    if let Some(operation_id) = identity.operation_id {
+        context["operationId"] = json!(operation_id);
+    }
     env.rpc(
         instance,
         &json!({
@@ -38,11 +75,7 @@ fn call(
             "id": id,
             "method": method,
             "params": params,
-            "context": {
-                "ctxId": ctx_id,
-                "requestId": request_id,
-                "source": "mcp"
-            }
+            "context": context
         }),
     )
 }
@@ -63,11 +96,13 @@ fn stop(env: &TestEnv, instance: &str) {
 
 fn wait_for_terminal(env: &TestEnv, instance: &str, task: &str, ctx_id: &str) -> Value {
     let deadline = Instant::now() + Duration::from_secs(5);
+    let mut attempt = 0;
     loop {
+        attempt += 1;
         let response = call(
             env,
             instance,
-            "wait",
+            &format!("wait-{attempt}"),
             "tmux_read",
             json!({ "task": task, "line": 200, "timeMs": 200 }),
             ctx_id,
@@ -129,6 +164,61 @@ fn tmux_catalog_exposes_task_scoped_tools() {
         .find(|tool| tool["name"] == "tmux_input")
         .unwrap();
     assert_eq!(input["inputSchema"]["required"], json!(["task", "input"]));
+    for tool_name in ["tmux_run", "tmux_input", "tmux_read"] {
+        let tool = catalog
+            .iter()
+            .find(|tool| tool["name"] == tool_name)
+            .unwrap();
+        assert_eq!(tool["inputSchema"]["properties"]["timeMs"]["minimum"], 0);
+        assert_eq!(
+            tool["inputSchema"]["properties"]["timeMs"]["maximum"],
+            300_000
+        );
+    }
+    stop(&env, instance);
+}
+
+#[test]
+fn tmux_zero_time_ms_returns_immediate_observations() {
+    if !tmux_available() {
+        return;
+    }
+    let env = TestEnv::new();
+    let instance = "aromatic-tmux-zero-time";
+    start(&env, instance);
+    let run = call(
+        &env,
+        instance,
+        "1",
+        "tmux_run",
+        json!({ "pane": "main", "command": "sleep 120", "wait": "nonblock", "timeMs": 0 }),
+        "ctx-a",
+        "run-ready",
+    );
+    assert_eq!(run["ok"], true, "{run}");
+    let task = run["result"]["task"]["id"].as_str().unwrap();
+    let input = call(
+        &env,
+        instance,
+        "2",
+        "tmux_input",
+        json!({ "task": task, "input": "^C", "timeMs": 0 }),
+        "ctx-a",
+        "input-zero-time",
+    );
+    assert_eq!(input["ok"], true, "{input}");
+    let read = call(
+        &env,
+        instance,
+        "3",
+        "tmux_read",
+        json!({ "task": task, "timeMs": 0 }),
+        "ctx-a",
+        "read-zero-time",
+    );
+    assert_eq!(read["ok"], true, "{read}");
+    let finished = wait_for_terminal(&env, instance, task, "ctx-a");
+    assert_ne!(finished["result"]["task"]["status"], "running");
     stop(&env, instance);
 }
 
@@ -283,39 +373,48 @@ fn tmux_run_without_pane_reuses_idle_then_creates_auto_pane() {
     assert_eq!(first["result"]["pane"]["name"], "main", "{first}");
     let first_task = first["result"]["task"]["id"].as_str().unwrap();
 
-    let second = call(
+    let second = call_with_identity(
         &env,
         instance,
         "2",
         "tmux_run",
         json!({ "command": "printf AUTO\\n", "wait": "block", "timeMs": 3000 }),
-        "ctx-b",
-        "run-auto",
+        CallIdentity {
+            ctx_id: "ctx-b",
+            operation_id: Some("run-auto-operation"),
+            request_id: "run-auto",
+        },
     );
     assert_eq!(second["ok"], true, "{second}");
     assert_eq!(second["result"]["pane"]["name"], "auto-1", "{second}");
 
-    let replay = call(
+    let replay = call_with_identity(
         &env,
         instance,
         "3",
         "tmux_run",
         json!({ "command": "printf AUTO\\n", "wait": "block", "timeMs": 3000 }),
-        "ctx-b",
-        "run-auto",
+        CallIdentity {
+            ctx_id: "ctx-b",
+            operation_id: Some("run-auto-operation"),
+            request_id: "run-auto",
+        },
     );
     assert_eq!(
         replay["result"]["task"]["id"],
         second["result"]["task"]["id"]
     );
-    let conflict = call(
+    let conflict = call_with_identity(
         &env,
         instance,
         "3b",
         "tmux_run",
         json!({ "command": "printf DIFFERENT\\n", "wait": "block", "timeMs": 3000 }),
-        "ctx-b",
-        "run-auto",
+        CallIdentity {
+            ctx_id: "ctx-b",
+            operation_id: Some("run-auto-operation"),
+            request_id: "run-auto",
+        },
     );
     assert_eq!(
         conflict["error"]["code"], "tmux.requestIdConflict",
@@ -346,25 +445,31 @@ fn concurrent_duplicate_run_requests_share_one_in_flight_execution() {
 
     let (first, second) = thread::scope(|scope| {
         let first = scope.spawn(|| {
-            call(
+            call_with_identity(
                 &env,
                 instance,
                 "1",
                 "tmux_run",
                 json!({ "pane": "main", "command": "sleep 10", "wait": "nonblock" }),
-                "ctx-a",
-                "same-run-request",
+                CallIdentity {
+                    ctx_id: "ctx-a",
+                    operation_id: Some("same-run-operation"),
+                    request_id: "same-run-request",
+                },
             )
         });
         let second = scope.spawn(|| {
-            call(
+            call_with_identity(
                 &env,
                 instance,
                 "2",
                 "tmux_run",
                 json!({ "pane": "main", "command": "sleep 10", "wait": "nonblock" }),
-                "ctx-a",
-                "same-run-request",
+                CallIdentity {
+                    ctx_id: "ctx-a",
+                    operation_id: Some("same-run-operation"),
+                    request_id: "same-run-request",
+                },
             )
         });
         (first.join().unwrap(), second.join().unwrap())

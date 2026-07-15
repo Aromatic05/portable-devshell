@@ -113,8 +113,8 @@ impl RpcRouter {
             ctx_id: context
                 .and_then(|value| value.ctx_id.clone())
                 .unwrap_or_else(|| "ctx-worker-default".to_string()),
-            request_id: context
-                .and_then(|value| value.request_id.clone())
+            operation_id: context
+                .and_then(|value| value.operation_id.clone())
                 .unwrap_or_else(|| request.id.clone()),
             policy: Arc::clone(&self.policy),
             process_registry: Arc::clone(&self.active_processes),

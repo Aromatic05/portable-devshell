@@ -320,7 +320,7 @@ impl TmuxState {
     ) -> Result<TmuxTaskOperationOutput, ToolError> {
         call.check_cancelled()?;
         require_read(call)?;
-        let time_ms = validate_time_allow_zero(params.time_ms.unwrap_or(DEFAULT_READ_TIME_MS))?;
+        let time_ms = validate_time(params.time_ms.unwrap_or(DEFAULT_READ_TIME_MS))?;
         let line = params.line.unwrap_or(DEFAULT_LINE);
         let deadline = Instant::now() + Duration::from_millis(time_ms);
         loop {
@@ -832,16 +832,6 @@ fn next_auto_name(workspace: &BackendWorkspace) -> String {
 }
 
 fn validate_time(value: u64) -> Result<u64, ToolError> {
-    if value == 0 || value > MAX_TIME_MS {
-        return Err(ToolError::new(
-            "tool.invalidArguments",
-            format!("timeMs must be between 1 and {MAX_TIME_MS}"),
-        ));
-    }
-    Ok(value)
-}
-
-fn validate_time_allow_zero(value: u64) -> Result<u64, ToolError> {
     if value > MAX_TIME_MS {
         return Err(ToolError::new(
             "tool.invalidArguments",

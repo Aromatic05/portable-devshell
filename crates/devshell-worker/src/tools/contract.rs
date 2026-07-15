@@ -39,7 +39,7 @@ pub struct ToolCall {
     pub workspace: PathBuf,
     pub params: serde_json::Value,
     pub ctx_id: String,
-    pub request_id: String,
+    pub operation_id: String,
     pub policy: Arc<dyn SecurityPolicy>,
     pub process_registry: Arc<ActiveProcessRegistry>,
     pub cancellation: ToolCancellation,

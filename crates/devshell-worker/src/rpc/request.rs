@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 #[serde(rename_all = "camelCase")]
 pub struct RpcRequestContext {
     pub request_id: Option<String>,
+    pub operation_id: Option<String>,
     pub ctx_id: Option<String>,
     pub source: Option<String>,
 }

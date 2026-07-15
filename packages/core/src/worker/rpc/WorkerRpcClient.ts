@@ -28,7 +28,8 @@ export class WorkerRpcClient {
             params,
             context: {
                 ...context,
-                ctxId: context?.ctxId ?? this.#ctxId
+                ctxId: context?.ctxId ?? this.#ctxId,
+                operationId: randomUUID()
             }
         };
         const response = await this.#bridge.request(request, signal);

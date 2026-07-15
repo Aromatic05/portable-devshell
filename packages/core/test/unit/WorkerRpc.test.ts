@@ -91,7 +91,7 @@ test("WorkerProtocolClient routes artifact payload and receive lifecycle through
     bridge.close();
 });
 
-test("WorkerRpcClient uses one connection-scoped ctxId unless a caller supplies an MCP context", async () => {
+test("WorkerRpcClient keeps context identity while assigning each call a distinct operation id", async () => {
     const harness = createRpcHarness();
     const bridge = new WorkerRpcBridge({
         transport: harness.transport,
@@ -101,13 +101,19 @@ test("WorkerRpcClient uses one connection-scoped ctxId unless a caller supplies 
 
     await client.request("worker.ping", {});
     await client.request("tools.list", {});
-    await client.request("worker.status", {}, { ctxId: "ctx-mcp", source: "mcp" });
+    await client.request("worker.status", {}, { ctxId: "ctx-mcp", requestId: "shared-mcp-request", source: "mcp" });
+    await client.request("worker.ping", {}, { ctxId: "ctx-mcp", requestId: "shared-mcp-request", source: "mcp" });
 
     const implicit = harness.requestContexts.slice(0, 2).map((context) => context?.ctxId);
     assert.equal(typeof implicit[0], "string");
     assert.equal(implicit[0], implicit[1]);
     assert.equal(harness.requestContexts[2]?.ctxId, "ctx-mcp");
     assert.equal(harness.requestContexts[2]?.source, "mcp");
+    assert.equal(harness.requestContexts[2]?.requestId, "shared-mcp-request");
+    assert.equal(harness.requestContexts[3]?.requestId, "shared-mcp-request");
+    const operationIds = harness.requestContexts.map((context) => context?.operationId);
+    assert.equal(operationIds.every((operationId) => typeof operationId === "string"), true);
+    assert.equal(new Set(operationIds).size, operationIds.length);
     bridge.close();
 });
 
@@ -246,14 +252,14 @@ function createRpcHarness(options?: { slowMethods?: Set<string> }): {
     transport: WorkerCommandTransport;
     spawnCount: number;
     requestMethods: string[];
-    requestContexts: Array<{ ctxId?: string; source?: string } | undefined>;
-    requests: Array<{ id: string; method: string; params?: JsonValue; context?: { ctxId?: string; source?: string } }>;
+    requestContexts: Array<{ ctxId?: string; operationId?: string; requestId?: string; source?: string } | undefined>;
+    requests: Array<{ id: string; method: string; params?: JsonValue; context?: { ctxId?: string; operationId?: string; requestId?: string; source?: string } }>;
     disconnect: () => void;
     waitForMethod: (method: string) => Promise<void>;
 } {
     const requestMethods: string[] = [];
-    const requestContexts: Array<{ ctxId?: string; source?: string } | undefined> = [];
-    const requests: Array<{ id: string; method: string; params?: JsonValue; context?: { ctxId?: string; source?: string } }> = [];
+    const requestContexts: Array<{ ctxId?: string; operationId?: string; requestId?: string; source?: string } | undefined> = [];
+    const requests: Array<{ id: string; method: string; params?: JsonValue; context?: { ctxId?: string; operationId?: string; requestId?: string; source?: string } }> = [];
     const slowMethods = options?.slowMethods ?? new Set<string>();
     const stdout = new PassThrough();
     const stdin = new PassThrough();

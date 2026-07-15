@@ -18,6 +18,7 @@ pub struct TmuxRunParams {
     #[serde(default)]
     pub wait: Option<TmuxWaitMode>,
     #[serde(default)]
+    #[schemars(range(min = 0, max = 300000))]
     pub time_ms: Option<u64>,
     #[serde(default)]
     pub line: Option<i64>,
@@ -30,6 +31,7 @@ pub struct TmuxInputParams {
     pub task: String,
     pub input: String,
     #[serde(default)]
+    #[schemars(range(min = 0, max = 300000))]
     pub time_ms: Option<u64>,
     #[serde(default)]
     pub line: Option<i64>,
@@ -41,6 +43,7 @@ pub struct TmuxInputParams {
 pub struct TmuxReadParams {
     pub task: String,
     #[serde(default)]
+    #[schemars(range(min = 0, max = 300000))]
     pub time_ms: Option<u64>,
     #[serde(default)]
     pub line: Option<i64>,
