@@ -196,7 +196,7 @@ impl FileReadTool {
                 ));
             }
             self.state.session_snapshots.lock().unwrap().remember_full(
-                &call.session_id,
+                &call.ctx_id,
                 path,
                 &text,
                 seen.clone(),
@@ -207,7 +207,7 @@ impl FileReadTool {
                 .session_snapshots
                 .lock()
                 .unwrap()
-                .remember_sparse(&call.session_id, path, metadata, seen.clone(), ordinal);
+                .remember_sparse(&call.ctx_id, path, metadata, seen.clone(), ordinal);
         }
 
         Ok(FileReadOutput {
@@ -235,7 +235,7 @@ impl FileReadTool {
     ) {
         if metadata.total_bytes <= FULL_SNAPSHOT_LIMIT {
             self.state.session_snapshots.lock().unwrap().remember_full(
-                &call.session_id,
+                &call.ctx_id,
                 path,
                 text,
                 seen,
@@ -246,7 +246,7 @@ impl FileReadTool {
                 .session_snapshots
                 .lock()
                 .unwrap()
-                .remember_sparse(&call.session_id, path, metadata, seen, ordinal);
+                .remember_sparse(&call.ctx_id, path, metadata, seen, ordinal);
         }
     }
 }

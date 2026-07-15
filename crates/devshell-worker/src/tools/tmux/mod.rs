@@ -10,7 +10,6 @@ pub mod output;
 pub mod read;
 pub mod replay;
 pub mod run;
-pub mod session;
 pub mod shell;
 pub mod state;
 pub mod task;
@@ -37,9 +36,9 @@ pub fn register_tools(
     instance_paths: &InstancePaths,
     socket_paths: &SocketPaths,
     runtime: &WorkerRuntimeContext,
-) -> Result<Option<Arc<TmuxState>>, ToolError> {
+) -> Result<(), ToolError> {
     if !TmuxBackend::available() {
-        return Ok(None);
+        return Ok(());
     }
     let state = Arc::new(TmuxState::new(TmuxBackend::new(
         instance_paths,
@@ -53,5 +52,5 @@ pub fn register_tools(
     registry.register(Arc::new(TmuxListTool::new(Arc::clone(&state))) as Arc<_>)?;
     registry.register(Arc::new(TmuxCreateTool::new(Arc::clone(&state))) as Arc<_>)?;
     registry.register(Arc::new(TmuxCloseTool::new(Arc::clone(&state))) as Arc<_>)?;
-    Ok(Some(state))
+    Ok(())
 }

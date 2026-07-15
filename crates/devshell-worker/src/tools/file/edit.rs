@@ -299,7 +299,7 @@ impl FileEditTool {
             .session_snapshots
             .lock()
             .unwrap()
-            .latest_for_path(&call.session_id, path)
+            .latest_for_path(&call.ctx_id, path)
     }
 
     fn execute(&self, call: &ToolCall, operations: Vec<PreparedOperation>) -> FileChangeSetOutput {
@@ -539,7 +539,7 @@ impl FileEditTool {
             .session_snapshots
             .lock()
             .unwrap()
-            .remove_path(&call.session_id, &path);
+            .remove_path(&call.ctx_id, &path);
         local_snapshots.remove(&path);
         let before = current.normalized();
         let diff = limit_detail(diff::render(&before, ""));
@@ -598,11 +598,11 @@ impl FileEditTool {
             ));
         }
         atomic_move_no_replace(&source, &target)?;
-        self.state.session_snapshots.lock().unwrap().migrate_path(
-            &call.session_id,
-            &source,
-            &target,
-        );
+        self.state
+            .session_snapshots
+            .lock()
+            .unwrap()
+            .migrate_path(&call.ctx_id, &source, &target);
         let mut moved_snapshot = base;
         moved_snapshot.canonical_path = target.display().to_string();
         local_snapshots.remove(&source);
@@ -647,7 +647,7 @@ impl FileEditTool {
         let ordinal = self.state.next_snapshot_ordinal();
         if text.total_bytes <= FULL_SNAPSHOT_LIMIT {
             self.state.session_snapshots.lock().unwrap().remember_full(
-                &call.session_id,
+                &call.ctx_id,
                 path,
                 text,
                 seen.iter().copied(),
@@ -666,13 +666,7 @@ impl FileEditTool {
                 .session_snapshots
                 .lock()
                 .unwrap()
-                .remember_sparse(
-                    &call.session_id,
-                    path,
-                    &metadata,
-                    seen.iter().copied(),
-                    ordinal,
-                );
+                .remember_sparse(&call.ctx_id, path, &metadata, seen.iter().copied(), ordinal);
         }
         session_snapshot(path, text, seen, ordinal)
     }

@@ -20,8 +20,6 @@ use crate::tools::ToolRegistry;
 use crate::tools::artifact::payload::ArtifactPayloadStore;
 use crate::tools::artifact::receive::ArtifactReceiveStore;
 use crate::tools::file::FileToolState;
-#[cfg(unix)]
-use crate::tools::tmux::state::TmuxState;
 
 #[allow(clippy::too_many_arguments)]
 pub fn register_control_handlers(
@@ -36,7 +34,6 @@ pub fn register_control_handlers(
     files: Arc<FileToolState>,
     payloads: Arc<ArtifactPayloadStore>,
     receives: Arc<ArtifactReceiveStore>,
-    #[cfg(unix)] tmux: Option<Arc<TmuxState>>,
 ) {
     handlers.insert(
         "artifact.receive.begin".to_string(),
@@ -88,11 +85,7 @@ pub fn register_control_handlers(
     );
     handlers.insert(
         "tool.session.close".to_string(),
-        Arc::new(tool_session::ToolSessionCloseHandler::new(
-            files,
-            #[cfg(unix)]
-            tmux,
-        )),
+        Arc::new(tool_session::ToolSessionCloseHandler::new(files)),
     );
     handlers.insert(
         "worker.handshake".to_string(),

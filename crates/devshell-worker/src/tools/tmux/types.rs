@@ -114,7 +114,6 @@ pub struct TmuxTaskView {
     pub started_at: u128,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub finished_at: Option<u128>,
-    pub owner_connected: bool,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
@@ -130,7 +129,7 @@ pub struct TmuxPaneView {
     pub created_at: u128,
     pub locked: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub owned_by_current_session: Option<bool>,
+    pub owned_by_current_context: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub task: Option<TmuxTaskView>,
     #[serde(skip_serializing_if = "Option::is_none")]

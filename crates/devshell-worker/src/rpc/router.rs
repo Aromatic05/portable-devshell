@@ -15,8 +15,6 @@ use crate::security::{SecurityPolicy, build_security_policy};
 use crate::tools::artifact::payload::ArtifactPayloadStore;
 use crate::tools::artifact::receive::ArtifactReceiveStore;
 use crate::tools::file::FileToolState;
-#[cfg(unix)]
-use crate::tools::tmux::state::TmuxState;
 use crate::tools::{ToolCall, ToolCancellation, ToolName, ToolRegistry};
 
 const MAX_CONCURRENT_TOOL_CALLS: usize = 8;
@@ -40,7 +38,6 @@ impl RpcRouter {
         files: Arc<FileToolState>,
         payloads: Arc<ArtifactPayloadStore>,
         receives: Arc<ArtifactReceiveStore>,
-        #[cfg(unix)] tmux: Option<Arc<TmuxState>>,
     ) -> Self {
         let active_processes = Arc::new(ActiveProcessRegistry::new());
         let active_tool_calls = Arc::new(ActiveToolCallRegistry::new());
@@ -59,8 +56,6 @@ impl RpcRouter {
             files,
             payloads,
             receives,
-            #[cfg(unix)]
-            tmux,
         );
 
         Self {
@@ -115,7 +110,7 @@ impl RpcRouter {
         tool.call(ToolCall {
             workspace: PathBuf::from(&self.runtime.workspace),
             params: request.params.clone(),
-            session_id: context
+            ctx_id: context
                 .and_then(|value| value.ctx_id.clone())
                 .unwrap_or_else(|| "ctx-worker-default".to_string()),
             request_id: context

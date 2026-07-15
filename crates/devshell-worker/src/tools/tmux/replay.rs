@@ -28,7 +28,7 @@ impl ReplayCache {
         T: Clone + DeserializeOwned + Serialize,
         F: FnOnce() -> Result<T, ToolError>,
     {
-        let key = format!("{}:{}", call.session_id, call.request_id);
+        let key = format!("{}:{}", call.ctx_id, call.request_id);
         let fingerprint = blake3::hash(
             &serde_json::to_vec(&serde_json::json!({
                 "method": method,
@@ -48,7 +48,7 @@ impl ReplayCache {
                 if slot.fingerprint != fingerprint {
                     return Err(ToolError::new(
                         "tmux.requestIdConflict",
-                        "the same session request id was reused with different arguments",
+                        "the same context request id was reused with different arguments",
                     ));
                 }
                 (Arc::clone(slot), false)

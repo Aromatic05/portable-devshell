@@ -39,8 +39,7 @@ pub struct TaskRecord {
     pub id: String,
     pub pane_id: String,
     pub pane_incarnation_id: String,
-    pub owner_session_id: String,
-    pub owner_connected: bool,
+    pub owner_context_id: String,
     pub state: TaskState,
     pub window: OutputWindow,
     pub start_status_seq: Option<u64>,
@@ -149,7 +148,7 @@ pub fn refresh_task_record(task: &mut TaskRecord, pane: &BackendPane) {
 pub fn pane_view(
     pane: &BackendPane,
     task: Option<&TaskRecord>,
-    session_id: &str,
+    ctx_id: &str,
     lines: Option<Vec<String>>,
 ) -> TmuxPaneView {
     let unmanaged_running = task.is_none() && pane.status.as_deref() == Some("running");
@@ -169,9 +168,9 @@ pub fn pane_view(
         command: pane.command.clone(),
         created_at: pane.created_at_ms,
         locked,
-        owned_by_current_session: task
+        owned_by_current_context: task
             .filter(|task| task.state.is_active())
-            .map(|task| task.owner_session_id == session_id),
+            .map(|task| task.owner_context_id == ctx_id),
         task: task.filter(|task| task.state.is_active()).map(task_view),
         lines,
     }
@@ -184,7 +183,6 @@ pub fn task_view(task: &TaskRecord) -> TmuxTaskView {
         status: task.state.text(),
         started_at: task.started_at_ms,
         finished_at: task.finished_at_ms,
-        owner_connected: task.owner_connected,
     }
 }
 
@@ -195,13 +193,13 @@ pub fn current_task<'a>(tasks: &'a TaskRegistry, pane_id: &str) -> Option<&'a Ta
 pub fn require_owned_task<'a>(
     tasks: &'a TaskRegistry,
     task_id: &str,
-    session_id: &str,
+    ctx_id: &str,
 ) -> Result<&'a TaskRecord, ToolError> {
     let task = tasks
         .tasks
         .get(task_id)
         .ok_or_else(|| task_expired(task_id))?;
-    if task.owner_session_id != session_id || !task.owner_connected {
+    if task.owner_context_id != ctx_id {
         return Err(task_locked(task));
     }
     Ok(task)
@@ -210,11 +208,7 @@ pub fn require_owned_task<'a>(
 pub fn task_locked(task: &TaskRecord) -> ToolError {
     ToolError::new(
         "tmux.taskLocked",
-        if task.owner_connected {
-            format!("task {} is owned by another MCP/RPC session", task.id)
-        } else {
-            format!("task {} owner session is disconnected", task.id)
-        },
+        format!("task {} is owned by another context", task.id),
     )
     .with_details(serde_json::json!({
         "task": task.id,
@@ -268,8 +262,7 @@ mod tests {
             id: id.to_string(),
             pane_id: "pane-main".to_string(),
             pane_incarnation_id: "incarnation".to_string(),
-            owner_session_id: "session".to_string(),
-            owner_connected: true,
+            owner_context_id: "ctx-test".to_string(),
             state,
             window: OutputWindow::default(),
             start_status_seq: Some(1),

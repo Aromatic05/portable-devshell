@@ -105,7 +105,7 @@ impl ToolHandler for FileSearchTool {
                 let (body, seen) = format_streamed_content(&matches, &shown);
                 if let Some(text) = full_text {
                     self.state.session_snapshots.lock().unwrap().remember_full(
-                        &call.session_id,
+                        &call.ctx_id,
                         &entry.path,
                         &text,
                         seen,
@@ -116,7 +116,7 @@ impl ToolHandler for FileSearchTool {
                         .session_snapshots
                         .lock()
                         .unwrap()
-                        .remember_sparse(&call.session_id, &entry.path, &metadata, seen, ordinal);
+                        .remember_sparse(&call.ctx_id, &entry.path, &metadata, seen, ordinal);
                 }
                 matched.push_back(FileSearchFile {
                     path: entry.display,

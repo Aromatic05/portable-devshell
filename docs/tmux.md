@@ -26,20 +26,20 @@ pane 是持久终端，task 是一次由 `tmux_run` 启动的前台命令。
 task id
 pane id
 pane incarnation id
-owner MCP/RPC session
+owner contextId
 startedAt / finishedAt
 running / numeric exit code / unknown
 ```
 
-任务运行期间，pane 被启动任务的 MCP/RPC session 独占：
+任务运行期间，pane 被启动任务的 contextId 独占：
 
 - `tmux_input` 和 `tmux_read` 必须携带 task id；
-- 只有 task owner session 可以输入或消费输出；
-- 其他 session 调用时返回 `tmux.taskLocked`；
+- 只有 task owner context 可以输入或消费输出；
+- 其他 context 调用时返回 `tmux.taskLocked`；
 - `tmux_inspect` 始终可以观察终端画面；
 - task 退出后，输出被冻结到 task，pane 立即释放并可运行下一个 task。
 
-session 关闭不会终止正在运行的 task。task 会标记 `ownerConnected = false`，pane 继续锁定，直到任务自然退出。worker 重启时仍在运行的 task 会作为 orphaned task 被接管，但不会允许新 session 直接输入。
+MCP/RPC transport session 关闭不会改变 task 所有权；只要继续携带原 contextId 和 taskId，重连后仍可读取输出和发送输入。worker 重启时仍在运行的 task 会作为 orphaned task 被接管，但不会允许任意 context 直接输入。
 
 ## 运行命令
 
@@ -69,7 +69,7 @@ block     等待 task 退出或 timeMs 到期
 nonblock  shell 确认 task 已启动后返回
 ```
 
-等待期间不会持有 pane 操作锁，因此同一 owner session 可以并发调用 `tmux_input` 发送 `^C`，或调用 `tmux_read` 获取输出。
+等待期间不会持有 pane 操作锁，因此同一 owner context 可以并发调用 `tmux_input` 发送 `^C`，或调用 `tmux_read` 获取输出。
 
 返回值包含 task id。后续交互不得只依赖 pane：
 
@@ -78,15 +78,14 @@ nonblock  shell 确认 task 已启动后返回
     "task": {
         "id": "task-...",
         "paneId": "pane-...",
-        "status": "running",
-        "ownerConnected": true
+        "status": "running"
     }
 }
 ```
 
 ## 取消等待
 
-取消 `tmux_run` 只终止当前 RPC 等待，不向终端发送信号，也不结束已经启动的 task。返回取消后，task 仍由原 session 持有，可以继续使用 `tmux_read`、`tmux_input` 或后续 `tmux_inspect` 观察。
+取消 `tmux_run` 只终止当前 RPC 等待，不向终端发送信号，也不结束已经启动的 task。返回取消后，task 仍由原 context 持有，可以继续使用 `tmux_read`、`tmux_input` 或后续 `tmux_inspect` 观察。
 
 取消 `tmux_read` 会停止等待且不消费本次尚未返回的 task 输出。需要真正中断前台程序时，调用 `tmux_input` 向对应 task 发送 `^C`。
 
@@ -112,7 +111,7 @@ nonblock  shell 确认 task 已启动后返回
 
 `^B` / Ctrl-B 被禁止，避免通过 tmux prefix 绕过受管接口。
 
-相同 `sessionId + requestId` 的副作用调用会返回首次执行结果，不会重复发送命令、按键、创建或关闭 pane。相同 request id 携带不同参数时返回 `tmux.requestIdConflict`。
+相同 `contextId + requestId` 的副作用调用会返回首次执行结果，不会重复发送命令、按键、创建或关闭 pane。相同 request id 携带不同参数时返回 `tmux.requestIdConflict`。
 
 ## 读取 task 输出
 
@@ -172,7 +171,7 @@ id                       稳定逻辑 ID
 name                     instance 内唯一名称
 tmuxPaneId               底层 tmux 坐标，仅用于诊断
 locked                   是否被运行中 task 或外部前台命令占用
-ownedByCurrentSession     当前 session 是否为 task owner
+ownedByCurrentContext     当前 context 是否为 task owner
 task                     当前运行中的 task
 ```
 
@@ -194,8 +193,8 @@ task                     当前运行中的 task
 
 运行中 task 的 pane：
 
-- owner session 使用 `force = true` 可以终止；
-- 其他 session 即使设置 `force = true` 也会得到 `tmux.taskLocked`；
+- owner context 使用 `force = true` 可以终止；
+- 其他 context 即使设置 `force = true` 也会得到 `tmux.taskLocked`；
 - 最后一个受管 pane不能关闭。
 
 ## 并发与容量
@@ -210,7 +209,7 @@ tmux_inspect
 tmux_list
 ```
 
-control scheduler 也允许一项 urgent tmux 调用越过普通 instance/session 并发上限，并优先调度已排队的 urgent 调用。
+control scheduler 也允许一项 urgent tmux 调用越过普通 instance/context 并发上限，并优先调度已排队的 urgent 调用。
 
 ## 生命周期与存储
 

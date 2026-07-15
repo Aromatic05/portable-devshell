@@ -28,7 +28,7 @@ fn call(
     id: &str,
     method: &str,
     params: Value,
-    session: &str,
+    ctx_id: &str,
     request_id: &str,
 ) -> Value {
     env.rpc(
@@ -39,7 +39,7 @@ fn call(
             "method": method,
             "params": params,
             "context": {
-                "ctxId": session,
+                "ctxId": ctx_id,
                 "requestId": request_id,
                 "source": "mcp"
             }
@@ -61,7 +61,7 @@ fn stop(env: &TestEnv, instance: &str) {
     kill_tmux_server(env, instance);
 }
 
-fn wait_for_terminal(env: &TestEnv, instance: &str, task: &str, session: &str) -> Value {
+fn wait_for_terminal(env: &TestEnv, instance: &str, task: &str, ctx_id: &str) -> Value {
     let deadline = Instant::now() + Duration::from_secs(5);
     loop {
         let response = call(
@@ -70,7 +70,7 @@ fn wait_for_terminal(env: &TestEnv, instance: &str, task: &str, session: &str) -
             "wait",
             "tmux_read",
             json!({ "task": task, "line": 200, "timeMs": 200 }),
-            session,
+            ctx_id,
             "wait-task",
         );
         assert_eq!(response["ok"], true, "{response}");
@@ -152,7 +152,7 @@ fn tmux_run_returns_a_task_and_preserves_clean_first_output() {
             "timeMs": 3000,
             "line": 80
         }),
-        "session-a",
+        "ctx-a",
         "run-ok",
     );
     assert_eq!(run["ok"], true, "{run}");
@@ -182,7 +182,7 @@ fn tmux_task_lock_controls_input_read_and_close_but_not_inspect() {
         "0",
         "tmux_create",
         json!({ "name": "server" }),
-        "session-a",
+        "ctx-a",
         "create-server",
     );
     assert_eq!(created["ok"], true, "{created}");
@@ -192,7 +192,7 @@ fn tmux_task_lock_controls_input_read_and_close_but_not_inspect() {
         "1",
         "tmux_run",
         json!({ "pane": "server", "command": "sleep 10", "wait": "nonblock" }),
-        "session-a",
+        "ctx-a",
         "run-sleep",
     );
     assert_eq!(run["ok"], true, "{run}");
@@ -204,7 +204,7 @@ fn tmux_task_lock_controls_input_read_and_close_but_not_inspect() {
         "2",
         "tmux_read",
         json!({ "task": task }),
-        "session-b",
+        "ctx-b",
         "read-foreign",
     );
     assert_eq!(
@@ -217,7 +217,7 @@ fn tmux_task_lock_controls_input_read_and_close_but_not_inspect() {
         "3",
         "tmux_input",
         json!({ "task": task, "input": "^C" }),
-        "session-b",
+        "ctx-b",
         "input-foreign",
     );
     assert_eq!(
@@ -230,7 +230,7 @@ fn tmux_task_lock_controls_input_read_and_close_but_not_inspect() {
         "4",
         "tmux_inspect",
         json!({ "pane": "server", "start": -20, "end": 0 }),
-        "session-b",
+        "ctx-b",
         "inspect-foreign",
     );
     assert_eq!(inspect["ok"], true, "{inspect}");
@@ -240,7 +240,7 @@ fn tmux_task_lock_controls_input_read_and_close_but_not_inspect() {
         "5",
         "tmux_close",
         json!({ "pane": "server", "force": true }),
-        "session-b",
+        "ctx-b",
         "close-foreign",
     );
     assert_eq!(
@@ -254,11 +254,11 @@ fn tmux_task_lock_controls_input_read_and_close_but_not_inspect() {
         "6",
         "tmux_input",
         json!({ "task": task, "input": "^C", "timeMs": 1000 }),
-        "session-a",
+        "ctx-a",
         "input-owner",
     );
     assert_eq!(interrupted["ok"], true, "{interrupted}");
-    let finished = wait_for_terminal(&env, instance, task, "session-a");
+    let finished = wait_for_terminal(&env, instance, task, "ctx-a");
     assert_ne!(finished["result"]["task"]["status"], "running");
     stop(&env, instance);
 }
@@ -277,7 +277,7 @@ fn tmux_run_without_pane_reuses_idle_then_creates_auto_pane() {
         "1",
         "tmux_run",
         json!({ "command": "sleep 10", "wait": "nonblock" }),
-        "session-a",
+        "ctx-a",
         "run-main",
     );
     assert_eq!(first["result"]["pane"]["name"], "main", "{first}");
@@ -289,7 +289,7 @@ fn tmux_run_without_pane_reuses_idle_then_creates_auto_pane() {
         "2",
         "tmux_run",
         json!({ "command": "printf AUTO\\n", "wait": "block", "timeMs": 3000 }),
-        "session-b",
+        "ctx-b",
         "run-auto",
     );
     assert_eq!(second["ok"], true, "{second}");
@@ -301,7 +301,7 @@ fn tmux_run_without_pane_reuses_idle_then_creates_auto_pane() {
         "3",
         "tmux_run",
         json!({ "command": "printf AUTO\\n", "wait": "block", "timeMs": 3000 }),
-        "session-b",
+        "ctx-b",
         "run-auto",
     );
     assert_eq!(
@@ -314,7 +314,7 @@ fn tmux_run_without_pane_reuses_idle_then_creates_auto_pane() {
         "3b",
         "tmux_run",
         json!({ "command": "printf DIFFERENT\\n", "wait": "block", "timeMs": 3000 }),
-        "session-b",
+        "ctx-b",
         "run-auto",
     );
     assert_eq!(
@@ -328,10 +328,10 @@ fn tmux_run_without_pane_reuses_idle_then_creates_auto_pane() {
         "4",
         "tmux_input",
         json!({ "task": first_task, "input": "^C" }),
-        "session-a",
+        "ctx-a",
         "stop-main",
     );
-    let _ = wait_for_terminal(&env, instance, first_task, "session-a");
+    let _ = wait_for_terminal(&env, instance, first_task, "ctx-a");
     stop(&env, instance);
 }
 
@@ -352,7 +352,7 @@ fn concurrent_duplicate_run_requests_share_one_in_flight_execution() {
                 "1",
                 "tmux_run",
                 json!({ "pane": "main", "command": "sleep 10", "wait": "nonblock" }),
-                "session-a",
+                "ctx-a",
                 "same-run-request",
             )
         });
@@ -363,7 +363,7 @@ fn concurrent_duplicate_run_requests_share_one_in_flight_execution() {
                 "2",
                 "tmux_run",
                 json!({ "pane": "main", "command": "sleep 10", "wait": "nonblock" }),
-                "session-a",
+                "ctx-a",
                 "same-run-request",
             )
         });
@@ -383,16 +383,16 @@ fn concurrent_duplicate_run_requests_share_one_in_flight_execution() {
         "3",
         "tmux_input",
         json!({ "task": task, "input": "^C", "timeMs": 1000 }),
-        "session-a",
+        "ctx-a",
         "stop-replayed-task",
     );
     assert_eq!(interrupted["ok"], true, "{interrupted}");
-    let _ = wait_for_terminal(&env, instance, task, "session-a");
+    let _ = wait_for_terminal(&env, instance, task, "ctx-a");
     stop(&env, instance);
 }
 
 #[test]
-fn block_wait_does_not_prevent_same_session_interrupt() {
+fn block_wait_does_not_prevent_same_context_interrupt() {
     if !tmux_available() {
         return;
     }
@@ -408,7 +408,7 @@ fn block_wait_does_not_prevent_same_session_interrupt() {
                 "1",
                 "tmux_run",
                 json!({ "pane": "main", "command": "sleep 10", "wait": "block", "timeMs": 5000 }),
-                "session-a",
+                "ctx-a",
                 "block-run",
             )
         });
@@ -421,7 +421,7 @@ fn block_wait_does_not_prevent_same_session_interrupt() {
                 "2",
                 "tmux_list",
                 json!({}),
-                "session-a",
+                "ctx-a",
                 "list-running",
             );
             if let Some(task) = listed["result"]["panes"][0]["task"]["id"].as_str() {
@@ -436,7 +436,7 @@ fn block_wait_does_not_prevent_same_session_interrupt() {
             "3",
             "tmux_input",
             json!({ "task": task, "input": "^C", "timeMs": 1000 }),
-            "session-a",
+            "ctx-a",
             "interrupt-block",
         );
         assert_eq!(interrupted["ok"], true, "{interrupted}");
@@ -477,7 +477,7 @@ fn bash_shell_preserves_task_identity_through_exit() {
             "timeMs": 3000,
             "line": 80
         }),
-        "session-bash",
+        "ctx-bash",
         "run-bash",
     );
     assert_eq!(run["ok"], true, "{run}");
@@ -532,7 +532,7 @@ fn fish_shell_preserves_task_identity_through_exit() {
             "timeMs": 3000,
             "line": 80
         }),
-        "session-fish",
+        "ctx-fish",
         "run-fish",
     );
     assert_eq!(run["ok"], true, "{run}");
@@ -549,87 +549,86 @@ fn fish_shell_preserves_task_identity_through_exit() {
 }
 
 #[test]
-fn closing_owner_session_keeps_running_task_locked_until_exit() {
+fn transport_session_close_does_not_invalidate_context_owned_task() {
     if !tmux_available() {
         return;
     }
     let env = TestEnv::new();
-    let instance = "aromatic-tmux-session-close";
+    let instance = "aromatic-tmux-context-reconnect";
     start(&env, instance);
     let run = call(
         &env,
         instance,
         "1",
         "tmux_run",
-        json!({ "pane": "main", "command": "sleep 1", "wait": "nonblock" }),
-        "session-a",
+        json!({ "pane": "main", "command": "sleep 10", "wait": "nonblock" }),
+        "ctx-a",
         "run-before-close",
     );
     assert_eq!(run["ok"], true, "{run}");
+    assert_eq!(
+        run["result"]["pane"]["ownedByCurrentContext"], true,
+        "{run}"
+    );
+    assert!(
+        run["result"]["pane"].get("ownedByCurrentSession").is_none(),
+        "{run}"
+    );
+    assert!(
+        run["result"]["task"].get("ownerConnected").is_none(),
+        "{run}"
+    );
     let task = run["result"]["task"]["id"].as_str().unwrap();
+
     let closed = call(
         &env,
         instance,
         "2",
         "tool.session.close",
-        json!({ "sessionId": "session-a" }),
-        "control",
-        "close-session",
+        json!({ "sessionId": "transport-session-a" }),
+        "ctx-control",
+        "close-transport-session",
     );
     assert_eq!(closed["ok"], true, "{closed}");
 
-    let listed = call(
+    let reconnected_owner = call(
         &env,
         instance,
         "3",
-        "tmux_list",
-        json!({}),
-        "session-b",
-        "list-locked",
+        "tmux_read",
+        json!({ "task": task }),
+        "ctx-a",
+        "read-after-reconnect",
     );
-    assert_eq!(listed["result"]["panes"][0]["locked"], true, "{listed}");
+    assert_eq!(reconnected_owner["ok"], true, "{reconnected_owner}");
     assert_eq!(
-        listed["result"]["panes"][0]["task"]["ownerConnected"], false,
-        "{listed}"
+        reconnected_owner["result"]["pane"]["ownedByCurrentContext"], true,
+        "{reconnected_owner}"
     );
-    let stale_owner = call(
+
+    let foreign = call(
         &env,
         instance,
         "4",
         "tmux_input",
         json!({ "task": task, "input": "^C" }),
-        "session-a",
-        "input-after-close",
+        "ctx-b",
+        "input-foreign-context",
     );
-    assert_eq!(
-        stale_owner["error"]["code"], "tmux.sessionClosed",
-        "{stale_owner}"
-    );
-    let late_run = call(
-        &env,
-        instance,
-        "4b",
-        "tmux_run",
-        json!({ "command": "echo LATE", "wait": "block", "timeMs": 1000 }),
-        "session-a",
-        "late-run-after-close",
-    );
-    assert_eq!(
-        late_run["error"]["code"], "tmux.sessionClosed",
-        "{late_run}"
-    );
+    assert_eq!(foreign["error"]["code"], "tmux.taskLocked", "{foreign}");
 
-    thread::sleep(Duration::from_millis(1200));
-    let after = call(
+    let interrupted = call(
         &env,
         instance,
         "5",
-        "tmux_list",
-        json!({}),
-        "session-b",
-        "list-after-exit",
+        "tmux_input",
+        json!({ "task": task, "input": "^C", "timeMs": 1000 }),
+        "ctx-a",
+        "input-after-reconnect",
     );
-    assert_eq!(after["result"]["panes"][0]["locked"], false, "{after}");
+    assert_eq!(interrupted["ok"], true, "{interrupted}");
+    let finished = wait_for_terminal(&env, instance, task, "ctx-a");
+    assert_ne!(finished["result"]["task"]["status"], "running");
     stop(&env, instance);
 }
 
@@ -647,7 +646,7 @@ fn worker_restart_adopts_existing_panes() {
         "1",
         "tmux_create",
         json!({ "name": "persistent" }),
-        "session-a",
+        "ctx-a",
         "create-persistent",
     );
     let pane_id = created["result"]["pane"]["id"]
@@ -663,7 +662,7 @@ fn worker_restart_adopts_existing_panes() {
         "2",
         "tmux_list",
         json!({}),
-        "session-b",
+        "ctx-b",
         "list-adopt",
     );
     let persistent = listed["result"]["panes"]

@@ -816,8 +816,6 @@ mod tests {
             FileToolState::new(),
             payloads,
             receives,
-            #[cfg(unix)]
-            None,
         ));
         let responses = Arc::new(ReverseResponseQueue::default());
         let dispatcher = Arc::new(ReverseDispatcher::new(router, Arc::clone(&responses)));

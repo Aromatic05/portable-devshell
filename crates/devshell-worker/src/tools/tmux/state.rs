@@ -11,7 +11,6 @@ use crate::tools::tmux::backend::{BackendPane, BackendWorkspace, MAX_PANES, Tmux
 use crate::tools::tmux::codec::contains_tmux_prefix_input;
 use crate::tools::tmux::output::{OutputWindow, take_output};
 use crate::tools::tmux::replay::ReplayCache;
-use crate::tools::tmux::session::ClosedSessionRegistry;
 use crate::tools::tmux::task::{
     TaskRecord, TaskRegistry, TaskState, current_task, new_task_id, pane_view, refresh_task_record,
     require_owned_task, task_expired, task_locked, task_view,
@@ -40,7 +39,6 @@ pub struct TmuxState {
     pane_locks: Mutex<HashMap<String, Arc<Mutex<()>>>>,
     tasks: Mutex<TaskRegistry>,
     replays: ReplayCache,
-    closed_sessions: ClosedSessionRegistry,
 }
 
 impl TmuxState {
@@ -51,7 +49,6 @@ impl TmuxState {
             pane_locks: Mutex::new(HashMap::new()),
             tasks: Mutex::new(TaskRegistry::default()),
             replays: ReplayCache::default(),
-            closed_sessions: ClosedSessionRegistry::default(),
         }
     }
 
@@ -71,7 +68,6 @@ impl TmuxState {
     ) -> Result<TmuxTaskOperationOutput, ToolError> {
         call.check_cancelled()?;
         require_execute(call)?;
-        self.closed_sessions.require_open(call)?;
         if params.command.is_empty()
             || params.command.contains('\0')
             || params.command.contains('\n')
@@ -139,8 +135,7 @@ impl TmuxState {
                 id: task_id.clone(),
                 pane_id: current.id.clone(),
                 pane_incarnation_id: current.pane_incarnation_id.clone(),
-                owner_session_id: call.session_id.clone(),
-                owner_connected: true,
+                owner_context_id: call.ctx_id.clone(),
                 state: TaskState::Pending,
                 window: OutputWindow {
                     anchor: current.lines.clone(),
@@ -253,7 +248,6 @@ impl TmuxState {
     ) -> Result<TmuxTaskOperationOutput, ToolError> {
         call.check_cancelled()?;
         require_execute(call)?;
-        self.closed_sessions.require_open(call)?;
         if params.input.is_empty() {
             return Err(ToolError::new(
                 "tool.invalidArguments",
@@ -271,7 +265,7 @@ impl TmuxState {
         self.refresh_task(&params.task)?;
         let (pane_id, tmux_pane_id, unread_before) = {
             let tasks = self.tasks.lock().map_err(|_| lock_error("tmux tasks"))?;
-            let task = require_owned_task(&tasks, &params.task, &call.session_id)?;
+            let task = require_owned_task(&tasks, &params.task, &call.ctx_id)?;
             if !task.state.is_active() {
                 return Err(ToolError::new(
                     "tmux.taskNotRunning",
@@ -290,7 +284,7 @@ impl TmuxState {
             self.refresh_task(&params.task)?;
             {
                 let tasks = self.tasks.lock().map_err(|_| lock_error("tmux tasks"))?;
-                let task = require_owned_task(&tasks, &params.task, &call.session_id)?;
+                let task = require_owned_task(&tasks, &params.task, &call.ctx_id)?;
                 if !task.state.is_active() {
                     return Err(ToolError::new(
                         "tmux.taskNotRunning",
@@ -307,7 +301,7 @@ impl TmuxState {
             self.refresh_task(&params.task)?;
             let (unread, terminal) = {
                 let tasks = self.tasks.lock().map_err(|_| lock_error("tmux tasks"))?;
-                let task = require_owned_task(&tasks, &params.task, &call.session_id)?;
+                let task = require_owned_task(&tasks, &params.task, &call.ctx_id)?;
                 (task.window.unread.len(), !task.state.is_active())
             };
             if unread > unread_before || terminal || Instant::now() >= deadline {
@@ -326,7 +320,6 @@ impl TmuxState {
     ) -> Result<TmuxTaskOperationOutput, ToolError> {
         call.check_cancelled()?;
         require_read(call)?;
-        self.closed_sessions.require_open(call)?;
         let time_ms = validate_time_allow_zero(params.time_ms.unwrap_or(DEFAULT_READ_TIME_MS))?;
         let line = params.line.unwrap_or(DEFAULT_LINE);
         let deadline = Instant::now() + Duration::from_millis(time_ms);
@@ -335,7 +328,7 @@ impl TmuxState {
             self.refresh_task(&params.task)?;
             let ready = {
                 let tasks = self.tasks.lock().map_err(|_| lock_error("tmux tasks"))?;
-                let task = require_owned_task(&tasks, &params.task, &call.session_id)?;
+                let task = require_owned_task(&tasks, &params.task, &call.ctx_id)?;
                 !task.window.unread.is_empty() || !task.state.is_active()
             };
             if ready || Instant::now() >= deadline {
@@ -354,7 +347,6 @@ impl TmuxState {
     ) -> Result<TmuxPaneOperationOutput, ToolError> {
         call.check_cancelled()?;
         require_read(call)?;
-        self.closed_sessions.require_open(call)?;
         if params.pane.is_some() && params.panes.is_some() {
             return Err(ToolError::new(
                 "tool.invalidArguments",
@@ -388,7 +380,7 @@ impl TmuxState {
             panes.push(pane_view(
                 &pane,
                 current_task(&tasks, &pane.id),
-                &call.session_id,
+                &call.ctx_id,
                 Some(lines),
             ));
         }
@@ -398,7 +390,6 @@ impl TmuxState {
     pub fn list(&self, call: &ToolCall) -> Result<TmuxListOutput, ToolError> {
         call.check_cancelled()?;
         require_read(call)?;
-        self.closed_sessions.require_open(call)?;
         self.ensure_session()?;
         let workspace = self.backend.capture_workspace()?;
         self.refresh_tasks_with_workspace(&workspace)?;
@@ -407,7 +398,7 @@ impl TmuxState {
         let panes = workspace
             .panes
             .iter()
-            .map(|pane| pane_view(pane, current_task(&tasks, &pane.id), &call.session_id, None))
+            .map(|pane| pane_view(pane, current_task(&tasks, &pane.id), &call.ctx_id, None))
             .collect();
         Ok(TmuxListOutput {
             kind: "list".to_string(),
@@ -435,7 +426,6 @@ impl TmuxState {
         params: TmuxCreateParams,
     ) -> Result<TmuxCreateOutput, ToolError> {
         require_execute(call)?;
-        self.closed_sessions.require_open(call)?;
         if let Some(size) = params.size_percent
             && !(10..=90).contains(&size)
         {
@@ -483,7 +473,7 @@ impl TmuxState {
         let after = self.backend.capture_workspace()?;
         Ok(TmuxCreateOutput {
             kind: "create".to_string(),
-            pane: pane_view(&pane, None, &call.session_id, None),
+            pane: pane_view(&pane, None, &call.ctx_id, None),
             capacity: capacity(&after),
             warnings: workspace_warnings(&after),
             observation_epoch: self.backend.observation_epoch().to_string(),
@@ -507,7 +497,6 @@ impl TmuxState {
         params: TmuxCloseParams,
     ) -> Result<TmuxCloseOutput, ToolError> {
         require_execute(call)?;
-        self.closed_sessions.require_open(call)?;
         let _structure_guard = self
             .structure
             .lock()
@@ -531,7 +520,7 @@ impl TmuxState {
         {
             let mut tasks = self.tasks.lock().map_err(|_| lock_error("tmux tasks"))?;
             if let Some(task) = tasks.active_for_pane_mut(&pane.id) {
-                if task.owner_session_id != call.session_id || !task.owner_connected {
+                if task.owner_context_id != call.ctx_id {
                     return Err(task_locked(task));
                 }
                 if !params.force {
@@ -570,17 +559,6 @@ impl TmuxState {
         })
     }
 
-    pub fn close_session(&self, session_id: &str) -> Result<(), ToolError> {
-        self.closed_sessions.close(session_id)?;
-        let mut tasks = self.tasks.lock().map_err(|_| lock_error("tmux tasks"))?;
-        for task in tasks.tasks.values_mut() {
-            if task.owner_session_id == session_id {
-                task.owner_connected = false;
-            }
-        }
-        Ok(())
-    }
-
     fn select_idle_pane(
         &self,
         workspace: &BackendWorkspace,
@@ -604,7 +582,7 @@ impl TmuxState {
     fn assert_pane_available(&self, call: &ToolCall, pane: &BackendPane) -> Result<(), ToolError> {
         let tasks = self.tasks.lock().map_err(|_| lock_error("tmux tasks"))?;
         if let Some(task) = tasks.active_for_pane(&pane.id) {
-            if task.owner_session_id != call.session_id || !task.owner_connected {
+            if task.owner_context_id != call.ctx_id {
                 return Err(task_locked(task));
             }
             return Err(ToolError::new(
@@ -722,8 +700,7 @@ impl TmuxState {
                     id: task_id.clone(),
                     pane_id: pane.id.clone(),
                     pane_incarnation_id: pane.pane_incarnation_id.clone(),
-                    owner_session_id: "__orphaned__".to_string(),
-                    owner_connected: false,
+                    owner_context_id: "__orphaned__".to_string(),
                     state: TaskState::Running,
                     window: OutputWindow {
                         anchor: pane.lines.clone(),
@@ -736,7 +713,7 @@ impl TmuxState {
                     warnings: vec![warning(
                         Some(&pane.id),
                         "tmux.taskOrphaned",
-                        "the worker adopted a running task without its previous MCP/RPC owner session",
+                        "the worker adopted a running task without its previous owner context",
                     )],
                 })
             })
@@ -761,13 +738,13 @@ impl TmuxState {
             .tasks
             .get_mut(task_id)
             .ok_or_else(|| task_expired(task_id))?;
-        if task.owner_session_id != call.session_id {
+        if task.owner_context_id != call.ctx_id {
             return Err(task_locked(task));
         }
         let output = take_output(&mut task.window, &task.pane_id, &mut task.warnings, line);
         let warnings = std::mem::take(&mut task.warnings);
         let view = task_view(task);
-        let pane = pane_view(&task.last_pane, Some(task), &call.session_id, None);
+        let pane = pane_view(&task.last_pane, Some(task), &call.ctx_id, None);
         Ok(TmuxTaskOperationOutput {
             kind: kind.to_string(),
             task: view,

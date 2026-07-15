@@ -81,8 +81,6 @@ pub fn serve(instance: InstanceName) -> Result<(), String> {
         builtin_tools.files,
         payloads,
         receives,
-        #[cfg(unix)]
-        builtin_tools.tmux,
     ));
     let _reverse_connector = config.reverse.clone().map(|reverse| {
         ReverseConnector::new(
