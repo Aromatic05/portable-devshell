@@ -564,20 +564,21 @@ test("config exposes container and tool scheduler settings", async () => {
     assert.equal(runtime.expandedLines.some((line) => line.text.includes("3000")), true);
 });
 
-test("audit keeps input in its original box line and opens structured patch details", async () => {
+test("audit truncates input and output previews while opening complete structured details", async () => {
     const harness = createHarness();
-    const patch = "*** Begin Patch\n*** Update File: src/example.ts\n-old\n+new\n*** End Patch";
+    const patch = "*** Begin Patch\n*** Update File: src/example.ts\n" + "-old\n+new\n".repeat(40) + "*** End Patch";
+    const output = { complete: true, files: [{ path: "src/example.ts", diff: "+new\n".repeat(40) }] };
 
     harness.store.applyEvent({
         event: "toolCall.queued",
-        payload: { at: "2026-07-14T00:00:00.000Z", data: { callId: "live-patch", input: { input: patch }, inputSummary: JSON.stringify({ input: patch }), source: "mcp", startedAt: "2026-07-14T00:00:00.000Z", status: "queued", toolName: "file_edit" } },
+        payload: { at: "2026-07-14T00:00:00.000Z", data: { callId: "live-patch", ctxId: "ctx-live-patch", input: { input: patch }, inputSummary: JSON.stringify({ input: patch }), source: "mcp", startedAt: "2026-07-14T00:00:00.000Z", status: "queued", toolName: "file_edit" } },
         seq: 21,
         target: { instance: "alpha" as never, kind: "instance" },
         type: "event"
     });
     harness.store.applyEvent({
         event: "toolCall.completed",
-        payload: { at: "2026-07-14T00:00:01.000Z", data: { callId: "live-patch", completedAt: "2026-07-14T00:00:01.000Z", source: "mcp", startedAt: "2026-07-14T00:00:00.000Z", status: "completed", toolName: "file_edit" } },
+        payload: { at: "2026-07-14T00:00:01.000Z", data: { callId: "live-patch", completedAt: "2026-07-14T00:00:01.000Z", output, source: "mcp", startedAt: "2026-07-14T00:00:00.000Z", status: "completed", toolName: "file_edit" } },
         seq: 22,
         target: { instance: "alpha" as never, kind: "instance" },
         type: "event"
@@ -586,8 +587,14 @@ test("audit keeps input in its original box line and opens structured patch deta
 
     const audit = selectMainScreenModel(harness.store.getState()).boxes.find((box) => box.id === "audit-live-patch")!;
     assert.equal((harness.store.getState().toolCallsByInstance.alpha ?? []).find((record) => record.callId === "live-patch")?.input !== undefined, true);
-    assert.equal(audit.expandedLines.some((line) => line.text.includes("*** Begin Patch")), true);
-    assert.equal(audit.expandedLines.some((line) => line.text === "[ View Full Input ]"), false);
+    const inputLine = audit.expandedLines.find((line) => line.id === "audit-live-patch:input")!;
+    const outputLine = audit.expandedLines.find((line) => line.id === "audit-live-patch:output")!;
+    assert.equal(audit.expandedLines.some((line) => line.text === "ctxId ctx-live-patch"), true);
+    assert.equal(inputLine.text.length <= 96, true);
+    assert.equal(outputLine.text.length <= 96, true);
+    assert.equal(inputLine.text.endsWith("…"), true);
+    assert.equal(outputLine.text.endsWith("…"), true);
+    assert.equal(audit.expandedLines.some((line) => line.text.includes("*** End Patch")), false);
 
     harness.store.toggleExpanded(audit.expandedKey);
     harness.store.setFocusScope("boxDetail");
@@ -596,6 +603,13 @@ test("audit keeps input in its original box line and opens structured patch deta
     await harness.dispatch({ type: "focus.activate" });
     assert.equal(harness.store.getState().interaction.textDetail.open, true);
     assert.equal(harness.store.getState().interaction.textDetail.body.includes("*** Begin Patch"), true);
+
+    await harness.dispatch({ type: "textDetail.close" });
+    harness.store.setSelectedDetailLine(audit.expandedKey, "audit-live-patch:output");
+    await harness.dispatch({ type: "focus.activate" });
+    assert.equal(harness.store.getState().interaction.textDetail.open, true);
+    assert.equal(harness.store.getState().interaction.textDetail.body.includes("complete: true"), true);
+    assert.equal(harness.store.getState().interaction.textDetail.body.includes("src/example.ts"), true);
 });
 
 test("audit renders legacy records without an input summary", async () => {
@@ -608,11 +622,28 @@ test("audit renders legacy records without an input summary", async () => {
         status: "completed",
         toolName: "bash_run"
     } as never]);
+    harness.store.replaceLogs("alpha", [{
+        at: "2026-07-14T00:00:01.000Z",
+        bytes: 14,
+        callId: "legacy-call",
+        ctxId: "ctx-legacy",
+        instance: "alpha",
+        message: "legacy output\n",
+        preview: "legacy output\n",
+        receivedAt: "2026-07-14T00:00:01.000Z",
+        seq: 1,
+        source: "mcp",
+        stream: "stdout",
+        tail: "legacy output\n",
+        toolName: "bash_run"
+    }]);
 
     await harness.press("5");
 
     const audit = selectMainScreenModel(harness.store.getState()).boxes.find((box) => box.id === "audit-legacy-call")!;
     assert.equal(audit.expandedLines.some((line) => line.text === "input -"), true);
+    assert.equal(audit.expandedLines.some((line) => line.text === "ctxId ctx-legacy"), true);
+    assert.equal(audit.expandedLines.some((line) => line.text.includes("legacy output")), true);
 });
 
 test("connector discard confirms and clears its per-instance MCP draft", async () => {

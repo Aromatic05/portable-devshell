@@ -190,6 +190,7 @@ export class TuiToolAuditModel {
             input: data.input ?? current?.input,
             inputSummary: readOptionalString(data.inputSummary) ?? current?.inputSummary ?? "",
             instance: asInstanceName(instance),
+            output: data.output === undefined ? current?.output : data.output,
             requestId: readOptionalString(data.requestId) ?? current?.requestId,
             ctxId: readOptionalString(data.ctxId) ?? current?.ctxId,
             source: readToolCallSource(data.source) ?? current?.source ?? "tui",

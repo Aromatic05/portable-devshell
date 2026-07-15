@@ -101,7 +101,7 @@ test("InstanceLogStore and ToolCallHistory persist per-instance records", async 
         const completed = await history.completed(
             "call-1",
             "2026-07-07T00:00:03.000Z",
-            { exitCode: 0, stderrBytes: 0, stdoutBytes: 2, termination: "exited" }
+            { exitCode: 0, output: { stdout: "ok" }, stderrBytes: 0, stdoutBytes: 2, termination: "exited" }
         );
         assert.equal(completed.status, "completed");
         assert.equal(completed.exitCode, 0);
@@ -109,6 +109,7 @@ test("InstanceLogStore and ToolCallHistory persist per-instance records", async 
         assert.equal(completed.termination, "exited");
         assert.equal(completed.inputSummary, "{\"command\":\"pwd\"}");
         assert.equal((completed.input as { input?: unknown } | undefined)?.input, patch);
+        assert.deepEqual(completed.output, { stdout: "ok" });
         assert.equal(completed.source, "cli");
         assert.equal(completed.taskId, "task-1");
         assert.equal(completed.todoItemId, "implement");
@@ -125,13 +126,14 @@ test("InstanceLogStore and ToolCallHistory persist per-instance records", async 
             "call-3",
             "worker.command_failed",
             "2026-07-07T00:00:05.000Z",
-            { exitCode: 1, stderrBytes: 4, stdoutBytes: 0, termination: "exited" }
+            { exitCode: 1, output: { stderr: "fail" }, stderrBytes: 4, stdoutBytes: 0, termination: "exited" }
         );
         assert.equal(failed.status, "failed");
         assert.equal(failed.error, "worker.command_failed");
         assert.equal(failed.requestId, "req-3");
         assert.equal(failed.source, "mcp");
         assert.equal(failed.stderrBytes, 4);
+        assert.deepEqual(failed.output, { stderr: "fail" });
 
         const records = await history.read();
         assert.deepEqual(records.map((record) => record.callId), ["call-1", "call-2", "call-3"]);

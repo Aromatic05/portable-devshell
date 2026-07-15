@@ -37,6 +37,7 @@ export interface ToolCallRecord {
     exitCode?: number | null;
     inputSummary: string;
     input?: JsonValue;
+    output?: JsonValue;
     instance: InstanceName;
     approvalId?: string;
     requestId?: string;

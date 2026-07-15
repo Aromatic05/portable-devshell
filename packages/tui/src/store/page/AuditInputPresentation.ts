@@ -2,8 +2,37 @@ import type { JsonValue } from "@portable-devshell/shared";
 
 import type { BoxLine } from "../../component/ExpandableBox.js";
 
+const AUDIT_PREVIEW_MAX_LENGTH = 80;
+
+interface AuditLinkedLog {
+    callId?: string;
+    ctxId?: string;
+    message?: string;
+    stream: "stderr" | "stdout";
+}
+
+export function resolveAuditCtxId(ctxId: string | undefined, logs: readonly AuditLinkedLog[], callId: string): string | undefined {
+    return ctxId ?? logs.find((entry) => entry.callId === callId && entry.ctxId !== undefined)?.ctxId;
+}
+
+export function resolveAuditOutput(output: JsonValue | undefined, logs: readonly AuditLinkedLog[], callId: string): JsonValue | undefined {
+    if (output !== undefined) {
+        return output;
+    }
+    const linked = logs.filter((entry) => entry.callId === callId);
+    const stdout = linked.filter((entry) => entry.stream === "stdout").map((entry) => entry.message ?? "").join("");
+    const stderr = linked.filter((entry) => entry.stream === "stderr").map((entry) => entry.message ?? "").join("");
+    if (stdout.length === 0 && stderr.length === 0) {
+        return undefined;
+    }
+    return {
+        ...(stderr.length === 0 ? {} : { stderr }),
+        ...(stdout.length === 0 ? {} : { stdout })
+    };
+}
+
 export function auditInputLines(input: JsonValue | undefined, fallback: string | undefined): Array<{ id: string; text: string; tone?: BoxLine["tone"] }> {
-    return formatValue(input ?? parseFallback(fallback), 0, undefined).map((text, index) => ({
+    return formatValue(input === undefined ? parseFallback(fallback) : input, 0, undefined).map((text, index) => ({
         id: `input:${index}`,
         text,
         tone: patchLineTone(text)
@@ -11,18 +40,32 @@ export function auditInputLines(input: JsonValue | undefined, fallback: string |
 }
 
 export function auditInputText(input: JsonValue | undefined, fallback: string | undefined): string {
-    return formatValue(input ?? parseFallback(fallback), 0, undefined).join("\n");
+    return auditValueText(input === undefined ? parseFallback(fallback) : input);
 }
 
 export function auditInputSummary(input: JsonValue | undefined, fallback: string | undefined): string {
-    const value = input ?? parseFallback(fallback);
-    if (typeof value === "object" && value !== null && !Array.isArray(value)) {
-        return Object.entries(value)
-            .slice(0, 3)
-            .map(([key, entry]) => `${key}=${summaryValue(entry)}`)
-            .join("  ");
+    return auditValueSummary(input === undefined ? parseFallback(fallback) : input);
+}
+
+export function auditOutputText(output: JsonValue | undefined): string {
+    return auditValueText(output === undefined ? "-" : output);
+}
+
+export function auditOutputSummary(output: JsonValue | undefined): string {
+    return auditValueSummary(output === undefined ? "-" : output);
+}
+
+function auditValueText(value: JsonValue): string {
+    return formatValue(value, 0, undefined).join("\n");
+}
+
+function auditValueSummary(value: JsonValue): string {
+    const serialized = typeof value === "string" ? value : JSON.stringify(value) ?? String(value);
+    const normalized = serialized.replace(/\s+/gu, " ").trim();
+    if (normalized.length <= AUDIT_PREVIEW_MAX_LENGTH) {
+        return normalized;
     }
-    return summaryValue(value);
+    return `${normalized.slice(0, AUDIT_PREVIEW_MAX_LENGTH - 1)}…`;
 }
 
 function formatValue(value: JsonValue, depth: number, label: string | undefined): string[] {
@@ -50,19 +93,6 @@ function parseFallback(value: string | undefined): JsonValue {
     } catch {
         return value;
     }
-}
-
-function summaryValue(value: JsonValue): string {
-    if (typeof value === "string") {
-        return value.replace(/\s+/gu, " ").slice(0, 48);
-    }
-    if (Array.isArray(value)) {
-        return `${value.length} items`;
-    }
-    if (value !== null && typeof value === "object") {
-        return `${Object.keys(value).length} fields`;
-    }
-    return String(value);
 }
 
 function patchLineTone(line: string): BoxLine["tone"] {

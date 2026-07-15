@@ -162,12 +162,15 @@ export class WorkerInstanceTool {
             await this.#toolCallHistory.completed(
                 callId,
                 completedAt,
-                bashResult === undefined ? undefined : {
-                    exitCode: bashResult.exitCode,
-                    stderrBytes: bashResult.stderrBytes,
-                    stdoutBytes: bashResult.stdoutBytes,
-                    termSignal: bashResult.termSignal,
-                    termination: bashResult.termination
+                {
+                    output: result,
+                    ...(bashResult === undefined ? {} : {
+                        exitCode: bashResult.exitCode,
+                        stderrBytes: bashResult.stderrBytes,
+                        stdoutBytes: bashResult.stdoutBytes,
+                        termSignal: bashResult.termSignal,
+                        termination: bashResult.termination
+                    })
                 }
             );
             if (bashResult !== undefined) {
@@ -180,6 +183,7 @@ export class WorkerInstanceTool {
                     completedAt,
                     ...(approvalState.decision === undefined ? {} : { decision: approvalState.decision }),
                     exitCode: bashResult?.exitCode,
+                    output: result,
                     startedAt,
                     status: "completed",
                     stderrBytes: bashResult?.stderrBytes,
@@ -231,6 +235,7 @@ export class WorkerInstanceTool {
                     ? undefined
                     : {
                           exitCode: result.exitCode,
+                          output: commandResultOutput(result),
                           stderrBytes: readByteLength(result.stderr),
                           stdoutBytes: readByteLength(result.stdout)
                       }
@@ -243,6 +248,7 @@ export class WorkerInstanceTool {
                     ...(approvalState.decision === undefined ? {} : { decision: approvalState.decision }),
                     errorCode,
                     exitCode: result?.exitCode,
+                    output: result === undefined ? undefined : commandResultOutput(result),
                     startedAt,
                     status: "failed",
                     stderrBytes: result === undefined ? undefined : readByteLength(result.stderr),
@@ -301,12 +307,13 @@ export class WorkerInstanceTool {
             throwIfAborted(signal);
             const result = await operation();
             const completedAt = new Date().toISOString();
-            await this.#toolCallHistory.completed(callId, completedAt);
+            await this.#toolCallHistory.completed(callId, completedAt, { output: result });
             await this.#appendEvent(
                 "toolCall.completed",
                 toEventData({
                     ...eventContext,
                     completedAt,
+                    output: result,
                     startedAt,
                     status: "completed"
                 })
@@ -464,6 +471,17 @@ function asCommandResult(error: unknown): CommandResult | undefined {
         stdout: "",
         timedOut: candidate.timedOut === true
     };
+}
+
+function commandResultOutput(result: CommandResult): JsonValue {
+    return toEventData({
+        details: result.details as unknown as JsonValue | undefined,
+        exitCode: result.exitCode,
+        signal: result.signal,
+        stderr: result.stderr,
+        stdout: result.stdout,
+        timedOut: result.timedOut
+    });
 }
 
 function asBashToolResult(value: JsonValue): {

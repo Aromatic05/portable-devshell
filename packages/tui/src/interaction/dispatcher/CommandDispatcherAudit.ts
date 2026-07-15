@@ -1,4 +1,4 @@
-import { auditInputText } from "../../store/page/AuditInputPresentation.js";
+import { auditInputText, auditOutputText, resolveAuditOutput } from "../../store/page/AuditInputPresentation.js";
 import type { TuiAppStore } from "../../store/TuiAppStore.js";
 import { selectMainScrollKey } from "../../store/TuiSelectors.js";
 import type { TuiUiIntent } from "../TuiInteractionTypes.js";
@@ -42,6 +42,19 @@ export class CommandDispatcherAudit {
         return await this.#dispatch({
             body: auditInputText(record.input, record.inputSummary),
             title: `${record.toolName} · input`,
+            type: "textDetail.open"
+        });
+    }
+
+    async openOutput(instance: string, callId: string): Promise<boolean> {
+        const record = this.#store.getState().toolCallsByInstance[instance]?.find((candidate) => candidate.callId === callId);
+        if (record === undefined) {
+            return false;
+        }
+        const output = resolveAuditOutput(record.output, this.#store.getState().logsByInstance[instance] ?? [], callId);
+        return await this.#dispatch({
+            body: auditOutputText(output),
+            title: `${record.toolName} · output`,
             type: "textDetail.open"
         });
     }

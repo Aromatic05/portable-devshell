@@ -26,6 +26,15 @@ interface ActiveToolCall {
     toolName: string;
 }
 
+interface ToolCallCompletionResult {
+    exitCode?: number | null;
+    output?: JsonValue;
+    stderrBytes?: number;
+    stdoutBytes?: number;
+    termSignal?: number;
+    termination?: "exited" | "signaled" | "timeout";
+}
+
 export class ToolCallHistory {
     readonly #instanceName: InstanceName;
     readonly #store: JsonlStore<ToolCallRecord>;
@@ -80,7 +89,7 @@ export class ToolCallHistory {
     async completed(
         callId: string,
         completedAt: string,
-        result?: { exitCode?: number | null; stderrBytes?: number; stdoutBytes?: number; termSignal?: number; termination?: "exited" | "signaled" | "timeout" }
+        result?: ToolCallCompletionResult
     ): Promise<ToolCallRecord> {
         return await this.#finishRunning(callId, completedAt, "completed", undefined, result);
     }
@@ -89,7 +98,7 @@ export class ToolCallHistory {
         callId: string,
         error: string,
         completedAt: string,
-        result?: { exitCode?: number | null; stderrBytes?: number; stdoutBytes?: number; termSignal?: number; termination?: "exited" | "signaled" | "timeout" }
+        result?: ToolCallCompletionResult
     ): Promise<ToolCallRecord> {
         return await this.#finishRunning(callId, completedAt, "failed", error, result);
     }
@@ -151,7 +160,7 @@ export class ToolCallHistory {
         completedAt: string,
         status: Extract<ToolCallRecord["status"], "completed" | "failed">,
         error?: string,
-        result?: { exitCode?: number | null; stderrBytes?: number; stdoutBytes?: number; termSignal?: number; termination?: "exited" | "signaled" | "timeout" }
+        result?: ToolCallCompletionResult
     ): Promise<ToolCallRecord> {
         await this.#initialize();
         const startedRecord = this.#readActiveCall(callId);
@@ -161,6 +170,7 @@ export class ToolCallHistory {
             ...(error === undefined ? {} : { error }),
             ...(result?.exitCode === undefined ? {} : { exitCode: result.exitCode }),
             instance: this.#instanceName,
+            ...(result?.output === undefined ? {} : { output: result.output }),
             status,
             ...(result?.stderrBytes === undefined ? {} : { stderrBytes: result.stderrBytes }),
             ...(result?.stdoutBytes === undefined ? {} : { stdoutBytes: result.stdoutBytes }),

@@ -106,8 +106,13 @@ export class CommandDispatcherDetail {
             }
 
             const callId = boxId === undefined ? undefined : this.#audit.callIdFromBox(boxId);
-            if (state.ui.selectedPage === "audit" && state.ui.selectedInstance !== undefined && callId !== undefined && selectedLine?.text.startsWith("input ") === true) {
-                return await this.#audit.openInput(state.ui.selectedInstance, callId);
+            if (state.ui.selectedPage === "audit" && state.ui.selectedInstance !== undefined && callId !== undefined) {
+                if (actionId === "input") {
+                    return await this.#audit.openInput(state.ui.selectedInstance, callId);
+                }
+                if (actionId === "output") {
+                    return await this.#audit.openOutput(state.ui.selectedInstance, callId);
+                }
             }
 
             if (button === "clear-filter" && (state.ui.selectedPage === "instances" || state.ui.selectedPage === "todo" || state.ui.selectedPage === "config" || state.ui.selectedPage === "audit")) {

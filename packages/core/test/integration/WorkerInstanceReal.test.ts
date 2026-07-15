@@ -153,6 +153,7 @@ test("WorkerInstance audits control-owned tool calls while the worker is stopped
                 ctxId: record.ctxId,
                 error: record.error,
                 input: record.input,
+                output: record.output,
                 requestId: record.requestId,
                 source: record.source,
                 status: record.status,
@@ -163,6 +164,7 @@ test("WorkerInstance audits control-owned tool calls while the worker is stopped
                     ctxId: "ctx-control-audit",
                     error: undefined,
                     input: {},
+                    output: { revision: 7 },
                     requestId: "request-control-audit",
                     source: "mcp",
                     status: "completed",
@@ -172,6 +174,7 @@ test("WorkerInstance audits control-owned tool calls while the worker is stopped
                     ctxId: "ctx-control-audit",
                     error: errorCodes.instanceMissing,
                     input: { instance: "missing" },
+                    output: undefined,
                     requestId: "request-control-audit",
                     source: "mcp",
                     status: "failed",
@@ -181,6 +184,7 @@ test("WorkerInstance audits control-owned tool calls while the worker is stopped
                     ctxId: "ctx-control-audit",
                     error: errorCodes.coreToolCallCancelled,
                     input: { operation: "status", transferId: "transfer-1" },
+                    output: undefined,
                     requestId: "request-control-audit",
                     source: "mcp",
                     status: "cancelled",
@@ -196,6 +200,10 @@ test("WorkerInstance audits control-owned tool calls while the worker is stopped
         assert.deepEqual(eventTypesForCall(records[0]?.callId), ["toolCall.running", "toolCall.completed"]);
         assert.deepEqual(eventTypesForCall(records[1]?.callId), ["toolCall.running", "toolCall.failed"]);
         assert.deepEqual(eventTypesForCall(records[2]?.callId), ["toolCall.running", "toolCall.cancelled"]);
+        const completedEvent = replay.events.find(
+            (event) => event.type === "toolCall.completed" && event.data?.callId === records[0]?.callId
+        );
+        assert.deepEqual(completedEvent?.data?.output, { revision: 7 });
     } finally {
         await instance.close();
         await rm(homeDirectory, { force: true, recursive: true });
@@ -266,6 +274,7 @@ test("WorkerInstance rejects not-ready and schedules concurrent tool calls while
         assert.deepEqual(records.map((record) => record.status), ["completed", "completed", "failed"]);
         assert.equal(records[0]?.source, "cli");
         assert.equal(records[0]?.inputSummary, "{\"command\":\"pwd\"}");
+        assert.deepEqual(records[0]?.output, { exitCode: 0, stderr: "", stdout });
         assert.equal(records[0]?.stdoutBytes, 240);
         assert.equal(records[0]?.stderrBytes, 0);
         assert.equal(records[0]?.termination, undefined);
@@ -330,6 +339,9 @@ test("WorkerInstance rejects not-ready and schedules concurrent tool calls while
         const failedEvent = replay.events.find(
             (event) => event.type === "toolCall.failed" && event.data?.callId === records[2]?.callId
         );
+        const completedEvent = replay.events.find(
+            (event) => event.type === "toolCall.completed" && event.data?.callId === records[0]?.callId
+        );
 
         assert.deepEqual(firstQueued?.data, {
             callId: records[0]?.callId,
@@ -350,6 +362,7 @@ test("WorkerInstance rejects not-ready and schedules concurrent tool calls while
             status: "running",
             toolName: "bash_run"
         });
+        assert.deepEqual(completedEvent?.data?.output, { exitCode: 0, stderr: "", stdout });
         assert.deepEqual(failedEvent?.data, {
             callId: records[2]?.callId,
             completedAt: failedEvent?.data.completedAt,

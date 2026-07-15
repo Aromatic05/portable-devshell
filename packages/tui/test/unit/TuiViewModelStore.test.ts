@@ -111,6 +111,7 @@ test("Audit page renders control-owned tool calls from live events", () => {
             data: {
                 callId: "control-call-1",
                 completedAt: "2026-07-15T00:00:01.000Z",
+                output: { revision: 3 },
                 source: "mcp",
                 startedAt: "2026-07-15T00:00:00.000Z",
                 status: "completed",
@@ -129,9 +130,12 @@ test("Audit page renders control-owned tool calls from live events", () => {
     assert.equal(record?.toolName, "todo_read");
     assert.equal(record?.status, "completed");
     assert.equal(record?.ctxId, "ctx-control");
+    assert.deepEqual(record?.output, { revision: 3 });
     assert.equal(record?.requestId, "request-control");
 
     const audit = selectMainScreenModel(store.getState());
     assert.equal(audit.boxes[0]?.id, "audit-control-call-1");
     assert.equal(audit.boxes[0]?.title, "todo_read · completed");
+    assert.equal(audit.boxes[0]?.expandedLines.some((line) => line.text === "ctxId ctx-control"), true);
+    assert.equal(audit.boxes[0]?.expandedLines.some((line) => line.text.startsWith("output ")), true);
 });

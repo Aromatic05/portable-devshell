@@ -23,5 +23,5 @@ test("todo write documents the complete replacement item contract", () => {
     assert.match(tool.description, /pending \| in_progress \| blocked \| completed \| failed \| cancelled/u);
     assert.match(schema.properties.revision.description ?? "", /latest todo_read result/u);
     assert.match(schema.properties.todos.description ?? "", /complete replacement list/u);
-    assert.match(schema.properties.todos.items.properties.detail.description ?? "", /blocked and failed/u);
+    assert.match(schema.properties.todos.items.properties.detail.description ?? "", /blocked or failed/u);
 });
