@@ -197,8 +197,41 @@ const toolsList = await postJson({
   method: "tools/list"
 }, sessionHeaders);
 
-if (toolsList.result?.tools?.[0]?.name !== "bash_run") {
-  throw new Error("tools/list did not expose bash_run");
+const toolNames = toolsList.result?.tools?.map((tool) => tool.name) ?? [];
+if (!toolNames.includes("environ_info") || !toolNames.includes("bash_run")) {
+  throw new Error(`tools/list did not expose environ_info and bash_run: ${toolNames.join(", ")}`);
+}
+
+const environmentCall = await postJson({
+  jsonrpc: "2.0",
+  id: "req-environ-info",
+  method: "tools/call",
+  params: {
+    name: "environ_info",
+    arguments: {}
+  }
+}, sessionHeaders);
+
+const environment = environmentCall.result?.structuredContent;
+const ctxId = environment?.ctxId;
+if (typeof ctxId !== "string" || ctxId.length === 0) {
+  throw new Error(`environ_info did not return ctxId: ${JSON.stringify(environmentCall)}`);
+}
+if (environment?.instance !== "aromatic-pc" || environment?.workspace !== workspacePath) {
+  throw new Error(`environ_info returned the wrong target environment: ${JSON.stringify(environment)}`);
+}
+if (
+  typeof environment?.platform?.os !== "string" ||
+  typeof environment?.platform?.arch !== "string" ||
+  typeof environment?.platform?.distribution?.id !== "string" ||
+  typeof environment?.platform?.distribution?.name !== "string" ||
+  typeof environment?.platform?.packageManager !== "string" ||
+  typeof environment?.platform?.shell !== "string"
+) {
+  throw new Error(`environ_info omitted required platform details: ${JSON.stringify(environment)}`);
+}
+if (Number.isNaN(Date.parse(String(environment?.expiresAt ?? "")))) {
+  throw new Error(`environ_info returned an invalid expiresAt: ${JSON.stringify(environment)}`);
 }
 
 const toolsCall = await postJson({
@@ -208,7 +241,8 @@ const toolsCall = await postJson({
   params: {
     name: "bash_run",
     arguments: {
-      command: "pwd"
+      command: "pwd",
+      ctxId
     }
   }
 }, sessionHeaders);
@@ -219,7 +253,7 @@ if (!text.includes(workspacePath)) {
   throw new Error(`tools/call output did not include workspace path: ${text}`);
 }
 
-console.log(JSON.stringify({ initialize, toolsList, toolsCall }, null, 2));
+console.log(JSON.stringify({ environmentCall, initialize, toolsList, toolsCall }, null, 2));
 EOF
 
 devshell instance stop aromatic-pc >/dev/null
