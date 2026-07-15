@@ -102,6 +102,7 @@ export class ControlServer {
         });
         await this.#artifactService.initialize();
         this.#mcpHost = this.#mcpWiringService.wire(config, registry, {
+            contextFile: controlPaths.contextsFile,
             gateway: withArtifactGateway(instanceGateway, this.#artifactService),
             storageDir: controlPaths.oauthDir
         });

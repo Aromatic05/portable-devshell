@@ -411,7 +411,6 @@ export class WorkerInstance {
 
     async appendMcpSessionClosed(sessionId: string): Promise<void> {
         await this.#appendEvent("mcp.sessionClosed", toEventData({ sessionId }));
-        await this.releaseToolSession(sessionId);
     }
 
     async releaseToolSession(sessionId: string): Promise<void> {
@@ -420,12 +419,12 @@ export class WorkerInstance {
         }
     }
 
-    async appendMcpToolCalled(toolName: string, context: { requestId?: string; sessionId?: string }): Promise<void> {
+    async appendMcpToolCalled(toolName: string, context: { requestId?: string; ctxId?: string }): Promise<void> {
         await this.#appendEvent(
             "mcp.toolCalled",
             toEventData({
                 requestId: context.requestId,
-                sessionId: context.sessionId,
+                ctxId: context.ctxId,
                 source: "mcp",
                 toolName
             })

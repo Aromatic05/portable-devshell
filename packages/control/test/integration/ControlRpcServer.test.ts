@@ -116,7 +116,7 @@ async function verifyRpcMethodsOverReusedConnection(): Promise<void> {
         assert.equal(toolCall.result.exitCode, 0);
         assert.equal(worker.lastToolCall?.source, "cli");
         assert.match(String(worker.lastToolCall?.requestId ?? ""), /^req-\d+$/u);
-        assert.equal(typeof worker.lastToolCall?.sessionId, "string");
+        assert.equal(typeof worker.lastToolCall?.ctxId, "string");
 
         const tuiClient = await RpcClient.connect(socketPath);
         const unknownClient = await RpcClient.connect(socketPath);
@@ -571,7 +571,7 @@ class FakeWorker {
     #lastReadLogsQuery?: { fromSeq?: number; limit?: number };
     #lastReadToolCallsQuery?: Record<string, unknown>;
     #lastInteractiveInput?: string;
-    #lastToolCall?: { requestId?: string; sessionId?: string; source: string };
+    #lastToolCall?: { requestId?: string; ctxId?: string; source: string };
     #events: Array<{ at: string; data?: unknown; instanceName: string; seq: number; type: string }> = [];
     #lastSeq = 0;
     #logs = [
@@ -751,7 +751,7 @@ class FakeWorker {
     async callTool(
         _toolName: string,
         _input: JsonValue,
-        context: { requestId?: string; sessionId?: string; source: string }
+        context: { requestId?: string; ctxId?: string; source: string }
     ) {
         this.#lastToolCall = context;
         this.emit("toolCall.completed", { source: context.source, toolName: "bash_run" });

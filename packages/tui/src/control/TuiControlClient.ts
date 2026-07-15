@@ -47,7 +47,7 @@ export interface TuiControlLogEntry {
     message: string;
     requestId?: string;
     seq: number;
-    sessionId?: string;
+    ctxId?: string;
     source?: "cli" | "mcp" | "tui";
     stream: "stderr" | "stdout";
     toolName?: string;

@@ -79,7 +79,7 @@ export class WorkerInstanceTool {
             input,
             inputSummary,
             requestId: context.requestId,
-            sessionId: context.sessionId,
+            ctxId: context.ctxId,
             source: context.source,
             taskId: association?.taskId,
             todoItemId: association?.todoItemId,
@@ -93,7 +93,7 @@ export class WorkerInstanceTool {
                 {
                     callId,
                     instanceName: this.#instanceName,
-                    sessionId: context.sessionId,
+                    ctxId: context.ctxId,
                     source: context.source,
                     toolName
                 },
@@ -281,7 +281,7 @@ export class WorkerInstanceTool {
         context: {
             callId: string;
             requestId?: string;
-            sessionId?: string;
+            ctxId?: string;
             source: ToolCallContext["source"];
             toolName: string;
         }

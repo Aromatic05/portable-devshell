@@ -15,6 +15,8 @@ import type {
 } from "@portable-devshell/shared";
 
 import { McpArtifactToolCatalog, type McpArtifactToolName } from "../artifact/McpArtifactToolCatalog.js";
+import { McpContextRegistry } from "../context/McpContextRegistry.js";
+import { McpEnvironmentToolCatalog, mcpEnvironmentToolName } from "../environment/McpEnvironmentToolCatalog.js";
 import type { McpInstanceGateway, McpSshInstanceCreateInput } from "../instance/McpInstanceGateway.js";
 import { McpInstanceToolCatalog, type McpInstanceToolName } from "../instance/McpInstanceToolCatalog.js";
 import { McpTodoToolCatalog, type McpTodoToolName } from "../todo/McpTodoToolCatalog.js";
@@ -29,17 +31,38 @@ import {
 interface WorkerInstanceLike {
     appendMcpSessionClosed(sessionId: string): Promise<void>;
     appendMcpSessionOpened(sessionId: string): Promise<void>;
-    appendMcpToolCalled(toolName: string, context: { requestId?: string; sessionId?: string }): Promise<void>;
+    appendMcpToolCalled(toolName: string, context: { requestId?: string; ctxId?: string }): Promise<void>;
     callTool(toolName: string, input: JsonValue, context: ToolCallContext, signal?: AbortSignal): Promise<JsonValue>;
+    readonly handshake?: WorkerEnvironmentHandshake;
+    readonly workspacePath?: string;
     hasToolSchemaCache?(): boolean;
     listTools(): ToolDefinition[];
     snapshot(): { ready?: boolean };
 }
 
+interface WorkerEnvironmentHandshake {
+    instance: string;
+    workspace: string;
+    platform: {
+        arch: string;
+        distribution?: { id: string; name: string; version?: string };
+        os: string;
+        packageManager?: string;
+        shell?: { executable: string; kind: string; version: string };
+    };
+}
+
+export interface McpEndpointCallContext {
+    principal: string;
+    requestId?: string;
+}
+
 export class McpEndpointWorker {
     readonly #artifactTools = new McpArtifactToolCatalog();
     readonly #catalog: McpEndpointToolCatalog;
+    readonly #contextRegistry: McpContextRegistry;
     readonly #descriptionEnhancer = new McpToolDescriptionEnhancer();
+    readonly #environmentTools = new McpEnvironmentToolCatalog();
     readonly #gateway?: McpInstanceGateway;
     readonly #instanceName: string;
     readonly #instanceTools = new McpInstanceToolCatalog();
@@ -48,12 +71,14 @@ export class McpEndpointWorker {
     readonly #worker: WorkerInstanceLike;
 
     constructor(options: {
+        contextRegistry?: McpContextRegistry;
         gateway?: McpInstanceGateway;
         instanceName: string;
         policy: ToolPolicy;
         worker: WorkerInstanceLike;
     }) {
         this.#catalog = new McpEndpointToolCatalog(options.policy);
+        this.#contextRegistry = options.contextRegistry ?? new McpContextRegistry();
         this.#gateway = options.gateway;
         this.#instanceName = options.instanceName;
         this.#worker = options.worker;
@@ -100,20 +125,73 @@ export class McpEndpointWorker {
 
     async appendSessionClosed(sessionId: string): Promise<void> {
         await this.#worker.appendMcpSessionClosed(sessionId);
-        await this.#gateway?.closeToolSession?.(sessionId);
     }
 
-    async callTool(toolName: string, input: JsonValue, context: ToolCallContext, signal?: AbortSignal): Promise<JsonValue> {
+    async callTool(
+        toolName: string,
+        input: JsonValue,
+        requestContext: McpEndpointCallContext,
+        signal?: AbortSignal
+    ): Promise<JsonValue> {
         throwIfAborted(signal);
-        await this.#worker.appendMcpToolCalled(toolName, {
-            requestId: context.requestId,
-            sessionId: context.sessionId
-        });
-        throwIfAborted(signal);
-
         const { merged, exposed } = this.#resolveCatalog();
         const known = merged.find((entry) => entry.definition.name === toolName);
         const selected = exposed.find((entry) => entry.definition.name === toolName);
+
+        if (known?.owner === "environment") {
+            if (selected === undefined) {
+                throw this.#toolNotExposed(toolName);
+            }
+            assertNoArguments(input, toolName);
+            const environment = this.#requireEnvironment();
+            const record = await this.#contextRegistry.create({
+                instance: this.#instanceName,
+                principal: requestContext.principal,
+                workspace: environment.workspace
+            });
+            await this.#worker.appendMcpToolCalled(toolName, {
+                ctxId: record.ctxId,
+                requestId: requestContext.requestId
+            });
+            return {
+                ctxId: record.ctxId,
+                expiresAt: record.expiresAt,
+                instance: this.#instanceName,
+                platform: {
+                    arch: environment.platform.arch,
+                    ...(environment.platform.distribution === undefined
+                        ? {}
+                        : { distribution: environment.platform.distribution }),
+                    os: environment.platform.os,
+                    ...(environment.platform.packageManager === undefined
+                        ? {}
+                        : { packageManager: environment.platform.packageManager }),
+                    ...(environment.platform.shell === undefined
+                        ? {}
+                        : { shell: environment.platform.shell.kind })
+                },
+                workspace: environment.workspace
+            };
+        }
+
+        const extracted = readContextInput(input);
+        const workspace = this.#currentWorkspace();
+        const record = await this.#contextRegistry.validateAndTouch(extracted.ctxId, {
+            instance: this.#instanceName,
+            principal: requestContext.principal,
+            workspace
+        });
+        const context: ToolCallContext = {
+            ctxId: record.ctxId,
+            requestId: requestContext.requestId,
+            source: "mcp"
+        };
+        await this.#worker.appendMcpToolCalled(toolName, {
+            ctxId: context.ctxId,
+            requestId: context.requestId
+        });
+        throwIfAborted(signal);
+        input = extracted.input;
 
         if (known?.owner === "todo") {
             if (selected === undefined) {
@@ -167,7 +245,10 @@ export class McpEndpointWorker {
         merged: McpEndpointToolEntry[];
     } {
         const hasWorkerSchema = this.#worker.snapshot().ready || this.#worker.hasToolSchemaCache?.() === true;
-        const sources: McpEndpointToolSource[] = [];
+        const sources: McpEndpointToolSource[] = [{
+            owner: "environment",
+            tools: this.#environmentTools.list()
+        }];
 
         if (hasWorkerSchema) {
             sources.push({
@@ -260,7 +341,34 @@ export class McpEndpointWorker {
     }
 
     #adaptTool(tool: ToolDefinition): McpTool {
-        return this.#schemaAdapter.toMcpTool(tool, this.#descriptionEnhancer.enhance(tool.description));
+        const exposed = tool.name === mcpEnvironmentToolName ? tool : withCtxId(tool);
+        return this.#schemaAdapter.toMcpTool(exposed, this.#descriptionEnhancer.enhance(exposed.description));
+    }
+
+    #requireEnvironment(): WorkerEnvironmentHandshake {
+        const environment = this.#worker.handshake;
+        if (environment !== undefined) {
+            return environment;
+        }
+        throw createError({
+            code: errorCodes.coreWorkerHandshakeFailed,
+            details: { instance: this.#instanceName },
+            message: `Environment information is unavailable for ${this.#instanceName}.`,
+            retryable: true
+        });
+    }
+
+    #currentWorkspace(): string {
+        const workspace = this.#worker.handshake?.workspace ?? this.#worker.workspacePath;
+        if (workspace !== undefined && workspace.length > 0) {
+            return workspace;
+        }
+        throw createError({
+            code: errorCodes.coreWorkerHandshakeFailed,
+            details: { instance: this.#instanceName },
+            message: `Workspace information is unavailable for ${this.#instanceName}.`,
+            retryable: true
+        });
     }
 
     #requireGateway(): McpInstanceGateway {
@@ -283,6 +391,44 @@ export class McpEndpointWorker {
             retryable: false
         });
     }
+}
+
+function withCtxId(tool: ToolDefinition): ToolDefinition {
+    if (!isRecord(tool.inputSchema)) {
+        throw new McpToolSchemaUnavailableError(tool.name);
+    }
+    const properties = isRecord(tool.inputSchema.properties) ? tool.inputSchema.properties : {};
+    const required = Array.isArray(tool.inputSchema.required)
+        ? tool.inputSchema.required.filter((entry): entry is string => typeof entry === "string")
+        : [];
+    return {
+        ...tool,
+        description: `${tool.description} Pass the ctxId returned by environ_info.`,
+        inputSchema: {
+            ...tool.inputSchema,
+            properties: {
+                ...properties,
+                ctxId: {
+                    description: "Invocation context returned by environ_info.",
+                    minLength: 1,
+                    type: "string"
+                }
+            },
+            required: required.includes("ctxId") ? required : [...required, "ctxId"]
+        }
+    };
+}
+
+function readContextInput(input: JsonValue): { ctxId: string; input: JsonValue } {
+    if (!isRecord(input) || typeof input.ctxId !== "string" || input.ctxId.trim().length === 0) {
+        throw createError({
+            code: errorCodes.mcpContextInvalid,
+            message: "This tool requires the ctxId returned by environ_info.",
+            retryable: false
+        });
+    }
+    const { ctxId, ...toolInput } = input;
+    return { ctxId: ctxId.trim(), input: toolInput };
 }
 
 function withInstanceTarget(tool: ToolDefinition): ToolDefinition {

@@ -373,7 +373,7 @@ test("WorkerInstance cancels a pending approval when the caller aborts", async (
         const callPromise = instance.callTool(
             "bash_run",
             { command: "pwd" },
-            { requestId: "req-cancel-approval", sessionId: "session-cancel", source: "mcp" },
+            { requestId: "req-cancel-approval", ctxId: "ctx-cancel", source: "mcp" },
             controller.signal
         );
 

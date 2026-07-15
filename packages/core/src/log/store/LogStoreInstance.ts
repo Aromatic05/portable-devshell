@@ -10,7 +10,7 @@ export interface InstanceLogEntry {
     message: string;
     requestId?: string;
     seq: number;
-    sessionId?: string;
+    ctxId?: string;
     source?: "cli" | "mcp" | "tui";
     stream: "stderr" | "stdout";
     toolName?: string;
@@ -31,7 +31,7 @@ export class InstanceLogStore {
         stream: InstanceLogEntry["stream"],
         message: string,
         at: string,
-        context: Pick<InstanceLogEntry, "callId" | "requestId" | "sessionId" | "source" | "toolName"> = {}
+        context: Pick<InstanceLogEntry, "callId" | "requestId" | "ctxId" | "source" | "toolName"> = {}
     ): Promise<InstanceLogEntry> {
         await this.#initialize();
 

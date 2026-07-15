@@ -22,7 +22,7 @@ test("route registry resolves per-instance binding", () => {
             worker: {
                 async appendMcpSessionClosed(_sessionId: string) {},
                 async appendMcpSessionOpened(_sessionId: string) {},
-                async appendMcpToolCalled(_toolName: string, _context: { requestId?: string; sessionId?: string }) {},
+                async appendMcpToolCalled(_toolName: string, _context: { ctxId?: string; requestId?: string }) {},
                 snapshot() {
                     return { ready: true };
                 },

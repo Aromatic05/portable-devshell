@@ -12,7 +12,7 @@ export interface ToolCallAssociation {
 export interface ToolCallContext {
     purpose?: string;
     requestId?: string;
-    sessionId?: string;
+    ctxId?: string;
     source: ToolCallSource;
 }
 
@@ -40,7 +40,7 @@ export interface ToolCallRecord {
     instance: InstanceName;
     approvalId?: string;
     requestId?: string;
-    sessionId?: string;
+    ctxId?: string;
     source: ToolCallSource;
     taskId?: string;
     todoItemId?: string;

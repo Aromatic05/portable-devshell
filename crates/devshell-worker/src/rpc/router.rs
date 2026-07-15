@@ -116,8 +116,8 @@ impl RpcRouter {
             workspace: PathBuf::from(&self.runtime.workspace),
             params: request.params.clone(),
             session_id: context
-                .and_then(|value| value.session_id.clone())
-                .unwrap_or_else(|| "worker-default".to_string()),
+                .and_then(|value| value.ctx_id.clone())
+                .unwrap_or_else(|| "ctx-worker-default".to_string()),
             request_id: context
                 .and_then(|value| value.request_id.clone())
                 .unwrap_or_else(|| request.id.clone()),
@@ -158,18 +158,18 @@ struct ActiveToolCallState {
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 struct ActiveToolCallKey {
     rpc_request_id: String,
-    session_id: String,
+    ctx_id: String,
 }
 
 impl ActiveToolCallKey {
     fn from_request(request: &RpcRequest) -> Self {
         Self {
             rpc_request_id: request.id.clone(),
-            session_id: request
+            ctx_id: request
                 .context
                 .as_ref()
-                .and_then(|context| context.session_id.clone())
-                .unwrap_or_else(|| "worker-default".to_string()),
+                .and_then(|context| context.ctx_id.clone())
+                .unwrap_or_else(|| "ctx-worker-default".to_string()),
         }
     }
 }
@@ -217,7 +217,7 @@ impl ActiveToolCallRegistry {
         if state.calls.contains_key(&key) {
             return Err(RpcError::new(
                 "worker.duplicateRpcRequest",
-                "A tool call with the same session and RPC request id is already active.",
+                "A tool call with the same context and RPC request id is already active.",
             ));
         }
         let cancellation = ToolCancellation::default();
@@ -234,7 +234,7 @@ impl ActiveToolCallRegistry {
         })
     }
 
-    pub fn cancel(&self, session_id: &str, rpc_request_id: &str) -> Result<bool, RpcError> {
+    pub fn cancel(&self, ctx_id: &str, rpc_request_id: &str) -> Result<bool, RpcError> {
         let state = self.state.lock().map_err(|_| {
             RpcError::new(
                 "worker.toolSchedulerFailed",
@@ -243,7 +243,7 @@ impl ActiveToolCallRegistry {
         })?;
         let key = ActiveToolCallKey {
             rpc_request_id: rpc_request_id.to_string(),
-            session_id: session_id.to_string(),
+            ctx_id: ctx_id.to_string(),
         };
         let Some(cancellation) = state.calls.get(&key) else {
             return Ok(false);

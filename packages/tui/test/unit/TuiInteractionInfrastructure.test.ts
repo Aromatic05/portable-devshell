@@ -858,7 +858,7 @@ test("logs render timestamps and correlation metadata", () => {
         receivedAt: "2026-07-11T12:34:56.000Z",
         requestId: "req-1",
         seq: 21,
-        sessionId: "session-1",
+        ctxId: "session-1",
         source: "mcp",
         stream: "stdout",
         toolName: "bash_run"

@@ -29,7 +29,7 @@ fn call(
             "method": method,
             "params": params,
             "context": {
-                "sessionId": session_id,
+                "ctxId": session_id,
                 "source": "mcp"
             }
         }),

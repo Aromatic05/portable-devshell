@@ -91,7 +91,7 @@ test("WorkerProtocolClient routes artifact payload and receive lifecycle through
     bridge.close();
 });
 
-test("WorkerRpcClient uses one connection-scoped session id unless a caller supplies an MCP session", async () => {
+test("WorkerRpcClient uses one connection-scoped ctxId unless a caller supplies an MCP context", async () => {
     const harness = createRpcHarness();
     const bridge = new WorkerRpcBridge({
         transport: harness.transport,
@@ -101,12 +101,12 @@ test("WorkerRpcClient uses one connection-scoped session id unless a caller supp
 
     await client.request("worker.ping", {});
     await client.request("tools.list", {});
-    await client.request("worker.status", {}, { sessionId: "mcp-session", source: "mcp" });
+    await client.request("worker.status", {}, { ctxId: "ctx-mcp", source: "mcp" });
 
-    const implicit = harness.requestContexts.slice(0, 2).map((context) => context?.sessionId);
+    const implicit = harness.requestContexts.slice(0, 2).map((context) => context?.ctxId);
     assert.equal(typeof implicit[0], "string");
     assert.equal(implicit[0], implicit[1]);
-    assert.equal(harness.requestContexts[2]?.sessionId, "mcp-session");
+    assert.equal(harness.requestContexts[2]?.ctxId, "ctx-mcp");
     assert.equal(harness.requestContexts[2]?.source, "mcp");
     bridge.close();
 });
@@ -123,7 +123,7 @@ test("WorkerRpcClient propagates abort as tool.call.cancel", async () => {
     const pending = client.request(
         "bash_run",
         { command: "sleep 30" },
-        { requestId: "mcp-call", sessionId: "mcp-session", source: "mcp" },
+        { requestId: "mcp-call", ctxId: "ctx-mcp", source: "mcp" },
         controller.signal
     );
     await harness.waitForMethod("bash_run");
@@ -139,7 +139,7 @@ test("WorkerRpcClient propagates abort as tool.call.cancel", async () => {
     assert.deepEqual(cancel?.params, {
         reason: "client timeout",
         rpcRequestId: original?.id,
-        sessionId: "mcp-session"
+        ctxId: "ctx-mcp"
     });
     bridge.close();
 });
@@ -246,14 +246,14 @@ function createRpcHarness(options?: { slowMethods?: Set<string> }): {
     transport: WorkerCommandTransport;
     spawnCount: number;
     requestMethods: string[];
-    requestContexts: Array<{ sessionId?: string; source?: string } | undefined>;
-    requests: Array<{ id: string; method: string; params?: JsonValue; context?: { sessionId?: string; source?: string } }>;
+    requestContexts: Array<{ ctxId?: string; source?: string } | undefined>;
+    requests: Array<{ id: string; method: string; params?: JsonValue; context?: { ctxId?: string; source?: string } }>;
     disconnect: () => void;
     waitForMethod: (method: string) => Promise<void>;
 } {
     const requestMethods: string[] = [];
-    const requestContexts: Array<{ sessionId?: string; source?: string } | undefined> = [];
-    const requests: Array<{ id: string; method: string; params?: JsonValue; context?: { sessionId?: string; source?: string } }> = [];
+    const requestContexts: Array<{ ctxId?: string; source?: string } | undefined> = [];
+    const requests: Array<{ id: string; method: string; params?: JsonValue; context?: { ctxId?: string; source?: string } }> = [];
     const slowMethods = options?.slowMethods ?? new Set<string>();
     const stdout = new PassThrough();
     const stdin = new PassThrough();
@@ -337,7 +337,7 @@ function isRequestFrame(value: unknown): value is {
     id: string;
     method: string;
     params?: JsonValue;
-    context?: { sessionId?: string; source?: string };
+    context?: { ctxId?: string; source?: string };
 } {
     if (typeof value !== "object" || value === null || Array.isArray(value)) {
         return false;

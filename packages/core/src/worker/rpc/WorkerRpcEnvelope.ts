@@ -2,7 +2,7 @@ import type { ControlErrorBody, JsonValue } from "@portable-devshell/shared";
 
 export interface WorkerRpcRequestContext {
     requestId?: string;
-    sessionId?: string;
+    ctxId?: string;
     source?: string;
 }
 

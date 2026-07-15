@@ -829,7 +829,7 @@ mod tests {
             "params": {},
             "context": {
                 "requestId": "mcp-long-tool",
-                "sessionId": "reverse-session",
+                "ctxId": "ctx-reverse",
                 "source": "mcp"
             }
         }))
@@ -856,7 +856,7 @@ mod tests {
             "params": {
                 "reason": "client timeout",
                 "rpcRequestId": "long-tool",
-                "sessionId": "reverse-session"
+                "ctxId": "ctx-reverse"
             }
         }))
         .unwrap();

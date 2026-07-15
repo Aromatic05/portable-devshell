@@ -21,7 +21,7 @@ export interface ApprovalRequest {
     reason: string;
     requestId?: string;
     riskLevel: ApprovalRiskLevel;
-    sessionId?: string;
+    ctxId?: string;
     source: ToolCallSource;
     status: ApprovalStatus;
     toolName: string;

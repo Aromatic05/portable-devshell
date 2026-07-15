@@ -267,7 +267,7 @@ function createHost(overrides?: {
                 worker: {
                     async appendMcpSessionClosed(_sessionId: string) {},
                     async appendMcpSessionOpened(_sessionId: string) {},
-                    async appendMcpToolCalled(_toolName: string, _context: { requestId?: string; sessionId?: string }) {},
+                    async appendMcpToolCalled(_toolName: string, _context: { ctxId?: string; requestId?: string }) {},
                     snapshot() {
                         return { ready: true };
                     },
@@ -431,14 +431,14 @@ test("running host replaces and unregisters instance bindings without restart", 
         assert.equal(typeof address, "object");
         const endpoint = `http://127.0.0.1:${address.port}/demo/mcp`;
 
-        assert.deepEqual(await initializeAndListTools(endpoint), ["bash_run"]);
+        assert.deepEqual(await initializeAndListTools(endpoint), ["environ_info", "bash_run"]);
 
         host.registerInstance({
             name: "demo",
             policy: { capabilities: ["read"], groups: ["file"] },
             worker: createToolWorker({ requiredCapabilities: ["read"], group: "file", name: "file_read" })
         });
-        assert.deepEqual(await initializeAndListTools(endpoint), ["file_read"]);
+        assert.deepEqual(await initializeAndListTools(endpoint), ["environ_info", "file_read"]);
 
         host.unregisterInstance("demo");
         const missing = await fetch(endpoint, {
@@ -503,7 +503,7 @@ function createToolWorker(tool: { requiredCapabilities: readonly ("execute" | "r
     return {
         async appendMcpSessionClosed(_sessionId: string) {},
         async appendMcpSessionOpened(_sessionId: string) {},
-        async appendMcpToolCalled(_toolName: string, _context: { requestId?: string; sessionId?: string }) {},
+        async appendMcpToolCalled(_toolName: string, _context: { ctxId?: string; requestId?: string }) {},
         snapshot() {
             return { ready: true };
         },

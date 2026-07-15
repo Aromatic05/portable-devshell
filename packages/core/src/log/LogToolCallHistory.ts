@@ -17,7 +17,7 @@ interface ActiveToolCall {
     inputSummary: string;
     input?: JsonValue;
     requestId?: string;
-    sessionId?: string;
+    ctxId?: string;
     source: ToolCallContext["source"];
     startedAt: string;
     status: ToolCallRecord["status"];
@@ -53,7 +53,7 @@ export class ToolCallHistory {
             inputSummary,
             input,
             requestId: context.requestId,
-            sessionId: context.sessionId,
+            ctxId: context.ctxId,
             source: context.source,
             startedAt,
             status,

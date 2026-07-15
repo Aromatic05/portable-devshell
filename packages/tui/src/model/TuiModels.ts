@@ -26,7 +26,7 @@ export interface TuiLogEntry {
     receivedAt: string;
     requestId?: string;
     seq: number;
-    sessionId?: string;
+    ctxId?: string;
     source?: ToolCallSource;
     stream: "stderr" | "stdout";
     tail?: string;
@@ -191,7 +191,7 @@ export class TuiToolAuditModel {
             inputSummary: readOptionalString(data.inputSummary) ?? current?.inputSummary ?? "",
             instance: asInstanceName(instance),
             requestId: readOptionalString(data.requestId) ?? current?.requestId,
-            sessionId: readOptionalString(data.sessionId) ?? current?.sessionId,
+            ctxId: readOptionalString(data.ctxId) ?? current?.ctxId,
             source: readToolCallSource(data.source) ?? current?.source ?? "tui",
             taskId: readOptionalString(data.taskId) ?? current?.taskId,
             todoItemId: readOptionalString(data.todoItemId) ?? current?.todoItemId,
@@ -271,7 +271,7 @@ export class TuiApprovalInboxModel {
             reason: readOptionalString(data.reason) ?? current?.reason ?? "",
             requestId: readOptionalString(data.requestId) ?? current?.requestId,
             riskLevel,
-            sessionId: readOptionalString(data.sessionId) ?? current?.sessionId,
+            ctxId: readOptionalString(data.ctxId) ?? current?.ctxId,
             source,
             status,
             toolName

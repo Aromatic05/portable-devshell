@@ -65,7 +65,7 @@ test("session lifecycle emits MCP session events", async () => {
     }
 });
 
-test("session close also releases routed worker tool state", async () => {
+test("session close does not release context-owned worker tool state", async () => {
     const harness = createWorkerHarness();
     const released: string[] = [];
     const endpoint = new McpEndpointWorker({
@@ -81,7 +81,7 @@ test("session close also releases routed worker tool state", async () => {
 
     await endpoint.appendSessionClosed("session-routed");
 
-    assert.deepEqual(released, ["session-routed"]);
+    assert.deepEqual(released, []);
     assert.deepEqual(harness.events, [
         { data: { sessionId: "session-routed" }, type: "mcp.sessionClosed" }
     ]);
@@ -96,7 +96,7 @@ test("tools/list uses group and capability filtering", async () => {
         const response = await postJson(server.url, await readFixture("mcp-tools-list.json"), session.headers);
 
         assert.equal(response.status, 200);
-        assert.deepEqual(response.body.result?.tools.map((tool: { name: string }) => tool.name), ["bash_run"]);
+        assert.deepEqual(response.body.result?.tools.map((tool: { name: string }) => tool.name), ["environ_info", "bash_run"]);
     } finally {
         await server.close();
         await binding.close();
@@ -110,19 +110,20 @@ test("tools/call delegates to WorkerInstance.callTool", async () => {
 
     try {
         const session = await initialize(server.url);
-        const response = await postJson(server.url, await readFixture("mcp-tools-call.json"), session.headers);
+        const ctxId = await createContext(server.url, session.headers);
+        const response = await postJson(server.url, withToolContext(await readFixture("mcp-tools-call.json"), ctxId), session.headers);
 
         assert.equal(response.status, 200);
         assert.equal(harness.calls.length, 1);
         assert.deepEqual(harness.calls[0]?.input, { command: "pwd" });
         assert.equal(harness.calls[0]?.requestId, "req-tools-call");
-        assert.equal(harness.calls[0]?.sessionId, session.headers["mcp-session-id"]);
+        assert.equal(harness.calls[0]?.ctxId, ctxId);
         assert.equal(harness.calls[0]?.source, "mcp");
         assert.equal(harness.calls[0]?.toolName, "bash_run");
-        assert.deepEqual(harness.events.map((event) => event.type), ["mcp.sessionOpened", "mcp.toolCalled"]);
-        assert.deepEqual(harness.events[1]?.data, {
+        assert.deepEqual(harness.events.map((event) => event.type), ["mcp.sessionOpened", "mcp.toolCalled", "mcp.toolCalled"]);
+        assert.deepEqual(harness.events[2]?.data, {
+            ctxId,
             requestId: "req-tools-call",
-            sessionId: session.headers["mcp-session-id"],
             source: "mcp",
             toolName: "bash_run"
         });
@@ -165,6 +166,7 @@ test("notifications/cancelled aborts an in-flight tools/call handler", async () 
 
     try {
         const session = await initialize(server.url);
+        const ctxId = await createContext(server.url, session.headers);
         const requestController = new AbortController();
         const pendingCall = fetch(server.url, {
             body: JSON.stringify({
@@ -172,7 +174,7 @@ test("notifications/cancelled aborts an in-flight tools/call handler", async () 
                 jsonrpc: "2.0",
                 method: "tools/call",
                 params: {
-                    arguments: { command: "sleep 30" },
+                    arguments: { command: "sleep 30", ctxId },
                     name: "bash_run"
                 }
             }),
@@ -235,6 +237,7 @@ test("closing the HTTP request aborts an in-flight tools/call handler", async ()
 
     try {
         const session = await initialize(server.url);
+        const ctxId = await createContext(server.url, session.headers);
         const requestController = new AbortController();
         const pendingCall = fetch(server.url, {
             body: JSON.stringify({
@@ -242,7 +245,7 @@ test("closing the HTTP request aborts an in-flight tools/call handler", async ()
                 jsonrpc: "2.0",
                 method: "tools/call",
                 params: {
-                    arguments: { command: "sleep 30" },
+                    arguments: { command: "sleep 30", ctxId },
                     name: "bash_run"
                 }
             }),
@@ -304,6 +307,7 @@ test("instance_list returns object structured content through SDK transport", as
 
     try {
         const session = await initialize(server.url);
+        const ctxId = await createContext(server.url, session.headers);
         const response = await postJson(
             server.url,
             {
@@ -311,7 +315,7 @@ test("instance_list returns object structured content through SDK transport", as
                 jsonrpc: "2.0",
                 method: "tools/call",
                 params: {
-                    arguments: {},
+                    arguments: { ctxId },
                     name: "instance_list"
                 }
             },
@@ -338,14 +342,14 @@ test("tools/list returns cached schema while the instance is not ready", async (
         const response = await postJson(server.url, await readFixture("mcp-tools-list.json"), session.headers);
 
         assert.equal(response.status, 200);
-        assert.deepEqual(response.body.result?.tools.map((tool: { name: string }) => tool.name), ["bash_run"]);
+        assert.deepEqual(response.body.result?.tools.map((tool: { name: string }) => tool.name), ["environ_info", "bash_run"]);
     } finally {
         await server.close();
         await binding.close();
     }
 });
 
-test("tools/list without schema cache returns mcp.toolSchemaUnavailable", async () => {
+test("tools/list without worker schema still exposes environ_info", async () => {
     const harness = createWorkerHarness({ hasToolSchemaCache: false, ready: false, tools: [] });
     const binding = createBinding(harness);
     const server = await createBindingServer(binding);
@@ -355,7 +359,7 @@ test("tools/list without schema cache returns mcp.toolSchemaUnavailable", async 
         const response = await postJson(server.url, await readFixture("mcp-tools-list.json"), session.headers);
 
         assert.equal(response.status, 200);
-        assert.equal(response.body.error?.data?.code, "mcp.toolSchemaUnavailable");
+        assert.deepEqual(response.body.result?.tools.map((tool: { name: string }) => tool.name), ["environ_info"]);
     } finally {
         await server.close();
         await binding.close();
@@ -368,7 +372,8 @@ test("tools/call still maps not ready to mcp.instanceNotReady", async () => {
 
     try {
         const session = await initialize(server.url);
-        const response = await postJson(server.url, await readFixture("mcp-tools-call.json"), session.headers);
+        const ctxId = await createContext(server.url, session.headers);
+        const response = await postJson(server.url, withToolContext(await readFixture("mcp-tools-call.json"), ctxId), session.headers);
 
         assert.equal(response.status, 200);
         assert.equal(response.body.error?.data?.code, "mcp.instanceNotReady");
@@ -452,6 +457,27 @@ async function initialize(url: string): Promise<{ headers: Record<string, string
     return { headers };
 }
 
+async function createContext(url: string, headers: Record<string, string>): Promise<string> {
+    const response = await postJson(url, {
+        id: `req-environ-${Date.now()}`,
+        jsonrpc: "2.0",
+        method: "tools/call",
+        params: { arguments: {}, name: "environ_info" }
+    }, headers);
+    const ctxId = response.body.result?.structuredContent?.ctxId;
+    assert.equal(typeof ctxId, "string");
+    return ctxId;
+}
+
+function withToolContext(body: JsonValue, ctxId: string): JsonValue {
+    const request = structuredClone(body) as {
+        params?: { arguments?: Record<string, JsonValue> };
+    };
+    request.params ??= {};
+    request.params.arguments = { ...(request.params.arguments ?? {}), ctxId };
+    return request as JsonValue;
+}
+
 async function postJson(url: string, body: JsonValue, extraHeaders?: Record<string, string>) {
     const response = await postRawJson(url, body, extraHeaders);
 
@@ -489,7 +515,7 @@ function createWorkerHarness(options?: {
     callHandler?: (
         toolName: string,
         input: JsonValue,
-        context: { requestId?: string; sessionId?: string; source: string },
+        context: { ctxId?: string; requestId?: string; source: string },
         signal?: AbortSignal
     ) => Promise<CommandResult>;
     hasToolSchemaCache?: boolean;
@@ -511,7 +537,7 @@ function createWorkerHarness(options?: {
         calls: calls as Array<{
             input: JsonValue;
             requestId?: string;
-            sessionId?: string;
+            ctxId?: string;
             source?: string;
             toolName: string;
         }>,
@@ -523,17 +549,29 @@ function createWorkerHarness(options?: {
             async appendMcpSessionOpened(sessionId: string) {
                 events.push({ data: { sessionId }, type: "mcp.sessionOpened" });
             },
-            async appendMcpToolCalled(toolName: string, context: { requestId?: string; sessionId?: string }) {
+            async appendMcpToolCalled(toolName: string, context: { ctxId?: string; requestId?: string }) {
                 events.push({
                     data: {
                         requestId: context.requestId ?? null,
-                        sessionId: context.sessionId ?? null,
+                        ctxId: context.ctxId ?? null,
                         source: "mcp",
                         toolName
                     },
                     type: "mcp.toolCalled"
                 });
             },
+            handshake: {
+                instance: "demo",
+                workspace: "/workspace",
+                platform: {
+                    arch: "x86_64",
+                    distribution: { id: "arch", name: "Arch Linux", version: "rolling" },
+                    os: "linux",
+                    packageManager: "pacman",
+                    shell: { executable: "/bin/bash", kind: "bash", version: "5" }
+                }
+            },
+            workspacePath: "/workspace",
             hasToolSchemaCache() {
                 return hasToolSchemaCache;
             },
@@ -546,7 +584,7 @@ function createWorkerHarness(options?: {
             async callTool(
                 toolName: string,
                 input: JsonValue,
-                context: { requestId?: string; sessionId?: string; source: string },
+                context: { ctxId?: string; requestId?: string; source: string },
                 signal?: AbortSignal
             ) {
                 if (!ready) {

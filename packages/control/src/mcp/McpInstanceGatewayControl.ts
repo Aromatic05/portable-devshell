@@ -126,7 +126,7 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
         const descriptor = this.#requireDescriptor(instance);
         return (await descriptor.todo.write(
             input as unknown as import("@portable-devshell/shared").TodoWriteInput,
-            context.sessionId ?? "mcp-session-unknown"
+            requireCtxId(context)
         )) as unknown as JsonValue;
     }
 
@@ -149,4 +149,15 @@ function withTodoSummary<T extends object>(snapshot: T, activeTodo: import("@por
         ...snapshot,
         ...(activeTodo === undefined ? {} : { activeTodo })
     };
+}
+
+function requireCtxId(context: ToolCallContext): string {
+    if (context.ctxId !== undefined && context.ctxId.length > 0) {
+        return context.ctxId;
+    }
+    throw createError({
+        code: errorCodes.mcpContextInvalid,
+        message: "todo_write requires a validated ctxId.",
+        retryable: false
+    });
 }

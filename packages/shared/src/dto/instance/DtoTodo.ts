@@ -30,10 +30,10 @@ export interface ActiveTodoSummary {
 }
 
 export interface TodoState {
-    activeSessionId?: string;
+    activeCtxId?: string;
     archivedAt?: string;
     createdAt: string;
-    createdBySessionId: string;
+    createdByCtxId: string;
     items: TodoItem[];
     originInstance: string;
     revision: number;

@@ -132,7 +132,7 @@ export class RouteHandlerInstance {
                 return (
                     await descriptor.worker.callTool(toolName, input, {
                         requestId,
-                        sessionId: connection.id,
+                        ctxId: connection.id,
                         source: readConnectionSource(connection, descriptor.name)
                     })
                 ) as unknown as JsonValue;

@@ -4,7 +4,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { CallToolRequestSchema, ErrorCode, isInitializeRequest, ListToolsRequestSchema, McpError } from "@modelcontextprotocol/sdk/types.js";
-import { toControlErrorBody, type ControlErrorBody, type JsonValue, type ToolCallContext } from "@portable-devshell/shared";
+import { toControlErrorBody, type ControlErrorBody, type JsonValue } from "@portable-devshell/shared";
 
 import { McpToolSchemaUnavailableError } from "../tool/McpToolSchemaAdapter.js";
 import { McpEndpointWorker } from "./McpEndpointWorker.js";
@@ -148,10 +148,9 @@ export class McpEndpointBinding {
 
         server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
             try {
-                const context: ToolCallContext = {
-                    requestId: toRequestId(extra.requestId),
-                    sessionId: extra.sessionId,
-                    source: "mcp"
+                const context = {
+                    principal: readPrincipal(extra.authInfo),
+                    requestId: toRequestId(extra.requestId)
                 };
                 const requestSignal =
                     extra.sessionId === undefined
@@ -174,6 +173,14 @@ export class McpEndpointBinding {
             }
         });
     }
+}
+
+function readPrincipal(authInfo: { clientId: string; extra?: Record<string, unknown> } | undefined): string {
+    const subject = authInfo?.extra?.subject;
+    if (typeof subject === "string" && subject.length > 0) {
+        return subject;
+    }
+    return authInfo?.clientId ?? "local";
 }
 
 function requestSignalKey(sessionId: string, requestId: string): string {

@@ -31,6 +31,8 @@ export interface WorkerHandshakeResult {
     platform: {
         os: string;
         arch: string;
+        distribution?: { id: string; name: string; version?: string };
+        packageManager?: string;
         shell?: WorkerShellRuntime;
     };
     capabilities: {

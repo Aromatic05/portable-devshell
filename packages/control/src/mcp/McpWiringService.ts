@@ -14,7 +14,7 @@ export class McpWiringService {
     wire(
         config: ControlConfig,
         registry: InstanceRegistry,
-        options?: { gateway?: McpInstanceGateway; storageDir?: string }
+        options?: { contextFile?: string; gateway?: McpInstanceGateway; storageDir?: string }
     ): McpHost | undefined {
         if (!config.mcp.enabled) {
             return undefined;
@@ -27,6 +27,7 @@ export class McpWiringService {
 
         return new McpHost({
             auth: toMcpHostAuth(config),
+            ...(options?.contextFile === undefined ? {} : { contextFile: options.contextFile }),
             instances: endpoints,
             listenHost: config.mcp.listenHost,
             listenPort: config.mcp.listenPort,

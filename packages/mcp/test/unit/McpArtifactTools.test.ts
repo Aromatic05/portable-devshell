@@ -2,9 +2,19 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import type { JsonValue, ToolCallContext, ToolDefinition } from "@portable-devshell/shared";
-import { McpEndpointWorker, type McpInstanceGateway } from "@portable-devshell/mcp";
+import { McpContextRegistry, McpEndpointWorker, type McpInstanceGateway } from "@portable-devshell/mcp";
 
-const context: ToolCallContext = { source: "mcp", sessionId: "session-1" };
+const context = { principal: "local", requestId: "artifact-request" } as const;
+const contextRegistry = new McpContextRegistry({ idFactory: () => "ctx-artifact-test" });
+const activeContext = await contextRegistry.create({
+    instance: "main-pc",
+    principal: "local",
+    workspace: "/workspace"
+});
+const withContext = <T extends Record<string, unknown>>(input: T): T & { ctxId: string } => ({
+    ...input,
+    ctxId: activeContext.ctxId
+});
 
 const artifactRead: ToolDefinition = {
     description: "Read an artifact payload.",
@@ -28,6 +38,7 @@ test("artifact endpoint exposes worker read plus control share and transfer whil
         }
     });
     const endpoint = new McpEndpointWorker({
+        contextRegistry,
         gateway,
         instanceName: "main-pc",
         policy: { capabilities: ["read", "write"], groups: ["artifact"] },
@@ -35,22 +46,23 @@ test("artifact endpoint exposes worker read plus control share and transfer whil
     });
 
     assert.deepEqual(endpoint.listTools().map((tool) => tool.name), [
+        "environ_info",
         "artifact_read",
         "artifact_share",
         "artifact_transfer"
     ]);
-    assert.deepEqual(await endpoint.callTool("artifact_share", { path: "./dist" }, context), {
+    assert.deepEqual(await endpoint.callTool("artifact_share", withContext({ path: "./dist" }), context), {
         shareId: "share-1"
     });
     assert.deepEqual(
         await endpoint.callTool(
             "artifact_transfer",
-            {
+            withContext({
                 operation: "start",
                 sourcePath: "./dist",
                 targetInstance: "remote-server",
                 targetPath: "/srv/app"
-            },
+            }),
             context
         ),
         { transferId: "transfer-1" }
@@ -77,12 +89,13 @@ test("artifact control tools require artifact group and read/write capabilities"
         async transferArtifact() { return {}; }
     });
     const endpoint = new McpEndpointWorker({
+        contextRegistry,
         gateway,
         instanceName: "main-pc",
         policy: { capabilities: ["read"], groups: ["artifact"] },
         worker: createWorker(false, true)
     });
-    assert.deepEqual(endpoint.listTools().map((tool) => tool.name), ["artifact_read"]);
+    assert.deepEqual(endpoint.listTools().map((tool) => tool.name), ["environ_info", "artifact_read"]);
 });
 
 function createWorker(ready: boolean, hasSchema: boolean) {
@@ -91,6 +104,7 @@ function createWorker(ready: boolean, hasSchema: boolean) {
         async appendMcpSessionOpened() {},
         async appendMcpToolCalled() {},
         async callTool() { return {}; },
+        workspacePath: "/workspace",
         hasToolSchemaCache() { return hasSchema; },
         listTools() { return [artifactRead]; },
         snapshot() { return { ready }; }

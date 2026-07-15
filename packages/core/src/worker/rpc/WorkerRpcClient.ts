@@ -8,7 +8,7 @@ import { WorkerRpcBridge } from "./WorkerRpcBridge.js";
 
 export class WorkerRpcClient {
     readonly #bridge: WorkerRpcBridge;
-    readonly #sessionId = `rpc-${randomUUID()}`;
+    readonly #ctxId = `ctx-rpc-${randomUUID()}`;
     #nextRequestId = 1;
 
     constructor(bridge: WorkerRpcBridge) {
@@ -28,7 +28,7 @@ export class WorkerRpcClient {
             params,
             context: {
                 ...context,
-                sessionId: context?.sessionId ?? this.#sessionId
+                ctxId: context?.ctxId ?? this.#ctxId
             }
         };
         const response = await this.#bridge.request(request, signal);

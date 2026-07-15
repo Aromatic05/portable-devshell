@@ -265,7 +265,7 @@ class FakeWorker {
     async callTool(
         _toolName: string,
         _input: JsonValue,
-        context: { requestId?: string; sessionId?: string; source: string }
+        context: { requestId?: string; ctxId?: string; source: string }
     ) {
         this.emit("toolCall.completed", { source: context.source, toolName: "bash_run" });
         return {

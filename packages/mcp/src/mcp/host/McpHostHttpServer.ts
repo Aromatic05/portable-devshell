@@ -2,6 +2,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import type { Duplex } from "node:stream";
 
 import express, { type NextFunction, type Request, type RequestHandler, type Response } from "express";
+import type { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
 
 import type { McpAuthConfig } from "../auth/McpAuthConfig.js";
 import { McpAuthProviderToken } from "../auth/provider/McpAuthProviderToken.js";
@@ -145,13 +146,19 @@ export class McpHostHttpServer {
             this.#app.use(this.#oauthProtectedResourceMetadataPath(resourceServerUrl), this.#oauth.protectedResourceMetadataHandler(resourceServerUrl));
         } else if (this.#auth?.provider === "token") {
             routeHandlers.push((request: Request, response: Response, next: NextFunction) => {
-                const authorized = this.#tokenProvider.authorize(request.headers.authorization);
+                const auth = this.#tokenProvider.authenticate(request.headers.authorization);
 
-                if (!authorized) {
+                if (auth === undefined) {
                     response.status(401).json({ error: "Unauthorized" });
                     return;
                 }
 
+                setRequestAuth(request, auth);
+                next();
+            });
+        } else {
+            routeHandlers.push((request: Request, _response: Response, next: NextFunction) => {
+                setRequestAuth(request, { clientId: "local", scopes: [], token: "local" });
                 next();
             });
         }
@@ -219,4 +226,8 @@ function joinUrlPaths(basePathname: string, nextPathname: string): string {
     const base = basePathname === "/" ? "" : basePathname.replace(/\/+$/u, "");
     const next = nextPathname.startsWith("/") ? nextPathname : `/${nextPathname}`;
     return `${base}${next}`;
+}
+
+function setRequestAuth(request: Request, auth: AuthInfo): void {
+    (request as Request & { auth?: AuthInfo }).auth = auth;
 }

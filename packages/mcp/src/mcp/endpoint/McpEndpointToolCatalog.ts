@@ -7,7 +7,7 @@ import {
 
 import { McpToolFilter } from "../tool/McpToolFilter.js";
 
-export type McpEndpointToolOwner = "worker" | "artifact" | "instance" | "todo";
+export type McpEndpointToolOwner = "worker" | "artifact" | "environment" | "instance" | "todo";
 
 export interface McpEndpointToolEntry {
     definition: ToolDefinition;
@@ -55,7 +55,7 @@ export class McpEndpointToolCatalog {
     }
 
     filter(entries: readonly McpEndpointToolEntry[]): McpEndpointToolEntry[] {
-        return entries.filter((entry) => this.#filter.isAllowed(entry.definition));
+        return entries.filter((entry) => entry.owner === "environment" || this.#filter.isAllowed(entry.definition));
     }
 
     isAllowed(tool: ToolDefinition): boolean {

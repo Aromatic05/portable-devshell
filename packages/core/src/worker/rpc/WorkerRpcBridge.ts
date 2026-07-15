@@ -210,8 +210,8 @@ export class WorkerRpcBridge {
     }
 
     #enqueueCancellation(request: WorkerRpcRequestEnvelope, reason: unknown): void {
-        const sessionId = request.context?.sessionId;
-        if (sessionId === undefined || request.method === "tool.call.cancel") {
+        const ctxId = request.context?.ctxId;
+        if (ctxId === undefined || request.method === "tool.call.cancel") {
             return;
         }
         const cancellation: WorkerRpcRequestEnvelope = {
@@ -221,10 +221,10 @@ export class WorkerRpcBridge {
             params: {
                 reason: readAbortReason(reason),
                 rpcRequestId: request.id,
-                sessionId
+                ctxId
             },
             context: {
-                sessionId,
+                ctxId,
                 source: request.context?.source
             }
         };
@@ -256,7 +256,7 @@ export class WorkerRpcBridge {
             method: request.method,
             reason: readAbortReason(reason),
             rpcRequestId: request.id,
-            sessionId: request.context?.sessionId
+            ctxId: request.context?.ctxId
         } as JsonValue;
     }
 

@@ -185,7 +185,7 @@ export class TuiViewModelStore {
             receivedAt: new Date().toISOString(),
             ...(readString(data.requestId) === undefined ? {} : { requestId: readString(data.requestId) }),
             seq,
-            ...(readString(data.sessionId) === undefined ? {} : { sessionId: readString(data.sessionId) }),
+            ...(readString(data.ctxId) === undefined ? {} : { ctxId: readString(data.ctxId) }),
             ...(data.source === "cli" || data.source === "tui" || data.source === "mcp" ? { source: data.source } : {}),
             stream,
             ...(readString(data.tail) === undefined ? {} : { tail: readString(data.tail) }),

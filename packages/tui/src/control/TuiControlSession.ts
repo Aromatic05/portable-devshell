@@ -442,7 +442,7 @@ function mapLogEntry(entry: TuiControlLogEntry): TuiLogEntry {
         preview: entry.message.slice(0, 160),
         receivedAt: entry.at,
         seq: entry.seq,
-        sessionId: entry.sessionId,
+        ctxId: entry.ctxId,
         source: entry.source,
         stream: entry.stream,
         tail: entry.message.slice(-160),

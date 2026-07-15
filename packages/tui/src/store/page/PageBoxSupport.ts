@@ -215,7 +215,7 @@ export function renderLogLine(entry: TuiLogEntry): string {
         entry.toolName === undefined ? undefined : `tool=${entry.toolName}`,
         entry.callId === undefined ? undefined : `call=${entry.callId}`,
         entry.requestId === undefined ? undefined : `request=${entry.requestId}`,
-        entry.sessionId === undefined ? undefined : `session=${entry.sessionId}`,
+        entry.ctxId === undefined ? undefined : `session=${entry.ctxId}`,
         entry.source === undefined ? undefined : `source=${entry.source}`
     ].filter(Boolean).join(" ");
     return `${entry.at ?? entry.receivedAt} ${entry.stream} #${entry.seq}${context.length === 0 ? "" : ` ${context}`} ${entry.message ?? entry.tail ?? entry.preview ?? ""}`;

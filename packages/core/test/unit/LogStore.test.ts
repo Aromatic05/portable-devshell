@@ -71,14 +71,14 @@ test("InstanceLogStore and ToolCallHistory persist per-instance records", async 
         const logEntry = await logStore.append("stdout", "hello", "2026-07-07T00:00:00.000Z", {
             callId: "call-1",
             requestId: "request-1",
-            sessionId: "session-1",
+            ctxId: "context-1",
             source: "mcp",
             toolName: "bash_run"
         });
         assert.equal(logEntry.seq, 1);
         assert.equal(logEntry.callId, "call-1");
         assert.equal(logEntry.requestId, "request-1");
-        assert.equal(logEntry.sessionId, "session-1");
+        assert.equal(logEntry.ctxId, "context-1");
         assert.equal(logEntry.source, "mcp");
         assert.equal(logEntry.toolName, "bash_run");
         assert.deepEqual(await logStore.read({ fromSeq: 1 }), [logEntry]);

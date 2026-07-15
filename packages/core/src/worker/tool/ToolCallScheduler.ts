@@ -17,7 +17,7 @@ export interface ToolSchedulerLimits {
 export interface ToolSchedulerRequest {
     callId: string;
     instanceName: InstanceName;
-    sessionId?: string;
+    ctxId?: string;
     source: ToolCallContext["source"];
     toolName: string;
 }
@@ -154,10 +154,10 @@ export class ToolCallScheduler {
             fullReasons.push("tool");
         }
         if (
-            request.sessionId !== undefined
-            && snapshot.sessionAccepted >= this.#limits.maxRunningPerSession + this.#limits.queueDepthPerSession + urgentAllowance
+            request.ctxId !== undefined
+            && snapshot.contextAccepted >= this.#limits.maxRunningPerSession + this.#limits.queueDepthPerSession + urgentAllowance
         ) {
-            fullReasons.push("session");
+            fullReasons.push("context");
         }
         if (fullReasons.length === 0) {
             return;
@@ -172,10 +172,10 @@ export class ToolCallScheduler {
             queueDepthPerSession: this.#limits.queueDepthPerSession,
             queued: snapshot.queued,
             running: snapshot.running,
-            sessionAccepted: snapshot.sessionAccepted,
-            sessionId: request.sessionId,
-            sessionQueued: snapshot.sessionQueued,
-            sessionRunning: snapshot.sessionRunning,
+            contextAccepted: snapshot.contextAccepted,
+            ctxId: request.ctxId,
+            contextQueued: snapshot.contextQueued,
+            contextRunning: snapshot.contextRunning,
             toolAccepted: snapshot.toolAccepted,
             toolName: request.toolName,
             toolQueueDepth: toolLimit.queueDepth,
@@ -208,7 +208,7 @@ export class ToolCallScheduler {
                     instance: entry.request.instanceName,
                     queueTimeoutMs: this.#limits.queueTimeoutMs,
                     queuedForMs: entry.queuedAt === undefined ? 0 : Date.now() - entry.queuedAt,
-                    sessionId: entry.request.sessionId,
+                    ctxId: entry.request.ctxId,
                     toolName: entry.request.toolName
                 }));
                 this.#drain();
@@ -333,8 +333,8 @@ export class ToolCallScheduler {
             return false;
         }
         if (
-            request.sessionId !== undefined
-            && snapshot.sessionRunning >= this.#limits.maxRunningPerSession + urgentAllowance
+            request.ctxId !== undefined
+            && snapshot.contextRunning >= this.#limits.maxRunningPerSession + urgentAllowance
         ) {
             return false;
         }
@@ -345,9 +345,9 @@ export class ToolCallScheduler {
         accepted: number;
         queued: number;
         running: number;
-        sessionAccepted: number;
-        sessionQueued: number;
-        sessionRunning: number;
+        contextAccepted: number;
+        contextQueued: number;
+        contextRunning: number;
         toolAccepted: number;
         toolQueued: number;
         toolRunning: number;
@@ -358,17 +358,17 @@ export class ToolCallScheduler {
         const toolEntries = entries.filter((entry) => entry.request.toolName === request.toolName);
         const toolQueuedEntries = queuedEntries.filter((entry) => entry.request.toolName === request.toolName);
         const toolRunningEntries = runningEntries.filter((entry) => entry.request.toolName === request.toolName);
-        const sessionEntries = request.sessionId === undefined ? [] : entries.filter((entry) => entry.request.sessionId === request.sessionId);
-        const sessionQueuedEntries = request.sessionId === undefined ? [] : queuedEntries.filter((entry) => entry.request.sessionId === request.sessionId);
-        const sessionRunningEntries = request.sessionId === undefined ? [] : runningEntries.filter((entry) => entry.request.sessionId === request.sessionId);
+        const contextEntries = request.ctxId === undefined ? [] : entries.filter((entry) => entry.request.ctxId === request.ctxId);
+        const contextQueuedEntries = request.ctxId === undefined ? [] : queuedEntries.filter((entry) => entry.request.ctxId === request.ctxId);
+        const contextRunningEntries = request.ctxId === undefined ? [] : runningEntries.filter((entry) => entry.request.ctxId === request.ctxId);
 
         return {
             accepted: entries.length,
             queued: queuedEntries.length,
             running: runningEntries.length,
-            sessionAccepted: sessionEntries.length,
-            sessionQueued: sessionQueuedEntries.length,
-            sessionRunning: sessionRunningEntries.length,
+            contextAccepted: contextEntries.length,
+            contextQueued: contextQueuedEntries.length,
+            contextRunning: contextRunningEntries.length,
             toolAccepted: toolEntries.length,
             toolQueued: toolQueuedEntries.length,
             toolRunning: toolRunningEntries.length

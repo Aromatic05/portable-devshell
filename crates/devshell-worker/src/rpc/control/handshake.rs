@@ -2,6 +2,7 @@ use serde_json::json;
 
 use crate::daemon::process::WorkerRuntimeContext;
 use crate::instance::WorkerConfig;
+use crate::platform::detect_environment;
 use crate::rpc::codec::PROTOCOL_VERSION;
 use crate::rpc::error::RpcError;
 use crate::rpc::request::RpcRequest;
@@ -47,6 +48,7 @@ impl ControlHandler for HandshakeHandler {
         }
 
         let shell = ShellRuntime::detect().ok();
+        let environment = detect_environment();
         Ok(json!({
             "instance": self.config.instance,
             "workspace": self.runtime.workspace,
@@ -56,6 +58,8 @@ impl ControlHandler for HandshakeHandler {
             "platform": {
                 "os": self.runtime.platform.os,
                 "arch": self.runtime.platform.arch,
+                "distribution": environment.distribution,
+                "packageManager": environment.package_manager,
                 "shell": shell.as_ref().map(|shell| json!({
                     "kind": shell.kind,
                     "executable": shell.executable,

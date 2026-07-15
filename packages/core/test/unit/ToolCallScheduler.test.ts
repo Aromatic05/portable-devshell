@@ -21,7 +21,7 @@ test("ToolCallScheduler runs up to the configured limit and keeps later calls qu
             .reserve({
                 callId: `call-${index}`,
                 instanceName,
-                sessionId: "session-1",
+                ctxId: "context-1",
                 source: "mcp",
                 toolName: "bash_run"
             })
@@ -81,7 +81,7 @@ test("ToolCallScheduler cancels a queued request when its abort signal fires", a
     const blocker = createDeferred<string>();
     const started: string[] = [];
     const running = scheduler
-        .reserve({ callId: "running", instanceName, sessionId: "session-1", source: "mcp", toolName: "bash_run" })
+        .reserve({ callId: "running", instanceName, ctxId: "context-1", source: "mcp", toolName: "bash_run" })
         .run(async () => {
             started.push("running");
             return await blocker.promise;
@@ -91,7 +91,7 @@ test("ToolCallScheduler cancels a queued request when its abort signal fires", a
     const controller = new AbortController();
     const queued = scheduler
         .reserve(
-            { callId: "queued", instanceName, sessionId: "session-1", source: "mcp", toolName: "bash_run" },
+            { callId: "queued", instanceName, ctxId: "context-1", source: "mcp", toolName: "bash_run" },
             controller.signal
         )
         .run(async () => {
@@ -131,7 +131,7 @@ async function waitFor(condition: () => boolean): Promise<void> {
     throw new Error("condition was not reached");
 }
 
-test("ToolCallScheduler admits one urgent tmux operation beyond normal instance and session limits", async () => {
+test("ToolCallScheduler admits one urgent tmux operation beyond normal instance and context limits", async () => {
     const instanceName = asInstanceName("scheduler-urgent");
     const scheduler = new ToolCallScheduler({
         byTool: {},
@@ -148,7 +148,7 @@ test("ToolCallScheduler admits one urgent tmux operation beyond normal instance 
 
     const run = (callId: string, toolName: string, deferred: ReturnType<typeof createDeferred<string>>) =>
         scheduler
-            .reserve({ callId, instanceName, sessionId: "session-1", source: "mcp", toolName })
+            .reserve({ callId, instanceName, ctxId: "context-1", source: "mcp", toolName })
             .run(async () => {
                 started.push(callId);
                 return await deferred.promise;

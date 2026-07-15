@@ -42,6 +42,8 @@ export const errorCodes = {
     instanceConflict: "instance.conflict",
     instanceAlreadyExists: "control.instanceAlreadyExists",
     instanceMissing: "control.instanceNotFound",
+    mcpContextExpired: "mcp.contextExpired",
+    mcpContextInvalid: "mcp.contextInvalid",
     mcpPublicAuthRequired: "mcp.publicAuthRequired",
     reverseConnectionSuperseded: "reverse.connectionSuperseded",
     reverseDeviceCodeConsumed: "reverse.deviceCodeConsumed",

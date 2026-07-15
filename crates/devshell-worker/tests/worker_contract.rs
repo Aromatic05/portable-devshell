@@ -735,7 +735,7 @@ fn tool_call_cancel_terminates_a_running_bash_process_group() {
                 "timeoutMs": 10000
             },
             "context": {
-                "sessionId": "cancel-session",
+                "ctxId": "ctx-cancel",
                 "requestId": "mcp-cancel-me",
                 "source": "mcp"
             }
@@ -751,7 +751,7 @@ fn tool_call_cancel_terminates_a_running_bash_process_group() {
             "method": "tool.call.cancel",
             "params": {
                 "rpcRequestId": "cancel-me",
-                "sessionId": "cancel-session",
+                "ctxId": "ctx-cancel",
                 "reason": "client timeout"
             }
         }),

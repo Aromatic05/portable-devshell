@@ -7,6 +7,7 @@ import type {
     ToolDefinition
 } from "@portable-devshell/shared";
 import {
+    McpContextRegistry,
     McpEndpointWorker,
     type McpInstanceGateway,
     type McpSshInstanceCreateInput
@@ -28,31 +29,39 @@ const bashTool: ToolDefinition = {
     outputSchema: { type: "object" }
 };
 
-const context: ToolCallContext = {
-    requestId: "request-1",
-    sessionId: "session-1",
-    source: "mcp"
-};
+const context = { principal: "local", requestId: "request-1" } as const;
+const contextRegistry = new McpContextRegistry({ idFactory: () => "ctx-instance-test" });
+const activeContext = await contextRegistry.create({
+    instance: "main-pc",
+    principal: "local",
+    workspace: "/workspace"
+});
+const withContext = <T extends Record<string, unknown>>(input: T): T & { ctxId: string } => ({
+    ...input,
+    ctxId: activeContext.ctxId
+});
 
 test("instance tools are hidden unless instance group and manage capability are both enabled", () => {
     const worker = createWorker();
     const gateway = createGateway();
     const withoutManage = new McpEndpointWorker({
+        contextRegistry,
         gateway,
         instanceName: "main-pc",
         policy: { capabilities: ["execute"], groups: ["bash", "instance"] },
         worker
     });
     const withoutGroup = new McpEndpointWorker({
+        contextRegistry,
         gateway,
         instanceName: "main-pc",
         policy: { capabilities: ["execute", "manage"], groups: ["bash"] },
         worker
     });
 
-    assert.deepEqual(withoutManage.listTools().map((tool) => tool.name), ["bash_run"]);
-    assert.deepEqual(withoutGroup.listTools().map((tool) => tool.name), ["bash_run"]);
-    assert.equal((withoutManage.listTools()[0]?.inputSchema as { properties?: Record<string, unknown> }).properties?.instance, undefined);
+    assert.deepEqual(withoutManage.listTools().map((tool) => tool.name), ["environ_info", "bash_run"]);
+    assert.deepEqual(withoutGroup.listTools().map((tool) => tool.name), ["environ_info", "bash_run"]);
+    assert.equal((withoutManage.listTools().find((tool) => tool.name === "bash_run")?.inputSchema as { properties?: Record<string, unknown> }).properties?.instance, undefined);
 });
 
 test("management-enabled endpoint exposes five instance tools and augments worker schemas", () => {
@@ -60,6 +69,7 @@ test("management-enabled endpoint exposes five instance tools and augments worke
     const tools = endpoint.listTools();
 
     assert.deepEqual(tools.map((tool) => tool.name), [
+        "environ_info",
         "bash_run",
         "instance_list",
         "instance_status",
@@ -90,9 +100,9 @@ test("worker calls default to the endpoint instance and route explicit targets t
     });
     const endpoint = createManagedEndpoint(worker, gateway);
 
-    assert.deepEqual(await endpoint.callTool("bash_run", { command: "pwd" }, context), { local: true });
+    assert.deepEqual(await endpoint.callTool("bash_run", withContext({ command: "pwd" }), context), { local: true });
     assert.deepEqual(
-        await endpoint.callTool("bash_run", { command: "pwd", instance: "remote-server" }, context),
+        await endpoint.callTool("bash_run", withContext({ command: "pwd", instance: "remote-server" }), context),
         { remote: true }
     );
     assert.deepEqual(localCalls, [{ input: { command: "pwd" }, toolName: "bash_run" }]);
@@ -118,7 +128,7 @@ test("remote worker calls check target readiness before tool exposure", async ()
     const endpoint = createManagedEndpoint(createWorker(), gateway);
 
     await assert.rejects(
-        endpoint.callTool("bash_run", { command: "pwd", instance: "remote-server" }, context),
+        endpoint.callTool("bash_run", withContext({ command: "pwd", instance: "remote-server" }), context),
         (error: unknown) => {
             assert.equal((error as { code?: string }).code, "core.instanceNotReady");
             return true;
@@ -141,7 +151,7 @@ test("cancelling an instance lifecycle tool stops MCP waiting while the operatio
     const controller = new AbortController();
     const pending = endpoint.callTool(
         "instance_start",
-        { instance: "remote-server" },
+        withContext({ instance: "remote-server" }),
         context,
         controller.signal
     );
@@ -184,26 +194,27 @@ test("instance management tools delegate to the gateway without requiring the lo
     const endpoint = createManagedEndpoint(createWorker({ hasSchema: false, ready: false }), gateway);
 
     assert.deepEqual(endpoint.listTools().map((tool) => tool.name), [
+        "environ_info",
         "instance_list",
         "instance_status",
         "instance_create",
         "instance_start",
         "instance_stop"
     ]);
-    assert.deepEqual(await endpoint.callTool("instance_list", {}, context), { instances: [] });
-    await endpoint.callTool("instance_status", { instance: "remote-server" }, context);
-    await endpoint.callTool("instance_start", { instance: "remote-server" }, context);
-    await endpoint.callTool("instance_stop", { instance: "remote-server" }, context);
+    assert.deepEqual(await endpoint.callTool("instance_list", withContext({}), context), { instances: [] });
+    await endpoint.callTool("instance_status", withContext({ instance: "remote-server" }), context);
+    await endpoint.callTool("instance_start", withContext({ instance: "remote-server" }), context);
+    await endpoint.callTool("instance_stop", withContext({ instance: "remote-server" }), context);
     await endpoint.callTool(
         "instance_create",
-        {
+        withContext({
             host: "server.example.com",
             identityFile: "~/.ssh/id_ed25519",
             name: "remote-server",
             port: 2222,
             user: "dev",
             workspace: "/srv/project"
-        },
+        }),
         context
     );
 
@@ -229,6 +240,7 @@ function createManagedEndpoint(
     gateway = createGateway()
 ): McpEndpointWorker {
     return new McpEndpointWorker({
+        contextRegistry,
         gateway,
         instanceName: "main-pc",
         policy: {
@@ -251,6 +263,18 @@ function createWorker(options: {
         async callTool(toolName: string, input: JsonValue, callContext: ToolCallContext) {
             return await (options.callTool?.(toolName, input, callContext) ?? Promise.resolve({ ok: true }));
         },
+        handshake: {
+            instance: "main-pc",
+            workspace: "/workspace",
+            platform: {
+                arch: "x86_64",
+                distribution: { id: "arch", name: "Arch Linux", version: "rolling" },
+                os: "linux",
+                packageManager: "pacman",
+                shell: { executable: "/bin/bash", kind: "bash", version: "5" }
+            }
+        },
+        workspacePath: "/workspace",
         hasToolSchemaCache() {
             return options.hasSchema ?? true;
         },
@@ -312,34 +336,36 @@ test("todo tools are control-side, group-controlled, capability-free, and availa
             return { items: [], revision: 0, summary: { completed: 0, total: 0 } };
         },
         async writeTodo(instance, input, callContext) {
-            calls.push(`write:${instance}:${callContext.sessionId}:${String((input as { revision?: number }).revision)}`);
+            calls.push(`write:${instance}:${callContext.ctxId}:${String((input as { revision?: number }).revision)}`);
             return { items: [], revision: 1, summary: { completed: 0, total: 0 } };
         }
     });
     const endpoint = new McpEndpointWorker({
+        contextRegistry,
         gateway,
         instanceName: "main-pc",
         policy: { capabilities: [], groups: ["todo"] },
         worker: createWorker({ hasSchema: false, ready: false })
     });
 
-    assert.deepEqual(endpoint.listTools().map((tool) => tool.name), ["todo_read", "todo_write"]);
-    assert.deepEqual(await endpoint.callTool("todo_read", {}, context), {
+    assert.deepEqual(endpoint.listTools().map((tool) => tool.name), ["environ_info", "todo_read", "todo_write"]);
+    assert.deepEqual(await endpoint.callTool("todo_read", withContext({}), context), {
         items: [],
         revision: 0,
         summary: { completed: 0, total: 0 }
     });
-    await endpoint.callTool("todo_write", { revision: 0, todos: [] }, context);
-    assert.deepEqual(calls, ["read:main-pc", "write:main-pc:session-1:0"]);
+    await endpoint.callTool("todo_write", withContext({ revision: 0, todos: [] }), context);
+    assert.deepEqual(calls, ["read:main-pc", "write:main-pc:ctx-instance-test:0"]);
 
     const hidden = new McpEndpointWorker({
+        contextRegistry,
         gateway,
         instanceName: "main-pc",
         policy: { capabilities: ["read", "write"], groups: [] },
         worker: createWorker({ hasSchema: false, ready: false })
     });
-    assert.throws(() => hidden.listTools(), /schema/u);
-    await assert.rejects(hidden.callTool("todo_read", {}, context), (error: unknown) => {
+    assert.deepEqual(hidden.listTools().map((tool) => tool.name), ["environ_info"]);
+    await assert.rejects(hidden.callTool("todo_read", withContext({}), context), (error: unknown) => {
         assert.equal((error as { code?: string }).code, "core.toolSchemaUnavailable");
         return true;
     });

@@ -79,8 +79,23 @@ test("MCP initialize tools/list and tools/call succeed against the frozen worker
         const tmuxCreate = tools.find((tool) => tool.name === "tmux_create");
         assert.notEqual(bash, undefined);
         assert.notEqual(tmuxCreate, undefined);
-        assert.deepEqual(bash?.inputSchema, instance.listTools().find((tool) => tool.name === "bash_run")?.inputSchema);
-        assert.deepEqual(tmuxCreate?.inputSchema, instance.listTools().find((tool) => tool.name === "tmux_create")?.inputSchema);
+        const workerBashSchema = instance.listTools().find((tool) => tool.name === "bash_run")?.inputSchema as Record<string, unknown>;
+        const workerTmuxSchema = instance.listTools().find((tool) => tool.name === "tmux_create")?.inputSchema as Record<string, unknown>;
+        assert.deepEqual(
+            Object.fromEntries(Object.entries(bash?.inputSchema ?? {}).filter(([key]) => key !== "properties" && key !== "required")),
+            Object.fromEntries(Object.entries(workerBashSchema).filter(([key]) => key !== "properties" && key !== "required"))
+        );
+        assert.deepEqual(
+            Object.fromEntries(Object.entries(tmuxCreate?.inputSchema ?? {}).filter(([key]) => key !== "properties" && key !== "required")),
+            Object.fromEntries(Object.entries(workerTmuxSchema).filter(([key]) => key !== "properties" && key !== "required"))
+        );
+        assert.deepEqual((bash?.inputSchema.properties as Record<string, unknown>).ctxId, {
+            description: "Invocation context returned by environ_info.",
+            minLength: 1,
+            type: "string"
+        });
+        assert.equal((bash?.inputSchema.required as string[]).includes("ctxId"), true);
+        assert.equal((tmuxCreate?.inputSchema.required as string[]).includes("ctxId"), true);
         assert.deepEqual(
             (tmuxCreate?.inputSchema.properties as Record<string, unknown>).name,
             {
@@ -91,7 +106,12 @@ test("MCP initialize tools/list and tools/call succeed against the frozen worker
             }
         );
 
-        const call = await postJson(endpoint, await readFixture("mcp-tools-call.json"), sessionHeaders);
+        const ctxId = await createContext(endpoint, sessionHeaders);
+        const call = await postJson(
+            endpoint,
+            withToolContext(await readFixture("mcp-tools-call.json"), ctxId),
+            sessionHeaders
+        );
         assert.equal(call.error, undefined);
         assert.equal(call.result?.isError, false);
         assert.match(String(call.result?.content?.[0]?.text ?? ""), new RegExp(workspacePath.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"), "u"));
@@ -174,7 +194,12 @@ test("MCP tools/call waits for approval before invoking the worker tool", async 
             sessionHeaders
         );
 
-        callPromise = postJson(endpoint, await readFixture("mcp-tools-call.json"), sessionHeaders);
+        const ctxId = await createContext(endpoint, sessionHeaders);
+        callPromise = postJson(
+            endpoint,
+            withToolContext(await readFixture("mcp-tools-call.json"), ctxId),
+            sessionHeaders
+        );
 
         const pendingApproval = await waitForPendingApproval(instance);
         assert.equal(pendingApproval.status, "pending");
@@ -200,7 +225,11 @@ test("MCP tools/call waits for approval before invoking the worker tool", async 
         assert.equal(toolCalls[0]?.decision, "approved");
         assert.equal(toolCalls[0]?.status, "completed");
 
-        deniedPromise = postJson(endpoint, await readFixture("mcp-tools-call.json"), sessionHeaders);
+        deniedPromise = postJson(
+            endpoint,
+            withToolContext(await readFixture("mcp-tools-call.json"), ctxId),
+            sessionHeaders
+        );
 
         const deniedApproval = await waitForPendingApproval(instance);
         await instance.decideApproval(deniedApproval.approvalId, {
@@ -233,6 +262,27 @@ test("MCP tools/call waits for approval before invoking the worker tool", async 
         await rm(workspacePath, { force: true, recursive: true });
     }
 });
+
+async function createContext(endpoint: string, headers: Record<string, string>): Promise<string> {
+    const response = await postJson(endpoint, {
+        id: `req-environ-${Date.now()}`,
+        jsonrpc: "2.0",
+        method: "tools/call",
+        params: { arguments: {}, name: "environ_info" }
+    }, headers);
+    const ctxId = response.result?.structuredContent?.ctxId;
+    assert.equal(typeof ctxId, "string");
+    return ctxId;
+}
+
+function withToolContext(body: JsonValue, ctxId: string): JsonValue {
+    const request = structuredClone(body) as {
+        params?: { arguments?: Record<string, JsonValue> };
+    };
+    request.params ??= {};
+    request.params.arguments = { ...(request.params.arguments ?? {}), ctxId };
+    return request as JsonValue;
+}
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function postJson(url: string, body: JsonValue, extraHeaders?: Record<string, string>): Promise<any> {

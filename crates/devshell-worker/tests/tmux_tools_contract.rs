@@ -39,7 +39,7 @@ fn call(
             "method": method,
             "params": params,
             "context": {
-                "sessionId": session,
+                "ctxId": session,
                 "requestId": request_id,
                 "source": "mcp"
             }

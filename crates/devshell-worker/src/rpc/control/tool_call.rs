@@ -11,7 +11,7 @@ use crate::rpc::router::{ActiveToolCallRegistry, ControlHandler};
 #[serde(rename_all = "camelCase")]
 struct ToolCallCancelParams {
     rpc_request_id: String,
-    session_id: String,
+    ctx_id: String,
     #[serde(default)]
     reason: Option<String>,
 }
@@ -30,20 +30,20 @@ impl ControlHandler for ToolCallCancelHandler {
     fn handle(&self, request: &RpcRequest) -> Result<serde_json::Value, RpcError> {
         let params: ToolCallCancelParams = serde_json::from_value(request.params.clone())
             .map_err(|error| RpcError::new("rpc.invalidParams", error.to_string()))?;
-        if params.rpc_request_id.is_empty() || params.session_id.is_empty() {
+        if params.rpc_request_id.is_empty() || params.ctx_id.is_empty() {
             return Err(RpcError::new(
                 "rpc.invalidParams",
-                "rpcRequestId and sessionId must be non-empty.",
+                "rpcRequestId and ctxId must be non-empty.",
             ));
         }
         let cancelled = self
             .active_calls
-            .cancel(&params.session_id, &params.rpc_request_id)?;
+            .cancel(&params.ctx_id, &params.rpc_request_id)?;
         Ok(serde_json::json!({
             "cancelled": cancelled,
             "reason": params.reason,
             "rpcRequestId": params.rpc_request_id,
-            "sessionId": params.session_id,
+            "ctxId": params.ctx_id,
         }))
     }
 }

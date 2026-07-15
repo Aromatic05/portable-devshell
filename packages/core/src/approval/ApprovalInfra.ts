@@ -142,7 +142,7 @@ export class ApprovalManager {
             reason: `Approval required before running ${input.toolName}.`,
             ...(input.context.requestId === undefined ? {} : { requestId: input.context.requestId }),
             riskLevel: "medium",
-            ...(input.context.sessionId === undefined ? {} : { sessionId: input.context.sessionId }),
+            ...(input.context.ctxId === undefined ? {} : { ctxId: input.context.ctxId }),
             source: input.context.source,
             status: "pending",
             toolName: input.toolName

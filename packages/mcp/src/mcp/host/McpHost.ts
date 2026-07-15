@@ -1,5 +1,6 @@
 import type { JsonValue, ToolDefinition, ToolPolicy } from "@portable-devshell/shared";
 import { type McpAuthConfig } from "../auth/McpAuthConfig.js";
+import { McpContextRegistry } from "../context/McpContextRegistry.js";
 import type { McpInstanceGateway } from "../instance/McpInstanceGateway.js";
 import { McpOAuthProtectedResource } from "../auth/oauth/McpOAuthProtectedResource.js";
 import type { McpOAuthApprovalService } from "../auth/oauth/McpOAuthApprovalService.js";
@@ -12,11 +13,11 @@ import { McpHostRouteRegistry } from "./route/McpHostRouteRegistry.js";
 interface WorkerInstanceLike {
     appendMcpSessionClosed(sessionId: string): Promise<void>;
     appendMcpSessionOpened(sessionId: string): Promise<void>;
-    appendMcpToolCalled(toolName: string, context: { requestId?: string; sessionId?: string }): Promise<void>;
+    appendMcpToolCalled(toolName: string, context: { ctxId?: string; requestId?: string }): Promise<void>;
     callTool(
         toolName: string,
         input: JsonValue,
-        context: { requestId?: string; sessionId?: string; source: "mcp" },
+        context: { ctxId?: string; requestId?: string; source: "mcp" },
         signal?: AbortSignal
     ): Promise<JsonValue>;
     hasToolSchemaCache?(): boolean;
@@ -34,6 +35,7 @@ export interface McpHostInstanceConfig {
 
 export interface McpHostConfig extends McpExposureConfig {
     auth?: McpAuthConfig;
+    contextFile?: string;
     instances: readonly McpHostInstanceConfig[];
     listenPort: number;
     storageDir?: string;
@@ -42,6 +44,7 @@ export interface McpHostConfig extends McpExposureConfig {
 export class McpHost {
     readonly #auth?: McpAuthConfig;
     readonly #config: McpHostConfig;
+    readonly #contextRegistry: McpContextRegistry;
     readonly #guard = new McpAuthPublicExposureGuard();
     readonly #httpServer: McpHostHttpServer;
     readonly #oauth?: McpOAuthProtectedResource;
@@ -52,6 +55,7 @@ export class McpHost {
     constructor(config: McpHostConfig) {
         this.#config = config;
         this.#auth = config.auth;
+        this.#contextRegistry = new McpContextRegistry({ filePath: config.contextFile });
         this.#oauth =
             config.auth?.provider === "oauth2" && config.publicBaseUrl !== undefined && config.storageDir !== undefined
                 ? new McpOAuthProtectedResource(config.auth.oauth2, config.publicBaseUrl, config.storageDir, {
@@ -77,6 +81,7 @@ export class McpHost {
         if (this.#auth?.provider === "oauth2" && this.#oauth === undefined) {
             throw new Error("mcp.publicBaseUrl and storageDir are required when mcp.auth.mode=oauth2");
         }
+        await this.#contextRegistry.initialize();
         await this.#oauth?.warmup();
         for (const binding of this.#registry.list()) {
             this.#httpServer.registerBinding(binding.path, binding.binding);
@@ -97,6 +102,7 @@ export class McpHost {
     registerInstance(instance: McpHostInstanceConfig): void {
         const binding = new McpEndpointBinding(
             new McpEndpointWorker({
+                contextRegistry: this.#contextRegistry,
                 gateway: instance.gateway,
                 policy: instance.policy,
                 instanceName: instance.name,

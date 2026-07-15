@@ -80,7 +80,7 @@ export class TodoService {
 
     async write(
         input: TodoWriteInput,
-        sessionId: string,
+        ctxId: string,
     ): Promise<TodoReadResult> {
         return await this.#runExclusive(async () => {
             const normalized = normalizeInput(input);
@@ -94,7 +94,7 @@ export class TodoService {
 
             if (previous === undefined) {
                 requireRevision(normalized.revision, 0);
-                active = createState(this.#instanceName, normalized, sessionId);
+                active = createState(this.#instanceName, normalized, ctxId);
                 events.push(todoEvent("todo.created", active));
             } else if (normalized.revision === 0 && isTerminal(previous)) {
                 const archivedState = {
@@ -103,14 +103,14 @@ export class TodoService {
                 };
                 archived.push(archivedState);
                 events.push(todoEvent("todo.archived", archivedState));
-                active = createState(this.#instanceName, normalized, sessionId);
+                active = createState(this.#instanceName, normalized, ctxId);
                 events.push(todoEvent("todo.created", active));
             } else {
                 requireRevision(normalized.revision, previous.revision);
                 const now = new Date().toISOString();
                 active = {
                     ...previous,
-                    activeSessionId: sessionId,
+                    activeCtxId: ctxId,
                     items: normalized.todos,
                     revision: previous.revision + 1,
                     title: normalized.title,
@@ -208,12 +208,12 @@ function normalizeState(value: unknown, instanceName: string): TodoState {
     }
     const items = normalizeItems(value.items);
     const state: TodoState = {
-        activeSessionId: optionalString(value.activeSessionId),
+        activeCtxId: optionalString(value.activeCtxId ?? value.activeSessionId),
         archivedAt: optionalString(value.archivedAt),
         createdAt: requiredString(value.createdAt, "createdAt"),
-        createdBySessionId: requiredString(
-            value.createdBySessionId,
-            "createdBySessionId",
+        createdByCtxId: requiredString(
+            value.createdByCtxId ?? value.createdBySessionId,
+            "createdByCtxId",
         ),
         items,
         originInstance: requiredString(value.originInstance, "originInstance"),
@@ -287,13 +287,13 @@ function normalizeItems(value: unknown): TodoItem[] {
 function createState(
     instanceName: string,
     input: TodoWriteInput,
-    sessionId: string,
+    ctxId: string,
 ): TodoState {
     const now = new Date().toISOString();
     return {
-        activeSessionId: sessionId,
+        activeCtxId: ctxId,
         createdAt: now,
-        createdBySessionId: sessionId,
+        createdByCtxId: ctxId,
         items: input.todos,
         originInstance: instanceName,
         revision: 1,

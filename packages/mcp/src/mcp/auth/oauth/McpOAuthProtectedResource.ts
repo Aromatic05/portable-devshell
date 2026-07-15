@@ -362,7 +362,11 @@ class McpOAuthResourceVerifier implements OAuthTokenVerifier {
         return {
             clientId: accessToken.clientId,
             expiresAt: accessToken.exp,
-            extra: undefined,
+            extra: {
+                subject: typeof (accessToken as { accountId?: unknown }).accountId === "string"
+                    ? (accessToken as { accountId: string }).accountId
+                    : accessToken.clientId
+            },
             resource,
             scopes: [...accessToken.scopes],
             token
