@@ -37,20 +37,6 @@ pub fn publish(temp: NamedTempFile, target: &Path, mode: PublishMode) -> Result<
     }
 }
 
-pub fn remove_source_after_publish(source: &Path, target: &Path) -> Result<(), ToolError> {
-    fs::remove_file(source).map_err(|error| {
-        ToolError::new(
-            "file.moveIncomplete",
-            format!("target was published but source removal failed: {error}"),
-        )
-        .with_details(serde_json::json!({
-            "sourceExists": source.symlink_metadata().is_ok(),
-            "targetExists": target.symlink_metadata().is_ok(),
-            "sourceModified": false,
-            "targetPublished": true,
-        }))
-    })
-}
 
 #[cfg(test)]
 mod tests {

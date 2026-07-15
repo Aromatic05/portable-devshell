@@ -27,6 +27,7 @@ pub struct FileReadInput {
     /// Content selector using N, N-M, N+count, or sorted non-overlapping comma-separated ranges. Append :raw for exact lines; otherwise each range includes one preceding line and up to three following lines for editing context. Cannot be combined with view=outline.
     pub selector: Option<String>,
 }
+
 #[derive(Debug, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct FileReadOutput {
@@ -44,6 +45,7 @@ pub struct FileReadOutput {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub parse_status: Option<FileParseStatus>,
 }
+
 #[derive(Clone, Debug, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ReturnedRange {
@@ -51,149 +53,6 @@ pub struct ReturnedRange {
     pub end_line: usize,
 }
 
-#[derive(Clone, Copy, Debug, Default, Deserialize, JsonSchema, PartialEq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum FileEditMode {
-    #[default]
-    Text,
-    Replace,
-    Patch,
-    ApplyPatch,
-}
-
-#[derive(Debug, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct FileEditTextInput {
-    pub input: String,
-}
-
-#[derive(Debug, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct FileEditReplaceInput {
-    pub path: String,
-    pub edits: Vec<FileEditReplaceEntry>,
-}
-
-#[derive(Clone, Debug, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct FileEditReplaceEntry {
-    pub old_text: String,
-    pub new_text: String,
-    pub all: Option<bool>,
-}
-
-#[derive(Debug, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct FileEditPatchInput {
-    pub path: String,
-    pub edits: Vec<FileEditPatchEntry>,
-}
-
-#[derive(Clone, Debug, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct FileEditPatchEntry {
-    pub op: Option<FileEditPatchOperation>,
-    pub rename: Option<String>,
-    pub diff: Option<String>,
-}
-
-#[derive(Clone, Copy, Debug, Deserialize, JsonSchema, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub enum FileEditPatchOperation {
-    Create,
-    Delete,
-    Update,
-}
-
-#[derive(Debug, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct FileEditApplyPatchInput {
-    pub input: String,
-}
-
-#[derive(Clone, Debug)]
-pub enum FileEditOperation {
-    Replace {
-        start_line: usize,
-        end_line: usize,
-        lines: Vec<String>,
-    },
-    Delete {
-        start_line: usize,
-        end_line: usize,
-    },
-    Insert {
-        at: InsertAt,
-        line: Option<usize>,
-        lines: Vec<String>,
-    },
-    ReplaceBlock {
-        start_line: usize,
-        lines: Vec<String>,
-    },
-    DeleteBlock {
-        start_line: usize,
-    },
-    InsertBlockPost {
-        start_line: usize,
-        lines: Vec<String>,
-    },
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub enum InsertAt {
-    Before,
-    After,
-    Head,
-    Tail,
-}
-
-#[derive(Debug, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct FileEditOutput {
-    pub files: Vec<FileEditFileOutput>,
-    pub applied_files: Vec<String>,
-}
-
-#[derive(Clone, Copy, Debug, JsonSchema, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub enum FileEditResultOperation {
-    Create,
-    Update,
-    Delete,
-    Move,
-}
-
-#[derive(Debug, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct FileEditFileOutput {
-    pub path: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub snapshot_id: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub snapshot_tag: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub revision: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub header: Option<String>,
-    pub operation: FileEditResultOperation,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub moved_from: Option<String>,
-    pub diff: String,
-    pub added_lines: usize,
-    pub removed_lines: usize,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub first_changed_line: Option<usize>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub total_lines: Option<usize>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub total_bytes: Option<usize>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub preview: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub preview_range: Option<ReturnedRange>,
-    pub truncated: bool,
-}
 
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -269,27 +128,6 @@ pub struct FileChangeSetOutput {
     pub operations: Vec<FileChangeOperationOutput>,
 }
 
-// Legacy file_write DTOs remain only so archived code and historical fixtures can compile.
-#[allow(dead_code)]
-#[derive(Debug, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct FileWriteInput {
-    pub path: String,
-    pub content: String,
-    pub expected_revision: Option<String>,
-}
-#[allow(dead_code)]
-#[derive(Debug, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct FileWriteOutput {
-    pub path: String,
-    pub created: bool,
-    pub snapshot_id: String,
-    pub snapshot_tag: String,
-    pub revision: String,
-    pub bytes_written: usize,
-    pub total_lines: usize,
-}
 
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]

@@ -92,26 +92,6 @@ pub fn outline(path: &Path, source: &str) -> Result<Option<StructureOutline>, To
     }))
 }
 
-pub fn block_range(
-    path: &Path,
-    source: &str,
-    start_line: usize,
-) -> Result<Option<(usize, usize)>, ToolError> {
-    let Some((_, language, _)) = language_for(path) else {
-        return Ok(None);
-    };
-    let mut parser = Parser::new();
-    parser
-        .set_language(&language)
-        .map_err(|error| ToolError::new("file.parseFailed", error.to_string()))?;
-    let Some(tree) = parser.parse(source, None) else {
-        return Ok(None);
-    };
-    let mut best = None;
-    find_block(tree.root_node(), start_line.saturating_sub(1), &mut best);
-    Ok(best.map(|node| (node.start_position().row + 1, node.end_position().row + 1)))
-}
-
 fn language_for(path: &Path) -> Option<(&'static str, Language, OutlineLanguage)> {
     let ext = path.extension()?.to_string_lossy().to_ascii_lowercase();
     Some(match ext.as_str() {
@@ -349,40 +329,3 @@ fn is_container(kind: &str) -> bool {
     )
 }
 
-fn is_block_kind(kind: &str) -> bool {
-    matches!(
-        kind,
-        "function_item"
-            | "function_declaration"
-            | "method_definition"
-            | "method_declaration"
-            | "class_declaration"
-            | "interface_declaration"
-            | "type_alias_declaration"
-            | "struct_item"
-            | "enum_item"
-            | "trait_item"
-            | "impl_item"
-            | "decorated_definition"
-            | "class_definition"
-            | "function_definition"
-            | "atx_heading"
-            | "setext_heading"
-            | "section"
-    )
-}
-
-fn find_block<'a>(node: Node<'a>, start_row: usize, best: &mut Option<Node<'a>>) {
-    if node.start_position().row == start_row
-        && is_block_kind(node.kind())
-        && best.is_none_or(|current| {
-            node.end_byte() - node.start_byte() < current.end_byte() - current.start_byte()
-        })
-    {
-        *best = Some(node);
-    }
-    let mut cursor = node.walk();
-    for child in node.named_children(&mut cursor) {
-        find_block(child, start_row, best);
-    }
-}

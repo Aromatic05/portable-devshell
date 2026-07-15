@@ -1,4 +1,3 @@
-pub mod codex_patch;
 pub mod context_patch;
 pub mod cursor;
 pub mod diff;
@@ -6,7 +5,6 @@ pub mod discover;
 pub mod edit;
 pub mod find;
 pub mod info;
-mod legacy_edit;
 pub mod publish;
 pub mod read;
 pub mod search;
@@ -27,7 +25,6 @@ use crate::tools::{ToolCall, ToolError};
 
 pub struct FileToolState {
     pub cursors: Mutex<cursor::CursorStore>,
-    pub snapshots: Mutex<state::SnapshotStore>,
     pub context_snapshots: Mutex<state::ContextSnapshotStore>,
     snapshot_ordinal: AtomicU64,
     write_locks: Mutex<HashMap<PathBuf, Arc<Mutex<()>>>>,
@@ -36,7 +33,6 @@ impl FileToolState {
     pub fn new() -> Arc<Self> {
         Arc::new(Self {
             cursors: Mutex::new(cursor::CursorStore::default()),
-            snapshots: Mutex::new(state::SnapshotStore::default()),
             context_snapshots: Mutex::new(state::ContextSnapshotStore::default()),
             snapshot_ordinal: AtomicU64::new(1),
             write_locks: Mutex::new(HashMap::new()),

@@ -273,10 +273,7 @@ fn search_stream(
     let mut hasher = blake3::Hasher::new();
     let mut total_bytes = 0usize;
     let mut total_lines = 0usize;
-    let mut bom = false;
     let mut first = true;
-    let mut final_newline = false;
-    let mut line_ending = "\n";
     loop {
         cancellation.check()?;
         buffer.clear();
@@ -295,7 +292,6 @@ fn search_stream(
         let had_newline = buffer.last() == Some(&b'\n');
         let mut content = buffer.as_slice();
         if first && content.starts_with(&[0xEF, 0xBB, 0xBF]) {
-            bom = true;
             content = &content[3..];
         }
         first = false;
@@ -307,14 +303,6 @@ fn search_stream(
         if had_newline || !without_eol.is_empty() {
             total_lines += 1;
         }
-        if had_newline && total_lines == 1 {
-            line_ending = if without_lf.len() != without_eol.len() {
-                "\r\n"
-            } else {
-                "\n"
-            };
-        }
-        final_newline = had_newline;
         if matches.len() < limit {
             let is_match = matcher.is_match(&line);
             if is_match {
@@ -338,9 +326,6 @@ fn search_stream(
         }
     }
     let metadata = TextMetadata {
-        bom,
-        final_newline,
-        line_ending,
         revision: hasher.finalize().to_hex().to_string(),
         total_bytes,
         total_lines,

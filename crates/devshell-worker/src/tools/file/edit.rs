@@ -650,9 +650,6 @@ impl FileEditTool {
             );
         } else {
             let metadata = crate::tools::file::state::TextMetadata {
-                bom: text.bom,
-                final_newline: text.final_newline,
-                line_ending: text.line_ending,
                 revision: text.revision.clone(),
                 total_bytes: text.total_bytes,
                 total_lines: text.lines.len(),
