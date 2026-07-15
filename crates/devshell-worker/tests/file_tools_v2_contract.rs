@@ -17,7 +17,7 @@ fn call(
     env: &TestEnv,
     instance: &str,
     id: &str,
-    session_id: &str,
+    ctx_id: &str,
     method: &str,
     params: Value,
 ) -> Value {
@@ -29,7 +29,7 @@ fn call(
             "method": method,
             "params": params,
             "context": {
-                "ctxId": session_id,
+                "ctxId": ctx_id,
                 "source": "mcp"
             }
         }),
@@ -42,7 +42,7 @@ fn tools_list_exposes_only_the_new_file_edit() {
     let instance = "aromatic-file-catalog-v2";
     start(&env, instance);
 
-    let response = call(&env, instance, "1", "session-a", "tools.list", json!({}));
+    let response = call(&env, instance, "1", "ctx-a", "tools.list", json!({}));
     let names = response["result"]["tools"]
         .as_array()
         .unwrap()
@@ -79,7 +79,7 @@ fn file_read_auto_returns_content_for_small_files_without_snapshot_tokens() {
         &env,
         instance,
         "1",
-        "session-a",
+        "ctx-a",
         "file_read",
         json!({ "path": "./small.rs" }),
     );
@@ -116,7 +116,7 @@ fn file_read_outline_reports_symbol_ranges_and_hierarchy() {
         &env,
         instance,
         "1",
-        "session-a",
+        "ctx-a",
         "file_read",
         json!({ "path": "./large.rs" }),
     );
@@ -134,9 +134,9 @@ fn file_read_outline_reports_symbol_ranges_and_hierarchy() {
 }
 
 #[test]
-fn file_edit_uses_session_scoped_implicit_snapshots() {
+fn file_edit_uses_context_scoped_implicit_snapshots() {
     let env = TestEnv::new();
-    let instance = "aromatic-file-session-snapshot";
+    let instance = "aromatic-file-context-snapshot";
     fs::write(env.workspace().join("document.txt"), "one\ntwo\n").unwrap();
     start(&env, instance);
 
@@ -144,7 +144,7 @@ fn file_edit_uses_session_scoped_implicit_snapshots() {
         &env,
         instance,
         "1",
-        "session-a",
+        "ctx-a",
         "file_read",
         json!({ "path": "./document.txt", "view": "content" }),
     );
@@ -154,7 +154,7 @@ fn file_edit_uses_session_scoped_implicit_snapshots() {
         &env,
         instance,
         "2",
-        "session-b",
+        "ctx-b",
         "file_edit",
         json!({
             "changes": "*** Begin Edit\n*** Patch File: ./document.txt\n@@\n one\n-two\n+changed\n*** End Edit"
@@ -167,7 +167,7 @@ fn file_edit_uses_session_scoped_implicit_snapshots() {
         &env,
         instance,
         "3",
-        "session-a",
+        "ctx-a",
         "file_edit",
         json!({
             "changes": "*** Begin Edit\n*** Patch File: ./document.txt\n@@\n one\n-two\n+changed\n*** End Edit"
@@ -197,7 +197,7 @@ fn file_search_establishes_edit_coverage() {
         &env,
         instance,
         "1",
-        "session-a",
+        "ctx-a",
         "file_search",
         json!({ "paths": ["./document.txt"], "pattern": "needle", "syntax": "literal" }),
     );
@@ -208,13 +208,70 @@ fn file_search_establishes_edit_coverage() {
         &env,
         instance,
         "2",
-        "session-a",
+        "ctx-a",
         "file_edit",
         json!({
             "changes": "*** Begin Edit\n*** Patch File: ./document.txt\n@@\n before\n-needle\n+changed\n after\n*** End Edit"
         }),
     );
     assert_eq!(edited["ok"], true, "{edited}");
+
+    env.json_command(&["stop", "--instance", instance]);
+}
+
+#[test]
+fn file_search_snapshots_only_files_returned_in_the_current_page() {
+    let env = TestEnv::new();
+    let instance = "aromatic-file-search-page";
+    let paths = (1..=21)
+        .map(|index| {
+            let name = format!("result-{index:02}.txt");
+            fs::write(env.workspace().join(&name), "needle\n").unwrap();
+            format!("./{name}")
+        })
+        .collect::<Vec<_>>();
+    start(&env, instance);
+
+    let searched = call(
+        &env,
+        instance,
+        "1",
+        "ctx-a",
+        "file_search",
+        json!({ "paths": paths, "pattern": "needle", "syntax": "literal" }),
+    );
+    assert_eq!(searched["ok"], true, "{searched}");
+    assert_eq!(searched["result"]["files"].as_array().unwrap().len(), 20);
+    assert!(searched["result"]["nextCursor"].is_string());
+
+    let returned_edit = call(
+        &env,
+        instance,
+        "2",
+        "ctx-a",
+        "file_edit",
+        json!({
+            "changes": "*** Begin Edit\n*** Rewrite File: ./result-01.txt\nreturned needle\n*** End Edit"
+        }),
+    );
+    assert_eq!(returned_edit["ok"], true, "{returned_edit}");
+
+    let hidden_edit = call(
+        &env,
+        instance,
+        "3",
+        "ctx-a",
+        "file_edit",
+        json!({
+            "changes": "*** Begin Edit\n*** Rewrite File: ./result-21.txt\nhidden\n*** End Edit"
+        }),
+    );
+    assert_eq!(hidden_edit["ok"], false, "{hidden_edit}");
+    assert_eq!(hidden_edit["error"]["code"], "file.snapshotRequired");
+    assert_eq!(
+        fs::read_to_string(env.workspace().join("result-21.txt")).unwrap(),
+        "needle\n"
+    );
 
     env.json_command(&["stop", "--instance", instance]);
 }
@@ -230,7 +287,7 @@ fn file_edit_static_preflight_prevents_partial_changes() {
         &env,
         instance,
         "1",
-        "session-a",
+        "ctx-a",
         "file_edit",
         json!({
             "changes": "*** Begin Edit\n*** Write File: ./created.txt\ncreated\n*** Rewrite File: ./existing.txt\nupdated\n*** End Edit"
@@ -263,7 +320,7 @@ fn file_edit_keeps_applied_operations_and_stops_after_runtime_failure() {
         &env,
         instance,
         "1",
-        "session-a",
+        "ctx-a",
         "file_edit",
         json!({ "changes": changes }),
     );
@@ -300,7 +357,7 @@ fn file_edit_applies_all_five_operations_in_order() {
             &env,
             instance,
             &format!("read-{index}"),
-            "session-a",
+            "ctx-a",
             "file_read",
             json!({ "path": format!("./{path}"), "view": "content" }),
         );
@@ -311,7 +368,7 @@ fn file_edit_applies_all_five_operations_in_order() {
         &env,
         instance,
         "edit",
-        "session-a",
+        "ctx-a",
         "file_edit",
         json!({
             "changes": concat!(
@@ -380,7 +437,7 @@ fn file_edit_rejects_patch_context_outside_read_coverage() {
         &env,
         instance,
         "1",
-        "session-a",
+        "ctx-a",
         "file_read",
         json!({ "path": "./document.txt", "view": "content", "selector": "1-1:raw" }),
     );
@@ -390,7 +447,7 @@ fn file_edit_rejects_patch_context_outside_read_coverage() {
         &env,
         instance,
         "2",
-        "session-a",
+        "ctx-a",
         "file_edit",
         json!({
             "changes": "*** Begin Edit\n*** Patch File: ./document.txt\n@@\n-three\n+third\n*** End Edit"
@@ -421,7 +478,7 @@ fn file_edit_three_way_merges_non_conflicting_external_changes() {
         &env,
         instance,
         "1",
-        "session-a",
+        "ctx-a",
         "file_read",
         json!({ "path": "./document.txt", "view": "content" }),
     );
@@ -436,7 +493,7 @@ fn file_edit_three_way_merges_non_conflicting_external_changes() {
         &env,
         instance,
         "2",
-        "session-a",
+        "ctx-a",
         "file_edit",
         json!({
             "changes": "*** Begin Edit\n*** Patch File: ./document.txt\n@@\n one\n-two\n+second\n three\n*** End Edit"
@@ -454,9 +511,9 @@ fn file_edit_three_way_merges_non_conflicting_external_changes() {
 }
 
 #[test]
-fn closing_tool_session_releases_implicit_file_snapshots() {
+fn closing_transport_session_does_not_release_context_snapshots() {
     let env = TestEnv::new();
-    let instance = "aromatic-tool-session-close";
+    let instance = "aromatic-context-session-close";
     fs::write(env.workspace().join("document.txt"), "old\n").unwrap();
     start(&env, instance);
 
@@ -464,7 +521,7 @@ fn closing_tool_session_releases_implicit_file_snapshots() {
         &env,
         instance,
         "1",
-        "session-a",
+        "ctx-a",
         "file_read",
         json!({ "path": "./document.txt" }),
     );
@@ -473,9 +530,9 @@ fn closing_tool_session_releases_implicit_file_snapshots() {
         &env,
         instance,
         "2",
-        "session-a",
+        "control",
         "tool.session.close",
-        json!({ "sessionId": "session-a" }),
+        json!({ "sessionId": "ctx-a" }),
     );
     assert_eq!(closed["ok"], true, "{closed}");
 
@@ -483,14 +540,17 @@ fn closing_tool_session_releases_implicit_file_snapshots() {
         &env,
         instance,
         "3",
-        "session-a",
+        "ctx-a",
         "file_edit",
         json!({
             "changes": "*** Begin Edit\n*** Rewrite File: ./document.txt\nnew\n*** End Edit"
         }),
     );
-    assert_eq!(edited["ok"], false, "{edited}");
-    assert_eq!(edited["error"]["code"], "file.snapshotRequired");
+    assert_eq!(edited["ok"], true, "{edited}");
+    assert_eq!(
+        fs::read_to_string(env.workspace().join("document.txt")).unwrap(),
+        "new\n"
+    );
 
     env.json_command(&["stop", "--instance", instance]);
 }
@@ -505,7 +565,7 @@ fn file_edit_keeps_a_call_local_snapshot_chain_for_dependent_operations() {
         &env,
         instance,
         "1",
-        "session-a",
+        "ctx-a",
         "file_edit",
         json!({
             "changes": concat!(

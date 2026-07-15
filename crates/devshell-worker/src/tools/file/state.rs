@@ -65,7 +65,7 @@ pub struct SnapshotReference {
 }
 
 #[derive(Clone, Debug)]
-pub struct SessionFileSnapshot {
+pub struct ContextFileSnapshot {
     pub canonical_path: String,
     pub revision: String,
     pub seen_lines: BTreeSet<usize>,
@@ -76,22 +76,21 @@ pub struct SessionFileSnapshot {
 }
 
 #[derive(Default)]
-pub struct SessionSnapshotStore {
-    closed_sessions: HashMap<String, u128>,
-    latest: HashMap<(String, String), SessionFileSnapshot>,
+pub struct ContextSnapshotStore {
+    latest: HashMap<(String, String), ContextFileSnapshot>,
 }
 
-impl SessionSnapshotStore {
+impl ContextSnapshotStore {
     pub fn remember_full(
         &mut self,
-        session_id: &str,
+        ctx_id: &str,
         path: &Path,
         text: &TextFile,
         seen_lines: impl IntoIterator<Item = usize>,
         ordinal: u64,
     ) {
         self.remember(
-            session_id,
+            ctx_id,
             path,
             text.revision.clone(),
             text.lines.len(),
@@ -103,14 +102,14 @@ impl SessionSnapshotStore {
 
     pub fn remember_sparse(
         &mut self,
-        session_id: &str,
+        ctx_id: &str,
         path: &Path,
         metadata: &TextMetadata,
         seen_lines: impl IntoIterator<Item = usize>,
         ordinal: u64,
     ) {
         self.remember(
-            session_id,
+            ctx_id,
             path,
             metadata.revision.clone(),
             metadata.total_lines,
@@ -123,7 +122,7 @@ impl SessionSnapshotStore {
     #[allow(clippy::too_many_arguments)]
     fn remember(
         &mut self,
-        session_id: &str,
+        ctx_id: &str,
         path: &Path,
         revision: String,
         total_lines: usize,
@@ -131,11 +130,8 @@ impl SessionSnapshotStore {
         seen_lines: impl IntoIterator<Item = usize>,
         ordinal: u64,
     ) {
-        if self.closed_sessions.contains_key(session_id) {
-            return;
-        }
         let canonical_path = path.display().to_string();
-        let key = (session_id.to_string(), canonical_path.clone());
+        let key = (ctx_id.to_string(), canonical_path.clone());
         let seen_lines = seen_lines.into_iter().collect::<BTreeSet<_>>();
         let now = now_ms();
 
@@ -157,7 +153,7 @@ impl SessionSnapshotStore {
 
         self.latest.insert(
             key,
-            SessionFileSnapshot {
+            ContextFileSnapshot {
                 canonical_path,
                 revision,
                 seen_lines,
@@ -172,14 +168,14 @@ impl SessionSnapshotStore {
 
     pub fn latest_for_path(
         &mut self,
-        session_id: &str,
+        ctx_id: &str,
         path: &Path,
-    ) -> Result<SessionFileSnapshot, ToolError> {
-        let key = (session_id.to_string(), path.display().to_string());
+    ) -> Result<ContextFileSnapshot, ToolError> {
+        let key = (ctx_id.to_string(), path.display().to_string());
         let snapshot = self.latest.get_mut(&key).ok_or_else(|| {
             ToolError::retryable(
                 "file.snapshotRequired",
-                "file must be read or searched in this session before editing",
+                "file must be read or searched in this context before editing",
             )
             .with_details(serde_json::json!({ "path": path.display().to_string() }))
         })?;
@@ -187,9 +183,9 @@ impl SessionSnapshotStore {
         Ok(snapshot.clone())
     }
 
-    pub fn migrate_path(&mut self, session_id: &str, source: &Path, target: &Path) {
-        let source_key = (session_id.to_string(), source.display().to_string());
-        let target_key = (session_id.to_string(), target.display().to_string());
+    pub fn migrate_path(&mut self, ctx_id: &str, source: &Path, target: &Path) {
+        let source_key = (ctx_id.to_string(), source.display().to_string());
+        let target_key = (ctx_id.to_string(), target.display().to_string());
         self.latest.remove(&target_key);
         if let Some(mut snapshot) = self.latest.remove(&source_key) {
             snapshot.canonical_path = target.display().to_string();
@@ -198,31 +194,14 @@ impl SessionSnapshotStore {
         }
     }
 
-    pub fn remove_path(&mut self, session_id: &str, path: &Path) {
+    pub fn remove_path(&mut self, ctx_id: &str, path: &Path) {
         self.latest
-            .remove(&(session_id.to_string(), path.display().to_string()));
-    }
-
-    pub fn clear_session(&mut self, session_id: &str) {
-        self.latest.retain(|(session, _), _| session != session_id);
-        self.closed_sessions
-            .insert(session_id.to_string(), now_ms());
-        while self.closed_sessions.len() > 512 {
-            let Some(oldest) = self
-                .closed_sessions
-                .iter()
-                .min_by_key(|(_, closed_at)| **closed_at)
-                .map(|(session, _)| session.clone())
-            else {
-                break;
-            };
-            self.closed_sessions.remove(&oldest);
-        }
+            .remove(&(ctx_id.to_string(), path.display().to_string()));
     }
 
     fn evict(&mut self) {
-        const MAX_SESSION_SNAPSHOTS: usize = 512;
-        while self.latest.len() > MAX_SESSION_SNAPSHOTS {
+        const MAX_CONTEXT_SNAPSHOTS: usize = 512;
+        while self.latest.len() > MAX_CONTEXT_SNAPSHOTS {
             let Some(oldest) = self
                 .latest
                 .iter()
@@ -738,7 +717,7 @@ mod tests {
     use std::path::Path;
 
     use super::{
-        FULL_SNAPSHOT_LIMIT, SessionSnapshotStore, SnapshotContent, SnapshotStore, TextFile,
+        ContextSnapshotStore, FULL_SNAPSHOT_LIMIT, SnapshotContent, SnapshotStore, TextFile,
     };
 
     fn text(revision: &str, line: String) -> TextFile {
@@ -753,23 +732,24 @@ mod tests {
     }
 
     #[test]
-    fn session_snapshot_store_uses_ordinals_and_does_not_reopen_closed_sessions() {
-        let mut store = SessionSnapshotStore::default();
+    fn context_snapshot_store_uses_ordinals_and_isolates_contexts() {
+        let mut store = ContextSnapshotStore::default();
         let path = Path::new("/workspace/document.txt");
         let newer = text("newer", "newer content".to_string());
         let older = text("older", "older content".to_string());
 
-        store.remember_full("session-a", path, &newer, [1], 2);
-        store.remember_full("session-a", path, &older, [1], 1);
+        store.remember_full("ctx-a", path, &newer, [1], 2);
+        store.remember_full("ctx-a", path, &older, [1], 1);
+        store.remember_full("ctx-b", path, &older, [1], 3);
+
         assert_eq!(
-            store.latest_for_path("session-a", path).unwrap().revision,
+            store.latest_for_path("ctx-a", path).unwrap().revision,
             "newer"
         );
-
-        store.clear_session("session-a");
-        store.remember_full("session-a", path, &newer, [1], 3);
-        let error = store.latest_for_path("session-a", path).unwrap_err();
-        assert_eq!(error.code, "file.snapshotRequired");
+        assert_eq!(
+            store.latest_for_path("ctx-b", path).unwrap().revision,
+            "older"
+        );
     }
 
     #[test]

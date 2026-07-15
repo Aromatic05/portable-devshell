@@ -28,7 +28,7 @@ use crate::tools::{ToolCall, ToolError};
 pub struct FileToolState {
     pub cursors: Mutex<cursor::CursorStore>,
     pub snapshots: Mutex<state::SnapshotStore>,
-    pub session_snapshots: Mutex<state::SessionSnapshotStore>,
+    pub context_snapshots: Mutex<state::ContextSnapshotStore>,
     snapshot_ordinal: AtomicU64,
     write_locks: Mutex<HashMap<PathBuf, Arc<Mutex<()>>>>,
 }
@@ -37,7 +37,7 @@ impl FileToolState {
         Arc::new(Self {
             cursors: Mutex::new(cursor::CursorStore::default()),
             snapshots: Mutex::new(state::SnapshotStore::default()),
-            session_snapshots: Mutex::new(state::SessionSnapshotStore::default()),
+            context_snapshots: Mutex::new(state::ContextSnapshotStore::default()),
             snapshot_ordinal: AtomicU64::new(1),
             write_locks: Mutex::new(HashMap::new()),
         })

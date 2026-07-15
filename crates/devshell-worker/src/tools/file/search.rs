@@ -1,6 +1,7 @@
 use std::collections::{BTreeMap, HashSet, VecDeque};
 use std::fs;
 use std::io::{BufRead, BufReader};
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use regex::RegexBuilder;
@@ -23,6 +24,29 @@ pub struct FileSearchTool {
     name: ToolName,
     state: Arc<FileToolState>,
 }
+
+struct MatchedFile {
+    output: FileSearchFile,
+    path: PathBuf,
+    metadata: TextMetadata,
+    seen: Vec<usize>,
+    ordinal: u64,
+}
+
+enum PreparedSearchSnapshot {
+    Full {
+        path: PathBuf,
+        text: TextFile,
+        seen: Vec<usize>,
+        ordinal: u64,
+    },
+    Sparse {
+        path: PathBuf,
+        metadata: TextMetadata,
+        seen: Vec<usize>,
+        ordinal: u64,
+    },
+}
 impl FileSearchTool {
     pub fn new(state: Arc<FileToolState>) -> Self {
         Self {
@@ -36,7 +60,7 @@ impl ToolHandler for FileSearchTool {
         &self.name
     }
     fn catalog_entry(&self) -> ToolCatalogEntry {
-        ToolCatalogEntry { group: self.name.group().to_string(), name: self.name.as_str(), description: "Search text within exact paths, directories, and globs. Complete returned source lines establish implicit, session-scoped edit coverage for later file_edit calls.".to_string(), input_schema: serde_json::to_value(schema_for!(FileSearchInput)).unwrap(), output_schema: serde_json::to_value(schema_for!(FileSearchOutput)).unwrap(), required_capabilities: vec![ToolCapability::Read] }
+        ToolCatalogEntry { group: self.name.group().to_string(), name: self.name.as_str(), description: "Search text within exact paths, directories, and globs. Complete returned source lines establish implicit, context-scoped edit coverage for later file_edit calls.".to_string(), input_schema: serde_json::to_value(schema_for!(FileSearchInput)).unwrap(), output_schema: serde_json::to_value(schema_for!(FileSearchOutput)).unwrap(), required_capabilities: vec![ToolCapability::Read] }
     }
     fn call(&self, call: ToolCall) -> Result<serde_json::Value, ToolError> {
         call.check_cancelled()?;
@@ -94,7 +118,7 @@ impl ToolHandler for FileSearchTool {
             for entry in group {
                 call.check_cancelled()?;
                 let ordinal = self.state.next_snapshot_ordinal();
-                let Ok((metadata, full_text, matches, shown)) =
+                let Ok((metadata, matches, shown)) =
                     search_stream(&entry.path, &matcher, per_file, context, &call.cancellation)
                 else {
                     continue;
@@ -103,25 +127,16 @@ impl ToolHandler for FileSearchTool {
                     continue;
                 }
                 let (body, seen) = format_streamed_content(&matches, &shown);
-                if let Some(text) = full_text {
-                    self.state.session_snapshots.lock().unwrap().remember_full(
-                        &call.ctx_id,
-                        &entry.path,
-                        &text,
-                        seen,
-                        ordinal,
-                    );
-                } else {
-                    self.state
-                        .session_snapshots
-                        .lock()
-                        .unwrap()
-                        .remember_sparse(&call.ctx_id, &entry.path, &metadata, seen, ordinal);
-                }
-                matched.push_back(FileSearchFile {
-                    path: entry.display,
-                    content: body,
-                    match_count: matches.len(),
+                matched.push_back(MatchedFile {
+                    output: FileSearchFile {
+                        path: entry.display,
+                        content: body,
+                        match_count: matches.len(),
+                    },
+                    path: entry.path,
+                    metadata,
+                    seen,
+                    ordinal,
                 });
             }
             matched_groups.push(matched);
@@ -141,11 +156,14 @@ impl ToolHandler for FileSearchTool {
             }
         }
         let total_files = files.len();
-        let mut page = Vec::new();
+        let mut page = Vec::<MatchedFile>::new();
         for file in files.into_iter().skip(offset).take(FILES_PER_PAGE) {
             call.check_cancelled()?;
-            let mut candidate = page.clone();
-            candidate.push(file.clone());
+            let candidate = page
+                .iter()
+                .map(|matched| matched.output.clone())
+                .chain(std::iter::once(file.output.clone()))
+                .collect();
             let probe = FileSearchOutput {
                 files: candidate,
                 next_cursor: Some("00000000-0000-0000-0000-000000000000".to_string()),
@@ -171,20 +189,69 @@ impl ToolHandler for FileSearchTool {
                 .unwrap()
                 .issue(&query, offset + consumed)
         });
+        let mut returned = Vec::with_capacity(page.len());
+        let mut prepared_snapshots = Vec::with_capacity(page.len());
+        for matched in page {
+            call.check_cancelled()?;
+            if matched.metadata.total_bytes <= FULL_SNAPSHOT_LIMIT {
+                let text = TextFile::read(&matched.path)?;
+                if text.revision != matched.metadata.revision {
+                    return Err(ToolError::retryable(
+                        "file.revisionMismatch",
+                        "file changed while search results were being prepared",
+                    ));
+                }
+                prepared_snapshots.push(PreparedSearchSnapshot::Full {
+                    path: matched.path,
+                    text,
+                    seen: matched.seen,
+                    ordinal: matched.ordinal,
+                });
+            } else {
+                let metadata = TextMetadata::inspect(&matched.path)?;
+                if metadata.revision != matched.metadata.revision {
+                    return Err(ToolError::retryable(
+                        "file.revisionMismatch",
+                        "file changed while search results were being prepared",
+                    ));
+                }
+                prepared_snapshots.push(PreparedSearchSnapshot::Sparse {
+                    path: matched.path,
+                    metadata,
+                    seen: matched.seen,
+                    ordinal: matched.ordinal,
+                });
+            }
+            returned.push(matched.output);
+        }
+        {
+            let mut snapshots = self.state.context_snapshots.lock().unwrap();
+            for snapshot in prepared_snapshots {
+                match snapshot {
+                    PreparedSearchSnapshot::Full {
+                        path,
+                        text,
+                        seen,
+                        ordinal,
+                    } => snapshots.remember_full(&call.ctx_id, &path, &text, seen, ordinal),
+                    PreparedSearchSnapshot::Sparse {
+                        path,
+                        metadata,
+                        seen,
+                        ordinal,
+                    } => snapshots.remember_sparse(&call.ctx_id, &path, &metadata, seen, ordinal),
+                }
+            }
+        }
         serde_json::to_value(FileSearchOutput {
-            files: page,
+            files: returned,
             next_cursor,
         })
         .map_err(|error| ToolError::new("tool.internalError", error.to_string()))
     }
 }
 
-type SearchStreamResult = (
-    TextMetadata,
-    Option<TextFile>,
-    Vec<usize>,
-    BTreeMap<usize, String>,
-);
+type SearchStreamResult = (TextMetadata, Vec<usize>, BTreeMap<usize, String>);
 
 fn search_stream(
     path: &std::path::Path,
@@ -210,7 +277,6 @@ fn search_stream(
     let mut first = true;
     let mut final_newline = false;
     let mut line_ending = "\n";
-    let mut full_lines = Some(Vec::new());
     loop {
         cancellation.check()?;
         buffer.clear();
@@ -222,9 +288,6 @@ fn search_stream(
         }
         hasher.update(&buffer);
         total_bytes += count;
-        if total_bytes > FULL_SNAPSHOT_LIMIT {
-            full_lines = None;
-        }
         if buffer.contains(&0) {
             return Err(ToolError::new("file.notText", "file contains NUL bytes"));
         }
@@ -252,10 +315,6 @@ fn search_stream(
             };
         }
         final_newline = had_newline;
-        if let Some(lines) = &mut full_lines {
-            lines.push(line.clone());
-        }
-
         if matches.len() < limit {
             let is_match = matcher.is_match(&line);
             if is_match {
@@ -278,24 +337,15 @@ fn search_stream(
             pending_after -= 1;
         }
     }
-    let revision = hasher.finalize().to_hex().to_string();
     let metadata = TextMetadata {
         bom,
         final_newline,
         line_ending,
-        revision: revision.clone(),
+        revision: hasher.finalize().to_hex().to_string(),
         total_bytes,
         total_lines,
     };
-    let full_text = full_lines.map(|lines| TextFile {
-        bom,
-        final_newline,
-        line_ending,
-        lines,
-        revision,
-        total_bytes,
-    });
-    Ok((metadata, full_text, matches, shown))
+    Ok((metadata, matches, shown))
 }
 
 fn format_streamed_content(

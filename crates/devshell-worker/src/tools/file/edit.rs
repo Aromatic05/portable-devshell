@@ -11,7 +11,7 @@ use crate::tools::file::context_patch;
 use crate::tools::file::diff;
 use crate::tools::file::publish::{self, PublishMode};
 use crate::tools::file::state::{
-    FULL_SNAPSHOT_LIMIT, SessionFileSnapshot, SnapshotContent, TextFile,
+    ContextFileSnapshot, FULL_SNAPSHOT_LIMIT, SnapshotContent, TextFile,
 };
 use crate::tools::file::types::{
     FileChangeAction, FileChangeError, FileChangeOperationOutput, FileChangeSetInput,
@@ -94,25 +94,25 @@ enum PreparedOperation {
         display: String,
         path: PathBuf,
         patch: String,
-        base: Option<SessionFileSnapshot>,
+        base: Option<ContextFileSnapshot>,
     },
     Rewrite {
         display: String,
         path: PathBuf,
         content: String,
-        base: Option<SessionFileSnapshot>,
+        base: Option<ContextFileSnapshot>,
     },
     Delete {
         display: String,
         path: PathBuf,
-        base: Option<SessionFileSnapshot>,
+        base: Option<ContextFileSnapshot>,
     },
     Move {
         source_display: String,
         source: PathBuf,
         target_display: String,
         target: PathBuf,
-        base: Option<SessionFileSnapshot>,
+        base: Option<ContextFileSnapshot>,
     },
 }
 
@@ -294,9 +294,9 @@ impl FileEditTool {
         &self,
         call: &ToolCall,
         path: &Path,
-    ) -> Result<SessionFileSnapshot, ToolError> {
+    ) -> Result<ContextFileSnapshot, ToolError> {
         self.state
-            .session_snapshots
+            .context_snapshots
             .lock()
             .unwrap()
             .latest_for_path(&call.ctx_id, path)
@@ -304,7 +304,7 @@ impl FileEditTool {
 
     fn execute(&self, call: &ToolCall, operations: Vec<PreparedOperation>) -> FileChangeSetOutput {
         let mut outputs = Vec::with_capacity(operations.len());
-        let mut local_snapshots = HashMap::<PathBuf, SessionFileSnapshot>::new();
+        let mut local_snapshots = HashMap::<PathBuf, ContextFileSnapshot>::new();
         let mut failed = false;
 
         for (offset, operation) in operations.into_iter().enumerate() {
@@ -346,7 +346,7 @@ impl FileEditTool {
         call: &ToolCall,
         index: usize,
         operation: PreparedOperation,
-        local_snapshots: &mut HashMap<PathBuf, SessionFileSnapshot>,
+        local_snapshots: &mut HashMap<PathBuf, ContextFileSnapshot>,
     ) -> Result<FileChangeOperationOutput, ToolError> {
         match operation {
             PreparedOperation::Write {
@@ -397,7 +397,7 @@ impl FileEditTool {
         display: String,
         path: PathBuf,
         content: String,
-        local_snapshots: &mut HashMap<PathBuf, SessionFileSnapshot>,
+        local_snapshots: &mut HashMap<PathBuf, ContextFileSnapshot>,
     ) -> Result<FileChangeOperationOutput, ToolError> {
         let lock = self.state.write_lock(&path);
         let _guard = lock.lock().unwrap();
@@ -435,8 +435,8 @@ impl FileEditTool {
         display: String,
         path: PathBuf,
         content: String,
-        base: Option<SessionFileSnapshot>,
-        local_snapshots: &mut HashMap<PathBuf, SessionFileSnapshot>,
+        base: Option<ContextFileSnapshot>,
+        local_snapshots: &mut HashMap<PathBuf, ContextFileSnapshot>,
     ) -> Result<FileChangeOperationOutput, ToolError> {
         let base = require_bound_base(base)?;
         let lock = self.state.write_lock(&path);
@@ -466,8 +466,8 @@ impl FileEditTool {
         display: String,
         path: PathBuf,
         patch: String,
-        base: Option<SessionFileSnapshot>,
-        local_snapshots: &mut HashMap<PathBuf, SessionFileSnapshot>,
+        base: Option<ContextFileSnapshot>,
+        local_snapshots: &mut HashMap<PathBuf, ContextFileSnapshot>,
     ) -> Result<FileChangeOperationOutput, ToolError> {
         let base = require_bound_base(base)?;
         let lock = self.state.write_lock(&path);
@@ -525,8 +525,8 @@ impl FileEditTool {
         index: usize,
         display: String,
         path: PathBuf,
-        base: Option<SessionFileSnapshot>,
-        local_snapshots: &mut HashMap<PathBuf, SessionFileSnapshot>,
+        base: Option<ContextFileSnapshot>,
+        local_snapshots: &mut HashMap<PathBuf, ContextFileSnapshot>,
     ) -> Result<FileChangeOperationOutput, ToolError> {
         let base = require_bound_base(base)?;
         let lock = self.state.write_lock(&path);
@@ -536,7 +536,7 @@ impl FileEditTool {
         fs::remove_file(&path)
             .map_err(|error| ToolError::new("file.writeFailed", error.to_string()))?;
         self.state
-            .session_snapshots
+            .context_snapshots
             .lock()
             .unwrap()
             .remove_path(&call.ctx_id, &path);
@@ -572,8 +572,8 @@ impl FileEditTool {
         source: PathBuf,
         target_display: String,
         target: PathBuf,
-        base: Option<SessionFileSnapshot>,
-        local_snapshots: &mut HashMap<PathBuf, SessionFileSnapshot>,
+        base: Option<ContextFileSnapshot>,
+        local_snapshots: &mut HashMap<PathBuf, ContextFileSnapshot>,
     ) -> Result<FileChangeOperationOutput, ToolError> {
         let base = require_bound_base(base)?;
         let (first, second) = if source <= target {
@@ -599,7 +599,7 @@ impl FileEditTool {
         }
         atomic_move_no_replace(&source, &target)?;
         self.state
-            .session_snapshots
+            .context_snapshots
             .lock()
             .unwrap()
             .migrate_path(&call.ctx_id, &source, &target);
@@ -632,7 +632,7 @@ impl FileEditTool {
         call: &ToolCall,
         path: &Path,
         text: &TextFile,
-    ) -> SessionFileSnapshot {
+    ) -> ContextFileSnapshot {
         self.remember_with_seen(call, path, text, 1..=text.lines.len())
     }
 
@@ -642,11 +642,11 @@ impl FileEditTool {
         path: &Path,
         text: &TextFile,
         seen: impl IntoIterator<Item = usize>,
-    ) -> SessionFileSnapshot {
+    ) -> ContextFileSnapshot {
         let seen = seen.into_iter().collect::<BTreeSet<_>>();
         let ordinal = self.state.next_snapshot_ordinal();
         if text.total_bytes <= FULL_SNAPSHOT_LIMIT {
-            self.state.session_snapshots.lock().unwrap().remember_full(
+            self.state.context_snapshots.lock().unwrap().remember_full(
                 &call.ctx_id,
                 path,
                 text,
@@ -663,18 +663,18 @@ impl FileEditTool {
                 total_lines: text.lines.len(),
             };
             self.state
-                .session_snapshots
+                .context_snapshots
                 .lock()
                 .unwrap()
                 .remember_sparse(&call.ctx_id, path, &metadata, seen.iter().copied(), ordinal);
         }
-        session_snapshot(path, text, seen, ordinal)
+        context_snapshot(path, text, seen, ordinal)
     }
 }
 
 fn bind_local_snapshot(
     operation: PreparedOperation,
-    local: &HashMap<PathBuf, SessionFileSnapshot>,
+    local: &HashMap<PathBuf, ContextFileSnapshot>,
 ) -> Result<PreparedOperation, ToolError> {
     match operation {
         PreparedOperation::Patch {
@@ -726,10 +726,10 @@ fn bind_local_snapshot(
 }
 
 fn resolve_operation_base(
-    base: Option<SessionFileSnapshot>,
-    local: &HashMap<PathBuf, SessionFileSnapshot>,
+    base: Option<ContextFileSnapshot>,
+    local: &HashMap<PathBuf, ContextFileSnapshot>,
     path: &Path,
-) -> Result<SessionFileSnapshot, ToolError> {
+) -> Result<ContextFileSnapshot, ToolError> {
     base.or_else(|| local.get(path).cloned()).ok_or_else(|| {
         ToolError::new(
             "tool.internalError",
@@ -738,7 +738,7 @@ fn resolve_operation_base(
     })
 }
 
-fn require_bound_base(base: Option<SessionFileSnapshot>) -> Result<SessionFileSnapshot, ToolError> {
+fn require_bound_base(base: Option<ContextFileSnapshot>) -> Result<ContextFileSnapshot, ToolError> {
     base.ok_or_else(|| {
         ToolError::new(
             "tool.internalError",
@@ -747,13 +747,13 @@ fn require_bound_base(base: Option<SessionFileSnapshot>) -> Result<SessionFileSn
     })
 }
 
-fn session_snapshot(
+fn context_snapshot(
     path: &Path,
     text: &TextFile,
     seen_lines: BTreeSet<usize>,
     ordinal: u64,
-) -> SessionFileSnapshot {
-    SessionFileSnapshot {
+) -> ContextFileSnapshot {
+    ContextFileSnapshot {
         canonical_path: path.display().to_string(),
         revision: text.revision.clone(),
         seen_lines,
@@ -1061,7 +1061,7 @@ fn ensure_text(content: &str) -> Result<(), ToolError> {
     Ok(())
 }
 
-fn require_revision(base: &SessionFileSnapshot, current: &TextFile) -> Result<(), ToolError> {
+fn require_revision(base: &ContextFileSnapshot, current: &TextFile) -> Result<(), ToolError> {
     if current.revision == base.revision {
         Ok(())
     } else {
@@ -1070,7 +1070,7 @@ fn require_revision(base: &SessionFileSnapshot, current: &TextFile) -> Result<()
 }
 
 fn require_coverage(
-    base: &SessionFileSnapshot,
+    base: &ContextFileSnapshot,
     required: &BTreeSet<usize>,
 ) -> Result<(), ToolError> {
     let missing = required
@@ -1083,7 +1083,7 @@ fn require_coverage(
     }
     Err(ToolError::retryable(
         "file.unreadRange",
-        "patch modifies or relies on source lines that were not read in this session",
+        "patch modifies or relies on source lines that were not read in this context",
     )
     .with_details(serde_json::json!({
         "missingLines": missing,
@@ -1093,7 +1093,7 @@ fn require_coverage(
 fn revision_mismatch() -> ToolError {
     ToolError::retryable(
         "file.revisionMismatch",
-        "file changed after it was read in this session",
+        "file changed after it was read in this context",
     )
 }
 

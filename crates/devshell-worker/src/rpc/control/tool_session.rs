@@ -13,13 +13,11 @@ struct ToolSessionCloseInput {
     session_id: String,
 }
 
-pub struct ToolSessionCloseHandler {
-    files: Arc<FileToolState>,
-}
+pub struct ToolSessionCloseHandler;
 
 impl ToolSessionCloseHandler {
-    pub fn new(files: Arc<FileToolState>) -> Self {
-        Self { files }
+    pub fn new(_files: Arc<FileToolState>) -> Self {
+        Self
     }
 }
 
@@ -33,11 +31,6 @@ impl ControlHandler for ToolSessionCloseHandler {
                 "sessionId must not be empty",
             ));
         }
-        self.files
-            .session_snapshots
-            .lock()
-            .map_err(|_| RpcError::new("worker.internalError", "snapshot registry lock poisoned"))?
-            .clear_session(&input.session_id);
         Ok(serde_json::json!({ "closed": true }))
     }
 }

@@ -35,7 +35,7 @@ impl ToolHandler for FileReadTool {
             group: self.name.group().to_string(),
             name: self.name.as_str(),
             description: concat!(
-                "Read UTF-8 text and establish an implicit, session-scoped edit snapshot. ",
+                "Read UTF-8 text and establish an implicit, context-scoped edit snapshot. ",
                 "view defaults to auto: small files return complete content, large supported source files return a compact Tree-sitter outline with symbol ranges and hierarchy, and other large files return the first 200 lines. ",
                 "Use view=content with selector for exact one-based ranges such as `50-100`, `50+100`, or `5-16,960-973`; add `:raw` to suppress context expansion. ",
                 "Use view=outline to force structural navigation. Snapshot identifiers and revisions are managed internally and never need to be copied into file_edit."
@@ -195,7 +195,7 @@ impl FileReadTool {
                     "file changed while it was being read",
                 ));
             }
-            self.state.session_snapshots.lock().unwrap().remember_full(
+            self.state.context_snapshots.lock().unwrap().remember_full(
                 &call.ctx_id,
                 path,
                 &text,
@@ -204,7 +204,7 @@ impl FileReadTool {
             );
         } else {
             self.state
-                .session_snapshots
+                .context_snapshots
                 .lock()
                 .unwrap()
                 .remember_sparse(&call.ctx_id, path, metadata, seen.clone(), ordinal);
@@ -234,7 +234,7 @@ impl FileReadTool {
         ordinal: u64,
     ) {
         if metadata.total_bytes <= FULL_SNAPSHOT_LIMIT {
-            self.state.session_snapshots.lock().unwrap().remember_full(
+            self.state.context_snapshots.lock().unwrap().remember_full(
                 &call.ctx_id,
                 path,
                 text,
@@ -243,7 +243,7 @@ impl FileReadTool {
             );
         } else {
             self.state
-                .session_snapshots
+                .context_snapshots
                 .lock()
                 .unwrap()
                 .remember_sparse(&call.ctx_id, path, metadata, seen, ordinal);
