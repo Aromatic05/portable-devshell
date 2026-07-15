@@ -1,8 +1,12 @@
 import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
-import { dirname, resolve } from "node:path";
+import { delimiter, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { homedir } from "node:os";
 import { spawnSync } from "node:child_process";
+
+const CARGO_ZIGBUILD_VERSION = "0.23.0";
+const ZIG_VERSION = "0.14.1";
 
 const TARGETS = {
     "linux-x64": {
@@ -44,6 +48,7 @@ const target = explicitTarget === undefined ? detectHostTarget() : resolveTarget
 const profile = outputDirectory === undefined ? "debug" : "release";
 const workerSource = resolveSourcePath(target, profile);
 const cargoSubcommand = target.key.startsWith("linux-") ? "zigbuild" : "build";
+const buildEnvironment = target.key.startsWith("linux-") ? ensureZigBuild(process.env) : process.env;
 
 run(
     "cargo",
@@ -58,7 +63,7 @@ run(
         target.rustTarget,
         ...(profile === "release" ? ["--release"] : [])
     ],
-    { env: process.env }
+    { env: buildEnvironment }
 );
 
 if (!existsSync(workerSource)) {
@@ -70,6 +75,68 @@ if (outputDirectory !== undefined) {
     const shaPath = `${outputPath}.sha256`;
     const bytes = copyWorker(workerSource, outputPath);
     writeFileSync(shaPath, `${createHash("sha256").update(bytes).digest("hex")}\n`, "utf8");
+}
+
+function ensureZigBuild(baseEnvironment) {
+    const environment = { ...baseEnvironment };
+
+    if (!commandSucceeds("cargo", ["zigbuild", "--version"], environment)) {
+        run(
+            "cargo",
+            ["install", "--locked", "cargo-zigbuild", "--version", CARGO_ZIGBUILD_VERSION],
+            { env: environment }
+        );
+    }
+
+    if (commandSucceeds("zig", ["version"], environment)) {
+        return environment;
+    }
+
+    const zigDirectory = installZig();
+    environment.PATH = `${zigDirectory}${delimiter}${environment.PATH ?? ""}`;
+    if (!commandSucceeds("zig", ["version"], environment)) {
+        throw new Error(`Zig ${ZIG_VERSION} was installed but is not executable from ${zigDirectory}`);
+    }
+    return environment;
+}
+
+function installZig() {
+    const host = zigHost();
+    const cacheRoot = resolve(homedir(), ".cache", "portable-devshell", "toolchains");
+    const installDirectory = resolve(cacheRoot, `zig-${ZIG_VERSION}-${host.archivePlatform}-${host.archiveArch}`);
+    const executable = resolve(installDirectory, process.platform === "win32" ? "zig.exe" : "zig");
+    if (existsSync(executable)) {
+        return installDirectory;
+    }
+
+    mkdirSync(installDirectory, { recursive: true });
+    const archiveName = `zig-${host.archiveArch}-${host.archivePlatform}-${ZIG_VERSION}.tar.xz`;
+    const archivePath = resolve(cacheRoot, archiveName);
+    const downloadUrl = `https://ziglang.org/download/${ZIG_VERSION}/${archiveName}`;
+    run("curl", ["-fsSL", downloadUrl, "-o", archivePath], { env: process.env });
+    run("tar", ["-xJf", archivePath, "--strip-components=1", "-C", installDirectory], { env: process.env });
+    if (!existsSync(executable)) {
+        throw new Error(`Zig archive did not contain the expected executable: ${executable}`);
+    }
+    return installDirectory;
+}
+
+function zigHost() {
+    const archivePlatform = process.platform === "darwin" ? "macos" : process.platform;
+    const archiveArch = process.arch === "x64" ? "x86_64" : process.arch === "arm64" ? "aarch64" : undefined;
+    if (!(["linux", "macos"].includes(archivePlatform)) || archiveArch === undefined) {
+        throw new Error(`automatic Zig installation is unsupported on ${process.platform}-${process.arch}`);
+    }
+    return { archiveArch, archivePlatform };
+}
+
+function commandSucceeds(command, args, environment) {
+    const result = spawnSync(command, args, {
+        cwd: repoRoot,
+        env: environment,
+        stdio: "ignore"
+    });
+    return result.status === 0;
 }
 
 function run(command, args, options = {}) {
