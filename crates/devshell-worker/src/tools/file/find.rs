@@ -35,8 +35,7 @@ impl ToolHandler for FileFindTool {
     }
     fn call(&self, call: ToolCall) -> Result<serde_json::Value, ToolError> {
         call.check_cancelled()?;
-        let input: FileFindInput = serde_json::from_value(call.params.clone())
-            .map_err(|error| ToolError::new("tool.invalidArguments", error.to_string()))?;
+        let input: FileFindInput = call.parse_params()?;
         let hidden = input.hidden.unwrap_or(true);
         let gitignore = input.gitignore.unwrap_or(true);
         let kind = input.entry_type.unwrap_or(FindType::Any);
@@ -89,12 +88,11 @@ impl ToolHandler for FileFindTool {
             .take(PAGE_SIZE)
             .collect::<Vec<_>>();
         let content = render_tree(&entries);
-        serde_json::to_value(FileFindOutput {
+        crate::tools::contract::serialize(FileFindOutput {
             entries,
             content,
             next_cursor,
         })
-        .map_err(|error| ToolError::new("tool.internalError", error.to_string()))
     }
 }
 #[derive(Default)]

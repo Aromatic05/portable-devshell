@@ -37,8 +37,7 @@ impl ToolHandler for FileReadTool {
     }
     fn call(&self, call: ToolCall) -> Result<serde_json::Value, ToolError> {
         call.check_cancelled()?;
-        let input: FileReadInput = serde_json::from_value(call.params.clone())
-            .map_err(|error| ToolError::new("tool.invalidArguments", error.to_string()))?;
+        let input: FileReadInput = call.parse_params()?;
         if input.view == FileReadView::Outline && input.selector.is_some() {
             return Err(ToolError::new(
                 "tool.invalidArguments",
@@ -62,8 +61,7 @@ impl ToolHandler for FileReadTool {
                 self.read_content(&call, requested.raw, &path, &metadata, &input, ordinal)?
             }
         };
-        serde_json::to_value(output)
-            .map_err(|error| ToolError::new("tool.internalError", error.to_string()))
+        crate::tools::contract::serialize(output)
     }
 }
 

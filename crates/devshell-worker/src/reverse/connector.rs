@@ -697,7 +697,6 @@ mod tests {
         reverse_endpoint,
     };
     use crate::daemon::process::{PlatformInfo, WorkerRuntimeContext};
-    use crate::instance::config::WorkerToolsConfig;
     use crate::instance::{InstanceName, WorkerConfig};
     use crate::rpc::codec::{decode_json, encode_json};
     use crate::rpc::request::RpcRequest;
@@ -784,7 +783,6 @@ mod tests {
                 version: 1,
                 instance: instance.as_str().to_string(),
                 created_at: 1,
-                tools: WorkerToolsConfig::default(),
                 reverse: None,
             },
             WorkerRuntimeContext {

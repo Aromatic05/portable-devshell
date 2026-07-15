@@ -847,13 +847,13 @@ fn validate_time(value: u64) -> Result<u64, ToolError> {
 fn require_execute(call: &ToolCall) -> Result<(), ToolError> {
     call.policy
         .check_capability(FilesystemCapability::ProcessExecute)
-        .map_err(|error| ToolError::new(error.code, error.message))
+        .map_err(ToolError::from)
 }
 
 fn require_read(call: &ToolCall) -> Result<(), ToolError> {
     call.policy
         .check_capability(FilesystemCapability::WorkspaceRead)
-        .map_err(|error| ToolError::new(error.code, error.message))
+        .map_err(ToolError::from)
 }
 
 fn resolve_cwd(call: &ToolCall, requested: Option<&str>) -> Result<PathBuf, ToolError> {
@@ -874,7 +874,7 @@ fn resolve_cwd(call: &ToolCall, requested: Option<&str>) -> Result<PathBuf, Tool
     call.policy
         .check_capability(read)
         .and_then(|_| call.policy.check_capability(write))
-        .map_err(|error| ToolError::new(error.code, error.message))?;
+        .map_err(ToolError::from)?;
     let resolved = resolve_existing_target(&call.workspace, &requested)?.canonical;
     if !resolved.is_dir() {
         return Err(ToolError::new(

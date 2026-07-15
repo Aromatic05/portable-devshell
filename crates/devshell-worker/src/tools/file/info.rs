@@ -29,8 +29,7 @@ impl ToolHandler for FileInfoTool {
     }
     fn call(&self, call: ToolCall) -> Result<serde_json::Value, ToolError> {
         call.check_cancelled()?;
-        let input: FileInfoInput = serde_json::from_value(call.params.clone())
-            .map_err(|error| ToolError::new("tool.invalidArguments", error.to_string()))?;
+        let input: FileInfoInput = call.parse_params()?;
         if input.paths.is_empty() {
             return Err(ToolError::new(
                 "tool.invalidArguments",
@@ -104,7 +103,6 @@ impl ToolHandler for FileInfoTool {
                 target_type,
             });
         }
-        serde_json::to_value(FileInfoOutput { entries })
-            .map_err(|error| ToolError::new("tool.internalError", error.to_string()))
+        crate::tools::contract::serialize(FileInfoOutput { entries })
     }
 }

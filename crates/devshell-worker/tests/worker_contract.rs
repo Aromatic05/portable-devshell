@@ -48,6 +48,7 @@ fn start_uses_runtime_workspace_and_keeps_config_minimal() {
     assert!(!config.contains("pid"));
     assert!(!config.contains("home"));
     assert!(!config.contains("workerPath"));
+    assert!(!config.contains("tools"));
 
     let status = env.json_command(&["status", "--instance", instance]);
     assert_eq!(status["state"], "running");
@@ -290,7 +291,12 @@ fn bash_run_returns_success_for_timeout_and_capture_truncation() {
     );
     assert_eq!(too_long["ok"], false);
     assert_eq!(too_long["error"]["code"], "tool.invalidArguments");
-    assert!(too_long["error"]["message"].as_str().unwrap().contains("tmux_run"));
+    assert!(
+        too_long["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("tmux_run")
+    );
 
     let output_limited = env.rpc(
         instance,

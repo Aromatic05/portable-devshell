@@ -13,8 +13,6 @@ pub struct WorkerConfig {
     pub version: u32,
     pub instance: String,
     pub created_at: u64,
-    #[serde(default)]
-    pub tools: WorkerToolsConfig,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reverse: Option<WorkerReverseConfig>,
 }
@@ -28,10 +26,6 @@ pub struct WorkerReverseConfig {
     pub generation: u64,
 }
 
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct WorkerToolsConfig {}
-
 pub fn build_config(instance: &InstanceName) -> Result<WorkerConfig, String> {
     let created_at = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -42,7 +36,6 @@ pub fn build_config(instance: &InstanceName) -> Result<WorkerConfig, String> {
         version: 1,
         instance: instance.as_str().to_string(),
         created_at,
-        tools: WorkerToolsConfig::default(),
         reverse: None,
     })
 }

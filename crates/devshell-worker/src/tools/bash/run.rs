@@ -52,8 +52,7 @@ impl ToolHandler for BashRunTool {
     }
     fn call(&self, call: ToolCall) -> Result<serde_json::Value, ToolError> {
         call.check_cancelled()?;
-        let params: BashRunParams = serde_json::from_value(call.params.clone())
-            .map_err(|error| ToolError::new("tool.invalidArguments", error.to_string()))?;
+        let params: BashRunParams = call.parse_params()?;
         if params.command.trim().is_empty() {
             return Err(ToolError::new(
                 "bash.invalidCommand",
@@ -94,7 +93,7 @@ impl ToolHandler for BashRunTool {
         }
         call.policy
             .check_capability(FilesystemCapability::ProcessExecute)
-            .map_err(|error| ToolError::new(error.code, error.message))?;
+            .map_err(ToolError::from)?;
         let cwd = resolve_cwd(&call, params.cwd.as_deref())?;
         let started = Instant::now();
         let mut child = spawn_shell(&self.shell, &params.command, &cwd, &params.env)?;
@@ -192,7 +191,7 @@ impl ToolHandler for BashRunTool {
                 "termSignal": term_signal,
             })));
         }
-        serde_json::to_value(BashRunOutput {
+        crate::tools::contract::serialize(BashRunOutput {
             exit_code: if matches!(termination, BashTermination::Exited) {
                 status.code()
             } else {
@@ -215,7 +214,6 @@ impl ToolHandler for BashRunTool {
             duration_ms: started.elapsed().as_millis(),
             termination,
         })
-        .map_err(|error| ToolError::new("tool.internalError", error.to_string()))
     }
 }
 struct ManagedBashChild {

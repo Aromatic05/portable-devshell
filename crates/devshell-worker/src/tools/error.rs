@@ -30,3 +30,14 @@ impl ToolError {
         self
     }
 }
+
+impl From<crate::security::policy::SecurityError> for ToolError {
+    fn from(error: crate::security::policy::SecurityError) -> Self {
+        Self {
+            code: error.code,
+            message: error.message,
+            retryable: false,
+            details: error.details,
+        }
+    }
+}

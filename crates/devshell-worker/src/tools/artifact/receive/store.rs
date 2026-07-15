@@ -111,13 +111,16 @@ impl ArtifactReceiveStore {
             guard: Mutex::new(()),
         });
         {
-            let _guard = store
-                .guard
-                .lock()
-                .map_err(|_| ToolError::new("artifact.storageFailed", "receive lock poisoned"))?;
+            let _guard = store.lock()?;
             store.recover_locked()?;
         }
         Ok(store)
+    }
+
+    fn lock(&self) -> Result<std::sync::MutexGuard<'_, ()>, ToolError> {
+        self.guard
+            .lock()
+            .map_err(|_| ToolError::new("artifact.storageFailed", "receive lock poisoned"))
     }
 
     pub fn begin(
@@ -134,12 +137,7 @@ impl ArtifactReceiveStore {
         };
         policy
             .check_capability(capability)
-            .map_err(|error| ToolError {
-                code: error.code,
-                message: error.message,
-                retryable: false,
-                details: error.details,
-            })?;
+            .map_err(ToolError::from)?;
         let target_path = resolve_create_target(workspace, &requested)?.canonical;
         reject_symlink_target(&target_path)?;
         if target_path.symlink_metadata().is_ok() && !input.overwrite {
@@ -154,10 +152,7 @@ impl ArtifactReceiveStore {
         fs::create_dir_all(parent)
             .map_err(|error| ToolError::new("artifact.receiveFailed", error.to_string()))?;
 
-        let _guard = self
-            .guard
-            .lock()
-            .map_err(|_| ToolError::new("artifact.storageFailed", "receive lock poisoned"))?;
+        let _guard = self.lock()?;
         let receive_id = Uuid::new_v4().to_string();
         let temporary = Builder::new()
             .prefix(&format!(".devshell-receive-{receive_id}-"))
@@ -204,10 +199,7 @@ impl ArtifactReceiveStore {
                 format!("invalid base64 chunk: {error}"),
             )
         })?;
-        let _guard = self
-            .guard
-            .lock()
-            .map_err(|_| ToolError::new("artifact.storageFailed", "receive lock poisoned"))?;
+        let _guard = self.lock()?;
         let mut metadata = self.load_metadata(receive_id)?;
         if metadata.phase != ArtifactReceivePhase::Receiving {
             return Err(ToolError::new(
@@ -251,10 +243,7 @@ impl ArtifactReceiveStore {
 
     pub fn finish(&self, receive_id: &str) -> Result<ArtifactReceiveFinishResult, ToolError> {
         validate_id(receive_id)?;
-        let _guard = self
-            .guard
-            .lock()
-            .map_err(|_| ToolError::new("artifact.storageFailed", "receive lock poisoned"))?;
+        let _guard = self.lock()?;
         let mut metadata = self.load_metadata(receive_id)?;
         if metadata.phase != ArtifactReceivePhase::Receiving {
             return Err(ToolError::new(
@@ -323,10 +312,7 @@ impl ArtifactReceiveStore {
 
     pub fn abort(&self, receive_id: &str) -> Result<(), ToolError> {
         validate_id(receive_id)?;
-        let _guard = self
-            .guard
-            .lock()
-            .map_err(|_| ToolError::new("artifact.storageFailed", "receive lock poisoned"))?;
+        let _guard = self.lock()?;
         let metadata = match self.load_metadata(receive_id) {
             Ok(metadata) => metadata,
             Err(error) if error.code == "artifact.receiveNotFound" => return Ok(()),
@@ -406,15 +392,7 @@ impl ArtifactReceiveStore {
     }
 
     fn recover_locked(&self) -> Result<(), ToolError> {
-        for entry in fs::read_dir(&self.root)
-            .map_err(|error| ToolError::new("artifact.storageFailed", error.to_string()))?
-        {
-            let entry = entry
-                .map_err(|error| ToolError::new("artifact.storageFailed", error.to_string()))?;
-            let path = entry.path();
-            if path.extension().and_then(|value| value.to_str()) != Some("json") {
-                continue;
-            }
+        for path in storage::json_files(&self.root)? {
             let metadata = fs::read(&path)
                 .ok()
                 .and_then(|bytes| serde_json::from_slice::<ArtifactReceiveMetadata>(&bytes).ok());

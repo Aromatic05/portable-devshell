@@ -67,8 +67,7 @@ impl ToolHandler for FileSearchTool {
     }
     fn call(&self, call: ToolCall) -> Result<serde_json::Value, ToolError> {
         call.check_cancelled()?;
-        let input: FileSearchInput = serde_json::from_value(call.params.clone())
-            .map_err(|error| ToolError::new("tool.invalidArguments", error.to_string()))?;
+        let input: FileSearchInput = call.parse_params()?;
         let paths = input.paths.unwrap_or_else(|| vec!["./".to_string()]);
         let syntax = input.syntax.unwrap_or(SearchSyntax::Regex);
         let case_sensitive = input.case_sensitive.unwrap_or(true);
@@ -246,11 +245,10 @@ impl ToolHandler for FileSearchTool {
                 }
             }
         }
-        serde_json::to_value(FileSearchOutput {
+        crate::tools::contract::serialize(FileSearchOutput {
             files: returned,
             next_cursor,
         })
-        .map_err(|error| ToolError::new("tool.internalError", error.to_string()))
     }
 }
 

@@ -52,15 +52,13 @@ impl ToolHandler for FileEditTool {
 
     fn call(&self, call: ToolCall) -> Result<serde_json::Value, ToolError> {
         call.check_cancelled()?;
-        let input: FileChangeSetInput = serde_json::from_value(call.params.clone())
-            .map_err(|error| ToolError::new("tool.invalidArguments", error.to_string()))?;
+        let input: FileChangeSetInput = call.parse_params()?;
         let parsed = parse_change_set(&input.changes)?;
         call.check_cancelled()?;
         let prepared = self.preflight(&call, parsed)?;
         let mut output = self.execute(&call, prepared);
         enforce_output_budget(&mut output)?;
-        serde_json::to_value(output)
-            .map_err(|error| ToolError::new("tool.internalError", error.to_string()))
+        crate::tools::contract::serialize(output)
     }
 }
 
@@ -534,22 +532,18 @@ impl FileEditTool {
         let before = current.normalized();
         let diff = limit_detail(diff::render(&before, ""));
         Ok(FileChangeOperationOutput {
-            index,
-            action: FileChangeAction::Delete,
-            path: display,
-            moved_from: None,
-            status: FileChangeStatus::Applied,
-            merged: None,
             added_lines: Some(0),
             removed_lines: Some(current.lines.len()),
             first_changed_line: (!current.lines.is_empty()).then_some(1),
-            total_lines: None,
-            total_bytes: None,
             diff: Some(diff.0),
-            preview: None,
-            preview_range: None,
-            error: None,
             truncated: diff.1,
+            ..base_output(
+                index,
+                FileChangeAction::Delete,
+                display,
+                None,
+                FileChangeStatus::Applied,
+            )
         })
     }
 
@@ -598,22 +592,17 @@ impl FileEditTool {
         local_snapshots.remove(&source);
         local_snapshots.insert(target.clone(), moved_snapshot);
         Ok(FileChangeOperationOutput {
-            index,
-            action: FileChangeAction::Move,
-            path: target_display,
-            moved_from: Some(source_display),
-            status: FileChangeStatus::Applied,
-            merged: None,
             added_lines: Some(0),
             removed_lines: Some(0),
-            first_changed_line: None,
             total_lines: Some(current.lines.len()),
             total_bytes: Some(current.total_bytes),
-            diff: None,
-            preview: None,
-            preview_range: None,
-            error: None,
-            truncated: false,
+            ..base_output(
+                index,
+                FileChangeAction::Move,
+                target_display,
+                Some(source_display),
+                FileChangeStatus::Applied,
+            )
         })
     }
 
@@ -1124,11 +1113,6 @@ fn applied_text_output(
     let diff = limit_detail(diff::render(before, after));
     let preview = preview(after, first_changed_line);
     FileChangeOperationOutput {
-        index,
-        action,
-        path,
-        moved_from: None,
-        status: FileChangeStatus::Applied,
         merged: Some(merged),
         added_lines: Some(added_lines),
         removed_lines: Some(removed_lines),
@@ -1138,8 +1122,35 @@ fn applied_text_output(
         diff: Some(diff.0),
         preview: preview.as_ref().map(|value| value.0.clone()),
         preview_range: preview.map(|value| value.1),
-        error: None,
         truncated: diff.1,
+        ..base_output(index, action, path, None, FileChangeStatus::Applied)
+    }
+}
+
+fn base_output(
+    index: usize,
+    action: FileChangeAction,
+    path: String,
+    moved_from: Option<String>,
+    status: FileChangeStatus,
+) -> FileChangeOperationOutput {
+    FileChangeOperationOutput {
+        index,
+        action,
+        path,
+        moved_from,
+        status,
+        merged: None,
+        added_lines: None,
+        removed_lines: None,
+        first_changed_line: None,
+        total_lines: None,
+        total_bytes: None,
+        diff: None,
+        preview: None,
+        preview_range: None,
+        error: None,
+        truncated: false,
     }
 }
 
@@ -1253,50 +1264,25 @@ fn failed_output(
 ) -> FileChangeOperationOutput {
     let (action, path, moved_from) = operation_identity(operation);
     FileChangeOperationOutput {
-        index,
-        action,
-        path,
-        moved_from,
-        status: FileChangeStatus::Failed,
-        merged: None,
-        added_lines: None,
-        removed_lines: None,
-        first_changed_line: None,
-        total_lines: None,
-        total_bytes: None,
-        diff: None,
-        preview: None,
-        preview_range: None,
         error: Some(FileChangeError {
             code: error.code,
             message: error.message,
             retryable: error.retryable,
             details: error.details,
         }),
-        truncated: false,
+        ..base_output(index, action, path, moved_from, FileChangeStatus::Failed)
     }
 }
 
 fn not_executed(index: usize, operation: &PreparedOperation) -> FileChangeOperationOutput {
     let (action, path, moved_from) = operation_identity(operation);
-    FileChangeOperationOutput {
+    base_output(
         index,
         action,
         path,
         moved_from,
-        status: FileChangeStatus::NotExecuted,
-        merged: None,
-        added_lines: None,
-        removed_lines: None,
-        first_changed_line: None,
-        total_lines: None,
-        total_bytes: None,
-        diff: None,
-        preview: None,
-        preview_range: None,
-        error: None,
-        truncated: false,
-    }
+        FileChangeStatus::NotExecuted,
+    )
 }
 
 fn operation_identity(operation: &PreparedOperation) -> (FileChangeAction, String, Option<String>) {

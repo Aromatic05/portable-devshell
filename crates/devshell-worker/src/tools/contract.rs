@@ -7,7 +7,7 @@ use crate::daemon::process_registry::ActiveProcessRegistry;
 use crate::security::SecurityPolicy;
 use crate::tools::{ToolError, ToolName};
 use schemars::JsonSchema;
-use serde::Serialize;
+use serde::{Serialize, de::DeserializeOwned};
 
 #[derive(Clone, Default)]
 pub struct ToolCancellation {
@@ -49,6 +49,11 @@ impl ToolCall {
     pub fn check_cancelled(&self) -> Result<(), ToolError> {
         self.cancellation.check()
     }
+
+    pub fn parse_params<T: DeserializeOwned>(&self) -> Result<T, ToolError> {
+        serde_json::from_value(self.params.clone())
+            .map_err(|error| ToolError::new("tool.invalidArguments", error.to_string()))
+    }
 }
 
 #[derive(Clone, Copy, Debug, JsonSchema, Serialize)]
@@ -83,6 +88,11 @@ pub(crate) fn catalog_entry<I: JsonSchema, O: JsonSchema>(
         output_schema: serde_json::to_value(schemars::schema_for!(O)).unwrap(),
         required_capabilities: capabilities.into_iter().collect(),
     }
+}
+
+pub(crate) fn serialize(value: impl Serialize) -> Result<serde_json::Value, ToolError> {
+    serde_json::to_value(value)
+        .map_err(|error| ToolError::new("tool.internalError", error.to_string()))
 }
 
 pub trait ToolHandler: Send + Sync {

@@ -1,6 +1,6 @@
 use std::fs;
 use std::io::Write;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use serde::{Serialize, de::DeserializeOwned};
 use tempfile::Builder;
@@ -18,9 +18,28 @@ pub(super) fn clear_temp_files(path: &Path) -> Result<(), ToolError> {
     Ok(())
 }
 
+pub(super) fn json_files(path: &Path) -> Result<Vec<PathBuf>, ToolError> {
+    let mut files = Vec::new();
+    for entry in fs::read_dir(path).map_err(storage_error)? {
+        let path = entry.map_err(storage_error)?.path();
+        if path.extension().and_then(|value| value.to_str()) == Some("json") {
+            files.push(path);
+        }
+    }
+    Ok(files)
+}
+
 pub(super) fn ensure_private_dir(path: &Path) -> Result<(), ToolError> {
     crate::storage::permissions::ensure_dir(path, 0o700)
         .map_err(|error| ToolError::new("artifact.storageFailed", error))
+}
+
+pub(super) fn remove_file_if_exists(path: &Path) -> Result<(), ToolError> {
+    match fs::remove_file(path) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(storage_error(error)),
+    }
 }
 
 pub(super) fn validate_uuid(value: &str, code: &str, message: &str) -> Result<(), ToolError> {

@@ -131,13 +131,16 @@ impl ArtifactPayloadStore {
             guard: Mutex::new(()),
         });
         {
-            let _guard = store
-                .guard
-                .lock()
-                .map_err(|_| ToolError::new("artifact.storageFailed", "payload lock poisoned"))?;
+            let _guard = store.lock()?;
             store.gc_locked()?;
         }
         Ok(store)
+    }
+
+    fn lock(&self) -> Result<std::sync::MutexGuard<'_, ()>, ToolError> {
+        self.guard
+            .lock()
+            .map_err(|_| ToolError::new("artifact.storageFailed", "payload lock poisoned"))
     }
 
     pub fn open_handle(
@@ -146,10 +149,7 @@ impl ArtifactPayloadStore {
         expires_at_ms: u128,
     ) -> Result<ArtifactPayloadOpenResult, ToolError> {
         validate_expiration(expires_at_ms)?;
-        let _guard = self
-            .guard
-            .lock()
-            .map_err(|_| ToolError::new("artifact.storageFailed", "payload lock poisoned"))?;
+        let _guard = self.lock()?;
         self.gc_locked()?;
 
         let payload_id = Uuid::new_v4().to_string();
@@ -191,12 +191,7 @@ impl ArtifactPayloadStore {
         };
         policy
             .check_capability(capability)
-            .map_err(|error| ToolError {
-                code: error.code,
-                message: error.message,
-                retryable: false,
-                details: error.details,
-            })?;
+            .map_err(ToolError::from)?;
         let requested_path = requested.path(workspace);
         let requested_metadata = fs::symlink_metadata(&requested_path).map_err(|error| {
             ToolError::new(
@@ -218,10 +213,7 @@ impl ArtifactPayloadStore {
         let metadata = fs::symlink_metadata(&resolved.canonical)
             .map_err(|error| ToolError::new("artifact.readFailed", error.to_string()))?;
 
-        let _guard = self
-            .guard
-            .lock()
-            .map_err(|_| ToolError::new("artifact.storageFailed", "payload lock poisoned"))?;
+        let _guard = self.lock()?;
         self.gc_locked()?;
 
         let payload_id = Uuid::new_v4().to_string();
@@ -267,10 +259,7 @@ impl ArtifactPayloadStore {
                 format!("maxBytes must be between 1 and {MAX_READ_BYTES}"),
             ));
         }
-        let _guard = self
-            .guard
-            .lock()
-            .map_err(|_| ToolError::new("artifact.storageFailed", "payload lock poisoned"))?;
+        let _guard = self.lock()?;
         self.gc_locked()?;
         let metadata = self.load_metadata(payload_id)?;
         if metadata.expires_at_ms <= unix_time_millis() {
@@ -313,10 +302,7 @@ impl ArtifactPayloadStore {
 
     pub fn close(&self, payload_id: &str) -> Result<(), ToolError> {
         validate_id(payload_id)?;
-        let _guard = self
-            .guard
-            .lock()
-            .map_err(|_| ToolError::new("artifact.storageFailed", "payload lock poisoned"))?;
+        let _guard = self.lock()?;
         let metadata = match self.load_metadata(payload_id) {
             Ok(metadata) => metadata,
             Err(error) if error.code == "artifact.payloadNotFound" => return Ok(()),
@@ -436,15 +422,7 @@ impl ArtifactPayloadStore {
 
     fn gc_locked(&self) -> Result<(), ToolError> {
         let now = unix_time_millis();
-        for entry in fs::read_dir(&self.root)
-            .map_err(|error| ToolError::new("artifact.storageFailed", error.to_string()))?
-        {
-            let entry = entry
-                .map_err(|error| ToolError::new("artifact.storageFailed", error.to_string()))?;
-            let path = entry.path();
-            if path.extension().and_then(|value| value.to_str()) != Some("json") {
-                continue;
-            }
+        for path in storage::json_files(&self.root)? {
             let metadata = fs::read(&path)
                 .ok()
                 .and_then(|bytes| serde_json::from_slice::<ArtifactPayloadMetadata>(&bytes).ok());
@@ -466,13 +444,7 @@ impl ArtifactPayloadStore {
     }
 
     fn remove_payload_locked(&self, metadata: &ArtifactPayloadMetadata) -> Result<(), ToolError> {
-        match fs::remove_file(self.metadata_path(&metadata.payload_id)) {
-            Ok(()) => {}
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(error) => {
-                return Err(ToolError::new("artifact.storageFailed", error.to_string()));
-            }
-        }
+        storage::remove_file_if_exists(&self.metadata_path(&metadata.payload_id))?;
         match &metadata.backing {
             ArtifactPayloadBacking::ArtifactLease { lease_id } => {
                 self.artifacts.release_lease(lease_id)?;

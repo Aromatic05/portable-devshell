@@ -120,13 +120,16 @@ impl ArtifactStore {
             guard: Mutex::new(()),
         });
         {
-            let _guard = store
-                .guard
-                .lock()
-                .map_err(|_| ToolError::new("artifact.storageFailed", "artifact lock poisoned"))?;
+            let _guard = store.lock()?;
             store.gc_locked(0)?;
         }
         Ok(store)
+    }
+
+    fn lock(&self) -> Result<std::sync::MutexGuard<'_, ()>, ToolError> {
+        self.guard
+            .lock()
+            .map_err(|_| ToolError::new("artifact.storageFailed", "artifact lock poisoned"))
     }
 
     pub fn begin(&self, stream: ArtifactStream) -> Result<ArtifactDraft, ToolError> {
@@ -157,10 +160,7 @@ impl ArtifactStore {
             .sync_all()
             .map_err(|error| ToolError::new("artifact.storageFailed", error.to_string()))?;
 
-        let _guard = self
-            .guard
-            .lock()
-            .map_err(|_| ToolError::new("artifact.storageFailed", "artifact lock poisoned"))?;
+        let _guard = self.lock()?;
         self.gc_locked(draft.stored_bytes)?;
 
         let handle = Uuid::new_v4().to_string();
@@ -216,10 +216,7 @@ impl ArtifactStore {
             ));
         }
 
-        let _guard = self
-            .guard
-            .lock()
-            .map_err(|_| ToolError::new("artifact.storageFailed", "artifact lock poisoned"))?;
+        let _guard = self.lock()?;
         self.gc_locked(0)?;
         let metadata = self.load_metadata(handle)?;
         if metadata.expires_at_ms <= now {
@@ -254,26 +251,14 @@ impl ArtifactStore {
 
     pub fn release_lease(&self, lease_id: &str) -> Result<(), ToolError> {
         validate_handle(lease_id)?;
-        let _guard = self
-            .guard
-            .lock()
-            .map_err(|_| ToolError::new("artifact.storageFailed", "artifact lock poisoned"))?;
-        match fs::remove_file(self.lease_path(lease_id)) {
-            Ok(()) => {}
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(error) => {
-                return Err(ToolError::new("artifact.storageFailed", error.to_string()));
-            }
-        }
+        let _guard = self.lock()?;
+        storage::remove_file_if_exists(&self.lease_path(lease_id))?;
         self.gc_locked(0)
     }
 
     pub fn resolve_lease(&self, lease_id: &str) -> Result<ArtifactLease, ToolError> {
         validate_handle(lease_id)?;
-        let _guard = self
-            .guard
-            .lock()
-            .map_err(|_| ToolError::new("artifact.storageFailed", "artifact lock poisoned"))?;
+        let _guard = self.lock()?;
         self.gc_locked(0)?;
         let path = self.lease_path(lease_id);
         let bytes = fs::read(path).map_err(|_| {
@@ -319,10 +304,7 @@ impl ArtifactStore {
         let offset = input.offset_bytes.unwrap_or(0);
         let encoding = input.encoding.unwrap_or_default();
 
-        let _guard = self
-            .guard
-            .lock()
-            .map_err(|_| ToolError::new("artifact.storageFailed", "artifact lock poisoned"))?;
+        let _guard = self.lock()?;
         self.gc_locked(0)?;
         let metadata = self.load_metadata(&input.handle)?;
         if metadata.expires_at_ms <= unix_time_millis() {
@@ -418,15 +400,7 @@ impl ArtifactStore {
 
     fn leases(&self, now: u128) -> Result<Vec<ArtifactLeaseMetadata>, ToolError> {
         let mut leases = Vec::new();
-        for entry in fs::read_dir(&self.leases_dir)
-            .map_err(|error| ToolError::new("artifact.storageFailed", error.to_string()))?
-        {
-            let entry = entry
-                .map_err(|error| ToolError::new("artifact.storageFailed", error.to_string()))?;
-            let path = entry.path();
-            if path.extension().and_then(|value| value.to_str()) != Some("json") {
-                continue;
-            }
+        for path in storage::json_files(&self.leases_dir)? {
             let lease = fs::read(&path)
                 .ok()
                 .and_then(|bytes| serde_json::from_slice::<ArtifactLeaseMetadata>(&bytes).ok());
@@ -449,15 +423,7 @@ impl ArtifactStore {
 
     fn records(&self) -> Result<Vec<ArtifactRecord>, ToolError> {
         let mut records = Vec::new();
-        for entry in fs::read_dir(&self.root)
-            .map_err(|error| ToolError::new("artifact.storageFailed", error.to_string()))?
-        {
-            let entry = entry
-                .map_err(|error| ToolError::new("artifact.storageFailed", error.to_string()))?;
-            let path = entry.path();
-            if path.extension().and_then(|value| value.to_str()) != Some("json") {
-                continue;
-            }
+        for path in storage::json_files(&self.root)? {
             let Some(handle) = path.file_stem().and_then(|value| value.to_str()) else {
                 continue;
             };
