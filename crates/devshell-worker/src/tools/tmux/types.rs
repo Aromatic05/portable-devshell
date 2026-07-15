@@ -13,6 +13,7 @@ pub enum TmuxWaitMode {
 #[serde(rename_all = "camelCase")]
 pub struct TmuxRunParams {
     #[serde(default)]
+    /// Managed pane name returned by tmux_list or tmux_create.
     pub pane: Option<String>,
     pub command: String,
     #[serde(default)]
@@ -67,6 +68,7 @@ pub enum TmuxInspectAll {
 #[serde(rename_all = "camelCase")]
 pub struct TmuxInspectParams {
     #[serde(default)]
+    /// Managed pane name returned by tmux_list or tmux_create.
     pub pane: Option<String>,
     #[serde(default)]
     pub panes: Option<TmuxInspectAll>,
@@ -101,6 +103,7 @@ pub struct TmuxCreateParams {
     )]
     pub name: String,
     #[serde(default)]
+    /// Managed pane name returned by tmux_list or tmux_create.
     pub relative_to: Option<String>,
     #[serde(default)]
     pub position: Option<TmuxPanePosition>,
@@ -115,6 +118,7 @@ pub struct TmuxCreateParams {
 #[serde(deny_unknown_fields)]
 #[serde(rename_all = "camelCase")]
 pub struct TmuxCloseParams {
+    /// Managed pane name returned by tmux_list or tmux_create.
     pub pane: String,
     #[serde(default)]
     pub force: bool,

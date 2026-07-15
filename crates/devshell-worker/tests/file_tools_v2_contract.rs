@@ -60,6 +60,37 @@ fn tools_list_exposes_only_the_new_file_edit() {
         .find(|tool| tool["name"] == "file_edit")
         .unwrap();
     assert_eq!(file_edit["inputSchema"]["required"], json!(["changes"]));
+    assert!(
+        file_edit["description"]
+            .as_str()
+            .unwrap()
+            .contains("Move File requires a following *** To: target line")
+    );
+    assert!(
+        file_edit["inputSchema"]["properties"]["changes"]["description"]
+            .as_str()
+            .unwrap()
+            .contains("*** Begin Edit / *** End Edit")
+    );
+
+    let file_read = response["result"]["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|tool| tool["name"] == "file_read")
+        .unwrap();
+    assert!(
+        file_read["description"]
+            .as_str()
+            .unwrap()
+            .contains(":raw for exact lines")
+    );
+    assert!(
+        file_read["inputSchema"]["properties"]["selector"]["description"]
+            .as_str()
+            .unwrap()
+            .contains("one preceding line and up to three following lines")
+    );
 
     env.json_command(&["stop", "--instance", instance]);
 }

@@ -12,10 +12,23 @@ const todoItemSchema: JsonValue = {
         then: { required: ["detail"] }
     }],
     properties: {
-        content: { minLength: 1, type: "string" },
-        detail: { minLength: 1, type: "string" },
-        id: { minLength: 1, type: "string" },
+        content: {
+            description: "Complete user-visible description of this todo item.",
+            minLength: 1,
+            type: "string"
+        },
+        detail: {
+            description: "Additional status detail. Required when status is blocked or failed.",
+            minLength: 1,
+            type: "string"
+        },
+        id: {
+            description: "Stable identifier unique within the complete todo list.",
+            minLength: 1,
+            type: "string"
+        },
         status: {
+            description: "Current item status.",
             enum: [
                 "pending",
                 "in_progress",
@@ -49,14 +62,23 @@ export class McpTodoToolCatalog {
         },
         {
             requiredCapabilities: [],
-            description: "Replace the entire todo plan; this is not a patch. Always call todo_read first and pass its current revision. Allow at most one in_progress item. blocked and failed items require detail. Update the plan promptly when progress changes.",
+            description: "This tool replaces the complete plan; it is not a patch. Always call todo_read first and pass its latest revision. Each item requires a unique id, content, and status. IDs must be unique. status must be one of pending | in_progress | blocked | completed | failed | cancelled. Allow at most one in_progress item; blocked and failed items require detail. title is optional. Update the plan promptly when progress changes.",
             group: "todo",
             inputSchema: {
                 additionalProperties: false,
                 properties: {
-                    revision: { minimum: 0, type: "integer" },
-                    title: { minLength: 1, type: "string" },
+                    revision: {
+                        description: "Revision from the latest todo_read result.",
+                        minimum: 0,
+                        type: "integer"
+                    },
+                    title: {
+                        description: "Optional title for the complete todo plan.",
+                        minLength: 1,
+                        type: "string"
+                    },
                     todos: {
+                        description: "The complete replacement list of todo items, not a partial update.",
                         contains: {
                             properties: { status: { const: "in_progress" } },
                             required: ["status"],

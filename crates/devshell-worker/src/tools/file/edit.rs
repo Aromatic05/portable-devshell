@@ -48,7 +48,7 @@ impl ToolHandler for FileEditTool {
         ToolCatalogEntry {
             group: self.name.group().to_string(),
             name: self.name.as_str(),
-            description: "Apply an ordered multi-file change set. changes must contain one *** Begin Edit / *** End Edit envelope with Write File, Patch File, Rewrite File, Delete File, or Move File sections. Patch hunks use @@, @@ BOF, or @@ EOF with space, -, and + line prefixes. Existing files must be read or searched first. If an operation fails, earlier operations remain applied and later operations are not executed.".to_string(),
+            description: "Apply an ordered multi-file change set. changes must contain one *** Begin Edit / *** End Edit envelope with Write File, Patch File, Rewrite File, Delete File, or Move File sections. Move File requires a following *** To: target line. Write File and Rewrite File bodies are literal text. Patch hunks use @@, @@ BOF, or @@ EOF with space, -, and + line prefixes. Existing files must be read or searched first. If an operation fails, earlier operations remain applied and later operations are not executed.".to_string(),
             input_schema: serde_json::to_value(schema_for!(FileChangeSetInput)).unwrap(),
             output_schema: serde_json::to_value(schema_for!(FileChangeSetOutput)).unwrap(),
             required_capabilities: vec![ToolCapability::Write],

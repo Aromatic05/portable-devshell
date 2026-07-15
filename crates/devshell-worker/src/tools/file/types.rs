@@ -24,6 +24,7 @@ pub struct FileReadInput {
     pub path: String,
     #[serde(default)]
     pub view: FileReadView,
+    /// Content selector using N, N-M, N+count, or sorted non-overlapping comma-separated ranges. Append :raw for exact lines; otherwise each range includes one preceding line and up to three following lines for editing context. Cannot be combined with view=outline.
     pub selector: Option<String>,
 }
 #[derive(Debug, Serialize, JsonSchema)]
@@ -197,6 +198,7 @@ pub struct FileEditFileOutput {
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct FileChangeSetInput {
+    /// Ordered edit document using the *** Begin Edit / *** End Edit format described by this tool.
     pub changes: String,
 }
 

@@ -159,11 +159,39 @@ fn tmux_catalog_exposes_task_scoped_tools() {
         .find(|tool| tool["name"] == "tmux_run")
         .unwrap();
     assert_eq!(run["inputSchema"]["required"], json!(["command"]));
+    assert_eq!(
+        run["inputSchema"]["properties"]["pane"]["description"],
+        "Managed pane name returned by tmux_list or tmux_create."
+    );
     let input = catalog
         .iter()
         .find(|tool| tool["name"] == "tmux_input")
         .unwrap();
     assert_eq!(input["inputSchema"]["required"], json!(["task", "input"]));
+    let read = catalog
+        .iter()
+        .find(|tool| tool["name"] == "tmux_read")
+        .unwrap();
+    assert!(
+        read["description"]
+            .as_str()
+            .unwrap()
+            .contains("not raw process stdout")
+    );
+    for (tool_name, field) in [
+        ("tmux_close", "pane"),
+        ("tmux_create", "relativeTo"),
+        ("tmux_inspect", "pane"),
+    ] {
+        let tool = catalog
+            .iter()
+            .find(|tool| tool["name"] == tool_name)
+            .unwrap();
+        assert_eq!(
+            tool["inputSchema"]["properties"][field]["description"],
+            "Managed pane name returned by tmux_list or tmux_create."
+        );
+    }
     for tool_name in ["tmux_run", "tmux_input", "tmux_read"] {
         let tool = catalog
             .iter()
