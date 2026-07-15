@@ -238,7 +238,7 @@ fn file_search_snapshots_only_files_returned_in_the_current_page() {
         "1",
         "ctx-a",
         "file_search",
-        json!({ "paths": paths, "pattern": "needle", "syntax": "literal" }),
+        json!({ "paths": paths.clone(), "pattern": "needle", "syntax": "literal" }),
     );
     assert_eq!(searched["ok"], true, "{searched}");
     assert_eq!(searched["result"]["files"].as_array().unwrap().len(), 20);
@@ -272,6 +272,39 @@ fn file_search_snapshots_only_files_returned_in_the_current_page() {
         fs::read_to_string(env.workspace().join("result-21.txt")).unwrap(),
         "needle\n"
     );
+
+    let cursor = searched["result"]["nextCursor"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let second_page = call(
+        &env,
+        instance,
+        "4",
+        "ctx-a",
+        "file_search",
+        json!({
+            "paths": paths,
+            "pattern": "needle",
+            "syntax": "literal",
+            "cursor": cursor
+        }),
+    );
+    assert_eq!(second_page["ok"], true, "{second_page}");
+    assert_eq!(second_page["result"]["files"].as_array().unwrap().len(), 1);
+    assert_eq!(second_page["result"]["files"][0]["path"], "./result-21.txt");
+
+    let second_page_edit = call(
+        &env,
+        instance,
+        "5",
+        "ctx-a",
+        "file_edit",
+        json!({
+            "changes": "*** Begin Edit\n*** Rewrite File: ./result-21.txt\nvisible\n*** End Edit"
+        }),
+    );
+    assert_eq!(second_page_edit["ok"], true, "{second_page_edit}");
 
     env.json_command(&["stop", "--instance", instance]);
 }

@@ -9,7 +9,7 @@ const MAX_CURSORS: usize = 256;
 
 struct Cursor {
     offset: usize,
-    query: String,
+    query: serde_json::Value,
 }
 
 pub struct CursorStore {
@@ -31,7 +31,7 @@ impl CursorStore {
             id.clone(),
             Cursor {
                 offset,
-                query: query.to_string(),
+                query: query.clone(),
             },
         );
         id
@@ -49,5 +49,36 @@ impl CursorStore {
             ));
         }
         Ok(cursor.offset)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::CursorStore;
+
+    #[test]
+    fn resolves_cursor_for_the_same_query() {
+        let mut store = CursorStore::default();
+        let query = json!({
+            "pattern": "needle",
+            "paths": ["./a.txt"],
+            "caseSensitive": true
+        });
+        let cursor = store.issue(&query, 20);
+
+        assert_eq!(store.resolve(&cursor, &query).unwrap(), 20);
+    }
+
+    #[test]
+    fn rejects_cursor_for_a_different_query() {
+        let mut store = CursorStore::default();
+        let cursor = store.issue(&json!({ "pattern": "needle" }), 20);
+        let error = store
+            .resolve(&cursor, &json!({ "pattern": "different" }))
+            .unwrap_err();
+
+        assert_eq!(error.code, "file.invalidCursor");
     }
 }
