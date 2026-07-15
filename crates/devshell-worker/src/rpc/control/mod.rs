@@ -19,7 +19,6 @@ use crate::security::SecurityPolicy;
 use crate::tools::ToolRegistry;
 use crate::tools::artifact::payload::ArtifactPayloadStore;
 use crate::tools::artifact::receive::ArtifactReceiveStore;
-use crate::tools::file::FileToolState;
 
 #[allow(clippy::too_many_arguments)]
 pub fn register_control_handlers(
@@ -31,84 +30,62 @@ pub fn register_control_handlers(
     active_tool_calls: Arc<ActiveToolCallRegistry>,
     tools: Arc<ToolRegistry>,
     policy: Arc<dyn SecurityPolicy>,
-    files: Arc<FileToolState>,
     payloads: Arc<ArtifactPayloadStore>,
     receives: Arc<ArtifactReceiveStore>,
 ) {
     handlers.insert(
         "artifact.receive.begin".to_string(),
-        Arc::new(artifact_payload::ArtifactReceiveBeginHandler::new(
+        artifact_payload::receive_begin(
             Arc::clone(&receives),
             Arc::clone(&policy),
             std::path::PathBuf::from(&runtime.workspace),
-        )),
+        ),
     );
     handlers.insert(
         "artifact.receive.write".to_string(),
-        Arc::new(artifact_payload::ArtifactReceiveWriteHandler::new(
-            Arc::clone(&receives),
-        )),
+        artifact_payload::receive_write(Arc::clone(&receives)),
     );
     handlers.insert(
         "artifact.receive.finish".to_string(),
-        Arc::new(artifact_payload::ArtifactReceiveFinishHandler::new(
-            Arc::clone(&receives),
-        )),
+        artifact_payload::receive_finish(Arc::clone(&receives)),
     );
     handlers.insert(
         "artifact.receive.abort".to_string(),
-        Arc::new(artifact_payload::ArtifactReceiveAbortHandler::new(receives)),
+        artifact_payload::receive_abort(receives),
     );
     handlers.insert(
         "artifact.payload.open".to_string(),
-        Arc::new(artifact_payload::ArtifactPayloadOpenHandler::new(
+        artifact_payload::payload_open(
             Arc::clone(&payloads),
             Arc::clone(&policy),
             std::path::PathBuf::from(&runtime.workspace),
-        )),
+        ),
     );
     handlers.insert(
         "artifact.payload.read".to_string(),
-        Arc::new(artifact_payload::ArtifactPayloadReadHandler::new(
-            Arc::clone(&payloads),
-        )),
+        artifact_payload::payload_read(Arc::clone(&payloads)),
     );
     handlers.insert(
         "artifact.payload.close".to_string(),
-        Arc::new(artifact_payload::ArtifactPayloadCloseHandler::new(payloads)),
+        artifact_payload::payload_close(payloads),
     );
     handlers.insert(
         "tool.call.cancel".to_string(),
-        Arc::new(tool_call::ToolCallCancelHandler::new(Arc::clone(
-            &active_tool_calls,
-        ))),
+        tool_call::handler(Arc::clone(&active_tool_calls)),
     );
-    handlers.insert(
-        "tool.session.close".to_string(),
-        Arc::new(tool_session::ToolSessionCloseHandler::new(files)),
-    );
+    handlers.insert("tool.session.close".to_string(), tool_session::handler());
     handlers.insert(
         "worker.handshake".to_string(),
-        Arc::new(handshake::HandshakeHandler::new(
-            config.clone(),
-            runtime.clone(),
-        )),
+        handshake::handler(config.clone(), runtime.clone()),
     );
     handlers.insert(
         "worker.status".to_string(),
-        Arc::new(status::StatusHandler::new(runtime.clone())),
+        status::handler(runtime.clone()),
     );
     handlers.insert(
         "worker.stop".to_string(),
-        Arc::new(stop::StopHandler::new(
-            shutdown_requested,
-            active_processes,
-            active_tool_calls,
-        )),
+        stop::handler(shutdown_requested, active_processes, active_tool_calls),
     );
-    handlers.insert("worker.ping".to_string(), Arc::new(ping::PingHandler));
-    handlers.insert(
-        "tools.list".to_string(),
-        Arc::new(tools_list::ToolsListHandler::new(tools)),
-    );
+    handlers.insert("worker.ping".to_string(), ping::handler());
+    handlers.insert("tools.list".to_string(), tools_list::handler(tools));
 }

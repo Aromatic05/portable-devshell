@@ -68,17 +68,15 @@ pub fn serve(instance: InstanceName) -> Result<(), String> {
     let builtin_tools = builtin_registry(
         &instance_paths,
         &socket_paths,
-        &config,
         &runtime,
         Arc::clone(&artifacts),
     )
     .map_err(|error| error.message)?;
-    let tools = Arc::new(builtin_tools.registry);
+    let tools = Arc::new(builtin_tools);
     let router = Arc::new(RpcRouter::new(
         config.clone(),
         runtime,
         tools,
-        builtin_tools.files,
         payloads,
         receives,
     ));

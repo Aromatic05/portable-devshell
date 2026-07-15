@@ -1,7 +1,5 @@
 use std::sync::Arc;
 
-use schemars::schema_for;
-
 use crate::tools::tmux::group::tmux_list_name;
 use crate::tools::tmux::state::TmuxState;
 use crate::tools::tmux::types::{TmuxListOutput, TmuxListParams};
@@ -27,14 +25,11 @@ impl ToolHandler for TmuxListTool {
     }
 
     fn catalog_entry(&self) -> ToolCatalogEntry {
-        ToolCatalogEntry {
-            group: self.name.group().to_string(),
-            name: self.name.as_str(),
-            description: "List managed panes, running tasks, and pane capacity.".to_string(),
-            input_schema: serde_json::to_value(schema_for!(TmuxListParams)).unwrap(),
-            output_schema: serde_json::to_value(schema_for!(TmuxListOutput)).unwrap(),
-            required_capabilities: vec![ToolCapability::Read],
-        }
+        crate::tools::contract::catalog_entry::<TmuxListParams, TmuxListOutput>(
+            &self.name,
+            "List managed panes, running tasks, and pane capacity.".to_string(),
+            [ToolCapability::Read],
+        )
     }
 
     fn call(&self, call: ToolCall) -> Result<serde_json::Value, ToolError> {

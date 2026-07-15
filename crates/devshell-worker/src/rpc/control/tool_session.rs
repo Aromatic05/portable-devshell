@@ -3,9 +3,7 @@ use std::sync::Arc;
 use serde::Deserialize;
 
 use crate::rpc::error::RpcError;
-use crate::rpc::request::RpcRequest;
-use crate::rpc::router::ControlHandler;
-use crate::tools::file::FileToolState;
+use crate::rpc::router::{ControlHandler, control_handler, parse_params};
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -13,18 +11,9 @@ struct ToolSessionCloseInput {
     session_id: String,
 }
 
-pub struct ToolSessionCloseHandler;
-
-impl ToolSessionCloseHandler {
-    pub fn new(_files: Arc<FileToolState>) -> Self {
-        Self
-    }
-}
-
-impl ControlHandler for ToolSessionCloseHandler {
-    fn handle(&self, request: &RpcRequest) -> Result<serde_json::Value, RpcError> {
-        let input: ToolSessionCloseInput = serde_json::from_value(request.params.clone())
-            .map_err(|error| RpcError::new("rpc.invalidParams", error.to_string()))?;
+pub fn handler() -> Arc<dyn ControlHandler> {
+    control_handler(|request| {
+        let input: ToolSessionCloseInput = parse_params(request)?;
         if input.session_id.is_empty() {
             return Err(RpcError::new(
                 "rpc.invalidParams",
@@ -32,5 +21,5 @@ impl ControlHandler for ToolSessionCloseHandler {
             ));
         }
         Ok(serde_json::json!({ "closed": true }))
-    }
+    })
 }

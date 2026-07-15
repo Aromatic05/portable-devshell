@@ -2,8 +2,11 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant};
 
+use super::warning;
+
+use crate::platform::unix_time_millis;
 use crate::security::path::{
     FilesystemCapability, PathNamespace, parse_requested_path, resolve_existing_target,
 };
@@ -142,7 +145,7 @@ impl TmuxState {
                     unread: Vec::new(),
                 },
                 start_status_seq: current.status_seq,
-                started_at_ms: now_ms(),
+                started_at_ms: unix_time_millis(),
                 finished_at_ms: None,
                 last_pane: current.clone(),
                 warnings: workspace_warnings(&workspace),
@@ -534,7 +537,7 @@ impl TmuxState {
                 }
                 refresh_task_record(task, &pane);
                 task.state = TaskState::Lost;
-                task.finished_at_ms = Some(now_ms());
+                task.finished_at_ms = Some(unix_time_millis());
             } else if pane.status.as_deref() == Some("running") && !params.force {
                 return Err(ToolError::new(
                     "tmux.paneBusy",
@@ -664,7 +667,7 @@ impl TmuxState {
             }
             _ => {
                 current.state = TaskState::Lost;
-                current.finished_at_ms = Some(now_ms());
+                current.finished_at_ms = Some(unix_time_millis());
             }
         }
         tasks.prune();
@@ -684,7 +687,7 @@ impl TmuxState {
                 }
                 _ => {
                     task.state = TaskState::Lost;
-                    task.finished_at_ms = Some(now_ms());
+                    task.finished_at_ms = Some(unix_time_millis());
                 }
             }
         }
@@ -707,7 +710,7 @@ impl TmuxState {
                         unread: Vec::new(),
                     },
                     start_status_seq: pane.status_seq,
-                    started_at_ms: now_ms(),
+                    started_at_ms: unix_time_millis(),
                     finished_at_ms: None,
                     last_pane: pane.clone(),
                     warnings: vec![warning(
@@ -828,7 +831,7 @@ fn next_auto_name(workspace: &BackendWorkspace) -> String {
             return name;
         }
     }
-    format!("auto-{}", now_ms())
+    format!("auto-{}", unix_time_millis())
 }
 
 fn validate_time(value: u64) -> Result<u64, ToolError> {
@@ -896,22 +899,6 @@ fn workspace_warnings(workspace: &BackendWorkspace) -> Vec<TmuxWarning> {
         )]
     }
 }
-
-fn warning(pane: Option<&str>, code: &str, message: &str) -> TmuxWarning {
-    TmuxWarning {
-        pane: pane.map(ToOwned::to_owned),
-        code: code.to_string(),
-        message: message.to_string(),
-    }
-}
-
-fn now_ms() -> u128 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis()
-}
-
 fn lock_error(name: &str) -> ToolError {
     ToolError::new("tmux.internalError", format!("{name} lock poisoned"))
 }

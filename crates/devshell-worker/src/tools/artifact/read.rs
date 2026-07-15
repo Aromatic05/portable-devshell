@@ -1,7 +1,5 @@
 use std::sync::Arc;
 
-use schemars::schema_for;
-
 use crate::tools::artifact::store::ArtifactStore;
 use crate::tools::artifact::types::{ArtifactReadInput, ArtifactReadOutput};
 use crate::tools::{ToolCall, ToolCapability, ToolCatalogEntry, ToolError, ToolHandler, ToolName};
@@ -26,14 +24,11 @@ impl ToolHandler for ArtifactReadTool {
     }
 
     fn catalog_entry(&self) -> ToolCatalogEntry {
-        ToolCatalogEntry {
-            group: self.name.group().to_string(),
-            name: self.name.as_str(),
-            description: "Read a paged stdout or stderr artifact by handle. Use base64 for lossless binary data.".to_string(),
-            input_schema: serde_json::to_value(schema_for!(ArtifactReadInput)).unwrap(),
-            output_schema: serde_json::to_value(schema_for!(ArtifactReadOutput)).unwrap(),
-            required_capabilities: vec![ToolCapability::Read],
-        }
+        crate::tools::contract::catalog_entry::<ArtifactReadInput, ArtifactReadOutput>(
+            &self.name,
+            "Read a paged stdout or stderr artifact by handle. Use base64 for lossless binary data.".to_string(),
+            [ToolCapability::Read],
+        )
     }
 
     fn call(&self, call: ToolCall) -> Result<serde_json::Value, ToolError> {

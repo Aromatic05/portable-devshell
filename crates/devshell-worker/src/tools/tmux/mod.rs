@@ -29,7 +29,16 @@ use crate::tools::tmux::list::TmuxListTool;
 use crate::tools::tmux::read::TmuxReadTool;
 use crate::tools::tmux::run::TmuxRunTool;
 use crate::tools::tmux::state::TmuxState;
+use crate::tools::tmux::types::TmuxWarning;
 use crate::tools::{ToolError, ToolRegistry};
+
+fn warning(pane: Option<&str>, code: &str, message: &str) -> TmuxWarning {
+    TmuxWarning {
+        pane: pane.map(ToOwned::to_owned),
+        code: code.to_string(),
+        message: message.to_string(),
+    }
+}
 
 pub fn register_tools(
     registry: &mut ToolRegistry,

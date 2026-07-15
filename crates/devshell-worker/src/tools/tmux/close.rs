@@ -1,7 +1,5 @@
 use std::sync::Arc;
 
-use schemars::schema_for;
-
 use crate::tools::tmux::group::tmux_close_name;
 use crate::tools::tmux::state::TmuxState;
 use crate::tools::tmux::types::{TmuxCloseOutput, TmuxCloseParams};
@@ -27,14 +25,11 @@ impl ToolHandler for TmuxCloseTool {
     }
 
     fn catalog_entry(&self) -> ToolCatalogEntry {
-        ToolCatalogEntry {
-            group: self.name.group().to_string(),
-            name: self.name.as_str(),
-            description: "Close a managed pane. A running pane requires force, and the final pane cannot be closed.".to_string(),
-            input_schema: serde_json::to_value(schema_for!(TmuxCloseParams)).unwrap(),
-            output_schema: serde_json::to_value(schema_for!(TmuxCloseOutput)).unwrap(),
-            required_capabilities: vec![ToolCapability::Execute],
-        }
+        crate::tools::contract::catalog_entry::<TmuxCloseParams, TmuxCloseOutput>(
+            &self.name,
+            "Close a managed pane. A running pane requires force, and the final pane cannot be closed.".to_string(),
+            [ToolCapability::Execute],
+        )
     }
 
     fn call(&self, call: ToolCall) -> Result<serde_json::Value, ToolError> {

@@ -4,6 +4,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
+use serde::{Serialize, de::DeserializeOwned};
+
 use crate::daemon::process::WorkerRuntimeContext;
 use crate::daemon::process_registry::ActiveProcessRegistry;
 use crate::instance::WorkerConfig;
@@ -14,7 +16,6 @@ use crate::rpc::response::RpcResponse;
 use crate::security::{SecurityPolicy, build_security_policy};
 use crate::tools::artifact::payload::ArtifactPayloadStore;
 use crate::tools::artifact::receive::ArtifactReceiveStore;
-use crate::tools::file::FileToolState;
 use crate::tools::{ToolCall, ToolCancellation, ToolName, ToolRegistry};
 
 const MAX_CONCURRENT_TOOL_CALLS: usize = 8;
@@ -35,7 +36,6 @@ impl RpcRouter {
         config: WorkerConfig,
         runtime: WorkerRuntimeContext,
         tools: Arc<ToolRegistry>,
-        files: Arc<FileToolState>,
         payloads: Arc<ArtifactPayloadStore>,
         receives: Arc<ArtifactReceiveStore>,
     ) -> Self {
@@ -53,7 +53,6 @@ impl RpcRouter {
             Arc::clone(&active_tool_calls),
             Arc::clone(&tools),
             Arc::clone(&policy),
-            files,
             payloads,
             receives,
         );
@@ -102,10 +101,7 @@ impl RpcRouter {
     ) -> Result<serde_json::Value, RpcError> {
         let tool_name = ToolName::parse(&request.method)
             .map_err(|message| RpcError::new("rpc.methodNotFound", message))?;
-        let tool = self
-            .tools
-            .find(&tool_name)
-            .map_err(|error| RpcError::new(error.code, error.message))?;
+        let tool = self.tools.find(&tool_name).map_err(RpcError::from)?;
         let context = request.context.as_ref();
         tool.call(ToolCall {
             workspace: PathBuf::from(&self.runtime.workspace),
@@ -120,12 +116,7 @@ impl RpcRouter {
             process_registry: Arc::clone(&self.active_processes),
             cancellation,
         })
-        .map_err(|error| {
-            let mut rpc_error = RpcError::new(error.code, error.message);
-            rpc_error.retryable = error.retryable;
-            rpc_error.details = error.details;
-            rpc_error
-        })
+        .map_err(RpcError::from)
     }
 
     fn response(id: String, result: Result<serde_json::Value, RpcError>) -> RpcResponse {
@@ -330,6 +321,34 @@ fn is_urgent_tool(method: &str) -> bool {
 
 pub trait ControlHandler: Send + Sync {
     fn handle(&self, request: &RpcRequest) -> Result<serde_json::Value, RpcError>;
+}
+
+struct ClosureControlHandler<F>(F);
+
+impl<F> ControlHandler for ClosureControlHandler<F>
+where
+    F: Fn(&RpcRequest) -> Result<serde_json::Value, RpcError> + Send + Sync,
+{
+    fn handle(&self, request: &RpcRequest) -> Result<serde_json::Value, RpcError> {
+        (self.0)(request)
+    }
+}
+
+pub fn control_handler<F>(handle: F) -> Arc<dyn ControlHandler>
+where
+    F: Fn(&RpcRequest) -> Result<serde_json::Value, RpcError> + Send + Sync + 'static,
+{
+    Arc::new(ClosureControlHandler(handle))
+}
+
+pub fn parse_params<T: DeserializeOwned>(request: &RpcRequest) -> Result<T, RpcError> {
+    serde_json::from_value(request.params.clone())
+        .map_err(|error| RpcError::new("rpc.invalidParams", error.to_string()))
+}
+
+pub fn serialize(value: impl Serialize) -> Result<serde_json::Value, RpcError> {
+    serde_json::to_value(value)
+        .map_err(|error| RpcError::new("rpc.serializeFailed", error.to_string()))
 }
 
 #[cfg(test)]

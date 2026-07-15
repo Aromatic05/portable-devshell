@@ -2,9 +2,8 @@ use std::collections::{BTreeSet, HashMap};
 use std::fs;
 use std::io::{BufRead, BufReader};
 use std::path::Path;
-use std::time::{SystemTime, UNIX_EPOCH};
 
-
+use crate::platform::unix_time_millis;
 use crate::tools::ToolError;
 
 pub const FULL_SNAPSHOT_LIMIT: usize = 4 * 1024 * 1024;
@@ -38,7 +37,6 @@ pub enum SnapshotContent {
     Full(String),
     Sparse,
 }
-
 
 #[derive(Clone, Debug)]
 pub struct ContextFileSnapshot {
@@ -109,7 +107,7 @@ impl ContextSnapshotStore {
         let canonical_path = path.display().to_string();
         let key = (ctx_id.to_string(), canonical_path.clone());
         let seen_lines = seen_lines.into_iter().collect::<BTreeSet<_>>();
-        let now = now_ms();
+        let now = unix_time_millis();
 
         if let Some(current) = self.latest.get_mut(&key) {
             if current.revision == revision {
@@ -155,7 +153,7 @@ impl ContextSnapshotStore {
             )
             .with_details(serde_json::json!({ "path": path.display().to_string() }))
         })?;
-        snapshot.last_accessed_at_ms = now_ms();
+        snapshot.last_accessed_at_ms = unix_time_millis();
         Ok(snapshot.clone())
     }
 
@@ -165,7 +163,7 @@ impl ContextSnapshotStore {
         self.latest.remove(&target_key);
         if let Some(mut snapshot) = self.latest.remove(&source_key) {
             snapshot.canonical_path = target.display().to_string();
-            snapshot.last_accessed_at_ms = now_ms();
+            snapshot.last_accessed_at_ms = unix_time_millis();
             self.latest.insert(target_key, snapshot);
         }
     }
@@ -419,22 +417,11 @@ impl TextFile {
         result
     }
 }
-
-pub fn now_ms() -> u128 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis()
-}
-
-
 #[cfg(test)]
 mod tests {
     use std::path::Path;
 
-    use super::{
-        ContextSnapshotStore, TextFile,
-    };
+    use super::{ContextSnapshotStore, TextFile};
 
     fn text(revision: &str, line: String) -> TextFile {
         TextFile {
@@ -467,5 +454,4 @@ mod tests {
             "older"
         );
     }
-
 }

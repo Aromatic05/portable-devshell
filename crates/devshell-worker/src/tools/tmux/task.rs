@@ -1,8 +1,8 @@
 use std::collections::{HashMap, VecDeque};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use uuid::Uuid;
 
+use crate::platform::unix_time_millis;
 use crate::tools::ToolError;
 use crate::tools::tmux::backend::BackendPane;
 use crate::tools::tmux::output::{OutputWindow, refresh_window};
@@ -79,7 +79,7 @@ impl TaskRegistry {
     }
 
     pub fn prune(&mut self) {
-        let now = now_ms();
+        let now = unix_time_millis();
         let expired = self
             .tasks
             .iter()
@@ -132,7 +132,7 @@ pub fn refresh_task_record(task: &mut TaskRecord, pane: &BackendPane) {
             Some("running") => task.state = TaskState::Running,
             Some(value) if value.parse::<i32>().is_ok() => {
                 task.state = TaskState::Exited(value.parse().unwrap_or(1));
-                task.finished_at_ms.get_or_insert_with(now_ms);
+                task.finished_at_ms.get_or_insert_with(unix_time_millis);
             }
             _ => {}
         }
@@ -141,7 +141,7 @@ pub fn refresh_task_record(task: &mut TaskRecord, pane: &BackendPane) {
         && pane.status.as_deref() != Some("running")
     {
         task.state = TaskState::Lost;
-        task.finished_at_ms.get_or_insert_with(now_ms);
+        task.finished_at_ms.get_or_insert_with(unix_time_millis);
     }
 }
 
@@ -226,17 +226,9 @@ pub fn task_expired(task_id: &str) -> ToolError {
 pub fn new_task_id() -> String {
     format!("task-{}", Uuid::new_v4().simple())
 }
-
-fn now_ms() -> u128 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis()
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{TASK_RETENTION_MS, TaskRecord, TaskRegistry, TaskState, now_ms};
+    use super::{TASK_RETENTION_MS, TaskRecord, TaskRegistry, TaskState, unix_time_millis};
     use crate::tools::tmux::backend::BackendPane;
     use crate::tools::tmux::output::OutputWindow;
 
@@ -275,7 +267,7 @@ mod tests {
 
     #[test]
     fn completed_tasks_expire_but_active_tasks_are_retained() {
-        let old = now_ms().saturating_sub(TASK_RETENTION_MS + 1);
+        let old = unix_time_millis().saturating_sub(TASK_RETENTION_MS + 1);
         let mut registry = TaskRegistry::default();
         registry.insert(task("completed", TaskState::Exited(0), Some(old)));
         registry.insert(task("running", TaskState::Running, Some(old)));

@@ -21,3 +21,14 @@ impl RpcError {
         self
     }
 }
+
+impl From<crate::tools::ToolError> for RpcError {
+    fn from(error: crate::tools::ToolError) -> Self {
+        Self {
+            code: error.code,
+            message: error.message,
+            retryable: error.retryable,
+            details: error.details,
+        }
+    }
+}

@@ -1,15 +1,17 @@
 use std::fs;
 use std::io::{Read, Seek, SeekFrom, Write};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use serde::{Deserialize, Serialize};
 use tempfile::{Builder, NamedTempFile};
 use uuid::Uuid;
 
+use crate::platform::unix_time_millis;
 use crate::tools::ToolError;
+use crate::tools::artifact::storage;
 use crate::tools::artifact::types::{
     ArtifactEncoding, ArtifactReadInput, ArtifactReadOutput, ArtifactReference, ArtifactStream,
 };
@@ -106,10 +108,10 @@ impl ArtifactStore {
             .map_err(|error| ToolError::new("artifact.storageFailed", error.to_string()))?;
         fs::create_dir_all(&leases_dir)
             .map_err(|error| ToolError::new("artifact.storageFailed", error.to_string()))?;
-        set_private_dir(&root)?;
-        set_private_dir(&temp_dir)?;
-        set_private_dir(&leases_dir)?;
-        clear_temp_dir(&temp_dir)?;
+        storage::ensure_private_dir(&root)?;
+        storage::ensure_private_dir(&temp_dir)?;
+        storage::ensure_private_dir(&leases_dir)?;
+        storage::clear_temp_files(&temp_dir)?;
         let store = Arc::new(Self {
             root,
             leases_dir,
@@ -162,7 +164,7 @@ impl ArtifactStore {
         self.gc_locked(draft.stored_bytes)?;
 
         let handle = Uuid::new_v4().to_string();
-        let created_at_ms = now_ms();
+        let created_at_ms = unix_time_millis();
         let expires_at_ms = created_at_ms.saturating_add(self.policy.ttl.as_millis());
         let blake3 = draft.hasher.finalize().to_hex().to_string();
         let metadata = ArtifactMetadata {
@@ -183,7 +185,8 @@ impl ArtifactStore {
             .file
             .persist(&data_path)
             .map_err(|error| ToolError::new("artifact.storageFailed", error.error.to_string()))?;
-        if let Err(error) = write_metadata(&self.root, &metadata_path, &metadata) {
+        if let Err(error) = storage::write_json(&self.root, &metadata_path, "metadata-", &metadata)
+        {
             let _ = fs::remove_file(&data_path);
             return Err(error);
         }
@@ -205,7 +208,7 @@ impl ArtifactStore {
         expires_at_ms: u128,
     ) -> Result<ArtifactLease, ToolError> {
         validate_handle(handle)?;
-        let now = now_ms();
+        let now = unix_time_millis();
         if expires_at_ms <= now {
             return Err(ToolError::new(
                 "artifact.invalidLease",
@@ -233,9 +236,10 @@ impl ArtifactStore {
             handle: handle.to_string(),
             expires_at_ms,
         };
-        write_json_metadata(
+        storage::write_json(
             &self.leases_dir,
             &self.lease_path(&lease_id),
+            "metadata-",
             &lease_metadata,
         )?;
 
@@ -279,7 +283,7 @@ impl ArtifactStore {
             .map_err(|_| ToolError::new("artifact.leaseNotFound", "artifact lease is invalid"))?;
         if lease.version != METADATA_VERSION
             || lease.lease_id != lease_id
-            || lease.expires_at_ms <= now_ms()
+            || lease.expires_at_ms <= unix_time_millis()
         {
             return Err(ToolError::new(
                 "artifact.leaseNotFound",
@@ -321,7 +325,7 @@ impl ArtifactStore {
             .map_err(|_| ToolError::new("artifact.storageFailed", "artifact lock poisoned"))?;
         self.gc_locked(0)?;
         let metadata = self.load_metadata(&input.handle)?;
-        if metadata.expires_at_ms <= now_ms() {
+        if metadata.expires_at_ms <= unix_time_millis() {
             return Err(ToolError::new(
                 "artifact.expired",
                 "artifact reference has expired",
@@ -372,22 +376,19 @@ impl ArtifactStore {
     }
 
     fn load_metadata(&self, handle: &str) -> Result<ArtifactMetadata, ToolError> {
-        let path = self.metadata_path(handle);
-        let bytes = fs::read(&path)
-            .map_err(|_| ToolError::new("artifact.notFound", "artifact is unavailable"))?;
-        let metadata: ArtifactMetadata = serde_json::from_slice(&bytes)
-            .map_err(|_| ToolError::new("artifact.notFound", "artifact metadata is invalid"))?;
-        if metadata.version != METADATA_VERSION || metadata.handle != handle {
-            return Err(ToolError::new(
-                "artifact.notFound",
-                "artifact metadata is invalid",
-            ));
-        }
-        Ok(metadata)
+        storage::read_json(
+            &self.metadata_path(handle),
+            "artifact.notFound",
+            "artifact is unavailable",
+            "artifact metadata is invalid",
+            |metadata: &ArtifactMetadata| {
+                metadata.version == METADATA_VERSION && metadata.handle == handle
+            },
+        )
     }
 
     fn gc_locked(&self, incoming_bytes: usize) -> Result<(), ToolError> {
-        let now = now_ms();
+        let now = unix_time_millis();
         let leases = self.leases(now)?;
         let leased_handles = leases
             .iter()
@@ -526,87 +527,22 @@ impl ArtifactDraft {
 }
 
 fn validate_handle(handle: &str) -> Result<(), ToolError> {
-    let parsed = Uuid::parse_str(handle)
-        .map_err(|_| ToolError::new("artifact.invalidHandle", "artifact handle is invalid"))?;
-    if parsed.to_string() != handle {
-        return Err(ToolError::new(
-            "artifact.invalidHandle",
-            "artifact handle is invalid",
-        ));
-    }
-    Ok(())
-}
-
-fn write_metadata(
-    root: &Path,
-    target: &Path,
-    metadata: &ArtifactMetadata,
-) -> Result<(), ToolError> {
-    write_json_metadata(root, target, metadata)
-}
-
-fn write_json_metadata<T: Serialize>(
-    root: &Path,
-    target: &Path,
-    metadata: &T,
-) -> Result<(), ToolError> {
-    let mut temp = Builder::new()
-        .prefix("metadata-")
-        .suffix(".tmp")
-        .tempfile_in(root)
-        .map_err(|error| ToolError::new("artifact.storageFailed", error.to_string()))?;
-    serde_json::to_writer(&mut temp, metadata)
-        .map_err(|error| ToolError::new("artifact.storageFailed", error.to_string()))?;
-    temp.flush()
-        .map_err(|error| ToolError::new("artifact.storageFailed", error.to_string()))?;
-    temp.as_file()
-        .sync_all()
-        .map_err(|error| ToolError::new("artifact.storageFailed", error.to_string()))?;
-    temp.persist(target)
-        .map_err(|error| ToolError::new("artifact.storageFailed", error.error.to_string()))?;
-    Ok(())
+    storage::validate_uuid(
+        handle,
+        "artifact.invalidHandle",
+        "artifact handle is invalid",
+    )
 }
 
 fn remove_record(record: &ArtifactRecord) {
     let _ = fs::remove_file(&record.data_path);
     let _ = fs::remove_file(&record.metadata_path);
 }
-
-fn clear_temp_dir(path: &Path) -> Result<(), ToolError> {
-    for entry in fs::read_dir(path)
-        .map_err(|error| ToolError::new("artifact.storageFailed", error.to_string()))?
-    {
-        let entry =
-            entry.map_err(|error| ToolError::new("artifact.storageFailed", error.to_string()))?;
-        if entry
-            .file_type()
-            .map_err(|error| ToolError::new("artifact.storageFailed", error.to_string()))?
-            .is_file()
-        {
-            fs::remove_file(entry.path())
-                .map_err(|error| ToolError::new("artifact.storageFailed", error.to_string()))?;
-        }
-    }
-    Ok(())
-}
-
-fn set_private_dir(path: &Path) -> Result<(), ToolError> {
-    crate::storage::permissions::ensure_dir(path, 0o700)
-        .map_err(|error| ToolError::new("artifact.storageFailed", error))
-}
-
-fn now_ms() -> u128 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis()
-}
-
 #[cfg(test)]
 mod tests {
     use std::time::Duration;
 
-    use super::{ArtifactPolicy, ArtifactStore, now_ms};
+    use super::{ArtifactPolicy, ArtifactStore, unix_time_millis};
     use crate::tools::artifact::types::{ArtifactEncoding, ArtifactReadInput, ArtifactStream};
 
     fn store(policy: ArtifactPolicy) -> (tempfile::TempDir, std::sync::Arc<ArtifactStore>) {
@@ -688,7 +624,7 @@ mod tests {
         draft.write_chunk(b"leased content").unwrap();
         let reference = store.persist(draft).unwrap();
         let lease = store
-            .acquire_lease(&reference.handle, now_ms() + 60_000)
+            .acquire_lease(&reference.handle, unix_time_millis() + 60_000)
             .unwrap();
 
         std::thread::sleep(Duration::from_millis(30));

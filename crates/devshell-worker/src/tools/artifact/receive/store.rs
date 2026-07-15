@@ -18,6 +18,7 @@ use crate::security::path::{
 };
 use crate::tools::ToolError;
 use crate::tools::artifact::payload::{ArtifactPayloadDescriptor, ArtifactPayloadType};
+use crate::tools::artifact::storage;
 
 const METADATA_VERSION: u32 = 1;
 
@@ -450,43 +451,24 @@ impl ArtifactReceiveStore {
     }
 
     fn load_metadata(&self, receive_id: &str) -> Result<ArtifactReceiveMetadata, ToolError> {
-        let bytes = fs::read(self.metadata_path(receive_id)).map_err(|_| {
-            ToolError::new(
-                "artifact.receiveNotFound",
-                "artifact receive is unavailable",
-            )
-        })?;
-        let metadata: ArtifactReceiveMetadata = serde_json::from_slice(&bytes).map_err(|_| {
-            ToolError::new(
-                "artifact.receiveNotFound",
-                "artifact receive metadata is invalid",
-            )
-        })?;
-        if metadata.version != METADATA_VERSION || metadata.receive_id != receive_id {
-            return Err(ToolError::new(
-                "artifact.receiveNotFound",
-                "artifact receive metadata is invalid",
-            ));
-        }
-        Ok(metadata)
+        storage::read_json(
+            &self.metadata_path(receive_id),
+            "artifact.receiveNotFound",
+            "artifact receive is unavailable",
+            "artifact receive metadata is invalid",
+            |metadata: &ArtifactReceiveMetadata| {
+                metadata.version == METADATA_VERSION && metadata.receive_id == receive_id
+            },
+        )
     }
 
     fn write_metadata(&self, metadata: &ArtifactReceiveMetadata) -> Result<(), ToolError> {
-        let mut temp = Builder::new()
-            .prefix("receive-metadata-")
-            .suffix(".tmp")
-            .tempfile_in(&self.root)
-            .map_err(|error| ToolError::new("artifact.storageFailed", error.to_string()))?;
-        serde_json::to_writer(&mut temp, metadata)
-            .map_err(|error| ToolError::new("artifact.storageFailed", error.to_string()))?;
-        temp.flush()
-            .map_err(|error| ToolError::new("artifact.storageFailed", error.to_string()))?;
-        temp.as_file()
-            .sync_all()
-            .map_err(|error| ToolError::new("artifact.storageFailed", error.to_string()))?;
-        temp.persist(self.metadata_path(&metadata.receive_id))
-            .map_err(|error| ToolError::new("artifact.storageFailed", error.error.to_string()))?;
-        Ok(())
+        storage::write_json(
+            &self.root,
+            &self.metadata_path(&metadata.receive_id),
+            "receive-metadata-",
+            metadata,
+        )
     }
 
     fn metadata_path(&self, receive_id: &str) -> PathBuf {
@@ -776,15 +758,7 @@ fn validate_archive_path(path: &Path) -> Result<(), ToolError> {
 }
 
 fn validate_id(value: &str) -> Result<(), ToolError> {
-    let parsed = Uuid::parse_str(value)
-        .map_err(|_| ToolError::new("artifact.invalidReceiveId", "receiveId is invalid"))?;
-    if parsed.to_string() != value {
-        return Err(ToolError::new(
-            "artifact.invalidReceiveId",
-            "receiveId is invalid",
-        ));
-    }
-    Ok(())
+    storage::validate_uuid(value, "artifact.invalidReceiveId", "receiveId is invalid")
 }
 
 fn sibling_path(target: &Path, name: &str) -> Result<PathBuf, ToolError> {

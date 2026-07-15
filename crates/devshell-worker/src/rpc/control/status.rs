@@ -1,33 +1,23 @@
+use std::sync::Arc;
+
 use serde_json::json;
 
 use crate::daemon::process::WorkerRuntimeContext;
 use crate::rpc::codec::PROTOCOL_VERSION;
-use crate::rpc::error::RpcError;
-use crate::rpc::request::RpcRequest;
-use crate::rpc::router::ControlHandler;
+use crate::rpc::router::{ControlHandler, control_handler};
 
-pub struct StatusHandler {
-    runtime: WorkerRuntimeContext,
-}
-
-impl StatusHandler {
-    pub fn new(runtime: WorkerRuntimeContext) -> Self {
-        Self { runtime }
-    }
-}
-
-impl ControlHandler for StatusHandler {
-    fn handle(&self, _request: &RpcRequest) -> Result<serde_json::Value, RpcError> {
+pub fn handler(runtime: WorkerRuntimeContext) -> Arc<dyn ControlHandler> {
+    control_handler(move |_| {
         Ok(json!({
-            "instance": self.runtime.instance.as_str(),
-            "workspace": self.runtime.workspace,
+            "instance": runtime.instance.as_str(),
+            "workspace": runtime.workspace,
             "protocolVersion": PROTOCOL_VERSION,
             "workerVersion": env!("CARGO_PKG_VERSION"),
-            "workerSha256": self.runtime.worker_sha256,
-            "securityMode": match self.runtime.security_mode {
+            "workerSha256": runtime.worker_sha256,
+            "securityMode": match runtime.security_mode {
                 crate::security::SecurityMode::Disabled => "disabled",
                 crate::security::SecurityMode::Workspace => "workspace",
             }
         }))
-    }
+    })
 }

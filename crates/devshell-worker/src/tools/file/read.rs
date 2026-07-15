@@ -1,7 +1,5 @@
 use std::sync::Arc;
 
-use schemars::schema_for;
-
 use crate::tools::file::state::{FULL_SNAPSHOT_LIMIT, TextFile, TextMetadata};
 use crate::tools::file::structure;
 use crate::tools::file::types::{FileReadInput, FileReadOutput, FileReadView, ReturnedRange};
@@ -31,14 +29,11 @@ impl ToolHandler for FileReadTool {
         &self.name
     }
     fn catalog_entry(&self) -> ToolCatalogEntry {
-        ToolCatalogEntry {
-            group: self.name.group().to_string(),
-            name: self.name.as_str(),
-            description: "Read UTF-8 text. All file tools use ./ for workspace-relative paths and / for absolute paths. Use view=content with selector forms N, N-M, N+count, or sorted non-overlapping comma-separated ranges; append :raw for exact lines. Without :raw, each range includes one preceding line and up to three following lines for editing context. A single N reads the default window and may return nextSelector. Use view=outline for structural navigation; selector cannot be combined with view=outline. Returned content ranges prepare those lines for file_edit; outline alone does not prepare source lines for patching.".to_string(),
-            input_schema: serde_json::to_value(schema_for!(FileReadInput)).unwrap(),
-            output_schema: serde_json::to_value(schema_for!(FileReadOutput)).unwrap(),
-            required_capabilities: vec![ToolCapability::Read],
-        }
+        crate::tools::contract::catalog_entry::<FileReadInput, FileReadOutput>(
+            &self.name,
+            "Read UTF-8 text. All file tools use ./ for workspace-relative paths and / for absolute paths. Use view=content with selector forms N, N-M, N+count, or sorted non-overlapping comma-separated ranges; append :raw for exact lines. Without :raw, each range includes one preceding line and up to three following lines for editing context. A single N reads the default window and may return nextSelector. Use view=outline for structural navigation; selector cannot be combined with view=outline. Returned content ranges prepare those lines for file_edit; outline alone does not prepare source lines for patching.".to_string(),
+            [ToolCapability::Read],
+        )
     }
     fn call(&self, call: ToolCall) -> Result<serde_json::Value, ToolError> {
         call.check_cancelled()?;

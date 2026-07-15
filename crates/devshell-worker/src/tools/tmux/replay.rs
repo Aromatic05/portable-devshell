@@ -1,10 +1,10 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Condvar, Mutex};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
+use crate::platform::unix_time_millis;
 use crate::tools::{ToolCall, ToolError};
 
 const REPLAY_RETENTION_MS: u128 = 10 * 60 * 1_000;
@@ -54,7 +54,7 @@ impl ReplayCache {
                 (Arc::clone(slot), false)
             } else {
                 let slot = Arc::new(ReplaySlot {
-                    created_at_ms: now_ms(),
+                    created_at_ms: unix_time_millis(),
                     fingerprint,
                     outcome: Mutex::new(None),
                     ready: Condvar::new(),
@@ -106,7 +106,7 @@ where
 }
 
 fn prune(slots: &mut HashMap<String, Arc<ReplaySlot>>) -> Result<(), ToolError> {
-    let now = now_ms();
+    let now = unix_time_millis();
     let mut expired = Vec::new();
     for (key, slot) in slots.iter() {
         let complete = slot
@@ -142,14 +142,6 @@ fn prune(slots: &mut HashMap<String, Arc<ReplaySlot>>) -> Result<(), ToolError> 
     }
     Ok(())
 }
-
-fn now_ms() -> u128 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis()
-}
-
 fn lock_error(name: &str) -> ToolError {
     ToolError::new("tmux.internalError", format!("{name} lock poisoned"))
 }

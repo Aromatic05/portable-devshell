@@ -3,8 +3,7 @@ use std::sync::Arc;
 use serde::Deserialize;
 
 use crate::rpc::error::RpcError;
-use crate::rpc::request::RpcRequest;
-use crate::rpc::router::{ActiveToolCallRegistry, ControlHandler};
+use crate::rpc::router::{ActiveToolCallRegistry, ControlHandler, control_handler, parse_params};
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -16,34 +15,21 @@ struct ToolCallCancelParams {
     reason: Option<String>,
 }
 
-pub struct ToolCallCancelHandler {
-    active_calls: Arc<ActiveToolCallRegistry>,
-}
-
-impl ToolCallCancelHandler {
-    pub fn new(active_calls: Arc<ActiveToolCallRegistry>) -> Self {
-        Self { active_calls }
-    }
-}
-
-impl ControlHandler for ToolCallCancelHandler {
-    fn handle(&self, request: &RpcRequest) -> Result<serde_json::Value, RpcError> {
-        let params: ToolCallCancelParams = serde_json::from_value(request.params.clone())
-            .map_err(|error| RpcError::new("rpc.invalidParams", error.to_string()))?;
+pub fn handler(active_calls: Arc<ActiveToolCallRegistry>) -> Arc<dyn ControlHandler> {
+    control_handler(move |request| {
+        let params: ToolCallCancelParams = parse_params(request)?;
         if params.rpc_request_id.is_empty() || params.ctx_id.is_empty() {
             return Err(RpcError::new(
                 "rpc.invalidParams",
                 "rpcRequestId and ctxId must be non-empty.",
             ));
         }
-        let cancelled = self
-            .active_calls
-            .cancel(&params.ctx_id, &params.rpc_request_id)?;
+        let cancelled = active_calls.cancel(&params.ctx_id, &params.rpc_request_id)?;
         Ok(serde_json::json!({
             "cancelled": cancelled,
             "reason": params.reason,
             "rpcRequestId": params.rpc_request_id,
             "ctxId": params.ctx_id,
         }))
-    }
+    })
 }

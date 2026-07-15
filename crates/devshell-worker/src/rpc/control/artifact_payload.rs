@@ -4,8 +4,7 @@ use std::sync::Arc;
 use serde::Deserialize;
 
 use crate::rpc::error::RpcError;
-use crate::rpc::request::RpcRequest;
-use crate::rpc::router::ControlHandler;
+use crate::rpc::router::{ControlHandler, control_handler, parse_params, serialize};
 use crate::security::SecurityPolicy;
 use crate::tools::ToolError;
 use crate::tools::artifact::payload::ArtifactPayloadStore;
@@ -47,206 +46,94 @@ struct ArtifactReceiveIdInput {
     receive_id: String,
 }
 
-pub struct ArtifactPayloadOpenHandler {
+pub fn payload_open(
     payloads: Arc<ArtifactPayloadStore>,
     policy: Arc<dyn SecurityPolicy>,
     workspace: PathBuf,
-}
-
-impl ArtifactPayloadOpenHandler {
-    pub fn new(
-        payloads: Arc<ArtifactPayloadStore>,
-        policy: Arc<dyn SecurityPolicy>,
-        workspace: PathBuf,
-    ) -> Self {
-        Self {
-            payloads,
-            policy,
-            workspace,
-        }
-    }
-}
-
-impl ControlHandler for ArtifactPayloadOpenHandler {
-    fn handle(&self, request: &RpcRequest) -> Result<serde_json::Value, RpcError> {
-        let input: ArtifactPayloadOpenInput = serde_json::from_value(request.params.clone())
-            .map_err(|error| RpcError::new("rpc.invalidParams", error.to_string()))?;
-        let opened = match (input.handle.as_deref(), input.path.as_deref()) {
-            (Some(handle), None) => self.payloads.open_handle(handle, input.expires_at_ms),
-            (None, Some(path)) => self.payloads.open_path(
-                &self.workspace,
-                path,
-                self.policy.as_ref(),
-                input.expires_at_ms,
-            ),
+) -> Arc<dyn ControlHandler> {
+    control_handler(move |request| {
+        let input: ArtifactPayloadOpenInput = parse_params(request)?;
+        let result = match (input.handle.as_deref(), input.path.as_deref()) {
+            (Some(handle), None) => payloads.open_handle(handle, input.expires_at_ms),
+            (None, Some(path)) => {
+                payloads.open_path(&workspace, path, policy.as_ref(), input.expires_at_ms)
+            }
             _ => Err(ToolError::new(
                 "rpc.invalidParams",
                 "exactly one of handle or path is required",
             )),
         }
-        .map_err(tool_error_to_rpc)?;
-        serde_json::to_value(opened)
-            .map_err(|error| RpcError::new("rpc.serializeFailed", error.to_string()))
-    }
+        .map_err(RpcError::from)?;
+        serialize(result)
+    })
 }
 
-pub struct ArtifactPayloadReadHandler {
-    payloads: Arc<ArtifactPayloadStore>,
+pub fn payload_read(payloads: Arc<ArtifactPayloadStore>) -> Arc<dyn ControlHandler> {
+    control_handler(move |request| {
+        let input: ArtifactPayloadReadInput = parse_params(request)?;
+        serialize(
+            payloads
+                .read(
+                    &input.payload_id,
+                    input.offset_bytes.unwrap_or(0),
+                    input.max_bytes.unwrap_or(64 * 1024),
+                )
+                .map_err(RpcError::from)?,
+        )
+    })
 }
 
-impl ArtifactPayloadReadHandler {
-    pub fn new(payloads: Arc<ArtifactPayloadStore>) -> Self {
-        Self { payloads }
-    }
-}
-
-impl ControlHandler for ArtifactPayloadReadHandler {
-    fn handle(&self, request: &RpcRequest) -> Result<serde_json::Value, RpcError> {
-        let input: ArtifactPayloadReadInput = serde_json::from_value(request.params.clone())
-            .map_err(|error| RpcError::new("rpc.invalidParams", error.to_string()))?;
-        let result = self
-            .payloads
-            .read(
-                &input.payload_id,
-                input.offset_bytes.unwrap_or(0),
-                input.max_bytes.unwrap_or(64 * 1024),
-            )
-            .map_err(tool_error_to_rpc)?;
-        serde_json::to_value(result)
-            .map_err(|error| RpcError::new("rpc.serializeFailed", error.to_string()))
-    }
-}
-
-pub struct ArtifactPayloadCloseHandler {
-    payloads: Arc<ArtifactPayloadStore>,
-}
-
-impl ArtifactPayloadCloseHandler {
-    pub fn new(payloads: Arc<ArtifactPayloadStore>) -> Self {
-        Self { payloads }
-    }
-}
-
-impl ControlHandler for ArtifactPayloadCloseHandler {
-    fn handle(&self, request: &RpcRequest) -> Result<serde_json::Value, RpcError> {
-        let input: ArtifactPayloadCloseInput = serde_json::from_value(request.params.clone())
-            .map_err(|error| RpcError::new("rpc.invalidParams", error.to_string()))?;
-        self.payloads
-            .close(&input.payload_id)
-            .map_err(tool_error_to_rpc)?;
+pub fn payload_close(payloads: Arc<ArtifactPayloadStore>) -> Arc<dyn ControlHandler> {
+    control_handler(move |request| {
+        let input: ArtifactPayloadCloseInput = parse_params(request)?;
+        payloads.close(&input.payload_id).map_err(RpcError::from)?;
         Ok(serde_json::json!({
             "closed": true,
             "payloadId": input.payload_id
         }))
-    }
+    })
 }
 
-pub struct ArtifactReceiveBeginHandler {
+pub fn receive_begin(
     receives: Arc<ArtifactReceiveStore>,
     policy: Arc<dyn SecurityPolicy>,
     workspace: PathBuf,
+) -> Arc<dyn ControlHandler> {
+    control_handler(move |request| {
+        let input: ArtifactReceiveBeginInput = parse_params(request)?;
+        serialize(
+            receives
+                .begin(&workspace, policy.as_ref(), input)
+                .map_err(RpcError::from)?,
+        )
+    })
 }
 
-impl ArtifactReceiveBeginHandler {
-    pub fn new(
-        receives: Arc<ArtifactReceiveStore>,
-        policy: Arc<dyn SecurityPolicy>,
-        workspace: PathBuf,
-    ) -> Self {
-        Self {
-            receives,
-            policy,
-            workspace,
-        }
-    }
+pub fn receive_write(receives: Arc<ArtifactReceiveStore>) -> Arc<dyn ControlHandler> {
+    control_handler(move |request| {
+        let input: ArtifactReceiveWriteInput = parse_params(request)?;
+        serialize(
+            receives
+                .write(&input.receive_id, input.offset_bytes, input.content)
+                .map_err(RpcError::from)?,
+        )
+    })
 }
 
-impl ControlHandler for ArtifactReceiveBeginHandler {
-    fn handle(&self, request: &RpcRequest) -> Result<serde_json::Value, RpcError> {
-        let input: ArtifactReceiveBeginInput = serde_json::from_value(request.params.clone())
-            .map_err(|error| RpcError::new("rpc.invalidParams", error.to_string()))?;
-        let result = self
-            .receives
-            .begin(&self.workspace, self.policy.as_ref(), input)
-            .map_err(tool_error_to_rpc)?;
-        serde_json::to_value(result)
-            .map_err(|error| RpcError::new("rpc.serializeFailed", error.to_string()))
-    }
+pub fn receive_finish(receives: Arc<ArtifactReceiveStore>) -> Arc<dyn ControlHandler> {
+    control_handler(move |request| {
+        let input: ArtifactReceiveIdInput = parse_params(request)?;
+        serialize(receives.finish(&input.receive_id).map_err(RpcError::from)?)
+    })
 }
 
-pub struct ArtifactReceiveWriteHandler {
-    receives: Arc<ArtifactReceiveStore>,
-}
-
-impl ArtifactReceiveWriteHandler {
-    pub fn new(receives: Arc<ArtifactReceiveStore>) -> Self {
-        Self { receives }
-    }
-}
-
-impl ControlHandler for ArtifactReceiveWriteHandler {
-    fn handle(&self, request: &RpcRequest) -> Result<serde_json::Value, RpcError> {
-        let input: ArtifactReceiveWriteInput = serde_json::from_value(request.params.clone())
-            .map_err(|error| RpcError::new("rpc.invalidParams", error.to_string()))?;
-        let result = self
-            .receives
-            .write(&input.receive_id, input.offset_bytes, input.content)
-            .map_err(tool_error_to_rpc)?;
-        serde_json::to_value(result)
-            .map_err(|error| RpcError::new("rpc.serializeFailed", error.to_string()))
-    }
-}
-
-pub struct ArtifactReceiveFinishHandler {
-    receives: Arc<ArtifactReceiveStore>,
-}
-
-impl ArtifactReceiveFinishHandler {
-    pub fn new(receives: Arc<ArtifactReceiveStore>) -> Self {
-        Self { receives }
-    }
-}
-
-impl ControlHandler for ArtifactReceiveFinishHandler {
-    fn handle(&self, request: &RpcRequest) -> Result<serde_json::Value, RpcError> {
-        let input: ArtifactReceiveIdInput = serde_json::from_value(request.params.clone())
-            .map_err(|error| RpcError::new("rpc.invalidParams", error.to_string()))?;
-        let result = self
-            .receives
-            .finish(&input.receive_id)
-            .map_err(tool_error_to_rpc)?;
-        serde_json::to_value(result)
-            .map_err(|error| RpcError::new("rpc.serializeFailed", error.to_string()))
-    }
-}
-
-pub struct ArtifactReceiveAbortHandler {
-    receives: Arc<ArtifactReceiveStore>,
-}
-
-impl ArtifactReceiveAbortHandler {
-    pub fn new(receives: Arc<ArtifactReceiveStore>) -> Self {
-        Self { receives }
-    }
-}
-
-impl ControlHandler for ArtifactReceiveAbortHandler {
-    fn handle(&self, request: &RpcRequest) -> Result<serde_json::Value, RpcError> {
-        let input: ArtifactReceiveIdInput = serde_json::from_value(request.params.clone())
-            .map_err(|error| RpcError::new("rpc.invalidParams", error.to_string()))?;
-        self.receives
-            .abort(&input.receive_id)
-            .map_err(tool_error_to_rpc)?;
+pub fn receive_abort(receives: Arc<ArtifactReceiveStore>) -> Arc<dyn ControlHandler> {
+    control_handler(move |request| {
+        let input: ArtifactReceiveIdInput = parse_params(request)?;
+        receives.abort(&input.receive_id).map_err(RpcError::from)?;
         Ok(serde_json::json!({
             "aborted": true,
             "receiveId": input.receive_id
         }))
-    }
-}
-
-fn tool_error_to_rpc(error: ToolError) -> RpcError {
-    let mut rpc_error = RpcError::new(error.code, error.message);
-    rpc_error.retryable = error.retryable;
-    rpc_error.details = error.details;
-    rpc_error
+    })
 }

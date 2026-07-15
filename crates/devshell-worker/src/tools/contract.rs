@@ -70,6 +70,21 @@ pub struct ToolCatalogEntry {
     pub required_capabilities: Vec<ToolCapability>,
 }
 
+pub(crate) fn catalog_entry<I: JsonSchema, O: JsonSchema>(
+    name: &ToolName,
+    description: impl Into<String>,
+    capabilities: impl IntoIterator<Item = ToolCapability>,
+) -> ToolCatalogEntry {
+    ToolCatalogEntry {
+        group: name.group().to_string(),
+        name: name.as_str(),
+        description: description.into(),
+        input_schema: serde_json::to_value(schemars::schema_for!(I)).unwrap(),
+        output_schema: serde_json::to_value(schemars::schema_for!(O)).unwrap(),
+        required_capabilities: capabilities.into_iter().collect(),
+    }
+}
+
 pub trait ToolHandler: Send + Sync {
     fn name(&self) -> &ToolName;
     fn catalog_entry(&self) -> ToolCatalogEntry;

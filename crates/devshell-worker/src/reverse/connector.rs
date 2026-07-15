@@ -21,6 +21,8 @@ use tungstenite::stream::MaybeTlsStream;
 use tungstenite::{Error as WebSocketError, Message, WebSocket, connect};
 use url::Url;
 
+use super::hex;
+
 use crate::daemon::log_writer::append_log;
 use crate::instance::{InstanceName, WorkerReverseConfig};
 use crate::rpc::codec::{decode_request_frame, encode_json};
@@ -244,7 +246,6 @@ impl ReverseConnector {
             generation,
             Arc::clone(&upload_error),
         );
-        let mut event_id: Option<u64> = None;
         let mut event_name = String::new();
         let mut data = String::new();
         let reader = BufReader::new(response);
@@ -266,7 +267,6 @@ impl ReverseConnector {
                         self.responses.push_back(response)?;
                     }
                 }
-                event_id = None;
                 event_name.clear();
                 data.clear();
                 continue;
@@ -274,9 +274,7 @@ impl ReverseConnector {
             if line.starts_with(':') {
                 continue;
             }
-            if let Some(value) = line.strip_prefix("id:") {
-                event_id = value.trim().parse::<u64>().ok();
-            } else if let Some(value) = line.strip_prefix("event:") {
+            if let Some(value) = line.strip_prefix("event:") {
                 event_name = value.trim().to_string();
             } else if let Some(value) = line.strip_prefix("data:") {
                 if !data.is_empty() {
@@ -284,7 +282,6 @@ impl ReverseConnector {
                 }
                 data.push_str(value.trim());
             }
-            let _ = event_id;
         }
 
         drop(uploader);
@@ -685,17 +682,6 @@ fn reverse_endpoint(base: &str, endpoint_path: &str, websocket: bool) -> Result<
     }
     Ok(url)
 }
-
-fn hex(bytes: &[u8]) -> String {
-    const DIGITS: &[u8; 16] = b"0123456789abcdef";
-    let mut output = String::with_capacity(bytes.len() * 2);
-    for byte in bytes {
-        output.push(DIGITS[(byte >> 4) as usize] as char);
-        output.push(DIGITS[(byte & 0x0f) as usize] as char);
-    }
-    output
-}
-
 #[cfg(test)]
 mod tests {
     use std::fs;
@@ -721,7 +707,6 @@ mod tests {
     use crate::tools::artifact::payload::ArtifactPayloadStore;
     use crate::tools::artifact::receive::ArtifactReceiveStore;
     use crate::tools::artifact::store::ArtifactStore;
-    use crate::tools::file::FileToolState;
     use crate::tools::{
         ToolCall, ToolCapability, ToolCatalogEntry, ToolError, ToolHandler, ToolName, ToolRegistry,
     };
@@ -813,7 +798,6 @@ mod tests {
                 worker_sha256: Some("0".repeat(64)),
             },
             Arc::new(registry),
-            FileToolState::new(),
             payloads,
             receives,
         ));

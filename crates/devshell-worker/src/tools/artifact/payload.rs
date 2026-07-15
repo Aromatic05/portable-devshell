@@ -7,18 +7,20 @@ use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::UNIX_EPOCH;
 
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use serde::{Deserialize, Serialize};
 use tempfile::{Builder, NamedTempFile};
 use uuid::Uuid;
 
+use crate::platform::unix_time_millis;
 use crate::security::SecurityPolicy;
 use crate::security::path::{
     FilesystemCapability, PathNamespace, parse_requested_path, resolve_existing_target,
 };
 use crate::tools::ToolError;
+use crate::tools::artifact::storage;
 use crate::tools::artifact::store::{ArtifactLease, ArtifactStore};
 use crate::tools::artifact::types::ArtifactStream;
 
@@ -119,9 +121,9 @@ impl ArtifactPayloadStore {
         let temp_dir = root.join("tmp");
         fs::create_dir_all(&temp_dir)
             .map_err(|error| ToolError::new("artifact.storageFailed", error.to_string()))?;
-        set_private_dir(&root)?;
-        set_private_dir(&temp_dir)?;
-        clear_temp_dir(&temp_dir)?;
+        storage::ensure_private_dir(&root)?;
+        storage::ensure_private_dir(&temp_dir)?;
+        storage::clear_temp_files(&temp_dir)?;
         let store = Arc::new(Self {
             root,
             temp_dir,
@@ -271,7 +273,7 @@ impl ArtifactPayloadStore {
             .map_err(|_| ToolError::new("artifact.storageFailed", "payload lock poisoned"))?;
         self.gc_locked()?;
         let metadata = self.load_metadata(payload_id)?;
-        if metadata.expires_at_ms <= now_ms() {
+        if metadata.expires_at_ms <= unix_time_millis() {
             return Err(ToolError::new(
                 "artifact.payloadExpired",
                 "artifact payload has expired",
@@ -433,7 +435,7 @@ impl ArtifactPayloadStore {
     }
 
     fn gc_locked(&self) -> Result<(), ToolError> {
-        let now = now_ms();
+        let now = unix_time_millis();
         for entry in fs::read_dir(&self.root)
             .map_err(|error| ToolError::new("artifact.storageFailed", error.to_string()))?
         {
@@ -483,39 +485,24 @@ impl ArtifactPayloadStore {
     }
 
     fn load_metadata(&self, payload_id: &str) -> Result<ArtifactPayloadMetadata, ToolError> {
-        let bytes = fs::read(self.metadata_path(payload_id)).map_err(|_| {
-            ToolError::new(
-                "artifact.payloadNotFound",
-                "artifact payload is unavailable",
-            )
-        })?;
-        let metadata: ArtifactPayloadMetadata = serde_json::from_slice(&bytes).map_err(|_| {
-            ToolError::new(
-                "artifact.payloadNotFound",
-                "artifact payload metadata is invalid",
-            )
-        })?;
-        if metadata.version != METADATA_VERSION || metadata.payload_id != payload_id {
-            return Err(ToolError::new(
-                "artifact.payloadNotFound",
-                "artifact payload metadata is invalid",
-            ));
-        }
-        Ok(metadata)
+        storage::read_json(
+            &self.metadata_path(payload_id),
+            "artifact.payloadNotFound",
+            "artifact payload is unavailable",
+            "artifact payload metadata is invalid",
+            |metadata: &ArtifactPayloadMetadata| {
+                metadata.version == METADATA_VERSION && metadata.payload_id == payload_id
+            },
+        )
     }
 
     fn write_metadata(&self, metadata: &ArtifactPayloadMetadata) -> Result<(), ToolError> {
-        let mut temp = self.new_temp("payload-metadata-")?;
-        serde_json::to_writer(&mut temp, metadata)
-            .map_err(|error| ToolError::new("artifact.storageFailed", error.to_string()))?;
-        temp.flush()
-            .map_err(|error| ToolError::new("artifact.storageFailed", error.to_string()))?;
-        temp.as_file()
-            .sync_all()
-            .map_err(|error| ToolError::new("artifact.storageFailed", error.to_string()))?;
-        temp.persist(self.metadata_path(&metadata.payload_id))
-            .map_err(|error| ToolError::new("artifact.storageFailed", error.error.to_string()))?;
-        Ok(())
+        storage::write_json(
+            &self.temp_dir,
+            &self.metadata_path(&metadata.payload_id),
+            "payload-metadata-",
+            metadata,
+        )
     }
 
     fn new_temp(&self, prefix: &str) -> Result<NamedTempFile, ToolError> {
@@ -745,7 +732,7 @@ fn hash_file(file: &mut File) -> Result<(usize, String), ToolError> {
 }
 
 fn validate_expiration(expires_at_ms: u128) -> Result<(), ToolError> {
-    if expires_at_ms <= now_ms() {
+    if expires_at_ms <= unix_time_millis() {
         return Err(ToolError::new(
             "artifact.invalidLease",
             "artifact payload must expire in the future",
@@ -755,15 +742,7 @@ fn validate_expiration(expires_at_ms: u128) -> Result<(), ToolError> {
 }
 
 fn validate_id(value: &str) -> Result<(), ToolError> {
-    let parsed = Uuid::parse_str(value)
-        .map_err(|_| ToolError::new("artifact.invalidPayloadId", "payloadId is invalid"))?;
-    if parsed.to_string() != value {
-        return Err(ToolError::new(
-            "artifact.invalidPayloadId",
-            "payloadId is invalid",
-        ));
-    }
-    Ok(())
+    storage::validate_uuid(value, "artifact.invalidPayloadId", "payloadId is invalid")
 }
 
 fn validate_relative_archive_path(path: &str) -> Result<(), ToolError> {
@@ -803,29 +782,6 @@ fn modified_at_seconds(metadata: &Metadata) -> u64 {
         .unwrap_or(0)
 }
 
-fn clear_temp_dir(path: &Path) -> Result<(), ToolError> {
-    for entry in fs::read_dir(path)
-        .map_err(|error| ToolError::new("artifact.storageFailed", error.to_string()))?
-    {
-        let entry =
-            entry.map_err(|error| ToolError::new("artifact.storageFailed", error.to_string()))?;
-        if entry
-            .file_type()
-            .map_err(|error| ToolError::new("artifact.storageFailed", error.to_string()))?
-            .is_file()
-        {
-            fs::remove_file(entry.path())
-                .map_err(|error| ToolError::new("artifact.storageFailed", error.to_string()))?;
-        }
-    }
-    Ok(())
-}
-
-fn set_private_dir(path: &Path) -> Result<(), ToolError> {
-    crate::storage::permissions::ensure_dir(path, 0o700)
-        .map_err(|error| ToolError::new("artifact.storageFailed", error))
-}
-
 #[cfg(unix)]
 fn metadata_mode(metadata: &Metadata, _entry_type: DirectoryEntryType) -> u32 {
     metadata.permissions().mode() & 0o777
@@ -852,14 +808,6 @@ fn os_sort_key(value: &OsStr) -> Vec<u8> {
         .flat_map(u16::to_be_bytes)
         .collect::<Vec<_>>()
 }
-
-fn now_ms() -> u128 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis()
-}
-
 #[cfg(test)]
 mod tests {
     use std::fs;

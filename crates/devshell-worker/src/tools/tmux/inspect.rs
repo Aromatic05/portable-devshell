@@ -1,7 +1,5 @@
 use std::sync::Arc;
 
-use schemars::schema_for;
-
 use crate::tools::tmux::group::tmux_inspect_name;
 use crate::tools::tmux::state::TmuxState;
 use crate::tools::tmux::types::{TmuxInspectParams, TmuxPaneOperationOutput};
@@ -27,14 +25,11 @@ impl ToolHandler for TmuxInspectTool {
     }
 
     fn catalog_entry(&self) -> ToolCatalogEntry {
-        ToolCatalogEntry {
-            group: self.name.group().to_string(),
-            name: self.name.as_str(),
-            description: "Inspect terminal history without consuming unread output. Use this for curses applications or terminal screen state.".to_string(),
-            input_schema: serde_json::to_value(schema_for!(TmuxInspectParams)).unwrap(),
-            output_schema: serde_json::to_value(schema_for!(TmuxPaneOperationOutput)).unwrap(),
-            required_capabilities: vec![ToolCapability::Read],
-        }
+        crate::tools::contract::catalog_entry::<TmuxInspectParams, TmuxPaneOperationOutput>(
+            &self.name,
+            "Inspect terminal history without consuming unread output. Use this for curses applications or terminal screen state.".to_string(),
+            [ToolCapability::Read],
+        )
     }
 
     fn call(&self, call: ToolCall) -> Result<serde_json::Value, ToolError> {

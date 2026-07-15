@@ -1,7 +1,6 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use schemars::schema_for;
 use serde_json::json;
 
 use crate::tools::file::FileToolState;
@@ -28,7 +27,11 @@ impl ToolHandler for FileFindTool {
         &self.name
     }
     fn catalog_entry(&self) -> ToolCatalogEntry {
-        ToolCatalogEntry { group: self.name.group().to_string(), name: self.name.as_str(), description: "Find files and directories by exact path or glob.".to_string(), input_schema: serde_json::to_value(schema_for!(FileFindInput)).unwrap(), output_schema: serde_json::to_value(schema_for!(FileFindOutput)).unwrap(), required_capabilities: vec![ToolCapability::Read] }
+        crate::tools::contract::catalog_entry::<FileFindInput, FileFindOutput>(
+            &self.name,
+            "Find files and directories by exact path or glob.".to_string(),
+            [ToolCapability::Read],
+        )
     }
     fn call(&self, call: ToolCall) -> Result<serde_json::Value, ToolError> {
         call.check_cancelled()?;

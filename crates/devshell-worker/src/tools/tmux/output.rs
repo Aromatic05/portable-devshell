@@ -1,3 +1,5 @@
+use super::warning;
+
 use crate::tools::tmux::backend::BackendPane;
 use crate::tools::tmux::types::TmuxWarning;
 
@@ -146,15 +148,6 @@ fn append_unread(
         ));
     }
 }
-
-fn warning(pane: Option<&str>, code: &str, message: &str) -> TmuxWarning {
-    TmuxWarning {
-        pane: pane.map(ToOwned::to_owned),
-        code: code.to_string(),
-        message: message.to_string(),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::changed_output;

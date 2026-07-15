@@ -5,12 +5,13 @@ use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::thread;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::daemon::process::WorkerRuntimeContext;
+use crate::platform::unix_time_millis;
 use crate::socket::SocketPaths;
 use crate::storage::InstancePaths;
 use crate::storage::permissions::ensure_dir;
@@ -476,7 +477,7 @@ impl TmuxBackend {
             schema_version: 1,
             session_id: Uuid::new_v4().to_string(),
             instance: self.instance.clone(),
-            created_at_ms: now_ms(),
+            created_at_ms: unix_time_millis(),
         }
     }
 
@@ -651,7 +652,7 @@ impl PaneRecord {
             pane_id: new_pane_id(),
             pane_incarnation_id: Uuid::new_v4().to_string(),
             name: name.to_string(),
-            created_at_ms: now_ms(),
+            created_at_ms: unix_time_millis(),
         })
     }
 }
@@ -714,14 +715,6 @@ fn new_pane_id() -> String {
     let uuid = Uuid::new_v4().simple().to_string();
     format!("pane-{}", &uuid[..26])
 }
-
-fn now_ms() -> u128 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis()
-}
-
 fn atomic_write_bytes(path: &Path, bytes: &[u8]) -> Result<(), ToolError> {
     let parent = path
         .parent()

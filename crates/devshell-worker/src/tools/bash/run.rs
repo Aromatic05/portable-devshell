@@ -8,8 +8,6 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use schemars::schema_for;
-
 use crate::daemon::process_registry::ActiveProcessGuard;
 use crate::platform;
 use crate::security::path::{FilesystemCapability, parse_requested_path, resolve_existing_target};
@@ -46,14 +44,11 @@ impl ToolHandler for BashRunTool {
         &self.name
     }
     fn catalog_entry(&self) -> ToolCatalogEntry {
-        ToolCatalogEntry {
-            group: self.name.group().to_string(),
-            name: self.name.as_str(),
-            description: self.shell.catalog_description(),
-            input_schema: serde_json::to_value(schema_for!(BashRunParams)).unwrap(),
-            output_schema: serde_json::to_value(schema_for!(BashRunOutput)).unwrap(),
-            required_capabilities: vec![ToolCapability::Execute],
-        }
+        crate::tools::contract::catalog_entry::<BashRunParams, BashRunOutput>(
+            &self.name,
+            self.shell.catalog_description(),
+            [ToolCapability::Execute],
+        )
     }
     fn call(&self, call: ToolCall) -> Result<serde_json::Value, ToolError> {
         call.check_cancelled()?;

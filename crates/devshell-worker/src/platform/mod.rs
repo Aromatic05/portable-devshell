@@ -1,4 +1,5 @@
 mod environment;
+use std::time::{SystemTime, UNIX_EPOCH};
 #[cfg(unix)]
 mod unix;
 #[cfg(windows)]
@@ -15,3 +16,10 @@ pub use windows::{
 };
 
 pub use environment::detect_environment;
+
+pub(crate) fn unix_time_millis() -> u128 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis()
+}

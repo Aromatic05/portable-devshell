@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use serde_json::json;
 
 use crate::daemon::process::WorkerRuntimeContext;
@@ -5,23 +7,11 @@ use crate::instance::WorkerConfig;
 use crate::platform::detect_environment;
 use crate::rpc::codec::PROTOCOL_VERSION;
 use crate::rpc::error::RpcError;
-use crate::rpc::request::RpcRequest;
-use crate::rpc::router::ControlHandler;
+use crate::rpc::router::{ControlHandler, control_handler};
 use crate::tools::bash::runtime::ShellRuntime;
 
-pub struct HandshakeHandler {
-    config: WorkerConfig,
-    runtime: WorkerRuntimeContext,
-}
-
-impl HandshakeHandler {
-    pub fn new(config: WorkerConfig, runtime: WorkerRuntimeContext) -> Self {
-        Self { config, runtime }
-    }
-}
-
-impl ControlHandler for HandshakeHandler {
-    fn handle(&self, request: &RpcRequest) -> Result<serde_json::Value, RpcError> {
+pub fn handler(config: WorkerConfig, runtime: WorkerRuntimeContext) -> Arc<dyn ControlHandler> {
+    control_handler(move |request| {
         let min_protocol_version = request
             .params
             .get("minProtocolVersion")
@@ -50,14 +40,14 @@ impl ControlHandler for HandshakeHandler {
         let shell = ShellRuntime::detect().ok();
         let environment = detect_environment();
         Ok(json!({
-            "instance": self.config.instance,
-            "workspace": self.runtime.workspace,
+            "instance": config.instance,
+            "workspace": runtime.workspace,
             "workerVersion": env!("CARGO_PKG_VERSION"),
-            "workerSha256": self.runtime.worker_sha256,
+            "workerSha256": runtime.worker_sha256,
             "protocolVersion": PROTOCOL_VERSION,
             "platform": {
-                "os": self.runtime.platform.os,
-                "arch": self.runtime.platform.arch,
+                "os": runtime.platform.os,
+                "arch": runtime.platform.arch,
                 "distribution": environment.distribution,
                 "packageManager": environment.package_manager,
                 "shell": shell.as_ref().map(|shell| json!({
@@ -72,5 +62,5 @@ impl ControlHandler for HandshakeHandler {
                 "cancel": true
             }
         }))
-    }
+    })
 }

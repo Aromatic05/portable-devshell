@@ -67,6 +67,14 @@ fn normalize_schema(value: &mut serde_json::Value) {
     }
 }
 
+fn is_numeric_type(value: &serde_json::Value) -> bool {
+    match value {
+        serde_json::Value::String(kind) => kind == "integer" || kind == "number",
+        serde_json::Value::Array(kinds) => kinds.iter().any(is_numeric_type),
+        _ => false,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use serde_json::json;
@@ -92,13 +100,5 @@ mod tests {
             },
             "type": "object"
         }));
-    }
-}
-
-fn is_numeric_type(value: &serde_json::Value) -> bool {
-    match value {
-        serde_json::Value::String(kind) => kind == "integer" || kind == "number",
-        serde_json::Value::Array(kinds) => kinds.iter().any(is_numeric_type),
-        _ => false,
     }
 }

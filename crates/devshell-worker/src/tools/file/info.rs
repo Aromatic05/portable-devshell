@@ -1,23 +1,18 @@
 use std::fs;
-use std::sync::Arc;
 use std::time::UNIX_EPOCH;
-
-use schemars::schema_for;
 
 use crate::security::path::parse_requested_path;
 use crate::tools::file::types::{FileInfoEntry, FileInfoInput, FileInfoOutput};
-use crate::tools::file::{FileToolState, authorize, resolve_info};
+use crate::tools::file::{authorize, resolve_info};
 use crate::tools::{ToolCall, ToolCapability, ToolCatalogEntry, ToolError, ToolHandler, ToolName};
 
 pub struct FileInfoTool {
     name: ToolName,
-    _state: Arc<FileToolState>,
 }
 impl FileInfoTool {
-    pub fn new(state: Arc<FileToolState>) -> Self {
+    pub fn new() -> Self {
         Self {
             name: ToolName::parse("file_info").unwrap(),
-            _state: state,
         }
     }
 }
@@ -26,14 +21,11 @@ impl ToolHandler for FileInfoTool {
         &self.name
     }
     fn catalog_entry(&self) -> ToolCatalogEntry {
-        ToolCatalogEntry {
-            group: self.name.group().to_string(),
-            name: self.name.as_str(),
-            description: "Inspect file metadata without following the final symbolic link.".to_string(),
-            input_schema: serde_json::to_value(schema_for!(FileInfoInput)).unwrap(),
-            output_schema: serde_json::to_value(schema_for!(FileInfoOutput)).unwrap(),
-            required_capabilities: vec![ToolCapability::Read],
-        }
+        crate::tools::contract::catalog_entry::<FileInfoInput, FileInfoOutput>(
+            &self.name,
+            "Inspect file metadata without following the final symbolic link.".to_string(),
+            [ToolCapability::Read],
+        )
     }
     fn call(&self, call: ToolCall) -> Result<serde_json::Value, ToolError> {
         call.check_cancelled()?;

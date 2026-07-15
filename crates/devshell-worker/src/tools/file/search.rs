@@ -5,7 +5,6 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use regex::RegexBuilder;
-use schemars::schema_for;
 use serde_json::json;
 
 use crate::tools::file::FileToolState;
@@ -60,7 +59,11 @@ impl ToolHandler for FileSearchTool {
         &self.name
     }
     fn catalog_entry(&self) -> ToolCatalogEntry {
-        ToolCatalogEntry { group: self.name.group().to_string(), name: self.name.as_str(), description: "Search text in files, directories, or globs. Returned source lines prepare those lines for file_edit.".to_string(), input_schema: serde_json::to_value(schema_for!(FileSearchInput)).unwrap(), output_schema: serde_json::to_value(schema_for!(FileSearchOutput)).unwrap(), required_capabilities: vec![ToolCapability::Read] }
+        crate::tools::contract::catalog_entry::<FileSearchInput, FileSearchOutput>(
+            &self.name,
+            "Search text in files, directories, or globs. Returned source lines prepare those lines for file_edit.".to_string(),
+            [ToolCapability::Read],
+        )
     }
     fn call(&self, call: ToolCall) -> Result<serde_json::Value, ToolError> {
         call.check_cancelled()?;

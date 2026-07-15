@@ -1,7 +1,5 @@
 use std::sync::Arc;
 
-use schemars::schema_for;
-
 use crate::tools::tmux::group::tmux_read_name;
 use crate::tools::tmux::state::TmuxState;
 use crate::tools::tmux::types::{TmuxReadParams, TmuxTaskOperationOutput};
@@ -27,14 +25,11 @@ impl ToolHandler for TmuxReadTool {
     }
 
     fn catalog_entry(&self) -> ToolCatalogEntry {
-        ToolCatalogEntry {
-            group: self.name.group().to_string(),
-            name: self.name.as_str(),
-            description: "Consume unread terminal output associated with a managed task. Output is derived from terminal history and may include command echo, shell prompts, and terminal-rendered text; it is not raw process stdout. Positive line values return the oldest unread lines, zero discards unread output, and negative values return only the requested tail.".to_string(),
-            input_schema: serde_json::to_value(schema_for!(TmuxReadParams)).unwrap(),
-            output_schema: serde_json::to_value(schema_for!(TmuxTaskOperationOutput)).unwrap(),
-            required_capabilities: vec![ToolCapability::Read],
-        }
+        crate::tools::contract::catalog_entry::<TmuxReadParams, TmuxTaskOperationOutput>(
+            &self.name,
+            "Consume unread terminal output associated with a managed task. Output is derived from terminal history and may include command echo, shell prompts, and terminal-rendered text; it is not raw process stdout. Positive line values return the oldest unread lines, zero discards unread output, and negative values return only the requested tail.".to_string(),
+            [ToolCapability::Read],
+        )
     }
 
     fn call(&self, call: ToolCall) -> Result<serde_json::Value, ToolError> {
