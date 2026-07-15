@@ -1,6 +1,5 @@
 export * from "./control/TuiControlClient.js";
 export * from "./control/TuiControlConnection.js";
-export * from "./control/TuiControlRequest.js";
 export * from "./control/TuiControlSession.js";
 export * from "./control/TuiControlStream.js";
 export * from "./attach/AttachShellAvailability.js";

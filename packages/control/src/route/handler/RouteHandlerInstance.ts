@@ -353,11 +353,7 @@ function truncateLogMessage<TLog extends { message: string }>(log: TLog, availab
 
 function readFromSeq(params?: JsonValue): number {
     if (!isRecord(params) || typeof params.fromSeq !== "number") {
-        throw createError({
-            code: errorCodes.targetInvalid,
-            message: "instance.subscribe requires numeric fromSeq.",
-            retryable: false
-        });
+        throw invalidTarget("instance.subscribe requires numeric fromSeq.");
     }
 
     return params.fromSeq;
@@ -365,11 +361,7 @@ function readFromSeq(params?: JsonValue): number {
 
 function readToolCall(params?: JsonValue): { input: JsonValue; toolName: string } {
     if (!isRecord(params) || typeof params.toolName !== "string") {
-        throw createError({
-            code: errorCodes.targetInvalid,
-            message: "instance.callTool requires toolName.",
-            retryable: false
-        });
+        throw invalidTarget("instance.callTool requires toolName.");
     }
 
     return {
@@ -380,11 +372,7 @@ function readToolCall(params?: JsonValue): { input: JsonValue; toolName: string 
 
 function readApprovalId(params: JsonValue | undefined, method: string): string {
     if (!isRecord(params) || typeof params.approvalId !== "string") {
-        throw createError({
-            code: errorCodes.targetInvalid,
-            message: `${method} requires approvalId.`,
-            retryable: false
-        });
+        throw invalidTarget(`${method} requires approvalId.`);
     }
 
     return params.approvalId;
@@ -394,11 +382,7 @@ function readApprovalDecision(
     params?: JsonValue
 ): { decision: ApprovalDecision["decision"]; policyPatch?: JsonValue; reason?: string; remember?: boolean } {
     if (!isRecord(params) || (params.decision !== "approve" && params.decision !== "deny")) {
-        throw createError({
-            code: errorCodes.targetInvalid,
-            message: "instance.decideApproval requires decision to be approve or deny.",
-            retryable: false
-        });
+        throw invalidTarget("instance.decideApproval requires decision to be approve or deny.");
     }
 
     return {
@@ -408,12 +392,12 @@ function readApprovalDecision(
             ? {}
             : typeof params.reason === "string"
               ? { reason: params.reason }
-              : failToolCallQuery("instance.decideApproval requires string reason.")),
+              : failInvalidTarget("instance.decideApproval requires string reason.")),
         ...(params.remember === undefined
             ? {}
             : typeof params.remember === "boolean"
               ? { remember: params.remember }
-              : failToolCallQuery("instance.decideApproval requires boolean remember."))
+              : failInvalidTarget("instance.decideApproval requires boolean remember."))
     };
 }
 
@@ -423,15 +407,15 @@ function readToolCallQuery(params?: JsonValue): ToolCallQuery {
     }
 
     if (params.after !== undefined && typeof params.after !== "string") {
-        throw invalidToolCallQuery("instance.readToolCalls requires string after.");
+        throw invalidTarget("instance.readToolCalls requires string after.");
     }
 
     if (params.before !== undefined && typeof params.before !== "string") {
-        throw invalidToolCallQuery("instance.readToolCalls requires string before.");
+        throw invalidTarget("instance.readToolCalls requires string before.");
     }
 
     if (params.limit !== undefined && typeof params.limit !== "number") {
-        throw invalidToolCallQuery("instance.readToolCalls requires numeric limit.");
+        throw invalidTarget("instance.readToolCalls requires numeric limit.");
     }
 
     return {
@@ -444,7 +428,7 @@ function readToolCallQuery(params?: JsonValue): ToolCallQuery {
             ? {}
             : typeof params.toolName === "string"
               ? { toolName: params.toolName }
-              : failToolCallQuery("instance.readToolCalls requires string toolName."))
+              : failInvalidTarget("instance.readToolCalls requires string toolName."))
     };
 }
 
@@ -453,7 +437,7 @@ function readToolCallSource(value: JsonValue): ToolCallSource {
         return value;
     }
 
-    throw invalidToolCallQuery("instance.readToolCalls requires source to be cli, tui, or mcp.");
+    throw invalidTarget("instance.readToolCalls requires source to be cli, tui, or mcp.");
 }
 
 function readToolCallStatus(value: JsonValue): ToolCallStatus {
@@ -468,10 +452,10 @@ function readToolCallStatus(value: JsonValue): ToolCallStatus {
         return value;
     }
 
-    throw invalidToolCallQuery("instance.readToolCalls requires status to be pendingApproval, running, completed, failed, denied, or expired.");
+    throw invalidTarget("instance.readToolCalls requires status to be pendingApproval, running, completed, failed, denied, or expired.");
 }
 
-function invalidToolCallQuery(message: string) {
+function invalidTarget(message: string) {
     return createError({
         code: errorCodes.targetInvalid,
         message,
@@ -479,6 +463,6 @@ function invalidToolCallQuery(message: string) {
     });
 }
 
-function failToolCallQuery(message: string): never {
-    throw invalidToolCallQuery(message);
+function failInvalidTarget(message: string): never {
+    throw invalidTarget(message);
 }

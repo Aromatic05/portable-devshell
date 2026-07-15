@@ -1,7 +1,11 @@
-import { createConnection } from "node:net";
 import { setTimeout as sleep } from "node:timers/promises";
 
-import { FrameReader, FrameWriter, type JsonValue } from "@portable-devshell/shared";
+import {
+    ProtocolControlClientConnection,
+    createControlTarget,
+    type ControlResponseEnvelope,
+    type JsonValue
+} from "@portable-devshell/shared";
 
 import { ControlDaemon, type ControlDaemonSpawnOptions } from "./ControlDaemon.js";
 import { ControlLogger } from "./ControlLogger.js";
@@ -15,7 +19,7 @@ export interface ControlLifecycleStatus {
 }
 
 export interface ControlLifecycleRpcClient {
-    request(method: string, params?: JsonValue): Promise<JsonValue>;
+    request(method: "control.shutdown" | "control.status"): Promise<JsonValue>;
 }
 
 export interface ControlLifecycleManagerOptions extends ControlDaemonSpawnOptions {
@@ -46,7 +50,7 @@ export class ControlLifecycleManager {
             spawnFunction: options.spawnFunction,
             xdgRuntimeDir: options.xdgRuntimeDir
         };
-        this.#rpcClient = options.rpcClient ?? new SocketControlLifecycleRpcClient(this.#socketFile.path);
+        this.#rpcClient = options.rpcClient ?? createSocketControlLifecycleRpcClient(this.#socketFile.path);
     }
 
     async start(): Promise<ControlLifecycleStatus> {
@@ -148,96 +152,32 @@ export class ControlLifecycleManager {
     }
 }
 
-class SocketControlLifecycleRpcClient implements ControlLifecycleRpcClient {
-    readonly #socketPath: string;
-
-    constructor(socketPath: string) {
-        this.#socketPath = socketPath;
-    }
-
-    async request(method: string, params?: JsonValue): Promise<JsonValue> {
-        const socket = createConnection(this.#socketPath);
-        const reader = new FrameReader();
-        const writer = new FrameWriter(socket);
-        let settled = false;
-        let resolveResponse: (value: JsonValue) => void = () => undefined;
-        let rejectResponse: (reason?: unknown) => void = () => undefined;
-
-        const resolveOnce = (value: JsonValue): void => {
-            if (settled) {
-                return;
+function createSocketControlLifecycleRpcClient(socketPath: string): ControlLifecycleRpcClient {
+    return {
+        async request(method) {
+            const connection = new ProtocolControlClientConnection<null, Error>({
+                connectionClosedMessage: null,
+                mapConnectionError: toError,
+                mapRemoteError: toRemoteError,
+                mapStreamMessage: () => null,
+                requestIdPrefix: "lifecycle",
+                socketPath
+            });
+            try {
+                return await connection.request(method, createControlTarget()) as unknown as JsonValue;
+            } finally {
+                connection.close();
             }
-
-            settled = true;
-            socket.end();
-            resolveResponse(value);
-        };
-
-        const rejectOnce = (error: unknown): void => {
-            if (settled) {
-                return;
-            }
-
-            settled = true;
-            socket.destroy();
-            rejectResponse(error);
-        };
-
-        await new Promise<void>((resolve, reject) => {
-            socket.once("connect", resolve);
-            socket.once("error", reject);
-        });
-
-        const response = new Promise<JsonValue>((resolve, reject) => {
-            resolveResponse = resolve;
-            rejectResponse = reject;
-
-            socket.on("data", (chunk: Uint8Array) => {
-                for (const frame of reader.push(chunk)) {
-                    if (!isJsonRecord(frame) || frame.type !== "response") {
-                        continue;
-                    }
-
-                    if (frame.ok !== true) {
-                        rejectOnce(
-                            new Error(
-                                isJsonRecord(frame.error) && typeof frame.error.message === "string"
-                                    ? frame.error.message
-                                    : "control request failed"
-                            )
-                        );
-                        return;
-                    }
-
-                    resolveOnce((frame.result ?? null) as JsonValue);
-                }
-            });
-            socket.once("error", (error) => {
-                rejectOnce(error);
-            });
-            socket.once("close", () => {
-                rejectOnce(new Error("control connection closed"));
-            });
-        });
-
-        try {
-            await writer.write({
-                id: `${method}-${Date.now()}`,
-                method,
-                params,
-                target: { kind: "control" },
-                type: "request"
-            } as unknown as JsonValue);
-        } catch (error) {
-            rejectOnce(error);
         }
+    };
+}
 
-        try {
-            return await response;
-        } finally {
-            socket.destroy();
-        }
-    }
+function toError(error: unknown): Error {
+    return error instanceof Error ? error : new Error(String(error));
+}
+
+function toRemoteError(response: ControlResponseEnvelope): Error {
+    return new Error(response.error?.message ?? "control request failed");
 }
 
 function isJsonRecord(value: JsonValue): value is { [key: string]: JsonValue } {

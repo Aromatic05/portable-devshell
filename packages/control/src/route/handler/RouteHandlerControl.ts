@@ -142,64 +142,31 @@ export class RouteHandlerControl {
     }
 
     #requireArtifactService(): ArtifactService {
-        if (this.#artifactService !== undefined) {
-            return this.#artifactService;
-        }
-        throw createError({
-            code: errorCodes.envelopeInvalid,
-            message: "Artifact service is not available.",
-            retryable: false
-        });
+        return requireService(this.#artifactService, "Artifact service is not available.");
     }
 
     #requireInstanceCreateService(): ControlInstanceCreateService {
-        if (this.#instanceCreateService !== undefined) {
-            return this.#instanceCreateService;
-        }
-
-        throw createError({
-            code: errorCodes.envelopeInvalid,
-            message: "Instance creation is not available.",
-            retryable: false
-        });
+        return requireService(this.#instanceCreateService, "Instance creation is not available.");
     }
 
     #requireConfigEditorService(): ControlConfigEditorService {
-        if (this.#configEditorService !== undefined) {
-            return this.#configEditorService;
-        }
-
-        throw createError({
-            code: errorCodes.envelopeInvalid,
-            message: "Config editing is not available.",
-            retryable: false
-        });
+        return requireService(this.#configEditorService, "Config editing is not available.");
     }
 
     #requireOAuthApprovals(): McpOAuthApprovalService {
-        const approvals = this.#getOAuthApprovals();
-        if (approvals !== undefined) {
-            return approvals;
-        }
-
-        throw createError({
-            code: errorCodes.envelopeInvalid,
-            message: "OAuth approvals are not available.",
-            retryable: false
-        });
+        return requireService(this.#getOAuthApprovals(), "OAuth approvals are not available.");
     }
+
     #requireReverseControlService(): ReverseControlService {
-        if (this.#reverseControlService !== undefined) {
-            return this.#reverseControlService;
-        }
-
-        throw createError({
-            code: errorCodes.envelopeInvalid,
-            message: "Reverse connection management is not available.",
-            retryable: false
-        });
+        return requireService(this.#reverseControlService, "Reverse connection management is not available.");
     }
+}
 
+function requireService<T>(service: T | undefined, message: string): T {
+    if (service !== undefined) {
+        return service;
+    }
+    throw createError({ code: errorCodes.envelopeInvalid, message, retryable: false });
 }
 
 function isRecord(value: JsonValue | undefined): value is Record<string, JsonValue> {

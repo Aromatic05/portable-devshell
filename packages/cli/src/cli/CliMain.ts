@@ -4,22 +4,7 @@ import { isCliEntrypoint } from "./CliEntrypoint.js";
 import { CliParser, type CliParsedCommand } from "./CliParser.js";
 import { executeArtifactCommand, type ArtifactCliClient } from "./artifact/ArtifactCommand.js";
 import { CliControlClient, type CliControlClientLike } from "./control/CliControlClient.js";
-import { CliCommandControlLogs } from "./command/control/CliCommandControlLogs.js";
-import { CliCommandControlStart, type CliLifecycleManagerLike } from "./command/control/CliCommandControlStart.js";
-import { CliCommandControlStatus } from "./command/control/CliCommandControlStatus.js";
-import { CliCommandControlStop } from "./command/control/CliCommandControlStop.js";
-import { CliCommandInstanceCall } from "./command/instance/CliCommandInstanceCall.js";
 import { CliCommandInstanceCreate } from "./command/instance/CliCommandInstanceCreate.js";
-import { CliCommandInstanceList } from "./command/instance/CliCommandInstanceList.js";
-import { CliCommandInstanceLogs } from "./command/instance/CliCommandInstanceLogs.js";
-import { CliCommandInstanceStart } from "./command/instance/CliCommandInstanceStart.js";
-import { CliCommandInstanceStatus } from "./command/instance/CliCommandInstanceStatus.js";
-import { CliCommandInstanceStop } from "./command/instance/CliCommandInstanceStop.js";
-import {
-    CliCommandInstanceDeviceCode,
-    CliCommandInstanceRevokeToken,
-    CliCommandInstanceRotateToken
-} from "./command/instance/CliCommandInstanceReverse.js";
 import { CliCommandInstanceTodo } from "./command/instance/CliCommandInstanceTodo.js";
 import { CliCommandWatchLogs } from "./command/watch/CliCommandWatchLogs.js";
 import { CliCommandWatchStatus } from "./command/watch/CliCommandWatchStatus.js";
@@ -52,6 +37,13 @@ export interface CliMainOptions {
     stderr?: { write(chunk: string): void };
     stdout?: { write(chunk: string): void };
     xdgRuntimeDir?: string;
+}
+
+export interface CliLifecycleManagerLike {
+    logs(): Promise<string>;
+    start(): Promise<{ instanceCount: number; pid?: number; running: boolean }>;
+    status(): Promise<{ instanceCount: number; pid?: number; running: boolean }>;
+    stop(): Promise<{ instanceCount: number; pid?: number; running: boolean }>;
 }
 
 export class CliMain {
@@ -94,16 +86,16 @@ export class CliMain {
     async #execute(command: CliParsedCommand): Promise<void> {
         switch (command.kind) {
             case "control.start":
-                this.#stdout.write(renderControlStatus(await new CliCommandControlStart().execute(await this.#lifecycle())));
+                this.#stdout.write(renderControlStatus(await (await this.#lifecycle()).start()));
                 return;
             case "control.stop":
-                this.#stdout.write(renderControlStatus(await new CliCommandControlStop().execute(await this.#lifecycle())));
+                this.#stdout.write(renderControlStatus(await (await this.#lifecycle()).stop()));
                 return;
             case "control.status":
-                this.#stdout.write(renderControlStatus(await new CliCommandControlStatus().execute(await this.#lifecycle())));
+                this.#stdout.write(renderControlStatus(await (await this.#lifecycle()).status()));
                 return;
             case "control.logs":
-                this.#stdout.write(renderControlLogs(await new CliCommandControlLogs().execute(await this.#lifecycle())));
+                this.#stdout.write(renderControlLogs(await (await this.#lifecycle()).logs()));
                 return;
             case "artifact":
                 await executeArtifactCommand(command.args, requireArtifactClient(this.#createClient()), this.#stdout);
@@ -112,7 +104,7 @@ export class CliMain {
                 await this.#startTui();
                 return;
             case "instance.list":
-                this.#stdout.write(renderInstanceList(await new CliCommandInstanceList().execute(this.#createClient())));
+                this.#stdout.write(renderInstanceList(await this.#createClient().listInstances()));
                 return;
             case "instance.create": {
                 const result = await new CliCommandInstanceCreate().execute(
@@ -131,34 +123,28 @@ export class CliMain {
             }
             case "instance.deviceCode":
                 this.#stdout.write(
-                    renderReverseDeviceCode(
-                        await new CliCommandInstanceDeviceCode().execute(this.#createClient(), command.instance)
-                    )
+                    renderReverseDeviceCode(await this.#createClient().createReverseDeviceCode(command.instance))
                 );
                 return;
             case "instance.rotateToken":
                 this.#stdout.write(
-                    renderReverseTokenRotation(
-                        await new CliCommandInstanceRotateToken().execute(this.#createClient(), command.instance)
-                    )
+                    renderReverseTokenRotation(await this.#createClient().rotateReverseDeviceToken(command.instance))
                 );
                 return;
             case "instance.revokeToken":
                 this.#stdout.write(
-                    renderReverseTokenRevocation(
-                        await new CliCommandInstanceRevokeToken().execute(this.#createClient(), command.instance)
-                    )
+                    renderReverseTokenRevocation(await this.#createClient().revokeReverseDeviceToken(command.instance))
                 );
                 return;
             case "instance.status":
                 this.#stdout.write(
-                    renderInstanceSnapshot((await new CliCommandInstanceStatus().execute(this.#createClient(), command.instance)).snapshot)
+                    renderInstanceSnapshot((await this.#createClient().getSnapshot(command.instance)).snapshot)
                 );
                 return;
             case "instance.start":
                 this.#stdout.write(
                     renderInstanceSnapshot(
-                        await new CliCommandInstanceStart().execute(this.#createClient(), command.instance, {
+                        await this.#createClient().startInstance(command.instance, {
                             input: this.#stdin,
                             output: this.#stderr
                         })
@@ -166,7 +152,7 @@ export class CliMain {
                 );
                 return;
             case "instance.stop":
-                this.#stdout.write(renderInstanceSnapshot(await new CliCommandInstanceStop().execute(this.#createClient(), command.instance)));
+                this.#stdout.write(renderInstanceSnapshot(await this.#createClient().stopInstance(command.instance)));
                 return;
             case "instance.logs":
                 if (command.follow) {
@@ -181,7 +167,7 @@ export class CliMain {
                     return;
                 }
 
-                this.#stdout.write(renderInstanceLogs(await new CliCommandInstanceLogs().execute(this.#createClient(), command.instance)));
+                this.#stdout.write(renderInstanceLogs(await this.#createClient().readLogs(command.instance)));
                 return;
             case "instance.todo":
                 await new CliCommandInstanceTodo().execute(
@@ -197,9 +183,7 @@ export class CliMain {
             case "instance.call":
                 this.#stdout.write(renderToolCall(command.instance, command.toolName));
                 this.#stdout.write(
-                    renderToolResult(
-                        await new CliCommandInstanceCall().execute(this.#createClient(), command.instance, command.toolName, command.input)
-                    )
+                    renderToolResult(await this.#createClient().callTool(command.instance, command.toolName, command.input))
                 );
                 return;
             case "watch.logs":

@@ -2,13 +2,21 @@ import { createConnection, type Socket } from "node:net";
 import { resolveControlSocketPath } from "../runtime/RuntimeControlPath.js";
 
 import type { ControlEventEnvelope, ControlRelayInputEnvelope, ControlResponseEnvelope } from "./envelope/ProtocolEnvelopeControl.js";
-import type { ControlTarget } from "./envelope/ProtocolEnvelopeTarget.js";
+import { createControlTarget, type ControlTarget } from "./envelope/ProtocolEnvelopeTarget.js";
 import { FrameReader } from "./frame/ProtocolFrameReader.js";
 import { FrameWriter } from "./frame/ProtocolFrameWriter.js";
+import { controlMethods } from "./method/ProtocolMethodControl.js";
+import type {
+    ControlRpcMethod,
+    ControlRpcParams,
+    ControlRpcRequestArgs,
+    ControlRpcResult,
+    ControlRpcTarget
+} from "./method/ProtocolMethodContract.js";
 import type { JsonValue } from "../type/TypeJsonValue.js";
 
 export interface ProtocolControlClientConnectionOptions<TStreamMessage, TError extends Error> {
-    clientKind: "cli" | "tui";
+    clientKind?: "cli" | "tui";
     connectionClosedMessage: TStreamMessage;
     mapConnectionError(error: unknown): TError;
     mapRemoteError(response: ControlResponseEnvelope): TError;
@@ -20,7 +28,7 @@ export interface ProtocolControlClientConnectionOptions<TStreamMessage, TError e
 }
 
 export class ProtocolControlClientConnection<TStreamMessage, TError extends Error> {
-    readonly #clientKind: "cli" | "tui";
+    readonly #clientKind?: "cli" | "tui";
     readonly #connectionClosedMessage: TStreamMessage;
     readonly #mapConnectionError: (error: unknown) => TError;
     readonly #mapRemoteError: (response: ControlResponseEnvelope) => TError;
@@ -54,19 +62,29 @@ export class ProtocolControlClientConnection<TStreamMessage, TError extends Erro
         this.#socketPath = options.socketPath ?? this.#resolveDefaultSocketPath(options.xdgRuntimeDir);
     }
 
-    async request(method: string, target: ControlTarget, params?: JsonValue): Promise<JsonValue> {
+    async request<TMethod extends ControlRpcMethod>(
+        method: TMethod,
+        target: ControlRpcTarget<TMethod>,
+        ...args: ControlRpcRequestArgs<TMethod>
+    ): Promise<ControlRpcResult<TMethod>> {
         await this.connect();
-        return await this.#requestConnected(method, target, params);
+        return (await this.#requestConnected(method, target, toWireParams(args[0]))) as unknown as ControlRpcResult<TMethod>;
     }
 
-    async requestWithRelay(
-        method: string,
-        target: ControlTarget,
+    async requestWithRelay<TMethod extends ControlRpcMethod>(
+        method: TMethod,
+        target: ControlRpcTarget<TMethod>,
         relay: { onOutput(chunk: string): void; onRequestId?(requestId: string): void },
-        params?: JsonValue
-    ): Promise<JsonValue> {
+        ...args: ControlRpcRequestArgs<TMethod>
+    ): Promise<ControlRpcResult<TMethod>> {
         await this.connect();
-        return await this.#requestConnected(method, target, params, relay.onOutput, relay.onRequestId);
+        return (await this.#requestConnected(
+            method,
+            target,
+            toWireParams(args[0]),
+            relay.onOutput,
+            relay.onRequestId
+        )) as unknown as ControlRpcResult<TMethod>;
     }
 
     async sendRelayInput(requestId: string, chunk: Uint8Array): Promise<void> {
@@ -116,14 +134,19 @@ export class ProtocolControlClientConnection<TStreamMessage, TError extends Erro
         this.#writer = new FrameWriter(socket);
 
         await new Promise<void>((resolve, reject) => {
-            socket.once("connect", () => {
+            const onConnect = () => {
+                socket.off("error", onError);
                 this.#connected = true;
                 this.#connectionClosed = false;
                 resolve();
-            });
-            socket.once("error", (error) => {
+            };
+            const onError = (error: Error) => {
+                socket.off("connect", onConnect);
+                socket.destroy();
                 reject(this.#mapConnectionError(error));
-            });
+            };
+            socket.once("connect", onConnect);
+            socket.once("error", onError);
         });
 
         socket.on("data", (chunk: Uint8Array) => {
@@ -145,16 +168,20 @@ export class ProtocolControlClientConnection<TStreamMessage, TError extends Erro
             this.#pushStreamMessage(this.#connectionClosedMessage);
         });
 
-        await this.#requestConnected("control.identifyClient", { kind: "control" }, { clientKind: this.#clientKind });
+        if (this.#clientKind !== undefined) {
+            await this.#requestConnected(controlMethods.controlIdentifyClient, createControlTarget(), {
+                clientKind: this.#clientKind
+            });
+        }
     }
 
     close(): void {
-        this.#socket?.destroy();
+        this.#socket?.end();
         this.#connected = false;
     }
 
     async #requestConnected(
-        method: string,
+        method: ControlRpcMethod,
         target: ControlTarget,
         params?: JsonValue,
         onRelayOutput?: (chunk: string) => void,
@@ -164,6 +191,7 @@ export class ProtocolControlClientConnection<TStreamMessage, TError extends Erro
         const response = new Promise<JsonValue>((resolve, reject) => {
             this.#pending.set(id, { method, reject, resolve });
         });
+        void response.catch(() => undefined);
 
         if (onRelayOutput !== undefined) {
             this.#relayOutputs.set(id, onRelayOutput);
@@ -181,6 +209,9 @@ export class ProtocolControlClientConnection<TStreamMessage, TError extends Erro
             } as unknown as JsonValue);
 
             return await response;
+        } catch (error) {
+            this.#pending.delete(id);
+            throw error;
         } finally {
             this.#relayOutputs.delete(id);
         }
@@ -276,4 +307,10 @@ export class ProtocolControlClientConnection<TStreamMessage, TError extends Erro
 
 function isRecord(value: JsonValue): value is { [key: string]: JsonValue } {
     return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function toWireParams<TMethod extends ControlRpcMethod>(
+    params: ControlRpcParams<TMethod> | undefined
+): JsonValue | undefined {
+    return params as unknown as JsonValue | undefined;
 }

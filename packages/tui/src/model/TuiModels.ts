@@ -1,6 +1,7 @@
 import type {
     ApprovalDecision,
     ApprovalRequest,
+    ControlEventEnvelope,
     InstanceSnapshot,
     JsonValue,
     ToolCallApprovalDecision,
@@ -10,7 +11,7 @@ import type {
 } from "@portable-devshell/shared";
 import { asInstanceName } from "@portable-devshell/shared";
 
-export type { TuiControlEventEnvelope } from "../control/TuiControlRequest.js";
+export type TuiControlEventEnvelope = ControlEventEnvelope;
 
 export interface TuiInstanceView {
     mcpEnabled: boolean;

@@ -1,3 +1,5 @@
+import type { ControlRpcMethod } from "./ProtocolMethodContract.js";
+
 export const controlMethods = {
     controlArtifactCancelTransfer: "control.artifact.cancelTransfer",
     controlArtifactCreateShare: "control.artifact.createShare",
@@ -9,13 +11,16 @@ export const controlMethods = {
     controlApplyConfig: "control.applyConfig",
     controlCreateInstance: "control.createInstance",
     controlCreateReverseDeviceCode: "control.createReverseDeviceCode",
+    controlDecideOAuthApproval: "control.decideOAuthApproval",
     controlDeleteInstance: "control.deleteInstance",
     controlDisableInstance: "control.disableInstance",
     controlEnableInstance: "control.enableInstance",
     controlGetConfigView: "control.getConfigView",
     controlGetInstanceCreateSchema: "control.getInstanceCreateSchema",
+    controlGetMcpStatus: "control.getMcpStatus",
     controlIdentifyClient: "control.identifyClient",
     controlListInstances: "control.listInstances",
+    controlListOAuthApprovals: "control.listOAuthApprovals",
     controlPing: "control.ping",
     controlRestart: "control.restart",
     controlRevokeReverseDeviceToken: "control.revokeReverseDeviceToken",
@@ -39,6 +44,6 @@ export const controlMethods = {
     instanceSubscribe: "instance.subscribe",
     instanceTodoGet: "instance.todo.get",
     instanceTodoSubscribe: "instance.todo.subscribe"
-} as const;
+} as const satisfies Record<string, ControlRpcMethod>;
 
-export type ControlMethod = (typeof controlMethods)[keyof typeof controlMethods];
+export type ControlMethod = ControlRpcMethod;
