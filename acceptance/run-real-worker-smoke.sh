@@ -149,9 +149,29 @@ logs_output=$(devshell instance logs aromatic-pc)
 printf '%s\n' "$logs_output"
 printf '%s\n' "$logs_output" | grep 'portable-devshell' >/dev/null
 
-grep 'bash_run' "$tmp_home/.devshell/aromatic-pc/control-worker/tool-calls.jsonl" >/dev/null
-grep 'toolCall.completed' "$tmp_home/.devshell/aromatic-pc/control-worker/events.jsonl" >/dev/null
-grep 'portable-devshell' "$tmp_home/.devshell/aromatic-pc/control-worker/logs.jsonl" >/dev/null
+audit_database="$tmp_home/.devshell/aromatic-pc/control-worker/audit.sqlite3"
+node --input-type=module - "$audit_database" <<'NODE'
+import assert from "node:assert/strict";
+import { createRequire } from "node:module";
+
+const require = createRequire(import.meta.url);
+const originalEmitWarning = process.emitWarning;
+process.emitWarning = ((warning, ...args) => {
+    if (String(warning instanceof Error ? warning.message : warning).includes("SQLite")) return;
+    Reflect.apply(originalEmitWarning, process, [warning, ...args]);
+});
+const { DatabaseSync } = require("node:sqlite");
+process.emitWarning = originalEmitWarning;
+const database = new DatabaseSync(process.argv[2], { readOnly: true });
+try {
+    const rows = database.prepare("SELECT collection, payload FROM audit_records ORDER BY id ASC").all();
+    assert.equal(rows.some((row) => row.collection === "toolCalls" && row.payload.includes('"toolName":"bash_run"')), true);
+    assert.equal(rows.some((row) => row.collection === "events" && row.payload.includes('"type":"toolCall.completed"')), true);
+    assert.equal(rows.some((row) => row.collection === "logs" && row.payload.includes("portable-devshell")), true);
+} finally {
+    database.close();
+}
+NODE
 grep 'control server started' "$tmp_home/.devshell/control/logs/control.log" >/dev/null
 
 devshell instance stop aromatic-pc >/dev/null

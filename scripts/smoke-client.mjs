@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { isAbsolute, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -167,14 +167,20 @@ async function reportFailure(error) {
     const logs = [];
     for (const [label, path] of [
         ["control.log", resolve(devshellHome, "control", "logs", "control.log")],
-        ["worker.log", resolve(devshellHome, instance, "logs", "worker.log")],
-        ["core logs", resolve(devshellHome, instance, "control-worker", "logs.jsonl")]
+        ["worker.log", resolve(devshellHome, instance, "logs", "worker.log")]
     ]) {
         try {
             logs.push(`${label}:\n${await readFile(path, "utf8")}`);
         } catch {
             logs.push(`${label} was unavailable`);
         }
+    }
+    try {
+        const auditDatabase = resolve(devshellHome, instance, "control-worker", "audit.sqlite3");
+        const metadata = await stat(auditDatabase);
+        logs.push(`audit.sqlite3: ${metadata.size} bytes`);
+    } catch {
+        logs.push("audit.sqlite3 was unavailable");
     }
     const rendered = [
         `stage: ${currentStage}`,
