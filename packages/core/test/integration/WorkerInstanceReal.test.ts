@@ -100,6 +100,108 @@ test("WorkerInstance completes lifecycle against frozen devshell-worker", async 
     assert.equal(stopped.ready, false);
 });
 
+test("WorkerInstance audits control-owned tool calls while the worker is stopped", async () => {
+    const homeDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-control-audit-"));
+    const harness = createWorkerInstanceHarness();
+    const instance = new WorkerInstanceFactory().create({
+        homeDirectory,
+        name: asInstanceName("control-audit"),
+        transport: harness.transport
+    });
+
+    try {
+        const context = {
+            ctxId: "ctx-control-audit",
+            requestId: "request-control-audit",
+            source: "mcp"
+        } as const;
+        const completed = await instance.auditToolCall(
+            "todo_read",
+            {},
+            context,
+            async () => ({ revision: 7 })
+        );
+        assert.deepEqual(completed, { revision: 7 });
+
+        await assert.rejects(
+            instance.auditToolCall("instance_status", { instance: "missing" }, context, async () => {
+                const error = new Error("missing instance");
+                Object.assign(error, { code: errorCodes.instanceMissing, retryable: false });
+                throw error;
+            }),
+            (error: unknown) => {
+                assert.equal((error as { code?: string }).code, errorCodes.instanceMissing);
+                return true;
+            }
+        );
+
+        await assert.rejects(
+            instance.auditToolCall("artifact_transfer", { operation: "status", transferId: "transfer-1" }, context, async () => {
+                const error = new Error("client cancelled");
+                Object.assign(error, { code: errorCodes.coreToolCallCancelled, retryable: true });
+                throw error;
+            }),
+            (error: unknown) => {
+                assert.equal((error as { code?: string }).code, errorCodes.coreToolCallCancelled);
+                return true;
+            }
+        );
+
+        const records = await instance.readToolCalls();
+        assert.deepEqual(
+            records.map((record) => ({
+                ctxId: record.ctxId,
+                error: record.error,
+                input: record.input,
+                requestId: record.requestId,
+                source: record.source,
+                status: record.status,
+                toolName: record.toolName
+            })),
+            [
+                {
+                    ctxId: "ctx-control-audit",
+                    error: undefined,
+                    input: {},
+                    requestId: "request-control-audit",
+                    source: "mcp",
+                    status: "completed",
+                    toolName: "todo_read"
+                },
+                {
+                    ctxId: "ctx-control-audit",
+                    error: errorCodes.instanceMissing,
+                    input: { instance: "missing" },
+                    requestId: "request-control-audit",
+                    source: "mcp",
+                    status: "failed",
+                    toolName: "instance_status"
+                },
+                {
+                    ctxId: "ctx-control-audit",
+                    error: errorCodes.coreToolCallCancelled,
+                    input: { operation: "status", transferId: "transfer-1" },
+                    requestId: "request-control-audit",
+                    source: "mcp",
+                    status: "cancelled",
+                    toolName: "artifact_transfer"
+                }
+            ]
+        );
+
+        const replay = instance.subscribe(1);
+        assert.equal(replay.kind, "events");
+        const eventTypesForCall = (callId: string | undefined) =>
+            replay.events.filter((event) => event.data?.callId === callId).map((event) => event.type);
+        assert.deepEqual(eventTypesForCall(records[0]?.callId), ["toolCall.running", "toolCall.completed"]);
+        assert.deepEqual(eventTypesForCall(records[1]?.callId), ["toolCall.running", "toolCall.failed"]);
+        assert.deepEqual(eventTypesForCall(records[2]?.callId), ["toolCall.running", "toolCall.cancelled"]);
+    } finally {
+        await instance.close();
+        await rm(homeDirectory, { force: true, recursive: true });
+    }
+});
+
 test("WorkerInstance rejects not-ready and schedules concurrent tool calls while persisting history", async () => {
     const homeDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-instance-harness-"));
     const harness = createWorkerInstanceHarness();

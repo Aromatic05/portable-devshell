@@ -1,4 +1,4 @@
-import type { JsonValue, ToolDefinition, ToolPolicy } from "@portable-devshell/shared";
+import type { JsonValue, ToolCallContext, ToolDefinition, ToolPolicy } from "@portable-devshell/shared";
 import { type McpAuthConfig } from "../auth/McpAuthConfig.js";
 import { McpContextRegistry } from "../context/McpContextRegistry.js";
 import type { McpInstanceGateway } from "../instance/McpInstanceGateway.js";
@@ -11,6 +11,13 @@ import { McpHostHttpServer } from "./McpHostHttpServer.js";
 import { McpHostRouteRegistry } from "./route/McpHostRouteRegistry.js";
 
 interface WorkerInstanceLike {
+    auditToolCall<T extends JsonValue>(
+        toolName: string,
+        input: JsonValue,
+        context: ToolCallContext,
+        operation: () => Promise<T>,
+        signal?: AbortSignal
+    ): Promise<T>;
     appendMcpSessionClosed(sessionId: string): Promise<void>;
     appendMcpSessionOpened(sessionId: string): Promise<void>;
     appendMcpToolCalled(toolName: string, context: { ctxId?: string; requestId?: string }): Promise<void>;

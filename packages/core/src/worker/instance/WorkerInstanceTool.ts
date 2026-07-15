@@ -253,6 +253,99 @@ export class WorkerInstanceTool {
         }
     }
 
+    async auditToolCall<T extends JsonValue>(
+        toolName: string,
+        input: JsonValue,
+        context: ToolCallContext,
+        operation: () => Promise<T>,
+        signal?: AbortSignal
+    ): Promise<T> {
+        throwIfAborted(signal);
+
+        const callId = randomUUID();
+        const startedAt = new Date().toISOString();
+        const inputSummary = toInputSummary(input);
+        const association = this.#toolCallAssociationProvider?.();
+        const eventContext = {
+            callId,
+            input,
+            inputSummary,
+            requestId: context.requestId,
+            ctxId: context.ctxId,
+            source: context.source,
+            taskId: association?.taskId,
+            todoItemId: association?.todoItemId,
+            toolName
+        } as const;
+
+        await this.#toolCallHistory.started(
+            callId,
+            toolName,
+            inputSummary,
+            context,
+            startedAt,
+            "running",
+            association,
+            input
+        );
+        await this.#appendEvent(
+            "toolCall.running",
+            toEventData({
+                ...eventContext,
+                startedAt,
+                status: "running"
+            })
+        );
+
+        try {
+            throwIfAborted(signal);
+            const result = await operation();
+            const completedAt = new Date().toISOString();
+            await this.#toolCallHistory.completed(callId, completedAt);
+            await this.#appendEvent(
+                "toolCall.completed",
+                toEventData({
+                    ...eventContext,
+                    completedAt,
+                    startedAt,
+                    status: "completed"
+                })
+            );
+            return result;
+        } catch (error) {
+            const completedAt = new Date().toISOString();
+            const errorCode = getErrorCode(error, errorCodes.coreProviderFailed);
+            const cancelled = errorCode === errorCodes.coreToolCallCancelled || errorCode === "tool.cancelled";
+
+            if (cancelled) {
+                await this.#toolCallHistory.cancelled(callId, errorCodes.coreToolCallCancelled, completedAt);
+                await this.#appendEvent(
+                    "toolCall.cancelled",
+                    toEventData({
+                        ...eventContext,
+                        completedAt,
+                        errorCode: errorCodes.coreToolCallCancelled,
+                        startedAt,
+                        status: "cancelled"
+                    })
+                );
+            } else {
+                await this.#toolCallHistory.failed(callId, errorCode, completedAt);
+                await this.#appendEvent(
+                    "toolCall.failed",
+                    toEventData({
+                        ...eventContext,
+                        completedAt,
+                        errorCode,
+                        startedAt,
+                        status: "failed"
+                    })
+                );
+            }
+            throw error;
+        }
+    }
+
     async listApprovals(): Promise<ApprovalRequest[]> {
         return await this.#approval.listApprovals();
     }

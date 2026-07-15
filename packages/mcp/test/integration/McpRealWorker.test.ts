@@ -221,9 +221,10 @@ test("MCP tools/call waits for approval before invoking the worker tool", async 
         assert.equal(call.result?.isError, false);
 
         const toolCalls = await instance.readToolCalls();
-        assert.equal(toolCalls[0]?.source, "mcp");
-        assert.equal(toolCalls[0]?.decision, "approved");
-        assert.equal(toolCalls[0]?.status, "completed");
+        const approvedToolCall = toolCalls.find((record) => record.toolName === "bash_run");
+        assert.equal(approvedToolCall?.source, "mcp");
+        assert.equal(approvedToolCall?.decision, "approved");
+        assert.equal(approvedToolCall?.status, "completed");
 
         deniedPromise = postJson(
             endpoint,

@@ -29,6 +29,13 @@ import {
 } from "./McpEndpointToolCatalog.js";
 
 interface WorkerInstanceLike {
+    auditToolCall<T extends JsonValue>(
+        toolName: string,
+        input: JsonValue,
+        context: ToolCallContext,
+        operation: () => Promise<T>,
+        signal?: AbortSignal
+    ): Promise<T>;
     appendMcpSessionClosed(sessionId: string): Promise<void>;
     appendMcpSessionOpened(sessionId: string): Promise<void>;
     appendMcpToolCalled(toolName: string, context: { requestId?: string; ctxId?: string }): Promise<void>;
@@ -153,25 +160,36 @@ export class McpEndpointWorker {
                 ctxId: record.ctxId,
                 requestId: requestContext.requestId
             });
-            return {
+            const context: ToolCallContext = {
                 ctxId: record.ctxId,
-                expiresAt: record.expiresAt,
-                instance: this.#instanceName,
-                platform: {
-                    arch: environment.platform.arch,
-                    ...(environment.platform.distribution === undefined
-                        ? {}
-                        : { distribution: environment.platform.distribution }),
-                    os: environment.platform.os,
-                    ...(environment.platform.packageManager === undefined
-                        ? {}
-                        : { packageManager: environment.platform.packageManager }),
-                    ...(environment.platform.shell === undefined
-                        ? {}
-                        : { shell: environment.platform.shell.kind })
-                },
-                workspace: environment.workspace
+                requestId: requestContext.requestId,
+                source: "mcp"
             };
+            return await this.#worker.auditToolCall(
+                toolName,
+                {},
+                context,
+                async () => ({
+                    ctxId: record.ctxId,
+                    expiresAt: record.expiresAt,
+                    instance: this.#instanceName,
+                    platform: {
+                        arch: environment.platform.arch,
+                        ...(environment.platform.distribution === undefined
+                            ? {}
+                            : { distribution: environment.platform.distribution }),
+                        os: environment.platform.os,
+                        ...(environment.platform.packageManager === undefined
+                            ? {}
+                            : { packageManager: environment.platform.packageManager }),
+                        ...(environment.platform.shell === undefined
+                            ? {}
+                            : { shell: environment.platform.shell.kind })
+                    },
+                    workspace: environment.workspace
+                }),
+                signal
+            );
         }
 
         const extracted = readContextInput(input);
@@ -198,7 +216,13 @@ export class McpEndpointWorker {
                 throw this.#toolNotExposed(toolName);
             }
             this.#adaptTool(selected.definition);
-            return await this.#callTodoTool(toolName as McpTodoToolName, input, context, signal);
+            return await this.#worker.auditToolCall(
+                toolName,
+                input,
+                context,
+                async () => await this.#callTodoTool(toolName as McpTodoToolName, input, context, signal),
+                signal
+            );
         }
 
         if (known?.owner === "artifact") {
@@ -206,7 +230,13 @@ export class McpEndpointWorker {
                 throw this.#toolNotExposed(toolName);
             }
             this.#adaptTool(selected.definition);
-            return await this.#callArtifactTool(toolName as McpArtifactToolName, input, signal);
+            return await this.#worker.auditToolCall(
+                toolName,
+                input,
+                context,
+                async () => await this.#callArtifactTool(toolName as McpArtifactToolName, input, signal),
+                signal
+            );
         }
 
         if (known?.owner === "instance") {
@@ -214,7 +244,13 @@ export class McpEndpointWorker {
                 throw this.#toolNotExposed(toolName);
             }
             this.#adaptTool(selected.definition);
-            return await this.#callInstanceTool(toolName as McpInstanceToolName, input, signal);
+            return await this.#worker.auditToolCall(
+                toolName,
+                input,
+                context,
+                async () => await this.#callInstanceTool(toolName as McpInstanceToolName, input, signal),
+                signal
+            );
         }
 
         const instanceRoutingEnabled = exposed.some((entry) => entry.owner === "instance");

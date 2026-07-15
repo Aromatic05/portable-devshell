@@ -97,6 +97,12 @@ test("McpEndpointWorker exposes environ_info and requires ctxId on every other t
         instanceName: "demo-local",
         policy: { capabilities: ["execute"], groups: ["bash"] },
         worker: {
+            async auditToolCall<T extends JsonValue>(
+                _toolName: string,
+                _input: JsonValue,
+                _context: ToolCallContext,
+                operation: () => Promise<T>
+            ): Promise<T> { return await operation(); },
             async appendMcpSessionClosed() {},
             async appendMcpSessionOpened() {},
             async appendMcpToolCalled() {},
@@ -206,6 +212,12 @@ test("only environ_info omits ctxId across the complete 24-tool endpoint catalog
             groups: ["artifact", "bash", "file", "instance", "tmux", "todo"]
         },
         worker: {
+            async auditToolCall<T extends JsonValue>(
+                _toolName: string,
+                _input: JsonValue,
+                _context: ToolCallContext,
+                operation: () => Promise<T>
+            ): Promise<T> { return await operation(); },
             async appendMcpSessionClosed() {},
             async appendMcpSessionOpened() {},
             async appendMcpToolCalled() {},

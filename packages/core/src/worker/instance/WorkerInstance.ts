@@ -369,6 +369,16 @@ export class WorkerInstance {
         return await this.#tool.call(toolName, input, context, signal);
     }
 
+    async auditToolCall<T extends JsonValue>(
+        toolName: string,
+        input: JsonValue,
+        context: ToolCallContext,
+        operation: () => Promise<T>,
+        signal?: AbortSignal
+    ): Promise<T> {
+        return await this.#tool.auditToolCall(toolName, input, context, operation, signal);
+    }
+
     async listApprovals(): Promise<ApprovalRequest[]> {
         return await this.#tool.listApprovals();
     }

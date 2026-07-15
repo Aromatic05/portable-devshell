@@ -257,6 +257,12 @@ function createWorker(options: {
     ready?: boolean;
 } = {}) {
     return {
+        async auditToolCall<T extends JsonValue>(
+            _toolName: string,
+            _input: JsonValue,
+            _context: ToolCallContext,
+            operation: () => Promise<T>
+        ): Promise<T> { return await operation(); },
         async appendMcpSessionClosed() {},
         async appendMcpSessionOpened() {},
         async appendMcpToolCalled() {},

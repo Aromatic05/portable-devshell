@@ -3,7 +3,7 @@ import test from "node:test";
 
 import { asInstanceName } from "@portable-devshell/shared";
 
-import { RenderScheduler, TuiAppStore } from "../../dist/index.js";
+import { RenderScheduler, TuiAppStore, selectMainScreenModel } from "../../dist/index.js";
 
 test("TuiAppStore keeps page, instance, and expanded boxes stable across events", () => {
     const store = new TuiAppStore({ maxRawEvents: 2 });
@@ -73,4 +73,65 @@ test("RenderScheduler batches multiple store updates into one render notificatio
 
     assert.equal(renderCount, 1);
     assert.equal(scheduler.getSnapshot().ui.selectedPage, "help");
+});
+
+test("Audit page renders control-owned tool calls from live events", () => {
+    const store = new TuiAppStore();
+    store.replaceInstances([{ mcpEnabled: true, name: "alpha" }]);
+    store.setSelectedInstance("alpha");
+    store.setSelectedPage("audit");
+
+    store.applyEvent({
+        event: "toolCall.running",
+        payload: {
+            at: "2026-07-15T00:00:00.000Z",
+            data: {
+                callId: "control-call-1",
+                ctxId: "ctx-control",
+                input: {},
+                inputSummary: "{}",
+                requestId: "request-control",
+                source: "mcp",
+                startedAt: "2026-07-15T00:00:00.000Z",
+                status: "running",
+                toolName: "todo_read"
+            }
+        },
+        seq: 1,
+        target: {
+            instance: asInstanceName("alpha"),
+            kind: "instance"
+        },
+        type: "event"
+    });
+    store.applyEvent({
+        event: "toolCall.completed",
+        payload: {
+            at: "2026-07-15T00:00:01.000Z",
+            data: {
+                callId: "control-call-1",
+                completedAt: "2026-07-15T00:00:01.000Z",
+                source: "mcp",
+                startedAt: "2026-07-15T00:00:00.000Z",
+                status: "completed",
+                toolName: "todo_read"
+            }
+        },
+        seq: 2,
+        target: {
+            instance: asInstanceName("alpha"),
+            kind: "instance"
+        },
+        type: "event"
+    });
+
+    const record = store.getState().toolCallsByInstance.alpha?.[0];
+    assert.equal(record?.toolName, "todo_read");
+    assert.equal(record?.status, "completed");
+    assert.equal(record?.ctxId, "ctx-control");
+    assert.equal(record?.requestId, "request-control");
+
+    const audit = selectMainScreenModel(store.getState());
+    assert.equal(audit.boxes[0]?.id, "audit-control-call-1");
+    assert.equal(audit.boxes[0]?.title, "todo_read · completed");
 });

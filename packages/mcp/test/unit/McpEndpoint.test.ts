@@ -134,6 +134,102 @@ test("tools/call delegates to WorkerInstance.callTool", async () => {
     }
 });
 
+test("environment and control-owned tools execute through the endpoint audit path", async () => {
+    const harness = createWorkerHarness();
+    const gateway: McpInstanceGateway = {
+        assertReady() {},
+        async callTool() {
+            return {};
+        },
+        async createSshInstance() {
+            return {};
+        },
+        async listInstances() {
+            return [{ name: "demo-local" }];
+        },
+        async readTodo() {
+            return { revision: 1, todos: [] };
+        },
+        listTools() {
+            return [];
+        },
+        async shareArtifact(_defaultInstance, input) {
+            return { path: input.path, shareId: "share-1" };
+        },
+        async transferArtifact() {
+            return {};
+        },
+        async startInstance() {
+            return {};
+        },
+        async statusInstance() {
+            return {};
+        },
+        async stopInstance() {
+            return {};
+        },
+        async writeTodo() {
+            return {};
+        }
+    };
+    const endpoint = new McpEndpointWorker({
+        gateway,
+        instanceName: "demo-local",
+        policy: {
+            capabilities: ["manage", "read", "write"],
+            groups: ["artifact", "instance", "todo"]
+        },
+        worker: harness.worker
+    });
+    const requestContext = { principal: "test", requestId: "request-control-tools" };
+
+    const environment = await endpoint.callTool("environ_info", {}, requestContext);
+    const ctxId = String((environment as { ctxId?: string }).ctxId);
+    await endpoint.callTool("todo_read", { ctxId }, requestContext);
+    await endpoint.callTool("instance_list", { ctxId }, requestContext);
+    await endpoint.callTool("artifact_share", { ctxId, path: "./result.txt" }, requestContext);
+
+    assert.deepEqual(
+        harness.auditedCalls.map((call) => ({
+            ctxId: call.context.ctxId,
+            input: call.input,
+            requestId: call.context.requestId,
+            source: call.context.source,
+            toolName: call.toolName
+        })),
+        [
+            {
+                ctxId,
+                input: {},
+                requestId: "request-control-tools",
+                source: "mcp",
+                toolName: "environ_info"
+            },
+            {
+                ctxId,
+                input: {},
+                requestId: "request-control-tools",
+                source: "mcp",
+                toolName: "todo_read"
+            },
+            {
+                ctxId,
+                input: {},
+                requestId: "request-control-tools",
+                source: "mcp",
+                toolName: "instance_list"
+            },
+            {
+                ctxId,
+                input: { path: "./result.txt" },
+                requestId: "request-control-tools",
+                source: "mcp",
+                toolName: "artifact_share"
+            }
+        ]
+    );
+});
+
 test("notifications/cancelled aborts an in-flight tools/call handler", async () => {
     let observedSignal: AbortSignal | undefined;
     let markStarted!: () => void;
@@ -523,6 +619,11 @@ function createWorkerHarness(options?: {
     result?: CommandResult;
     tools?: ToolDefinition[];
 }) {
+    const auditedCalls: Array<{
+        context: { ctxId?: string; requestId?: string; source: string };
+        input: JsonValue;
+        toolName: string;
+    }> = [];
     const calls: Array<{ input: JsonValue; toolName: string }> = [];
     const events: Array<{ data: Record<string, JsonValue>; type: string }> = [];
     const tools = options?.tools ?? [
@@ -534,6 +635,7 @@ function createWorkerHarness(options?: {
     const result = options?.result ?? { exitCode: 0, stderr: "", stdout: "/workspace\n" };
 
     return {
+        auditedCalls,
         calls: calls as Array<{
             input: JsonValue;
             requestId?: string;
@@ -543,6 +645,15 @@ function createWorkerHarness(options?: {
         }>,
         events,
         worker: {
+            async auditToolCall<T extends JsonValue>(
+                toolName: string,
+                input: JsonValue,
+                context: { ctxId?: string; requestId?: string; source: string },
+                operation: () => Promise<T>
+            ): Promise<T> {
+                auditedCalls.push({ context, input, toolName });
+                return await operation();
+            },
             async appendMcpSessionClosed(sessionId: string) {
                 events.push({ data: { sessionId }, type: "mcp.sessionClosed" });
             },
