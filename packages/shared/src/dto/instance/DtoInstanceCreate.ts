@@ -23,14 +23,6 @@ export interface InstanceContainerPresetSchema {
     preset: string;
 }
 
-export interface InstanceContainerManagedConfig {
-    containerName: string;
-    env?: Record<string, string>;
-    mounts?: InstanceContainerMountConfig[];
-    network?: string;
-    user?: string;
-}
-
 export interface InstanceContainerPresetConfig {
     containerName: string;
     env?: Record<string, string>;

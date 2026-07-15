@@ -31,7 +31,6 @@ export interface WorkerCommandTransport {
 }
 
 export type SpawnFunction = (command: string, args: readonly string[], options: SpawnOptions) => ChildProcess;
-export const providerFailedErrorCode = "core.providerFailed";
 const COMMAND_OUTPUT_TAIL_LIMIT = 4000;
 
 export async function waitForCommandResult(

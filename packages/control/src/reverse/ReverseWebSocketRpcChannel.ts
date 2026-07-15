@@ -1,25 +1,21 @@
+import { WorkerRpcChannelBase } from "@portable-devshell/core";
 import { FrameCodec, type JsonValue } from "@portable-devshell/shared";
-import type { WorkerRpcChannel } from "@portable-devshell/core";
 import WebSocket, { type RawData } from "ws";
 
 const HEARTBEAT_INTERVAL_MS = 20_000;
 const DEAD_CONNECTION_MS = 60_000;
 
-export class ReverseWebSocketRpcChannel implements WorkerRpcChannel {
+export class ReverseWebSocketRpcChannel extends WorkerRpcChannelBase {
     readonly #socket: WebSocket;
-    readonly #messageListeners = new Set<(message: JsonValue) => void>();
-    readonly #disconnectListeners = new Set<(error: unknown) => void>();
     readonly #heartbeat: NodeJS.Timeout;
     readonly #pendingRequestIds = new Set<string>();
-    #disconnected = false;
     #lastSeenAt = Date.now();
 
     constructor(socket: WebSocket) {
+        super();
         this.#socket = socket;
         socket.on("message", this.#handleMessage);
-        socket.on("pong", () => {
-            this.#lastSeenAt = Date.now();
-        });
+        socket.on("pong", () => { this.#lastSeenAt = Date.now(); });
         socket.once("close", (code, reason) => {
             this.#disconnect(new Error(`reverse websocket closed: ${code} ${reason.toString()}`));
         });
@@ -29,7 +25,7 @@ export class ReverseWebSocketRpcChannel implements WorkerRpcChannel {
     }
 
     async send(message: JsonValue): Promise<void> {
-        if (this.#disconnected || this.#socket.readyState !== WebSocket.OPEN) {
+        if (this.disconnected || this.#socket.readyState !== WebSocket.OPEN) {
             throw new Error("reverse websocket is disconnected");
         }
         const frame = FrameCodec.encode(message);
@@ -49,16 +45,6 @@ export class ReverseWebSocketRpcChannel implements WorkerRpcChannel {
                 reject(error);
             });
         });
-    }
-
-    onMessage(listener: (message: JsonValue) => void): () => void {
-        this.#messageListeners.add(listener);
-        return () => this.#messageListeners.delete(listener);
-    }
-
-    onDisconnect(listener: (error: unknown) => void): () => void {
-        this.#disconnectListeners.add(listener);
-        return () => this.#disconnectListeners.delete(listener);
     }
 
     close(): void {
@@ -85,9 +71,7 @@ export class ReverseWebSocketRpcChannel implements WorkerRpcChannel {
             if (responseId !== undefined) {
                 this.#pendingRequestIds.delete(responseId);
             }
-            for (const listener of this.#messageListeners) {
-                listener(message);
-            }
+            this.emitMessage(message);
         } catch (error) {
             this.#socket.close(1007, "invalid RPC frame");
             this.#disconnect(error);
@@ -95,7 +79,7 @@ export class ReverseWebSocketRpcChannel implements WorkerRpcChannel {
     };
 
     #heartbeatTick(): void {
-        if (this.#disconnected) {
+        if (this.disconnected) {
             return;
         }
         if (this.#pendingRequestIds.size === 0 && Date.now() - this.#lastSeenAt >= DEAD_CONNECTION_MS) {
@@ -109,15 +93,10 @@ export class ReverseWebSocketRpcChannel implements WorkerRpcChannel {
     }
 
     #disconnect(error: unknown): void {
-        if (this.#disconnected) {
-            return;
-        }
-        this.#disconnected = true;
-        this.#pendingRequestIds.clear();
-        clearInterval(this.#heartbeat);
-        for (const listener of this.#disconnectListeners) {
-            listener(error);
-        }
+        this.notifyDisconnect(error, () => {
+            this.#pendingRequestIds.clear();
+            clearInterval(this.#heartbeat);
+        });
     }
 }
 

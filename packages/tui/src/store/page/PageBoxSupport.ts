@@ -72,44 +72,6 @@ export function makeBox(
     };
 }
 
-export function buildCommandBoxes(state: TuiAppState, page: PageId, instance: string | undefined): BoxModel[] {
-    if (instance === undefined) {
-        return [];
-    }
-
-    const command = state.commandRecords.find(
-        (record) => record.targetInstance === instance && record.title === `Start Worker: ${instance}`
-    );
-
-    if (command === undefined) {
-        return [];
-    }
-
-    const relay = state.relayByCommand[command.commandId];
-    const output = relay?.output.flatMap((chunk) => chunk.split(/\r?\n/)).filter((line) => line.length > 0) ?? [];
-    const status = command.status === "succeeded" ? "ready" : command.status === "failed" ? "failed" : "running";
-
-    return [
-        makeBox(state, page, instance, {
-            detailLines: [
-                formatField("Workspace", relay?.workspace ?? "unavailable"),
-                formatField("Provider", relay?.provider ?? "unknown"),
-                formatField("Status", command.status),
-                ...(command.error === undefined ? [] : [formatField("Error", `${command.error.code}: ${command.error.message}`)]),
-                "Relay output:",
-                ...(output.length === 0 ? ["No relay output received."] : output)
-            ],
-            id: `start-${command.commandId}`,
-            status,
-            summaryLines: [
-                compactSummary(["status", command.status], ["workspace", shortenPath(relay?.workspace ?? "unavailable")]),
-                command.error === undefined ? "relay=control RPC" : `lastError=${command.error.code}`
-            ],
-            title: `Start Worker: ${instance}`
-        })
-    ];
-}
-
 export function formatField(label: string, value: string): string {
     return `${label.padEnd(14, " ")} ${value}`;
 }
@@ -124,10 +86,6 @@ export function shortenPath(value: string): string {
 
 export function compactSummary(...entries: Array<[string, string]>): string {
     return entries.map(([key, value]) => `${key}=${value}`).join("  ");
-}
-
-export function endpointAvailabilityLabel(publicBaseUrl: string | undefined): string {
-    return publicBaseUrl === undefined ? "unavailable" : "configured";
 }
 
 export function readConfigInstance(state: TuiAppState, instanceName: string): {
@@ -154,17 +112,6 @@ export function readConfigInstance(state: TuiAppState, instanceName: string): {
         publicBaseUrl: typeof mcp?.publicBaseUrl === "string" ? mcp.publicBaseUrl : undefined,
         ...(configEntry === undefined ? {} : {})
     };
-}
-
-export function buildEndpointPreview(state: TuiAppState, instanceName: string): string {
-    const mcp = asRecord(state.configView?.mcp);
-    if (mcp?.enabled !== true) {
-        return "mcp disabled";
-    }
-
-    const host = typeof mcp.listenHost === "string" ? mcp.listenHost : "127.0.0.1";
-    const port = typeof mcp.listenPort === "number" ? String(mcp.listenPort) : "unavailable";
-    return `http://${host}:${port}/${instanceName}/mcp`;
 }
 
 export function runtimeStatus(snapshot: TuiAppState["snapshotsByInstance"][string] | undefined): ExpandableBoxStatus {
@@ -202,14 +149,6 @@ export function toolCallStatus(record: ToolCallRecord): ExpandableBoxStatus {
     }
 }
 
-export function renderApprovalLine(approval: ApprovalRequest): string {
-    return `${approval.toolName} ${approval.approvalId} ${approval.riskLevel}`;
-}
-
-export function renderToolCallLine(record: ToolCallRecord): string {
-    return `${record.toolName} ${record.status} ${record.callId}`;
-}
-
 export function renderLogLine(entry: TuiLogEntry): string {
     const context = [
         entry.toolName === undefined ? undefined : `tool=${entry.toolName}`,
@@ -219,14 +158,6 @@ export function renderLogLine(entry: TuiLogEntry): string {
         entry.source === undefined ? undefined : `source=${entry.source}`
     ].filter(Boolean).join(" ");
     return `${entry.at ?? entry.receivedAt} ${entry.stream} #${entry.seq}${context.length === 0 ? "" : ` ${context}`} ${entry.message ?? entry.tail ?? entry.preview ?? ""}`;
-}
-
-export function applySearch(lines: string[], query: string): string[] {
-    if (query.length === 0) {
-        return lines;
-    }
-
-    return lines.filter((line) => line.toLowerCase().includes(query.toLowerCase()));
 }
 
 function normalizeCollapsedLines(lines: string[]): [BoxLine] | [BoxLine, BoxLine] {

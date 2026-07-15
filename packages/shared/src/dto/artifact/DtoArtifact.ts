@@ -67,25 +67,6 @@ export interface ArtifactDirectoryPayloadDescriptor extends ArtifactPayloadDescr
 
 export type ArtifactPayloadDescriptor = ArtifactBytePayloadDescriptor | ArtifactDirectoryPayloadDescriptor;
 
-export interface ArtifactManifestDirectoryEntry {
-    entryType: "directory";
-    mode: number;
-    modifiedAtSeconds: number;
-    relativePath: string;
-    size: 0;
-}
-
-export interface ArtifactManifestFileEntry {
-    blake3: string;
-    entryType: "file";
-    mode: number;
-    modifiedAtSeconds: number;
-    relativePath: string;
-    size: number;
-}
-
-export type ArtifactManifestEntry = ArtifactManifestDirectoryEntry | ArtifactManifestFileEntry;
-
 export type ArtifactShareInput =
     | {
           expiresInSeconds?: number;
@@ -110,10 +91,6 @@ export interface ArtifactShareResult {
     source: ArtifactSourceDescriptor;
     state: ArtifactShareState;
     url: string;
-}
-
-export interface ArtifactShareRevokeInput {
-    shareId: string;
 }
 
 export interface ArtifactShareRevokeResult {
@@ -149,11 +126,6 @@ export interface ArtifactTransferCancelInput {
     operation: "cancel";
     transferId: string;
 }
-
-export type ArtifactTransferInput =
-    | ArtifactTransferStartInput
-    | ArtifactTransferLookupInput
-    | ArtifactTransferCancelInput;
 
 export interface ArtifactTransferFailure {
     code: string;
@@ -195,9 +167,3 @@ export const artifactEventTypes = [
 ] as const;
 export type ArtifactEventType = (typeof artifactEventTypes)[number];
 
-export interface ArtifactEvent {
-    at: string;
-    data?: Record<string, unknown>;
-    seq: number;
-    type: ArtifactEventType;
-}

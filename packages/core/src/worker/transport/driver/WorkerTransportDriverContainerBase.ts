@@ -26,16 +26,18 @@ type ContainerLifecycleStatus = "missing" | "running" | "stopped";
 export interface ContainerWorkerTransportBaseOptions {
     binary: string;
     container: InstanceContainerConfig;
+    keepIdUserNamespace?: boolean;
     provider: "docker" | "podman";
     remoteCwd?: string;
     spawnFunction?: SpawnFunction;
     workerBinary?: WorkerBinary;
 }
 
-export abstract class ContainerWorkerTransportBase implements WorkerCommandTransport {
+export class ContainerWorkerTransportBase implements WorkerCommandTransport {
     readonly #binary: string;
     readonly #container: InstanceContainerConfig;
     readonly #installer: RemoteWorkerInstaller;
+    readonly #keepIdUserNamespace: boolean;
     readonly #provider: "docker" | "podman";
     readonly #remoteCwd?: string;
     readonly #spawn: SpawnFunction;
@@ -45,6 +47,7 @@ export abstract class ContainerWorkerTransportBase implements WorkerCommandTrans
     constructor(options: ContainerWorkerTransportBaseOptions) {
         this.#binary = options.binary;
         this.#container = options.container;
+        this.#keepIdUserNamespace = options.keepIdUserNamespace === true;
         this.#provider = options.provider;
         this.#remoteCwd = options.remoteCwd;
         this.#spawn = options.spawnFunction ?? spawn;
@@ -106,22 +109,6 @@ export abstract class ContainerWorkerTransportBase implements WorkerCommandTrans
             this.#spawnCommand(invocation.context, invocation.args, ["pipe", "pipe", "pipe"], options.env, errorCodes.coreWorkerRpcSpawnFailed)
         );
     }
-
-    protected get binary(): string {
-        return this.#binary;
-    }
-
-    protected get containerConfig(): InstanceContainerConfig {
-        return this.#container;
-    }
-
-    protected get provider(): "docker" | "podman" {
-        return this.#provider;
-    }
-
-    protected abstract buildComposeArgs(args: readonly string[]): string[];
-
-    protected abstract buildManagedContainerCreateArgs(image: string, containerName: string): string[];
 
     async #runStatusCommand(options: WorkerCommandOptions): Promise<WorkerCommandResult> {
         if (!(await this.#isRuntimeAvailable())) {
@@ -260,14 +247,14 @@ export abstract class ContainerWorkerTransportBase implements WorkerCommandTrans
         }
 
         const compose = this.#requireComposeConfig();
-        await this.#runProviderCommand("composeUp", this.buildComposeArgs(["up", "-d", compose.service]));
+        await this.#runProviderCommand("composeUp", this.#buildComposeArgs(["up", "-d", compose.service]));
     }
 
     async #isComposeServiceRunning(): Promise<boolean> {
         const compose = this.#requireComposeConfig();
         const result = await this.#runProviderCommand(
             "composePs",
-            this.buildComposeArgs(["ps", "-q", compose.service]),
+            this.#buildComposeArgs(["ps", "-q", compose.service]),
             { allowNonZeroExit: true }
         );
 
@@ -313,7 +300,7 @@ export abstract class ContainerWorkerTransportBase implements WorkerCommandTrans
     }
 
     async #createManagedContainer(image: string, containerName: string): Promise<void> {
-        await this.#runProviderCommand("createContainer", this.buildManagedContainerCreateArgs(image, containerName));
+        await this.#runProviderCommand("createContainer", this.#buildManagedContainerCreateArgs(image, containerName));
     }
 
     async #readContainerStatus(containerName: string): Promise<ContainerLifecycleStatus> {
@@ -420,7 +407,7 @@ export abstract class ContainerWorkerTransportBase implements WorkerCommandTrans
     #buildExecArgs(command: readonly string[], useRemoteCwd: boolean): string[] {
         switch (this.#container.mode) {
             case "compose":
-                return this.buildComposeArgs([
+                return this.#buildComposeArgs([
                     "exec",
                     "-T",
                     ...this.#workingDirectoryArgs(useRemoteCwd),
@@ -439,7 +426,7 @@ export abstract class ContainerWorkerTransportBase implements WorkerCommandTrans
     #buildShellExecArgs(commandLine: string): string[] {
         switch (this.#container.mode) {
             case "compose":
-                return this.buildComposeArgs(["exec", "-T", this.#container.compose.service, "sh", "-lc", commandLine]);
+                return this.#buildComposeArgs(["exec", "-T", this.#container.compose.service, "sh", "-lc", commandLine]);
             case "preset":
             case "dockerfile":
             case "existingImage":
@@ -447,6 +434,38 @@ export abstract class ContainerWorkerTransportBase implements WorkerCommandTrans
             case "existingStoppedContainer":
                 return ["exec", "-i", this.#container.containerName, "sh", "-lc", commandLine];
         }
+    }
+
+    #buildComposeArgs(args: readonly string[]): string[] {
+        const compose = this.#requireComposeConfig();
+        return [
+            "compose",
+            "-f",
+            compose.file,
+            ...(compose.projectName === undefined ? [] : ["-p", compose.projectName]),
+            ...args
+        ];
+    }
+
+    #buildManagedContainerCreateArgs(image: string, containerName: string): string[] {
+        const container = this.#container;
+        if (container.mode !== "preset" && container.mode !== "dockerfile" && container.mode !== "existingImage") {
+            throw new Error("managed create args are only available for managed container modes");
+        }
+        return [
+            "create",
+            "--name",
+            containerName,
+            ...(this.#keepIdUserNamespace ? ["--userns=keep-id"] : []),
+            ...(container.user === undefined ? [] : ["--user", container.user]),
+            ...(container.network === undefined ? [] : ["--network", container.network]),
+            ...Object.entries(container.env ?? {}).flatMap(([key, value]) => ["-e", `${key}=${value}`]),
+            ...(container.mounts ?? []).flatMap((mount) => ["-v", renderContainerMount(mount)]),
+            image,
+            "sh",
+            "-lc",
+            "trap 'exit 0' TERM INT; while :; do sleep 2147483647; done"
+        ];
     }
 
     #workingDirectoryArgs(useRemoteCwd: boolean): string[] {

@@ -30,13 +30,6 @@ export interface ReverseEnrollmentRequest {
     workerVersion: string;
 }
 
-export interface ReverseEnrollmentResponse {
-    controllerUrl: string;
-    deviceToken: string;
-    instance: InstanceName;
-    workspace: string;
-}
-
 export interface ReverseSseFrame {
     frame: string;
     seq: number;
@@ -47,7 +40,3 @@ export interface ReverseUpstreamBatch {
     generation: number;
 }
 
-export interface ReverseUpstreamAck {
-    acceptedThrough: number;
-    generation: number;
-}

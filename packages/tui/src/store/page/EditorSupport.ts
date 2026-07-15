@@ -93,29 +93,6 @@ export function setPath(record: Record<string, JsonValue>, path: string, value: 
     return copy;
 }
 
-export function inputValue(current: JsonValue | undefined, input: string): JsonValue {
-    if (typeof current === "boolean") {
-        return !current;
-    }
-    if (typeof current === "number") {
-        return `${current}${input}`;
-    }
-    if (Array.isArray(current)) {
-        return `${current.join(", ")}${input}`;
-    }
-    return `${typeof current === "string" ? current : ""}${input}`;
-}
-
-export function removeInputValue(current: JsonValue | undefined): JsonValue {
-    if (typeof current === "boolean") {
-        return !current;
-    }
-    if (Array.isArray(current)) {
-        return current.join(", ").slice(0, -1);
-    }
-    return String(current ?? "").slice(0, -1);
-}
-
 export function normalizeDraftForSave(value: Record<string, JsonValue>): Record<string, JsonValue> {
     return normalizeRecord(value);
 }

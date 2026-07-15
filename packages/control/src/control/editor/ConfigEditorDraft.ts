@@ -3,8 +3,7 @@ import { createError, errorCodes, type ApprovalPolicy, type JsonValue } from "@p
 import type {
     ControlConfig,
     ControlGlobalConfig,
-    ControlInstanceConfig,
-    ControlMcpAuthMode
+    ControlInstanceConfig
 } from "../config/codec/ConfigTomlCodec.js";
 import { cloneInstanceConfig, resolveSecurityMode } from "./ConfigEditorValue.js";
 
@@ -54,7 +53,7 @@ function readSingleInstanceConfig(
         mcp: readInstanceMcpConfig(instance.mcp, current?.mcp, name, `${fieldName}.mcp`),
         name,
         podmanBinary: readOptionalString(instance.podmanBinary, `${fieldName}.podmanBinary`),
-        provider: readProvider(instance.provider, `${fieldName}.provider`),
+        provider: readEnum(instance.provider, `${fieldName}.provider`, ["local", "ssh", "docker", "podman", "reverse"]),
         security: {
             mode: resolveSecurityMode(readSecurityMode(instance.security, current?.security?.mode, `${fieldName}.security`))
         },
@@ -87,7 +86,7 @@ export function readMcpConfig(value: JsonValue | undefined, currentConfig: Contr
 
     const mcp = readRecord(value, "mcp");
     const auth = readRecord(mcp.auth, "mcp.auth");
-    const mode = readMcpAuthMode(auth.mode, "mcp.auth.mode");
+    const mode = readEnum(auth.mode, "mcp.auth.mode", ["none", "oauth2", "token"]);
 
     return {
         auth: {
@@ -226,16 +225,16 @@ function readApprovalPolicy(
     const rules = policy.rules;
 
     return {
-        mode: readApprovalPolicyMode(policy.mode, "approvalPolicy.mode"),
+        mode: readEnum(policy.mode, "approvalPolicy.mode", ["disabled", "allow", "ask", "deny"]),
         rules:
             rules === undefined
                 ? undefined
                 : readArray(rules, "approvalPolicy.rules").map((entry, index) => {
                       const rule = readRecord(entry, `approvalPolicy.rules[${index}]`);
                       return {
-                          decision: readApprovalPolicyDecision(rule.decision, `approvalPolicy.rules[${index}].decision`),
-                          match: readApprovalPolicyMatch(rule.match, `approvalPolicy.rules[${index}].match`),
-                          source: readApprovalPolicySource(rule.source, `approvalPolicy.rules[${index}].source`),
+                          decision: readEnum(rule.decision, `approvalPolicy.rules[${index}].decision`, ["allow", "ask", "deny"]),
+                          match: readEnum(rule.match, `approvalPolicy.rules[${index}].match`, ["exact"], "exact"),
+                          source: readEnum(rule.source, `approvalPolicy.rules[${index}].source`, ["all", "cli", "tui", "mcp"]),
                           toolName: readOptionalString(rule.toolName, `approvalPolicy.rules[${index}].toolName`)
                       };
                   })
@@ -275,64 +274,17 @@ function readVersion(value: JsonValue | undefined, current: number): number {
     return value === undefined ? current : readInteger(value, "version");
 }
 
-function readProvider(value: JsonValue | undefined, fieldName: string): ControlInstanceConfig["provider"] {
-    const provider = readRequiredString(value, fieldName);
-    if (
-        provider === "local" ||
-        provider === "ssh" ||
-        provider === "docker" ||
-        provider === "podman" ||
-        provider === "reverse"
-    ) {
-        return provider;
+function readEnum<const T extends string>(
+    value: JsonValue | undefined,
+    fieldName: string,
+    values: readonly T[],
+    requirement = `one of ${values.join(", ")}`
+): T {
+    const candidate = readRequiredString(value, fieldName);
+    if ((values as readonly string[]).includes(candidate)) {
+        return candidate as T;
     }
-
-    throw invalidConfig(`${fieldName} must be one of local, ssh, docker, podman, reverse.`);
-}
-
-function readMcpAuthMode(value: JsonValue | undefined, fieldName: string): ControlMcpAuthMode {
-    const mode = readRequiredString(value, fieldName);
-    if (mode === "none" || mode === "oauth2" || mode === "token") {
-        return mode;
-    }
-
-    throw invalidConfig(`${fieldName} must be one of none, oauth2, token.`);
-}
-
-function readApprovalPolicyMode(value: JsonValue | undefined, fieldName: string): ApprovalPolicy["mode"] {
-    const mode = readRequiredString(value, fieldName);
-    if (mode === "disabled" || mode === "allow" || mode === "ask" || mode === "deny") {
-        return mode;
-    }
-
-    throw invalidConfig(`${fieldName} must be one of disabled, allow, ask, deny.`);
-}
-
-function readApprovalPolicyDecision(value: JsonValue | undefined, fieldName: string): NonNullable<ApprovalPolicy["rules"]>[number]["decision"] {
-    const decision = readRequiredString(value, fieldName);
-    if (decision === "allow" || decision === "ask" || decision === "deny") {
-        return decision;
-    }
-
-    throw invalidConfig(`${fieldName} must be one of allow, ask, deny.`);
-}
-
-function readApprovalPolicyMatch(value: JsonValue | undefined, fieldName: string): "exact" {
-    const match = readRequiredString(value, fieldName);
-    if (match === "exact") {
-        return match;
-    }
-
-    throw invalidConfig(`${fieldName} must be exact.`);
-}
-
-function readApprovalPolicySource(value: JsonValue | undefined, fieldName: string): NonNullable<ApprovalPolicy["rules"]>[number]["source"] {
-    const source = readRequiredString(value, fieldName);
-    if (source === "all" || source === "cli" || source === "tui" || source === "mcp") {
-        return source;
-    }
-
-    throw invalidConfig(`${fieldName} must be one of all, cli, tui, mcp.`);
+    throw invalidConfig(`${fieldName} must be ${requirement}.`);
 }
 
 function readRecord(value: JsonValue | undefined, fieldName: string): Record<string, JsonValue> {

@@ -21,35 +21,17 @@ interface CommandEditorOptions {
 }
 
 export class CommandDispatcherEditor {
-    readonly #dispatch: CommandEditorOptions["dispatch"];
-    readonly #onApplyConfig: CommandEditorOptions["onApplyConfig"];
-    readonly #onCreateInstance: CommandEditorOptions["onCreateInstance"];
-    readonly #onGetInstanceCreateSchema: CommandEditorOptions["onGetInstanceCreateSchema"];
-    readonly #onInstanceAction: CommandEditorOptions["onInstanceAction"];
-    readonly #onInstanceConfigUpdate: CommandEditorOptions["onInstanceConfigUpdate"];
-    readonly #onMcpConfigUpdate: CommandEditorOptions["onMcpConfigUpdate"];
-    readonly #onValidateConfigDraft: CommandEditorOptions["onValidateConfigDraft"];
-    readonly #onValidateInstanceCreateDraft: CommandEditorOptions["onValidateInstanceCreateDraft"];
+    readonly #options: CommandEditorOptions;
     readonly #store: TuiAppStore;
-    readonly #syncMainFocus: CommandEditorOptions["syncMainFocus"];
 
     constructor(options: CommandEditorOptions) {
-        this.#dispatch = options.dispatch;
-        this.#onApplyConfig = options.onApplyConfig;
-        this.#onCreateInstance = options.onCreateInstance;
-        this.#onGetInstanceCreateSchema = options.onGetInstanceCreateSchema;
-        this.#onInstanceAction = options.onInstanceAction;
-        this.#onInstanceConfigUpdate = options.onInstanceConfigUpdate;
-        this.#onMcpConfigUpdate = options.onMcpConfigUpdate;
-        this.#onValidateConfigDraft = options.onValidateConfigDraft;
-        this.#onValidateInstanceCreateDraft = options.onValidateInstanceCreateDraft;
+        this.#options = options;
         this.#store = options.store;
-        this.#syncMainFocus = options.syncMainFocus;
     }
 
     async openCreateWizard(): Promise<boolean> {
         try {
-            const schema = await this.#onGetInstanceCreateSchema();
+            const schema = await this.#options.onGetInstanceCreateSchema();
             const key = "create";
             if (this.#store.getState().ui.formDrafts[key] === undefined) {
                 this.#store.setFormDraft(key, {
@@ -71,7 +53,7 @@ export class CommandDispatcherEditor {
             if (this.#store.getState().ui.expandedBoxes["instances:all:create-wizard"] !== true) {
                 this.#store.toggleExpanded("instances:all:create-wizard");
             }
-            await this.#dispatch({ key, kind: "create", schema, type: "editor.open" });
+            await this.#options.dispatch({ key, kind: "create", schema, type: "editor.open" });
             this.#selectFirstEditorItem();
             return true;
         } catch (error) {
@@ -134,7 +116,7 @@ export class CommandDispatcherEditor {
                     if (instance === undefined) {
                         return false;
                     }
-                    return await this.#dispatch({
+                    return await this.#options.dispatch({
                         body: `Delete ${instance}?`,
                         confirmIntent: { instance, type: "instance.delete" },
                         confirmLabel: "Delete",
@@ -259,14 +241,14 @@ export class CommandDispatcherEditor {
         try {
             if (editor.kind === "create") {
                 const draft = normalizeDraftForSave(this.#editorDraft(editor.key, defaultCreateDraft()));
-                const summary = await this.#onValidateInstanceCreateDraft(draft as unknown as InstanceCreateDraft);
+                const summary = await this.#options.onValidateInstanceCreateDraft(draft as unknown as InstanceCreateDraft);
                 this.#store.setFormDraft(editor.key, draft);
                 this.#store.setEditor({ ...editor, editing: false, error: undefined, summary: summary as unknown as JsonValue });
                 return true;
             }
             const draft = this.#fullConfigDraft(editor.kind === "connector");
             this.#assertPublicAuth(draft);
-            await this.#onValidateConfigDraft(draft);
+            await this.#options.onValidateConfigDraft(draft);
             this.#store.setEditor({ ...editor, editing: false, error: undefined });
             return true;
         } catch (error) {
@@ -294,7 +276,7 @@ export class CommandDispatcherEditor {
             const state = this.#store.getState();
             const wasRunning = state.snapshotsByInstance[instance]?.daemonState === "running" || state.snapshotsByInstance[instance]?.ready === true;
             if (restartInstance && wasRunning) {
-                await this.#onInstanceAction("stop", instance);
+                await this.#options.onInstanceAction("stop", instance);
             }
             const instanceKey = `config:${instance}`;
             const globalKey = `connector:${instance}`;
@@ -303,17 +285,17 @@ export class CommandDispatcherEditor {
             const instanceDirty = state.ui.dirtyForms[instanceKey] === true;
             const globalDirty = editor.kind === "connector" && state.ui.dirtyForms[globalKey] === true;
             if (instanceDirty) {
-                await this.#onInstanceConfigUpdate(instanceDraft);
+                await this.#options.onInstanceConfigUpdate(instanceDraft);
             }
             if (globalDirty) {
-                await this.#onMcpConfigUpdate(globalDraft);
+                await this.#options.onMcpConfigUpdate(globalDraft);
             }
-            const applyResult = instanceDirty || globalDirty ? await this.#onApplyConfig() : {};
+            const applyResult = instanceDirty || globalDirty ? await this.#options.onApplyConfig() : {};
             if (asRecord(applyResult)?.restartControlRequired === true) {
                 this.#store.setControlRestartRequired(true);
             }
             if (restartInstance && wasRunning) {
-                await this.#onInstanceAction("start", instance);
+                await this.#options.onInstanceAction("start", instance);
             }
             this.#store.setFormDraft(`config:${instance}`, instanceDraft, false);
             if (editor.kind === "connector") {
@@ -338,7 +320,7 @@ export class CommandDispatcherEditor {
         }
         const dirty = this.#editorDraftKeys(editor).some((key) => this.#store.getState().ui.dirtyForms[key] === true);
         if (dirty && !confirmed) {
-            return await this.#dispatch({
+            return await this.#options.dispatch({
                 body: "Discard local changes and reload from control?",
                 confirmIntent: { type: "editor.reloadConfirmed" },
                 confirmLabel: "Reload",
@@ -351,7 +333,7 @@ export class CommandDispatcherEditor {
         }
         this.#store.setEditor(undefined);
         this.#store.setFocusScope("mainBoxes");
-        await this.#dispatch({ type: "page.reload" });
+        await this.#options.dispatch({ type: "page.reload" });
         return true;
     }
 
@@ -364,7 +346,7 @@ export class CommandDispatcherEditor {
             return false;
         }
         try {
-            const status = await this.#onCreateInstance(
+            const status = await this.#options.onCreateInstance(
                 normalizeDraftForSave(this.#editorDraft(editor.key, defaultCreateDraft())) as unknown as InstanceCreateDraft
             );
             this.#store.clearFormDraft(editor.key);
@@ -383,7 +365,7 @@ export class CommandDispatcherEditor {
             return false;
         }
         if (this.#editorDraftKeys(editor).some((key) => this.#store.getState().ui.dirtyForms[key] === true)) {
-            return await this.#dispatch({
+            return await this.#options.dispatch({
                 body: "Discard unsaved changes?",
                 confirmIntent: { type: "editor.close" },
                 confirmLabel: "Discard",
@@ -404,7 +386,7 @@ export class CommandDispatcherEditor {
         }
         this.#store.setEditor(undefined);
         this.#store.setFocusScope("mainBoxes");
-        this.#syncMainFocus();
+        this.#options.syncMainFocus();
     }
 
     changeStep(direction: "next" | "previous"): boolean {

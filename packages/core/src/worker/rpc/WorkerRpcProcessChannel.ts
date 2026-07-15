@@ -3,7 +3,7 @@ import { FrameReader, FrameWriter, type JsonValue } from "@portable-devshell/sha
 import type { WorkerCommandTransport } from "../command/WorkerCommandTransport.js";
 import type { WorkerRpcOptions } from "../command/WorkerCommandOptions.js";
 import { WorkerRpcProcessAdapter } from "./WorkerRpcProcessAdapter.js";
-import type { WorkerRpcChannel, WorkerRpcConnector } from "./WorkerRpcChannel.js";
+import { WorkerRpcChannelBase, type WorkerRpcChannel, type WorkerRpcConnector } from "./WorkerRpcChannel.js";
 
 export class WorkerRpcProcessConnector implements WorkerRpcConnector {
     readonly #transport: WorkerCommandTransport;
@@ -19,15 +19,13 @@ export class WorkerRpcProcessConnector implements WorkerRpcConnector {
     }
 }
 
-export class WorkerRpcProcessChannel implements WorkerRpcChannel {
+export class WorkerRpcProcessChannel extends WorkerRpcChannelBase {
     readonly #process: WorkerRpcProcessAdapter;
     readonly #reader = new FrameReader();
     readonly #writer: FrameWriter;
-    readonly #messageListeners = new Set<(message: JsonValue) => void>();
-    readonly #disconnectListeners = new Set<(error: unknown) => void>();
-    #disconnected = false;
 
     constructor(process: WorkerRpcProcessAdapter) {
+        super();
         this.#process = process;
         this.#writer = new FrameWriter(process.stdin);
         process.stdout.on("data", this.#handleStdout);
@@ -35,35 +33,19 @@ export class WorkerRpcProcessChannel implements WorkerRpcChannel {
         process.stdout.once("error", (error) => this.#disconnect(error));
         process.stdin.once("error", (error) => this.#disconnect(error));
         process.exit
-            .then((result) => {
-                this.#disconnect(
-                    new Error(
-                        `rpc process exited with code ${String(result.code)} signal ${String(result.signal)}`
-                    )
-                );
-            })
+            .then((result) => this.#disconnect(new Error(`rpc process exited with code ${String(result.code)} signal ${String(result.signal)}`)))
             .catch((error) => this.#disconnect(error));
     }
 
     async send(message: JsonValue): Promise<void> {
-        if (this.#disconnected) {
+        if (this.disconnected) {
             throw new Error("rpc process channel is disconnected");
         }
         await this.#writer.write(message);
     }
 
-    onMessage(listener: (message: JsonValue) => void): () => void {
-        this.#messageListeners.add(listener);
-        return () => this.#messageListeners.delete(listener);
-    }
-
-    onDisconnect(listener: (error: unknown) => void): () => void {
-        this.#disconnectListeners.add(listener);
-        return () => this.#disconnectListeners.delete(listener);
-    }
-
     close(): void {
-        if (!this.#disconnected) {
+        if (!this.disconnected) {
             this.#process.kill("SIGTERM");
         }
         this.#disconnect(new Error("rpc process channel closed"));
@@ -72,9 +54,7 @@ export class WorkerRpcProcessChannel implements WorkerRpcChannel {
     readonly #handleStdout = (chunk: Uint8Array): void => {
         try {
             for (const message of this.#reader.push(chunk)) {
-                for (const listener of this.#messageListeners) {
-                    listener(message);
-                }
+                this.emitMessage(message);
             }
         } catch (error) {
             this.#disconnect(error);
@@ -82,13 +62,6 @@ export class WorkerRpcProcessChannel implements WorkerRpcChannel {
     };
 
     #disconnect(error: unknown): void {
-        if (this.#disconnected) {
-            return;
-        }
-        this.#disconnected = true;
-        this.#reader.reset();
-        for (const listener of this.#disconnectListeners) {
-            listener(error);
-        }
+        this.notifyDisconnect(error, () => this.#reader.reset());
     }
 }

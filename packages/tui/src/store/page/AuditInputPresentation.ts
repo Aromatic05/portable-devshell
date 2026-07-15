@@ -1,7 +1,5 @@
 import type { JsonValue } from "@portable-devshell/shared";
 
-import type { BoxLine } from "../../component/ExpandableBox.js";
-
 const AUDIT_PREVIEW_MAX_LENGTH = 80;
 
 interface AuditLinkedLog {
@@ -29,14 +27,6 @@ export function resolveAuditOutput(output: JsonValue | undefined, logs: readonly
         ...(stderr.length === 0 ? {} : { stderr }),
         ...(stdout.length === 0 ? {} : { stdout })
     };
-}
-
-export function auditInputLines(input: JsonValue | undefined, fallback: string | undefined): Array<{ id: string; text: string; tone?: BoxLine["tone"] }> {
-    return formatValue(input === undefined ? parseFallback(fallback) : input, 0, undefined).map((text, index) => ({
-        id: `input:${index}`,
-        text,
-        tone: patchLineTone(text)
-    }));
 }
 
 export function auditInputText(input: JsonValue | undefined, fallback: string | undefined): string {
@@ -95,16 +85,3 @@ function parseFallback(value: string | undefined): JsonValue {
     }
 }
 
-function patchLineTone(line: string): BoxLine["tone"] {
-    const value = line.trimStart();
-    if (value.startsWith("+++") || value.startsWith("+")) {
-        return "success";
-    }
-    if (value.startsWith("---") || value.startsWith("-")) {
-        return "danger";
-    }
-    if (value.startsWith("@@") || value.startsWith("***")) {
-        return "accent";
-    }
-    return undefined;
-}

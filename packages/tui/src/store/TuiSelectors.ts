@@ -219,10 +219,6 @@ export function selectSearchModel(state: TuiAppState): { open: boolean; query: s
     };
 }
 
-export function selectExpanded(state: TuiAppState, key: string): boolean {
-    return state.ui.expandedBoxes[key] === true;
-}
-
 export function selectHelpLines(state: TuiAppState): string[] {
     return buildHelpLines(state);
 }

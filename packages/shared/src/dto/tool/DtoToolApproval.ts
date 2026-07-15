@@ -53,8 +53,3 @@ export interface ApprovalTimeout {
     ms: number;
 }
 
-export interface ApprovalEvent {
-    decision?: ApprovalDecision;
-    request: ApprovalRequest;
-    type: "approval.requested" | "approval.approved" | "approval.denied" | "approval.expired" | "approval.cancelled";
-}

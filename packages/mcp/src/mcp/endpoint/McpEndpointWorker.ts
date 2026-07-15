@@ -211,7 +211,7 @@ export class McpEndpointWorker {
         throwIfAborted(signal);
         input = extracted.input;
 
-        if (known?.owner === "todo") {
+        if (known?.owner === "todo" || known?.owner === "artifact" || known?.owner === "instance") {
             if (selected === undefined) {
                 throw this.#toolNotExposed(toolName);
             }
@@ -220,35 +220,17 @@ export class McpEndpointWorker {
                 toolName,
                 input,
                 context,
-                async () => await this.#callTodoTool(toolName as McpTodoToolName, input, context, signal),
-                signal
-            );
-        }
-
-        if (known?.owner === "artifact") {
-            if (selected === undefined) {
-                throw this.#toolNotExposed(toolName);
-            }
-            this.#adaptTool(selected.definition);
-            return await this.#worker.auditToolCall(
-                toolName,
-                input,
-                context,
-                async () => await this.#callArtifactTool(toolName as McpArtifactToolName, input, signal),
-                signal
-            );
-        }
-
-        if (known?.owner === "instance") {
-            if (selected === undefined) {
-                throw this.#toolNotExposed(toolName);
-            }
-            this.#adaptTool(selected.definition);
-            return await this.#worker.auditToolCall(
-                toolName,
-                input,
-                context,
-                async () => await this.#callInstanceTool(toolName as McpInstanceToolName, input, signal),
+                async () => {
+                    switch (known.owner) {
+                        case "todo":
+                            return await this.#callTodoTool(toolName as McpTodoToolName, input, context, signal);
+                        case "artifact":
+                            return await this.#callArtifactTool(toolName as McpArtifactToolName, input, signal);
+                        case "instance":
+                            return await this.#callInstanceTool(toolName as McpInstanceToolName, input, signal);
+                    }
+                    throw this.#toolNotExposed(toolName);
+                },
                 signal
             );
         }
@@ -430,28 +412,11 @@ export class McpEndpointWorker {
 }
 
 function withCtxId(tool: ToolDefinition): ToolDefinition {
-    if (!isRecord(tool.inputSchema)) {
-        throw new McpToolSchemaUnavailableError(tool.name);
-    }
-    const properties = isRecord(tool.inputSchema.properties) ? tool.inputSchema.properties : {};
-    const required = Array.isArray(tool.inputSchema.required)
-        ? tool.inputSchema.required.filter((entry): entry is string => typeof entry === "string")
-        : [];
-    return {
-        ...tool,
-        inputSchema: {
-            ...tool.inputSchema,
-            properties: {
-                ...properties,
-                ctxId: {
-                    description: "Session context ID.",
-                    minLength: 1,
-                    type: "string"
-                }
-            },
-            required: required.includes("ctxId") ? required : [...required, "ctxId"]
-        }
-    };
+    return withInputProperty(tool, "ctxId", {
+        description: "Session context ID.",
+        minLength: 1,
+        type: "string"
+    }, true);
 }
 
 function readContextInput(input: JsonValue): { ctxId: string; input: JsonValue } {
@@ -467,22 +432,32 @@ function readContextInput(input: JsonValue): { ctxId: string; input: JsonValue }
 }
 
 function withInstanceTarget(tool: ToolDefinition): ToolDefinition {
+    return withInputProperty(tool, "instance", {
+        description: "Managed instance name returned by instance_list.",
+        minLength: 1,
+        type: "string"
+    });
+}
+
+function withInputProperty(
+    tool: ToolDefinition,
+    name: string,
+    property: Record<string, JsonValue>,
+    requiredProperty = false
+): ToolDefinition {
     if (!isRecord(tool.inputSchema)) {
         throw new McpToolSchemaUnavailableError(tool.name);
     }
     const properties = isRecord(tool.inputSchema.properties) ? tool.inputSchema.properties : {};
+    const required = Array.isArray(tool.inputSchema.required)
+        ? tool.inputSchema.required.filter((entry): entry is string => typeof entry === "string")
+        : [];
     return {
         ...tool,
         inputSchema: {
             ...tool.inputSchema,
-            properties: {
-                ...properties,
-                instance: {
-                    description: "Managed instance name returned by instance_list.",
-                    minLength: 1,
-                    type: "string"
-                }
-            }
+            properties: { ...properties, [name]: property },
+            ...(requiredProperty ? { required: required.includes(name) ? required : [...required, name] } : {})
         }
     };
 }

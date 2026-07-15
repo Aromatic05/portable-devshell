@@ -1,7 +1,7 @@
 import type { TodoReadResult } from "@portable-devshell/shared";
 
 import type { CliControlClientLike } from "../../control/CliControlClient.js";
-import type { CliControlStream } from "../../control/CliControlStream.js";
+import { followControlStream } from "../watch/CliCommandFollowStream.js";
 
 export class CliCommandInstanceTodo {
     async execute(
@@ -9,55 +9,26 @@ export class CliCommandInstanceTodo {
         instance: string,
         follow: boolean,
         onTodo: (todo: TodoReadResult) => Promise<void> | void,
-        maxEvents?: number,
+        maxEvents?: number
     ): Promise<void> {
-        let handled = 0;
-        let stream: CliControlStream | undefined;
+        const load = async () => {
+            const envelope = await client.getTodo(instance);
+            await onTodo(envelope.todo);
+            return envelope.lastSeq + 1;
+        };
 
-        try {
-            while (true) {
-                const envelope = await client.getTodo(instance);
-                await onTodo(envelope.todo);
-
-                if (
-                    !follow ||
-                    (maxEvents !== undefined && handled >= maxEvents)
-                ) {
-                    return;
-                }
-
-                try {
-                    stream = await client.subscribeTodo(
-                        instance,
-                        envelope.lastSeq + 1,
-                    );
-                    while (maxEvents === undefined || handled < maxEvents) {
-                        await stream.nextEvent();
-                        handled += 1;
-                        const refreshed = await client.getTodo(instance);
-                        await onTodo(refreshed.todo);
-                    }
-                    return;
-                } catch (error) {
-                    stream?.close();
-                    stream = undefined;
-                    if (readErrorCode(error) === "stream.gap") {
-                        continue;
-                    }
-                    throw error;
-                }
-            }
-        } finally {
-            stream?.close();
+        if (!follow) {
+            await load();
+            return;
         }
-    }
-}
 
-function readErrorCode(error: unknown): string | undefined {
-    return typeof error === "object" &&
-        error !== null &&
-        "code" in error &&
-        typeof error.code === "string"
-        ? error.code
-        : undefined;
+        await followControlStream({
+            loadFromSeq: load,
+            maxEvents,
+            async onEvent() {
+                await onTodo((await client.getTodo(instance)).todo);
+            },
+            subscribe: (fromSeq) => client.subscribeTodo(instance, fromSeq)
+        });
+    }
 }

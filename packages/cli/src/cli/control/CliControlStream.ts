@@ -6,11 +6,9 @@ import {
     type ControlRpcInstanceListEntry,
     type ControlRpcInstanceLogEntry,
     type ControlRpcInstanceSnapshotEnvelope,
-    type JsonValue,
-    type ProtocolControlStreamMessage
+    type JsonValue
 } from "@portable-devshell/shared";
 
-export type CliControlStreamMessage = ProtocolControlStreamMessage;
 export type CliInstanceSnapshotEnvelope = ControlRpcInstanceSnapshotEnvelope;
 export type CliInstanceListEntry = ControlRpcInstanceListEntry;
 export type CliInstanceLogEntry = ControlRpcInstanceLogEntry;
