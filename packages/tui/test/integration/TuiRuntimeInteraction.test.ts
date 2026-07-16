@@ -16,7 +16,7 @@ test("real Ink runtime handles keyboard navigation, search, redraw, and terminal
     const clients = createClients();
     const runtime = new TuiRuntime(
         { stdin: terminal.stdin, stdout: terminal.stdout },
-        { clients: clients.value }
+        { clients: clients.value, inkDebug: true }
     );
     const running = runtime.run();
 
@@ -66,7 +66,7 @@ test("real Ink runtime buffers split mouse input and enters then discards the cr
     const clients = createClients();
     const runtime = new TuiRuntime(
         { stdin: terminal.stdin, stdout: terminal.stdout },
-        { clients: clients.value }
+        { clients: clients.value, inkDebug: true }
     );
     const running = runtime.run();
 
@@ -143,7 +143,7 @@ test("real Ink runtime renders connection failure and remains interactive until 
     });
     const runtime = new TuiRuntime(
         { stdin: terminal.stdin, stdout: terminal.stdout },
-        { clients: clients.value }
+        { clients: clients.value, inkDebug: true }
     );
     const running = runtime.run();
 
@@ -168,7 +168,7 @@ test("real Ink runtime handles sidebar mouse buttons and viewport wheel scrollin
     const clients = createClients();
     const runtime = new TuiRuntime(
         { stdin: terminal.stdin, stdout: terminal.stdout },
-        { clients: clients.value }
+        { clients: clients.value, inkDebug: true }
     );
     const running = runtime.run();
 
@@ -222,7 +222,7 @@ test("real Ink runtime renders compact and unsupported terminal layouts", async 
         const clients = createClients();
         const runtime = new TuiRuntime(
             { stdin: terminal.stdin, stdout: terminal.stdout },
-            { clients: clients.value }
+            { clients: clients.value, inkDebug: true }
         );
         const running = runtime.run();
 
@@ -244,7 +244,7 @@ test("real Ink runtime routes every page and drives approval and text detail scr
     const clients = createClients();
     const runtime = new TuiRuntime(
         { stdin: terminal.stdin, stdout: terminal.stdout },
-        { clients: clients.value }
+        { clients: clients.value, inkDebug: true }
     );
     const running = runtime.run();
 
@@ -361,7 +361,7 @@ test(
         const clients = createClients();
         const runtime = new TuiRuntime(
             { stdin: terminal.stdin, stdout: terminal.stdout },
-            { clients: clients.value }
+            { clients: clients.value, inkDebug: true }
         );
         let sessionRefreshes = 0;
         (runtime.session as unknown as { refreshInstance(instance: string): Promise<void> }).refreshInstance = async (instance) => {

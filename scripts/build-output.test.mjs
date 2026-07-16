@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { lstat, mkdir, rm, writeFile } from "node:fs/promises";
+import { lstat, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
@@ -41,4 +41,9 @@ test("incremental package builds remove obsolete dist artifacts", { timeout: 120
             await rm(marker, { force: true });
         }
     }
+});
+
+test("TUI tests serialize files that exercise Ink global runtime state", async () => {
+    const manifest = JSON.parse(await readFile(resolve(repositoryRoot, "packages", "tui", "package.json"), "utf8"));
+    assert.match(manifest.scripts.test, /--test-concurrency=1/u);
 });

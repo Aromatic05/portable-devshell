@@ -34,6 +34,7 @@ export interface TuiRuntimeOptions {
 
 export interface TuiRuntimeDependencies {
     clients?: TuiClients;
+    inkDebug?: boolean;
 }
 
 export class TuiRuntime {
@@ -44,6 +45,7 @@ export class TuiRuntime {
     readonly session: TuiControlSession;
     readonly store: TuiAppStore;
     readonly #alternateScreen: AlternateScreen;
+    readonly #inkDebug: boolean;
     readonly #inkStdin: ReadStream;
     readonly #operations: TuiRuntimeOperations;
     readonly #stdin: ReadStream;
@@ -62,6 +64,7 @@ export class TuiRuntime {
     ) {
         this.#stdin = options.stdin ?? process.stdin;
         this.#stdout = options.stdout ?? process.stdout;
+        this.#inkDebug = dependencies.inkDebug ?? false;
         this.#inkStdin = createInkStdin(this.#stdin);
         this.#alternateScreen = new AlternateScreen(this.#stdout);
         this.store = new TuiAppStore();
@@ -272,6 +275,7 @@ export class TuiRuntime {
         this.#ink = render(
             React.createElement(TuiApp, { runtime: this }),
             {
+                debug: this.#inkDebug,
                 exitOnCtrlC: false,
                 stdin: this.#inkStdin,
                 stdout: this.#stdout
