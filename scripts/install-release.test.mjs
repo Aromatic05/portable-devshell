@@ -11,6 +11,9 @@ const repositoryRoot = fileURLToPath(new URL("../", import.meta.url));
 test("PowerShell release installer is UTF-8 with BOM for Windows PowerShell", async () => {
     const content = await readFile(resolve(repositoryRoot, "scripts", "install-release.ps1"));
     assert.deepEqual([...content.subarray(0, 3)], [0xef, 0xbb, 0xbf]);
+    const source = content.toString("utf8");
+    assert.doesNotMatch(source, /Get-FileHash/u);
+    assert.match(source, /Security\.Cryptography\.SHA256/u);
 });
 
 const allTargets = [

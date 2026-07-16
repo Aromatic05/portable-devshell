@@ -87,7 +87,17 @@ function Assert-CliStarts([string]$CliPath, [string]$FailureLabel, [bool]$Comman
 function Assert-Sha256([string]$File, [string]$ShaFile) {
     $expected = ((Get-Content -LiteralPath $ShaFile -TotalCount 1) -split '\s+')[0].Trim().ToLowerInvariant()
     if ($expected -notmatch '^[0-9a-f]{64}$') { throw "无效的 SHA-256 文件：$ShaFile" }
-    $actual = (Get-FileHash -Algorithm SHA256 -LiteralPath $File).Hash.ToLowerInvariant()
+    $stream = [IO.File]::OpenRead($File)
+    try {
+        $sha256 = [Security.Cryptography.SHA256]::Create()
+        try {
+            $actual = ([BitConverter]::ToString($sha256.ComputeHash($stream))).Replace("-", "").ToLowerInvariant()
+        } finally {
+            $sha256.Dispose()
+        }
+    } finally {
+        $stream.Dispose()
+    }
     if ($actual -ne $expected) { throw "SHA-256 校验失败：$File" }
 }
 
