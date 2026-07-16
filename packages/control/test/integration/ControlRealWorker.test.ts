@@ -7,16 +7,13 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 import {
-    Channel,
-    Codec,
-    PrefixRoute,
     asInstanceName,
+    ClientConnection,
     createError,
     ControlLifecycleManager,
     ControlPathHome,
     ControlPathRuntime,
     type Destination,
-    type Event,
     type JsonValue
 } from "@portable-devshell/shared";
 
@@ -231,28 +228,24 @@ function normalizeArch(arch: string): string {
 
 async function request(
     socketPath: string,
-    operation: Event["name"],
+    operation: string,
     destination: Destination,
     params?: JsonValue,
     clientKind: "cli" | "tui" = "cli"
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 ): Promise<any> {
-    const route = new PrefixRoute(
-        new Codec(await Channel.connect(socketPath), { local: clientKind, remote: "server" }),
-        { requestIdPrefix: clientKind }
-    );
-    try {
-        if (operation === "runtime.start") {
-            const acknowledgement = await route.openStream({
-                destination,
-                name: operation,
-                ...(params === undefined ? {} : { payload: params })
-            });
-            if (acknowledgement.event.error !== undefined) {
-                throw createError(acknowledgement.event.error);
-            }
+    const [module, method] = operation.split(".");
+    const client = new ClientConnection({
+        mapError: (error) => error instanceof Error ? error : new Error(String(error)),
+        mapRemoteError: (error) => createError(error),
+        peer: clientKind,
+        socketPath
+    });
+    if (operation === "runtime.start") {
+        const opened = await client.openStream(destination, module!, method!, params);
+        try {
             while (true) {
-                const event = (await route.nextStreamFrame()).event;
+                const event = await opened.stream.nextEvent();
                 if (event.name === "stream.completed") {
                     return event.payload;
                 }
@@ -264,18 +257,10 @@ async function request(
                     });
                 }
             }
+        } finally {
+            opened.stream.close();
         }
-
-        const reply = await route.request({
-            destination,
-            name: operation,
-            ...(params === undefined ? {} : { payload: params })
-        });
-        if (reply.event.error !== undefined) {
-            throw createError(reply.event.error);
-        }
-        return reply.event.payload;
-    } finally {
-        route.close();
     }
+
+    return await client.request(destination, module!, method!, params);
 }

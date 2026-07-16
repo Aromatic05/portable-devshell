@@ -1,11 +1,11 @@
 import {
     instanceClientModule,
     type ClientConnection,
+    type ClientStream,
     type InstanceLogEntry,
     type InstanceRuntimeEnvelope,
     type InstanceSnapshot,
-    type JsonValue,
-    type PrefixRoute
+    type JsonValue
 } from "@portable-devshell/shared";
 
 import { clientEventStream, type ClientEventStream } from "../../client/ClientEventStream.js";
@@ -30,15 +30,15 @@ export function createRuntimeClient(connection: ClientConnection) {
         start: async (instance: string, relay?: TerminalRelay): Promise<InstanceSnapshot> => {
             const restoreTerminal = relay === undefined ? () => undefined : enableRawRelayMode(relay.input);
             let cleanupInput: () => void = () => undefined;
-            let route: PrefixRoute | undefined;
+            let stream: ClientStream | undefined;
             try {
                 const opened = await runtime.openStream(instance, "start");
-                route = opened.route;
+                stream = opened.stream;
                 if (relay !== undefined) {
-                    cleanupInput = attachRelayInput(relay.input, route, opened.acknowledgement.event.destination);
+                    cleanupInput = attachRelayInput(relay.input, stream);
                 }
                 while (true) {
-                    const event = (await route.nextStreamFrame()).event;
+                    const event = await stream.nextEvent();
                     if (event.name === "runtime.output") {
                         if (relay !== undefined && isRecord(event.payload) && typeof event.payload.chunk === "string") {
                             relay.output.write(event.payload.chunk);
@@ -58,7 +58,7 @@ export function createRuntimeClient(connection: ClientConnection) {
             } finally {
                 cleanupInput();
                 restoreTerminal();
-                route?.close();
+                stream?.close();
             }
         }
     };
@@ -66,21 +66,13 @@ export function createRuntimeClient(connection: ClientConnection) {
 
 export type RuntimeClient = ReturnType<typeof createRuntimeClient>;
 
-function attachRelayInput(
-    input: NodeJS.ReadableStream,
-    route: PrefixRoute,
-    destination: import("@portable-devshell/shared").Destination
-): () => void {
+function attachRelayInput(input: NodeJS.ReadableStream, stream: ClientStream): () => void {
     const onData = (chunk: string | Buffer) => {
         const value = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-        void route.sendStream({
-            destination,
-            name: "runtime.input",
-            payload: { data: value.toString("base64") }
-        });
+        void stream.send("input", { data: value.toString("base64") });
     };
     const onEnd = () => {
-        void route.sendStream({ destination, name: "runtime.eof" });
+        void stream.send("eof");
     };
     input.on("data", onData);
     input.once("end", onEnd);

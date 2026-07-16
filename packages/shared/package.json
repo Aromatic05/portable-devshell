@@ -9,6 +9,10 @@
         ".": {
             "types": "./dist/index.d.ts",
             "default": "./dist/index.js"
+        },
+        "./internal/frame": {
+            "types": "./dist/transport/Frame.d.ts",
+            "default": "./dist/transport/Frame.js"
         }
     },
     "files": [

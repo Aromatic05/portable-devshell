@@ -1,4 +1,4 @@
-import { type ApprovalRequest, type ArtifactShareResult, type ArtifactTransferRecord, type ControlError, type Event, type InstanceSnapshot, type JsonValue, type OAuthApprovalRequest, type TodoReadResult, type ToolCallRecord } from "@portable-devshell/shared";
+import { type ApprovalRequest, type ArtifactShareResult, type ArtifactTransferRecord, type ClientEvent, type ControlError, type InstanceSnapshot, type JsonValue, type OAuthApprovalRequest, type TodoReadResult, type ToolCallRecord } from "@portable-devshell/shared";
 
 import { type TuiEditorState, type TuiUiIntent } from "../interaction/TuiInteractionTypes.js";
 import type { AuditPageState, FocusScope, PageId, SidebarCursor, SidebarFocus } from "../model/TuiUiTypes.js";
@@ -382,14 +382,14 @@ export class TuiAppStore {
         });
     }
 
-    appendRawEvent(event: Event): void {
+    appendRawEvent(event: ClientEvent): void {
         this.dispatch({
             rawEvent: toRawEventRecord(event),
             type: "event.append"
         });
     }
 
-    applyEvent(event: Event): void {
+    applyEvent(event: ClientEvent): void {
         if (event.destination === "@control" || event.seq === undefined) {
             return;
         }

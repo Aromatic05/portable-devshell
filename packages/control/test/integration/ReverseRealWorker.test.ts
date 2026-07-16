@@ -8,13 +8,10 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 import {
-    Channel,
-    Codec,
-    PrefixRoute,
     asInstanceName,
+    ClientConnection,
     createError,
     type Destination,
-    type Event,
     type JsonValue
 } from "@portable-devshell/shared";
 
@@ -210,26 +207,17 @@ async function waitForExit(child: ChildProcessWithoutNullStreams): Promise<void>
 
 async function request(
     socketPath: string,
-    operation: Event["name"],
+    operation: string,
     destination: Destination,
     params?: JsonValue
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 ): Promise<any> {
-    const route = new PrefixRoute(
-        new Codec(await Channel.connect(socketPath), { local: "cli", remote: "server" }),
-        { requestIdPrefix: "cli" }
-    );
-    try {
-        const reply = await route.request({
-            destination,
-            name: operation,
-            ...(params === undefined ? {} : { payload: params })
-        });
-        if (reply.event.error !== undefined) {
-            throw createError(reply.event.error);
-        }
-        return reply.event.payload;
-    } finally {
-        route.close();
-    }
+    const [module, method] = operation.split(".");
+    const client = new ClientConnection({
+        mapError: (error) => error instanceof Error ? error : new Error(String(error)),
+        mapRemoteError: (error) => createError(error),
+        peer: "cli",
+        socketPath
+    });
+    return await client.request(destination, module!, method!, params);
 }

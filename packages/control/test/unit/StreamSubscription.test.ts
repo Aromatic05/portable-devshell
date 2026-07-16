@@ -27,7 +27,8 @@ test("RuntimeSubscriptionManager returns snapshot lastSeq and pushes sequenced e
     await waitFor(() => harness.events.length === 1);
 
     assert.equal(harness.events[0]?.seq, 2);
-    assert.equal(harness.events[0]?.name, "toolCall.completed");
+    assert.equal(harness.events[0]?.module, "toolCall");
+    assert.equal(harness.events[0]?.name, "completed");
     assert.equal((harness.events[0]?.payload as { seq?: number }).seq, 2);
     manager.unsubscribeConnection("conn-1");
 });
@@ -76,7 +77,8 @@ test("RuntimeSubscriptionManager emits a non-terminal runtime stream.gap", async
     worker.dropBefore(4);
     await waitFor(() => harness.events.length === 2);
 
-    assert.equal(harness.events[1]?.name, "stream.gap");
+    assert.equal(harness.events[1]?.module, "stream");
+    assert.equal(harness.events[1]?.name, "gap");
     assert.deepEqual(harness.events[1]?.payload, {
         instance: "alpha",
         latestSeq: 3,
@@ -88,12 +90,12 @@ test("RuntimeSubscriptionManager emits a non-terminal runtime stream.gap", async
 
 function createStreamContext(connectionId: string, requestId: string): {
     context: PrefixRouteContext;
-    events: Array<{ name: string; payload?: JsonValue; seq?: number }>;
+    events: Array<{ module?: string; name: string; payload?: JsonValue; seq?: number }>;
     initialPayload?: JsonValue;
 } {
     const result: {
         context: PrefixRouteContext;
-        events: Array<{ name: string; payload?: JsonValue; seq?: number }>;
+        events: Array<{ module?: string; name: string; payload?: JsonValue; seq?: number }>;
         initialPayload?: JsonValue;
     } = {
         context: undefined as unknown as PrefixRouteContext,
@@ -103,8 +105,9 @@ function createStreamContext(connectionId: string, requestId: string): {
         id: requestId,
         async cancel() {},
         async complete() {},
-        async emit(name, payload, seq) {
+        async emit(name, payload, seq, module) {
             result.events.push({
+                ...(module === undefined ? {} : { module }),
                 name,
                 ...(payload === undefined ? {} : { payload }),
                 ...(seq === undefined ? {} : { seq })

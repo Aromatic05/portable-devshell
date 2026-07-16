@@ -6,13 +6,12 @@ import test from "node:test";
 
 import type { WorkerCommandInteractiveSession, WorkerInstance } from "@portable-devshell/core";
 import {
-    Channel,
-    Codec,
-    PrefixRoute,
     asInstanceName,
+    ClientConnection,
+    createError,
+    type ClientEvent,
+    type ClientStream,
     type Destination,
-    type Event,
-    type Frame,
     type JsonValue,
     type Peer
 } from "@portable-devshell/shared";
@@ -34,19 +33,19 @@ test("ControlSocketServer routes canonical control and instance operations over 
     const harness = await createHarness();
     t.after(() => harness.cleanup());
 
-    assert.deepEqual((await request(harness.socketPath, "@control", "service.ping")).event.payload, { pong: true });
-    assert.deepEqual((await request(harness.socketPath, "@control", "service.status")).event.payload, {
+    assert.deepEqual((await request(harness.socketPath, "@control", "service.ping")).payload, { pong: true });
+    assert.deepEqual((await request(harness.socketPath, "@control", "service.status")).payload, {
         instanceCount: 1,
         ok: true
     });
 
-    const listed = (await request(harness.socketPath, "@control", "instance.list")).event.payload as Array<{
+    const listed = (await request(harness.socketPath, "@control", "instance.list")).payload as Array<{
         name: string;
     }>;
     assert.equal(listed[0]?.name, "alpha");
 
     const snapshot = await request(harness.socketPath, asInstanceName("alpha"), "runtime.snapshot");
-    assert.equal((snapshot.event.payload as { lastSeq: number }).lastSeq, 0);
+    assert.equal((snapshot.payload as { lastSeq: number }).lastSeq, 0);
 
     await request(harness.socketPath, asInstanceName("alpha"), "runtime.readLogs", { limit: 1_000 });
     assert.deepEqual(harness.worker.lastReadLogsQuery, { fromSeq: undefined, limit: 100 });
@@ -58,7 +57,7 @@ test("ControlSocketServer routes canonical control and instance operations over 
         { input: { command: "pwd" }, toolName: "bash_run" },
         "tui"
     );
-    assert.equal((toolReply.event.payload as { exitCode: number }).exitCode, 0);
+    assert.equal((toolReply.payload as { exitCode: number }).exitCode, 0);
     assert.equal(harness.worker.lastToolCall?.source, "tui");
     assert.equal(typeof harness.worker.lastToolCall?.requestId, "string");
     assert.equal(typeof harness.worker.lastToolCall?.ctxId, "string");
@@ -68,14 +67,14 @@ test("ControlSocketServer routes canonical control and instance operations over 
         asInstanceName("missing"),
         "runtime.snapshot"
     );
-    assert.equal(missingDestination.event.error?.code, "control.invalidTarget");
+    assert.equal(missingDestination.error?.code, "control.invalidTarget");
 
     const missingOperation = await request(
         harness.socketPath,
         asInstanceName("alpha"),
-        "runtime.missing" as Event["name"]
+        "runtime.missing"
     );
-    assert.equal(missingOperation.event.error?.code, "control.methodNotFound");
+    assert.equal(missingOperation.error?.code, "control.methodNotFound");
 });
 
 test("ControlSocketServer rebuilds the immutable route snapshot after registry changes", async (t) => {
@@ -92,42 +91,39 @@ test("ControlSocketServer rebuilds the immutable route snapshot after registry c
     });
 
     const before = await request(socketPath, asInstanceName("alpha"), "runtime.snapshot");
-    assert.equal(before.event.error?.code, "control.invalidTarget");
+    assert.equal(before.error?.code, "control.invalidTarget");
 
     registry.add(createDescriptor(new FakeWorker("alpha")));
 
     const after = await request(socketPath, asInstanceName("alpha"), "runtime.snapshot");
-    assert.equal(after.event.error, undefined);
-    assert.equal((after.event.payload as { snapshot: { name: string } }).snapshot.name, "alpha");
+    assert.equal(after.error, undefined);
+    assert.equal((after.payload as { snapshot: { name: string } }).snapshot.name, "alpha");
 });
 
 test("interactive runtime receives stream input while the root handler is still running", async (t) => {
     const harness = await createHarness();
     t.after(() => harness.cleanup());
-    const route = await connectRoute(harness.socketPath, "cli");
-    t.after(() => route.close());
+    const client = createClient(harness.socketPath, "cli");
+    const opened = await client.openStream(
+        asInstanceName("alpha"),
+        "runtime",
+        "start",
+        { workspacePath: "/tmp/ws" }
+    );
+    const stream: ClientStream = opened.stream;
+    t.after(() => stream.close());
+    assert.equal(opened.acknowledgement.replyTo === undefined, false);
+    assert.notEqual(stream.id, opened.acknowledgement.replyTo);
 
-    const acknowledgement = await route.openStream({
-        destination: asInstanceName("alpha"),
-        name: "runtime.start",
-        payload: { workspacePath: "/tmp/ws" }
-    }, "start-1");
-    assert.equal(acknowledgement.replyTo, "start-1");
-    assert.equal(acknowledgement.streamId, "start-1");
+    await stream.send("input", { data: Buffer.from("hello").toString("base64") });
 
-    await route.sendStream({
-        destination: asInstanceName("alpha"),
-        name: "runtime.input",
-        payload: { data: Buffer.from("hello").toString("base64") }
-    });
+    const output = await stream.nextEvent();
+    assert.equal(output.name, "runtime.output");
+    assert.deepEqual(output.payload, { chunk: "echo:hello" });
 
-    const output = await route.nextStreamFrame();
-    assert.equal(output.event.name, "runtime.output");
-    assert.deepEqual(output.event.payload, { chunk: "echo:hello" });
-
-    const completed = await route.nextStreamFrame();
-    assert.equal(completed.event.name, "stream.completed");
-    assert.equal((completed.event.payload as { ready: boolean }).ready, true);
+    const completed = await stream.nextEvent();
+    assert.equal(completed.name, "stream.completed");
+    assert.equal((completed.payload as { ready: boolean }).ready, true);
 });
 
 test("service.shutdown replies before invoking the shutdown action", async (t) => {
@@ -149,7 +145,7 @@ test("service.shutdown replies before invoking the shutdown action", async (t) =
     });
 
     const reply = await request(socketPath, "@control", "service.shutdown");
-    assert.deepEqual(reply.event.payload, { accepted: true });
+    assert.deepEqual(reply.payload, { accepted: true });
     await waitFor(() => shutdownRequested);
 });
 
@@ -193,30 +189,24 @@ function createDescriptor(worker: FakeWorker) {
     };
 }
 
-async function connectRoute(socketPath: string, peer: Exclude<Peer, "server">): Promise<PrefixRoute> {
-    const channel = await Channel.connect(socketPath);
-    return new PrefixRoute(new Codec(channel, { local: peer, remote: "server" }), {
-        requestIdPrefix: peer
+function createClient(socketPath: string, peer: Exclude<Peer, "server">): ClientConnection {
+    return new ClientConnection({
+        mapError: (error) => error instanceof Error ? error : new Error(String(error)),
+        mapRemoteError: (error) => createError(error),
+        peer,
+        socketPath
     });
 }
 
 async function request(
     socketPath: string,
     destination: Destination,
-    name: Event["name"],
+    name: string,
     payload?: JsonValue,
     peer: Exclude<Peer, "server"> = "cli"
-): Promise<Frame> {
-    const route = await connectRoute(socketPath, peer);
-    try {
-        return await route.request({
-            destination,
-            name,
-            ...(payload === undefined ? {} : { payload })
-        });
-    } finally {
-        route.close();
-    }
+): Promise<ClientEvent> {
+    const [module, operation] = name.split(".");
+    return await createClient(socketPath, peer).requestEvent(destination, module!, operation!, payload);
 }
 
 class FakeWorker {

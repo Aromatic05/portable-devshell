@@ -89,14 +89,15 @@ export class RuntimeSubscriptionManager {
             try {
                 if (slice.kind === "gap") {
                     await subscription.stream.emit(
-                        "stream.gap",
+                        "gap",
                         {
                             instance: subscription.instanceName,
                             latestSeq: slice.lastSeq,
                             oldestAvailableSeq: slice.nextSeq,
                             requestedFromSeq: subscription.nextSeq
                         },
-                        slice.lastSeq
+                        slice.lastSeq,
+                        "stream"
                     );
                     subscription.nextSeq = slice.nextSeq;
                     continue;
@@ -106,7 +107,8 @@ export class RuntimeSubscriptionManager {
                     if (subscription.eventFilter !== undefined && !subscription.eventFilter(event)) {
                         continue;
                     }
-                    await subscription.stream.emit(event.type, event as unknown as JsonValue, event.seq);
+                    const [module, operation] = splitEventType(event.type);
+                    await subscription.stream.emit(operation, event as unknown as JsonValue, event.seq, module);
                 }
                 subscription.nextSeq = slice.lastSeq + 1;
             } catch {
@@ -127,4 +129,12 @@ export class RuntimeSubscriptionManager {
         clearInterval(this.#timer);
         this.#timer = undefined;
     }
+}
+
+function splitEventType(type: string): [module: string, operation: string] {
+    const segments = type.split(".");
+    if (segments.length !== 2 || segments.some((segment) => !/^[A-Za-z][A-Za-z0-9]*$/.test(segment))) {
+        throw new Error(`Invalid instance event type: ${type}`);
+    }
+    return [segments[0]!, segments[1]!];
 }

@@ -51,8 +51,8 @@ export class ControlSocketServer {
     #attach(socket: Socket): void {
         const channel = Channel.accept(socket);
         const route = new PrefixRoute(new Codec(channel, { local: "server" }), {
+            eventIdPrefix: "server",
             getSnapshot: () => this.#routes.snapshot(),
-            requestIdPrefix: "server"
         });
         this.#connections.set(route.connectionId, route);
         channel.onClose(() => {

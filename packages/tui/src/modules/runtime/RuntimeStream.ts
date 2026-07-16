@@ -1,24 +1,24 @@
 import {
     asInstanceName,
     readClientSubscriptionEvents,
-    type Event,
-    type OpenedClientStream,
-    type PrefixRoute
+    type ClientEvent,
+    type ClientStream,
+    type OpenedClientStream
 } from "@portable-devshell/shared";
 
 export type RuntimeStreamMessage =
-    | { event: Event; kind: "instance.event" }
-    | { event: Event; kind: "stream.gap" }
-    | { event: Event; kind: "stream.cancelled" }
+    | { event: ClientEvent; kind: "instance.event" }
+    | { event: ClientEvent; kind: "stream.gap" }
+    | { event: ClientEvent; kind: "stream.cancelled" }
     | { kind: "connection.closed" };
 
 export class RuntimeStream {
-    readonly #route: PrefixRoute;
-    readonly #initialEvents: Event[];
+    readonly #stream: ClientStream;
+    readonly #initialEvents: ClientEvent[];
     #closed = false;
 
-    constructor(route: PrefixRoute, initialEvents: Event[]) {
-        this.#route = route;
+    constructor(stream: ClientStream, initialEvents: ClientEvent[]) {
+        this.#stream = stream;
         this.#initialEvents = [...initialEvents];
     }
 
@@ -31,7 +31,7 @@ export class RuntimeStream {
             return { kind: "connection.closed" };
         }
         try {
-            const event = (await this.#route.nextStreamFrame()).event;
+            const event = await this.#stream.nextEvent();
             if (event.name === "stream.gap") {
                 return { event, kind: "stream.gap" };
             }
@@ -49,14 +49,13 @@ export class RuntimeStream {
             return;
         }
         this.#closed = true;
-        this.#route.close();
+        this.#stream.close();
     }
 }
 
 export function runtimeStream(instance: string, opened: OpenedClientStream): RuntimeStream {
-    const destination = asInstanceName(instance);
     return new RuntimeStream(
-        opened.route,
-        readClientSubscriptionEvents(destination, opened.acknowledgement.event.payload)
+        opened.stream,
+        readClientSubscriptionEvents(asInstanceName(instance), opened.acknowledgement.payload)
     );
 }

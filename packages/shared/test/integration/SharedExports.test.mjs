@@ -1,15 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-const { configSchema, errorCodes, validateFrame } = await import("@portable-devshell/shared");
+const { configSchema, errorCodes, validateEvent } = await import("@portable-devshell/shared");
 
 test("configSchema accepts a valid controller config", () => {
     const result = configSchema.safeParse({
         instances: [
             {
-                env: {
-                    HOME: "/tmp/demo"
-                },
+                env: { HOME: "/tmp/demo" },
                 name: "demo",
                 workspacePath: "/workspace/demo"
             }
@@ -24,7 +22,6 @@ test("configSchema accepts a valid controller config", () => {
             publicExposure: false
         }
     });
-
     assert.equal(result.success, true);
 });
 
@@ -32,38 +29,30 @@ test("configSchema rejects invalid auth and public exposure structure", () => {
     const result = configSchema.safeParse({
         instances: [],
         mcp: {
-            auth: {
-                enabled: true,
-                provider: ""
-            },
+            auth: { enabled: true, provider: "" },
             enabled: true,
             publicExposure: "yes"
         }
     });
-
     assert.equal(result.success, false);
 });
 
-test("validateFrame accepts the Frame/Event contract and rejects old envelopes", () => {
-    assert.deepEqual(validateFrame({
+test("validateEvent accepts the Event contract and rejects old envelopes", () => {
+    assert.deepEqual(validateEvent({
         id: "req-1",
         from: "cli",
         to: "server",
-        event: {
-            destination: "@control",
-            name: "service.ping"
-        }
+        destination: "@control",
+        name: "service.ping"
     }), {
         id: "req-1",
         from: "cli",
         to: "server",
-        event: {
-            destination: "@control",
-            name: "service.ping"
-        }
+        destination: "@control",
+        name: "service.ping"
     });
 
-    assert.throws(() => validateFrame({
+    assert.throws(() => validateEvent({
         id: "req-1",
         method: "control.ping",
         target: { kind: "control" },

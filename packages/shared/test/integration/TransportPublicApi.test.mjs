@@ -7,9 +7,18 @@ test("shared does not expose a centralized control operation catalog", () => {
     assert.equal("controlOperations" in shared, false);
 });
 
-test("shared publicly exposes only the three main socket communication layers", () => {
-    assert.deepEqual(
-        ["Channel", "Codec", "PrefixRoute"].filter((name) => typeof shared[name] === "function"),
-        ["Channel", "Codec", "PrefixRoute"]
-    );
+test("shared exposes three protocol layers and their shared compositions", () => {
+    for (const name of [
+        "Channel",
+        "Codec",
+        "PrefixRoute",
+        "ClientConnection",
+        "ControlLifecycleManager",
+        "ControlSocketFile"
+    ]) {
+        assert.equal(typeof shared[name], "function", `${name} must be public`);
+    }
+    for (const name of ["FrameBuffer", "encodeFrame", "decodeFrame"]) {
+        assert.equal(name in shared, false, `${name} must stay out of the root public API`);
+    }
 });

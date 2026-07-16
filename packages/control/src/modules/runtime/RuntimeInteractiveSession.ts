@@ -1,5 +1,5 @@
 import type { WorkerCommandInteractiveSession } from "@portable-devshell/core";
-import { createError, errorCodes, type Event, type JsonValue } from "@portable-devshell/shared";
+import { createError, errorCodes, type JsonValue, type PrefixRouteEvent } from "@portable-devshell/shared";
 
 export class RuntimeInteractiveSession implements WorkerCommandInteractiveSession {
     readonly #queue: Buffer[] = [];
@@ -11,15 +11,15 @@ export class RuntimeInteractiveSession implements WorkerCommandInteractiveSessio
         this.#writeOutput = writeOutput;
     }
 
-    accept(event: Event): void {
+    accept(event: PrefixRouteEvent): void {
         if (this.#closed) {
             return;
         }
-        if (event.name === "runtime.eof") {
+        if (event.name === "eof") {
             this.closeInput();
             return;
         }
-        if (event.name !== "runtime.input") {
+        if (event.name !== "input") {
             throw createError({
                 code: errorCodes.envelopeInvalid,
                 message: `Interactive runtime does not accept ${event.name}.`,

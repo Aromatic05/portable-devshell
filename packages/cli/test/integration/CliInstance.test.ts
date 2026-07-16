@@ -7,7 +7,7 @@ import { Readable } from "node:stream";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { Channel, Codec, type Frame, type JsonValue } from "@portable-devshell/shared";
+import { Channel, Codec, type Event, type JsonValue } from "@portable-devshell/shared";
 
 import { CliMain } from "../../dist/cli/CliMain.js";
 
@@ -252,17 +252,17 @@ function createInstanceHarness(): { attach: (socket: Socket) => void } {
     return {
         attach(socket: Socket) {
             const codec = new Codec(Channel.accept(socket), { local: "server" });
-            codec.onFrame((frame) => {
-                void handleHarnessFrame(codec, frame).catch(() => undefined);
+            codec.onEvent((event) => {
+                void handleHarnessEvent(codec, event).catch(() => undefined);
             });
         }
     };
 }
 
-async function handleHarnessFrame(codec: Codec, frame: Frame): Promise<void> {
-    switch (frame.event.name) {
+async function handleHarnessEvent(codec: Codec, event: Event): Promise<void> {
+    switch (event.name) {
         case "instance.list":
-            await reply(codec, frame, [
+            await reply(codec, event, [
                 {
                     mcpEnabled: true,
                     name: "demo-local",
@@ -272,100 +272,88 @@ async function handleHarnessFrame(codec: Codec, frame: Frame): Promise<void> {
             return;
         case "runtime.snapshot":
         case "runtime.refresh":
-            await reply(codec, frame, { lastSeq: 1, snapshot: stoppedSnapshot() });
+            await reply(codec, event, { lastSeq: 1, snapshot: stoppedSnapshot() });
             return;
         case "runtime.start":
             await codec.send({
-                id: `ack-${frame.id}`,
-                replyTo: frame.id,
-                streamId: frame.id,
-                event: {
-                    destination: frame.event.destination,
-                    name: frame.event.name,
-                    payload: { accepted: true }
-                }
+                id: `ack-${event.id}`,
+                replyTo: event.id,
+                streamId: `stream-${event.id}`,
+                destination: event.destination,
+                name: event.name,
+                payload: { accepted: true }
             });
             await codec.send({
-                id: `complete-${frame.id}`,
-                streamId: frame.id,
-                event: {
-                    destination: frame.event.destination,
-                    name: "stream.completed",
-                    payload: readySnapshot()
-                }
+                id: `complete-${event.id}`,
+                streamId: `stream-${event.id}`,
+                destination: event.destination,
+                name: "stream.completed",
+                payload: readySnapshot()
             });
             return;
         case "runtime.stop":
-            await reply(codec, frame, stoppedSnapshot());
+            await reply(codec, event, stoppedSnapshot());
             return;
         case "runtime.readLogs":
             await reply(
                 codec,
-                frame,
-                isRecord(frame.event.payload) && frame.event.payload.fromSeq === 2
+                event,
+                isRecord(event.payload) && event.payload.fromSeq === 2
                     ? [{ at: "", instanceName: "demo-local", message: "after\n", seq: 2, stream: "stdout" }]
                     : [{ at: "", instanceName: "demo-local", message: "before\n", seq: 1, stream: "stdout" }]
             );
             return;
         case "runtime.subscribe":
             await codec.send({
-                id: `ack-${frame.id}`,
-                replyTo: frame.id,
-                streamId: frame.id,
-                event: {
-                    destination: frame.event.destination,
-                    name: frame.event.name,
-                    payload: { events: [], lastSeq: 1 }
-                }
+                id: `ack-${event.id}`,
+                replyTo: event.id,
+                streamId: `stream-${event.id}`,
+                destination: event.destination,
+                name: event.name,
+                payload: { events: [], lastSeq: 1 }
             });
             setTimeout(() => {
                 void codec.send({
-                    id: `event-${frame.id}`,
-                    streamId: frame.id,
-                    event: {
-                        destination: frame.event.destination,
-                        name: "toolCall.completed",
-                        payload: {
-                            at: "",
-                            data: { toolName: "bash_run" },
-                            instanceName: "demo-local",
-                            seq: 2,
-                            type: "toolCall.completed"
-                        },
-                        seq: 2
-                    }
+                    id: `event-${event.id}`,
+                    streamId: `stream-${event.id}`,
+                    destination: event.destination,
+                    name: "toolCall.completed",
+                    payload: {
+                        at: "",
+                        data: { toolName: "bash_run" },
+                        instanceName: "demo-local",
+                        seq: 2,
+                        type: "toolCall.completed"
+                    },
+                    seq: 2
                 }).catch(() => undefined);
             }, 5);
             return;
         case "tool.call":
-            await reply(codec, frame, { exitCode: 0, stderr: "", stdout: "/tmp/ws\n" });
+            await reply(codec, event, { exitCode: 0, stderr: "", stdout: "/tmp/ws\n" });
             return;
         default:
             await codec.send({
-                id: `error-${frame.id}`,
-                replyTo: frame.id,
-                event: {
-                    destination: frame.event.destination,
-                    name: frame.event.name,
-                    error: {
-                        code: "control.methodNotFound",
-                        message: `unknown operation ${frame.event.name}`,
-                        retryable: false
-                    }
+                id: `error-${event.id}`,
+                replyTo: event.id,
+                destination: event.destination,
+                name: event.name,
+                error: {
+                    code: "control.methodNotFound",
+                    message: `unknown operation ${event.name}`,
+                    retryable: false
                 }
             });
     }
 }
 
-async function reply(codec: Codec, frame: Frame, payload: JsonValue): Promise<void> {
+async function reply(codec: Codec, event: Event, payload: JsonValue): Promise<void> {
     await codec.send({
-        id: `reply-${frame.id}`,
-        replyTo: frame.id,
-        event: {
-            destination: frame.event.destination,
-            name: frame.event.name,
-            payload
-        }
+        id: `reply-${event.id}`,
+        replyTo: event.id,
+        destination: event.destination,
+        name: event.name,
+        payload
     });
 }
 

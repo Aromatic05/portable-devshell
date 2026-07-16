@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { asInstanceName, Channel, Codec, type Frame } from "@portable-devshell/shared";
+import { asInstanceName, Channel, Codec, type Event } from "@portable-devshell/shared";
 
 interface CodecPair {
     client: Codec;
@@ -13,7 +13,6 @@ interface CodecPair {
     directory: string;
     listener: Server;
     server: Codec;
-    serverChannel: Channel;
 }
 
 async function pair(): Promise<CodecPair> {
@@ -32,8 +31,7 @@ async function pair(): Promise<CodecPair> {
         clientChannel,
         directory,
         listener,
-        server: new Codec(serverChannel, { local: "server" }),
-        serverChannel
+        server: new Codec(serverChannel, { local: "server" })
     };
 }
 
@@ -44,37 +42,33 @@ async function closePair(value: CodecPair): Promise<void> {
     await rm(value.directory, { force: true, recursive: true });
 }
 
-function onceFrame(codec: Codec): Promise<Frame> {
+function onceEvent(codec: Codec): Promise<Event> {
     return new Promise((resolve) => {
-        const remove = codec.onFrame((frame) => {
+        const remove = codec.onEvent((event) => {
             remove();
-            resolve(frame);
+            resolve(event);
         });
     });
 }
 
-test("Codec round-trips Frame/Event and binds the first server peer", async (t) => {
+test("Codec round-trips Event and binds the first server peer", async (t) => {
     const value = await pair();
     t.after(() => closePair(value));
-    const incoming = onceFrame(value.server);
+    const incoming = onceEvent(value.server);
     await value.client.send({
         id: "tui-1",
-        event: {
-            destination: asInstanceName("aromatic-pc"),
-            name: "todo.get",
-            payload: {}
-        }
+        destination: asInstanceName("aromatic-pc"),
+        name: "todo.get",
+        payload: {}
     });
 
     assert.deepEqual(await incoming, {
         id: "tui-1",
         from: "tui",
         to: "server",
-        event: {
-            destination: "aromatic-pc",
-            name: "todo.get",
-            payload: {}
-        }
+        destination: "aromatic-pc",
+        name: "todo.get",
+        payload: {}
     });
     assert.equal(value.server.remotePeer, "tui");
 });
@@ -82,31 +76,26 @@ test("Codec round-trips Frame/Event and binds the first server peer", async (t) 
 test("Codec preserves replyTo, streamId, error, and seq", async (t) => {
     const value = await pair();
     t.after(() => closePair(value));
-    const binding = onceFrame(value.server);
-    await value.client.send({
-        id: "bind-1",
-        event: { destination: "@control", name: "service.ping" }
-    });
+    const binding = onceEvent(value.server);
+    await value.client.send({ id: "bind-1", destination: "@control", name: "service.ping" });
     await binding;
 
-    const incoming = onceFrame(value.client);
+    const incoming = onceEvent(value.client);
     await value.server.send({
         id: "server-1",
         replyTo: "bind-1",
-        streamId: "bind-1",
-        event: {
-            destination: "@control",
-            name: "service.ping",
-            seq: 3,
-            error: { code: "test.failed", message: "failed", retryable: false }
-        }
+        streamId: "stream-1",
+        destination: "@control",
+        name: "service.ping",
+        seq: 3,
+        error: { code: "test.failed", message: "failed", retryable: false }
     });
 
-    const frame = await incoming;
-    assert.equal(frame.replyTo, "bind-1");
-    assert.equal(frame.streamId, "bind-1");
-    assert.equal(frame.event.seq, 3);
-    assert.equal(frame.event.error?.code, "test.failed");
+    const event = await incoming;
+    assert.equal(event.replyTo, "bind-1");
+    assert.equal(event.streamId, "stream-1");
+    assert.equal(event.seq, 3);
+    assert.equal(event.error?.code, "test.failed");
 });
 
 test("Codec rejects invalid operation names before sending", async (t) => {
@@ -116,10 +105,8 @@ test("Codec rejects invalid operation names before sending", async (t) => {
     await assert.rejects(
         value.client.send({
             id: "bad",
-            event: {
-                destination: "@control",
-                name: "three.segment.name" as "service.ping"
-            }
+            destination: "@control",
+            name: "three.segment.name" as "service.ping"
         }),
         /module\.operation/
     );
@@ -140,11 +127,11 @@ test("Codec rejects legacy envelopes", async (t) => {
     assert.equal((await closed as { code?: string } | undefined)?.code, "protocol.invalidDirection");
 });
 
-test("Codec rejects a peer change after first-frame binding", async (t) => {
+test("Codec rejects a peer change after first-event binding", async (t) => {
     const value = await pair();
     t.after(() => closePair(value));
-    const binding = onceFrame(value.server);
-    await value.client.send({ id: "bind", event: { destination: "@control", name: "service.ping" } });
+    const binding = onceEvent(value.server);
+    await value.client.send({ id: "bind", destination: "@control", name: "service.ping" });
     await binding;
     const closed = new Promise<Error | undefined>((resolve) => value.server.onClose(resolve));
 
@@ -152,7 +139,8 @@ test("Codec rejects a peer change after first-frame binding", async (t) => {
         id: "spoof",
         from: "cli",
         to: "server",
-        event: { destination: "@control", name: "service.ping" }
+        destination: "@control",
+        name: "service.ping"
     }), "utf8"));
 
     assert.equal((await closed as { code?: string } | undefined)?.code, "protocol.invalidDirection");

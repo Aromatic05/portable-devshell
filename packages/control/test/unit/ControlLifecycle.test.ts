@@ -8,8 +8,8 @@ import { fileURLToPath } from "node:url";
 
 import {
     Channel,
+    ClientConnection,
     Codec,
-    PrefixRoute,
     createError,
     ControlLifecycleManager,
     ControlPathHome,
@@ -172,21 +172,19 @@ test("stop tolerates shutdown socket races in the real lifecycle rpc client", as
 
         const channel = Channel.accept(socket);
         const codec = new Codec(channel, { local: "server" });
-        codec.onFrame((frame) => {
-            if (frame.event.name === "service.status") {
+        codec.onEvent((event) => {
+            if (event.name === "service.status") {
                 void codec.send({
-                    id: `reply-${frame.id}`,
-                    replyTo: frame.id,
-                    event: {
-                        destination: "@control",
-                        name: "service.status",
-                        payload: { instanceCount: 1 }
-                    }
+                    id: `reply-${event.id}`,
+                    replyTo: event.id,
+                    destination: "@control",
+                    name: "service.status",
+                    payload: { instanceCount: 1 }
                 }).catch(() => undefined);
                 return;
             }
 
-            if (frame.event.name === "service.shutdown") {
+            if (event.name === "service.shutdown") {
                 shutdownRequested = true;
                 socket.destroy();
             }
@@ -386,21 +384,12 @@ async function reserveTcpPort(): Promise<number> {
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function request(socketPath: string, operation: Event["name"], params?: JsonValue): Promise<any> {
-    const route = new PrefixRoute(
-        new Codec(await Channel.connect(socketPath), { local: "cli", remote: "server" }),
-        { requestIdPrefix: "test" }
-    );
-    try {
-        const reply = await route.request({
-            destination: "@control",
-            name: operation,
-            ...(params === undefined ? {} : { payload: params })
-        });
-        if (reply.event.error !== undefined) {
-            throw createError(reply.event.error);
-        }
-        return reply.event.payload;
-    } finally {
-        route.close();
-    }
+    const [module, method] = operation.split(".");
+    const client = new ClientConnection({
+        mapError: (error) => error instanceof Error ? error : new Error(String(error)),
+        mapRemoteError: (error) => createError(error),
+        peer: "cli",
+        socketPath
+    });
+    return await client.request("@control", module!, method!, params);
 }

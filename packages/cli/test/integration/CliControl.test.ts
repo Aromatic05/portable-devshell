@@ -18,9 +18,9 @@ test("module CLI clients perform control rpc over unix socket", async (t) => {
     const methods: string[] = [];
     const server = createServer((socket) => {
         const codec = new Codec(Channel.accept(socket), { local: "server" });
-        codec.onFrame((frame) => {
-            methods.push(frame.event.name);
-            const payload: JsonValue = frame.event.name === "instance.list"
+        codec.onEvent((event) => {
+            methods.push(event.name);
+            const payload: JsonValue = event.name === "instance.list"
                 ? [
                       {
                           mcpEnabled: true,
@@ -35,7 +35,7 @@ test("module CLI clients perform control rpc over unix socket", async (t) => {
                           }
                       }
                   ]
-                : frame.event.name === "runtime.readLogs"
+                : event.name === "runtime.readLogs"
                   ? [
                         {
                             at: "2026-07-08T00:00:00.000Z",
@@ -46,13 +46,11 @@ test("module CLI clients perform control rpc over unix socket", async (t) => {
                     ]
                   : null;
             void codec.send({
-                id: `reply-${frame.id}`,
-                replyTo: frame.id,
-                event: {
-                    destination: frame.event.destination,
-                    name: frame.event.name,
-                    payload
-                }
+                id: `reply-${event.id}`,
+                replyTo: event.id,
+                destination: event.destination,
+                name: event.name,
+                payload
             }).catch(() => undefined);
         });
     });

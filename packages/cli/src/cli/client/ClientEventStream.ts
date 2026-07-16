@@ -3,27 +3,27 @@ import {
     createError,
     errorCodes,
     readClientSubscriptionEvents,
-    type Event,
+    type ClientEvent,
+    type ClientStream,
     type JsonValue,
-    type OpenedClientStream,
-    type PrefixRoute
+    type OpenedClientStream
 } from "@portable-devshell/shared";
 
 export class ClientEventStream {
-    readonly #route: PrefixRoute;
-    readonly #initialEvents: Event[];
+    readonly #stream: ClientStream;
+    readonly #initialEvents: ClientEvent[];
 
-    constructor(route: PrefixRoute, initialEvents: Event[]) {
-        this.#route = route;
+    constructor(stream: ClientStream, initialEvents: ClientEvent[]) {
+        this.#stream = stream;
         this.#initialEvents = [...initialEvents];
     }
 
-    async nextEvent(): Promise<Event> {
+    async nextEvent(): Promise<ClientEvent> {
         const initial = this.#initialEvents.shift();
         if (initial !== undefined) {
             return initial;
         }
-        const event = (await this.#route.nextStreamFrame()).event;
+        const event = await this.#stream.nextEvent();
         if (event.name === "stream.gap") {
             throw createError({
                 code: errorCodes.streamGap,
@@ -45,14 +45,13 @@ export class ClientEventStream {
     }
 
     close(): void {
-        this.#route.close();
+        this.#stream.close();
     }
 }
 
 export function clientEventStream(instance: string, opened: OpenedClientStream): ClientEventStream {
-    const destination = asInstanceName(instance);
     return new ClientEventStream(
-        opened.route,
-        readClientSubscriptionEvents(destination, opened.acknowledgement.event.payload)
+        opened.stream,
+        readClientSubscriptionEvents(asInstanceName(instance), opened.acknowledgement.payload)
     );
 }

@@ -1,11 +1,28 @@
 import { randomUUID } from "node:crypto";
 
 import type { ControlErrorBody } from "../error/ErrorBodyControl.js";
+import { toControlErrorBody } from "../error/ErrorBodyControl.js";
 import { errorCodes } from "../error/ErrorCodeCatalog.js";
 import { createError } from "../error/ErrorFactoryCreate.js";
-import { toControlErrorBody } from "../error/ErrorBodyControl.js";
 import type { JsonValue } from "../type/TypeJsonValue.js";
-import { Codec, type Destination, type Event, type Frame, type Peer } from "./Codec.js";
+import { Codec, type Destination, type Event, type Peer } from "./Codec.js";
+
+export interface PrefixRouteEvent {
+    id: string;
+    replyTo?: string;
+    streamId?: string;
+    name: string;
+    payload?: JsonValue;
+    error?: ControlErrorBody;
+    seq?: number;
+}
+
+export interface PrefixRouteIncoming {
+    destination: Destination;
+    module: string;
+    peer: Peer;
+    event: PrefixRouteEvent;
+}
 
 export interface PrefixRouteRequest {
     id: string;
@@ -16,14 +33,14 @@ export interface PrefixRouteRequest {
 
 export interface PrefixRouteStreamOptions {
     onClose?(): Promise<void> | void;
-    onEvent?(event: Event, frame: Frame): Promise<void> | void;
+    onEvent?(event: PrefixRouteEvent, incoming: PrefixRouteIncoming): Promise<void> | void;
 }
 
 export interface PrefixRouteStream {
     readonly id: string;
     cancel(error: ControlErrorBody): Promise<void>;
     complete(payload?: JsonValue): Promise<void>;
-    emit(name: string, payload?: JsonValue, seq?: number): Promise<void>;
+    emit(name: string, payload?: JsonValue, seq?: number, module?: string): Promise<void>;
 }
 
 export interface PrefixRouteContext {
@@ -67,14 +84,7 @@ export interface PrefixRouteSnapshot {
 export interface PrefixRouteOptions {
     connectionId?: string;
     getSnapshot?: () => PrefixRouteSnapshot;
-    requestIdPrefix?: string;
-}
-
-interface PendingRequest {
-    expectsStream: boolean;
-    id: string;
-    reject(error: Error): void;
-    resolve(frame: Frame): void;
+    eventIdPrefix?: string;
 }
 
 interface ActiveServerStream {
@@ -89,22 +99,16 @@ export class PrefixRoute {
     readonly #codec: Codec;
     readonly #connectionId: string;
     readonly #getSnapshot?: () => PrefixRouteSnapshot;
-    readonly #requestIdPrefix: string;
+    readonly #eventIdPrefix: string;
     readonly #abortController = new AbortController();
-    readonly #streamFrames: Frame[] = [];
-    readonly #streamWaiters: Array<{ reject(error: Error): void; resolve(frame: Frame): void }> = [];
-    #pending?: PendingRequest;
-    #clientStreamId?: string;
-    #clientStreamEnded = false;
-    #serverStream?: ActiveServerStream;
-    #rootSent = false;
-    #rootAccepted = false;
+    readonly #eventListeners = new Set<(incoming: PrefixRouteIncoming) => void>();
+    readonly #closeListeners = new Set<(error?: Error) => void>();
+    readonly #serverStreams = new Map<string, ActiveServerStream>();
     #closed = false;
     #closeError?: Error;
 
     static snapshot(definitions: readonly PrefixRouteDestinationDefinition[]): PrefixRouteSnapshot {
         const destinations = new Map<Destination, ModuleMap>();
-
         for (const destinationDefinition of definitions) {
             if (destinations.has(destinationDefinition.destination)) {
                 throw new Error(`Duplicate route destination: ${destinationDefinition.destination}`);
@@ -129,7 +133,6 @@ export class PrefixRoute {
             }
             destinations.set(destinationDefinition.destination, modules);
         }
-
         return { destinations };
     }
 
@@ -137,59 +140,50 @@ export class PrefixRoute {
         this.#codec = codec;
         this.#connectionId = options.connectionId ?? randomUUID();
         this.#getSnapshot = options.getSnapshot;
-        this.#requestIdPrefix = options.requestIdPrefix ?? codec.localPeer;
-
-        codec.onFrame((frame) => {
-            void this.#accept(frame).catch((error) => {
+        this.#eventIdPrefix = options.eventIdPrefix ?? codec.localPeer;
+        codec.onEvent((event) => {
+            void this.#accept(event).catch((error) => {
                 this.close(error instanceof Error ? error : new Error(String(error)));
             });
         });
-        codec.onClose((error) => {
-            this.#finishClose(error);
-        });
+        codec.onClose((error) => this.#finishClose(error));
     }
 
     get connectionId(): string {
         return this.#connectionId;
     }
 
-    get streamId(): string | undefined {
-        return this.#clientStreamId ?? this.#serverStream?.id;
+    get closed(): boolean {
+        return this.#closed;
     }
 
-    async request(event: Event, id = this.#nextId()): Promise<Frame> {
-        return await this.#sendRoot(event, id, false);
-    }
-
-    async openStream(event: Event, id = this.#nextId()): Promise<Frame> {
-        return await this.#sendRoot(event, id, true);
-    }
-
-    async nextStreamFrame(): Promise<Frame> {
-        const queued = this.#streamFrames.shift();
-        if (queued !== undefined) {
-            return queued;
-        }
-        if (this.#closed) {
-            throw this.#closeError ?? new Error("PrefixRoute is closed.");
-        }
-        if (this.#clientStreamId === undefined && !this.#clientStreamEnded) {
-            throw new Error("No client stream is active.");
-        }
-        return await new Promise<Frame>((resolve, reject) => {
-            this.#streamWaiters.push({ reject, resolve });
-        });
-    }
-
-    async sendStream(event: Event): Promise<void> {
-        if (this.#clientStreamId === undefined || this.#clientStreamEnded) {
-            throw new Error("No client stream is active.");
-        }
+    async send(destination: Destination, module: string, event: PrefixRouteEvent): Promise<void> {
+        validateRouteSegment(module, "module");
+        validateRouteSegment(event.name, "operation");
         await this.#codec.send({
-            id: this.#nextId(),
-            streamId: this.#clientStreamId,
-            event
+            id: event.id,
+            ...(event.replyTo === undefined ? {} : { replyTo: event.replyTo }),
+            ...(event.streamId === undefined ? {} : { streamId: event.streamId }),
+            destination,
+            name: `${module}.${event.name}`,
+            ...(event.payload === undefined ? {} : { payload: event.payload }),
+            ...(event.error === undefined ? {} : { error: event.error }),
+            ...(event.seq === undefined ? {} : { seq: event.seq })
         });
+    }
+
+    onEvent(listener: (incoming: PrefixRouteIncoming) => void): () => void {
+        this.#eventListeners.add(listener);
+        return () => this.#eventListeners.delete(listener);
+    }
+
+    onClose(listener: (error?: Error) => void): () => void {
+        if (this.#closed) {
+            queueMicrotask(() => listener(this.#closeError));
+            return () => undefined;
+        }
+        this.#closeListeners.add(listener);
+        return () => this.#closeListeners.delete(listener);
     }
 
     close(error?: Error): void {
@@ -197,193 +191,119 @@ export class PrefixRoute {
         this.#finishClose(error);
     }
 
-    async #sendRoot(event: Event, id: string, expectsStream: boolean): Promise<Frame> {
-        if (this.#rootSent) {
-            throw new Error("A dedicated PrefixRoute connection accepts only one root request.");
-        }
-        if (this.#closed) {
-            throw this.#closeError ?? new Error("PrefixRoute is closed.");
-        }
-        this.#rootSent = true;
-
-        const response = new Promise<Frame>((resolve, reject) => {
-            this.#pending = { expectsStream, id, reject, resolve };
-        });
-        void response.catch(() => undefined);
-
-        try {
-            await this.#codec.send({ id, event });
-        } catch (error) {
-            this.#pending = undefined;
-            throw error;
-        }
-        return await response;
-    }
-
-    async #accept(frame: Frame): Promise<void> {
-        if (frame.replyTo !== undefined) {
-            this.#acceptReply(frame);
-            return;
-        }
-        if (frame.streamId !== undefined) {
-            await this.#acceptStreamFrame(frame);
-            return;
-        }
-        await this.#route(frame);
-    }
-
-    #acceptReply(frame: Frame): void {
-        const pending = this.#pending;
-        if (pending === undefined || frame.replyTo !== pending.id) {
-            throw protocolFailure(`Unexpected replyTo ${frame.replyTo}.`);
-        }
-        if (pending.expectsStream) {
-            if (frame.event.error === undefined && frame.streamId !== pending.id) {
-                throw protocolFailure("Stream acknowledgement must carry streamId equal to the root request id.");
-            }
-            if (frame.event.error === undefined) {
-                this.#clientStreamId = pending.id;
-            }
-        } else if (frame.streamId !== undefined) {
-            throw protocolFailure("A normal reply must not establish a stream.");
-        }
-        this.#pending = undefined;
-        pending.resolve(frame);
-    }
-
-    async #acceptStreamFrame(frame: Frame): Promise<void> {
-        const serverStream = this.#serverStream;
-        if (serverStream !== undefined && frame.streamId === serverStream.id) {
-            await serverStream.options.onEvent?.(frame.event, frame);
-            return;
-        }
-
-        if (this.#clientStreamId === undefined || frame.streamId !== this.#clientStreamId) {
-            throw protocolFailure(`Unexpected streamId ${frame.streamId}.`);
-        }
-
-        const waiter = this.#streamWaiters.shift();
-        if (waiter === undefined) {
-            this.#streamFrames.push(frame);
-        } else {
-            waiter.resolve(frame);
-        }
-
-        if (frame.event.name === "stream.completed" || frame.event.name === "stream.cancelled") {
-            this.#clientStreamEnded = true;
-        }
-    }
-
-    async #route(frame: Frame): Promise<void> {
+    async #accept(event: Event): Promise<void> {
+        const incoming = toIncoming(event);
         if (this.#getSnapshot === undefined) {
-            throw protocolFailure("This PrefixRoute has no route snapshot.");
+            for (const listener of [...this.#eventListeners]) {
+                listener(incoming);
+            }
+            return;
         }
-        if (this.#rootAccepted) {
-            throw protocolFailure("A dedicated PrefixRoute connection accepts only one root request.");
+        if (event.replyTo !== undefined) {
+            throw protocolFailure("Clients must not send reply events to the server route.");
         }
-        if (frame.event.error !== undefined) {
-            throw protocolFailure("A new routed request cannot carry an error.");
+        if (event.streamId !== undefined) {
+            await this.#acceptStream(incoming);
+            return;
         }
-        this.#rootAccepted = true;
+        await this.#route(incoming);
+    }
 
-        const [moduleName, operationName] = frame.event.name.split(".");
-        const snapshot = this.#getSnapshot();
-        const modules = snapshot.destinations.get(frame.event.destination);
+    async #acceptStream(incoming: PrefixRouteIncoming): Promise<void> {
+        const streamId = incoming.event.streamId!;
+        const active = this.#serverStreams.get(streamId);
+        if (active === undefined) {
+            throw protocolFailure(`Unexpected streamId ${streamId}.`);
+        }
+        if (incoming.destination !== active.destination || incoming.module !== active.module) {
+            throw protocolFailure(`Stream ${streamId} was addressed to the wrong route.`);
+        }
+        await active.options.onEvent?.(incoming.event, incoming);
+    }
+
+    async #route(incoming: PrefixRouteIncoming): Promise<void> {
+        const snapshot = this.#getSnapshot!();
+        const modules = snapshot.destinations.get(incoming.destination);
         if (modules === undefined) {
-            await this.#sendErrorReply(
-                frame,
-                createError({
-                    code: errorCodes.targetInvalid,
-                    message: `Destination ${frame.event.destination} was not found.`,
-                    retryable: false
-                }).toBody()
-            );
+            await this.#sendErrorReply(incoming, createError({
+                code: errorCodes.targetInvalid,
+                message: `Destination ${incoming.destination} was not found.`,
+                retryable: false
+            }).toBody());
             return;
         }
-        const operations = modules.get(moduleName!);
+        const operations = modules.get(incoming.module);
         if (operations === undefined) {
-            await this.#sendErrorReply(
-                frame,
-                createError({
-                    code: errorCodes.envelopeInvalid,
-                    message: `Module ${moduleName} was not found for ${frame.event.destination}.`,
-                    retryable: false
-                }).toBody()
-            );
+            await this.#sendErrorReply(incoming, createError({
+                code: errorCodes.envelopeInvalid,
+                message: `Module ${incoming.module} was not found for ${incoming.destination}.`,
+                retryable: false
+            }).toBody());
             return;
         }
-        const handler = operations.get(operationName!);
+        const handler = operations.get(incoming.event.name);
         if (handler === undefined) {
-            await this.#sendErrorReply(
-                frame,
-                createError({
-                    code: errorCodes.envelopeInvalid,
-                    message: `Operation ${frame.event.name} was not found for ${frame.event.destination}.`,
-                    retryable: false
-                }).toBody()
-            );
+            await this.#sendErrorReply(incoming, createError({
+                code: errorCodes.envelopeInvalid,
+                message: `Operation ${incoming.module}.${incoming.event.name} was not found for ${incoming.destination}.`,
+                retryable: false
+            }).toBody());
             return;
         }
 
         const afterReply: Array<() => Promise<void> | void> = [];
         let openedStream: PrefixRouteStream | undefined;
         const context: PrefixRouteContext = {
-            afterReply: (action) => {
-                afterReply.push(action);
-            },
+            afterReply: (action) => afterReply.push(action),
             connectionId: this.#connectionId,
-            destination: frame.event.destination,
-            module: moduleName!,
+            destination: incoming.destination,
+            module: incoming.module,
             openStream: async (initialPayload, options = {}) => {
-                if (openedStream !== undefined || this.#serverStream !== undefined) {
-                    throw new Error("A dedicated PrefixRoute connection accepts only one stream.");
+                if (openedStream !== undefined || this.#serverStreams.has(incoming.event.id)) {
+                    throw new Error(`Stream ${incoming.event.id} is already open.`);
                 }
                 const active: ActiveServerStream = {
                     closed: false,
-                    destination: frame.event.destination,
-                    id: frame.id,
-                    module: moduleName!,
+                    destination: incoming.destination,
+                    id: this.#nextId(),
+                    module: incoming.module,
                     options
                 };
-                this.#serverStream = active;
+                this.#serverStreams.set(active.id, active);
                 openedStream = this.#createServerStream(active);
-                await this.#codec.send({
+                await this.send(incoming.destination, incoming.module, {
                     id: this.#nextId(),
-                    replyTo: frame.id,
-                    streamId: frame.id,
-                    event: {
-                        destination: frame.event.destination,
-                        name: frame.event.name,
-                        ...(initialPayload === undefined ? {} : { payload: initialPayload })
-                    }
+                    replyTo: incoming.event.id,
+                    streamId: active.id,
+                    name: incoming.event.name,
+                    ...(initialPayload === undefined ? {} : { payload: initialPayload })
                 });
                 return openedStream;
             },
-            peer: frame.from as Exclude<Peer, "server">,
-            requestId: frame.id,
+            peer: incoming.peer as Exclude<Peer, "server">,
+            requestId: incoming.event.id,
             signal: this.#abortController.signal
         };
 
         try {
             const result = await handler({
-                id: frame.id,
-                name: operationName!,
-                ...(frame.event.payload === undefined ? {} : { payload: frame.event.payload }),
-                ...(frame.event.seq === undefined ? {} : { seq: frame.event.seq })
+                id: incoming.event.id,
+                name: incoming.event.name,
+                ...(incoming.event.payload === undefined ? {} : { payload: incoming.event.payload }),
+                ...(incoming.event.seq === undefined ? {} : { seq: incoming.event.seq })
             }, context);
             if (openedStream === undefined) {
-                await this.#codec.send({
+                await this.send(incoming.destination, incoming.module, {
                     id: this.#nextId(),
-                    replyTo: frame.id,
-                    event: {
-                        destination: frame.event.destination,
-                        name: frame.event.name,
-                        ...(result === undefined ? {} : { payload: result })
-                    }
+                    replyTo: incoming.event.id,
+                    name: incoming.event.name,
+                    ...(result === undefined ? {} : { payload: result })
                 });
                 for (const action of afterReply) {
                     queueMicrotask(() => {
-                        void action();
+                        void Promise.resolve(action()).catch((error) => {
+                            process.emitWarning(error instanceof Error ? error : new Error(String(error)));
+                        });
                     });
                 }
             }
@@ -392,68 +312,55 @@ export class PrefixRoute {
             if (openedStream !== undefined) {
                 await openedStream.cancel(body);
             } else {
-                await this.#sendErrorReply(frame, body);
+                await this.#sendErrorReply(incoming, body);
             }
         }
     }
 
     #createServerStream(active: ActiveServerStream): PrefixRouteStream {
-        const sendTerminal = async (name: "stream.cancelled" | "stream.completed", payload?: JsonValue, error?: ControlErrorBody) => {
+        const finish = async (
+            name: "completed" | "cancelled",
+            payload?: JsonValue,
+            error?: ControlErrorBody
+        ) => {
             if (active.closed) {
                 return;
             }
             active.closed = true;
-            await this.#codec.send({
+            await this.send(active.destination, "stream", {
                 id: this.#nextId(),
                 streamId: active.id,
-                event: {
-                    destination: active.destination,
-                    name,
-                    ...(payload === undefined ? {} : { payload }),
-                    ...(error === undefined ? {} : { error })
-                }
+                name,
+                ...(payload === undefined ? {} : { payload }),
+                ...(error === undefined ? {} : { error })
             });
-            if (this.#serverStream === active) {
-                this.#serverStream = undefined;
-            }
+            this.#serverStreams.delete(active.id);
         };
-
         return {
             id: active.id,
-            cancel: async (error) => {
-                await sendTerminal("stream.cancelled", undefined, error);
-            },
-            complete: async (payload) => {
-                await sendTerminal("stream.completed", payload);
-            },
-            emit: async (name, payload, seq) => {
+            cancel: async (error) => await finish("cancelled", undefined, error),
+            complete: async (payload) => await finish("completed", payload),
+            emit: async (name, payload, seq, module = active.module) => {
                 if (active.closed) {
                     throw new Error(`Stream ${active.id} is closed.`);
                 }
-                const fullName = name.includes(".") ? name : `${active.module}.${name}`;
-                await this.#codec.send({
+                await this.send(active.destination, module, {
                     id: this.#nextId(),
                     streamId: active.id,
-                    event: {
-                        destination: active.destination,
-                        name: fullName as Event["name"],
-                        ...(payload === undefined ? {} : { payload }),
-                        ...(seq === undefined ? {} : { seq })
-                    }
+                    name,
+                    ...(payload === undefined ? {} : { payload }),
+                    ...(seq === undefined ? {} : { seq })
                 });
             }
         };
     }
 
-    async #sendErrorReply(frame: Frame, error: ControlErrorBody): Promise<void> {
-        await this.#codec.send({
+    async #sendErrorReply(incoming: PrefixRouteIncoming, error: ControlErrorBody): Promise<void> {
+        await this.send(incoming.destination, incoming.module, {
             id: this.#nextId(),
-            replyTo: frame.id,
-            event: {
-                destination: frame.event.destination,
-                name: frame.event.name,
-                error
-            }
+            replyTo: incoming.event.id,
+            name: incoming.event.name,
+            error
         });
     }
 
@@ -466,24 +373,41 @@ export class PrefixRoute {
         }
         this.#closed = true;
         this.#abortController.abort(this.#closeError);
-        const failure = this.#closeError ?? new Error("PrefixRoute connection closed.");
-        const pending = this.#pending;
-        this.#pending = undefined;
-        pending?.reject(failure);
-        for (const waiter of this.#streamWaiters.splice(0)) {
-            waiter.reject(failure);
+        for (const active of this.#serverStreams.values()) {
+            if (!active.closed) {
+                active.closed = true;
+                void active.options.onClose?.();
+            }
         }
-        const serverStream = this.#serverStream;
-        this.#serverStream = undefined;
-        if (serverStream !== undefined && !serverStream.closed) {
-            serverStream.closed = true;
-            void serverStream.options.onClose?.();
+        this.#serverStreams.clear();
+        const listeners = [...this.#closeListeners];
+        this.#closeListeners.clear();
+        for (const listener of listeners) {
+            listener(this.#closeError);
         }
     }
 
     #nextId(): string {
-        return `${this.#requestIdPrefix}-${randomUUID()}`;
+        return `${this.#eventIdPrefix}-${randomUUID()}`;
     }
+}
+
+function toIncoming(event: Event): PrefixRouteIncoming {
+    const [module, operation] = event.name.split(".");
+    return {
+        destination: event.destination,
+        module: module!,
+        peer: event.from,
+        event: {
+            id: event.id,
+            ...(event.replyTo === undefined ? {} : { replyTo: event.replyTo }),
+            ...(event.streamId === undefined ? {} : { streamId: event.streamId }),
+            name: operation!,
+            ...(event.payload === undefined ? {} : { payload: event.payload }),
+            ...(event.error === undefined ? {} : { error: event.error }),
+            ...(event.seq === undefined ? {} : { seq: event.seq })
+        }
+    };
 }
 
 function validateRouteSegment(value: string, kind: string): void {
@@ -502,9 +426,5 @@ function normalizeError(error: unknown): ControlErrorBody {
 }
 
 function protocolFailure(message: string): Error {
-    return createError({
-        code: errorCodes.envelopeInvalid,
-        message,
-        retryable: false
-    });
+    return createError({ code: errorCodes.envelopeInvalid, message, retryable: false });
 }

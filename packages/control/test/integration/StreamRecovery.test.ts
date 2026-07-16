@@ -6,10 +6,9 @@ import test from "node:test";
 
 import type { WorkerInstance } from "@portable-devshell/core";
 import {
-    Channel,
-    Codec,
-    PrefixRoute,
     asInstanceName,
+    ClientConnection,
+    createError,
     type JsonValue
 } from "@portable-devshell/shared";
 
@@ -48,30 +47,30 @@ test("stream gap is non-terminal and the dedicated subscription remains usable",
         await rm(directory, { force: true, recursive: true });
     });
 
-    const route = await connect(socketPath);
-    t.after(() => route.close());
-    const acknowledgement = await route.openStream({
-        destination: asInstanceName("alpha"),
-        name: "runtime.subscribe",
-        payload: { fromSeq: 1 }
-    }, "subscribe-1");
-    assert.equal(acknowledgement.replyTo, "subscribe-1");
-    assert.equal(acknowledgement.streamId, "subscribe-1");
-    assert.deepEqual(acknowledgement.event.payload, {
+    const opened = await connect(socketPath).openStream(
+        asInstanceName("alpha"),
+        "runtime",
+        "subscribe",
+        { fromSeq: 1 }
+    );
+    t.after(() => opened.stream.close());
+    assert.equal(opened.acknowledgement.replyTo === undefined, false);
+    assert.notEqual(opened.stream.id, opened.acknowledgement.replyTo);
+    assert.deepEqual(opened.acknowledgement.payload, {
         events: [worker.events[0]],
         lastSeq: 1
     });
 
     worker.emit("toolCall.completed", { toolName: "bash_run" });
-    const normal = await route.nextStreamFrame();
-    assert.equal(normal.event.name, "toolCall.completed");
-    assert.equal(normal.event.seq, 2);
+    const normal = await opened.stream.nextEvent();
+    assert.equal(normal.name, "toolCall.completed");
+    assert.equal(normal.seq, 2);
 
     worker.emit("toolCall.completed", { toolName: "bash_run" });
     worker.dropBefore(4);
-    const gap = await route.nextStreamFrame();
-    assert.equal(gap.event.name, "stream.gap");
-    assert.deepEqual(gap.event.payload, {
+    const gap = await opened.stream.nextEvent();
+    assert.equal(gap.name, "stream.gap");
+    assert.deepEqual(gap.payload, {
         instance: "alpha",
         latestSeq: 3,
         oldestAvailableSeq: 4,
@@ -79,9 +78,9 @@ test("stream gap is non-terminal and the dedicated subscription remains usable",
     });
 
     worker.emit("toolCall.completed", { toolName: "bash_run" });
-    const recovered = await route.nextStreamFrame();
-    assert.equal(recovered.event.name, "toolCall.completed");
-    assert.equal(recovered.event.seq, 4);
+    const recovered = await opened.stream.nextEvent();
+    assert.equal(recovered.name, "toolCall.completed");
+    assert.equal(recovered.seq, 4);
 });
 
 test("an initial unavailable sequence returns a normal stream.gap error reply", async (t) => {
@@ -117,16 +116,15 @@ test("an initial unavailable sequence returns a normal stream.gap error reply", 
         await rm(directory, { force: true, recursive: true });
     });
 
-    const route = await connect(socketPath);
-    t.after(() => route.close());
-    const reply = await route.openStream({
-        destination: asInstanceName("alpha"),
-        name: "runtime.subscribe",
-        payload: { fromSeq: 1 }
-    });
-    assert.equal(reply.event.error?.code, "stream.gap");
-    assert.equal(reply.event.error?.retryable, true);
-    assert.deepEqual(reply.event.error?.details, {
+    const reply = await connect(socketPath).requestEvent(
+        asInstanceName("alpha"),
+        "runtime",
+        "subscribe",
+        { fromSeq: 1 }
+    );
+    assert.equal(reply.error?.code, "stream.gap");
+    assert.equal(reply.error?.retryable, true);
+    assert.deepEqual(reply.error?.details, {
         instance: "alpha",
         latestSeq: 2,
         oldestAvailableSeq: 2,
@@ -134,10 +132,12 @@ test("an initial unavailable sequence returns a normal stream.gap error reply", 
     });
 });
 
-async function connect(socketPath: string): Promise<PrefixRoute> {
-    const channel = await Channel.connect(socketPath);
-    return new PrefixRoute(new Codec(channel, { local: "cli", remote: "server" }), {
-        requestIdPrefix: "cli"
+function connect(socketPath: string): ClientConnection {
+    return new ClientConnection({
+        mapError: (error) => error instanceof Error ? error : new Error(String(error)),
+        mapRemoteError: (error) => createError(error),
+        peer: "cli",
+        socketPath
     });
 }
 

@@ -1,11 +1,11 @@
 import {
     instanceClientModule,
     type ClientConnection,
+    type ClientStream,
     type InstanceLogEntry,
     type InstanceRuntimeEnvelope,
     type InstanceSnapshot,
-    type JsonValue,
-    type PrefixRoute
+    type JsonValue
 } from "@portable-devshell/shared";
 
 import { runtimeStream, type RuntimeStream } from "./RuntimeStream.js";
@@ -31,17 +31,17 @@ export function createRuntimeClient(connection: ClientConnection) {
         subscribe: async (instance: string, fromSeq: number): Promise<RuntimeStream> =>
             runtimeStream(instance, await runtime.openStream(instance, "subscribe", { fromSeq })),
         start: async (instance: string, options: RuntimeStartOptions = {}): Promise<InstanceSnapshot> => {
-            let route: PrefixRoute | undefined;
+            let stream: ClientStream | undefined;
             try {
                 const opened = await runtime.openStream(
                     instance,
                     "start",
                     options.workspacePath === undefined ? undefined : { workspacePath: options.workspacePath }
                 );
-                route = opened.route;
-                options.relay?.onRequestId?.(opened.acknowledgement.streamId ?? opened.acknowledgement.replyTo ?? "");
+                stream = opened.stream;
+                options.relay?.onRequestId?.(stream.id);
                 while (true) {
-                    const event = (await route.nextStreamFrame()).event;
+                    const event = await stream.nextEvent();
                     if (event.name === "runtime.output") {
                         if (isRecord(event.payload) && typeof event.payload.chunk === "string") {
                             options.relay?.onOutput(event.payload.chunk);
@@ -61,7 +61,7 @@ export function createRuntimeClient(connection: ClientConnection) {
             } catch (error) {
                 throw connection.mapError(error);
             } finally {
-                route?.close();
+                stream?.close();
             }
         }
     };
