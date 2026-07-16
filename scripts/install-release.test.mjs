@@ -14,6 +14,7 @@ test("PowerShell release installer is UTF-8 with BOM for Windows PowerShell", as
     const source = content.toString("utf8");
     assert.doesNotMatch(source, /Get-FileHash/u);
     assert.match(source, /Security\.Cryptography\.SHA256/u);
+    assert.match(source, /IsNullOrWhiteSpace\(\$CurrentCli\).*Test-Path -LiteralPath \$CurrentCli/u);
 });
 
 const allTargets = [

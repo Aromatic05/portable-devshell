@@ -139,7 +139,7 @@ function Wait-ControlProcessExit([int]$ControlProcessId, [int]$TimeoutMillisecon
 
 function Stop-InstalledControl([string]$CurrentCli, [string]$DevshellHome) {
     $pidFile = Join-Path $DevshellHome "control\control.pid"
-    if (Test-Path -LiteralPath $CurrentCli) {
+    if (-not [string]::IsNullOrWhiteSpace($CurrentCli) -and (Test-Path -LiteralPath $CurrentCli -PathType Leaf)) {
         & node $CurrentCli stop *> $null
         if ($LASTEXITCODE -eq 0 -and -not (Test-Path -LiteralPath $pidFile)) { return }
         Write-Warning "当前 CLI 未能完整停止 control，尝试使用经过验证的 PID 恢复。"
