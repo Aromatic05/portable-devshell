@@ -1,66 +1,102 @@
-import type { InstanceCreateDraft, InstanceCreateSchema, InstanceCreateSummary, JsonValue } from "@portable-devshell/shared";
+import type {
+    InstanceCreateDraft,
+    InstanceCreateSchema,
+    InstanceCreateSummary,
+    JsonValue
+} from "@portable-devshell/shared";
 
-import type { TuiAppStore } from "../../store/TuiAppStore.js";
-import { selectMainBoxIds, selectMainScreenModel } from "../../store/TuiSelectors.js";
-import { TuiFocusManager } from "../../focus/TuiFocusManager.js";
+import type { TuiFocusManager } from "../../focus/TuiFocusManager.js";
 import type { TuiUiIntent } from "../../interaction/TuiInteractionModel.js";
+import type { TuiAppStore } from "../../store/TuiAppStore.js";
+import type { TuiPageId } from "../../ui/TuiUiModel.js";
 import { TuiCommandDispatcherAudit } from "./TuiCommandDispatcherAudit.js";
-import { TuiCommandDispatcherEditor } from "./TuiCommandDispatcherEditor.js";
 import { TuiCommandDispatcherDetail } from "./TuiCommandDispatcherDetail.js";
+import { TuiCommandDispatcherEditor } from "./TuiCommandDispatcherEditor.js";
 import { TuiCommandDispatcherFocus } from "./TuiCommandDispatcherFocus.js";
+import { TuiCommandDispatcherNavigation } from "./TuiCommandDispatcherNavigation.js";
 
 export interface TuiCommandDispatcherOptions {
     focusManager: TuiFocusManager;
-    onApprovalDecision(instance: string, approvalId: string, decision: "approve" | "deny"): Promise<void>;
+    onApprovalDecision(
+        instance: string,
+        approvalId: string,
+        decision: "approve" | "deny"
+    ): Promise<void>;
     onArtifactRevokeShare?(shareId: string): Promise<void>;
     onArtifactCancelTransfer?(transferId: string): Promise<void>;
-    onInstanceAction(action: "refresh" | "restart" | "start" | "stop", instance: string): Promise<void>;
+    onInstanceAction(
+        action: "refresh" | "restart" | "start" | "stop",
+        instance: string
+    ): Promise<void>;
     onAttachShell(instance: string): Promise<void>;
     mainViewportRows(): number;
     onLogsReload(): Promise<void>;
-    onPageReload(page: import("../../ui/TuiUiModel.js").TuiPageId, instance: string | undefined): Promise<void>;
+    onPageReload(page: TuiPageId, instance: string | undefined): Promise<void>;
     onQuit(): Promise<void>;
     onRedraw(): void;
-    onToolCall(instance: string, toolName: string, input: string): Promise<boolean>;
+    onToolCall(
+        instance: string,
+        toolName: string,
+        input: string
+    ): Promise<boolean>;
     onApplyConfig?(): Promise<JsonValue>;
     onControlRestart?(): Promise<void>;
     onCreateInstance?(draft: InstanceCreateDraft): Promise<string | undefined>;
     onGetInstanceCreateSchema?(): Promise<InstanceCreateSchema>;
-    onInstanceConfigUpdate?(instanceName: string, patch: Record<string, JsonValue>): Promise<void>;
+    onInstanceConfigUpdate?(
+        instanceName: string,
+        patch: Record<string, JsonValue>
+    ): Promise<void>;
     onInstanceDangerAction?(action: "delete", instance: string): Promise<void>;
     onInstanceEnabledChange?(instance: string, enabled: boolean): Promise<void>;
     onMcpConfigUpdate?(mcp: Record<string, JsonValue>): Promise<void>;
-    onOAuthApprovalDecision?(approvalId: string, decision: "approve" | "deny"): Promise<void>;
+    onOAuthApprovalDecision?(
+        approvalId: string,
+        decision: "approve" | "deny"
+    ): Promise<void>;
     onValidateConfigDraft?(draft: Record<string, JsonValue>): Promise<void>;
-    onValidateInstanceCreateDraft?(draft: InstanceCreateDraft): Promise<InstanceCreateSummary>;
+    onValidateInstanceCreateDraft?(
+        draft: InstanceCreateDraft
+    ): Promise<InstanceCreateSummary>;
     store: TuiAppStore;
 }
 
 export class TuiCommandDispatcher {
+    readonly #audit: TuiCommandDispatcherAudit;
+    readonly #detail: TuiCommandDispatcherDetail;
+    readonly #editor: TuiCommandDispatcherEditor;
+    readonly #focus: TuiCommandDispatcherFocus;
     readonly #focusManager: TuiFocusManager;
+    readonly #navigation: TuiCommandDispatcherNavigation;
     readonly #options: TuiCommandDispatcherOptions;
     readonly #store: TuiAppStore;
-    readonly #audit: TuiCommandDispatcherAudit;
-    readonly #editor: TuiCommandDispatcherEditor;
-    readonly #detail: TuiCommandDispatcherDetail;
-    readonly #focus: TuiCommandDispatcherFocus;
 
     constructor(options: TuiCommandDispatcherOptions) {
         this.#focusManager = options.focusManager;
         this.#options = options;
         this.#store = options.store;
-        this.#focus = new TuiCommandDispatcherFocus({ mainViewportRows: options.mainViewportRows, store: this.#store });
-        this.#audit = new TuiCommandDispatcherAudit({ dispatch: (intent) => this.dispatch(intent), store: this.#store });
+        this.#focus = new TuiCommandDispatcherFocus({
+            mainViewportRows: options.mainViewportRows,
+            store: this.#store
+        });
+        this.#audit = new TuiCommandDispatcherAudit({
+            dispatch: (intent) => this.dispatch(intent),
+            store: this.#store
+        });
         this.#editor = new TuiCommandDispatcherEditor({
             dispatch: (intent) => this.dispatch(intent),
             onApplyConfig: options.onApplyConfig ?? unavailable,
             onCreateInstance: options.onCreateInstance ?? unavailable,
-            onGetInstanceCreateSchema: options.onGetInstanceCreateSchema ?? unavailable,
+            onGetInstanceCreateSchema:
+                options.onGetInstanceCreateSchema ?? unavailable,
             onInstanceAction: options.onInstanceAction,
-            onInstanceConfigUpdate: options.onInstanceConfigUpdate ?? unavailable,
+            onInstanceConfigUpdate:
+                options.onInstanceConfigUpdate ?? unavailable,
             onMcpConfigUpdate: options.onMcpConfigUpdate ?? unavailable,
-            onValidateConfigDraft: options.onValidateConfigDraft ?? unavailable,
-            onValidateInstanceCreateDraft: options.onValidateInstanceCreateDraft ?? unavailable,
+            onValidateConfigDraft:
+                options.onValidateConfigDraft ?? unavailable,
+            onValidateInstanceCreateDraft:
+                options.onValidateInstanceCreateDraft ?? unavailable,
             store: this.#store,
             syncMainFocus: () => this.#focus.syncMainFocus()
         });
@@ -69,196 +105,44 @@ export class TuiCommandDispatcher {
             dispatch: (intent) => this.dispatch(intent),
             editor: this.#editor,
             focus: this.#focus,
-            onOAuthApprovalDecision: options.onOAuthApprovalDecision ?? unavailable,
+            onOAuthApprovalDecision:
+                options.onOAuthApprovalDecision ?? unavailable,
+            store: this.#store
+        });
+        this.#navigation = new TuiCommandDispatcherNavigation({
+            dispatch: (intent) => this.dispatch(intent),
+            focus: this.#focus,
+            focusManager: this.#focusManager,
+            onLogsReload: options.onLogsReload,
+            onPageReload: options.onPageReload,
+            onRedraw: options.onRedraw,
             store: this.#store
         });
     }
 
     async dispatch(intent: TuiUiIntent): Promise<boolean> {
+        const navigationResult = await this.#navigation.dispatch(intent);
+        if (navigationResult !== undefined) {
+            return navigationResult;
+        }
+
         switch (intent.type) {
             case "app.requestQuit":
             case "app.quit":
                 await this.#options.onQuit();
                 return true;
-            case "page.select":
-                this.#store.setSelectedPage(intent.page);
-                this.#store.setSidebarCursor({ id: intent.page, kind: "page" });
-                this.#focus.syncMainFocus();
-                await this.#reloadLogsIfSelected();
-                return true;
-            case "instance.selectIndex": {
-                const entry = this.#store.getState().instances[intent.index];
-                if (entry === undefined) {
-                    this.#store.setScreenStatus(this.#store.getState().ui.selectedPage, `Instance ${intent.index + 1} is unavailable.`);
-                    return false;
-                }
-                this.#store.setSelectedInstance(entry.name);
-                this.#store.setSidebarCursor({ id: entry.name, kind: "instance" });
-                this.#focus.syncMainFocus();
-                return true;
-            }
             case "control.restart":
                 await (this.#options.onControlRestart ?? unavailable)();
                 this.#store.setControlRestartRequired(false);
-                this.#store.setScreenStatus("connector", "Control runtime restarted and MCP configuration reloaded.");
+                this.#store.setScreenStatus(
+                    "connector",
+                    "Control runtime restarted and MCP configuration reloaded."
+                );
                 return true;
-            case "page.reload": {
-                const state = this.#store.getState();
-                try {
-                    await this.#options.onPageReload(state.ui.selectedPage, state.ui.selectedInstance);
-                    this.#store.setScreenStatus(state.ui.selectedPage, "Page reloaded.");
-                    this.#focus.syncMainFocus();
-                    return true;
-                } catch (error) {
-                    this.#store.setScreenStatus(state.ui.selectedPage, `Reload failed: ${readErrorMessage(error)}`);
-                    return false;
-                }
-            }
-            case "focus.move":
-                if (intent.direction === "next" || intent.direction === "previous") {
-                    return this.#moveAcrossScopes(intent.direction);
-                }
-                return this.#moveWithinScope(intent.direction);
             case "focus.activate":
                 return await this.#activateCurrentScope();
             case "ui.cancel":
                 return this.#cancel();
-            case "ui.help":
-                return await this.dispatch({ page: "help", type: "page.select" });
-            case "ui.redraw":
-                this.#store.bumpRedrawNonce();
-                this.#options.onRedraw();
-                return true;
-            case "search.open": {
-                const page = this.#store.getState().ui.selectedPage;
-                if (!isSearchablePage(page)) {
-                    return false;
-                }
-                this.#focusManager.pushRestore("search");
-                this.#store.setSearchOpen(true);
-                this.#store.setFocusScope("search");
-                return true;
-            }
-            case "search.append":
-                return this.#updateSearch((current) => `${current}${intent.text}`);
-            case "search.backspace":
-                return this.#updateSearch((current) => current.slice(0, -1));
-            case "search.submit":
-                this.#store.setSearchOpen(false);
-                this.#focusManager.restore();
-                return true;
-            case "confirm.accept": {
-                if (this.#store.getState().interaction.selectedConfirmButton === "cancel") {
-                    return await this.dispatch({ type: "confirm.cancel" });
-                }
-                const confirmIntent = this.#store.getState().interaction.confirmDialog.confirmIntent;
-                this.#closeConfirm();
-                return await this.dispatch(confirmIntent);
-            }
-            case "confirm.cancel":
-                this.#closeConfirm();
-                return true;
-            case "screen.pageUp":
-                this.#focus.pauseLogFollow();
-                return this.#focus.scrollMainColumn(-Math.max(1, this.#focus.boxViewportRows() - 1));
-            case "screen.pageDown":
-                return this.#focus.scrollMainColumn(Math.max(1, this.#focus.boxViewportRows() - 1));
-            case "screen.home":
-                this.#focus.pauseLogFollow();
-                return this.#focus.setMainColumnOffset(0);
-            case "screen.end":
-                return this.#focus.setMainColumnOffset(this.#focus.maxMainScrollOffset());
-            case "textDetail.open":
-                this.#focusManager.pushRestore("textDetail");
-                this.#store.setTextDetail({ body: intent.body, open: true, title: intent.title });
-                this.#store.setFocusScope("textDetail");
-                return true;
-            case "textDetail.close":
-                this.#store.setTextDetail({ body: "", open: false, title: "" });
-                this.#focusManager.restore();
-                return true;
-            case "textDetail.scroll": {
-                const detail = this.#store.getState().interaction.textDetail;
-                this.#store.setTextDetail({ ...detail, scrollOffset: Math.max(0, detail.scrollOffset + intent.delta) });
-                return true;
-            }
-            case "screen.toggle": {
-                if (this.#store.getState().interaction.focusScope !== "mainBoxes") {
-                    return false;
-                }
-                const boxId = this.#store.getState().ui.mainFocusId;
-                if (boxId === undefined) {
-                    return false;
-                }
-                const key = this.#focus.expandedKey(boxId);
-                const expanded = this.#store.getState().ui.expandedBoxes[key] === true;
-                this.#store.toggleExpanded(key);
-                if (expanded) {
-                    this.#store.setSelectedDetailLine(key, undefined);
-                } else {
-                    const box = selectMainScreenModel(this.#store.getState()).boxes.find((candidate) => candidate.id === boxId);
-                    this.#store.setSelectedDetailLine(key, box?.expandedLines[0]?.id);
-                }
-                this.#focus.ensureMainFocusVisible();
-                this.#store.setScreenStatus(this.#store.getState().ui.selectedPage, expanded ? "Collapsed box." : "Expanded box.");
-                return true;
-            }
-            case "logs.toggleFollow": {
-                const instance = this.#store.getState().ui.selectedInstance;
-                if (this.#store.getState().ui.selectedPage !== "logs" || instance === undefined) {
-                    return false;
-                }
-                const follow = this.#store.getState().ui.logsFollowByInstance[instance] === false;
-                this.#store.setLogsFollow(instance, follow);
-                if (follow) {
-                    this.#store.setLogsPausedAtSeq(instance, undefined);
-                    this.#focus.setMainColumnOffset(this.#focus.maxMainScrollOffset());
-                } else {
-                    this.#store.setLogsPausedAtSeq(instance, this.#store.getState().logsByInstance[instance]?.at(-1)?.seq);
-                }
-                this.#store.setScreenStatus("logs", follow ? "Following new log entries." : "Log follow paused.");
-                return true;
-            }
-            case "logs.clearBuffer":
-                if (this.#store.getState().ui.selectedPage !== "logs") {
-                    return false;
-                }
-                this.#store.clearLogsBuffer();
-                this.#store.setScreenStatus("logs", "Cleared local log buffer only.");
-                return true;
-            case "overlay.openConfirm":
-                this.#focusManager.pushRestore("confirm");
-                this.#store.setConfirmDialog({
-                    body: intent.body,
-                    cancelLabel: intent.cancelLabel,
-                    confirmIntent: intent.confirmIntent,
-                    confirmLabel: intent.confirmLabel,
-                    open: true,
-                    title: intent.title
-                });
-                this.#store.setFocusScope("confirm");
-                return true;
-            case "overlay.closeConfirm":
-                this.#closeConfirm();
-                return true;
-            case "focus.scope.set":
-                this.#store.setFocusScope(intent.focusScope);
-                return true;
-            case "mainFocus.set":
-                this.#store.setMainFocusId(intent.id);
-                return true;
-            case "confirm.focus":
-                this.#store.setConfirmFocus(intent.button);
-                return true;
-            case "ui.toggleExpanded":
-                this.#store.toggleExpanded(intent.key);
-                return true;
-            case "screen.setStatus":
-                this.#store.setScreenStatus(intent.page, intent.status);
-                return true;
-            case "screen.clearStatus":
-                this.#store.setScreenStatus(this.#store.getState().ui.selectedPage, undefined);
-                return true;
             case "instance.start":
                 await this.#options.onInstanceAction("start", intent.instance);
                 return true;
@@ -269,39 +153,65 @@ export class TuiCommandDispatcher {
                 await this.#options.onInstanceAction("stop", intent.instance);
                 return true;
             case "instance.setEnabled":
-                await (this.#options.onInstanceEnabledChange ?? unavailable)(intent.instance, intent.enabled);
+                await (this.#options.onInstanceEnabledChange ?? unavailable)(
+                    intent.instance,
+                    intent.enabled
+                );
                 return true;
             case "instance.attachShell":
                 await this.#options.onAttachShell(intent.instance);
                 return true;
             case "instance.delete":
-                await (this.#options.onInstanceDangerAction ?? unavailable)("delete", intent.instance);
+                await (this.#options.onInstanceDangerAction ?? unavailable)(
+                    "delete",
+                    intent.instance
+                );
                 return true;
             case "artifact.revokeShare":
-                await (this.#options.onArtifactRevokeShare ?? unavailable)(intent.shareId);
-                this.#store.setScreenStatus("instances", `Artifact share ${intent.shareId} revoked.`);
+                await (this.#options.onArtifactRevokeShare ?? unavailable)(
+                    intent.shareId
+                );
+                this.#store.setScreenStatus(
+                    "instances",
+                    `Artifact share ${intent.shareId} revoked.`
+                );
                 return true;
             case "artifact.cancelTransfer":
-                await (this.#options.onArtifactCancelTransfer ?? unavailable)(intent.transferId);
-                this.#store.setScreenStatus("instances", `Artifact transfer ${intent.transferId} cancellation requested.`);
+                await (this.#options.onArtifactCancelTransfer ?? unavailable)(
+                    intent.transferId
+                );
+                this.#store.setScreenStatus(
+                    "instances",
+                    `Artifact transfer ${intent.transferId} cancellation requested.`
+                );
                 return true;
             case "approval.open":
                 this.#audit.openDetail(intent.approvalId);
                 return true;
             case "approval.decide":
-                if (intent.decision === "deny") {
-                    this.#audit.openDenyConfirm();
-                    return true;
-                }
-                await this.#options.onApprovalDecision(intent.instance, intent.approvalId, intent.decision);
-                this.#audit.returnToList();
-                return true;
+                return await this.#decideApproval(
+                    intent.instance,
+                    intent.approvalId,
+                    intent.decision
+                );
             case "oauthApproval.decide":
-                await (this.#options.onOAuthApprovalDecision ?? unavailable)(intent.approvalId, intent.decision);
-                this.#store.setScreenStatus("oauth", intent.decision === "approve" ? "OAuth approval granted." : "OAuth approval denied.");
+                await (this.#options.onOAuthApprovalDecision ?? unavailable)(
+                    intent.approvalId,
+                    intent.decision
+                );
+                this.#store.setScreenStatus(
+                    "oauth",
+                    intent.decision === "approve"
+                        ? "OAuth approval granted."
+                        : "OAuth approval denied."
+                );
                 return true;
             case "approval.confirmDeny":
-                await this.#options.onApprovalDecision(intent.instance, intent.approvalId, "deny");
+                await this.#options.onApprovalDecision(
+                    intent.instance,
+                    intent.approvalId,
+                    "deny"
+                );
                 this.#audit.returnToList();
                 return true;
             case "approval.back":
@@ -309,30 +219,37 @@ export class TuiCommandDispatcher {
                 return true;
             case "toolForm.open":
                 this.#focusManager.pushRestore("toolForm");
-                this.#store.setToolForm(intent.instance, intent.toolName, '{"command":""}');
+                this.#store.setToolForm(
+                    intent.instance,
+                    intent.toolName,
+                    '{"command":""}'
+                );
                 return true;
             case "toolForm.append":
-                return this.#updateToolForm((input) => `${input}${intent.text}`);
+                return this.#updateToolForm((input) => {
+                    return `${input}${intent.text}`;
+                });
             case "toolForm.backspace":
                 return this.#updateToolForm((input) => input.slice(0, -1));
-            case "toolForm.submit": {
-                const form = this.#store.getState().interaction.toolForm;
-                if (form === undefined) {
-                    return false;
-                }
-                if (await this.#options.onToolCall(form.instance, form.toolName, form.input)) {
-                    this.#store.clearToolForm();
-                    this.#focusManager.restore();
-                }
-                return true;
-            }
+            case "toolForm.submit":
+                return await this.#submitToolForm();
             case "toolForm.cancel":
                 this.#store.clearToolForm();
                 this.#focusManager.restore();
                 return true;
             case "editor.open":
-                this.#store.setEditor({ editing: false, key: intent.key, kind: intent.kind, ...(intent.schema === undefined ? {} : { schema: intent.schema }), ...(intent.kind === "create" ? { step: 1 } : {}) });
-                this.#store.setFocusScope(intent.kind === "create" ? "wizard" : "form");
+                this.#store.setEditor({
+                    editing: false,
+                    key: intent.key,
+                    kind: intent.kind,
+                    ...(intent.schema === undefined
+                        ? {}
+                        : { schema: intent.schema }),
+                    ...(intent.kind === "create" ? { step: 1 } : {})
+                });
+                this.#store.setFocusScope(
+                    intent.kind === "create" ? "wizard" : "form"
+                );
                 return true;
             case "editor.close":
                 this.#editor.close();
@@ -357,6 +274,8 @@ export class TuiCommandDispatcher {
                 return await this.#editor.discard();
             case "wizard.step":
                 return this.#editor.changeStep(intent.direction);
+            default:
+                return false;
         }
     }
 
@@ -366,45 +285,8 @@ export class TuiCommandDispatcher {
         }
     }
 
-    #closeConfirm(): void {
-        this.#store.setConfirmDialog({ body: "", confirmIntent: { type: "ui.cancel" }, open: false, title: "" });
-        this.#focusManager.restore();
-    }
-
-    #updateSearch(update: (value: string) => string): true {
-        const page = this.#store.getState().ui.selectedPage;
-        this.#store.setSearchQuery(page, update(this.#store.getState().ui.searchQueries[page] ?? ""));
-        this.#focus.syncMainFocus();
-        return true;
-    }
-
-    #updateToolForm(update: (value: string) => string): boolean {
-        const form = this.#store.getState().interaction.toolForm;
-        if (form === undefined) {
-            return false;
-        }
-        this.#store.setToolForm(form.instance, form.toolName, update(form.input));
-        return true;
-    }
-
-    #returnToSidebar(): void {
-        this.#store.setFocusScope(this.#store.getState().interaction.sidebarCursor?.kind === "instance" ? "sidebarInstances" : "sidebarPages");
-    }
-
-    async #reloadLogsIfSelected(): Promise<void> {
-        const state = this.#store.getState();
-        if (state.ui.selectedPage === "logs" && state.ui.selectedInstance !== undefined) {
-            await this.#options.onLogsReload();
-            this.#store.setScreenStatus("logs", "Logs reloaded from instance.readLogs.");
-        }
-    }
-
     #cancel(): boolean {
         const scope = this.#store.getState().interaction.focusScope;
-        if (scope === "textDetail") {
-            void this.dispatch({ type: "textDetail.close" });
-            return true;
-        }
         if (scope === "approvalDetail" || scope === "denyConfirm") {
             this.#audit.returnToList();
             return true;
@@ -413,119 +295,33 @@ export class TuiCommandDispatcher {
             void this.#editor.discard();
             return true;
         }
-        if (scope === "confirm") {
-            void this.dispatch({ type: "confirm.cancel" });
-            return true;
-        }
-        if (scope === "search") {
-            this.#store.setSearchOpen(false);
-            this.#focusManager.restore();
-            return true;
-        }
-        if (scope === "toolForm") {
-            this.#store.clearToolForm();
-            this.#focusManager.restore();
-            return true;
-        }
-        if (scope === "boxDetail") {
-            this.#store.setFocusScope("mainBoxes");
-            return true;
-        }
-        if (scope === "mainBoxes") {
-            this.#returnToSidebar();
-            return true;
-        }
-        if (scope === "sidebarInstances") {
-            this.#store.setSidebarCursor({ id: this.#store.getState().ui.selectedPage, kind: "page" });
-            this.#store.setFocusScope("sidebarPages");
-            return true;
-        }
-        return false;
-    }
-
-    #moveAcrossScopes(direction: "next" | "previous"): boolean {
-        const scope = this.#store.getState().interaction.focusScope;
-        const boxIds = selectMainBoxIds(this.#store.getState());
-        const hasBoxes = boxIds.length > 0;
-
-        if (scope === "confirm" || scope === "approvalDetail" || scope === "denyConfirm" || scope === "form" || scope === "wizard") {
-            return this.#focusManager.move(direction);
-        }
-
-        if (scope === "sidebarPages" || scope === "sidebarInstances") {
-            if (!hasBoxes) {
-                return false;
-            }
-            this.#store.setFocusScope("mainBoxes");
-            this.#focus.syncMainFocus();
-            return true;
-        }
-        if (scope === "mainBoxes" || scope === "boxDetail") {
-            this.#returnToSidebar();
-            return true;
-        }
-        return false;
-    }
-
-    #moveWithinScope(direction: "up" | "down" | "left" | "right"): boolean {
-        const scope = this.#store.getState().interaction.focusScope;
-        if (scope === "textDetail") {
-            void this.dispatch({ type: "textDetail.close" });
-            return true;
-        }
-        if (scope === "approvalDetail" || scope === "denyConfirm") {
-            return (direction === "up" || direction === "down") && this.#focusManager.move(direction);
-        }
-        if (scope === "boxDetail" || scope === "form" || scope === "wizard") {
-            if (direction === "left" && scope === "boxDetail") {
-                this.#returnToSidebar();
-                return true;
-            }
-            return (direction === "up" || direction === "down") && this.#focusManager.move(direction);
-        }
-        if ((scope === "sidebarPages" || scope === "sidebarInstances") && direction === "right") {
-            if (selectMainBoxIds(this.#store.getState()).length === 0) {
-                return false;
-            }
-            this.#store.setFocusScope("mainBoxes");
-            this.#focus.syncMainFocus();
-            return true;
-        }
-        if (scope === "mainBoxes" && direction === "left") {
-            this.#returnToSidebar();
-            return true;
-        }
-        const moved = this.#focusManager.move(direction);
-        if (moved && scope === "mainBoxes") {
-            this.#focus.ensureMainFocusVisible();
-        }
-        return moved;
+        return this.#navigation.cancelPassiveScope();
     }
 
     async #activateCurrentScope(): Promise<boolean> {
         const scope = this.#store.getState().interaction.focusScope;
         const state = this.#store.getState();
         if (scope === "sidebarPages" || scope === "sidebarInstances") {
-            const cursor = this.#store.getState().interaction.sidebarCursor;
-            if (cursor?.kind === "page") {
-                this.#store.setSelectedPage(cursor.id);
-            } else if (cursor?.kind === "instance") {
-                this.#store.setSelectedInstance(cursor.id);
-            } else {
-                return false;
-            }
-            this.#focus.syncMainFocus();
-            await this.#reloadLogsIfSelected();
-            return true;
+            return await this.#navigation.activateSidebarSelection();
         }
         if (scope === "mainBoxes") {
             const focused = this.#focusManager.currentFocus();
             if (focused?.kind === "line") {
                 return await this.#detail.activate();
             }
-            const approvalId = focused?.kind === "box" ? this.#focus.approvalIdFromBox(focused.id) : undefined;
-            if (state.ui.selectedPage === "audit" && state.ui.selectedInstance !== undefined && approvalId !== undefined) {
-                return await this.dispatch({ approvalId, instance: state.ui.selectedInstance, type: "approval.open" });
+            const approvalId = focused?.kind === "box"
+                ? this.#focus.approvalIdFromBox(focused.id)
+                : undefined;
+            if (
+                state.ui.selectedPage === "audit" &&
+                state.ui.selectedInstance !== undefined &&
+                approvalId !== undefined
+            ) {
+                return await this.dispatch({
+                    approvalId,
+                    instance: state.ui.selectedInstance,
+                    type: "approval.open"
+                });
             }
             return await this.dispatch({ type: "screen.toggle" });
         }
@@ -533,8 +329,7 @@ export class TuiCommandDispatcher {
             return await this.#detail.activate();
         }
         if (scope === "textDetail") {
-            void this.dispatch({ type: "textDetail.close" });
-            return true;
+            return await this.dispatch({ type: "textDetail.close" });
         }
         if (scope === "approvalDetail" || scope === "denyConfirm") {
             return await this.#audit.activate();
@@ -545,15 +340,54 @@ export class TuiCommandDispatcher {
         return true;
     }
 
+    async #decideApproval(
+        instance: string,
+        approvalId: string,
+        decision: "approve" | "deny"
+    ): Promise<boolean> {
+        if (decision === "deny") {
+            this.#audit.openDenyConfirm();
+            return true;
+        }
+        await this.#options.onApprovalDecision(
+            instance,
+            approvalId,
+            decision
+        );
+        this.#audit.returnToList();
+        return true;
+    }
 
-}
+    #updateToolForm(update: (value: string) => string): boolean {
+        const form = this.#store.getState().interaction.toolForm;
+        if (form === undefined) {
+            return false;
+        }
+        this.#store.setToolForm(
+            form.instance,
+            form.toolName,
+            update(form.input)
+        );
+        return true;
+    }
 
-function readErrorMessage(error: unknown): string {
-    return error instanceof Error ? error.message : String(error);
-}
-
-function isSearchablePage(page: import("../../ui/TuiUiModel.js").TuiPageId): boolean {
-    return page === "instances" || page === "config" || page === "audit" || page === "logs";
+    async #submitToolForm(): Promise<boolean> {
+        const form = this.#store.getState().interaction.toolForm;
+        if (form === undefined) {
+            return false;
+        }
+        if (
+            await this.#options.onToolCall(
+                form.instance,
+                form.toolName,
+                form.input
+            )
+        ) {
+            this.#store.clearToolForm();
+            this.#focusManager.restore();
+        }
+        return true;
+    }
 }
 
 async function unavailable(): Promise<never> {

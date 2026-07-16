@@ -1,24 +1,26 @@
-import type { ReadStream, WriteStream } from "node:tty";
 import { PassThrough } from "node:stream";
+import type { ReadStream, WriteStream } from "node:tty";
 
 import React from "react";
 import { render, type Instance as InkInstance } from "ink";
-import { ControlError, createError, errorCodes, type JsonValue } from "@portable-devshell/shared";
 
-import { TuiApp } from "./TuiApp.js";
-import { buildTuiHitRegions, hitTargetAt, type TuiHitTarget } from "./TuiHitRegions.js";
-import { TuiAttachShellCommandResolver } from "../attach/TuiAttachShellCommandResolver.js";
-import { TuiAttachShellRunner } from "../attach/TuiAttachShellRunner.js";
-import { createTuiClients as createControlClients, type TuiClients } from "../client/TuiClientComposition.js";
-import { TuiControlSession } from "../control/TuiControlSession.js";
+import { createTuiClients } from "../client/TuiClientComposition.js";
 import { TuiCommandDispatcher } from "../command/dispatcher/TuiCommandDispatcher.js";
-import { TuiKeyDispatcher } from "../input/TuiKeyDispatcher.js";
+import { TuiControlSession } from "../control/TuiControlSession.js";
 import { TuiFocusManager } from "../focus/TuiFocusManager.js";
+import { TuiKeyDispatcher } from "../input/TuiKeyDispatcher.js";
 import { TuiRenderScheduler } from "../render/TuiRenderScheduler.js";
 import { buildFocusGraphForState } from "../screen/TuiScreenRouter.js";
 import { TuiAppStore } from "../store/TuiAppStore.js";
-import type { TuiCommandRecord } from "../store/TuiStoreTypes.js";
 import { selectMainScreenModel } from "../store/TuiSelectors.js";
+import type { TuiPageId } from "../ui/TuiUiModel.js";
+import { TuiApp } from "./TuiApp.js";
+import {
+    buildTuiHitRegions,
+    hitTargetAt,
+    type TuiHitTarget
+} from "./TuiHitRegions.js";
+import { TuiRuntimeOperations } from "./TuiRuntimeOperations.js";
 
 export interface TuiRuntimeOptions {
     stdin?: ReadStream;
@@ -33,16 +35,15 @@ export class TuiRuntime {
     readonly scheduler: TuiRenderScheduler;
     readonly session: TuiControlSession;
     readonly store: TuiAppStore;
-    readonly #clients: TuiClients;
-    readonly #stdin: ReadStream;
-    readonly #inkStdin: ReadStream;
-    readonly #stdout: WriteStream;
     readonly #alternateScreen: AlternateScreen;
-    #ink?: InkInstance;
-    #commandCounter = 0;
+    readonly #inkStdin: ReadStream;
+    readonly #operations: TuiRuntimeOperations;
+    readonly #stdin: ReadStream;
+    readonly #stdout: WriteStream;
     #attachResume?: () => void;
     #attachWait?: Promise<void>;
     #cursorBlinkTimer?: ReturnType<typeof setInterval>;
+    #ink?: InkInstance;
     #inputStarted = false;
     #mouseBuffer = "";
     #stopped = false;
@@ -51,124 +52,100 @@ export class TuiRuntime {
         this.#stdin = options.stdin ?? process.stdin;
         this.#stdout = options.stdout ?? process.stdout;
         this.#inkStdin = createInkStdin(this.#stdin);
+        this.#alternateScreen = new AlternateScreen(this.#stdout);
         this.store = new TuiAppStore();
         this.scheduler = new TuiRenderScheduler(this.store);
         this.focusManager = new TuiFocusManager(this.store, {
             currentPage: () => this.store.getState().ui.selectedPage,
-            graphFor: (page, mode) =>
-                buildFocusGraphForState({
-                    ...this.store.getState(),
-                    interaction: {
-                        ...this.store.getState().interaction,
-                        focusScope: mode
-                    },
-                    ui: {
-                        ...this.store.getState().ui,
-                        selectedPage: page
-                    }
-                }),
+            graphFor: (page, mode) => buildFocusGraphForState({
+                ...this.store.getState(),
+                interaction: {
+                    ...this.store.getState().interaction,
+                    focusScope: mode
+                },
+                ui: {
+                    ...this.store.getState().ui,
+                    selectedPage: page
+                }
+            }),
             mode: () => this.store.getState().interaction.focusScope
         });
         this.keyDispatcher = new TuiKeyDispatcher();
+
+        const clients = createTuiClients({
+            xdgRuntimeDir: options.xdgRuntimeDir
+        });
+        this.session = new TuiControlSession({
+            clients,
+            store: this.store
+        });
+        this.#operations = new TuiRuntimeOperations({
+            attachHooks: {
+                resume: () => this.#resumeAfterAttach(),
+                suspend: () => this.#suspendForAttach()
+            },
+            clients,
+            session: this.session,
+            store: this.store
+        });
         this.commandDispatcher = new TuiCommandDispatcher({
             focusManager: this.focusManager,
+            mainViewportRows: () => Math.max(0, this.rows - 7),
+            onApplyConfig: async () => await this.#operations.applyConfig(),
             onApprovalDecision: async (instance, approvalId, decision) => {
-                await this.#decideApproval(instance, approvalId, decision);
-            },
-            onArtifactRevokeShare: async (shareId) => {
-                await this.#clients.artifact.revokeShare(shareId);
-                await this.session.refreshArtifacts();
+                await this.#operations.decideApproval(
+                    instance,
+                    approvalId,
+                    decision
+                );
             },
             onArtifactCancelTransfer: async (transferId) => {
-                await this.#clients.artifact.cancelTransfer(transferId);
-                await this.session.refreshArtifacts();
+                await this.#operations.cancelArtifactTransfer(transferId);
             },
-            onInstanceAction: async (action, instance) => {
-                await this.#runInstanceAction(action, instance);
+            onArtifactRevokeShare: async (shareId) => {
+                await this.#operations.revokeArtifactShare(shareId);
             },
             onAttachShell: async (instance) => {
-                await this.#attachShell(instance);
-            },
-            onApplyConfig: async () => {
-                const result = await this.#clients.config.apply();
-                await this.session.refresh();
-                return result;
+                await this.#operations.attachShell(instance);
             },
             onControlRestart: async () => {
-                await this.#clients.service.restart();
-                await new Promise((resolve) => setTimeout(resolve, 100));
-                await this.session.reconnect();
+                await this.#operations.restartControl();
             },
             onCreateInstance: async (draft) => {
-                const result = await this.#clients.instance.create(draft);
-                let status: string | undefined;
-                if (draft.provider === "reverse") {
-                    const code = await this.#clients.reverse.createCode(result.name);
-                    status = `Reverse instance created. Run: devshell-worker enroll --controller ${code.controllerUrl} --device-code ${code.deviceCode} (expires ${code.expiresAt})`;
-                }
-                await this.session.refresh();
-                return status;
+                return await this.#operations.createInstance(draft);
             },
-            onGetInstanceCreateSchema: async () => await this.#clients.instance.createSchema(),
+            onGetInstanceCreateSchema: async () => {
+                return await this.#operations.getInstanceCreateSchema();
+            },
+            onInstanceAction: async (action, instance) => {
+                await this.#operations.runInstanceAction(action, instance);
+            },
             onInstanceConfigUpdate: async (instanceName, patch) => {
-                await this.#clients.config.updateInstance({ instanceName, patch });
+                await this.#operations.updateInstanceConfig(
+                    instanceName,
+                    patch
+                );
             },
             onInstanceDangerAction: async (_action, instance) => {
-                await this.#clients.instance.delete(instance);
-                await this.session.refresh();
+                await this.#operations.deleteInstance(instance);
             },
             onInstanceEnabledChange: async (instance, enabled) => {
-                if (!enabled && this.store.getState().snapshotsByInstance[instance]?.daemonState !== undefined && this.store.getState().snapshotsByInstance[instance]?.daemonState !== "stopped") {
-                    await this.#clients.runtime.stop(instance);
-                }
-                await this.#clients.config.updateInstance({ instanceName: instance, patch: { enabled } });
-                await this.#clients.config.apply();
-                await this.session.refresh();
+                await this.#operations.setInstanceEnabled(instance, enabled);
+            },
+            onLogsReload: async () => {
+                await this.#operations.reloadLogs();
             },
             onMcpConfigUpdate: async (mcp) => {
-                await this.#clients.config.updateMcp({ patch: mcp });
+                await this.#operations.updateMcpConfig(mcp);
             },
             onOAuthApprovalDecision: async (approvalId, decision) => {
-                await this.#clients.mcp.decideApproval(approvalId, decision);
-                await this.session.refresh();
-            },
-            onValidateConfigDraft: async (draft) => {
-                await this.#clients.config.validate(draft);
-            },
-            onValidateInstanceCreateDraft: async (draft) => await this.#clients.instance.validateCreate(draft),
-            mainViewportRows: () => Math.max(0, this.rows - 7),
-            onLogsReload: async () => {
-                await this.session.refreshLogs();
+                await this.#operations.decideOAuthApproval(
+                    approvalId,
+                    decision
+                );
             },
             onPageReload: async (page, instance) => {
-                switch (page) {
-                    case "instances":
-                    case "help":
-                        await this.session.refresh();
-                        return;
-                    case "todo":
-                        if (instance !== undefined) {
-                            await this.session.refreshTodo(instance);
-                        }
-                        return;
-                    case "config":
-                    case "connector":
-                        await this.session.refreshConfig();
-                        return;
-                    case "oauth":
-                        await this.session.refreshOAuth();
-                        return;
-                    case "audit":
-                        if (instance !== undefined) {
-                            await this.session.refreshAudit(instance);
-                        }
-                        return;
-                    case "logs":
-                        if (instance !== undefined) {
-                            await this.session.refreshLogsForInstance(instance);
-                        }
-                        return;
-                }
+                await this.#operations.reloadPage(page, instance);
             },
             onQuit: async () => {
                 await this.stop();
@@ -176,18 +153,27 @@ export class TuiRuntime {
             onRedraw: () => {
                 this.redraw();
             },
-            onToolCall: async (instance, toolName, input) => await this.#callTool(instance, toolName, input),
+            onToolCall: async (instance, toolName, input) => {
+                return await this.#operations.callTool(
+                    instance,
+                    toolName,
+                    input
+                );
+            },
+            onValidateConfigDraft: async (draft) => {
+                await this.#operations.validateConfigDraft(draft);
+            },
+            onValidateInstanceCreateDraft: async (draft) => {
+                return await this.#operations.validateInstanceCreateDraft(
+                    draft
+                );
+            },
             store: this.store
         });
-        this.#clients = createControlClients({
-            xdgRuntimeDir: options.xdgRuntimeDir
-        });
-        this.session = new TuiControlSession({
-            clients: this.#clients,
-            store: this.store
-        });
-        this.#alternateScreen = new AlternateScreen(this.#stdout);
-        this.focusManager.syncPanel(this.store.getState().ui.selectedPage, this.store.getState().interaction.focusScope);
+        this.focusManager.syncPanel(
+            this.store.getState().ui.selectedPage,
+            this.store.getState().interaction.focusScope
+        );
     }
 
     async run(): Promise<void> {
@@ -195,15 +181,14 @@ export class TuiRuntime {
         this.#startInput();
         this.#startCursorBlink();
         this.#mountInk();
-
         await this.session.start();
+
         while (!this.#stopped) {
             const ink = this.#ink;
             if (ink === undefined) {
                 await this.#attachWait;
                 continue;
             }
-
             await ink.waitUntilExit();
             if (this.#stopped) {
                 break;
@@ -246,14 +231,17 @@ export class TuiRuntime {
         tab?: boolean;
         upArrow?: boolean;
     }): Promise<void> {
-        await this.commandDispatcher.dispatchMany(this.keyDispatcher.dispatch(this.store.getState().interaction.focusScope, { input, key }));
+        const intents = this.keyDispatcher.dispatch(
+            this.store.getState().interaction.focusScope,
+            { input, key }
+        );
+        await this.commandDispatcher.dispatchMany(intents);
     }
 
     async stop(): Promise<void> {
         if (this.#stopped) {
             return;
         }
-
         this.#stopped = true;
         this.#stopCursorBlink();
         await this.session.stop();
@@ -277,123 +265,28 @@ export class TuiRuntime {
     }
 
     #stopCursorBlink(): void {
-        if (this.#cursorBlinkTimer !== undefined) {
-            clearInterval(this.#cursorBlinkTimer);
-            this.#cursorBlinkTimer = undefined;
-        }
-    }
-
-    async #runInstanceAction(action: "refresh" | "restart" | "start" | "stop", instance: string): Promise<void> {
-        switch (action) {
-            case "refresh":
-                await this.#runCommand(`Refresh Status: ${instance}`, instance, async () => {
-                    const result = await this.#clients.runtime.refresh(instance);
-                    this.store.replaceSnapshot(result.snapshot);
-                    await this.session.refreshInstance(instance);
-                });
-                return;
-            case "start":
-                await this.#runCommand(`Start Worker: ${instance}`, instance, async (commandId) => {
-                    const entry = this.store.getState().instances.find((candidate) => candidate.name === instance);
-                    this.store.setRelayMetadata(commandId, {
-                        provider: entry?.provider,
-                        workspace: entry?.defaultWorkspace
-                    });
-                    const snapshot = await this.#clients.runtime.start(instance, {
-                        relay: {
-                            onOutput: (chunk) => {
-                                this.store.appendRelayOutput(commandId, chunk);
-                            },
-                            onRequestId: (requestId) => {
-                                this.store.setRelayMetadata(commandId, { requestId });
-                            }
-                        },
-                        workspacePath: entry?.defaultWorkspace
-                    });
-                    this.store.replaceSnapshot(snapshot);
-                    await this.session.refreshInstance(instance);
-                });
-                return;
-            case "restart":
-                await this.#runCommand(`Restart Worker: ${instance}`, instance, async (commandId) => {
-                    await this.#clients.runtime.stop(instance);
-                    const entry = this.store.getState().instances.find((candidate) => candidate.name === instance);
-                    this.store.setRelayMetadata(commandId, {
-                        provider: entry?.provider,
-                        workspace: entry?.defaultWorkspace
-                    });
-                    const snapshot = await this.#clients.runtime.start(instance, {
-                        relay: {
-                            onOutput: (chunk) => {
-                                this.store.appendRelayOutput(commandId, chunk);
-                            },
-                            onRequestId: (requestId) => {
-                                this.store.setRelayMetadata(commandId, { requestId });
-                            }
-                        },
-                        workspacePath: entry?.defaultWorkspace
-                    });
-                    this.store.replaceSnapshot(snapshot);
-                    await this.session.refreshInstance(instance);
-                });
-                return;
-            case "stop":
-                await this.#runCommand(`Stop Worker: ${instance}`, instance, async () => {
-                    const snapshot = await this.#clients.runtime.stop(instance);
-                    this.store.replaceSnapshot(snapshot);
-                    await this.session.refreshInstance(instance);
-                });
-        }
-    }
-
-    async #attachShell(instance: string): Promise<void> {
-        const entry = this.store.getState().instances.find((candidate) => candidate.name === instance);
-        if (entry === undefined) {
-            this.store.setScreenStatus(this.store.getState().ui.selectedPage, "Attach Shell failed: selected entry is unavailable.");
+        if (this.#cursorBlinkTimer === undefined) {
             return;
         }
-
-        try {
-            const command = new TuiAttachShellCommandResolver().resolve({
-                configView: this.store.getState().configView,
-                environment: process.env,
-                instance: entry,
-                snapshot: this.store.getState().snapshotsByInstance[instance]
-            });
-            await new TuiAttachShellRunner({
-                hooks: {
-                    resume: () => this.#resumeAfterAttach(),
-                    suspend: () => this.#suspendForAttach()
-                }
-            }).run(command);
-        } catch (error) {
-            this.store.setScreenStatus(this.store.getState().ui.selectedPage, `Attach Shell failed: ${readErrorMessage(error)}`);
-            return;
-        }
-
-        try {
-            const refreshed = await this.#clients.runtime.refresh(instance);
-            this.store.replaceSnapshot(refreshed.snapshot);
-            await this.session.refreshInstance(instance);
-            this.store.setScreenStatus(this.store.getState().ui.selectedPage, "Shell exited. Status refreshed from control.");
-        } catch (error) {
-            this.store.setScreenStatus(this.store.getState().ui.selectedPage, `Shell exited. Status refresh failed: ${readErrorMessage(error)}`);
-        }
+        clearInterval(this.#cursorBlinkTimer);
+        this.#cursorBlinkTimer = undefined;
     }
 
     #mountInk(): void {
-        this.#ink = render(React.createElement(TuiApp, { runtime: this }), {
-            exitOnCtrlC: false,
-            stdin: this.#inkStdin,
-            stdout: this.#stdout
-        });
+        this.#ink = render(
+            React.createElement(TuiApp, { runtime: this }),
+            {
+                exitOnCtrlC: false,
+                stdin: this.#inkStdin,
+                stdout: this.#stdout
+            }
+        );
     }
 
     #startInput(): void {
         if (this.#inputStarted) {
             return;
         }
-
         this.#inputStarted = true;
         this.#stdin.on("data", this.#forwardTerminalInput);
     }
@@ -402,7 +295,6 @@ export class TuiRuntime {
         if (!this.#inputStarted) {
             return;
         }
-
         this.#inputStarted = false;
         this.#stdin.off("data", this.#forwardTerminalInput);
     }
@@ -411,9 +303,11 @@ export class TuiRuntime {
         if (this.#ink === undefined) {
             return;
         }
-
         const input = this.#mouseBuffer + chunk.toString();
-        const pattern = new RegExp(`${String.fromCharCode(27)}\\[<(\\d+);(\\d+);(\\d+)([Mm])`, "g");
+        const pattern = new RegExp(
+            `${String.fromCharCode(27)}\\[<(\\d+);(\\d+);(\\d+)([Mm])`,
+            "g"
+        );
         let cursor = 0;
 
         for (const match of input.matchAll(pattern)) {
@@ -435,29 +329,38 @@ export class TuiRuntime {
             this.#mouseBuffer = remainder.slice(partialStart);
             return;
         }
-
         this.#mouseBuffer = "";
         this.#inkStdin.write(remainder);
     };
 
-    async #handleMouse(event: { button: number; kind: "press" | "release"; x: number; y: number }): Promise<void> {
+    async #handleMouse(event: {
+        button: number;
+        kind: "press" | "release";
+        x: number;
+        y: number;
+    }): Promise<void> {
         if (event.kind !== "press") {
             return;
         }
-
+        const regions = buildTuiHitRegions(this.store.getState(), {
+            columns: this.columns,
+            rows: this.rows
+        });
         if ((event.button & 64) !== 0) {
-            const target = hitTargetAt(buildTuiHitRegions(this.store.getState(), { columns: this.columns, rows: this.rows }), event.x, event.y);
+            const target = hitTargetAt(regions, event.x, event.y);
             if (target?.kind === "scrollViewport") {
-                await this.commandDispatcher.dispatch({ type: (event.button & 1) === 0 ? "screen.pageUp" : "screen.pageDown" });
+                await this.commandDispatcher.dispatch({
+                    type: (event.button & 1) === 0
+                        ? "screen.pageUp"
+                        : "screen.pageDown"
+                });
             }
             return;
         }
-
         if ((event.button & 3) !== 0) {
             return;
         }
-
-        const target = hitTargetAt(buildTuiHitRegions(this.store.getState(), { columns: this.columns, rows: this.rows }), event.x, event.y);
+        const target = hitTargetAt(regions, event.x, event.y);
         if (target !== undefined) {
             await this.#handleHitTarget(target);
         }
@@ -465,8 +368,14 @@ export class TuiRuntime {
 
     async #handleHitTarget(target: TuiHitTarget): Promise<void> {
         if (target.kind === "page") {
-            await this.commandDispatcher.dispatch({ page: target.id as "instances" | "todo" | "config" | "connector" | "oauth" | "audit" | "logs" | "help", type: "page.select" });
-            this.focusManager.setFocus({ id: target.id as "instances" | "todo" | "config" | "connector" | "oauth" | "audit" | "logs" | "help", kind: "page" });
+            await this.commandDispatcher.dispatch({
+                page: target.id as TuiPageId,
+                type: "page.select"
+            });
+            this.focusManager.setFocus({
+                id: target.id as TuiPageId,
+                kind: "page"
+            });
             return;
         }
         if (target.kind === "instance") {
@@ -477,13 +386,16 @@ export class TuiRuntime {
         if (target.kind === "scrollViewport") {
             return;
         }
-        const state = this.store.getState();
         if (target.kind === "boxTitle") {
             this.focusManager.setFocus({ id: target.boxId, kind: "box" });
             await this.commandDispatcher.dispatch({ type: "screen.toggle" });
             return;
         }
-        const box = selectMainScreenModel(state).boxes.find((candidate) => candidate.id === target.boxId);
+
+        const state = this.store.getState();
+        const box = selectMainScreenModel(state).boxes.find((candidate) => {
+            return candidate.id === target.boxId;
+        });
         if (box === undefined) {
             return;
         }
@@ -494,20 +406,6 @@ export class TuiRuntime {
         if (target.lineId === undefined) {
             return;
         }
-
-        if (state.interaction.editor?.kind === "create" && box.id === "create-wizard") {
-            this.store.setSelectedDetailLine(box.expandedKey, target.lineId);
-            await this.commandDispatcher.dispatch({ type: "focus.activate" });
-            return;
-        }
-
-        if (state.ui.selectedPage === "config" || state.ui.selectedPage === "connector") {
-            this.focusManager.setFocus({ id: box.id, kind: "box" });
-            this.store.setSelectedDetailLine(box.expandedKey, target.lineId);
-            await this.commandDispatcher.dispatch({ type: "focus.activate" });
-            return;
-        }
-
         this.focusManager.setFocus({ id: box.id, kind: "box" });
         this.store.setSelectedDetailLine(box.expandedKey, target.lineId);
         await this.commandDispatcher.dispatch({ type: "focus.activate" });
@@ -517,7 +415,6 @@ export class TuiRuntime {
         if (this.#attachWait !== undefined) {
             return;
         }
-
         this.#attachWait = new Promise<void>((resolve) => {
             this.#attachResume = resolve;
         });
@@ -537,82 +434,6 @@ export class TuiRuntime {
         this.#attachWait = undefined;
         resume?.();
     }
-
-    async #decideApproval(instance: string, approvalId: string, decision: "approve" | "deny"): Promise<void> {
-        await this.#runCommand(`${decision === "approve" ? "Approve" : "Deny"} Approval: ${approvalId}`, instance, async () => {
-            await this.#clients.tool.getApproval(instance, approvalId);
-            await this.#clients.tool.decideApproval(instance, approvalId, decision);
-            await this.session.refreshInstance(instance);
-        });
-    }
-
-    async #callTool(instance: string, toolName: string, input: string): Promise<boolean> {
-        const result = await this.#runCommand(`Call Tool: ${toolName}`, instance, async () => {
-            const parsed = JSON.parse(input) as JsonValue;
-            await this.#clients.tool.call(instance, toolName, parsed);
-            await this.session.refreshInstance(instance);
-        });
-
-        return result;
-    }
-
-    async #runCommand(title: string, targetInstance: string, operation: (commandId: string) => Promise<void>): Promise<boolean> {
-        const commandId = `tui-command-${++this.#commandCounter}`;
-        const startedAt = new Date().toISOString();
-        const sourcePanel = this.store.getState().ui.selectedPage;
-        const panelKey = `${sourcePanel}:${targetInstance}`;
-        this.store.upsertCommand({
-            commandId,
-            sourcePanel,
-            startedAt,
-            status: "running",
-            targetInstance,
-            title
-        });
-        this.store.setPanelError(panelKey, undefined);
-
-        try {
-            await operation(commandId);
-            this.#completeCommand({ commandId, sourcePanel, startedAt, targetInstance, title }, "succeeded");
-            this.store.setScreenStatus(sourcePanel, `${title} completed.`);
-            return true;
-        } catch (error) {
-            const failure = toControlError(error);
-            this.#completeCommand({ commandId, sourcePanel, startedAt, targetInstance, title }, "failed", failure);
-            this.store.setPanelError(panelKey, failure);
-            return false;
-        }
-    }
-
-    #completeCommand(
-        command: Omit<TuiCommandRecord, "completedAt" | "error" | "status">,
-        status: "succeeded" | "failed",
-        error?: ControlError
-    ): void {
-        this.store.upsertCommand({
-            ...command,
-            completedAt: new Date().toISOString(),
-            ...(error === undefined ? {} : { error }),
-            status
-        });
-    }
-}
-
-function toControlError(error: unknown): ControlError {
-    if (error instanceof ControlError) {
-        return error;
-    }
-
-    const candidate = error as { code?: unknown; message?: unknown; retryable?: unknown } | undefined;
-    return createError({
-        code: typeof candidate?.code === "string" ? candidate.code : errorCodes.targetInvalid,
-        message: typeof candidate?.message === "string" ? candidate.message : String(error),
-        retryable: candidate?.retryable === true
-    });
-}
-
-function readErrorMessage(error: unknown): string {
-    return error instanceof Error ? error.message : String(error);
 }
 
 function createInkStdin(stdin: ReadStream): ReadStream {
@@ -650,17 +471,19 @@ class AlternateScreen {
         if (this.#active) {
             return;
         }
-
         this.#active = true;
-        this.#stdout.write("\u001B[?1049h\u001B[?25l\u001B[?1000h\u001B[?1002h\u001B[?1006h");
+        this.#stdout.write(
+            "\u001B[?1049h\u001B[?25l\u001B[?1000h\u001B[?1002h\u001B[?1006h"
+        );
     }
 
     exit(): void {
         if (!this.#active) {
             return;
         }
-
         this.#active = false;
-        this.#stdout.write("\u001B[?1006l\u001B[?1002l\u001B[?1000l\u001B[?25h\u001B[?1049l");
+        this.#stdout.write(
+            "\u001B[?1006l\u001B[?1002l\u001B[?1000l\u001B[?25h\u001B[?1049l"
+        );
     }
 }
