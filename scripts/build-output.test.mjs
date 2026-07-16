@@ -6,7 +6,6 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 const repositoryRoot = fileURLToPath(new URL("../", import.meta.url));
-const pnpm = process.platform === "win32" ? "pnpm.cmd" : "pnpm";
 
 test("incremental package builds remove obsolete dist artifacts", { timeout: 120_000 }, async () => {
     for (const packageName of ["core", "mcp"]) {
@@ -21,9 +20,10 @@ test("incremental package builds remove obsolete dist artifacts", { timeout: 120
         await writeFile(marker, "throw new Error('obsolete output was loaded');\n", "utf8");
 
         try {
+            const pnpmArgs = ["--filter", `@portable-devshell/${packageName}`, "run", "build"];
             const result = spawnSync(
-                pnpm,
-                ["--filter", `@portable-devshell/${packageName}`, "run", "build"],
+                process.platform === "win32" ? process.env.ComSpec ?? "cmd.exe" : "pnpm",
+                process.platform === "win32" ? ["/d", "/s", "/c", ["pnpm", ...pnpmArgs].join(" ")] : pnpmArgs,
                 {
                     cwd: repositoryRoot,
                     encoding: "utf8",

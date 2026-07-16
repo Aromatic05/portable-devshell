@@ -8,6 +8,11 @@ import test from "node:test";
 import { pathToFileURL, fileURLToPath } from "node:url";
 
 const repositoryRoot = fileURLToPath(new URL("../", import.meta.url));
+test("PowerShell release installer is UTF-8 with BOM for Windows PowerShell", async () => {
+    const content = await readFile(resolve(repositoryRoot, "scripts", "install-release.ps1"));
+    assert.deepEqual([...content.subarray(0, 3)], [0xef, 0xbb, 0xbf]);
+});
+
 const allTargets = [
     "linux-x64",
     "linux-arm64",

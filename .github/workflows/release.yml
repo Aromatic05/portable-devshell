@@ -6,10 +6,25 @@ on:
             - "v*"
 
 permissions:
+    actions: read
     contents: write
 
 jobs:
+    verify-development-ci:
+        runs-on: ubuntu-24.04
+        steps:
+            - uses: actions/checkout@v5
+            - uses: actions/setup-node@v5
+              with:
+                  node-version: 24
+                  package-manager-cache: false
+            - name: 验证同一提交的开发 CI
+              env:
+                  GITHUB_TOKEN: ${{ github.token }}
+              run: node ./scripts/verify-release-ci.mjs
+
     build-worker:
+        needs: verify-development-ci
         strategy:
             fail-fast: false
             matrix:
@@ -86,6 +101,7 @@ jobs:
                   path: release-assets/*
 
     package-app:
+        needs: verify-development-ci
         runs-on: ubuntu-24.04
 
         steps:
