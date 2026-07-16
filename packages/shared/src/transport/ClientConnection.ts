@@ -20,9 +20,12 @@ export interface ClientEvent {
     seq?: number;
 }
 
+export type ClientConnectionMode = "short" | "persistent";
+
 export interface ClientConnectionOptions {
     mapError(error: unknown): Error;
     mapRemoteError(error: ControlErrorBody): Error;
+    mode?: ClientConnectionMode;
     peer: Exclude<Peer, "server">;
     socketFactory?: (path: string) => Socket;
     socketPath?: string;
@@ -45,10 +48,24 @@ export interface InstanceClientModule {
 }
 
 interface PendingRequest {
-    id: string;
+    destination: Destination;
     expectsStream: boolean;
+    id: string;
+    module: string;
     reject(error: Error): void;
     resolve(event: ClientEvent): void;
+}
+
+interface ClientStreamState {
+    closeError?: Error;
+    closed: boolean;
+    destination: Destination;
+    events: ClientEvent[];
+    id: string;
+    localClosed: boolean;
+    module: string;
+    terminal: boolean;
+    waiters: Array<{ reject(error: Error): void; resolve(event: ClientEvent): void }>;
 }
 
 export class ClientStream {
@@ -56,6 +73,7 @@ export class ClientStream {
     readonly #send: (operation: string, payload?: JsonValue) => Promise<void>;
     readonly #close: () => void;
     readonly id: string;
+    #closed = false;
 
     constructor(
         id: string,
@@ -80,6 +98,10 @@ export class ClientStream {
     }
 
     close(): void {
+        if (this.#closed) {
+            return;
+        }
+        this.#closed = true;
         this.#close();
     }
 }
@@ -87,13 +109,20 @@ export class ClientStream {
 export class ClientConnection {
     readonly #mapError: (error: unknown) => Error;
     readonly #mapRemoteError: (error: ControlErrorBody) => Error;
+    readonly #mode: ClientConnectionMode;
     readonly #peer: Exclude<Peer, "server">;
     readonly #socketFactory?: (path: string) => Socket;
     readonly #socketPath: string;
+    #closed = false;
+    #persistentFailure?: Error;
+    #persistentGeneration = 0;
+    #persistentSession?: ClientSession;
+    #persistentSessionPromise?: Promise<ClientSession>;
 
     constructor(options: ClientConnectionOptions) {
         this.#mapError = options.mapError;
         this.#mapRemoteError = options.mapRemoteError;
+        this.#mode = options.mode ?? "short";
         this.#peer = options.peer;
         this.#socketFactory = options.socketFactory;
         this.#socketPath = options.socketPath ?? resolveControlSocketPath(options.xdgRuntimeDir);
@@ -116,13 +145,16 @@ export class ClientConnection {
         operation: string,
         payload?: unknown
     ): Promise<ClientEvent> {
-        const session = await this.#connect();
+        let session: ClientSession | undefined;
         try {
+            session = await this.#acquireSession();
             return await session.request(destination, module, operation, payload as JsonValue | undefined, false);
         } catch (error) {
             throw this.mapError(error);
         } finally {
-            session.close();
+            if (this.#mode === "short") {
+                session?.close();
+            }
         }
     }
 
@@ -132,8 +164,10 @@ export class ClientConnection {
         operation: string,
         payload?: unknown
     ): Promise<OpenedClientStream> {
-        const session = await this.#connect();
+        let session: ClientSession | undefined;
         try {
+            session = await this.#acquireSession();
+            const activeSession = session;
             const acknowledgement = await session.request(
                 destination,
                 module,
@@ -145,19 +179,55 @@ export class ClientConnection {
             if (acknowledgement.streamId === undefined) {
                 throw new Error("Stream acknowledgement did not include streamId.");
             }
+            const streamId = acknowledgement.streamId;
             return {
                 acknowledgement,
-                stream: new ClientStream(acknowledgement.streamId, {
-                    close: () => session.close(),
-                    nextEvent: async () => await session.nextStreamEvent(),
+                stream: new ClientStream(streamId, {
+                    close: () => {
+                        if (this.#mode === "short") {
+                            activeSession.close();
+                        } else {
+                            activeSession.closeStream(streamId);
+                        }
+                    },
+                    nextEvent: async () => await activeSession.nextStreamEvent(streamId),
                     send: async (streamOperation, streamPayload) =>
-                        await session.sendStream(destination, module, streamOperation, streamPayload)
+                        await activeSession.sendStream(streamId, streamOperation, streamPayload)
                 })
             };
         } catch (error) {
-            session.close();
+            if (this.#mode === "short") {
+                session?.close();
+            }
             throw this.mapError(error);
         }
+    }
+
+    async reconnect(): Promise<void> {
+        if (this.#mode === "short") {
+            return;
+        }
+        this.#assertOpen();
+        this.#persistentGeneration += 1;
+        const session = this.#persistentSession;
+        this.#persistentSession = undefined;
+        this.#persistentSessionPromise = undefined;
+        this.#persistentFailure = undefined;
+        session?.close();
+        await this.#acquirePersistentSession();
+    }
+
+    close(): void {
+        if (this.#closed) {
+            return;
+        }
+        this.#closed = true;
+        this.#persistentGeneration += 1;
+        const session = this.#persistentSession;
+        this.#persistentSession = undefined;
+        this.#persistentSessionPromise = undefined;
+        this.#persistentFailure = undefined;
+        session?.close();
     }
 
     throwRemoteError(error: ControlErrorBody | undefined): void {
@@ -170,15 +240,66 @@ export class ClientConnection {
         return this.#mapError(error);
     }
 
-    async #connect(): Promise<ClientSession> {
-        try {
-            const channel = await Channel.connect(this.#socketPath, { socketFactory: this.#socketFactory });
-            const route = new PrefixRoute(new Codec(channel, { local: this.#peer, remote: "server" }), {
-                eventIdPrefix: this.#peer
-            });
-            return new ClientSession(route, this.#peer);
-        } catch (error) {
-            throw this.mapError(error);
+    async #acquireSession(): Promise<ClientSession> {
+        this.#assertOpen();
+        return this.#mode === "short" ? await this.#connect() : await this.#acquirePersistentSession();
+    }
+
+    async #acquirePersistentSession(): Promise<ClientSession> {
+        this.#assertOpen();
+        if (this.#persistentFailure !== undefined) {
+            throw this.#persistentFailure;
+        }
+        if (this.#persistentSession !== undefined && !this.#persistentSession.closed) {
+            return this.#persistentSession;
+        }
+        if (this.#persistentSessionPromise !== undefined) {
+            return await this.#persistentSessionPromise;
+        }
+
+        const generation = this.#persistentGeneration;
+        let promise!: Promise<ClientSession>;
+        promise = this.#connect((session, error) => {
+            if (generation !== this.#persistentGeneration || this.#closed) {
+                return;
+            }
+            if (this.#persistentSession === session) {
+                this.#persistentSession = undefined;
+            }
+            this.#persistentFailure = this.mapError(error ?? new Error("Client connection closed."));
+        }).then((session) => {
+            if (generation !== this.#persistentGeneration || this.#closed) {
+                session.close();
+                throw new Error("Client connection was reset while connecting.");
+            }
+            this.#persistentSession = session;
+            return session;
+        }).catch((error) => {
+            const failure = this.mapError(error);
+            if (generation === this.#persistentGeneration && !this.#closed) {
+                this.#persistentFailure = failure;
+            }
+            throw failure;
+        }).finally(() => {
+            if (this.#persistentSessionPromise === promise) {
+                this.#persistentSessionPromise = undefined;
+            }
+        });
+        this.#persistentSessionPromise = promise;
+        return await promise;
+    }
+
+    async #connect(onClose?: (session: ClientSession, error?: Error) => void): Promise<ClientSession> {
+        const channel = await Channel.connect(this.#socketPath, { socketFactory: this.#socketFactory });
+        const route = new PrefixRoute(new Codec(channel, { local: this.#peer, remote: "server" }), {
+            eventIdPrefix: this.#peer
+        });
+        return new ClientSession(route, this.#peer, onClose);
+    }
+
+    #assertOpen(): void {
+        if (this.#closed) {
+            throw new Error("Client connection is closed.");
         }
     }
 }
@@ -186,18 +307,26 @@ export class ClientConnection {
 class ClientSession {
     readonly #route: PrefixRoute;
     readonly #peer: Exclude<Peer, "server">;
-    readonly #streamEvents: ClientEvent[] = [];
-    readonly #streamWaiters: Array<{ reject(error: Error): void; resolve(event: ClientEvent): void }> = [];
-    #pending?: PendingRequest;
-    #streamId?: string;
+    readonly #onClose?: (session: ClientSession, error?: Error) => void;
+    readonly #pending = new Map<string, PendingRequest>();
+    readonly #streams = new Map<string, ClientStreamState>();
     #closed = false;
     #closeError?: Error;
 
-    constructor(route: PrefixRoute, peer: Exclude<Peer, "server">) {
+    constructor(
+        route: PrefixRoute,
+        peer: Exclude<Peer, "server">,
+        onClose?: (session: ClientSession, error?: Error) => void
+    ) {
         this.#route = route;
         this.#peer = peer;
+        this.#onClose = onClose;
         route.onEvent((incoming) => this.#accept(incoming));
         route.onClose((error) => this.#finishClose(error));
+    }
+
+    get closed(): boolean {
+        return this.#closed;
     }
 
     async request(
@@ -207,15 +336,10 @@ class ClientSession {
         payload: JsonValue | undefined,
         expectsStream: boolean
     ): Promise<ClientEvent> {
-        if (this.#pending !== undefined) {
-            throw new Error("Client session already has a pending request.");
-        }
-        if (this.#closed) {
-            throw this.#closeError ?? new Error("Client session is closed.");
-        }
+        this.#assertOpen();
         const id = `${this.#peer}-${randomUUID()}`;
         const response = new Promise<ClientEvent>((resolve, reject) => {
-            this.#pending = { expectsStream, id, reject, resolve };
+            this.#pending.set(id, { destination, expectsStream, id, module, reject, resolve });
         });
         void response.catch(() => undefined);
         try {
@@ -225,42 +349,64 @@ class ClientSession {
                 ...(payload === undefined ? {} : { payload })
             });
         } catch (error) {
-            this.#pending = undefined;
-            throw error;
+            const pending = this.#pending.get(id);
+            this.#pending.delete(id);
+            pending?.reject(error instanceof Error ? error : new Error(String(error)));
         }
         return await response;
     }
 
-    async nextStreamEvent(): Promise<ClientEvent> {
-        const queued = this.#streamEvents.shift();
+    async nextStreamEvent(streamId: string): Promise<ClientEvent> {
+        const stream = this.#requireStream(streamId);
+        const queued = stream.events.shift();
         if (queued !== undefined) {
+            if (isTerminalStreamEvent(queued)) {
+                this.#finishStream(stream);
+            }
             return queued;
         }
-        if (this.#closed) {
-            throw this.#closeError ?? new Error("Client stream is closed.");
-        }
-        if (this.#streamId === undefined) {
-            throw new Error("No client stream is active.");
+        if (stream.closed || stream.localClosed || stream.terminal || this.#closed) {
+            throw stream.closeError ?? this.#closeError ?? new Error("Client stream is closed.");
         }
         return await new Promise<ClientEvent>((resolve, reject) => {
-            this.#streamWaiters.push({ reject, resolve });
+            stream.waiters.push({ reject, resolve });
         });
     }
 
-    async sendStream(
-        destination: Destination,
-        module: string,
-        operation: string,
-        payload?: JsonValue
-    ): Promise<void> {
-        if (this.#streamId === undefined) {
-            throw new Error("No client stream is active.");
+    async sendStream(streamId: string, operation: string, payload?: JsonValue): Promise<void> {
+        const stream = this.#requireStream(streamId);
+        if (stream.closed || stream.localClosed || stream.terminal || this.#closed) {
+            throw stream.closeError ?? this.#closeError ?? new Error("Client stream is closed.");
         }
-        await this.#route.send(destination, module, {
+        await this.#route.send(stream.destination, stream.module, {
             id: `${this.#peer}-${randomUUID()}`,
-            streamId: this.#streamId,
+            streamId,
             name: operation,
             ...(payload === undefined ? {} : { payload })
+        });
+    }
+
+    closeStream(streamId: string): void {
+        const stream = this.#streams.get(streamId);
+        if (stream === undefined || stream.localClosed || stream.closed) {
+            return;
+        }
+        if (stream.terminal) {
+            this.#finishStream(stream);
+            return;
+        }
+        stream.localClosed = true;
+        stream.closeError = new Error("Client stream is closed.");
+        stream.events.length = 0;
+        for (const waiter of stream.waiters.splice(0)) {
+            waiter.reject(stream.closeError);
+        }
+        void this.#route.send(stream.destination, "stream", {
+            id: `${this.#peer}-${randomUUID()}`,
+            streamId,
+            name: "cancel"
+        }).catch((error) => {
+            this.close(error instanceof Error ? error : new Error(String(error)));
         });
     }
 
@@ -272,37 +418,97 @@ class ClientSession {
     #accept(incoming: PrefixRouteIncoming): void {
         const event = toClientEvent(incoming);
         if (event.replyTo !== undefined) {
-            const pending = this.#pending;
-            if (pending === undefined || event.replyTo !== pending.id) {
-                this.close(new Error(`Unexpected replyTo ${event.replyTo}.`));
+            this.#acceptReply(event, incoming);
+            return;
+        }
+        if (event.streamId !== undefined) {
+            this.#acceptStream(event);
+            return;
+        }
+        this.close(new Error(`Unexpected uncorrelated event ${event.name}.`));
+    }
+
+    #acceptReply(event: ClientEvent, incoming: PrefixRouteIncoming): void {
+        const pending = this.#pending.get(event.replyTo!);
+        if (pending === undefined) {
+            this.close(new Error(`Unexpected replyTo ${event.replyTo}.`));
+            return;
+        }
+        if (pending.destination !== incoming.destination || pending.module !== incoming.module) {
+            this.close(new Error(`Reply ${event.replyTo} was addressed to the wrong route.`));
+            return;
+        }
+        if (pending.expectsStream) {
+            if (event.error === undefined && event.streamId === undefined) {
+                this.close(new Error("Stream acknowledgement must include streamId."));
                 return;
             }
-            if (pending.expectsStream) {
-                if (event.error === undefined && event.streamId === undefined) {
-                    this.close(new Error("Stream acknowledgement must include streamId."));
+            if (event.error === undefined) {
+                if (this.#streams.has(event.streamId!)) {
+                    this.close(new Error(`Duplicate streamId ${event.streamId}.`));
                     return;
                 }
-                if (event.error === undefined) {
-                    this.#streamId = event.streamId;
-                }
-            } else if (event.streamId !== undefined) {
-                this.close(new Error("A normal reply must not establish a stream."));
-                return;
+                this.#streams.set(event.streamId!, {
+                    closed: false,
+                    destination: pending.destination,
+                    events: [],
+                    id: event.streamId!,
+                    localClosed: false,
+                    module: pending.module,
+                    terminal: false,
+                    waiters: []
+                });
             }
-            this.#pending = undefined;
-            pending.resolve(event);
+        } else if (event.streamId !== undefined) {
+            this.close(new Error("A normal reply must not establish a stream."));
             return;
         }
-        if (event.streamId === undefined || event.streamId !== this.#streamId) {
-            this.close(new Error(`Unexpected streamId ${event.streamId ?? "<missing>"}.`));
+        this.#pending.delete(pending.id);
+        pending.resolve(event);
+    }
+
+    #acceptStream(event: ClientEvent): void {
+        const stream = this.#streams.get(event.streamId!);
+        if (stream === undefined) {
+            this.close(new Error(`Unexpected streamId ${event.streamId}.`));
             return;
         }
-        const waiter = this.#streamWaiters.shift();
+        if (event.destination !== stream.destination) {
+            this.close(new Error(`Stream ${event.streamId} was addressed to the wrong destination.`));
+            return;
+        }
+        const terminal = isTerminalStreamEvent(event);
+        if (stream.localClosed) {
+            if (terminal) {
+                this.#finishStream(stream);
+            }
+            return;
+        }
+        if (stream.terminal) {
+            this.close(new Error(`Stream ${event.streamId} emitted after termination.`));
+            return;
+        }
+        if (terminal) {
+            stream.terminal = true;
+        }
+        const waiter = stream.waiters.shift();
         if (waiter === undefined) {
-            this.#streamEvents.push(event);
-        } else {
-            waiter.resolve(event);
+            stream.events.push(event);
+            return;
         }
+        waiter.resolve(event);
+        if (terminal) {
+            for (const remaining of stream.waiters.splice(0)) {
+                remaining.reject(new Error("Client stream is closed."));
+            }
+            this.#finishStream(stream);
+        }
+    }
+
+    #finishStream(stream: ClientStreamState): void {
+        stream.closed = true;
+        stream.events.length = 0;
+        this.#streams.delete(stream.id);
     }
 
     #finishClose(error?: Error): void {
@@ -314,11 +520,33 @@ class ClientSession {
         }
         this.#closed = true;
         const failure = this.#closeError ?? new Error("Client connection closed.");
-        const pending = this.#pending;
-        this.#pending = undefined;
-        pending?.reject(failure);
-        for (const waiter of this.#streamWaiters.splice(0)) {
-            waiter.reject(failure);
+        for (const pending of this.#pending.values()) {
+            pending.reject(failure);
+        }
+        this.#pending.clear();
+        for (const stream of this.#streams.values()) {
+            stream.closed = true;
+            stream.closeError = failure;
+            stream.events.length = 0;
+            for (const waiter of stream.waiters.splice(0)) {
+                waiter.reject(failure);
+            }
+        }
+        this.#streams.clear();
+        this.#onClose?.(this, this.#closeError);
+    }
+
+    #requireStream(streamId: string): ClientStreamState {
+        const stream = this.#streams.get(streamId);
+        if (stream === undefined) {
+            throw this.#closeError ?? new Error("Client stream is closed.");
+        }
+        return stream;
+    }
+
+    #assertOpen(): void {
+        if (this.#closed) {
+            throw this.#closeError ?? new Error("Client session is closed.");
         }
     }
 }
@@ -372,6 +600,10 @@ function toClientEvent(incoming: PrefixRouteIncoming): ClientEvent {
         ...(event.error === undefined ? {} : { error: event.error }),
         ...(event.seq === undefined ? {} : { seq: event.seq })
     };
+}
+
+function isTerminalStreamEvent(event: ClientEvent): boolean {
+    return event.name === "stream.completed" || event.name === "stream.cancelled";
 }
 
 function isRecord(value: JsonValue | undefined): value is Record<string, JsonValue> {

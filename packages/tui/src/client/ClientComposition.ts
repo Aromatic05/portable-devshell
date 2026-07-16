@@ -23,9 +23,11 @@ export interface ClientOptions {
 
 export interface Clients {
     artifact: ArtifactClient;
+    close(): void;
     config: ConfigClient;
     instance: InstanceClient;
     mcp: McpClient;
+    reconnect(): Promise<void>;
     reverse: ReverseClient;
     runtime: RuntimeClient;
     service: ServiceClient;
@@ -36,15 +38,18 @@ export interface Clients {
 export function createClients(options: ClientOptions = {}): Clients {
     const connection = new ClientConnection({
         ...options,
+        mode: "persistent",
         peer: "tui",
         mapError: toClientError,
         mapRemoteError: toRemoteError
     });
     return {
         artifact: createArtifactClient(connection),
+        close: () => connection.close(),
         config: createConfigClient(connection),
         instance: createInstanceClient(connection),
         mcp: createMcpClient(connection),
+        reconnect: async () => await connection.reconnect(),
         reverse: createReverseClient(connection),
         runtime: createRuntimeClient(connection),
         service: createServiceClient(connection),

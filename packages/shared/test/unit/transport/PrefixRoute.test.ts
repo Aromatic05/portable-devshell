@@ -258,6 +258,47 @@ test("streamId is independent from replyTo and bypasses normal routing", async (
     assert.deepEqual(completed.event.payload, { exitCode: 0 });
 });
 
+test("stream.cancel closes one server stream without closing the routed connection", async (t) => {
+    let streamClosed = false;
+    const snapshot = PrefixRoute.snapshot([{
+        destination: instance,
+        modules: [{
+            name: "runtime",
+            operations: [{
+                name: "subscribe",
+                handle: async (_request, context) => {
+                    await context.openStream(undefined, {
+                        onClose: () => {
+                            streamClosed = true;
+                        }
+                    });
+                    return undefined;
+                }
+            }]
+        }]
+    }]);
+    const value = await pair(() => snapshot);
+    t.after(() => closePair(value));
+
+    await value.client.send(instance, "runtime", { id: "subscribe-1", name: "subscribe" });
+    const acknowledgement = await value.events.next();
+    const streamId = acknowledgement.event.streamId!;
+
+    await value.client.send(instance, "stream", {
+        id: "cancel-1",
+        streamId,
+        name: "cancel"
+    });
+    const cancelled = await value.events.next();
+
+    assert.equal(streamClosed, true);
+    assert.equal(cancelled.module, "stream");
+    assert.equal(cancelled.event.streamId, streamId);
+    assert.equal(cancelled.event.name, "cancelled");
+    assert.equal(value.client.closed, false);
+    assert.equal(value.server.closed, false);
+});
+
 test("PrefixRoute snapshots reject duplicate destinations, modules, and operations", () => {
     assert.throws(
         () => PrefixRoute.snapshot([

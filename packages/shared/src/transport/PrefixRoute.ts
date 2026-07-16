@@ -212,6 +212,23 @@ export class PrefixRoute {
     async #acceptStream(incoming: PrefixRouteIncoming): Promise<void> {
         const streamId = incoming.event.streamId!;
         const active = this.#serverStreams.get(streamId);
+        if (incoming.module === "stream" && incoming.event.name === "cancel") {
+            if (active === undefined) {
+                return;
+            }
+            if (incoming.destination !== active.destination) {
+                throw protocolFailure(`Stream ${streamId} was addressed to the wrong destination.`);
+            }
+            active.closed = true;
+            this.#serverStreams.delete(streamId);
+            await active.options.onClose?.();
+            await this.send(active.destination, "stream", {
+                id: this.#nextId(),
+                streamId,
+                name: "cancelled"
+            });
+            return;
+        }
         if (active === undefined) {
             throw protocolFailure(`Unexpected streamId ${streamId}.`);
         }

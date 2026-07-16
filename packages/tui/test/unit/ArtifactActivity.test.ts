@@ -42,6 +42,7 @@ test("TUI startup pulls artifact shares and transfers from Control", async () =>
                 async listShares() { return [share]; },
                 async listTransfers() { return [transfer]; }
             },
+            close() {},
             config: {
                 async get() { return {}; }
             },
@@ -51,6 +52,7 @@ test("TUI startup pulls artifact shares and transfers from Control", async () =>
             mcp: {
                 async status() { return {}; }
             },
+            async reconnect() {},
             service: {
                 async ping() { return { pong: true }; }
             }

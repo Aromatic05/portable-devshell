@@ -243,6 +243,7 @@ function createSocketControlLifecycleRpcClient(socketPath: string): ControlLifec
     const connection = new ClientConnection({
         mapError: toError,
         mapRemoteError: (error) => createError(error),
+        mode: "short",
         peer: "cli",
         socketPath
     });

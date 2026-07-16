@@ -31,6 +31,7 @@ export interface Clients {
 export function createClients(options: ClientOptions = {}): Clients {
     const connection = new ClientConnection({
         ...options,
+        mode: "short",
         peer: "cli",
         mapError: toClientError,
         mapRemoteError: toRemoteError

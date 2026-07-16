@@ -40,18 +40,16 @@ export class TuiControlSession {
 
         this.#started = true;
         await this.refresh();
-        this.#oauthRefreshTimer = setInterval(() => {
-            void this.#reloadOAuthApprovals(this.#store.getState().configView).catch(() => undefined);
-        }, 1_000);
+        if (this.#store.getState().connection.status === "connected") {
+            this.#startOAuthRefresh();
+        }
     }
 
     async stop(): Promise<void> {
         this.#started = false;
-        if (this.#oauthRefreshTimer !== undefined) {
-            clearInterval(this.#oauthRefreshTimer);
-            this.#oauthRefreshTimer = undefined;
-        }
+        this.#stopOAuthRefresh();
         this.#closeSubscriptions();
+        this.#clients.close();
     }
 
     async reconnect(): Promise<void> {
@@ -59,7 +57,18 @@ export class TuiControlSession {
             return;
         }
 
-        await this.refresh();
+        this.#stopOAuthRefresh();
+        try {
+            await this.#clients.reconnect();
+            await this.refresh();
+            if (this.#store.getState().connection.status === "connected") {
+                this.#startOAuthRefresh();
+            }
+        } catch (error) {
+            const failure = toFailure(error);
+            this.#store.setConnectionState(failure.status, failure.error);
+            this.#closeSubscriptions();
+        }
     }
 
 
@@ -260,8 +269,26 @@ export class TuiControlSession {
     }
 
     #handleDisconnected(): void {
+        this.#stopOAuthRefresh();
         this.#store.setConnectionState("disconnected");
         this.#closeSubscriptions();
+    }
+
+    #startOAuthRefresh(): void {
+        if (this.#oauthRefreshTimer !== undefined) {
+            return;
+        }
+        this.#oauthRefreshTimer = setInterval(() => {
+            void this.#reloadOAuthApprovals(this.#store.getState().configView).catch(() => undefined);
+        }, 1_000);
+    }
+
+    #stopOAuthRefresh(): void {
+        if (this.#oauthRefreshTimer === undefined) {
+            return;
+        }
+        clearInterval(this.#oauthRefreshTimer);
+        this.#oauthRefreshTimer = undefined;
     }
 }
 

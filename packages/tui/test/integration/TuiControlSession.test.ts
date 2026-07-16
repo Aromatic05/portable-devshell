@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
+import { createConnection } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -17,8 +18,15 @@ test("TuiControlSession pulls instances, snapshots, subscribes, and recovers fro
     const socketPath = join(runtimeDir, "control.sock");
     const worker = new FakeWorker("alpha");
     const server = createServer(socketPath, worker, () => 7);
+    let socketCount = 0;
     const session = new TuiControlSession({
-        clients: createClients({ socketPath })
+        clients: createClients({
+            socketFactory: (path) => {
+                socketCount += 1;
+                return createConnection(path);
+            },
+            socketPath
+        })
     });
 
     worker.emit("toolCall.completed", {
@@ -56,6 +64,7 @@ test("TuiControlSession pulls instances, snapshots, subscribes, and recovers fro
     assert.equal(session.store.getState().logsByInstance.alpha?.length, 1);
     assert.equal(session.store.getState().toolCallsByInstance.alpha?.length, 1);
     assert.equal(session.store.getState().approvalsByInstance.alpha?.length, 1);
+    assert.equal(socketCount, 1);
 
     worker.emit("toolCall.completed", {
         callId: "live-3",
@@ -138,6 +147,7 @@ test("module TUI clients send explicit instance operations and preserve start re
     const clients = createClients({ socketPath });
 
     t.after(async () => {
+        clients.close();
         await server.stop().catch(() => undefined);
         await rm(runtimeDir, { force: true, recursive: true });
     });
