@@ -7,7 +7,7 @@ import { Readable } from "node:stream";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { FrameReader, FrameWriter, type JsonValue } from "@portable-devshell/shared";
+import { Channel, Codec, type Frame, type JsonValue } from "@portable-devshell/shared";
 
 import { CliMain } from "../../dist/cli/CliMain.js";
 
@@ -251,98 +251,126 @@ test("CliInstance integration", async (t) => {
 function createInstanceHarness(): { attach: (socket: Socket) => void } {
     return {
         attach(socket: Socket) {
-            const reader = new FrameReader();
-            const writer = new FrameWriter(socket);
-
-            socket.on("data", (chunk: Uint8Array) => {
-                for (const frame of reader.push(chunk)) {
-                    const envelope = frame as {
-                        id: string;
-                        method: string;
-                        params?: { clientKind?: JsonValue };
-                    };
-
-                    switch (envelope.method) {
-                        case "control.identifyClient":
-                            void respond(writer, envelope.id, {
-                                clientKind: envelope.params?.clientKind,
-                                ok: true
-                            });
-                            break;
-                        case "control.listInstances":
-                            void respond(writer, envelope.id, [
-                                {
-                                    mcpEnabled: true,
-                                    name: "demo-local",
-                                    snapshot: stoppedSnapshot()
-                                }
-                            ]);
-                            break;
-                        case "instance.getSnapshot":
-                        case "instance.refreshStatus":
-                            void respond(writer, envelope.id, {
-                                lastSeq: 1,
-                                snapshot: stoppedSnapshot()
-                            });
-                            break;
-                        case "instance.start":
-                            void respond(writer, envelope.id, readySnapshot());
-                            break;
-                        case "instance.stop":
-                            void respond(writer, envelope.id, stoppedSnapshot());
-                            break;
-                        case "instance.readLogs":
-                            void respond(
-                                writer,
-                                envelope.id,
-                                envelope.params?.fromSeq === 2
-                                    ? [{ at: "", instanceName: "demo-local", message: "after\n", seq: 2, stream: "stdout" }]
-                                    : [{ at: "", instanceName: "demo-local", message: "before\n", seq: 1, stream: "stdout" }]
-                            );
-                            break;
-                        case "instance.subscribe":
-                            void respond(writer, envelope.id, { events: [], lastSeq: 1 }).then(() => {
-                                setTimeout(() => {
-                                    void writer.write({
-                                        event: "toolCall.completed",
-                                        payload: {
-                                            at: "",
-                                            data: { toolName: "bash_run" },
-                                            instanceName: "demo-local",
-                                            seq: 2,
-                                            type: "toolCall.completed"
-                                        },
-                                        seq: 2,
-                                        target: { instance: "demo-local", kind: "instance" },
-                                        type: "event"
-                                    } as unknown as JsonValue);
-                                }, 5);
-                            });
-                            break;
-                        case "instance.callTool":
-                            void respond(writer, envelope.id, { exitCode: 0, stderr: "", stdout: "/tmp/ws\n" });
-                            break;
-                        default:
-                            void writer.write({
-                                error: { code: "control.methodNotFound", message: `unknown method ${envelope.method}`, retryable: false },
-                                id: envelope.id,
-                                ok: false,
-                                type: "response"
-                            } as unknown as JsonValue);
-                    }
-                }
+            const codec = new Codec(Channel.accept(socket), { local: "server" });
+            codec.onFrame((frame) => {
+                void handleHarnessFrame(codec, frame).catch(() => undefined);
             });
         }
     };
 }
 
-async function respond(writer: FrameWriter, id: string, result: unknown): Promise<void> {
-    await writer.write({
-        id,
-        ok: true,
-        result,
-        type: "response"
-    } as unknown as JsonValue);
+async function handleHarnessFrame(codec: Codec, frame: Frame): Promise<void> {
+    switch (frame.event.name) {
+        case "instance.list":
+            await reply(codec, frame, [
+                {
+                    mcpEnabled: true,
+                    name: "demo-local",
+                    snapshot: stoppedSnapshot()
+                }
+            ]);
+            return;
+        case "runtime.snapshot":
+        case "runtime.refresh":
+            await reply(codec, frame, { lastSeq: 1, snapshot: stoppedSnapshot() });
+            return;
+        case "runtime.start":
+            await codec.send({
+                id: `ack-${frame.id}`,
+                replyTo: frame.id,
+                streamId: frame.id,
+                event: {
+                    destination: frame.event.destination,
+                    name: frame.event.name,
+                    payload: { accepted: true }
+                }
+            });
+            await codec.send({
+                id: `complete-${frame.id}`,
+                streamId: frame.id,
+                event: {
+                    destination: frame.event.destination,
+                    name: "stream.completed",
+                    payload: readySnapshot()
+                }
+            });
+            return;
+        case "runtime.stop":
+            await reply(codec, frame, stoppedSnapshot());
+            return;
+        case "runtime.readLogs":
+            await reply(
+                codec,
+                frame,
+                isRecord(frame.event.payload) && frame.event.payload.fromSeq === 2
+                    ? [{ at: "", instanceName: "demo-local", message: "after\n", seq: 2, stream: "stdout" }]
+                    : [{ at: "", instanceName: "demo-local", message: "before\n", seq: 1, stream: "stdout" }]
+            );
+            return;
+        case "runtime.subscribe":
+            await codec.send({
+                id: `ack-${frame.id}`,
+                replyTo: frame.id,
+                streamId: frame.id,
+                event: {
+                    destination: frame.event.destination,
+                    name: frame.event.name,
+                    payload: { events: [], lastSeq: 1 }
+                }
+            });
+            setTimeout(() => {
+                void codec.send({
+                    id: `event-${frame.id}`,
+                    streamId: frame.id,
+                    event: {
+                        destination: frame.event.destination,
+                        name: "toolCall.completed",
+                        payload: {
+                            at: "",
+                            data: { toolName: "bash_run" },
+                            instanceName: "demo-local",
+                            seq: 2,
+                            type: "toolCall.completed"
+                        },
+                        seq: 2
+                    }
+                }).catch(() => undefined);
+            }, 5);
+            return;
+        case "tool.call":
+            await reply(codec, frame, { exitCode: 0, stderr: "", stdout: "/tmp/ws\n" });
+            return;
+        default:
+            await codec.send({
+                id: `error-${frame.id}`,
+                replyTo: frame.id,
+                event: {
+                    destination: frame.event.destination,
+                    name: frame.event.name,
+                    error: {
+                        code: "control.methodNotFound",
+                        message: `unknown operation ${frame.event.name}`,
+                        retryable: false
+                    }
+                }
+            });
+    }
+}
+
+async function reply(codec: Codec, frame: Frame, payload: JsonValue): Promise<void> {
+    await codec.send({
+        id: `reply-${frame.id}`,
+        replyTo: frame.id,
+        event: {
+            destination: frame.event.destination,
+            name: frame.event.name,
+            payload
+        }
+    });
+}
+
+function isRecord(value: JsonValue | undefined): value is Record<string, JsonValue> {
+    return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function stoppedSnapshot() {

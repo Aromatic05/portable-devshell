@@ -1,9 +1,10 @@
-import { FrameReader, FrameWriter, type JsonValue } from "@portable-devshell/shared";
+import type { JsonValue } from "@portable-devshell/shared";
 
 import type { WorkerCommandTransport } from "../command/WorkerCommandTransport.js";
 import type { WorkerRpcOptions } from "../command/WorkerCommandOptions.js";
 import { WorkerRpcProcessAdapter } from "./WorkerRpcProcessAdapter.js";
 import { WorkerRpcChannelBase, type WorkerRpcChannel, type WorkerRpcConnector } from "./WorkerRpcChannel.js";
+import { WorkerRpcFrameReader, WorkerRpcFrameWriter } from "./WorkerRpcFrame.js";
 
 export class WorkerRpcProcessConnector implements WorkerRpcConnector {
     readonly #transport: WorkerCommandTransport;
@@ -21,13 +22,13 @@ export class WorkerRpcProcessConnector implements WorkerRpcConnector {
 
 export class WorkerRpcProcessChannel extends WorkerRpcChannelBase {
     readonly #process: WorkerRpcProcessAdapter;
-    readonly #reader = new FrameReader();
-    readonly #writer: FrameWriter;
+    readonly #reader = new WorkerRpcFrameReader();
+    readonly #writer: WorkerRpcFrameWriter;
 
     constructor(process: WorkerRpcProcessAdapter) {
         super();
         this.#process = process;
-        this.#writer = new FrameWriter(process.stdin);
+        this.#writer = new WorkerRpcFrameWriter(process.stdin);
         process.stdout.on("data", this.#handleStdout);
         process.stdout.once("end", () => this.#disconnect(new Error("rpc process stdout ended")));
         process.stdout.once("error", (error) => this.#disconnect(error));

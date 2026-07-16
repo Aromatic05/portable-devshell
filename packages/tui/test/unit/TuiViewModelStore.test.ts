@@ -25,7 +25,8 @@ test("TuiAppStore keeps page, instance, and expanded boxes stable across events"
         status: "ready"
     });
     store.applyEvent({
-        event: "log.appended",
+        destination: asInstanceName("beta"),
+        name: "log.appended",
         payload: {
             at: "2026-07-09T00:00:03.000Z",
             data: {
@@ -34,12 +35,7 @@ test("TuiAppStore keeps page, instance, and expanded boxes stable across events"
                 tail: "payload"
             }
         },
-        seq: 3,
-        target: {
-            instance: asInstanceName("beta"),
-            kind: "instance"
-        },
-        type: "event"
+        seq: 3
     });
 
     const state = store.getState();
@@ -82,7 +78,8 @@ test("Audit page renders control-owned tool calls from live events", () => {
     store.setSelectedPage("audit");
 
     store.applyEvent({
-        event: "toolCall.running",
+        destination: asInstanceName("alpha"),
+        name: "toolCall.running",
         payload: {
             at: "2026-07-15T00:00:00.000Z",
             data: {
@@ -97,15 +94,11 @@ test("Audit page renders control-owned tool calls from live events", () => {
                 toolName: "todo_read"
             }
         },
-        seq: 1,
-        target: {
-            instance: asInstanceName("alpha"),
-            kind: "instance"
-        },
-        type: "event"
+        seq: 1
     });
     store.applyEvent({
-        event: "toolCall.completed",
+        destination: asInstanceName("alpha"),
+        name: "toolCall.completed",
         payload: {
             at: "2026-07-15T00:00:01.000Z",
             data: {
@@ -118,12 +111,7 @@ test("Audit page renders control-owned tool calls from live events", () => {
                 toolName: "todo_read"
             }
         },
-        seq: 2,
-        target: {
-            instance: asInstanceName("alpha"),
-            kind: "instance"
-        },
-        type: "event"
+        seq: 2
     });
 
     const record = store.getState().toolCallsByInstance.alpha?.[0];

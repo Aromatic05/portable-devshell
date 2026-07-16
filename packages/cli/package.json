@@ -23,8 +23,8 @@
         "dist"
     ],
     "scripts": {
-        "build": "tsc -b",
+        "build": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && tsc -b --force",
         "typecheck": "tsc --noEmit -p tsconfig.json",
-        "test": "node --import ../mcp/test/RegisterWorkspacePackages.mjs --test test/unit/*.test.ts test/integration/*.test.ts"
+        "test": "pnpm run build && node --import ../mcp/test/RegisterWorkspacePackages.mjs --test test/unit/*.test.ts test/integration/*.test.ts"
     }
 }

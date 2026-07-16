@@ -2,17 +2,17 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-    ControlConfigEditorService,
+    ConfigEditorCoordinator,
     InstanceRegistry,
-    InstanceRegistryBuilder,
+    InstanceRegistryFactory,
     createDefaultControlConfig
 } from "../../dist/index.js";
 
 test("config editor accumulates apply summary across multiple updates", async () => {
     let config = createConfig();
-    const registry = new InstanceRegistryBuilder().build(config);
+    const registry = new InstanceRegistryFactory().build(config);
     const writes: unknown[] = [];
-    const service = new ControlConfigEditorService({
+    const service = new ConfigEditorCoordinator({
         configStore: {
             async write(nextConfig: unknown) {
                 writes.push(nextConfig);
@@ -134,7 +134,7 @@ test("config editor allows updating and disabling a running instance without dro
             }
         }
     ]);
-    const service = new ControlConfigEditorService({
+    const service = new ConfigEditorCoordinator({
         configStore: {
             async write(nextConfig: unknown) {
                 config = nextConfig as typeof config;
@@ -205,7 +205,7 @@ test("config editor refuses deleting a running instance", async () => {
             }
         }
     ]);
-    const service = new ControlConfigEditorService({
+    const service = new ConfigEditorCoordinator({
         configStore: {
             async write(nextConfig: unknown) {
                 config = nextConfig as typeof config;
@@ -275,7 +275,7 @@ test("tool scheduler rebuild validation happens before persistence", async () =>
             }
         }
     ]);
-    const service = new ControlConfigEditorService({
+    const service = new ConfigEditorCoordinator({
         configStore: {
             async write(nextConfig: unknown) {
                 writes.push(nextConfig);
@@ -305,7 +305,7 @@ test("tool scheduler rebuild validation happens before persistence", async () =>
 
 test("config editor reconciles instance MCP bindings without restarting control", async () => {
     let config = createConfig();
-    const registry = new InstanceRegistryBuilder().build(config);
+    const registry = new InstanceRegistryFactory().build(config);
     const registered: Array<Record<string, unknown>> = [];
     const unregistered: string[] = [];
     const gateway = {} as never;
@@ -317,7 +317,7 @@ test("config editor reconciles instance MCP bindings without restarting control"
             unregistered.push(instanceName);
         }
     };
-    const service = new ControlConfigEditorService({
+    const service = new ConfigEditorCoordinator({
         configStore: {
             async write(nextConfig: unknown) {
                 config = nextConfig as typeof config;

@@ -1,7 +1,7 @@
 import type { ApprovalPolicy, ApprovalTimeout, EffectiveSecurityMode, InstanceName, WorkspacePath } from "@portable-devshell/shared";
 
 import type { WorkerCommandTransport } from "../command/WorkerCommandTransport.js";
-import type { WorkerHandshakeParams } from "../../worker/protocol/WorkerProtocolClient.js";
+import type { WorkerHandshakeParams } from "../protocol/WorkerProtocolClient.js";
 import type { WorkerRpcConnector } from "../rpc/WorkerRpcChannel.js";
 import { resolveToolSchedulerLimits, type ToolSchedulerLimits } from "../tool/ToolCallScheduler.js";
 import {

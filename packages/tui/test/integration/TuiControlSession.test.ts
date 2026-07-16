@@ -7,9 +7,10 @@ import test from "node:test";
 import { asInstanceName, type ApprovalRequest, type JsonValue, type ToolCallRecord } from "@portable-devshell/shared";
 import type { WorkerInstance } from "@portable-devshell/core";
 
-import { ControlRpcServer } from "../../../control/dist/control/rpc/ControlRpcServer.js";
-import { InstanceRegistry } from "../../../control/dist/instance/registry/InstanceRegistry.js";
-import { TuiControlClient, TuiControlSession } from "../../dist/index.js";
+import { ControlSocketServer } from "../../../control/dist/control/socket/ControlSocketServer.js";
+import { RouteComposition } from "../../../control/dist/composition/RouteComposition.js";
+import { InstanceRegistry } from "../../../control/dist/modules/instance/registry/InstanceRegistry.js";
+import { createClients, TuiControlSession } from "../../dist/index.js";
 
 test("TuiControlSession pulls instances, snapshots, subscribes, and recovers from stream.gap", async (t) => {
     const runtimeDir = await mkdtemp(join(tmpdir(), "portable-devshell-tui-session-"));
@@ -17,7 +18,7 @@ test("TuiControlSession pulls instances, snapshots, subscribes, and recovers fro
     const worker = new FakeWorker("alpha");
     const server = createServer(socketPath, worker, () => 7);
     const session = new TuiControlSession({
-        client: new TuiControlClient({ socketPath })
+        clients: createClients({ socketPath })
     });
 
     worker.emit("toolCall.completed", {
@@ -114,7 +115,7 @@ test("TuiControlSession reports missing control without auto-starting it", async
     const runtimeDir = await mkdtemp(join(tmpdir(), "portable-devshell-tui-not-running-"));
     const socketPath = join(runtimeDir, "control.sock");
     const session = new TuiControlSession({
-        client: new TuiControlClient({ socketPath })
+        clients: createClients({ socketPath })
     });
 
     try {
@@ -129,12 +130,12 @@ test("TuiControlSession reports missing control without auto-starting it", async
     }
 });
 
-test("TuiControlClient sends explicit instance operations through control RPC and preserves start relay output", async (t) => {
+test("module TUI clients send explicit instance operations and preserve start relay output", async (t) => {
     const runtimeDir = await mkdtemp(join(tmpdir(), "portable-devshell-tui-operations-"));
     const socketPath = join(runtimeDir, "control.sock");
     const worker = new FakeWorker("alpha");
     const server = createServer(socketPath, worker, () => 7);
-    const client = new TuiControlClient({ socketPath });
+    const clients = createClients({ socketPath });
 
     t.after(async () => {
         await server.stop().catch(() => undefined);
@@ -143,11 +144,11 @@ test("TuiControlClient sends explicit instance operations through control RPC an
 
     await server.start();
 
-    const refreshed = await client.refreshStatus("alpha");
+    const refreshed = await clients.runtime.refresh("alpha");
     assert.equal(refreshed.snapshot.name, "alpha");
 
     const relayOutput: string[] = [];
-    const started = await client.startInstance("alpha", {
+    const started = await clients.runtime.start("alpha", {
         relay: {
             onOutput: (chunk) => {
                 relayOutput.push(chunk);
@@ -157,21 +158,46 @@ test("TuiControlClient sends explicit instance operations through control RPC an
     });
     assert.equal(started.name, "alpha");
     assert.deepEqual(relayOutput, ["starting alpha\n"]);
-    assert.deepEqual(await client.stopInstance("alpha"), started);
+    assert.deepEqual(await clients.runtime.stop("alpha"), started);
 
-    const approval = await client.getApproval("alpha", "approval-1");
+    const approval = await clients.tool.getApproval("alpha", "approval-1");
     assert.equal(approval.status, "pending");
-    await client.decideApproval("alpha", "approval-1", "approve");
+    await clients.tool.decideApproval("alpha", "approval-1", "approve");
     assert.equal(worker.decisions[0]?.decision, "approve");
 
-    const result = await client.callTool("alpha", "bash_run", { command: "pwd" });
+    const result = await clients.tool.call("alpha", "bash_run", { command: "pwd" });
     assert.equal(result.exitCode, 0);
     assert.equal(worker.callToolCount, 1);
 });
 
-function createServer(socketPath: string, worker: FakeWorker, getConfigVersion: () => number): ControlRpcServer {
-    return new ControlRpcServer({
-        configEditorService: {
+function createServer(socketPath: string, worker: FakeWorker, getConfigVersion: () => number): {
+    start(): Promise<void>;
+    stop(): Promise<void>;
+} {
+    const instances = new InstanceRegistry([
+        {
+            allowTools: [],
+            enabled: true,
+            mcpEnabled: false,
+            mcpPath: "",
+            name: "alpha",
+            todo: {
+                async read() {
+                    return { items: [], revision: 0, summary: { completed: 0, total: 0 } };
+                },
+                summary() {
+                    return undefined;
+                }
+            },
+            worker: worker as unknown as WorkerInstance
+        }
+    ]);
+    const routes = new RouteComposition({
+        artifact: {
+            listShares() { return []; },
+            listTransfers() { return []; }
+        } as never,
+        config: {
             getConfigView() {
                 return {
                     instances: [
@@ -188,27 +214,18 @@ function createServer(socketPath: string, worker: FakeWorker, getConfigVersion: 
                 };
             }
         } as never,
-        getMcpStatus: () => ({ running: false, reason: "MCP runtime is disabled." }),
-        instanceRegistry: new InstanceRegistry([
-            {
-                allowTools: [],
-                enabled: true,
-                mcpEnabled: false,
-                mcpPath: "",
-                name: "alpha",
-                todo: {
-                    async read() {
-                        return { items: [], revision: 0, summary: { completed: 0, total: 0 } };
-                    },
-                    summary() {
-                        return undefined;
-                    }
-                },
-                worker: worker as unknown as WorkerInstance
-            }
-        ]),
-        socketPath
+        instances,
+        mcpStatus: () => ({ running: false, reason: "MCP runtime is disabled." }),
+        shutdown() {}
     });
+    const server = new ControlSocketServer({ routes, socketPath });
+    return {
+        start: async () => await server.start(),
+        async stop() {
+            await server.stop();
+            routes.dispose();
+        }
+    };
 }
 
 class FakeWorker {

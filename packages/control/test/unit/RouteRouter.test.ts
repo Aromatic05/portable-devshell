@@ -2,137 +2,88 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import type { WorkerInstance } from "@portable-devshell/core";
-import type { ArtifactService } from "../../dist/artifact/ArtifactService.js";
+import type { JsonValue, PrefixRouteContext } from "@portable-devshell/shared";
 
-import { InstanceRegistry } from "../../dist/instance/registry/InstanceRegistry.js";
-import { RouteMethodRegistry } from "../../dist/route/RouteMethodRegistry.js";
-import { RouteHandlerControl } from "../../dist/route/handler/RouteHandlerControl.js";
-import { RouteHandlerInstance } from "../../dist/route/handler/RouteHandlerInstance.js";
-import { RouteRouterControl } from "../../dist/route/router/RouteRouterControl.js";
-import { RouteRouterInstance } from "../../dist/route/router/RouteRouterInstance.js";
-import { StreamSubscriptionManager } from "../../dist/stream/StreamSubscriptionManager.js";
+import type { ArtifactService } from "../../dist/modules/artifact/ArtifactService.js";
+import { InstanceRegistry } from "../../dist/modules/instance/registry/InstanceRegistry.js";
+import { RouteComposition } from "../../dist/composition/RouteComposition.js";
 
-test("RouteMethodRegistry resolves control and instance methods", () => {
-    const registry = new RouteMethodRegistry();
+test("RouteComposition exposes the consolidated control modules", () => {
+    const snapshot = createSnapshot(new InstanceRegistry([]));
+    const control = snapshot.destinations.get("@control");
 
-    assert.equal(registry.resolve("control.identifyClient"), "control");
-    assert.equal(registry.resolve("control.ping"), "control");
-    assert.equal(registry.resolve("control.restart"), "control");
-    assert.equal(registry.resolve("control.listInstances"), "control");
-    assert.equal(registry.resolve("control.createInstance"), "control");
-    assert.equal(registry.resolve("control.artifact.createShare"), "control");
-    assert.equal(registry.resolve("control.artifact.revokeShare"), "control");
-    assert.equal(registry.resolve("control.artifact.startTransfer"), "control");
-    assert.equal(registry.resolve("control.artifact.getTransfer"), "control");
-    assert.equal(registry.resolve("control.artifact.cancelTransfer"), "control");
-    assert.equal(registry.resolve("instance.callTool"), "instance");
-    assert.equal(registry.resolve("instance.readToolCalls"), "instance");
-    assert.equal(registry.resolve("instance.listApprovals"), "instance");
-    assert.equal(registry.resolve("instance.getApproval"), "instance");
-    assert.equal(registry.resolve("instance.decideApproval"), "instance");
-    assert.equal(registry.resolve("control.getGlobalLogs"), undefined);
+    assert.deepEqual([...control!.keys()], [
+        "service",
+        "mcp",
+        "instance",
+        "config",
+        "reverse",
+        "artifact"
+    ]);
+    assert.deepEqual([...control!.get("service")!.keys()], ["ping", "status", "shutdown", "restart"]);
+    assert.deepEqual([...control!.get("instance")!.keys()], [
+        "list",
+        "createSchema",
+        "validateCreate",
+        "create",
+        "enable",
+        "disable",
+        "delete"
+    ]);
 });
 
-test("RouteRouterControl rejects instance targets with control.invalidTarget", async () => {
-    const instanceRegistry = new InstanceRegistry([]);
-    const controlRouter = new RouteRouterControl(
-        new RouteHandlerControl({
-            instanceRegistry
-        })
-    );
-
-    await assert.rejects(
-        controlRouter.route(
-            {
-                clientKind: "unknown",
-                id: "conn-control",
-                identifyClient() {}
-            } as never,
-            {
-                id: "req-1",
-                method: "control.ping",
-                target: { instance: "alpha", kind: "instance" },
-                type: "request"
-            }
-        ),
-        (error: unknown) => {
-            assert.equal((error as { code?: string }).code, "control.invalidTarget");
-            return true;
-        }
-    );
-});
-
-test("Route routers dispatch by target and return instance not found / invalid target errors", async () => {
-    const instanceRegistry = new InstanceRegistry([]);
-    const controlRouter = new RouteRouterControl(
-        new RouteHandlerControl({
-            instanceRegistry
-        })
-    );
-    const instanceRouter = new RouteRouterInstance(
-        new RouteHandlerInstance({
-            instanceRegistry,
-            streamSubscriptionManager: new StreamSubscriptionManager(5)
-        })
-    );
-
-    const controlResult = (await controlRouter.route(
+test("RouteComposition creates one consolidated destination tree per instance", () => {
+    const registry = new InstanceRegistry([
         {
-            clientKind: "unknown",
-            id: "conn-control",
-            identifyClient() {}
-        } as never,
-        {
-            id: "req-1",
-            method: "control.ping",
-            target: { kind: "control" },
-            type: "request"
+            enabled: true,
+            mcpEnabled: false,
+            mcpPath: "",
+            name: "alpha",
+            todo: {
+                async read() {
+                    return { items: [], revision: 0, summary: { completed: 0, total: 0 } };
+                },
+                summary() {
+                    return undefined;
+                }
+            },
+            worker: {
+                snapshot() {
+                    return {
+                        connectionState: "disconnected",
+                        daemonState: "stopped",
+                        lastSeq: 0,
+                        name: "alpha",
+                        ready: false,
+                        status: "stopped"
+                    };
+                }
+            } as unknown as WorkerInstance
         }
-    )) as { pong: boolean };
+    ]);
+    const snapshot = createSnapshot(registry);
+    const instance = snapshot.destinations.get("alpha" as never);
 
-    assert.equal(controlResult.pong, true);
-
-    await assert.rejects(
-        instanceRouter.route(
-            {
-                id: "conn-route",
-                async sendEvent() {}
-            } as never,
-            {
-                id: "req-2",
-                method: "instance.getSnapshot",
-                target: { kind: "control" },
-                type: "request"
-            }
-        ),
-        (error: unknown) => {
-            assert.equal((error as { code?: string }).code, "control.invalidTarget");
-            return true;
-        }
-    );
-
-    await assert.rejects(
-        instanceRouter.route(
-            {
-                id: "conn-route",
-                async sendEvent() {}
-            } as never,
-            {
-                id: "req-3",
-                method: "instance.getSnapshot",
-                target: { instance: "missing", kind: "instance" },
-                type: "request"
-            }
-        ),
-        (error: unknown) => {
-            assert.equal((error as { code?: string }).code, "control.instanceNotFound");
-            return true;
-        }
-    );
+    assert.deepEqual([...instance!.keys()], ["runtime", "todo", "tool"]);
+    assert.deepEqual([...instance!.get("runtime")!.keys()], [
+        "snapshot",
+        "refresh",
+        "start",
+        "stop",
+        "readLogs",
+        "subscribe"
+    ]);
+    assert.deepEqual([...instance!.get("tool")!.keys()], [
+        "call",
+        "listCalls",
+        "listApprovals",
+        "getApproval",
+        "decideApproval"
+    ]);
+    assert.deepEqual([...instance!.get("todo")!.keys()], ["get", "subscribe"]);
 });
 
-
-test("artifact control route accepts an explicit source instance", async () => {
+test("artifact.startTransfer accepts an explicit source instance", async () => {
     const calls: unknown[] = [];
     const artifactService = {
         async startTransfer(input: unknown, defaultInstance: string) {
@@ -151,31 +102,26 @@ test("artifact control route accepts an explicit source instance", async () => {
             };
         }
     } as unknown as ArtifactService;
-    const router = new RouteRouterControl(
-        new RouteHandlerControl({
-            artifactService,
-            instanceRegistry: new InstanceRegistry([])
-        })
-    );
+    const table = new RouteComposition({
+        artifact: artifactService,
+        instances: new InstanceRegistry([]),
+        shutdown() {}
+    });
+    const snapshot = table.snapshot();
+    const handler = snapshot.destinations.get("@control")!.get("artifact")!.get("startTransfer")!;
 
-    const result = await router.route(
-        {
-            clientKind: "cli",
-            id: "artifact-route",
-            identifyClient() {}
-        } as never,
+    const result = await handler(
         {
             id: "artifact-start",
-            method: "control.artifact.startTransfer",
-            params: {
+            name: "startTransfer",
+            payload: {
                 instance: "source-a",
                 sourcePath: "./result.bin",
                 targetInstance: "target-b",
                 targetPath: "/tmp/result.bin"
-            },
-            target: { kind: "control" },
-            type: "request"
-        }
+            }
+        },
+        createContext("@control", "artifact")
     );
 
     assert.equal((result as { transfer: { status: string } }).transfer.status, "queued");
@@ -192,4 +138,27 @@ test("artifact control route accepts an explicit source instance", async () => {
         }
     ]);
 });
-void (0 as unknown as WorkerInstance);
+
+function createSnapshot(instanceRegistry: InstanceRegistry) {
+    return new RouteComposition({
+        instances: instanceRegistry,
+        shutdown() {}
+    }).snapshot();
+}
+
+function createContext(destination: "@control" | string, module: string): PrefixRouteContext {
+    return {
+        afterReply() {},
+        connectionId: "connection-1",
+        destination: destination as never,
+        module,
+        async openStream() {
+            throw new Error("stream not expected");
+        },
+        peer: "cli",
+        requestId: "request-1",
+        signal: new AbortController().signal
+    };
+}
+
+void (0 as unknown as JsonValue);

@@ -1,23 +1,21 @@
-import type { CliControlStream } from "../../control/CliControlStream.js";
+import type { ClientEventStream } from "../../client/ClientEventStream.js";
 
 export interface CliCommandFollowStreamOptions {
     loadFromSeq(): Promise<number>;
     maxEvents?: number;
     onEvent(): Promise<void>;
-    subscribe(fromSeq: number): Promise<CliControlStream>;
+    subscribe(fromSeq: number): Promise<ClientEventStream>;
 }
 
 export async function followControlStream(options: CliCommandFollowStreamOptions): Promise<void> {
     let handled = 0;
-    let stream: CliControlStream | undefined;
-
+    let stream: ClientEventStream | undefined;
     try {
         while (true) {
             const fromSeq = await options.loadFromSeq();
             if (options.maxEvents !== undefined && handled >= options.maxEvents) {
                 return;
             }
-
             try {
                 stream = await options.subscribe(fromSeq);
             } catch (error) {
@@ -26,7 +24,6 @@ export async function followControlStream(options: CliCommandFollowStreamOptions
                 }
                 throw error;
             }
-
             while (options.maxEvents === undefined || handled < options.maxEvents) {
                 try {
                     await stream.nextEvent();
@@ -41,7 +38,6 @@ export async function followControlStream(options: CliCommandFollowStreamOptions
                 handled += 1;
                 await options.onEvent();
             }
-
             if (stream !== undefined) {
                 return;
             }

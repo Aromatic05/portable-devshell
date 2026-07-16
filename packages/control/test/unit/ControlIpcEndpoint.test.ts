@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { removeControlIpcEndpoint } from "@portable-devshell/control";
+import { removeControlIpcEndpoint } from "@portable-devshell/shared";
 
 test("Windows named pipes are not passed to filesystem unlink", async () => {
     let calls = 0;

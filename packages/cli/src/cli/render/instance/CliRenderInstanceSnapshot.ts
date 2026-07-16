@@ -1,6 +1,6 @@
-import type { CliInstanceSnapshotEnvelope } from "../../control/CliControlStream.js";
+import type { InstanceSnapshot } from "@portable-devshell/shared";
 
-export function renderInstanceSnapshot(snapshot: CliInstanceSnapshotEnvelope["snapshot"]): string {
+export function renderInstanceSnapshot(snapshot: InstanceSnapshot): string {
     const lines = [
         `instance: ${snapshot.name}`,
         `status: ${snapshot.status}`,

@@ -1,4 +1,4 @@
-import type { ApprovalRequest, ArtifactShareResult, ArtifactTransferRecord, ControlError, ControlEventEnvelope, InstanceSnapshot, JsonValue, OAuthApprovalRequest, TodoReadResult, ToolCallRecord } from "@portable-devshell/shared";
+import type { ApprovalRequest, ArtifactShareResult, ArtifactTransferRecord, ControlError, Event, InstanceSnapshot, JsonValue, OAuthApprovalRequest, TodoReadResult, ToolCallRecord } from "@portable-devshell/shared";
 
 import type { TuiEditorState, TuiInteractionState, TuiUiIntent } from "../../interaction/TuiInteractionTypes.js";
 import type { AuditPageState, FocusScope, PageId, SidebarCursor, SidebarFocus, TuiUiState } from "../../model/TuiUiTypes.js";
@@ -144,11 +144,11 @@ export type TuiAppAction =
     | { type: "restore.pop" }
     | { focusScope: FocusScope; mainFocusId?: string; sidebarFocus: SidebarFocus; type: "restore.push" };
 
-export function toRawEventRecord(envelope: ControlEventEnvelope): TuiRawEventRecord {
+export function toRawEventRecord(event: Event): TuiRawEventRecord {
     return {
-        event: envelope.event,
-        instance: envelope.target.instance,
-        payload: envelope.payload,
-        seq: envelope.seq
+        event: event.name,
+        instance: event.destination,
+        payload: event.payload,
+        seq: event.seq ?? 0
     };
 }

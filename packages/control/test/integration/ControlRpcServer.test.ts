@@ -1,812 +1,316 @@
 import assert from "node:assert/strict";
-import { createConnection } from "node:net";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import test from "node:test";
 
-import { FrameReader, FrameWriter, type JsonValue } from "@portable-devshell/shared";
-import type { WorkerInstance } from "@portable-devshell/core";
+import type { WorkerCommandInteractiveSession, WorkerInstance } from "@portable-devshell/core";
+import {
+    Channel,
+    Codec,
+    PrefixRoute,
+    asInstanceName,
+    type Destination,
+    type Event,
+    type Frame,
+    type JsonValue,
+    type Peer
+} from "@portable-devshell/shared";
 
-import { ControlRpcServer } from "../../dist/control/rpc/ControlRpcServer.js";
-import { InstanceRegistry } from "../../dist/instance/registry/InstanceRegistry.js";
+import { RouteComposition } from "../../dist/composition/RouteComposition.js";
+import { ControlSocketServer } from "../../dist/control/socket/ControlSocketServer.js";
+import { InstanceRegistry } from "../../dist/modules/instance/registry/InstanceRegistry.js";
 
-async function verifyRpcMethodsOverReusedConnection(): Promise<void> {
-    const runtimeDir = await mkdtemp(join(tmpdir(), "portable-devshell-control-"));
-    const socketPath = join(runtimeDir, "control.sock");
-    const worker = new FakeWorker("alpha");
-    const server = new ControlRpcServer({
-        instanceRegistry: new InstanceRegistry([
-            {
-                tools: { capabilities: ["read", "write", "execute"], groups: ["file", "bash", "artifact"] },
-                enabled: true,
-                mcpEnabled: false,
-                mcpPath: "",
-                name: "alpha",
-                todo: createFakeTodo(),
-                worker: worker as unknown as WorkerInstance
-            }
-        ]),
-        socketPath
+interface Harness {
+    cleanup(): Promise<void>;
+    registry: InstanceRegistry;
+    routes: RouteComposition;
+    server: ControlSocketServer;
+    socketPath: string;
+    worker: FakeWorker;
+}
+
+test("ControlSocketServer routes canonical control and instance operations over dedicated connections", async (t) => {
+    const harness = await createHarness();
+    t.after(() => harness.cleanup());
+
+    assert.deepEqual((await request(harness.socketPath, "@control", "service.ping")).event.payload, { pong: true });
+    assert.deepEqual((await request(harness.socketPath, "@control", "service.status")).event.payload, {
+        instanceCount: 1,
+        ok: true
     });
 
+    const listed = (await request(harness.socketPath, "@control", "instance.list")).event.payload as Array<{
+        name: string;
+    }>;
+    assert.equal(listed[0]?.name, "alpha");
+
+    const snapshot = await request(harness.socketPath, asInstanceName("alpha"), "runtime.snapshot");
+    assert.equal((snapshot.event.payload as { lastSeq: number }).lastSeq, 0);
+
+    await request(harness.socketPath, asInstanceName("alpha"), "runtime.readLogs", { limit: 1_000 });
+    assert.deepEqual(harness.worker.lastReadLogsQuery, { fromSeq: undefined, limit: 100 });
+
+    const toolReply = await request(
+        harness.socketPath,
+        asInstanceName("alpha"),
+        "tool.call",
+        { input: { command: "pwd" }, toolName: "bash_run" },
+        "tui"
+    );
+    assert.equal((toolReply.event.payload as { exitCode: number }).exitCode, 0);
+    assert.equal(harness.worker.lastToolCall?.source, "tui");
+    assert.equal(typeof harness.worker.lastToolCall?.requestId, "string");
+    assert.equal(typeof harness.worker.lastToolCall?.ctxId, "string");
+
+    const missingDestination = await request(
+        harness.socketPath,
+        asInstanceName("missing"),
+        "runtime.snapshot"
+    );
+    assert.equal(missingDestination.event.error?.code, "control.invalidTarget");
+
+    const missingOperation = await request(
+        harness.socketPath,
+        asInstanceName("alpha"),
+        "runtime.missing" as Event["name"]
+    );
+    assert.equal(missingOperation.event.error?.code, "control.methodNotFound");
+});
+
+test("ControlSocketServer rebuilds the immutable route snapshot after registry changes", async (t) => {
+    const directory = await mkdtemp(join(tmpdir(), "portable-devshell-route-snapshot-"));
+    const socketPath = join(directory, "control.sock");
+    const registry = new InstanceRegistry([]);
+    const routes = new RouteComposition({ instances: registry, shutdown() {} });
+    const server = new ControlSocketServer({ routes, socketPath });
     await server.start();
-    const client = await RpcClient.connect(socketPath);
+    t.after(async () => {
+        await server.stop().catch(() => undefined);
+        routes.dispose();
+        await rm(directory, { force: true, recursive: true });
+    });
 
-    try {
-        const identified = await client.identifyClient("cli");
-        assert.equal(identified.result.clientKind, "cli");
+    const before = await request(socketPath, asInstanceName("alpha"), "runtime.snapshot");
+    assert.equal(before.event.error?.code, "control.invalidTarget");
 
-        const ping = await client.request("control.ping", { kind: "control" });
-        assert.equal(ping.result.pong, true);
+    registry.add(createDescriptor(new FakeWorker("alpha")));
 
-        const status = await client.request("control.status", { kind: "control" });
-        assert.equal(status.result.instanceCount, 1);
+    const after = await request(socketPath, asInstanceName("alpha"), "runtime.snapshot");
+    assert.equal(after.event.error, undefined);
+    assert.equal((after.event.payload as { snapshot: { name: string } }).snapshot.name, "alpha");
+});
 
-        const listed = await client.request("control.listInstances", { kind: "control" });
-        assert.equal(listed.result[0].name, "alpha");
+test("interactive runtime receives stream input while the root handler is still running", async (t) => {
+    const harness = await createHarness();
+    t.after(() => harness.cleanup());
+    const route = await connectRoute(harness.socketPath, "cli");
+    t.after(() => route.close());
 
-        const snapshot = await client.request("instance.getSnapshot", { instance: "alpha", kind: "instance" });
-        assert.equal(snapshot.result.lastSeq, 0);
+    const acknowledgement = await route.openStream({
+        destination: asInstanceName("alpha"),
+        name: "runtime.start",
+        payload: { workspacePath: "/tmp/ws" }
+    }, "start-1");
+    assert.equal(acknowledgement.replyTo, "start-1");
+    assert.equal(acknowledgement.streamId, "start-1");
 
-        const started = await client.request("instance.start", { instance: "alpha", kind: "instance" }, { workspacePath: "/tmp/ws" });
-        assert.equal(started.result.ready, true);
+    await route.sendStream({
+        destination: asInstanceName("alpha"),
+        name: "runtime.input",
+        payload: { data: Buffer.from("hello").toString("base64") }
+    });
 
-        const refreshed = await client.request("instance.refreshStatus", { instance: "alpha", kind: "instance" });
-        assert.equal(refreshed.result.snapshot.status, "ready");
-        assert.equal(worker.refreshCount, 1);
+    const output = await route.nextStreamFrame();
+    assert.equal(output.event.name, "runtime.output");
+    assert.deepEqual(output.event.payload, { chunk: "echo:hello" });
 
-        const logs = await client.request("instance.readLogs", { instance: "alpha", kind: "instance" }, { fromSeq: 1 });
-        assert.equal(logs.result.length, 1);
-        assert.deepEqual(worker.lastReadLogsQuery, { fromSeq: 1, limit: 100 });
+    const completed = await route.nextStreamFrame();
+    assert.equal(completed.event.name, "stream.completed");
+    assert.equal((completed.event.payload as { ready: boolean }).ready, true);
+});
 
-        await client.request("instance.readLogs", { instance: "alpha", kind: "instance" }, { limit: 1_000 });
-        assert.deepEqual(worker.lastReadLogsQuery, { fromSeq: undefined, limit: 100 });
-
-        worker.setLogMessage("x".repeat(17 * 1024 * 1024));
-        const oversizedLogs = await client.request("instance.readLogs", { instance: "alpha", kind: "instance" });
-        assert.equal(oversizedLogs.result.length, 1);
-        assert.match(oversizedLogs.result[0].message, /^\n\[log output truncated\]\n/u);
-        assert.equal(Buffer.byteLength(oversizedLogs.result[0].message, "utf8") < 1024 * 1024, true);
-
-        const toolCalls = await client.request("instance.readToolCalls", { instance: "alpha", kind: "instance" }, { limit: 1 });
-        assert.deepEqual(toolCalls.result, [
-            {
-                callId: "call-1",
-                completedAt: "2026-07-08T00:00:01.000Z",
-                exitCode: 0,
-                inputSummary: "{\"command\":\"pwd\"}",
-                instance: "alpha",
-                source: "cli",
-                startedAt: "2026-07-08T00:00:00.000Z",
-                status: "completed",
-                stderrBytes: 0,
-                stdoutBytes: 8,
-                termination: "exited",
-                toolName: "bash_run"
-            }
-        ]);
-        assert.deepEqual(worker.lastReadToolCallsQuery, { limit: 1 });
-
-        const approvals = await client.request("instance.listApprovals", { instance: "alpha", kind: "instance" });
-        assert.equal(approvals.result.length, 1);
-        assert.equal(approvals.result[0].approvalId, "approval-1");
-
-        const approval = await client.request(
-            "instance.getApproval",
-            { instance: "alpha", kind: "instance" },
-            { approvalId: "approval-1" }
-        );
-        assert.equal(approval.result.status, "pending");
-
-        const decided = await client.request(
-            "instance.decideApproval",
-            { instance: "alpha", kind: "instance" },
-            { approvalId: "approval-1", decision: "approve", reason: "approved in rpc test", remember: true }
-        );
-        assert.equal(decided.result.status, "approved");
-        assert.equal(worker.lastApprovalDecision?.approvalId, "approval-1");
-        assert.equal(worker.lastApprovalDecision?.decision, "approve");
-        assert.equal(worker.lastApprovalDecision?.decidedBy, "cli");
-
-        const toolCall = await client.request(
-            "instance.callTool",
-            { instance: "alpha", kind: "instance" },
-            { input: { command: "pwd" }, toolName: "bash_run" }
-        );
-        assert.equal(toolCall.result.exitCode, 0);
-        assert.equal(worker.lastToolCall?.source, "cli");
-        assert.match(String(worker.lastToolCall?.requestId ?? ""), /^req-\d+$/u);
-        assert.equal(typeof worker.lastToolCall?.ctxId, "string");
-
-        const tuiClient = await RpcClient.connect(socketPath);
-        const unknownClient = await RpcClient.connect(socketPath);
-
-        try {
-            const tuiIdentified = await tuiClient.identifyClient("tui");
-            assert.equal(tuiIdentified.result.clientKind, "tui");
-
-            const tuiToolCall = await tuiClient.request(
-                "instance.callTool",
-                { instance: "alpha", kind: "instance" },
-                { input: { command: "pwd" }, toolName: "bash_run" }
-            );
-            assert.equal(tuiToolCall.result.exitCode, 0);
-            assert.equal(worker.lastToolCall?.source, "tui");
-
-            const unknownToolCall = await unknownClient.request(
-                "instance.callTool",
-                { instance: "alpha", kind: "instance" },
-                { input: { command: "pwd" }, toolName: "bash_run" }
-            );
-            assert.equal(unknownToolCall.ok, false);
-            assert.equal(unknownToolCall.error.code, "control.clientIdentityRequired");
-        } finally {
-            tuiClient.close();
-            unknownClient.close();
+test("service.shutdown replies before invoking the shutdown action", async (t) => {
+    const directory = await mkdtemp(join(tmpdir(), "portable-devshell-shutdown-reply-"));
+    const socketPath = join(directory, "control.sock");
+    let shutdownRequested = false;
+    const routes = new RouteComposition({
+        instances: new InstanceRegistry([]),
+        shutdown() {
+            shutdownRequested = true;
         }
-
-        const subscribed = await client.request(
-            "instance.subscribe",
-            { instance: "alpha", kind: "instance" },
-            { fromSeq: 1 }
-        );
-        assert.equal(subscribed.result.lastSeq, 3);
-        assert.equal(subscribed.result.events.length, 3);
-
-        worker.emit("toolCall.completed", { toolName: "bash_run" });
-        const streamed = await client.nextEvent();
-        assert.equal(streamed.seq, 4);
-        assert.equal(streamed.target.instance, "alpha");
-
-        worker.emit("toolCall.completed", { toolName: "bash_run" });
-        worker.dropBefore(6);
-        const runtimeGap = await client.nextEvent();
-        assert.equal(runtimeGap.event, "stream.gap");
-        assert.deepEqual(runtimeGap.payload, {
-            instance: "alpha",
-            latestSeq: 5,
-            oldestAvailableSeq: 6,
-            requestedFromSeq: 5
-        });
-
-        const cancelled = await client.nextEvent();
-        assert.equal(cancelled.event, "stream.cancelled");
-        assert.deepEqual(cancelled.payload, {
-            instance: "alpha",
-            reason: "gap"
-        });
-
-        const resubscribed = await client.request(
-            "instance.subscribe",
-            { instance: "alpha", kind: "instance" },
-            { fromSeq: 6 }
-        );
-        assert.equal(resubscribed.ok, true);
-        assert.equal(resubscribed.result.lastSeq, 5);
-        assert.equal(resubscribed.result.events.length, 0);
-
-        const stopped = await client.request("instance.stop", { instance: "alpha", kind: "instance" });
-        assert.equal(stopped.result.ready, false);
-
-        const invalidTarget = await client.request("control.ping", { kind: "invalid" });
-        assert.equal(invalidTarget.ok, false);
-        assert.equal(invalidTarget.error.code, "control.invalidTarget");
-
-        const unknownMethod = await client.request("control.missing", { kind: "control" });
-        assert.equal(unknownMethod.ok, false);
-
-        const missingInstance = await client.request("instance.getSnapshot", { instance: "missing", kind: "instance" });
-        assert.equal(missingInstance.ok, false);
-        assert.equal(missingInstance.error.code, "control.instanceNotFound");
-
-        worker.dropBefore(3);
-        const gap = await client.request("instance.subscribe", { instance: "alpha", kind: "instance" }, { fromSeq: 1 });
-        assert.equal(gap.ok, false);
-        assert.equal(gap.error.code, "stream.gap");
-
-        const shutdown = await client.request("control.shutdown", { kind: "control" });
-        assert.equal(shutdown.result.accepted, true);
-    } finally {
-        client.close();
-        await server.stop().catch(() => undefined);
-        await rm(runtimeDir, { force: true, recursive: true });
-    }
-}
-
-
-async function verifyTodoRpc(): Promise<void> {
-    const runtimeDir = await mkdtemp(join(tmpdir(), "portable-devshell-control-todo-"));
-    const socketPath = join(runtimeDir, "control.sock");
-    const worker = new FakeWorker("alpha");
-    const todo = createFakeTodo({
-        items: [
-            { content: "Inspect", id: "inspect", status: "completed" },
-            { content: "Implement", id: "implement", status: "in_progress" }
-        ],
-        revision: 2,
-        summary: { completed: 1, currentItemId: "implement", total: 2 },
-        taskId: "task-1",
-        title: "Todo RPC"
     });
-    const server = new ControlRpcServer({
-        instanceRegistry: new InstanceRegistry([
-            {
-                enabled: true,
-                mcpCapabilities: ["read", "write", "execute"],
-                mcpEnabled: false,
-                mcpGroups: ["file", "bash", "artifact", "todo"],
-                mcpPath: "",
-                name: "alpha",
-                todo,
-                worker: worker as unknown as WorkerInstance
-            }
-        ]),
-        socketPath
-    });
-
+    const server = new ControlSocketServer({ routes, socketPath });
     await server.start();
-    const client = await RpcClient.connect(socketPath);
-
-    try {
-        await client.identifyClient("cli");
-        const snapshot = await client.request("instance.getSnapshot", { instance: "alpha", kind: "instance" });
-        assert.equal(snapshot.result.snapshot.activeTodo.taskId, "task-1");
-        assert.equal(snapshot.result.snapshot.activeTodo.currentItem, "Implement");
-
-        const read = await client.request("instance.todo.get", { instance: "alpha", kind: "instance" });
-        assert.equal(read.result.lastSeq, 0);
-        assert.equal(read.result.todo.revision, 2);
-        assert.equal(read.result.todo.summary.currentItemId, "implement");
-
-        const subscribed = await client.request(
-            "instance.todo.subscribe",
-            { instance: "alpha", kind: "instance" },
-            { fromSeq: 1 }
-        );
-        assert.equal(subscribed.result.lastSeq, 0);
-        assert.deepEqual(subscribed.result.events, []);
-
-        worker.emit("toolCall.completed", { toolName: "bash_run" });
-        worker.emit("todo.updated", { revision: 3, taskId: "task-1" });
-        const streamed = await client.nextEvent();
-        assert.equal(streamed.event, "todo.updated");
-        assert.equal(streamed.seq, 2);
-    } finally {
-        client.close();
+    t.after(async () => {
         await server.stop().catch(() => undefined);
-        await rm(runtimeDir, { force: true, recursive: true });
-    }
-}
+        routes.dispose();
+        await rm(directory, { force: true, recursive: true });
+    });
 
-function createFakeTodo(todo = {
-    items: [],
-    revision: 0,
-    summary: { completed: 0, total: 0 }
-}) {
+    const reply = await request(socketPath, "@control", "service.shutdown");
+    assert.deepEqual(reply.event.payload, { accepted: true });
+    await waitFor(() => shutdownRequested);
+});
+
+async function createHarness(): Promise<Harness> {
+    const directory = await mkdtemp(join(tmpdir(), "portable-devshell-control-socket-"));
+    const socketPath = join(directory, "control.sock");
+    const worker = new FakeWorker("alpha");
+    const registry = new InstanceRegistry([createDescriptor(worker)]);
+    const routes = new RouteComposition({ instances: registry, shutdown() {} });
+    const server = new ControlSocketServer({ routes, socketPath });
+    await server.start();
     return {
-        async read() {
-            return todo;
+        async cleanup() {
+            await server.stop().catch(() => undefined);
+            routes.dispose();
+            await rm(directory, { force: true, recursive: true });
         },
-        summary() {
-            if (!("taskId" in todo) || typeof todo.taskId !== "string") {
-                return undefined;
-            }
-            const currentItemId = todo.summary.currentItemId;
-            const currentItem = currentItemId === undefined
-                ? undefined
-                : todo.items.find((item) => item.id === currentItemId)?.content;
-            return {
-                completed: todo.summary.completed,
-                currentItem,
-                revision: todo.revision,
-                status: currentItem === undefined ? "pending" : "in_progress",
-                taskId: todo.taskId,
-                title: "title" in todo ? todo.title : undefined,
-                total: todo.summary.total
-            };
-        }
+        registry,
+        routes,
+        server,
+        socketPath,
+        worker
     };
 }
 
-async function verifyShutdownToleratesClientDisconnect(): Promise<void> {
-    const runtimeDir = await mkdtemp(join(tmpdir(), "portable-devshell-control-"));
-    const socketPath = join(runtimeDir, "control.sock");
-    let shutdownRequested = false;
-    const server = new ControlRpcServer({
-        instanceRegistry: new InstanceRegistry([]),
-        shutdown() {
-            shutdownRequested = true;
+function createDescriptor(worker: FakeWorker) {
+    return {
+        enabled: true,
+        mcpEnabled: false,
+        mcpPath: "",
+        name: "alpha",
+        todo: {
+            async read() {
+                return { items: [], revision: 0, summary: { completed: 0, total: 0 } };
+            },
+            summary() {
+                return undefined;
+            }
         },
-        socketPath
+        worker: worker as unknown as WorkerInstance
+    };
+}
+
+async function connectRoute(socketPath: string, peer: Exclude<Peer, "server">): Promise<PrefixRoute> {
+    const channel = await Channel.connect(socketPath);
+    return new PrefixRoute(new Codec(channel, { local: peer, remote: "server" }), {
+        requestIdPrefix: peer
     });
+}
 
-    await server.start();
-
+async function request(
+    socketPath: string,
+    destination: Destination,
+    name: Event["name"],
+    payload?: JsonValue,
+    peer: Exclude<Peer, "server"> = "cli"
+): Promise<Frame> {
+    const route = await connectRoute(socketPath, peer);
     try {
-        const socket = createConnection(socketPath);
-        const writer = new FrameWriter(socket);
-
-        await new Promise<void>((resolve, reject) => {
-            socket.once("connect", resolve);
-            socket.once("error", reject);
+        return await route.request({
+            destination,
+            name,
+            ...(payload === undefined ? {} : { payload })
         });
-
-        await writer.write({
-            id: "req-shutdown",
-            method: "control.shutdown",
-            target: { kind: "control" },
-            type: "request"
-        } as unknown as JsonValue);
-        socket.destroy();
-
-        await waitFor(() => shutdownRequested);
-        assert.equal(shutdownRequested, true);
     } finally {
-        await server.stop().catch(() => undefined);
-        await rm(runtimeDir, { force: true, recursive: true });
+        route.close();
     }
-}
-
-async function verifyInteractiveStartRelay(): Promise<void> {
-    const runtimeDir = await mkdtemp(join(tmpdir(), "portable-devshell-control-"));
-    const socketPath = join(runtimeDir, "control.sock");
-    const worker = new FakeWorker("alpha");
-    worker.enableInteractiveStart();
-    const server = new ControlRpcServer({
-        instanceRegistry: new InstanceRegistry([
-            {
-                tools: { capabilities: ["read", "write", "execute"], groups: ["file", "bash", "artifact"] },
-                enabled: true,
-                mcpEnabled: false,
-                mcpPath: "",
-                name: "alpha",
-                todo: createFakeTodo(),
-                worker: worker as unknown as WorkerInstance
-            }
-        ]),
-        socketPath
-    });
-
-    await server.start();
-    const client = await RpcClient.connect(socketPath);
-
-    try {
-        const startedPromise = client.request("instance.start", { instance: "alpha", kind: "instance" }, { workspacePath: "/tmp/ws" });
-        const prompt = await client.nextRelayOutput();
-        assert.equal(prompt.id, "req-1");
-        assert.equal(prompt.data, "Password: ");
-
-        await client.sendRelayInput(prompt.id, Buffer.from("secret\n"));
-
-        const started = await startedPromise;
-        assert.equal(started.result.ready, true);
-        assert.equal(worker.lastInteractiveInput, "secret\n");
-    } finally {
-        client.close();
-        await server.stop().catch(() => undefined);
-        await rm(runtimeDir, { force: true, recursive: true });
-    }
-}
-
-class RpcClient {
-    readonly #reader = new FrameReader();
-    readonly #pending = new Map<string, { reject: (error: unknown) => void; resolve: (value: Record<string, JsonValue>) => void }>();
-    readonly #events: Array<Record<string, JsonValue>> = [];
-    readonly #eventWaiters: Array<{ reject: (error: unknown) => void; resolve: (event: Record<string, JsonValue>) => void }> = [];
-    readonly #relayOutputs: Array<Record<string, JsonValue>> = [];
-    readonly #relayWaiters: Array<{ reject: (error: unknown) => void; resolve: (event: Record<string, JsonValue>) => void }> = [];
-    readonly #socket;
-    readonly #writer: FrameWriter;
-    #counter = 0;
-
-    private constructor(socketPath: string) {
-        this.#socket = createConnection(socketPath);
-        this.#writer = new FrameWriter(this.#socket);
-        this.#socket.on("data", (chunk: Uint8Array) => {
-            for (const frame of this.#reader.push(chunk)) {
-                this.#accept(frame as Record<string, JsonValue>);
-            }
-        });
-        this.#socket.once("close", () => {
-            this.#failPending(new Error("control connection closed"));
-        });
-        this.#socket.once("error", (error) => {
-            this.#failPending(error);
-        });
-    }
-
-    static async connect(socketPath: string): Promise<RpcClient> {
-        const client = new RpcClient(socketPath);
-        await new Promise<void>((resolve, reject) => {
-            client.#socket.once("connect", resolve);
-            client.#socket.once("error", reject);
-        });
-        return client;
-    }
-
-    async identifyClient(clientKind: "cli" | "tui"): Promise<Record<string, JsonValue>> {
-        return await this.request("control.identifyClient", { kind: "control" }, { clientKind });
-    }
-
-    async request(method: string, target: Record<string, unknown>, params?: JsonValue): Promise<Record<string, JsonValue>> {
-        const id = `req-${++this.#counter}`;
-        const response = new Promise<Record<string, JsonValue>>((resolve, reject) => {
-            this.#pending.set(id, { reject, resolve });
-        });
-
-        await this.#writer.write({
-            id,
-            method,
-            params,
-            target,
-            type: "request"
-        } as unknown as JsonValue);
-
-        return await response;
-    }
-
-    async nextEvent(): Promise<Record<string, JsonValue>> {
-        const existing = this.#events.shift();
-
-        if (existing !== undefined) {
-            return existing;
-        }
-
-        return await new Promise<Record<string, JsonValue>>((resolve, reject) => {
-            this.#eventWaiters.push({ reject, resolve });
-        });
-    }
-
-    async nextRelayOutput(): Promise<Record<string, JsonValue>> {
-        const existing = this.#relayOutputs.shift();
-
-        if (existing !== undefined) {
-            return existing;
-        }
-
-        return await new Promise<Record<string, JsonValue>>((resolve, reject) => {
-            this.#relayWaiters.push({ reject, resolve });
-        });
-    }
-
-    async sendRelayInput(id: string, input: Buffer): Promise<void> {
-        await this.#writer.write({
-            data: input.toString("base64"),
-            id,
-            type: "relay.input"
-        } as unknown as JsonValue);
-    }
-
-    close(): void {
-        this.#socket.destroy();
-    }
-
-    #accept(frame: Record<string, JsonValue>): void {
-        if (frame.type === "response" && typeof frame.id === "string") {
-            const pending = this.#pending.get(frame.id);
-
-            if (pending !== undefined) {
-                this.#pending.delete(frame.id);
-                pending.resolve(frame);
-            }
-
-            return;
-        }
-
-        if (frame.type === "event") {
-            const waiter = this.#eventWaiters.shift();
-
-            if (waiter !== undefined) {
-                waiter.resolve(frame);
-                return;
-            }
-
-            this.#events.push(frame);
-            return;
-        }
-
-        if (frame.type === "relay.output") {
-            const waiter = this.#relayWaiters.shift();
-
-            if (waiter !== undefined) {
-                waiter.resolve(frame);
-                return;
-            }
-
-            this.#relayOutputs.push(frame);
-        }
-    }
-
-    #failPending(error: unknown): void {
-        for (const pending of this.#pending.values()) {
-            pending.reject(error);
-        }
-
-        this.#pending.clear();
-
-        for (const waiter of this.#eventWaiters.splice(0)) {
-            waiter.reject(error);
-        }
-
-        for (const waiter of this.#relayWaiters.splice(0)) {
-            waiter.reject(error);
-        }
-    }
-}
-
-async function waitFor(factory: () => boolean, timeoutMs = 1_000): Promise<void> {
-    const deadline = Date.now() + timeoutMs;
-
-    while (Date.now() < deadline) {
-        if (factory()) {
-            return;
-        }
-
-        await new Promise((resolve) => setTimeout(resolve, 10));
-    }
-
-    throw new Error("Timed out waiting for condition.");
 }
 
 class FakeWorker {
     readonly #name: string;
-    #approvals = [
-        {
-            approvalId: "approval-1",
-            callId: "call-approval-1",
-            createdAt: "2026-07-08T00:00:02.000Z",
-            expiresAt: "2026-07-08T00:05:02.000Z",
-            inputSummary: "{\"command\":\"pwd\"}",
-            instance: "alpha",
-            reason: "Approval required before running bash_run.",
-            riskLevel: "medium",
-            source: "cli",
-            status: "pending",
-            toolName: "bash_run"
-        }
-    ];
-    #interactiveStartEnabled = false;
-    #lastApprovalDecision?: { approvalId: string; decidedBy: string; decision: string; reason?: string; remember?: boolean };
-    #refreshCount = 0;
-    #lastReadLogsQuery?: { fromSeq?: number; limit?: number };
-    #lastReadToolCallsQuery?: Record<string, unknown>;
-    #lastInteractiveInput?: string;
-    #lastToolCall?: { requestId?: string; ctxId?: string; source: string };
-    #events: Array<{ at: string; data?: unknown; instanceName: string; seq: number; type: string }> = [];
+    readonly #events: Array<{ at: string; data?: JsonValue; instanceName: string; seq: number; type: string }> = [];
     #lastSeq = 0;
-    #logs = [
-        {
-            at: new Date().toISOString(),
-            instanceName: "alpha",
-            message: "booted\n",
-            seq: 1,
-            stream: "stdout"
-        }
-    ];
-    #snapshot = {
-        connectionState: "disconnected",
-        daemonState: "stopped",
-        lastSeq: 0,
-        name: "alpha",
-        ready: false,
-        status: "stopped"
-    };
+    #ready = false;
+    lastReadLogsQuery?: { fromSeq?: number; limit?: number };
+    lastToolCall?: { ctxId?: string; requestId?: string; source?: string };
 
     constructor(name: string) {
         this.#name = name;
-        this.#snapshot = {
-            ...this.#snapshot,
-            name
-        };
     }
 
     snapshot() {
-        return this.#snapshot;
-    }
-
-    get refreshCount() {
-        return this.#refreshCount;
-    }
-
-    get lastToolCall() {
-        return this.#lastToolCall;
-    }
-
-    get lastApprovalDecision() {
-        return this.#lastApprovalDecision;
-    }
-
-    get lastReadToolCallsQuery() {
-        return this.#lastReadToolCallsQuery;
-    }
-
-    get lastReadLogsQuery() {
-        return this.#lastReadLogsQuery;
-    }
-
-    get lastInteractiveInput() {
-        return this.#lastInteractiveInput;
-    }
-
-    setLogMessage(message: string): void {
-        this.#logs = [{
-            at: new Date().toISOString(),
-            instanceName: this.#name,
-            message,
-            seq: 1,
-            stream: "stdout"
-        }];
-    }
-
-    enableInteractiveStart(): void {
-        this.#interactiveStartEnabled = true;
-    }
-
-    async start(_workspacePath?: string) {
-        this.emit("instance.started", { workspacePath: "/tmp/ws" });
-        this.#snapshot = {
-            connectionState: "connected",
-            daemonState: "running",
+        return {
+            connectionState: this.#ready ? "connected" : "disconnected",
+            daemonState: this.#ready ? "running" : "stopped",
             lastSeq: this.#lastSeq,
-            name: this.#name,
-            ready: true,
-            status: "ready"
+            name: asInstanceName(this.#name),
+            ready: this.#ready,
+            status: this.#ready ? "ready" : "stopped"
         };
-        return this.snapshot();
-    }
-
-    async startInteractive(
-        workspacePath?: string,
-        interactiveSession?: {
-            readInput(): Promise<Buffer | undefined>;
-            writeOutput(chunk: string): Promise<void>;
-        }
-    ) {
-        if (interactiveSession === undefined || this.#interactiveStartEnabled !== true) {
-            return await this.start(workspacePath);
-        }
-
-        await interactiveSession.writeOutput("Password: ");
-        this.#lastInteractiveInput = (await interactiveSession.readInput())?.toString("utf8");
-        return await this.start(workspacePath);
-    }
-
-    async stop() {
-        this.#snapshot = {
-            connectionState: "disconnected",
-            daemonState: "stopped",
-            lastSeq: this.#lastSeq,
-            name: this.#name,
-            ready: false,
-            status: "stopped"
-        };
-        return this.snapshot();
     }
 
     async refreshStatus() {
-        this.#refreshCount += 1;
+        return this.snapshot();
+    }
+
+    async startInteractive(_workspacePath: string | undefined, session: WorkerCommandInteractiveSession) {
+        const input = await session.readInput();
+        await session.writeOutput(`echo:${input?.toString("utf8") ?? ""}`);
+        this.#ready = true;
+        return this.snapshot();
+    }
+
+    async stop() {
+        this.#ready = false;
         return this.snapshot();
     }
 
     async readLogs(query: { fromSeq?: number; limit?: number }) {
-        this.#lastReadLogsQuery = query;
-        return this.#logs.filter((entry) => entry.seq >= (query.fromSeq ?? 1));
-    }
-
-    async readToolCalls(query: Record<string, unknown> = {}) {
-        this.#lastReadToolCallsQuery = query;
+        this.lastReadLogsQuery = query;
         return [
             {
-                callId: "call-1",
-                completedAt: "2026-07-08T00:00:01.000Z",
-                exitCode: 0,
-                inputSummary: "{\"command\":\"pwd\"}",
-                instance: this.#name,
-                source: "cli",
-                startedAt: "2026-07-08T00:00:00.000Z",
-                status: "completed",
-                stderrBytes: 0,
-                stdoutBytes: 8,
-                termination: "exited",
-                toolName: "bash_run"
+                at: new Date(0).toISOString(),
+                instanceName: asInstanceName(this.#name),
+                message: "ready\n",
+                seq: 1,
+                stream: "stdout" as const
             }
         ];
     }
 
-    async listApprovals() {
-        return this.#approvals;
+    async callTool(_toolName: string, _input: JsonValue, options: { ctxId?: string; requestId?: string; source?: string }) {
+        this.lastToolCall = options;
+        return { exitCode: 0 };
     }
 
-    async getApproval(approvalId: string) {
-        return this.#approvals.find((approval) => approval.approvalId === approvalId);
+    readToolCalls() {
+        return [];
     }
 
-    async decideApproval(
-        approvalId: string,
-        input: { decidedBy: string; decision: string; reason?: string; remember?: boolean }
-    ) {
-        this.#lastApprovalDecision = {
-            approvalId,
-            ...input
-        };
-        this.#approvals = this.#approvals.map((approval) =>
-            approval.approvalId === approvalId
-                ? {
-                      ...approval,
-                      decision: {
-                          approvalId,
-                          decidedAt: "2026-07-08T00:00:03.000Z",
-                          decidedBy: input.decidedBy,
-                          decision: input.decision,
-                          ...(input.reason === undefined ? {} : { reason: input.reason }),
-                          ...(input.remember === undefined ? {} : { remember: input.remember })
-                      },
-                      status: input.decision === "approve" ? "approved" : "denied"
-                  }
-                : approval
-        );
-        return this.#approvals[0];
+    listApprovals() {
+        return [];
     }
 
-    async callTool(
-        _toolName: string,
-        _input: JsonValue,
-        context: { requestId?: string; ctxId?: string; source: string }
-    ) {
-        this.#lastToolCall = context;
-        this.emit("toolCall.completed", { source: context.source, toolName: "bash_run" });
-        return {
-            exitCode: 0,
-            signal: undefined,
-            stderr: "",
-            stdout: "/tmp/ws\n",
-            termination: "exited"
-        };
+    getApproval() {
+        throw new Error("unused");
+    }
+
+    decideApproval() {
+        throw new Error("unused");
     }
 
     subscribe(fromSeq = 1) {
         const nextSeq = this.#events[0]?.seq ?? this.#lastSeq + 1;
-
         if (fromSeq < nextSeq) {
-            return {
-                code: "stream.gap",
-                fromSeq,
-                kind: "gap" as const,
-                lastSeq: this.#lastSeq,
-                nextSeq
-            };
+            return { kind: "gap" as const, lastSeq: this.#lastSeq, nextSeq };
         }
-
         return {
             events: this.#events.filter((event) => event.seq >= fromSeq),
             kind: "events" as const,
             lastSeq: this.#lastSeq
         };
     }
-
-    emit(type: string, data?: unknown) {
-        const event = {
-            at: new Date().toISOString(),
-            data,
-            instanceName: this.#name,
-            seq: this.#lastSeq + 1,
-            type
-        };
-
-        this.#lastSeq = event.seq;
-        this.#events.push(event);
-        this.#snapshot = {
-            ...this.#snapshot,
-            lastSeq: this.#lastSeq
-        };
-    }
-
-    dropBefore(seq: number) {
-        this.#events = this.#events.filter((event) => event.seq >= seq);
-    }
 }
 
-await verifyRpcMethodsOverReusedConnection();
-await verifyTodoRpc();
-await verifyShutdownToleratesClientDisconnect();
-await verifyInteractiveStartRelay();
+async function waitFor(predicate: () => boolean, timeoutMs = 1_000): Promise<void> {
+    const startedAt = Date.now();
+    while (!predicate()) {
+        if (Date.now() - startedAt > timeoutMs) {
+            throw new Error("condition was not met");
+        }
+        await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+}

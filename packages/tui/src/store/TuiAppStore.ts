@@ -1,4 +1,4 @@
-import { type ApprovalRequest, type ArtifactShareResult, type ArtifactTransferRecord, type ControlError, type ControlEventEnvelope, type InstanceSnapshot, type JsonValue, type OAuthApprovalRequest, type TodoReadResult, type ToolCallRecord } from "@portable-devshell/shared";
+import { type ApprovalRequest, type ArtifactShareResult, type ArtifactTransferRecord, type ControlError, type Event, type InstanceSnapshot, type JsonValue, type OAuthApprovalRequest, type TodoReadResult, type ToolCallRecord } from "@portable-devshell/shared";
 
 import { type TuiEditorState, type TuiUiIntent } from "../interaction/TuiInteractionTypes.js";
 import type { AuditPageState, FocusScope, PageId, SidebarCursor, SidebarFocus } from "../model/TuiUiTypes.js";
@@ -382,20 +382,23 @@ export class TuiAppStore {
         });
     }
 
-    appendRawEvent(envelope: ControlEventEnvelope): void {
+    appendRawEvent(event: Event): void {
         this.dispatch({
-            rawEvent: toRawEventRecord(envelope),
+            rawEvent: toRawEventRecord(event),
             type: "event.append"
         });
     }
 
-    applyEvent(envelope: ControlEventEnvelope): void {
-        const lastSeq = this.#state.lastSeqByInstance[envelope.target.instance] ?? 0;
+    applyEvent(event: Event): void {
+        if (event.destination === "@control" || event.seq === undefined) {
+            return;
+        }
+        const lastSeq = this.#state.lastSeqByInstance[event.destination] ?? 0;
 
-        if (envelope.seq <= lastSeq) {
+        if (event.seq <= lastSeq) {
             return;
         }
 
-        this.appendRawEvent(envelope);
+        this.appendRawEvent(event);
     }
 }

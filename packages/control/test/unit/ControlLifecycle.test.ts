@@ -1,17 +1,25 @@
 import assert from "node:assert/strict";
 import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { createConnection, createServer } from "node:net";
+import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { FrameReader, FrameWriter, type JsonValue } from "@portable-devshell/shared";
+import {
+    Channel,
+    Codec,
+    PrefixRoute,
+    createError,
+    ControlLifecycleManager,
+    ControlPathHome,
+    ControlPathRuntime,
+    type Event,
+    type JsonValue
+} from "@portable-devshell/shared";
 
-import { ControlLifecycleManager } from "../../dist/control/ControlLifecycleManager.js";
-import { ControlConfigTomlCodec, ControlInstanceTomlCodec } from "../../dist/control/config/codec/ConfigTomlCodec.js";
-import { ControlPathHome } from "../../dist/control/path/ControlPathHome.js";
-import { ControlPathRuntime } from "../../dist/control/path/ControlPathRuntime.js";
+import { controlDaemonModulePath } from "../../dist/index.js";
+import { ControlConfigTomlCodec, ControlInstanceTomlCodec } from "../../dist/modules/config/config/codec/ConfigTomlCodec.js";
 
 test("start creates control directory, socket, pid and status uses rpc", async (t) => {
     const harness = await createHarness();
@@ -74,6 +82,7 @@ test("stale pid does not mark control as running and start replaces it", async (
 
 test("start failure includes recent control log output", async () => {
     const manager = new ControlLifecycleManager({
+        daemonModulePath: controlDaemonModulePath(),
         logger: {
             error: async () => undefined,
             info: async () => undefined,
@@ -113,6 +122,7 @@ test("stop sends control.shutdown over rpc", async () => {
     const methods: string[] = [];
     let running = true;
     const manager = new ControlLifecycleManager({
+        daemonModulePath: controlDaemonModulePath(),
         pidFile: {
             read: async () => 123,
             remove: async () => undefined,
@@ -123,7 +133,7 @@ test("stop sends control.shutdown over rpc", async () => {
             async request(method: string) {
                 methods.push(method);
 
-                if (method === "control.status") {
+                if (method === "status") {
                     if (!running) {
                         throw new Error("offline");
                     }
@@ -146,7 +156,7 @@ test("stop sends control.shutdown over rpc", async () => {
 
     const stopped = await manager.stop();
 
-    assert.deepEqual(methods, ["control.status", "control.shutdown", "control.status", "control.status"]);
+    assert.deepEqual(methods, ["status", "shutdown", "status", "status"]);
     assert.equal(stopped.running, false);
 });
 
@@ -160,28 +170,25 @@ test("stop tolerates shutdown socket races in the real lifecycle rpc client", as
             return;
         }
 
-        const reader = new FrameReader();
-        const writer = new FrameWriter(socket);
+        const channel = Channel.accept(socket);
+        const codec = new Codec(channel, { local: "server" });
+        codec.onFrame((frame) => {
+            if (frame.event.name === "service.status") {
+                void codec.send({
+                    id: `reply-${frame.id}`,
+                    replyTo: frame.id,
+                    event: {
+                        destination: "@control",
+                        name: "service.status",
+                        payload: { instanceCount: 1 }
+                    }
+                }).catch(() => undefined);
+                return;
+            }
 
-        socket.on("data", (chunk: Uint8Array) => {
-            for (const frame of reader.push(chunk)) {
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                const envelope = frame as Record<string, any>;
-
-                if (envelope.method === "control.status") {
-                    void writer.write({
-                        id: envelope.id,
-                        ok: true,
-                        result: { instanceCount: 1 },
-                        type: "response"
-                    } as unknown as JsonValue);
-                    continue;
-                }
-
-                if (envelope.method === "control.shutdown") {
-                    shutdownRequested = true;
-                    socket.destroy();
-                }
+            if (frame.event.name === "service.shutdown") {
+                shutdownRequested = true;
+                socket.destroy();
             }
         });
     });
@@ -198,6 +205,7 @@ test("stop tolerates shutdown socket races in the real lifecycle rpc client", as
     });
 
     const manager = new ControlLifecycleManager({
+        daemonModulePath: controlDaemonModulePath(),
         pidFile: {
             read: async () => 123,
             remove: async () => undefined,
@@ -225,6 +233,7 @@ test("start keeps real worker config registered and does not auto-start worker",
     const homePaths = new ControlPathHome(homeDirectory);
     const runtimePaths = new ControlPathRuntime(xdgRuntimeDir);
     const manager = new ControlLifecycleManager({
+        daemonModulePath: controlDaemonModulePath(),
         homeDirectory,
         xdgRuntimeDir,
         waitTimeoutMs: 10_000
@@ -261,7 +270,7 @@ test("start keeps real worker config registered and does not auto-start worker",
     assert.equal(started.running, true);
     assert.equal(started.instanceCount, 1);
 
-    const listed = await request(runtimePaths.socketFile, "control.listInstances");
+    const listed = await request(runtimePaths.socketFile, "instance.list");
     assert.equal(Array.isArray(listed), true);
     assert.equal(listed[0]?.name, "demo-local");
     assert.equal(listed[0]?.snapshot.ready, false);
@@ -276,6 +285,7 @@ async function createHarness(): Promise<{
     const homeDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-control-home-"));
     const xdgRuntimeDir = await mkdtemp(join(tmpdir(), "portable-devshell-control-runtime-"));
     const manager = new ControlLifecycleManager({
+        daemonModulePath: controlDaemonModulePath(),
         homeDirectory,
         xdgRuntimeDir,
         waitTimeoutMs: 10_000
@@ -375,47 +385,22 @@ async function reserveTcpPort(): Promise<number> {
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function request(socketPath: string, method: string, params?: JsonValue): Promise<any> {
-    const socket = createConnection(socketPath);
-    const reader = new FrameReader();
-    const writer = new FrameWriter(socket);
-
-    await new Promise<void>((resolve, reject) => {
-        socket.once("connect", resolve);
-        socket.once("error", reject);
-    });
-
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const response = new Promise<any>((resolve, reject) => {
-        socket.on("data", (chunk: Uint8Array) => {
-            for (const frame of reader.push(chunk)) {
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                const envelope = frame as Record<string, any>;
-
-                if (envelope.type !== "response") {
-                    continue;
-                }
-
-                socket.destroy();
-
-                if (envelope.ok !== true) {
-                    reject(new Error(envelope.error?.message ?? "request failed"));
-                    return;
-                }
-
-                resolve(envelope.result);
-            }
+async function request(socketPath: string, operation: Event["name"], params?: JsonValue): Promise<any> {
+    const route = new PrefixRoute(
+        new Codec(await Channel.connect(socketPath), { local: "cli", remote: "server" }),
+        { requestIdPrefix: "test" }
+    );
+    try {
+        const reply = await route.request({
+            destination: "@control",
+            name: operation,
+            ...(params === undefined ? {} : { payload: params })
         });
-        socket.once("error", reject);
-    });
-
-    await writer.write({
-        id: `${method}-${Date.now()}`,
-        method,
-        params,
-        target: { kind: "control" },
-        type: "request"
-    } as unknown as JsonValue);
-
-    return await response;
+        if (reply.event.error !== undefined) {
+            throw createError(reply.event.error);
+        }
+        return reply.event.payload;
+    } finally {
+        route.close();
+    }
 }

@@ -19,8 +19,8 @@ import type { EventStreamGap, EventStreamSlice, InstanceEventInput } from "../..
 import { InstanceEventBuffer } from "../../log/LogEventBuffer.js";
 import type { LogQuery } from "../../log/LogQuery.js";
 import { InstanceLogStore, type InstanceLogEntry } from "../../log/store/LogStoreInstance.js";
-import { WorkerCommandClient } from "../../worker/command/WorkerCommandClient.js";
-import type { WorkerCommandInteractiveSession } from "../../worker/command/WorkerCommandTransport.js";
+import { WorkerCommandClient } from "../command/WorkerCommandClient.js";
+import type { WorkerCommandInteractiveSession } from "../command/WorkerCommandTransport.js";
 import {
     WorkerProtocolClient,
     type WorkerArtifactPayloadOpenInput,
@@ -33,9 +33,9 @@ import {
     type WorkerArtifactReceiveWriteInput,
     type WorkerArtifactReceiveWriteResult,
     type WorkerHandshakeResult
-} from "../../worker/protocol/WorkerProtocolClient.js";
-import { WorkerRpcBridge } from "../../worker/rpc/WorkerRpcBridge.js";
-import type { WorkerRpcChannel } from "../../worker/rpc/WorkerRpcChannel.js";
+} from "../protocol/WorkerProtocolClient.js";
+import { WorkerRpcBridge } from "../rpc/WorkerRpcBridge.js";
+import type { WorkerRpcChannel } from "../rpc/WorkerRpcChannel.js";
 import { WorkerToolCatalog } from "../tool/WorkerToolCatalog.js";
 import { WorkerToolInvoker } from "../tool/WorkerToolInvoker.js";
 import { ToolCallScheduler } from "../tool/ToolCallScheduler.js";

@@ -1,6 +1,6 @@
-import type { CliInstanceListEntry } from "../../control/CliControlStream.js";
+import type { InstanceListEntry } from "@portable-devshell/shared";
 
-export function renderInstanceList(instances: readonly CliInstanceListEntry[]): string {
+export function renderInstanceList(instances: readonly InstanceListEntry[]): string {
     if (instances.length === 0) {
         return "no instances\n";
     }

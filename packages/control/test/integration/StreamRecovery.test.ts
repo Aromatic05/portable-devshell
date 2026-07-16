@@ -1,295 +1,175 @@
 import assert from "node:assert/strict";
-import { createConnection } from "node:net";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import test from "node:test";
 
-import { FrameReader, FrameWriter, type JsonValue } from "@portable-devshell/shared";
 import type { WorkerInstance } from "@portable-devshell/core";
+import {
+    Channel,
+    Codec,
+    PrefixRoute,
+    asInstanceName,
+    type JsonValue
+} from "@portable-devshell/shared";
 
-import { ControlRpcServer } from "../../dist/control/rpc/ControlRpcServer.js";
-import { InstanceRegistry } from "../../dist/instance/registry/InstanceRegistry.js";
+import { RouteComposition } from "../../dist/composition/RouteComposition.js";
+import { ControlSocketServer } from "../../dist/control/socket/ControlSocketServer.js";
+import { InstanceRegistry } from "../../dist/modules/instance/registry/InstanceRegistry.js";
 
-async function verifyStreamRecovery(): Promise<void> {
-    const runtimeDir = await mkdtemp(join(tmpdir(), "portable-devshell-stream-recovery-"));
-    const socketPath = join(runtimeDir, "control.sock");
+test("stream gap is non-terminal and the dedicated subscription remains usable", async (t) => {
+    const directory = await mkdtemp(join(tmpdir(), "portable-devshell-stream-recovery-"));
+    const socketPath = join(directory, "control.sock");
     const worker = new FakeWorker("alpha");
-    const server = new ControlRpcServer({
-        instanceRegistry: new InstanceRegistry([
-            {
-                tools: { capabilities: ["read", "write", "execute"], groups: ["file", "bash", "artifact"] },
-                enabled: true,
-                mcpEnabled: false,
-                mcpPath: "",
-                name: "alpha",
-                todo: {
-                    async read() { return { items: [], revision: 0, summary: { completed: 0, total: 0 } }; },
-                    summary() { return undefined; }
+    worker.emit("instance.started", { workspacePath: "/tmp/ws" });
+    const registry = new InstanceRegistry([
+        {
+            enabled: true,
+            mcpEnabled: false,
+            mcpPath: "",
+            name: "alpha",
+            todo: {
+                async read() {
+                    return { items: [], revision: 0, summary: { completed: 0, total: 0 } };
                 },
-                worker: worker as unknown as WorkerInstance
-            }
-        ]),
-        socketPath
+                summary() {
+                    return undefined;
+                }
+            },
+            worker: worker as unknown as WorkerInstance
+        }
+    ]);
+    const routes = new RouteComposition({ instances: registry, shutdown() {} });
+    const server = new ControlSocketServer({ routes, socketPath });
+    await server.start();
+    t.after(async () => {
+        await server.stop().catch(() => undefined);
+        routes.dispose();
+        await rm(directory, { force: true, recursive: true });
     });
 
+    const route = await connect(socketPath);
+    t.after(() => route.close());
+    const acknowledgement = await route.openStream({
+        destination: asInstanceName("alpha"),
+        name: "runtime.subscribe",
+        payload: { fromSeq: 1 }
+    }, "subscribe-1");
+    assert.equal(acknowledgement.replyTo, "subscribe-1");
+    assert.equal(acknowledgement.streamId, "subscribe-1");
+    assert.deepEqual(acknowledgement.event.payload, {
+        events: [worker.events[0]],
+        lastSeq: 1
+    });
+
+    worker.emit("toolCall.completed", { toolName: "bash_run" });
+    const normal = await route.nextStreamFrame();
+    assert.equal(normal.event.name, "toolCall.completed");
+    assert.equal(normal.event.seq, 2);
+
+    worker.emit("toolCall.completed", { toolName: "bash_run" });
+    worker.dropBefore(4);
+    const gap = await route.nextStreamFrame();
+    assert.equal(gap.event.name, "stream.gap");
+    assert.deepEqual(gap.event.payload, {
+        instance: "alpha",
+        latestSeq: 3,
+        oldestAvailableSeq: 4,
+        requestedFromSeq: 3
+    });
+
+    worker.emit("toolCall.completed", { toolName: "bash_run" });
+    const recovered = await route.nextStreamFrame();
+    assert.equal(recovered.event.name, "toolCall.completed");
+    assert.equal(recovered.event.seq, 4);
+});
+
+test("an initial unavailable sequence returns a normal stream.gap error reply", async (t) => {
+    const directory = await mkdtemp(join(tmpdir(), "portable-devshell-stream-initial-gap-"));
+    const socketPath = join(directory, "control.sock");
+    const worker = new FakeWorker("alpha");
+    worker.emit("instance.started", {});
+    worker.emit("toolCall.completed", {});
+    worker.dropBefore(2);
+    const registry = new InstanceRegistry([
+        {
+            enabled: true,
+            mcpEnabled: false,
+            mcpPath: "",
+            name: "alpha",
+            todo: {
+                async read() {
+                    return { items: [], revision: 0, summary: { completed: 0, total: 0 } };
+                },
+                summary() {
+                    return undefined;
+                }
+            },
+            worker: worker as unknown as WorkerInstance
+        }
+    ]);
+    const routes = new RouteComposition({ instances: registry, shutdown() {} });
+    const server = new ControlSocketServer({ routes, socketPath });
     await server.start();
-    const client = await RpcClient.connect(socketPath);
-
-    try {
-        const identified = await client.identifyClient("cli");
-        assert.equal(identified.result.clientKind, "cli");
-
-        const started = await client.request("instance.start", { instance: "alpha", kind: "instance" }, { workspacePath: "/tmp/ws" });
-        assert.equal(started.result.ready, true);
-
-        const toolCall = await client.request(
-            "instance.callTool",
-            { instance: "alpha", kind: "instance" },
-            { input: { command: "pwd" }, toolName: "bash_run" }
-        );
-        assert.equal(toolCall.result.exitCode, 0);
-
-        const subscribed = await client.request(
-            "instance.subscribe",
-            { instance: "alpha", kind: "instance" },
-            { fromSeq: 1 }
-        );
-        assert.equal(subscribed.result.lastSeq, 2);
-        assert.equal(subscribed.result.events.length, 2);
-
-        worker.emit("toolCall.completed", { toolName: "bash_run" });
-        const streamed = await client.nextEvent();
-        assert.equal(streamed.event, "toolCall.completed");
-        assert.equal(streamed.seq, 3);
-
-        worker.emit("toolCall.completed", { toolName: "bash_run" });
-        worker.dropBefore(5);
-        const runtimeGap = await client.nextEvent();
-        assert.equal(runtimeGap.event, "stream.gap");
-        assert.deepEqual(runtimeGap.payload, {
-            instance: "alpha",
-            latestSeq: 4,
-            oldestAvailableSeq: 5,
-            requestedFromSeq: 4
-        });
-
-        const cancelled = await client.nextEvent();
-        assert.equal(cancelled.event, "stream.cancelled");
-        assert.deepEqual(cancelled.payload, {
-            instance: "alpha",
-            reason: "gap"
-        });
-
-        const resubscribed = await client.request(
-            "instance.subscribe",
-            { instance: "alpha", kind: "instance" },
-            { fromSeq: 5 }
-        );
-        assert.equal(resubscribed.result.lastSeq, 4);
-        assert.equal(resubscribed.result.events.length, 0);
-
-        worker.dropBefore(3);
-        const initialGap = await client.request(
-            "instance.subscribe",
-            { instance: "alpha", kind: "instance" },
-            { fromSeq: 1 }
-        );
-        assert.equal(initialGap.ok, false);
-        assert.equal(initialGap.error.code, "stream.gap");
-        assert.deepEqual(initialGap.error.details, {
-            instance: "alpha",
-            latestSeq: 4,
-            oldestAvailableSeq: 5,
-            requestedFromSeq: 1
-        });
-
-        const shutdown = await client.request("control.shutdown", { kind: "control" });
-        assert.equal(shutdown.result.accepted, true);
-    } finally {
-        client.close();
+    t.after(async () => {
         await server.stop().catch(() => undefined);
-        await rm(runtimeDir, { force: true, recursive: true });
-    }
-}
+        routes.dispose();
+        await rm(directory, { force: true, recursive: true });
+    });
 
-class RpcClient {
-    readonly #reader = new FrameReader();
-    readonly #pending = new Map<string, { reject: (error: unknown) => void; resolve: (value: Record<string, JsonValue>) => void }>();
-    readonly #events: Array<Record<string, JsonValue>> = [];
-    readonly #eventWaiters: Array<{ reject: (error: unknown) => void; resolve: (event: Record<string, JsonValue>) => void }> = [];
-    readonly #socket;
-    readonly #writer: FrameWriter;
-    #counter = 0;
+    const route = await connect(socketPath);
+    t.after(() => route.close());
+    const reply = await route.openStream({
+        destination: asInstanceName("alpha"),
+        name: "runtime.subscribe",
+        payload: { fromSeq: 1 }
+    });
+    assert.equal(reply.event.error?.code, "stream.gap");
+    assert.equal(reply.event.error?.retryable, true);
+    assert.deepEqual(reply.event.error?.details, {
+        instance: "alpha",
+        latestSeq: 2,
+        oldestAvailableSeq: 2,
+        requestedFromSeq: 1
+    });
+});
 
-    private constructor(socketPath: string) {
-        this.#socket = createConnection(socketPath);
-        this.#writer = new FrameWriter(this.#socket);
-        this.#socket.on("data", (chunk: Uint8Array) => {
-            for (const frame of this.#reader.push(chunk)) {
-                this.#accept(frame as Record<string, JsonValue>);
-            }
-        });
-        this.#socket.once("close", () => {
-            this.#failPending(new Error("control connection closed"));
-        });
-        this.#socket.once("error", (error) => {
-            this.#failPending(error);
-        });
-    }
-
-    static async connect(socketPath: string): Promise<RpcClient> {
-        const client = new RpcClient(socketPath);
-        await new Promise<void>((resolve, reject) => {
-            client.#socket.once("connect", resolve);
-            client.#socket.once("error", reject);
-        });
-        return client;
-    }
-
-    async identifyClient(clientKind: "cli" | "tui"): Promise<Record<string, JsonValue>> {
-        return await this.request("control.identifyClient", { kind: "control" }, { clientKind });
-    }
-
-    async request(method: string, target: Record<string, unknown>, params?: JsonValue): Promise<Record<string, JsonValue>> {
-        const id = `req-${++this.#counter}`;
-        const response = new Promise<Record<string, JsonValue>>((resolve, reject) => {
-            this.#pending.set(id, { reject, resolve });
-        });
-
-        await this.#writer.write({
-            id,
-            method,
-            params,
-            target,
-            type: "request"
-        } as unknown as JsonValue);
-
-        return await response;
-    }
-
-    async nextEvent(): Promise<Record<string, JsonValue>> {
-        const existing = this.#events.shift();
-
-        if (existing !== undefined) {
-            return existing;
-        }
-
-        return await new Promise<Record<string, JsonValue>>((resolve, reject) => {
-            this.#eventWaiters.push({ reject, resolve });
-        });
-    }
-
-    close(): void {
-        this.#socket.destroy();
-    }
-
-    #accept(frame: Record<string, JsonValue>): void {
-        if (frame.type === "response" && typeof frame.id === "string") {
-            const pending = this.#pending.get(frame.id);
-
-            if (pending !== undefined) {
-                this.#pending.delete(frame.id);
-                pending.resolve(frame);
-            }
-
-            return;
-        }
-
-        if (frame.type === "event") {
-            const waiter = this.#eventWaiters.shift();
-
-            if (waiter !== undefined) {
-                waiter.resolve(frame);
-                return;
-            }
-
-            this.#events.push(frame);
-        }
-    }
-
-    #failPending(error: unknown): void {
-        for (const pending of this.#pending.values()) {
-            pending.reject(error);
-        }
-
-        this.#pending.clear();
-
-        for (const waiter of this.#eventWaiters.splice(0)) {
-            waiter.reject(error);
-        }
-    }
+async function connect(socketPath: string): Promise<PrefixRoute> {
+    const channel = await Channel.connect(socketPath);
+    return new PrefixRoute(new Codec(channel, { local: "cli", remote: "server" }), {
+        requestIdPrefix: "cli"
+    });
 }
 
 class FakeWorker {
     readonly #name: string;
-    #events: Array<{ at: string; data?: unknown; instanceName: string; seq: number; type: string }> = [];
+    #events: Array<{ at: string; data?: JsonValue; instanceName: string; seq: number; type: string }> = [];
     #lastSeq = 0;
-    #snapshot = {
-        connectionState: "disconnected",
-        daemonState: "stopped",
-        lastSeq: 0,
-        name: "alpha",
-        ready: false,
-        status: "stopped"
-    };
 
     constructor(name: string) {
         this.#name = name;
-        this.#snapshot = {
-            ...this.#snapshot,
-            name
-        };
+    }
+
+    get events() {
+        return this.#events;
     }
 
     snapshot() {
-        return this.#snapshot;
-    }
-
-    async start(_workspacePath?: string) {
-        this.emit("instance.started", { workspacePath: "/tmp/ws" });
-        this.#snapshot = {
+        return {
             connectionState: "connected",
             daemonState: "running",
             lastSeq: this.#lastSeq,
-            name: this.#name,
+            name: asInstanceName(this.#name),
             ready: true,
             status: "ready"
-        };
-        return this.snapshot();
-    }
-
-    async startInteractive(workspacePath?: string) {
-        return await this.start(workspacePath);
-    }
-
-    async callTool(
-        _toolName: string,
-        _input: JsonValue,
-        context: { requestId?: string; ctxId?: string; source: string }
-    ) {
-        this.emit("toolCall.completed", { source: context.source, toolName: "bash_run" });
-        return {
-            exitCode: 0,
-            signal: undefined,
-            stderr: "",
-            stdout: "/tmp/ws\n",
-            termination: "exited"
         };
     }
 
     subscribe(fromSeq = 1) {
         const nextSeq = this.#events[0]?.seq ?? this.#lastSeq + 1;
-
         if (fromSeq < nextSeq) {
-            return {
-                code: "stream.gap",
-                fromSeq,
-                kind: "gap" as const,
-                lastSeq: this.#lastSeq,
-                nextSeq
-            };
+            return { kind: "gap" as const, lastSeq: this.#lastSeq, nextSeq };
         }
-
         return {
             events: this.#events.filter((event) => event.seq >= fromSeq),
             kind: "events" as const,
@@ -297,26 +177,18 @@ class FakeWorker {
         };
     }
 
-    emit(type: string, data?: unknown) {
+    emit(type: string, data?: JsonValue) {
         const event = {
             at: new Date().toISOString(),
-            data,
+            ...(data === undefined ? {} : { data }),
             instanceName: this.#name,
-            seq: this.#lastSeq + 1,
+            seq: ++this.#lastSeq,
             type
         };
-
-        this.#lastSeq = event.seq;
         this.#events.push(event);
-        this.#snapshot = {
-            ...this.#snapshot,
-            lastSeq: this.#lastSeq
-        };
     }
 
     dropBefore(seq: number) {
         this.#events = this.#events.filter((event) => event.seq >= seq);
     }
 }
-
-await verifyStreamRecovery();

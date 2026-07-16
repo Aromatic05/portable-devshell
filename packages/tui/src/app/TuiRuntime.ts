@@ -9,7 +9,7 @@ import { TuiApp } from "./TuiApp.js";
 import { buildTuiHitRegions, hitTargetAt, type TuiHitTarget } from "./TuiHitRegions.js";
 import { AttachShellCommandResolver } from "../attach/AttachShellCommandResolver.js";
 import { AttachShellRunner } from "../attach/AttachShellRunner.js";
-import { TuiControlClient } from "../control/TuiControlClient.js";
+import { createClients as createControlClients, type Clients } from "../client/ClientComposition.js";
 import { TuiControlSession } from "../control/TuiControlSession.js";
 import { CommandDispatcher } from "../interaction/dispatcher/CommandDispatcher.js";
 import { KeyDispatcher } from "../interaction/KeyDispatcher.js";
@@ -33,7 +33,7 @@ export class TuiRuntime {
     readonly scheduler: RenderScheduler;
     readonly session: TuiControlSession;
     readonly store: TuiAppStore;
-    readonly #client: TuiControlClient;
+    readonly #clients: Clients;
     readonly #stdin: ReadStream;
     readonly #inkStdin: ReadStream;
     readonly #stdout: WriteStream;
@@ -76,11 +76,11 @@ export class TuiRuntime {
                 await this.#decideApproval(instance, approvalId, decision);
             },
             onArtifactRevokeShare: async (shareId) => {
-                await this.#client.revokeArtifactShare(shareId);
+                await this.#clients.artifact.revokeShare(shareId);
                 await this.session.refreshArtifacts();
             },
             onArtifactCancelTransfer: async (transferId) => {
-                await this.#client.cancelArtifactTransfer(transferId);
+                await this.#clients.artifact.cancelTransfer(transferId);
                 await this.session.refreshArtifacts();
             },
             onInstanceAction: async (action, instance) => {
@@ -90,31 +90,31 @@ export class TuiRuntime {
                 await this.#attachShell(instance);
             },
             onApplyConfig: async () => {
-                const result = await this.#client.applyConfig();
+                const result = await this.#clients.config.apply();
                 await this.session.refresh();
                 return result;
             },
             onControlRestart: async () => {
-                await this.#client.restartControl();
+                await this.#clients.service.restart();
                 await new Promise((resolve) => setTimeout(resolve, 100));
                 await this.session.reconnect();
             },
             onCreateInstance: async (draft) => {
-                const result = await this.#client.createInstance(draft);
+                const result = await this.#clients.instance.create(draft);
                 let status: string | undefined;
                 if (draft.provider === "reverse") {
-                    const code = await this.#client.createReverseDeviceCode(result.name);
+                    const code = await this.#clients.reverse.createCode(result.name);
                     status = `Reverse instance created. Run: devshell-worker enroll --controller ${code.controllerUrl} --device-code ${code.deviceCode} (expires ${code.expiresAt})`;
                 }
                 await this.session.refresh();
                 return status;
             },
-            onGetInstanceCreateSchema: async () => await this.#client.getInstanceCreateSchema(),
+            onGetInstanceCreateSchema: async () => await this.#clients.instance.createSchema(),
             onInstanceConfigUpdate: async (instance) => {
-                await this.#client.updateInstanceConfig(instance);
+                await this.#clients.config.updateInstance(instance);
             },
             onInstanceDangerAction: async (_action, instance) => {
-                await this.#client.deleteInstance(instance);
+                await this.#clients.instance.delete(instance);
                 await this.session.refresh();
             },
             onInstanceEnabledChange: async (instance, enabled) => {
@@ -125,23 +125,23 @@ export class TuiRuntime {
                     throw new Error(`Instance config is unavailable: ${instance}`);
                 }
                 if (!enabled && this.store.getState().snapshotsByInstance[instance]?.daemonState !== undefined && this.store.getState().snapshotsByInstance[instance]?.daemonState !== "stopped") {
-                    await this.#client.stopInstance(instance);
+                    await this.#clients.runtime.stop(instance);
                 }
-                await this.#client.updateInstanceConfig({ ...current, enabled });
-                await this.#client.applyConfig();
+                await this.#clients.config.updateInstance({ ...current, enabled });
+                await this.#clients.config.apply();
                 await this.session.refresh();
             },
             onMcpConfigUpdate: async (mcp) => {
-                await this.#client.updateMcpConfig(mcp);
+                await this.#clients.config.updateMcp(mcp);
             },
             onOAuthApprovalDecision: async (approvalId, decision) => {
-                await this.#client.decideOAuthApproval(approvalId, decision);
+                await this.#clients.mcp.decideApproval(approvalId, decision);
                 await this.session.refresh();
             },
             onValidateConfigDraft: async (draft) => {
-                await this.#client.validateConfigDraft(draft);
+                await this.#clients.config.validate(draft);
             },
-            onValidateInstanceCreateDraft: async (draft) => await this.#client.validateInstanceCreateDraft(draft),
+            onValidateInstanceCreateDraft: async (draft) => await this.#clients.instance.validateCreate(draft),
             mainViewportRows: () => Math.max(0, this.rows - 7),
             onLogsReload: async () => {
                 await this.session.refreshLogs();
@@ -185,11 +185,11 @@ export class TuiRuntime {
             onToolCall: async (instance, toolName, input) => await this.#callTool(instance, toolName, input),
             store: this.store
         });
-        this.#client = new TuiControlClient({
+        this.#clients = createControlClients({
             xdgRuntimeDir: options.xdgRuntimeDir
         });
         this.session = new TuiControlSession({
-            client: this.#client,
+            clients: this.#clients,
             store: this.store
         });
         this.#alternateScreen = new AlternateScreen(this.#stdout);
@@ -293,7 +293,7 @@ export class TuiRuntime {
         switch (action) {
             case "refresh":
                 await this.#runCommand(`Refresh Status: ${instance}`, instance, async () => {
-                    const result = await this.#client.refreshStatus(instance);
+                    const result = await this.#clients.runtime.refresh(instance);
                     this.store.replaceSnapshot(result.snapshot);
                     await this.session.refreshInstance(instance);
                 });
@@ -305,7 +305,7 @@ export class TuiRuntime {
                         provider: entry?.provider,
                         workspace: entry?.defaultWorkspace
                     });
-                    const snapshot = await this.#client.startInstance(instance, {
+                    const snapshot = await this.#clients.runtime.start(instance, {
                         relay: {
                             onOutput: (chunk) => {
                                 this.store.appendRelayOutput(commandId, chunk);
@@ -322,13 +322,13 @@ export class TuiRuntime {
                 return;
             case "restart":
                 await this.#runCommand(`Restart Worker: ${instance}`, instance, async (commandId) => {
-                    await this.#client.stopInstance(instance);
+                    await this.#clients.runtime.stop(instance);
                     const entry = this.store.getState().instances.find((candidate) => candidate.name === instance);
                     this.store.setRelayMetadata(commandId, {
                         provider: entry?.provider,
                         workspace: entry?.defaultWorkspace
                     });
-                    const snapshot = await this.#client.startInstance(instance, {
+                    const snapshot = await this.#clients.runtime.start(instance, {
                         relay: {
                             onOutput: (chunk) => {
                                 this.store.appendRelayOutput(commandId, chunk);
@@ -345,7 +345,7 @@ export class TuiRuntime {
                 return;
             case "stop":
                 await this.#runCommand(`Stop Worker: ${instance}`, instance, async () => {
-                    const snapshot = await this.#client.stopInstance(instance);
+                    const snapshot = await this.#clients.runtime.stop(instance);
                     this.store.replaceSnapshot(snapshot);
                     await this.session.refreshInstance(instance);
                 });
@@ -378,7 +378,7 @@ export class TuiRuntime {
         }
 
         try {
-            const refreshed = await this.#client.refreshStatus(instance);
+            const refreshed = await this.#clients.runtime.refresh(instance);
             this.store.replaceSnapshot(refreshed.snapshot);
             await this.session.refreshInstance(instance);
             this.store.setScreenStatus(this.store.getState().ui.selectedPage, "Shell exited. Status refreshed from control.");
@@ -546,8 +546,8 @@ export class TuiRuntime {
 
     async #decideApproval(instance: string, approvalId: string, decision: "approve" | "deny"): Promise<void> {
         await this.#runCommand(`${decision === "approve" ? "Approve" : "Deny"} Approval: ${approvalId}`, instance, async () => {
-            await this.#client.getApproval(instance, approvalId);
-            await this.#client.decideApproval(instance, approvalId, decision);
+            await this.#clients.tool.getApproval(instance, approvalId);
+            await this.#clients.tool.decideApproval(instance, approvalId, decision);
             await this.session.refreshInstance(instance);
         });
     }
@@ -555,7 +555,7 @@ export class TuiRuntime {
     async #callTool(instance: string, toolName: string, input: string): Promise<boolean> {
         const result = await this.#runCommand(`Call Tool: ${toolName}`, instance, async () => {
             const parsed = JSON.parse(input) as JsonValue;
-            await this.#client.callTool(instance, toolName, parsed);
+            await this.#clients.tool.call(instance, toolName, parsed);
             await this.session.refreshInstance(instance);
         });
 

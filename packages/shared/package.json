@@ -15,8 +15,8 @@
         "dist"
     ],
     "scripts": {
-        "build": "tsc -b",
+        "build": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && tsc -b --force",
         "typecheck": "tsc --noEmit -p tsconfig.json",
-        "test": "tsc -b && node --import ./test/RegisterWorkspacePackages.mjs --test test/integration/*.test.mjs test/unit/protocol/frame/*.test.ts test/unit/runtime/*.test.ts"
+        "test": "pnpm run build && node --import ./test/RegisterWorkspacePackages.mjs --test test/integration/*.test.mjs test/unit/runtime/*.test.ts test/unit/transport/*.test.ts"
     }
 }

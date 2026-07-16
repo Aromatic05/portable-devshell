@@ -1,32 +1,31 @@
-import type { JsonValue } from "@portable-devshell/shared";
-
 import type {
-    TuiControlClientLike,
-    TuiControlListInstanceEntry,
-    TuiControlLogEntry,
-    TuiControlSnapshotEnvelope
-} from "./TuiControlClient.js";
-import { TuiControlClient } from "./TuiControlClient.js";
-import type { TuiControlStreamMessage } from "./TuiControlStream.js";
+    InstanceListEntry,
+    InstanceLogEntry,
+    InstanceRuntimeEnvelope,
+    JsonValue
+} from "@portable-devshell/shared";
+
+import { createClients as createControlClients, type Clients } from "../client/ClientComposition.js";
+import type { RuntimeStreamMessage } from "../modules/runtime/RuntimeStream.js";
 import { TuiAppStore } from "../store/TuiAppStore.js";
 import type { TuiInstanceListEntry, TuiLogEntry } from "../store/TuiReducers.js";
 
 const LOG_READ_LIMIT = 100;
 
 export interface TuiControlSessionOptions {
-    client?: TuiControlClientLike;
+    clients?: Clients;
     store?: TuiAppStore;
 }
 
 export class TuiControlSession {
-    readonly #client: TuiControlClientLike;
+    readonly #clients: Clients;
     readonly #store: TuiAppStore;
     readonly #subscriptions = new Map<string, TuiInstanceSubscription>();
     #oauthRefreshTimer?: ReturnType<typeof setInterval>;
     #started = false;
 
     constructor(options: TuiControlSessionOptions = {}) {
-        this.#client = options.client ?? new TuiControlClient();
+        this.#clients = options.clients ?? createControlClients();
         this.#store = options.store ?? new TuiAppStore();
     }
 
@@ -66,8 +65,8 @@ export class TuiControlSession {
 
     async refreshConfig(): Promise<void> {
         const configView = await this.#readConfigView();
-        this.#store.setMcpStatus(await this.#client.getMcpStatus());
-        const runtimeInstances = await this.#client.listInstances();
+        this.#store.setMcpStatus(await this.#clients.mcp.status());
+        const runtimeInstances = await this.#clients.instance.list();
         this.#store.replaceInstances(mergeInstances(configView, runtimeInstances));
         this.#store.setConfigView(configView);
     }
@@ -90,15 +89,10 @@ export class TuiControlSession {
     }
 
     async refreshArtifacts(): Promise<void> {
-        if (this.#client.listArtifactShares === undefined || this.#client.listArtifactTransfers === undefined) {
-            this.#store.replaceArtifactShares([]);
-            this.#store.replaceArtifactTransfers([]);
-            return;
-        }
         try {
             const [shares, transfers] = await Promise.all([
-                this.#client.listArtifactShares(),
-                this.#client.listArtifactTransfers()
+                this.#clients.artifact.listShares(),
+                this.#clients.artifact.listTransfers()
             ]);
             this.#store.replaceArtifactShares(shares);
             this.#store.replaceArtifactTransfers(transfers);
@@ -127,10 +121,10 @@ export class TuiControlSession {
         this.#store.setConnectionState("connecting");
 
         try {
-            await this.#client.ping();
+            await this.#clients.service.ping();
             const configView = await this.#readConfigView();
-            const runtimeInstances = await this.#client.listInstances();
-            this.#store.setMcpStatus(await this.#client.getMcpStatus());
+            const runtimeInstances = await this.#clients.instance.list();
+            this.#store.setMcpStatus(await this.#clients.mcp.status());
             this.#store.replaceInstances(mergeInstances(configView, runtimeInstances));
             this.#store.setConfigView(configView);
             await this.#reloadOAuthApprovals(configView);
@@ -144,7 +138,7 @@ export class TuiControlSession {
         }
     }
 
-    async #reloadAllInstances(instances: TuiControlListInstanceEntry[]): Promise<void> {
+    async #reloadAllInstances(instances: InstanceListEntry[]): Promise<void> {
         this.#closeSubscriptions();
 
         for (const instance of instances) {
@@ -157,7 +151,7 @@ export class TuiControlSession {
     }
 
     async #reloadRuntimeInstance(instance: string): Promise<void> {
-        const snapshotEnvelope = await this.#client.getSnapshot(instance);
+        const snapshotEnvelope = await this.#clients.runtime.snapshot(instance);
         this.#store.replaceSnapshot(snapshotEnvelope.snapshot);
         await this.#reloadTodo(instance);
         await this.#reloadLogs(instance);
@@ -167,30 +161,30 @@ export class TuiControlSession {
     }
 
     async #reloadTodo(instance: string): Promise<void> {
-        const envelope = await this.#client.getTodo(instance);
+        const envelope = await this.#clients.todo.get(instance);
         this.#store.replaceTodo(instance, envelope.todo);
     }
 
     async #reloadLogs(instance: string): Promise<void> {
-        const logs = await this.#client.readLogs(instance, { limit: LOG_READ_LIMIT });
+        const logs = await this.#clients.runtime.readLogs(instance, { limit: LOG_READ_LIMIT });
         this.#store.replaceLogs(instance, logs.map(mapLogEntry));
     }
 
     async #reloadToolCalls(instance: string): Promise<void> {
-        this.#store.replaceToolCalls(instance, await this.#client.readToolCalls(instance, { limit: 100 }));
+        this.#store.replaceToolCalls(instance, await this.#clients.tool.listCalls(instance, { limit: 100 }));
     }
 
     async #reloadApprovals(instance: string): Promise<void> {
-        this.#store.replaceApprovals(instance, await this.#client.listApprovals(instance));
+        this.#store.replaceApprovals(instance, await this.#clients.tool.listApprovals(instance));
     }
 
     async #reloadOAuthApprovals(configView: Record<string, JsonValue> | undefined): Promise<void> {
-        if (this.#client.listOAuthApprovals === undefined || oauthApprovalsUnavailable(configView)) {
+        if (oauthApprovalsUnavailable(configView)) {
             this.#store.replaceOAuthApprovals([]);
             return;
         }
 
-        this.#store.replaceOAuthApprovals(await this.#client.listOAuthApprovals());
+        this.#store.replaceOAuthApprovals(await this.#clients.mcp.listApprovals());
     }
 
     #readRuntimeInstances(): string[] {
@@ -202,7 +196,7 @@ export class TuiControlSession {
 
     async #readConfigView(): Promise<Record<string, JsonValue> | undefined> {
         try {
-            return await this.#client.getConfigView();
+            return await this.#clients.config.get();
         } catch (error) {
             if (readErrorCode(error) === "control.methodNotFound") {
                 return undefined;
@@ -227,12 +221,12 @@ export class TuiControlSession {
                 await this.#reloadInstance(instance);
             },
             onInstanceEvent: (message) => {
-                this.#store.applyEvent(message.envelope);
-                if (message.envelope.event.startsWith("todo.")) {
+                this.#store.applyEvent(message.event);
+                if (message.event.name.startsWith("todo.")) {
                     void this.#reloadTodo(instance).catch(() => undefined);
                 }
                 const state = this.#store.getState();
-                if (message.envelope.event === "log.appended" && state.ui.selectedPage === "logs" && state.ui.selectedInstance === instance && state.ui.logsFollowByInstance[instance] !== false) {
+                if (message.event.name === "log.appended" && state.ui.selectedPage === "logs" && state.ui.selectedInstance === instance && state.ui.logsFollowByInstance[instance] !== false) {
                     this.#store.setScrollOffset(`logs:${instance}:main`, Number.MAX_SAFE_INTEGER);
                 }
             },
@@ -250,7 +244,7 @@ export class TuiControlSession {
                 this.#store.setConnectionState(failure.status, failure.error);
                 this.#closeSubscriptions();
             },
-            subscribe: async (requestedFromSeq) => await this.#client.subscribe(instance, requestedFromSeq)
+            subscribe: async (requestedFromSeq) => await this.#clients.runtime.subscribe(instance, requestedFromSeq)
         });
 
         this.#subscriptions.set(instance, subscription);
@@ -285,20 +279,20 @@ interface TuiInstanceSubscriptionOptions {
     instance: string;
     onConnectionClosed(): void;
     onGap(): Promise<void>;
-    onInstanceEvent(message: Extract<TuiControlStreamMessage, { kind: "instance.event" }>): void;
+    onInstanceEvent(message: Extract<RuntimeStreamMessage, { kind: "instance.event" }>): void;
     onSubscribeError(error: unknown): Promise<void>;
-    subscribe(fromSeq: number): Promise<{ close(): void; nextMessage(): Promise<TuiControlStreamMessage> }>;
+    subscribe(fromSeq: number): Promise<{ close(): void; nextMessage(): Promise<RuntimeStreamMessage> }>;
 }
 
 class TuiInstanceSubscription {
     readonly #instance: string;
     readonly #onConnectionClosed: () => void;
     readonly #onGap: () => Promise<void>;
-    readonly #onInstanceEvent: (message: Extract<TuiControlStreamMessage, { kind: "instance.event" }>) => void;
+    readonly #onInstanceEvent: (message: Extract<RuntimeStreamMessage, { kind: "instance.event" }>) => void;
     readonly #onSubscribeError: (error: unknown) => Promise<void>;
     readonly #subscribe: TuiInstanceSubscriptionOptions["subscribe"];
     #closed = false;
-    #stream?: { close(): void; nextMessage(): Promise<TuiControlStreamMessage> };
+    #stream?: { close(): void; nextMessage(): Promise<RuntimeStreamMessage> };
 
     constructor(options: TuiInstanceSubscriptionOptions) {
         this.#instance = options.instance;
@@ -322,7 +316,7 @@ class TuiInstanceSubscription {
 
                 switch (message.kind) {
                     case "instance.event":
-                        if (message.envelope.target.instance === this.#instance) {
+                        if (message.event.destination === this.#instance) {
                             this.#onInstanceEvent(message);
                         }
                         break;
@@ -331,12 +325,6 @@ class TuiInstanceSubscription {
                         await this.#onGap();
                         return;
                     case "stream.cancelled":
-                        if (message.envelope.payload.reason === "gap") {
-                            this.close();
-                            await this.#onGap();
-                            return;
-                        }
-
                         this.close();
                         this.#onConnectionClosed();
                         return;
@@ -366,13 +354,13 @@ class TuiInstanceSubscription {
     }
 }
 
-function nextSubscribeSeq(snapshotEnvelope: TuiControlSnapshotEnvelope): number {
+function nextSubscribeSeq(snapshotEnvelope: InstanceRuntimeEnvelope): number {
     return Math.max(snapshotEnvelope.lastSeq, 1);
 }
 
 function mergeInstances(
     configView: Record<string, JsonValue> | undefined,
-    runtimeInstances: TuiControlListInstanceEntry[]
+    runtimeInstances: InstanceListEntry[]
 ): TuiInstanceListEntry[] {
     const runtimeByName = new Map(runtimeInstances.map((instance) => [instance.name, instance] as const));
     const configured = readConfigInstances(configView);
@@ -431,7 +419,7 @@ function readConfigInstances(configView: Record<string, JsonValue> | undefined):
     });
 }
 
-function mapLogEntry(entry: TuiControlLogEntry): TuiLogEntry {
+function mapLogEntry(entry: InstanceLogEntry): TuiLogEntry {
     return {
         at: entry.at,
         bytes: Buffer.byteLength(entry.message, "utf8"),

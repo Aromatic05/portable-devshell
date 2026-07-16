@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { InstanceRegistry, createDefaultControlConfig } from "../../dist/index.js";
-import { ControlInstanceCreateService } from "../../dist/control/ControlInstanceCreateService.js";
+import { InstanceCreateCoordinator } from "../../dist/composition/InstanceCreateCoordinator.js";
 
 test("instance create schema exposes supported container modes without running container attach", () => {
     const service = createService();
@@ -74,7 +74,7 @@ test("instance create validates existing stopped container drafts with adoptLife
 function createService(platform?: NodeJS.Platform) {
     let config = createDefaultControlConfig();
 
-    return new ControlInstanceCreateService({
+    return new InstanceCreateCoordinator({
         configStore: {
             async readOrCreate() {
                 return config;
@@ -126,7 +126,7 @@ test("MCP instance_create creates only SSH and strips instance management from i
     const registry = new InstanceRegistry([]);
     const registered: Array<Record<string, unknown>> = [];
     const gateway = {} as never;
-    const service = new ControlInstanceCreateService({
+    const service = new InstanceCreateCoordinator({
         configStore: {
             async readOrCreate() {
                 return config;
@@ -219,7 +219,7 @@ function createMcpCreateService() {
         workspace: "/home/dev/main"
     });
 
-    return new ControlInstanceCreateService({
+    return new InstanceCreateCoordinator({
         configStore: {
             async readOrCreate() {
                 return config;

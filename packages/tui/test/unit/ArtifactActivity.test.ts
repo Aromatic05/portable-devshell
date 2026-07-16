@@ -37,13 +37,23 @@ const transfer: ArtifactTransferRecord = {
 test("TUI startup pulls artifact shares and transfers from Control", async () => {
     const store = new TuiAppStore();
     const session = new TuiControlSession({
-        client: {
-            async getConfigView() { return {}; },
-            async getMcpStatus() { return {}; },
-            async listArtifactShares() { return [share]; },
-            async listArtifactTransfers() { return [transfer]; },
-            async listInstances() { return []; },
-            async ping() { return { pong: true }; }
+        clients: {
+            artifact: {
+                async listShares() { return [share]; },
+                async listTransfers() { return [transfer]; }
+            },
+            config: {
+                async get() { return {}; }
+            },
+            instance: {
+                async list() { return []; }
+            },
+            mcp: {
+                async status() { return {}; }
+            },
+            service: {
+                async ping() { return { pong: true }; }
+            }
         } as never,
         store
     });
@@ -57,25 +67,22 @@ test("TUI startup pulls artifact shares and transfers from Control", async () =>
 test("artifact stream events upsert complete records without replacing shares from download audit events", () => {
     const store = new TuiAppStore();
     store.applyEvent({
-        event: "artifact.shareCreated",
+        destination: asInstanceName("instance-a"),
+        name: "artifact.shareCreated",
         payload: { at: "2026-07-13T00:00:00.000Z", data: share },
-        seq: 1,
-        target: { instance: asInstanceName("instance-a"), kind: "instance" },
-        type: "event"
+        seq: 1
     });
     store.applyEvent({
-        event: "artifact.shareDownloaded",
+        destination: asInstanceName("instance-a"),
+        name: "artifact.shareDownloaded",
         payload: { at: "2026-07-13T00:00:01.000Z", data: { shareId: share.shareId } },
-        seq: 2,
-        target: { instance: asInstanceName("instance-a"), kind: "instance" },
-        type: "event"
+        seq: 2
     });
     store.applyEvent({
-        event: "artifact.transferProgress",
+        destination: asInstanceName("instance-a"),
+        name: "artifact.transferProgress",
         payload: { at: "2026-07-13T00:00:02.000Z", data: transfer },
-        seq: 3,
-        target: { instance: asInstanceName("instance-a"), kind: "instance" },
-        type: "event"
+        seq: 3
     });
 
     assert.deepEqual(store.getState().artifactShares, [share]);

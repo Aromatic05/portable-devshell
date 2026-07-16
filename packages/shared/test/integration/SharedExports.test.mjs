@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-const { configSchema, envelopeSchema, errorCodes } = await import("@portable-devshell/shared");
+const { configSchema, errorCodes, validateFrame } = await import("@portable-devshell/shared");
 
 test("configSchema accepts a valid controller config", () => {
     const result = configSchema.safeParse({
@@ -44,49 +44,31 @@ test("configSchema rejects invalid auth and public exposure structure", () => {
     assert.equal(result.success, false);
 });
 
-test("envelopeSchema accepts request envelopes with type and target.kind", () => {
-    const result = envelopeSchema.safeParse({
+test("validateFrame accepts the Frame/Event contract and rejects old envelopes", () => {
+    assert.deepEqual(validateFrame({
         id: "req-1",
-        method: "control.ping",
-        target: {
-            kind: "control"
-        },
-        type: "request"
-    });
-
-    assert.equal(result.success, true);
-});
-
-test("envelopeSchema rejects legacy envelope fields", () => {
-    const legacyKind = envelopeSchema.safeParse({
+        from: "cli",
+        to: "server",
+        event: {
+            destination: "@control",
+            name: "service.ping"
+        }
+    }), {
         id: "req-1",
-        kind: "request",
-        method: "control.ping",
-        target: {
-            kind: "control"
+        from: "cli",
+        to: "server",
+        event: {
+            destination: "@control",
+            name: "service.ping"
         }
     });
-    const legacyTarget = envelopeSchema.safeParse({
-        id: "req-2",
-        method: "control.ping",
-        target: {
-            type: "controller"
-        },
-        type: "request"
-    });
-    const legacyIssuedAt = envelopeSchema.safeParse({
-        id: "req-3",
-        issuedAt: "2026-07-07T00:00:00.000Z",
-        method: "control.ping",
-        target: {
-            kind: "control"
-        },
-        type: "request"
-    });
 
-    assert.equal(legacyKind.success, false);
-    assert.equal(legacyTarget.success, false);
-    assert.equal(legacyIssuedAt.success, false);
+    assert.throws(() => validateFrame({
+        id: "req-1",
+        method: "control.ping",
+        target: { kind: "control" },
+        type: "request"
+    }));
 });
 
 test("error codes use domain.reason format", () => {

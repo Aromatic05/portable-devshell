@@ -1,6 +1,6 @@
-import type { CliInstanceLogEntry } from "../../control/CliControlStream.js";
+import type { InstanceLogEntry } from "@portable-devshell/shared";
 
-export function renderInstanceLogs(entries: readonly CliInstanceLogEntry[]): string {
+export function renderInstanceLogs(entries: readonly InstanceLogEntry[]): string {
     if (entries.length === 0) {
         return "";
     }

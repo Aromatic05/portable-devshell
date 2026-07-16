@@ -25,11 +25,11 @@ function createArtifactClient() {
     const calls: Array<{ input?: unknown; method: string }> = [];
     return {
         calls,
-        async cancelArtifactTransfer(transferId: string) {
+        async cancelTransfer(transferId: string) {
             calls.push({ input: transferId, method: "cancel" });
             return { operation: "cancel" as const, transfer: transferRecord(transferId, "cancelled") };
         },
-        async createArtifactShare(defaultInstance: string, input: ArtifactShareInput) {
+        async createShare(defaultInstance: string, input: ArtifactShareInput) {
             calls.push({ input: { defaultInstance, input }, method: "share" });
             return {
                 blake3: "a".repeat(64),
@@ -43,23 +43,23 @@ function createArtifactClient() {
                 url: "https://example.test/artifacts/share/token"
             };
         },
-        async getArtifactTransfer(transferId: string) {
+        async getTransfer(transferId: string) {
             calls.push({ input: transferId, method: "status" });
             return transferRecord(transferId, "transferring");
         },
-        async listArtifactShares() {
+        async listShares() {
             calls.push({ method: "shares" });
             return [];
         },
-        async listArtifactTransfers() {
+        async listTransfers() {
             calls.push({ method: "transfers" });
             return [];
         },
-        async revokeArtifactShare(shareId: string) {
+        async revokeShare(shareId: string) {
             calls.push({ input: shareId, method: "revoke" });
             return { revoked: true as const, shareId };
         },
-        async startArtifactTransfer(defaultInstance: string, input: ArtifactTransferStartInput) {
+        async startTransfer(defaultInstance: string, input: ArtifactTransferStartInput) {
             calls.push({ input: { defaultInstance, input }, method: "transfer" });
             return { operation: "start" as const, transfer: transferRecord("transfer-1", "queued") };
         }
@@ -82,7 +82,7 @@ function cli(client: ReturnType<typeof createArtifactClient>) {
     const stdout = createBuffer();
     const stderr = createBuffer();
     return {
-        instance: new CliMain({ createClient: () => client as never, stderr, stdout }),
+        instance: new CliMain({ createClients: () => ({ artifact: client } as never), stderr, stdout }),
         stderr,
         stdout
     };

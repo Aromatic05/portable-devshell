@@ -1,54 +1,38 @@
-import { homedir } from "node:os";
-import { join } from "node:path";
-import { createError, errorCodes } from "@portable-devshell/shared";
-import type { McpHost } from "@portable-devshell/mcp";
-
-import { ArtifactHttpRoute, artifactShareRoute } from "../artifact/ArtifactHttpRoute.js";
-import { ArtifactHostBridge } from "../artifact/host/ArtifactHostBridge.js";
-import { ArtifactService } from "../artifact/ArtifactService.js";
-import { ControlInstanceCreateService } from "./ControlInstanceCreateService.js";
-import { ControlConfigEditorService } from "./editor/ConfigEditorService.js";
-import { ControlConfigStore } from "./config/ControlConfigStore.js";
-import type { ControlConfig } from "./config/codec/ConfigTomlCodec.js";
-import { ControlPathHome } from "./path/ControlPathHome.js";
-import { InstanceRegistry } from "../instance/registry/InstanceRegistry.js";
-import { InstanceRegistryBuilder } from "../instance/registry/InstanceRegistryBuilder.js";
-import { withArtifactGateway } from "../mcp/McpArtifactGateway.js";
-import { McpInstanceGatewayControl } from "../mcp/McpInstanceGatewayControl.js";
-import { McpWiringService } from "../mcp/McpWiringService.js";
-import { ControlRpcServer } from "./rpc/ControlRpcServer.js";
-import { ControlSocketFile } from "./ControlSocketFile.js";
-import { ReverseConnectionGateway } from "../reverse/ReverseConnectionGateway.js";
-import { ReverseControlService } from "../reverse/ReverseControlService.js";
-import { ReverseCredentialStore } from "../reverse/ReverseCredentialStore.js";
+import type { ControlConfig } from "../modules/config/config/codec/ConfigTomlCodec.js";
+import type { ControlConfigStore } from "../modules/config/config/ControlConfigStore.js";
+import type { InstanceRegistryFactory } from "../composition/InstanceRegistryFactory.js";
+import type { McpRuntimeFactory } from "../composition/McpRuntimeFactory.js";
+import { ControlRuntimeFactory } from "../composition/runtime/ControlRuntimeFactory.js";
+import type { ControlRuntime } from "../composition/runtime/ControlRuntime.js";
+import { ControlState } from "../composition/runtime/ControlState.js";
+import { ControlSocketFile } from "@portable-devshell/shared";
 
 export interface ControlServerOptions {
     configStore?: ControlConfigStore;
     homeDirectory?: string;
-    instanceRegistryBuilder?: InstanceRegistryBuilder;
-    mcpWiringService?: McpWiringService;
+    instanceRegistryBuilder?: InstanceRegistryFactory;
+    mcpWiringService?: McpRuntimeFactory;
+    runtimeFactory?: ControlRuntimeFactory;
     xdgRuntimeDir?: string;
 }
 
 export class ControlServer {
-    readonly #configStore: ControlConfigStore;
-    readonly #homeDirectory?: string;
-    readonly #instanceRegistryBuilder: InstanceRegistryBuilder;
-    readonly #mcpWiringService: McpWiringService;
+    readonly #runtimeFactory: ControlRuntimeFactory;
     readonly #socketFile: ControlSocketFile;
-    #artifactHostBridge?: ArtifactHostBridge;
-    #artifactService?: ArtifactService;
-    #config?: ControlConfig;
-    #instanceRegistry = new InstanceRegistry([]);
-    #mcpHost?: McpHost;
-    #reverseGateway?: ReverseConnectionGateway;
-    #rpcServer?: ControlRpcServer;
+    readonly #state: ControlState;
+    #runtime?: ControlRuntime;
+    #startPromise?: Promise<void>;
+    #stopPromise?: Promise<void>;
 
     constructor(options: ControlServerOptions = {}) {
-        this.#configStore = options.configStore ?? new ControlConfigStore();
-        this.#homeDirectory = options.homeDirectory;
-        this.#instanceRegistryBuilder = options.instanceRegistryBuilder ?? new InstanceRegistryBuilder();
-        this.#mcpWiringService = options.mcpWiringService ?? new McpWiringService();
+        this.#state = new ControlState({
+            configStore: options.configStore,
+            homeDirectory: options.homeDirectory,
+            instanceRegistryFactory: options.instanceRegistryBuilder
+        });
+        this.#runtimeFactory = options.runtimeFactory ?? new ControlRuntimeFactory({
+            mcpFactory: options.mcpWiringService
+        });
         this.#socketFile = new ControlSocketFile(options.xdgRuntimeDir);
     }
 
@@ -57,185 +41,60 @@ export class ControlServer {
     }
 
     get config(): ControlConfig | undefined {
-        return this.#config;
+        return this.#state.config;
     }
 
     async start(): Promise<void> {
-        const config = await this.#configStore.readOrCreate(this.#homeDirectory);
-        const registry = this.#instanceRegistryBuilder.build(config);
+        if (this.#runtime !== undefined) return;
+        if (this.#startPromise !== undefined) return await this.#startPromise;
+        this.#startPromise = this.#start();
+        try {
+            await this.#startPromise;
+        } finally {
+            this.#startPromise = undefined;
+        }
+    }
 
+    async stop(): Promise<void> {
+        if (this.#stopPromise !== undefined) return await this.#stopPromise;
+        this.#stopPromise = this.#stop();
+        try {
+            await this.#stopPromise;
+        } finally {
+            this.#stopPromise = undefined;
+        }
+    }
+
+    async #start(): Promise<void> {
+        await this.#state.load();
         await this.#socketFile.ensureRuntimeDir();
-
-        this.#config = config;
-        this.#instanceRegistry = registry;
-        const setConfig = (nextConfig: ControlConfig) => {
-            this.#config = nextConfig;
-        };
-        const instanceGatewayHolder: { value?: McpInstanceGatewayControl } = {};
-        const instanceCreateService = new ControlInstanceCreateService({
-            configStore: this.#configStore,
-            getConfig: () => this.#requireConfig(),
-            getMcpHost: () => this.#mcpHost,
-            getMcpInstanceGateway: () => instanceGatewayHolder.value,
-            homeDirectory: this.#homeDirectory,
-            instanceRegistry: this.#instanceRegistry,
-            setConfig
-        });
-        const instanceGateway = new McpInstanceGatewayControl({
-            createService: instanceCreateService,
-            getConfig: () => this.#requireConfig(),
-            instanceRegistry: this.#instanceRegistry
-        });
-        instanceGatewayHolder.value = instanceGateway;
-        const homeDirectory = this.#homeDirectory ?? homedir();
-        const controlPaths = new ControlPathHome(homeDirectory);
-        this.#artifactHostBridge = new ArtifactHostBridge({
-            homeDirectory,
-            storageDir: join(controlPaths.artifactsDir, "host")
-        });
-        await this.#artifactHostBridge.initialize();
-        this.#artifactService = new ArtifactService({
-            resolveEndpoint: (name, authorityInstance) =>
-                this.#resolveArtifactEndpoint(name, authorityInstance),
-            shareUrl: (token) => artifactShareUrl(this.#requireConfig(), token),
-            storageDir: controlPaths.artifactsDir
-        });
-        await this.#artifactService.initialize();
-        this.#mcpHost = this.#mcpWiringService.wire(config, registry, {
-            contextFile: controlPaths.contextsFile,
-            gateway: withArtifactGateway(instanceGateway, this.#artifactService),
-            storageDir: controlPaths.oauthDir
-        });
-        if (this.#mcpHost !== undefined) {
-            new ArtifactHttpRoute(this.#artifactService, {
-                publicBaseUrl: config.mcp.publicBaseUrl
-            }).install(this.#mcpHost.server);
-        }
-        const reverseCredentialStore = new ReverseCredentialStore(this.#homeDirectory);
-        let reverseControlService: ReverseControlService | undefined;
-        if (config.instances.some((instance) => instance.provider === "reverse")) {
-            if (this.#mcpHost === undefined || config.mcp.publicBaseUrl === undefined) {
-                throw createError({
-                    code: errorCodes.controlConfigValidationFailed,
-                    message: "Reverse instances require enabled MCP HTTP host and mcp.publicBaseUrl.",
-                    retryable: false
-                });
-            }
-            reverseControlService = new ReverseControlService({
-                credentialStore: reverseCredentialStore,
-                instanceRegistry: this.#instanceRegistry,
-                publicBaseUrl: config.mcp.publicBaseUrl
-            });
-            this.#reverseGateway = new ReverseConnectionGateway({
-                credentialStore: reverseCredentialStore,
-                instanceRegistry: this.#instanceRegistry,
-                publicBaseUrl: config.mcp.publicBaseUrl
-            });
-            this.#reverseGateway.install(this.#mcpHost.server);
-            reverseControlService.setDisconnectHandler((instance) => this.#reverseGateway?.disconnect(instance));
-        }
-        this.#rpcServer = new ControlRpcServer({
-            artifactService: this.#artifactService,
-            configEditorService: new ControlConfigEditorService({
-                configStore: this.#configStore,
-                getConfig: () => this.#requireConfig(),
-                getMcpHost: () => this.#mcpHost,
-                getMcpInstanceGateway: () => instanceGateway,
-                homeDirectory: this.#homeDirectory,
-                instanceRegistry: this.#instanceRegistry,
-                setConfig
-            }),
-            getOAuthApprovals: () => this.#mcpHost?.oauthApprovals,
-            getMcpStatus: () =>
-                (this.#mcpHost as unknown as
-                    | { status(): import("@portable-devshell/shared").JsonValue }
-                    | undefined)?.status() ?? { running: false, reason: "MCP runtime is disabled." },
-            instanceCreateService,
-            instanceRegistry: this.#instanceRegistry,
-            reverseControlService,
-            shutdown: async () => {
-                await this.stop();
-            },
+        const runtime = await this.#runtimeFactory.create({
             restart: async () => {
                 await this.stop();
                 await this.start();
             },
-            socketPath: this.#socketFile.path
+            shutdown: async () => {
+                await this.stop();
+            },
+            socketPath: this.#socketFile.path,
+            state: this.#state
         });
-
-        await this.#mcpHost?.start();
-        await this.#rpcServer.start();
-    }
-
-    async stop(): Promise<void> {
-        this.#reverseGateway?.stop();
-        await this.#mcpHost?.stop();
-        await this.#artifactService?.stop();
-        await this.#instanceRegistry.stopOwned();
-        await this.#rpcServer?.stop();
-        this.#config = undefined;
-        this.#artifactService = undefined;
-        this.#artifactHostBridge = undefined;
-        this.#instanceRegistry = new InstanceRegistry([]);
-        this.#rpcServer = undefined;
-        this.#reverseGateway = undefined;
-        this.#mcpHost = undefined;
-    }
-
-    #resolveArtifactEndpoint(name: string, authorityInstance?: string) {
-        if (name !== "host") {
-            return this.#instanceRegistry.get(name)?.worker;
+        try {
+            await runtime.start();
+            this.#runtime = runtime;
+        } catch (error) {
+            this.#state.reset();
+            throw error;
         }
-        if (authorityInstance === undefined || this.#artifactHostBridge === undefined) {
-            return undefined;
+    }
+
+    async #stop(): Promise<void> {
+        const runtime = this.#runtime;
+        this.#runtime = undefined;
+        try {
+            await runtime?.stop();
+        } finally {
+            this.#state.reset();
         }
-        const authority = this.#instanceRegistry.get(authorityInstance);
-        if (authority === undefined) {
-            return undefined;
-        }
-        const snapshot = authority.worker.snapshot();
-        return this.#artifactHostBridge.endpointFor({
-            appendControlEvent: async (type, data) =>
-                await authority.worker.appendControlEvent(type, data),
-            authorityInstance,
-            provider: authority.provider,
-            securityMode: snapshot.effectiveSecurityMode ?? "disabled",
-            workspace: authority.workspace
-        });
     }
-
-    #requireConfig(): ControlConfig {
-        if (this.#config !== undefined) {
-            return this.#config;
-        }
-
-        throw createError({
-            code: errorCodes.controlConfigLoadFailed,
-            message: "Control config is not loaded.",
-            retryable: false
-        });
-    }
-}
-
-function artifactShareUrl(config: ControlConfig, token: string): string {
-    if (!config.mcp.enabled) {
-        throw createError({
-            code: errorCodes.controlConfigValidationFailed,
-            message: "Artifact sharing requires the MCP HTTP host to be enabled.",
-            retryable: false
-        });
-    }
-    const localHost = normalizeArtifactHttpHost(config.mcp.listenHost);
-    const base = new URL(config.mcp.publicBaseUrl ?? `http://${localHost}:${config.mcp.listenPort}`);
-    base.pathname = `${artifactShareRoute(base.toString())}/${encodeURIComponent(token)}`;
-    base.search = "";
-    base.hash = "";
-    return base.toString();
-}
-
-function normalizeArtifactHttpHost(host: string): string {
-    if (host === "0.0.0.0" || host === "::") {
-        return "127.0.0.1";
-    }
-    return host.includes(":") && !host.startsWith("[") ? `[${host}]` : host;
 }

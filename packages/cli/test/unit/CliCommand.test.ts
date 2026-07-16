@@ -23,9 +23,7 @@ test("CliMain handles control lifecycle commands and exit code mapping", async (
     };
 
     const cli = new CliMain({
-        createClient: () => {
-            throw new Error("client should not be used for control lifecycle commands");
-        },
+        createClients: () => testClients({}),
         createLifecycleManager: async () => lifecycle,
         stderr,
         stdout
@@ -44,7 +42,7 @@ test("CliMain handles control lifecycle commands and exit code mapping", async (
     assert.equal(stdout.flush(), "control: stopped\n");
 
     const failureCli = new CliMain({
-        createClient: () => ({
+        createClients: () => testClients({
             async callTool() {
                 throw new Error("unused");
             },
@@ -96,9 +94,7 @@ test("CliMain routes the tui command through the injected runtime", async () => 
     const stderr = createBuffer();
     let started = false;
     const cli = new CliMain({
-        createClient: () => {
-            throw new Error("client should not be used for tui");
-        },
+        createClients: () => testClients({}),
         createLifecycleManager: async () => {
             throw new Error("lifecycle should not be used for tui");
         },
@@ -119,7 +115,7 @@ test("CliMain renders structured remote errors in verbose mode", async () => {
     const stdout = createBuffer();
     const stderr = createBuffer();
     const cli = new CliMain({
-        createClient: () => ({
+        createClients: () => testClients({
             async callTool() {
                 throw new Error("unused");
             },
@@ -247,7 +243,7 @@ test("CliMain routes interactive instance.start relay output to stderr", async (
     };
 
     const cli = new CliMain({
-        createClient: () => client,
+        createClients: () => testClients(client),
         createLifecycleManager: async () => ({
             async logs() {
                 return "";
@@ -335,7 +331,7 @@ test("CliMain handles instance logs follow and tool call through injected client
     };
 
     const cli = new CliMain({
-        createClient: () => client,
+        createClients: () => testClients(client),
         createLifecycleManager: async () => ({
             async logs() {
                 return "";
@@ -437,7 +433,7 @@ test("CliMain follows instance logs without skipping events between initial pull
     };
 
     const cli = new CliMain({
-        createClient: () => client,
+        createClients: () => testClients(client),
         createLifecycleManager: async () => ({
             async logs() {
                 return "";
@@ -544,7 +540,7 @@ test("CliMain recovers instance log follow when subscribe returns stream.gap", a
     };
 
     const cli = new CliMain({
-        createClient: () => client,
+        createClients: () => testClients(client),
         createLifecycleManager: async () => ({
             async logs() {
                 return "";
@@ -650,7 +646,7 @@ test("CliMain recovers watch status when subscribe returns stream.gap", async ()
     };
 
     const cli = new CliMain({
-        createClient: () => client,
+        createClients: () => testClients(client),
         createLifecycleManager: async () => ({
             async logs() {
                 return "";
@@ -767,7 +763,7 @@ test("CliMain runs interactive instance create through control rpc", async () =>
     };
 
     const cli = new CliMain({
-        createClient: () => client,
+        createClients: () => testClients(client),
         createLifecycleManager: async () => ({
             async logs() {
                 return "";
@@ -830,7 +826,7 @@ test("CliMain reads and follows Todo through control RPC", async () => {
     let reads = 0;
     let closed = false;
     const cli = new CliMain({
-        createClient: () => ({
+        createClients: () => testClients({
             async getTodo() {
                 reads += 1;
                 return reads === 1
@@ -883,3 +879,53 @@ test("CliMain reads and follows Todo through control RPC", async () => {
     assert.equal(closed, true);
     assert.equal(stderr.flush(), "");
 });
+
+function testClients(client: Record<string, unknown>) {
+    const invoke = (name: string, args: unknown[]) => {
+        const method = client[name];
+        if (typeof method !== "function") {
+            throw new Error(`Test client method ${name} is not available.`);
+        }
+        return Reflect.apply(method, client, args) as unknown;
+    };
+    return {
+        artifact: {
+            cancelTransfer: (...args: unknown[]) => invoke("cancelTransfer", args),
+            createShare: (...args: unknown[]) => invoke("createShare", args),
+            getTransfer: (...args: unknown[]) => invoke("getTransfer", args),
+            listShares: (...args: unknown[]) => invoke("listShares", args),
+            listTransfers: (...args: unknown[]) => invoke("listTransfers", args),
+            revokeShare: (...args: unknown[]) => invoke("revokeShare", args),
+            startTransfer: (...args: unknown[]) => invoke("startTransfer", args)
+        },
+        instance: {
+            create: (...args: unknown[]) => invoke("createInstance", args),
+            createSchema: (...args: unknown[]) => invoke("getInstanceCreateSchema", args),
+            list: (...args: unknown[]) => invoke("listInstances", args),
+            validateCreate: (...args: unknown[]) => invoke("validateInstanceCreateDraft", args)
+        },
+        reverse: {
+            createCode: (...args: unknown[]) => invoke("createReverseDeviceCode", args),
+            revokeToken: (...args: unknown[]) => invoke("revokeReverseDeviceToken", args),
+            rotateToken: (...args: unknown[]) => invoke("rotateReverseDeviceToken", args)
+        },
+        runtime: {
+            refresh: (...args: unknown[]) => invoke("refreshStatus", args),
+            snapshot: (...args: unknown[]) => invoke("getSnapshot", args),
+            start: (...args: unknown[]) => invoke("startInstance", args),
+            stop: (...args: unknown[]) => invoke("stopInstance", args),
+            readLogs: (...args: unknown[]) => invoke("readLogs", args),
+            subscribe: (...args: unknown[]) => invoke("subscribe", args)
+        },
+        todo: {
+            get: (...args: unknown[]) => invoke("getTodo", args),
+            subscribe: (...args: unknown[]) => invoke(
+                typeof client.subscribeTodo === "function" ? "subscribeTodo" : "subscribe",
+                args
+            )
+        },
+        tool: {
+            call: (...args: unknown[]) => invoke("callTool", args)
+        }
+    } as never;
+}

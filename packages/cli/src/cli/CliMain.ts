@@ -2,8 +2,8 @@
 
 import { isCliEntrypoint } from "./CliEntrypoint.js";
 import { CliParser, type CliParsedCommand } from "./CliParser.js";
-import { executeArtifactCommand, type ArtifactCliClient } from "./artifact/ArtifactCommand.js";
-import { CliControlClient, type CliControlClientLike } from "./control/CliControlClient.js";
+import { executeArtifactCommand } from "./modules/artifact/ArtifactCommand.js";
+import { createClients as createControlClients, type Clients } from "./client/ClientComposition.js";
 import { CliCommandInstanceCreate } from "./command/instance/CliCommandInstanceCreate.js";
 import { CliCommandInstanceTodo } from "./command/instance/CliCommandInstanceTodo.js";
 import { CliCommandWatchLogs } from "./command/watch/CliCommandWatchLogs.js";
@@ -28,7 +28,7 @@ import { renderToolResult } from "./render/tool/CliRenderToolResult.js";
 import { InstanceCreateWizard } from "./wizard/InstanceCreateWizard.js";
 
 export interface CliMainOptions {
-    createClient?: () => CliControlClientLike;
+    createClients?: () => Clients;
     createLifecycleManager?: () => Promise<CliLifecycleManagerLike>;
     followEventLimit?: number;
     homeDirectory?: string;
@@ -47,7 +47,7 @@ export interface CliLifecycleManagerLike {
 }
 
 export class CliMain {
-    readonly #createClient: () => CliControlClientLike;
+    readonly #clients: Clients;
     readonly #createLifecycleManager?: () => Promise<CliLifecycleManagerLike>;
     readonly #exitMapper = new CliExitMapper();
     readonly #followEventLimit?: number;
@@ -60,7 +60,6 @@ export class CliMain {
     readonly #xdgRuntimeDir?: string;
 
     constructor(options: CliMainOptions = {}) {
-        this.#createClient = options.createClient ?? (() => new CliControlClient({ xdgRuntimeDir: this.#xdgRuntimeDir }));
         this.#createLifecycleManager = options.createLifecycleManager;
         this.#followEventLimit = options.followEventLimit;
         this.#runTui = options.runTui;
@@ -69,6 +68,7 @@ export class CliMain {
         this.#stdout = options.stdout ?? process.stdout;
         this.#homeDirectory = options.homeDirectory;
         this.#xdgRuntimeDir = options.xdgRuntimeDir;
+        this.#clients = options.createClients?.() ?? createControlClients({ xdgRuntimeDir: this.#xdgRuntimeDir });
     }
 
     async run(argv: readonly string[]): Promise<number> {
@@ -98,17 +98,18 @@ export class CliMain {
                 this.#stdout.write(renderControlLogs(await (await this.#lifecycle()).logs()));
                 return;
             case "artifact":
-                await executeArtifactCommand(command.args, requireArtifactClient(this.#createClient()), this.#stdout);
+                await executeArtifactCommand(command.args, this.#clients.artifact, this.#stdout);
                 return;
             case "tui":
                 await this.#startTui();
                 return;
             case "instance.list":
-                this.#stdout.write(renderInstanceList(await this.#createClient().listInstances()));
+                this.#stdout.write(renderInstanceList(await this.#clients.instance.list()));
                 return;
             case "instance.create": {
                 const result = await new CliCommandInstanceCreate().execute(
-                    this.#createClient(),
+                    this.#clients.instance,
+                    this.#clients.reverse,
                     new InstanceCreateWizard({
                         input: this.#stdin,
                         output: this.#stdout
@@ -123,28 +124,28 @@ export class CliMain {
             }
             case "instance.deviceCode":
                 this.#stdout.write(
-                    renderReverseDeviceCode(await this.#createClient().createReverseDeviceCode(command.instance))
+                    renderReverseDeviceCode(await this.#clients.reverse.createCode(command.instance))
                 );
                 return;
             case "instance.rotateToken":
                 this.#stdout.write(
-                    renderReverseTokenRotation(await this.#createClient().rotateReverseDeviceToken(command.instance))
+                    renderReverseTokenRotation(await this.#clients.reverse.rotateToken(command.instance))
                 );
                 return;
             case "instance.revokeToken":
                 this.#stdout.write(
-                    renderReverseTokenRevocation(await this.#createClient().revokeReverseDeviceToken(command.instance))
+                    renderReverseTokenRevocation(await this.#clients.reverse.revokeToken(command.instance))
                 );
                 return;
             case "instance.status":
                 this.#stdout.write(
-                    renderInstanceSnapshot((await this.#createClient().getSnapshot(command.instance)).snapshot)
+                    renderInstanceSnapshot((await this.#clients.runtime.snapshot(command.instance)).snapshot)
                 );
                 return;
             case "instance.start":
                 this.#stdout.write(
                     renderInstanceSnapshot(
-                        await this.#createClient().startInstance(command.instance, {
+                        await this.#clients.runtime.start(command.instance, {
                             input: this.#stdin,
                             output: this.#stderr
                         })
@@ -152,12 +153,12 @@ export class CliMain {
                 );
                 return;
             case "instance.stop":
-                this.#stdout.write(renderInstanceSnapshot(await this.#createClient().stopInstance(command.instance)));
+                this.#stdout.write(renderInstanceSnapshot(await this.#clients.runtime.stop(command.instance)));
                 return;
             case "instance.logs":
                 if (command.follow) {
                     await new CliCommandWatchLogs().execute(
-                        this.#createClient(),
+                        this.#clients.runtime,
                         command.instance,
                         async (entries) => {
                             this.#stdout.write(renderInstanceLogs(entries));
@@ -167,11 +168,11 @@ export class CliMain {
                     return;
                 }
 
-                this.#stdout.write(renderInstanceLogs(await this.#createClient().readLogs(command.instance)));
+                this.#stdout.write(renderInstanceLogs(await this.#clients.runtime.readLogs(command.instance)));
                 return;
             case "instance.todo":
                 await new CliCommandInstanceTodo().execute(
-                    this.#createClient(),
+                    this.#clients.todo,
                     command.instance,
                     command.follow,
                     async (todo) => {
@@ -183,12 +184,12 @@ export class CliMain {
             case "instance.call":
                 this.#stdout.write(renderToolCall(command.instance, command.toolName));
                 this.#stdout.write(
-                    renderToolResult(await this.#createClient().callTool(command.instance, command.toolName, command.input))
+                    renderToolResult(await this.#clients.tool.call(command.instance, command.toolName, command.input))
                 );
                 return;
             case "watch.logs":
                 await new CliCommandWatchLogs().execute(
-                    this.#createClient(),
+                    this.#clients.runtime,
                     command.instance,
                     async (entries) => {
                         this.#stdout.write(renderInstanceLogs(entries));
@@ -198,7 +199,7 @@ export class CliMain {
                 return;
             case "watch.status":
                 await new CliCommandWatchStatus().execute(
-                    this.#createClient(),
+                    this.#clients.runtime,
                     command.instance,
                     async (snapshot) => {
                         this.#stdout.write(renderInstanceSnapshot(snapshot));
@@ -214,11 +215,12 @@ export class CliMain {
             return await this.#createLifecycleManager();
         }
 
-        const imported = (await import("@portable-devshell/control")) as {
-            ControlLifecycleManager: new (options?: { homeDirectory?: string; xdgRuntimeDir?: string }) => CliLifecycleManagerLike;
-        };
-
-        return new imported.ControlLifecycleManager({
+        const [lifecycle, control] = await Promise.all([
+            import("@portable-devshell/shared"),
+            import("@portable-devshell/control")
+        ]);
+        return new lifecycle.ControlLifecycleManager({
+            daemonModulePath: control.controlDaemonModulePath(),
             homeDirectory: this.#homeDirectory,
             xdgRuntimeDir: this.#xdgRuntimeDir
         });
@@ -261,19 +263,4 @@ function splitGlobalFlags(argv: readonly string[]): { commandArgs: string[]; deb
     }
 
     return { commandArgs, debug, verbose };
-}
-
-function requireArtifactClient(client: CliControlClientLike): ArtifactCliClient {
-    if (
-        client.cancelArtifactTransfer === undefined ||
-        client.createArtifactShare === undefined ||
-        client.getArtifactTransfer === undefined ||
-        client.listArtifactShares === undefined ||
-        client.listArtifactTransfers === undefined ||
-        client.revokeArtifactShare === undefined ||
-        client.startArtifactTransfer === undefined
-    ) {
-        throw new Error("Artifact control methods are unavailable in this CLI client.");
-    }
-    return client as CliControlClientLike & ArtifactCliClient;
 }

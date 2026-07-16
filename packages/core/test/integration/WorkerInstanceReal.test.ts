@@ -8,8 +8,6 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 import {
-    FrameReader,
-    FrameWriter,
     asInstanceName,
     asWorkspacePath,
     errorCodes,
@@ -19,6 +17,8 @@ import {
     LocalWorkerTransport,
     WorkerBinary,
     WorkerInstanceFactory,
+    WorkerRpcFrameReader,
+    WorkerRpcFrameWriter,
     type WorkerCommandResult,
     type WorkerCommandTransport,
     type WorkerRpcResponseEnvelope
@@ -725,7 +725,7 @@ function createWorkerInstanceHarness(): {
         | {
               exitResolve?: (value: { code: number | null; signal: NodeJS.Signals | null }) => void;
               stdout: PassThrough;
-              writer: FrameWriter;
+              writer: WorkerRpcFrameWriter;
           }
         | undefined;
 
@@ -759,8 +759,8 @@ function createWorkerInstanceHarness(): {
             const stdout = new PassThrough();
             const stdin = new PassThrough();
             const stderr = new PassThrough();
-            const reader = new FrameReader();
-            const writer = new FrameWriter(stdout);
+            const reader = new WorkerRpcFrameReader();
+            const writer = new WorkerRpcFrameWriter(stdout);
             let exitResolve: ((value: { code: number | null; signal: NodeJS.Signals | null }) => void) | undefined;
 
             stdin.on("data", (chunk: Uint8Array) => {

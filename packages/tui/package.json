@@ -22,8 +22,8 @@
         "string-width": "^7.2.0"
     },
     "scripts": {
-        "build": "tsc -b --force",
+        "build": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && tsc -b --force",
         "typecheck": "tsc --noEmit -p tsconfig.json",
-        "test": "tsc -b --force && node --import ../mcp/test/RegisterWorkspacePackages.mjs --test test/unit/*.test.ts test/integration/*.test.ts"
+        "test": "pnpm --filter @portable-devshell/control build && pnpm run build && node --import ../mcp/test/RegisterWorkspacePackages.mjs --test test/unit/*.test.ts test/integration/*.test.ts"
     }
 }

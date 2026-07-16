@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { InstanceConfigMapper } from "../../dist/index.js";
+import { InstanceFactory } from "../../dist/index.js";
 
 test("instance config mapper passes effective security mode, worker env, and approval policy into runtime config", () => {
     let capturedConfig: Record<string, unknown> | undefined;
-    const mapper = new InstanceConfigMapper({
+    const mapper = new InstanceFactory({
         workerInstanceFactory: {
             create(config: unknown) {
                 capturedConfig = config as Record<string, unknown>;

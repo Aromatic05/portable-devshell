@@ -10,10 +10,9 @@ import {
     ControlInstanceTomlCodec,
     ControlConfigTomlCodec,
     ControlConfigValidator,
-    ControlPathHome,
-    ControlPathRuntime,
     createDefaultControlConfig
 } from "../../dist/index.js";
+import { ControlPathHome, ControlPathRuntime } from "@portable-devshell/shared";
 
 const fixturesDir = fileURLToPath(new URL("../fixtures/", import.meta.url));
 

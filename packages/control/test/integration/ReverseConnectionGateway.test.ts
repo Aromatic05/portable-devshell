@@ -6,8 +6,10 @@ import test from "node:test";
 
 import { WorkerInstanceFactory, WorkerRpcInboundConnector } from "@portable-devshell/core";
 import { McpHostHttpServer } from "@portable-devshell/mcp";
-import { FrameCodec, asInstanceName, asWorkspacePath, type JsonValue } from "@portable-devshell/shared";
+import { asInstanceName, asWorkspacePath, type JsonValue } from "@portable-devshell/shared";
 import WebSocket from "ws";
+
+import { ReverseRpcFrameCodec as FrameCodec } from "../../dist/modules/reverse/ReverseRpcFrameCodec.js";
 
 import {
     InstanceRegistry,

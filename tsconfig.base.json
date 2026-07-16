@@ -4,14 +4,28 @@
         "module": "NodeNext",
         "moduleResolution": "NodeNext",
         "paths": {
-            "@portable-devshell/shared": ["./packages/shared/dist/index.d.ts"],
-            "@portable-devshell/core": ["./packages/core/dist/index.d.ts"],
-            "@portable-devshell/control": ["./packages/control/dist/index.d.ts"],
-            "@portable-devshell/mcp": ["./packages/mcp/dist/index.d.ts"],
-            "@portable-devshell/cli": ["./packages/cli/dist/index.d.ts"],
-            "@portable-devshell/tui": ["./packages/tui/dist/index.d.ts"]
+            "@portable-devshell/shared": [
+                "./packages/shared/dist/index.d.ts"
+            ],
+            "@portable-devshell/core": [
+                "./packages/core/dist/index.d.ts"
+            ],
+            "@portable-devshell/control": [
+                "./packages/control/dist/index.d.ts"
+            ],
+            "@portable-devshell/mcp": [
+                "./packages/mcp/dist/index.d.ts"
+            ],
+            "@portable-devshell/cli": [
+                "./packages/cli/dist/index.d.ts"
+            ],
+            "@portable-devshell/tui": [
+                "./packages/tui/dist/index.d.ts"
+            ]
         },
-        "types": ["node"],
+        "types": [
+            "node"
+        ],
         "strict": true,
         "declaration": true,
         "declarationMap": true,

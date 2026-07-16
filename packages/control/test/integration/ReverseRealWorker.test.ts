@@ -1,21 +1,30 @@
 import assert from "node:assert/strict";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
-import { createConnection, createServer } from "node:net";
+import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { FrameReader, FrameWriter, type JsonValue } from "@portable-devshell/shared";
+import {
+    Channel,
+    Codec,
+    PrefixRoute,
+    asInstanceName,
+    createError,
+    type Destination,
+    type Event,
+    type JsonValue
+} from "@portable-devshell/shared";
 
 import { ControlServer } from "../../dist/control/ControlServer.js";
 import {
     ControlConfigTomlCodec,
     ControlInstanceTomlCodec
-} from "../../dist/control/config/codec/ConfigTomlCodec.js";
-import { ControlPathHome } from "../../dist/control/path/ControlPathHome.js";
-import { ReverseCredentialStore } from "../../dist/reverse/ReverseCredentialStore.js";
+} from "../../dist/modules/config/config/codec/ConfigTomlCodec.js";
+import { ControlPathHome } from "@portable-devshell/shared";
+import { ReverseCredentialStore } from "../../dist/modules/reverse/ReverseCredentialStore.js";
 
 test("real Rust reverse worker connects to the TS gateway and executes a tool call", async (t) => {
     const homeDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-reverse-real-home-"));
@@ -121,27 +130,29 @@ test("real Rust reverse worker connects to the TS gateway and executes a tool ca
     });
 
     await waitUntil(async () => {
-        const snapshot = await request(server.socketPath, "instance.getSnapshot", {
-            instance: "reverse-test",
-            kind: "instance"
-        });
+        const snapshot = await request(
+            server.socketPath,
+            "runtime.snapshot",
+            asInstanceName("reverse-test")
+        );
         return snapshot.snapshot.ready === true && snapshot.snapshot.reverse?.transport === "wss";
     }, () => `worker stdout:\n${workerStdout}\nworker stderr:\n${workerStderr}`);
 
     const result = await request(
         server.socketPath,
-        "instance.callTool",
-        { instance: "reverse-test", kind: "instance" },
+        "tool.call",
+        asInstanceName("reverse-test"),
         { input: { command: "pwd && printf ' reverse-real-worker'" }, toolName: "bash_run" }
     );
     assert.equal(result.exitCode, 0);
     assert.match(result.stdout, /reverse-real-worker/u);
     assert.match(result.stdout, new RegExp(workspace.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"), "u"));
 
-    const stopped = await request(server.socketPath, "instance.stop", {
-        instance: "reverse-test",
-        kind: "instance"
-    });
+    const stopped = await request(
+        server.socketPath,
+        "runtime.stop",
+        asInstanceName("reverse-test")
+    );
     assert.equal(stopped.ready, false);
     await waitForExit(worker);
 });
@@ -199,53 +210,26 @@ async function waitForExit(child: ChildProcessWithoutNullStreams): Promise<void>
 
 async function request(
     socketPath: string,
-    method: string,
-    target: { kind: "control" } | { instance: string; kind: "instance" },
+    operation: Event["name"],
+    destination: Destination,
     params?: JsonValue
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 ): Promise<any> {
-    const socket = createConnection(socketPath);
-    const reader = new FrameReader();
-    const writer = new FrameWriter(socket);
-    await new Promise<void>((resolvePromise, rejectPromise) => {
-        socket.once("connect", resolvePromise);
-        socket.once("error", rejectPromise);
-    });
-    const identifyId = `identify-${Date.now()}-${Math.random()}`;
-    const requestId = `${method}-${Date.now()}-${Math.random()}`;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const response = new Promise<any>((resolvePromise, rejectPromise) => {
-        socket.on("data", (chunk: Uint8Array) => {
-            for (const frame of reader.push(chunk)) {
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                const envelope = frame as Record<string, any>;
-                if (envelope.type !== "response" || (envelope.id !== identifyId && envelope.id !== requestId)) {
-                    continue;
-                }
-                if (envelope.ok !== true) {
-                    socket.destroy();
-                    rejectPromise(
-                        new Error(
-                            `${envelope.error?.message ?? "request failed"}: ${JSON.stringify(envelope.error?.details ?? {})}`
-                        )
-                    );
-                    return;
-                }
-                if (envelope.id === requestId) {
-                    socket.destroy();
-                    resolvePromise(envelope.result);
-                }
-            }
+    const route = new PrefixRoute(
+        new Codec(await Channel.connect(socketPath), { local: "cli", remote: "server" }),
+        { requestIdPrefix: "cli" }
+    );
+    try {
+        const reply = await route.request({
+            destination,
+            name: operation,
+            ...(params === undefined ? {} : { payload: params })
         });
-        socket.once("error", rejectPromise);
-    });
-    await writer.write({
-        id: identifyId,
-        method: "control.identifyClient",
-        params: { clientKind: "cli" },
-        target: { kind: "control" },
-        type: "request"
-    } as unknown as JsonValue);
-    await writer.write({ id: requestId, method, params, target, type: "request" } as unknown as JsonValue);
-    return await response;
+        if (reply.event.error !== undefined) {
+            throw createError(reply.event.error);
+        }
+        return reply.event.payload;
+    } finally {
+        route.close();
+    }
 }

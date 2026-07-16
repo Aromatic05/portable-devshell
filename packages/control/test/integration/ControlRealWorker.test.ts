@@ -1,19 +1,28 @@
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
-import { createConnection } from "node:net";
 import { spawn } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { FrameReader, FrameWriter, type JsonValue } from "@portable-devshell/shared";
+import {
+    Channel,
+    Codec,
+    PrefixRoute,
+    asInstanceName,
+    createError,
+    ControlLifecycleManager,
+    ControlPathHome,
+    ControlPathRuntime,
+    type Destination,
+    type Event,
+    type JsonValue
+} from "@portable-devshell/shared";
 
-import { ControlLifecycleManager } from "../../dist/control/ControlLifecycleManager.js";
-import { ControlInstanceTomlCodec } from "../../dist/control/config/codec/ConfigTomlCodec.js";
-import { ControlConfigTomlCodec } from "../../dist/control/config/codec/ConfigTomlCodec.js";
-import { ControlPathHome } from "../../dist/control/path/ControlPathHome.js";
-import { ControlPathRuntime } from "../../dist/control/path/ControlPathRuntime.js";
+import { controlDaemonModulePath } from "../../dist/index.js";
+import { ControlInstanceTomlCodec } from "../../dist/modules/config/config/codec/ConfigTomlCodec.js";
+import { ControlConfigTomlCodec } from "../../dist/modules/config/config/codec/ConfigTomlCodec.js";
 
 if (process.env.PORTABLE_DEVSHELL_REAL_WORKER_CHILD !== "1") {
     test("control lifecycle smoke drives the frozen worker in an isolated process", async () => {
@@ -30,6 +39,7 @@ if (process.env.PORTABLE_DEVSHELL_REAL_WORKER_CHILD !== "1") {
     const homePaths = new ControlPathHome(homeDirectory);
     const runtimePaths = new ControlPathRuntime(xdgRuntimeDir);
     const manager = new ControlLifecycleManager({
+        daemonModulePath: controlDaemonModulePath(),
         homeDirectory,
         xdgRuntimeDir,
         waitTimeoutMs: 10_000
@@ -58,24 +68,24 @@ if (process.env.PORTABLE_DEVSHELL_REAL_WORKER_CHILD !== "1") {
     assert.equal(started.running, true);
     assert.equal(started.instanceCount, 1);
 
-    const listed = await request(runtimePaths.socketFile, "control.listInstances", { kind: "control" });
+    const listed = await request(runtimePaths.socketFile, "instance.list", "@control");
     assert.equal(Array.isArray(listed), true);
     assert.equal(listed[0]?.name, "aromatic-pc");
     assert.equal(listed[0]?.snapshot.ready, false);
     assert.equal(listed[0]?.snapshot.daemonState, "stopped");
 
-    const instanceStarted = await request(runtimePaths.socketFile, "instance.start", { instance: "aromatic-pc", kind: "instance" });
+    const instanceStarted = await request(runtimePaths.socketFile, "runtime.start", asInstanceName("aromatic-pc"));
     assert.equal(instanceStarted.ready, true);
 
-    const snapshot = await request(runtimePaths.socketFile, "instance.getSnapshot", { instance: "aromatic-pc", kind: "instance" });
+    const snapshot = await request(runtimePaths.socketFile, "runtime.snapshot", asInstanceName("aromatic-pc"));
     assert.equal(snapshot.snapshot.ready, true);
     assert.equal(snapshot.snapshot.name, "aromatic-pc");
     assert.ok(snapshot.lastSeq >= 1);
 
     const toolCall = await request(
         runtimePaths.socketFile,
-        "instance.callTool",
-        { instance: "aromatic-pc", kind: "instance" },
+        "tool.call",
+        asInstanceName("aromatic-pc"),
         { input: { command: "pwd && printf ' portable-devshell-control'" }, toolName: "bash_run" }
     );
     assert.equal(toolCall.exitCode, 0);
@@ -84,8 +94,8 @@ if (process.env.PORTABLE_DEVSHELL_REAL_WORKER_CHILD !== "1") {
 
     const logs = await request(
         runtimePaths.socketFile,
-        "instance.readLogs",
-        { instance: "aromatic-pc", kind: "instance" },
+        "runtime.readLogs",
+        asInstanceName("aromatic-pc"),
         { fromSeq: 1 }
     );
     assert.equal(Array.isArray(logs), true);
@@ -93,8 +103,8 @@ if (process.env.PORTABLE_DEVSHELL_REAL_WORKER_CHILD !== "1") {
 
     const toolCalls = await request(
         runtimePaths.socketFile,
-        "instance.readToolCalls",
-        { instance: "aromatic-pc", kind: "instance" },
+        "tool.listCalls",
+        asInstanceName("aromatic-pc"),
         { limit: 1, status: "completed", toolName: "bash_run" }
     );
     assert.equal(Array.isArray(toolCalls), true);
@@ -105,7 +115,7 @@ if (process.env.PORTABLE_DEVSHELL_REAL_WORKER_CHILD !== "1") {
     assert.equal(typeof toolCalls[0]?.stdoutBytes, "number");
     assert.equal(toolCalls[0]?.termination, "exited");
 
-    const instanceStopped = await request(runtimePaths.socketFile, "instance.stop", { instance: "aromatic-pc", kind: "instance" });
+    const instanceStopped = await request(runtimePaths.socketFile, "runtime.stop", asInstanceName("aromatic-pc"));
     assert.equal(instanceStopped.ready, false);
 
     const auditDatabase = await stat(join(homeDirectory, ".devshell", "aromatic-pc", "control-worker", "audit.sqlite3"));
@@ -221,64 +231,51 @@ function normalizeArch(arch: string): string {
 
 async function request(
     socketPath: string,
-    method: string,
-    target: { kind: "control" } | { instance: string; kind: "instance" },
+    operation: Event["name"],
+    destination: Destination,
     params?: JsonValue,
     clientKind: "cli" | "tui" = "cli"
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 ): Promise<any> {
-    const socket = createConnection(socketPath);
-    const reader = new FrameReader();
-    const writer = new FrameWriter(socket);
-
-    await new Promise<void>((resolve, reject) => {
-        socket.once("connect", resolve);
-        socket.once("error", reject);
-    });
-
-    const identifyId = `identify-${method}-${Date.now()}`;
-    const requestId = `${method}-${Date.now()}-request`;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const response = new Promise<any>((resolve, reject) => {
-        socket.on("data", (chunk: Uint8Array) => {
-            for (const frame of reader.push(chunk)) {
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                const envelope = frame as Record<string, any>;
-
-                if (envelope.type !== "response" || (envelope.id !== identifyId && envelope.id !== requestId)) {
-                    continue;
+    const route = new PrefixRoute(
+        new Codec(await Channel.connect(socketPath), { local: clientKind, remote: "server" }),
+        { requestIdPrefix: clientKind }
+    );
+    try {
+        if (operation === "runtime.start") {
+            const acknowledgement = await route.openStream({
+                destination,
+                name: operation,
+                ...(params === undefined ? {} : { payload: params })
+            });
+            if (acknowledgement.event.error !== undefined) {
+                throw createError(acknowledgement.event.error);
+            }
+            while (true) {
+                const event = (await route.nextStreamFrame()).event;
+                if (event.name === "stream.completed") {
+                    return event.payload;
                 }
-
-                if (envelope.ok !== true) {
-                    socket.destroy();
-                    reject(new Error(`${envelope.error?.message ?? "request failed"}: ${JSON.stringify(envelope.error?.details ?? {})}`));
-                    return;
-                }
-
-                if (envelope.id === requestId) {
-                    socket.destroy();
-                    resolve(envelope.result);
+                if (event.name === "stream.cancelled") {
+                    throw createError(event.error ?? {
+                        code: "control.requestFailed",
+                        message: "runtime.start was cancelled",
+                        retryable: false
+                    });
                 }
             }
+        }
+
+        const reply = await route.request({
+            destination,
+            name: operation,
+            ...(params === undefined ? {} : { payload: params })
         });
-        socket.once("error", reject);
-    });
-
-    await writer.write({
-        id: identifyId,
-        method: "control.identifyClient",
-        params: { clientKind },
-        target: { kind: "control" },
-        type: "request"
-    } as unknown as JsonValue);
-
-    await writer.write({
-        id: requestId,
-        method,
-        params,
-        target,
-        type: "request"
-    } as unknown as JsonValue);
-
-    return await response;
+        if (reply.event.error !== undefined) {
+            throw createError(reply.event.error);
+        }
+        return reply.event.payload;
+    } finally {
+        route.close();
+    }
 }

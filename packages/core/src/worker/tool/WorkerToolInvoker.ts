@@ -2,7 +2,7 @@ import { Ajv2020, type AnySchema, type ErrorObject, type ValidateFunction } from
 
 import { createError, errorCodes, type JsonValue, type ToolCallContext } from "@portable-devshell/shared";
 
-import { WorkerRpcClient } from "../../worker/rpc/WorkerRpcClient.js";
+import { WorkerRpcClient } from "../rpc/WorkerRpcClient.js";
 import { WorkerToolCatalog } from "./WorkerToolCatalog.js";
 
 export class WorkerToolInvoker {

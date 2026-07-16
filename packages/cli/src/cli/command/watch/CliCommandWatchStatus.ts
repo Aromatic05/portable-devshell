@@ -1,25 +1,26 @@
-import type { CliControlClientLike } from "../../control/CliControlClient.js";
-import type { CliInstanceSnapshotEnvelope } from "../../control/CliControlStream.js";
+import type { InstanceSnapshot } from "@portable-devshell/shared";
+
+import type { RuntimeClient } from "../../modules/runtime/RuntimeClient.js";
 import { followControlStream } from "./CliCommandFollowStream.js";
 
 export class CliCommandWatchStatus {
     async execute(
-        client: CliControlClientLike,
+        runtime: RuntimeClient,
         instance: string,
-        onSnapshot: (snapshot: CliInstanceSnapshotEnvelope["snapshot"]) => Promise<void> | void,
+        onSnapshot: (snapshot: InstanceSnapshot) => Promise<void> | void,
         maxEvents?: number
     ): Promise<void> {
         await followControlStream({
             async loadFromSeq() {
-                const envelope = await client.getSnapshot(instance);
+                const envelope = await runtime.snapshot(instance);
                 await onSnapshot(envelope.snapshot);
                 return envelope.lastSeq + 1;
             },
             maxEvents,
             async onEvent() {
-                await onSnapshot((await client.refreshStatus(instance)).snapshot);
+                await onSnapshot((await runtime.refresh(instance)).snapshot);
             },
-            subscribe: (fromSeq) => client.subscribe(instance, fromSeq)
+            subscribe: (fromSeq) => runtime.subscribe(instance, fromSeq)
         });
     }
 }

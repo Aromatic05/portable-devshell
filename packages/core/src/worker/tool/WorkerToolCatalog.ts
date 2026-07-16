@@ -1,6 +1,6 @@
 import { createError, errorCodes, toolSchema, type ToolDefinition } from "@portable-devshell/shared";
 
-import type { WorkerToolDefinition } from "../../worker/protocol/WorkerProtocolClient.js";
+import type { WorkerToolDefinition } from "../protocol/WorkerProtocolClient.js";
 
 export class WorkerToolCatalog {
     #hasSchema = false;

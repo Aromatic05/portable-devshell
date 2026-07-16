@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { InstanceRegistryBuilder, McpEndpointConfigMapper, McpWiringService, createDefaultControlConfig } from "../../dist/index.js";
+import { InstanceRegistryFactory, McpEndpointFactory, McpRuntimeFactory, createDefaultControlConfig } from "../../dist/index.js";
 
 test("disabled instances are skipped and registry does not auto start workers", () => {
     const config = createDefaultControlConfig();
@@ -24,7 +24,7 @@ test("disabled instances are skipped and registry does not auto start workers", 
     );
     config.mcp.enabled = true;
 
-    const registry = new InstanceRegistryBuilder().build(config);
+    const registry = new InstanceRegistryFactory().build(config);
 
     assert.equal(registry.list().length, 1);
     assert.equal(registry.get("demo-disabled"), undefined);
@@ -42,12 +42,12 @@ test("mcp endpoint path is generated and wiring only builds host configuration",
         workspace: "/tmp/demo"
     });
 
-    const registry = new InstanceRegistryBuilder().build(config);
+    const registry = new InstanceRegistryFactory().build(config);
     const descriptor = registry.get("demo-local");
 
     assert.ok(descriptor !== undefined);
     assert.equal(descriptor.mcpPath, "/demo-local/mcp");
-    assert.deepEqual(new McpEndpointConfigMapper().map(descriptor), {
+    assert.deepEqual(new McpEndpointFactory().map(descriptor), {
         policy: {
             capabilities: ["read", "write", "execute"],
             groups: ["file", "bash", "artifact"]
@@ -57,7 +57,7 @@ test("mcp endpoint path is generated and wiring only builds host configuration",
         worker: descriptor.worker
     });
 
-    const host = new McpWiringService().wire(config, registry);
+    const host = new McpRuntimeFactory().wire(config, registry);
 
     assert.ok(host !== undefined);
     assert.ok(host.server);
@@ -66,7 +66,7 @@ test("mcp endpoint path is generated and wiring only builds host configuration",
 
 test("stopOwned only stops workers started by this control and keeps failed ownership", async () => {
     const stopped: string[] = [];
-    const registry = new (await import("../../dist/instance/registry/InstanceRegistry.js")).InstanceRegistry([
+    const registry = new (await import("../../dist/modules/instance/registry/InstanceRegistry.js")).InstanceRegistry([
         {
             tools: { capabilities: ["read", "write", "execute"], groups: ["file", "bash", "artifact"] },
             enabled: true,

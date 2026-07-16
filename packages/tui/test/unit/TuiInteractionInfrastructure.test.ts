@@ -574,18 +574,16 @@ test("audit truncates input and output previews while opening complete structure
     const output = { complete: true, files: [{ path: "src/example.ts", diff: "+new\n".repeat(40) }] };
 
     harness.store.applyEvent({
-        event: "toolCall.queued",
+        destination: "alpha" as never,
+        name: "toolCall.queued",
         payload: { at: "2026-07-14T00:00:00.000Z", data: { callId: "live-patch", ctxId: "ctx-live-patch", input: { input: patch }, inputSummary: JSON.stringify({ input: patch }), source: "mcp", startedAt: "2026-07-14T00:00:00.000Z", status: "queued", toolName: "file_edit" } },
-        seq: 21,
-        target: { instance: "alpha" as never, kind: "instance" },
-        type: "event"
+        seq: 21
     });
     harness.store.applyEvent({
-        event: "toolCall.completed",
+        destination: "alpha" as never,
+        name: "toolCall.completed",
         payload: { at: "2026-07-14T00:00:01.000Z", data: { callId: "live-patch", completedAt: "2026-07-14T00:00:01.000Z", output, source: "mcp", startedAt: "2026-07-14T00:00:00.000Z", status: "completed", toolName: "file_edit" } },
-        seq: 22,
-        target: { instance: "alpha" as never, kind: "instance" },
-        type: "event"
+        seq: 22
     });
     await harness.press("5");
 

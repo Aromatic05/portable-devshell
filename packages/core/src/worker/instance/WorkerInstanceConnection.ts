@@ -12,9 +12,9 @@ import {
 import type { InstanceEventInput } from "../../log/LogEventBuffer.js";
 import type { InstanceStateUpdate } from "../../instance/state/InstanceStateMachine.js";
 import type { InstanceSnapshot } from "../../instance/state/InstanceStateSnapshot.js";
-import type { WorkerProtocolClient, WorkerHandshakeResult } from "../../worker/protocol/WorkerProtocolClient.js";
-import type { WorkerRpcBridge } from "../../worker/rpc/WorkerRpcBridge.js";
-import type { WorkerRpcChannel } from "../../worker/rpc/WorkerRpcChannel.js";
+import type { WorkerProtocolClient, WorkerHandshakeResult } from "../protocol/WorkerProtocolClient.js";
+import type { WorkerRpcBridge } from "../rpc/WorkerRpcBridge.js";
+import type { WorkerRpcChannel } from "../rpc/WorkerRpcChannel.js";
 import type { WorkerToolCatalog } from "../tool/WorkerToolCatalog.js";
 import type { ResolvedWorkerInstanceConfig } from "./WorkerInstanceConfig.js";
 import { getErrorCode, isKnownErrorCode, readReverseErrorMessage, wrapWorkerCommandError } from "./WorkerInstanceError.js";

@@ -29,6 +29,7 @@ export * from "./worker/rpc/WorkerRpcClient.js";
 export * from "./worker/rpc/WorkerRpcEnvelope.js";
 export * from "./worker/rpc/WorkerRpcInboundConnector.js";
 export * from "./worker/rpc/WorkerRpcError.js";
+export * from "./worker/rpc/WorkerRpcFrame.js";
 export * from "./worker/rpc/WorkerRpcProcessAdapter.js";
 export * from "./worker/rpc/WorkerRpcProcessChannel.js";
 export * from "./worker/target/WorkerTarget.js";

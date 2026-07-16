@@ -7,7 +7,7 @@ import { PassThrough } from "node:stream";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { FrameReader, FrameWriter, errorCodes, type JsonValue } from "@portable-devshell/shared";
+import { errorCodes, type JsonValue } from "@portable-devshell/shared";
 import {
     LocalWorkerTransport,
     WorkerBinary,
@@ -15,6 +15,8 @@ import {
     WorkerRpcBridge,
     WorkerRpcClient,
     WorkerRpcError,
+    WorkerRpcFrameReader,
+    WorkerRpcFrameWriter,
     workerRpcDisconnectedErrorCode,
     type WorkerCommandResult,
     type WorkerCommandTransport,
@@ -264,8 +266,8 @@ function createRpcHarness(options?: { slowMethods?: Set<string> }): {
     const stdout = new PassThrough();
     const stdin = new PassThrough();
     const stderr = new PassThrough();
-    const reader = new FrameReader();
-    const writer = new FrameWriter(stdout);
+    const reader = new WorkerRpcFrameReader();
+    const writer = new WorkerRpcFrameWriter(stdout);
     let spawnCount = 0;
     let exitResolve: ((value: { code: number | null; signal: NodeJS.Signals | null }) => void) | undefined;
     const methodWaiters = new Map<string, Array<() => void>>();

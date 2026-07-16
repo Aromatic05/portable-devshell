@@ -2,49 +2,38 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import type { WorkerInstance } from "@portable-devshell/core";
+import type { JsonValue, PrefixRouteContext, PrefixRouteStream } from "@portable-devshell/shared";
 
-import { StreamSubscriptionManager } from "../../dist/stream/StreamSubscriptionManager.js";
+import { RuntimeSubscriptionManager } from "../../dist/modules/runtime/RuntimeSubscriptionManager.js";
 
-test("StreamSubscriptionManager returns snapshot lastSeq and pushes sequenced events", async () => {
-    const manager = new StreamSubscriptionManager(5);
+test("RuntimeSubscriptionManager returns snapshot lastSeq and pushes sequenced events", async () => {
+    const manager = new RuntimeSubscriptionManager(5);
     const worker = new FakeWorker("alpha");
     await worker.start("/tmp/ws");
 
-    const sentEvents: Array<Record<string, unknown>> = [];
-    const connection = {
-        id: "conn-1",
-        async sendEvent(event: Record<string, unknown>) {
-            sentEvents.push(event);
-        }
-    } as unknown as {
-        id: string;
-        sendEvent: (event: Record<string, unknown>) => Promise<void>;
-    };
+    const harness = createStreamContext("conn-1", "subscribe-1");
 
-    const snapshot = (await manager.subscribe(
-        connection as never,
+    await manager.subscribe(
+        harness.context,
         "alpha",
         worker as unknown as WorkerInstance,
         1
-    )) as {
-        events: Array<{ seq: number; type: string }>;
-        lastSeq: number;
-    };
+    );
 
-    assert.equal(snapshot.lastSeq, 1);
-    assert.equal(snapshot.events[0]?.seq, 1);
+    assert.equal((harness.initialPayload as { lastSeq?: number })?.lastSeq, 1);
+    assert.equal((harness.initialPayload as { events?: Array<{ seq: number }> })?.events?.[0]?.seq, 1);
 
     worker.emit("toolCall.completed", { toolName: "bash_run" });
-    await waitFor(() => sentEvents.length === 1);
+    await waitFor(() => harness.events.length === 1);
 
-    assert.equal(sentEvents[0]?.seq, 2);
-    assert.equal(sentEvents[0]?.event, "toolCall.completed");
-    assert.equal((sentEvents[0]?.payload as { seq?: number }).seq, 2);
+    assert.equal(harness.events[0]?.seq, 2);
+    assert.equal(harness.events[0]?.name, "toolCall.completed");
+    assert.equal((harness.events[0]?.payload as { seq?: number }).seq, 2);
     manager.unsubscribeConnection("conn-1");
 });
 
-test("StreamSubscriptionManager returns stream.gap when fromSeq is unavailable", async () => {
-    const manager = new StreamSubscriptionManager(5);
+test("RuntimeSubscriptionManager returns stream.gap when fromSeq is unavailable", async () => {
+    const manager = new RuntimeSubscriptionManager(5);
     const worker = new FakeWorker("alpha");
     await worker.start("/tmp/ws");
     worker.emit("toolCall.completed", { toolName: "bash_run" });
@@ -52,10 +41,7 @@ test("StreamSubscriptionManager returns stream.gap when fromSeq is unavailable",
 
     await assert.rejects(
         manager.subscribe(
-            {
-                id: "conn-2",
-                async sendEvent() {}
-            } as never,
+            createStreamContext("conn-2", "subscribe-2").context,
             "alpha",
             worker as unknown as WorkerInstance,
             1
@@ -75,44 +61,71 @@ test("StreamSubscriptionManager returns stream.gap when fromSeq is unavailable",
     manager.unsubscribeConnection("conn-2");
 });
 
-test("StreamSubscriptionManager emits runtime stream.gap before cancelling the subscription", async () => {
-    const manager = new StreamSubscriptionManager(5);
+test("RuntimeSubscriptionManager emits a non-terminal runtime stream.gap", async () => {
+    const manager = new RuntimeSubscriptionManager(5);
     const worker = new FakeWorker("alpha");
     await worker.start("/tmp/ws");
 
-    const sentEvents: Array<Record<string, unknown>> = [];
-    const connection = {
-        id: "conn-3",
-        async sendEvent(event: Record<string, unknown>) {
-            sentEvents.push(event);
-        }
-    } as unknown as {
-        id: string;
-        sendEvent: (event: Record<string, unknown>) => Promise<void>;
-    };
+    const harness = createStreamContext("conn-3", "subscribe-3");
 
-    await manager.subscribe(connection as never, "alpha", worker as unknown as WorkerInstance, 1);
+    await manager.subscribe(harness.context, "alpha", worker as unknown as WorkerInstance, 1);
     worker.emit("toolCall.completed", { toolName: "bash_run" });
-    await waitFor(() => sentEvents.length === 1);
+    await waitFor(() => harness.events.length === 1);
 
     worker.emit("toolCall.completed", { toolName: "bash_run" });
     worker.dropBefore(4);
-    await waitFor(() => sentEvents.length === 3);
+    await waitFor(() => harness.events.length === 2);
 
-    assert.equal(sentEvents[1]?.event, "stream.gap");
-    assert.deepEqual(sentEvents[1]?.payload, {
+    assert.equal(harness.events[1]?.name, "stream.gap");
+    assert.deepEqual(harness.events[1]?.payload, {
         instance: "alpha",
         latestSeq: 3,
         oldestAvailableSeq: 4,
         requestedFromSeq: 3
     });
-    assert.equal(sentEvents[2]?.event, "stream.cancelled");
-    assert.deepEqual(sentEvents[2]?.payload, {
-        instance: "alpha",
-        reason: "gap"
-    });
     manager.unsubscribeConnection("conn-3");
 });
+
+function createStreamContext(connectionId: string, requestId: string): {
+    context: PrefixRouteContext;
+    events: Array<{ name: string; payload?: JsonValue; seq?: number }>;
+    initialPayload?: JsonValue;
+} {
+    const result: {
+        context: PrefixRouteContext;
+        events: Array<{ name: string; payload?: JsonValue; seq?: number }>;
+        initialPayload?: JsonValue;
+    } = {
+        context: undefined as unknown as PrefixRouteContext,
+        events: []
+    };
+    const stream: PrefixRouteStream = {
+        id: requestId,
+        async cancel() {},
+        async complete() {},
+        async emit(name, payload, seq) {
+            result.events.push({
+                name,
+                ...(payload === undefined ? {} : { payload }),
+                ...(seq === undefined ? {} : { seq })
+            });
+        }
+    };
+    result.context = {
+        afterReply() {},
+        connectionId,
+        destination: "alpha" as never,
+        module: "runtime",
+        async openStream(initialPayload) {
+            result.initialPayload = initialPayload;
+            return stream;
+        },
+        peer: "cli",
+        requestId,
+        signal: new AbortController().signal
+    };
+    return result;
+}
 
 class FakeWorker {
     readonly #name: string;

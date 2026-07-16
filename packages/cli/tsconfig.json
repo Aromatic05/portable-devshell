@@ -5,6 +5,18 @@
         "outDir": "./dist",
         "tsBuildInfoFile": "./dist/.tsbuildinfo"
     },
-    "include": ["src/**/*.ts"],
-    "references": [{ "path": "../shared" }, { "path": "../control" }, { "path": "../tui" }]
+    "include": [
+        "src/**/*.ts"
+    ],
+    "references": [
+        {
+            "path": "../shared"
+        },
+        {
+            "path": "../control"
+        },
+        {
+            "path": "../tui"
+        }
+    ]
 }
