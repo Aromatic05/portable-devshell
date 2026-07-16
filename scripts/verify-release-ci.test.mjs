@@ -57,6 +57,6 @@ test("release workflow requires the development CI gate before packaging any rel
     const workflow = await readFile(resolve(repositoryRoot, ".github", "workflows", "release.yml"), "utf8");
     assert.match(workflow, /verify-development-ci:/u);
     assert.match(workflow, /node \.\/scripts\/verify-release-ci\.mjs/u);
-    assert.match(workflow, /build-worker:\n\s+needs: verify-development-ci/u);
-    assert.match(workflow, /package-app:\n\s+needs: verify-development-ci/u);
+    assert.match(workflow, /build-worker:\r?\n\s+needs: verify-development-ci/u);
+    assert.match(workflow, /package-app:\r?\n\s+needs: verify-development-ci/u);
 });

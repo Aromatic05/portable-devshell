@@ -205,8 +205,18 @@ $hostTarget = switch ($architecture) {
     default { throw "不支持的 Windows CPU 架构：$architecture" }
 }
 
-$homeDirectory = [Environment]::GetFolderPath("UserProfile")
-$localAppData = [Environment]::GetFolderPath("LocalApplicationData")
+$homeDirectory = Get-EnvironmentValue "USERPROFILE" ([Environment]::GetFolderPath("UserProfile"))
+if ([string]::IsNullOrWhiteSpace($homeDirectory)) {
+    throw "无法确定当前用户目录；请设置 USERPROFILE。"
+}
+$localAppDataFallback = [Environment]::GetFolderPath("LocalApplicationData")
+if ([string]::IsNullOrWhiteSpace($localAppDataFallback)) {
+    $localAppDataFallback = Join-Path $homeDirectory "AppData\Local"
+}
+$localAppData = Get-EnvironmentValue "LOCALAPPDATA" $localAppDataFallback
+if ([string]::IsNullOrWhiteSpace($localAppData)) {
+    throw "无法确定本地应用数据目录；请设置 LOCALAPPDATA。"
+}
 $installRoot = Get-EnvironmentValue "PORTABLE_DEVSHELL_INSTALL_ROOT" (Join-Path $localAppData "portable-devshell")
 $binDirectory = Get-EnvironmentValue "PORTABLE_DEVSHELL_BIN_DIR" (Join-Path $homeDirectory ".local\bin")
 $devshellHome = Get-EnvironmentValue "PORTABLE_DEVSHELL_HOME" (Join-Path $homeDirectory ".devshell")
