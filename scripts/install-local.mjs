@@ -1,12 +1,23 @@
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
-import { chmod, copyFile, lstat, mkdir, readFile, rename, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, copyFile, lstat, mkdir, mkdtemp, readFile, readlink, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { delimiter, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { assertPackageBinFile, readPackageBinPath, writePortableApplicationManifest, tryReadPackageBinPath } from "./application-layout.mjs";
 
+const installStepTotal = 5;
+let installStep = 0;
+
+function beginStep(message) {
+    installStep += 1;
+    process.stdout.write(`\n[${installStep}/${installStepTotal}] ${message}\n`);
+}
+
+function writeDetail(message) {
+    process.stdout.write(`  ${message}\n`);
+}
 
 class WorkerReleaseIntegrityError extends Error {
     constructor(message) {
@@ -35,7 +46,7 @@ const stagingDirectory = resolve(installRoot, `.staging-${version}-${process.pid
 const backupDirectory = resolve(installRoot, `.backup-${version}-${process.pid}`);
 const currentLink = resolve(installRoot, "current");
 const commandLink = resolve(binDirectory, process.platform === "win32" ? "devshell.cmd" : "devshell");
-const targets = [
+const allTargets = [
     { key: "linux-x64", rustTarget: "x86_64-unknown-linux-musl" },
     { key: "linux-arm64", rustTarget: "aarch64-unknown-linux-musl" },
     { key: "darwin-x64", rustTarget: "x86_64-apple-darwin" },
@@ -43,33 +54,53 @@ const targets = [
     { key: "windows-x64", rustTarget: "x86_64-pc-windows-msvc" },
     { key: "windows-arm64", rustTarget: "aarch64-pc-windows-msvc" }
 ];
+const hostTarget = resolveHostTarget();
+const targets = allTargets.filter((target) => target.key === "linux-x64" || target.key === hostTarget);
 
 await rm(stagingDirectory, { force: true, recursive: true });
 await rm(backupDirectory, { force: true, recursive: true });
 await mkdir(installRoot, { mode: 0o700, recursive: true });
 
 try {
+    beginStep("检查安装环境");
+    writeDetail(`Node.js ${process.version}`);
+    writeDetail(`宿主平台 ${hostTarget}`);
+    writeDetail(`预装 Worker：${targets.map((target) => target.key).join(", ")}`);
+    writeDetail("其他平台将在首次连接时按需下载");
+
+    beginStep("构建并验证应用");
     runPnpm(["build"]);
     runPnpm(["--filter", "@portable-devshell/cli", "--prod", "deploy", stagingDirectory]);
     await writePortableApplicationManifest(stagingDirectory, { minimumNodeMajor: 24, version });
     const stagingCli = await assertPackageBinFile(await readPackageBinPath(stagingDirectory, "devshell"));
     if (process.platform !== "win32") await chmod(stagingCli.absolutePath, 0o755);
+    await assertCliStarts(stagingCli.absolutePath, "安装前验证失败");
+    writeDetail("CLI 入口和运行时依赖验证通过");
 
+    beginStep(`准备预装 Worker（${targets.length} 个）`);
     const installedWorkers = {};
     for (const target of targets) {
+        writeDetail(`准备 ${target.key}`);
         installedWorkers[target.key] = await installWorkerRemoteFirst(target);
     }
     await activateHostWorker();
 
     await writeFile(
         resolve(stagingDirectory, "portable-devshell-install.json"),
-        `${JSON.stringify({ releaseTag, version, workers: installedWorkers }, null, 2)}\n`,
+        `${JSON.stringify({
+            releaseTag,
+            version,
+            workerReleaseDirectoryUrl: `${releaseBaseUrl}/${releaseTag}`,
+            workers: installedWorkers
+        }, null, 2)}\n`,
         { mode: 0o600 }
     );
 
+    beginStep("停止旧版本并切换安装");
     await stopInstalledControl();
     await mkdir(versionsDirectory, { mode: 0o700, recursive: true });
 
+    const previousActivation = await captureApplicationActivation();
     if (await pathExists(versionDirectory)) {
         await rename(versionDirectory, backupDirectory);
     }
@@ -77,23 +108,32 @@ try {
     try {
         await rename(stagingDirectory, versionDirectory);
         await activateApplication(versionDirectory);
+        beginStep("验证安装结果");
+        await assertInstalledCommandStarts();
     } catch (error) {
         await rm(versionDirectory, { force: true, recursive: true });
         if (await pathExists(backupDirectory)) {
             await rename(backupDirectory, versionDirectory);
         }
+        await restoreApplicationActivation(previousActivation);
         throw error;
     }
 
     await rm(backupDirectory, { force: true, recursive: true });
+    writeDetail("已安装命令可以正常启动");
     process.stdout.write(
         [
+            "",
             `已安装 portable-devshell ${version}。`,
             `命令：${commandLink}`,
-            `Worker：${targets.map((target) => target.key).join(", ")}`,
+            `已预装 Worker：${targets.map((target) => target.key).join(", ")}`,
+            "其他 Worker：首次连接对应平台时按需下载并校验",
+            "下一步：",
+            `  ${commandLink} start`,
+            `  ${commandLink} tui`,
             process.env.PATH?.split(delimiter).includes(binDirectory)
                 ? ""
-                : `提示：${binDirectory} 不在 PATH 中，请将它加入 shell 配置。`
+                : `PATH 尚未包含 ${binDirectory}，请将它加入 shell 配置。`
         ]
             .filter(Boolean)
             .join("\n") + "\n"
@@ -133,7 +173,9 @@ async function installWorkerRemoteFirst(target) {
 async function installReleaseWorker(target) {
     const assetName = workerAssetName(target);
     const releaseDirectory = `${releaseBaseUrl}/${releaseTag}`;
+    writeDetail(`下载 ${assetName}.sha256`);
     const expectedSha = await fetchSha256(`${releaseDirectory}/${assetName}.sha256`);
+    writeDetail(`下载 ${assetName}`);
     const payload = Buffer.from(await fetchBytes(`${releaseDirectory}/${assetName}`));
     const actualSha = createHash("sha256").update(payload).digest("hex");
     if (actualSha !== expectedSha) {
@@ -220,6 +262,83 @@ async function activateApplication(versionDirectory) {
     } else {
         await replaceSymlink(currentLink, `versions/${version}`);
         await replaceSymlink(commandLink, resolve(currentLink, cli.relativePath));
+    }
+}
+
+async function captureApplicationActivation() {
+    return {
+        commandContent: process.platform === "win32" ? await readFileIfExists(commandLink) : undefined,
+        commandTarget: process.platform === "win32" ? undefined : await readlinkIfExists(commandLink),
+        currentTarget: await readlinkIfExists(currentLink)
+    };
+}
+
+async function restoreApplicationActivation(previous) {
+    await rm(currentLink, { force: true, recursive: process.platform === "win32" });
+    await rm(commandLink, { force: true });
+    if (previous.currentTarget !== undefined) {
+        await symlink(previous.currentTarget, currentLink, process.platform === "win32" ? "junction" : undefined);
+    }
+    if (process.platform === "win32") {
+        if (previous.commandContent !== undefined) {
+            await writeFile(commandLink, previous.commandContent, "utf8");
+        }
+    } else if (previous.commandTarget !== undefined) {
+        await symlink(previous.commandTarget, commandLink);
+    }
+}
+
+async function assertCliStarts(cliPath, failureLabel) {
+    await assertCommandStarts(process.execPath, [cliPath, "status"], false, failureLabel);
+}
+
+async function assertInstalledCommandStarts() {
+    await assertCommandStarts(commandLink, ["status"], process.platform === "win32", "安装结果验证失败");
+}
+
+async function assertCommandStarts(command, args, shell, failureLabel) {
+    const smokeRoot = await mkdtemp(join(tmpdir(), "portable-devshell-install-smoke-"));
+    const smokeRuntime = resolve(smokeRoot, "runtime");
+    try {
+        await mkdir(smokeRuntime, { recursive: true });
+        const result = spawnSync(command, args, {
+            cwd: smokeRoot,
+            encoding: "utf8",
+            env: {
+                ...process.env,
+                HOME: smokeRoot,
+                USERPROFILE: smokeRoot,
+                LOCALAPPDATA: resolve(smokeRoot, "AppData", "Local"),
+                PORTABLE_DEVSHELL_HOME: resolve(smokeRoot, ".devshell"),
+                XDG_RUNTIME_DIR: smokeRuntime
+            },
+            shell,
+            windowsHide: true
+        });
+        const output = `${result.stdout ?? ""}${result.stderr ?? ""}`;
+        if (result.error !== undefined || result.status !== 0 || !output.includes("control: stopped")) {
+            throw new Error(`${failureLabel}：CLI 无法正常执行 status。\n${result.error?.stack ?? output}`);
+        }
+    } finally {
+        await rm(smokeRoot, { force: true, recursive: true });
+    }
+}
+
+async function readlinkIfExists(path) {
+    try {
+        return await readlink(path);
+    } catch (error) {
+        if (error?.code === "ENOENT") return undefined;
+        throw error;
+    }
+}
+
+async function readFileIfExists(path) {
+    try {
+        return await readFile(path, "utf8");
+    } catch (error) {
+        if (error?.code === "ENOENT") return undefined;
+        throw error;
     }
 }
 
@@ -365,7 +484,7 @@ async function fetchSha256(url) {
 }
 
 async function fetchBytes(url) {
-    const response = await fetch(url);
+    const response = await fetch(url, { signal: AbortSignal.timeout(120_000) });
     if (!response.ok) {
         throw new Error(`Download failed with HTTP ${response.status}: ${url}`);
     }

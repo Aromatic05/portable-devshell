@@ -1,6 +1,18 @@
 #!/bin/sh
 set -eu
 
+step_total=6
+step_index=0
+
+step() {
+    step_index=$((step_index + 1))
+    printf '\n[%s/%s] %s\n' "$step_index" "$step_total" "$1"
+}
+
+detail() {
+    printf '  %s\n' "$1"
+}
+
 require_command() {
     if ! command -v "$1" >/dev/null 2>&1; then
         echo "缺少必需命令：$1" >&2
@@ -9,7 +21,16 @@ require_command() {
 }
 
 download() {
-    curl --fail --location --silent --show-error "$1" --output "$2"
+    url=$1
+    destination=$2
+    label=$3
+    detail "下载 $label"
+    curl_options="--fail --location --show-error --connect-timeout 15 --retry 3 --retry-delay 1 --retry-connrefused --speed-limit 1024 --speed-time 30"
+    if [ -t 2 ]; then
+        curl $curl_options --progress-bar "$url" --output "$destination"
+    else
+        curl $curl_options --silent "$url" --output "$destination"
+    fi
 }
 
 read_sha() {
@@ -63,6 +84,44 @@ if (relative === "" || relative === ".." || relative.startsWith(`..${path.sep}`)
 }
 process.stdout.write(relative.split(path.sep).join("/"));
 NODE
+}
+
+write_install_metadata() {
+    manifest_path=$1
+    release_directory=$2
+    node - "$manifest_path" "$release_directory" <<'NODE'
+const fs = require("fs");
+const manifestPath = process.argv[2];
+const releaseDirectory = process.argv[3].replace(/\/+$/u, "");
+const value = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+value.workerReleaseDirectoryUrl = releaseDirectory;
+fs.writeFileSync(manifestPath, `${JSON.stringify(value, null, 2)}\n`, "utf8");
+NODE
+}
+
+smoke_cli() {
+    cli=$1
+    failure_label=$2
+    smoke_home="$temporary/smoke-home"
+    smoke_runtime="$temporary/smoke-runtime"
+    mkdir -p "$smoke_home" "$smoke_runtime"
+    if ! smoke_output=$(HOME="$smoke_home" \
+        XDG_DATA_HOME="$smoke_home/.local/share" \
+        PORTABLE_DEVSHELL_HOME="$smoke_home/.devshell" \
+        XDG_RUNTIME_DIR="$smoke_runtime" \
+        node "$cli" status 2>&1); then
+        echo "$failure_label：CLI 无法启动。" >&2
+        printf '%s\n' "$smoke_output" >&2
+        return 1
+    fi
+    case "$smoke_output" in
+        *"control: stopped"*) return 0 ;;
+        *)
+            echo "$failure_label：CLI status 输出不符合预期。" >&2
+            printf '%s\n' "$smoke_output" >&2
+            return 1
+            ;;
+    esac
 }
 
 cleanup_control_runtime() {
@@ -170,6 +229,23 @@ install_worker() {
     ln -sfn "../workers/$target/$sha/$binary_name" "$worker_bin_directory/$asset"
 }
 
+rollback_application() {
+    rm -rf "$version_directory"
+    if [ -e "$backup_directory" ] || [ -L "$backup_directory" ]; then
+        mv "$backup_directory" "$version_directory"
+    fi
+    if [ -n "${previous_current_target:-}" ]; then
+        ln -sfn "$previous_current_target" "$current_link"
+    else
+        rm -f "$current_link"
+    fi
+    if [ -n "${previous_command_target:-}" ]; then
+        ln -sfn "$previous_command_target" "$command_link"
+    else
+        rm -f "$command_link"
+    fi
+}
+
 repository=${PORTABLE_DEVSHELL_RELEASE_REPOSITORY:-Aromatic05/portable-devshell}
 explicit_release_base=${PORTABLE_DEVSHELL_RELEASE_BASE_URL:-}
 requested_version=${PORTABLE_DEVSHELL_VERSION:-latest}
@@ -178,12 +254,14 @@ data_home=${XDG_DATA_HOME:-"$home/.local/share"}
 install_root=${PORTABLE_DEVSHELL_INSTALL_ROOT:-"$data_home/portable-devshell"}
 bin_directory=${PORTABLE_DEVSHELL_BIN_DIR:-"$home/.local/bin"}
 devshell_home=${PORTABLE_DEVSHELL_HOME:-"$home/.devshell"}
-targets="linux-x64 linux-arm64 darwin-x64 darwin-arm64 windows-x64 windows-arm64"
 
+step "检查安装环境"
 require_command curl
 require_command node
 require_command tar
 require_command install
+require_command readlink
+require_command ps
 
 node_major=$(node -p 'Number(process.versions.node.split(".")[0])')
 if [ "$node_major" -lt 24 ]; then
@@ -204,6 +282,20 @@ case $(uname -m) in
 esac
 
 host_target="$host_os-$host_arch"
+if [ "$host_target" = "linux-x64" ]; then
+    targets="linux-x64"
+else
+    targets="linux-x64 $host_target"
+fi
+target_count=0
+for target in $targets; do
+    target_count=$((target_count + 1))
+done
+detail "Node.js $(node --version)"
+detail "宿主平台 $host_target"
+detail "预装 Worker：$targets"
+detail "其他平台将在首次连接时按需下载"
+
 if [ -n "$explicit_release_base" ]; then
     release_base=${explicit_release_base%/}
 elif [ "$requested_version" = latest ]; then
@@ -219,20 +311,25 @@ fi
 temporary=$(mktemp -d "${TMPDIR:-/tmp}/portable-devshell-install.XXXXXX")
 trap 'rm -rf "$temporary"' EXIT HUP INT TERM
 
-download "$release_base/portable-devshell-app.tar.gz" "$temporary/app.tar.gz"
-download "$release_base/portable-devshell-app.tar.gz.sha256" "$temporary/app.sha256"
+step "下载应用包"
+download "$release_base/portable-devshell-app.tar.gz" "$temporary/app.tar.gz" "portable-devshell-app.tar.gz"
+download "$release_base/portable-devshell-app.tar.gz.sha256" "$temporary/app.sha256" "应用包校验文件"
 verify_sha256 "$temporary/app.tar.gz" "$temporary/app.sha256"
+detail "应用包 SHA-256 校验通过"
 
+step "下载预装 Worker（$target_count 个）"
 for target in $targets; do
     case "$target" in
         windows-*) asset="devshell-worker-$target.exe" ;;
         *) asset="devshell-worker-$target" ;;
     esac
-    download "$release_base/$asset" "$temporary/$asset"
-    download "$release_base/$asset.sha256" "$temporary/$asset.sha256"
+    download "$release_base/$asset" "$temporary/$asset" "$asset"
+    download "$release_base/$asset.sha256" "$temporary/$asset.sha256" "$asset.sha256"
     verify_sha256 "$temporary/$asset" "$temporary/$asset.sha256"
+    detail "$target 校验通过"
 done
 
+step "验证应用包并准备安装"
 mkdir -p "$temporary/app"
 tar -xzf "$temporary/app.tar.gz" -C "$temporary/app"
 manifest="$temporary/app/portable-devshell-install.json"
@@ -242,6 +339,12 @@ if [ ! -f "$manifest" ]; then
 fi
 
 version=$(node -e 'const fs=require("fs"); const value=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); if(typeof value.version!=="string"||!value.version) process.exit(1); process.stdout.write(value.version)' "$manifest")
+if [ -n "$explicit_release_base" ]; then
+    worker_release_directory=$release_base
+else
+    worker_release_directory="https://github.com/$repository/releases/download/v$version"
+fi
+write_install_metadata "$manifest" "$worker_release_directory"
 versions_directory="$install_root/versions"
 version_directory="$versions_directory/$version"
 staging_directory="$install_root/.staging-$version-$$"
@@ -252,6 +355,7 @@ worker_bin_directory="$devshell_home/bin"
 
 rm -rf "$staging_directory" "$backup_directory"
 mkdir -p -m 700 "$install_root" "$versions_directory" "$worker_bin_directory" "$staging_directory"
+mkdir -p "$bin_directory"
 cp -R "$temporary/app/." "$staging_directory/"
 cli_relative_path=$(resolve_cli_relative_path "$staging_directory")
 staging_cli="$staging_directory/$cli_relative_path"
@@ -260,7 +364,12 @@ if [ ! -f "$staging_cli" ]; then
     exit 1
 fi
 chmod 755 "$staging_cli"
+if ! smoke_cli "$staging_cli" "安装前验证失败"; then
+    exit 1
+fi
+detail "CLI 入口和运行时依赖验证通过"
 
+step "停止旧版本并切换安装"
 current_cli=
 if [ -f "$current_link/package.json" ]; then
     current_cli_relative_path=$(resolve_cli_relative_path "$current_link")
@@ -272,31 +381,58 @@ if ! stop_installed_control "$current_cli"; then
 fi
 
 for target in $targets; do
+    detail "安装 $target Worker"
     install_worker "$target"
 done
 ln -sfn "devshell-worker-$host_target" "$worker_bin_directory/devshell-worker"
+
+previous_current_target=
+previous_command_target=
+if [ -L "$current_link" ]; then
+    previous_current_target=$(readlink "$current_link")
+fi
+if [ -L "$command_link" ]; then
+    previous_command_target=$(readlink "$command_link")
+fi
 
 if [ -e "$version_directory" ] || [ -L "$version_directory" ]; then
     mv "$version_directory" "$backup_directory"
 fi
 
-if mv "$staging_directory" "$version_directory"; then
-    ln -sfn "versions/$version" "$current_link"
-    mkdir -p "$bin_directory"
-    ln -sfn "$current_link/$cli_relative_path" "$command_link"
-    rm -rf "$backup_directory"
-else
+if ! mv "$staging_directory" "$version_directory"; then
     rm -rf "$version_directory"
     if [ -e "$backup_directory" ]; then
         mv "$backup_directory" "$version_directory"
     fi
     exit 1
 fi
+if ! ln -sfn "versions/$version" "$current_link" || ! ln -sfn "$current_link/$cli_relative_path" "$command_link"; then
+    echo "无法激活新版本，正在恢复原安装。" >&2
+    rollback_application
+    exit 1
+fi
 
-echo "已安装 portable-devshell $version。"
+step "验证安装结果"
+if ! smoke_cli "$command_link" "安装结果验证失败"; then
+    echo "新版本未通过启动验证，正在恢复原安装。" >&2
+    rollback_application
+    exit 1
+fi
+rm -rf "$backup_directory"
+detail "已安装命令可以正常启动"
+
+printf '\n已安装 portable-devshell %s。\n' "$version"
 echo "命令：$command_link"
-echo "Worker：$targets"
+echo "已预装 Worker：$targets"
+echo "其他 Worker：首次连接对应平台时按需下载并校验"
+echo "下一步："
+echo "  $command_link start"
+echo "  $command_link tui"
 case :${PATH:-}: in
     *:"$bin_directory":*) ;;
-    *) echo "提示：$bin_directory 不在 PATH 中，请将它加入 shell 配置。" ;;
+    *)
+        echo "PATH 尚未包含 $bin_directory。"
+        echo "当前 shell 可执行：export PATH=\"$bin_directory:\$PATH\""
+        echo "并将同一行加入 ~/.bashrc、~/.zshrc 或对应 shell 配置。"
+        ;;
 esac

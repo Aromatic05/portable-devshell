@@ -128,15 +128,14 @@ export class WorkerAssetResolver {
         searchedPaths: string[],
         environment: NodeJS.ProcessEnv
     ): Promise<WorkerAsset | undefined> {
-        const releaseBaseUrl = this.#resolveReleaseBaseUrl(environment);
+        const releaseDirectoryUrl = this.#resolveReleaseDirectoryUrl(environment);
         const releaseTag = this.#resolveReleaseTag(environment);
 
-        if (releaseBaseUrl === undefined || releaseTag === undefined) {
+        if (releaseDirectoryUrl === undefined || releaseTag === undefined) {
             return undefined;
         }
 
         const assetBaseName = workerAssetFileName(target);
-        const releaseDirectoryUrl = `${releaseBaseUrl}/${releaseTag}`;
         const shaUrl = `${releaseDirectoryUrl}/${assetBaseName}.sha256`;
         const binaryUrl = `${releaseDirectoryUrl}/${assetBaseName}`;
         searchedPaths.push(shaUrl, binaryUrl);
@@ -196,7 +195,7 @@ export class WorkerAssetResolver {
     async #fetchReleaseSha256(target: WorkerTarget, url: string, searchedPaths: string[]): Promise<string> {
         let response: Response;
         try {
-            response = await fetch(url);
+            response = await fetch(url, { signal: AbortSignal.timeout(120_000) });
         } catch (error) {
             throw createError({
                 code: errorCodes.coreWorkerAssetUnavailable,
@@ -246,7 +245,7 @@ export class WorkerAssetResolver {
     async #fetchReleaseBinary(target: WorkerTarget, url: string, searchedPaths: string[]): Promise<Buffer> {
         let response: Response;
         try {
-            response = await fetch(url);
+            response = await fetch(url, { signal: AbortSignal.timeout(120_000) });
         } catch (error) {
             throw createError({
                 code: errorCodes.coreWorkerAssetUnavailable,
@@ -288,6 +287,26 @@ export class WorkerAssetResolver {
         return repository.length > 0 ? `https://github.com/${repository.replace(/^\/+|\/+$/gu, "")}/releases/download` : undefined;
     }
 
+    #resolveReleaseDirectoryUrl(environment: NodeJS.ProcessEnv): string | undefined {
+        const hasExplicitReleaseSelection = [
+            environment[releaseBaseUrlEnvVar],
+            environment[releaseRepositoryEnvVar],
+            environment[releaseTagEnvVar]
+        ].some((value) => value !== undefined && value.length > 0);
+        if (!hasExplicitReleaseSelection) {
+            const installedDirectory = this.#readInstalledManifestField("workerReleaseDirectoryUrl");
+            if (typeof installedDirectory === "string" && installedDirectory.length > 0) {
+                return installedDirectory.replace(/\/+$/u, "");
+            }
+        }
+
+        const releaseBaseUrl = this.#resolveReleaseBaseUrl(environment);
+        const releaseTag = this.#resolveReleaseTag(environment);
+        return releaseBaseUrl === undefined || releaseTag === undefined
+            ? undefined
+            : `${releaseBaseUrl}/${releaseTag}`;
+    }
+
     #resolveReleaseTag(environment: NodeJS.ProcessEnv): string | undefined {
         const explicitTag = environment[releaseTagEnvVar];
         if (explicitTag !== undefined && explicitTag.length > 0) {
@@ -318,6 +337,18 @@ export class WorkerAssetResolver {
             probeDir = resolve(probeDir, "..");
         }
 
+        return undefined;
+    }
+
+    #readInstalledManifestField(field: string): unknown {
+        let probeDir = this.#moduleDir;
+        for (let depth = 0; depth < 12; depth += 1) {
+            const installManifestPath = resolve(probeDir, "portable-devshell-install.json");
+            if (isReadableFile(installManifestPath)) {
+                return readJsonField(installManifestPath, field);
+            }
+            probeDir = resolve(probeDir, "..");
+        }
         return undefined;
     }
 

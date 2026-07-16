@@ -305,7 +305,7 @@ test("WorkerAssetResolver uses an installed target worker before release lookup"
     assert.equal(asset.source, "installed");
 });
 
-test("WorkerAssetResolver derives the release tag from an installed app manifest", async (t) => {
+test("WorkerAssetResolver uses the exact release directory recorded by the installer", async (t) => {
     const root = await mkdtemp(join(tmpdir(), "portable-devshell-installed-resolver-"));
     const appRoot = join(root, "app");
     const modulePath = join(
@@ -343,11 +343,13 @@ test("WorkerAssetResolver derives the release tag from an installed app manifest
         delete process.env[name];
     }
     process.env.PORTABLE_DEVSHELL_HOME = join(root, "devshell-home");
-    process.env.PORTABLE_DEVSHELL_WORKER_RELEASE_BASE_URL = "https://example.test/releases/download";
     process.env.PORTABLE_DEVSHELL_WORKER_CACHE_DIR = join(root, "cache");
 
     await mkdir(dirname(modulePath), { recursive: true });
-    await writeFile(join(appRoot, "portable-devshell-install.json"), JSON.stringify({ version: "7.8.9" }), "utf8");
+    await writeFile(join(appRoot, "portable-devshell-install.json"), JSON.stringify({
+        version: "7.8.9",
+        workerReleaseDirectoryUrl: "https://mirror.example.test/portable-devshell/7.8.9"
+    }), "utf8");
 
     globalThis.fetch = async (input) => {
         requestUrls.push(String(input));
@@ -364,6 +366,6 @@ test("WorkerAssetResolver derives the release tag from an installed app manifest
     });
     assert.equal(
         requestUrls[0],
-        "https://example.test/releases/download/v7.8.9/devshell-worker-darwin-arm64.sha256"
+        "https://mirror.example.test/portable-devshell/7.8.9/devshell-worker-darwin-arm64.sha256"
     );
 });

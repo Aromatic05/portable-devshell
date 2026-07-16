@@ -222,7 +222,7 @@ PORTABLE_DEVSHELL_RELEASE_REPOSITORY
 PORTABLE_DEVSHELL_RELEASE_BASE_URL
 ```
 
-安装时会准备全部六个 worker target。Unix 的 `~/.devshell/bin/devshell-worker` 和 Windows 的 `%USERPROFILE%\.devshell\bin\devshell-worker.exe` 只用于 control 主机上的默认执行；远程安装和 provider 选择使用带 target 后缀的 worker，不应把默认入口理解为全部受管环境的平台。
+安装时只准备 `linux-x64` 和当前主机 worker。Unix 的 `~/.devshell/bin/devshell-worker` 和 Windows 的 `%USERPROFILE%\.devshell\bin\devshell-worker.exe` 用于 control 主机上的默认执行；其他目标由 provider 探测后从对应 Release 按需下载、校验并传输。
 
 ## 进一步阅读
 

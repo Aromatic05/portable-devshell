@@ -1,5 +1,18 @@
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
+$ProgressPreference = "SilentlyContinue"
+$script:InstallStep = 0
+$script:InstallStepTotal = 6
+
+function Write-InstallStep([string]$Message) {
+    $script:InstallStep += 1
+    Write-Host ""
+    Write-Host "[$($script:InstallStep)/$script:InstallStepTotal] $Message"
+}
+
+function Write-InstallDetail([string]$Message) {
+    Write-Host "  $Message"
+}
 
 function Get-EnvironmentValue([string]$Name, [string]$DefaultValue) {
     $value = [Environment]::GetEnvironmentVariable($Name)
@@ -18,7 +31,54 @@ function Get-ReleaseBase {
 }
 
 function Download-File([string]$Url, [string]$Destination) {
-    Invoke-WebRequest -UseBasicParsing -Uri $Url -OutFile $Destination
+    Write-InstallDetail "下载 $(Split-Path -Leaf $Destination)"
+    $uri = $null
+    if ([Uri]::TryCreate($Url, [UriKind]::Absolute, [ref]$uri) -and $uri.IsFile) {
+        Copy-Item -Force -LiteralPath $uri.LocalPath -Destination $Destination
+        return
+    }
+    for ($attempt = 1; $attempt -le 3; $attempt += 1) {
+        try {
+            Invoke-WebRequest -UseBasicParsing -TimeoutSec 300 -Uri $Url -OutFile $Destination
+            return
+        } catch {
+            if ($attempt -eq 3) { throw }
+            Write-InstallDetail "下载失败，1 秒后重试（$attempt/3）"
+            Start-Sleep -Seconds 1
+        }
+    }
+}
+
+function Set-InstallMetadata([string]$ManifestPath, [string]$WorkerReleaseDirectoryUrl) {
+    $manifest = Get-Content -Raw -LiteralPath $ManifestPath | ConvertFrom-Json
+    $manifest | Add-Member -NotePropertyName workerReleaseDirectoryUrl -NotePropertyValue $WorkerReleaseDirectoryUrl.TrimEnd('/') -Force
+    $json = $manifest | ConvertTo-Json -Depth 20
+    [IO.File]::WriteAllText($ManifestPath, "$json`n", [Text.UTF8Encoding]::new($false))
+}
+
+function Assert-CliStarts([string]$CliPath, [string]$FailureLabel, [bool]$CommandWrapper = $false) {
+    $smokeRoot = Join-Path ([IO.Path]::GetTempPath()) ("portable-devshell-smoke-" + [Guid]::NewGuid().ToString("N"))
+    $names = @("HOME", "USERPROFILE", "LOCALAPPDATA", "PORTABLE_DEVSHELL_HOME", "XDG_RUNTIME_DIR")
+    $previous = @{}
+    foreach ($name in $names) { $previous[$name] = [Environment]::GetEnvironmentVariable($name) }
+    New-Item -ItemType Directory -Force -Path $smokeRoot | Out-Null
+    try {
+        $env:HOME = $smokeRoot
+        $env:USERPROFILE = $smokeRoot
+        $env:LOCALAPPDATA = Join-Path $smokeRoot "AppData\Local"
+        $env:PORTABLE_DEVSHELL_HOME = Join-Path $smokeRoot ".devshell"
+        $env:XDG_RUNTIME_DIR = Join-Path $smokeRoot "runtime"
+        New-Item -ItemType Directory -Force -Path $env:LOCALAPPDATA, $env:XDG_RUNTIME_DIR | Out-Null
+        $output = if ($CommandWrapper) { @(& $CliPath status 2>&1) } else { @(& node $CliPath status 2>&1) }
+        $exitCode = $LASTEXITCODE
+        $text = $output -join [Environment]::NewLine
+        if ($exitCode -ne 0 -or -not $text.Contains("control: stopped")) {
+            throw "$FailureLabel：CLI 无法正常执行 status。`n$text"
+        }
+    } finally {
+        foreach ($name in $names) { [Environment]::SetEnvironmentVariable($name, $previous[$name]) }
+        Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $smokeRoot
+    }
 }
 
 function Assert-Sha256([string]$File, [string]$ShaFile) {
@@ -127,6 +187,9 @@ function Install-Worker([string]$Target, [string]$Temporary, [string]$DevshellHo
     Copy-Item -Force -LiteralPath $source -Destination (Join-Path $workerBinDirectory $asset)
 }
 
+Write-InstallStep "检查安装环境"
+if ($null -eq (Get-Command node -ErrorAction SilentlyContinue)) { throw "缺少必需命令：node" }
+if ($null -eq (Get-Command tar.exe -ErrorAction SilentlyContinue)) { throw "缺少必需命令：tar.exe" }
 $nodeVersion = & node -p "Number(process.versions.node.split('.')[0])"
 if ($LASTEXITCODE -ne 0 -or [int]$nodeVersion -lt 24) {
     throw "portable-devshell 需要 Node.js 24 或更高版本。"
@@ -144,26 +207,35 @@ $localAppData = [Environment]::GetFolderPath("LocalApplicationData")
 $installRoot = Get-EnvironmentValue "PORTABLE_DEVSHELL_INSTALL_ROOT" (Join-Path $localAppData "portable-devshell")
 $binDirectory = Get-EnvironmentValue "PORTABLE_DEVSHELL_BIN_DIR" (Join-Path $homeDirectory ".local\bin")
 $devshellHome = Get-EnvironmentValue "PORTABLE_DEVSHELL_HOME" (Join-Path $homeDirectory ".devshell")
-$targets = @("linux-x64", "linux-arm64", "darwin-x64", "darwin-arm64", "windows-x64", "windows-arm64")
+$targets = @("linux-x64", $hostTarget) | Select-Object -Unique
 $releaseBase = Get-ReleaseBase
 $temporary = Join-Path ([IO.Path]::GetTempPath()) ("portable-devshell-install-" + [Guid]::NewGuid().ToString("N"))
+Write-InstallDetail "Node.js $(& node --version)"
+Write-InstallDetail "宿主平台 $hostTarget"
+Write-InstallDetail "预装 Worker：$($targets -join ', ')"
+Write-InstallDetail "其他平台将在首次连接时按需下载"
 
 New-Item -ItemType Directory -Force -Path $temporary | Out-Null
 try {
+    Write-InstallStep "下载应用包"
     $appArchive = Join-Path $temporary "portable-devshell-app.tar.gz"
     $appSha = "$appArchive.sha256"
     Download-File "$releaseBase/portable-devshell-app.tar.gz" $appArchive
     Download-File "$releaseBase/portable-devshell-app.tar.gz.sha256" $appSha
     Assert-Sha256 $appArchive $appSha
+    Write-InstallDetail "应用包 SHA-256 校验通过"
 
+    Write-InstallStep "下载预装 Worker（$($targets.Count) 个）"
     foreach ($target in $targets) {
         $asset = Get-WorkerAssetName $target
         $destination = Join-Path $temporary $asset
         Download-File "$releaseBase/$asset" $destination
         Download-File "$releaseBase/$asset.sha256" "$destination.sha256"
         Assert-Sha256 $destination "$destination.sha256"
+        Write-InstallDetail "$target 校验通过"
     }
 
+    Write-InstallStep "验证应用包并准备安装"
     $appDirectory = Join-Path $temporary "app"
     New-Item -ItemType Directory -Force -Path $appDirectory | Out-Null
     & tar.exe -xzf $appArchive -C $appDirectory
@@ -173,21 +245,34 @@ try {
     $manifest = Get-Content -Raw -LiteralPath $manifestPath | ConvertFrom-Json
     $version = [string]$manifest.version
     if ([string]::IsNullOrWhiteSpace($version)) { throw "应用包版本无效。" }
+    $explicitReleaseBase = [Environment]::GetEnvironmentVariable("PORTABLE_DEVSHELL_RELEASE_BASE_URL")
+    $workerReleaseDirectory = if (-not [string]::IsNullOrWhiteSpace($explicitReleaseBase)) {
+        $releaseBase
+    } else {
+        $repository = Get-EnvironmentValue "PORTABLE_DEVSHELL_RELEASE_REPOSITORY" "Aromatic05/portable-devshell"
+        "https://github.com/$repository/releases/download/v$version"
+    }
+    Set-InstallMetadata $manifestPath $workerReleaseDirectory
 
     $versionsDirectory = Join-Path $installRoot "versions"
     $versionDirectory = Join-Path $versionsDirectory $version
     $stagingDirectory = Join-Path $installRoot ".staging-$version-$PID"
     $backupDirectory = Join-Path $installRoot ".backup-$version-$PID"
     $currentDirectory = Join-Path $installRoot "current"
+    $currentBackupDirectory = Join-Path $installRoot ".current-backup-$PID"
+    $commandPath = Join-Path $binDirectory "devshell.cmd"
     New-Item -ItemType Directory -Force -Path $installRoot, $versionsDirectory, $binDirectory, $devshellHome | Out-Null
-    Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $stagingDirectory, $backupDirectory
+    Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $stagingDirectory, $backupDirectory, $currentBackupDirectory
     Copy-Item -Recurse -Force -LiteralPath $appDirectory -Destination $stagingDirectory
     $cliRelativePath = Get-ApplicationCliRelativePath $stagingDirectory
     $stagingCli = Join-Path $stagingDirectory $cliRelativePath
     if (-not (Test-Path -LiteralPath $stagingCli -PathType Leaf)) {
         throw "应用包声明的 CLI 不存在：$stagingCli"
     }
+    Assert-CliStarts $stagingCli "安装前验证失败"
+    Write-InstallDetail "CLI 入口和运行时依赖验证通过"
 
+    Write-InstallStep "停止旧版本并切换安装"
     $currentCli = ""
     if (Test-Path -LiteralPath (Join-Path $currentDirectory "package.json") -PathType Leaf) {
         $currentCliRelativePath = Get-ApplicationCliRelativePath $currentDirectory
@@ -195,23 +280,56 @@ try {
     }
     Stop-InstalledControl $currentCli $devshellHome
 
-    foreach ($target in $targets) { Install-Worker $target $temporary $devshellHome }
+    foreach ($target in $targets) {
+        Write-InstallDetail "安装 $target Worker"
+        Install-Worker $target $temporary $devshellHome
+    }
     $hostAsset = Get-WorkerAssetName $hostTarget
     Copy-Item -Force -LiteralPath (Join-Path $devshellHome "bin\$hostAsset") -Destination (Join-Path $devshellHome "bin\devshell-worker.exe")
 
-    if (Test-Path -LiteralPath $versionDirectory) { Move-Item -Force $versionDirectory $backupDirectory }
-    Move-Item -Force $stagingDirectory $versionDirectory
-    Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $currentDirectory
-    Copy-Item -Recurse -Force -LiteralPath $versionDirectory -Destination $currentDirectory
-    Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $backupDirectory
+    $previousCommandContent = if (Test-Path -LiteralPath $commandPath -PathType Leaf) {
+        Get-Content -Raw -LiteralPath $commandPath
+    } else {
+        $null
+    }
+    $activated = $false
+    try {
+        if (Test-Path -LiteralPath $versionDirectory) { Move-Item -Force $versionDirectory $backupDirectory }
+        if (Test-Path -LiteralPath $currentDirectory) { Move-Item -Force $currentDirectory $currentBackupDirectory }
+        Move-Item -Force $stagingDirectory $versionDirectory
+        Copy-Item -Recurse -Force -LiteralPath $versionDirectory -Destination $currentDirectory
+        $cliPath = Join-Path $currentDirectory $cliRelativePath
+        Set-Content -Encoding ASCII -LiteralPath $commandPath -Value "@echo off`r`nnode `"$cliPath`" %*`r`n"
 
-    $commandPath = Join-Path $binDirectory "devshell.cmd"
-    $cliPath = Join-Path $currentDirectory $cliRelativePath
-    Set-Content -Encoding ASCII -LiteralPath $commandPath -Value "@echo off`r`nnode `"$cliPath`" %*`r`n"
+        Write-InstallStep "验证安装结果"
+        Assert-CliStarts $commandPath "安装结果验证失败" $true
+        $activated = $true
+    } finally {
+        if (-not $activated) {
+            Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $currentDirectory, $versionDirectory
+            if (Test-Path -LiteralPath $currentBackupDirectory) { Move-Item -Force $currentBackupDirectory $currentDirectory }
+            if (Test-Path -LiteralPath $backupDirectory) { Move-Item -Force $backupDirectory $versionDirectory }
+            if ($null -eq $previousCommandContent) {
+                Remove-Item -Force -ErrorAction SilentlyContinue $commandPath
+            } else {
+                Set-Content -Encoding ASCII -LiteralPath $commandPath -Value $previousCommandContent
+            }
+        }
+    }
+    Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $backupDirectory, $currentBackupDirectory
+    Write-InstallDetail "已安装命令可以正常启动"
+
+    Write-Host ""
     Write-Host "已安装 portable-devshell $version。"
     Write-Host "命令：$commandPath"
-    Write-Host "Worker：$($targets -join ', ')"
-    Write-Host "如果命令不可用，请将 $binDirectory 加入用户 PATH。"
+    Write-Host "已预装 Worker：$($targets -join ', ')"
+    Write-Host "其他 Worker：首次连接对应平台时按需下载并校验"
+    Write-Host "下一步："
+    Write-Host "  $commandPath start"
+    Write-Host "  $commandPath tui"
+    if (-not (($env:PATH -split ';') -contains $binDirectory)) {
+        Write-Host "PATH 尚未包含 $binDirectory，请将它加入用户 PATH 后重新打开终端。"
+    }
 } finally {
     Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $temporary
 }
