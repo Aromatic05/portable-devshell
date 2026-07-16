@@ -6,10 +6,6 @@ import { mapNodeWorkerTarget, mapUnameWorkerTarget } from "./WorkerTargetMapper.
 
 const COMMAND_OUTPUT_TAIL_LIMIT = 4000;
 
-export interface WorkerTargetProbe {
-    probe(): Promise<WorkerTarget>;
-}
-
 export const workerTargetProbeCommandLine = "uname -s && uname -m";
 
 export function probeLocalWorkerTarget(

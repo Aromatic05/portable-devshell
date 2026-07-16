@@ -1,5 +1,3 @@
-import React from "react";
-import { Box, Text } from "ink";
 import stringWidth from "string-width";
 
 import type { ExpandableBoxStatus } from "../model/TuiUiTypes.js";
@@ -25,23 +23,6 @@ export interface BoxModel {
     selectedDetailLineId?: string;
     status: ExpandableBoxStatus;
     title: string;
-}
-
-export interface ExpandableBoxProps {
-    box: BoxModel;
-    innerWidth: number;
-}
-
-export function ExpandableBox(props: ExpandableBoxProps) {
-    return (
-        <Box flexDirection="column">
-            {renderExpandableBoxLines(props.box, props.innerWidth).map((line) => (
-                <Text backgroundColor={line.backgroundColor} color={line.color} dimColor={line.dimColor} key={line.key}>
-                    {line.text}
-                </Text>
-            ))}
-        </Box>
-    );
 }
 
 export interface ExpandableBoxRenderLine {

@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 
 import type { JsonValue } from "@portable-devshell/shared";
 
+import { readWorkerAbortReason } from "../WorkerAbortReason.js";
 import type { WorkerCommandTransport } from "../command/WorkerCommandTransport.js";
 import type { WorkerRpcOptions } from "../command/WorkerCommandOptions.js";
 import type { WorkerRpcChannel, WorkerRpcConnector } from "./WorkerRpcChannel.js";
@@ -219,7 +220,7 @@ export class WorkerRpcBridge {
             id: `cancel-${randomUUID()}`,
             method: "tool.call.cancel",
             params: {
-                reason: readAbortReason(reason),
+                reason: readWorkerAbortReason(reason),
                 rpcRequestId: request.id,
                 ctxId
             },
@@ -254,7 +255,7 @@ export class WorkerRpcBridge {
         return {
             instanceName: this.#rpcOptions.instanceName,
             method: request.method,
-            reason: readAbortReason(reason),
+            reason: readWorkerAbortReason(reason),
             rpcRequestId: request.id,
             ctxId: request.context?.ctxId
         } as JsonValue;
@@ -285,14 +286,4 @@ function isWorkerRpcResponseEnvelope(value: JsonValue): value is WorkerRpcRespon
 
     const candidate = value as Record<string, JsonValue>;
     return candidate.type === "response" && typeof candidate.id === "string" && typeof candidate.ok === "boolean";
-}
-
-function readAbortReason(reason: unknown): string {
-    if (typeof reason === "string" && reason.length > 0) {
-        return reason;
-    }
-    if (reason instanceof Error && reason.message.length > 0) {
-        return reason.message;
-    }
-    return "client cancelled";
 }

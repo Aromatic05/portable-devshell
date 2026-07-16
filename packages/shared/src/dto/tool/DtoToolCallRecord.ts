@@ -2,7 +2,6 @@ import type { InstanceName } from "../../type/identity/TypeIdentityInstanceName.
 import type { JsonValue } from "../../type/TypeJsonValue.js";
 
 export type ToolCallSource = "cli" | "tui" | "mcp";
-export type ControlClientKind = ToolCallSource | "unknown";
 
 export interface ToolCallAssociation {
     taskId: string;

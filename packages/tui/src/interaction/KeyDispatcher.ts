@@ -48,7 +48,7 @@ export class KeyDispatcher {
             case "sidebarInstances":
             case "mainBoxes":
             case "boxDetail":
-                return this.#forMainScopes(mode, press);
+                return this.#forMainScopes(press);
         }
     }
 
@@ -189,7 +189,7 @@ export class KeyDispatcher {
         return [];
     }
 
-    #forMainScopes(mode: "sidebarPages" | "sidebarInstances" | "mainBoxes" | "boxDetail", press: TuiKeyPress): TuiUiIntent[] {
+    #forMainScopes(press: TuiKeyPress): TuiUiIntent[] {
         const instanceIndex = shiftedInstanceIndex(press);
         if (instanceIndex !== undefined) {
             return [{ index: instanceIndex, type: "instance.selectIndex" }];

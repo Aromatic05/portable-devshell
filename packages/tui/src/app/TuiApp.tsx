@@ -1,4 +1,4 @@
-import React, { useSyncExternalStore } from "react";
+import { useSyncExternalStore } from "react";
 import { Box, Text, useInput } from "ink";
 
 import { ConfirmDialog } from "../component/ConfirmDialog.js";

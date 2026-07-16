@@ -28,6 +28,7 @@ import {
 } from "./ArtifactSource.js";
 import {
     ARTIFACT_RECORD_VERSION,
+    requireArtifactEndpoint,
     DEFAULT_ARTIFACT_CHUNK_BYTES,
     DEFAULT_ARTIFACT_SHARE_TTL_SECONDS,
     MAX_ARTIFACT_SHARE_TTL_SECONDS,
@@ -156,7 +157,7 @@ export class ArtifactService {
     async createShare(input: ArtifactShareInput, defaultInstance: string): Promise<ArtifactShareResult> {
         this.#assertInitialized();
         const sourceInstance = readSourceInstance(input.instance, defaultInstance);
-        const endpoint = this.#requireEndpoint(sourceInstance, defaultInstance);
+        const endpoint = requireArtifactEndpoint(this.#resolveEndpoint, sourceInstance, defaultInstance);
         const expiresInSeconds = input.expiresInSeconds ?? DEFAULT_ARTIFACT_SHARE_TTL_SECONDS;
         if (
             !Number.isInteger(expiresInSeconds) ||
@@ -278,7 +279,8 @@ export class ArtifactService {
     ): Promise<WorkerArtifactPayloadReadResult> {
         const access = await this.resolveShare(token);
         const share = this.#shares.get(access.share.shareId);
-        const endpoint = this.#requireEndpoint(
+        const endpoint = requireArtifactEndpoint(
+            this.#resolveEndpoint,
             access.sourceInstance,
             share?.authorityInstance ?? access.sourceInstance
         );
@@ -307,8 +309,8 @@ export class ArtifactService {
         this.#assertInitialized();
         validateTransferStart(input);
         const sourceInstance = readSourceInstance(input.instance, defaultInstance);
-        this.#requireEndpoint(sourceInstance, defaultInstance);
-        this.#requireEndpoint(input.targetInstance, defaultInstance);
+        requireArtifactEndpoint(this.#resolveEndpoint, sourceInstance, defaultInstance);
+        requireArtifactEndpoint(this.#resolveEndpoint, input.targetInstance, defaultInstance);
         const now = new Date().toISOString();
         const transferId = randomUUID();
         const sourceInput = readTransferPayloadSourceInput(input);
@@ -456,19 +458,6 @@ export class ArtifactService {
         } catch {
             // Keep payloadClosed false so a later initialize/revoke can retry.
         }
-    }
-
-    #requireEndpoint(instance: string, authorityInstance: string): ArtifactServiceEndpoint {
-        const endpoint = this.#resolveEndpoint(instance, authorityInstance);
-        if (endpoint !== undefined) {
-            return endpoint;
-        }
-        throw createError({
-            code: errorCodes.instanceMissing,
-            message: `Instance ${instance} was not found.`,
-            retryable: false,
-            details: { instance }
-        });
     }
 
     #assertInitialized(): void {

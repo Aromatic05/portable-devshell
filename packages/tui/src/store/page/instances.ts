@@ -2,6 +2,7 @@ import type { JsonValue } from "@portable-devshell/shared";
 
 import { isAttachShellSupported } from "../../attach/AttachShellAvailability.js";
 import { buildArtifactActivityView } from "../../component/ArtifactActivityBox.js";
+import { createDefaultInstanceDraft } from "../../modules/instance/InstanceCreateDraft.js";
 import type { BoxModel } from "../../component/ExpandableBox.js";
 import type { TuiAppState } from "../TuiReducers.js";
 import { compactSummary, formatField, makeBox, runtimeStatus, shortenPath } from "./PageBoxSupport.js";
@@ -128,7 +129,7 @@ function lifecycleAvailability(
 
 function buildCreateWizard(state: TuiAppState): BoxModel {
     const editor = state.interaction.editor!;
-    const draft = editorDraft(state, editor.key, defaultCreateDraft());
+    const draft = editorDraft(state, editor.key, createDefaultInstanceDraft());
     const step = editor.step ?? 1;
     const error = editor.error;
     const summary = editor.summary === undefined ? undefined : JSON.stringify(editor.summary);
@@ -191,17 +192,6 @@ function wizardFields(step: number, draft: Record<string, JsonValue>): Array<str
         default:
             return ["Review normalized draft", JSON.stringify(draft)];
     }
-}
-
-function defaultCreateDraft(): Record<string, JsonValue> {
-    return {
-        enabled: true,
-        mcp: { enabled: true, tools: { capabilities: ["read", "write", "execute"], groups: ["file", "bash", "artifact", "tmux", "todo"] } },
-        name: "",
-        provider: "local",
-        security: { mode: "disabled" },
-        workspace: ""
-    };
 }
 
 function stepName(step: number): string {

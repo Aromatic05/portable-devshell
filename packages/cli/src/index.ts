@@ -1,4 +1,3 @@
-export * from "./main.js";
 export * from "./cli/CliMain.js";
 export * from "./cli/CliParser.js";
 export * from "./cli/client/ClientComposition.js";

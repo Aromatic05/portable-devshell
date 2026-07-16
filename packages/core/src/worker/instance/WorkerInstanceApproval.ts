@@ -8,6 +8,7 @@ import {
 } from "@portable-devshell/shared";
 
 import type { ApprovalManager } from "../../approval/ApprovalInfra.js";
+import { readWorkerAbortReason } from "../WorkerAbortReason.js";
 import type { InstanceEventInput } from "../../log/LogEventBuffer.js";
 import type { ToolCallHistory } from "../../log/LogToolCallHistory.js";
 import { getErrorCode } from "./WorkerInstanceError.js";
@@ -98,10 +99,10 @@ export class WorkerInstanceApproval {
         );
 
         const onAbort = () => {
-            void this.#approvalManager.cancel(evaluation.request.approvalId, readAbortReason(signal?.reason));
+            void this.#approvalManager.cancel(evaluation.request.approvalId, readWorkerAbortReason(signal?.reason));
         };
         if (signal?.aborted === true) {
-            await this.#approvalManager.cancel(evaluation.request.approvalId, readAbortReason(signal.reason));
+            await this.#approvalManager.cancel(evaluation.request.approvalId, readWorkerAbortReason(signal.reason));
         } else {
             signal?.addEventListener("abort", onAbort, { once: true });
         }
@@ -261,14 +262,4 @@ export class WorkerInstanceApproval {
         throw error;
     }
 
-}
-
-function readAbortReason(reason: unknown): string {
-    if (typeof reason === "string" && reason.length > 0) {
-        return reason;
-    }
-    if (reason instanceof Error && reason.message.length > 0) {
-        return reason.message;
-    }
-    return "client cancelled";
 }

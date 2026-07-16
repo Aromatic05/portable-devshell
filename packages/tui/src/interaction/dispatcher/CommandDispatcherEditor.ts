@@ -1,5 +1,6 @@
 import type { InstanceCreateDraft, InstanceCreateSchema, InstanceCreateSummary, JsonValue } from "@portable-devshell/shared";
 
+import { createDefaultInstanceDraft } from "../../modules/instance/InstanceCreateDraft.js";
 import { editableProviderChoices } from "../../platform/TuiProviderAvailability.js";
 import type { TuiAppStore } from "../../store/TuiAppStore.js";
 import { asRecord, cloneRecord, editorDraft, normalizeDraftForSave, readPath, setPath } from "../../store/page/EditorSupport.js";
@@ -240,7 +241,7 @@ export class CommandDispatcherEditor {
         }
         try {
             if (editor.kind === "create") {
-                const draft = normalizeDraftForSave(this.#editorDraft(editor.key, defaultCreateDraft()));
+                const draft = normalizeDraftForSave(this.#editorDraft(editor.key, createDefaultInstanceDraft()));
                 const summary = await this.#options.onValidateInstanceCreateDraft(draft as unknown as InstanceCreateDraft);
                 this.#store.setFormDraft(editor.key, draft);
                 this.#store.setEditor({ ...editor, editing: false, error: undefined, summary: summary as unknown as JsonValue });
@@ -347,7 +348,7 @@ export class CommandDispatcherEditor {
         }
         try {
             const status = await this.#options.onCreateInstance(
-                normalizeDraftForSave(this.#editorDraft(editor.key, defaultCreateDraft())) as unknown as InstanceCreateDraft
+                normalizeDraftForSave(this.#editorDraft(editor.key, createDefaultInstanceDraft())) as unknown as InstanceCreateDraft
             );
             this.#store.clearFormDraft(editor.key);
             this.close();
@@ -413,7 +414,7 @@ export class CommandDispatcherEditor {
         const editor = this.#store.getState().interaction.editor!;
         const instance = this.#store.getState().ui.selectedInstance;
         if (editor.kind === "create") {
-            return { fallback: defaultCreateDraft(), key: editor.key, path: field };
+            return { fallback: createDefaultInstanceDraft(), key: editor.key, path: field };
         }
         if (editor.kind === "connector" && field.startsWith("instance.")) {
             const name = instance!;
@@ -485,17 +486,6 @@ export class CommandDispatcherEditor {
         const state = this.#store.getState();
         return selectMainScreenModel(state).boxes.find((box) => box.id === boxId)?.expandedKey ?? `${state.ui.selectedPage}:${state.ui.selectedInstance}:${boxId}`;
     }
-}
-
-function defaultCreateDraft(): Record<string, JsonValue> {
-    return {
-        enabled: true,
-        mcp: { enabled: true, tools: { capabilities: ["read", "write", "execute"], groups: ["file", "bash", "artifact", "tmux", "todo"] } },
-        name: "",
-        provider: "local",
-        security: { mode: "disabled" },
-        workspace: ""
-    };
 }
 
 function inputText(value: JsonValue | undefined): string {

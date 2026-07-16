@@ -11,6 +11,7 @@ import {
 import { readTransferPayloadSourceInput, sourceTypeFromPayload } from "./ArtifactSource.js";
 import {
     ARTIFACT_TRANSFER_PAYLOAD_TTL_MS,
+    requireArtifactEndpoint,
     type ArtifactServiceEndpoint,
     type ArtifactServiceSchedule,
     type StoredArtifactTransfer
@@ -91,8 +92,8 @@ export class ArtifactTransferExecutor {
         let targetEndpoint: ArtifactServiceEndpoint | undefined;
         try {
             this.#throwIfCancelled(transfer);
-            sourceEndpoint = this.#requireEndpoint(transfer.record.source.instance, transfer.defaultInstance);
-            targetEndpoint = this.#requireEndpoint(transfer.record.target.instance, transfer.defaultInstance);
+            sourceEndpoint = requireArtifactEndpoint(this.#resolveEndpoint, transfer.record.source.instance, transfer.defaultInstance);
+            targetEndpoint = requireArtifactEndpoint(this.#resolveEndpoint, transfer.record.target.instance, transfer.defaultInstance);
             const startedAt = new Date().toISOString();
             transfer.record.status = "preparing";
             transfer.record.startedAt = startedAt;
@@ -266,18 +267,6 @@ export class ArtifactTransferExecutor {
         }
     }
 
-    #requireEndpoint(instance: string, authorityInstance: string): ArtifactServiceEndpoint {
-        const endpoint = this.#resolveEndpoint(instance, authorityInstance);
-        if (endpoint !== undefined) {
-            return endpoint;
-        }
-        throw createError({
-            code: errorCodes.instanceMissing,
-            message: `Instance ${instance} was not found.`,
-            retryable: false,
-            details: { instance }
-        });
-    }
 }
 
 function validatePayloadChunk(

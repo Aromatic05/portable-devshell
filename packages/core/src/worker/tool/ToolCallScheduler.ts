@@ -1,5 +1,7 @@
 import { createError, errorCodes, type InstanceName, type JsonValue, type ToolCallContext } from "@portable-devshell/shared";
 
+import { readWorkerAbortReason } from "../WorkerAbortReason.js";
+
 export interface ToolSchedulerToolLimit {
     maxRunning?: number;
     queueDepth?: number;
@@ -302,7 +304,7 @@ export class ToolCallScheduler {
             details: {
                 callId: request.callId,
                 instance: request.instanceName,
-                reason: readCancellationReason(reason),
+                reason: readWorkerAbortReason(reason),
                 toolName: request.toolName
             }
         });
@@ -396,14 +398,4 @@ export function resolveToolSchedulerLimits(input?: Partial<ToolSchedulerLimits>)
         queueDepthPerSession: input?.queueDepthPerSession ?? defaultToolSchedulerLimits.queueDepthPerSession,
         queueTimeoutMs: input?.queueTimeoutMs ?? defaultToolSchedulerLimits.queueTimeoutMs
     };
-}
-
-function readCancellationReason(reason: unknown): string {
-    if (typeof reason === "string" && reason.length > 0) {
-        return reason;
-    }
-    if (reason instanceof Error && reason.message.length > 0) {
-        return reason.message;
-    }
-    return "client cancelled";
 }

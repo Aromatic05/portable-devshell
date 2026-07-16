@@ -32,4 +32,3 @@ export interface WorkerRpcFailureEnvelope {
 }
 
 export type WorkerRpcResponseEnvelope = WorkerRpcSuccessEnvelope | WorkerRpcFailureEnvelope;
-export type WorkerRpcEnvelope = WorkerRpcRequestEnvelope | WorkerRpcResponseEnvelope;

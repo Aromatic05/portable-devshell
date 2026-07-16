@@ -9,12 +9,14 @@ import type {
     WorkerArtifactReceiveWriteInput,
     WorkerArtifactReceiveWriteResult
 } from "@portable-devshell/core";
-import type {
-    ArtifactEventType,
-    ArtifactShareResult,
-    ArtifactTransferRecord,
-    ArtifactTransferStartInput,
-    JsonValue
+import {
+    createError,
+    errorCodes,
+    type ArtifactEventType,
+    type ArtifactShareResult,
+    type ArtifactTransferRecord,
+    type ArtifactTransferStartInput,
+    type JsonValue
 } from "@portable-devshell/shared";
 
 export const ARTIFACT_RECORD_VERSION = 1;
@@ -42,6 +44,24 @@ export interface ArtifactServiceOptions {
     schedule?: ArtifactServiceSchedule;
     shareUrl: (token: string) => string;
     storageDir: string;
+}
+
+export function requireArtifactEndpoint(
+    resolveEndpoint: ArtifactServiceOptions["resolveEndpoint"],
+    instance: string,
+    authorityInstance: string
+): ArtifactServiceEndpoint {
+    const endpoint = resolveEndpoint(instance, authorityInstance);
+    if (endpoint !== undefined) {
+        return endpoint;
+    }
+
+    throw createError({
+        code: errorCodes.instanceMissing,
+        message: `Instance ${instance} was not found.`,
+        retryable: false,
+        details: { instance }
+    });
 }
 
 export interface StoredArtifactShare {

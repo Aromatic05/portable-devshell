@@ -7,8 +7,6 @@ export * from "./mcp/auth/oauth/McpOAuthProtectedResource.js";
 export * from "./mcp/auth/oauth/McpOAuthApprovalService.js";
 export * from "./mcp/auth/public/McpAuthPublicBaseUrlValidator.js";
 export * from "./mcp/auth/public/McpAuthPublicExposureGuard.js";
-export * from "./mcp/connector/McpConnectorChatGpt.js";
-export * from "./mcp/connector/McpConnectorPlaceholder.js";
 export * from "./mcp/endpoint/McpEndpointBinding.js";
 export * from "./mcp/endpoint/McpEndpointToolCatalog.js";
 export * from "./mcp/endpoint/McpEndpointWorker.js";
