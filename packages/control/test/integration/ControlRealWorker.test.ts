@@ -17,7 +17,7 @@ import {
     type JsonValue
 } from "@portable-devshell/shared";
 
-import { controlDaemonModulePath } from "../../dist/index.js";
+import { controlDaemonModulePath } from "../../dist/testing.js";
 import { encodeGlobalConfig, encodeInstanceConfig } from "../ConfigTomlTestSupport.ts";
 
 if (process.env.PORTABLE_DEVSHELL_REAL_WORKER_CHILD !== "1") {

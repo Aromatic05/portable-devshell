@@ -9,7 +9,7 @@ import {
     TuiAppStore,
     TuiControlSession,
     TuiFocusManager
-} from "@portable-devshell/tui";
+} from "@portable-devshell/tui/testing";
 
 const share: ArtifactShareResult = {
     blake3: "a".repeat(64),

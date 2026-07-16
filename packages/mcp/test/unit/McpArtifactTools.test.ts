@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import type { JsonValue, ToolCallContext, ToolDefinition } from "@portable-devshell/shared";
-import { McpContextRegistry, McpEndpointWorker, type McpInstanceGateway } from "@portable-devshell/mcp";
+import { McpContextRegistry, McpEndpointWorker, type McpInstanceGateway } from "@portable-devshell/mcp/testing";
 
 const context = { principal: "local", requestId: "artifact-request" } as const;
 const contextRegistry = new McpContextRegistry({ idFactory: () => "ctx-artifact-test" });

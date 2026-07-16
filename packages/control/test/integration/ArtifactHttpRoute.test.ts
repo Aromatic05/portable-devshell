@@ -4,14 +4,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { McpHostHttpServer } from "@portable-devshell/mcp";
+import { McpHostHttpServer } from "@portable-devshell/mcp/testing";
 import type { ArtifactPayloadDescriptor, JsonValue } from "@portable-devshell/shared";
 import {
     ArtifactHttpRoute,
     ArtifactService,
     artifactShareRoute,
     type ArtifactServiceEndpoint
-} from "@portable-devshell/control";
+} from "@portable-devshell/control/testing";
 
 class MemoryShareEndpoint implements ArtifactServiceEndpoint {
     readonly events: Array<{ type: string; data?: JsonValue }> = [];

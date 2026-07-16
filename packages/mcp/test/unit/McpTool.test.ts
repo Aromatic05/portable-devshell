@@ -6,7 +6,7 @@ import {
     McpToolDescriptionEnhancer,
     McpToolFilter,
     McpToolSchemaAdapter
-} from "@portable-devshell/mcp";
+} from "@portable-devshell/mcp/testing";
 import type { ToolDefinition } from "@portable-devshell/shared";
 
 const bashRun: ToolDefinition = {

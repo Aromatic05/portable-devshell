@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import type { WorkerInstance } from "@portable-devshell/core";
+import type { WorkerInstance } from "@portable-devshell/core/testing";
 import type { JsonValue, PrefixRouteContext } from "@portable-devshell/shared";
 
 import type { ArtifactService } from "../../dist/control/artifact/ArtifactService.js";

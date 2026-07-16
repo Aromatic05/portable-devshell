@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import type { JsonValue } from "@portable-devshell/shared";
-import { WorkerToolCatalog, WorkerToolInvoker } from "@portable-devshell/core";
+import { WorkerToolCatalog, WorkerToolInvoker } from "@portable-devshell/core/testing";
 
 test("WorkerToolInvoker enforces all JSON Schema constraints for input and output", async () => {
     const catalog = new WorkerToolCatalog();

@@ -18,7 +18,7 @@ import {
     WorkerBinary,
     getWorkerTargetByKey,
     probeLocalWorkerTarget
-} from "@portable-devshell/core";
+} from "@portable-devshell/core/testing";
 import { createError, errorCodes } from "@portable-devshell/shared";
 
 const shellEscape = (value: string): string => `'${value.replaceAll("'", `'\\''`)}'`;

@@ -6,8 +6,8 @@ import { join, resolve } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { WorkerTransportDriverLocal, WorkerBinary, WorkerInstanceFactory } from "@portable-devshell/core";
-import { McpHost } from "@portable-devshell/mcp";
+import { WorkerTransportDriverLocal, WorkerBinary, WorkerInstanceFactory } from "@portable-devshell/core/testing";
+import { McpHost } from "@portable-devshell/mcp/testing";
 import { asInstanceName, asWorkspacePath } from "@portable-devshell/shared";
 
 type JsonValue = boolean | number | null | string | JsonValue[] | { [key: string]: JsonValue };

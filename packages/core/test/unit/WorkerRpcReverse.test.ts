@@ -8,7 +8,7 @@ import {
     type WorkerRpcChannel,
     type WorkerRpcConnector,
     type WorkerRpcRequestEnvelope
-} from "@portable-devshell/core";
+} from "@portable-devshell/core/testing";
 
 class DeferredConnector implements WorkerRpcConnector {
     channel?: MemoryChannel;

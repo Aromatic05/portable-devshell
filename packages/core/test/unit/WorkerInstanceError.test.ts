@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { WorkerInstance, InstanceStateMachine } from "@portable-devshell/core";
+import { WorkerInstance, InstanceStateMachine } from "@portable-devshell/core/testing";
 import { asInstanceName, createError } from "@portable-devshell/shared";
 
 test("WorkerInstance wraps start stop and status command failures with diagnostic details", async () => {

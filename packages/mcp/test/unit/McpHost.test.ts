@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { McpEndpointBinding, McpEndpointWorker, McpHostRouteMatcher, McpHostRouteRegistry } from "@portable-devshell/mcp";
+import { McpEndpointBinding, McpEndpointWorker, McpHostRouteMatcher, McpHostRouteRegistry } from "@portable-devshell/mcp/testing";
 
 test("/<instance>/mcp route matches", () => {
     const matcher = new McpHostRouteMatcher();

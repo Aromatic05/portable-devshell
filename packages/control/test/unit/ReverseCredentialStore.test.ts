@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { ReverseCredentialStore, reverseRoute } from "../../dist/index.js";
+import { ReverseCredentialStore, reverseRoute } from "../../dist/testing.js";
 
 test("reverse device code is single-use and device token is stored in user-only files", async () => {
     const home = await mkdtemp(join(tmpdir(), "devshell-reverse-"));

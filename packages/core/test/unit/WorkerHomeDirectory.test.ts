@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { resolveWorkerDevshellHomeDirectory, resolveWorkerHomeDirectory } from "@portable-devshell/core";
+import { resolveWorkerDevshellHomeDirectory, resolveWorkerHomeDirectory } from "@portable-devshell/core/testing";
 
 test("worker home keeps HOME precedence on Unix-style environments", () => {
     assert.equal(

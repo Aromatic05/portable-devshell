@@ -1,26 +1,5 @@
-export * from "./server/ControlDaemon.js";
-export * from "./control/artifact/ArtifactService.js";
-export * from "./control/artifact/ArtifactHttpRoute.js";
-export * from "./control/artifact/host/ArtifactHostBridge.js";
-export * from "./control/artifact/host/ArtifactHostModel.js";
-export * from "./control/config/editor/ConfigEditorCoordinator.js";
-export * from "./control/config/ControlConfigDefaults.js";
-export * from "./control/config/ControlConfigStore.js";
-export * from "./control/config/toml/ControlConfigTomlCodec.js";
-export * from "./control/config/toml/ControlConfigTomlDocument.js";
-export * from "./control/config/ControlConfigValidator.js";
-export * from "./control/instance/InstanceFactory.js";
-export * from "./control/instance/create/InstanceCreateCoordinator.js";
-export * from "./composition/McpInstanceGatewayArtifactDecorator.js";
-export * from "./control/instance/InstanceDescriptor.js";
-export * from "./control/instance/registry/InstanceRegistry.js";
-export * from "./control/instance/registry/InstanceRegistryFactory.js";
-export * from "./composition/McpEndpointFactory.js";
-export * from "./composition/McpRuntimeFactory.js";
-export * from "./composition/McpInstanceGatewayControl.js";
-export * from "./control/reverse/ReverseConnectionGateway.js";
-export * from "./control/reverse/ReverseControlService.js";
-export * from "./control/reverse/ReverseCredentialStore.js";
-export * from "./control/reverse/rpc/ReverseRpcSseChannel.js";
-export * from "./control/reverse/rpc/ReverseRpcWebSocketChannel.js";
-export * from "./instance/todo/TodoService.js";
+export {
+    ControlDaemon,
+    controlDaemonModulePath
+} from "./server/ControlDaemon.js";
+export type { ControlDaemonOptions } from "./server/ControlDaemon.js";

@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import type { WorkerRpcChannel } from "@portable-devshell/core";
+import type { WorkerRpcChannel } from "@portable-devshell/core/testing";
 import type { JsonValue } from "@portable-devshell/shared";
 
 import { ReverseConnectionService } from "../../dist/control/reverse/ReverseConnectionService.js";

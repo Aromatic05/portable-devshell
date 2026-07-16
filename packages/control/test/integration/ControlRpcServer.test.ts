@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import type { WorkerCommandInteractiveSession, WorkerInstance } from "@portable-devshell/core";
+import type { WorkerCommandInteractiveSession, WorkerInstance } from "@portable-devshell/core/testing";
 import {
     asInstanceName,
     ClientConnection,

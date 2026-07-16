@@ -1,25 +1,9 @@
-export * from "./tool/catalog/McpToolCatalogArtifact.js";
-export * from "./auth/McpAuthConfig.js";
-export * from "./auth/McpAuthMiddleware.js";
-export * from "./auth/provider/McpAuthProviderNone.js";
-export * from "./auth/provider/McpAuthProviderToken.js";
-export * from "./auth/oauth/McpOAuthProtectedResource.js";
-export * from "./auth/oauth/McpOAuthApprovalService.js";
-export * from "./auth/public/McpAuthPublicBaseUrlValidator.js";
-export * from "./auth/public/McpAuthPublicExposureGuard.js";
-export * from "./endpoint/McpEndpointBinding.js";
-export * from "./tool/catalog/McpToolCatalogEndpoint.js";
-export * from "./endpoint/McpEndpointWorker.js";
-export * from "./instance/McpInstanceGateway.js";
-export * from "./tool/catalog/McpToolCatalogInstance.js";
-export * from "./host/McpHost.js";
-export * from "./host/McpHostHttpServer.js";
-export * from "./host/route/McpHostRouteMatcher.js";
-export * from "./host/route/McpHostRouteRegistry.js";
-export * from "./tool/McpToolDescriptionEnhancer.js";
-export * from "./tool/McpToolFilter.js";
-export * from "./tool/McpToolSchemaAdapter.js";
-export * from "./tool/catalog/McpToolCatalogTodo.js";
-
-export * from "./context/McpContextRegistry.js";
-export * from "./tool/catalog/McpToolCatalogEnvironment.js";
+export type { McpAuthConfig } from "./auth/McpAuthConfig.js";
+export { McpOAuthApprovalService } from "./auth/oauth/McpOAuthApprovalService.js";
+export { McpHost } from "./host/McpHost.js";
+export type { McpHostInstanceConfig } from "./host/McpHost.js";
+export { McpHostHttpServer } from "./host/McpHostHttpServer.js";
+export type {
+    McpInstanceGateway,
+    McpSshInstanceCreateInput
+} from "./instance/McpInstanceGateway.js";

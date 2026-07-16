@@ -21,7 +21,7 @@ import {
     type WorkerCommandResult,
     type WorkerCommandTransport,
     type WorkerRpcResponseEnvelope
-} from "@portable-devshell/core";
+} from "@portable-devshell/core/testing";
 
 test("WorkerRpcBridge reuses one spawned rpc process across multiple calls", async () => {
     const harness = createRpcHarness();

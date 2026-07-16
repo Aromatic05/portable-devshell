@@ -12,7 +12,7 @@ import {
     ControlInstanceTomlDocument,
     ControlConfigTomlCodec,
     createDefaultControlConfig
-} from "../../dist/index.js";
+} from "../../dist/testing.js";
 import {
     ControlPathHome,
     ControlPathRuntime,

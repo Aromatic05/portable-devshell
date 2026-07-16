@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { McpContextRegistry, McpEndpointWorker } from "@portable-devshell/mcp";
+import { McpContextRegistry, McpEndpointWorker } from "@portable-devshell/mcp/testing";
 import type { JsonValue, ToolCallContext, ToolDefinition } from "@portable-devshell/shared";
 
 const bashRun: ToolDefinition = {

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { asInstanceName, errorCodes } from "@portable-devshell/shared";
-import { WorkerToolCallScheduler } from "@portable-devshell/core";
+import { WorkerToolCallScheduler } from "@portable-devshell/core/testing";
 
 test("WorkerToolCallScheduler runs up to the configured limit and keeps later calls queued", async () => {
     const instanceName = asInstanceName("scheduler-test");

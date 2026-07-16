@@ -6,12 +6,14 @@ import { join } from "node:path";
 import test from "node:test";
 
 import { asInstanceName, type ApprovalRequest, type JsonValue, type ToolCallRecord } from "@portable-devshell/shared";
-import type { WorkerInstance } from "@portable-devshell/core";
+import type { WorkerInstance } from "@portable-devshell/core/testing";
 
-import { ControlSocketServer } from "../../../control/dist/server/socket/ControlSocketServer.js";
-import { ControlRouteComposition } from "../../../control/dist/composition/ControlRouteComposition.js";
-import { InstanceRegistry } from "../../../control/dist/control/instance/registry/InstanceRegistry.js";
-import { createTuiClients, TuiControlSession } from "../../dist/index.js";
+import {
+    ControlRouteComposition,
+    ControlSocketServer,
+    InstanceRegistry
+} from "@portable-devshell/control/testing";
+import { createTuiClients, TuiControlSession } from "../../dist/testing.js";
 
 test("TuiControlSession pulls instances, snapshots, subscribes, and recovers from stream.gap", async (t) => {
     const runtimeDir = await mkdtemp(join(tmpdir(), "portable-devshell-tui-session-"));

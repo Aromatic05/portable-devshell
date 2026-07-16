@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { InstanceRegistry, createDefaultControlConfig } from "../../dist/index.js";
+import { InstanceRegistry, createDefaultControlConfig } from "../../dist/testing.js";
 import { InstanceCreateCoordinator } from "../../dist/control/instance/create/InstanceCreateCoordinator.js";
 import { normalizeConfigInstanceDraft } from "@portable-devshell/shared";
 

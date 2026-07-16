@@ -13,7 +13,7 @@ import {
     ArtifactService,
     type ArtifactServiceEndpoint,
     type ArtifactServiceSchedule
-} from "@portable-devshell/control";
+} from "@portable-devshell/control/testing";
 
 class Deferred {
     readonly promise: Promise<void>;

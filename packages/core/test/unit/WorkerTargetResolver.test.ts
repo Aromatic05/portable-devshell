@@ -12,7 +12,7 @@ import {
     mapUnameWorkerTarget,
     probeLocalWorkerTarget,
     supportedWorkerTargets
-} from "@portable-devshell/core";
+} from "@portable-devshell/core/testing";
 
 test("WorkerTargetMapper maps supported uname values to canonical keys", () => {
     assert.equal(mapUnameWorkerTarget({ provider: "ssh", operation: "probeTarget", rawOs: "Linux", rawArch: "x86_64" }).key, "linux-x64");

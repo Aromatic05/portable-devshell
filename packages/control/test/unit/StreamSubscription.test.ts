@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import type { WorkerInstance } from "@portable-devshell/core";
+import type { WorkerInstance } from "@portable-devshell/core/testing";
 import type { JsonValue, PrefixRouteContext, PrefixRouteStream } from "@portable-devshell/shared";
 
 import { RuntimeSubscriptionManager } from "../../dist/instance/runtime/RuntimeSubscriptionManager.js";

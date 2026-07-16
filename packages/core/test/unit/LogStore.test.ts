@@ -12,7 +12,7 @@ import {
     AuditDatabase,
     AuditToolCallHistory,
     type InstanceLogEntry
-} from "@portable-devshell/core";
+} from "@portable-devshell/core/testing";
 
 const MIB = 1024 * 1024;
 

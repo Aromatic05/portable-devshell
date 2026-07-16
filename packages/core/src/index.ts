@@ -1,49 +1,26 @@
-export * from "./approval/ApprovalManager.js";
-export * from "./approval/ApprovalError.js";
-export * from "./approval/ApprovalEvaluation.js";
-export * from "./approval/ApprovalStore.js";
-export * from "./audit/AuditDatabase.js";
-export * from "./audit/AuditRecordStore.js";
-export * from "./audit/AuditStorageLimits.js";
-export * from "./instance/InstancePaths.js";
-export * from "./instance/state/InstanceStateMachine.js";
-export * from "./instance/state/InstanceStateRuntime.js";
-export * from "./instance/state/InstanceStateSnapshot.js";
-export * from "./instance/event/InstanceEventBuffer.js";
-export * from "./log/LogQuery.js";
-export * from "./audit/tool/AuditToolCallHistory.js";
-export * from "./log/store/LogStoreInstance.js";
-export * from "./worker/WorkerBinary.js";
-export * from "./worker/WorkerAssetResolver.js";
-export * from "./worker/rpc/WorkerRpcProcess.js";
-export * from "./worker/command/WorkerCommandClient.js";
-export * from "./worker/command/WorkerCommandOptions.js";
-export * from "./worker/command/WorkerCommandTransport.js";
-export * from "./worker/install/WorkerInstallerLocal.js";
-export * from "./worker/install/WorkerInstallerRemote.js";
-export * from "./worker/instance/WorkerInstance.js";
-export * from "./worker/instance/WorkerInstanceConfig.js";
-export * from "./worker/instance/WorkerInstanceFactory.js";
-export * from "./worker/platform/WorkerHomeDirectory.js";
-export * from "./worker/protocol/WorkerProtocolClient.js";
-export * from "./worker/rpc/WorkerRpcBridge.js";
-export * from "./worker/rpc/WorkerRpcChannel.js";
-export * from "./worker/rpc/WorkerRpcClient.js";
-export * from "./worker/rpc/WorkerRpcEnvelope.js";
-export * from "./worker/rpc/WorkerRpcInboundConnector.js";
-export * from "./worker/rpc/WorkerRpcError.js";
-export * from "./worker/rpc/WorkerRpcFrame.js";
-export * from "./worker/rpc/WorkerRpcProcessAdapter.js";
-export * from "./worker/rpc/WorkerRpcProcessChannel.js";
-export * from "./worker/target/WorkerTarget.js";
-export * from "./worker/target/WorkerTargetBinary.js";
-export * from "./worker/target/WorkerTargetMapper.js";
-export * from "./worker/target/WorkerTargetProbe.js";
-export * from "./worker/tool/WorkerToolCatalog.js";
-export * from "./worker/tool/WorkerToolCallScheduler.js";
-export * from "./worker/tool/WorkerToolInvoker.js";
-export * from "./worker/transport/driver/WorkerTransportDriverDocker.js";
-export * from "./worker/transport/driver/WorkerTransportDriverLocal.js";
-export * from "./worker/transport/driver/WorkerTransportDriverPodman.js";
-export * from "./worker/transport/driver/WorkerTransportDriverSsh.js";
-export * from "./worker/transport/factory/WorkerTransportFactory.js";
+export { InstancePaths } from "./instance/InstancePaths.js";
+export type { WorkerCommandInteractiveSession } from "./worker/command/WorkerCommandTransport.js";
+export { WorkerInstance } from "./worker/instance/WorkerInstance.js";
+export type { WorkerInstanceConfig } from "./worker/instance/WorkerInstanceConfig.js";
+export { WorkerInstanceFactory } from "./worker/instance/WorkerInstanceFactory.js";
+export { resolveWorkerHomeDirectory } from "./worker/platform/WorkerHomeDirectory.js";
+export type {
+    WorkerArtifactPayloadOpenInput,
+    WorkerArtifactPayloadOpenResult,
+    WorkerArtifactPayloadReadInput,
+    WorkerArtifactPayloadReadResult,
+    WorkerArtifactReceiveBeginInput,
+    WorkerArtifactReceiveBeginResult,
+    WorkerArtifactReceiveFinishResult,
+    WorkerArtifactReceiveWriteInput,
+    WorkerArtifactReceiveWriteResult
+} from "./worker/protocol/WorkerProtocolClient.js";
+export {
+    WorkerRpcChannelBase
+} from "./worker/rpc/WorkerRpcChannel.js";
+export type {
+    WorkerRpcChannel
+} from "./worker/rpc/WorkerRpcChannel.js";
+export { WorkerRpcInboundConnector } from "./worker/rpc/WorkerRpcInboundConnector.js";
+export { WorkerTransportFactory } from "./worker/transport/factory/WorkerTransportFactory.js";
+export type { WorkerTransportFactoryOptions } from "./worker/transport/factory/WorkerTransportFactory.js";

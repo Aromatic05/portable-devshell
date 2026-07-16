@@ -2,7 +2,7 @@ import {
     ControlGlobalTomlDocument,
     ControlInstanceTomlDocument,
     ControlConfigTomlCodec
-} from "../dist/index.js";
+} from "../dist/testing.js";
 import {
     normalizeConfigGlobalDraft,
     normalizeConfigInstanceDraft,

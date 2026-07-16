@@ -22,7 +22,7 @@ import {
     type WorkerCommandResult,
     type WorkerCommandTransport,
     type WorkerRpcResponseEnvelope
-} from "@portable-devshell/core";
+} from "@portable-devshell/core/testing";
 
 const cliToolCallContext = { source: "cli" } as const;
 

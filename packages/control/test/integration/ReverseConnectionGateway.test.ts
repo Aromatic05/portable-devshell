@@ -4,8 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { WorkerInstanceFactory, WorkerRpcInboundConnector } from "@portable-devshell/core";
-import { McpHostHttpServer } from "@portable-devshell/mcp";
+import { WorkerInstanceFactory, WorkerRpcInboundConnector } from "@portable-devshell/core/testing";
+import { McpHostHttpServer } from "@portable-devshell/mcp/testing";
 import { asInstanceName, asWorkspacePath, type JsonValue } from "@portable-devshell/shared";
 import WebSocket from "ws";
 
@@ -17,7 +17,7 @@ import {
     ReverseControlService,
     ReverseCredentialStore,
     TodoService
-} from "../../dist/index.js";
+} from "../../dist/testing.js";
 
 test("WSS reverse connection authenticates, handshakes, and a higher generation replaces the old channel", async () => {
     const home = await mkdtemp(join(tmpdir(), "devshell-reverse-gateway-"));

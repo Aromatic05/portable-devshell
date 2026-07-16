@@ -5,7 +5,7 @@ import { join } from "node:path";
 import test from "node:test";
 
 import type { ArtifactPayloadDescriptor, JsonValue } from "@portable-devshell/shared";
-import { ArtifactHostBridge, type ArtifactHostAccessContext } from "@portable-devshell/control";
+import { ArtifactHostBridge, type ArtifactHostAccessContext } from "@portable-devshell/control/testing";
 
 function context(overrides?: Partial<ArtifactHostAccessContext>): ArtifactHostAccessContext {
     return {
@@ -177,7 +177,7 @@ test("artifact service routes hidden host source and target with the real author
     await writeFile(source, "host bridge");
     const authority = context();
     const authorities: Array<string | undefined> = [];
-    const { ArtifactService } = await import("@portable-devshell/control");
+    const { ArtifactService } = await import("@portable-devshell/control/testing");
     const service = new ArtifactService({
         resolveEndpoint: (name, authorityInstance) => {
             authorities.push(authorityInstance);

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { McpAuthMiddleware, McpAuthPublicExposureGuard } from "@portable-devshell/mcp";
+import { McpAuthMiddleware, McpAuthPublicExposureGuard } from "@portable-devshell/mcp/testing";
 
 test("listenHost=0.0.0.0 plus auth none is rejected", () => {
     const guard = new McpAuthPublicExposureGuard();

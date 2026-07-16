@@ -18,7 +18,7 @@ import {
     type JsonValue
 } from "@portable-devshell/shared";
 
-import { controlDaemonModulePath } from "../../dist/index.js";
+import { controlDaemonModulePath } from "../../dist/testing.js";
 import { encodeGlobalConfig, encodeInstanceConfig } from "../ConfigTomlTestSupport.ts";
 
 test("start creates control directory, socket, pid and status uses rpc", async (t) => {

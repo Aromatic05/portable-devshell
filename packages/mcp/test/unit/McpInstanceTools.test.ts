@@ -11,7 +11,7 @@ import {
     McpEndpointWorker,
     type McpInstanceGateway,
     type McpSshInstanceCreateInput
-} from "@portable-devshell/mcp";
+} from "@portable-devshell/mcp/testing";
 
 const bashTool: ToolDefinition = {
     requiredCapabilities: ["execute"],

@@ -29,9 +29,14 @@ process.once("exit", () => {
 
 const workspacePackages = new Map([
     ["@portable-devshell/control", new URL("../../control/dist/index.js", import.meta.url).href],
+    ["@portable-devshell/control/testing", new URL("../../control/dist/testing.js", import.meta.url).href],
     ["@portable-devshell/core", new URL("../../core/dist/index.js", import.meta.url).href],
+    ["@portable-devshell/core/testing", new URL("../../core/dist/testing.js", import.meta.url).href],
     ["@portable-devshell/mcp", new URL("../dist/index.js", import.meta.url).href],
-    ["@portable-devshell/shared", new URL("../../shared/dist/index.js", import.meta.url).href]
+    ["@portable-devshell/mcp/testing", new URL("../dist/testing.js", import.meta.url).href],
+    ["@portable-devshell/shared", new URL("../../shared/dist/index.js", import.meta.url).href],
+    ["@portable-devshell/tui", new URL("../../tui/dist/index.js", import.meta.url).href],
+    ["@portable-devshell/tui/testing", new URL("../../tui/dist/testing.js", import.meta.url).href]
 ]);
 
 registerHooks({

@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { WorkerInstallerLocal, getWorkerTargetByKey, type WorkerAsset } from "@portable-devshell/core";
+import { WorkerInstallerLocal, getWorkerTargetByKey, type WorkerAsset } from "@portable-devshell/core/testing";
 
 test("WorkerInstallerLocal installs into target-specific directory and refreshes symlink", async (t) => {
     const devshellHomeDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-home-"));

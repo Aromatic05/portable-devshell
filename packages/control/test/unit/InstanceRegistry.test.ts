@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { InstanceRegistryFactory, McpEndpointFactory, McpRuntimeFactory, createDefaultControlConfig } from "../../dist/index.js";
+import { InstanceRegistryFactory, McpEndpointFactory, McpRuntimeFactory, createDefaultControlConfig } from "../../dist/testing.js";
 import { normalizeConfigInstanceDraft } from "@portable-devshell/shared";
 
 test("disabled instances are skipped and registry does not auto start workers", () => {

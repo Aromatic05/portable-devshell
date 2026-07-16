@@ -15,7 +15,7 @@ import {
     hitTargetAt,
     TuiAppStore,
     TuiFocusManager
-} from "../../dist/index.js";
+} from "../../dist/testing.js";
 
 test("Prompt 3 urgent fix uses page + instance coordinates with a two-stage Tab cycle", async () => {
     const harness = createHarness();
