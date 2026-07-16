@@ -1,4 +1,3 @@
-import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { once } from "node:events";
 import { tmpdir } from "node:os";
@@ -11,10 +10,8 @@ import { WorkerBinary } from "../../WorkerBinary.js";
 import { WorkerInstallerRemote } from "../../install/WorkerInstallerRemote.js";
 import {
     createCommandContext,
-    createProviderError,
     type WorkerCommandInteractiveSession,
     type SpawnFunction,
-    waitForCommandResult,
     type ProviderCommandContext,
     type WorkerCommandTransport
 } from "../../command/WorkerCommandTransport.js";
@@ -25,6 +22,7 @@ import {
     parseWorkerTargetProbeOutput,
     workerTargetProbeCommandLine
 } from "../../target/WorkerTargetProbe.js";
+import { WorkerTransportProcessRunner } from "../process/WorkerTransportProcessRunner.js";
 
 const SSH_NON_INTERACTIVE_ARGS = [
     "-oBatchMode=yes",
@@ -47,7 +45,7 @@ export class WorkerTransportDriverSsh implements WorkerCommandTransport {
     readonly #workspace?: string;
     readonly #workerBinary: WorkerBinary;
     readonly #installer: WorkerInstallerRemote;
-    readonly #spawn: SpawnFunction;
+    readonly #process: WorkerTransportProcessRunner;
     readonly #controlPath = join(tmpdir(), `pds-ssh-${randomUUID().slice(0, 8)}`);
     #controlSocketEnabled = false;
 
@@ -55,12 +53,12 @@ export class WorkerTransportDriverSsh implements WorkerCommandTransport {
         this.#sshCommand = parseSshCommand(options.command);
         this.#workspace = options.workspace;
         this.#workerBinary = options.workerBinary ?? new WorkerBinary();
-        this.#spawn = options.spawnFunction ?? spawn;
+        this.#process = new WorkerTransportProcessRunner(options.spawnFunction);
         this.#installer = new WorkerInstallerRemote({
             createContext: (operation, command) => this.#createShellContext(operation, command),
             probeTarget: () => this.#probeTarget(),
             spawnShell: (commandLine, stdio, context) => this.#spawnRemoteShell(commandLine, stdio, context),
-            createProviderError: this.#createProviderError
+            createProviderError: this.#process.createError
         });
     }
 
@@ -72,15 +70,14 @@ export class WorkerTransportDriverSsh implements WorkerCommandTransport {
             commandLine
         );
         const result = this.#decorateCommandResult(
-            await waitForCommandResult(
+            await this.#process.wait(
                 this.#spawnRemoteShell(commandLine, ["ignore", "pipe", "pipe"], context),
-                this.#createProviderError,
                 context
             )
         );
 
         if (result.exitCode !== 0) {
-            throw this.#createProviderError(context, new Error(result.stderr || result.stdout || "worker install check failed"), {
+            throw this.#process.createError(context, new Error(result.stderr || result.stdout || "worker install check failed"), {
                 errorCode: errorCodes.coreWorkerProvisionFailed,
                 result
             });
@@ -112,7 +109,7 @@ export class WorkerTransportDriverSsh implements WorkerCommandTransport {
         );
         const child = this.#spawnRemoteShell(commandLine, ["ignore", "pipe", "pipe"], context, options.env, command === "start");
 
-        return this.#decorateCommandResult(await waitForCommandResult(child, this.#createProviderError, context));
+        return this.#decorateCommandResult(await this.#process.wait(child, context));
     }
 
     async spawnWorkerRpc(options: WorkerRpcOptions): Promise<WorkerRpcProcess> {
@@ -140,7 +137,7 @@ export class WorkerTransportDriverSsh implements WorkerCommandTransport {
         const child = this.#spawnRemoteShell(workerTargetProbeCommandLine, ["ignore", "pipe", "pipe"], context);
 
         try {
-            const result = this.#decorateCommandResult(await waitForCommandResult(child, this.#createProviderError, context));
+            const result = this.#decorateCommandResult(await this.#process.wait(child, context));
 
             if (result.exitCode !== 0) {
                 throw createWorkerTargetProbeFailedError(context, { result });
@@ -157,24 +154,17 @@ export class WorkerTransportDriverSsh implements WorkerCommandTransport {
     }
 
     #spawnRemoteShell(
-        commandLine: string,
+        _commandLine: string,
         stdio: ["ignore" | "pipe", "pipe", "pipe"],
         context: ProviderCommandContext,
         env?: NodeJS.ProcessEnv,
-        useWorkspace: boolean = false
+        _useWorkspace: boolean = false
     ) {
-        const command = this.#buildRemoteShellCommand(this.#withRemoteCwd(commandLine, useWorkspace));
-
-        try {
-            return this.#spawn(command[0], command.slice(1), {
-                env,
-                stdio
-            });
-        } catch (error) {
-            throw this.#createProviderError(context, error, {
-                errorCode: context.operation === "spawnWorkerRpc" ? errorCodes.coreWorkerRpcSpawnFailed : errorCodes.coreProviderFailed
-            });
-        }
+        return this.#process.spawn(
+            context,
+            { env, stdio },
+            context.operation === "spawnWorkerRpc" ? errorCodes.coreWorkerRpcSpawnFailed : errorCodes.coreProviderFailed
+        );
     }
 
     #createRemoteShellContext(
@@ -257,12 +247,6 @@ export class WorkerTransportDriverSsh implements WorkerCommandTransport {
         return stderr.includes(SSH_INTERACTIVE_HINT) ? stderr : `${stderr}${stderr.endsWith("\n") || stderr.length === 0 ? "" : "\n"}${SSH_INTERACTIVE_HINT}\n`;
     }
 
-    readonly #createProviderError = (
-        context: ProviderCommandContext,
-        cause: unknown,
-        options?: { errorCode?: string; result?: { exitCode?: number | null; signal?: string; stderr?: string; stdout?: string } }
-    ) => createProviderError(context, cause, options);
-
     async #ensureInteractiveControlConnection(
         operation: string,
         instance: string | undefined,
@@ -284,7 +268,7 @@ export class WorkerTransportDriverSsh implements WorkerCommandTransport {
         const result = await this.#runInteractiveRemoteShell(commandLine, context, interactiveSession, env);
 
         if (result.exitCode !== 0) {
-            throw this.#createProviderError(context, new Error(result.stderr || result.stdout || "ssh interactive authentication failed"), {
+            throw this.#process.createError(context, new Error(result.stderr || result.stdout || "ssh interactive authentication failed"), {
                 result
             });
         }
@@ -316,17 +300,10 @@ export class WorkerTransportDriverSsh implements WorkerCommandTransport {
         interactiveSession: WorkerCommandInteractiveSession,
         env?: NodeJS.ProcessEnv
     ) {
-        const command = this.#buildInteractiveRemoteShellCommand(commandLine);
-        let child;
-
-        try {
-            child = this.#spawn(command[0], command.slice(1), {
-                env,
-                stdio: ["pipe", "pipe", "pipe"]
-            });
-        } catch (error) {
-            throw this.#createProviderError(context, error);
-        }
+        const child = this.#process.spawn(context, {
+            env,
+            stdio: ["pipe", "pipe", "pipe"]
+        });
 
         let outputFlush = Promise.resolve();
         child.stdout?.setEncoding("utf8");
@@ -344,7 +321,7 @@ export class WorkerTransportDriverSsh implements WorkerCommandTransport {
 
         const exitSignal = once(child, "close").then(() => undefined);
         const inputPump = this.#pumpInteractiveInput(child.stdin, interactiveSession, exitSignal);
-        const result = await waitForCommandResult(child, this.#createProviderError, context);
+        const result = await this.#process.wait(child, context);
 
         await inputPump;
         await outputFlush;

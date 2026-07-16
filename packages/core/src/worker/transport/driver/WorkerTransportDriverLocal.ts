@@ -1,4 +1,3 @@
-import { spawn } from "node:child_process";
 import { accessSync, constants } from "node:fs";
 import { resolve } from "node:path";
 
@@ -8,9 +7,7 @@ import { WorkerAssetResolver } from "../../WorkerAssetResolver.js";
 import { WorkerBinary } from "../../WorkerBinary.js";
 import {
     createCommandContext,
-    createProviderError,
     type SpawnFunction,
-    waitForCommandResult,
     type ProviderCommandContext,
     type WorkerCommandTransport
 } from "../../command/WorkerCommandTransport.js";
@@ -20,6 +17,7 @@ import { WorkerInstallerLocal, type WorkerInstallerLocalResult } from "../../ins
 import { resolveWorkerDevshellHomeDirectory } from "../../platform/WorkerHomeDirectory.js";
 import { workerInstalledAliasFileName } from "../../target/WorkerTargetBinary.js";
 import { probeLocalWorkerTarget } from "../../target/WorkerTargetProbe.js";
+import { WorkerTransportProcessRunner } from "../process/WorkerTransportProcessRunner.js";
 
 export interface WorkerTransportDriverLocalOptions {
     installer?: WorkerInstallerLocal;
@@ -32,26 +30,24 @@ export class WorkerTransportDriverLocal implements WorkerCommandTransport {
     readonly #installer: WorkerInstallerLocal;
     readonly #resolver: WorkerAssetResolver;
     readonly #workerBinary: WorkerBinary;
-    readonly #spawn: SpawnFunction;
+    readonly #process: WorkerTransportProcessRunner;
 
     constructor(options: WorkerTransportDriverLocalOptions = {}) {
         this.#installer = options.installer ?? new WorkerInstallerLocal();
         this.#resolver = options.resolver ?? new WorkerAssetResolver();
         this.#workerBinary = options.workerBinary ?? new WorkerBinary();
-        this.#spawn = options.spawnFunction ?? spawn;
+        this.#process = new WorkerTransportProcessRunner(options.spawnFunction);
     }
 
     async installWorker(): Promise<void> {
         const installCommand = new WorkerBinary(await this.#resolveExecutable()).buildInstallCommand();
         const context = this.#createCommandContext("installWorker", [installCommand.command, ...installCommand.args]);
-        const child = this.#spawnCommand(context, {
+        const result = await this.#process.run(context, {
             env: this.#mergeEnv(undefined),
             stdio: ["ignore", "pipe", "pipe"]
         });
-
-        const result = await waitForCommandResult(child, this.#createProviderError, context);
         if (result.exitCode !== 0) {
-            throw this.#createProviderError(context, new Error(result.stderr || result.stdout || "worker install check failed"), {
+            throw this.#process.createError(context, new Error(result.stderr || result.stdout || "worker install check failed"), {
                 errorCode: errorCodes.coreWorkerProvisionFailed,
                 result
             });
@@ -72,7 +68,7 @@ export class WorkerTransportDriverLocal implements WorkerCommandTransport {
                     env: options.env
                 });
                 if (stopResult.exitCode !== 0) {
-                    throw this.#createProviderError(
+                    throw this.#process.createError(
                         this.#createCommandContext("upgradeWorker", [installed.executablePath, "stop", "--instance", options.instanceName], {
                             instance: options.instanceName
                         }),
@@ -92,7 +88,7 @@ export class WorkerTransportDriverLocal implements WorkerCommandTransport {
         const context = this.#createCommandContext("spawnWorkerRpc", [workerCommand.command, ...workerCommand.args], {
             instance: options.instanceName
         });
-        const child = this.#spawnCommand(
+        const child = this.#process.spawn(
             context,
             {
                 env: this.#mergeEnv(options.env),
@@ -139,11 +135,11 @@ export class WorkerTransportDriverLocal implements WorkerCommandTransport {
                 throw error;
             }
 
-            throw this.#createProviderError(this.#createCommandContext("resolveExecutable", ["devshell-worker"]), error);
+            throw this.#process.createError(this.#createCommandContext("resolveExecutable", ["devshell-worker"]), error);
         });
 
         return await this.#installer.ensureInstalled(devshellHomeDirectory, asset, target).catch((error) => {
-            throw this.#createProviderError(this.#createCommandContext("resolveExecutable", ["devshell-worker"]), error, {
+            throw this.#process.createError(this.#createCommandContext("resolveExecutable", ["devshell-worker"]), error, {
                 errorCode: errorCodes.coreWorkerProvisionFailed
             });
         });
@@ -159,12 +155,11 @@ export class WorkerTransportDriverLocal implements WorkerCommandTransport {
             cwd: command === "start" ? options.workspacePath : undefined,
             instance: options.instanceName
         });
-        const child = this.#spawnCommand(context, {
+        return await this.#process.run(context, {
             cwd: context.cwd,
             env: this.#mergeEnv(options.env),
             stdio: ["ignore", "pipe", "pipe"]
         });
-        return await waitForCommandResult(child, this.#createProviderError, context);
     }
 
     #mergeEnv(env: NodeJS.ProcessEnv | undefined): NodeJS.ProcessEnv {
@@ -176,20 +171,6 @@ export class WorkerTransportDriverLocal implements WorkerCommandTransport {
         delete merged.DEVSHELL_WORKER_INTERNAL_WORKSPACE;
         delete merged.DEVSHELL_WORKER_INTERNAL_SECURITY_MODE;
         return merged;
-    }
-
-    #spawnCommand(
-        context: ProviderCommandContext,
-        options: Parameters<SpawnFunction>[2],
-        errorCode: string = errorCodes.coreProviderFailed
-    ) {
-        const [command, ...args] = context.command;
-
-        try {
-            return this.#spawn(command, args, options);
-        } catch (error) {
-            throw this.#createProviderError(context, error, { errorCode });
-        }
     }
 
     #createCommandContext(
@@ -206,11 +187,6 @@ export class WorkerTransportDriverLocal implements WorkerCommandTransport {
         });
     }
 
-    readonly #createProviderError = (
-        context: ProviderCommandContext,
-        cause: unknown,
-        options?: { errorCode?: string; result?: { exitCode?: number | null; signal?: string; stderr?: string; stdout?: string } }
-    ) => createProviderError(context, cause, options);
 }
 
 function isReadableFile(path: string): boolean {

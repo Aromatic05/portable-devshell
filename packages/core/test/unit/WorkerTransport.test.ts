@@ -1059,6 +1059,190 @@ test("docker transport creates and starts managed containers before starting the
     ]);
 });
 
+test("dockerfile container mode builds the image before creating the managed container", async () => {
+    const recorder = createSpawnRecorder((call, child) => {
+        if (call.args[0] === "image" && call.args[1] === "inspect") {
+            closeRecordedChild(child, { stderr: "image missing\n", code: 1 });
+            return true;
+        }
+
+        if (call.args[0] === "inspect" && call.args[1] === "--type") {
+            closeRecordedChild(child, { stderr: "No such container\n", code: 1 });
+            return true;
+        }
+
+        return false;
+    });
+    const transport = new WorkerTransportDriverDocker({
+        container: {
+            build: {
+                context: "/project",
+                dockerfile: "/project/Containerfile",
+                tag: "devshell-test:latest"
+            },
+            containerName: "dockerfile-container",
+            mode: "dockerfile"
+        },
+        dockerBinary: "docker-bin",
+        remoteCwd: "/workspace",
+        workerBinary: new WorkerBinary("/usr/local/bin/devshell-worker"),
+        spawnFunction: recorder.spawn
+    });
+
+    await transport.runWorkerCommand("start", {
+        instanceName: "task-3-dockerfile",
+        workspacePath: "/workspace"
+    });
+
+    assert.deepEqual(recorder.calls.map((call) => call.args), [
+        ["image", "inspect", "devshell-test:latest"],
+        ["build", "-t", "devshell-test:latest", "-f", "/project/Containerfile", "/project"],
+        ["inspect", "--type", "container", "--format", "{{.State.Status}}", "dockerfile-container"],
+        ["create", "--name", "dockerfile-container", "devshell-test:latest", "sh", "-lc", "trap 'exit 0' TERM INT; while :; do sleep 2147483647; done"],
+        ["start", "dockerfile-container"],
+        [
+            "exec",
+            "-w",
+            "/workspace",
+            "-i",
+            "dockerfile-container",
+            "/usr/local/bin/devshell-worker",
+            "start",
+            "--instance",
+            "task-3-dockerfile"
+        ]
+    ]);
+});
+
+test("compose container mode starts the configured service and executes the worker through compose", async () => {
+    const recorder = createSpawnRecorder();
+    const transport = new WorkerTransportDriverDocker({
+        container: {
+            compose: {
+                file: "/project/compose.yaml",
+                projectName: "devshell-test",
+                service: "workspace"
+            },
+            mode: "compose"
+        },
+        dockerBinary: "docker-bin",
+        remoteCwd: "/workspace",
+        workerBinary: new WorkerBinary("/usr/local/bin/devshell-worker"),
+        spawnFunction: recorder.spawn
+    });
+
+    await transport.runWorkerCommand("start", {
+        instanceName: "task-3-compose",
+        workspacePath: "/workspace"
+    });
+
+    assert.deepEqual(recorder.calls.map((call) => call.args), [
+        ["compose", "-f", "/project/compose.yaml", "-p", "devshell-test", "ps", "-q", "workspace"],
+        ["compose", "-f", "/project/compose.yaml", "-p", "devshell-test", "up", "-d", "workspace"],
+        [
+            "compose",
+            "-f",
+            "/project/compose.yaml",
+            "-p",
+            "devshell-test",
+            "exec",
+            "-T",
+            "-w",
+            "/workspace",
+            "workspace",
+            "/usr/local/bin/devshell-worker",
+            "start",
+            "--instance",
+            "task-3-compose"
+        ]
+    ]);
+});
+
+test("existing image container mode creates a dedicated managed container", async () => {
+    const recorder = createSpawnRecorder((call, child) => {
+        if (call.args[0] === "inspect") {
+            closeRecordedChild(child, { stderr: "No such container\n", code: 1 });
+            return true;
+        }
+
+        return false;
+    });
+    const transport = new WorkerTransportDriverPodman({
+        container: {
+            containerName: "existing-image-container",
+            image: "registry.example/devshell:latest",
+            mode: "existingImage"
+        },
+        podmanBinary: "podman-bin",
+        remoteCwd: "/workspace",
+        workerBinary: new WorkerBinary("/usr/local/bin/devshell-worker"),
+        spawnFunction: recorder.spawn
+    });
+
+    await transport.runWorkerCommand("start", {
+        instanceName: "task-3-existing-image",
+        workspacePath: "/workspace"
+    });
+
+    assert.deepEqual(recorder.calls[1]?.args.slice(0, 4), [
+        "create",
+        "--name",
+        "existing-image-container",
+        "--userns=keep-id"
+    ]);
+    assert.equal(recorder.calls[1]?.args.includes("registry.example/devshell:latest"), true);
+    assert.deepEqual(recorder.calls[2]?.args, ["start", "existing-image-container"]);
+    assert.deepEqual(recorder.calls[3]?.args.slice(0, 5), ["exec", "-w", "/workspace", "-i", "existing-image-container"]);
+});
+
+test("existing stopped container mode adopts and restores the configured lifecycle", async () => {
+    let inspectCount = 0;
+    const recorder = createSpawnRecorder((call, child) => {
+        if (call.args[0] === "inspect") {
+            closeRecordedChild(child, { stdout: inspectCount++ === 0 ? "stopped\n" : "running\n" });
+            return true;
+        }
+
+        return false;
+    });
+    const transport = new WorkerTransportDriverPodman({
+        container: {
+            adoptLifecycle: true,
+            containerName: "adopted-container",
+            mode: "existingStoppedContainer"
+        },
+        podmanBinary: "podman-bin",
+        remoteCwd: "/workspace",
+        workerBinary: new WorkerBinary("/usr/local/bin/devshell-worker"),
+        spawnFunction: recorder.spawn
+    });
+
+    await transport.runWorkerCommand("start", {
+        instanceName: "task-3-adopted",
+        workspacePath: "/workspace"
+    });
+    await transport.runWorkerCommand("stop", { instanceName: "task-3-adopted" });
+
+    assert.deepEqual(recorder.calls.map((call) => call.args), [
+        ["inspect", "--type", "container", "--format", "{{.State.Status}}", "adopted-container"],
+        ["start", "adopted-container"],
+        [
+            "exec",
+            "-w",
+            "/workspace",
+            "-i",
+            "adopted-container",
+            "/usr/local/bin/devshell-worker",
+            "start",
+            "--instance",
+            "task-3-adopted"
+        ],
+        ["inspect", "--type", "container", "--format", "{{.State.Status}}", "adopted-container"],
+        ["exec", "-i", "adopted-container", "/usr/local/bin/devshell-worker", "stop", "--instance", "task-3-adopted"],
+        ["stop", "adopted-container"]
+    ]);
+});
+
 test("podman transport rejects already running existing stopped containers", async () => {
     const recorder = createSpawnRecorder((call, child, callIndex) => {
         if (callIndex === 0) {

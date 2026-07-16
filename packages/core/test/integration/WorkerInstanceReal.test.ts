@@ -590,6 +590,52 @@ test("WorkerInstance denies and expires approval-gated calls without invoking to
     }
 });
 
+test("WorkerInstance restores a stopped disconnected snapshot when start fails", async () => {
+    const homeDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-instance-start-failure-"));
+    const transport: WorkerCommandTransport = {
+        async runWorkerCommand(command): Promise<WorkerCommandResult> {
+            assert.equal(command, "start");
+            return {
+                exitCode: 1,
+                stderr: "start failed",
+                stdout: ""
+            };
+        },
+        async spawnWorkerRpc() {
+            throw new Error("rpc must not be spawned after a failed start");
+        },
+        async installWorker(): Promise<void> {}
+    };
+    const instance = new WorkerInstanceFactory().create({
+        homeDirectory,
+        name: asInstanceName("task-6-start-failure"),
+        transport
+    });
+
+    try {
+        await assert.rejects(instance.start("/tmp/workspace"), (error: unknown) => {
+            assert.equal((error as { code?: string }).code, errorCodes.coreWorkerStartFailed);
+            return true;
+        });
+
+        const snapshot = instance.snapshot();
+        assert.equal(snapshot.daemonState, "stopped");
+        assert.equal(snapshot.connectionState, "disconnected");
+        assert.equal(snapshot.ready, false);
+        assert.equal(snapshot.lastErrorCode, errorCodes.coreWorkerStartFailed);
+
+        const replay = instance.subscribe(1);
+        assert.equal(replay.kind, "events");
+        assert.deepEqual(replay.events.map((event) => event.type), [
+            "instance.statusChanged",
+            "instance.statusChanged"
+        ]);
+    } finally {
+        await instance.close();
+        await rm(homeDirectory, { force: true, recursive: true });
+    }
+});
+
 test("WorkerInstance refreshStatus updates snapshot from worker status without auto start", async () => {
     const homeDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-instance-refresh-"));
     const harness = createWorkerInstanceHarness();

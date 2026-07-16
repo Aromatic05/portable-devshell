@@ -1,13 +1,9 @@
-import { spawn } from "node:child_process";
-
-import { ControlError, createError, errorCodes, type InstanceContainerConfig, type InstanceContainerMountConfig } from "@portable-devshell/shared";
+import { ControlError, errorCodes, type InstanceContainerConfig } from "@portable-devshell/shared";
 
 import { WorkerBinary } from "../../WorkerBinary.js";
 import { WorkerInstallerRemote } from "../../install/WorkerInstallerRemote.js";
 import {
     createCommandContext,
-    createProviderError,
-    waitForCommandResult,
     type ProviderCommandContext,
     type SpawnFunction,
     type WorkerCommandResult,
@@ -20,8 +16,12 @@ import {
     parseWorkerTargetProbeOutput,
     workerTargetProbeCommandLine
 } from "../../target/WorkerTargetProbe.js";
-
-type ContainerLifecycleStatus = "missing" | "running" | "stopped";
+import {
+    createWorkerTransportContainerProvision,
+    type WorkerTransportContainerLifecycleStatus,
+    type WorkerTransportContainerProvision
+} from "../container/WorkerTransportContainerProvision.js";
+import { WorkerTransportProcessRunner } from "../process/WorkerTransportProcessRunner.js";
 
 export interface WorkerTransportDriverContainerBaseOptions {
     binary: string;
@@ -35,57 +35,66 @@ export interface WorkerTransportDriverContainerBaseOptions {
 
 export class WorkerTransportDriverContainerBase implements WorkerCommandTransport {
     readonly #binary: string;
-    readonly #container: InstanceContainerConfig;
     readonly #installer: WorkerInstallerRemote;
-    readonly #keepIdUserNamespace: boolean;
+    readonly #process: WorkerTransportProcessRunner;
     readonly #provider: "docker" | "podman";
+    readonly #provision: WorkerTransportContainerProvision;
     readonly #remoteCwd?: string;
-    readonly #spawn: SpawnFunction;
     readonly #workerBinary: WorkerBinary;
-    #existingStoppedContainerAdopted = false;
 
     constructor(options: WorkerTransportDriverContainerBaseOptions) {
         this.#binary = options.binary;
-        this.#container = options.container;
-        this.#keepIdUserNamespace = options.keepIdUserNamespace === true;
         this.#provider = options.provider;
         this.#remoteCwd = options.remoteCwd;
-        this.#spawn = options.spawnFunction ?? spawn;
         this.#workerBinary = options.workerBinary ?? new WorkerBinary();
+        this.#process = new WorkerTransportProcessRunner(options.spawnFunction);
+        this.#provision = createWorkerTransportContainerProvision({
+            container: options.container,
+            keepIdUserNamespace: options.keepIdUserNamespace === true,
+            operations: {
+                provider: this.#provider,
+                readContainerStatus: (containerName) => this.#readContainerStatus(containerName),
+                remoteCwd: this.#remoteCwd,
+                runProviderCommand: (operation, args, commandOptions) =>
+                    this.#runProviderCommand(operation, args, commandOptions)
+            }
+        });
         this.#installer = new WorkerInstallerRemote({
             createContext: (operation, command) => this.#createShellContext(operation, command),
-            createProviderError: this.#createProviderError,
+            createProviderError: this.#process.createError,
             probeTarget: () => this.#probeTarget(),
             spawnShell: (commandLine, stdio, context) => this.#spawnShell(commandLine, stdio, context)
         });
     }
 
     async installWorker(): Promise<void> {
-        await this.#ensureRuntimeReady("installWorker");
+        await this.#provision.ensureReady("installWorker");
         const installCommand = new WorkerBinary(await this.#resolveExecutable()).buildInstallCommand();
         const invocation = this.#createExecInvocation("installWorker", [installCommand.command, ...installCommand.args]);
-        const child = this.#spawnCommand(invocation.context, invocation.args, ["ignore", "pipe", "pipe"]);
-        const result = await waitForCommandResult(child, this.#createProviderError, invocation.context);
+        const result = await this.#process.run(invocation.context, {
+            stdio: ["ignore", "pipe", "pipe"]
+        });
 
         if (result.exitCode !== 0) {
-            throw this.#createProviderError(invocation.context, new Error(result.stderr || result.stdout || "worker install check failed"), {
-                errorCode: errorCodes.coreWorkerProvisionFailed,
-                result
-            });
+            throw this.#process.createError(
+                invocation.context,
+                new Error(result.stderr || result.stdout || "worker install check failed"),
+                { errorCode: errorCodes.coreWorkerProvisionFailed, result }
+            );
         }
     }
 
     async runWorkerCommand(command: WorkerCommandName, options: WorkerCommandOptions): Promise<WorkerCommandResult> {
         switch (command) {
             case "start":
-                await this.#ensureRuntimeReady("start");
+                await this.#provision.ensureReady("start");
                 break;
             case "status":
                 return await this.#runStatusCommand(options);
             case "stop":
                 return await this.#runStopCommand(options);
             case "logs":
-                if (!(await this.#isRuntimeAvailable())) {
+                if (!(await this.#provision.isAvailable())) {
                     return this.#syntheticResult("logs", options.instanceName, "");
                 }
                 break;
@@ -96,43 +105,78 @@ export class WorkerTransportDriverContainerBase implements WorkerCommandTranspor
             options.instanceName,
             options.extraArgs
         );
-        const invocation = this.#createExecInvocation(command, [workerCommand.command, ...workerCommand.args], options.instanceName, command === "start");
-        const child = this.#spawnCommand(invocation.context, invocation.args, ["ignore", "pipe", "pipe"], options.env);
-        return await waitForCommandResult(child, this.#createProviderError, invocation.context);
+        const invocation = this.#createExecInvocation(
+            command,
+            [workerCommand.command, ...workerCommand.args],
+            options.instanceName,
+            command === "start"
+        );
+        return await this.#process.run(invocation.context, {
+            env: options.env,
+            stdio: ["ignore", "pipe", "pipe"]
+        });
     }
 
     async spawnWorkerRpc(options: WorkerRpcOptions): Promise<WorkerRpcProcess> {
-        await this.#ensureRuntimeReady("spawnWorkerRpc");
+        await this.#provision.ensureReady("spawnWorkerRpc");
         const workerCommand = new WorkerBinary(await this.#resolveExecutable()).buildCommand("rpc", options.instanceName);
-        const invocation = this.#createExecInvocation("spawnWorkerRpc", [workerCommand.command, ...workerCommand.args], options.instanceName);
+        const invocation = this.#createExecInvocation(
+            "spawnWorkerRpc",
+            [workerCommand.command, ...workerCommand.args],
+            options.instanceName
+        );
         return createWorkerRpcProcess(
-            this.#spawnCommand(invocation.context, invocation.args, ["pipe", "pipe", "pipe"], options.env, errorCodes.coreWorkerRpcSpawnFailed)
+            this.#process.spawn(
+                invocation.context,
+                { env: options.env, stdio: ["pipe", "pipe", "pipe"] },
+                errorCodes.coreWorkerRpcSpawnFailed
+            )
         );
     }
 
     async #runStatusCommand(options: WorkerCommandOptions): Promise<WorkerCommandResult> {
-        if (!(await this.#isRuntimeAvailable())) {
+        if (!(await this.#provision.isAvailable())) {
             return this.#syntheticResult("status", options.instanceName, JSON.stringify({ state: "stopped" }));
         }
 
-        const workerCommand = new WorkerBinary(await this.#resolveExecutable()).buildCommand("status", options.instanceName, options.extraArgs);
-        const invocation = this.#createExecInvocation("status", [workerCommand.command, ...workerCommand.args], options.instanceName);
-        const child = this.#spawnCommand(invocation.context, invocation.args, ["ignore", "pipe", "pipe"], options.env);
-        return await waitForCommandResult(child, this.#createProviderError, invocation.context);
+        const workerCommand = new WorkerBinary(await this.#resolveExecutable()).buildCommand(
+            "status",
+            options.instanceName,
+            options.extraArgs
+        );
+        const invocation = this.#createExecInvocation(
+            "status",
+            [workerCommand.command, ...workerCommand.args],
+            options.instanceName
+        );
+        return await this.#process.run(invocation.context, {
+            env: options.env,
+            stdio: ["ignore", "pipe", "pipe"]
+        });
     }
 
     async #runStopCommand(options: WorkerCommandOptions): Promise<WorkerCommandResult> {
-        if (!(await this.#isRuntimeAvailable())) {
+        if (!(await this.#provision.isAvailable())) {
             return this.#syntheticResult("stop", options.instanceName, JSON.stringify({ stopped: true }));
         }
 
-        const workerCommand = new WorkerBinary(await this.#resolveExecutable()).buildCommand("stop", options.instanceName, options.extraArgs);
-        const invocation = this.#createExecInvocation("stop", [workerCommand.command, ...workerCommand.args], options.instanceName);
-        const child = this.#spawnCommand(invocation.context, invocation.args, ["ignore", "pipe", "pipe"], options.env);
-        const result = await waitForCommandResult(child, this.#createProviderError, invocation.context);
+        const workerCommand = new WorkerBinary(await this.#resolveExecutable()).buildCommand(
+            "stop",
+            options.instanceName,
+            options.extraArgs
+        );
+        const invocation = this.#createExecInvocation(
+            "stop",
+            [workerCommand.command, ...workerCommand.args],
+            options.instanceName
+        );
+        const result = await this.#process.run(invocation.context, {
+            env: options.env,
+            stdio: ["ignore", "pipe", "pipe"]
+        });
 
         if (result.exitCode === 0) {
-            await this.#afterWorkerStop();
+            await this.#provision.afterWorkerStop();
         }
 
         return result;
@@ -143,187 +187,47 @@ export class WorkerTransportDriverContainerBase implements WorkerCommandTranspor
     }
 
     async #probeTarget() {
-        const args = this.#buildShellExecArgs(workerTargetProbeCommandLine);
-        const context = createCommandContext({
-            command: [this.#binary, ...args],
-            cwd: this.#remoteCwd,
-            operation: "probeTarget",
-            provider: this.#provider
-        });
-        const child = this.#spawnShell(workerTargetProbeCommandLine, ["ignore", "pipe", "pipe"], context);
+        const context = this.#createShellContext("probeTarget", ["sh", "-lc", workerTargetProbeCommandLine]);
 
         try {
-            const result = await waitForCommandResult(child, this.#createProviderError, context);
-
+            const result = await this.#process.run(context, { stdio: ["ignore", "pipe", "pipe"] });
             if (result.exitCode !== 0) {
                 throw createWorkerTargetProbeFailedError(context, { result });
             }
-
             return parseWorkerTargetProbeOutput(context, result.stdout);
         } catch (error) {
             if (error instanceof ControlError) {
                 throw error;
             }
-
             throw createWorkerTargetProbeFailedError(context, { cause: error });
         }
     }
 
-    async #ensureRuntimeReady(operation: string): Promise<void> {
-        switch (this.#container.mode) {
-            case "preset":
-                await this.#ensureManagedContainerReady(this.#container.image, this.#container.containerName);
-                return;
-            case "dockerfile":
-                await this.#ensureDockerfileImage(this.#container.build);
-                await this.#ensureManagedContainerReady(
-                    this.#container.build.tag ?? `${this.#container.containerName}:latest`,
-                    this.#container.containerName
-                );
-                return;
-            case "compose":
-                await this.#ensureComposeServiceRunning();
-                return;
-            case "existingImage":
-                await this.#ensureManagedContainerReady(this.#container.image, this.#container.containerName);
-                return;
-            case "existingStoppedContainer":
-                await this.#ensureExistingStoppedContainerReady(operation);
-                return;
-        }
+    #spawnShell(
+        _commandLine: string,
+        stdio: ["ignore" | "pipe", "pipe", "pipe"],
+        context: ProviderCommandContext
+    ) {
+        return this.#process.spawn(context, { stdio });
     }
 
-    async #isRuntimeAvailable(): Promise<boolean> {
-        switch (this.#container.mode) {
-            case "preset":
-            case "dockerfile":
-            case "existingImage":
-                return (await this.#readContainerStatus(this.#container.containerName)) === "running";
-            case "compose":
-                return await this.#isComposeServiceRunning();
-            case "existingStoppedContainer": {
-                const status = await this.#readContainerStatus(this.#container.containerName);
-                if (status === "running" && !this.#existingStoppedContainerAdopted) {
-                    throw this.#runningContainerUnsupportedError(this.#container.containerName);
-                }
-                return status === "running";
-            }
-        }
-    }
-
-    async #ensureManagedContainerReady(image: string, containerName: string): Promise<void> {
-        const status = await this.#readContainerStatus(containerName);
-
-        if (status === "missing") {
-            await this.#createManagedContainer(image, containerName);
-            await this.#runProviderCommand("createContainer", ["start", containerName]);
-            return;
-        }
-
-        if (status !== "running") {
-            await this.#runProviderCommand("startContainer", ["start", containerName]);
-        }
-    }
-
-    async #ensureDockerfileImage(build: Extract<InstanceContainerConfig, { mode: "dockerfile" }>["build"]): Promise<void> {
-        const tag = build.tag ?? "devshell-container:latest";
-        const result = await this.#runProviderCommand("inspectImage", ["image", "inspect", tag], { allowNonZeroExit: true });
-
-        if (result.exitCode === 0) {
-            return;
-        }
-
-        const args = ["build", "-t", tag];
-        if (build.dockerfile !== undefined) {
-            args.push("-f", build.dockerfile);
-        }
-        args.push(build.context);
-        await this.#runProviderCommand("buildImage", args);
-    }
-
-    async #ensureComposeServiceRunning(): Promise<void> {
-        if (await this.#isComposeServiceRunning()) {
-            return;
-        }
-
-        const compose = this.#requireComposeConfig();
-        await this.#runProviderCommand("composeUp", this.#buildComposeArgs(["up", "-d", compose.service]));
-    }
-
-    async #isComposeServiceRunning(): Promise<boolean> {
-        const compose = this.#requireComposeConfig();
-        const result = await this.#runProviderCommand(
-            "composePs",
-            this.#buildComposeArgs(["ps", "-q", compose.service]),
-            { allowNonZeroExit: true }
-        );
-
-        return result.exitCode === 0 && result.stdout.trim().length > 0;
-    }
-
-    async #ensureExistingStoppedContainerReady(operation: string): Promise<void> {
-        const containerName = this.#requireExistingStoppedContainer().containerName;
-        const status = await this.#readContainerStatus(containerName);
-
-        if (status === "missing") {
-            throw this.#missingContainerError(containerName);
-        }
-
-        if (status === "running") {
-            if (!this.#existingStoppedContainerAdopted) {
-                throw this.#runningContainerUnsupportedError(containerName);
-            }
-
-            return;
-        }
-
-        await this.#runProviderCommand("startContainer", ["start", containerName]);
-        this.#existingStoppedContainerAdopted = operation !== "status";
-    }
-
-    async #afterWorkerStop(): Promise<void> {
-        switch (this.#container.mode) {
-            case "preset":
-            case "dockerfile":
-            case "existingImage":
-                await this.#runProviderCommand("stopContainer", ["stop", this.#container.containerName], { allowNonZeroExit: true });
-                return;
-            case "compose":
-                return;
-            case "existingStoppedContainer":
-                if (this.#container.adoptLifecycle) {
-                    await this.#runProviderCommand("stopContainer", ["stop", this.#container.containerName], { allowNonZeroExit: true });
-                    this.#existingStoppedContainerAdopted = false;
-                }
-                return;
-        }
-    }
-
-    async #createManagedContainer(image: string, containerName: string): Promise<void> {
-        await this.#runProviderCommand("createContainer", this.#buildManagedContainerCreateArgs(image, containerName));
-    }
-
-    async #readContainerStatus(containerName: string): Promise<ContainerLifecycleStatus> {
-        const result = await this.#runProviderCommand(
-            "inspectContainer",
-            ["inspect", "--type", "container", "--format", "{{.State.Status}}", containerName],
-            { allowNonZeroExit: true }
-        );
+    async #readContainerStatus(containerName: string): Promise<WorkerTransportContainerLifecycleStatus> {
+        const args = ["inspect", "--type", "container", "--format", "{{.State.Status}}", containerName];
+        const result = await this.#runProviderCommand("inspectContainer", args, { allowNonZeroExit: true });
 
         if (result.exitCode !== 0) {
             if (isMissingContainerMessage(result.stderr) || isMissingContainerMessage(result.stdout)) {
                 return "missing";
             }
 
-            throw this.#createProviderError(
-                this.#createProviderContext("inspectContainer", ["inspect", "--type", "container", "--format", "{{.State.Status}}", containerName]),
+            throw this.#process.createError(
+                this.#createProviderContext("inspectContainer", args),
                 new Error(result.stderr || result.stdout || "container inspect failed"),
                 { result }
             );
         }
 
-        const status = result.stdout.trim();
-        return status === "running" ? "running" : "stopped";
+        return result.stdout.trim() === "running" ? "running" : "stopped";
     }
 
     async #runProviderCommand(
@@ -332,45 +236,29 @@ export class WorkerTransportDriverContainerBase implements WorkerCommandTranspor
         options: { allowNonZeroExit?: boolean; env?: NodeJS.ProcessEnv } = {}
     ): Promise<WorkerCommandResult> {
         const context = this.#createProviderContext(operation, args);
-        const child = this.#spawnCommand(context, args, ["ignore", "pipe", "pipe"], options.env);
-        const result = await waitForCommandResult(child, this.#createProviderError, context);
+        const result = await this.#process.run(context, {
+            env: options.env,
+            stdio: ["ignore", "pipe", "pipe"]
+        });
 
         if (!options.allowNonZeroExit && result.exitCode !== 0) {
-            throw this.#createProviderError(context, new Error(result.stderr || result.stdout || `${operation} failed`), { result });
+            throw this.#process.createError(
+                context,
+                new Error(result.stderr || result.stdout || `${operation} failed`),
+                { result }
+            );
         }
 
         return result;
     }
 
-    #spawnCommand(
-        context: ProviderCommandContext,
-        args: readonly string[],
-        stdio: ["ignore" | "pipe", "pipe", "pipe"],
-        env?: NodeJS.ProcessEnv,
-        errorCode: string = errorCodes.coreProviderFailed
+    #createExecInvocation(
+        operation: string,
+        command: readonly string[],
+        instance?: string,
+        useRemoteCwd: boolean = false
     ) {
-        try {
-            return this.#spawn(this.#binary, args, {
-                env,
-                stdio
-            });
-        } catch (error) {
-            throw this.#createProviderError(context, error, { errorCode });
-        }
-    }
-
-    #spawnShell(commandLine: string, stdio: ["ignore" | "pipe", "pipe", "pipe"], context: ProviderCommandContext) {
-        const args = this.#buildShellExecArgs(commandLine);
-
-        try {
-            return this.#spawn(this.#binary, args, { stdio });
-        } catch (error) {
-            throw this.#createProviderError(context, error);
-        }
-    }
-
-    #createExecInvocation(operation: string, command: readonly string[], instance?: string, useRemoteCwd: boolean = false) {
-        const args = this.#buildExecArgs(command, useRemoteCwd);
+        const args = this.#provision.buildExecArgs(command, useRemoteCwd);
         return {
             args,
             context: createCommandContext({
@@ -394,82 +282,16 @@ export class WorkerTransportDriverContainerBase implements WorkerCommandTranspor
 
     #createShellContext(operation: string, command: readonly string[]): ProviderCommandContext {
         const commandLine =
-            command[0] === "sh" && command[1] === "-lc" && typeof command[2] === "string" ? command[2] : command.join(" ");
-        const args = this.#buildShellExecArgs(commandLine);
+            command[0] === "sh" && command[1] === "-lc" && typeof command[2] === "string"
+                ? command[2]
+                : command.join(" ");
+        const args = this.#provision.buildShellExecArgs(commandLine);
         return createCommandContext({
             command: [this.#binary, ...args],
             cwd: this.#remoteCwd,
             operation,
             provider: this.#provider
         });
-    }
-
-    #buildExecArgs(command: readonly string[], useRemoteCwd: boolean): string[] {
-        switch (this.#container.mode) {
-            case "compose":
-                return this.#buildComposeArgs([
-                    "exec",
-                    "-T",
-                    ...this.#workingDirectoryArgs(useRemoteCwd),
-                    this.#container.compose.service,
-                    ...command
-                ]);
-            case "preset":
-            case "dockerfile":
-            case "existingImage":
-                return ["exec", ...this.#workingDirectoryArgs(useRemoteCwd), "-i", this.#container.containerName, ...command];
-            case "existingStoppedContainer":
-                return ["exec", ...this.#workingDirectoryArgs(useRemoteCwd), "-i", this.#container.containerName, ...command];
-        }
-    }
-
-    #buildShellExecArgs(commandLine: string): string[] {
-        switch (this.#container.mode) {
-            case "compose":
-                return this.#buildComposeArgs(["exec", "-T", this.#container.compose.service, "sh", "-lc", commandLine]);
-            case "preset":
-            case "dockerfile":
-            case "existingImage":
-                return ["exec", "-i", this.#container.containerName, "sh", "-lc", commandLine];
-            case "existingStoppedContainer":
-                return ["exec", "-i", this.#container.containerName, "sh", "-lc", commandLine];
-        }
-    }
-
-    #buildComposeArgs(args: readonly string[]): string[] {
-        const compose = this.#requireComposeConfig();
-        return [
-            "compose",
-            "-f",
-            compose.file,
-            ...(compose.projectName === undefined ? [] : ["-p", compose.projectName]),
-            ...args
-        ];
-    }
-
-    #buildManagedContainerCreateArgs(image: string, containerName: string): string[] {
-        const container = this.#container;
-        if (container.mode !== "preset" && container.mode !== "dockerfile" && container.mode !== "existingImage") {
-            throw new Error("managed create args are only available for managed container modes");
-        }
-        return [
-            "create",
-            "--name",
-            containerName,
-            ...(this.#keepIdUserNamespace ? ["--userns=keep-id"] : []),
-            ...(container.user === undefined ? [] : ["--user", container.user]),
-            ...(container.network === undefined ? [] : ["--network", container.network]),
-            ...Object.entries(container.env ?? {}).flatMap(([key, value]) => ["-e", `${key}=${value}`]),
-            ...(container.mounts ?? []).flatMap((mount) => ["-v", renderContainerMount(mount)]),
-            image,
-            "sh",
-            "-lc",
-            "trap 'exit 0' TERM INT; while :; do sleep 2147483647; done"
-        ];
-    }
-
-    #workingDirectoryArgs(useRemoteCwd: boolean): string[] {
-        return useRemoteCwd && this.#remoteCwd ? ["-w", this.#remoteCwd] : [];
     }
 
     #syntheticResult(operation: string, instance: string, stdout: string): WorkerCommandResult {
@@ -488,70 +310,9 @@ export class WorkerTransportDriverContainerBase implements WorkerCommandTranspor
             stdout
         };
     }
-
-    #missingContainerError(containerName: string) {
-        return createError({
-            code: errorCodes.coreProviderFailed,
-            details: {
-                containerName,
-                mode: "existingStoppedContainer",
-                provider: this.#provider
-            },
-            message: `Configured container ${containerName} does not exist.`,
-            retryable: false
-        });
-    }
-
-    #runningContainerUnsupportedError(containerName: string) {
-        return createError({
-            code: errorCodes.coreProviderFailed,
-            details: {
-                containerName,
-                mode: "existingStoppedContainer",
-                provider: this.#provider,
-                unsupportedMode: "runningContainer"
-            },
-            message: `Container ${containerName} is already running. Running container attach is not a supported instance mode.`,
-            retryable: false
-        });
-    }
-
-    readonly #createProviderError = (
-        context: ProviderCommandContext,
-        cause: unknown,
-        options?: { errorCode?: string; result?: { exitCode?: number | null; signal?: string; stderr?: string; stdout?: string } }
-    ) => createProviderError(context, cause, options);
-
-    #requireComposeConfig(): Extract<InstanceContainerConfig, { mode: "compose" }>["compose"] {
-        if (this.#container.mode !== "compose") {
-            throw new Error("compose configuration is not available for this container mode");
-        }
-
-        return this.#container.compose;
-    }
-
-    #requireExistingStoppedContainer(): Extract<InstanceContainerConfig, { mode: "existingStoppedContainer" }> {
-        if (this.#container.mode !== "existingStoppedContainer") {
-            throw new Error("existing stopped container configuration is not available for this container mode");
-        }
-
-        return this.#container;
-    }
 }
 
 function isMissingContainerMessage(value: string): boolean {
     const normalized = value.toLowerCase();
     return normalized.includes("no such object") || normalized.includes("no such container");
-}
-
-export function renderContainerMount(mount: InstanceContainerMountConfig): string {
-    const segments = [mount.source, mount.target, mount.mode];
-
-    if (mount.selinux === "shared") {
-        segments.push("z");
-    } else if (mount.selinux === "private") {
-        segments.push("Z");
-    }
-
-    return segments.join(":");
 }

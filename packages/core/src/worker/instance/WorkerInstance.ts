@@ -15,49 +15,41 @@ import {
 
 import type { ApprovalManager } from "../../approval/ApprovalManager.js";
 import type { AuditDatabase } from "../../audit/AuditDatabase.js";
-import type { InstanceEventStreamGap, InstanceEventStreamSlice, InstanceEventInput } from "../../instance/event/InstanceEventBuffer.js";
-import { InstanceEventBuffer } from "../../instance/event/InstanceEventBuffer.js";
+import type { InstanceEventInput, InstanceEventStreamGap, InstanceEventStreamSlice } from "../../instance/event/InstanceEventBuffer.js";
 import type { LogQuery } from "../../log/LogQuery.js";
-import { LogStoreInstance, type InstanceLogEntry } from "../../log/store/LogStoreInstance.js";
-import { WorkerCommandClient } from "../command/WorkerCommandClient.js";
+import type { InstanceLogEntry } from "../../log/store/LogStoreInstance.js";
+import type { WorkerCommandClient } from "../command/WorkerCommandClient.js";
 import type { WorkerCommandInteractiveSession } from "../command/WorkerCommandTransport.js";
-import {
-    WorkerProtocolClient,
-    type WorkerArtifactPayloadOpenInput,
-    type WorkerArtifactPayloadOpenResult,
-    type WorkerArtifactPayloadReadInput,
-    type WorkerArtifactPayloadReadResult,
-    type WorkerArtifactReceiveBeginInput,
-    type WorkerArtifactReceiveBeginResult,
-    type WorkerArtifactReceiveFinishResult,
-    type WorkerArtifactReceiveWriteInput,
-    type WorkerArtifactReceiveWriteResult,
-    type WorkerHandshakeResult
+import type {
+    WorkerArtifactPayloadOpenInput,
+    WorkerArtifactPayloadOpenResult,
+    WorkerArtifactPayloadReadInput,
+    WorkerArtifactPayloadReadResult,
+    WorkerArtifactReceiveBeginInput,
+    WorkerArtifactReceiveBeginResult,
+    WorkerArtifactReceiveFinishResult,
+    WorkerArtifactReceiveWriteInput,
+    WorkerArtifactReceiveWriteResult,
+    WorkerHandshakeResult,
+    WorkerProtocolClient
 } from "../protocol/WorkerProtocolClient.js";
-import { WorkerRpcBridge } from "../rpc/WorkerRpcBridge.js";
+import type { WorkerRpcBridge } from "../rpc/WorkerRpcBridge.js";
 import type { WorkerRpcChannel } from "../rpc/WorkerRpcChannel.js";
-import { WorkerToolCatalog } from "../tool/WorkerToolCatalog.js";
-import { WorkerToolInvoker } from "../tool/WorkerToolInvoker.js";
-import { WorkerToolCallScheduler } from "../tool/WorkerToolCallScheduler.js";
-import { AuditToolCallHistory } from "../../audit/tool/AuditToolCallHistory.js";
-import { InstanceStateMachine, type InstanceStateUpdate } from "../../instance/state/InstanceStateMachine.js";
+import type { WorkerToolCatalog } from "../tool/WorkerToolCatalog.js";
+import type { WorkerToolInvoker } from "../tool/WorkerToolInvoker.js";
+import type { WorkerToolCallScheduler } from "../tool/WorkerToolCallScheduler.js";
+import type { AuditToolCallHistory } from "../../audit/tool/AuditToolCallHistory.js";
+import type { InstanceStateMachine } from "../../instance/state/InstanceStateMachine.js";
 import type { InstanceSnapshot } from "../../instance/state/InstanceStateSnapshot.js";
+import type { InstanceEventBuffer } from "../../instance/event/InstanceEventBuffer.js";
+import type { LogStoreInstance } from "../../log/store/LogStoreInstance.js";
 import type { ResolvedWorkerInstanceConfig } from "./WorkerInstanceConfig.js";
-import {
-    getErrorCode,
-    toJsonDetails,
-    withInstanceDetails,
-    wrapWorkerCommandError
-} from "./WorkerInstanceError.js";
-import {
-    createConnectionChangedEventData,
-    createReadyChangedEventData,
-    createStatusChangedEventData,
-    toEventData
-} from "./WorkerInstanceEvent.js";
-import { normalizeLifecycleStatus, parseWorkerStatus } from "./WorkerInstanceStatus.js";
 import { WorkerInstanceTool } from "./WorkerInstanceTool.js";
 import { WorkerInstanceConnection } from "./WorkerInstanceConnection.js";
+import { WorkerInstanceLifecycle } from "./WorkerInstanceLifecycle.js";
+import { WorkerInstanceArtifact } from "./WorkerInstanceArtifact.js";
+import { WorkerInstanceAudit } from "./WorkerInstanceAudit.js";
+import { WorkerInstanceState } from "./WorkerInstanceState.js";
 
 interface WorkerInstanceDependencies {
     approvalManager: ApprovalManager;
@@ -78,28 +70,53 @@ interface WorkerInstanceDependencies {
 
 export class WorkerInstance {
     readonly #approvalManager: ApprovalManager;
-    readonly #auditDatabase: AuditDatabase;
+    readonly #artifact: WorkerInstanceArtifact;
+    readonly #audit: WorkerInstanceAudit;
     readonly #catalog: WorkerToolCatalog;
-    readonly #connection: WorkerInstanceConnection;
-    readonly #commandClient?: WorkerCommandClient;
     readonly #config: ResolvedWorkerInstanceConfig;
-    readonly #eventBuffer: InstanceEventBuffer;
-    readonly #protocolClient: WorkerProtocolClient;
-    readonly #stateMachine: InstanceStateMachine;
+    readonly #connection: WorkerInstanceConnection;
+    readonly #lifecycle: WorkerInstanceLifecycle;
+    readonly #state: WorkerInstanceState;
     readonly #tool: WorkerInstanceTool;
 
     constructor(dependencies: WorkerInstanceDependencies) {
         this.#approvalManager = dependencies.approvalManager;
-        this.#auditDatabase = dependencies.auditDatabase;
         this.#catalog = dependencies.catalog;
-        this.#commandClient = dependencies.commandClient;
         this.#config = dependencies.config;
-        this.#eventBuffer = dependencies.eventBuffer;
-        this.#protocolClient = dependencies.protocolClient;
-        this.#stateMachine = dependencies.stateMachine;
+        this.#state = new WorkerInstanceState({
+            config: this.#config,
+            eventBuffer: dependencies.eventBuffer,
+            stateMachine: dependencies.stateMachine
+        });
+        this.#connection = new WorkerInstanceConnection({
+            appendEvent: (type, data) => this.#state.appendEvent(type, data),
+            applyStateUpdate: (update) => this.#state.apply(update, this.#connection.snapshotReverse()),
+            catalog: this.#catalog,
+            config: this.#config,
+            protocolClient: dependencies.protocolClient,
+            rpcBridge: dependencies.rpcBridge,
+            snapshot: () => this.snapshot()
+        });
+        this.#lifecycle = new WorkerInstanceLifecycle({
+            appendEvent: (type) => this.#state.appendEvent(type),
+            applyStateUpdate: (update) => this.#state.apply(update, this.#connection.snapshotReverse()),
+            commandClient: dependencies.commandClient,
+            config: this.#config,
+            connection: this.#connection
+        });
+        this.#artifact = new WorkerInstanceArtifact({
+            assertReady: () => this.#assertReady(),
+            protocolClient: dependencies.protocolClient
+        });
+        this.#audit = new WorkerInstanceAudit({
+            appendEvent: (type, data) => this.#state.appendEvent(type, data),
+            auditDatabase: dependencies.auditDatabase,
+            isReady: () => this.snapshot().ready,
+            protocolClient: dependencies.protocolClient
+        });
         this.#tool = new WorkerInstanceTool({
             approvalManager: this.#approvalManager,
-            appendEvent: (type, data) => this.#appendEvent(type, data),
+            appendEvent: (type, data) => this.#state.appendEvent(type, data),
             assertReady: () => this.#assertReady(),
             instanceName: this.#config.name,
             logStore: dependencies.logStore,
@@ -108,23 +125,10 @@ export class WorkerInstance {
             toolCallScheduler: dependencies.toolCallScheduler,
             toolInvoker: dependencies.toolInvoker
         });
-        this.#connection = new WorkerInstanceConnection({
-            appendEvent: (type, data) => this.#appendEvent(type, data),
-            applyStateUpdate: (update) => this.#applyStateUpdate(update),
-            catalog: this.#catalog,
-            config: this.#config,
-            protocolClient: this.#protocolClient,
-            rpcBridge: dependencies.rpcBridge,
-            snapshot: () => this.snapshot()
-        });
     }
 
     snapshot(): InstanceSnapshot {
-        return {
-            ...this.#stateMachine.snapshot(),
-            effectiveSecurityMode: this.#config.effectiveSecurityMode,
-            ...(this.#connection.snapshotReverse() === undefined ? {} : { reverse: this.#connection.snapshotReverse() })
-        };
+        return this.#state.snapshot(this.#connection.snapshotReverse());
     }
 
     get managementMode(): ResolvedWorkerInstanceConfig["managementMode"] {
@@ -143,7 +147,7 @@ export class WorkerInstance {
     }
 
     async appendControlEvent(type: InstanceEventInput["type"], data?: JsonValue) {
-        return await this.#appendEvent(type, data);
+        return await this.#state.appendEvent(type, data);
     }
 
     listTools() {
@@ -155,218 +159,50 @@ export class WorkerInstance {
     }
 
     async openArtifactPayload(input: WorkerArtifactPayloadOpenInput): Promise<WorkerArtifactPayloadOpenResult> {
-        this.#assertReady();
-        return await this.#protocolClient.openArtifactPayload(input);
+        return await this.#artifact.openPayload(input);
     }
 
     async readArtifactPayload(input: WorkerArtifactPayloadReadInput): Promise<WorkerArtifactPayloadReadResult> {
-        this.#assertReady();
-        return await this.#protocolClient.readArtifactPayload(input);
+        return await this.#artifact.readPayload(input);
     }
 
     async closeArtifactPayload(payloadId: string): Promise<void> {
-        this.#assertReady();
-        await this.#protocolClient.closeArtifactPayload(payloadId);
+        await this.#artifact.closePayload(payloadId);
     }
 
     async beginArtifactReceive(input: WorkerArtifactReceiveBeginInput): Promise<WorkerArtifactReceiveBeginResult> {
-        this.#assertReady();
-        return await this.#protocolClient.beginArtifactReceive(input);
+        return await this.#artifact.beginReceive(input);
     }
 
     async writeArtifactReceive(input: WorkerArtifactReceiveWriteInput): Promise<WorkerArtifactReceiveWriteResult> {
-        this.#assertReady();
-        return await this.#protocolClient.writeArtifactReceive(input);
+        return await this.#artifact.writeReceive(input);
     }
 
     async finishArtifactReceive(receiveId: string): Promise<WorkerArtifactReceiveFinishResult> {
-        this.#assertReady();
-        return await this.#protocolClient.finishArtifactReceive(receiveId);
+        return await this.#artifact.finishReceive(receiveId);
     }
 
     async abortArtifactReceive(receiveId: string): Promise<void> {
-        this.#assertReady();
-        await this.#protocolClient.abortArtifactReceive(receiveId);
+        await this.#artifact.abortReceive(receiveId);
     }
 
     async start(workspacePath?: WorkspacePath | string): Promise<InstanceSnapshot> {
-        return await this.#start(workspacePath);
+        return await this.#lifecycle.start(workspacePath);
     }
 
     async startInteractive(
         workspacePath: WorkerCommandInteractiveSession | WorkspacePath | string | undefined,
         interactiveSession?: WorkerCommandInteractiveSession
     ): Promise<InstanceSnapshot> {
-        return await this.#start(
-            isInteractiveSession(workspacePath) ? undefined : workspacePath,
-            isInteractiveSession(workspacePath) ? workspacePath : interactiveSession
-        );
-    }
-
-    async #start(
-        workspacePath?: WorkspacePath | string,
-        interactiveSession?: WorkerCommandInteractiveSession
-    ): Promise<InstanceSnapshot> {
-        if (this.#config.managementMode === "selfManaged") {
-            throw createError({
-                code: errorCodes.reverseSelfManagedOffline,
-                details: { instance: this.#config.name },
-                message: `Instance ${this.#config.name} is self-managed and must be started on the remote machine.`,
-                retryable: true
-            });
-        }
-
-        const resolvedWorkspacePath = workspacePath ?? this.#config.defaultWorkspace;
-
-        if (resolvedWorkspacePath === undefined) {
-            throw createError({
-                code: errorCodes.coreWorkerStartFailed,
-                message: `Instance ${this.#config.name} requires a workspace to start.`,
-                retryable: false,
-                details: { instanceName: this.#config.name }
-            });
-        }
-
-        this.#connection.setWorkspacePath(resolvedWorkspacePath);
-        await this.#applyStateUpdate({
-            connectionState: "disconnected",
-            daemonState: "starting",
-            lastErrorCode: undefined
-        });
-
-        try {
-            const startResult = await this.#requireCommandClient().start(resolvedWorkspacePath, interactiveSession);
-
-            if (startResult.exitCode !== 0) {
-                throw createError({
-                    code: errorCodes.coreWorkerStartFailed,
-                    message: `Worker start failed for instance ${this.#config.name}.`,
-                    retryable: false,
-                    details: toJsonDetails(withInstanceDetails(startResult.details, this.#config.name))
-                });
-            }
-        } catch (error) {
-            const wrappedError = wrapWorkerCommandError(
-                error,
-                errorCodes.coreWorkerStartFailed,
-                `Worker start failed for instance ${this.#config.name}.`,
-                this.#config.name
-            );
-            await this.#applyStateUpdate({
-                connectionState: "disconnected",
-                daemonState: "stopped",
-                lastErrorCode: getErrorCode(wrappedError, errorCodes.coreWorkerStartFailed)
-            });
-            throw wrappedError;
-        }
-
-        await this.#applyStateUpdate({ connectionState: "connecting" });
-        return await this.#connection.connectStarted();
+        return await this.#lifecycle.startInteractive(workspacePath, interactiveSession);
     }
 
     async stop(): Promise<InstanceSnapshot> {
-        if (this.#config.managementMode === "selfManaged") {
-            return await this.#connection.stopSelfManaged();
-        }
-
-        let stopErrorCode: string | undefined;
-
-        try {
-            const result = await this.#requireCommandClient().stop();
-
-            if (result.exitCode !== 0) {
-                throw createError({
-                    code: errorCodes.coreWorkerStopFailed,
-                    message: `Worker stop failed for instance ${this.#config.name}.`,
-                    retryable: false,
-                    details: toJsonDetails(withInstanceDetails(result.details, this.#config.name))
-                });
-            }
-        } catch (error) {
-            const wrappedError = wrapWorkerCommandError(
-                error,
-                errorCodes.coreWorkerStopFailed,
-                `Worker stop failed for instance ${this.#config.name}.`,
-                this.#config.name
-            );
-            stopErrorCode = getErrorCode(error, errorCodes.coreWorkerStopFailed);
-            await this.#applyStateUpdate({
-                connectionState: "disconnected",
-                daemonState: "stopping",
-                lastErrorCode: getErrorCode(wrappedError, errorCodes.coreWorkerStopFailed)
-            });
-            throw wrappedError;
-        } finally {
-            this.#connection.closeBridge();
-            this.#connection.clearHandshake();
-        }
-
-        await this.#appendEvent("instance.stopped");
-        await this.#applyStateUpdate({
-            daemonState: "stopped",
-            lastErrorCode: stopErrorCode
-        });
-        return await this.#applyStateUpdate({
-            connectionState: "disconnected",
-            lastErrorCode: undefined
-        });
+        return await this.#lifecycle.stop();
     }
 
     async refreshStatus(): Promise<InstanceSnapshot> {
-        if (this.#config.managementMode === "selfManaged") {
-            if (!this.#connection.connected) {
-                this.#connection.markReverseOffline();
-                this.#connection.clearHandshake();
-                return await this.#applyStateUpdate({
-                    connectionState: "disconnected",
-                    daemonState: "stopped",
-                    lastErrorCode: undefined,
-                    pid: undefined
-                });
-            }
-
-            return await this.#connection.refreshRunningStatus(undefined);
-        }
-
-        const status = await this.#readWorkerStatus();
-
-        if (status.workspacePath !== undefined) {
-            this.#connection.setWorkspacePath(status.workspacePath);
-        }
-
-        switch (status.daemonState) {
-            case "stopped":
-            case "stale":
-                this.#connection.closeBridge();
-                this.#connection.clearHandshake();
-                return await this.#applyStateUpdate({
-                    connectionState: "disconnected",
-                    daemonState: status.daemonState,
-                    lastErrorCode: undefined,
-                    pid: status.pid
-                });
-            case "running":
-                return await this.#connection.refreshRunningStatus(status.pid);
-            default:
-                return await this.#applyStateUpdate({
-                    connectionState: "failed",
-                    daemonState: "failed",
-                    lastErrorCode: errorCodes.coreWorkerStatusFailed,
-                    pid: status.pid
-                });
-        }
-    }
-
-    #assertReady(): void {
-        if (this.snapshot().ready) {
-            return;
-        }
-        throw createError({
-            code: errorCodes.coreInstanceNotReady,
-            message: `Instance ${this.#config.name} is not ready.`,
-            retryable: false,
-            details: { instanceName: this.#config.name }
-        });
+        return await this.#lifecycle.refreshStatus();
     }
 
     async callTool(toolName: string, input: JsonValue, context: ToolCallContext, signal?: AbortSignal): Promise<JsonValue> {
@@ -420,40 +256,30 @@ export class WorkerInstance {
     }
 
     async appendMcpSessionOpened(sessionId: string): Promise<void> {
-        await this.#appendEvent("mcp.sessionOpened", toEventData({ sessionId }));
+        await this.#audit.appendMcpSessionOpened(sessionId);
     }
 
     async appendMcpSessionClosed(sessionId: string): Promise<void> {
-        await this.#appendEvent("mcp.sessionClosed", toEventData({ sessionId }));
+        await this.#audit.appendMcpSessionClosed(sessionId);
     }
 
     async releaseToolSession(sessionId: string): Promise<void> {
-        if (this.snapshot().ready) {
-            await this.#protocolClient.closeToolSession(sessionId).catch(() => undefined);
-        }
+        await this.#audit.releaseToolSession(sessionId);
     }
 
     async appendMcpToolCalled(toolName: string, context: { requestId?: string; ctxId?: string }): Promise<void> {
-        await this.#appendEvent(
-            "mcp.toolCalled",
-            toEventData({
-                requestId: context.requestId,
-                ctxId: context.ctxId,
-                source: "mcp",
-                toolName
-            })
-        );
+        await this.#audit.appendMcpToolCalled(toolName, context);
     }
 
     subscribe(fromSeq = 1): InstanceEventStreamGap | InstanceEventStreamSlice {
-        return this.#eventBuffer.readFrom(fromSeq);
+        return this.#state.subscribe(fromSeq);
     }
 
     async close(): Promise<void> {
         try {
             await this.#connection.close();
         } finally {
-            this.#auditDatabase.close();
+            this.#audit.close();
         }
     }
 
@@ -469,100 +295,15 @@ export class WorkerInstance {
         return await this.#connection.reconnectRpc();
     }
 
-    #requireCommandClient(): WorkerCommandClient {
-        if (this.#commandClient !== undefined) {
-            return this.#commandClient;
+    #assertReady(): void {
+        if (this.snapshot().ready) {
+            return;
         }
-
         throw createError({
-            code: errorCodes.coreProviderFailed,
-            details: { instance: this.#config.name },
-            message: `Instance ${this.#config.name} does not have a controller-managed command transport.`,
-            retryable: false
+            code: errorCodes.coreInstanceNotReady,
+            message: `Instance ${this.#config.name} is not ready.`,
+            retryable: false,
+            details: { instanceName: this.#config.name }
         });
     }
-
-    async #readWorkerStatus(): Promise<{
-        daemonState: "running" | "stale" | "stopped";
-        pid?: number;
-        workspacePath?: string;
-    }> {
-        let result: Awaited<ReturnType<WorkerCommandClient["status"]>>;
-
-        try {
-            result = await this.#requireCommandClient().status();
-        } catch (error) {
-            const wrappedError = wrapWorkerCommandError(
-                error,
-                errorCodes.coreWorkerStatusFailed,
-                `Worker status failed for instance ${this.#config.name}.`,
-                this.#config.name
-            );
-            await this.#applyStateUpdate({
-                connectionState: "failed",
-                daemonState: "failed",
-                lastErrorCode: getErrorCode(wrappedError, errorCodes.coreWorkerStatusFailed)
-            });
-            throw wrappedError;
-        }
-
-        if (result.exitCode !== 0) {
-            const error = createError({
-                code: errorCodes.coreWorkerStatusFailed,
-                message: `Worker status failed for instance ${this.#config.name}.`,
-                retryable: false,
-                details: toJsonDetails(withInstanceDetails(result.details, this.#config.name))
-            });
-            await this.#applyStateUpdate({
-                connectionState: "failed",
-                daemonState: "failed",
-                lastErrorCode: error.code
-            });
-            throw error;
-        }
-
-        try {
-            return parseWorkerStatus(result.stdout, this.#config.name);
-        } catch (error) {
-            await this.#applyStateUpdate({
-                connectionState: "failed",
-                daemonState: "failed",
-                lastErrorCode: getErrorCode(error, errorCodes.coreWorkerStatusFailed)
-            });
-            throw error;
-        }
-    }
-
-    async #appendEvent(type: InstanceEventInput["type"], data?: JsonValue) {
-        const event = await this.#eventBuffer.append({
-            at: new Date().toISOString(),
-            data,
-            type
-        });
-        this.#stateMachine.apply({ lastSeq: event.seq });
-        return event;
-    }
-
-    async #applyStateUpdate(update: InstanceStateUpdate): Promise<InstanceSnapshot> {
-        const previous = this.snapshot();
-        const next = this.#stateMachine.apply(update);
-
-        if (previous.daemonState !== next.daemonState || normalizeLifecycleStatus(previous.status) !== normalizeLifecycleStatus(next.status)) {
-            await this.#appendEvent("instance.statusChanged", createStatusChangedEventData(previous, next));
-        }
-
-        if (previous.connectionState !== next.connectionState) {
-            await this.#appendEvent("instance.connectionChanged", createConnectionChangedEventData(previous, next));
-        }
-
-        if (previous.ready !== next.ready) {
-            await this.#appendEvent("instance.readyChanged", createReadyChangedEventData(previous, next));
-        }
-
-        return this.snapshot();
-    }
-}
-
-function isInteractiveSession(value: unknown): value is WorkerCommandInteractiveSession {
-    return typeof value === "object" && value !== null && "readInput" in value && "writeOutput" in value;
 }

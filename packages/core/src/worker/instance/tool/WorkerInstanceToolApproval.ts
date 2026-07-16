@@ -7,25 +7,25 @@ import {
     type ToolCallContext
 } from "@portable-devshell/shared";
 
-import type { ApprovalManager } from "../../approval/ApprovalManager.js";
-import { readWorkerAbortReason } from "../WorkerAbortReason.js";
-import type { InstanceEventInput } from "../../instance/event/InstanceEventBuffer.js";
-import type { AuditToolCallHistory } from "../../audit/tool/AuditToolCallHistory.js";
-import { getErrorCode } from "./WorkerInstanceError.js";
-import { toApprovalEventData, toEventData } from "./WorkerInstanceEvent.js";
+import type { ApprovalManager } from "../../../approval/ApprovalManager.js";
+import { readWorkerAbortReason } from "../../WorkerAbortReason.js";
+import type { InstanceEventInput } from "../../../instance/event/InstanceEventBuffer.js";
+import type { AuditToolCallHistory } from "../../../audit/tool/AuditToolCallHistory.js";
+import { getErrorCode } from "../WorkerInstanceError.js";
+import { toApprovalEventData, toEventData } from "../WorkerInstanceEvent.js";
 
-interface WorkerInstanceApprovalOptions {
+interface WorkerInstanceToolApprovalOptions {
     approvalManager: ApprovalManager;
     appendEvent(type: InstanceEventInput["type"], data?: JsonValue): Promise<unknown>;
     toolCallHistory: AuditToolCallHistory;
 }
 
-export class WorkerInstanceApproval {
+export class WorkerInstanceToolApproval {
     readonly #approvalManager: ApprovalManager;
-    readonly #appendEvent: WorkerInstanceApprovalOptions["appendEvent"];
+    readonly #appendEvent: WorkerInstanceToolApprovalOptions["appendEvent"];
     readonly #toolCallHistory: AuditToolCallHistory;
 
-    constructor(options: WorkerInstanceApprovalOptions) {
+    constructor(options: WorkerInstanceToolApprovalOptions) {
         this.#approvalManager = options.approvalManager;
         this.#appendEvent = options.appendEvent;
         this.#toolCallHistory = options.toolCallHistory;
