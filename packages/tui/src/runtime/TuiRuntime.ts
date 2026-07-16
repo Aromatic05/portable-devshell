@@ -4,7 +4,10 @@ import type { ReadStream, WriteStream } from "node:tty";
 import React from "react";
 import { render, type Instance as InkInstance } from "ink";
 
-import { createTuiClients } from "./client/TuiClientComposition.js";
+import {
+    createTuiClients,
+    type TuiClients
+} from "./client/TuiClientComposition.js";
 import { TuiCommandDispatcher } from "../interaction/command/dispatcher/TuiCommandDispatcher.js";
 import { TuiControlSession } from "./control/TuiControlSession.js";
 import { TuiFocusManager } from "../interaction/focus/TuiFocusManager.js";
@@ -29,6 +32,10 @@ export interface TuiRuntimeOptions {
     xdgRuntimeDir?: string;
 }
 
+export interface TuiRuntimeDependencies {
+    clients?: TuiClients;
+}
+
 export class TuiRuntime {
     readonly commandDispatcher: TuiCommandDispatcher;
     readonly focusManager: TuiFocusManager;
@@ -49,7 +56,10 @@ export class TuiRuntime {
     #mouseBuffer = "";
     #stopped = false;
 
-    constructor(options: TuiRuntimeOptions = {}) {
+    constructor(
+        options: TuiRuntimeOptions = {},
+        dependencies: TuiRuntimeDependencies = {}
+    ) {
         this.#stdin = options.stdin ?? process.stdin;
         this.#stdout = options.stdout ?? process.stdout;
         this.#inkStdin = createInkStdin(this.#stdin);
@@ -73,7 +83,7 @@ export class TuiRuntime {
         });
         this.keyDispatcher = new TuiKeyDispatcher();
 
-        const clients = createTuiClients({
+        const clients = dependencies.clients ?? createTuiClients({
             xdgRuntimeDir: options.xdgRuntimeDir
         });
         this.session = new TuiControlSession({

@@ -661,3 +661,305 @@ fn file_edit_keeps_a_call_local_snapshot_chain_for_dependent_operations() {
 
     env.json_command(&["stop", "--instance", instance]);
 }
+
+#[test]
+fn file_tools_reject_non_canonical_workspace_paths() {
+    let env = TestEnv::new();
+    let instance = "aromatic-file-path-v2";
+    fs::write(env.workspace().join("document.txt"), "document\n").unwrap();
+    start(&env, instance);
+
+    let response = call(
+        &env,
+        instance,
+        "1",
+        "ctx-a",
+        "file_read",
+        json!({ "path": "././document.txt" }),
+    );
+
+    assert_eq!(response["ok"], false, "{response}");
+    assert_eq!(response["error"]["code"], "file.invalidPath");
+
+    env.json_command(&["stop", "--instance", instance]);
+}
+
+#[test]
+fn file_tools_omit_absent_pagination_fields() {
+    let env = TestEnv::new();
+    let instance = "aromatic-file-optional-output-v2";
+    fs::write(env.workspace().join("document.txt"), "needle\n").unwrap();
+    start(&env, instance);
+
+    let read = call(
+        &env,
+        instance,
+        "1",
+        "ctx-a",
+        "file_read",
+        json!({ "path": "./document.txt", "selector": "1-1:raw" }),
+    );
+    assert_eq!(read["ok"], true, "{read}");
+    assert!(read["result"].get("nextSelector").is_none());
+
+    let found = call(
+        &env,
+        instance,
+        "2",
+        "ctx-a",
+        "file_find",
+        json!({ "paths": ["./document.txt"] }),
+    );
+    assert_eq!(found["ok"], true, "{found}");
+    assert!(found["result"].get("nextCursor").is_none());
+
+    let searched = call(
+        &env,
+        instance,
+        "3",
+        "ctx-a",
+        "file_search",
+        json!({ "paths": ["./document.txt"], "pattern": "needle", "syntax": "literal" }),
+    );
+    assert_eq!(searched["ok"], true, "{searched}");
+    assert!(searched["result"].get("nextCursor").is_none());
+
+    env.json_command(&["stop", "--instance", instance]);
+}
+
+#[test]
+fn file_find_respects_gitignore_and_can_explicitly_include_ignored_files() {
+    let env = TestEnv::new();
+    let instance = "aromatic-file-find-ignore-v2";
+    fs::write(env.workspace().join(".gitignore"), "ignored.txt\n").unwrap();
+    fs::write(env.workspace().join("ignored.txt"), "ignored\n").unwrap();
+    fs::write(env.workspace().join("visible.txt"), "visible\n").unwrap();
+    start(&env, instance);
+
+    let default_result = call(
+        &env,
+        instance,
+        "1",
+        "ctx-a",
+        "file_find",
+        json!({ "paths": ["./"] }),
+    );
+    assert_eq!(default_result["ok"], true, "{default_result}");
+    let default_paths = default_result["result"]["entries"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|entry| entry["path"].as_str().unwrap())
+        .collect::<Vec<_>>();
+    assert!(default_paths.contains(&"./visible.txt"));
+    assert!(!default_paths.contains(&"./ignored.txt"));
+
+    let inclusive_result = call(
+        &env,
+        instance,
+        "2",
+        "ctx-a",
+        "file_find",
+        json!({ "paths": ["./"], "gitignore": false }),
+    );
+    assert_eq!(inclusive_result["ok"], true, "{inclusive_result}");
+    let inclusive_paths = inclusive_result["result"]["entries"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|entry| entry["path"].as_str().unwrap())
+        .collect::<Vec<_>>();
+    assert!(inclusive_paths.contains(&"./ignored.txt"));
+
+    env.json_command(&["stop", "--instance", instance]);
+}
+
+#[cfg(unix)]
+#[test]
+fn file_info_reports_missing_entries_and_dangling_symlinks_in_one_batch() {
+    use std::os::unix::fs::symlink;
+
+    let env = TestEnv::new();
+    let instance = "aromatic-file-info-batch-v2";
+    symlink("missing-target", env.workspace().join("dangling-link")).unwrap();
+    start(&env, instance);
+
+    let response = call(
+        &env,
+        instance,
+        "1",
+        "ctx-a",
+        "file_info",
+        json!({ "paths": ["./missing.txt", "./dangling-link"] }),
+    );
+
+    assert_eq!(response["ok"], true, "{response}");
+    assert_eq!(response["result"]["entries"][0]["path"], "./missing.txt");
+    assert_eq!(response["result"]["entries"][0]["exists"], false);
+    assert!(response["result"]["entries"][0].get("type").is_none());
+    assert_eq!(response["result"]["entries"][1]["path"], "./dangling-link");
+    assert_eq!(response["result"]["entries"][1]["exists"], true);
+    assert_eq!(response["result"]["entries"][1]["type"], "symlink");
+    assert!(response["result"]["entries"][1].get("targetType").is_none());
+
+    env.json_command(&["stop", "--instance", instance]);
+}
+
+#[test]
+fn file_search_rejects_a_cursor_reused_with_a_different_query() {
+    let env = TestEnv::new();
+    let instance = "aromatic-file-search-cursor-v2";
+    let paths = (1..=21)
+        .map(|index| {
+            let name = format!("result-{index:02}.txt");
+            fs::write(env.workspace().join(&name), "needle\n").unwrap();
+            format!("./{name}")
+        })
+        .collect::<Vec<_>>();
+    start(&env, instance);
+
+    let first_page = call(
+        &env,
+        instance,
+        "1",
+        "ctx-a",
+        "file_search",
+        json!({ "paths": paths.clone(), "pattern": "needle", "syntax": "literal" }),
+    );
+    assert_eq!(first_page["ok"], true, "{first_page}");
+    let cursor = first_page["result"]["nextCursor"].as_str().unwrap();
+
+    let reused = call(
+        &env,
+        instance,
+        "2",
+        "ctx-a",
+        "file_search",
+        json!({
+            "paths": paths,
+            "pattern": "different",
+            "syntax": "literal",
+            "cursor": cursor
+        }),
+    );
+
+    assert_eq!(reused["ok"], false, "{reused}");
+    assert_eq!(reused["error"]["code"], "file.invalidCursor");
+
+    env.json_command(&["stop", "--instance", instance]);
+}
+
+#[test]
+fn file_edit_preserves_the_detected_line_ending_style() {
+    let env = TestEnv::new();
+    let instance = "aromatic-file-ending-v2";
+    fs::write(env.workspace().join("document.txt"), b"first\r\nsecond\r\n").unwrap();
+    start(&env, instance);
+
+    let read = call(
+        &env,
+        instance,
+        "1",
+        "ctx-a",
+        "file_read",
+        json!({ "path": "./document.txt", "view": "content" }),
+    );
+    assert_eq!(read["ok"], true, "{read}");
+
+    let edited = call(
+        &env,
+        instance,
+        "2",
+        "ctx-a",
+        "file_edit",
+        json!({
+            "changes": "*** Begin Edit\n*** Patch File: ./document.txt\n@@\n-first\n+updated\n second\n*** End Edit"
+        }),
+    );
+
+    assert_eq!(edited["ok"], true, "{edited}");
+    assert_eq!(edited["result"]["complete"], true, "{edited}");
+    assert_eq!(
+        fs::read(env.workspace().join("document.txt")).unwrap(),
+        b"updated\r\nsecond\r\n"
+    );
+
+    env.json_command(&["stop", "--instance", instance]);
+}
+
+#[test]
+fn file_edit_rejects_conflicting_external_changes_without_overwriting_them() {
+    let env = TestEnv::new();
+    let instance = "aromatic-file-conflict-v2";
+    fs::write(env.workspace().join("document.txt"), "one\ntwo\nthree\n").unwrap();
+    start(&env, instance);
+
+    let read = call(
+        &env,
+        instance,
+        "1",
+        "ctx-a",
+        "file_read",
+        json!({ "path": "./document.txt", "view": "content" }),
+    );
+    assert_eq!(read["ok"], true, "{read}");
+    fs::write(
+        env.workspace().join("document.txt"),
+        "one\nexternal\nthree\n",
+    )
+    .unwrap();
+
+    let edited = call(
+        &env,
+        instance,
+        "2",
+        "ctx-a",
+        "file_edit",
+        json!({
+            "changes": "*** Begin Edit\n*** Patch File: ./document.txt\n@@\n one\n-two\n+second\n three\n*** End Edit"
+        }),
+    );
+
+    assert_eq!(edited["ok"], true, "{edited}");
+    assert_eq!(edited["result"]["complete"], false, "{edited}");
+    assert_eq!(
+        edited["result"]["operations"][0]["error"]["code"],
+        "file.revisionMismatch"
+    );
+    assert_eq!(
+        fs::read_to_string(env.workspace().join("document.txt")).unwrap(),
+        "one\nexternal\nthree\n"
+    );
+
+    env.json_command(&["stop", "--instance", instance]);
+}
+
+#[test]
+fn file_search_keeps_the_serialized_page_within_the_rpc_output_budget() {
+    let env = TestEnv::new();
+    let instance = "aromatic-file-search-budget-v2";
+    let line = format!("needle {}\n", "\\\"".repeat(2000));
+    for index in 0..40 {
+        fs::write(
+            env.workspace().join(format!("file-{index:02}.txt")),
+            line.repeat(20),
+        )
+        .unwrap();
+    }
+    start(&env, instance);
+
+    let searched = call(
+        &env,
+        instance,
+        "1",
+        "ctx-a",
+        "file_search",
+        json!({ "pattern": "needle", "syntax": "literal" }),
+    );
+
+    assert_eq!(searched["ok"], true, "{searched}");
+    assert!(serde_json::to_vec(&searched["result"]).unwrap().len() <= 1024 * 1024);
+    assert!(searched["result"]["nextCursor"].is_string());
+
+    env.json_command(&["stop", "--instance", instance]);
+}

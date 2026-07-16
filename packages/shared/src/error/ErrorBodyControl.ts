@@ -61,7 +61,7 @@ export function toControlErrorBody(error: unknown): ControlErrorBody | undefined
         return error.toBody();
     }
 
-    if (isControlErrorBody(error)) {
+    if (!(error instanceof Error) && isControlErrorBody(error)) {
         return error;
     }
 
@@ -81,9 +81,10 @@ export function toControlErrorBody(error: unknown): ControlErrorBody | undefined
         return undefined;
     }
 
+    const cause = toControlErrorBody(candidate.cause);
     return {
         code: typeof candidate.code === "string" ? candidate.code : "error.unknown",
-        ...(toControlErrorBody(candidate.cause) === undefined ? {} : { cause: toControlErrorBody(candidate.cause) }),
+        ...(cause === undefined ? {} : { cause }),
         ...(candidate.details === undefined ? {} : { details: candidate.details }),
         message: candidate.message,
         retryable: typeof candidate.retryable === "boolean" ? candidate.retryable : false

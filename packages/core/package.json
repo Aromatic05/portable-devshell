@@ -24,8 +24,8 @@
         "string-argv": "^0.3.2"
     },
     "scripts": {
-        "build": "tsc -b",
+        "build": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && tsc -b --force",
         "typecheck": "tsc --noEmit -p tsconfig.json",
-        "test": "tsc -b && node --import ./test/RegisterWorkspacePackages.mjs --test test/unit/*.test.ts test/integration/*.test.ts"
+        "test": "pnpm run build && node --import ./test/RegisterWorkspacePackages.mjs --test test/unit/*.test.ts test/integration/*.test.ts"
     }
 }
