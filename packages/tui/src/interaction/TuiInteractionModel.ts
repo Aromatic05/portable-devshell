@@ -1,6 +1,6 @@
 import type { InstanceCreateSchema, JsonValue } from "@portable-devshell/shared";
 
-import type { TuiAuditPageState, TuiFocusScope, TuiPageId, TuiSidebarCursor } from "../ui/TuiUiModel.js";
+import type { TuiAuditPageState, TuiFocusScope, TuiPageId, TuiSidebarCursor } from "../view/TuiUiModel.js";
 
 export type TuiEditorKind = "config" | "connector" | "create";
 

@@ -1,8 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { renderExpandableBoxLines, wrapTerminalText } from "../../dist/component/TuiComponentExpandableBox.js";
-import { isTerminalSizeSupported, mainInnerWidth, tuiLayoutMetrics } from "../../dist/app/TuiRootLayout.js";
 import {
     buildFocusGraphForState,
     buildTuiHitRegions,
@@ -13,8 +11,13 @@ import {
     selectMainScreenModel,
     selectSidebarModel,
     hitTargetAt,
+    isTerminalSizeSupported,
+    mainInnerWidth,
+    renderExpandableBoxLines,
     TuiAppStore,
-    TuiFocusManager
+    TuiFocusManager,
+    tuiLayoutMetrics,
+    wrapTerminalText
 } from "../../dist/testing.js";
 
 test("Prompt 3 urgent fix uses page + instance coordinates with a two-stage Tab cycle", async () => {

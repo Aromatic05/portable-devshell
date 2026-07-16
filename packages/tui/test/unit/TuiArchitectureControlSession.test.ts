@@ -3,9 +3,7 @@ import test from "node:test";
 
 import { asInstanceName, type JsonValue } from "@portable-devshell/shared";
 
-import { TuiControlSessionRefresh } from "../../dist/control/TuiControlSessionRefresh.js";
-import { TuiControlSessionSubscriptions } from "../../dist/control/TuiControlSessionSubscriptions.js";
-import { TuiAppStore } from "../../dist/store/TuiAppStore.js";
+import { TuiAppStore, TuiControlSessionRefresh, TuiControlSessionSubscriptions } from "../../dist/testing.js";
 
 function createRefreshHarness() {
     const store = new TuiAppStore();
