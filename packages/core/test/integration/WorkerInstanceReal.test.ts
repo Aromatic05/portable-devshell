@@ -14,7 +14,7 @@ import {
     type JsonValue
 } from "@portable-devshell/shared";
 import {
-    LocalWorkerTransport,
+    WorkerTransportDriverLocal,
     WorkerBinary,
     WorkerInstanceFactory,
     WorkerRpcFrameReader,
@@ -38,7 +38,7 @@ test("WorkerInstance completes lifecycle against frozen devshell-worker", async 
         env: { ...process.env, HOME: homeDirectory, XDG_RUNTIME_DIR: runtimeDirectory },
         homeDirectory,
         name: instanceName,
-        transport: new LocalWorkerTransport({
+        transport: new WorkerTransportDriverLocal({
             workerBinary: new WorkerBinary(resolve(repoRoot, "target/debug/devshell-worker")),
             spawnFunction: nodeSpawn
         })

@@ -3,11 +3,11 @@ import test from "node:test";
 
 import {
     InstanceRegistry,
-    ControlMcpInstanceGateway,
+    McpInstanceGatewayControl,
     createDefaultControlConfig
 } from "../../dist/index.js";
 
-function createGateway(ready: boolean): ControlMcpInstanceGateway {
+function createGateway(ready: boolean): McpInstanceGatewayControl {
     const registry = new InstanceRegistry([
         {
             enabled: true,
@@ -24,7 +24,7 @@ function createGateway(ready: boolean): ControlMcpInstanceGateway {
         } as never
     ]);
 
-    return new ControlMcpInstanceGateway({
+    return new McpInstanceGatewayControl({
         createService: {} as never,
         getConfig: () => createDefaultControlConfig(),
         instanceRegistry: registry
@@ -69,7 +69,7 @@ test("closing an MCP tool session releases worker-owned session state", async ()
             }
         })) as never
     );
-    const gateway = new ControlMcpInstanceGateway({
+    const gateway = new McpInstanceGatewayControl({
         createService: {} as never,
         getConfig: () => createDefaultControlConfig(),
         instanceRegistry: registry

@@ -1,7 +1,7 @@
 import {
     ControlGlobalTomlDocument,
     ControlInstanceTomlDocument,
-    ControlTomlCodec
+    ControlConfigTomlCodec
 } from "../dist/index.js";
 import {
     normalizeConfigGlobalDraft,
@@ -10,7 +10,7 @@ import {
     type ConfigInstanceDraft
 } from "@portable-devshell/shared";
 
-const toml = new ControlTomlCodec();
+const toml = new ControlConfigTomlCodec();
 const globalDocument = new ControlGlobalTomlDocument();
 const instanceDocument = new ControlInstanceTomlDocument();
 

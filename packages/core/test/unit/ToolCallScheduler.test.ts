@@ -2,11 +2,11 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { asInstanceName, errorCodes } from "@portable-devshell/shared";
-import { ToolCallScheduler } from "@portable-devshell/core";
+import { WorkerToolCallScheduler } from "@portable-devshell/core";
 
-test("ToolCallScheduler runs up to the configured limit and keeps later calls queued", async () => {
+test("WorkerToolCallScheduler runs up to the configured limit and keeps later calls queued", async () => {
     const instanceName = asInstanceName("scheduler-test");
-    const scheduler = new ToolCallScheduler({
+    const scheduler = new WorkerToolCallScheduler({
         byTool: {},
         maxRunning: 2,
         maxRunningPerSession: 2,
@@ -44,9 +44,9 @@ test("ToolCallScheduler runs up to the configured limit and keeps later calls qu
     assert.deepEqual(await Promise.all(calls.slice(1)), ["second", "third"]);
 });
 
-test("ToolCallScheduler rejects requests that exceed the bounded queue", () => {
+test("WorkerToolCallScheduler rejects requests that exceed the bounded queue", () => {
     const instanceName = asInstanceName("scheduler-test");
-    const scheduler = new ToolCallScheduler({
+    const scheduler = new WorkerToolCallScheduler({
         byTool: {},
         maxRunning: 1,
         maxRunningPerSession: 10,
@@ -68,9 +68,9 @@ test("ToolCallScheduler rejects requests that exceed the bounded queue", () => {
     );
 });
 
-test("ToolCallScheduler cancels a queued request when its abort signal fires", async () => {
+test("WorkerToolCallScheduler cancels a queued request when its abort signal fires", async () => {
     const instanceName = asInstanceName("scheduler-cancel");
-    const scheduler = new ToolCallScheduler({
+    const scheduler = new WorkerToolCallScheduler({
         byTool: {},
         maxRunning: 1,
         maxRunningPerSession: 2,
@@ -131,9 +131,9 @@ async function waitFor(condition: () => boolean): Promise<void> {
     throw new Error("condition was not reached");
 }
 
-test("ToolCallScheduler admits one urgent tmux operation beyond normal instance and context limits", async () => {
+test("WorkerToolCallScheduler admits one urgent tmux operation beyond normal instance and context limits", async () => {
     const instanceName = asInstanceName("scheduler-urgent");
-    const scheduler = new ToolCallScheduler({
+    const scheduler = new WorkerToolCallScheduler({
         byTool: {},
         maxRunning: 2,
         maxRunningPerSession: 2,
@@ -168,9 +168,9 @@ test("ToolCallScheduler admits one urgent tmux operation beyond normal instance 
     assert.deepEqual(await Promise.all([firstCall, secondCall, urgentCall]), ["first", "second", "interrupted"]);
 });
 
-test("ToolCallScheduler prioritizes queued urgent tmux operations", async () => {
+test("WorkerToolCallScheduler prioritizes queued urgent tmux operations", async () => {
     const instanceName = asInstanceName("scheduler-priority");
-    const scheduler = new ToolCallScheduler({
+    const scheduler = new WorkerToolCallScheduler({
         byTool: {},
         maxRunning: 1,
         maxRunningPerSession: 10,

@@ -4,11 +4,11 @@ import test from "node:test";
 import type { WorkerInstance } from "@portable-devshell/core";
 import type { JsonValue, PrefixRouteContext } from "@portable-devshell/shared";
 
-import type { ArtifactService } from "../../dist/modules/artifact/ArtifactService.js";
-import { InstanceRegistry } from "../../dist/modules/instance/registry/InstanceRegistry.js";
-import { RouteComposition } from "../../dist/composition/RouteComposition.js";
+import type { ArtifactService } from "../../dist/control/artifact/ArtifactService.js";
+import { InstanceRegistry } from "../../dist/control/instance/registry/InstanceRegistry.js";
+import { ControlRouteComposition } from "../../dist/composition/ControlRouteComposition.js";
 
-test("RouteComposition exposes the consolidated control modules", () => {
+test("ControlRouteComposition exposes the consolidated control modules", () => {
     const snapshot = createSnapshot(new InstanceRegistry([]));
     const control = snapshot.destinations.get("@control");
 
@@ -32,7 +32,7 @@ test("RouteComposition exposes the consolidated control modules", () => {
     ]);
 });
 
-test("RouteComposition creates one consolidated destination tree per instance", () => {
+test("ControlRouteComposition creates one consolidated destination tree per instance", () => {
     const registry = new InstanceRegistry([
         {
             enabled: true,
@@ -102,7 +102,7 @@ test("artifact.startTransfer accepts an explicit source instance", async () => {
             };
         }
     } as unknown as ArtifactService;
-    const table = new RouteComposition({
+    const table = new ControlRouteComposition({
         artifact: artifactService,
         instances: new InstanceRegistry([]),
         shutdown() {}
@@ -140,7 +140,7 @@ test("artifact.startTransfer accepts an explicit source instance", async () => {
 });
 
 function createSnapshot(instanceRegistry: InstanceRegistry) {
-    return new RouteComposition({
+    return new ControlRouteComposition({
         instances: instanceRegistry,
         shutdown() {}
     }).snapshot();

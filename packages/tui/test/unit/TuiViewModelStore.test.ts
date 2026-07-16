@@ -3,7 +3,7 @@ import test from "node:test";
 
 import { asInstanceName } from "@portable-devshell/shared";
 
-import { RenderScheduler, TuiAppStore, selectMainScreenModel } from "../../dist/index.js";
+import { TuiRenderScheduler, TuiAppStore, selectMainScreenModel } from "../../dist/index.js";
 
 test("TuiAppStore keeps page, instance, and expanded boxes stable across events", () => {
     const store = new TuiAppStore({ maxRawEvents: 2 });
@@ -49,9 +49,9 @@ test("TuiAppStore keeps page, instance, and expanded boxes stable across events"
     assert.equal(state.globalDerived.connectedInstanceCount, 1);
 });
 
-test("RenderScheduler batches multiple store updates into one render notification", async () => {
+test("TuiRenderScheduler batches multiple store updates into one render notification", async () => {
     const store = new TuiAppStore();
-    const scheduler = new RenderScheduler(store, 5);
+    const scheduler = new TuiRenderScheduler(store, 5);
     let renderCount = 0;
 
     const unsubscribe = scheduler.subscribe(() => {

@@ -1,18 +1,18 @@
 import type { ApprovalRequest, InstanceEvent, ToolCallAssociation, ToolCallRecord } from "@portable-devshell/shared";
 import type { InstanceLogEntry } from "../../log/store/LogStoreInstance.js";
 
-import { ApprovalManager, ApprovalStore } from "../../approval/ApprovalInfra.js";
+import { ApprovalManager, ApprovalStore } from "../../approval/ApprovalManager.js";
 import { AuditDatabase } from "../../audit/AuditDatabase.js";
-import { InstanceEventBuffer } from "../../log/LogEventBuffer.js";
-import { InstanceLogStore } from "../../log/store/LogStoreInstance.js";
-import { ToolCallHistory } from "../../log/LogToolCallHistory.js";
+import { InstanceEventBuffer } from "../../instance/event/InstanceEventBuffer.js";
+import { LogStoreInstance } from "../../log/store/LogStoreInstance.js";
+import { AuditToolCallHistory } from "../../audit/tool/AuditToolCallHistory.js";
 import { WorkerCommandClient } from "../command/WorkerCommandClient.js";
 import { WorkerProtocolClient } from "../protocol/WorkerProtocolClient.js";
 import { WorkerRpcBridge } from "../rpc/WorkerRpcBridge.js";
 import { WorkerRpcClient } from "../rpc/WorkerRpcClient.js";
 import { WorkerToolCatalog } from "../tool/WorkerToolCatalog.js";
 import { WorkerToolInvoker } from "../tool/WorkerToolInvoker.js";
-import { ToolCallScheduler } from "../tool/ToolCallScheduler.js";
+import { WorkerToolCallScheduler } from "../tool/WorkerToolCallScheduler.js";
 import { InstancePaths } from "../../instance/InstancePaths.js";
 import { InstanceStateMachine } from "../../instance/state/InstanceStateMachine.js";
 import { WorkerInstance } from "./WorkerInstance.js";
@@ -65,7 +65,7 @@ export class WorkerInstanceFactory {
                 resolved.eventBufferSize,
                 eventStore
             ),
-            logStore: new InstanceLogStore(resolved.name, logStore),
+            logStore: new LogStoreInstance(resolved.name, logStore),
             protocolClient: new WorkerProtocolClient(rpcClient),
             rpcBridge,
             stateMachine: new InstanceStateMachine(resolved.name),
@@ -76,8 +76,8 @@ export class WorkerInstanceFactory {
                 timeout: resolved.approvalTimeout
             }),
             toolCallAssociationProvider: options.toolCallAssociationProvider,
-            toolCallHistory: new ToolCallHistory(resolved.name, toolCallStore),
-            toolCallScheduler: new ToolCallScheduler(resolved.toolScheduler),
+            toolCallHistory: new AuditToolCallHistory(resolved.name, toolCallStore),
+            toolCallScheduler: new WorkerToolCallScheduler(resolved.toolScheduler),
             toolInvoker: new WorkerToolInvoker(rpcClient, catalog)
         });
     }

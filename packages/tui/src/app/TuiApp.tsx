@@ -1,12 +1,12 @@
 import { useSyncExternalStore } from "react";
 import { Box, Text, useInput } from "ink";
 
-import { ConfirmDialog } from "../component/ConfirmDialog.js";
-import { ErrorBanner } from "../component/ErrorBanner.js";
-import { Footer } from "../component/Footer.js";
-import { Header } from "../component/Header.js";
-import { Sidebar } from "../component/Sidebar.js";
-import { ScreenRouter } from "../screen/ScreenRouter.js";
+import { TuiComponentConfirmDialog } from "../component/TuiComponentConfirmDialog.js";
+import { TuiComponentErrorBanner } from "../component/TuiComponentErrorBanner.js";
+import { TuiComponentFooter } from "../component/TuiComponentFooter.js";
+import { TuiComponentHeader } from "../component/TuiComponentHeader.js";
+import { TuiComponentSidebar } from "../component/TuiComponentSidebar.js";
+import { TuiScreenRouter } from "../screen/TuiScreenRouter.js";
 import {
     selectConnectionState,
     selectConfirmDialogModel,
@@ -51,11 +51,11 @@ export function TuiApp(props: TuiAppProps) {
     return (
         <TuiRootLayout
             columns={props.runtime.columns}
-            footer={<Footer text={footer.text} />}
-            header={<Header stateLabel={connection.status} summary={selectHeaderSummary(state)} title={selectHeaderTitle()} />}
+            footer={<TuiComponentFooter text={footer.text} />}
+            header={<TuiComponentHeader stateLabel={connection.status} summary={selectHeaderSummary(state)} title={selectHeaderTitle()} />}
             main={
                 <Box flexDirection="column" flexGrow={1}>
-                    {errorLines !== undefined ? <ErrorBanner lines={errorLines} /> : undefined}
+                    {errorLines !== undefined ? <TuiComponentErrorBanner lines={errorLines} /> : undefined}
                     {search.open ? <Text color="cyan">{`/ ${search.query}`}</Text> : undefined}
                     {toolForm?.open === true && !auditDetailOpen ? (
                         <Box borderStyle="round" borderColor="cyan" flexDirection="column" paddingX={1}>
@@ -65,9 +65,9 @@ export function TuiApp(props: TuiAppProps) {
                             <Text dimColor>Enter submit, Esc cancel</Text>
                         </Box>
                     ) : undefined}
-                    <ScreenRouter boxInnerWidth={boxInnerWidth} state={state} viewportRows={viewportRows} />
+                    <TuiScreenRouter boxInnerWidth={boxInnerWidth} state={state} viewportRows={viewportRows} />
                     {!auditDetailOpen ? (
-                        <ConfirmDialog
+                        <TuiComponentConfirmDialog
                             body={confirmDialog.body}
                             cancelFocused={confirmDialog.cancelFocused}
                             cancelLabel={confirmDialog.cancelLabel}
@@ -81,7 +81,7 @@ export function TuiApp(props: TuiAppProps) {
                 </Box>
             }
             rows={props.runtime.rows}
-            sidebar={<Sidebar compact={layout.mode === "compact"} model={selectSidebarModel(state)} />}
+            sidebar={<TuiComponentSidebar compact={layout.mode === "compact"} model={selectSidebarModel(state)} />}
         />
     );
 }

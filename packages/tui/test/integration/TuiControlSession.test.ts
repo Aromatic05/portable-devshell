@@ -8,10 +8,10 @@ import test from "node:test";
 import { asInstanceName, type ApprovalRequest, type JsonValue, type ToolCallRecord } from "@portable-devshell/shared";
 import type { WorkerInstance } from "@portable-devshell/core";
 
-import { ControlSocketServer } from "../../../control/dist/control/socket/ControlSocketServer.js";
-import { RouteComposition } from "../../../control/dist/composition/RouteComposition.js";
-import { InstanceRegistry } from "../../../control/dist/modules/instance/registry/InstanceRegistry.js";
-import { createClients, TuiControlSession } from "../../dist/index.js";
+import { ControlSocketServer } from "../../../control/dist/server/socket/ControlSocketServer.js";
+import { ControlRouteComposition } from "../../../control/dist/composition/ControlRouteComposition.js";
+import { InstanceRegistry } from "../../../control/dist/control/instance/registry/InstanceRegistry.js";
+import { createTuiClients, TuiControlSession } from "../../dist/index.js";
 
 test("TuiControlSession pulls instances, snapshots, subscribes, and recovers from stream.gap", async (t) => {
     const runtimeDir = await mkdtemp(join(tmpdir(), "portable-devshell-tui-session-"));
@@ -20,7 +20,7 @@ test("TuiControlSession pulls instances, snapshots, subscribes, and recovers fro
     const server = createServer(socketPath, worker, () => 7);
     let socketCount = 0;
     const session = new TuiControlSession({
-        clients: createClients({
+        clients: createTuiClients({
             socketFactory: (path) => {
                 socketCount += 1;
                 return createConnection(path);
@@ -124,7 +124,7 @@ test("TuiControlSession reports missing control without auto-starting it", async
     const runtimeDir = await mkdtemp(join(tmpdir(), "portable-devshell-tui-not-running-"));
     const socketPath = join(runtimeDir, "control.sock");
     const session = new TuiControlSession({
-        clients: createClients({ socketPath })
+        clients: createTuiClients({ socketPath })
     });
 
     try {
@@ -144,7 +144,7 @@ test("module TUI clients send explicit instance operations and preserve start re
     const socketPath = join(runtimeDir, "control.sock");
     const worker = new FakeWorker("alpha");
     const server = createServer(socketPath, worker, () => 7);
-    const clients = createClients({ socketPath });
+    const clients = createTuiClients({ socketPath });
 
     t.after(async () => {
         clients.close();
@@ -202,7 +202,7 @@ function createServer(socketPath: string, worker: FakeWorker, getConfigVersion: 
             worker: worker as unknown as WorkerInstance
         }
     ]);
-    const routes = new RouteComposition({
+    const routes = new ControlRouteComposition({
         artifact: {
             listShares() { return []; },
             listTransfers() { return []; }

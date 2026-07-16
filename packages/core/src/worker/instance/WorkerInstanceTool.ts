@@ -15,14 +15,14 @@ import {
     type ToolCallRecord
 } from "@portable-devshell/shared";
 
-import type { ApprovalManager } from "../../approval/ApprovalInfra.js";
-import type { InstanceEventInput } from "../../log/LogEventBuffer.js";
+import type { ApprovalManager } from "../../approval/ApprovalManager.js";
+import type { InstanceEventInput } from "../../instance/event/InstanceEventBuffer.js";
 import type { LogQuery } from "../../log/LogQuery.js";
 import type { InstanceLogEntry } from "../../log/store/LogStoreInstance.js";
-import type { InstanceLogStore } from "../../log/store/LogStoreInstance.js";
-import type { ToolCallHistory } from "../../log/LogToolCallHistory.js";
+import type { LogStoreInstance } from "../../log/store/LogStoreInstance.js";
+import type { AuditToolCallHistory } from "../../audit/tool/AuditToolCallHistory.js";
 import type { WorkerToolInvoker } from "../tool/WorkerToolInvoker.js";
-import type { ToolCallScheduler, ToolSchedulerReservation } from "../tool/ToolCallScheduler.js";
+import type { WorkerToolCallScheduler, WorkerToolSchedulerReservation } from "../tool/WorkerToolCallScheduler.js";
 import { getErrorCode, readCommandDiagnostic } from "./WorkerInstanceError.js";
 import { toEventData } from "./WorkerInstanceEvent.js";
 import { WorkerInstanceApproval } from "./WorkerInstanceApproval.js";
@@ -32,10 +32,10 @@ interface WorkerToolOptions {
     appendEvent(type: InstanceEventInput["type"], data?: JsonValue): Promise<unknown>;
     assertReady(): void;
     instanceName: InstanceName;
-    logStore: InstanceLogStore;
+    logStore: LogStoreInstance;
     toolCallAssociationProvider?: () => ToolCallAssociation | undefined;
-    toolCallHistory: ToolCallHistory;
-    toolCallScheduler: ToolCallScheduler;
+    toolCallHistory: AuditToolCallHistory;
+    toolCallScheduler: WorkerToolCallScheduler;
     toolInvoker: WorkerToolInvoker;
 }
 
@@ -44,10 +44,10 @@ export class WorkerInstanceTool {
     readonly #approval: WorkerInstanceApproval;
     readonly #assertReady: WorkerToolOptions["assertReady"];
     readonly #instanceName: InstanceName;
-    readonly #logStore: InstanceLogStore;
+    readonly #logStore: LogStoreInstance;
     readonly #toolCallAssociationProvider?: () => ToolCallAssociation | undefined;
-    readonly #toolCallHistory: ToolCallHistory;
-    readonly #toolCallScheduler: ToolCallScheduler;
+    readonly #toolCallHistory: AuditToolCallHistory;
+    readonly #toolCallScheduler: WorkerToolCallScheduler;
     readonly #toolInvoker: WorkerToolInvoker;
 
     constructor(options: WorkerToolOptions) {
@@ -86,7 +86,7 @@ export class WorkerInstanceTool {
             toolName
         } as const;
 
-        let reservation: ToolSchedulerReservation;
+        let reservation: WorkerToolSchedulerReservation;
 
         try {
             reservation = this.#toolCallScheduler.reserve(

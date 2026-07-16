@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { CliParser } from "../../dist/cli/CliParser.js";
+import { CliParser } from "../../dist/CliParser.js";
 
 test("CliParser parses Task 11 command fixture", async () => {
     const fixturePath = fileURLToPath(new URL("../fixtures/cli-argv.json", import.meta.url));
@@ -35,7 +35,7 @@ test("Cli package exposes the Task 11 bin and runtime dependency contract", asyn
     };
 
     assert.deepEqual(packageJson.bin, {
-        devshell: "./dist/cli/CliMain.js"
+        devshell: "./dist/CliMain.js"
     });
     assert.equal(packageJson.dependencies?.["@portable-devshell/shared"], "workspace:*");
     assert.equal(packageJson.dependencies?.["@portable-devshell/tui"], "workspace:*");

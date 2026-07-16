@@ -1,11 +1,11 @@
-import { measureExpandableBoxHeight, type BoxModel } from "../component/ExpandableBox.js";
-import type { TuiMode } from "../interaction/TuiInteractionTypes.js";
-import type { ActivePage, PageId } from "../model/TuiUiTypes.js";
-import { buildBoxesForPage } from "./page/buildBoxesForPage.js";
-import { buildHelpLines } from "./page/help.js";
-import type { TuiAppState, TuiConnectionState } from "./TuiReducers.js";
+import { measureExpandableBoxHeight, type BoxModel } from "../component/TuiComponentExpandableBox.js";
+import type { TuiMode } from "../interaction/TuiInteractionModel.js";
+import type { TuiActivePage, TuiPageId } from "../ui/TuiUiModel.js";
+import { buildBoxesForPage } from "../page/TuiPageBoxBuilder.js";
+import { buildHelpLines } from "../page/TuiPageHelp.js";
+import type { TuiAppState, TuiConnectionState } from "./TuiStoreTypes.js";
 
-const pageEntries: Array<{ id: PageId; label: string }> = [
+const pageEntries: Array<{ id: TuiPageId; label: string }> = [
     { id: "instances", label: "instances" },
     { id: "config", label: "config" },
     { id: "connector", label: "connector" },
@@ -29,7 +29,7 @@ export interface SidebarModel {
 }
 
 export interface MainScreenModel {
-    activePage: ActivePage;
+    activePage: TuiActivePage;
     boxes: BoxModel[];
     emptyState?: string;
     errorLines?: string[];
@@ -43,7 +43,7 @@ export interface MainBoxFlowMetrics {
     totalLines: number;
 }
 
-export function selectActivePage(state: TuiAppState): ActivePage {
+export function selectActivePage(state: TuiAppState): TuiActivePage {
     return {
         instance: state.ui.selectedPage === "oauth" || state.ui.selectedPage === "help" ? undefined : state.ui.selectedInstance,
         page: state.ui.selectedPage
@@ -223,10 +223,10 @@ export function selectHelpLines(state: TuiAppState): string[] {
     return buildHelpLines(state);
 }
 
-function isSearchablePage(page: PageId): boolean {
+function isSearchablePage(page: TuiPageId): boolean {
     return page === "instances" || page === "todo" || page === "config" || page === "audit" || page === "logs";
 }
 
-function pageTitle(page: PageId): string {
+function pageTitle(page: TuiPageId): string {
     return pageEntries.find((entry) => entry.id === page)?.label ?? page;
 }

@@ -7,8 +7,8 @@ import test from "node:test";
 
 import { Channel, Codec, type JsonValue } from "@portable-devshell/shared";
 
-import { createClients } from "../../dist/cli/client/ClientComposition.js";
-import { CliMain } from "../../dist/cli/CliMain.js";
+import { createCliClients } from "../../dist/client/CliClientComposition.js";
+import { CliMain } from "../../dist/CliMain.js";
 
 test("module CLI clients perform control rpc over unix socket", async (t) => {
     const runtimeRoot = await mkdtemp(join(tmpdir(), "portable-devshell-cli-control-"));
@@ -65,7 +65,7 @@ test("module CLI clients perform control rpc over unix socket", async (t) => {
         await rm(runtimeRoot, { force: true, recursive: true });
     });
 
-    const clients = createClients({ socketPath });
+    const clients = createCliClients({ socketPath });
     const instances = await clients.instance.list();
     const logs = await clients.runtime.readLogs("demo-local", { limit: 1 });
 

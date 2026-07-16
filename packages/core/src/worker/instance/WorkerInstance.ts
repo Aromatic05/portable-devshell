@@ -13,12 +13,12 @@ import {
     type WorkspacePath
 } from "@portable-devshell/shared";
 
-import type { ApprovalManager } from "../../approval/ApprovalInfra.js";
+import type { ApprovalManager } from "../../approval/ApprovalManager.js";
 import type { AuditDatabase } from "../../audit/AuditDatabase.js";
-import type { EventStreamGap, EventStreamSlice, InstanceEventInput } from "../../log/LogEventBuffer.js";
-import { InstanceEventBuffer } from "../../log/LogEventBuffer.js";
+import type { InstanceEventStreamGap, InstanceEventStreamSlice, InstanceEventInput } from "../../instance/event/InstanceEventBuffer.js";
+import { InstanceEventBuffer } from "../../instance/event/InstanceEventBuffer.js";
 import type { LogQuery } from "../../log/LogQuery.js";
-import { InstanceLogStore, type InstanceLogEntry } from "../../log/store/LogStoreInstance.js";
+import { LogStoreInstance, type InstanceLogEntry } from "../../log/store/LogStoreInstance.js";
 import { WorkerCommandClient } from "../command/WorkerCommandClient.js";
 import type { WorkerCommandInteractiveSession } from "../command/WorkerCommandTransport.js";
 import {
@@ -38,8 +38,8 @@ import { WorkerRpcBridge } from "../rpc/WorkerRpcBridge.js";
 import type { WorkerRpcChannel } from "../rpc/WorkerRpcChannel.js";
 import { WorkerToolCatalog } from "../tool/WorkerToolCatalog.js";
 import { WorkerToolInvoker } from "../tool/WorkerToolInvoker.js";
-import { ToolCallScheduler } from "../tool/ToolCallScheduler.js";
-import { ToolCallHistory } from "../../log/LogToolCallHistory.js";
+import { WorkerToolCallScheduler } from "../tool/WorkerToolCallScheduler.js";
+import { AuditToolCallHistory } from "../../audit/tool/AuditToolCallHistory.js";
 import { InstanceStateMachine, type InstanceStateUpdate } from "../../instance/state/InstanceStateMachine.js";
 import type { InstanceSnapshot } from "../../instance/state/InstanceStateSnapshot.js";
 import type { ResolvedWorkerInstanceConfig } from "./WorkerInstanceConfig.js";
@@ -66,13 +66,13 @@ interface WorkerInstanceDependencies {
     commandClient?: WorkerCommandClient;
     config: ResolvedWorkerInstanceConfig;
     eventBuffer: InstanceEventBuffer;
-    logStore: InstanceLogStore;
+    logStore: LogStoreInstance;
     protocolClient: WorkerProtocolClient;
     rpcBridge: WorkerRpcBridge;
     stateMachine: InstanceStateMachine;
     toolCallAssociationProvider?: () => ToolCallAssociation | undefined;
-    toolCallHistory: ToolCallHistory;
-    toolCallScheduler: ToolCallScheduler;
+    toolCallHistory: AuditToolCallHistory;
+    toolCallScheduler: WorkerToolCallScheduler;
     toolInvoker: WorkerToolInvoker;
 }
 
@@ -445,7 +445,7 @@ export class WorkerInstance {
         );
     }
 
-    subscribe(fromSeq = 1): EventStreamGap | EventStreamSlice {
+    subscribe(fromSeq = 1): InstanceEventStreamGap | InstanceEventStreamSlice {
         return this.#eventBuffer.readFrom(fromSeq);
     }
 

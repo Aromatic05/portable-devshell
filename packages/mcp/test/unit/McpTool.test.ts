@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-    McpEndpointToolCatalog,
+    McpToolCatalogEndpoint,
     McpToolDescriptionEnhancer,
     McpToolFilter,
     McpToolSchemaAdapter
@@ -58,8 +58,8 @@ test("McpToolFilter allows capability-free tools only when their group is enable
     assert.equal(new McpToolFilter({ capabilities: [], groups: [] }).isAllowed(todoRead), false);
 });
 
-test("McpEndpointToolCatalog merges worker and control tools before applying one policy", () => {
-    const catalog = new McpEndpointToolCatalog({
+test("McpToolCatalogEndpoint merges worker and control tools before applying one policy", () => {
+    const catalog = new McpToolCatalogEndpoint({
         capabilities: ["execute"],
         groups: ["bash", "todo"]
     });
@@ -75,8 +75,8 @@ test("McpEndpointToolCatalog merges worker and control tools before applying one
     ]);
 });
 
-test("McpEndpointToolCatalog rejects duplicate names across providers", () => {
-    const catalog = new McpEndpointToolCatalog({ capabilities: [], groups: ["todo"] });
+test("McpToolCatalogEndpoint rejects duplicate names across providers", () => {
+    const catalog = new McpToolCatalogEndpoint({ capabilities: [], groups: ["todo"] });
 
     assert.throws(
         () =>

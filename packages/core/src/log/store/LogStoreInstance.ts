@@ -16,7 +16,7 @@ export interface InstanceLogEntry {
     toolName?: string;
 }
 
-export class InstanceLogStore {
+export class LogStoreInstance {
     readonly #instanceName: InstanceName;
     readonly #store: AuditRecordStore<InstanceLogEntry>;
     #initialized = false;

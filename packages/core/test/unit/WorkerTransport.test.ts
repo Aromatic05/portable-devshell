@@ -10,11 +10,11 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 import {
-    DockerWorkerTransport,
-    LocalWorkerTransport,
-    PodmanWorkerTransport,
-    RemoteWorkerInstaller,
-    SshWorkerTransport,
+    WorkerTransportDriverDocker,
+    WorkerTransportDriverLocal,
+    WorkerTransportDriverPodman,
+    WorkerInstallerRemote,
+    WorkerTransportDriverSsh,
     WorkerBinary,
     getWorkerTargetByKey,
     probeLocalWorkerTarget
@@ -33,7 +33,7 @@ function sanitizedWorkerEnv(): NodeJS.ProcessEnv {
 
 test("local transport builds start command and rpc bridge", async () => {
     const recorder = createSpawnRecorder();
-    const transport = new LocalWorkerTransport({
+    const transport = new WorkerTransportDriverLocal({
         workerBinary: new WorkerBinary("/worker/bin"),
         spawnFunction: recorder.spawn
     });
@@ -66,7 +66,7 @@ test("local transport builds start command and rpc bridge", async () => {
 
 test("local transport runs installWorker probe", async () => {
     const recorder = createSpawnRecorder();
-    const transport = new LocalWorkerTransport({
+    const transport = new WorkerTransportDriverLocal({
         workerBinary: new WorkerBinary("/worker/bin"),
         spawnFunction: recorder.spawn
     });
@@ -92,7 +92,7 @@ test("local transport honors command PORTABLE_DEVSHELL_HOME for worker lookup an
     const target = probeLocalWorkerTarget();
     const workerPathEnvironmentName = `PORTABLE_DEVSHELL_WORKER_${target.key.replaceAll("-", "_").toUpperCase()}_PATH`;
     const recorder = createSpawnRecorder();
-    const transport = new LocalWorkerTransport({ spawnFunction: recorder.spawn });
+    const transport = new WorkerTransportDriverLocal({ spawnFunction: recorder.spawn });
     const result = await transport.runWorkerCommand("status", {
         env: {
             PORTABLE_DEVSHELL_HOME: devshellHome,
@@ -135,7 +135,7 @@ test("local start upgrades a changed worker while status keeps the active worker
         });
         return true;
     });
-    const transport = new LocalWorkerTransport({ spawnFunction: recorder.spawn });
+    const transport = new WorkerTransportDriverLocal({ spawnFunction: recorder.spawn });
     const baseOptions = {
         instanceName: "local-upgrade",
         workspacePath: "/tmp/workspace"
@@ -177,7 +177,7 @@ test("provider installWorker failures keep diagnostic details across local ssh d
     const cases = [
         {
             build: (spawnFunction: SpawnFunctionLike) =>
-                new LocalWorkerTransport({
+                new WorkerTransportDriverLocal({
                     workerBinary: new WorkerBinary("/worker/bin"),
                     spawnFunction
                 }),
@@ -186,7 +186,7 @@ test("provider installWorker failures keep diagnostic details across local ssh d
         },
         {
             build: (spawnFunction: SpawnFunctionLike) =>
-                new SshWorkerTransport({
+                new WorkerTransportDriverSsh({
                     command: "ssh-bin devbox",
                     workerBinary: new WorkerBinary("/usr/local/bin/devshell-worker"),
                     spawnFunction
@@ -196,7 +196,7 @@ test("provider installWorker failures keep diagnostic details across local ssh d
         },
         {
             build: (spawnFunction: SpawnFunctionLike) =>
-                new DockerWorkerTransport({
+                new WorkerTransportDriverDocker({
                     container: createManagedContainerConfig(),
                     dockerBinary: "docker-bin",
                     workerBinary: new WorkerBinary("/usr/local/bin/devshell-worker"),
@@ -207,7 +207,7 @@ test("provider installWorker failures keep diagnostic details across local ssh d
         },
         {
             build: (spawnFunction: SpawnFunctionLike) =>
-                new PodmanWorkerTransport({
+                new WorkerTransportDriverPodman({
                     container: createManagedContainerConfig(),
                     podmanBinary: "podman-bin",
                     workerBinary: new WorkerBinary("/usr/local/bin/devshell-worker"),
@@ -253,7 +253,7 @@ test("provider installWorker failures keep diagnostic details across local ssh d
 
 test("local transport preserves base process env when instance env is provided", async () => {
     const recorder = createSpawnRecorder();
-    const transport = new LocalWorkerTransport({
+    const transport = new WorkerTransportDriverLocal({
         workerBinary: new WorkerBinary("/worker/bin"),
         spawnFunction: recorder.spawn
     });
@@ -294,7 +294,7 @@ test("local transport preserves base process env when instance env is provided",
 
 test("ssh transport uses remote cwd only for start command", async () => {
     const recorder = createSpawnRecorder();
-    const transport = new SshWorkerTransport({
+    const transport = new WorkerTransportDriverSsh({
         command: "ssh-bin devbox",
         workspace: "/srv/workspaces/task 3",
         workerBinary: new WorkerBinary("/usr/local/bin/devshell-worker"),
@@ -348,7 +348,7 @@ test("ssh transport uses remote cwd only for start command", async () => {
 
 test("ssh transport runs installWorker probe via remote shell", async () => {
     const recorder = createSpawnRecorder();
-    const transport = new SshWorkerTransport({
+    const transport = new WorkerTransportDriverSsh({
         command: "ssh-bin devbox",
         workspace: "/srv/workspaces/task 3",
         workerBinary: new WorkerBinary("/usr/local/bin/devshell-worker"),
@@ -413,7 +413,7 @@ test("ssh transport probes remote target before installing default worker", asyn
 
         return false;
     });
-    const transport = new SshWorkerTransport({
+    const transport = new WorkerTransportDriverSsh({
         command: "ssh-bin devbox",
         spawnFunction: recorder.spawn
     });
@@ -501,7 +501,7 @@ test("ssh transport reuses a matching remote worker without uploading the binary
         closeRecordedChild(child, { stdout: "running\n" });
         return true;
     });
-    const transport = new SshWorkerTransport({
+    const transport = new WorkerTransportDriverSsh({
         command: "ssh-bin devbox",
         spawnFunction: recorder.spawn
     });
@@ -516,7 +516,7 @@ test("ssh transport reuses a matching remote worker without uploading the binary
 });
 
 test("remote installer surfaces missing target-specific asset as structured error", async () => {
-    const installer = new RemoteWorkerInstaller({
+    const installer = new WorkerInstallerRemote({
         probeTarget: async () => getWorkerTargetByKey("darwin-arm64"),
         resolver: {
             async resolve() {
@@ -593,7 +593,7 @@ test("ssh transport reinstalls default worker when target asset changes", async 
         closeRecordedChild(child);
         return true;
     });
-    const transport = new SshWorkerTransport({
+    const transport = new WorkerTransportDriverSsh({
         command: "ssh-bin devbox",
         spawnFunction: recorder.spawn
     });
@@ -615,7 +615,7 @@ test("ssh transport appends interactive-auth hint when batch mode authentication
         });
         return true;
     });
-    const transport = new SshWorkerTransport({
+    const transport = new WorkerTransportDriverSsh({
         command: "ssh demo",
         workspace: "/workspace",
         workerBinary: new WorkerBinary("/usr/local/bin/devshell-worker"),
@@ -640,7 +640,7 @@ test("ssh transport interactive start establishes a reusable control socket", as
         closeRecordedChild(child);
         return true;
     });
-    const transport = new SshWorkerTransport({
+    const transport = new WorkerTransportDriverSsh({
         command: "ssh-bin devbox",
         workerBinary: new WorkerBinary("/usr/local/bin/devshell-worker"),
         spawnFunction: recorder.spawn
@@ -718,7 +718,7 @@ test("docker transport builds exec command", async () => {
 
         return false;
     });
-    const transport = new DockerWorkerTransport({
+    const transport = new WorkerTransportDriverDocker({
         container: createManagedContainerConfig(),
         dockerBinary: "docker-bin",
         remoteCwd: "/workspace",
@@ -750,7 +750,7 @@ test("docker transport runs installWorker probe via exec", async () => {
 
         return false;
     });
-    const transport = new DockerWorkerTransport({
+    const transport = new WorkerTransportDriverDocker({
         container: createManagedContainerConfig(),
         dockerBinary: "docker-bin",
         remoteCwd: "/workspace",
@@ -811,7 +811,7 @@ test("docker transport installs default worker before exec command", async (t) =
 
         return false;
     });
-    const transport = new DockerWorkerTransport({
+    const transport = new WorkerTransportDriverDocker({
         container: createManagedContainerConfig(),
         dockerBinary: "docker-bin",
         remoteCwd: "/workspace",
@@ -865,7 +865,7 @@ test("podman transport builds exec command", async () => {
 
         return false;
     });
-    const transport = new PodmanWorkerTransport({
+    const transport = new WorkerTransportDriverPodman({
         container: createManagedContainerConfig(),
         podmanBinary: "podman-bin",
         remoteCwd: "/workspace",
@@ -902,7 +902,7 @@ test("podman transport runs installWorker probe via exec", async () => {
 
         return false;
     });
-    const transport = new PodmanWorkerTransport({
+    const transport = new WorkerTransportDriverPodman({
         container: createManagedContainerConfig(),
         podmanBinary: "podman-bin",
         remoteCwd: "/workspace",
@@ -963,7 +963,7 @@ test("podman transport installs default worker before spawning rpc", async (t) =
 
         return false;
     });
-    const transport = new PodmanWorkerTransport({
+    const transport = new WorkerTransportDriverPodman({
         container: createManagedContainerConfig(),
         podmanBinary: "podman-bin",
         remoteCwd: "/workspace",
@@ -1024,7 +1024,7 @@ test("docker transport creates and starts managed containers before starting the
 
         return false;
     });
-    const transport = new DockerWorkerTransport({
+    const transport = new WorkerTransportDriverDocker({
         container: {
             containerName: "worker-container",
             image: "archlinux:latest",
@@ -1068,7 +1068,7 @@ test("podman transport rejects already running existing stopped containers", asy
 
         return false;
     });
-    const transport = new PodmanWorkerTransport({
+    const transport = new WorkerTransportDriverPodman({
         container: {
             adoptLifecycle: true,
             containerName: "worker-container",
@@ -1093,7 +1093,7 @@ test("local transport executes frozen devshell-worker start status logs stop rpc
     const instanceName = `task-3-${process.pid}`;
     const env = { ...process.env, HOME: homeDirectory, XDG_RUNTIME_DIR: runtimeDirectory };
     const repoRoot = fileURLToPath(new URL("../../../../", import.meta.url));
-    const transport = new LocalWorkerTransport({
+    const transport = new WorkerTransportDriverLocal({
         workerBinary: new WorkerBinary(resolve(repoRoot, "target/debug/devshell-worker")),
         spawnFunction: nodeSpawn
     });

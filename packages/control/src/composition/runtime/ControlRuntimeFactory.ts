@@ -2,11 +2,11 @@ import { homedir } from "node:os";
 
 import { ControlPathHome } from "@portable-devshell/shared";
 import { McpRuntimeFactory } from "../McpRuntimeFactory.js";
-import { ArtifactRuntime } from "./ArtifactRuntime.js";
+import { ControlRuntimeArtifact } from "./ControlRuntimeArtifact.js";
 import { ControlRuntime } from "./ControlRuntime.js";
-import type { ControlState } from "./ControlState.js";
-import { McpRuntime } from "./McpRuntime.js";
-import { ReverseRuntime } from "./ReverseRuntime.js";
+import type { ControlRuntimeState } from "./ControlRuntimeState.js";
+import { ControlRuntimeMcp } from "./ControlRuntimeMcp.js";
+import { ControlRuntimeReverse } from "./ControlRuntimeReverse.js";
 
 export interface ControlRuntimeFactoryOptions {
     mcpFactory?: McpRuntimeFactory;
@@ -23,10 +23,10 @@ export class ControlRuntimeFactory {
         restart: () => Promise<void>;
         shutdown: () => Promise<void>;
         socketPath: string;
-        state: ControlState;
+        state: ControlRuntimeState;
     }): Promise<ControlRuntime> {
         const controlPaths = new ControlPathHome(options.state.homeDirectory ?? homedir());
-        const artifact = new ArtifactRuntime({
+        const artifact = new ControlRuntimeArtifact({
             config: () => options.state.requireConfig(),
             controlPaths,
             homeDirectory: options.state.homeDirectory,
@@ -34,13 +34,13 @@ export class ControlRuntimeFactory {
         });
         await artifact.start();
         try {
-            const mcp = new McpRuntime({
+            const mcp = new ControlRuntimeMcp({
                 artifact,
                 controlPaths,
                 factory: this.#mcpFactory,
                 state: options.state
             });
-            const reverse = new ReverseRuntime({ mcp, state: options.state });
+            const reverse = new ControlRuntimeReverse({ mcp, state: options.state });
             return new ControlRuntime({
                 artifact,
                 instances: options.state.instances,

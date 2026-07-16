@@ -2,9 +2,9 @@ import type { InstanceContainerConfig } from "@portable-devshell/shared";
 
 import type { SpawnFunction } from "../../command/WorkerCommandTransport.js";
 import { WorkerBinary } from "../../WorkerBinary.js";
-import { ContainerWorkerTransportBase } from "./WorkerTransportDriverContainerBase.js";
+import { WorkerTransportDriverContainerBase } from "./WorkerTransportDriverContainerBase.js";
 
-export interface DockerWorkerTransportOptions {
+export interface WorkerTransportDriverDockerOptions {
     container: InstanceContainerConfig;
     dockerBinary?: string;
     remoteCwd?: string;
@@ -12,8 +12,8 @@ export interface DockerWorkerTransportOptions {
     workerBinary?: WorkerBinary;
 }
 
-export class DockerWorkerTransport extends ContainerWorkerTransportBase {
-    constructor(options: DockerWorkerTransportOptions) {
+export class WorkerTransportDriverDocker extends WorkerTransportDriverContainerBase {
+    constructor(options: WorkerTransportDriverDockerOptions) {
         super({
             binary: options.dockerBinary ?? "docker",
             container: options.container,

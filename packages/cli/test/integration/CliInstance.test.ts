@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
 
 import { Channel, Codec, type Event, type JsonValue } from "@portable-devshell/shared";
 
-import { CliMain } from "../../dist/cli/CliMain.js";
+import { CliMain } from "../../dist/CliMain.js";
 
 async function runInstanceCommandsThroughControlRpc(t: { after(callback: () => Promise<void> | void): void }): Promise<void> {
     const runtimeRoot = await mkdtemp(join(tmpdir(), "portable-devshell-cli-instance-"));

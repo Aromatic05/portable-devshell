@@ -5,9 +5,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { LocalWorkerInstaller, getWorkerTargetByKey, type WorkerAsset } from "@portable-devshell/core";
+import { WorkerInstallerLocal, getWorkerTargetByKey, type WorkerAsset } from "@portable-devshell/core";
 
-test("LocalWorkerInstaller installs into target-specific directory and refreshes symlink", async (t) => {
+test("WorkerInstallerLocal installs into target-specific directory and refreshes symlink", async (t) => {
     const devshellHomeDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-home-"));
     const workerDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-worker-"));
     t.after(async () => {
@@ -21,7 +21,7 @@ test("LocalWorkerInstaller installs into target-specific directory and refreshes
     await writeFile(binaryPath, contents, { mode: 0o755 });
 
     const target = getWorkerTargetByKey("darwin-arm64");
-    const installer = new LocalWorkerInstaller();
+    const installer = new WorkerInstallerLocal();
     const executable = await installer.ensure(devshellHomeDirectory, createAsset(binaryPath, sha256, target), target);
 
     assert.equal(executable, join(devshellHomeDirectory, "bin", "devshell-worker"));
@@ -33,7 +33,7 @@ test("LocalWorkerInstaller installs into target-specific directory and refreshes
     );
 });
 
-test("LocalWorkerInstaller installs a Windows executable without requiring symlink privileges", async (t) => {
+test("WorkerInstallerLocal installs a Windows executable without requiring symlink privileges", async (t) => {
     const devshellHomeDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-home-"));
     const workerDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-worker-"));
     t.after(async () => {
@@ -47,7 +47,7 @@ test("LocalWorkerInstaller installs a Windows executable without requiring symli
     await writeFile(binaryPath, contents);
 
     const target = getWorkerTargetByKey("windows-arm64");
-    const installer = new LocalWorkerInstaller();
+    const installer = new WorkerInstallerLocal();
     const executable = await installer.ensure(devshellHomeDirectory, createAsset(binaryPath, sha256, target), target);
 
     assert.equal(executable, join(devshellHomeDirectory, "workers", target.key, sha256, "devshell-worker.exe"));
@@ -61,7 +61,7 @@ test("LocalWorkerInstaller installs a Windows executable without requiring symli
     );
 });
 
-test("LocalWorkerInstaller rejects asset target mismatch", async (t) => {
+test("WorkerInstallerLocal rejects asset target mismatch", async (t) => {
     const devshellHomeDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-home-"));
     const workerDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-worker-"));
     t.after(async () => {
@@ -74,7 +74,7 @@ test("LocalWorkerInstaller rejects asset target mismatch", async (t) => {
     const sha256 = createHash("sha256").update(contents).digest("hex");
     await writeFile(binaryPath, contents, { mode: 0o755 });
 
-    const installer = new LocalWorkerInstaller();
+    const installer = new WorkerInstallerLocal();
     const requestedTarget = getWorkerTargetByKey("linux-x64");
     const assetTarget = getWorkerTargetByKey("darwin-arm64");
 

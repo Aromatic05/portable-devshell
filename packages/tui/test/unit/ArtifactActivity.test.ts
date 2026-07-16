@@ -4,7 +4,7 @@ import test from "node:test";
 import { asInstanceName, type ArtifactShareResult, type ArtifactTransferRecord } from "@portable-devshell/shared";
 import {
     buildFocusGraphForState,
-    CommandDispatcher,
+    TuiCommandDispatcher,
     selectMainScreenModel,
     TuiAppStore,
     TuiControlSession,
@@ -105,7 +105,7 @@ test("instance box shows artifact activity and confirms revoke or cancel before 
             }),
         mode: () => store.getState().interaction.focusScope
     });
-    const dispatcher = new CommandDispatcher({
+    const dispatcher = new TuiCommandDispatcher({
         focusManager,
         mainViewportRows: () => 20,
         onApprovalDecision: async () => undefined,

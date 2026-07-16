@@ -1,37 +1,37 @@
 import type { SpawnFunction, WorkerCommandTransport } from "../../command/WorkerCommandTransport.js";
 import { WorkerBinary } from "../../WorkerBinary.js";
-import { DockerWorkerTransport, type DockerWorkerTransportOptions } from "../driver/WorkerTransportDriverDocker.js";
-import { LocalWorkerTransport, type LocalWorkerTransportOptions } from "../driver/WorkerTransportDriverLocal.js";
-import { PodmanWorkerTransport, type PodmanWorkerTransportOptions } from "../driver/WorkerTransportDriverPodman.js";
-import { SshWorkerTransport, type SshWorkerTransportOptions } from "../driver/WorkerTransportDriverSsh.js";
+import { WorkerTransportDriverDocker, type WorkerTransportDriverDockerOptions } from "../driver/WorkerTransportDriverDocker.js";
+import { WorkerTransportDriverLocal, type WorkerTransportDriverLocalOptions } from "../driver/WorkerTransportDriverLocal.js";
+import { WorkerTransportDriverPodman, type WorkerTransportDriverPodmanOptions } from "../driver/WorkerTransportDriverPodman.js";
+import { WorkerTransportDriverSsh, type WorkerTransportDriverSshOptions } from "../driver/WorkerTransportDriverSsh.js";
 
-export interface LocalWorkerTransportFactoryOptions extends Omit<LocalWorkerTransportOptions, "workerBinary" | "spawnFunction"> {
+export interface WorkerTransportFactoryLocalOptions extends Omit<WorkerTransportDriverLocalOptions, "workerBinary" | "spawnFunction"> {
     type: "local";
     spawnFunction?: SpawnFunction;
 }
 
-export interface SshWorkerTransportFactoryOptions extends Omit<SshWorkerTransportOptions, "workerBinary" | "spawnFunction"> {
+export interface WorkerTransportFactorySshOptions extends Omit<WorkerTransportDriverSshOptions, "workerBinary" | "spawnFunction"> {
     type: "ssh";
     spawnFunction?: SpawnFunction;
 }
 
-export interface DockerWorkerTransportFactoryOptions
-    extends Omit<DockerWorkerTransportOptions, "workerBinary" | "spawnFunction"> {
+export interface WorkerTransportFactoryDockerOptions
+    extends Omit<WorkerTransportDriverDockerOptions, "workerBinary" | "spawnFunction"> {
     type: "docker";
     spawnFunction?: SpawnFunction;
 }
 
-export interface PodmanWorkerTransportFactoryOptions
-    extends Omit<PodmanWorkerTransportOptions, "workerBinary" | "spawnFunction"> {
+export interface WorkerTransportFactoryPodmanOptions
+    extends Omit<WorkerTransportDriverPodmanOptions, "workerBinary" | "spawnFunction"> {
     type: "podman";
     spawnFunction?: SpawnFunction;
 }
 
 export type WorkerTransportFactoryOptions =
-    | LocalWorkerTransportFactoryOptions
-    | SshWorkerTransportFactoryOptions
-    | DockerWorkerTransportFactoryOptions
-    | PodmanWorkerTransportFactoryOptions;
+    | WorkerTransportFactoryLocalOptions
+    | WorkerTransportFactorySshOptions
+    | WorkerTransportFactoryDockerOptions
+    | WorkerTransportFactoryPodmanOptions;
 
 export class WorkerTransportFactory {
     static create(options: WorkerTransportFactoryOptions): WorkerCommandTransport {
@@ -39,13 +39,13 @@ export class WorkerTransportFactory {
 
         switch (options.type) {
             case "local":
-                return new LocalWorkerTransport({ workerBinary, spawnFunction: options.spawnFunction });
+                return new WorkerTransportDriverLocal({ workerBinary, spawnFunction: options.spawnFunction });
             case "ssh":
-                return new SshWorkerTransport({ ...options, workerBinary });
+                return new WorkerTransportDriverSsh({ ...options, workerBinary });
             case "docker":
-                return new DockerWorkerTransport({ ...options, workerBinary });
+                return new WorkerTransportDriverDocker({ ...options, workerBinary });
             case "podman":
-                return new PodmanWorkerTransport({ ...options, workerBinary });
+                return new WorkerTransportDriverPodman({ ...options, workerBinary });
         }
     }
 }

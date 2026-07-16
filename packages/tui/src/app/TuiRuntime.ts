@@ -7,17 +7,17 @@ import { ControlError, createError, errorCodes, type JsonValue } from "@portable
 
 import { TuiApp } from "./TuiApp.js";
 import { buildTuiHitRegions, hitTargetAt, type TuiHitTarget } from "./TuiHitRegions.js";
-import { AttachShellCommandResolver } from "../attach/AttachShellCommandResolver.js";
-import { AttachShellRunner } from "../attach/AttachShellRunner.js";
-import { createClients as createControlClients, type Clients } from "../client/ClientComposition.js";
+import { TuiAttachShellCommandResolver } from "../attach/TuiAttachShellCommandResolver.js";
+import { TuiAttachShellRunner } from "../attach/TuiAttachShellRunner.js";
+import { createTuiClients as createControlClients, type TuiClients } from "../client/TuiClientComposition.js";
 import { TuiControlSession } from "../control/TuiControlSession.js";
-import { CommandDispatcher } from "../interaction/dispatcher/CommandDispatcher.js";
-import { KeyDispatcher } from "../interaction/KeyDispatcher.js";
-import { TuiFocusManager } from "../interaction/TuiFocusManager.js";
-import { RenderScheduler } from "../render/RenderScheduler.js";
-import { buildFocusGraphForState } from "../screen/ScreenRouter.js";
+import { TuiCommandDispatcher } from "../command/dispatcher/TuiCommandDispatcher.js";
+import { TuiKeyDispatcher } from "../input/TuiKeyDispatcher.js";
+import { TuiFocusManager } from "../focus/TuiFocusManager.js";
+import { TuiRenderScheduler } from "../render/TuiRenderScheduler.js";
+import { buildFocusGraphForState } from "../screen/TuiScreenRouter.js";
 import { TuiAppStore } from "../store/TuiAppStore.js";
-import type { TuiCommandRecord } from "../store/TuiReducers.js";
+import type { TuiCommandRecord } from "../store/TuiStoreTypes.js";
 import { selectMainScreenModel } from "../store/TuiSelectors.js";
 
 export interface TuiRuntimeOptions {
@@ -27,13 +27,13 @@ export interface TuiRuntimeOptions {
 }
 
 export class TuiRuntime {
-    readonly commandDispatcher: CommandDispatcher;
+    readonly commandDispatcher: TuiCommandDispatcher;
     readonly focusManager: TuiFocusManager;
-    readonly keyDispatcher: KeyDispatcher;
-    readonly scheduler: RenderScheduler;
+    readonly keyDispatcher: TuiKeyDispatcher;
+    readonly scheduler: TuiRenderScheduler;
     readonly session: TuiControlSession;
     readonly store: TuiAppStore;
-    readonly #clients: Clients;
+    readonly #clients: TuiClients;
     readonly #stdin: ReadStream;
     readonly #inkStdin: ReadStream;
     readonly #stdout: WriteStream;
@@ -52,7 +52,7 @@ export class TuiRuntime {
         this.#stdout = options.stdout ?? process.stdout;
         this.#inkStdin = createInkStdin(this.#stdin);
         this.store = new TuiAppStore();
-        this.scheduler = new RenderScheduler(this.store);
+        this.scheduler = new TuiRenderScheduler(this.store);
         this.focusManager = new TuiFocusManager(this.store, {
             currentPage: () => this.store.getState().ui.selectedPage,
             graphFor: (page, mode) =>
@@ -69,8 +69,8 @@ export class TuiRuntime {
                 }),
             mode: () => this.store.getState().interaction.focusScope
         });
-        this.keyDispatcher = new KeyDispatcher();
-        this.commandDispatcher = new CommandDispatcher({
+        this.keyDispatcher = new TuiKeyDispatcher();
+        this.commandDispatcher = new TuiCommandDispatcher({
             focusManager: this.focusManager,
             onApprovalDecision: async (instance, approvalId, decision) => {
                 await this.#decideApproval(instance, approvalId, decision);
@@ -354,13 +354,13 @@ export class TuiRuntime {
         }
 
         try {
-            const command = new AttachShellCommandResolver().resolve({
+            const command = new TuiAttachShellCommandResolver().resolve({
                 configView: this.store.getState().configView,
                 environment: process.env,
                 instance: entry,
                 snapshot: this.store.getState().snapshotsByInstance[instance]
             });
-            await new AttachShellRunner({
+            await new TuiAttachShellRunner({
                 hooks: {
                     resume: () => this.#resumeAfterAttach(),
                     suspend: () => this.#suspendForAttach()

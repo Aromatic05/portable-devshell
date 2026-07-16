@@ -8,7 +8,7 @@ import { ControlError, errorCodes } from "@portable-devshell/shared";
 import { parseArgsStringToArgv } from "string-argv";
 
 import { WorkerBinary } from "../../WorkerBinary.js";
-import { RemoteWorkerInstaller } from "../../install/RemoteWorkerInstaller.js";
+import { WorkerInstallerRemote } from "../../install/WorkerInstallerRemote.js";
 import {
     createCommandContext,
     createProviderError,
@@ -19,7 +19,7 @@ import {
     type WorkerCommandTransport
 } from "../../command/WorkerCommandTransport.js";
 import type { WorkerCommandName, WorkerCommandOptions, WorkerRpcOptions } from "../../command/WorkerCommandOptions.js";
-import { createWorkerRpcProcess, type WorkerRpcProcess } from "../../WorkerProcess.js";
+import { createWorkerRpcProcess, type WorkerRpcProcess } from "../../rpc/WorkerRpcProcess.js";
 import {
     createWorkerTargetProbeFailedError,
     parseWorkerTargetProbeOutput,
@@ -35,28 +35,28 @@ const SSH_NON_INTERACTIVE_ARGS = [
 const SSH_INTERACTIVE_HINT =
     "portable-devshell: ssh command requires interactive authentication or host confirmation; non-interactive control commands fail fast.";
 
-export interface SshWorkerTransportOptions {
+export interface WorkerTransportDriverSshOptions {
     command: string;
     workspace?: string;
     workerBinary?: WorkerBinary;
     spawnFunction?: SpawnFunction;
 }
 
-export class SshWorkerTransport implements WorkerCommandTransport {
+export class WorkerTransportDriverSsh implements WorkerCommandTransport {
     readonly #sshCommand: readonly [string, ...string[]];
     readonly #workspace?: string;
     readonly #workerBinary: WorkerBinary;
-    readonly #installer: RemoteWorkerInstaller;
+    readonly #installer: WorkerInstallerRemote;
     readonly #spawn: SpawnFunction;
     readonly #controlPath = join(tmpdir(), `pds-ssh-${randomUUID().slice(0, 8)}`);
     #controlSocketEnabled = false;
 
-    constructor(options: SshWorkerTransportOptions) {
+    constructor(options: WorkerTransportDriverSshOptions) {
         this.#sshCommand = parseSshCommand(options.command);
         this.#workspace = options.workspace;
         this.#workerBinary = options.workerBinary ?? new WorkerBinary();
         this.#spawn = options.spawnFunction ?? spawn;
-        this.#installer = new RemoteWorkerInstaller({
+        this.#installer = new WorkerInstallerRemote({
             createContext: (operation, command) => this.#createShellContext(operation, command),
             probeTarget: () => this.#probeTarget(),
             spawnShell: (commandLine, stdio, context) => this.#spawnRemoteShell(commandLine, stdio, context),

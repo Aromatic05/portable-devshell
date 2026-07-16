@@ -4,7 +4,7 @@ import { createError, errorCodes } from "@portable-devshell/shared";
 
 import type { WorkerCommandTransport } from "../command/WorkerCommandTransport.js";
 import type { WorkerRpcOptions } from "../command/WorkerCommandOptions.js";
-import type { WorkerRpcProcess } from "../WorkerProcess.js";
+import type { WorkerRpcProcess } from "./WorkerRpcProcess.js";
 
 export class WorkerRpcProcessAdapter {
     readonly #process: WorkerRpcProcess;

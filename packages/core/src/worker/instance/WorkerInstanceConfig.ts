@@ -3,7 +3,7 @@ import type { ApprovalPolicy, ApprovalTimeout, EffectiveSecurityMode, InstanceNa
 import type { WorkerCommandTransport } from "../command/WorkerCommandTransport.js";
 import type { WorkerHandshakeParams } from "../protocol/WorkerProtocolClient.js";
 import type { WorkerRpcConnector } from "../rpc/WorkerRpcChannel.js";
-import { resolveToolSchedulerLimits, type ToolSchedulerLimits } from "../tool/ToolCallScheduler.js";
+import { resolveWorkerToolSchedulerLimits, type WorkerToolSchedulerLimits } from "../tool/WorkerToolCallScheduler.js";
 import {
     resolveAuditStorageLimits,
     type AuditStorageLimits
@@ -22,7 +22,7 @@ interface WorkerInstanceConfigCommon {
     handshake?: Partial<WorkerHandshakeParams>;
     approvalPolicy?: ApprovalPolicy;
     approvalTimeout?: ApprovalTimeout;
-    toolScheduler?: Partial<ToolSchedulerLimits>;
+    toolScheduler?: Partial<WorkerToolSchedulerLimits>;
 }
 
 export type WorkerInstanceConfig =
@@ -44,7 +44,7 @@ export interface ResolvedWorkerInstanceConfig extends WorkerInstanceConfigCommon
     handshake: WorkerHandshakeParams;
     managementMode: WorkerManagementMode;
     rpcConnector?: WorkerRpcConnector;
-    toolScheduler: ToolSchedulerLimits;
+    toolScheduler: WorkerToolSchedulerLimits;
     transport?: WorkerCommandTransport;
 }
 
@@ -71,6 +71,6 @@ export function resolveWorkerInstanceConfig(config: WorkerInstanceConfig): Resol
             ...config.handshake
         },
         managementMode,
-        toolScheduler: resolveToolSchedulerLimits(config.toolScheduler)
+        toolScheduler: resolveWorkerToolSchedulerLimits(config.toolScheduler)
     };
 }

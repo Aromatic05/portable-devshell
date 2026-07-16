@@ -1,6 +1,6 @@
 import type { McpHostInstanceConfig, McpInstanceGateway } from "@portable-devshell/mcp";
 
-import type { InstanceDescriptor } from "../modules/instance/InstanceDescriptor.js";
+import type { InstanceDescriptor } from "../control/instance/InstanceDescriptor.js";
 
 export class McpEndpointFactory {
     map(descriptor: InstanceDescriptor, gateway?: McpInstanceGateway): McpHostInstanceConfig {

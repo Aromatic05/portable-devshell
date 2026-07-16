@@ -16,14 +16,14 @@ import {
     type Peer
 } from "@portable-devshell/shared";
 
-import { RouteComposition } from "../../dist/composition/RouteComposition.js";
-import { ControlSocketServer } from "../../dist/control/socket/ControlSocketServer.js";
-import { InstanceRegistry } from "../../dist/modules/instance/registry/InstanceRegistry.js";
+import { ControlRouteComposition } from "../../dist/composition/ControlRouteComposition.js";
+import { ControlSocketServer } from "../../dist/server/socket/ControlSocketServer.js";
+import { InstanceRegistry } from "../../dist/control/instance/registry/InstanceRegistry.js";
 
 interface Harness {
     cleanup(): Promise<void>;
     registry: InstanceRegistry;
-    routes: RouteComposition;
+    routes: ControlRouteComposition;
     server: ControlSocketServer;
     socketPath: string;
     worker: FakeWorker;
@@ -81,7 +81,7 @@ test("ControlSocketServer rebuilds the immutable route snapshot after registry c
     const directory = await mkdtemp(join(tmpdir(), "portable-devshell-route-snapshot-"));
     const socketPath = join(directory, "control.sock");
     const registry = new InstanceRegistry([]);
-    const routes = new RouteComposition({ instances: registry, shutdown() {} });
+    const routes = new ControlRouteComposition({ instances: registry, shutdown() {} });
     const server = new ControlSocketServer({ routes, socketPath });
     await server.start();
     t.after(async () => {
@@ -130,7 +130,7 @@ test("service.shutdown replies before invoking the shutdown action", async (t) =
     const directory = await mkdtemp(join(tmpdir(), "portable-devshell-shutdown-reply-"));
     const socketPath = join(directory, "control.sock");
     let shutdownRequested = false;
-    const routes = new RouteComposition({
+    const routes = new ControlRouteComposition({
         instances: new InstanceRegistry([]),
         shutdown() {
             shutdownRequested = true;
@@ -154,7 +154,7 @@ async function createHarness(): Promise<Harness> {
     const socketPath = join(directory, "control.sock");
     const worker = new FakeWorker("alpha");
     const registry = new InstanceRegistry([createDescriptor(worker)]);
-    const routes = new RouteComposition({ instances: registry, shutdown() {} });
+    const routes = new ControlRouteComposition({ instances: registry, shutdown() {} });
     const server = new ControlSocketServer({ routes, socketPath });
     await server.start();
     return {

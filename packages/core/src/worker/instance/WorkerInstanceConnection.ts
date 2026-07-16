@@ -9,7 +9,7 @@ import {
     type WorkspacePath
 } from "@portable-devshell/shared";
 
-import type { InstanceEventInput } from "../../log/LogEventBuffer.js";
+import type { InstanceEventInput } from "../../instance/event/InstanceEventBuffer.js";
 import type { InstanceStateUpdate } from "../../instance/state/InstanceStateMachine.js";
 import type { InstanceSnapshot } from "../../instance/state/InstanceStateSnapshot.js";
 import type { WorkerProtocolClient, WorkerHandshakeResult } from "../protocol/WorkerProtocolClient.js";

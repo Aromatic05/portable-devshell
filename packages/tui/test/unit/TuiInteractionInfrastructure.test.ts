@@ -1,13 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { renderExpandableBoxLines, wrapTerminalText } from "../../dist/component/ExpandableBox.js";
+import { renderExpandableBoxLines, wrapTerminalText } from "../../dist/component/TuiComponentExpandableBox.js";
 import { isTerminalSizeSupported, mainInnerWidth, tuiLayoutMetrics } from "../../dist/app/TuiRootLayout.js";
 import {
     buildFocusGraphForState,
     buildTuiHitRegions,
-    CommandDispatcher,
-    KeyDispatcher,
+    TuiCommandDispatcher,
+    TuiKeyDispatcher,
     selectFooterText,
     selectHelpLines,
     selectMainScreenModel,
@@ -1132,7 +1132,7 @@ function createHarness(options: {
             }),
         mode: () => store.getState().interaction.focusScope
     });
-    const commandDispatcher = new CommandDispatcher({
+    const commandDispatcher = new TuiCommandDispatcher({
         focusManager,
         mainViewportRows: () => 12,
         onApprovalDecision: async (instance, approvalId, decision) => {
@@ -1180,12 +1180,12 @@ function createHarness(options: {
         onValidateConfigDraft: options.onValidateConfigDraft ?? (async () => undefined),
         store
     });
-    const keyDispatcher = new KeyDispatcher();
+    const keyDispatcher = new TuiKeyDispatcher();
 
     focusManager.syncPanel(store.getState().ui.selectedPage, store.getState().interaction.focusScope);
 
     return {
-        async dispatch(intent: Parameters<CommandDispatcher["dispatch"]>[0]) {
+        async dispatch(intent: Parameters<TuiCommandDispatcher["dispatch"]>[0]) {
             await commandDispatcher.dispatch(intent);
         },
         async press(input: string, key: Record<string, boolean> = {}) {

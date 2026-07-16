@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
 
 import { errorCodes, type JsonValue } from "@portable-devshell/shared";
 import {
-    LocalWorkerTransport,
+    WorkerTransportDriverLocal,
     WorkerBinary,
     WorkerProtocolClient,
     WorkerRpcBridge,
@@ -209,7 +209,7 @@ test("WorkerProtocolClient performs ping, handshake, and tools.list against froz
     const instanceName = `task-4-${process.pid}`;
     const env = { ...process.env, HOME: homeDirectory, XDG_RUNTIME_DIR: runtimeDirectory };
     const repoRoot = fileURLToPath(new URL("../../../../", import.meta.url));
-    const transport = new LocalWorkerTransport({
+    const transport = new WorkerTransportDriverLocal({
         workerBinary: new WorkerBinary(resolve(repoRoot, "target/debug/devshell-worker")),
         spawnFunction: nodeSpawn
     });

@@ -15,27 +15,27 @@ import {
     type WorkerCommandTransport
 } from "../../command/WorkerCommandTransport.js";
 import type { WorkerCommandName, WorkerCommandOptions, WorkerRpcOptions } from "../../command/WorkerCommandOptions.js";
-import { createWorkerRpcProcess, type WorkerRpcProcess } from "../../WorkerProcess.js";
-import { LocalWorkerInstaller, type LocalWorkerInstallResult } from "../../install/LocalWorkerInstaller.js";
+import { createWorkerRpcProcess, type WorkerRpcProcess } from "../../rpc/WorkerRpcProcess.js";
+import { WorkerInstallerLocal, type WorkerInstallerLocalResult } from "../../install/WorkerInstallerLocal.js";
 import { resolveWorkerDevshellHomeDirectory } from "../../platform/WorkerHomeDirectory.js";
 import { workerInstalledAliasFileName } from "../../target/WorkerTargetBinary.js";
 import { probeLocalWorkerTarget } from "../../target/WorkerTargetProbe.js";
 
-export interface LocalWorkerTransportOptions {
-    installer?: LocalWorkerInstaller;
+export interface WorkerTransportDriverLocalOptions {
+    installer?: WorkerInstallerLocal;
     resolver?: WorkerAssetResolver;
     workerBinary?: WorkerBinary;
     spawnFunction?: SpawnFunction;
 }
 
-export class LocalWorkerTransport implements WorkerCommandTransport {
-    readonly #installer: LocalWorkerInstaller;
+export class WorkerTransportDriverLocal implements WorkerCommandTransport {
+    readonly #installer: WorkerInstallerLocal;
     readonly #resolver: WorkerAssetResolver;
     readonly #workerBinary: WorkerBinary;
     readonly #spawn: SpawnFunction;
 
-    constructor(options: LocalWorkerTransportOptions = {}) {
-        this.#installer = options.installer ?? new LocalWorkerInstaller();
+    constructor(options: WorkerTransportDriverLocalOptions = {}) {
+        this.#installer = options.installer ?? new WorkerInstallerLocal();
         this.#resolver = options.resolver ?? new WorkerAssetResolver();
         this.#workerBinary = options.workerBinary ?? new WorkerBinary();
         this.#spawn = options.spawnFunction ?? spawn;
@@ -125,7 +125,7 @@ export class LocalWorkerTransport implements WorkerCommandTransport {
         return (await this.#provisionExecutable(env)).executablePath;
     }
 
-    async #provisionExecutable(env?: NodeJS.ProcessEnv): Promise<LocalWorkerInstallResult> {
+    async #provisionExecutable(env?: NodeJS.ProcessEnv): Promise<WorkerInstallerLocalResult> {
         if (this.#workerBinary.executable !== "devshell-worker") {
             return { executablePath: this.#workerBinary.executable, sha256: "" };
         }

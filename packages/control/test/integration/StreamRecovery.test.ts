@@ -12,9 +12,9 @@ import {
     type JsonValue
 } from "@portable-devshell/shared";
 
-import { RouteComposition } from "../../dist/composition/RouteComposition.js";
-import { ControlSocketServer } from "../../dist/control/socket/ControlSocketServer.js";
-import { InstanceRegistry } from "../../dist/modules/instance/registry/InstanceRegistry.js";
+import { ControlRouteComposition } from "../../dist/composition/ControlRouteComposition.js";
+import { ControlSocketServer } from "../../dist/server/socket/ControlSocketServer.js";
+import { InstanceRegistry } from "../../dist/control/instance/registry/InstanceRegistry.js";
 
 test("stream gap is non-terminal and the dedicated subscription remains usable", async (t) => {
     const directory = await mkdtemp(join(tmpdir(), "portable-devshell-stream-recovery-"));
@@ -38,7 +38,7 @@ test("stream gap is non-terminal and the dedicated subscription remains usable",
             worker: worker as unknown as WorkerInstance
         }
     ]);
-    const routes = new RouteComposition({ instances: registry, shutdown() {} });
+    const routes = new ControlRouteComposition({ instances: registry, shutdown() {} });
     const server = new ControlSocketServer({ routes, socketPath });
     await server.start();
     t.after(async () => {
@@ -107,7 +107,7 @@ test("an initial unavailable sequence returns a normal stream.gap error reply", 
             worker: worker as unknown as WorkerInstance
         }
     ]);
-    const routes = new RouteComposition({ instances: registry, shutdown() {} });
+    const routes = new ControlRouteComposition({ instances: registry, shutdown() {} });
     const server = new ControlSocketServer({ routes, socketPath });
     await server.start();
     t.after(async () => {

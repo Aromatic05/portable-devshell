@@ -1,7 +1,7 @@
 import { type ApprovalRequest, type ArtifactShareResult, type ArtifactTransferRecord, type ClientEvent, type ControlError, type InstanceSnapshot, type JsonValue, type OAuthApprovalRequest, type TodoReadResult, type ToolCallRecord } from "@portable-devshell/shared";
 
-import { type TuiEditorState, type TuiUiIntent } from "../interaction/TuiInteractionTypes.js";
-import type { AuditPageState, FocusScope, PageId, SidebarCursor, SidebarFocus } from "../model/TuiUiTypes.js";
+import { type TuiEditorState, type TuiUiIntent } from "../interaction/TuiInteractionModel.js";
+import type { TuiAuditPageState, TuiFocusScope, TuiPageId, TuiSidebarCursor, TuiSidebarFocus } from "../ui/TuiUiModel.js";
 import {
     createInitialTuiAppState,
     toRawEventRecord,
@@ -12,7 +12,7 @@ import {
     type TuiConnectionStatus,
     type TuiInstanceListEntry,
     type TuiLogEntry
-} from "./TuiReducers.js";
+} from "./TuiStoreTypes.js";
 
 export interface TuiAppStoreOptions {
     initialState?: TuiAppState;
@@ -94,21 +94,21 @@ export class TuiAppStore {
         });
     }
 
-    setFocusScope(focusScope: FocusScope): void {
+    setFocusScope(focusScope: TuiFocusScope): void {
         this.dispatch({
             focusScope,
             type: "focus.scope.set"
         });
     }
 
-    setAuditPage(auditPage: AuditPageState): void {
+    setAuditPage(auditPage: TuiAuditPageState): void {
         this.dispatch({
             auditPage,
             type: "auditPage.set"
         });
     }
 
-    setSidebarFocus(sidebarFocus: SidebarFocus): void {
+    setSidebarFocus(sidebarFocus: TuiSidebarFocus): void {
         this.dispatch({
             sidebarFocus,
             type: "sidebar.focus.set"
@@ -122,7 +122,7 @@ export class TuiAppStore {
         });
     }
 
-    setSelectedPage(page: PageId): void {
+    setSelectedPage(page: TuiPageId): void {
         this.dispatch({
             page,
             type: "ui.selectPage"
@@ -136,7 +136,7 @@ export class TuiAppStore {
         });
     }
 
-    pushRestore(focusScope: FocusScope, sidebarFocus: SidebarFocus, mainFocusId?: string): void {
+    pushRestore(focusScope: TuiFocusScope, sidebarFocus: TuiSidebarFocus, mainFocusId?: string): void {
         this.dispatch({
             focusScope,
             mainFocusId,
@@ -185,7 +185,7 @@ export class TuiAppStore {
         });
     }
 
-    setSidebarCursor(cursor?: SidebarCursor): void {
+    setSidebarCursor(cursor?: TuiSidebarCursor): void {
         this.dispatch({
             cursor,
             type: "sidebar.cursor.set"
@@ -199,7 +199,7 @@ export class TuiAppStore {
         });
     }
 
-    setSearchQuery(page: PageId, query: string): void {
+    setSearchQuery(page: TuiPageId, query: string): void {
         this.dispatch({
             page,
             query,
@@ -207,7 +207,7 @@ export class TuiAppStore {
         });
     }
 
-    setScreenStatus(page: PageId, status?: string): void {
+    setScreenStatus(page: TuiPageId, status?: string): void {
         this.dispatch({
             page,
             status,

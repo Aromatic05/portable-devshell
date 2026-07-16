@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { McpTodoToolCatalog } from "../../dist/mcp/todo/McpTodoToolCatalog.js";
+import { McpToolCatalogTodo } from "../../dist/tool/catalog/McpToolCatalogTodo.js";
 
 test("todo write documents the complete replacement item contract", () => {
-    const tool = new McpTodoToolCatalog().get("todo_write")!;
+    const tool = new McpToolCatalogTodo().get("todo_write")!;
     const schema = tool.inputSchema as {
         properties: {
             revision: { description?: string };

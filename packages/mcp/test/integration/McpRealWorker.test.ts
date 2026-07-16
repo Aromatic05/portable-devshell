@@ -7,7 +7,7 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 import { asInstanceName, asWorkspacePath, errorCodes } from "@portable-devshell/shared";
-import { LocalWorkerTransport, WorkerBinary, WorkerInstanceFactory } from "@portable-devshell/core";
+import { WorkerTransportDriverLocal, WorkerBinary, WorkerInstanceFactory } from "@portable-devshell/core";
 import { McpHost } from "@portable-devshell/mcp";
 
 const fixturesDirectory = resolve(dirname(fileURLToPath(import.meta.url)), "../fixtures");
@@ -23,7 +23,7 @@ test("MCP initialize tools/list and tools/call succeed against the frozen worker
         env: { ...process.env, HOME: homeDirectory },
         homeDirectory,
         name: asInstanceName(instanceName),
-        transport: new LocalWorkerTransport({
+        transport: new WorkerTransportDriverLocal({
             spawnFunction: nodeSpawn,
             workerBinary: new WorkerBinary(workerBinaryPath)
         })
@@ -146,7 +146,7 @@ test("MCP tools/call waits for approval before invoking the worker tool", async 
         env: { ...process.env, HOME: homeDirectory },
         homeDirectory,
         name: asInstanceName(instanceName),
-        transport: new LocalWorkerTransport({
+        transport: new WorkerTransportDriverLocal({
             spawnFunction: nodeSpawn,
             workerBinary: new WorkerBinary(workerBinaryPath)
         })

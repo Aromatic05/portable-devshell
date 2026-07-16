@@ -4,7 +4,7 @@ import test from "node:test";
 import type { WorkerInstance } from "@portable-devshell/core";
 import type { JsonValue, PrefixRouteContext, PrefixRouteStream } from "@portable-devshell/shared";
 
-import { RuntimeSubscriptionManager } from "../../dist/modules/runtime/RuntimeSubscriptionManager.js";
+import { RuntimeSubscriptionManager } from "../../dist/instance/runtime/RuntimeSubscriptionManager.js";
 
 test("RuntimeSubscriptionManager returns snapshot lastSeq and pushes sequenced events", async () => {
     const manager = new RuntimeSubscriptionManager(5);

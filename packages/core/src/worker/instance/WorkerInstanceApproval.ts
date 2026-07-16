@@ -7,23 +7,23 @@ import {
     type ToolCallContext
 } from "@portable-devshell/shared";
 
-import type { ApprovalManager } from "../../approval/ApprovalInfra.js";
+import type { ApprovalManager } from "../../approval/ApprovalManager.js";
 import { readWorkerAbortReason } from "../WorkerAbortReason.js";
-import type { InstanceEventInput } from "../../log/LogEventBuffer.js";
-import type { ToolCallHistory } from "../../log/LogToolCallHistory.js";
+import type { InstanceEventInput } from "../../instance/event/InstanceEventBuffer.js";
+import type { AuditToolCallHistory } from "../../audit/tool/AuditToolCallHistory.js";
 import { getErrorCode } from "./WorkerInstanceError.js";
 import { toApprovalEventData, toEventData } from "./WorkerInstanceEvent.js";
 
 interface WorkerInstanceApprovalOptions {
     approvalManager: ApprovalManager;
     appendEvent(type: InstanceEventInput["type"], data?: JsonValue): Promise<unknown>;
-    toolCallHistory: ToolCallHistory;
+    toolCallHistory: AuditToolCallHistory;
 }
 
 export class WorkerInstanceApproval {
     readonly #approvalManager: ApprovalManager;
     readonly #appendEvent: WorkerInstanceApprovalOptions["appendEvent"];
-    readonly #toolCallHistory: ToolCallHistory;
+    readonly #toolCallHistory: AuditToolCallHistory;
 
     constructor(options: WorkerInstanceApprovalOptions) {
         this.#approvalManager = options.approvalManager;

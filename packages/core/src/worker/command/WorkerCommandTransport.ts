@@ -2,7 +2,7 @@ import type { ChildProcess, SpawnOptions } from "node:child_process";
 
 import { createError, errorCodes, type CommandDiagnostic, type CommandResult, type ControlError, type JsonValue } from "@portable-devshell/shared";
 
-import type { WorkerRpcProcess } from "../WorkerProcess.js";
+import type { WorkerRpcProcess } from "../rpc/WorkerRpcProcess.js";
 import type { WorkerCommandName, WorkerCommandOptions, WorkerRpcOptions } from "./WorkerCommandOptions.js";
 
 export type WorkerCommandResult = CommandResult;

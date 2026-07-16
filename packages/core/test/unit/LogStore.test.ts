@@ -7,10 +7,10 @@ import test from "node:test";
 import { errorCodes, asInstanceName, type InstanceEvent } from "@portable-devshell/shared";
 import {
     InstanceEventBuffer,
-    InstanceLogStore,
+    LogStoreInstance,
     InstancePaths,
     AuditDatabase,
-    ToolCallHistory,
+    AuditToolCallHistory,
     type InstanceLogEntry
 } from "@portable-devshell/core";
 
@@ -158,7 +158,7 @@ test("InstanceEventBuffer replays from fromSeq and reports stream.gap", async ()
     }
 });
 
-test("InstanceLogStore and ToolCallHistory persist per-instance records", async () => {
+test("LogStoreInstance and AuditToolCallHistory persist per-instance records", async () => {
     const root = await mkdtemp(join(tmpdir(), "portable-devshell-storage-"));
     const instanceName = asInstanceName("task-5-storage");
 
@@ -169,7 +169,7 @@ test("InstanceLogStore and ToolCallHistory persist per-instance records", async 
             now: () => Date.parse("2026-07-07T00:00:10.000Z"),
             retentionDays: 30
         });
-        const logStore = new InstanceLogStore(
+        const logStore = new LogStoreInstance(
             instanceName,
             database.store<InstanceLogEntry>("logs", {
                 legacyFile: paths.legacyLogsFile,
@@ -177,7 +177,7 @@ test("InstanceLogStore and ToolCallHistory persist per-instance records", async 
                 timestamp: (record) => record.at
             })
         );
-        const history = new ToolCallHistory(
+        const history = new AuditToolCallHistory(
             instanceName,
             database.store("toolCalls", {
                 legacyFile: paths.legacyToolCallsFile,

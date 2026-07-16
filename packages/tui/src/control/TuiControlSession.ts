@@ -5,20 +5,20 @@ import type {
     JsonValue
 } from "@portable-devshell/shared";
 
-import { createClients as createControlClients, type Clients } from "../client/ClientComposition.js";
-import type { RuntimeStreamMessage } from "../modules/runtime/RuntimeStream.js";
+import { createTuiClients as createControlClients, type TuiClients } from "../client/TuiClientComposition.js";
+import type { TuiClientRuntimeStreamMessage } from "../client/runtime/TuiClientRuntimeStream.js";
 import { TuiAppStore } from "../store/TuiAppStore.js";
-import type { TuiInstanceListEntry, TuiLogEntry } from "../store/TuiReducers.js";
+import type { TuiInstanceListEntry, TuiLogEntry } from "../store/TuiStoreTypes.js";
 
 const LOG_READ_LIMIT = 100;
 
 export interface TuiControlSessionOptions {
-    clients?: Clients;
+    clients?: TuiClients;
     store?: TuiAppStore;
 }
 
 export class TuiControlSession {
-    readonly #clients: Clients;
+    readonly #clients: TuiClients;
     readonly #store: TuiAppStore;
     readonly #subscriptions = new Map<string, TuiInstanceSubscription>();
     #oauthRefreshTimer?: ReturnType<typeof setInterval>;
@@ -306,20 +306,20 @@ interface TuiInstanceSubscriptionOptions {
     instance: string;
     onConnectionClosed(): void;
     onGap(): Promise<void>;
-    onInstanceEvent(message: Extract<RuntimeStreamMessage, { kind: "instance.event" }>): void;
+    onInstanceEvent(message: Extract<TuiClientRuntimeStreamMessage, { kind: "instance.event" }>): void;
     onSubscribeError(error: unknown): Promise<void>;
-    subscribe(fromSeq: number): Promise<{ close(): void; nextMessage(): Promise<RuntimeStreamMessage> }>;
+    subscribe(fromSeq: number): Promise<{ close(): void; nextMessage(): Promise<TuiClientRuntimeStreamMessage> }>;
 }
 
 class TuiInstanceSubscription {
     readonly #instance: string;
     readonly #onConnectionClosed: () => void;
     readonly #onGap: () => Promise<void>;
-    readonly #onInstanceEvent: (message: Extract<RuntimeStreamMessage, { kind: "instance.event" }>) => void;
+    readonly #onInstanceEvent: (message: Extract<TuiClientRuntimeStreamMessage, { kind: "instance.event" }>) => void;
     readonly #onSubscribeError: (error: unknown) => Promise<void>;
     readonly #subscribe: TuiInstanceSubscriptionOptions["subscribe"];
     #closed = false;
-    #stream?: { close(): void; nextMessage(): Promise<RuntimeStreamMessage> };
+    #stream?: { close(): void; nextMessage(): Promise<TuiClientRuntimeStreamMessage> };
 
     constructor(options: TuiInstanceSubscriptionOptions) {
         this.#instance = options.instance;

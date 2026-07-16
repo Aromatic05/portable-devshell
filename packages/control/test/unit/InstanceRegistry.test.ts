@@ -67,7 +67,7 @@ test("mcp endpoint path is generated and wiring only builds host configuration",
 
 test("stopOwned only stops workers started by this control and keeps failed ownership", async () => {
     const stopped: string[] = [];
-    const registry = new (await import("../../dist/modules/instance/registry/InstanceRegistry.js")).InstanceRegistry([
+    const registry = new (await import("../../dist/control/instance/registry/InstanceRegistry.js")).InstanceRegistry([
         {
             tools: { capabilities: ["read", "write", "execute"], groups: ["file", "bash", "artifact"] },
             enabled: true,

@@ -3,7 +3,7 @@ import { spawn } from "node:child_process";
 import { ControlError, createError, errorCodes, type InstanceContainerConfig, type InstanceContainerMountConfig } from "@portable-devshell/shared";
 
 import { WorkerBinary } from "../../WorkerBinary.js";
-import { RemoteWorkerInstaller } from "../../install/RemoteWorkerInstaller.js";
+import { WorkerInstallerRemote } from "../../install/WorkerInstallerRemote.js";
 import {
     createCommandContext,
     createProviderError,
@@ -14,7 +14,7 @@ import {
     type WorkerCommandTransport
 } from "../../command/WorkerCommandTransport.js";
 import type { WorkerCommandName, WorkerCommandOptions, WorkerRpcOptions } from "../../command/WorkerCommandOptions.js";
-import { createWorkerRpcProcess, type WorkerRpcProcess } from "../../WorkerProcess.js";
+import { createWorkerRpcProcess, type WorkerRpcProcess } from "../../rpc/WorkerRpcProcess.js";
 import {
     createWorkerTargetProbeFailedError,
     parseWorkerTargetProbeOutput,
@@ -23,7 +23,7 @@ import {
 
 type ContainerLifecycleStatus = "missing" | "running" | "stopped";
 
-export interface ContainerWorkerTransportBaseOptions {
+export interface WorkerTransportDriverContainerBaseOptions {
     binary: string;
     container: InstanceContainerConfig;
     keepIdUserNamespace?: boolean;
@@ -33,10 +33,10 @@ export interface ContainerWorkerTransportBaseOptions {
     workerBinary?: WorkerBinary;
 }
 
-export class ContainerWorkerTransportBase implements WorkerCommandTransport {
+export class WorkerTransportDriverContainerBase implements WorkerCommandTransport {
     readonly #binary: string;
     readonly #container: InstanceContainerConfig;
-    readonly #installer: RemoteWorkerInstaller;
+    readonly #installer: WorkerInstallerRemote;
     readonly #keepIdUserNamespace: boolean;
     readonly #provider: "docker" | "podman";
     readonly #remoteCwd?: string;
@@ -44,7 +44,7 @@ export class ContainerWorkerTransportBase implements WorkerCommandTransport {
     readonly #workerBinary: WorkerBinary;
     #existingStoppedContainerAdopted = false;
 
-    constructor(options: ContainerWorkerTransportBaseOptions) {
+    constructor(options: WorkerTransportDriverContainerBaseOptions) {
         this.#binary = options.binary;
         this.#container = options.container;
         this.#keepIdUserNamespace = options.keepIdUserNamespace === true;
@@ -52,7 +52,7 @@ export class ContainerWorkerTransportBase implements WorkerCommandTransport {
         this.#remoteCwd = options.remoteCwd;
         this.#spawn = options.spawnFunction ?? spawn;
         this.#workerBinary = options.workerBinary ?? new WorkerBinary();
-        this.#installer = new RemoteWorkerInstaller({
+        this.#installer = new WorkerInstallerRemote({
             createContext: (operation, command) => this.#createShellContext(operation, command),
             createProviderError: this.#createProviderError,
             probeTarget: () => this.#probeTarget(),

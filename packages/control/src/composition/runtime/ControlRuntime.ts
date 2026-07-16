@@ -1,26 +1,26 @@
-import type { InstanceRegistry } from "../../modules/instance/registry/InstanceRegistry.js";
-import { ControlSocketServer } from "../../control/socket/ControlSocketServer.js";
-import { RouteComposition } from "../RouteComposition.js";
-import type { ArtifactRuntime } from "./ArtifactRuntime.js";
-import type { McpRuntime } from "./McpRuntime.js";
-import type { ReverseRuntime } from "./ReverseRuntime.js";
+import type { InstanceRegistry } from "../../control/instance/registry/InstanceRegistry.js";
+import { ControlSocketServer } from "../../server/socket/ControlSocketServer.js";
+import { ControlRouteComposition } from "../ControlRouteComposition.js";
+import type { ControlRuntimeArtifact } from "./ControlRuntimeArtifact.js";
+import type { ControlRuntimeMcp } from "./ControlRuntimeMcp.js";
+import type { ControlRuntimeReverse } from "./ControlRuntimeReverse.js";
 
 export interface ControlRuntimeOptions {
-    artifact: ArtifactRuntime;
+    artifact: ControlRuntimeArtifact;
     instances: InstanceRegistry;
-    mcp: McpRuntime;
+    mcp: ControlRuntimeMcp;
     restart: () => Promise<void>;
-    reverse: ReverseRuntime;
+    reverse: ControlRuntimeReverse;
     shutdown: () => Promise<void>;
     socketPath: string;
 }
 
 export class ControlRuntime {
-    readonly #artifact: ArtifactRuntime;
+    readonly #artifact: ControlRuntimeArtifact;
     readonly #instances: InstanceRegistry;
-    readonly #mcp: McpRuntime;
-    readonly #reverse: ReverseRuntime;
-    readonly #routes: RouteComposition;
+    readonly #mcp: ControlRuntimeMcp;
+    readonly #reverse: ControlRuntimeReverse;
+    readonly #routes: ControlRouteComposition;
     readonly #socket: ControlSocketServer;
 
     constructor(options: ControlRuntimeOptions) {
@@ -28,7 +28,7 @@ export class ControlRuntime {
         this.#instances = options.instances;
         this.#mcp = options.mcp;
         this.#reverse = options.reverse;
-        this.#routes = new RouteComposition({
+        this.#routes = new ControlRouteComposition({
             artifact: options.artifact.service,
             config: options.mcp.configEditor,
             instanceCreate: options.mcp.instanceCreate,

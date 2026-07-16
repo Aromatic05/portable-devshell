@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { Readable } from "node:stream";
 import test from "node:test";
 
-import { CliMain } from "../../dist/cli/CliMain.js";
+import { CliMain } from "../../dist/CliMain.js";
 
 test("CliMain handles control lifecycle commands and exit code mapping", async () => {
     const stdout = createBuffer();
@@ -23,7 +23,7 @@ test("CliMain handles control lifecycle commands and exit code mapping", async (
     };
 
     const cli = new CliMain({
-        createClients: () => testClients({}),
+        createCliClients: () => testClients({}),
         createLifecycleManager: async () => lifecycle,
         stderr,
         stdout
@@ -42,7 +42,7 @@ test("CliMain handles control lifecycle commands and exit code mapping", async (
     assert.equal(stdout.flush(), "control: stopped\n");
 
     const failureCli = new CliMain({
-        createClients: () => testClients({
+        createCliClients: () => testClients({
             async callTool() {
                 throw new Error("unused");
             },
@@ -94,7 +94,7 @@ test("CliMain routes the tui command through the injected runtime", async () => 
     const stderr = createBuffer();
     let started = false;
     const cli = new CliMain({
-        createClients: () => testClients({}),
+        createCliClients: () => testClients({}),
         createLifecycleManager: async () => {
             throw new Error("lifecycle should not be used for tui");
         },
@@ -115,7 +115,7 @@ test("CliMain renders structured remote errors in verbose mode", async () => {
     const stdout = createBuffer();
     const stderr = createBuffer();
     const cli = new CliMain({
-        createClients: () => testClients({
+        createCliClients: () => testClients({
             async callTool() {
                 throw new Error("unused");
             },
@@ -243,7 +243,7 @@ test("CliMain routes interactive instance.start relay output to stderr", async (
     };
 
     const cli = new CliMain({
-        createClients: () => testClients(client),
+        createCliClients: () => testClients(client),
         createLifecycleManager: async () => ({
             async logs() {
                 return "";
@@ -331,7 +331,7 @@ test("CliMain handles instance logs follow and tool call through injected client
     };
 
     const cli = new CliMain({
-        createClients: () => testClients(client),
+        createCliClients: () => testClients(client),
         createLifecycleManager: async () => ({
             async logs() {
                 return "";
@@ -433,7 +433,7 @@ test("CliMain follows instance logs without skipping events between initial pull
     };
 
     const cli = new CliMain({
-        createClients: () => testClients(client),
+        createCliClients: () => testClients(client),
         createLifecycleManager: async () => ({
             async logs() {
                 return "";
@@ -540,7 +540,7 @@ test("CliMain recovers instance log follow when subscribe returns stream.gap", a
     };
 
     const cli = new CliMain({
-        createClients: () => testClients(client),
+        createCliClients: () => testClients(client),
         createLifecycleManager: async () => ({
             async logs() {
                 return "";
@@ -646,7 +646,7 @@ test("CliMain recovers watch status when subscribe returns stream.gap", async ()
     };
 
     const cli = new CliMain({
-        createClients: () => testClients(client),
+        createCliClients: () => testClients(client),
         createLifecycleManager: async () => ({
             async logs() {
                 return "";
@@ -763,7 +763,7 @@ test("CliMain runs interactive instance create through control rpc", async () =>
     };
 
     const cli = new CliMain({
-        createClients: () => testClients(client),
+        createCliClients: () => testClients(client),
         createLifecycleManager: async () => ({
             async logs() {
                 return "";
@@ -826,7 +826,7 @@ test("CliMain reads and follows Todo through control RPC", async () => {
     let reads = 0;
     let closed = false;
     const cli = new CliMain({
-        createClients: () => testClients({
+        createCliClients: () => testClients({
             async getTodo() {
                 reads += 1;
                 return reads === 1

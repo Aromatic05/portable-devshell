@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { McpArtifactToolCatalog } from "../../dist/mcp/artifact/McpArtifactToolCatalog.js";
+import { McpToolCatalogArtifact } from "../../dist/tool/catalog/McpToolCatalogArtifact.js";
 
 test("artifact control catalog exposes only share and transfer without documenting hidden host", () => {
-    const tools = new McpArtifactToolCatalog().list();
+    const tools = new McpToolCatalogArtifact().list();
     assert.deepEqual(
         tools.map((tool) => tool.name),
         ["artifact_share", "artifact_transfer"]

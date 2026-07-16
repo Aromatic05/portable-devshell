@@ -6,7 +6,7 @@ import { join, resolve } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { LocalWorkerTransport, WorkerBinary, WorkerInstanceFactory } from "@portable-devshell/core";
+import { WorkerTransportDriverLocal, WorkerBinary, WorkerInstanceFactory } from "@portable-devshell/core";
 import { McpHost } from "@portable-devshell/mcp";
 import { asInstanceName, asWorkspacePath } from "@portable-devshell/shared";
 
@@ -151,7 +151,7 @@ async function withTmuxHarness(instanceName: string, body: (harness: TmuxHarness
         },
         homeDirectory,
         name: asInstanceName(instanceName),
-        transport: new LocalWorkerTransport({
+        transport: new WorkerTransportDriverLocal({
             spawnFunction: nodeSpawn,
             workerBinary: new WorkerBinary(workerBinaryPath)
         })
