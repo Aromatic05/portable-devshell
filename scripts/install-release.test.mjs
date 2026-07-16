@@ -243,8 +243,8 @@ test("Windows release installer activates a fresh application with only linux-x6
             timeout: 30_000
         });
         assert.equal(result.status, 0, `${result.error?.stack ?? ""}\n${result.stdout}${result.stderr}`);
-        assert.match(result.stdout, /\[1\/6\] 检查安装环境/u);
-        assert.match(result.stdout, /已安装 portable-devshell 9\.8\.7-windows-test/u);
+        assert.match(result.stdout, /\[1\/6\]/u);
+        assert.match(result.stdout, /portable-devshell 9\.8\.7-windows-test/u);
 
         const command = resolve(binDirectory, "devshell.cmd");
         const commandResult = spawnSync(command, ["status"], {

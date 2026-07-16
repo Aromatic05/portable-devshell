@@ -1,4 +1,7 @@
 ﻿Set-StrictMode -Version Latest
+$Utf8NoBom = [Text.UTF8Encoding]::new($false)
+[Console]::OutputEncoding = $Utf8NoBom
+$OutputEncoding = $Utf8NoBom
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
 $script:InstallStep = 0

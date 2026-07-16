@@ -42,7 +42,21 @@ jobs:
                   pnpm lint
 
             - name: 校验发布布局
-              run: pnpm test:release-layout
+              shell: pwsh
+              run: |
+                  $output = @(& pnpm test:release-layout 2>&1)
+                  $exitCode = $LASTEXITCODE
+                  $output | Tee-Object -FilePath release-layout.log
+                  if ($exitCode -ne 0) {
+                      exit $exitCode
+                  }
+
+            - name: 上传发布布局日志
+              if: always()
+              uses: actions/upload-artifact@v7
+              with:
+                  name: windows-x64-release-layout-${{ github.sha }}
+                  path: release-layout.log
 
             - name: 校验 PowerShell 安装器语法
               shell: pwsh
