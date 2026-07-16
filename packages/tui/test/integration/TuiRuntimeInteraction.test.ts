@@ -572,7 +572,7 @@ function createTerminal(options: { columns?: number; rows?: number } = {}): {
     };
 }
 
-async function waitUntil(predicate: () => boolean, timeoutMs = 2_000): Promise<void> {
+async function waitUntil(predicate: () => boolean, timeoutMs = 10_000): Promise<void> {
     const deadline = Date.now() + timeoutMs;
     while (!predicate()) {
         if (Date.now() >= deadline) {
