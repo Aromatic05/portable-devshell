@@ -8,7 +8,8 @@ import {
     selectMainScreenModel,
     TuiAppStore,
     TuiControlSession,
-    TuiFocusManager
+    TuiFocusManager,
+    tuiViewProjection
 } from "@portable-devshell/tui/testing";
 
 const share: ArtifactShareResult = {
@@ -108,6 +109,7 @@ test("instance box shows artifact activity and confirms revoke or cancel before 
     const dispatcher = new TuiCommandDispatcher({
         focusManager,
         mainViewportRows: () => 20,
+        projection: tuiViewProjection,
         onApprovalDecision: async () => undefined,
         onArtifactCancelTransfer: async (transferId) => { cancelled.push(transferId); },
         onArtifactRevokeShare: async (shareId) => { revoked.push(shareId); },

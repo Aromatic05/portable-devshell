@@ -8,15 +8,15 @@ import {
 } from "@portable-devshell/shared";
 
 import type { ArtifactService } from "../control/artifact/ArtifactService.js";
-import { createArtifactRouteModule } from "../control/artifact/ArtifactRouteModule.js";
+import { createArtifactRouteModule } from "../control/artifact/route/ArtifactRouteModule.js";
 import type { ConfigEditorPort } from "../control/config/ConfigRouteModule.js";
 import { createConfigRouteModule } from "../control/config/ConfigRouteModule.js";
 import type { InstanceCreatePort } from "../control/instance/InstanceRouteModule.js";
 import { createInstanceRouteModule } from "../control/instance/InstanceRouteModule.js";
 import type { InstanceRegistry } from "../control/instance/registry/InstanceRegistry.js";
 import { createMcpRouteModule } from "../control/mcp/McpRouteModule.js";
-import type { ReverseControlService } from "../control/reverse/ReverseControlService.js";
-import { createReverseRouteModule } from "../control/reverse/ReverseRouteModule.js";
+import type { ReverseCredentialService } from "../control/reverse/credential/ReverseCredentialService.js";
+import { createReverseRouteModule } from "../control/reverse/route/ReverseRouteModule.js";
 import { createRuntimeRouteModule } from "../instance/runtime/RuntimeRouteModule.js";
 import { RuntimeSubscriptionManager } from "../instance/runtime/RuntimeSubscriptionManager.js";
 import { createServiceRouteModule } from "../control/service/ServiceRouteModule.js";
@@ -31,7 +31,7 @@ export interface ControlRouteCompositionOptions {
     mcpStatus?: () => JsonValue;
     oauthApprovals?: () => McpOAuthApprovalService | undefined;
     restart?: () => Promise<void> | void;
-    reverse?: ReverseControlService;
+    reverse?: ReverseCredentialService;
     shutdown(): Promise<void> | void;
 }
 

@@ -1,8 +1,8 @@
 import type { ApprovalRequest, JsonValue, ToolCallRecord } from "@portable-devshell/shared";
 
 import type { BoxLine, BoxModel } from "../component/TuiComponentExpandableBox.js";
-import type { TuiExpandableBoxStatus, TuiPageId } from "../TuiUiModel.js";
-import type { TuiAppState, TuiLogEntry, TuiInstanceListEntry } from "../../state/TuiStoreTypes.js";
+import type { TuiExpandableBoxStatus, TuiPageId } from "../../state/TuiUiState.js";
+import type { TuiAppState, TuiLogEntry, TuiInstanceListEntry } from "../../state/reducer/TuiStoreModel.js";
 
 export interface SelectedInstancePageContext {
     approvals: ApprovalRequest[];

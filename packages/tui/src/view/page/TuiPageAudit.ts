@@ -1,9 +1,9 @@
 import type { ApprovalRequest } from "@portable-devshell/shared";
 
 import type { BoxModel } from "../component/TuiComponentExpandableBox.js";
-import type { TuiAppState } from "../../state/TuiStoreTypes.js";
+import type { TuiAppState } from "../../state/reducer/TuiStoreModel.js";
 import { buildSelectedInstancePageContext, compactSummary, formatField, makeBox, toolCallStatus } from "./TuiPageBoxSupport.js";
-import { auditInputSummary, auditOutputSummary, resolveAuditCtxId, resolveAuditOutput } from "./TuiPageAuditInputPresentation.js";
+import { auditInputSummary, auditOutputSummary, resolveAuditCtxId, resolveAuditOutput } from "../../state/audit/TuiAuditPresentation.js";
 
 export function buildAuditPageBoxes(state: TuiAppState, instanceName: string): BoxModel[] {
     const { approvals, logs, toolCalls } = buildSelectedInstancePageContext(state, instanceName);

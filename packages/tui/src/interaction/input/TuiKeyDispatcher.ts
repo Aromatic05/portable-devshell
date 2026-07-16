@@ -1,5 +1,5 @@
-import type { TuiMode, TuiUiIntent } from "../TuiInteractionModel.js";
-import { pageFromShortcut } from "../../view/screen/TuiScreenRouter.js";
+import type { TuiMode, TuiUiIntent } from "../../state/TuiInteractionState.js";
+import { pageFromShortcut } from "../../state/TuiPageNavigation.js";
 
 export interface TuiKeyPress {
     input: string;

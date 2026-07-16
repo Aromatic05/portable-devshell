@@ -1,12 +1,13 @@
 import type { JsonValue } from "@portable-devshell/shared";
 
-import { isTuiAttachShellSupported } from "../../runtime/attach/TuiAttachShellAvailability.js";
+import { isTuiAttachShellSupported } from "../../state/instance/TuiInstanceAttachCapability.js";
 import { buildArtifactActivityView } from "../component/TuiComponentArtifactActivityBox.js";
-import { createDefaultInstanceDraft } from "../../interaction/editor/instance/TuiEditorInstanceCreateDraft.js";
+import { createDefaultInstanceDraft } from "../../state/editor/TuiEditorInstanceCreateDraft.js";
 import type { BoxModel } from "../component/TuiComponentExpandableBox.js";
-import type { TuiAppState } from "../../state/TuiStoreTypes.js";
+import type { TuiAppState } from "../../state/reducer/TuiStoreModel.js";
 import { compactSummary, formatField, makeBox, runtimeStatus, shortenPath } from "./TuiPageBoxSupport.js";
-import { buttonLine, editorDraft, fieldLine, readPath } from "../../interaction/editor/TuiEditorSupport.js";
+import { editorDraft, readPath } from "../../state/editor/TuiEditorDraft.js";
+import { buttonLine, fieldLine } from "../editor/TuiEditorView.js";
 
 export function buildInstancesPageBoxes(state: TuiAppState): BoxModel[] {
     if (state.interaction.editor?.kind === "create") {

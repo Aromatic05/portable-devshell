@@ -3,7 +3,7 @@ import {
     type ErrorCode,
     type JsonValue
 } from "@portable-devshell/shared";
-import { decodeFrame, encodeFrame } from "@portable-devshell/shared/internal/frame";
+import { decodeFrame, encodeFrame } from "@portable-devshell/shared/transport/frame";
 
 export class ReverseRpcFrameCodec {
     static encode(value: JsonValue): Buffer {

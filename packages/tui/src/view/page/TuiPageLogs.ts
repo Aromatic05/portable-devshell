@@ -1,7 +1,7 @@
 import type { BoxModel } from "../component/TuiComponentExpandableBox.js";
-import type { TuiAppState, TuiLogEntry } from "../../state/TuiStoreTypes.js";
+import type { TuiAppState, TuiLogEntry } from "../../state/reducer/TuiStoreModel.js";
 import { buildSelectedInstancePageContext, compactSummary, makeBox, renderLogLine } from "./TuiPageBoxSupport.js";
-import { buttonLine } from "../../interaction/editor/TuiEditorSupport.js";
+import { buttonLine } from "../editor/TuiEditorView.js";
 
 export function buildLogsPageBoxes(state: TuiAppState, instanceName: string): BoxModel[] {
     const { logs } = buildSelectedInstancePageContext(state, instanceName);

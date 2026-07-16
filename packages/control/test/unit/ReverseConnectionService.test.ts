@@ -7,8 +7,8 @@ import test from "node:test";
 import type { WorkerRpcChannel } from "@portable-devshell/core/testing";
 import type { JsonValue } from "@portable-devshell/shared";
 
-import { ReverseConnectionService } from "../../dist/control/reverse/ReverseConnectionService.js";
-import { ReverseCredentialStore } from "../../dist/control/reverse/ReverseCredentialStore.js";
+import { ReverseConnectionService } from "../../dist/control/reverse/connection/ReverseConnectionService.js";
+import { ReverseCredentialStore } from "../../dist/control/reverse/credential/ReverseCredentialStore.js";
 
 class MemoryRpcChannel implements WorkerRpcChannel {
     readonly sent: JsonValue[] = [];

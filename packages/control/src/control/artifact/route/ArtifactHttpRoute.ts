@@ -4,7 +4,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import type { McpHostHttpServer } from "@portable-devshell/mcp";
 import { errorCodes, toControlErrorBody } from "@portable-devshell/shared";
 
-import type { ArtifactService } from "./ArtifactService.js";
+import type { ArtifactService } from "../ArtifactService.js";
 
 const ROUTE_SUFFIX = "/artifacts/share";
 const HTTP_CHUNK_BYTES = 512 * 1024;

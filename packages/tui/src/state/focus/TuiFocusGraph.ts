@@ -1,4 +1,4 @@
-import { tuiFocusItemKey, isSameTuiFocusItem, type TuiFocusItem } from "../TuiInteractionModel.js";
+import { tuiFocusItemKey, isSameTuiFocusItem, type TuiFocusItem } from "./TuiFocusItem.js";
 
 export type TuiFocusDirection = "next" | "previous" | "up" | "down" | "left" | "right";
 

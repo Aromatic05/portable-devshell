@@ -3,7 +3,7 @@ import test from "node:test";
 
 import { asInstanceName } from "@portable-devshell/shared";
 
-import { buildFocusGraphForState, TuiAppStore, TuiCommandDispatcherFocus, TuiCommandDispatcherNavigation, TuiFocusManager } from "../../dist/testing.js";
+import { buildFocusGraphForState, tuiViewProjection, TuiAppStore, TuiCommandDispatcherFocus, TuiCommandDispatcherNavigation, TuiFocusManager } from "../../dist/testing.js";
 
 function createHarness() {
     const store = new TuiAppStore();
@@ -48,6 +48,7 @@ function createHarness() {
     });
     const focus = new TuiCommandDispatcherFocus({
         mainViewportRows: () => 30,
+        projection: tuiViewProjection,
         store
     });
     const reloads: Array<{ instance?: string; page: string }> = [];
@@ -67,6 +68,7 @@ function createHarness() {
         onRedraw: () => {
             redraws += 1;
         },
+        projection: tuiViewProjection,
         store
     });
     focusManager.syncPanel(

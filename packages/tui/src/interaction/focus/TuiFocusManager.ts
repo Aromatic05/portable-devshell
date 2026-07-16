@@ -1,8 +1,9 @@
+import { type TuiFocusItem, isSameTuiFocusItem } from "../../state/focus/TuiFocusItem.js";
 import type { TuiAppStore } from "../../state/TuiAppStore.js";
-import type { TuiAppState } from "../../state/TuiStoreTypes.js";
-import { TuiFocusGraph, type TuiFocusDirection } from "./TuiFocusGraph.js";
-import { type TuiFocusItem, type TuiMode, isSameTuiFocusItem } from "../TuiInteractionModel.js";
-import type { TuiPageId } from "../../view/TuiUiModel.js";
+import type { TuiAppState } from "../../state/reducer/TuiStoreModel.js";
+import { TuiFocusGraph, type TuiFocusDirection } from "../../state/focus/TuiFocusGraph.js";
+import { type TuiMode } from "../../state/TuiInteractionState.js";
+import type { TuiPageId } from "../../state/TuiUiState.js";
 
 export interface TuiFocusManagerContext {
     currentPage(): TuiPageId;

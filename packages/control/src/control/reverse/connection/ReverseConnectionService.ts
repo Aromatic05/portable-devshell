@@ -7,12 +7,12 @@ import {
     type ReverseUpstreamBatch
 } from "@portable-devshell/shared";
 
-import { ReverseCredentialStore } from "./ReverseCredentialStore.js";
+import { ReverseCredentialStore } from "../credential/ReverseCredentialStore.js";
 import type {
     ReverseInstanceLookupPort,
     ReverseInstancePort
-} from "./ReverseInstancePort.js";
-import { ReverseRpcSseChannel } from "./rpc/ReverseRpcSseChannel.js";
+} from "../ReverseInstancePort.js";
+import { ReverseRpcSseChannel } from "../rpc/ReverseRpcSseChannel.js";
 
 interface ActiveReverseConnection {
     channel: WorkerRpcChannel;

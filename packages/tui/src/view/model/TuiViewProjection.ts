@@ -1,9 +1,10 @@
-import { measureExpandableBoxHeight, type BoxModel } from "../view/component/TuiComponentExpandableBox.js";
-import type { TuiMode } from "../interaction/TuiInteractionModel.js";
-import type { TuiActivePage, TuiPageId } from "../view/TuiUiModel.js";
-import { buildBoxesForPage } from "../view/page/TuiPageBoxBuilder.js";
-import { buildHelpLines } from "../view/page/TuiPageHelp.js";
-import type { TuiAppState, TuiConnectionState } from "./TuiStoreTypes.js";
+import { measureExpandableBoxHeight } from "../component/TuiComponentExpandableBox.js";
+import type { TuiMode } from "../../state/TuiInteractionState.js";
+import type { TuiActivePage, TuiPageId } from "../../state/TuiUiState.js";
+import { buildBoxesForPage } from "../page/TuiPageBoxBuilder.js";
+import { buildHelpLines } from "../page/TuiPageHelp.js";
+import type { TuiAppState, TuiConnectionState } from "../../state/reducer/TuiStoreModel.js";
+import type { TuiMainBoxFlowMetrics, TuiMainScreenModel, TuiSidebarModel } from "../../state/TuiViewModel.js";
 
 const pageEntries: Array<{ id: TuiPageId; label: string }> = [
     { id: "instances", label: "instances" },
@@ -15,33 +16,6 @@ const pageEntries: Array<{ id: TuiPageId; label: string }> = [
     { id: "todo", label: "todo" },
     { id: "help", label: "help" }
 ];
-
-export interface SidebarEntry {
-    focused: boolean;
-    id: string;
-    label: string;
-    selected: boolean;
-}
-
-export interface SidebarModel {
-    instances: SidebarEntry[];
-    pages: SidebarEntry[];
-}
-
-export interface MainScreenModel {
-    activePage: TuiActivePage;
-    boxes: BoxModel[];
-    emptyState?: string;
-    errorLines?: string[];
-    pageTitle: string;
-    statusLine?: string;
-}
-
-export interface MainBoxFlowMetrics {
-    boxRanges: Record<string, { end: number; start: number }>;
-    scrollKey: string;
-    totalLines: number;
-}
 
 export function selectActivePage(state: TuiAppState): TuiActivePage {
     return {
@@ -62,7 +36,7 @@ export function selectHeaderSummary(state: TuiAppState): string {
     return `instances ${state.instances.length} | live ${state.globalDerived.connectedInstanceCount} | approvals ${state.globalDerived.pendingApprovalCount} | events ${state.globalDerived.totalEventCount}`;
 }
 
-export function selectSidebarModel(state: TuiAppState): SidebarModel {
+export function selectSidebarModel(state: TuiAppState): TuiSidebarModel {
     const cursor = state.interaction.sidebarCursor;
     const sidebarFocused = state.interaction.focusScope === "sidebarPages" || state.interaction.focusScope === "sidebarInstances";
 
@@ -82,7 +56,7 @@ export function selectSidebarModel(state: TuiAppState): SidebarModel {
     };
 }
 
-export function selectMainScreenModel(state: TuiAppState): MainScreenModel {
+export function selectMainScreenModel(state: TuiAppState): TuiMainScreenModel {
     const activePage = selectActivePage(state);
     const statusLine = state.interaction.screenStatusByPage[activePage.page];
     const panelError = state.panelErrors[`${activePage.page}:${activePage.instance ?? "-"}`];
@@ -116,7 +90,7 @@ export function selectMainBoxIds(state: TuiAppState): string[] {
     return selectMainScreenModel(state).boxes.map((box) => box.id);
 }
 
-export function selectMainBoxFlowMetrics(state: TuiAppState, boxInnerWidth = 80): MainBoxFlowMetrics {
+export function selectMainBoxFlowMetrics(state: TuiAppState, boxInnerWidth = 80): TuiMainBoxFlowMetrics {
     const model = selectMainScreenModel(state);
     let cursor = 0;
     const boxRanges: Record<string, { end: number; start: number }> = {};
@@ -230,3 +204,9 @@ function isSearchablePage(page: TuiPageId): boolean {
 function pageTitle(page: TuiPageId): string {
     return pageEntries.find((entry) => entry.id === page)?.label ?? page;
 }
+export const tuiViewProjection = {
+    selectMainBoxFlowMetrics,
+    selectMainBoxIds,
+    selectMainScreenModel,
+    selectMainScrollKey
+};

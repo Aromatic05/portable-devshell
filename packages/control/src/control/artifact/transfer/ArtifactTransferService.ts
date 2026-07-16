@@ -14,12 +14,12 @@ import {
     type JsonValue
 } from "@portable-devshell/shared";
 
-import { ArtifactRecordStore } from "./ArtifactRecordStore.js";
+import { ArtifactRecordStore } from "../ArtifactRecordStore.js";
 import {
     readSourceInstance,
     readTransferPayloadSourceInput,
     validateTransferStart
-} from "./ArtifactSource.js";
+} from "../ArtifactSource.js";
 import {
     ARTIFACT_RECORD_VERSION,
     DEFAULT_ARTIFACT_CHUNK_BYTES,
@@ -27,7 +27,7 @@ import {
     type ArtifactServiceEndpoint,
     type ArtifactServiceOptions,
     type StoredArtifactTransfer
-} from "./ArtifactServiceModel.js";
+} from "../ArtifactServiceModel.js";
 import { ArtifactTransferExecutor } from "./ArtifactTransferExecutor.js";
 
 export interface ArtifactTransferServiceOptions {

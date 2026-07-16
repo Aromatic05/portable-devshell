@@ -1,10 +1,10 @@
 import { Box, Text } from "ink";
 
-import type { SidebarModel } from "../../state/TuiSelectors.js";
+import type { TuiSidebarModel } from "../../state/TuiViewModel.js";
 
 export interface TuiComponentSidebarProps {
     compact?: boolean;
-    model: SidebarModel;
+    model: TuiSidebarModel;
 }
 
 export function TuiComponentSidebar(props: TuiComponentSidebarProps) {
@@ -26,16 +26,16 @@ export function TuiComponentSidebar(props: TuiComponentSidebarProps) {
     );
 }
 
-function compactPageLabel(item: SidebarModel["pages"][number], index: number): string {
+function compactPageLabel(item: TuiSidebarModel["pages"][number], index: number): string {
     const label = item.id === "instances" ? "inst" : item.id === "connector" ? "conn" : item.label;
     return `${item.selected ? "▶" : " "}${index + 1}:${label}`;
 }
 
-function compactInstanceLabel(item: SidebarModel["instances"][number], index: number): string {
+function compactInstanceLabel(item: TuiSidebarModel["instances"][number], index: number): string {
     return `${item.selected ? "▶" : " "}S${index + 1}:${item.label}`;
 }
 
-function SidebarSection(props: { items: SidebarModel["pages"] }) {
+function SidebarSection(props: { items: TuiSidebarModel["pages"] }) {
     return (
         <Box flexDirection="column">
             {props.items.map((item, index) => (
@@ -47,12 +47,12 @@ function SidebarSection(props: { items: SidebarModel["pages"] }) {
     );
 }
 
-function CompactSidebarLine(props: { items: SidebarModel["pages"] | SidebarModel["instances"]; kind: "instance" | "page" }) {
+function CompactSidebarLine(props: { items: TuiSidebarModel["pages"] | TuiSidebarModel["instances"]; kind: "instance" | "page" }) {
     return (
         <Text>
             {props.items.map((item, index) => (
                 <Text bold={item.selected} inverse={item.focused} key={item.id}>
-                    {`${props.kind === "page" ? compactPageLabel(item as SidebarModel["pages"][number], index) : compactInstanceLabel(item as SidebarModel["instances"][number], index)} `}
+                    {`${props.kind === "page" ? compactPageLabel(item as TuiSidebarModel["pages"][number], index) : compactInstanceLabel(item as TuiSidebarModel["instances"][number], index)} `}
                 </Text>
             ))}
         </Text>

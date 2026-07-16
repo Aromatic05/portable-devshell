@@ -1,11 +1,20 @@
-import type { InstanceCreateDraft, InstanceCreateSchema, InstanceCreateSummary, JsonValue } from "@portable-devshell/shared";
+import type {
+    ConfigDraft,
+    ConfigInstancePatch,
+    ConfigMcpPatch,
+    InstanceCreateDraft,
+    InstanceCreateSchema,
+    InstanceCreateSummary,
+    JsonValue
+} from "@portable-devshell/shared";
 
-import { createDefaultInstanceDraft } from "../../editor/instance/TuiEditorInstanceCreateDraft.js";
-import { editableProviderChoices } from "../../../runtime/platform/TuiProviderAvailability.js";
+import { createDefaultInstanceDraft } from "../../../state/editor/TuiEditorInstanceCreateDraft.js";
+import { editableProviderChoices } from "../../../state/editor/TuiEditorProviderChoices.js";
 import type { TuiAppStore } from "../../../state/TuiAppStore.js";
-import { asRecord, cloneRecord, editorDraft, normalizeDraftForSave, readPath, setPath } from "../../editor/TuiEditorSupport.js";
-import { selectMainScreenModel } from "../../../state/TuiSelectors.js";
-import type { TuiEditorState, TuiUiIntent } from "../../TuiInteractionModel.js";
+import { asRecord, cloneRecord, editorDraft, readPath, setPath } from "../../../state/editor/TuiEditorDraft.js";
+import { coerceTuiEditorRecord, parseTuiConfigDraft, parseTuiInstanceDraft, parseTuiInstancePatch, parseTuiMcpPatch, toTuiInstanceEditorRecord } from "../../../state/editor/TuiEditorConfigAdapter.js";
+import type { TuiInteractionProjection } from "../../TuiInteractionProjection.js";
+import type { TuiEditorState, TuiUiIntent } from "../../../state/TuiInteractionState.js";
 
 interface CommandEditorOptions {
     dispatch(intent: TuiUiIntent): Promise<boolean>;
@@ -13,20 +22,23 @@ interface CommandEditorOptions {
     onCreateInstance(draft: InstanceCreateDraft): Promise<string | undefined>;
     onGetInstanceCreateSchema(): Promise<InstanceCreateSchema>;
     onInstanceAction(action: "refresh" | "restart" | "start" | "stop", instance: string): Promise<void>;
-    onInstanceConfigUpdate(instanceName: string, patch: Record<string, JsonValue>): Promise<void>;
-    onMcpConfigUpdate(mcp: Record<string, JsonValue>): Promise<void>;
-    onValidateConfigDraft(draft: Record<string, JsonValue>): Promise<void>;
+    onInstanceConfigUpdate(instanceName: string, patch: ConfigInstancePatch): Promise<void>;
+    onMcpConfigUpdate(mcp: ConfigMcpPatch): Promise<void>;
+    onValidateConfigDraft(draft: ConfigDraft): Promise<void>;
     onValidateInstanceCreateDraft(draft: InstanceCreateDraft): Promise<InstanceCreateSummary>;
+    projection: TuiInteractionProjection;
     store: TuiAppStore;
     syncMainFocus(): void;
 }
 
 export class TuiCommandDispatcherEditor {
     readonly #options: CommandEditorOptions;
+    readonly #projection: TuiInteractionProjection;
     readonly #store: TuiAppStore;
 
     constructor(options: CommandEditorOptions) {
         this.#options = options;
+        this.#projection = options.projection;
         this.#store = options.store;
     }
 
@@ -74,7 +86,7 @@ export class TuiCommandDispatcherEditor {
             const source = kind === "config" ? this.#instanceDraft(instance) : this.#mcpDraft();
             this.#store.setFormDraft(key, source, false);
         }
-        const box = selectMainScreenModel(this.#store.getState()).boxes.find((candidate) => candidate.id === boxId);
+        const box = this.#projection.selectMainScreenModel(this.#store.getState()).boxes.find((candidate) => candidate.id === boxId);
         if (box !== undefined && !box.expanded) {
             this.#store.toggleExpanded(box.expandedKey);
         }
@@ -241,14 +253,13 @@ export class TuiCommandDispatcherEditor {
         }
         try {
             if (editor.kind === "create") {
-                const draft = normalizeDraftForSave(this.#editorDraft(editor.key, createDefaultInstanceDraft()));
-                const summary = await this.#options.onValidateInstanceCreateDraft(draft as unknown as InstanceCreateDraft);
+                const draft = parseTuiInstanceDraft(this.#editorDraft(editor.key, createDefaultInstanceDraft()));
+                const summary = await this.#options.onValidateInstanceCreateDraft(draft);
                 this.#store.setFormDraft(editor.key, draft);
-                this.#store.setEditor({ ...editor, editing: false, error: undefined, summary: summary as unknown as JsonValue });
+                this.#store.setEditor({ ...editor, editing: false, error: undefined, summary });
                 return true;
             }
             const draft = this.#fullConfigDraft(editor.kind === "connector");
-            this.#assertPublicAuth(draft);
             await this.#options.onValidateConfigDraft(draft);
             this.#store.setEditor({ ...editor, editing: false, error: undefined });
             return true;
@@ -281,15 +292,15 @@ export class TuiCommandDispatcherEditor {
             }
             const instanceKey = `config:${instance}`;
             const globalKey = `connector:${instance}`;
-            const instanceDraft = normalizeDraftForSave(this.#editorDraft(instanceKey, this.#instanceDraft(instance)));
-            const globalDraft = normalizeDraftForSave(this.#editorDraft(globalKey, this.#mcpDraft()));
+            const instanceDraft = coerceTuiEditorRecord(this.#editorDraft(instanceKey, this.#instanceDraft(instance)));
+            const globalDraft = coerceTuiEditorRecord(this.#editorDraft(globalKey, this.#mcpDraft()));
             const instanceDirty = state.ui.dirtyForms[instanceKey] === true;
             const globalDirty = editor.kind === "connector" && state.ui.dirtyForms[globalKey] === true;
             if (instanceDirty) {
-                await this.#options.onInstanceConfigUpdate(instance, toInstancePatch(instanceDraft));
+                await this.#options.onInstanceConfigUpdate(instance, parseTuiInstancePatch(instanceDraft));
             }
             if (globalDirty) {
-                await this.#options.onMcpConfigUpdate(globalDraft);
+                await this.#options.onMcpConfigUpdate(parseTuiMcpPatch(globalDraft));
             }
             const applyResult = instanceDirty || globalDirty ? await this.#options.onApplyConfig() : {};
             if (asRecord(applyResult)?.restartControlRequired === true) {
@@ -348,7 +359,7 @@ export class TuiCommandDispatcherEditor {
         }
         try {
             const status = await this.#options.onCreateInstance(
-                normalizeDraftForSave(this.#editorDraft(editor.key, createDefaultInstanceDraft())) as unknown as InstanceCreateDraft
+                parseTuiInstanceDraft(this.#editorDraft(editor.key, createDefaultInstanceDraft()))
             );
             this.#store.clearFormDraft(editor.key);
             this.close();
@@ -403,7 +414,7 @@ export class TuiCommandDispatcherEditor {
 
     #selectFirstEditorItem(): void {
         const boxId = this.#store.getState().ui.mainFocusId;
-        const box = boxId === undefined ? undefined : selectMainScreenModel(this.#store.getState()).boxes.find((candidate) => candidate.id === boxId);
+        const box = boxId === undefined ? undefined : this.#projection.selectMainScreenModel(this.#store.getState()).boxes.find((candidate) => candidate.id === boxId);
         const line = box?.expandedLines.find((candidate) => candidate.id?.includes(":field:") === true || candidate.id?.includes(":button:") === true);
         if (box !== undefined && line?.id !== undefined) {
             this.#store.setSelectedDetailLine(box.expandedKey, line.id);
@@ -446,7 +457,7 @@ export class TuiCommandDispatcherEditor {
         const entry = Array.isArray(entries)
             ? entries.find((value) => asRecord(value)?.name === instanceName)
             : undefined;
-        return toInstanceDraft(
+        return toTuiInstanceEditorRecord(
             cloneRecord(asRecord(entry) ?? { enabled: true, mcp: { enabled: true, path: `/${instanceName}/mcp`, tools: { capabilities: ["read", "write", "execute"], groups: ["file", "bash", "artifact", "tmux", "todo"] } }, name: instanceName, provider: "local", security: { mode: "disabled" }, workspace: "" })
         );
     }
@@ -455,7 +466,7 @@ export class TuiCommandDispatcherEditor {
         return cloneRecord(asRecord(this.#store.getState().configView?.mcp) ?? { auth: { mode: "none" }, enabled: false, listenHost: "127.0.0.1", listenPort: 0 });
     }
 
-    #fullConfigDraft(includeMcp: boolean): Record<string, JsonValue> {
+    #fullConfigDraft(includeMcp: boolean): ConfigDraft {
         const state = this.#store.getState();
         const instance = state.ui.selectedInstance!;
         const config = cloneRecord(state.configView ?? { control: {}, instances: [], mcp: this.#mcpDraft() });
@@ -464,55 +475,27 @@ export class TuiCommandDispatcherEditor {
             ? rawInstances.map((entry) => {
                   const record = asRecord(entry);
                   return record?.name === instance
-                      ? normalizeDraftForSave(this.#editorDraft(`config:${instance}`, this.#instanceDraft(instance)))
+                      ? coerceTuiEditorRecord(this.#editorDraft(`config:${instance}`, this.#instanceDraft(instance)))
                       : record === undefined
                         ? entry
-                        : toInstanceDraft(cloneRecord(record));
+                        : toTuiInstanceEditorRecord(cloneRecord(record));
               })
             : [];
         config.instances = instances;
         if (includeMcp) {
-            config.mcp = normalizeDraftForSave(this.#editorDraft(`connector:${instance}`, this.#mcpDraft()));
+            config.mcp = coerceTuiEditorRecord(this.#editorDraft(`connector:${instance}`, this.#mcpDraft()));
         }
-        return config;
+        return parseTuiConfigDraft(config);
     }
-
-    #assertPublicAuth(config: Record<string, JsonValue>): void {
-        const mcp = asRecord(config.mcp);
-        const auth = asRecord(mcp?.auth);
-        const baseUrl = mcp?.publicBaseUrl;
-        const publicHost = mcp?.listenHost === "0.0.0.0";
-        const publicUrl = typeof baseUrl === "string" && !/^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(?::|\/|$)/.test(baseUrl);
-        if ((publicHost || publicUrl) && auth?.mode === "none") {
-            throw new Error("auth.mode=none cannot expose a non-local endpoint.");
-        }
-    }
-
 
     #expandedKey(boxId: string): string {
         const state = this.#store.getState();
-        return selectMainScreenModel(state).boxes.find((box) => box.id === boxId)?.expandedKey ?? `${state.ui.selectedPage}:${state.ui.selectedInstance}:${boxId}`;
+        return this.#projection.selectMainScreenModel(state).boxes.find((box) => box.id === boxId)?.expandedKey ?? `${state.ui.selectedPage}:${state.ui.selectedInstance}:${boxId}`;
     }
 }
 
 function inputText(value: JsonValue | undefined): string {
     return Array.isArray(value) ? value.join(", ") : String(value ?? "");
-}
-
-function toInstanceDraft(value: Record<string, JsonValue>): Record<string, JsonValue> {
-    const draft = cloneRecord(value);
-    const security = asRecord(draft.security);
-    if (security !== undefined) {
-        const { effectiveMode: _effectiveMode, ...persistedSecurity } = security;
-        draft.security = persistedSecurity;
-    }
-    return draft;
-}
-
-function toInstancePatch(value: Record<string, JsonValue>): Record<string, JsonValue> {
-    const draft = toInstanceDraft(value);
-    const { name: _name, ...patch } = draft;
-    return patch;
 }
 
 function readErrorMessage(error: unknown): string {

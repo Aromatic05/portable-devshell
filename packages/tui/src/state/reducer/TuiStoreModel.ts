@@ -1,7 +1,7 @@
 import type { ApprovalRequest, ArtifactShareResult, ArtifactTransferRecord, ClientEvent, ControlError, InstanceSnapshot, JsonValue, OAuthApprovalRequest, TodoReadResult, ToolCallRecord } from "@portable-devshell/shared";
 
-import type { TuiEditorState, TuiInteractionState, TuiUiIntent } from "../../interaction/TuiInteractionModel.js";
-import type { TuiAuditPageState, TuiFocusScope, TuiPageId, TuiSidebarCursor, TuiSidebarFocus, TuiUiState } from "../../view/TuiUiModel.js";
+import type { TuiEditorState, TuiInteractionState, TuiUiIntent } from "../TuiInteractionState.js";
+import type { TuiAuditPageState, TuiFocusScope, TuiPageId, TuiSidebarCursor, TuiSidebarFocus, TuiUiState } from "../TuiUiState.js";
 
 export type TuiConnectionStatus = "connecting" | "connected" | "disconnected" | "error";
 

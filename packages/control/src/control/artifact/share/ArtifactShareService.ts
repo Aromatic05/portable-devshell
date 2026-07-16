@@ -11,12 +11,12 @@ import {
     type JsonValue
 } from "@portable-devshell/shared";
 
-import { ArtifactRecordStore } from "./ArtifactRecordStore.js";
+import { ArtifactRecordStore } from "../ArtifactRecordStore.js";
 import {
     readSharePayloadSourceInput,
     readSourceInstance,
     sourceDescriptor
-} from "./ArtifactSource.js";
+} from "../ArtifactSource.js";
 import {
     ARTIFACT_RECORD_VERSION,
     DEFAULT_ARTIFACT_SHARE_TTL_SECONDS,
@@ -26,7 +26,7 @@ import {
     type ArtifactServiceOptions,
     type ArtifactShareAccess,
     type StoredArtifactShare
-} from "./ArtifactServiceModel.js";
+} from "../ArtifactServiceModel.js";
 
 export interface ArtifactShareServiceOptions {
     recordStore: ArtifactRecordStore;

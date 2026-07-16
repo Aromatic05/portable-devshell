@@ -7,7 +7,7 @@ import {
 
 import { createCliClientArtifact, type CliClientArtifact } from "./artifact/CliClientArtifact.js";
 import { createCliClientInstance, type CliClientInstance } from "./instance/CliClientInstance.js";
-import { createCliClientReverse, type CliClientReverse } from "../client/reverse/CliClientReverse.js";
+import { createCliClientReverse, type CliClientReverse } from "./reverse/CliClientReverse.js";
 import { createCliClientRuntime, type CliClientRuntime } from "./runtime/CliClientRuntime.js";
 import { createCliClientTodo, type CliClientTodo } from "./todo/CliClientTodo.js";
 import { createCliClientTool, type CliClientTool } from "./tool/CliClientTool.js";

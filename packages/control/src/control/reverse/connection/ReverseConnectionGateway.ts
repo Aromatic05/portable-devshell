@@ -15,10 +15,10 @@ import {
     ReverseConnectionService,
     type ReverseConnectionIdentity
 } from "./ReverseConnectionService.js";
-import { ReverseCredentialStore } from "./ReverseCredentialStore.js";
-import type { ReverseInstanceLookupPort } from "./ReverseInstancePort.js";
-import { ReverseRpcSseChannel } from "./rpc/ReverseRpcSseChannel.js";
-import { ReverseRpcWebSocketChannel } from "./rpc/ReverseRpcWebSocketChannel.js";
+import { ReverseCredentialStore } from "../credential/ReverseCredentialStore.js";
+import type { ReverseInstanceLookupPort } from "../ReverseInstancePort.js";
+import { ReverseRpcSseChannel } from "../rpc/ReverseRpcSseChannel.js";
+import { ReverseRpcWebSocketChannel } from "../rpc/ReverseRpcWebSocketChannel.js";
 
 const ENROLL_SUFFIX = "/reverse/v1/enroll";
 const WSS_SUFFIX = "/reverse/v1/connect";

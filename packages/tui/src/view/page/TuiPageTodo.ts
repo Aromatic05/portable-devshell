@@ -1,8 +1,8 @@
 import type { TodoItem, TodoReadResult } from "@portable-devshell/shared";
 
 import type { BoxModel } from "../component/TuiComponentExpandableBox.js";
-import type { TuiExpandableBoxStatus } from "../TuiUiModel.js";
-import type { TuiAppState } from "../../state/TuiStoreTypes.js";
+import type { TuiExpandableBoxStatus } from "../../state/TuiUiState.js";
+import type { TuiAppState } from "../../state/reducer/TuiStoreModel.js";
 import { compactSummary, formatField, makeBox } from "./TuiPageBoxSupport.js";
 
 const symbols: Record<TodoItem["status"], string> = {

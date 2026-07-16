@@ -1,17 +1,20 @@
 import type { TuiAppStore } from "../../../state/TuiAppStore.js";
-import { selectMainBoxFlowMetrics, selectMainBoxIds, selectMainScreenModel, selectMainScrollKey } from "../../../state/TuiSelectors.js";
+import type { TuiInteractionProjection } from "../../TuiInteractionProjection.js";
 
 interface CommandFocusOptions {
     mainViewportRows(): number;
+    projection: TuiInteractionProjection;
     store: TuiAppStore;
 }
 
 export class TuiCommandDispatcherFocus {
     readonly #mainViewportRows: CommandFocusOptions["mainViewportRows"];
+    readonly #projection: TuiInteractionProjection;
     readonly #store: TuiAppStore;
 
     constructor(options: CommandFocusOptions) {
         this.#mainViewportRows = options.mainViewportRows;
+        this.#projection = options.projection;
         this.#store = options.store;
     }
 
@@ -23,7 +26,7 @@ export class TuiCommandDispatcherFocus {
     }
 
     syncMainFocus(): void {
-        const boxIds = selectMainBoxIds(this.#store.getState());
+        const boxIds = this.#projection.selectMainBoxIds(this.#store.getState());
         if (boxIds.length === 0) {
             this.#store.setMainFocusId(undefined);
             return;
@@ -37,7 +40,7 @@ export class TuiCommandDispatcherFocus {
 
     expandedKey(boxId: string): string {
         const state = this.#store.getState();
-        return selectMainScreenModel(state).boxes.find((box) => box.id === boxId)?.expandedKey ?? `${state.ui.selectedPage}:${state.ui.selectedInstance}:${boxId}`;
+        return this.#projection.selectMainScreenModel(state).boxes.find((box) => box.id === boxId)?.expandedKey ?? `${state.ui.selectedPage}:${state.ui.selectedInstance}:${boxId}`;
     }
 
     instanceNameFromBox(boxId: string | undefined): string | undefined {
@@ -45,13 +48,13 @@ export class TuiCommandDispatcherFocus {
     }
 
     approvalIdFromBox(boxId: string): string | undefined {
-        const box = selectMainScreenModel(this.#store.getState()).boxes.find((candidate) => candidate.id === boxId);
+        const box = this.#projection.selectMainScreenModel(this.#store.getState()).boxes.find((candidate) => candidate.id === boxId);
         const action = box?.expandedLines.find((line) => line.id?.startsWith(`${boxId}:approval.open:`));
         return action?.id?.slice(`${boxId}:approval.open:`.length);
     }
 
     scrollMainColumn(delta: number): boolean {
-        const key = selectMainScrollKey(this.#store.getState());
+        const key = this.#projection.selectMainScrollKey(this.#store.getState());
         const current = this.#store.getState().ui.scrollOffsets[key] ?? 0;
         const next = clamp(delta === 0 ? current : current + delta, 0, this.maxMainScrollOffset());
         this.#store.setScrollOffset(key, next);
@@ -59,7 +62,7 @@ export class TuiCommandDispatcherFocus {
     }
 
     setMainColumnOffset(offset: number): boolean {
-        const key = selectMainScrollKey(this.#store.getState());
+        const key = this.#projection.selectMainScrollKey(this.#store.getState());
         this.#store.setScrollOffset(key, clamp(offset, 0, this.maxMainScrollOffset()));
         return true;
     }
@@ -71,7 +74,7 @@ export class TuiCommandDispatcherFocus {
             return;
         }
 
-        const metrics = selectMainBoxFlowMetrics(state);
+        const metrics = this.#projection.selectMainBoxFlowMetrics(state);
         const range = metrics.boxRanges[boxId];
         if (range === undefined) {
             return;
@@ -94,12 +97,12 @@ export class TuiCommandDispatcherFocus {
     }
 
     boxViewportRows(): number {
-        const model = selectMainScreenModel(this.#store.getState());
+        const model = this.#projection.selectMainScreenModel(this.#store.getState());
         return Math.max(0, this.#mainViewportRows() - 1 - (model.statusLine === undefined ? 0 : 1) - (model.emptyState === undefined ? 0 : 1));
     }
 
     maxMainScrollOffset(): number {
-        const metrics = selectMainBoxFlowMetrics(this.#store.getState());
+        const metrics = this.#projection.selectMainBoxFlowMetrics(this.#store.getState());
         return Math.max(0, metrics.totalLines - this.boxViewportRows());
     }}
 

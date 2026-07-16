@@ -5,7 +5,7 @@ import {
     type ErrorCode,
     type JsonValue
 } from "@portable-devshell/shared";
-import { encodeFrame, FrameBuffer } from "@portable-devshell/shared/internal/frame";
+import { encodeFrame, FrameBuffer } from "@portable-devshell/shared/transport/frame";
 
 export class WorkerRpcFrameReader {
     readonly #frames = new FrameBuffer();

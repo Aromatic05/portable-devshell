@@ -1,9 +1,10 @@
 import type { JsonValue } from "@portable-devshell/shared";
 
 import type { BoxModel } from "../component/TuiComponentExpandableBox.js";
-import type { TuiAppState } from "../../state/TuiStoreTypes.js";
+import type { TuiAppState } from "../../state/reducer/TuiStoreModel.js";
 import { compactSummary, makeBox } from "./TuiPageBoxSupport.js";
-import { asRecord, buttonLine, editorDraft, editorErrorLine, fieldLine, readPath } from "../../interaction/editor/TuiEditorSupport.js";
+import { asRecord, editorDraft, readPath } from "../../state/editor/TuiEditorDraft.js";
+import { buttonLine, editorErrorLine, fieldLine } from "../editor/TuiEditorView.js";
 
 export function buildConnectorPageBoxes(state: TuiAppState, instanceName: string): BoxModel[] {
     const instanceDraft = editorDraft(state, `config:${instanceName}`, selectedInstanceDraft(state, instanceName));

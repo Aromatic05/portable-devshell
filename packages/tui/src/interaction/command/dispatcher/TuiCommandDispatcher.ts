@@ -2,13 +2,17 @@ import type {
     InstanceCreateDraft,
     InstanceCreateSchema,
     InstanceCreateSummary,
+    ConfigDraft,
+    ConfigInstancePatch,
+    ConfigMcpPatch,
     JsonValue
 } from "@portable-devshell/shared";
 
 import type { TuiFocusManager } from "../../focus/TuiFocusManager.js";
-import type { TuiUiIntent } from "../../TuiInteractionModel.js";
+import type { TuiUiIntent } from "../../../state/TuiInteractionState.js";
 import type { TuiAppStore } from "../../../state/TuiAppStore.js";
-import type { TuiPageId } from "../../../view/TuiUiModel.js";
+import type { TuiPageId } from "../../../state/TuiUiState.js";
+import type { TuiInteractionProjection } from "../../TuiInteractionProjection.js";
 import { TuiCommandDispatcherAudit } from "./TuiCommandDispatcherAudit.js";
 import { TuiCommandDispatcherDetail } from "./TuiCommandDispatcherDetail.js";
 import { TuiCommandDispatcherEditor } from "./TuiCommandDispatcherEditor.js";
@@ -45,19 +49,20 @@ export interface TuiCommandDispatcherOptions {
     onGetInstanceCreateSchema?(): Promise<InstanceCreateSchema>;
     onInstanceConfigUpdate?(
         instanceName: string,
-        patch: Record<string, JsonValue>
+        patch: ConfigInstancePatch
     ): Promise<void>;
     onInstanceDangerAction?(action: "delete", instance: string): Promise<void>;
     onInstanceEnabledChange?(instance: string, enabled: boolean): Promise<void>;
-    onMcpConfigUpdate?(mcp: Record<string, JsonValue>): Promise<void>;
+    onMcpConfigUpdate?(mcp: ConfigMcpPatch): Promise<void>;
     onOAuthApprovalDecision?(
         approvalId: string,
         decision: "approve" | "deny"
     ): Promise<void>;
-    onValidateConfigDraft?(draft: Record<string, JsonValue>): Promise<void>;
+    onValidateConfigDraft?(draft: ConfigDraft): Promise<void>;
     onValidateInstanceCreateDraft?(
         draft: InstanceCreateDraft
     ): Promise<InstanceCreateSummary>;
+    projection: TuiInteractionProjection;
     store: TuiAppStore;
 }
 
@@ -77,10 +82,12 @@ export class TuiCommandDispatcher {
         this.#store = options.store;
         this.#focus = new TuiCommandDispatcherFocus({
             mainViewportRows: options.mainViewportRows,
+            projection: options.projection,
             store: this.#store
         });
         this.#audit = new TuiCommandDispatcherAudit({
             dispatch: (intent) => this.dispatch(intent),
+            projection: options.projection,
             store: this.#store
         });
         this.#editor = new TuiCommandDispatcherEditor({
@@ -97,6 +104,7 @@ export class TuiCommandDispatcher {
                 options.onValidateConfigDraft ?? unavailable,
             onValidateInstanceCreateDraft:
                 options.onValidateInstanceCreateDraft ?? unavailable,
+            projection: options.projection,
             store: this.#store,
             syncMainFocus: () => this.#focus.syncMainFocus()
         });
@@ -107,6 +115,7 @@ export class TuiCommandDispatcher {
             focus: this.#focus,
             onOAuthApprovalDecision:
                 options.onOAuthApprovalDecision ?? unavailable,
+            projection: options.projection,
             store: this.#store
         });
         this.#navigation = new TuiCommandDispatcherNavigation({
@@ -116,6 +125,7 @@ export class TuiCommandDispatcher {
             onLogsReload: options.onLogsReload,
             onPageReload: options.onPageReload,
             onRedraw: options.onRedraw,
+            projection: options.projection,
             store: this.#store
         });
     }

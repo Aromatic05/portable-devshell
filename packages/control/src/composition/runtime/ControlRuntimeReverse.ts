@@ -1,8 +1,8 @@
 import { createError, errorCodes } from "@portable-devshell/shared";
 
-import { ReverseConnectionGateway } from "../../control/reverse/ReverseConnectionGateway.js";
-import { ReverseControlService } from "../../control/reverse/ReverseControlService.js";
-import { ReverseCredentialStore } from "../../control/reverse/ReverseCredentialStore.js";
+import { ReverseConnectionGateway } from "../../control/reverse/connection/ReverseConnectionGateway.js";
+import { ReverseCredentialService } from "../../control/reverse/credential/ReverseCredentialService.js";
+import { ReverseCredentialStore } from "../../control/reverse/credential/ReverseCredentialStore.js";
 import type { ControlRuntimeState } from "./ControlRuntimeState.js";
 import type { ControlRuntimeMcp } from "./ControlRuntimeMcp.js";
 
@@ -12,7 +12,7 @@ export interface ControlRuntimeReverseOptions {
 }
 
 export class ControlRuntimeReverse {
-    readonly service?: ReverseControlService;
+    readonly service?: ReverseCredentialService;
     readonly #gateway?: ReverseConnectionGateway;
 
     constructor(options: ControlRuntimeReverseOptions) {
@@ -26,7 +26,7 @@ export class ControlRuntimeReverse {
             });
         }
         const credentialStore = new ReverseCredentialStore(options.state.homeDirectory);
-        this.service = new ReverseControlService({
+        this.service = new ReverseCredentialService({
             credentialStore,
             instanceRegistry: options.state.instances,
             publicBaseUrl: config.mcp.publicBaseUrl

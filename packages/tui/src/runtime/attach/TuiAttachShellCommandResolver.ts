@@ -1,5 +1,5 @@
 import { parseArgsStringToArgv } from "string-argv";
-import { isTuiAttachShellSupported } from "./TuiAttachShellAvailability.js";
+import { isTuiAttachShellSupported } from "../../state/instance/TuiInstanceAttachCapability.js";
 
 import {
     TuiAttachShellResolutionError,

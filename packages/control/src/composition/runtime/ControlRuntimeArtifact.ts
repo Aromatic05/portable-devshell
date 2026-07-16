@@ -3,7 +3,7 @@ import { join } from "node:path";
 
 import { createError, errorCodes } from "@portable-devshell/shared";
 
-import { ArtifactHttpRoute, artifactShareRoute } from "../../control/artifact/ArtifactHttpRoute.js";
+import { ArtifactHttpRoute, artifactShareRoute } from "../../control/artifact/route/ArtifactHttpRoute.js";
 import { ArtifactHostBridge } from "../../control/artifact/host/ArtifactHostBridge.js";
 import { ArtifactService } from "../../control/artifact/ArtifactService.js";
 import type { InstanceRegistry } from "../../control/instance/registry/InstanceRegistry.js";

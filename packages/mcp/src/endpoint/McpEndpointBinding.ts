@@ -7,7 +7,7 @@ import { CallToolRequestSchema, ErrorCode, isInitializeRequest, ListToolsRequest
 import { toControlErrorBody, type ControlErrorBody, type JsonValue } from "@portable-devshell/shared";
 
 import { McpToolSchemaUnavailableError } from "../tool/McpToolSchemaAdapter.js";
-import { McpEndpointWorker } from "../endpoint/McpEndpointWorker.js";
+import { McpEndpointWorker } from "./McpEndpointWorker.js";
 
 interface McpEndpointSession {
     server: Server;

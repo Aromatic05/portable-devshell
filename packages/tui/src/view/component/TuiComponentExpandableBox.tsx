@@ -1,29 +1,9 @@
 import stringWidth from "string-width";
 
-import type { TuiExpandableBoxStatus } from "../TuiUiModel.js";
+import type { TuiBoxLineTone, TuiBoxModel } from "../../state/TuiViewModel.js";
+import type { TuiExpandableBoxStatus } from "../../state/TuiUiState.js";
 
-export type BoxLineTone = "normal" | "muted" | "accent" | "success" | "warning" | "danger";
-
-export interface BoxLine {
-    disabled?: boolean;
-    id?: string;
-    text: string;
-    tone?: BoxLineTone;
-}
-
-export interface BoxModel {
-    collapsedLines: readonly [BoxLine] | readonly [BoxLine, BoxLine];
-    disabled?: boolean;
-    expanded: boolean;
-    expandedLines: readonly BoxLine[];
-    focused: boolean;
-    id: string;
-    expandedKey: string;
-    severity?: BoxLineTone;
-    selectedDetailLineId?: string;
-    status: TuiExpandableBoxStatus;
-    title: string;
-}
+export type { TuiBoxLine as BoxLine, TuiBoxLineTone as BoxLineTone, TuiBoxModel as BoxModel } from "../../state/TuiViewModel.js";
 
 export interface TuiComponentExpandableBoxRenderLine {
     backgroundColor?: string;
@@ -33,7 +13,7 @@ export interface TuiComponentExpandableBoxRenderLine {
     text: string;
 }
 
-export function renderExpandableBoxLines(box: BoxModel, requestedInnerWidth: number): TuiComponentExpandableBoxRenderLine[] {
+export function renderExpandableBoxLines(box: TuiBoxModel, requestedInnerWidth: number): TuiComponentExpandableBoxRenderLine[] {
     const innerWidth = Math.max(24, requestedInnerWidth);
     const bodyLines = box.expanded ? box.expandedLines : box.collapsedLines;
     const frame = box.focused
@@ -70,7 +50,7 @@ export function renderExpandableBoxLines(box: BoxModel, requestedInnerWidth: num
     ];
 }
 
-export function measureExpandableBoxHeight(box: BoxModel, requestedInnerWidth = 80): number {
+export function measureExpandableBoxHeight(box: TuiBoxModel, requestedInnerWidth = 80): number {
     const innerWidth = Math.max(24, requestedInnerWidth);
     const bodyLines = box.expanded ? box.expandedLines : box.collapsedLines;
     return bodyLines.reduce((height, line) => height + wrapTerminalText(line.text, innerWidth).length, 2);
@@ -161,7 +141,7 @@ function takeTerminalWidth(text: string, width: number): string {
     return output.length === 0 ? text.slice(0, 1) : output;
 }
 
-function lineColor(tone: BoxLineTone | undefined): string | undefined {
+function lineColor(tone: TuiBoxLineTone | undefined): string | undefined {
     switch (tone) {
         case "accent":
             return "cyan";

@@ -17,6 +17,7 @@ import {
     TuiAppStore,
     TuiFocusManager,
     tuiLayoutMetrics,
+    tuiViewProjection,
     wrapTerminalText
 } from "../../dist/testing.js";
 
@@ -400,6 +401,13 @@ test("wizard validation keeps the draft and reports the control error", async ()
     });
 
     await openCreateWizard(harness);
+    harness.store.setFormDraft("create", {
+        enabled: true,
+        mcp: { enabled: true },
+        name: "alpha",
+        provider: "reverse",
+        security: { mode: "disabled" }
+    });
     await harness.dispatch({ type: "editor.validate" });
 
     assert.equal(harness.store.getState().interaction.focusScope, "wizard");
@@ -438,7 +446,7 @@ test("wizard normalizes friendly container mode labels before control validation
     });
 
     await openCreateWizard(harness);
-    harness.store.setFormDraft("create", { container: { mode: "Existing stopped container" }, name: "alpha", provider: "docker" });
+    harness.store.setFormDraft("create", { container: { containerName: "alpha-container", mode: "Existing stopped container" }, name: "alpha", provider: "docker" });
     await harness.dispatch({ type: "editor.validate" });
 
     assert.equal(validatedMode, "existingStoppedContainer");
@@ -1138,6 +1146,7 @@ function createHarness(options: {
     const commandDispatcher = new TuiCommandDispatcher({
         focusManager,
         mainViewportRows: () => 12,
+        projection: tuiViewProjection,
         onApprovalDecision: async (instance, approvalId, decision) => {
             approvalDecisions.push({ approvalId, decision, instance });
         },

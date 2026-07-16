@@ -10,7 +10,7 @@
             "types": "./dist/index.d.ts",
             "default": "./dist/index.js"
         },
-        "./internal/frame": {
+        "./transport/frame": {
             "types": "./dist/transport/Frame.d.ts",
             "default": "./dist/transport/Frame.js"
         }

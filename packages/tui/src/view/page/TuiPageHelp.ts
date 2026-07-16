@@ -1,5 +1,5 @@
 import type { BoxModel } from "../component/TuiComponentExpandableBox.js";
-import type { TuiAppState } from "../../state/TuiStoreTypes.js";
+import type { TuiAppState } from "../../state/reducer/TuiStoreModel.js";
 import { makeBox } from "./TuiPageBoxSupport.js";
 
 export function buildHelpLines(state: TuiAppState): string[] {

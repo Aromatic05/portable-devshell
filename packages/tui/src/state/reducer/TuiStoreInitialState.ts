@@ -1,4 +1,4 @@
-import { createEmptyInteractionState } from "../../interaction/TuiInteractionModel.js";
+import { createEmptyInteractionState } from "../TuiInteractionState.js";
 import type { TuiAppState } from "./TuiStoreModel.js";
 
 export function createInitialTuiAppState(): TuiAppState {

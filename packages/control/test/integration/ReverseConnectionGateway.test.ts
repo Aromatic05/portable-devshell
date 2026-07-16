@@ -14,7 +14,7 @@ import { ReverseRpcFrameCodec as FrameCodec } from "../../dist/control/reverse/r
 import {
     InstanceRegistry,
     ReverseConnectionGateway,
-    ReverseControlService,
+    ReverseCredentialService,
     ReverseCredentialStore,
     TodoService
 } from "../../dist/testing.js";
@@ -106,7 +106,7 @@ test("WSS reverse connection authenticates, handshakes, and a higher generation 
         await firstClosed;
         assert.equal(worker.snapshot().reverse?.transport, "wss");
 
-        const reverseControl = new ReverseControlService({
+        const reverseControl = new ReverseCredentialService({
             credentialStore,
             instanceRegistry: registry,
             publicBaseUrl: "http://127.0.0.1/base"

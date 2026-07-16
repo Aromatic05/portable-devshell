@@ -7,7 +7,7 @@
             "@portable-devshell/shared": [
                 "./packages/shared/dist/index.d.ts"
             ],
-            "@portable-devshell/shared/internal/frame": [
+            "@portable-devshell/shared/transport/frame": [
                 "./packages/shared/dist/transport/Frame.d.ts"
             ],
             "@portable-devshell/core": [

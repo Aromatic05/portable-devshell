@@ -10,7 +10,7 @@ import type { TuiAppStore } from "../../state/TuiAppStore.js";
 import type {
     TuiInstanceListEntry,
     TuiLogEntry
-} from "../../state/TuiStoreTypes.js";
+} from "../../state/reducer/TuiStoreModel.js";
 
 const LOG_READ_LIMIT = 100;
 const TOOL_CALL_READ_LIMIT = 100;

@@ -8,14 +8,14 @@ import {
     type ArtifactTransferRecord
 } from "@portable-devshell/shared";
 
-import { readTransferPayloadSourceInput, sourceTypeFromPayload } from "./ArtifactSource.js";
+import { readTransferPayloadSourceInput, sourceTypeFromPayload } from "../ArtifactSource.js";
 import {
     ARTIFACT_TRANSFER_PAYLOAD_TTL_MS,
     requireArtifactEndpoint,
     type ArtifactServiceEndpoint,
     type ArtifactServiceSchedule,
     type StoredArtifactTransfer
-} from "./ArtifactServiceModel.js";
+} from "../ArtifactServiceModel.js";
 
 interface ArtifactTransferExecutorOptions {
     chunkBytes: number;

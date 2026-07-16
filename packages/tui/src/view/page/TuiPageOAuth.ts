@@ -1,7 +1,7 @@
 import type { OAuthApprovalRequest } from "@portable-devshell/shared";
 
 import type { BoxModel } from "../component/TuiComponentExpandableBox.js";
-import type { TuiAppState } from "../../state/TuiStoreTypes.js";
+import type { TuiAppState } from "../../state/reducer/TuiStoreModel.js";
 import { compactSummary, makeBox } from "./TuiPageBoxSupport.js";
 
 export function buildOAuthPageBoxes(state: TuiAppState): BoxModel[] {

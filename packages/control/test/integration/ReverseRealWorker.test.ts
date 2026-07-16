@@ -17,7 +17,7 @@ import {
 
 import { ControlServer } from "../../dist/server/ControlServer.js";
 import { ControlPathHome } from "@portable-devshell/shared";
-import { ReverseCredentialStore } from "../../dist/control/reverse/ReverseCredentialStore.js";
+import { ReverseCredentialStore } from "../../dist/control/reverse/credential/ReverseCredentialStore.js";
 import { encodeGlobalConfig, encodeInstanceConfig } from "../ConfigTomlTestSupport.ts";
 
 test("real Rust reverse worker connects to the TS gateway and executes a tool call", async (t) => {

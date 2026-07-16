@@ -16,12 +16,12 @@ import {
     selectHeaderTitle,
     selectSearchModel,
     selectSidebarModel
-} from "../state/TuiSelectors.js";
-import type { TuiRuntime } from "../runtime/TuiRuntime.js";
+} from "./model/TuiViewProjection.js";
+import type { TuiAppController } from "./TuiAppController.js";
 import { mainInnerWidth, tuiLayoutMetrics, TuiRootLayout } from "./TuiRootLayout.js";
 
 export interface TuiAppProps {
-    runtime: TuiRuntime;
+    runtime: TuiAppController;
 }
 
 export function TuiApp(props: TuiAppProps) {

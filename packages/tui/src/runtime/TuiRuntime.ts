@@ -12,9 +12,10 @@ import { TuiKeyDispatcher } from "../interaction/input/TuiKeyDispatcher.js";
 import { TuiRenderScheduler } from "../view/render/TuiRenderScheduler.js";
 import { buildFocusGraphForState } from "../view/screen/TuiScreenRouter.js";
 import { TuiAppStore } from "../state/TuiAppStore.js";
-import { selectMainScreenModel } from "../state/TuiSelectors.js";
-import type { TuiPageId } from "../view/TuiUiModel.js";
+import { selectMainScreenModel, tuiViewProjection } from "../view/model/TuiViewProjection.js";
+import type { TuiPageId } from "../state/TuiUiState.js";
 import { TuiApp } from "../view/TuiApp.js";
+import type { TuiAppKey } from "../view/TuiAppController.js";
 import {
     buildTuiHitRegions,
     hitTargetAt,
@@ -163,6 +164,7 @@ export class TuiRuntime {
             onValidateConfigDraft: async (draft) => {
                 await this.#operations.validateConfigDraft(draft);
             },
+            projection: tuiViewProjection,
             onValidateInstanceCreateDraft: async (draft) => {
                 return await this.#operations.validateInstanceCreateDraft(
                     draft
@@ -214,23 +216,7 @@ export class TuiRuntime {
         return this.#stdout.rows ?? 40;
     }
 
-    async handleInput(input: string, key: {
-        backspace?: boolean;
-        ctrl?: boolean;
-        delete?: boolean;
-        downArrow?: boolean;
-        escape?: boolean;
-        end?: boolean;
-        home?: boolean;
-        leftArrow?: boolean;
-        pageDown?: boolean;
-        pageUp?: boolean;
-        return?: boolean;
-        rightArrow?: boolean;
-        shift?: boolean;
-        tab?: boolean;
-        upArrow?: boolean;
-    }): Promise<void> {
+    async handleInput(input: string, key: TuiAppKey): Promise<void> {
         const intents = this.keyDispatcher.dispatch(
             this.store.getState().interaction.focusScope,
             { input, key }

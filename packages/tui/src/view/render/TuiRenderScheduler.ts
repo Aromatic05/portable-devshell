@@ -1,5 +1,5 @@
 import type { TuiAppStore } from "../../state/TuiAppStore.js";
-import type { TuiAppState } from "../../state/TuiStoreTypes.js";
+import type { TuiAppState } from "../../state/reducer/TuiStoreModel.js";
 
 export class TuiRenderScheduler {
     readonly #listeners = new Set<() => void>();

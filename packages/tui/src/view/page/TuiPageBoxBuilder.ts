@@ -1,10 +1,10 @@
 import type { BoxModel } from "../component/TuiComponentExpandableBox.js";
-import type { TuiPageId } from "../TuiUiModel.js";
-import type { TuiAppState } from "../../state/TuiStoreTypes.js";
+import type { TuiPageId } from "../../state/TuiUiState.js";
+import type { TuiAppState } from "../../state/reducer/TuiStoreModel.js";
 import { buildAuditPageBoxes } from "./TuiPageAudit.js";
 import { buildConfigPageBoxes } from "./TuiPageConfig.js";
 import { buildConnectorPageBoxes } from "./TuiPageConnector.js";
-import { buttonLine } from "../../interaction/editor/TuiEditorSupport.js";
+import { buttonLine } from "../editor/TuiEditorView.js";
 import { buildHelpPageBoxes } from "./TuiPageHelp.js";
 import { buildInstancesPageBoxes } from "./TuiPageInstances.js";
 import { buildLogsPageBoxes } from "./TuiPageLogs.js";

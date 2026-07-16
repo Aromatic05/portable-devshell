@@ -1,6 +1,6 @@
 import type { PrefixRouteModuleDefinition } from "@portable-devshell/shared";
 
-import { requirePort, routeModule } from "../../route/ControlRouteFactory.js";
+import { requirePort, routeModule } from "../../../route/ControlRouteFactory.js";
 import {
     readArtifactShareInput,
     readArtifactTransferStartInput,
@@ -8,7 +8,7 @@ import {
     readShareId,
     readTransferId
 } from "./ArtifactRouteInput.js";
-import type { ArtifactService } from "./ArtifactService.js";
+import type { ArtifactService } from "../ArtifactService.js";
 
 export function createArtifactRouteModule(service?: ArtifactService): PrefixRouteModuleDefinition {
     const artifact = () => requirePort(service, "Artifact service is not available.");

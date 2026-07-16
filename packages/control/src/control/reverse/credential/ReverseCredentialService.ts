@@ -1,9 +1,9 @@
 import { createError, errorCodes, type ReverseDeviceCodeResult } from "@portable-devshell/shared";
 
-import type { ReverseInstanceLookupPort, ReverseInstancePort } from "./ReverseInstancePort.js";
+import type { ReverseInstanceLookupPort, ReverseInstancePort } from "../ReverseInstancePort.js";
 import { ReverseCredentialStore } from "./ReverseCredentialStore.js";
 
-export class ReverseControlService {
+export class ReverseCredentialService {
     readonly #credentialStore: ReverseCredentialStore;
     readonly #instanceRegistry: ReverseInstanceLookupPort;
     readonly #publicBaseUrl: string;

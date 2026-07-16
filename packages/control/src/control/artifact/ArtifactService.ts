@@ -12,12 +12,12 @@ import type {
 } from "@portable-devshell/shared";
 
 import { ArtifactRecordStore } from "./ArtifactRecordStore.js";
-import { ArtifactShareService } from "./ArtifactShareService.js";
+import { ArtifactShareService } from "./share/ArtifactShareService.js";
 import type {
     ArtifactServiceOptions,
     ArtifactShareAccess
 } from "./ArtifactServiceModel.js";
-import { ArtifactTransferService } from "./ArtifactTransferService.js";
+import { ArtifactTransferService } from "./transfer/ArtifactTransferService.js";
 
 export type {
     ArtifactServiceEndpoint,

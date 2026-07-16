@@ -1,13 +1,13 @@
+import { TuiFocusItem } from "../../state/focus/TuiFocusItem.js";
 import { Box, Text } from "ink";
 import type { ApprovalRequest, ToolCallRecord } from "@portable-devshell/shared";
 
 import { renderExpandableBoxLines } from "../component/TuiComponentExpandableBox.js";
 import { TuiComponentErrorBanner } from "../component/TuiComponentErrorBanner.js";
-import { TuiFocusGraph, type TuiFocusNode } from "../../interaction/focus/TuiFocusGraph.js";
-import type { TuiFocusItem } from "../../interaction/TuiInteractionModel.js";
-import type { TuiPageId } from "../TuiUiModel.js";
-import type { TuiAppState } from "../../state/TuiStoreTypes.js";
-import { selectMainBoxFlowMetrics, selectMainScreenModel } from "../../state/TuiSelectors.js";
+import { TuiFocusGraph, type TuiFocusNode } from "../../state/focus/TuiFocusGraph.js";
+import type { TuiPageId } from "../../state/TuiUiState.js";
+import type { TuiAppState } from "../../state/reducer/TuiStoreModel.js";
+import { selectMainBoxFlowMetrics, selectMainScreenModel } from "../model/TuiViewProjection.js";
 
 export const orderedPages: TuiPageId[] = ["instances", "config", "connector", "oauth", "audit", "logs", "todo", "help"];
 
@@ -126,9 +126,6 @@ function clamp(value: number, min: number, max: number): number {
     return Math.min(Math.max(value, min), max);
 }
 
-export function pageFromShortcut(index: number): TuiPageId | undefined {
-    return orderedPages[index - 1];
-}
 
 export function buildFocusGraphForState(state: TuiAppState): TuiFocusGraph {
     switch (state.interaction.focusScope) {

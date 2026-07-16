@@ -1,18 +1,35 @@
-import { type ApprovalRequest, type ArtifactShareResult, type ArtifactTransferRecord, type ClientEvent, type ControlError, type InstanceSnapshot, type JsonValue, type OAuthApprovalRequest, type TodoReadResult, type ToolCallRecord } from "@portable-devshell/shared";
-
-import { type TuiEditorState, type TuiUiIntent } from "../interaction/TuiInteractionModel.js";
-import type { TuiAuditPageState, TuiFocusScope, TuiPageId, TuiSidebarCursor, TuiSidebarFocus } from "../view/TuiUiModel.js";
 import {
-    createInitialTuiAppState,
+    type ApprovalRequest,
+    type ArtifactShareResult,
+    type ArtifactTransferRecord,
+    type ClientEvent,
+    type ControlError,
+    type InstanceSnapshot,
+    type JsonValue,
+    type OAuthApprovalRequest,
+    type TodoReadResult,
+    type ToolCallRecord
+} from "@portable-devshell/shared";
+
+import type { TuiEditorState, TuiUiIntent } from "./TuiInteractionState.js";
+import type {
+    TuiAuditPageState,
+    TuiFocusScope,
+    TuiPageId,
+    TuiSidebarCursor,
+    TuiSidebarFocus
+} from "./TuiUiState.js";
+import { createInitialTuiAppState } from "./reducer/TuiStoreInitialState.js";
+import { tuiAppReducer } from "./reducer/TuiStoreReducer.js";
+import {
     toRawEventRecord,
-    tuiAppReducer,
     type TuiAppAction,
     type TuiAppState,
     type TuiCommandRecord,
     type TuiConnectionStatus,
     type TuiInstanceListEntry,
-    type TuiLogEntry
-} from "./TuiStoreTypes.js";
+    type TuiLogEntry,
+} from "./reducer/TuiStoreModel.js";
 
 export interface TuiAppStoreOptions {
     initialState?: TuiAppState;

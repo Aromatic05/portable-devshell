@@ -1,5 +1,5 @@
-import { selectErrorMessage, selectMainBoxFlowMetrics, selectMainScreenModel, selectSearchModel, selectSidebarModel } from "../state/TuiSelectors.js";
-import type { TuiAppState } from "../state/TuiStoreTypes.js";
+import { selectErrorMessage, selectMainBoxFlowMetrics, selectMainScreenModel, selectSearchModel, selectSidebarModel } from "./model/TuiViewProjection.js";
+import type { TuiAppState } from "../state/reducer/TuiStoreModel.js";
 import { isTerminalSizeSupported, mainInnerWidth, tuiLayoutMetrics } from "./TuiRootLayout.js";
 
 export type TuiHitTarget =

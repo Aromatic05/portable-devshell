@@ -1,19 +1,22 @@
-import { auditInputText, auditOutputText, resolveAuditOutput } from "../../../view/page/TuiPageAuditInputPresentation.js";
+import { auditInputText, auditOutputText, resolveAuditOutput } from "../../../state/audit/TuiAuditPresentation.js";
 import type { TuiAppStore } from "../../../state/TuiAppStore.js";
-import { selectMainScrollKey } from "../../../state/TuiSelectors.js";
-import type { TuiUiIntent } from "../../TuiInteractionModel.js";
+import type { TuiUiIntent } from "../../../state/TuiInteractionState.js";
+import type { TuiInteractionProjection } from "../../TuiInteractionProjection.js";
 
 interface CommandAuditOptions {
     dispatch(intent: TuiUiIntent): Promise<boolean>;
+    projection: TuiInteractionProjection;
     store: TuiAppStore;
 }
 
 export class TuiCommandDispatcherAudit {
     readonly #dispatch: CommandAuditOptions["dispatch"];
+    readonly #projection: TuiInteractionProjection;
     readonly #store: TuiAppStore;
 
     constructor(options: CommandAuditOptions) {
         this.#dispatch = options.dispatch;
+        this.#projection = options.projection;
         this.#store = options.store;
     }
 
@@ -23,7 +26,7 @@ export class TuiCommandDispatcherAudit {
         this.#store.setAuditPage({
             approvalId,
             listFocusId: state.ui.mainFocusId,
-            listScrollOffset: state.ui.scrollOffsets[selectMainScrollKey(state)] ?? 0,
+            listScrollOffset: state.ui.scrollOffsets[this.#projection.selectMainScrollKey(state)] ?? 0,
             mode: "approvalDetail",
             selectedAction: "back"
         });
@@ -74,7 +77,7 @@ export class TuiCommandDispatcherAudit {
         this.#store.setFocusScope("mainBoxes");
         this.#store.setMainFocusId(auditPage.listFocusId);
         if (auditPage.listScrollOffset !== undefined) {
-            this.#store.setScrollOffset(selectMainScrollKey(this.#store.getState()), auditPage.listScrollOffset);
+            this.#store.setScrollOffset(this.#projection.selectMainScrollKey(this.#store.getState()), auditPage.listScrollOffset);
         }
     }
 

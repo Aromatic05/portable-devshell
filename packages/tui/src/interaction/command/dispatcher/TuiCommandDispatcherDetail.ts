@@ -1,6 +1,6 @@
 import type { TuiAppStore } from "../../../state/TuiAppStore.js";
-import { selectMainScreenModel } from "../../../state/TuiSelectors.js";
-import type { TuiUiIntent } from "../../TuiInteractionModel.js";
+import type { TuiInteractionProjection } from "../../TuiInteractionProjection.js";
+import type { TuiUiIntent } from "../../../state/TuiInteractionState.js";
 import type { TuiCommandDispatcherAudit } from "./TuiCommandDispatcherAudit.js";
 import type { TuiCommandDispatcherEditor } from "./TuiCommandDispatcherEditor.js";
 import type { TuiCommandDispatcherFocus } from "./TuiCommandDispatcherFocus.js";
@@ -11,6 +11,7 @@ interface CommandDispatcherDetailOptions {
     editor: TuiCommandDispatcherEditor;
     focus: TuiCommandDispatcherFocus;
     onOAuthApprovalDecision(approvalId: string, decision: "approve" | "deny"): Promise<void>;
+    projection: TuiInteractionProjection;
     store: TuiAppStore;
 }
 
@@ -20,6 +21,7 @@ export class TuiCommandDispatcherDetail {
     readonly #editor: TuiCommandDispatcherEditor;
     readonly #focus: TuiCommandDispatcherFocus;
     readonly #onOAuthApprovalDecision: CommandDispatcherDetailOptions["onOAuthApprovalDecision"];
+    readonly #projection: TuiInteractionProjection;
     readonly #store: TuiAppStore;
 
     constructor(options: CommandDispatcherDetailOptions) {
@@ -28,13 +30,14 @@ export class TuiCommandDispatcherDetail {
         this.#editor = options.editor;
         this.#focus = options.focus;
         this.#onOAuthApprovalDecision = options.onOAuthApprovalDecision;
+        this.#projection = options.projection;
         this.#store = options.store;
     }
 
     async activate(): Promise<boolean> {
             const state = this.#store.getState();
             const boxId = state.ui.mainFocusId;
-            const box = selectMainScreenModel(state).boxes.find((candidate) => candidate.id === boxId);
+            const box = this.#projection.selectMainScreenModel(state).boxes.find((candidate) => candidate.id === boxId);
             const lineId = box?.selectedDetailLineId;
             const actionId = boxId === undefined || lineId === undefined ? undefined : lineId.slice(`${boxId}:`.length);
             const selectedLine = box?.expandedLines.find((line) => line.id === lineId);
