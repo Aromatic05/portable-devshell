@@ -108,6 +108,7 @@ jobs:
             - name: 打包可分发应用
               run: |
                   pnpm package:app -- --output-dir ./release-assets
+                  pnpm smoke:package -- ./release-assets/portable-devshell-app.tar.gz
                   cp ./scripts/install-release.sh ./release-assets/install-release.sh
                   chmod 755 ./release-assets/install-release.sh
                   (cd ./release-assets && sha256sum install-release.sh > install-release.sh.sha256)

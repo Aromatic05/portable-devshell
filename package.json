@@ -14,12 +14,13 @@
         "lint:fix": "eslint . --fix",
         "version:set": "node ./scripts/version-state.mjs set",
         "version:check": "node ./scripts/version-state.mjs check-development",
-        "test": "pnpm test:boundaries && pnpm -r --workspace-concurrency=1 --filter \"./packages/*\" test",
+        "test": "pnpm test:boundaries && pnpm test:release-layout && pnpm -r --workspace-concurrency=1 --filter \"./packages/*\" test",
         "typecheck": "pnpm -r --filter \"./packages/*\" typecheck",
         "install:local": "node ./scripts/install-local.mjs",
         "package:app": "node ./scripts/package-app.mjs",
         "smoke:package": "node ./scripts/smoke-package.mjs",
-        "test:boundaries": "node --test scripts/package-boundary.test.mjs"
+        "test:boundaries": "node --test scripts/package-boundary.test.mjs",
+        "test:release-layout": "node --test scripts/application-layout.test.mjs scripts/install-release.test.mjs"
     },
     "devDependencies": {
         "@types/react": "^18.3.11",

@@ -258,8 +258,7 @@ export class ClientConnection {
         }
 
         const generation = this.#persistentGeneration;
-        let promise!: Promise<ClientSession>;
-        promise = this.#connect((session, error) => {
+        const promise = this.#connect((session, error) => {
             if (generation !== this.#persistentGeneration || this.#closed) {
                 return;
             }

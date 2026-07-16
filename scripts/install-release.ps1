@@ -28,6 +28,29 @@ function Assert-Sha256([string]$File, [string]$ShaFile) {
     if ($actual -ne $expected) { throw "SHA-256 校验失败：$File" }
 }
 
+function Get-ApplicationCliRelativePath([string]$ApplicationDirectory) {
+    $packageManifestPath = Join-Path $ApplicationDirectory "package.json"
+    if (-not (Test-Path -LiteralPath $packageManifestPath -PathType Leaf)) {
+        throw "应用包缺少 package.json：$packageManifestPath"
+    }
+    $packageManifest = Get-Content -Raw -LiteralPath $packageManifestPath | ConvertFrom-Json
+    $entry = [string]$packageManifest.bin.devshell
+    if ([string]::IsNullOrWhiteSpace($entry)) {
+        throw "应用包未声明 bin.devshell：$packageManifestPath"
+    }
+    if ([IO.Path]::IsPathRooted($entry)) {
+        throw "应用包 bin.devshell 必须是相对路径：$entry"
+    }
+
+    $root = [IO.Path]::GetFullPath($ApplicationDirectory).TrimEnd('\')
+    $absolute = [IO.Path]::GetFullPath((Join-Path $root $entry))
+    $rootPrefix = "$root\"
+    if (-not $absolute.StartsWith($rootPrefix, [StringComparison]::OrdinalIgnoreCase)) {
+        throw "应用包 bin.devshell 逃逸 package 根目录：$entry"
+    }
+    return $absolute.Substring($rootPrefix.Length).Replace('\', '/')
+}
+
 function Test-ControlProcessRunning([int]$ControlProcessId) {
     return $null -ne (Get-Process -Id $ControlProcessId -ErrorAction SilentlyContinue)
 }
@@ -159,8 +182,17 @@ try {
     New-Item -ItemType Directory -Force -Path $installRoot, $versionsDirectory, $binDirectory, $devshellHome | Out-Null
     Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $stagingDirectory, $backupDirectory
     Copy-Item -Recurse -Force -LiteralPath $appDirectory -Destination $stagingDirectory
+    $cliRelativePath = Get-ApplicationCliRelativePath $stagingDirectory
+    $stagingCli = Join-Path $stagingDirectory $cliRelativePath
+    if (-not (Test-Path -LiteralPath $stagingCli -PathType Leaf)) {
+        throw "应用包声明的 CLI 不存在：$stagingCli"
+    }
 
-    $currentCli = Join-Path $currentDirectory "dist\cli\CliMain.js"
+    $currentCli = ""
+    if (Test-Path -LiteralPath (Join-Path $currentDirectory "package.json") -PathType Leaf) {
+        $currentCliRelativePath = Get-ApplicationCliRelativePath $currentDirectory
+        $currentCli = Join-Path $currentDirectory $currentCliRelativePath
+    }
     Stop-InstalledControl $currentCli $devshellHome
 
     foreach ($target in $targets) { Install-Worker $target $temporary $devshellHome }
@@ -174,7 +206,7 @@ try {
     Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $backupDirectory
 
     $commandPath = Join-Path $binDirectory "devshell.cmd"
-    $cliPath = Join-Path $currentDirectory "dist\cli\CliMain.js"
+    $cliPath = Join-Path $currentDirectory $cliRelativePath
     Set-Content -Encoding ASCII -LiteralPath $commandPath -Value "@echo off`r`nnode `"$cliPath`" %*`r`n"
     Write-Host "已安装 portable-devshell $version。"
     Write-Host "命令：$commandPath"

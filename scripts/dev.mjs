@@ -1,17 +1,21 @@
-import { accessSync, constants } from "node:fs";
-import { resolve } from "node:path";
 import { spawn } from "node:child_process";
+import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
-const cliEntry = resolve("packages/cli/dist/cli/CliMain.js");
+import { assertPackageBinFile, normalizeCliArguments, readPackageBinPath } from "./application-layout.mjs";
 
+const repositoryRoot = fileURLToPath(new URL("../", import.meta.url));
+let cliEntry;
 try {
-    accessSync(cliEntry, constants.R_OK);
-} catch {
-    process.stderr.write(`missing built cli entry: ${cliEntry}\nrun pnpm build first\n`);
+    cliEntry = (await assertPackageBinFile(
+        await readPackageBinPath(resolve(repositoryRoot, "packages", "cli"), "devshell")
+    )).absolutePath;
+} catch (error) {
+    process.stderr.write(`${error instanceof Error ? error.message : String(error)}\nrun pnpm build first\n`);
     process.exit(1);
 }
 
-const child = spawn(process.execPath, [cliEntry, ...process.argv.slice(2)], {
+const child = spawn(process.execPath, [cliEntry, ...normalizeCliArguments(process.argv.slice(2))], {
     env: process.env,
     stdio: "inherit"
 });

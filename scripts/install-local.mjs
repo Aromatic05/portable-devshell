@@ -5,6 +5,8 @@ import { homedir, tmpdir } from "node:os";
 import { delimiter, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { assertPackageBinFile, readPackageBinPath, writePortableApplicationManifest, tryReadPackageBinPath } from "./application-layout.mjs";
+
 
 class WorkerReleaseIntegrityError extends Error {
     constructor(message) {
@@ -49,7 +51,9 @@ await mkdir(installRoot, { mode: 0o700, recursive: true });
 try {
     runPnpm(["build"]);
     runPnpm(["--filter", "@portable-devshell/cli", "--prod", "deploy", stagingDirectory]);
-    if (process.platform !== "win32") await chmod(resolve(stagingDirectory, "dist", "cli", "CliMain.js"), 0o755);
+    await writePortableApplicationManifest(stagingDirectory, { minimumNodeMajor: 24, version });
+    const stagingCli = await assertPackageBinFile(await readPackageBinPath(stagingDirectory, "devshell"));
+    if (process.platform !== "win32") await chmod(stagingCli.absolutePath, 0o755);
 
     const installedWorkers = {};
     for (const target of targets) {
@@ -207,22 +211,23 @@ async function activateHostWorker() {
 }
 
 async function activateApplication(versionDirectory) {
+    const cli = await assertPackageBinFile(await readPackageBinPath(versionDirectory, "devshell"));
     await mkdir(binDirectory, { recursive: true });
     if (process.platform === "win32") {
         await replaceSymlink(currentLink, versionDirectory, "junction");
-        const cliPath = resolve(currentLink, "dist", "cli", "CliMain.js");
+        const cliPath = resolve(currentLink, cli.relativePath);
         await writeFile(commandLink, `@echo off\r\nnode "${cliPath}" %*\r\n`, "utf8");
     } else {
         await replaceSymlink(currentLink, `versions/${version}`);
-        await replaceSymlink(commandLink, resolve(currentLink, "dist", "cli", "CliMain.js"));
+        await replaceSymlink(commandLink, resolve(currentLink, cli.relativePath));
     }
 }
 
 async function stopInstalledControl() {
-    const currentCli = resolve(currentLink, "dist", "cli", "CliMain.js");
+    const currentCli = await tryReadPackageBinPath(currentLink, "devshell");
     const pidFile = resolve(devshellHome, "control", "control.pid");
-    if (await pathExists(currentCli)) {
-        const result = spawnSync(process.execPath, [currentCli, "stop"], {
+    if (currentCli !== undefined && await pathExists(currentCli.absolutePath)) {
+        const result = spawnSync(process.execPath, [currentCli.absolutePath, "stop"], {
             cwd: home,
             encoding: "utf8",
             env: process.env

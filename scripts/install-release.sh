@@ -41,6 +41,30 @@ verify_sha256() {
     fi
 }
 
+resolve_cli_relative_path() {
+    app_directory=$1
+    node - "$app_directory/package.json" <<'NODE'
+const fs = require("fs");
+const path = require("path");
+const manifestPath = process.argv[2];
+const root = path.resolve(path.dirname(manifestPath));
+const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+const entry = manifest?.bin?.devshell;
+if (typeof entry !== "string" || entry.trim().length === 0) {
+    throw new Error(`Application package does not declare bin.devshell: ${manifestPath}`);
+}
+if (path.isAbsolute(entry)) {
+    throw new Error(`Application bin.devshell must be relative: ${entry}`);
+}
+const absolute = path.resolve(root, entry);
+const relative = path.relative(root, absolute);
+if (relative === "" || relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
+    throw new Error(`Application bin.devshell escapes package root: ${entry}`);
+}
+process.stdout.write(relative.split(path.sep).join("/"));
+NODE
+}
+
 cleanup_control_runtime() {
     pid_file=$1
     rm -f "$pid_file"
@@ -229,9 +253,20 @@ worker_bin_directory="$devshell_home/bin"
 rm -rf "$staging_directory" "$backup_directory"
 mkdir -p -m 700 "$install_root" "$versions_directory" "$worker_bin_directory" "$staging_directory"
 cp -R "$temporary/app/." "$staging_directory/"
-chmod 755 "$staging_directory/dist/cli/CliMain.js"
+cli_relative_path=$(resolve_cli_relative_path "$staging_directory")
+staging_cli="$staging_directory/$cli_relative_path"
+if [ ! -f "$staging_cli" ]; then
+    echo "应用包声明的 CLI 不存在：$staging_cli" >&2
+    exit 1
+fi
+chmod 755 "$staging_cli"
 
-if ! stop_installed_control "$current_link/dist/cli/CliMain.js"; then
+current_cli=
+if [ -f "$current_link/package.json" ]; then
+    current_cli_relative_path=$(resolve_cli_relative_path "$current_link")
+    current_cli="$current_link/$current_cli_relative_path"
+fi
+if ! stop_installed_control "$current_cli"; then
     echo "无法安全停止当前 control daemon，安装已取消。" >&2
     exit 1
 fi
@@ -248,7 +283,7 @@ fi
 if mv "$staging_directory" "$version_directory"; then
     ln -sfn "versions/$version" "$current_link"
     mkdir -p "$bin_directory"
-    ln -sfn "$current_link/dist/cli/CliMain.js" "$command_link"
+    ln -sfn "$current_link/$cli_relative_path" "$command_link"
     rm -rf "$backup_directory"
 else
     rm -rf "$version_directory"

@@ -4,13 +4,17 @@ import { tmpdir } from "node:os";
 import { isAbsolute, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { assertPackageBinFile, readPackageBinPath } from "./application-layout.mjs";
+
 const workerArgument = process.argv[2];
 if (workerArgument === undefined) {
     throw new Error("usage: node scripts/smoke-client.mjs <worker executable>");
 }
 
 const repositoryRoot = fileURLToPath(new URL("../", import.meta.url));
-const cli = process.env.PORTABLE_DEVSHELL_CLI_PATH ?? resolve(repositoryRoot, "packages", "cli", "dist", "cli", "CliMain.js");
+const cli = process.env.PORTABLE_DEVSHELL_CLI_PATH ?? (await assertPackageBinFile(
+    await readPackageBinPath(resolve(repositoryRoot, "packages", "cli"), "devshell")
+)).absolutePath;
 const worker = isAbsolute(workerArgument) ? workerArgument : resolve(process.cwd(), workerArgument);
 const root = await mkdtemp(resolve(tmpdir(), "portable-devshell-client-smoke-"));
 const home = resolve(root, "user");

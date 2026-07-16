@@ -12,6 +12,8 @@ import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { assertPackageBinFile, readPackageBinPath, writePortableApplicationManifest } from "./application-layout.mjs";
+
 const repoRoot = fileURLToPath(new URL("../", import.meta.url));
 const args = process.argv.slice(2);
 const outputDirectory = resolve(
@@ -36,7 +38,9 @@ try {
         "deploy",
         appDirectory,
     ]);
-    await chmod(resolve(appDirectory, "dist", "cli", "CliMain.js"), 0o755);
+    await writePortableApplicationManifest(appDirectory, { minimumNodeMajor: 24, version });
+    const cli = await assertPackageBinFile(await readPackageBinPath(appDirectory, "devshell"));
+    await chmod(cli.absolutePath, 0o755);
     await writeFile(
         resolve(appDirectory, "portable-devshell-install.json"),
         `${JSON.stringify({ minimumNodeMajor: 24, version }, null, 2)}\n`,

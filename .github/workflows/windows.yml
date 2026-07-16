@@ -37,9 +37,12 @@ jobs:
             - name: 校验 TypeScript client
               run: |
                   pnpm build
-                  node -e "const fs=require('node:fs'); for (const path of ['packages/cli/dist/cli/CliMain.js','packages/cli/node_modules/@portable-devshell/control/dist/index.js']) if (!fs.existsSync(path)) throw new Error('missing build output: '+path)"
+                  node -e "const fs=require('node:fs'); for (const path of ['packages/cli/dist/CliMain.js','packages/cli/node_modules/@portable-devshell/control/dist/index.js']) if (!fs.existsSync(path)) throw new Error('missing build output: '+path)"
                   pnpm typecheck
                   pnpm lint
+
+            - name: 校验发布布局
+              run: pnpm test:release-layout
 
             - name: 校验 PowerShell 安装器语法
               shell: pwsh
