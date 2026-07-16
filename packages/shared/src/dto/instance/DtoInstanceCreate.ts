@@ -1,3 +1,8 @@
+import type {
+    ConfigInstanceDraft,
+    ControlProviderKind,
+    ControlSecurityMode
+} from "../../config/ConfigModel.js";
 import type { ToolCapability } from "../tool/DtoToolDefinition.js";
 import type { InstanceSnapshot } from "./DtoInstanceSnapshot.js";
 
@@ -80,7 +85,7 @@ export type InstanceContainerConfig =
     | InstanceContainerExistingImageConfig
     | InstanceContainerExistingStoppedContainerConfig;
 
-export type InstanceCreateProvider = "local" | "ssh" | "docker" | "podman" | "reverse";
+export type InstanceCreateProvider = ControlProviderKind;
 
 export interface InstanceCreateSchema {
     container: {
@@ -100,31 +105,10 @@ export interface InstanceCreateSchema {
     defaultMcpEnabled: boolean;
     defaultMcpCapabilities: readonly ToolCapability[];
     defaultMcpGroups: readonly string[];
-    defaultSecurityMode: string;
+    defaultSecurityMode: ControlSecurityMode;
 }
 
-export interface InstanceCreateDraft {
-    container?: InstanceContainerConfig;
-    dockerBinary?: string;
-    enabled?: boolean;
-    mcp?: {
-        enabled?: boolean;
-        tools?: {
-            capabilities?: ToolCapability[];
-            groups?: string[];
-        };
-    };
-    name: string;
-    podmanBinary?: string;
-    provider: InstanceCreateProvider;
-    security?: {
-        mode?: string;
-    };
-    ssh?: {
-        command?: string;
-    };
-    workspace?: string;
-}
+export type InstanceCreateDraft = ConfigInstanceDraft;
 
 export interface InstanceCreateSummary {
     container?: InstanceContainerConfig;
@@ -142,7 +126,7 @@ export interface InstanceCreateSummary {
     podmanBinary?: string;
     provider: InstanceCreateProvider;
     security: {
-        mode: string;
+        mode: ControlSecurityMode;
     };
     ssh?: {
         command?: string;

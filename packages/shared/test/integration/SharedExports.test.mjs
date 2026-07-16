@@ -1,40 +1,71 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-const { configSchema, errorCodes, validateEvent } = await import("@portable-devshell/shared");
+const {
+    applyConfigInstancePatch,
+    applyConfigMcpPatch,
+    createDefaultControlConfig,
+    errorCodes,
+    normalizeConfigInstanceDraft,
+    normalizeConfigGlobalDraft,
+    parseConfigInstanceDraft,
+    parseConfigInstancePatch,
+    validateConfigSemantics,
+    validateEvent
+} = await import("@portable-devshell/shared");
 
-test("configSchema accepts a valid controller config", () => {
-    const result = configSchema.safeParse({
-        instances: [
-            {
-                env: { HOME: "/tmp/demo" },
-                name: "demo",
-                workspacePath: "/workspace/demo"
-            }
-        ],
-        mcp: {
-            auth: {
-                enabled: true,
-                issuer: "https://issuer.example",
-                provider: "oidc"
-            },
-            enabled: true,
-            publicExposure: false
-        }
-    });
-    assert.equal(result.success, true);
+test("shared config parser and normalizer produce canonical instance config", () => {
+    const instance = normalizeConfigInstanceDraft(parseConfigInstanceDraft({
+        env: { HOME: "/tmp/demo" },
+        name: "demo-local",
+        provider: "local",
+        workspace: "/workspace/demo"
+    }));
+
+    assert.equal(instance.name, "demo-local");
+    assert.equal(instance.mcp.path, "/demo-local/mcp");
+    assert.equal(instance.security.mode, "disabled");
+    assert.deepEqual(instance.mcp.tools.capabilities, ["read", "write", "execute"]);
 });
 
-test("configSchema rejects invalid auth and public exposure structure", () => {
-    const result = configSchema.safeParse({
-        instances: [],
-        mcp: {
-            auth: { enabled: true, provider: "" },
-            enabled: true,
-            publicExposure: "yes"
-        }
+test("config patch has explicit null clearing and strict unknown-field parsing", () => {
+    const current = normalizeConfigInstanceDraft(parseConfigInstanceDraft({
+        container: {
+            image: "archlinux:latest",
+            mode: "existingImage"
+        },
+        dockerBinary: "docker",
+        name: "demo-docker",
+        provider: "docker",
+        workspace: "/workspace/demo"
+    }));
+    const next = normalizeConfigInstanceDraft(applyConfigInstancePatch(current, parseConfigInstancePatch({
+        dockerBinary: null
+    })));
+
+    assert.equal(next.dockerBinary, undefined);
+    assert.throws(() => parseConfigInstanceDraft({
+        name: "demo-local",
+        provider: "local",
+        workspace: "/workspace/demo",
+        workspacePath: "/legacy"
+    }), /workspacePath is not supported/u);
+
+    const global = normalizeConfigGlobalDraft({
+        mcp: applyConfigMcpPatch(createDefaultControlConfig().mcp, { publicBaseUrl: null })
     });
-    assert.equal(result.success, false);
+    assert.equal(global.mcp.publicBaseUrl, undefined);
+});
+
+test("semantic validation accepts normalized canonical config", () => {
+    const config = createDefaultControlConfig();
+    config.instances.push(normalizeConfigInstanceDraft({
+        name: "demo-local",
+        provider: "local",
+        workspace: "/workspace/demo"
+    }));
+
+    assert.equal(validateConfigSemantics(config), config);
 });
 
 test("validateEvent accepts the Event contract and rejects old envelopes", () => {

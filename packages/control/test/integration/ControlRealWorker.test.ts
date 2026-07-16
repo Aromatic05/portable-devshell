@@ -18,8 +18,7 @@ import {
 } from "@portable-devshell/shared";
 
 import { controlDaemonModulePath } from "../../dist/index.js";
-import { ControlInstanceTomlCodec } from "../../dist/modules/config/config/codec/ConfigTomlCodec.js";
-import { ControlConfigTomlCodec } from "../../dist/modules/config/config/codec/ConfigTomlCodec.js";
+import { encodeGlobalConfig, encodeInstanceConfig } from "../ConfigTomlTestSupport.ts";
 
 if (process.env.PORTABLE_DEVSHELL_REAL_WORKER_CHILD !== "1") {
     test("control lifecycle smoke drives the frozen worker in an isolated process", async () => {
@@ -46,10 +45,10 @@ if (process.env.PORTABLE_DEVSHELL_REAL_WORKER_CHILD !== "1") {
 
     await mkdir(homePaths.controlHomeDir, { recursive: true });
     await mkdir(homePaths.instancesDir, { recursive: true });
-    await writeFile(homePaths.configFile, new ControlConfigTomlCodec().encode(createGlobalConfig()), "utf8");
+    await writeFile(homePaths.configFile, encodeGlobalConfig(createGlobalConfig()), "utf8");
     await writeFile(
         homePaths.instanceConfigFile("aromatic-pc"),
-        new ControlInstanceTomlCodec().encode(createInstanceConfig(workspacePath)),
+        encodeInstanceConfig(createInstanceConfig(workspacePath)),
         "utf8"
     );
 
@@ -163,7 +162,6 @@ function createGlobalConfig() {
         control: {
             logLevel: "info"
         },
-        instances: [],
         mcp: {
             auth: {
                 mode: "none" as const
@@ -171,8 +169,7 @@ function createGlobalConfig() {
             enabled: true,
             listenHost: "127.0.0.1",
             listenPort: 0
-        },
-        version: 1
+        }
     };
 }
 

@@ -64,7 +64,7 @@ export class InstanceCreateWizard {
         const mcpCapabilities = await this.#stringList(lines, "MCP capabilities", schema.defaultMcpCapabilities);
 
         this.#output.write("Security\n");
-        const securityMode = await this.#optional(lines, "security mode", schema.defaultSecurityMode);
+        const securityMode = await this.#securityMode(lines, schema);
 
         return {
             ...(workspace.length === 0 ? {} : { workspace }),
@@ -98,6 +98,19 @@ export class InstanceCreateWizard {
 
             this.#output.write(`provider must be one of ${schema.providers.join(", ")}.\n`);
     }
+    }
+
+    async #securityMode(
+        lines: AsyncIterator<string>,
+        schema: InstanceCreateSchema
+    ): Promise<InstanceCreateSchema["defaultSecurityMode"]> {
+        while (true) {
+            const value = await this.#optional(lines, "security mode (disabled | workspace)", schema.defaultSecurityMode);
+            if (value === "disabled" || value === "workspace") {
+                return value;
+            }
+            this.#output.write("security mode must be disabled or workspace.\n");
+        }
     }
 
     async #providerFields(

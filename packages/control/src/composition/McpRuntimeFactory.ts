@@ -1,6 +1,6 @@
 import { McpHost, type McpAuthConfig, type McpInstanceGateway } from "@portable-devshell/mcp";
+import type { ControlConfig } from "@portable-devshell/shared";
 
-import type { ControlConfig } from "../modules/config/config/codec/ConfigTomlCodec.js";
 import type { InstanceRegistry } from "../modules/instance/registry/InstanceRegistry.js";
 import { McpEndpointFactory } from "./McpEndpointFactory.js";
 

@@ -11,7 +11,7 @@ import {
 } from "@portable-devshell/shared";
 
 import type { InstanceCreateCoordinator } from "./InstanceCreateCoordinator.js";
-import type { ControlConfig } from "../modules/config/config/codec/ConfigTomlCodec.js";
+import type { ControlConfig } from "@portable-devshell/shared";
 import type { InstanceRegistry } from "../modules/instance/registry/InstanceRegistry.js";
 
 export interface ControlMcpInstanceGatewayOptions {

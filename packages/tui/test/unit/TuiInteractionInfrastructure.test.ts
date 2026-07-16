@@ -763,7 +763,7 @@ test("connector page actions expose and save only affected scopes", async () => 
     const instanceUpdates: unknown[] = [];
     const mcpUpdates: unknown[] = [];
     const harness = createHarness({
-        onInstanceConfigUpdate: async (value) => { instanceUpdates.push(value); return {}; },
+        onInstanceConfigUpdate: async (instanceName, patch) => { instanceUpdates.push({ instanceName, patch }); return {}; },
         onMcpConfigUpdate: async (value) => { mcpUpdates.push(value); return {}; }
     });
 
@@ -1101,7 +1101,7 @@ async function openCreateWizard(harness: ReturnType<typeof createHarness>): Prom
 function createHarness(options: {
     onAttachShell?: (instance: string) => Promise<void>;
     onOAuthApprovalDecision?: (approvalId: string, decision: "approve" | "deny") => Promise<void>;
-    onInstanceConfigUpdate?: (value: Record<string, unknown>) => Promise<void>;
+    onInstanceConfigUpdate?: (instanceName: string, patch: Record<string, unknown>) => Promise<void>;
     onMcpConfigUpdate?: (value: Record<string, unknown>) => Promise<void>;
     onToolCall?: (instance: string, toolName: string, input: string) => Promise<boolean>;
     onValidateConfigDraft?: () => Promise<void>;

@@ -3,6 +3,7 @@ import test from "node:test";
 
 import { InstanceRegistry, createDefaultControlConfig } from "../../dist/index.js";
 import { InstanceCreateCoordinator } from "../../dist/composition/InstanceCreateCoordinator.js";
+import { normalizeConfigInstanceDraft } from "@portable-devshell/shared";
 
 test("instance create schema exposes supported container modes without running container attach", () => {
     const service = createService();
@@ -96,7 +97,7 @@ function createService(platform?: NodeJS.Platform) {
 test("MCP instance_create creates only SSH and strips instance management from inherited policy", async () => {
     let config = createDefaultControlConfig();
     config.mcp.enabled = true;
-    config.instances.push({
+    config.instances.push(normalizeConfigInstanceDraft({
         approvalPolicy: {
             mode: "ask",
             rules: [
@@ -122,7 +123,7 @@ test("MCP instance_create creates only SSH and strips instance management from i
             mode: "workspace"
         },
         workspace: "/home/dev/main"
-    });
+    }));
     const registry = new InstanceRegistry([]);
     const registered: Array<Record<string, unknown>> = [];
     const gateway = {} as never;
@@ -205,7 +206,7 @@ test("MCP instance_create rejects SSH option injection through host and user", a
 
 function createMcpCreateService() {
     let config = createDefaultControlConfig();
-    config.instances.push({
+    config.instances.push(normalizeConfigInstanceDraft({
         enabled: true,
         mcp: {
             enabled: true,
@@ -217,7 +218,7 @@ function createMcpCreateService() {
         name: "main-pc",
         provider: "local",
         workspace: "/home/dev/main"
-    });
+    }));
 
     return new InstanceCreateCoordinator({
         configStore: {

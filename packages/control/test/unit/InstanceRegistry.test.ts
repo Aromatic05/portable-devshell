@@ -2,25 +2,26 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { InstanceRegistryFactory, McpEndpointFactory, McpRuntimeFactory, createDefaultControlConfig } from "../../dist/index.js";
+import { normalizeConfigInstanceDraft } from "@portable-devshell/shared";
 
 test("disabled instances are skipped and registry does not auto start workers", () => {
     const config = createDefaultControlConfig();
 
     config.instances.push(
-        {
+        normalizeConfigInstanceDraft({
             enabled: true,
             mcp: { enabled: true, tools: { capabilities: ["read", "write", "execute"], groups: ["file", "bash", "artifact"] } },
             name: "demo-local",
             provider: "local",
             workspace: "/tmp/demo"
-        },
-        {
+        }),
+        normalizeConfigInstanceDraft({
             enabled: false,
             mcp: { enabled: true, tools: { capabilities: ["read", "write", "execute"], groups: ["file", "bash", "artifact"] } },
             name: "demo-disabled",
             provider: "local",
             workspace: "/tmp/disabled"
-        }
+        })
     );
     config.mcp.enabled = true;
 
@@ -34,13 +35,13 @@ test("disabled instances are skipped and registry does not auto start workers", 
 test("mcp endpoint path is generated and wiring only builds host configuration", () => {
     const config = createDefaultControlConfig();
     config.mcp.enabled = true;
-    config.instances.push({
+    config.instances.push(normalizeConfigInstanceDraft({
         enabled: true,
         mcp: { enabled: true, tools: { capabilities: ["read", "write", "execute"], groups: ["file", "bash", "artifact"] } },
         name: "demo-local",
         provider: "local",
         workspace: "/tmp/demo"
-    });
+    }));
 
     const registry = new InstanceRegistryFactory().build(config);
     const descriptor = registry.get("demo-local");

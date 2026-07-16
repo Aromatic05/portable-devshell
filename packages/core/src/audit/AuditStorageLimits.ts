@@ -1,9 +1,11 @@
+import { minimumAuditStorageBytes } from "@portable-devshell/shared";
+
+export { minimumAuditStorageBytes } from "@portable-devshell/shared";
+
 export interface AuditStorageLimits {
     maxBytes: number;
     retentionDays: number;
 }
-
-export const minimumAuditStorageBytes = 1024 * 1024;
 
 export const defaultAuditStorageLimits: AuditStorageLimits = {
     maxBytes: 64 * 1024 * 1024,

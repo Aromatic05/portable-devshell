@@ -16,12 +16,9 @@ import {
 } from "@portable-devshell/shared";
 
 import { ControlServer } from "../../dist/control/ControlServer.js";
-import {
-    ControlConfigTomlCodec,
-    ControlInstanceTomlCodec
-} from "../../dist/modules/config/config/codec/ConfigTomlCodec.js";
 import { ControlPathHome } from "@portable-devshell/shared";
 import { ReverseCredentialStore } from "../../dist/modules/reverse/ReverseCredentialStore.js";
+import { encodeGlobalConfig, encodeInstanceConfig } from "../ConfigTomlTestSupport.ts";
 
 test("real Rust reverse worker connects to the TS gateway and executes a tool call", async (t) => {
     const homeDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-reverse-real-home-"));
@@ -43,23 +40,21 @@ test("real Rust reverse worker connects to the TS gateway and executes a tool ca
     await mkdir(paths.instancesDir, { recursive: true });
     await writeFile(
         paths.configFile,
-        new ControlConfigTomlCodec().encode({
+        encodeGlobalConfig({
             control: { logLevel: "info" },
-            instances: [],
             mcp: {
                 auth: { mode: "none" },
                 enabled: true,
                 listenHost: "127.0.0.1",
                 listenPort: port,
                 publicBaseUrl
-            },
-            version: 1
+            }
         }),
         "utf8"
     );
     await writeFile(
         paths.instanceConfigFile("reverse-test"),
-        new ControlInstanceTomlCodec().encode({
+        encodeInstanceConfig({
             enabled: true,
             logs: { eventBufferSize: 50 },
             mcp: {

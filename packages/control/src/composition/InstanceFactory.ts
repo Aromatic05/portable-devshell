@@ -1,7 +1,6 @@
 import { InstancePaths, WorkerInstanceFactory, WorkerRpcInboundConnector, WorkerTransportFactory, resolveWorkerHomeDirectory, type WorkerInstance, type WorkerInstanceConfig, type WorkerTransportFactoryOptions } from "@portable-devshell/core";
-import { asInstanceName, asWorkspacePath } from "@portable-devshell/shared";
+import { asInstanceName, asWorkspacePath, type ControlInstanceConfig } from "@portable-devshell/shared";
 
-import type { ControlInstanceConfig } from "../modules/config/config/codec/ConfigTomlCodec.js";
 import type { InstanceDescriptor } from "../modules/instance/InstanceDescriptor.js";
 import { TodoService } from "../modules/todo/TodoService.js";
 
@@ -94,20 +93,20 @@ export class InstanceFactory {
                 };
             case "ssh":
                 return {
-                    command: instance.ssh?.command ?? fail(`ssh instance ${instance.name} requires ssh.command`),
+                    command: instance.ssh.command,
                     workspace: instance.workspace,
                     type: "ssh"
                 };
             case "docker":
                 return {
-                    container: instance.container ?? fail(`docker instance ${instance.name} requires container`),
+                    container: instance.container,
                     dockerBinary: instance.dockerBinary,
                     remoteCwd: instance.workspace,
                     type: "docker"
                 };
             case "podman":
                 return {
-                    container: instance.container ?? fail(`podman instance ${instance.name} requires container`),
+                    container: instance.container,
                     podmanBinary: instance.podmanBinary,
                     remoteCwd: instance.workspace,
                     type: "podman"

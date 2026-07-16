@@ -110,29 +110,23 @@ export class TuiRuntime {
                 return status;
             },
             onGetInstanceCreateSchema: async () => await this.#clients.instance.createSchema(),
-            onInstanceConfigUpdate: async (instance) => {
-                await this.#clients.config.updateInstance(instance);
+            onInstanceConfigUpdate: async (instanceName, patch) => {
+                await this.#clients.config.updateInstance({ instanceName, patch });
             },
             onInstanceDangerAction: async (_action, instance) => {
                 await this.#clients.instance.delete(instance);
                 await this.session.refresh();
             },
             onInstanceEnabledChange: async (instance, enabled) => {
-                const config = this.store.getState().configView;
-                const entries = Array.isArray(config?.instances) ? config.instances : [];
-                const current = entries.find((entry) => typeof entry === "object" && entry !== null && !Array.isArray(entry) && entry.name === instance);
-                if (typeof current !== "object" || current === null || Array.isArray(current)) {
-                    throw new Error(`Instance config is unavailable: ${instance}`);
-                }
                 if (!enabled && this.store.getState().snapshotsByInstance[instance]?.daemonState !== undefined && this.store.getState().snapshotsByInstance[instance]?.daemonState !== "stopped") {
                     await this.#clients.runtime.stop(instance);
                 }
-                await this.#clients.config.updateInstance({ ...current, enabled });
+                await this.#clients.config.updateInstance({ instanceName: instance, patch: { enabled } });
                 await this.#clients.config.apply();
                 await this.session.refresh();
             },
             onMcpConfigUpdate: async (mcp) => {
-                await this.#clients.config.updateMcp(mcp);
+                await this.#clients.config.updateMcp({ patch: mcp });
             },
             onOAuthApprovalDecision: async (approvalId, decision) => {
                 await this.#clients.mcp.decideApproval(approvalId, decision);

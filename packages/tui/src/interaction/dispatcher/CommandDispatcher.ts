@@ -26,7 +26,7 @@ export interface CommandDispatcherOptions {
     onControlRestart?(): Promise<void>;
     onCreateInstance?(draft: InstanceCreateDraft): Promise<string | undefined>;
     onGetInstanceCreateSchema?(): Promise<InstanceCreateSchema>;
-    onInstanceConfigUpdate?(instance: Record<string, JsonValue>): Promise<void>;
+    onInstanceConfigUpdate?(instanceName: string, patch: Record<string, JsonValue>): Promise<void>;
     onInstanceDangerAction?(action: "delete", instance: string): Promise<void>;
     onInstanceEnabledChange?(instance: string, enabled: boolean): Promise<void>;
     onMcpConfigUpdate?(mcp: Record<string, JsonValue>): Promise<void>;

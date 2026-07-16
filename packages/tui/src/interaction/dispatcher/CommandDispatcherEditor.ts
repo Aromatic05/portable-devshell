@@ -13,7 +13,7 @@ interface CommandEditorOptions {
     onCreateInstance(draft: InstanceCreateDraft): Promise<string | undefined>;
     onGetInstanceCreateSchema(): Promise<InstanceCreateSchema>;
     onInstanceAction(action: "refresh" | "restart" | "start" | "stop", instance: string): Promise<void>;
-    onInstanceConfigUpdate(instance: Record<string, JsonValue>): Promise<void>;
+    onInstanceConfigUpdate(instanceName: string, patch: Record<string, JsonValue>): Promise<void>;
     onMcpConfigUpdate(mcp: Record<string, JsonValue>): Promise<void>;
     onValidateConfigDraft(draft: Record<string, JsonValue>): Promise<void>;
     onValidateInstanceCreateDraft(draft: InstanceCreateDraft): Promise<InstanceCreateSummary>;
@@ -286,7 +286,7 @@ export class CommandDispatcherEditor {
             const instanceDirty = state.ui.dirtyForms[instanceKey] === true;
             const globalDirty = editor.kind === "connector" && state.ui.dirtyForms[globalKey] === true;
             if (instanceDirty) {
-                await this.#options.onInstanceConfigUpdate(instanceDraft);
+                await this.#options.onInstanceConfigUpdate(instance, toInstancePatch(instanceDraft));
             }
             if (globalDirty) {
                 await this.#options.onMcpConfigUpdate(globalDraft);
@@ -446,7 +446,9 @@ export class CommandDispatcherEditor {
         const entry = Array.isArray(entries)
             ? entries.find((value) => asRecord(value)?.name === instanceName)
             : undefined;
-        return cloneRecord(asRecord(entry) ?? { enabled: true, mcp: { enabled: true, path: `/${instanceName}/mcp`, tools: { capabilities: ["read", "write", "execute"], groups: ["file", "bash", "artifact", "tmux", "todo"] } }, name: instanceName, provider: "local", security: { mode: "disabled" }, workspace: "" });
+        return toInstanceDraft(
+            cloneRecord(asRecord(entry) ?? { enabled: true, mcp: { enabled: true, path: `/${instanceName}/mcp`, tools: { capabilities: ["read", "write", "execute"], groups: ["file", "bash", "artifact", "tmux", "todo"] } }, name: instanceName, provider: "local", security: { mode: "disabled" }, workspace: "" })
+        );
     }
 
     #mcpDraft(): Record<string, JsonValue> {
@@ -456,12 +458,17 @@ export class CommandDispatcherEditor {
     #fullConfigDraft(includeMcp: boolean): Record<string, JsonValue> {
         const state = this.#store.getState();
         const instance = state.ui.selectedInstance!;
-        const config = cloneRecord(state.configView ?? { control: {}, instances: [], mcp: this.#mcpDraft(), version: 1 });
+        const config = cloneRecord(state.configView ?? { control: {}, instances: [], mcp: this.#mcpDraft() });
         const rawInstances = config.instances;
         const instances = Array.isArray(rawInstances)
-            ? rawInstances.map((entry) =>
-                  asRecord(entry)?.name === instance ? normalizeDraftForSave(this.#editorDraft(`config:${instance}`, this.#instanceDraft(instance))) : entry
-              )
+            ? rawInstances.map((entry) => {
+                  const record = asRecord(entry);
+                  return record?.name === instance
+                      ? normalizeDraftForSave(this.#editorDraft(`config:${instance}`, this.#instanceDraft(instance)))
+                      : record === undefined
+                        ? entry
+                        : toInstanceDraft(cloneRecord(record));
+              })
             : [];
         config.instances = instances;
         if (includeMcp) {
@@ -490,6 +497,22 @@ export class CommandDispatcherEditor {
 
 function inputText(value: JsonValue | undefined): string {
     return Array.isArray(value) ? value.join(", ") : String(value ?? "");
+}
+
+function toInstanceDraft(value: Record<string, JsonValue>): Record<string, JsonValue> {
+    const draft = cloneRecord(value);
+    const security = asRecord(draft.security);
+    if (security !== undefined) {
+        const { effectiveMode: _effectiveMode, ...persistedSecurity } = security;
+        draft.security = persistedSecurity;
+    }
+    return draft;
+}
+
+function toInstancePatch(value: Record<string, JsonValue>): Record<string, JsonValue> {
+    const draft = toInstanceDraft(value);
+    const { name: _name, ...patch } = draft;
+    return patch;
 }
 
 function readErrorMessage(error: unknown): string {

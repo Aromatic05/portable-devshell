@@ -7,21 +7,30 @@ import { fileURLToPath } from "node:url";
 
 import {
     ControlConfigStore,
-    ControlInstanceTomlCodec,
-    ControlConfigTomlCodec,
     ControlConfigValidator,
+    ControlGlobalTomlDocument,
+    ControlInstanceTomlDocument,
+    ControlTomlCodec,
     createDefaultControlConfig
 } from "../../dist/index.js";
-import { ControlPathHome, ControlPathRuntime } from "@portable-devshell/shared";
+import {
+    ControlPathHome,
+    ControlPathRuntime,
+    normalizeConfigGlobalDraft,
+    normalizeConfigInstanceDraft,
+    parseConfigInstanceDraft
+} from "@portable-devshell/shared";
 
 const fixturesDir = fileURLToPath(new URL("../fixtures/", import.meta.url));
+const toml = new ControlTomlCodec();
+const globalDocument = new ControlGlobalTomlDocument();
+const instanceDocument = new ControlInstanceTomlDocument();
 
 test("default config is generated at the fixed control config path", async () => {
     const homeDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-control-home-"));
 
     try {
-        const store = new ControlConfigStore();
-        const config = await store.readOrCreate(homeDirectory);
+        const config = await new ControlConfigStore().readOrCreate(homeDirectory);
         const paths = new ControlPathHome(homeDirectory);
 
         assert.deepEqual(config, createDefaultControlConfig());
@@ -33,44 +42,34 @@ test("default config is generated at the fixed control config path", async () =>
         );
 
         await access(paths.configFile);
-        const source = await readFile(paths.configFile, "utf8");
-        assert.match(source, /\[mcp\]/u);
+        assert.match(await readFile(paths.configFile, "utf8"), /\[mcp\]/u);
     } finally {
         await rm(homeDirectory, { force: true, recursive: true });
     }
 });
 
-test("valid config fixture is loaded", async () => {
+test("valid global and instance documents are assembled into canonical config", async () => {
     const homeDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-control-home-"));
 
     try {
-        const fixture = await readFixture("config-valid.toml");
         const paths = new ControlPathHome(homeDirectory);
-
-        await writeFileWithParents(paths.configFile, fixture);
-        await writeFileWithParents(
-            paths.instanceConfigFile("demo-local"),
-            new ControlInstanceTomlCodec().encode(createInstanceConfig("/tmp/demo"))
-        );
+        await writeFileWithParents(paths.configFile, await readFixture("config-valid.toml"));
+        await writeFileWithParents(paths.instanceConfigFile("demo-local"), encodeInstance(createInstanceConfig("/tmp/demo")));
 
         const config = await new ControlConfigStore().readOrCreate(homeDirectory);
-
-        assert.equal(config.instances[0]?.name, "demo-local");
-        assert.deepEqual(config.instances[0]?.mcp.tools.groups, ["file", "bash", "artifact"]);
-        assert.deepEqual(config.instances[0]?.mcp.tools.capabilities, ["read", "write", "execute"]);
-        assert.equal(config.instances[0]?.logs?.eventBufferSize, 50);
-        assert.equal(config.instances[0]?.logs?.maxBytes, 33_554_432);
-        assert.equal(config.instances[0]?.logs?.retentionDays, 14);
-        assert.equal(config.instances[0]?.approvalPolicy?.mode, "ask");
-        assert.equal(config.instances[0]?.approvalPolicy?.rules?.[0]?.source, "mcp");
-        assert.equal(config.instances[0]?.security?.mode, "workspace");
-        assert.equal(config.instances[0]?.workspace, "/tmp/demo");
+        const instance = config.instances[0];
+        assert.equal(instance?.name, "demo-local");
+        assert.equal(instance?.mcp.path, "/demo-local/mcp");
+        assert.deepEqual(instance?.mcp.tools.groups, ["file", "bash", "artifact"]);
+        assert.equal(instance?.logs?.maxBytes, 33_554_432);
+        assert.equal(instance?.approvalPolicy?.rules?.[0]?.source, "mcp");
+        assert.equal(instance?.security.mode, "workspace");
     } finally {
         await rm(homeDirectory, { force: true, recursive: true });
     }
 });
 
-test("invalid config fixture is rejected", async () => {
+test("invalid TOML field type is reported with file and structural path", async () => {
     const homeDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-control-home-"));
 
     try {
@@ -78,14 +77,10 @@ test("invalid config fixture is rejected", async () => {
         await writeFileWithParents(paths.configFile, await readFixture("config-invalid.toml"));
 
         await assert.rejects(new ControlConfigStore().readOrCreate(homeDirectory), (error: unknown) => {
-            assert.equal(typeof error, "object");
             assert.equal((error as { code?: string }).code, "control.configParseFailed");
-            assert.equal((error as { message?: string }).message, "mcp.listenPort must be an integer");
-            assert.deepEqual((error as { details?: unknown }).details, {
-                configFile: paths.configFile,
-                fieldPath: "mcp.listenPort",
-                phase: "decode"
-            });
+            assert.match((error as { message?: string }).message ?? "", /mcp\.listenPort must be an integer/u);
+            assert.equal((error as { details?: { configFile?: string; fieldPath?: string } }).details?.configFile, paths.configFile);
+            assert.equal((error as { details?: { fieldPath?: string } }).details?.fieldPath, "mcp.listenPort");
             return true;
         });
     } finally {
@@ -93,62 +88,53 @@ test("invalid config fixture is rejected", async () => {
     }
 });
 
-test("public MCP without auth is rejected", async () => {
+test("public MCP without auth is rejected by semantic validation", async () => {
     const homeDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-control-home-"));
 
     try {
         const paths = new ControlPathHome(homeDirectory);
         await writeFileWithParents(paths.configFile, await readFixture("config-public-no-auth.toml"));
-
-        await assert.rejects(new ControlConfigStore().readOrCreate(homeDirectory), /Public MCP exposure requires authentication\./u);
+        await assert.rejects(
+            new ControlConfigStore().readOrCreate(homeDirectory),
+            /mcp\.auth\.mode must not be none when MCP is publicly exposed/u
+        );
     } finally {
         await rm(homeDirectory, { force: true, recursive: true });
     }
 });
 
-test("oauth2 config requires nested issuer and audience settings", () => {
-    const codec = new ControlConfigTomlCodec();
-    const validator = new ControlConfigValidator();
-
+test("OAuth2 document structure is parsed before normalization", () => {
     assert.throws(
-        () =>
-            validator.validate({
-                ...createDefaultControlConfig(),
-                mcp: {
-                    ...createDefaultControlConfig().mcp,
-                    auth: {
-                        mode: "oauth2"
-                    },
-                    enabled: true
-                }
-            }),
-        /mcp\.auth\.oauth2 is required when mcp\.auth\.mode=oauth2/u
-    );
-
-    const config = codec.decode(
-        [
+        () => globalDocument.decode(toml.decode([
             "version = 1",
-            "",
             "[control]",
             'logLevel = "info"',
-            "",
             "[mcp]",
             "enabled = true",
             'listenHost = "127.0.0.1"',
             "listenPort = 17890",
-            'publicBaseUrl = "http://127.0.0.1:17890"',
-            "",
             "[mcp.auth]",
-            'mode = "oauth2"',
-            "",
-            "[mcp.auth.oauth2]",
-            'issuer = "http://127.0.0.1:9000"',
-            'audience = "aromatic-mcp"',
-            'resourceName = "aromatic"',
-            'requiredScopes = ["mcp"]',
-            ""
-        ].join("\n")
+            'mode = "oauth2"'
+        ].join("\n"))),
+        /mcp\.auth\.oauth2 is required when mode=oauth2/u
     );
+
+    const config = normalizeConfigGlobalDraft(globalDocument.decode(toml.decode([
+        "version = 1",
+        "[control]",
+        'logLevel = "info"',
+        "[mcp]",
+        "enabled = true",
+        'listenHost = "127.0.0.1"',
+        "listenPort = 17890",
+        "[mcp.auth]",
+        'mode = "oauth2"',
+        "[mcp.auth.oauth2]",
+        'issuer = "http://127.0.0.1:9000"',
+        'audience = "aromatic-mcp"',
+        'resourceName = "aromatic"',
+        'requiredScopes = ["mcp", "mcp"]'
+    ].join("\n"))));
 
     assert.deepEqual(config.mcp.auth, {
         mode: "oauth2",
@@ -163,136 +149,66 @@ test("oauth2 config requires nested issuer and audience settings", () => {
     });
 });
 
-test("instance name without dash is rejected", () => {
+test("instance name and audit limits are semantic validation rules", () => {
     const validator = new ControlConfigValidator();
-    const config = createDefaultControlConfig();
-
-    config.instances.push({
-        enabled: true,
-        mcp: { enabled: true, tools: { capabilities: ["read", "write", "execute"], groups: ["file", "bash", "artifact"] } },
+    const invalidName = normalizeConfigInstanceDraft({
         name: "invalidname",
         provider: "local",
         workspace: "/tmp/demo"
     });
-
     assert.throws(
-        () => validator.validate(config),
-        (error: unknown) => {
-            assert.equal(typeof error, "object");
-            assert.equal((error as { code?: string }).code, "control.configValidationFailed");
-            assert.equal((error as { message?: string }).message, "instance name must include '-': invalidname");
-            assert.deepEqual((error as { details?: unknown }).details, {
-                fieldPath: "instance",
-                phase: "validate"
-            });
-            return true;
-        }
+        () => validator.validate({ ...createDefaultControlConfig(), instances: [invalidName] }),
+        /instances\[0\]\.name must contain at least one '-'/u
     );
-});
 
-test("instance security mode must be valid", () => {
-    const validator = new ControlConfigValidator();
-    const config = createDefaultControlConfig();
-
-    config.instances.push({
-        enabled: true,
-        mcp: { enabled: true, tools: { capabilities: ["read", "write", "execute"], groups: ["file", "bash", "artifact"] } },
-        name: "demo-local",
-        provider: "local",
-        security: {
-            mode: "invalid"
-        },
-        workspace: "/tmp/demo"
-    });
-
-    assert.throws(() => validator.validate(config), /security\.mode must be one of disabled, workspace/u);
-});
-
-test("instance audit storage limits must be positive integers", () => {
-    const config = createDefaultControlConfig();
-    const instance = createInstanceConfig("/tmp/demo");
-    instance.logs.maxBytes = 0;
-
+    const invalidLogs = createInstanceConfig("/tmp/demo");
+    invalidLogs.logs.maxBytes = 0;
     assert.throws(
-        () => new ControlConfigValidator().validate({ ...config, instances: [instance] }),
+        () => validator.validate({ ...createDefaultControlConfig(), instances: [invalidLogs] }),
         /logs\.maxBytes must be an integer of at least 1048576/u
     );
 });
 
-test("legacy tools.fileEdit config is ignored and removed on encode", () => {
-    const codec = new ControlInstanceTomlCodec();
-    const decoded = codec.decode(
-        [
+test("unknown and legacy instance fields are rejected instead of silently ignored", () => {
+    assert.throws(
+        () => instanceDocument.decode(toml.decode([
             "version = 2",
             'name = "demo-local"',
             "enabled = true",
             'provider = "local"',
             'workspace = "/tmp/demo"',
-            "",
             "[mcp]",
             "enabled = true",
-            "",
             "[mcp.tools]",
             'groups = ["file"]',
             'capabilities = ["read", "write"]',
-            "",
             "[tools.fileEdit]",
-            'mode = "patch"',
-            "",
-            "[tools.scheduler]",
-            "maxRunning = 2",
-            ""
-        ].join("\n")
+            'mode = "patch"'
+        ].join("\n"))),
+        /tools\.fileEdit is not supported/u
     );
 
-    assert.equal(decoded.tools?.scheduler?.maxRunning, 2);
-    assert.equal("fileEdit" in (decoded.tools ?? {}), false);
-    const encoded = codec.encode(decoded);
-    assert.doesNotMatch(encoded, /fileEdit/u);
-    assert.match(encoded, /\[tools\.scheduler\]/u);
+    assert.throws(
+        () => instanceDocument.decode(toml.decode([
+            "version = 2",
+            'name = "demo-ssh"',
+            "enabled = true",
+            'provider = "ssh"',
+            'workspace = "/srv/workspace"',
+            'host = "demo"'
+        ].join("\n"))),
+        /host is not supported; use ssh\.command/u
+    );
 });
 
-test("ssh instance config requires ssh.command and rejects legacy host fields", () => {
-    const validator = new ControlConfigValidator();
-
+test("SSH instance normalization requires ssh.command", () => {
     assert.throws(
-        () =>
-            validator.validate({
-                ...createDefaultControlConfig(),
-                instances: [
-                    {
-                        enabled: true,
-                        mcp: { enabled: true, tools: { capabilities: ["read", "write", "execute"], groups: ["file", "bash", "artifact"] } },
-                        name: "demo-ssh",
-                        provider: "ssh",
-                        workspace: "/srv/workspace"
-                    }
-                ]
-            }),
-        /requires ssh\.command/u
-    );
-
-    assert.throws(
-        () =>
-            new ControlInstanceTomlCodec().decode(
-                [
-                    "version = 2",
-                    'name = "demo-ssh"',
-                    "enabled = true",
-                    'provider = "ssh"',
-                    'workspace = "/srv/workspace"',
-                    'host = "demo"',
-                    "",
-                    "[mcp]",
-                    "enabled = true",
-                    "",
-                    "[mcp.tools]",
-                    'groups = ["file", "bash", "artifact"]',
-                    'capabilities = ["read", "write", "execute"]',
-                    ""
-                ].join("\n")
-            ),
-        /host is not supported; use ssh\.command/u
+        () => normalizeConfigInstanceDraft(parseConfigInstanceDraft({
+            name: "demo-ssh",
+            provider: "ssh",
+            workspace: "/srv/workspace"
+        })),
+        /ssh\.command is required/u
     );
 });
 
@@ -306,34 +222,39 @@ async function writeFileWithParents(path: string, source: string): Promise<void>
     await writeFile(path, source, "utf8");
 }
 
+function encodeInstance(instance: ReturnType<typeof createInstanceConfig>): string {
+    return toml.encode(instanceDocument.encode(instance));
+}
+
 function createInstanceConfig(workspace: string) {
-    return {
+    return normalizeConfigInstanceDraft({
         approvalPolicy: {
-            mode: "ask" as const,
+            mode: "ask",
             rules: [
                 {
-                    decision: "deny" as const,
-                    match: "exact" as const,
-                    source: "mcp" as const,
+                    decision: "deny",
+                    match: "exact",
+                    source: "mcp",
                     toolName: "bash_run"
                 }
             ]
         },
-        enabled: true,
-        env: {
-            DEMO: "1"
-        },
+        env: { DEMO: "1" },
         logs: {
             eventBufferSize: 50,
             maxBytes: 33_554_432,
             retentionDays: 14
         },
-        mcp: { enabled: true, tools: { capabilities: ["read", "write", "execute"], groups: ["file", "bash", "artifact"] } },
-        name: "demo-local",
-        provider: "local" as const,
-        security: {
-            mode: "workspace"
+        mcp: {
+            enabled: true,
+            tools: {
+                capabilities: ["read", "write", "execute"],
+                groups: ["file", "bash", "artifact"]
+            }
         },
+        name: "demo-local",
+        provider: "local",
+        security: { mode: "workspace" },
         workspace
-    };
+    });
 }

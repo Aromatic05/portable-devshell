@@ -1,4 +1,4 @@
-import type { ControlConfig } from "../modules/config/config/codec/ConfigTomlCodec.js";
+import type { ControlConfig } from "@portable-devshell/shared";
 import { InstanceFactory } from "./InstanceFactory.js";
 import { InstanceRegistry } from "../modules/instance/registry/InstanceRegistry.js";
 

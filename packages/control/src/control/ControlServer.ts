@@ -1,4 +1,4 @@
-import type { ControlConfig } from "../modules/config/config/codec/ConfigTomlCodec.js";
+import type { ControlConfig } from "@portable-devshell/shared";
 import type { ControlConfigStore } from "../modules/config/config/ControlConfigStore.js";
 import type { InstanceRegistryFactory } from "../composition/InstanceRegistryFactory.js";
 import type { McpRuntimeFactory } from "../composition/McpRuntimeFactory.js";

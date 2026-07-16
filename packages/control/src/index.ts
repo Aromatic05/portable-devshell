@@ -7,6 +7,7 @@ export * from "./composition/ConfigEditorCoordinator.js";
 export * from "./modules/config/config/ControlConfigDefaults.js";
 export * from "./modules/config/config/ControlConfigStore.js";
 export * from "./modules/config/config/codec/ConfigTomlCodec.js";
+export * from "./modules/config/config/codec/ConfigTomlDocument.js";
 export * from "./modules/config/config/ControlConfigValidator.js";
 export * from "./composition/InstanceFactory.js";
 export * from "./composition/InstanceCreateCoordinator.js";

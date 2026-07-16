@@ -9,7 +9,7 @@ export const errorCodes = {
     artifactTransferNotFound: "artifact.transferNotFound",
     artifactTransferStateConflict: "artifact.transferStateConflict",
     artifactTransferInterrupted: "artifact.transferInterrupted",
-    authConfigInvalid: "control.configInvalid",
+    controlConfigInvalid: "control.configInvalid",
     controlClientIdentityInvalid: "control.clientIdentityInvalid",
     controlClientIdentityRequired: "control.clientIdentityRequired",
     controlConfigLoadFailed: "control.configLoadFailed",

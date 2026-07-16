@@ -1,7 +1,6 @@
-import { createError, errorCodes } from "@portable-devshell/shared";
+import { createError, errorCodes, type ControlConfig } from "@portable-devshell/shared";
 
 import { ControlConfigStore } from "../../modules/config/config/ControlConfigStore.js";
-import type { ControlConfig } from "../../modules/config/config/codec/ConfigTomlCodec.js";
 import { InstanceRegistry } from "../../modules/instance/registry/InstanceRegistry.js";
 import { InstanceRegistryFactory } from "../InstanceRegistryFactory.js";
 

@@ -6,9 +6,8 @@ import { createError, errorCodes } from "@portable-devshell/shared";
 import { ArtifactHttpRoute, artifactShareRoute } from "../../modules/artifact/ArtifactHttpRoute.js";
 import { ArtifactHostBridge } from "../../modules/artifact/host/ArtifactHostBridge.js";
 import { ArtifactService } from "../../modules/artifact/ArtifactService.js";
-import type { ControlConfig } from "../../modules/config/config/codec/ConfigTomlCodec.js";
 import type { InstanceRegistry } from "../../modules/instance/registry/InstanceRegistry.js";
-import type { ControlPathHome } from "@portable-devshell/shared";
+import type { ControlConfig, ControlPathHome } from "@portable-devshell/shared";
 
 export interface ArtifactRuntimeOptions {
     config: () => ControlConfig;

@@ -1,7 +1,9 @@
-import { asWorkspacePath, type ApprovalPolicy } from "@portable-devshell/shared";
-
-import type { ControlConfig, ControlInstanceConfig } from "../config/codec/ConfigTomlCodec.js";
-import { resolveSecurityMode } from "./ConfigEditorValue.js";
+import {
+    asWorkspacePath,
+    type ApprovalPolicy,
+    type ControlConfig,
+    type ControlInstanceConfig
+} from "@portable-devshell/shared";
 
 export interface ConfigApplyChange {
     kind: "instance.deleted" | "instance.disabled" | "instance.enabled" | "instance.updated" | "mcp.updated";
@@ -81,11 +83,11 @@ export function toWorkerReconfigureInput(instance: ControlInstanceConfig): {
     effectiveSecurityMode: "disabled" | "workspace";
     env?: NodeJS.ProcessEnv;
 } {
-    const effectiveSecurityMode = resolveSecurityMode(instance.security?.mode);
+    const effectiveSecurityMode = instance.security.mode;
 
     return {
         approvalPolicy: instance.approvalPolicy,
-        defaultWorkspace: instance.workspace === undefined ? undefined : asWorkspacePath(instance.workspace),
+        defaultWorkspace: asWorkspacePath(instance.workspace),
         effectiveSecurityMode,
         env: {
             ...instance.env,

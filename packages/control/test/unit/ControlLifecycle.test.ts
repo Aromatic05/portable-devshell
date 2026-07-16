@@ -19,7 +19,7 @@ import {
 } from "@portable-devshell/shared";
 
 import { controlDaemonModulePath } from "../../dist/index.js";
-import { ControlConfigTomlCodec, ControlInstanceTomlCodec } from "../../dist/modules/config/config/codec/ConfigTomlCodec.js";
+import { encodeGlobalConfig, encodeInstanceConfig } from "../ConfigTomlTestSupport.ts";
 
 test("start creates control directory, socket, pid and status uses rpc", async (t) => {
     const harness = await createHarness();
@@ -248,7 +248,7 @@ test("start keeps real worker config registered and does not auto-start worker",
     await mkdir(homePaths.instancesDir, { recursive: true });
     await writeFile(
         homePaths.instanceConfigFile("demo-local"),
-        new ControlInstanceTomlCodec().encode({
+        encodeInstanceConfig({
             enabled: true,
             mcp: { enabled: true, tools: { capabilities: ["read", "write", "execute"], groups: ["file", "bash", "artifact"] } },
             name: "demo-local",
@@ -295,11 +295,10 @@ async function createHarness(): Promise<{
     await mkdir(homePaths.controlHomeDir, { recursive: true });
     await writeFile(
         homePaths.configFile,
-        new ControlConfigTomlCodec().encode({
+        encodeGlobalConfig({
             control: {
                 logLevel: "info"
             },
-            instances: [],
             mcp: {
                 auth: {
                     mode: "none"
@@ -307,8 +306,7 @@ async function createHarness(): Promise<{
                 enabled: false,
                 listenHost: "127.0.0.1",
                 listenPort
-            },
-            version: 1
+            }
         }),
         "utf8"
     );

@@ -7,8 +7,9 @@ import {
     InstanceRegistryFactory,
     createDefaultControlConfig
 } from "../../dist/index.js";
+import { normalizeConfigInstanceDraft } from "@portable-devshell/shared";
 
-test("config editor accumulates apply summary across multiple updates", async () => {
+test("config editor validates drafts and accumulates patch apply summaries", async () => {
     let config = createConfig();
     const registry = new InstanceRegistryFactory().build(config);
     const writes: unknown[] = [];
@@ -31,55 +32,37 @@ test("config editor accumulates apply summary across multiple updates", async ()
     assert.equal(view.instances[0]?.security.effectiveMode, "disabled");
 
     const validated = service.validateConfigDraft({
-        ...view,
+        ...config,
         instances: [
             {
                 ...config.instances[0],
-                approvalPolicy: {
-                    mode: "ask"
-                },
-                mcp: {
-                    tools: { capabilities: ["read", "write", "execute"], groups: ["file", "bash", "artifact"] },
-                    enabled: true,
-                    path: "/demo-local/mcp"
-                },
-                security: {
-                    mode: "workspace"
-                }
+                approvalPolicy: { mode: "ask" },
+                security: { mode: "workspace" }
             }
         ]
     }) as { instances: Array<{ security: { effectiveMode: string; mode: string } }> };
     assert.equal(validated.instances[0]?.security.mode, "workspace");
-    assert.equal(config.instances[0]?.security?.mode, "disabled");
+    assert.equal(config.instances[0]?.security.mode, "disabled");
 
     await service.updateInstanceConfig({
-        ...config.instances[0],
-        approvalPolicy: {
-            mode: "ask"
-        },
-        mcp: {
-            tools: { capabilities: ["read", "write", "execute"], groups: ["file", "bash", "artifact"] },
-            enabled: true,
-            path: "/demo-local/mcp"
-        },
-        security: {
-            mode: "workspace"
+        instanceName: "demo-local",
+        patch: {
+            approvalPolicy: { mode: "ask" },
+            security: { mode: "workspace" }
         }
     });
-
     assert.equal(writes.length, 1);
-    assert.equal(config.instances[0]?.security?.mode, "workspace");
-    assert.equal(config.instances[0]?.approvalPolicy?.mode, "ask");
+    assert.equal(config.instances[0]?.security.mode, "workspace");
     assert.equal(registry.get("demo-local")?.worker.snapshot().effectiveSecurityMode, "workspace");
 
     await service.updateMcpConfig({
-        auth: {
-            mode: "token"
-        },
-        enabled: true,
-        listenHost: "127.0.0.1",
-        listenPort: 17891,
-        publicBaseUrl: "http://127.0.0.1:17891"
+        patch: {
+            auth: { mode: "token" },
+            enabled: true,
+            listenHost: "127.0.0.1",
+            listenPort: 17891,
+            publicBaseUrl: "http://127.0.0.1:17891"
+        }
     });
 
     const applied = service.applyConfig() as {
@@ -94,83 +77,41 @@ test("config editor accumulates apply summary across multiple updates", async ()
         { kind: "mcp.updated", target: "mcp" }
     ]);
     assert.deepEqual(applied.affectedInstances, ["demo-local"]);
-    assert.deepEqual(applied.affectedMcpEndpoints, ["/demo-local/mcp", "mcp"]);
+    assert.deepEqual(applied.affectedMcpEndpoints, ["mcp"]);
     assert.equal(applied.reloadRequired, true);
     assert.equal(applied.restartControlRequired, true);
-    assert.deepEqual(service.applyConfig(), {
-        affectedInstances: [],
-        affectedMcpEndpoints: [],
-        appliedChanges: [],
-        reloadRequired: false,
-        restartControlRequired: false
-    });
+    assert.deepEqual(service.applyConfig(), emptyApplyResult());
 });
 
-test("config editor allows updating and disabling a running instance without dropping current control", async () => {
+test("config editor reconfigures and disables a running instance without replacing it", async () => {
     let config = createConfig();
     const reconfigureCalls: Array<Record<string, unknown>> = [];
     const registry = new InstanceRegistry([
-        {
-            tools: { capabilities: ["read", "write", "execute"], groups: ["file", "bash", "artifact"] },
-            enabled: true,
-            mcpEnabled: true,
-            mcpPath: "/demo-local/mcp",
-            name: "demo-local",
-            worker: {
-                reconfigure(input: Record<string, unknown>) {
-                    reconfigureCalls.push(input);
-                },
-                snapshot() {
-                    return {
-                        connectionState: "connected",
-                        daemonState: "running",
-                        effectiveSecurityMode: "disabled",
-                        lastSeq: 0,
-                        name: "demo-local",
-                        ready: true,
-                        status: "ready"
-                    };
-                }
-            }
-        }
+        descriptor({
+            reconfigure(input: Record<string, unknown>) {
+                reconfigureCalls.push(input);
+            },
+            snapshot: runningSnapshot
+        })
     ]);
-    const service = new ConfigEditorCoordinator({
-        configStore: {
-            async write(nextConfig: unknown) {
-                config = nextConfig as typeof config;
-            }
-        },
-        getConfig: () => config,
-        instanceRegistry: registry,
-        setConfig: (nextConfig) => {
-            config = nextConfig;
-        }
-    });
+    const service = createService(() => config, (next) => {
+        config = next;
+    }, registry);
 
     await service.updateInstanceConfig({
-        ...config.instances[0],
-        approvalPolicy: {
-            mode: "ask"
-        },
-        mcp: {
-            tools: { capabilities: ["read", "write", "execute"], groups: ["file", "bash", "artifact"] },
-            enabled: true,
-            path: "/demo-local/mcp"
-        },
-        security: {
-            mode: "workspace"
+        instanceName: "demo-local",
+        patch: {
+            approvalPolicy: { mode: "ask" },
+            security: { mode: "workspace" }
         }
     });
     await service.disableInstance({ instanceName: "demo-local" });
 
     assert.equal(config.instances[0]?.enabled, false);
-    assert.equal(config.instances[0]?.security?.mode, "workspace");
+    assert.equal(config.instances[0]?.security.mode, "workspace");
     assert.equal(reconfigureCalls.length, 1);
     assert.deepEqual(reconfigureCalls[0], {
-        approvalPolicy: {
-            mode: "ask",
-            rules: undefined
-        },
+        approvalPolicy: { mode: "ask", rules: undefined },
         defaultWorkspace: "/tmp/demo",
         effectiveSecurityMode: "workspace",
         env: {
@@ -181,100 +122,10 @@ test("config editor allows updating and disabling a running instance without dro
     assert.equal(registry.get("demo-local")?.enabled, false);
 });
 
-test("config editor refuses deleting a running instance", async () => {
-    let config = createConfig();
-    const registry = new InstanceRegistry([
-        {
-            tools: { capabilities: ["read", "write", "execute"], groups: ["file", "bash", "artifact"] },
-            enabled: true,
-            mcpEnabled: true,
-            mcpPath: "/demo-local/mcp",
-            name: "demo-local",
-            worker: {
-                snapshot() {
-                    return {
-                        connectionState: "connected",
-                        daemonState: "running",
-                        effectiveSecurityMode: "disabled",
-                        lastSeq: 0,
-                        name: "demo-local",
-                        ready: true,
-                        status: "ready"
-                    };
-                }
-            }
-        }
-    ]);
-    const service = new ConfigEditorCoordinator({
-        configStore: {
-            async write(nextConfig: unknown) {
-                config = nextConfig as typeof config;
-            }
-        },
-        getConfig: () => config,
-        instanceRegistry: registry,
-        setConfig: (nextConfig) => {
-            config = nextConfig;
-        }
-    });
-
-    await assert.rejects(service.deleteInstance({ instanceName: "demo-local" }), (error: unknown) => {
-        assert.equal((error as { code?: string }).code, "instance.conflict");
-        return true;
-    });
-});
-
-function createConfig() {
-    return {
-        ...createDefaultControlConfig(),
-        instances: [
-            {
-                enabled: true,
-                mcp: {
-                    tools: { capabilities: ["read", "write", "execute"], groups: ["file", "bash", "artifact"] },
-                    enabled: true,
-                    path: "/demo-local/mcp"
-                },
-                name: "demo-local",
-                provider: "local" as const,
-                security: {
-                    mode: "disabled"
-                },
-                workspace: "/tmp/demo"
-            }
-        ],
-        mcp: {
-            ...createDefaultControlConfig().mcp,
-            enabled: true
-        }
-    };
-}
-
-test("tool scheduler rebuild validation happens before persistence", async () => {
+test("config editor rejects delete and rebuild patches while an instance is running before persistence", async () => {
     let config = createConfig();
     const writes: unknown[] = [];
-    const registry = new InstanceRegistry([
-        {
-            tools: { capabilities: ["read", "write", "execute"], groups: ["file", "bash", "artifact"] },
-            enabled: true,
-            mcpEnabled: true,
-            mcpPath: "/demo-local/mcp",
-            name: "demo-local",
-            worker: {
-                snapshot() {
-                    return {
-                        connectionState: "connected",
-                        daemonState: "running",
-                        effectiveSecurityMode: "disabled",
-                        lastSeq: 0,
-                        name: "demo-local",
-                        ready: true,
-                        status: "ready"
-                    };
-                }
-            }
-        }
-    ]);
+    const registry = new InstanceRegistry([descriptor({ snapshot: runningSnapshot })]);
     const service = new ConfigEditorCoordinator({
         configStore: {
             async write(nextConfig: unknown) {
@@ -289,21 +140,19 @@ test("tool scheduler rebuild validation happens before persistence", async () =>
         }
     });
 
+    await assert.rejects(service.deleteInstance({ instanceName: "demo-local" }), hasCode("instance.conflict"));
     await assert.rejects(
         service.updateInstanceConfig({
-            ...config.instances[0],
-            tools: { scheduler: { maxRunning: 2 } }
+            instanceName: "demo-local",
+            patch: { tools: { scheduler: { maxRunning: 2 } } }
         }),
-        (error: unknown) => {
-            assert.equal((error as { code?: string }).code, "instance.conflict");
-            return true;
-        }
+        hasCode("instance.conflict")
     );
     assert.equal(writes.length, 0);
     assert.equal(config.instances[0]?.tools, undefined);
 });
 
-test("config editor reconciles instance MCP bindings without restarting control", async () => {
+test("config editor reconciles instance MCP bindings from patches without restarting control", async () => {
     let config = createConfig();
     const registry = new InstanceRegistryFactory().build(config);
     const registered: Array<Record<string, unknown>> = [];
@@ -333,12 +182,13 @@ test("config editor reconciles instance MCP bindings without restarting control"
     });
 
     await service.updateInstanceConfig({
-        ...config.instances[0],
-        mcp: {
-            ...config.instances[0]?.mcp,
-            tools: {
-                capabilities: ["read", "write", "execute", "manage"],
-                groups: ["file", "bash", "artifact", "instance"]
+        instanceName: "demo-local",
+        patch: {
+            mcp: {
+                tools: {
+                    capabilities: ["read", "write", "execute", "manage"],
+                    groups: ["file", "bash", "artifact", "instance"]
+                }
             }
         }
     });
@@ -359,11 +209,87 @@ test("config editor reconciles instance MCP bindings without restarting control"
 
     await service.disableInstance({ instanceName: "demo-local" });
     assert.deepEqual(unregistered, ["demo-local"]);
-
     await service.enableInstance({ instanceName: "demo-local" });
     assert.equal(registered.length, 2);
-
     await service.deleteInstance({ instanceName: "demo-local" });
     assert.deepEqual(unregistered, ["demo-local", "demo-local"]);
     assert.equal(registry.get("demo-local"), undefined);
 });
+
+function createConfig() {
+    const config = createDefaultControlConfig();
+    config.mcp.enabled = true;
+    config.instances = [
+        normalizeConfigInstanceDraft({
+            mcp: {
+                enabled: true,
+                tools: {
+                    capabilities: ["read", "write", "execute"],
+                    groups: ["file", "bash", "artifact"]
+                }
+            },
+            name: "demo-local",
+            provider: "local",
+            security: { mode: "disabled" },
+            workspace: "/tmp/demo"
+        })
+    ];
+    return config;
+}
+
+function createService(
+    getConfig: () => ReturnType<typeof createConfig>,
+    setConfig: (config: ReturnType<typeof createConfig>) => void,
+    registry: InstanceRegistry
+): ConfigEditorCoordinator {
+    return new ConfigEditorCoordinator({
+        configStore: {
+            async write(nextConfig: unknown) {
+                setConfig(nextConfig as ReturnType<typeof createConfig>);
+            }
+        },
+        getConfig,
+        instanceRegistry: registry,
+        setConfig
+    });
+}
+
+function descriptor(worker: Record<string, unknown>) {
+    return {
+        tools: { capabilities: ["read", "write", "execute"] as const, groups: ["file", "bash", "artifact"] },
+        enabled: true,
+        mcpEnabled: true,
+        mcpPath: "/demo-local/mcp",
+        name: "demo-local",
+        worker
+    } as never;
+}
+
+function runningSnapshot() {
+    return {
+        connectionState: "connected",
+        daemonState: "running",
+        effectiveSecurityMode: "disabled",
+        lastSeq: 0,
+        name: "demo-local",
+        ready: true,
+        status: "ready"
+    };
+}
+
+function hasCode(code: string): (error: unknown) => boolean {
+    return (error) => {
+        assert.equal((error as { code?: string }).code, code);
+        return true;
+    };
+}
+
+function emptyApplyResult() {
+    return {
+        affectedInstances: [],
+        affectedMcpEndpoints: [],
+        appliedChanges: [],
+        reloadRequired: false,
+        restartControlRequired: false
+    };
+}
