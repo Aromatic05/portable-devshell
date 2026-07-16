@@ -74,4 +74,14 @@ jobs:
                   rustup toolchain install stable --profile minimal
                   rustup default stable
             - run: pnpm install --frozen-lockfile
-            - run: bash acceptance/run-final-acceptance.sh
+            - name: 运行最终验收
+              shell: bash
+              run: |
+                  set -o pipefail
+                  bash acceptance/run-final-acceptance.sh 2>&1 | tee acceptance.log
+            - name: 上传最终验收日志
+              if: always()
+              uses: actions/upload-artifact@v7
+              with:
+                  name: linux-acceptance-${{ github.sha }}
+                  path: acceptance.log

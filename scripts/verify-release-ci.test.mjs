@@ -51,6 +51,7 @@ test("development CI installs dependencies before script tests and exercises the
     const scriptTestIndex = workflow.indexOf("node --test ./scripts/*.test.mjs");
     assert.ok(installIndex >= 0 && scriptTestIndex > installIndex);
     assert.match(workflow, /pnpm smoke:install-release -- \.\/ci-artifacts\/portable-devshell-app\.tar\.gz/u);
+    assert.match(workflow, /linux-acceptance-\$\{\{ github\.sha \}\}/u);
 });
 
 test("release workflow requires the development CI gate before packaging any release assets", async () => {
