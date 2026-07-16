@@ -3,7 +3,7 @@ set -eu
 
 repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 worker_binary="$repo_root/target/debug/devshell-worker"
-cli_entry="$repo_root/packages/cli/dist/cli/CliMain.js"
+cli_entry=$(node "$repo_root/acceptance/resolve-cli-entry.mjs")
 fixture_config="$repo_root/acceptance/fixtures/config.local.toml"
 fixture_workspace="$repo_root/acceptance/fixtures/workspace"
 
