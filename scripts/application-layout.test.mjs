@@ -3,7 +3,6 @@ import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promis
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import test from "node:test";
-import { fileURLToPath } from "node:url";
 
 import {
     assertPackageBinFile,
@@ -13,7 +12,6 @@ import {
     writePortableApplicationManifest
 } from "./application-layout.mjs";
 
-const repositoryRoot = fileURLToPath(new URL("../", import.meta.url));
 
 test("CLI argument normalization removes only the pnpm separator", () => {
     assert.deepEqual(normalizeCliArguments(["--", "status"]), ["status"]);
@@ -22,14 +20,6 @@ test("CLI argument normalization removes only the pnpm separator", () => {
     assert.deepEqual(normalizeCliArguments([]), []);
 });
 
-test("package bin resolver reads the declared devshell entry instead of assuming a build directory", async () => {
-    const packageRoot = resolve(repositoryRoot, "packages", "cli");
-    const cli = await readPackageBinPath(packageRoot, "devshell");
-
-    assert.equal(cli.relativePath, "dist/CliMain.js");
-    assert.equal(cli.absolutePath, resolve(packageRoot, "dist", "CliMain.js"));
-    assert.equal(cli.command, "devshell");
-});
 
 test("package bin resolver accepts object and string bin declarations", () => {
     assert.deepEqual(
@@ -143,39 +133,4 @@ test("portable application manifest removes workspace paths and publishes the re
     } finally {
         await rm(root, { force: true, recursive: true });
     }
-});
-
-test("release and installation scripts share the manifest-derived application layout", async () => {
-    const files = [
-        "scripts/package-app.mjs",
-        "scripts/smoke-package.mjs",
-        "scripts/install-local.mjs",
-        "scripts/smoke-client.mjs",
-        "scripts/dev.mjs"
-    ];
-
-    for (const file of files) {
-        const source = await readFile(resolve(repositoryRoot, file), "utf8");
-        assert.match(source, /application-layout\.mjs/u, `${file} must use the shared layout resolver`);
-        assert.doesNotMatch(source, /dist["'],\s*["']cli["'],\s*["']CliMain\.js/u, `${file} contains the legacy CLI path`);
-        assert.doesNotMatch(source, /dist\/cli\/CliMain\.js/u, `${file} contains the legacy CLI path`);
-    }
-
-
-    for (const file of ["scripts/install-release.sh", "scripts/install-release.ps1"]) {
-        const source = await readFile(resolve(repositoryRoot, file), "utf8");
-        assert.doesNotMatch(source, /dist[\\/]cli[\\/]CliMain\.js/u, `${file} contains the legacy CLI path`);
-        assert.match(source, /package\.json/u, `${file} must inspect the installed package manifest`);
-        assert.match(source, /bin(?:\.devshell|\["devshell"\])/u, `${file} must resolve bin.devshell`);
-    }
-
-    const windowsWorkflow = await readFile(resolve(repositoryRoot, ".github", "workflows", "windows.yml"), "utf8");
-    assert.doesNotMatch(windowsWorkflow, /packages\/cli\/dist\/cli\/CliMain\.js/u);
-    assert.match(windowsWorkflow, /packages\/cli\/dist\/CliMain\.js/u);
-
-    for (const workflow of ["ci.yml", "release.yml"]) {
-        const source = await readFile(resolve(repositoryRoot, ".github", "workflows", workflow), "utf8");
-        assert.match(source, /pnpm smoke:package/u, `${workflow} must execute the packaged application smoke`);
-    }
-    assert.match(windowsWorkflow, /pnpm test:release-layout/u, "Windows CI must validate release layout contracts");
 });

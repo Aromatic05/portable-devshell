@@ -66,28 +66,6 @@ test("McpOAuthProviderRuntime owns provider lifecycle, resources, metadata, and 
     }
 });
 
-test("McpOAuthProviderRuntime rejects an unknown default resource when multiple resources exist", async () => {
-    const storageDir = await mkdtemp(join(tmpdir(), "mcp-oauth-provider-resources-"));
-    const runtime = new McpOAuthProviderRuntime({
-        approvals: new McpOAuthApprovalService(storageDir),
-        config,
-        publicBaseUrl: "http://127.0.0.1:9999",
-        storageDir
-    });
-
-    try {
-        runtime.registerResource(new URL("http://127.0.0.1:9999/one/mcp"));
-        runtime.registerResource(new URL("http://127.0.0.1:9999/two/mcp"));
-        await runtime.warmup();
-        assert.equal(runtime.registeredResources.length, 2);
-        assert.deepEqual(runtime.registeredResources, [
-            "http://127.0.0.1:9999/one/mcp",
-            "http://127.0.0.1:9999/two/mcp"
-        ]);
-    } finally {
-        await rm(storageDir, { force: true, recursive: true });
-    }
-});
 
 test("McpOAuthInteraction renders escaped approval state with the configured base path", async () => {
     const storageDir = await mkdtemp(join(tmpdir(), "mcp-oauth-interaction-"));

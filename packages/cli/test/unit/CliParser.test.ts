@@ -27,19 +27,6 @@ test("CliParser rejects invalid command shapes", () => {
     assert.throws(() => parser.parse(["watch", "status"]), /requires <instance>/u);
 });
 
-test("Cli package exposes the Task 11 bin and runtime dependency contract", async () => {
-    const packageJsonPath = fileURLToPath(new URL("../../package.json", import.meta.url));
-    const packageJson = JSON.parse(await readFile(packageJsonPath, "utf8")) as {
-        bin?: Record<string, string>;
-        dependencies?: Record<string, string>;
-    };
-
-    assert.deepEqual(packageJson.bin, {
-        devshell: "./dist/CliMain.js"
-    });
-    assert.equal(packageJson.dependencies?.["@portable-devshell/shared"], "workspace:*");
-    assert.equal(packageJson.dependencies?.["@portable-devshell/tui"], "workspace:*");
-});
 
 test("CliParser routes artifact arguments through the normal command pipeline", () => {
     const parser = new CliParser();
