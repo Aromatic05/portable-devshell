@@ -1,4 +1,3 @@
-import { rmSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 import {
@@ -48,8 +47,6 @@ export class ControlDaemon {
         if (!this.#started) return;
         await this.#logger.info("control server stopping");
         await this.#server.stop();
-        await this.#pidFile.remove();
-        await this.#socketFile.remove();
         await this.#logger.info("control server stopped");
         this.#started = false;
     }
@@ -61,10 +58,8 @@ export function controlDaemonModulePath(): string {
 
 async function main(): Promise<void> {
     const daemon = new ControlDaemon();
-    const pidFile = new ControlPidFile();
     process.once("SIGINT", () => void daemon.stop().finally(() => process.exit(0)));
     process.once("SIGTERM", () => void daemon.stop().finally(() => process.exit(0)));
-    process.once("exit", () => rmSync(pidFile.path, { force: true }));
     await daemon.start();
 }
 

@@ -55,9 +55,9 @@ export class ControlRuntime {
     async stop(): Promise<void> {
         this.#reverse.stop();
         await this.#mcp.stop();
+        await this.#socket.stop();
         await this.#artifact.stop();
         await this.#instances.stopOwned();
-        await this.#socket.stop();
         this.#routes.dispose();
     }
 }
