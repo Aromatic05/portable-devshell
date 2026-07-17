@@ -8,10 +8,13 @@ import type {
     ArtifactTransferRecord,
     ArtifactTransferResult,
     ArtifactTransferStartInput,
+    ArtifactViewImageInput,
+    ArtifactViewImageResult,
     JsonValue
 } from "@portable-devshell/shared";
 
 import { ArtifactRecordStore } from "./ArtifactRecordStore.js";
+import { ArtifactImageService } from "./image/ArtifactImageService.js";
 import { ArtifactShareService } from "./share/ArtifactShareService.js";
 import type {
     ArtifactServiceOptions,
@@ -27,12 +30,14 @@ export type {
 } from "./ArtifactServiceModel.js";
 
 export class ArtifactService {
+    readonly #imageService: ArtifactImageService;
     readonly #recordStore: ArtifactRecordStore;
     readonly #shareService: ArtifactShareService;
     readonly #transferService: ArtifactTransferService;
     #initialized = false;
 
     constructor(options: ArtifactServiceOptions) {
+        this.#imageService = new ArtifactImageService(options);
         this.#recordStore = new ArtifactRecordStore(options.storageDir);
         this.#shareService = new ArtifactShareService({
             recordStore: this.#recordStore,
@@ -66,6 +71,17 @@ export class ArtifactService {
         this.#initialized = false;
         this.#shareService.stop();
         await this.#transferService.stop();
+    }
+
+    async viewImage(
+        input: ArtifactViewImageInput,
+        defaultInstance: string,
+        signal?: AbortSignal
+    ): Promise<ArtifactViewImageResult> {
+        if (!this.#initialized) {
+            throw new Error("ArtifactService is not initialized.");
+        }
+        return await this.#imageService.view(input, defaultInstance, signal);
     }
 
     async createShare(

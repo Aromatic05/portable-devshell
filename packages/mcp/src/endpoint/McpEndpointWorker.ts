@@ -8,6 +8,7 @@ import { McpContextRegistry } from "../context/McpContextRegistry.js";
 import type { McpInstanceGateway } from "../instance/McpInstanceGateway.js";
 import type { McpTool } from "../tool/McpToolSchemaAdapter.js";
 import { McpEndpointCatalog } from "./McpEndpointCatalog.js";
+import type { McpEndpointResult } from "./McpEndpointResult.js";
 import {
     McpEndpointDispatch,
     type McpEndpointCallContext,
@@ -88,7 +89,7 @@ export class McpEndpointWorker {
         input: JsonValue,
         requestContext: McpEndpointCallContext,
         signal?: AbortSignal
-    ): Promise<JsonValue> {
+    ): Promise<McpEndpointResult> {
         return await this.#dispatch.callTool(
             toolName,
             input,

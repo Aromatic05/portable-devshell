@@ -70,7 +70,7 @@ capabilities = ["read", "write", "execute"]
 | ---------- | ---------------------------------------------------------------------------------------- | ----------------- |
 | `bash`     | `bash_run`                                                                               | `execute`         |
 | `file`     | `file_read`、`file_edit`、`file_find`、`file_search`、`file_info`          | `read`、`write`   |
-| `artifact` | `artifact_read`、`artifact_share`、`artifact_transfer`                                   | `read`、`write`   |
+| `artifact` | `artifact_read`、`artifact_viewImage`、`artifact_share`、`artifact_transfer`             | `read`、`write`   |
 | `tmux`     | `tmux_run`、`tmux_input`、`tmux_read`、`tmux_inspect`、`tmux_list`、`tmux_create`、`tmux_close`    | `read`、`execute` |
 | `todo`     | `todo_read`、`todo_write`                                                                | 无硬性 capability |
 | `instance` | `instance_list`、`instance_status`、`instance_create`、`instance_start`、`instance_stop` | `manage`          |
@@ -159,6 +159,7 @@ bash_run           终止对应进程组
 file_read/search   在扫描或读取安全点停止
 file_edit          在预检和子操作边界停止；已完成的原子子操作不回滚
 artifact_read      在读取前后停止
+artifact_viewImage 在 payload 分块读取边界停止，并关闭临时 lease
 control 侧工具     立即停止 MCP 等待；已经开始的生命周期或原子操作继续完成
 tmux_run           停止等待，已经启动的 task 继续运行
 tmux_read          停止等待且不消费尚未返回的输出

@@ -5,6 +5,7 @@ import {
     type ArtifactTransferCancelInput,
     type ArtifactTransferLookupInput,
     type ArtifactTransferStartInput,
+    type ArtifactViewImageInput,
     type JsonValue,
     type ToolDefinition
 } from "@portable-devshell/shared";
@@ -60,6 +61,26 @@ export function readMcpRoutedInput(
     }
     const { instance: _ignored, ...workerInput } = input;
     return { input: workerInput, instance: target.trim() };
+}
+
+export function readMcpArtifactViewImageInput(input: JsonValue): ArtifactViewImageInput {
+    if (!isRecord(input)) {
+        throw invalidArguments("artifact_viewImage requires an object input.");
+    }
+    const handle = optionalString(input.handle, "handle");
+    const path = optionalString(input.path, "path");
+    if ((handle === undefined) === (path === undefined)) {
+        throw invalidArguments("artifact_viewImage requires exactly one of handle or path.");
+    }
+    const instance = optionalString(input.instance, "instance");
+    const common = instance === undefined ? {} : { instance };
+    if (handle !== undefined) {
+        return { ...common, handle };
+    }
+    if (path === undefined) {
+        throw invalidArguments("artifact_viewImage requires path when handle is omitted.");
+    }
+    return { ...common, path };
 }
 
 export function readMcpArtifactShareInput(input: JsonValue): ArtifactShareInput {

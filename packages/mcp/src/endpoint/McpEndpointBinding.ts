@@ -8,6 +8,7 @@ import { toControlErrorBody, type ControlErrorBody, type JsonValue } from "@port
 
 import { McpToolSchemaUnavailableError } from "../tool/McpToolSchemaAdapter.js";
 import { McpEndpointWorker } from "./McpEndpointWorker.js";
+import { McpNativeToolResult, type McpEndpointResult } from "./McpEndpointResult.js";
 
 interface McpEndpointSession {
     server: Server;
@@ -267,7 +268,14 @@ function writeJsonRpcError(response: ServerResponse, statusCode: number, code: n
     );
 }
 
-function toCallToolResult(result: JsonValue) {
+function toCallToolResult(result: McpEndpointResult) {
+    if (result instanceof McpNativeToolResult) {
+        return {
+            content: result.content,
+            isError: result.isError,
+            structuredContent: result.structuredContent
+        };
+    }
     return {
         content: [
             {

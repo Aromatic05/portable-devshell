@@ -174,7 +174,7 @@ function hasCode(expected: string): (error: unknown) => boolean {
     };
 }
 
-test("only environ_info omits ctxId across the complete 24-tool endpoint catalog", () => {
+test("only environ_info omits ctxId across the complete 25-tool endpoint catalog", () => {
     const workerToolNames = [
         "artifact_read",
         "bash_run",
@@ -204,6 +204,16 @@ test("only environ_info omits ctxId across the complete 24-tool endpoint catalog
             async statusInstance(instance) { return { instance }; },
             async stopInstance(instance) { return { instance }; },
             async transferArtifact() { return {}; },
+            async viewArtifactImage() {
+                return {
+                    bytes: 1,
+                    content: "AA==",
+                    encoding: "base64",
+                    mediaType: "image/png",
+                    name: "pixel.png",
+                    source: { instance: "demo-local", path: "./pixel.png", type: "file" }
+                };
+            },
             async writeTodo() { return { items: [], revision: 1, summary: { completed: 0, total: 0 } }; }
         },
         instanceName: "demo-local",
@@ -235,7 +245,7 @@ test("only environ_info omits ctxId across the complete 24-tool endpoint catalog
     });
 
     const tools = endpoint.listTools();
-    assert.equal(tools.length, 24);
+    assert.equal(tools.length, 25);
     assert.equal(tools[0]?.name, "environ_info");
     assert.equal(
         tools[0]?.description,

@@ -102,6 +102,7 @@ tmux_close
 control 合并到 MCP catalog 的工具：
 
 ```text
+artifact_viewImage
 artifact_share
 artifact_transfer
 todo_read

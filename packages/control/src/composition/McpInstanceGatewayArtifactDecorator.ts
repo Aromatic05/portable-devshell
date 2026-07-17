@@ -4,6 +4,8 @@ import type {
     ArtifactTransferCancelInput,
     ArtifactTransferLookupInput,
     ArtifactTransferStartInput,
+    ArtifactViewImageInput,
+    ArtifactViewImageResult,
     JsonValue
 } from "@portable-devshell/shared";
 
@@ -15,6 +17,14 @@ export function decorateMcpInstanceGatewayArtifact(
 ): McpInstanceGateway {
     return new Proxy(base, {
         get(target, property, receiver) {
+            if (property === "viewArtifactImage") {
+                return async (
+                    defaultInstance: string,
+                    input: ArtifactViewImageInput,
+                    signal?: AbortSignal
+                ): Promise<ArtifactViewImageResult> =>
+                    await artifactService.viewImage(input, defaultInstance, signal);
+            }
             if (property === "shareArtifact") {
                 return async (defaultInstance: string, input: ArtifactShareInput): Promise<JsonValue> =>
                     (await artifactService.createShare(input, defaultInstance)) as unknown as JsonValue;

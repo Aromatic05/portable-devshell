@@ -2,6 +2,8 @@ export const errorCodes = {
     artifactContentUnavailable: "artifact.contentUnavailable",
     artifactDirectoryUnsafe: "artifact.directoryUnsafe",
     artifactHostPathDenied: "artifact.hostPathDenied",
+    artifactImageTooLarge: "artifact.imageTooLarge",
+    artifactImageUnsupported: "artifact.imageUnsupported",
     artifactPayloadInvalid: "artifact.payloadInvalid",
     artifactShareExpired: "artifact.shareExpired",
     artifactShareNotFound: "artifact.shareNotFound",

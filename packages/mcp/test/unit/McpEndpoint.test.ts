@@ -429,6 +429,78 @@ test("instance_list returns object structured content through SDK transport", as
     }
 });
 
+test("artifact_viewImage returns native image content over SDK transport", async () => {
+    const pngData = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
+    const harness = createWorkerHarness({ hasToolSchemaCache: false, ready: false, tools: [] });
+    const gateway: McpInstanceGateway = {
+        assertReady() {},
+        async callTool() { return {}; },
+        async createSshInstance() { return {}; },
+        async listInstances() { return []; },
+        async readTodo() { return { revision: 0, todos: [] }; },
+        listTools() { return []; },
+        async startInstance() { return {}; },
+        async statusInstance() { return {}; },
+        async stopInstance() { return {}; },
+        async viewArtifactImage(defaultInstance, input) {
+            assert.equal(defaultInstance, "demo");
+            assert.deepEqual(input, { path: "./pixel.png" });
+            return {
+                bytes: 68,
+                content: pngData,
+                encoding: "base64",
+                mediaType: "image/png",
+                name: "pixel.png",
+                source: { instance: "demo", path: "./pixel.png", type: "file" }
+            };
+        },
+        async writeTodo() { return { revision: 0, todos: [] }; }
+    };
+    const binding = new McpEndpointBinding(
+        new McpEndpointWorker({
+            gateway,
+            instanceName: "demo",
+            policy: { capabilities: ["read"], groups: ["artifact"] },
+            worker: harness.worker
+        })
+    );
+    const server = await createBindingServer(binding);
+
+    try {
+        const session = await initialize(server.url);
+        const ctxId = await createContext(server.url, session.headers);
+        const response = await postJson(
+            server.url,
+            {
+                id: "req-artifact-view-image",
+                jsonrpc: "2.0",
+                method: "tools/call",
+                params: {
+                    arguments: { ctxId, path: "./pixel.png" },
+                    name: "artifact_viewImage"
+                }
+            },
+            session.headers
+        );
+
+        assert.equal(response.status, 200);
+        assert.equal(response.body.error, undefined);
+        assert.deepEqual(response.body.result?.content, [
+            { data: pngData, mimeType: "image/png", type: "image" },
+            { text: "pixel.png (image/png, 68 bytes)", type: "text" }
+        ]);
+        assert.deepEqual(response.body.result?.structuredContent, {
+            bytes: 68,
+            mediaType: "image/png",
+            name: "pixel.png",
+            source: { instance: "demo", path: "./pixel.png", type: "file" }
+        });
+    } finally {
+        await server.close();
+        await binding.close();
+    }
+});
+
 test("tools/list returns cached schema while the instance is not ready", async () => {
     const binding = createBinding(createWorkerHarness({ ready: false }));
     const server = await createBindingServer(binding);

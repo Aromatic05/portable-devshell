@@ -3,17 +3,23 @@ import test from "node:test";
 
 import { McpToolCatalogArtifact } from "../../dist/tool/catalog/McpToolCatalogArtifact.js";
 
-test("artifact control catalog exposes only share and transfer without documenting hidden host", () => {
+test("artifact control catalog exposes image viewing, sharing, and transfer without documenting hidden host", () => {
     const tools = new McpToolCatalogArtifact().list();
     assert.deepEqual(
         tools.map((tool) => tool.name),
-        ["artifact_share", "artifact_transfer"]
+        ["artifact_viewImage", "artifact_share", "artifact_transfer"]
     );
     const serialized = JSON.stringify(tools);
     assert.doesNotMatch(serialized, /\bhost\b/u);
     assert.match(serialized, /"start"/u);
     assert.match(serialized, /"status"/u);
     assert.match(serialized, /"cancel"/u);
+
+    const viewImage = tools.find((tool) => tool.name === "artifact_viewImage")!;
+    assert.deepEqual(viewImage.requiredCapabilities, ["read"]);
+    assert.match(viewImage.description, /native MCP image content/u);
+    assert.match(viewImage.description, /exactly one of path or handle/u);
+    assert.doesNotMatch(viewImage.name, /view_image/u);
 
     const share = tools.find((tool) => tool.name === "artifact_share")!;
     const shareSchema = share.inputSchema as {

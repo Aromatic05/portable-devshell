@@ -25,9 +25,29 @@ const artifactRead: ToolDefinition = {
     requiredCapabilities: ["read"]
 };
 
+const png = Buffer.from(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+    "base64"
+);
+
 test("artifact endpoint exposes worker read plus control share and transfer while worker is stopped", async () => {
     const calls: Array<{ kind: string; defaultInstance: string; input: JsonValue }> = [];
     const gateway = createGateway({
+        async viewArtifactImage(defaultInstance, input) {
+            calls.push({ defaultInstance, input: input as unknown as JsonValue, kind: "viewImage" });
+            return {
+                bytes: png.length,
+                content: png.toString("base64"),
+                encoding: "base64",
+                mediaType: "image/png",
+                name: "pixel.png",
+                source: {
+                    instance: defaultInstance,
+                    path: "./pixel.png",
+                    type: "file"
+                }
+            };
+        },
         async shareArtifact(defaultInstance, input) {
             calls.push({ defaultInstance, input: input as unknown as JsonValue, kind: "share" });
             return { shareId: "share-1" };
@@ -48,6 +68,7 @@ test("artifact endpoint exposes worker read plus control share and transfer whil
     assert.deepEqual(endpoint.listTools().map((tool) => tool.name), [
         "environ_info",
         "artifact_read",
+        "artifact_viewImage",
         "artifact_share",
         "artifact_transfer"
     ]);
@@ -57,6 +78,28 @@ test("artifact endpoint exposes worker read plus control share and transfer whil
     }
     assert.deepEqual(await endpoint.callTool("artifact_share", withContext({ path: "./dist" }), context), {
         shareId: "share-1"
+    });
+    const image = await endpoint.callTool(
+        "artifact_viewImage",
+        withContext({ path: "./pixel.png" }),
+        context
+    ) as unknown as {
+        content: Array<{ data?: string; mimeType?: string; text?: string; type: string }>;
+        structuredContent: JsonValue;
+    };
+    assert.deepEqual(image.content, [
+        { data: png.toString("base64"), mimeType: "image/png", type: "image" },
+        { text: "pixel.png (image/png, 68 bytes)", type: "text" }
+    ]);
+    assert.deepEqual(image.structuredContent, {
+        bytes: png.length,
+        mediaType: "image/png",
+        name: "pixel.png",
+        source: {
+            instance: "main-pc",
+            path: "./pixel.png",
+            type: "file"
+        }
     });
     assert.deepEqual(
         await endpoint.callTool(
@@ -73,6 +116,7 @@ test("artifact endpoint exposes worker read plus control share and transfer whil
     );
     assert.deepEqual(calls, [
         { defaultInstance: "main-pc", input: { path: "./dist" }, kind: "share" },
+        { defaultInstance: "main-pc", input: { path: "./pixel.png" }, kind: "viewImage" },
         {
             defaultInstance: "main-pc",
             input: {
@@ -87,8 +131,18 @@ test("artifact endpoint exposes worker read plus control share and transfer whil
     ]);
 });
 
-test("artifact control tools require artifact group and read/write capabilities", () => {
+test("artifact control tools apply read-only and mutating capability requirements independently", () => {
     const gateway = createGateway({
+        async viewArtifactImage() {
+            return {
+                bytes: png.length,
+                content: png.toString("base64"),
+                encoding: "base64",
+                mediaType: "image/png",
+                name: "pixel.png",
+                source: { instance: "main-pc", path: "./pixel.png", type: "file" }
+            };
+        },
         async shareArtifact() { return {}; },
         async transferArtifact() { return {}; }
     });
@@ -99,7 +153,11 @@ test("artifact control tools require artifact group and read/write capabilities"
         policy: { capabilities: ["read"], groups: ["artifact"] },
         worker: createWorker(false, true)
     });
-    assert.deepEqual(endpoint.listTools().map((tool) => tool.name), ["environ_info", "artifact_read"]);
+    assert.deepEqual(endpoint.listTools().map((tool) => tool.name), [
+        "environ_info",
+        "artifact_read",
+        "artifact_viewImage"
+    ]);
 });
 
 function createWorker(ready: boolean, hasSchema: boolean) {

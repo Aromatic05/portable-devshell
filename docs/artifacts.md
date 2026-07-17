@@ -4,17 +4,24 @@
 
 ## MCP 工具面
 
-Artifact 只占用三个 MCP 工具名：
+Artifact 使用四个 MCP 工具名：
 
 ```text
 artifact_read
+artifact_viewImage
 artifact_share
 artifact_transfer
 ```
 
 `artifact_read` 是 worker 工具，只读取 `bash_run` 为 stdout 或 stderr 创建的 Artifact。
 
-`artifact_share` 和 `artifact_transfer` 由 control 提供，并合并到实例 MCP endpoint 的工具 catalog。普通文件、目录、分享 payload 和传输 payload 不会获得 Artifact handle，也不能通过 `artifact_read` 读取。
+`artifact_viewImage`、`artifact_share` 和 `artifact_transfer` 由 control 提供，并合并到实例 MCP endpoint 的工具 catalog。普通文件、目录、分享 payload 和传输 payload 不会获得 Artifact handle，也不能通过 `artifact_read` 读取。
+
+## 图片查看
+
+`artifact_viewImage` 必须且只能接受 `path` 或 `handle` 之一，来源 instance 默认是当前 MCP endpoint 对应的 instance。它通过已有 `artifact.payload.open/read/close` 协议读取来源，因此本地、SSH、容器和反向连接实例不需要新增 worker RPC。
+
+支持 PNG、JPEG、GIF 和 WebP；格式依据文件魔数判断，不信任扩展名。SVG、目录、空文件、未知格式以及超过 10 MiB 的图片会被拒绝。成功结果包含原生 MCP `ImageContent` 和不含图片字节的结构化元数据；payload lease 无论成功或失败都必须关闭。
 
 ## 内容、引用与租约
 

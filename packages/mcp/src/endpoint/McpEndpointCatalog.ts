@@ -140,13 +140,15 @@ export class McpEndpointCatalog {
         }
 
         if (this.#gateway !== undefined) {
-            if (
-                this.#gateway.shareArtifact !== undefined &&
-                this.#gateway.transferArtifact !== undefined
-            ) {
+            const artifactTools = this.#artifactTools.list({
+                share: this.#gateway.shareArtifact !== undefined,
+                transfer: this.#gateway.transferArtifact !== undefined,
+                viewImage: this.#gateway.viewArtifactImage !== undefined
+            });
+            if (artifactTools.length > 0) {
                 sources.push({
                     owner: "artifact",
-                    tools: this.#artifactTools.list()
+                    tools: artifactTools
                 });
             }
             sources.push(

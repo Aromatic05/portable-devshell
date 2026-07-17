@@ -67,6 +67,29 @@ export interface ArtifactDirectoryPayloadDescriptor extends ArtifactPayloadDescr
 
 export type ArtifactPayloadDescriptor = ArtifactBytePayloadDescriptor | ArtifactDirectoryPayloadDescriptor;
 
+export type ArtifactImageMediaType = "image/png" | "image/jpeg" | "image/gif" | "image/webp";
+
+export type ArtifactViewImageInput =
+    | {
+          handle: string;
+          instance?: string;
+          path?: never;
+      }
+    | {
+          handle?: never;
+          instance?: string;
+          path: string;
+      };
+
+export interface ArtifactViewImageResult {
+    bytes: number;
+    content: string;
+    encoding: "base64";
+    mediaType: ArtifactImageMediaType;
+    name: string;
+    source: ArtifactSourceDescriptor;
+}
+
 export type ArtifactShareInput =
     | {
           expiresInSeconds?: number;

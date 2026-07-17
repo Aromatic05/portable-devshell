@@ -15,6 +15,11 @@ import {
     type ArtifactServiceSchedule
 } from "@portable-devshell/control/testing";
 
+const png = Buffer.from(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+    "base64"
+);
+
 class Deferred {
     readonly promise: Promise<void>;
     #resolve!: () => void;
@@ -172,6 +177,59 @@ test("artifact transfer returns queued immediately and completes asynchronously"
     assert.deepEqual(source.closedPayloads, ["payload-1"]);
     assert.ok(source.events.some((event) => event.type === "artifact.transferCompleted"));
     assert.ok(target.events.some((event) => event.type === "artifact.transferCompleted"));
+});
+
+test("artifact image view reads through the payload protocol and always closes the lease", async (t) => {
+    const storageDir = await mkdtemp(join(tmpdir(), "artifact-image-"));
+    t.after(() => rm(storageDir, { force: true, recursive: true }));
+    const source = new MemoryArtifactEndpoint(png);
+    const service = new ArtifactService({
+        chunkBytes: 7,
+        resolveEndpoint: resolver({ "source-a": source }),
+        shareUrl: (token) => `https://example.test/artifacts/share/${token}`,
+        storageDir
+    });
+    await service.initialize();
+
+    const image = await service.viewImage({ path: "./pixel.png" }, "source-a");
+
+    assert.deepEqual(image, {
+        bytes: png.length,
+        content: png.toString("base64"),
+        encoding: "base64",
+        mediaType: "image/png",
+        name: "payload.bin",
+        source: {
+            instance: "source-a",
+            path: "./pixel.png",
+            type: "file"
+        }
+    });
+    assert.deepEqual(source.closedPayloads, ["payload-1"]);
+});
+
+test("artifact image view rejects unsupported and oversized payloads before returning content", async (t) => {
+    const storageDir = await mkdtemp(join(tmpdir(), "artifact-image-invalid-"));
+    t.after(() => rm(storageDir, { force: true, recursive: true }));
+    const unsupported = new MemoryArtifactEndpoint(Buffer.from("not an image"));
+    const oversized = new MemoryArtifactEndpoint(Buffer.alloc(10 * 1024 * 1024 + 1));
+    const service = new ArtifactService({
+        resolveEndpoint: resolver({ oversized, unsupported }),
+        shareUrl: (token) => `https://example.test/artifacts/share/${token}`,
+        storageDir
+    });
+    await service.initialize();
+
+    await assert.rejects(
+        service.viewImage({ path: "./plain.txt" }, "unsupported"),
+        (error: unknown) => (error as { code?: string }).code === "artifact.imageUnsupported"
+    );
+    await assert.rejects(
+        service.viewImage({ path: "./huge.png" }, "oversized"),
+        (error: unknown) => (error as { code?: string }).code === "artifact.imageTooLarge"
+    );
+    assert.deepEqual(unsupported.closedPayloads, ["payload-1"]);
+    assert.deepEqual(oversized.closedPayloads, ["payload-1"]);
 });
 
 test("queued transfer resumes after restart while active transfer becomes interrupted", async (t) => {

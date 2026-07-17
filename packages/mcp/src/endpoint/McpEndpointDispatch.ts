@@ -14,6 +14,7 @@ import { throwIfMcpEndpointAborted } from "./McpEndpointCancellation.js";
 import type { McpEndpointCatalog, McpEndpointCatalogWorker } from "./McpEndpointCatalog.js";
 import { readMcpContextInput } from "./McpEndpointInput.js";
 import type { McpEndpointCallContext, McpEndpointWorkerPort } from "./McpEndpointPort.js";
+import { McpNativeToolResult, type McpEndpointResult } from "./McpEndpointResult.js";
 import { McpEndpointHandlerArtifact } from "./handler/McpEndpointHandlerArtifact.js";
 import { McpEndpointHandlerEnvironment } from "./handler/McpEndpointHandlerEnvironment.js";
 import { McpEndpointHandlerInstance } from "./handler/McpEndpointHandlerInstance.js";
@@ -83,7 +84,7 @@ export class McpEndpointDispatch {
         input: JsonValue,
         requestContext: McpEndpointCallContext,
         signal?: AbortSignal
-    ): Promise<JsonValue> {
+    ): Promise<McpEndpointResult> {
         throwIfMcpEndpointAborted(signal);
         const snapshot = this.#catalog.snapshot();
         const known = snapshot.merged.find((entry) => entry.definition.name === toolName);
@@ -114,11 +115,11 @@ export class McpEndpointDispatch {
             }
             const owner = known.owner;
             this.#catalog.assertAdaptable(selected.definition);
-            return await this.#worker.auditToolCall(
+            return await this.#auditControlTool(
+                owner,
                 toolName,
                 input,
                 context,
-                async () => await this.#callControlTool(owner, toolName, input, context, signal),
                 signal
             );
         }
@@ -157,13 +158,38 @@ export class McpEndpointDispatch {
         return context;
     }
 
+    async #auditControlTool(
+        owner: "artifact" | "instance" | "todo",
+        toolName: string,
+        input: JsonValue,
+        context: ToolCallContext,
+        signal?: AbortSignal
+    ): Promise<McpEndpointResult> {
+        let nativeResult: McpNativeToolResult | undefined;
+        const structuredResult = await this.#worker.auditToolCall(
+            toolName,
+            input,
+            context,
+            async () => {
+                const result = await this.#callControlTool(owner, toolName, input, context, signal);
+                if (result instanceof McpNativeToolResult) {
+                    nativeResult = result;
+                    return result.structuredContent;
+                }
+                return result;
+            },
+            signal
+        );
+        return nativeResult ?? structuredResult;
+    }
+
     async #callControlTool(
         owner: "artifact" | "instance" | "todo",
         toolName: string,
         input: JsonValue,
         context: ToolCallContext,
         signal?: AbortSignal
-    ): Promise<JsonValue> {
+    ): Promise<McpEndpointResult> {
         switch (owner) {
             case "artifact":
                 return await this.#artifact.call(toolName as McpToolCatalogArtifactName, input, signal);

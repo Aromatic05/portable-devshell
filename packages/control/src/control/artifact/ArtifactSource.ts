@@ -4,25 +4,18 @@ import {
     type ArtifactPayloadDescriptor,
     type ArtifactShareInput,
     type ArtifactSourceDescriptor,
-    type ArtifactTransferStartInput
+    type ArtifactTransferStartInput,
+    type ArtifactViewImageInput
 } from "@portable-devshell/shared";
 
 import type { ArtifactPayloadSourceInput } from "./ArtifactServiceModel.js";
 
+export function readImagePayloadSourceInput(input: ArtifactViewImageInput): ArtifactPayloadSourceInput {
+    return readPathOrHandle(input, "artifact_viewImage");
+}
+
 export function readSharePayloadSourceInput(input: ArtifactShareInput): ArtifactPayloadSourceInput {
-    const handle = "handle" in input ? input.handle : undefined;
-    const path = "path" in input ? input.path : undefined;
-    if (typeof handle === "string" && handle.length > 0 && path === undefined) {
-        return { handle };
-    }
-    if (typeof path === "string" && path.length > 0 && handle === undefined) {
-        return { path };
-    }
-    throw createError({
-        code: errorCodes.targetInvalid,
-        message: "Exactly one of handle or path is required.",
-        retryable: false
-    });
+    return readPathOrHandle(input, "artifact_share");
 }
 
 export function readTransferPayloadSourceInput(input: ArtifactTransferStartInput): ArtifactPayloadSourceInput {
@@ -93,6 +86,25 @@ export function sourceTypeFromPayload(
         case "directoryArchive":
             return "directory";
     }
+}
+
+function readPathOrHandle(
+    input: { handle?: string; path?: string },
+    toolName: string
+): ArtifactPayloadSourceInput {
+    const handle = input.handle;
+    const path = input.path;
+    if (typeof handle === "string" && handle.length > 0 && path === undefined) {
+        return { handle };
+    }
+    if (typeof path === "string" && path.length > 0 && handle === undefined) {
+        return { path };
+    }
+    throw createError({
+        code: errorCodes.targetInvalid,
+        message: `${toolName} requires exactly one of handle or path.`,
+        retryable: false
+    });
 }
 
 function inputHasHandle(input: ArtifactPayloadSourceInput): input is { handle: string } {
