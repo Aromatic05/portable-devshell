@@ -16,6 +16,7 @@ export * from "./runtime/attach/TuiAttachShellRunner.js";
 export * from "./state/editor/TuiEditorProviderChoices.js";
 export * from "./runtime/attach/TuiAttachShellModel.js";
 export * from "./runtime/terminal/TuiTerminalBuffer.js";
+export * from "./runtime/terminal/TuiTerminalInputRouter.js";
 export * from "./runtime/terminal/TuiTerminalModel.js";
 export * from "./runtime/terminal/TuiTerminalSession.js";
 export * from "./view/TuiHitRegions.js";

@@ -29,10 +29,12 @@ export function TuiComponentTerminal(props: TuiComponentTerminalProps) {
     }, [props.columns, props.instance, props.onOpen, props.rows]);
 
     const status = snapshot.error ?? snapshot.message ?? `${snapshot.status}${snapshot.exitCode === undefined ? "" : ` (${snapshot.exitCode})`}`;
+    const scroll = snapshot.scroll.atBottom ? "" : ` · scroll -${snapshot.scroll.offsetFromBottom}`;
+    const controls = props.focused ? "Shift+PgUp/PgDn · Ctrl+] sidebar" : "→/Tab focus · r restart";
     return (
         <Box flexDirection="column" height={props.rows + 1} overflow="hidden">
             <Text bold color={props.focused ? "cyan" : undefined}>
-                {`terminal · ${props.instance ?? "no instance"} · ${status} · ${props.focused ? "Ctrl+] sidebar" : "→/Tab focus"}`}
+                {`terminal · ${props.instance ?? "no instance"} · ${status}${scroll} · ${controls}`}
             </Text>
             {snapshot.lines.slice(0, props.rows).map((line, row) => (
                 <Box height={1} key={row} overflow="hidden" width={props.columns}>

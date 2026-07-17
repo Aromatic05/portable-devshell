@@ -153,7 +153,7 @@ export function selectFooterShortcuts(state: TuiAppState): string[] {
         case "denyConfirm":
             return ["tab", "↑↓", "enter", "esc"];
         case "terminal":
-            return ["raw input", "ctrl+] sidebar"];
+            return ["raw input", "shift+pgup/pgdn", "shift+home/end", "mouse", "ctrl+] sidebar"];
     }
 }
 

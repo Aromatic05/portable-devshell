@@ -20,11 +20,37 @@ export interface TuiTerminalLine {
     segments: TuiTerminalSegment[];
 }
 
+export type TuiTerminalMouseTrackingMode = "none" | "x10" | "vt200" | "drag" | "any";
+
+export interface TuiTerminalInputModes {
+    applicationCursorKeys: boolean;
+    bracketedPaste: boolean;
+    mouseEncoding: "legacy" | "sgr" | "unsupported";
+    mouseTracking: TuiTerminalMouseTrackingMode;
+    sendFocus: boolean;
+}
+
+export interface TuiTerminalScrollState {
+    atBottom: boolean;
+    historyLines: number;
+    offsetFromBottom: number;
+    viewportLine: number;
+}
+
+export interface TuiTerminalMouseEvent {
+    button: number;
+    kind: "press" | "release";
+    x: number;
+    y: number;
+}
+
 export interface TuiTerminalBufferSnapshot {
     columns: number;
     cursor: { x: number; y: number };
     lines: TuiTerminalLine[];
+    modes: TuiTerminalInputModes;
     rows: number;
+    scroll: TuiTerminalScrollState;
     title?: string;
 }
 

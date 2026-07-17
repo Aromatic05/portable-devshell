@@ -17,6 +17,43 @@ export interface TuiHitRegion {
     y: number;
 }
 
+export interface TuiTerminalViewportRegion {
+    height: number;
+    width: number;
+    x: number;
+    y: number;
+}
+
+export function buildTuiTerminalViewportRegion(
+    state: TuiAppState,
+    viewport: { columns: number; rows: number }
+): TuiTerminalViewportRegion | undefined {
+    if (state.ui.selectedPage !== "terminal" || !isTerminalSizeSupported(viewport.columns, viewport.rows)) {
+        return undefined;
+    }
+
+    const layout = tuiLayoutMetrics(viewport.columns);
+    const compact = layout.mode === "compact";
+    const search = selectSearchModel(state);
+    const globalErrorHeight = blockHeight(selectErrorMessage(state));
+    const toolFormHeight = state.interaction.toolForm?.open === true ? 6 : 0;
+    const viewportRows = Math.max(
+        0,
+        viewport.rows
+            - (compact ? 10 : 7)
+            - globalErrorHeight
+            - (search.open ? 1 : 0)
+            - (state.connection.status === "connecting" ? 1 : 0)
+    );
+
+    return {
+        height: Math.max(1, viewportRows - 1),
+        width: Math.max(1, mainInnerWidth(viewport.columns)),
+        x: compact ? 2 : layout.outerGap + layout.sidebarWidth + layout.panelGap + 2,
+        y: (compact ? 6 : 5) + globalErrorHeight + (search.open ? 1 : 0) + toolFormHeight + 1
+    };
+}
+
 export function buildTuiHitRegions(state: TuiAppState, viewport: { columns: number; rows: number }): TuiHitRegion[] {
     const regions: TuiHitRegion[] = [];
     const layout = tuiLayoutMetrics(viewport.columns);

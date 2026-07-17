@@ -21,11 +21,13 @@ import { TuiApp } from "../view/TuiApp.js";
 import type { TuiAppKey } from "../view/TuiAppController.js";
 import {
     buildTuiHitRegions,
+    buildTuiTerminalViewportRegion,
     hitTargetAt,
     type TuiHitTarget
 } from "../view/TuiHitRegions.js";
 import { TuiRuntimeOperations } from "./TuiRuntimeOperations.js";
 import { TuiAttachShellCommandResolver } from "./attach/TuiAttachShellCommandResolver.js";
+import { TuiTerminalInputRouter } from "./terminal/TuiTerminalInputRouter.js";
 import { TuiTerminalSession } from "./terminal/TuiTerminalSession.js";
 
 export interface TuiRuntimeOptions {
@@ -37,6 +39,7 @@ export interface TuiRuntimeOptions {
 export interface TuiRuntimeDependencies {
     clients?: TuiClients;
     inkDebug?: boolean;
+    terminal?: TuiTerminalSession;
 }
 
 export class TuiRuntime {
@@ -52,7 +55,9 @@ export class TuiRuntime {
     readonly #inkStdin: ReadStream;
     readonly #operations: TuiRuntimeOperations;
     readonly #stdin: ReadStream;
+    readonly #storeUnsubscribe: () => void;
     readonly #stdout: WriteStream;
+    readonly #terminalInputRouter = new TuiTerminalInputRouter();
     #attachResume?: () => void;
     #attachWait?: Promise<void>;
     #cursorBlinkTimer?: ReturnType<typeof setInterval>;
@@ -61,6 +66,7 @@ export class TuiRuntime {
     #mouseBuffer = "";
     #stopped = false;
     #terminalColumns = 1;
+    #terminalFocused = false;
     #terminalInstance?: string;
     #terminalRows = 1;
 
@@ -75,7 +81,8 @@ export class TuiRuntime {
         this.#alternateScreen = new AlternateScreen(this.#stdout);
         this.store = new TuiAppStore();
         this.scheduler = new TuiRenderScheduler(this.store);
-        this.terminal = new TuiTerminalSession();
+        this.terminal = dependencies.terminal ?? new TuiTerminalSession();
+        this.#storeUnsubscribe = this.store.subscribe(() => this.#syncTerminalFocus());
         this.focusManager = new TuiFocusManager(this.store, {
             currentPage: () => this.store.getState().ui.selectedPage,
             graphFor: (page, mode) => buildFocusGraphForState({
@@ -314,6 +321,7 @@ export class TuiRuntime {
         }
         this.#stopped = true;
         this.#stopCursorBlink();
+        this.#storeUnsubscribe();
         this.terminal.dispose();
         await this.session.stop();
         this.scheduler.dispose();
@@ -375,29 +383,43 @@ export class TuiRuntime {
         if (this.#ink === undefined) {
             return;
         }
-        const input = this.#mouseBuffer + chunk.toString();
         if (
             this.store.getState().ui.selectedPage === "terminal"
             && this.store.getState().interaction.focusScope === "terminal"
         ) {
-            const filtered = stripSgrMouseReports(input);
-            this.#mouseBuffer = filtered.partial;
-            const escapeIndex = filtered.data.indexOf("\u001D");
-            if (escapeIndex === -1) {
-                this.terminal.writeInput(filtered.data);
-                return;
-            }
-
             this.#mouseBuffer = "";
-            this.terminal.writeInput(filtered.data.slice(0, escapeIndex));
-            const cursor = this.store.getState().interaction.sidebarCursor;
-            this.store.setFocusScope(cursor?.kind === "instance" ? "sidebarInstances" : "sidebarPages");
-            const remainder = filtered.data.slice(escapeIndex + 1);
-            if (remainder.length > 0) {
-                this.#inkStdin.write(remainder);
+            let focused = true;
+            for (const action of this.#terminalInputRouter.push(chunk.toString())) {
+                if (action.type === "focus.leave") {
+                    focused = false;
+                    const cursor = this.store.getState().interaction.sidebarCursor;
+                    this.store.setFocusScope(cursor?.kind === "instance" ? "sidebarInstances" : "sidebarPages");
+                    continue;
+                }
+                if (action.type === "data") {
+                    if (focused) {
+                        this.terminal.writeInput(action.data);
+                    } else {
+                        this.#inkStdin.write(action.data);
+                    }
+                    continue;
+                }
+                if (action.type === "scroll") {
+                    if (focused) {
+                        this.#scrollTerminal(action.direction);
+                    }
+                    continue;
+                }
+                if (focused) {
+                    void this.#handleTerminalMouse(action);
+                } else {
+                    void this.#handleMouse(action);
+                }
             }
             return;
         }
+        this.#terminalInputRouter.reset();
+        const input = this.#mouseBuffer + chunk.toString();
         const pattern = new RegExp(
             `${String.fromCharCode(27)}\\[<(\\d+);(\\d+);(\\d+)([Mm])`,
             "g"
@@ -426,6 +448,76 @@ export class TuiRuntime {
         this.#mouseBuffer = "";
         this.#inkStdin.write(remainder);
     };
+
+    #syncTerminalFocus(): void {
+        const state = this.store.getState();
+        const focused = state.ui.selectedPage === "terminal" && state.interaction.focusScope === "terminal";
+        if (focused === this.#terminalFocused) {
+            return;
+        }
+        this.#terminalFocused = focused;
+        this.terminal.setFocused(focused);
+        if (!focused) {
+            this.#terminalInputRouter.reset();
+        }
+    }
+
+    #scrollTerminal(direction: "pageUp" | "pageDown" | "top" | "bottom"): void {
+        switch (direction) {
+            case "pageUp":
+                this.terminal.scrollPages(-1);
+                return;
+            case "pageDown":
+                this.terminal.scrollPages(1);
+                return;
+            case "top":
+                this.terminal.scrollToTop();
+                return;
+            case "bottom":
+                this.terminal.scrollToBottom();
+                return;
+        }
+    }
+
+    async #handleTerminalMouse(event: {
+        button: number;
+        kind: "press" | "release";
+        x: number;
+        y: number;
+    }): Promise<void> {
+        const region = buildTuiTerminalViewportRegion(this.store.getState(), {
+            columns: this.columns,
+            rows: this.rows
+        });
+        if (
+            region === undefined
+            || event.x < region.x
+            || event.x >= region.x + region.width
+            || event.y < region.y
+            || event.y >= region.y + region.height
+        ) {
+            await this.#handleMouse(event);
+            return;
+        }
+
+        const relative = {
+            button: event.button,
+            kind: event.kind,
+            x: event.x - region.x + 1,
+            y: event.y - region.y + 1
+        } as const;
+        if (this.terminal.sendMouse(relative)) {
+            return;
+        }
+
+        if (
+            event.kind === "press"
+            && (event.button & 64) !== 0
+            && this.terminal.getSnapshot().modes.mouseTracking === "none"
+        ) {
+            this.terminal.scrollLines((event.button & 1) === 0 ? -3 : 3);
+        }
+    }
 
     async #handleMouse(event: {
         button: number;
@@ -532,32 +624,6 @@ export class TuiRuntime {
 
 function readErrorMessage(error: unknown): string {
     return error instanceof Error ? error.message : String(error);
-}
-
-function stripSgrMouseReports(input: string): { data: string; partial: string } {
-    const pattern = new RegExp(
-        `${String.fromCharCode(27)}\\[<\\d+;\\d+;\\d+[Mm]`,
-        "g"
-    );
-    let cursor = 0;
-    let data = "";
-
-    for (const match of input.matchAll(pattern)) {
-        const start = match.index ?? 0;
-        data += input.slice(cursor, start);
-        cursor = start + match[0].length;
-    }
-
-    const remainder = input.slice(cursor);
-    const partialStart = remainder.lastIndexOf("\u001B[<");
-    if (partialStart >= 0) {
-        return {
-            data: data + remainder.slice(0, partialStart),
-            partial: remainder.slice(partialStart)
-        };
-    }
-
-    return { data: data + remainder, partial: "" };
 }
 
 function createInkStdin(stdin: ReadStream): ReadStream {

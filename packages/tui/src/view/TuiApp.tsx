@@ -51,7 +51,6 @@ export function TuiApp(props: TuiAppProps) {
         },
         [props.runtime]
     );
-
     useInput((input, key) => {
         void props.runtime.handleInput(input, key);
     });

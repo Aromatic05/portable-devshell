@@ -8,7 +8,8 @@ import test from "node:test";
 
 import type { TuiClients } from "../../dist/runtime/client/TuiClientComposition.js";
 import { TuiRuntime } from "../../dist/runtime/TuiRuntime.js";
-import { buildTuiHitRegions, hitTargetAt } from "../../dist/view/TuiHitRegions.js";
+import { TuiTerminalSession, type TuiTerminalPty } from "../../dist/testing.js";
+import { buildTuiHitRegions, buildTuiTerminalViewportRegion, hitTargetAt } from "../../dist/view/TuiHitRegions.js";
 import { selectMainScrollKey } from "../../dist/view/model/TuiViewProjection.js";
 
 test("real Ink runtime handles keyboard navigation, search, redraw, and terminal cleanup", async () => {
@@ -435,6 +436,95 @@ test(
         assert.equal(terminal.rawModes.at(-1), false);
     }
 );
+
+test("real Ink runtime routes terminal scrollback and mouse without trapping sidebar clicks", async () => {
+    const host = createTerminal();
+    const clients = createClients();
+    let dataListener: ((data: string) => void) | undefined;
+    const writes: string[] = [];
+    const pty: TuiTerminalPty = {
+        kill() {},
+        onData(listener) {
+            dataListener = listener;
+            return { dispose() {} };
+        },
+        onExit() {
+            return { dispose() {} };
+        },
+        resize() {},
+        write(data) {
+            writes.push(data);
+        }
+    };
+    const embedded = new TuiTerminalSession({ ptyFactory: () => pty });
+    const runtime = new TuiRuntime(
+        { stdin: host.stdin, stdout: host.stdout },
+        { clients: clients.value, inkDebug: true, terminal: embedded }
+    );
+    const running = runtime.run();
+
+    try {
+        await waitUntil(() => runtime.store.getState().connection.status === "connected");
+        runtime.store.replaceInstances([
+            {
+                defaultWorkspace: process.cwd(),
+                enabled: true,
+                mcpEnabled: true,
+                name: "alpha",
+                provider: "local"
+            }
+        ]);
+        runtime.store.setSelectedInstance("alpha");
+
+        host.write("9");
+        await waitUntil(() => runtime.store.getState().ui.selectedPage === "terminal");
+        await waitUntil(() => embedded.getSnapshot().status === "running");
+        host.write("\t");
+        await waitUntil(() => runtime.store.getState().interaction.focusScope === "terminal");
+
+        host.write("\u001B[A");
+        await waitUntil(() => writes.includes("\u001B[A"));
+
+        dataListener?.(Array.from({ length: 80 }, (_, index) => String(index)).join("\r\n"));
+        await waitUntil(() => embedded.getSnapshot().scroll.historyLines > 0);
+        host.write("\u001B[5;");
+        await delay(10);
+        assert.equal(embedded.getSnapshot().scroll.atBottom, true);
+        host.write("2~");
+        await delay(50);
+        assert.equal(
+            embedded.getSnapshot().scroll.atBottom,
+            false,
+            JSON.stringify({ scroll: embedded.getSnapshot().scroll, writes })
+        );
+
+        dataListener?.("\u001B[?1000;1006h");
+        await waitUntil(() => embedded.getSnapshot().modes.mouseTracking === "vt200");
+        const terminalRegion = buildTuiTerminalViewportRegion(runtime.store.getState(), {
+            columns: runtime.columns,
+            rows: runtime.rows
+        });
+        assert.ok(terminalRegion);
+        host.write(mouseSequence(0, terminalRegion.x + 4, terminalRegion.y + 2, "press"));
+        await waitUntil(() => writes.includes("\u001B[<0;5;3M"));
+
+        const helpRegion = buildTuiHitRegions(runtime.store.getState(), {
+            columns: runtime.columns,
+            rows: runtime.rows
+        }).find((region) => region.target.kind === "page" && region.target.id === "help");
+        assert.ok(helpRegion);
+        host.write(mouseSequence(0, helpRegion.x, helpRegion.y, "press"));
+        await waitUntil(() => runtime.store.getState().ui.selectedPage === "help");
+
+        host.write("\u0004");
+        await running;
+    } finally {
+        await runtime.stop();
+    }
+
+    assert.equal(clients.closed(), 1);
+    assert.equal(host.rawModes.at(-1), false);
+});
 
 function createClients(options: { pingError?: Error } = {}) {
     let closeCount = 0;

@@ -4,6 +4,7 @@ import type { TuiAttachShellCommand } from "../attach/TuiAttachShellModel.js";
 import { TuiTerminalBuffer } from "./TuiTerminalBuffer.js";
 import type {
     TuiTerminalDisposable,
+    TuiTerminalMouseEvent,
     TuiTerminalPty,
     TuiTerminalPtyFactory,
     TuiTerminalSnapshot,
@@ -17,6 +18,7 @@ export class TuiTerminalSession {
     #bufferDataSubscription?: TuiTerminalDisposable;
     #command?: TuiAttachShellCommand;
     #fallbackCommands: TuiAttachShellCommand[] = [];
+    #focused = false;
     #outputQueue: Promise<void> = Promise.resolve();
     #processGeneration = 0;
     #pty?: TuiTerminalPty;
@@ -91,6 +93,7 @@ export class TuiTerminalSession {
         this.#bufferDataSubscription = this.#buffer.onData((data) => {
             this.#pty?.write(data);
         });
+        this.#buffer.setFocused(this.#focused);
 
         try {
             this.#spawn(options.command, options.environment, options.instance, generation);
@@ -111,9 +114,43 @@ export class TuiTerminalSession {
         };
     }
 
+    scrollPages(amount: number): void {
+        this.#buffer?.scrollPages(amount);
+        this.#syncBuffer();
+    }
+
+    scrollLines(amount: number): void {
+        this.#buffer?.scrollLines(amount);
+        this.#syncBuffer();
+    }
+
+    scrollToBottom(): void {
+        this.#buffer?.scrollToBottom();
+        this.#syncBuffer();
+    }
+
+    scrollToTop(): void {
+        this.#buffer?.scrollToTop();
+        this.#syncBuffer();
+    }
+
+    sendMouse(event: TuiTerminalMouseEvent): boolean {
+        const sent = this.#buffer?.sendMouse(event) ?? false;
+        if (sent) {
+            this.#syncBuffer();
+        }
+        return sent;
+    }
+
+    setFocused(focused: boolean): void {
+        this.#focused = focused;
+        this.#buffer?.setFocused(focused);
+    }
+
     writeInput(data: string): void {
         if (this.#snapshot.status === "running") {
-            this.#pty?.write(data);
+            this.#buffer?.input(data);
+            this.#syncBuffer();
         }
     }
 
@@ -247,7 +284,20 @@ function emptySnapshot(columns = 1, rows = 1): TuiTerminalSnapshot {
         columns: clampDimension(columns),
         cursor: { x: 0, y: 0 },
         lines: [],
+        modes: {
+            applicationCursorKeys: false,
+            bracketedPaste: false,
+            mouseEncoding: "legacy",
+            mouseTracking: "none",
+            sendFocus: false
+        },
         rows: clampDimension(rows),
+        scroll: {
+            atBottom: true,
+            historyLines: 0,
+            offsetFromBottom: 0,
+            viewportLine: 0
+        },
         status: "idle"
     };
 }
