@@ -27,6 +27,13 @@ import {
 } from "../view/TuiHitRegions.js";
 import { TuiRuntimeOperations } from "./TuiRuntimeOperations.js";
 import { TuiAttachShellCommandResolver } from "./attach/TuiAttachShellCommandResolver.js";
+import {
+    detectTerminalGraphicsSupport,
+    renderTerminalGraphicsFrame,
+    terminalGraphicsClearSequence,
+    type TuiTerminalGraphicsMode,
+    type TuiTerminalGraphicsSupport
+} from "./terminal/TuiTerminalGraphicsRenderer.js";
 import { TuiTerminalInputRouter } from "./terminal/TuiTerminalInputRouter.js";
 import { TuiTerminalSession } from "./terminal/TuiTerminalSession.js";
 
@@ -38,6 +45,7 @@ export interface TuiRuntimeOptions {
 
 export interface TuiRuntimeDependencies {
     clients?: TuiClients;
+    graphicsMode?: TuiTerminalGraphicsMode;
     inkDebug?: boolean;
     terminal?: TuiTerminalSession;
 }
@@ -57,6 +65,7 @@ export class TuiRuntime {
     readonly #stdin: ReadStream;
     readonly #storeUnsubscribe: () => void;
     readonly #stdout: WriteStream;
+    readonly #terminalGraphicsSupport: TuiTerminalGraphicsSupport;
     readonly #terminalInputRouter = new TuiTerminalInputRouter();
     #attachResume?: () => void;
     #attachWait?: Promise<void>;
@@ -69,6 +78,7 @@ export class TuiRuntime {
     #terminalFocused = false;
     #terminalInstance?: string;
     #terminalRows = 1;
+    #terminalSelecting = false;
 
     constructor(
         options: TuiRuntimeOptions = {},
@@ -77,6 +87,7 @@ export class TuiRuntime {
         this.#stdin = options.stdin ?? process.stdin;
         this.#stdout = options.stdout ?? process.stdout;
         this.#inkDebug = dependencies.inkDebug ?? false;
+        this.#terminalGraphicsSupport = detectTerminalGraphicsSupport(process.env, dependencies.graphicsMode);
         this.#inkStdin = createInkStdin(this.#stdin);
         this.#alternateScreen = new AlternateScreen(this.#stdout);
         this.store = new TuiAppStore();
@@ -321,6 +332,7 @@ export class TuiRuntime {
         }
         this.#stopped = true;
         this.#stopCursorBlink();
+        this.renderTerminalGraphics(false);
         this.#storeUnsubscribe();
         this.terminal.dispose();
         await this.session.stop();
@@ -333,6 +345,44 @@ export class TuiRuntime {
 
     redraw(): void {
         this.#stdout.write("\u001B[2J\u001B[H");
+    }
+
+    renderTerminalGraphics(visible: boolean): void {
+        if (!visible || this.store.getState().ui.selectedPage !== "terminal") {
+            const clear = terminalGraphicsClearSequence(this.#terminalGraphicsSupport);
+            if (clear.length > 0) {
+                this.#stdout.write(clear);
+            }
+            return;
+        }
+
+        const region = buildTuiTerminalViewportRegion(this.store.getState(), {
+            columns: this.columns,
+            rows: this.rows
+        });
+        if (region === undefined) {
+            return;
+        }
+
+        const snapshot = this.terminal.getSnapshot();
+        const transient = this.terminal.takePendingGraphics()
+            .filter((graphic) => !graphic.persistent)
+            .map((graphic) => ({
+                ...graphic,
+                x: graphic.column,
+                y: graphic.line - snapshot.scroll.viewportLine
+            }));
+        const persistent = this.terminal.getVisibleGraphics();
+        const graphics = [...transient, ...persistent];
+        const frame = renderTerminalGraphicsFrame({
+            clear: true,
+            graphics,
+            region,
+            support: this.#terminalGraphicsSupport
+        });
+        if (frame.length > 0) {
+            this.#stdout.write(frame);
+        }
     }
 
     #startCursorBlink(): void {
@@ -404,6 +454,14 @@ export class TuiRuntime {
                     }
                     continue;
                 }
+                if (action.type === "paste") {
+                    if (focused) {
+                        this.terminal.paste(action.data);
+                    } else {
+                        this.#inkStdin.write(action.data);
+                    }
+                    continue;
+                }
                 if (action.type === "scroll") {
                     if (focused) {
                         this.#scrollTerminal(action.direction);
@@ -457,7 +515,9 @@ export class TuiRuntime {
         }
         this.#terminalFocused = focused;
         this.terminal.setFocused(focused);
+        this.#stdout.write(focused ? "\u001B[?1h\u001B=" : "\u001B[?1l\u001B>");
         if (!focused) {
+            this.#terminalSelecting = false;
             this.#terminalInputRouter.reset();
         }
     }
@@ -489,13 +549,27 @@ export class TuiRuntime {
             columns: this.columns,
             rows: this.rows
         });
-        if (
-            region === undefined
-            || event.x < region.x
-            || event.x >= region.x + region.width
-            || event.y < region.y
-            || event.y >= region.y + region.height
-        ) {
+        if (region === undefined) {
+            await this.#handleMouse(event);
+            return;
+        }
+
+        const inside = event.x >= region.x
+            && event.x < region.x + region.width
+            && event.y >= region.y
+            && event.y < region.y + region.height;
+        if (this.#terminalSelecting) {
+            this.terminal.updateSelection(
+                Math.min(Math.max(1, event.x - region.x + 1), region.width),
+                Math.min(Math.max(1, event.y - region.y + 1), region.height)
+            );
+            if (event.kind === "release") {
+                this.#terminalSelecting = false;
+                this.#copyTerminalSelection();
+            }
+            return;
+        }
+        if (!inside) {
             await this.#handleMouse(event);
             return;
         }
@@ -506,6 +580,21 @@ export class TuiRuntime {
             x: event.x - region.x + 1,
             y: event.y - region.y + 1
         } as const;
+        const tracking = this.terminal.getSnapshot().modes.mouseTracking;
+        const selectionModifier = (event.button & 4) !== 0;
+        const leftButton = (event.button & 3) === 0;
+        const motion = (event.button & 32) !== 0;
+        if (
+            event.kind === "press"
+            && leftButton
+            && !motion
+            && (event.button & 64) === 0
+            && (tracking === "none" || selectionModifier)
+        ) {
+            this.#terminalSelecting = true;
+            this.terminal.beginSelection(relative.x, relative.y);
+            return;
+        }
         if (this.terminal.sendMouse(relative)) {
             return;
         }
@@ -513,10 +602,19 @@ export class TuiRuntime {
         if (
             event.kind === "press"
             && (event.button & 64) !== 0
-            && this.terminal.getSnapshot().modes.mouseTracking === "none"
+            && tracking === "none"
         ) {
             this.terminal.scrollLines((event.button & 1) === 0 ? -3 : 3);
         }
+    }
+
+    #copyTerminalSelection(): void {
+        const text = this.terminal.getSelectionText();
+        if (text.length === 0) {
+            return;
+        }
+        const encoded = Buffer.from(text, "utf8").toString("base64");
+        this.#stdout.write(`\u001B]52;c;${encoded}\u0007`);
     }
 
     async #handleMouse(event: {
@@ -663,7 +761,7 @@ class AlternateScreen {
         }
         this.#active = true;
         this.#stdout.write(
-            "\u001B[?1049h\u001B[?25l\u001B[?1000h\u001B[?1002h\u001B[?1006h"
+            "\u001B[?1049h\u001B[?25l\u001B[?1000h\u001B[?1002h\u001B[?1006h\u001B[?2004h"
         );
     }
 
@@ -673,7 +771,7 @@ class AlternateScreen {
         }
         this.#active = false;
         this.#stdout.write(
-            "\u001B[?1006l\u001B[?1002l\u001B[?1000l\u001B[?25h\u001B[?1049l"
+            "\u001B[?2004l\u001B[?1006l\u001B[?1002l\u001B[?1000l\u001B[?1l\u001B>\u001B[?25h\u001B[?1049l"
         );
     }
 }

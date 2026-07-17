@@ -2,13 +2,16 @@ import { spawn } from "node-pty";
 
 import type { TuiAttachShellCommand } from "../attach/TuiAttachShellModel.js";
 import { TuiTerminalBuffer } from "./TuiTerminalBuffer.js";
+import { TuiTerminalGraphicsParser, type TuiTerminalOutputToken } from "./TuiTerminalGraphicsParser.js";
 import type {
     TuiTerminalDisposable,
+    TuiTerminalGraphic,
     TuiTerminalMouseEvent,
     TuiTerminalPty,
     TuiTerminalPtyFactory,
     TuiTerminalSnapshot,
-    TuiTerminalStartOptions
+    TuiTerminalStartOptions,
+    TuiTerminalVisibleGraphic
 } from "./TuiTerminalModel.js";
 
 export class TuiTerminalSession {
@@ -19,6 +22,7 @@ export class TuiTerminalSession {
     #command?: TuiAttachShellCommand;
     #fallbackCommands: TuiAttachShellCommand[] = [];
     #focused = false;
+    #graphicsParser = new TuiTerminalGraphicsParser();
     #outputQueue: Promise<void> = Promise.resolve();
     #processGeneration = 0;
     #pty?: TuiTerminalPty;
@@ -37,11 +41,20 @@ export class TuiTerminalSession {
         this.#bufferDataSubscription = undefined;
         this.#buffer?.dispose();
         this.#buffer = undefined;
+        this.#graphicsParser.reset();
         this.#listeners.clear();
     }
 
     getSnapshot(): TuiTerminalSnapshot {
         return this.#snapshot;
+    }
+
+    getVisibleGraphics(): TuiTerminalVisibleGraphic[] {
+        return this.#buffer?.getVisibleGraphics() ?? [];
+    }
+
+    takePendingGraphics(): TuiTerminalGraphic[] {
+        return this.#buffer?.takePendingGraphics() ?? [];
     }
 
     resize(columns: number, rows: number): void {
@@ -77,6 +90,7 @@ export class TuiTerminalSession {
         this.#disposeProcess();
         const generation = ++this.#processGeneration;
         this.#outputQueue = Promise.resolve();
+        this.#graphicsParser.reset();
         this.#bufferDataSubscription?.dispose();
         this.#buffer?.dispose();
 
@@ -114,6 +128,27 @@ export class TuiTerminalSession {
         };
     }
 
+    beginSelection(x: number, y: number): void {
+        this.#buffer?.beginSelection(x, y);
+        this.#syncBuffer();
+    }
+
+    clearSelection(): void {
+        this.#buffer?.clearSelection();
+        this.#syncBuffer();
+    }
+
+    getSelectionText(): string {
+        return this.#buffer?.getSelectionText() ?? "";
+    }
+
+    paste(data: string): void {
+        if (this.#snapshot.status === "running") {
+            this.#buffer?.paste(data);
+            this.#syncBuffer();
+        }
+    }
+
     scrollPages(amount: number): void {
         this.#buffer?.scrollPages(amount);
         this.#syncBuffer();
@@ -147,6 +182,11 @@ export class TuiTerminalSession {
         this.#buffer?.setFocused(focused);
     }
 
+    updateSelection(x: number, y: number): void {
+        this.#buffer?.updateSelection(x, y);
+        this.#syncBuffer();
+    }
+
     writeInput(data: string): void {
         if (this.#snapshot.status === "running") {
             this.#buffer?.input(data);
@@ -165,18 +205,9 @@ export class TuiTerminalSession {
         });
         this.#pty = pty;
         this.#ptyDataSubscription = pty.onData((data) => {
+            const tokens = this.#graphicsParser.push(data);
             this.#outputQueue = this.#outputQueue.then(async () => {
-                if (generation !== this.#processGeneration) {
-                    return;
-                }
-                const buffer = this.#buffer;
-                if (buffer === undefined) {
-                    return;
-                }
-                await buffer.write(data);
-                if (generation === this.#processGeneration) {
-                    this.#syncBuffer();
-                }
+                await this.#writeOutputTokens(tokens, generation);
             }).catch((error: unknown) => {
                 if (generation === this.#processGeneration) {
                     this.#replaceSnapshot({
@@ -188,10 +219,12 @@ export class TuiTerminalSession {
             });
         });
         this.#ptyExitSubscription = pty.onExit((event) => {
-            void this.#outputQueue.then(() => {
+            const finalTokens = this.#graphicsParser.flush();
+            void this.#outputQueue.then(async () => {
                 if (generation !== this.#processGeneration) {
                     return;
                 }
+                await this.#writeOutputTokens(finalTokens, generation);
                 const fallback = event.exitCode === this.#command?.fallbackOnExitCode
                     ? this.#fallbackCommands.shift()
                     : undefined;
@@ -221,6 +254,25 @@ export class TuiTerminalSession {
             instance,
             status: "running"
         });
+    }
+
+    async #writeOutputTokens(tokens: readonly TuiTerminalOutputToken[], generation: number): Promise<void> {
+        if (generation !== this.#processGeneration) {
+            return;
+        }
+        const buffer = this.#buffer;
+        if (buffer === undefined) {
+            return;
+        }
+        for (const token of tokens) {
+            if (token.type === "graphic") {
+                buffer.recordGraphic(token.protocol, token.data);
+            }
+            await buffer.write(token.data);
+        }
+        if (generation === this.#processGeneration) {
+            this.#syncBuffer();
+        }
     }
 
     #disposeProcess(kill = true): void {
@@ -283,9 +335,15 @@ function emptySnapshot(columns = 1, rows = 1): TuiTerminalSnapshot {
     return {
         columns: clampDimension(columns),
         cursor: { x: 0, y: 0 },
+        graphics: {
+            count: 0,
+            protocols: [],
+            revision: 0
+        },
         lines: [],
         modes: {
             applicationCursorKeys: false,
+            applicationKeypad: false,
             bracketedPaste: false,
             mouseEncoding: "legacy",
             mouseTracking: "none",

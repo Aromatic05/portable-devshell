@@ -24,6 +24,7 @@ export type TuiTerminalMouseTrackingMode = "none" | "x10" | "vt200" | "drag" | "
 
 export interface TuiTerminalInputModes {
     applicationCursorKeys: boolean;
+    applicationKeypad: boolean;
     bracketedPaste: boolean;
     mouseEncoding: "legacy" | "sgr" | "unsupported";
     mouseTracking: TuiTerminalMouseTrackingMode;
@@ -44,6 +45,22 @@ export interface TuiTerminalMouseEvent {
     y: number;
 }
 
+export type TuiTerminalGraphicProtocol = "kitty" | "sixel";
+
+export interface TuiTerminalGraphic {
+    column: number;
+    line: number;
+    persistent: boolean;
+    protocol: TuiTerminalGraphicProtocol;
+    revision: number;
+    sequence: string;
+}
+
+export interface TuiTerminalVisibleGraphic extends TuiTerminalGraphic {
+    x: number;
+    y: number;
+}
+
 export interface TuiTerminalBufferSnapshot {
     columns: number;
     cursor: { x: number; y: number };
@@ -51,6 +68,14 @@ export interface TuiTerminalBufferSnapshot {
     modes: TuiTerminalInputModes;
     rows: number;
     scroll: TuiTerminalScrollState;
+    graphics: {
+        count: number;
+        protocols: TuiTerminalGraphicProtocol[];
+        revision: number;
+    };
+    selection?: {
+        characters: number;
+    };
     title?: string;
 }
 

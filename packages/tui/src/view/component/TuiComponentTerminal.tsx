@@ -12,6 +12,7 @@ export interface TuiComponentTerminalProps {
     columns: number;
     focused: boolean;
     instance?: string;
+    onGraphicsVisibility(visible: boolean): void;
     onOpen(instance: string | undefined, columns: number, rows: number): Promise<void>;
     rows: number;
     source: TuiTerminalRenderSource;
@@ -28,13 +29,25 @@ export function TuiComponentTerminal(props: TuiComponentTerminalProps) {
         void props.onOpen(props.instance, props.columns, props.rows);
     }, [props.columns, props.instance, props.onOpen, props.rows]);
 
+    useEffect(() => {
+        props.onGraphicsVisibility(true);
+    });
+
+    useEffect(() => {
+        return () => props.onGraphicsVisibility(false);
+    }, [props.onGraphicsVisibility]);
+
     const status = snapshot.error ?? snapshot.message ?? `${snapshot.status}${snapshot.exitCode === undefined ? "" : ` (${snapshot.exitCode})`}`;
     const scroll = snapshot.scroll.atBottom ? "" : ` · scroll -${snapshot.scroll.offsetFromBottom}`;
-    const controls = props.focused ? "Shift+PgUp/PgDn · Ctrl+] sidebar" : "→/Tab focus · r restart";
+    const selection = snapshot.selection === undefined ? "" : ` · selected ${snapshot.selection.characters}`;
+    const graphics = snapshot.graphics.count === 0
+        ? ""
+        : ` · graphics ${snapshot.graphics.count} ${snapshot.graphics.protocols.join("+")}`;
+    const controls = props.focused ? "drag copy · Shift+PgUp/PgDn · Ctrl+] sidebar" : "→/Tab focus · r restart";
     return (
         <Box flexDirection="column" height={props.rows + 1} overflow="hidden">
             <Text bold color={props.focused ? "cyan" : undefined}>
-                {`terminal · ${props.instance ?? "no instance"} · ${status}${scroll} · ${controls}`}
+                {`terminal · ${props.instance ?? "no instance"} · ${status}${scroll}${selection}${graphics} · ${controls}`}
             </Text>
             {snapshot.lines.slice(0, props.rows).map((line, row) => (
                 <Box height={1} key={row} overflow="hidden" width={props.columns}>

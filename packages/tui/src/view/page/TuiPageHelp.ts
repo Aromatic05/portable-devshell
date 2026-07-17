@@ -27,6 +27,9 @@ export function buildHelpPageBoxes(state: TuiAppState): BoxModel[] {
                 "Space expands or collapses the focused box.",
                 "1-9 switch pages; Shift+1-0 switch instances.",
                 "Terminal uses the selected instance; Right/Tab enters it and Ctrl+] returns to the sidebar.",
+                "Terminal: drag selects and copies with OSC 52; hold Shift when the application owns mouse input.",
+                "Terminal: Shift+PgUp/PgDn and Shift+Home/End browse scrollback; bracketed paste is preserved.",
+                "Kitty and Sixel images are replayed when the host terminal advertises support; DEVSHELL_TUI_GRAPHICS overrides detection.",
                 "r reloads the current page and / opens search where available.",
                 "? opens this page; Ctrl+[ returns from detail, search, menus, and main focus."
             ],

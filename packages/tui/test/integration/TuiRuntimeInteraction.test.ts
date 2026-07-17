@@ -459,7 +459,7 @@ test("real Ink runtime routes terminal scrollback and mouse without trapping sid
     const embedded = new TuiTerminalSession({ ptyFactory: () => pty });
     const runtime = new TuiRuntime(
         { stdin: host.stdin, stdout: host.stdout },
-        { clients: clients.value, inkDebug: true, terminal: embedded }
+        { clients: clients.value, graphicsMode: "kitty", inkDebug: true, terminal: embedded }
     );
     const running = runtime.run();
 
@@ -481,9 +481,33 @@ test("real Ink runtime routes terminal scrollback and mouse without trapping sid
         await waitUntil(() => embedded.getSnapshot().status === "running");
         host.write("\t");
         await waitUntil(() => runtime.store.getState().interaction.focusScope === "terminal");
+        await waitUntil(() => host.output.includes("\u001B[?1h\u001B="));
 
         host.write("\u001B[A");
         await waitUntil(() => writes.includes("\u001B[A"));
+
+        const terminalRegion = buildTuiTerminalViewportRegion(runtime.store.getState(), {
+            columns: runtime.columns,
+            rows: runtime.rows
+        });
+        assert.ok(terminalRegion);
+        dataListener?.("select me");
+        await waitUntil(() => embedded.getSnapshot().lines[0]?.segments.some((segment) => segment.text.includes("select")) === true);
+        host.write(mouseSequence(0, terminalRegion.x, terminalRegion.y, "press"));
+        host.write(mouseSequence(32, terminalRegion.x + 5, terminalRegion.y, "press"));
+        host.write(mouseSequence(0, terminalRegion.x + 5, terminalRegion.y, "release"));
+        await waitUntil(() => host.output.includes("\u001B]52;c;c2VsZWN0\u0007"));
+
+        dataListener?.("\u001B[?2004h");
+        await waitUntil(() => embedded.getSnapshot().modes.bracketedPaste === true);
+        host.write("\u001B[200~pasted");
+        host.write(" text\u001B[201~");
+        await waitUntil(() => writes.includes("\u001B[200~pasted text\u001B[201~"));
+
+        dataListener?.("\u001B_Ga=T,f=100;AAAA\u001B\\");
+        await waitUntil(() => embedded.getSnapshot().graphics.count === 1);
+        await waitUntil(() => host.output.includes("\u001B_Ga=T,f=100;AAAA\u001B\\"));
+        assert.equal(host.output.includes("\u001B_Ga=d,d=A;\u001B\\"), true);
 
         dataListener?.(Array.from({ length: 80 }, (_, index) => String(index)).join("\r\n"));
         await waitUntil(() => embedded.getSnapshot().scroll.historyLines > 0);
@@ -500,11 +524,6 @@ test("real Ink runtime routes terminal scrollback and mouse without trapping sid
 
         dataListener?.("\u001B[?1000;1006h");
         await waitUntil(() => embedded.getSnapshot().modes.mouseTracking === "vt200");
-        const terminalRegion = buildTuiTerminalViewportRegion(runtime.store.getState(), {
-            columns: runtime.columns,
-            rows: runtime.rows
-        });
-        assert.ok(terminalRegion);
         host.write(mouseSequence(0, terminalRegion.x + 4, terminalRegion.y + 2, "press"));
         await waitUntil(() => writes.includes("\u001B[<0;5;3M"));
 
@@ -513,8 +532,10 @@ test("real Ink runtime routes terminal scrollback and mouse without trapping sid
             rows: runtime.rows
         }).find((region) => region.target.kind === "page" && region.target.id === "help");
         assert.ok(helpRegion);
+        const beforePageChange = host.output.length;
         host.write(mouseSequence(0, helpRegion.x, helpRegion.y, "press"));
         await waitUntil(() => runtime.store.getState().ui.selectedPage === "help");
+        await waitUntil(() => host.output.slice(beforePageChange).includes("\u001B_Ga=d,d=A;\u001B\\"));
 
         host.write("\u0004");
         await running;

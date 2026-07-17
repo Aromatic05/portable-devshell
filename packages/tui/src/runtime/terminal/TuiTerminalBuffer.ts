@@ -4,9 +4,12 @@ import type { IBufferCell, IBufferLine, Terminal as HeadlessTerminal } from "@xt
 import type {
     TuiTerminalBufferSnapshot,
     TuiTerminalDisposable,
+    TuiTerminalGraphic,
+    TuiTerminalGraphicProtocol,
     TuiTerminalLine,
     TuiTerminalMouseEvent,
-    TuiTerminalSegment
+    TuiTerminalSegment,
+    TuiTerminalVisibleGraphic
 } from "./TuiTerminalModel.js";
 
 const ANSI_COLORS = [
@@ -14,12 +17,26 @@ const ANSI_COLORS = [
     "#7f7f7f", "#ff0000", "#00ff00", "#ffff00", "#5c5cff", "#ff00ff", "#00ffff", "#ffffff"
 ] as const;
 const { Terminal } = headless;
+const MAX_PERSISTENT_GRAPHICS = 128;
+const MAX_PERSISTENT_GRAPHICS_BYTES = 16 * 1024 * 1024;
+
+interface TuiTerminalSelectionPoint {
+    column: number;
+    line: number;
+}
 
 export class TuiTerminalBuffer {
     readonly #terminal: HeadlessTerminal;
     #focused = false;
+    #graphicsRevision = 0;
     #mouseSgr = false;
     #mouseUnsupported = false;
+    #pendingGraphics: TuiTerminalGraphic[] = [];
+    #persistentGraphics: TuiTerminalGraphic[] = [];
+    #selection?: {
+        anchor: TuiTerminalSelectionPoint;
+        focus: TuiTerminalSelectionPoint;
+    };
     #title?: string;
 
     constructor(options: { columns: number; rows: number }) {
@@ -51,6 +68,49 @@ export class TuiTerminalBuffer {
         this.#terminal.dispose();
     }
 
+    beginSelection(x: number, y: number): void {
+        const point = this.#selectionPoint(x, y);
+        this.#selection = { anchor: point, focus: point };
+    }
+
+    clearSelection(): void {
+        this.#selection = undefined;
+    }
+
+    getSelectionText(): string {
+        if (this.#selection === undefined) {
+            return "";
+        }
+        const buffer = this.#terminal.buffer.active;
+        const [start, end] = orderedSelection(this.#selection.anchor, this.#selection.focus);
+        let output = "";
+        for (let lineIndex = start.line; lineIndex <= end.line; lineIndex += 1) {
+            const line = buffer.getLine(lineIndex);
+            if (line === undefined) {
+                continue;
+            }
+            const startColumn = lineIndex === start.line ? start.column : 0;
+            const endColumn = lineIndex === end.line ? end.column + 1 : this.#terminal.cols;
+            output += line.translateToString(true, startColumn, endColumn);
+            if (lineIndex < end.line && buffer.getLine(lineIndex + 1)?.isWrapped !== true) {
+                output += "\n";
+            }
+        }
+        return output;
+    }
+
+    getVisibleGraphics(): TuiTerminalVisibleGraphic[] {
+        const buffer = this.#terminal.buffer.active;
+        const endLine = buffer.viewportY + this.#terminal.rows;
+        return this.#persistentGraphics
+            .filter((graphic) => graphic.line >= buffer.viewportY && graphic.line < endLine)
+            .map((graphic) => ({
+                ...graphic,
+                x: graphic.column,
+                y: graphic.line - buffer.viewportY
+            }));
+    }
+
     getSnapshot(): TuiTerminalBufferSnapshot {
         const buffer = this.#terminal.buffer.active;
         const cursor = {
@@ -60,18 +120,32 @@ export class TuiTerminalBuffer {
         const lines: TuiTerminalLine[] = [];
 
         for (let row = 0; row < this.#terminal.rows; row += 1) {
-            const line = buffer.getLine(buffer.viewportY + row);
+            const absoluteLine = buffer.viewportY + row;
+            const line = buffer.getLine(absoluteLine);
             lines.push({
-                segments: buildSegments(line, this.#terminal.cols, row === cursor.y ? cursor.x : undefined)
+                segments: buildSegments(
+                    line,
+                    this.#terminal.cols,
+                    row === cursor.y ? cursor.x : undefined,
+                    this.#selectionRange(absoluteLine)
+                )
             });
         }
+
+        const selectionText = this.getSelectionText();
 
         return {
             columns: this.#terminal.cols,
             cursor,
+            graphics: {
+                count: this.#persistentGraphics.length,
+                protocols: [...new Set(this.#persistentGraphics.map((graphic) => graphic.protocol))],
+                revision: this.#graphicsRevision
+            },
             lines,
             modes: {
                 applicationCursorKeys: this.#terminal.modes.applicationCursorKeysMode,
+                applicationKeypad: this.#terminal.modes.applicationKeypadMode,
                 bracketedPaste: this.#terminal.modes.bracketedPasteMode,
                 mouseEncoding: this.#mouseSgr ? "sgr" : this.#mouseUnsupported ? "unsupported" : "legacy",
                 mouseTracking: this.#terminal.modes.mouseTrackingMode,
@@ -84,12 +158,17 @@ export class TuiTerminalBuffer {
                 offsetFromBottom: Math.max(0, buffer.baseY - buffer.viewportY),
                 viewportLine: buffer.viewportY
             },
+            selection: selectionText.length === 0 ? undefined : { characters: [...selectionText].length },
             title: this.#title
         };
     }
 
     input(data: string): void {
-        this.#terminal.input(encodeCursorKeys(data, this.#terminal.modes.applicationCursorKeysMode), true);
+        this.clearSelection();
+        this.#terminal.input(encodeInput(data, {
+            applicationCursorKeys: this.#terminal.modes.applicationCursorKeysMode,
+            applicationKeypad: this.#terminal.modes.applicationKeypadMode
+        }), true);
     }
 
     onData(listener: (data: string) => void): TuiTerminalDisposable {
@@ -97,7 +176,39 @@ export class TuiTerminalBuffer {
     }
 
     resize(columns: number, rows: number): void {
+        this.clearSelection();
         this.#terminal.resize(clampDimension(columns), clampDimension(rows));
+    }
+
+    paste(data: string): void {
+        this.clearSelection();
+        this.#terminal.input(
+            this.#terminal.modes.bracketedPasteMode
+                ? `\u001B[200~${data}\u001B[201~`
+                : data,
+            true
+        );
+    }
+
+    recordGraphic(protocol: TuiTerminalGraphicProtocol, sequence: string): void {
+        const buffer = this.#terminal.buffer.active;
+        const classification = classifyGraphic(protocol, sequence);
+        if (classification.clearPersistent) {
+            this.#persistentGraphics = [];
+        }
+        const graphic: TuiTerminalGraphic = {
+            column: buffer.cursorX,
+            line: buffer.baseY + buffer.cursorY,
+            persistent: classification.persistent,
+            protocol,
+            revision: ++this.#graphicsRevision,
+            sequence
+        };
+        this.#pendingGraphics.push(graphic);
+        if (classification.persistent) {
+            this.#persistentGraphics.push(graphic);
+            this.#trimPersistentGraphics();
+        }
     }
 
     scrollLines(amount: number): void {
@@ -141,10 +252,77 @@ export class TuiTerminalBuffer {
         }
     }
 
+    takePendingGraphics(): TuiTerminalGraphic[] {
+        const pending = this.#pendingGraphics;
+        this.#pendingGraphics = [];
+        return pending;
+    }
+
     write(data: string): Promise<void> {
+        this.clearSelection();
+        if (clearsGraphics(data)) {
+            this.#clearPersistentGraphics();
+        }
         return new Promise((resolve) => {
             this.#terminal.write(data, resolve);
         });
+    }
+
+    updateSelection(x: number, y: number): void {
+        if (this.#selection === undefined) {
+            return;
+        }
+        this.#selection.focus = this.#selectionPoint(x, y);
+    }
+
+    #selectionPoint(x: number, y: number): TuiTerminalSelectionPoint {
+        const buffer = this.#terminal.buffer.active;
+        return {
+            column: Math.min(Math.max(0, Math.floor(x) - 1), Math.max(0, this.#terminal.cols - 1)),
+            line: Math.min(
+                Math.max(0, buffer.viewportY + Math.floor(y) - 1),
+                Math.max(0, buffer.length - 1)
+            )
+        };
+    }
+
+    #selectionRange(line: number): readonly [number, number] | undefined {
+        if (this.#selection === undefined) {
+            return undefined;
+        }
+        const [start, end] = orderedSelection(this.#selection.anchor, this.#selection.focus);
+        if (line < start.line || line > end.line) {
+            return undefined;
+        }
+        return [
+            line === start.line ? start.column : 0,
+            line === end.line ? end.column + 1 : this.#terminal.cols
+        ];
+    }
+
+    #clearPersistentGraphics(): void {
+        if (this.#persistentGraphics.length === 0) {
+            return;
+        }
+        this.#persistentGraphics = [];
+        this.#graphicsRevision += 1;
+    }
+
+    #trimPersistentGraphics(): void {
+        let bytes = this.#persistentGraphics.reduce(
+            (total, graphic) => total + Buffer.byteLength(graphic.sequence, "utf8"),
+            0
+        );
+        while (
+            this.#persistentGraphics.length > MAX_PERSISTENT_GRAPHICS
+            || bytes > MAX_PERSISTENT_GRAPHICS_BYTES
+        ) {
+            const removed = this.#persistentGraphics.shift();
+            if (removed === undefined) {
+                break;
+            }
+            bytes -= Buffer.byteLength(removed.sequence, "utf8");
+        }
     }
 
     #updatePrivateModes(params: (number | number[])[], enabled: boolean): void {
@@ -162,14 +340,86 @@ export class TuiTerminalBuffer {
     }
 }
 
-function encodeCursorKeys(data: string, applicationMode: boolean): string {
-    const source = applicationMode ? "\u001B[" : "\u001BO";
-    const target = applicationMode ? "\u001BO" : "\u001B[";
+function classifyGraphic(
+    protocol: TuiTerminalGraphicProtocol,
+    sequence: string
+): { clearPersistent: boolean; persistent: boolean } {
+    if (protocol === "sixel") {
+        return { clearPersistent: false, persistent: true };
+    }
+
+    const separator = sequence.indexOf(";");
+    const header = separator === -1 ? sequence : sequence.slice(0, separator);
+    const action = header
+        .slice(header.indexOf("_G") + 2)
+        .split(",")
+        .find((part) => part.startsWith("a="))
+        ?.slice(2) ?? "T";
+    return {
+        clearPersistent: action === "d",
+        persistent: action !== "d" && action !== "q"
+    };
+}
+
+function clearsGraphics(data: string): boolean {
+    return data.includes("\u001B[2J")
+        || data.includes("\u001B[3J")
+        || data.includes("\u001B[?47h")
+        || data.includes("\u001B[?47l")
+        || data.includes("\u001B[?1047h")
+        || data.includes("\u001B[?1047l")
+        || data.includes("\u001B[?1049h")
+        || data.includes("\u001B[?1049l")
+        || data.includes("\u001Bc");
+}
+
+function encodeInput(
+    data: string,
+    modes: { applicationCursorKeys: boolean; applicationKeypad: boolean }
+): string {
+    const source = modes.applicationCursorKeys ? "\u001B[" : "\u001BO";
+    const target = modes.applicationCursorKeys ? "\u001BO" : "\u001B[";
     let output = data;
     for (const final of "ABCDHF") {
         output = output.split(`${source}${final}`).join(`${target}${final}`);
     }
+    if (!modes.applicationKeypad) {
+        for (const [final, replacement] of Object.entries(KEYPAD_NORMAL_VALUES)) {
+            output = output.split(`\u001BO${final}`).join(replacement);
+        }
+    }
     return output;
+}
+
+const KEYPAD_NORMAL_VALUES: Readonly<Record<string, string>> = {
+    M: "\r",
+    X: "=",
+    j: "*",
+    k: "+",
+    l: ",",
+    m: "-",
+    n: ".",
+    o: "/",
+    p: "0",
+    q: "1",
+    r: "2",
+    s: "3",
+    t: "4",
+    u: "5",
+    v: "6",
+    w: "7",
+    x: "8",
+    y: "9"
+};
+
+function orderedSelection(
+    left: TuiTerminalSelectionPoint,
+    right: TuiTerminalSelectionPoint
+): readonly [TuiTerminalSelectionPoint, TuiTerminalSelectionPoint] {
+    if (left.line < right.line || (left.line === right.line && left.column <= right.column)) {
+        return [left, right];
+    }
+    return [right, left];
 }
 
 function shouldSendMouse(
@@ -208,7 +458,12 @@ function clampCoordinate(value: number, maximum: number): number {
     return Math.min(Math.max(1, Math.floor(value)), Math.max(1, maximum));
 }
 
-function buildSegments(line: IBufferLine | undefined, columns: number, cursorColumn?: number): TuiTerminalSegment[] {
+function buildSegments(
+    line: IBufferLine | undefined,
+    columns: number,
+    cursorColumn?: number,
+    selection?: readonly [number, number]
+): TuiTerminalSegment[] {
     const segments: TuiTerminalSegment[] = [];
 
     for (let column = 0; column < columns; column += 1) {
@@ -217,7 +472,8 @@ function buildSegments(line: IBufferLine | undefined, columns: number, cursorCol
             continue;
         }
 
-        const segment = segmentForCell(cell, column === cursorColumn);
+        const selected = selection !== undefined && column >= selection[0] && column < selection[1];
+        const segment = segmentForCell(cell, column === cursorColumn || selected);
         const previous = segments.at(-1);
         if (previous !== undefined && sameStyle(previous, segment)) {
             previous.text += segment.text;

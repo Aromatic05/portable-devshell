@@ -2,10 +2,13 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+    detectTerminalGraphicsSupport,
     pageFromShortcut,
+    renderTerminalGraphicsFrame,
     selectSidebarModel,
     TuiAppStore,
     TuiTerminalBuffer,
+    TuiTerminalGraphicsParser,
     TuiTerminalInputRouter,
     TuiTerminalSession,
     type TuiTerminalInputAction,
@@ -78,6 +81,53 @@ test("terminal buffer adapts application cursor keys and focus reporting", async
     terminal.dispose();
 });
 
+test("terminal buffer adapts application keypad sequences", async () => {
+    const terminal = new TuiTerminalBuffer({ columns: 8, rows: 3 });
+    const writes: string[] = [];
+    terminal.onData((data) => writes.push(data));
+
+    await terminal.write("\u001B=");
+    assert.equal(terminal.getSnapshot().modes.applicationKeypad, true);
+    terminal.input("\u001BOp\u001BOq\u001BOM");
+    assert.equal(writes.at(-1), "\u001BOp\u001BOq\u001BOM");
+
+    await terminal.write("\u001B>");
+    assert.equal(terminal.getSnapshot().modes.applicationKeypad, false);
+    terminal.input("\u001BOp\u001BOq\u001BOM");
+    assert.equal(writes.at(-1), "01\r");
+    terminal.dispose();
+});
+
+test("terminal buffer selects wrapped text and exposes it for clipboard copy", async () => {
+    const terminal = new TuiTerminalBuffer({ columns: 6, rows: 3 });
+    await terminal.write("abcdefghi\r\nnext");
+
+    terminal.beginSelection(2, 1);
+    terminal.updateSelection(3, 2);
+    const snapshot = terminal.getSnapshot();
+
+    assert.equal(terminal.getSelectionText(), "bcdefghi");
+    assert.equal(snapshot.selection?.characters, 8);
+    assert.equal(snapshot.lines.some((line) => line.segments.some((segment) => segment.inverse === true)), true);
+
+    terminal.clearSelection();
+    assert.equal(terminal.getSnapshot().selection, undefined);
+    terminal.dispose();
+});
+
+test("terminal buffer wraps pasted text only when bracketed paste is enabled", async () => {
+    const terminal = new TuiTerminalBuffer({ columns: 8, rows: 3 });
+    const writes: string[] = [];
+    terminal.onData((data) => writes.push(data));
+
+    terminal.paste("plain");
+    await terminal.write("\u001B[?2004h");
+    terminal.paste("wrapped");
+
+    assert.deepEqual(writes, ["plain", "\u001B[200~wrapped\u001B[201~"]);
+    terminal.dispose();
+});
+
 test("terminal buffer forwards SGR and legacy mouse reports only when requested", async () => {
     const terminal = new TuiTerminalBuffer({ columns: 20, rows: 6 });
     const writes: string[] = [];
@@ -110,6 +160,68 @@ test("terminal input router preserves order across split shortcuts and mouse rep
             { data: "rest", type: "data" }
         ]
     );
+});
+
+test("terminal input router reconstructs split bracketed paste", () => {
+    const router = new TuiTerminalInputRouter();
+
+    assert.deepEqual(router.push("before\u001B[200~hello"), [{ data: "before", type: "data" }]);
+    assert.deepEqual(router.push(" world\u001B[20"), []);
+    assert.deepEqual(router.push("1~after"), [
+        { data: "hello world", type: "paste" },
+        { data: "after", type: "data" }
+    ]);
+});
+
+test("terminal graphics parser preserves text and captures split Kitty and Sixel sequences", () => {
+    const parser = new TuiTerminalGraphicsParser();
+
+    assert.deepEqual(parser.push("before\u001B_Ga=T,f=100;AAAA"), [
+        { data: "before", type: "text" }
+    ]);
+    assert.deepEqual(parser.push("\u001B\\middle\u001BP1;2qabc"), [
+        { data: "\u001B_Ga=T,f=100;AAAA\u001B\\", protocol: "kitty", type: "graphic" },
+        { data: "middle", type: "text" }
+    ]);
+    assert.deepEqual(parser.push("\u001B\\after"), [
+        { data: "\u001BP1;2qabc\u001B\\", protocol: "sixel", type: "graphic" },
+        { data: "after", type: "text" }
+    ]);
+    assert.deepEqual(parser.flush(), []);
+});
+
+test("terminal graphics renderer detects support and positions native protocol output", () => {
+    assert.deepEqual(detectTerminalGraphicsSupport({}, "kitty"), { kitty: true, sixel: false });
+    assert.deepEqual(detectTerminalGraphicsSupport({ TERM_PROGRAM: "WezTerm" }, "auto"), {
+        kitty: true,
+        sixel: true
+    });
+
+    const frame = renderTerminalGraphicsFrame({
+        clear: true,
+        graphics: [
+            {
+                persistent: true,
+                protocol: "kitty",
+                sequence: "\u001B_Ga=T;AAAA\u001B\\",
+                x: 2,
+                y: 3
+            },
+            {
+                persistent: true,
+                protocol: "sixel",
+                sequence: "\u001BPqabc\u001B\\",
+                x: 4,
+                y: 5
+            }
+        ],
+        region: { height: 10, width: 20, x: 30, y: 7 },
+        support: { kitty: true, sixel: false }
+    });
+
+    assert.equal(frame.includes("\u001B_Ga=d,d=A;\u001B\\"), true);
+    assert.equal(frame.includes("\u001B[10;32H\u001B_Ga=T;AAAA\u001B\\"), true);
+    assert.equal(frame.includes("\u001BPqabc"), false);
 });
 
 test("terminal session connects PTY output, input, resize, and disposal", async () => {

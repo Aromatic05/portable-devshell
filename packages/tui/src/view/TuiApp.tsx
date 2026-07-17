@@ -51,6 +51,10 @@ export function TuiApp(props: TuiAppProps) {
         },
         [props.runtime]
     );
+    const renderTerminalGraphics = useCallback(
+        (visible: boolean) => props.runtime.renderTerminalGraphics(visible),
+        [props.runtime]
+    );
     useInput((input, key) => {
         void props.runtime.handleInput(input, key);
     });
@@ -77,6 +81,7 @@ export function TuiApp(props: TuiAppProps) {
                             columns={Math.max(1, boxInnerWidth)}
                             focused={state.interaction.focusScope === "terminal"}
                             instance={state.ui.selectedInstance}
+                            onGraphicsVisibility={renderTerminalGraphics}
                             onOpen={openTerminal}
                             rows={terminalRows}
                             source={props.runtime.terminal}

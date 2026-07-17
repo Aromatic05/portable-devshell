@@ -1,12 +1,15 @@
 export type TuiTerminalInputAction =
     | { data: string; type: "data" }
     | { type: "focus.leave" }
+    | { data: string; type: "paste" }
     | { direction: "pageUp" | "pageDown" | "top" | "bottom"; type: "scroll" }
     | { button: number; kind: "press" | "release"; type: "mouse"; x: number; y: number };
 
 const ESCAPE = "\u001B";
 const FOCUS_LEAVE = "\u001D";
 const MOUSE_PREFIX = `${ESCAPE}[<`;
+const PASTE_BEGIN = `${ESCAPE}[200~`;
+const PASTE_END = `${ESCAPE}[201~`;
 const SCROLL_SEQUENCES = new Map<string, Extract<TuiTerminalInputAction, { type: "scroll" }>["direction"]>([
     [`${ESCAPE}[5;2~`, "pageUp"],
     [`${ESCAPE}[6;2~`, "pageDown"],
@@ -18,15 +21,35 @@ const SCROLL_SEQUENCES = new Map<string, Extract<TuiTerminalInputAction, { type:
 
 export class TuiTerminalInputRouter {
     #buffer = "";
+    #pasteBuffer?: string;
 
     push(chunk: string): TuiTerminalInputAction[] {
         this.#buffer += chunk;
         const actions: TuiTerminalInputAction[] = [];
 
         while (this.#buffer.length > 0) {
+            if (this.#pasteBuffer !== undefined) {
+                this.#pasteBuffer += this.#buffer;
+                this.#buffer = "";
+                const end = this.#pasteBuffer.indexOf(PASTE_END);
+                if (end === -1) {
+                    break;
+                }
+                actions.push({ data: this.#pasteBuffer.slice(0, end), type: "paste" });
+                this.#buffer = this.#pasteBuffer.slice(end + PASTE_END.length);
+                this.#pasteBuffer = undefined;
+                continue;
+            }
+
             if (this.#buffer.startsWith(FOCUS_LEAVE)) {
                 actions.push({ type: "focus.leave" });
                 this.#buffer = this.#buffer.slice(FOCUS_LEAVE.length);
+                continue;
+            }
+
+            if (this.#buffer.startsWith(PASTE_BEGIN)) {
+                this.#buffer = this.#buffer.slice(PASTE_BEGIN.length);
+                this.#pasteBuffer = "";
                 continue;
             }
 
@@ -71,6 +94,7 @@ export class TuiTerminalInputRouter {
 
     reset(): void {
         this.#buffer = "";
+        this.#pasteBuffer = undefined;
     }
 }
 
@@ -84,6 +108,9 @@ function firstControlIndex(value: string): number {
 
 function isRecognizedPartial(value: string): boolean {
     if ([...SCROLL_SEQUENCES.keys()].some((sequence) => sequence.startsWith(value))) {
+        return true;
+    }
+    if (PASTE_BEGIN.startsWith(value)) {
         return true;
     }
     if (value === ESCAPE || value === `${ESCAPE}[`) {

@@ -31,4 +31,5 @@ export interface TuiAppController {
     readonly terminal: TuiTerminalRenderSource;
     handleInput(input: string, key: TuiAppKey): Promise<void>;
     openTerminal(instance: string | undefined, columns: number, rows: number): Promise<void>;
+    renderTerminalGraphics(visible: boolean): void;
 }
