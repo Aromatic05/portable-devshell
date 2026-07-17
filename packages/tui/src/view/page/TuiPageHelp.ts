@@ -25,7 +25,8 @@ export function buildHelpPageBoxes(state: TuiAppState): BoxModel[] {
                 "Up/Down moves sidebar focus without selecting.",
                 "Enter selects the focused item or activates its action.",
                 "Space expands or collapses the focused box.",
-                "1-8 switch pages; Shift+1-0 switch instances.",
+                "1-9 switch pages; Shift+1-0 switch instances.",
+                "Terminal uses the selected instance; Right/Tab enters it and Ctrl+] returns to the sidebar.",
                 "r reloads the current page and / opens search where available.",
                 "? opens this page; Ctrl+[ returns from detail, search, menus, and main focus."
             ],

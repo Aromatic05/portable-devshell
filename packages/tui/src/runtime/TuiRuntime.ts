@@ -25,6 +25,8 @@ import {
     type TuiHitTarget
 } from "../view/TuiHitRegions.js";
 import { TuiRuntimeOperations } from "./TuiRuntimeOperations.js";
+import { TuiAttachShellCommandResolver } from "./attach/TuiAttachShellCommandResolver.js";
+import { TuiTerminalSession } from "./terminal/TuiTerminalSession.js";
 
 export interface TuiRuntimeOptions {
     stdin?: ReadStream;
@@ -44,6 +46,7 @@ export class TuiRuntime {
     readonly scheduler: TuiRenderScheduler;
     readonly session: TuiControlSession;
     readonly store: TuiAppStore;
+    readonly terminal: TuiTerminalSession;
     readonly #alternateScreen: AlternateScreen;
     readonly #inkDebug: boolean;
     readonly #inkStdin: ReadStream;
@@ -57,6 +60,9 @@ export class TuiRuntime {
     #inputStarted = false;
     #mouseBuffer = "";
     #stopped = false;
+    #terminalColumns = 1;
+    #terminalInstance?: string;
+    #terminalRows = 1;
 
     constructor(
         options: TuiRuntimeOptions = {},
@@ -69,6 +75,7 @@ export class TuiRuntime {
         this.#alternateScreen = new AlternateScreen(this.#stdout);
         this.store = new TuiAppStore();
         this.scheduler = new TuiRenderScheduler(this.store);
+        this.terminal = new TuiTerminalSession();
         this.focusManager = new TuiFocusManager(this.store, {
             currentPage: () => this.store.getState().ui.selectedPage,
             graphFor: (page, mode) => buildFocusGraphForState({
@@ -159,6 +166,11 @@ export class TuiRuntime {
                 );
             },
             onPageReload: async (page, instance) => {
+                if (page === "terminal") {
+                    this.#terminalInstance = undefined;
+                    await this.openTerminal(instance, this.#terminalColumns, this.#terminalRows);
+                    return;
+                }
                 await this.#operations.reloadPage(page, instance);
             },
             onQuit: async () => {
@@ -237,12 +249,72 @@ export class TuiRuntime {
         await this.commandDispatcher.dispatchMany(intents);
     }
 
+    async openTerminal(instance: string | undefined, columns: number, rows: number): Promise<void> {
+        this.#terminalColumns = Math.max(1, Math.floor(columns));
+        this.#terminalRows = Math.max(1, Math.floor(rows));
+
+        if (instance === undefined) {
+            this.#terminalInstance = undefined;
+            this.terminal.setUnavailable(
+                "Select an instance from the lower sidebar list.",
+                this.#terminalColumns,
+                this.#terminalRows
+            );
+            return;
+        }
+
+        const current = this.terminal.getSnapshot();
+        if (
+            this.#terminalInstance === instance
+            && (current.status === "starting" || current.status === "running" || current.status === "exited")
+        ) {
+            this.terminal.resize(this.#terminalColumns, this.#terminalRows);
+            return;
+        }
+
+        const entry = this.store.getState().instances.find((candidate) => candidate.name === instance);
+        if (entry === undefined) {
+            this.#terminalInstance = instance;
+            this.terminal.setError(
+                "Selected instance is unavailable.",
+                this.#terminalColumns,
+                this.#terminalRows
+            );
+            return;
+        }
+
+        try {
+            const command = new TuiAttachShellCommandResolver().resolve({
+                configView: this.store.getState().configView,
+                environment: process.env,
+                instance: entry,
+                snapshot: this.store.getState().snapshotsByInstance[instance]
+            });
+            this.#terminalInstance = instance;
+            await this.terminal.start({
+                columns: this.#terminalColumns,
+                command,
+                environment: process.env,
+                instance,
+                rows: this.#terminalRows
+            });
+        } catch (error) {
+            this.#terminalInstance = instance;
+            this.terminal.setError(
+                readErrorMessage(error),
+                this.#terminalColumns,
+                this.#terminalRows
+            );
+        }
+    }
+
     async stop(): Promise<void> {
         if (this.#stopped) {
             return;
         }
         this.#stopped = true;
         this.#stopCursorBlink();
+        this.terminal.dispose();
         await this.session.stop();
         this.scheduler.dispose();
         this.#ink?.unmount();
@@ -304,6 +376,28 @@ export class TuiRuntime {
             return;
         }
         const input = this.#mouseBuffer + chunk.toString();
+        if (
+            this.store.getState().ui.selectedPage === "terminal"
+            && this.store.getState().interaction.focusScope === "terminal"
+        ) {
+            const filtered = stripSgrMouseReports(input);
+            this.#mouseBuffer = filtered.partial;
+            const escapeIndex = filtered.data.indexOf("\u001D");
+            if (escapeIndex === -1) {
+                this.terminal.writeInput(filtered.data);
+                return;
+            }
+
+            this.#mouseBuffer = "";
+            this.terminal.writeInput(filtered.data.slice(0, escapeIndex));
+            const cursor = this.store.getState().interaction.sidebarCursor;
+            this.store.setFocusScope(cursor?.kind === "instance" ? "sidebarInstances" : "sidebarPages");
+            const remainder = filtered.data.slice(escapeIndex + 1);
+            if (remainder.length > 0) {
+                this.#inkStdin.write(remainder);
+            }
+            return;
+        }
         const pattern = new RegExp(
             `${String.fromCharCode(27)}\\[<(\\d+);(\\d+);(\\d+)([Mm])`,
             "g"
@@ -434,6 +528,36 @@ export class TuiRuntime {
         this.#attachWait = undefined;
         resume?.();
     }
+}
+
+function readErrorMessage(error: unknown): string {
+    return error instanceof Error ? error.message : String(error);
+}
+
+function stripSgrMouseReports(input: string): { data: string; partial: string } {
+    const pattern = new RegExp(
+        `${String.fromCharCode(27)}\\[<\\d+;\\d+;\\d+[Mm]`,
+        "g"
+    );
+    let cursor = 0;
+    let data = "";
+
+    for (const match of input.matchAll(pattern)) {
+        const start = match.index ?? 0;
+        data += input.slice(cursor, start);
+        cursor = start + match[0].length;
+    }
+
+    const remainder = input.slice(cursor);
+    const partialStart = remainder.lastIndexOf("\u001B[<");
+    if (partialStart >= 0) {
+        return {
+            data: data + remainder.slice(0, partialStart),
+            partial: remainder.slice(partialStart)
+        };
+    }
+
+    return { data: data + remainder, partial: "" };
 }
 
 function createInkStdin(stdin: ReadStream): ReadStream {

@@ -115,6 +115,8 @@ export class TuiRuntimeControlOperations {
             case "help":
                 await this.options.session.refresh();
                 return;
+            case "terminal":
+                return;
             case "todo":
                 if (instance !== undefined) await this.options.session.refreshTodo(instance);
                 return;

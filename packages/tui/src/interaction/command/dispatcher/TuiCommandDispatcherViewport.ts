@@ -53,6 +53,10 @@ export class TuiCommandDispatcherViewport {
 
     cancelPassiveScope(): boolean {
         const scope = this.#store.getState().interaction.focusScope;
+        if (scope === "terminal") {
+            this.returnToSidebar();
+            return true;
+        }
         if (scope === "boxDetail") {
             this.#store.setFocusScope("mainBoxes");
             return true;
@@ -144,9 +148,17 @@ export class TuiCommandDispatcherViewport {
             return this.#focusManager.move(direction);
         }
         if (scope === "sidebarPages" || scope === "sidebarInstances") {
+            if (this.#store.getState().ui.selectedPage === "terminal") {
+                this.#store.setFocusScope("terminal");
+                return true;
+            }
             if (!hasBoxes) return false;
             this.#store.setFocusScope("mainBoxes");
             this.#focus.syncMainFocus();
+            return true;
+        }
+        if (scope === "terminal") {
+            this.returnToSidebar();
             return true;
         }
         if (scope === "mainBoxes" || scope === "boxDetail") {
@@ -158,6 +170,13 @@ export class TuiCommandDispatcherViewport {
 
     #moveWithinScope(direction: "up" | "down" | "left" | "right"): boolean {
         const scope = this.#store.getState().interaction.focusScope;
+        if (scope === "terminal") {
+            if (direction === "left") {
+                this.returnToSidebar();
+                return true;
+            }
+            return false;
+        }
         if (scope === "textDetail") {
             return false;
         }
@@ -172,6 +191,10 @@ export class TuiCommandDispatcherViewport {
             return (direction === "up" || direction === "down") && this.#focusManager.move(direction);
         }
         if ((scope === "sidebarPages" || scope === "sidebarInstances") && direction === "right") {
+            if (this.#store.getState().ui.selectedPage === "terminal") {
+                this.#store.setFocusScope("terminal");
+                return true;
+            }
             if (this.#projection.selectMainBoxIds(this.#store.getState()).length === 0) return false;
             this.#store.setFocusScope("mainBoxes");
             this.#focus.syncMainFocus();

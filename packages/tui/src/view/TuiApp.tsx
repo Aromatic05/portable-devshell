@@ -1,4 +1,4 @@
-import { useSyncExternalStore } from "react";
+import { useCallback, useSyncExternalStore } from "react";
 import { Box, Text, useInput } from "ink";
 
 import { TuiComponentConfirmDialog } from "./component/TuiComponentConfirmDialog.js";
@@ -6,6 +6,7 @@ import { TuiComponentErrorBanner } from "./component/TuiComponentErrorBanner.js"
 import { TuiComponentFooter } from "./component/TuiComponentFooter.js";
 import { TuiComponentHeader } from "./component/TuiComponentHeader.js";
 import { TuiComponentSidebar } from "./component/TuiComponentSidebar.js";
+import { TuiComponentTerminal } from "./component/TuiComponentTerminal.js";
 import { TuiScreenRouter } from "./screen/TuiScreenRouter.js";
 import {
     selectConnectionState,
@@ -43,6 +44,13 @@ export function TuiApp(props: TuiAppProps) {
         0,
         props.runtime.rows - (layout.mode === "compact" ? 10 : 7) - (errorLines?.length ?? 0) - (search.open ? 1 : 0) - (connection.status === "connecting" ? 1 : 0)
     );
+    const terminalRows = Math.max(1, viewportRows - 1);
+    const openTerminal = useCallback(
+        async (instance: string | undefined, columns: number, rows: number) => {
+            await props.runtime.openTerminal(instance, columns, rows);
+        },
+        [props.runtime]
+    );
 
     useInput((input, key) => {
         void props.runtime.handleInput(input, key);
@@ -65,7 +73,18 @@ export function TuiApp(props: TuiAppProps) {
                             <Text dimColor>Enter submit, Esc cancel</Text>
                         </Box>
                     ) : undefined}
-                    <TuiScreenRouter boxInnerWidth={boxInnerWidth} state={state} viewportRows={viewportRows} />
+                    {state.ui.selectedPage === "terminal" ? (
+                        <TuiComponentTerminal
+                            columns={Math.max(1, boxInnerWidth)}
+                            focused={state.interaction.focusScope === "terminal"}
+                            instance={state.ui.selectedInstance}
+                            onOpen={openTerminal}
+                            rows={terminalRows}
+                            source={props.runtime.terminal}
+                        />
+                    ) : (
+                        <TuiScreenRouter boxInnerWidth={boxInnerWidth} state={state} viewportRows={viewportRows} />
+                    )}
                     {!auditDetailOpen ? (
                         <TuiComponentConfirmDialog
                             body={confirmDialog.body}

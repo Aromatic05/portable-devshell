@@ -14,7 +14,8 @@ const pageEntries: Array<{ id: TuiPageId; label: string }> = [
     { id: "audit", label: "audit" },
     { id: "logs", label: "logs" },
     { id: "todo", label: "todo" },
-    { id: "help", label: "help" }
+    { id: "help", label: "help" },
+    { id: "terminal", label: "terminal" }
 ];
 
 export function selectActivePage(state: TuiAppState): TuiActivePage {
@@ -130,7 +131,7 @@ export function selectFooterShortcuts(state: TuiAppState): string[] {
     switch (state.interaction.focusScope) {
         case "sidebarPages":
         case "sidebarInstances":
-            return ["→ main", "tab", "enter", "1-8", "shift+1-9", "r", "↑↓", "esc"];
+            return ["→ main", "tab", "enter", "1-9", "shift+1-9", "r", "↑↓", "esc"];
         case "mainBoxes":
             return ["← sidebar", "tab", "enter", "space", "r", "↑↓", ...(isSearchablePage(state.ui.selectedPage) ? ["/"] : []), "esc"];
         case "boxDetail":
@@ -151,6 +152,8 @@ export function selectFooterShortcuts(state: TuiAppState): string[] {
             return ["tab", "↑↓", "enter", "esc"];
         case "denyConfirm":
             return ["tab", "↑↓", "enter", "esc"];
+        case "terminal":
+            return ["raw input", "ctrl+] sidebar"];
     }
 }
 

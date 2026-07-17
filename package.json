@@ -6,6 +6,11 @@
     "engines": {
         "node": ">=24"
     },
+    "pnpm": {
+        "onlyBuiltDependencies": [
+            "node-pty"
+        ]
+    },
     "scripts": {
         "dev": "node ./scripts/dev.mjs",
         "build": "pnpm -r --filter \"./packages/*\" build",

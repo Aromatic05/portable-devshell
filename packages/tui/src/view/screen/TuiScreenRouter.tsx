@@ -9,7 +9,7 @@ import type { TuiPageId } from "../../state/TuiUiState.js";
 import type { TuiAppState } from "../../state/reducer/TuiStoreModel.js";
 import { selectMainBoxFlowMetrics, selectMainScreenModel } from "../model/TuiViewProjection.js";
 
-export const orderedPages: TuiPageId[] = ["instances", "config", "connector", "oauth", "audit", "logs", "todo", "help"];
+export const orderedPages: TuiPageId[] = ["instances", "config", "connector", "oauth", "audit", "logs", "todo", "help", "terminal"];
 
 export interface TuiScreenRouterProps {
     boxInnerWidth: number;
@@ -129,6 +129,7 @@ function clamp(value: number, min: number, max: number): number {
 
 export function buildFocusGraphForState(state: TuiAppState): TuiFocusGraph {
     switch (state.interaction.focusScope) {
+        case "terminal":
         case "textDetail":
             return new TuiFocusGraph([]);
         case "confirm":

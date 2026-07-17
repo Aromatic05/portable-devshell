@@ -31,6 +31,8 @@ export function buildBoxesForPage(state: TuiAppState, page: TuiPageId, instanceN
                 return instanceName === undefined ? [] : buildAuditPageBoxes(state, instanceName);
             case "logs":
                 return instanceName === undefined ? [] : buildLogsPageBoxes(state, instanceName);
+            case "terminal":
+                return [];
         }
     })();
 

@@ -24,6 +24,9 @@ export interface TuiKeyPress {
 
 export class TuiKeyDispatcher {
     dispatch(mode: TuiMode, press: TuiKeyPress): TuiUiIntent[] {
+        if (mode === "terminal") {
+            return [];
+        }
         const globalIntent = this.#global(mode, press);
         if (globalIntent !== undefined) {
             return [globalIntent];
@@ -247,8 +250,8 @@ export class TuiKeyDispatcher {
     }
 }
 
-function isShortcutDigit(input: string): input is "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" {
-    return input === "1" || input === "2" || input === "3" || input === "4" || input === "5" || input === "6" || input === "7" || input === "8";
+function isShortcutDigit(input: string): input is "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" {
+    return input === "1" || input === "2" || input === "3" || input === "4" || input === "5" || input === "6" || input === "7" || input === "8" || input === "9";
 }
 
 function shiftedInstanceIndex(press: TuiKeyPress): number | undefined {

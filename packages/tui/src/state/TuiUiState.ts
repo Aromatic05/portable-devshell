@@ -1,4 +1,4 @@
-export type TuiPageId = "instances" | "todo" | "config" | "connector" | "oauth" | "audit" | "logs" | "help";
+export type TuiPageId = "instances" | "todo" | "config" | "connector" | "oauth" | "audit" | "logs" | "help" | "terminal";
 
 export type TuiSidebarFocus = "pages" | "instances";
 
@@ -14,7 +14,8 @@ export type TuiFocusScope =
     | "confirm"
     | "approvalDetail"
     | "denyConfirm"
-    | "textDetail";
+    | "textDetail"
+    | "terminal";
 
 export type TuiAuditPageMode = "list" | "approvalDetail" | "denyConfirm";
 
