@@ -36,7 +36,8 @@ test("ControlSocketServer routes canonical control and instance operations over 
     assert.deepEqual((await request(harness.socketPath, "@control", "service.ping")).payload, { pong: true });
     assert.deepEqual((await request(harness.socketPath, "@control", "service.status")).payload, {
         instanceCount: 1,
-        ok: true
+        ok: true,
+        pid: process.pid
     });
 
     const listed = (await request(harness.socketPath, "@control", "instance.list")).payload as Array<{

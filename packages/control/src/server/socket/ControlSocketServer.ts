@@ -18,8 +18,8 @@ export class ControlSocketServer {
     readonly #routes: ControlRouteProvider;
     readonly #socketPath: string;
     readonly #connections = new Map<string, PrefixRoute>();
+    #closePromise?: Promise<void>;
     #server?: Server;
-    #stopPromise?: Promise<void>;
 
     constructor(options: ControlSocketServerOptions) {
         this.#routes = options.routes;
@@ -39,13 +39,22 @@ export class ControlSocketServer {
     }
 
     async stop(): Promise<void> {
-        if (this.#stopPromise !== undefined) return await this.#stopPromise;
-        this.#stopPromise = this.#stopInternal();
+        await this.close();
+        await this.removeEndpoint();
+    }
+
+    async close(): Promise<void> {
+        if (this.#closePromise !== undefined) return await this.#closePromise;
+        this.#closePromise = this.#closeInternal();
         try {
-            await this.#stopPromise;
+            await this.#closePromise;
         } finally {
-            this.#stopPromise = undefined;
+            this.#closePromise = undefined;
         }
+    }
+
+    async removeEndpoint(): Promise<void> {
+        await removeControlIpcEndpoint(this.#socketPath);
     }
 
     #attach(socket: Socket): void {
@@ -61,7 +70,7 @@ export class ControlSocketServer {
         });
     }
 
-    async #stopInternal(): Promise<void> {
+    async #closeInternal(): Promise<void> {
         for (const route of this.#connections.values()) route.close();
         this.#connections.clear();
         const server = this.#server;
@@ -71,6 +80,5 @@ export class ControlSocketServer {
                 server.close((error) => error === undefined ? resolve() : reject(error));
             });
         }
-        await removeControlIpcEndpoint(this.#socketPath);
     }
 }

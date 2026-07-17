@@ -33,6 +33,7 @@ export class WorkerInstanceLifecycle {
     readonly #commandClient?: WorkerCommandClient;
     readonly #config: ResolvedWorkerInstanceConfig;
     readonly #connection: WorkerInstanceConnection;
+    #operationTail: Promise<void> = Promise.resolve();
 
     constructor(options: WorkerInstanceLifecycleOptions) {
         this.#appendEvent = options.appendEvent;
@@ -43,17 +44,17 @@ export class WorkerInstanceLifecycle {
     }
 
     async start(workspacePath?: WorkspacePath | string): Promise<InstanceSnapshot> {
-        return await this.#start(workspacePath);
+        return await this.#runExclusive(async () => await this.#start(workspacePath));
     }
 
     async startInteractive(
         workspacePath: WorkerCommandInteractiveSession | WorkspacePath | string | undefined,
         interactiveSession?: WorkerCommandInteractiveSession
     ): Promise<InstanceSnapshot> {
-        return await this.#start(
+        return await this.#runExclusive(async () => await this.#start(
             isInteractiveSession(workspacePath) ? undefined : workspacePath,
             isInteractiveSession(workspacePath) ? workspacePath : interactiveSession
-        );
+        ));
     }
 
     async #start(
@@ -116,10 +117,21 @@ export class WorkerInstanceLifecycle {
     }
 
     async stop(): Promise<InstanceSnapshot> {
+        return await this.#runExclusive(async () => await this.#stop());
+    }
+
+    async #stop(): Promise<InstanceSnapshot> {
         if (this.#config.managementMode === "selfManaged") {
             return await this.#connection.stopSelfManaged();
         }
 
+        await this.#applyStateUpdate({
+            connectionState: "disconnected",
+            daemonState: "stopping",
+            lastErrorCode: undefined
+        });
+        this.#connection.closeBridge();
+        this.#connection.clearHandshake();
         try {
             const result = await this.#requireCommandClient().stop();
             if (result.exitCode !== 0) {
@@ -137,15 +149,11 @@ export class WorkerInstanceLifecycle {
                 `Worker stop failed for instance ${this.#config.name}.`,
                 this.#config.name
             );
+            await this.#refreshStatus().catch(() => undefined);
             await this.#applyStateUpdate({
-                connectionState: "disconnected",
-                daemonState: "stopping",
                 lastErrorCode: getErrorCode(wrappedError, errorCodes.coreWorkerStopFailed)
             });
             throw wrappedError;
-        } finally {
-            this.#connection.closeBridge();
-            this.#connection.clearHandshake();
         }
 
         await this.#appendEvent("instance.stopped");
@@ -157,6 +165,18 @@ export class WorkerInstanceLifecycle {
     }
 
     async refreshStatus(): Promise<InstanceSnapshot> {
+        return await this.#runExclusive(async () => await this.#refreshStatus());
+    }
+
+    async reconnectRpc(): Promise<InstanceSnapshot> {
+        return await this.#runExclusive(async () => await this.#connection.reconnectRpc());
+    }
+
+    async closeConnection(): Promise<void> {
+        await this.#runExclusive(async () => await this.#connection.close());
+    }
+
+    async #refreshStatus(): Promise<InstanceSnapshot> {
         if (this.#config.managementMode === "selfManaged") {
             if (!this.#connection.connected) {
                 this.#connection.markReverseOffline();
@@ -211,6 +231,15 @@ export class WorkerInstanceLifecycle {
             message: `Instance ${this.#config.name} does not have a controller-managed command transport.`,
             retryable: false
         });
+    }
+
+    async #runExclusive<T>(factory: () => Promise<T>): Promise<T> {
+        const operation = this.#operationTail.then(factory, factory);
+        this.#operationTail = operation.then(
+            () => undefined,
+            () => undefined
+        );
+        return await operation;
     }
 
     async #readWorkerStatus(): Promise<{

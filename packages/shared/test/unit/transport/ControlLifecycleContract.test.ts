@@ -114,6 +114,7 @@ test("control lifecycle start is idempotent and stop tolerates the shutdown sock
     };
     const socketFile: ControlSocketFilePort = {
         path: "/tmp/control.sock",
+        runtimeDir: "/tmp",
         async ensureRuntimeDir() {
             socketActions.push("ensure");
         },
@@ -138,7 +139,7 @@ test("control lifecycle start is idempotent and stop tolerates the shutdown sock
         spawnFunction() {
             spawnCount += 1;
             running = true;
-            return Object.assign(new EventEmitter(), { unref() {} }) as never;
+            return Object.assign(new EventEmitter(), { pid: 4321, unref() {} }) as never;
         },
         waitTimeoutMs: 100
     });
@@ -154,7 +155,7 @@ test("control lifecycle start is idempotent and stop tolerates the shutdown sock
         running: true
     });
     assert.equal(spawnCount, 1);
-    assert.deepEqual(pidActions, ["remove"]);
+    assert.deepEqual(pidActions, ["remove", "write:4321"]);
     assert.deepEqual(socketActions, ["remove", "ensure"]);
 
     assert.deepEqual(await lifecycle.stop(), {
@@ -163,7 +164,7 @@ test("control lifecycle start is idempotent and stop tolerates the shutdown sock
         running: false
     });
     assert.equal(shutdownCount, 1);
-    assert.deepEqual(pidActions, ["remove", "remove"]);
+    assert.deepEqual(pidActions, ["remove", "write:4321", "remove"]);
     assert.deepEqual(socketActions, ["remove", "ensure", "remove"]);
 });
 
@@ -199,11 +200,13 @@ test("control lifecycle start failure includes the latest daemon log tail", asyn
             },
             socketFile: {
                 path: socketPath,
+                runtimeDir: root,
                 async ensureRuntimeDir() {},
                 async remove() {}
             },
+            processIsRunning: () => true,
             spawnFunction() {
-                return Object.assign(new EventEmitter(), { unref() {} }) as never;
+                return Object.assign(new EventEmitter(), { pid: 999_999_999, unref() {} }) as never;
             },
             waitTimeoutMs: 1
         });

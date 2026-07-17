@@ -16,7 +16,7 @@ use windows_sys::Win32::Foundation::{
 use windows_sys::Win32::Storage::FileSystem::PIPE_ACCESS_DUPLEX;
 use windows_sys::Win32::System::Pipes::{
     ConnectNamedPipe, CreateNamedPipeW, PIPE_READMODE_BYTE, PIPE_TYPE_BYTE,
-    PIPE_UNLIMITED_INSTANCES, PIPE_WAIT,
+    PIPE_UNLIMITED_INSTANCES, PIPE_WAIT, PeekNamedPipe,
 };
 
 pub fn endpoint_may_exist(_path: &Path) -> bool {
@@ -70,7 +70,11 @@ pub struct LocalIpcStream {
 
 impl LocalIpcStream {
     pub fn connect(path: &Path) -> IoResult<Self> {
-        let deadline = Instant::now() + Duration::from_secs(5);
+        Self::connect_with_timeout(path, Duration::from_secs(5))
+    }
+
+    pub fn connect_with_timeout(path: &Path, timeout: Duration) -> IoResult<Self> {
+        let deadline = Instant::now() + timeout;
         loop {
             match OpenOptions::new().read(true).write(true).open(path) {
                 Ok(inner) => return Ok(Self { inner }),
@@ -97,6 +101,48 @@ impl LocalIpcStream {
 
     pub fn set_nonblocking(&self, _nonblocking: bool) -> IoResult<()> {
         Ok(())
+    }
+
+    pub fn set_request_timeout(&self, _timeout: Duration) -> IoResult<()> {
+        Ok(())
+    }
+
+    pub fn wait_for_response(&self, timeout: Duration) -> IoResult<()> {
+        let deadline = Instant::now() + timeout;
+        loop {
+            let mut header = [0_u8; 4];
+            let mut bytes_read = 0_u32;
+            let mut bytes_available = 0_u32;
+            let succeeded = unsafe {
+                PeekNamedPipe(
+                    self.inner.as_raw_handle(),
+                    header.as_mut_ptr().cast(),
+                    header.len() as u32,
+                    &mut bytes_read,
+                    &mut bytes_available,
+                    ptr::null_mut(),
+                )
+            };
+            if succeeded == 0 {
+                return Err(Error::last_os_error());
+            }
+            if bytes_read == header.len() as u32 {
+                let payload_length = u32::from_be_bytes(header) as u64;
+                if bytes_available as u64 >= header.len() as u64 + payload_length {
+                    return Ok(());
+                }
+            }
+            if Instant::now() >= deadline {
+                return Err(Error::new(
+                    ErrorKind::TimedOut,
+                    format!(
+                        "named pipe response timed out after {}ms",
+                        timeout.as_millis()
+                    ),
+                ));
+            }
+            thread::sleep(Duration::from_millis(5));
+        }
     }
 
     pub fn shutdown_both(&self) -> IoResult<()> {

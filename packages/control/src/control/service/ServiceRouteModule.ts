@@ -11,7 +11,7 @@ export interface ServiceRouteModuleOptions {
 export function createServiceRouteModule(options: ServiceRouteModuleOptions): PrefixRouteModuleDefinition {
     return routeModule("service", {
         ping: () => ({ pong: true }),
-        status: () => ({ instanceCount: options.instanceCount(), ok: true }),
+        status: () => ({ instanceCount: options.instanceCount(), ok: true, pid: process.pid }),
         shutdown: (_request, context) => {
             context.afterReply(options.shutdown);
             return { accepted: true };

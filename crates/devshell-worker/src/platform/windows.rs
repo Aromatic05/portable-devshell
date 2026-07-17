@@ -75,7 +75,7 @@ pub fn spawn_daemon_process(
     executable: &Path,
     current_directory: &Path,
     environment_overrides: &[(&str, &OsStr)],
-) -> Result<(), String> {
+) -> Result<u32, String> {
     let application_name = null_terminated(executable.as_os_str());
     let mut command_line = quoted_command_line(executable.as_os_str());
     let current_directory = null_terminated(current_directory.as_os_str());
@@ -108,11 +108,12 @@ pub fn spawn_daemon_process(
             std::io::Error::last_os_error()
         ));
     }
+    let process_id = process_information.dwProcessId;
     unsafe {
         CloseHandle(process_information.hThread);
         CloseHandle(process_information.hProcess);
     }
-    Ok(())
+    Ok(process_id)
 }
 
 pub fn configure_child_process(command: &mut Command) {

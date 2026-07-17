@@ -53,11 +53,24 @@ export class ControlRuntime {
     }
 
     async stop(): Promise<void> {
-        this.#reverse.stop();
-        await this.#mcp.stop();
-        await this.#socket.stop();
-        await this.#artifact.stop();
-        await this.#instances.stopOwned();
-        this.#routes.dispose();
+        const failures: unknown[] = [];
+        try {
+            this.#reverse.stop();
+        } catch (error) {
+            failures.push(error);
+        }
+        await this.#mcp.stop().catch((error) => failures.push(error));
+        await this.#socket.close().catch((error) => failures.push(error));
+        await this.#artifact.stop().catch((error) => failures.push(error));
+        await this.#instances.stopOwned().catch((error) => failures.push(error));
+        try {
+            this.#routes.dispose();
+        } catch (error) {
+            failures.push(error);
+        }
+        await this.#socket.removeEndpoint().catch((error) => failures.push(error));
+        if (failures.length > 0) {
+            throw new AggregateError(failures, "Control runtime failed to stop cleanly.");
+        }
     }
 }

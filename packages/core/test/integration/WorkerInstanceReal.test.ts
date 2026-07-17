@@ -100,6 +100,49 @@ test("WorkerInstance completes lifecycle against frozen devshell-worker", async 
     assert.equal(stopped.ready, false);
 });
 
+test("WorkerInstance serializes start and stop lifecycle operations", async () => {
+    const homeDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-instance-serialized-"));
+    const harness = createWorkerInstanceHarness();
+    const commands: string[] = [];
+    let releaseStart!: () => void;
+    const startGate = new Promise<void>((resolve) => {
+        releaseStart = resolve;
+    });
+    const transport: WorkerCommandTransport = {
+        ...harness.transport,
+        async runWorkerCommand(command, options) {
+            commands.push(command);
+            if (command === "start") {
+                await startGate;
+            }
+            return await harness.transport.runWorkerCommand(command, options);
+        }
+    };
+    const instance = new WorkerInstanceFactory().create({
+        homeDirectory,
+        name: asInstanceName("serialized-lifecycle"),
+        transport
+    });
+
+    try {
+        const starting = instance.start("/tmp/workspace");
+        await waitFor(() => commands.includes("start"));
+        const stopping = instance.stop();
+        await new Promise((resolve) => setTimeout(resolve, 25));
+
+        assert.deepEqual(commands, ["start"]);
+
+        releaseStart();
+        await starting;
+        await stopping;
+        assert.deepEqual(commands, ["start", "stop"]);
+    } finally {
+        releaseStart();
+        await instance.close();
+        await rm(homeDirectory, { force: true, recursive: true });
+    }
+});
+
 test("WorkerInstance audits control-owned tool calls while the worker is stopped", async () => {
     const homeDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-control-audit-"));
     const harness = createWorkerInstanceHarness();
@@ -636,6 +679,48 @@ test("WorkerInstance restores a stopped disconnected snapshot when start fails",
     }
 });
 
+test("WorkerInstance refreshes actual daemon state when stop fails", async () => {
+    const homeDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-instance-stop-failure-"));
+    const harness = createWorkerInstanceHarness();
+    const transport: WorkerCommandTransport = {
+        ...harness.transport,
+        async runWorkerCommand(command, options) {
+            if (command === "stop") {
+                return {
+                    exitCode: 1,
+                    stderr: "stop failed",
+                    stdout: ""
+                };
+            }
+            return await harness.transport.runWorkerCommand(command, options);
+        }
+    };
+    const instance = new WorkerInstanceFactory().create({
+        homeDirectory,
+        name: asInstanceName("task-6-stop-failure"),
+        transport
+    });
+
+    try {
+        await instance.start("/tmp/workspace");
+        harness.setStatus("running");
+
+        await assert.rejects(instance.stop(), (error: unknown) => {
+            assert.equal((error as { code?: string }).code, errorCodes.coreWorkerStopFailed);
+            return true;
+        });
+
+        const snapshot = instance.snapshot();
+        assert.equal(snapshot.daemonState, "running");
+        assert.equal(snapshot.connectionState, "connected");
+        assert.equal(snapshot.ready, true);
+        assert.equal(snapshot.lastErrorCode, errorCodes.coreWorkerStopFailed);
+    } finally {
+        await instance.close();
+        await rm(homeDirectory, { force: true, recursive: true });
+    }
+});
+
 test("WorkerInstance refreshStatus updates snapshot from worker status without auto start", async () => {
     const homeDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-instance-refresh-"));
     const harness = createWorkerInstanceHarness();
@@ -973,4 +1058,13 @@ function toolSchemaFor(field: string): JsonValue {
         required: [field],
         type: "object"
     };
+}
+
+async function waitFor(predicate: () => boolean): Promise<void> {
+    const deadline = Date.now() + 1_000;
+    while (Date.now() < deadline) {
+        if (predicate()) return;
+        await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    throw new Error("Timed out waiting for condition.");
 }

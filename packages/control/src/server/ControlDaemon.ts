@@ -22,6 +22,7 @@ export class ControlDaemon {
     readonly #pidFile: ControlPidFile;
     readonly #server: ControlServer;
     readonly #socketFile: ControlSocketFile;
+    #operationTail: Promise<void> = Promise.resolve();
     #started = false;
 
     constructor(options: ControlDaemonOptions = {}) {
@@ -35,20 +36,51 @@ export class ControlDaemon {
     }
 
     async start(): Promise<void> {
+        await this.#runExclusive(async () => await this.#start());
+    }
+
+    async #start(): Promise<void> {
         if (this.#started) return;
         await this.#socketFile.ensureRuntimeDir();
         await this.#server.start();
-        await this.#pidFile.write();
-        await this.#logger.info("control server started");
         this.#started = true;
+        try {
+            await this.#pidFile.write();
+            await this.#logger.info("control server started");
+        } catch (error) {
+            await this.#server.stop().catch(() => undefined);
+            this.#started = false;
+            throw error;
+        }
     }
 
     async stop(): Promise<void> {
+        await this.#runExclusive(async () => await this.#stop());
+    }
+
+    async #stop(): Promise<void> {
         if (!this.#started) return;
-        await this.#logger.info("control server stopping");
-        await this.#server.stop();
-        await this.#logger.info("control server stopped");
-        this.#started = false;
+        const failures: unknown[] = [];
+        await this.#logger.info("control server stopping").catch((error) => failures.push(error));
+        try {
+            await this.#server.stop();
+            this.#started = false;
+        } catch (error) {
+            failures.push(error);
+        }
+        await this.#logger.info("control server stopped").catch((error) => failures.push(error));
+        if (failures.length > 0) {
+            throw new AggregateError(failures, "Control server failed to stop cleanly.");
+        }
+    }
+
+    async #runExclusive<T>(factory: () => Promise<T>): Promise<T> {
+        const operation = this.#operationTail.then(factory, factory);
+        this.#operationTail = operation.then(
+            () => undefined,
+            () => undefined
+        );
+        return await operation;
     }
 }
 
@@ -58,8 +90,17 @@ export function controlDaemonModulePath(): string {
 
 async function main(): Promise<void> {
     const daemon = new ControlDaemon();
-    process.once("SIGINT", () => void daemon.stop().finally(() => process.exit(0)));
-    process.once("SIGTERM", () => void daemon.stop().finally(() => process.exit(0)));
+    const stopAndExit = () => {
+        void daemon.stop().then(
+            () => process.exit(0),
+            (error) => {
+                console.error(error);
+                process.exit(1);
+            }
+        );
+    };
+    process.once("SIGINT", stopAndExit);
+    process.once("SIGTERM", stopAndExit);
     await daemon.start();
 }
 

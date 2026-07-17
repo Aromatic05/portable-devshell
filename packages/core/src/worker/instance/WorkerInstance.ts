@@ -277,7 +277,7 @@ export class WorkerInstance {
 
     async close(): Promise<void> {
         try {
-            await this.#connection.close();
+            await this.#lifecycle.closeConnection();
         } finally {
             this.#audit.close();
         }
@@ -292,7 +292,7 @@ export class WorkerInstance {
     }
 
     async reconnectRpc(): Promise<InstanceSnapshot> {
-        return await this.#connection.reconnectRpc();
+        return await this.#lifecycle.reconnectRpc();
     }
 
     #assertReady(): void {

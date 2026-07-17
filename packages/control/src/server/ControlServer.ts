@@ -20,9 +20,8 @@ export class ControlServer {
     readonly #runtimeFactory: ControlRuntimeFactory;
     readonly #socketFile: ControlSocketFile;
     readonly #state: ControlRuntimeState;
+    #operationTail: Promise<void> = Promise.resolve();
     #runtime?: ControlRuntime;
-    #startPromise?: Promise<void>;
-    #stopPromise?: Promise<void>;
 
     constructor(options: ControlServerOptions = {}) {
         this.#state = new ControlRuntimeState({
@@ -45,33 +44,27 @@ export class ControlServer {
     }
 
     async start(): Promise<void> {
-        if (this.#runtime !== undefined) return;
-        if (this.#startPromise !== undefined) return await this.#startPromise;
-        this.#startPromise = this.#start();
-        try {
-            await this.#startPromise;
-        } finally {
-            this.#startPromise = undefined;
-        }
+        await this.#runExclusive(async () => await this.#start());
     }
 
     async stop(): Promise<void> {
-        if (this.#stopPromise !== undefined) return await this.#stopPromise;
-        this.#stopPromise = this.#stop();
-        try {
-            await this.#stopPromise;
-        } finally {
-            this.#stopPromise = undefined;
-        }
+        await this.#runExclusive(async () => await this.#stop());
+    }
+
+    async restart(): Promise<void> {
+        await this.#runExclusive(async () => {
+            await this.#stop();
+            await this.#start();
+        });
     }
 
     async #start(): Promise<void> {
+        if (this.#runtime !== undefined) return;
         await this.#state.load();
         await this.#socketFile.ensureRuntimeDir();
         const runtime = await this.#runtimeFactory.create({
             restart: async () => {
-                await this.stop();
-                await this.start();
+                await this.restart();
             },
             shutdown: async () => {
                 await this.stop();
@@ -96,5 +89,14 @@ export class ControlServer {
         } finally {
             this.#state.reset();
         }
+    }
+
+    async #runExclusive<T>(factory: () => Promise<T>): Promise<T> {
+        const operation = this.#operationTail.then(factory, factory);
+        this.#operationTail = operation.then(
+            () => undefined,
+            () => undefined
+        );
+        return await operation;
     }
 }

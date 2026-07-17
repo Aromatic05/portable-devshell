@@ -21,6 +21,7 @@ use crate::tools::builtin_registry;
 
 const FAIL_AFTER_BIND_ENV: &str = "DEVSHELL_WORKER_TEST_FAIL_AFTER_BIND";
 const FAIL_ACCEPT_LOOP_ENV: &str = "DEVSHELL_WORKER_TEST_FAIL_ACCEPT_LOOP";
+const DELAY_READY_MS_ENV: &str = "DEVSHELL_WORKER_TEST_DELAY_READY_MS";
 
 pub fn serve(instance: InstanceName) -> Result<(), String> {
     let instance_paths = InstancePaths::resolve(&instance)?;
@@ -55,6 +56,12 @@ pub fn serve(instance: InstanceName) -> Result<(), String> {
     listener
         .set_nonblocking(true)
         .map_err(|error| format!("failed to set listener nonblocking: {error}"))?;
+    if let Some(delay_ms) = std::env::var(DELAY_READY_MS_ENV)
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+    {
+        thread::sleep(Duration::from_millis(delay_ms));
+    }
 
     let artifacts =
         ArtifactStore::new(instance_paths.artifacts_dir.clone()).map_err(|error| error.message)?;

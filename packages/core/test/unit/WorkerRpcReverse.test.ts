@@ -23,6 +23,7 @@ class DeferredConnector implements WorkerRpcConnector {
 
 class MemoryChannel implements WorkerRpcChannel {
     readonly sent: WorkerRpcRequestEnvelope[] = [];
+    closed = false;
     readonly #messages = new Set<(message: JsonValue) => void>();
     readonly #disconnects = new Set<(error: unknown) => void>();
 
@@ -40,7 +41,9 @@ class MemoryChannel implements WorkerRpcChannel {
         return () => this.#disconnects.delete(listener);
     }
 
-    close(): void {}
+    close(): void {
+        this.closed = true;
+    }
 
     disconnect(): void {
         for (const listener of this.#disconnects) {
@@ -79,6 +82,32 @@ test("reverse RPC bridge replays pending request with the original request id af
     assert.equal(second.sent[0]?.id, requestId);
     second.respond(requestId!, { stdout: "replay" });
     assert.deepEqual(await pending, { stdout: "replay" });
+});
+
+test("closing an RPC bridge while connecting cannot resurrect the channel", async () => {
+    const channel = new MemoryChannel();
+    let releaseConnect!: () => void;
+    const connectGate = new Promise<void>((resolve) => {
+        releaseConnect = resolve;
+    });
+    const connector: WorkerRpcConnector = {
+        async connect() {
+            await connectGate;
+            return channel;
+        }
+    };
+    const bridge = new WorkerRpcBridge({
+        connector,
+        rpcOptions: { instanceName: "closing-connect" }
+    });
+
+    const connecting = bridge.connect();
+    bridge.close();
+    releaseConnect();
+
+    await assert.rejects(connecting, /closed|reset/u);
+    assert.equal(channel.closed, true);
+    assert.equal(bridge.connected, false);
 });
 
 async function waitUntil(predicate: () => boolean): Promise<void> {

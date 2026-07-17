@@ -5,7 +5,7 @@ use std::fs;
 use std::fs::OpenOptions;
 use std::path::{Path, PathBuf};
 #[cfg(unix)]
-use std::process::{Command, Stdio};
+use std::process::{Child, Command, Stdio};
 
 use crate::instance::InstanceName;
 #[cfg(unix)]
@@ -13,7 +13,7 @@ use crate::platform::configure_daemon_command;
 use crate::platform::process_is_running;
 #[cfg(windows)]
 use crate::platform::spawn_daemon_process;
-use crate::rpc::bridge::send_request;
+use crate::rpc::bridge::send_request_with_timeout;
 use crate::rpc::request::RpcRequest;
 use crate::security::SecurityMode;
 use crate::socket::SocketPaths;
@@ -48,11 +48,38 @@ pub enum DaemonState {
     Stale,
 }
 
+pub struct SpawnedDaemon {
+    pid: u32,
+    #[cfg(unix)]
+    child: Child,
+}
+
+impl SpawnedDaemon {
+    pub fn pid(&self) -> u32 {
+        self.pid
+    }
+
+    pub fn has_exited(&mut self) -> bool {
+        #[cfg(unix)]
+        {
+            return match self.child.try_wait() {
+                Ok(Some(_)) => true,
+                Ok(None) => false,
+                Err(_) => !process_is_running(self.pid),
+            };
+        }
+        #[cfg(windows)]
+        {
+            !process_is_running(self.pid)
+        }
+    }
+}
+
 pub fn spawn(
     instance: &InstanceName,
     paths: &InstancePaths,
     runtime: &WorkerRuntimeContext,
-) -> Result<(), String> {
+) -> Result<SpawnedDaemon, String> {
     #[cfg(unix)]
     {
         let log_file = OpenOptions::new()
@@ -80,10 +107,13 @@ pub fn spawn(
             .stdout(Stdio::from(stdout_file))
             .stderr(Stdio::from(log_file));
         configure_daemon_command(&mut command);
-        command
+        let child = command
             .spawn()
             .map_err(|error| format!("failed to spawn daemon process: {error}"))?;
-        Ok(())
+        Ok(SpawnedDaemon {
+            pid: child.id(),
+            child,
+        })
     }
     #[cfg(windows)]
     {
@@ -93,7 +123,7 @@ pub fn spawn(
             SecurityMode::Disabled => "disabled",
             SecurityMode::Workspace => "workspace",
         });
-        spawn_daemon_process(
+        let pid = spawn_daemon_process(
             &executable,
             &runtime.workspace,
             &[
@@ -101,7 +131,8 @@ pub fn spawn(
                 (INTERNAL_WORKSPACE_ENV, runtime.workspace.as_os_str()),
                 (INTERNAL_SECURITY_MODE_ENV, security_mode),
             ],
-        )
+        )?;
+        Ok(SpawnedDaemon { pid })
     }
 }
 
@@ -196,24 +227,12 @@ pub fn clear_runtime_files(
     remove_ipc_endpoint_if_exists(socket_path)
 }
 
-pub fn is_running(paths: &InstancePaths, socket_path: &Path) -> bool {
-    #[cfg(windows)]
-    let _ = socket_path;
-    let Some(pid) = read_pid(paths) else {
-        return false;
-    };
-    #[cfg(windows)]
-    let endpoint_ready = true;
-    #[cfg(unix)]
-    let endpoint_ready = socket_path.exists();
-    endpoint_ready && process_is_running(pid)
-}
-
 pub fn daemon_is_responsive(socket_paths: &SocketPaths) -> bool {
     matches!(
-        send_request(
+        send_request_with_timeout(
             &socket_paths.socket_file,
             &RpcRequest::request("ping-1", "worker.ping", serde_json::json!({})),
+            std::time::Duration::from_millis(500),
         ),
         Ok(response) if response.ok
     )

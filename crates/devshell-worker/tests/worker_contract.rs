@@ -578,6 +578,85 @@ fn status_reports_stale_and_start_recovers_from_stale_runtime_files() {
 }
 
 #[test]
+fn start_terminates_an_unresponsive_live_daemon_before_replacing_it() {
+    let env = TestEnv::new();
+    let instance = "aromatic-stale-start";
+
+    env.command()
+        .current_dir(env.workspace())
+        .args(["start", "--instance", instance])
+        .assert()
+        .success();
+
+    let pid_path = env.instance_root(instance).join("state/worker.pid");
+    let old_pid: i32 = fs::read_to_string(&pid_path)
+        .unwrap()
+        .trim()
+        .parse()
+        .unwrap();
+    fs::remove_file(env.socket_file(instance)).unwrap();
+
+    let restarted = env
+        .command()
+        .current_dir(env.workspace())
+        .args(["start", "--instance", instance])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let restarted: Value = serde_json::from_slice(&restarted).unwrap();
+    let new_pid = restarted["pid"].as_i64().unwrap() as i32;
+
+    assert_ne!(new_pid, old_pid);
+    wait_until_process_exits(old_pid);
+    assert!(process_is_running(new_pid));
+
+    env.json_command(&["stop", "--instance", instance]);
+}
+
+#[test]
+fn concurrent_stop_waits_for_start_to_finish() {
+    let env = TestEnv::new();
+    let instance = "aromatic-start-stop";
+    let start = env
+        .std_command()
+        .current_dir(env.workspace())
+        .env("DEVSHELL_WORKER_TEST_DELAY_READY_MS", "300")
+        .env("DEVSHELL_WORKER_TEST_READY_TIMEOUT_MS", "2000")
+        .args(["start", "--instance", instance])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+
+    wait_until_path_exists(&env.instance_root(instance).join("state/worker.pid"));
+    let stopped = env
+        .command()
+        .args(["stop", "--instance", instance])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let stopped: Value = serde_json::from_slice(&stopped).unwrap();
+    let start_output = start.wait_with_output().unwrap();
+
+    assert!(
+        start_output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&start_output.stderr)
+    );
+    assert_eq!(stopped["stopped"], true);
+    assert!(
+        !env.instance_root(instance)
+            .join("state/worker.pid")
+            .exists()
+    );
+    assert!(!env.socket_file(instance).exists());
+}
+
+#[test]
 fn stop_terminates_unresponsive_live_daemon_before_clearing_runtime_files() {
     let env = TestEnv::new();
     let instance = "aromatic-unresponsive";
@@ -599,6 +678,33 @@ fn stop_terminates_unresponsive_live_daemon_before_clearing_runtime_files() {
     let stale = env.json_command(&["status", "--instance", instance]);
     assert_eq!(stale["state"], "stale");
     assert!(process_is_running(pid));
+
+    let stopped = env.json_command(&["stop", "--instance", instance]);
+    assert_eq!(stopped["stopped"], true);
+    wait_until_process_exits(pid);
+    assert!(!pid_path.exists());
+    assert!(!env.socket_file(instance).exists());
+}
+
+#[test]
+fn stop_force_terminates_a_responsive_daemon_when_stop_rpc_fails() {
+    let env = TestEnv::new();
+    let instance = "aromatic-stop-rpc-failure";
+
+    env.command_with_env("DEVSHELL_WORKER_TEST_FAIL_STOP", "1")
+        .current_dir(env.workspace())
+        .args(["start", "--instance", instance])
+        .assert()
+        .success();
+
+    let pid_path = env.instance_root(instance).join("state/worker.pid");
+    let pid: i32 = fs::read_to_string(&pid_path)
+        .unwrap()
+        .trim()
+        .parse()
+        .unwrap();
+    let running = env.json_command(&["status", "--instance", instance]);
+    assert_eq!(running["state"], "running");
 
     let stopped = env.json_command(&["stop", "--instance", instance]);
     assert_eq!(stopped["stopped"], true);
@@ -679,6 +785,36 @@ fn daemon_start_failures_and_accept_loop_errors_clean_runtime_files() {
             .exists()
     );
     assert!(!env.socket_file(loop_fail).exists());
+}
+
+#[test]
+fn readiness_timeout_terminates_the_spawned_daemon_and_cleans_runtime_files() {
+    let env = TestEnv::new();
+    let instance = "aromatic-ready-timeout";
+    let start = env
+        .std_command()
+        .current_dir(env.workspace())
+        .env("DEVSHELL_WORKER_TEST_DELAY_READY_MS", "1000")
+        .env("DEVSHELL_WORKER_TEST_READY_TIMEOUT_MS", "100")
+        .args(["start", "--instance", instance])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let pid_path = env.instance_root(instance).join("state/worker.pid");
+
+    wait_until_path_exists(&pid_path);
+    let daemon_pid: i32 = fs::read_to_string(&pid_path)
+        .unwrap()
+        .trim()
+        .parse()
+        .unwrap();
+    let output = start.wait_with_output().unwrap();
+
+    assert!(!output.status.success());
+    wait_until_process_exits(daemon_pid);
+    assert!(!pid_path.exists());
+    assert!(!env.socket_file(instance).exists());
 }
 
 #[test]
@@ -985,4 +1121,15 @@ fn wait_until_process_exits(pid: i32) {
         std::thread::sleep(Duration::from_millis(25));
     }
     panic!("worker daemon process {pid} did not exit");
+}
+
+fn wait_until_path_exists(path: &std::path::Path) {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while Instant::now() < deadline {
+        if path.exists() {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    panic!("path did not appear: {}", path.display());
 }

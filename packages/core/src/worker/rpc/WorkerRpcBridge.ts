@@ -36,6 +36,7 @@ export class WorkerRpcBridge {
     readonly #disconnectListeners = new Set<(error: WorkerRpcError) => void>();
     readonly #pending = new Map<string, PendingResponse>();
     #channel?: WorkerRpcChannel;
+    #connectionGeneration = 0;
     #connectPromise?: Promise<WorkerRpcChannel>;
 
     constructor(options: WorkerRpcBridgeOptions) {
@@ -108,7 +109,8 @@ export class WorkerRpcBridge {
     }
 
     async replaceChannel(channel: WorkerRpcChannel): Promise<void> {
-
+        this.#connectionGeneration += 1;
+        this.#connectPromise = undefined;
         const previous = this.#channel;
         this.#attachChannel(channel);
         if (previous !== undefined && previous !== channel) {
@@ -118,12 +120,14 @@ export class WorkerRpcBridge {
     }
 
     close(_signal: NodeJS.Signals | number = "SIGTERM"): void {
+        this.#connectionGeneration += 1;
         const error = WorkerRpcError.disconnected({
             instanceName: this.#rpcOptions.instanceName,
             reason: "bridge_closed"
         });
         const channel = this.#channel;
         this.#channel = undefined;
+        this.#connectPromise = undefined;
         channel?.close();
         this.#rejectPending(error);
     }
@@ -133,16 +137,31 @@ export class WorkerRpcBridge {
             return this.#channel;
         }
         if (this.#connectPromise === undefined) {
-            this.#connectPromise = this.#connector
+            const generation = this.#connectionGeneration;
+            const promise = this.#connector
                 .connect()
                 .then(async (channel) => {
+                    if (generation !== this.#connectionGeneration) {
+                        channel.close();
+                        throw new Error("Worker RPC connection was reset while connecting.");
+                    }
                     this.#attachChannel(channel);
                     await this.#replayPending(channel);
+                    if (generation !== this.#connectionGeneration) {
+                        if (this.#channel === channel) {
+                            this.#channel = undefined;
+                        }
+                        channel.close();
+                        throw new Error("Worker RPC connection was reset while connecting.");
+                    }
                     return channel;
                 })
                 .finally(() => {
-                    this.#connectPromise = undefined;
+                    if (this.#connectPromise === promise) {
+                        this.#connectPromise = undefined;
+                    }
                 });
+            this.#connectPromise = promise;
         }
         return await this.#connectPromise;
     }

@@ -9,9 +9,10 @@ use crate::socket::SocketPaths;
 use crate::storage::InstancePaths;
 
 pub fn request_stop(socket_paths: &SocketPaths) -> Result<(), String> {
-    let response = crate::rpc::bridge::send_request(
+    let response = crate::rpc::bridge::send_request_with_timeout(
         &socket_paths.socket_file,
         &RpcRequest::request("stop-1", "worker.stop", serde_json::json!({})),
+        Duration::from_secs(1),
     )?;
 
     if response.ok {
@@ -45,29 +46,59 @@ pub fn stop_stale_daemon(
         return Ok(false);
     }
 
-    terminate_process(pid, false)?;
-    if wait_for_process_exit(pid, timeout) {
-        process::clear_runtime_files(instance_paths, &socket_paths.socket_file)?;
-        return Ok(true);
-    }
-
-    terminate_process(pid, true)?;
-    if !wait_for_process_exit(pid, timeout) {
-        return Err(format!("daemon process {pid} did not stop"));
-    }
-
-    process::clear_runtime_files(instance_paths, &socket_paths.socket_file)?;
+    terminate_daemon_process(pid, instance_paths, socket_paths, timeout)?;
     Ok(true)
 }
 
-pub fn wait_until_stopped(
+pub fn terminate_daemon_process(
+    pid: u32,
     instance_paths: &InstancePaths,
     socket_paths: &SocketPaths,
     timeout: Duration,
 ) -> Result<(), String> {
+    if process_is_running(pid) {
+        terminate_process(pid, false)?;
+        if !wait_for_process_exit(pid, timeout) {
+            terminate_process(pid, true)?;
+            if !wait_for_process_exit(pid, timeout) {
+                return Err(format!("daemon process {pid} did not stop"));
+            }
+        }
+    }
+    process::clear_runtime_files(instance_paths, &socket_paths.socket_file)
+}
+
+pub fn terminate_spawned_daemon(
+    daemon: &mut process::SpawnedDaemon,
+    instance_paths: &InstancePaths,
+    socket_paths: &SocketPaths,
+    timeout: Duration,
+) -> Result<(), String> {
+    let pid = daemon.pid();
+    if !daemon.has_exited() {
+        terminate_process(pid, false)?;
+        if !wait_for_spawned_process_exit(daemon, timeout) {
+            terminate_process(pid, true)?;
+            if !wait_for_spawned_process_exit(daemon, timeout) {
+                return Err(format!("daemon process {pid} did not stop"));
+            }
+        }
+    }
+    process::clear_runtime_files(instance_paths, &socket_paths.socket_file)
+}
+
+pub fn wait_until_stopped(
+    expected_pid: Option<u32>,
+    instance_paths: &InstancePaths,
+    timeout: Duration,
+) -> Result<(), String> {
     let started = Instant::now();
     while started.elapsed() <= timeout {
-        if !process::is_running(instance_paths, &socket_paths.socket_file) {
+        let stopped = match expected_pid {
+            Some(pid) => !process_is_running(pid),
+            None => InstanceLock::try_acquire_daemon(instance_paths)?.is_some(),
+        };
+        if stopped {
             return Ok(());
         }
         thread::sleep(Duration::from_millis(50));
@@ -88,4 +119,15 @@ fn wait_for_process_exit(pid: u32, timeout: Duration) -> bool {
         thread::sleep(Duration::from_millis(50));
     }
     false
+}
+
+fn wait_for_spawned_process_exit(daemon: &mut process::SpawnedDaemon, timeout: Duration) -> bool {
+    let started = Instant::now();
+    while started.elapsed() <= timeout {
+        if daemon.has_exited() {
+            return true;
+        }
+        thread::sleep(Duration::from_millis(50));
+    }
+    daemon.has_exited()
 }

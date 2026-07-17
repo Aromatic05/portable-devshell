@@ -2,7 +2,7 @@ use serde::Serialize;
 
 use crate::cli::InstanceArgs;
 use crate::daemon::process::DaemonState;
-use crate::daemon::{process, readiness};
+use crate::daemon::{process, readiness, shutdown};
 use crate::instance::{InstanceLock, InstanceName, build_config, write_config};
 use crate::rpc::bridge::send_request;
 use crate::rpc::request::RpcRequest;
@@ -34,7 +34,11 @@ pub fn run(args: InstanceArgs) -> Result<String, String> {
     let started = match process::daemon_state(&instance_paths, &socket_paths) {
         DaemonState::Running => false,
         DaemonState::Stale => {
-            process::clear_runtime_files(&instance_paths, &socket_paths.socket_file)?;
+            shutdown::stop_stale_daemon(
+                &instance_paths,
+                &socket_paths,
+                std::time::Duration::from_secs(5),
+            )?;
             start_daemon(&instance, &instance_paths, &socket_paths)?;
             true
         }
@@ -90,10 +94,22 @@ fn start_daemon(
         security_mode: process::current_security_mode(),
         worker_sha256: process::current_worker_sha256(),
     };
-    process::spawn(instance, instance_paths, &runtime)?;
-    if let Err(error) = readiness::wait_until_ready(socket_paths, std::time::Duration::from_secs(5))
-    {
-        let _ = process::clear_runtime_files(instance_paths, &socket_paths.socket_file);
+    let mut daemon = process::spawn(instance, instance_paths, &runtime)?;
+    let readiness_timeout = std::env::var("DEVSHELL_WORKER_TEST_READY_TIMEOUT_MS")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .map(std::time::Duration::from_millis)
+        .unwrap_or_else(|| std::time::Duration::from_secs(5));
+    if let Err(error) = readiness::wait_until_ready(socket_paths, readiness_timeout) {
+        let cleanup = shutdown::terminate_spawned_daemon(
+            &mut daemon,
+            instance_paths,
+            socket_paths,
+            std::time::Duration::from_secs(5),
+        );
+        if let Err(cleanup_error) = cleanup {
+            return Err(format!("{error}; cleanup failed: {cleanup_error}"));
+        }
         return Err(error);
     }
     Ok(())
