@@ -55,7 +55,7 @@ const allTargets = [
     { key: "windows-arm64", rustTarget: "aarch64-pc-windows-msvc" }
 ];
 const hostTarget = resolveHostTarget();
-const targets = allTargets.filter((target) => target.key === "linux-x64" || target.key === hostTarget);
+const targets = allTargets.filter((target) => target.key === hostTarget);
 
 await rm(stagingDirectory, { force: true, recursive: true });
 await rm(backupDirectory, { force: true, recursive: true });

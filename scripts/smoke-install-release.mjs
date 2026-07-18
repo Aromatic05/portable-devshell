@@ -41,8 +41,9 @@ try {
     await mkdir(release, { recursive: true });
     await mkdir(home, { recursive: true });
     await mkdir(runtime, { recursive: true });
-    await copyFile(archive, resolve(release, "portable-devshell-app.tar.gz"));
-    await copyFile(archiveSha, resolve(release, "portable-devshell-app.tar.gz.sha256"));
+    const applicationAsset = `portable-devshell-app-${hostTarget()}.tar.gz`;
+    await copyFile(archive, resolve(release, applicationAsset));
+    await copyFile(archiveSha, resolve(release, `${applicationAsset}.sha256`));
 
     for (const target of preinstalledTargets()) {
         const asset = target.startsWith("windows-")
@@ -76,10 +77,13 @@ try {
 }
 
 function preinstalledTargets() {
+    return [hostTarget()];
+}
+
+function hostTarget() {
     const os = process.platform === "darwin" ? "darwin" : "linux";
     const arch = process.arch === "arm64" ? "arm64" : "x64";
-    const host = `${os}-${arch}`;
-    return host === "linux-x64" ? [host] : ["linux-x64", host];
+    return `${os}-${arch}`;
 }
 
 function run(executable, args, env, ignoreFailure = false) {

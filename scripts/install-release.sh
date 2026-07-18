@@ -282,11 +282,7 @@ case $(uname -m) in
 esac
 
 host_target="$host_os-$host_arch"
-if [ "$host_target" = "linux-x64" ]; then
-    targets="linux-x64"
-else
-    targets="linux-x64 $host_target"
-fi
+targets="$host_target"
 target_count=0
 for target in $targets; do
     target_count=$((target_count + 1))
@@ -311,9 +307,10 @@ fi
 temporary=$(mktemp -d "${TMPDIR:-/tmp}/portable-devshell-install.XXXXXX")
 trap 'rm -rf "$temporary"' EXIT HUP INT TERM
 
-step "下载应用包"
-download "$release_base/portable-devshell-app.tar.gz" "$temporary/app.tar.gz" "portable-devshell-app.tar.gz"
-download "$release_base/portable-devshell-app.tar.gz.sha256" "$temporary/app.sha256" "应用包校验文件"
+app_asset="portable-devshell-app-$host_target.tar.gz"
+step "下载应用包（$host_target）"
+download "$release_base/$app_asset" "$temporary/app.tar.gz" "$app_asset"
+download "$release_base/$app_asset.sha256" "$temporary/app.sha256" "应用包校验文件"
 verify_sha256 "$temporary/app.tar.gz" "$temporary/app.sha256"
 detail "应用包 SHA-256 校验通过"
 

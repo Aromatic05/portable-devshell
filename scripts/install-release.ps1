@@ -230,7 +230,7 @@ if ([string]::IsNullOrWhiteSpace($localAppData)) {
 $installRoot = Get-EnvironmentValue "PORTABLE_DEVSHELL_INSTALL_ROOT" (Join-Path $localAppData "portable-devshell")
 $binDirectory = Get-EnvironmentValue "PORTABLE_DEVSHELL_BIN_DIR" (Join-Path $homeDirectory ".local\bin")
 $devshellHome = Get-EnvironmentValue "PORTABLE_DEVSHELL_HOME" (Join-Path $homeDirectory ".devshell")
-$targets = @("linux-x64", $hostTarget) | Select-Object -Unique
+$targets = @($hostTarget)
 $releaseBase = Get-ReleaseBase
 $temporary = Join-Path ([IO.Path]::GetTempPath()) ("portable-devshell-install-" + [Guid]::NewGuid().ToString("N"))
 Write-InstallDetail "Node.js $(& node --version)"
@@ -240,11 +240,12 @@ Write-InstallDetail "其他平台将在首次连接时按需下载"
 
 New-Item -ItemType Directory -Force -Path $temporary | Out-Null
 try {
-    Write-InstallStep "下载应用包"
-    $appArchive = Join-Path $temporary "portable-devshell-app.tar.gz"
+    $appAsset = "portable-devshell-app-$hostTarget.tar.gz"
+    Write-InstallStep "下载应用包（$hostTarget）"
+    $appArchive = Join-Path $temporary $appAsset
     $appSha = "$appArchive.sha256"
-    Download-File "$releaseBase/portable-devshell-app.tar.gz" $appArchive
-    Download-File "$releaseBase/portable-devshell-app.tar.gz.sha256" $appSha
+    Download-File "$releaseBase/$appAsset" $appArchive
+    Download-File "$releaseBase/$appAsset.sha256" $appSha
     Assert-Sha256 $appArchive $appSha
     Write-InstallDetail "应用包 SHA-256 校验通过"
 

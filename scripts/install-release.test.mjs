@@ -65,7 +65,7 @@ test("Unix release installer activates the manifest-declared CLI and supports re
         ].join("\n"), "utf8");
         await chmod(cli, 0o755);
 
-        const archive = resolve(release, "portable-devshell-app.tar.gz");
+        const archive = resolve(release, applicationAssetName());
         run("tar", ["-czf", archive, "-C", app, "."]);
         await writeChecksum(archive);
 
@@ -139,7 +139,7 @@ test("Unix release installer rejects an application that cannot start before act
         ].join("\n"), "utf8");
         await chmod(cli, 0o755);
 
-        const archive = resolve(release, "portable-devshell-app.tar.gz");
+        const archive = resolve(release, applicationAssetName());
         run("tar", ["-czf", archive, "-C", app, "."]);
         await writeChecksum(archive);
         for (const target of preinstalledTargets()) {
@@ -174,7 +174,7 @@ test("Unix release installer rejects an application that cannot start before act
     }
 });
 
-test("Windows release installer activates a fresh application with only linux-x64 and host workers", {
+test("Windows release installer activates a fresh application with the host worker", {
     skip: process.platform !== "win32"
 }, async () => {
     const root = await mkdtemp(resolve(tmpdir(), "portable-devshell-windows-release-install-test-"));
@@ -211,7 +211,7 @@ test("Windows release installer activates a fresh application with only linux-x6
             ""
         ].join("\n"), "utf8");
 
-        const archive = resolve(release, "portable-devshell-app.tar.gz");
+        const archive = resolve(release, applicationAssetName());
         run("tar.exe", ["-czf", archive, "-C", app, "."]);
         await writeChecksum(archive);
         for (const target of preinstalledTargets()) {
@@ -327,7 +327,11 @@ function hostTarget() {
 }
 
 function preinstalledTargets() {
-    return hostTarget() === "linux-x64" ? ["linux-x64"] : ["linux-x64", hostTarget()];
+    return [hostTarget()];
+}
+
+function applicationAssetName() {
+    return `portable-devshell-app-${hostTarget()}.tar.gz`;
 }
 
 function run(command, args) {
