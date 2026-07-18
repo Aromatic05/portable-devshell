@@ -171,6 +171,7 @@ mod tests {
             fs::read(target_workspace.join("app/assets/app.js")).unwrap(),
             b"app"
         );
+        #[cfg(unix)]
         assert_eq!(
             fs::metadata(target_workspace.join("app/assets/app.js"))
                 .unwrap()

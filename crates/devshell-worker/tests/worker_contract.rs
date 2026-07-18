@@ -1101,6 +1101,7 @@ fn read_rpc_frame(reader: &mut impl Read) -> Value {
     serde_json::from_slice(&payload).unwrap()
 }
 
+#[cfg(unix)]
 fn process_is_running(pid: i32) -> bool {
     use nix::errno::Errno;
     use nix::sys::signal::kill;
@@ -1110,6 +1111,15 @@ fn process_is_running(pid: i32) -> bool {
         Ok(()) | Err(Errno::EPERM) => true,
         Err(_) => false,
     }
+}
+
+#[cfg(windows)]
+fn process_is_running(pid: i32) -> bool {
+    let output = Command::new("tasklist")
+        .args(["/FI", &format!("PID eq {pid}"), "/NH"])
+        .output()
+        .unwrap();
+    String::from_utf8_lossy(&output.stdout).contains(&pid.to_string())
 }
 
 fn wait_until_process_exits(pid: i32) {
