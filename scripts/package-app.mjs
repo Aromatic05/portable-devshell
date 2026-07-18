@@ -20,13 +20,18 @@ const outputDirectory = resolve(
     repoRoot,
     readOption("--output-dir") ?? "release-assets",
 );
+const target = readOption("--target") ?? hostTarget();
+if (target !== hostTarget()) {
+    throw new Error(`cannot package ${target} on ${hostTarget()}; install dependencies on the target platform first.`);
+}
 const packageJson = JSON.parse(
     await readFile(resolve(repoRoot, "package.json"), "utf8"),
 );
 const version = requireString(packageJson.version, "package.json version");
 const stagingRoot = await mkdtemp(resolve(tmpdir(), "portable-devshell-app-"));
 const appDirectory = resolve(stagingRoot, "app");
-const assetPath = resolve(outputDirectory, "portable-devshell-app.tar.gz");
+const assetName = `portable-devshell-app-${target}.tar.gz`;
+const assetPath = resolve(outputDirectory, assetName);
 
 try {
     await mkdir(outputDirectory, { recursive: true });
@@ -53,7 +58,7 @@ try {
         .digest("hex");
     await writeFile(
         `${assetPath}.sha256`,
-        `${sha256}  portable-devshell-app.tar.gz\n`,
+        `${sha256}  ${assetName}\n`,
         "utf8",
     );
     process.stdout.write(`${assetPath}\n${assetPath}.sha256\n`);
@@ -93,4 +98,13 @@ function requireString(value, name) {
         throw new Error(`${name} must be a non-empty string.`);
     }
     return value;
+}
+
+function hostTarget() {
+    const os = process.platform === "darwin" ? "darwin" : process.platform === "win32" ? "windows" : "linux";
+    const arch = process.arch === "arm64" ? "arm64" : process.arch === "x64" ? "x64" : undefined;
+    if (arch === undefined) {
+        throw new Error(`unsupported host architecture: ${process.arch}`);
+    }
+    return `${os}-${arch}`;
 }
