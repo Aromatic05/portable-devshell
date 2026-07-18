@@ -31,7 +31,7 @@ import {
     realWorkerTestOptions,
     resolveTestWorkerBinary,
     workerPathEnvironmentName,
-    workingDirectoryMarkerCommand,
+    readRelativeMarkerCommand,
 } from "../../../../test/TestPlatformSupport.ts";
 import {
     encodeGlobalConfig,
@@ -62,6 +62,9 @@ if (process.env.PORTABLE_DEVSHELL_REAL_WORKER_CHILD !== "1") {
             const workspacePath = await mkdtemp(
                 join(tmpdir(), "portable-devshell-control-real-workspace-"),
             );
+            const workspaceMarkerName = "control-real-workspace-marker.txt";
+            const workspaceMarker = "portable-devshell-control-workspace";
+            await writeFile(join(workspacePath, workspaceMarkerName), workspaceMarker, "utf8");
             const workerEnvName = workerPathEnvironmentName();
             const previousWorkerPath = process.env[workerEnvName];
             const homePaths = new ControlPathHome(homeDirectory);
@@ -132,22 +135,13 @@ if (process.env.PORTABLE_DEVSHELL_REAL_WORKER_CHILD !== "1") {
                 asInstanceName("aromatic-pc"),
                 {
                     input: {
-                        command: workingDirectoryMarkerCommand(
-                            "portable-devshell-control",
-                        ),
+                        command: readRelativeMarkerCommand(workspaceMarkerName),
                     },
                     toolName: "bash_run",
                 },
             );
             assert.equal(toolCall.exitCode, 0);
-            assert.match(
-                toolCall.stdout,
-                new RegExp(
-                    workspacePath.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"),
-                    "u",
-                ),
-            );
-            assert.match(toolCall.stdout, /portable-devshell-control/u);
+            assert.match(toolCall.stdout, new RegExp(workspaceMarker, "u"));
 
             const logs = await request(
                 runtimePaths.socketFile,
@@ -160,7 +154,7 @@ if (process.env.PORTABLE_DEVSHELL_REAL_WORKER_CHILD !== "1") {
                 logs
                     .map((entry: { message: string }) => entry.message)
                     .join("\n"),
-                /portable-devshell-control/u,
+                /portable-devshell-control-workspace/u,
             );
 
             const toolCalls = await request(
@@ -173,7 +167,7 @@ if (process.env.PORTABLE_DEVSHELL_REAL_WORKER_CHILD !== "1") {
             assert.equal(toolCalls[0]?.instance, "aromatic-pc");
             assert.equal(toolCalls[0]?.source, "cli");
             assert.equal(toolCalls[0]?.toolName, "bash_run");
-            assert.match(toolCalls[0]?.inputSummary ?? "", /portable-devshell-control/u);
+            assert.match(toolCalls[0]?.inputSummary ?? "", /control-real-workspace-marker\.txt/u);
             assert.equal(typeof toolCalls[0]?.stdoutBytes, "number");
             assert.equal(toolCalls[0]?.termination, "exited");
 

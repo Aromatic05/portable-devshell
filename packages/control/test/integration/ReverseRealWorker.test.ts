@@ -18,7 +18,7 @@ import { ControlServer } from "../../src/server/ControlServer.ts";
 import { ControlPathHome } from "@portable-devshell/shared";
 import { ReverseCredentialStore } from "../../src/control/reverse/credential/ReverseCredentialStore.ts";
 import { encodeGlobalConfig, encodeInstanceConfig } from "../ConfigTomlTestSupport.ts";
-import { installUniqueWindowsTestIdentity, realWorkerTestOptions, resolveTestWorkerBinary, workingDirectoryMarkerCommand } from "../../../../test/TestPlatformSupport.ts";
+import { installUniqueWindowsTestIdentity, realWorkerTestOptions, resolveTestWorkerBinary, readRelativeMarkerCommand } from "../../../../test/TestPlatformSupport.ts";
 
 const workerBinary = resolveTestWorkerBinary();
 
@@ -26,6 +26,9 @@ test("real Rust reverse worker connects to the TS gateway and executes a tool ca
     const homeDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-reverse-real-home-"));
     const xdgRuntimeDir = await mkdtemp(join(tmpdir(), "portable-devshell-reverse-real-runtime-"));
     const workspace = await mkdtemp(join(tmpdir(), "portable-devshell-reverse-real-workspace-"));
+    const workspaceMarkerName = "reverse-real-workspace-marker.txt";
+    const workspaceMarker = "portable-devshell-reverse-workspace";
+    await writeFile(join(workspace, workspaceMarkerName), workspaceMarker, "utf8");
     const port = await reservePort();
     const publicBaseUrl = `http://127.0.0.1:${port}`;
     const restoreWindowsIdentity = installUniqueWindowsTestIdentity("reverse-real-worker");
@@ -107,6 +110,7 @@ test("real Rust reverse worker connects to the TS gateway and executes a tool ca
             DEVSHELL_WORKER_INTERNAL_SECURITY_MODE: "disabled",
             DEVSHELL_WORKER_INTERNAL_WORKSPACE: workspace,
             HOME: homeDirectory,
+            USERPROFILE: homeDirectory,
             XDG_RUNTIME_DIR: xdgRuntimeDir
         },
         stdio: ["pipe", "pipe", "pipe"]
@@ -134,11 +138,10 @@ test("real Rust reverse worker connects to the TS gateway and executes a tool ca
         server.socketPath,
         "tool.call",
         asInstanceName("reverse-test"),
-        { input: { command: workingDirectoryMarkerCommand("reverse-real-worker") }, toolName: "bash_run" }
+        { input: { command: readRelativeMarkerCommand(workspaceMarkerName) }, toolName: "bash_run" }
     );
     assert.equal(result.exitCode, 0);
-    assert.match(result.stdout, /reverse-real-worker/u);
-    assert.match(result.stdout, new RegExp(workspace.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"), "u"));
+    assert.match(result.stdout, new RegExp(workspaceMarker, "u"));
 
     const stopped = await request(
         server.socketPath,

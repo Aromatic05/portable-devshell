@@ -6,7 +6,7 @@ import { InstanceCreateCoordinator } from "../../src/control/instance/create/Ins
 import { normalizeConfigInstanceDraft } from "@portable-devshell/shared";
 
 test("instance create schema exposes supported container modes without running container attach", () => {
-    const service = createService();
+    const service = createService("linux");
     const schema = service.getSchema();
 
     assert.deepEqual(schema.container.modes, [
@@ -26,7 +26,7 @@ test("Windows instance create schema exposes only supported providers", () => {
 });
 
 test("instance create validates docker preset drafts into container config", () => {
-    const service = createService();
+    const service = createService("linux");
 
     const summary = service.validateDraft({
         container: {
@@ -52,7 +52,7 @@ test("instance create validates docker preset drafts into container config", () 
 });
 
 test("instance create validates existing stopped container drafts with adoptLifecycle", () => {
-    const service = createService();
+    const service = createService("linux");
 
     const summary = service.validateDraft({
         container: {

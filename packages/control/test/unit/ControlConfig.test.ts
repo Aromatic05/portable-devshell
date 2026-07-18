@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { access, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, posix } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
@@ -38,7 +38,11 @@ test("default config is generated at the fixed control config path", async () =>
         assert.equal(new ControlPathRuntime("/tmp/runtime-task-8", "linux", {}).socketFile, "/tmp/runtime-task-8/portable-devshell/control.sock");
         assert.equal(
             new ControlPathRuntime("", "linux", process.env).socketFile,
-            join(tmpdir(), `portable-devshell-${typeof process.getuid === "function" ? process.getuid() : process.env.USER ?? process.env.USERNAME ?? "user"}`, "control.sock")
+            posix.join(
+                process.platform === "win32" ? "/tmp" : tmpdir(),
+                `portable-devshell-${typeof process.getuid === "function" ? process.getuid() : process.env.USER ?? process.env.USERNAME ?? "user"}`,
+                "control.sock"
+            )
         );
 
         await access(paths.configFile);

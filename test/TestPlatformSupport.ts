@@ -85,13 +85,13 @@ export function installUniqueWindowsTestIdentity(label: string): () => void {
     };
 }
 
-export function workingDirectoryMarkerCommand(marker: string): string {
-    if (!/^[A-Za-z0-9._-]+$/u.test(marker)) {
-        throw new Error(`invalid test marker: ${marker}`);
+export function readRelativeMarkerCommand(fileName: string): string {
+    if (!/^[A-Za-z0-9._-]+$/u.test(fileName)) {
+        throw new Error(`invalid test marker file: ${fileName}`);
     }
     return process.platform === "win32"
-        ? `[Console]::Out.Write((Get-Location).Path + ' ${marker}')`
-        : `pwd && printf ' ${marker}'`;
+        ? `[Console]::Out.Write((Get-Content -Raw -LiteralPath '.\\${fileName}'))`
+        : `cat -- './${fileName}'`;
 }
 
 export function workerPathEnvironmentName(platform = process.platform, arch = process.arch): string {

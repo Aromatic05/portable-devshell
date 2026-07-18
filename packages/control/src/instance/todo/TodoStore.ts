@@ -102,6 +102,9 @@ export class TodoStore {
     }
 
     #syncDirectory(directory: string): void {
+        if (process.platform === "win32") {
+            return;
+        }
         const directoryFd = openSync(directory, "r");
         try {
             fsyncSync(directoryFd);

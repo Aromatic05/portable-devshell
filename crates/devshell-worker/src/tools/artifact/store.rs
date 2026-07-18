@@ -509,6 +509,7 @@ mod tests {
     use std::time::Duration;
 
     use super::{ArtifactPolicy, ArtifactStore, unix_time_millis};
+    use crate::tools::artifact::storage;
     use crate::tools::artifact::types::{ArtifactEncoding, ArtifactReadInput, ArtifactStream};
 
     fn store(policy: ArtifactPolicy) -> (tempfile::TempDir, std::sync::Arc<ArtifactStore>) {
@@ -593,7 +594,15 @@ mod tests {
             .acquire_lease(&reference.handle, unix_time_millis() + 60_000)
             .unwrap();
 
-        std::thread::sleep(Duration::from_millis(300));
+        let mut metadata = store.load_metadata(&reference.handle).unwrap();
+        metadata.expires_at_ms = 0;
+        storage::write_json(
+            &store.root,
+            &store.metadata_path(&reference.handle),
+            "metadata-",
+            &metadata,
+        )
+        .unwrap();
         let error = store
             .read(ArtifactReadInput {
                 handle: reference.handle.clone(),
