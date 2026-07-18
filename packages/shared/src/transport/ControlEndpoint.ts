@@ -1,9 +1,11 @@
+import { createHash } from "node:crypto";
 import { chmod, mkdir, unlink } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { join, posix, win32 } from "node:path";
 
 const runtimeDirectoryName = "portable-devshell";
 const windowsPipePrefix = "\\\\.\\pipe\\portable-devshell-control-";
+const conservativeUnixSocketPathBytes = 100;
 
 export class ControlPathHome {
     readonly controlHomeDir: string;
@@ -99,11 +101,16 @@ export function resolveControlRuntimeDirectory(
         return win32.join(base, runtimeDirectoryName, "runtime");
     }
     const explicit = xdgRuntimeDir ?? environment.XDG_RUNTIME_DIR;
-    if (explicit !== undefined && explicit.length > 0) {
-        return posix.join(explicit, runtimeDirectoryName);
+    const candidate = explicit !== undefined && explicit.length > 0
+        ? posix.join(explicit, runtimeDirectoryName)
+        : posix.join(
+            process.platform === "win32" ? "/tmp" : tmpdir(),
+            `${runtimeDirectoryName}-${resolveUnixUserIdentity(environment)}`
+        );
+    if (Buffer.byteLength(posix.join(candidate, "control.sock"), "utf8") <= conservativeUnixSocketPathBytes) {
+        return candidate;
     }
-    const temporaryDirectory = process.platform === "win32" ? "/tmp" : tmpdir();
-    return posix.join(temporaryDirectory, `${runtimeDirectoryName}-${resolveUnixUserIdentity(environment)}`);
+    return shortUnixRuntimeDirectory(candidate, environment);
 }
 
 export function resolveControlSocketPath(
@@ -127,6 +134,15 @@ export async function removeControlIpcEndpoint(
     if (!isWindowsNamedPipePath(path)) {
         await unlinkFunction(path).catch(() => undefined);
     }
+}
+
+function shortUnixRuntimeDirectory(candidate: string, environment: NodeJS.ProcessEnv): string {
+    const identity = resolveUnixUserIdentity(environment);
+    const digest = createHash("sha256")
+        .update(`${identity}\0${candidate}`)
+        .digest("hex")
+        .slice(0, 16);
+    return posix.join("/tmp", `pds-control-${normalizeIdentity(identity).slice(0, 16)}-${digest}`);
 }
 
 function resolveUnixUserIdentity(environment: NodeJS.ProcessEnv): string {

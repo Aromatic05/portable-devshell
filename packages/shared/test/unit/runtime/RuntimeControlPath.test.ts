@@ -43,3 +43,27 @@ test("Windows named pipe identity never contains path separators", () => {
         "\\\\.\\pipe\\portable-devshell-control-DOMAIN-alice-bob"
     );
 });
+
+
+test("long Unix control paths use one deterministic short runtime directory", () => {
+    const longRuntime = `/var/folders/${"x".repeat(160)}/T/runtime`;
+    const environment = { USER: "alice" };
+    const runtimeDir = resolveControlRuntimeDirectory(longRuntime, "darwin", environment);
+    const socketPath = resolveControlSocketPath(longRuntime, "darwin", environment);
+
+    assert.match(runtimeDir, /^\/tmp\/pds-control-/u);
+    assert.equal(socketPath, `${runtimeDir}/control.sock`);
+    assert.ok(Buffer.byteLength(socketPath, "utf8") <= 100, socketPath);
+    assert.equal(
+        resolveControlRuntimeDirectory(longRuntime, "darwin", environment),
+        runtimeDir
+    );
+});
+
+test("different long Unix runtime roots do not share a control socket", () => {
+    const environment = { USER: "alice" };
+    assert.notEqual(
+        resolveControlSocketPath(`/var/folders/${"a".repeat(160)}`, "darwin", environment),
+        resolveControlSocketPath(`/var/folders/${"b".repeat(160)}`, "darwin", environment)
+    );
+});
