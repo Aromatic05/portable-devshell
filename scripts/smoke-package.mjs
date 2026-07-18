@@ -153,11 +153,27 @@ function smokeNativePty(applicationDirectory) {
         `const { spawn } = require(${JSON.stringify(nodePtyPath)});`,
         `const pty = spawn(${JSON.stringify(shell)}, ${JSON.stringify(args)}, { cols: 80, rows: 24 });`,
         "let output = '';",
-        "pty.onData((data) => { output += data; });",
-        "pty.onExit(({ exitCode }) => {",
-        "  if (exitCode !== 0 || !output.includes('package-pty-ok')) process.exitCode = 1;",
+        "let settled = false;",
+        "let dataSubscription;",
+        "let exitSubscription;",
+        "const timeout = setTimeout(() => finish(1), 10000);",
+        "function finish(code) {",
+        "  if (settled) return;",
+        "  settled = true;",
+        "  clearTimeout(timeout);",
+        "  dataSubscription?.dispose();",
+        "  exitSubscription?.dispose();",
+        "  try { pty.kill(); } catch {}",
+        "  process.exit(code);",
+        "}",
+        "dataSubscription = pty.onData((data) => {",
+        "  output += data;",
+        "  if (output.includes('package-pty-ok')) finish(0);",
+        "});",
+        "exitSubscription = pty.onExit(({ exitCode }) => {",
+        "  finish(exitCode === 0 && output.includes('package-pty-ok') ? 0 : 1);",
         "});"
-    ].join("\n")], { encoding: "utf8" });
+    ].join("\n")], { encoding: "utf8", timeout: 15_000 });
     if (result.error !== undefined || result.status !== 0) {
         throw new Error(`packaged node-pty smoke failed (${result.status ?? "unknown"})\n${result.stderr ?? ""}`);
     }
