@@ -54,6 +54,7 @@ test("development CI validates every native target and exercises its target-spec
     }
     assert.match(workflow, /node \.\/scripts\/smoke-pty\.mjs/u);
     assert.match(workflow, /portable-devshell-app-\$\{\{ matrix\.target \}\}\.tar\.gz/u);
+    assert.match(workflow, /smoke-install-release-windows\.mjs/u);
 });
 
 test("release workflow requires the development CI gate before packaging any release assets", async () => {
