@@ -26,14 +26,7 @@ fn start_uses_runtime_workspace_and_keeps_config_minimal() {
 
     assert_eq!(start["ok"], true);
     assert_eq!(start["started"], true);
-    assert_eq!(
-        start["workspace"],
-        env.workspace()
-            .canonicalize()
-            .unwrap()
-            .display()
-            .to_string()
-    );
+    assert_eq!(start["workspace"], env.protocol_workspace());
 
     let instance_root = env.instance_root(instance);
     assert!(instance_root.join("config.toml").exists());
@@ -54,14 +47,7 @@ fn start_uses_runtime_workspace_and_keeps_config_minimal() {
     let status = env.json_command(&["status", "--instance", instance]);
     assert_eq!(status["state"], "running");
     assert_eq!(status["running"], true);
-    assert_eq!(
-        status["workspace"],
-        env.workspace()
-            .canonicalize()
-            .unwrap()
-            .display()
-            .to_string()
-    );
+    assert_eq!(status["workspace"], env.protocol_workspace());
 
     env.json_command(&["stop", "--instance", instance]);
 }
@@ -99,14 +85,7 @@ fn handshake_tools_and_bash_run_flow_work_over_framed_rpc() {
         env!("CARGO_PKG_VERSION")
     );
     assert!(handshake["result"]["workerSha256"].is_null());
-    assert_eq!(
-        handshake["result"]["workspace"],
-        env.workspace()
-            .canonicalize()
-            .unwrap()
-            .display()
-            .to_string()
-    );
+    assert_eq!(handshake["result"]["workspace"], env.protocol_workspace());
     assert!(handshake["result"].get("tools").is_none());
 
     let tools = env.rpc(

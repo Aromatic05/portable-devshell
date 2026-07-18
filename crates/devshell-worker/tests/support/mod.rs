@@ -42,6 +42,21 @@ impl TestEnv {
         &self.workspace_root
     }
 
+    pub fn protocol_workspace(&self) -> String {
+        let canonical = self.workspace().canonicalize().unwrap();
+        let value = canonical.to_string_lossy();
+        #[cfg(windows)]
+        {
+            if let Some(rest) = value.strip_prefix(r"\\?\UNC\") {
+                return format!(r"\\{rest}");
+            }
+            if let Some(rest) = value.strip_prefix(r"\\?\") {
+                return rest.to_string();
+            }
+        }
+        value.into_owned()
+    }
+
     pub fn instance_root(&self, instance: &str) -> PathBuf {
         self.home_root.join(instance)
     }
