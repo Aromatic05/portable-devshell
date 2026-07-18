@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { access, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { access, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
@@ -43,6 +43,10 @@ test("default config is generated at the fixed control config path", async () =>
 
         await access(paths.configFile);
         assert.match(await readFile(paths.configFile, "utf8"), /\[mcp\]/u);
+        if (process.platform !== "win32") {
+            assert.equal((await stat(paths.configFile)).mode & 0o777, 0o600);
+            assert.equal((await stat(paths.controlHomeDir)).mode & 0o777, 0o700);
+        }
     } finally {
         await rm(homeDirectory, { force: true, recursive: true });
     }

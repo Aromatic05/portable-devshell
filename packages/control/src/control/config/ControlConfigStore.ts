@@ -1,4 +1,5 @@
-import { mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import { chmod, mkdir, open, readFile, readdir, rename, rm } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
 import {
@@ -45,6 +46,7 @@ export class ControlConfigStore {
 
         try {
             const source = await readFile(paths.configFile, "utf8");
+            await secureFile(paths.configFile);
             const draft = this.#globalDocument.decode(this.#tomlCodec.decode(source));
             globalConfig = normalizeConfigGlobalDraft(draft);
         } catch (error) {
@@ -72,8 +74,8 @@ export class ControlConfigStore {
             source: this.#tomlCodec.encode(this.#instanceDocument.encode(instance))
         }));
 
-        await mkdir(paths.controlHomeDir, { recursive: true });
-        await mkdir(paths.instancesDir, { recursive: true });
+        await secureDirectory(paths.controlHomeDir);
+        await secureDirectory(paths.instancesDir);
         await atomicWriteFile(paths.configFile, globalSource);
         for (const entry of instanceSources) await atomicWriteFile(entry.filePath, entry.source);
         await this.#removeStaleInstances(paths, new Set(instanceSources.map((entry) => entry.filePath)));
@@ -83,6 +85,9 @@ export class ControlConfigStore {
         let entries: Array<{ isFile(): boolean; name: string }>;
         try {
             entries = await readdir(paths.instancesDir, { encoding: "utf8", withFileTypes: true });
+            if (process.platform !== "win32") {
+                await chmod(paths.instancesDir, 0o700);
+            }
         } catch (error) {
             if (isFileMissingError(error)) return [];
             throw createError({
@@ -102,6 +107,7 @@ export class ControlConfigStore {
             const filePath = join(paths.instancesDir, fileName);
             try {
                 const source = await readFile(filePath, "utf8");
+                await secureFile(filePath);
                 const draft = this.#instanceDocument.decode(this.#tomlCodec.decode(source));
                 instances.push(normalizeConfigInstanceDraft(draft));
             } catch (error) {
@@ -121,13 +127,27 @@ export class ControlConfigStore {
 }
 
 async function atomicWriteFile(filePath: string, source: string): Promise<void> {
-    await mkdir(dirname(filePath), { recursive: true });
-    const temporaryPath = `${filePath}.tmp-${process.pid}-${Date.now()}`;
+    const directory = dirname(filePath);
+    await secureDirectory(directory);
+    const temporaryPath = `${filePath}.tmp-${process.pid}-${randomUUID()}`;
+    const file = await open(temporaryPath, "wx", 0o600);
     try {
-        await writeFile(temporaryPath, source, "utf8");
+        await file.writeFile(source, "utf8");
+        await file.sync();
+        await file.close();
         await rename(temporaryPath, filePath);
+        await secureFile(filePath);
+        if (process.platform !== "win32") {
+            const directoryHandle = await open(directory, "r");
+            try {
+                await directoryHandle.sync();
+            } finally {
+                await directoryHandle.close();
+            }
+        }
     } catch (error) {
-        await rm(temporaryPath, { force: true });
+        await file.close().catch(() => undefined);
+        await rm(temporaryPath, { force: true }).catch(() => undefined);
         throw createError({
             code: errorCodes.controlConfigLoadFailed,
             cause: error,
@@ -135,6 +155,19 @@ async function atomicWriteFile(filePath: string, source: string): Promise<void> 
             message: `Failed to write control config to ${filePath}.`,
             retryable: false
         });
+    }
+}
+
+async function secureDirectory(path: string): Promise<void> {
+    await mkdir(path, { mode: 0o700, recursive: true });
+    if (process.platform !== "win32") {
+        await chmod(path, 0o700);
+    }
+}
+
+async function secureFile(path: string): Promise<void> {
+    if (process.platform !== "win32") {
+        await chmod(path, 0o600);
     }
 }
 
