@@ -584,7 +584,7 @@ mod tests {
         let (_root, store) = store(ArtifactPolicy {
             stream_limit_bytes: 32,
             instance_quota_bytes: 64,
-            ttl: Duration::from_millis(20),
+            ttl: Duration::from_millis(250),
         });
         let mut draft = store.begin(ArtifactStream::Stdout).unwrap();
         draft.write_chunk(b"leased content").unwrap();
@@ -593,7 +593,7 @@ mod tests {
             .acquire_lease(&reference.handle, unix_time_millis() + 60_000)
             .unwrap();
 
-        std::thread::sleep(Duration::from_millis(30));
+        std::thread::sleep(Duration::from_millis(300));
         let error = store
             .read(ArtifactReadInput {
                 handle: reference.handle.clone(),

@@ -763,6 +763,7 @@ fn remove_path_if_exists(path: &Path) -> Result<(), ToolError> {
     }
 }
 
+#[cfg(unix)]
 fn sync_parent(path: &Path) -> Result<(), ToolError> {
     let parent = path
         .parent()
@@ -772,6 +773,12 @@ fn sync_parent(path: &Path) -> Result<(), ToolError> {
         .map_err(|error| ToolError::new("artifact.commitFailed", error.to_string()))
 }
 
+#[cfg(windows)]
+fn sync_parent(_path: &Path) -> Result<(), ToolError> {
+    Ok(())
+}
+
+#[cfg(unix)]
 fn sync_tree(root: &Path) -> Result<(), ToolError> {
     let mut directories = vec![root.to_path_buf()];
     let mut index = 0;
@@ -800,6 +807,11 @@ fn sync_tree(root: &Path) -> Result<(), ToolError> {
             .and_then(|file| file.sync_all())
             .map_err(|error| ToolError::new("artifact.receiveFailed", error.to_string()))?;
     }
+    Ok(())
+}
+
+#[cfg(windows)]
+fn sync_tree(_root: &Path) -> Result<(), ToolError> {
     Ok(())
 }
 
