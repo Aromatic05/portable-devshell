@@ -17,6 +17,11 @@ test("PowerShell release installer is UTF-8 with BOM for Windows PowerShell", as
     assert.match(source, /IsNullOrWhiteSpace\(\$CurrentCli\).*Test-Path -LiteralPath \$CurrentCli/u);
 });
 
+test("Unix release installer braces variables before Chinese punctuation", async () => {
+    const source = await readFile(resolve(repositoryRoot, "scripts", "install-release.sh"), "utf8");
+    assert.doesNotMatch(source, /\$[A-Za-z_][A-Za-z0-9_]*[：。]/u);
+});
+
 const allTargets = [
     "linux-x64",
     "linux-arm64",

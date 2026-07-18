@@ -110,14 +110,14 @@ smoke_cli() {
         PORTABLE_DEVSHELL_HOME="$smoke_home/.devshell" \
         XDG_RUNTIME_DIR="$smoke_runtime" \
         node "$cli" status 2>&1); then
-        echo "$failure_label：CLI 无法启动。" >&2
+        echo "${failure_label}：CLI 无法启动。" >&2
         printf '%s\n' "$smoke_output" >&2
         return 1
     fi
     case "$smoke_output" in
         *"control: stopped"*) return 0 ;;
         *)
-            echo "$failure_label：CLI status 输出不符合预期。" >&2
+            echo "${failure_label}：CLI status 输出不符合预期。" >&2
             printf '%s\n' "$smoke_output" >&2
             return 1
             ;;
@@ -185,11 +185,11 @@ stop_installed_control() {
     command_line=$(ps -p "$control_pid" -o command= 2>/dev/null || true)
     case "$command_line" in
         *ControlDaemon.js*) ;;
-        *) echo "拒绝终止 PID $control_pid：PID 文件指向的进程不是可验证的 ControlDaemon.js。" >&2; return 1 ;;
+        *) echo "拒绝终止 PID ${control_pid}：PID 文件指向的进程不是可验证的 ControlDaemon.js。" >&2; return 1 ;;
     esac
     case "$command_line" in
         *portable-devshell*) ;;
-        *) echo "拒绝终止 PID $control_pid：进程命令行不属于 portable-devshell。" >&2; return 1 ;;
+        *) echo "拒绝终止 PID ${control_pid}：进程命令行不属于 portable-devshell。" >&2; return 1 ;;
     esac
 
     if ! kill -TERM "$control_pid" 2>/dev/null; then
@@ -202,7 +202,7 @@ stop_installed_control() {
     fi
     if ! wait_for_control_exit "$control_pid" 5; then
         if ! kill -KILL "$control_pid" 2>/dev/null && control_process_running "$control_pid"; then
-            echo "无法强制终止经过验证的 control PID $control_pid。" >&2
+            echo "无法强制终止经过验证的 control PID ${control_pid}。" >&2
             return 1
         fi
         if ! wait_for_control_exit "$control_pid" 2; then
@@ -428,7 +428,7 @@ echo "  $command_link tui"
 case :${PATH:-}: in
     *:"$bin_directory":*) ;;
     *)
-        echo "PATH 尚未包含 $bin_directory。"
+        echo "PATH 尚未包含 ${bin_directory}。"
         echo "当前 shell 可执行：export PATH=\"$bin_directory:\$PATH\""
         echo "并将同一行加入 ~/.bashrc、~/.zshrc 或对应 shell 配置。"
         ;;
