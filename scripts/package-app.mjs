@@ -37,8 +37,7 @@ try {
     await mkdir(outputDirectory, { recursive: true });
     runPnpm([
         "--config.node-linker=hoisted",
-        "--filter",
-        "@portable-devshell/cli",
+        "--filter=./packages/cli",
         "--prod",
         "deploy",
         appDirectory,
