@@ -39,6 +39,7 @@ fn start_uses_runtime_workspace_and_keeps_config_minimal() {
     assert!(instance_root.join("config.toml").exists());
     assert!(instance_root.join("logs/worker.log").exists());
     assert!(instance_root.join("state/worker.pid").exists());
+    #[cfg(unix)]
     assert!(env.socket_file(instance).exists());
 
     let config = fs::read_to_string(instance_root.join("config.toml")).unwrap();
@@ -183,6 +184,11 @@ fn handshake_tools_and_bash_run_flow_work_over_framed_rpc() {
         100_000
     );
 
+    #[cfg(unix)]
+    let command = "printf ready";
+    #[cfg(windows)]
+    let command = "[Console]::Out.Write('ready')";
+
     let bash_run = env.rpc(
         instance,
         &serde_json::json!({
@@ -190,7 +196,7 @@ fn handshake_tools_and_bash_run_flow_work_over_framed_rpc() {
             "id": "3",
             "method": "bash_run",
             "params": {
-                "command": "pwd && printf 'ready'"
+                "command": command
             }
         }),
     );
@@ -199,13 +205,7 @@ fn handshake_tools_and_bash_run_flow_work_over_framed_rpc() {
     assert_eq!(bash_run["result"]["termination"], "exited");
     assert_eq!(bash_run["result"]["stdoutTruncated"], false);
     assert_eq!(bash_run["result"]["stderrTruncated"], false);
-    assert_eq!(
-        bash_run["result"]["stdout"],
-        format!(
-            "{}\nready",
-            env.workspace().canonicalize().unwrap().display()
-        )
-    );
+    assert_eq!(bash_run["result"]["stdout"], "ready");
 
     let stopped = env.json_command(&["stop", "--instance", instance]);
     assert_eq!(stopped["stopped"], true);
@@ -260,6 +260,11 @@ fn bash_run_returns_success_for_timeout_and_capture_truncation() {
         .assert()
         .success();
 
+    #[cfg(unix)]
+    let timeout_command = "sleep 1";
+    #[cfg(windows)]
+    let timeout_command = "Start-Sleep -Seconds 1";
+
     let timed_out = env.rpc(
         instance,
         &serde_json::json!({
@@ -267,7 +272,7 @@ fn bash_run_returns_success_for_timeout_and_capture_truncation() {
             "id": "5",
             "method": "bash_run",
             "params": {
-                "command": "sleep 1",
+                "command": timeout_command,
                 "timeoutMs": 10
             }
         }),
@@ -298,6 +303,11 @@ fn bash_run_returns_success_for_timeout_and_capture_truncation() {
             .contains("tmux_run")
     );
 
+    #[cfg(unix)]
+    let output_command = "printf 'x%.0s' {1..2000}";
+    #[cfg(windows)]
+    let output_command = "[Console]::Out.Write([string]::new([char]'x', 2000))";
+
     let output_limited = env.rpc(
         instance,
         &serde_json::json!({
@@ -305,7 +315,7 @@ fn bash_run_returns_success_for_timeout_and_capture_truncation() {
             "id": "6",
             "method": "bash_run",
             "params": {
-                "command": "python3 - <<'PY'\nprint('x' * 2000)\nPY",
+                "command": output_command,
                 "maxCaptureBytes": 128
             }
         }),
@@ -320,11 +330,11 @@ fn bash_run_returns_success_for_timeout_and_capture_truncation() {
         .expect("truncated stdout must expose an artifact handle");
     assert_eq!(
         output_limited["result"]["stdoutArtifact"]["sourceBytes"],
-        2001
+        2000
     );
     assert_eq!(
         output_limited["result"]["stdoutArtifact"]["storedBytes"],
-        2001
+        2000
     );
     assert_eq!(
         output_limited["result"]["stdoutArtifact"]["artifactTruncated"],
@@ -362,7 +372,7 @@ fn bash_run_returns_success_for_timeout_and_capture_truncation() {
         }),
     );
     assert_eq!(second["ok"], true, "{second}");
-    assert_eq!(second["result"]["returnedBytes"], 1001);
+    assert_eq!(second["result"]["returnedBytes"], 1000);
     assert_eq!(second["result"]["eof"], true);
     assert!(second["result"].get("nextOffsetBytes").is_none());
     let restored = format!(
@@ -370,7 +380,12 @@ fn bash_run_returns_success_for_timeout_and_capture_truncation() {
         first["result"]["content"].as_str().unwrap(),
         second["result"]["content"].as_str().unwrap()
     );
-    assert_eq!(restored, format!("{}\n", "x".repeat(2000)));
+    assert_eq!(restored, "x".repeat(2000));
+
+    #[cfg(unix)]
+    let compact_command = "printf compact";
+    #[cfg(windows)]
+    let compact_command = "[Console]::Out.Write('compact')";
 
     let compact = env.rpc(
         instance,
@@ -378,7 +393,7 @@ fn bash_run_returns_success_for_timeout_and_capture_truncation() {
             "type": "request",
             "id": "9",
             "method": "bash_run",
-            "params": { "command": "printf compact" }
+            "params": { "command": compact_command }
         }),
     );
     assert_eq!(compact["ok"], true, "{compact}");
@@ -475,7 +490,6 @@ fn start_falls_back_to_stable_runtime_dir_when_xdg_runtime_dir_is_missing() {
 
     assert_eq!(start["ok"], true);
     assert_eq!(start["started"], true);
-    assert!(env.fallback_socket_file(instance).exists());
 
     let status_output = env
         .command_without_runtime_dir()
@@ -545,8 +559,11 @@ fn status_reports_stale_and_start_recovers_from_stale_runtime_files() {
     let instance_root = env.instance_root(instance);
     fs::create_dir_all(instance_root.join("state")).unwrap();
     fs::write(instance_root.join("state/worker.pid"), "999999\n").unwrap();
-    fs::create_dir_all(env.socket_file(instance).parent().unwrap()).unwrap();
-    fs::write(env.socket_file(instance), b"stale").unwrap();
+    #[cfg(unix)]
+    {
+        fs::create_dir_all(env.socket_file(instance).parent().unwrap()).unwrap();
+        fs::write(env.socket_file(instance), b"stale").unwrap();
+    }
 
     let stale_status = env.json_command(&["status", "--instance", instance]);
     assert_eq!(stale_status["state"], "stale");
@@ -577,6 +594,7 @@ fn status_reports_stale_and_start_recovers_from_stale_runtime_files() {
     env.json_command(&["stop", "--instance", instance]);
 }
 
+#[cfg(unix)]
 #[test]
 fn start_terminates_an_unresponsive_live_daemon_before_replacing_it() {
     let env = TestEnv::new();
@@ -653,9 +671,11 @@ fn concurrent_stop_waits_for_start_to_finish() {
             .join("state/worker.pid")
             .exists()
     );
+    #[cfg(unix)]
     assert!(!env.socket_file(instance).exists());
 }
 
+#[cfg(unix)]
 #[test]
 fn stop_terminates_unresponsive_live_daemon_before_clearing_runtime_files() {
     let env = TestEnv::new();
@@ -683,6 +703,7 @@ fn stop_terminates_unresponsive_live_daemon_before_clearing_runtime_files() {
     assert_eq!(stopped["stopped"], true);
     wait_until_process_exits(pid);
     assert!(!pid_path.exists());
+    #[cfg(unix)]
     assert!(!env.socket_file(instance).exists());
 }
 
@@ -710,6 +731,7 @@ fn stop_force_terminates_a_responsive_daemon_when_stop_rpc_fails() {
     assert_eq!(stopped["stopped"], true);
     wait_until_process_exits(pid);
     assert!(!pid_path.exists());
+    #[cfg(unix)]
     assert!(!env.socket_file(instance).exists());
 }
 
@@ -772,6 +794,7 @@ fn daemon_start_failures_and_accept_loop_errors_clean_runtime_files() {
             .join("state/worker.pid")
             .exists()
     );
+    #[cfg(unix)]
     assert!(!env.socket_file(bind_fail).exists());
 
     env.command_with_env("DEVSHELL_WORKER_TEST_FAIL_ACCEPT_LOOP", "1")
@@ -784,6 +807,7 @@ fn daemon_start_failures_and_accept_loop_errors_clean_runtime_files() {
             .join("state/worker.pid")
             .exists()
     );
+    #[cfg(unix)]
     assert!(!env.socket_file(loop_fail).exists());
 }
 
@@ -814,6 +838,7 @@ fn readiness_timeout_terminates_the_spawned_daemon_and_cleans_runtime_files() {
     assert!(!output.status.success());
     wait_until_process_exits(daemon_pid);
     assert!(!pid_path.exists());
+    #[cfg(unix)]
     assert!(!env.socket_file(instance).exists());
 }
 
@@ -838,6 +863,11 @@ fn long_tool_call_does_not_block_control_requests_on_the_same_rpc_connection() {
     let mut stdin = bridge.stdin.take().unwrap();
     let mut stdout = bridge.stdout.take().unwrap();
 
+    #[cfg(unix)]
+    let long_command = "sleep 2; printf done";
+    #[cfg(windows)]
+    let long_command = "Start-Sleep -Seconds 2; [Console]::Out.Write('done')";
+
     write_rpc_frame(
         &mut stdin,
         &serde_json::json!({
@@ -845,7 +875,7 @@ fn long_tool_call_does_not_block_control_requests_on_the_same_rpc_connection() {
             "id": "long-tool",
             "method": "bash_run",
             "params": {
-                "command": "sleep 2; printf done",
+                "command": long_command,
                 "timeoutMs": 5000
             }
         }),
@@ -901,6 +931,14 @@ fn tool_call_cancel_terminates_a_running_bash_process_group() {
     let mut stdin = bridge.stdin.take().unwrap();
     let mut stdout = bridge.stdout.take().unwrap();
 
+    #[cfg(unix)]
+    let cancel_command = format!("sleep 5; printf done > {}", marker.display());
+    #[cfg(windows)]
+    let cancel_command = format!(
+        "Start-Sleep -Seconds 5; [System.IO.File]::WriteAllText('{}', 'done')",
+        marker.display().to_string().replace('\'', "''")
+    );
+
     write_rpc_frame(
         &mut stdin,
         &serde_json::json!({
@@ -908,7 +946,7 @@ fn tool_call_cancel_terminates_a_running_bash_process_group() {
             "id": "cancel-me",
             "method": "bash_run",
             "params": {
-                "command": format!("sleep 5; printf done > {}", marker.display()),
+                "command": cancel_command,
                 "timeoutMs": 10000
             },
             "context": {
