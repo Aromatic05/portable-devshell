@@ -16,6 +16,7 @@ import { ControlRouteComposition } from "../../src/composition/ControlRouteCompo
 import { ControlSocketServer } from "../../src/server/socket/ControlSocketServer.ts";
 import { InstanceRegistry } from "../../src/control/instance/registry/InstanceRegistry.ts";
 import { createTestIpcPath } from "../../../../test/TestPlatformSupport.ts";
+import { createTestInstanceDescriptor } from "../ControlTestFixtures.ts";
 
 test("stream gap is non-terminal and the dedicated subscription remains usable", async (t) => {
     const directory = await mkdtemp(join(tmpdir(), "portable-devshell-stream-recovery-"));
@@ -23,21 +24,7 @@ test("stream gap is non-terminal and the dedicated subscription remains usable",
     const worker = new FakeWorker("alpha");
     worker.emit("instance.started", { workspacePath: "/tmp/ws" });
     const registry = new InstanceRegistry([
-        {
-            enabled: true,
-            mcpEnabled: false,
-            mcpPath: "",
-            name: "alpha",
-            todo: {
-                async read() {
-                    return { items: [], revision: 0, summary: { completed: 0, total: 0 } };
-                },
-                summary() {
-                    return undefined;
-                }
-            },
-            worker: worker as unknown as WorkerInstance
-        }
+        createTestInstanceDescriptor(worker as unknown as WorkerInstance, { name: "alpha" })
     ]);
     const routes = new ControlRouteComposition({ instances: registry, shutdown() {} });
     const server = new ControlSocketServer({ routes, socketPath });
@@ -92,21 +79,7 @@ test("an initial unavailable sequence returns a normal stream.gap error reply", 
     worker.emit("toolCall.completed", {});
     worker.dropBefore(2);
     const registry = new InstanceRegistry([
-        {
-            enabled: true,
-            mcpEnabled: false,
-            mcpPath: "",
-            name: "alpha",
-            todo: {
-                async read() {
-                    return { items: [], revision: 0, summary: { completed: 0, total: 0 } };
-                },
-                summary() {
-                    return undefined;
-                }
-            },
-            worker: worker as unknown as WorkerInstance
-        }
+        createTestInstanceDescriptor(worker as unknown as WorkerInstance, { name: "alpha" })
     ]);
     const routes = new ControlRouteComposition({ instances: registry, shutdown() {} });
     const server = new ControlSocketServer({ routes, socketPath });

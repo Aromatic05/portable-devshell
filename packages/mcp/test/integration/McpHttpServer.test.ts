@@ -7,6 +7,8 @@ import { dirname, join, resolve } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
+import { requireTcpPort } from "../../../../test/TestHttpSupport.ts";
+
 import { McpHost } from "@portable-devshell/mcp/testing";
 
 const fixturesDirectory = resolve(dirname(fileURLToPath(import.meta.url)), "../fixtures");
@@ -17,11 +19,9 @@ test("missing instance returns 404", async () => {
     await host.start();
 
     try {
-        const address = host.server.address;
-        assert.notEqual(address, null);
-        assert.equal(typeof address, "object");
+        const port = requireTcpPort(host.server.address);
 
-        const response = await fetch(`http://127.0.0.1:${address.port}/missing/mcp`, {
+        const response = await fetch(`http://127.0.0.1:${port}/missing/mcp`, {
             method: "POST",
             headers: {
                 accept: "application/json, text/event-stream",
@@ -41,11 +41,9 @@ test("initialize succeeds over HTTP", async () => {
     await host.start();
 
     try {
-        const address = host.server.address;
-        assert.notEqual(address, null);
-        assert.equal(typeof address, "object");
+        const port = requireTcpPort(host.server.address);
 
-        const response = await fetch(`http://127.0.0.1:${address.port}/demo/mcp`, {
+        const response = await fetch(`http://127.0.0.1:${port}/demo/mcp`, {
             method: "POST",
             headers: {
                 accept: "application/json, text/event-stream",
@@ -84,11 +82,9 @@ test("oauth2 exposes protected resource metadata and accepts a valid bearer toke
     await host.start();
 
     try {
-        const address = host.server.address;
-        assert.notEqual(address, null);
-        assert.equal(typeof address, "object");
+        const port = requireTcpPort(host.server.address);
 
-        const endpoint = `http://127.0.0.1:${address.port}/demo/mcp`;
+        const endpoint = `http://127.0.0.1:${port}/demo/mcp`;
         const unauthorized = await fetch(endpoint, {
             method: "POST",
             headers: {
@@ -101,17 +97,17 @@ test("oauth2 exposes protected resource metadata and accepts a valid bearer toke
         assert.equal(unauthorized.status, 401);
         assert.match(String(unauthorized.headers.get("www-authenticate")), /resource_metadata=/u);
 
-        const protectedMetadata = await fetch(`http://127.0.0.1:${address.port}/.well-known/oauth-protected-resource/demo/mcp`);
+        const protectedMetadata = await fetch(`http://127.0.0.1:${port}/.well-known/oauth-protected-resource/demo/mcp`);
         assert.equal(protectedMetadata.status, 200);
         assert.deepEqual(await protectedMetadata.json(), {
-            authorization_servers: [`http://127.0.0.1:${address.port}`],
+            authorization_servers: [`http://127.0.0.1:${port}`],
             resource: endpoint,
             resource_documentation: "https://docs.example.com/aromatic",
             resource_name: "aromatic",
             scopes_supported: ["mcp"]
         });
 
-        const authorizationServerMetadata = await fetch(`http://127.0.0.1:${address.port}/.well-known/openid-configuration`);
+        const authorizationServerMetadata = await fetch(`http://127.0.0.1:${port}/.well-known/openid-configuration`);
         assert.equal(authorizationServerMetadata.status, 200);
         const metadata = await authorizationServerMetadata.json() as {
             authorization_endpoint: string;
@@ -119,7 +115,7 @@ test("oauth2 exposes protected resource metadata and accepts a valid bearer toke
             registration_endpoint: string;
             token_endpoint: string;
         };
-        assert.equal(metadata.issuer, `http://127.0.0.1:${address.port}`);
+        assert.equal(metadata.issuer, `http://127.0.0.1:${port}`);
 
         const clientRegistration = await fetch(metadata.registration_endpoint, {
             method: "POST",
@@ -221,11 +217,9 @@ test("oauth2 emits HTTPS endpoints behind a loopback reverse proxy", async () =>
     await host.start();
 
     try {
-        const address = host.server.address;
-        assert.notEqual(address, null);
-        assert.equal(typeof address, "object");
+        const port = requireTcpPort(host.server.address);
 
-        const response = await fetch(`http://127.0.0.1:${address.port}/.well-known/openid-configuration`, {
+        const response = await fetch(`http://127.0.0.1:${port}/.well-known/openid-configuration`, {
             headers: {
                 host: "mcp.example.com",
                 "x-forwarded-host": "mcp.example.com",
@@ -290,10 +284,7 @@ async function reservePort(): Promise<number> {
         server.listen(0, "127.0.0.1", () => resolve());
     });
 
-    const address = server.address();
-    assert.notEqual(address, null);
-    assert.equal(typeof address, "object");
-    const { port } = address;
+    const port = requireTcpPort(server.address());
 
     await new Promise<void>((resolve, reject) => {
         server.close((error) => {
@@ -426,10 +417,8 @@ test("running host replaces and unregisters instance bindings without restart", 
     await host.start();
 
     try {
-        const address = host.server.address;
-        assert.notEqual(address, null);
-        assert.equal(typeof address, "object");
-        const endpoint = `http://127.0.0.1:${address.port}/demo/mcp`;
+        const port = requireTcpPort(host.server.address);
+        const endpoint = `http://127.0.0.1:${port}/demo/mcp`;
 
         assert.deepEqual(await initializeAndListTools(endpoint), ["environ_info", "bash_run"]);
 

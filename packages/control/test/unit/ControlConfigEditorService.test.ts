@@ -7,7 +7,7 @@ import {
     InstanceRegistryFactory,
     createDefaultControlConfig
 } from "../../src/testing.ts";
-import { normalizeConfigInstanceDraft } from "@portable-devshell/shared";
+import { normalizeConfigInstanceDraft, type ControlConfig, type JsonValue } from "@portable-devshell/shared";
 
 test("config editor validates drafts and accumulates patch apply summaries", async () => {
     let config = createConfig();
@@ -15,9 +15,9 @@ test("config editor validates drafts and accumulates patch apply summaries", asy
     const writes: unknown[] = [];
     const service = new ConfigEditorCoordinator({
         configStore: {
-            async write(nextConfig: unknown) {
+            async write(nextConfig: ControlConfig) {
                 writes.push(nextConfig);
-                config = nextConfig as typeof config;
+                config = nextConfig;
             }
         },
         getConfig: () => config,
@@ -40,7 +40,7 @@ test("config editor validates drafts and accumulates patch apply summaries", asy
                 security: { mode: "workspace" }
             }
         ]
-    }) as { instances: Array<{ security: { effectiveMode: string; mode: string } }> };
+    } as unknown as JsonValue) as { instances: Array<{ security: { effectiveMode: string; mode: string } }> };
     assert.equal(validated.instances[0]?.security.mode, "workspace");
     assert.equal(config.instances[0]?.security.mode, "disabled");
 
@@ -128,9 +128,9 @@ test("config editor rejects delete and rebuild patches while an instance is runn
     const registry = new InstanceRegistry([descriptor({ snapshot: runningSnapshot })]);
     const service = new ConfigEditorCoordinator({
         configStore: {
-            async write(nextConfig: unknown) {
+            async write(nextConfig: ControlConfig) {
                 writes.push(nextConfig);
-                config = nextConfig as typeof config;
+                config = nextConfig;
             }
         },
         getConfig: () => config,
@@ -168,8 +168,8 @@ test("config editor reconciles instance MCP bindings from patches without restar
     };
     const service = new ConfigEditorCoordinator({
         configStore: {
-            async write(nextConfig: unknown) {
-                config = nextConfig as typeof config;
+            async write(nextConfig: ControlConfig) {
+                config = nextConfig;
             }
         },
         getConfig: () => config,
@@ -244,8 +244,8 @@ function createService(
 ): ConfigEditorCoordinator {
     return new ConfigEditorCoordinator({
         configStore: {
-            async write(nextConfig: unknown) {
-                setConfig(nextConfig as ReturnType<typeof createConfig>);
+            async write(nextConfig: ControlConfig) {
+                setConfig(nextConfig);
             }
         },
         getConfig,

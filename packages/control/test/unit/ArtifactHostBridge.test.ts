@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { chmod, mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import test from "node:test";
+import test, { type TestContext } from "node:test";
 
 import type { ArtifactPayloadDescriptor, JsonValue } from "@portable-devshell/shared";
 import { ArtifactHostBridge, type ArtifactHostAccessContext } from "@portable-devshell/control/testing";
@@ -43,7 +43,7 @@ async function readPayload(endpoint: ReturnType<ArtifactHostBridge["endpointFor"
     return Buffer.concat(chunks);
 }
 
-async function fixture(t: Parameters<typeof test>[1] extends (t: infer T) => unknown ? T : never) {
+async function fixture(t: TestContext) {
     const root = await mkdtemp(join(tmpdir(), "artifact-host-"));
     const homeDirectory = join(root, "home");
     const processCwd = join(root, "cwd");

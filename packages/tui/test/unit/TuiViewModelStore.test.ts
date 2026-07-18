@@ -10,8 +10,8 @@ test("TuiAppStore keeps page, instance, and expanded boxes stable across events"
 
     store.setConnectionState("connected");
     store.replaceInstances([
-        { mcpEnabled: false, name: "alpha" },
-        { mcpEnabled: true, name: "beta" }
+        { enabled: true, mcpEnabled: false, name: "alpha" },
+        { enabled: true, mcpEnabled: true, name: "beta" }
     ]);
     store.setSelectedPage("logs");
     store.setSelectedInstance("beta");
@@ -26,6 +26,7 @@ test("TuiAppStore keeps page, instance, and expanded boxes stable across events"
     });
     store.applyEvent({
         destination: asInstanceName("beta"),
+        id: "log-appended-3",
         name: "log.appended",
         payload: {
             at: "2026-07-09T00:00:03.000Z",
@@ -73,12 +74,13 @@ test("TuiRenderScheduler batches multiple store updates into one render notifica
 
 test("Audit page renders control-owned tool calls from live events", () => {
     const store = new TuiAppStore();
-    store.replaceInstances([{ mcpEnabled: true, name: "alpha" }]);
+    store.replaceInstances([{ enabled: true, mcpEnabled: true, name: "alpha" }]);
     store.setSelectedInstance("alpha");
     store.setSelectedPage("audit");
 
     store.applyEvent({
         destination: asInstanceName("alpha"),
+        id: "tool-running-1",
         name: "toolCall.running",
         payload: {
             at: "2026-07-15T00:00:00.000Z",
@@ -98,6 +100,7 @@ test("Audit page renders control-owned tool calls from live events", () => {
     });
     store.applyEvent({
         destination: asInstanceName("alpha"),
+        id: "tool-completed-2",
         name: "toolCall.completed",
         payload: {
             at: "2026-07-15T00:00:01.000Z",

@@ -2,6 +2,13 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+    asInstanceName,
+    createError,
+    type InstanceCreateDraft,
+    type InstanceCreateSummary
+} from "@portable-devshell/shared";
+
+import {
     buildFocusGraphForState,
     buildTuiHitRegions,
     TuiCommandDispatcher,
@@ -259,7 +266,11 @@ test("mouse hit regions follow the rendered sidebar, boxes, and overlays", () =>
     assert.deepEqual(hitTargetAt(initialRegions, boxRegion.x, boxRegion.y), boxRegion.target);
 
 
-    harness.store.setPanelError("instances:alpha", { code: "control.failed", message: "rendered error" });
+    harness.store.setPanelError("instances:alpha", createError({
+        code: "control.failed",
+        message: "rendered error",
+        retryable: false
+    }));
     const erroredRegions = buildTuiHitRegions(harness.store.getState(), viewport);
     const shiftedBoxRegion = erroredRegions.find((region) => region.target.kind === "boxTitle" && region.target.boxId === "create-instance")!;
     assert.equal(shiftedBoxRegion.y, boxRegion.y + 3);
@@ -442,8 +453,8 @@ test("wizard normalizes friendly container mode labels before control validation
     let validatedMode: unknown;
     const harness = createHarness({
         onValidateInstanceCreateDraft: async (draft) => {
-            validatedMode = (draft as { container?: { mode?: unknown } }).container?.mode;
-            return {};
+            validatedMode = draft.container?.mode;
+            return instanceCreateSummary(draft);
         }
     });
 
@@ -587,13 +598,15 @@ test("audit truncates input and output previews while opening complete structure
     const output = { complete: true, files: [{ path: "src/example.ts", diff: "+new\n".repeat(40) }] };
 
     harness.store.applyEvent({
-        destination: "alpha" as never,
+        destination: asInstanceName("alpha"),
+        id: "tool-queued-live-patch",
         name: "toolCall.queued",
         payload: { at: "2026-07-14T00:00:00.000Z", data: { callId: "live-patch", ctxId: "ctx-live-patch", input: { input: patch }, inputSummary: JSON.stringify({ input: patch }), source: "mcp", startedAt: "2026-07-14T00:00:00.000Z", status: "queued", toolName: "file_edit" } },
         seq: 21
     });
     harness.store.applyEvent({
-        destination: "alpha" as never,
+        destination: asInstanceName("alpha"),
+        id: "tool-completed-live-patch",
         name: "toolCall.completed",
         payload: { at: "2026-07-14T00:00:01.000Z", data: { callId: "live-patch", completedAt: "2026-07-14T00:00:01.000Z", output, source: "mcp", startedAt: "2026-07-14T00:00:00.000Z", status: "completed", toolName: "file_edit" } },
         seq: 22
@@ -827,8 +840,8 @@ test("connector page actions expose and save only affected scopes", async () => 
     const instanceUpdates: unknown[] = [];
     const mcpUpdates: unknown[] = [];
     const harness = createHarness({
-        onInstanceConfigUpdate: async (instanceName, patch) => { instanceUpdates.push({ instanceName, patch }); return {}; },
-        onMcpConfigUpdate: async (value) => { mcpUpdates.push(value); return {}; }
+        onInstanceConfigUpdate: async (instanceName, patch) => { instanceUpdates.push({ instanceName, patch }); },
+        onMcpConfigUpdate: async (value) => { mcpUpdates.push(value); }
     });
 
     await harness.press("3");
@@ -1162,6 +1175,27 @@ async function openCreateWizard(harness: ReturnType<typeof createHarness>): Prom
     await harness.dispatch({ type: "focus.activate" });
 }
 
+function instanceCreateSummary(draft: InstanceCreateDraft): InstanceCreateSummary {
+    return {
+        ...(draft.dockerBinary === undefined ? {} : { dockerBinary: draft.dockerBinary }),
+        ...(draft.podmanBinary === undefined ? {} : { podmanBinary: draft.podmanBinary }),
+        ...(draft.ssh === undefined ? {} : { ssh: draft.ssh }),
+        ...(draft.workspace === undefined ? {} : { workspace: draft.workspace }),
+        enabled: draft.enabled ?? true,
+        mcp: {
+            enabled: draft.mcp?.enabled ?? true,
+            path: `/${draft.name}/mcp`,
+            tools: {
+                capabilities: [...(draft.mcp?.tools?.capabilities ?? ["read", "write", "execute"])],
+                groups: [...(draft.mcp?.tools?.groups ?? ["file", "bash", "artifact"])]
+            }
+        },
+        name: draft.name,
+        provider: draft.provider,
+        security: { mode: draft.security?.mode ?? "disabled" }
+    };
+}
+
 function createHarness(options: {
     onArtifactViewImage?: (instance: string, input: { handle?: string; instance?: string; path?: string }) => Promise<{
         bytes: number;
@@ -1177,7 +1211,7 @@ function createHarness(options: {
     onMcpConfigUpdate?: (value: Record<string, unknown>) => Promise<void>;
     onToolCall?: (instance: string, toolName: string, input: string) => Promise<boolean>;
     onValidateConfigDraft?: () => Promise<void>;
-    onValidateInstanceCreateDraft?: () => Promise<unknown>;
+    onValidateInstanceCreateDraft?: (draft: InstanceCreateDraft) => Promise<InstanceCreateSummary>;
 } = {}) {
     const store = new TuiAppStore();
     seedPrompt3State(store);
@@ -1250,7 +1284,7 @@ function createHarness(options: {
             defaultSecurityMode: "disabled",
             providers: ["local", "ssh", "docker", "podman"] as const
         }),
-        onValidateInstanceCreateDraft: options.onValidateInstanceCreateDraft as never,
+        onValidateInstanceCreateDraft: options.onValidateInstanceCreateDraft ?? (async (draft) => instanceCreateSummary(draft)),
         onValidateConfigDraft: options.onValidateConfigDraft ?? (async () => undefined),
         store
     });

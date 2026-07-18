@@ -6,6 +6,8 @@ import { dirname, join, resolve } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
+import { requireTcpPort } from "../../../../test/TestHttpSupport.ts";
+
 import { asInstanceName, asWorkspacePath, errorCodes } from "@portable-devshell/shared";
 import { WorkerTransportDriverLocal, WorkerBinary, WorkerInstanceFactory } from "@portable-devshell/core/testing";
 import { McpHost } from "@portable-devshell/mcp/testing";
@@ -50,10 +52,8 @@ test("MCP initialize tools/list and tools/call succeed against the frozen worker
         await instance.start();
         await host.start();
 
-        const address = host.server.address;
-        assert.notEqual(address, null);
-        assert.equal(typeof address, "object");
-        const endpoint = `http://127.0.0.1:${address.port}/${instanceName}/mcp`;
+        const port = requireTcpPort(host.server.address);
+        const endpoint = `http://127.0.0.1:${port}/${instanceName}/mcp`;
 
         const initialize = await postJson(endpoint, await readFixture("mcp-initialize.json"));
         assert.equal(initialize.error, undefined);
@@ -180,10 +180,8 @@ test("MCP tools/call waits for approval before invoking the worker tool", realWo
         await instance.start();
         await host.start();
 
-        const address = host.server.address;
-        assert.notEqual(address, null);
-        assert.equal(typeof address, "object");
-        const endpoint = `http://127.0.0.1:${address.port}/${instanceName}/mcp`;
+        const port = requireTcpPort(host.server.address);
+        const endpoint = `http://127.0.0.1:${port}/${instanceName}/mcp`;
 
         const initialize = await postJson(endpoint, await readFixture("mcp-initialize.json"));
         const sessionHeaders = {

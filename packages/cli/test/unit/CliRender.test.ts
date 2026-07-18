@@ -3,6 +3,8 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
+import { asInstanceName } from "@portable-devshell/shared";
+
 import { renderCliError } from "../../src/render/CliRenderError.ts";
 import { renderControlStatus } from "../../src/render/control/CliRenderControlStatus.ts";
 import { renderInstanceList } from "../../src/render/instance/CliRenderInstanceList.ts";
@@ -24,7 +26,7 @@ test("renderers format control, instance, and tool outputs", async () => {
             connectionState: "disconnected",
             daemonState: "stopped",
             lastSeq: 0,
-            name: "demo-local",
+            name: asInstanceName("demo-local"),
             ready: false,
             status: "stopped"
         }),

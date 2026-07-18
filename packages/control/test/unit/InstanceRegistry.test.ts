@@ -3,6 +3,7 @@ import test from "node:test";
 
 import { InstanceRegistryFactory, McpEndpointFactory, McpRuntimeFactory, createDefaultControlConfig } from "../../src/testing.ts";
 import { normalizeConfigInstanceDraft } from "@portable-devshell/shared";
+import { createTestInstanceDescriptor } from "../ControlTestFixtures.ts";
 
 test("disabled instances are skipped and registry does not auto start workers", () => {
     const config = createDefaultControlConfig();
@@ -68,43 +69,22 @@ test("mcp endpoint path is generated and wiring only builds host configuration",
 test("stopOwned only stops workers started by this control and keeps failed ownership", async () => {
     const stopped: string[] = [];
     const registry = new (await import("../../src/control/instance/registry/InstanceRegistry.js")).InstanceRegistry([
-        {
-            tools: { capabilities: ["read", "write", "execute"], groups: ["file", "bash", "artifact"] },
-            enabled: true,
-            mcpEnabled: false,
-            mcpPath: "",
-            name: "owned-ok",
-            worker: {
-                async stop() {
-                    stopped.push("owned-ok");
-                }
-            } as never
-        },
-        {
-            tools: { capabilities: ["read", "write", "execute"], groups: ["file", "bash", "artifact"] },
-            enabled: true,
-            mcpEnabled: false,
-            mcpPath: "",
-            name: "owned-fail",
-            worker: {
-                async stop() {
-                    stopped.push("owned-fail");
-                    throw new Error("stop failed");
-                }
-            } as never
-        },
-        {
-            tools: { capabilities: ["read", "write", "execute"], groups: ["file", "bash", "artifact"] },
-            enabled: true,
-            mcpEnabled: false,
-            mcpPath: "",
-            name: "unowned",
-            worker: {
-                async stop() {
-                    stopped.push("unowned");
-                }
-            } as never
-        }
+        createTestInstanceDescriptor({
+            async stop() {
+                stopped.push("owned-ok");
+            }
+        } as never, { name: "owned-ok" }),
+        createTestInstanceDescriptor({
+            async stop() {
+                stopped.push("owned-fail");
+                throw new Error("stop failed");
+            }
+        } as never, { name: "owned-fail" }),
+        createTestInstanceDescriptor({
+            async stop() {
+                stopped.push("unowned");
+            }
+        } as never, { name: "unowned" })
     ]);
 
     registry.markOwned("owned-ok");

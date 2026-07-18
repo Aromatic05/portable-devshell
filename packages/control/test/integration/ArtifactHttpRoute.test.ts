@@ -2,9 +2,10 @@ import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import test from "node:test";
+import test, { type TestContext } from "node:test";
 
 import { McpHostHttpServer } from "@portable-devshell/mcp/testing";
+import { requireTcpPort } from "../../../../test/TestHttpSupport.ts";
 import type { ArtifactPayloadDescriptor, JsonValue } from "@portable-devshell/shared";
 import {
     ArtifactHttpRoute,
@@ -79,7 +80,7 @@ class MemoryShareEndpoint implements ArtifactServiceEndpoint {
 }
 
 async function fixture(
-    t: Parameters<typeof test>[1] extends (t: infer T) => unknown ? T : never,
+    t: TestContext,
     publicBaseUrl?: string
 ) {
     const storageDir = await mkdtemp(join(tmpdir(), "artifact-http-"));
@@ -106,10 +107,8 @@ async function fixture(
         await service.stop();
         await rm(storageDir, { force: true, recursive: true });
     });
-    const address = server.address;
-    assert.notEqual(address, null);
-    assert.equal(typeof address, "object");
-    const baseUrl = `http://127.0.0.1:${address.port}`;
+    const port = requireTcpPort(server.address);
+    const baseUrl = `http://127.0.0.1:${port}`;
     const share = await service.createShare({ instance: "source-a", path: "./result.bin" }, "source-a");
     const token = new URL(share.url).pathname.split("/").at(-1)!;
     const downloadUrl = `${baseUrl}${artifactShareRoute(publicBaseUrl)}/${token}`;

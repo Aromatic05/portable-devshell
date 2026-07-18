@@ -20,6 +20,7 @@ import { ControlRouteComposition } from "../../src/composition/ControlRouteCompo
 import { ControlSocketServer } from "../../src/server/socket/ControlSocketServer.ts";
 import { InstanceRegistry } from "../../src/control/instance/registry/InstanceRegistry.ts";
 import { createTestIpcPath } from "../../../../test/TestPlatformSupport.ts";
+import { createTestInstanceDescriptor } from "../ControlTestFixtures.ts";
 
 interface Harness {
     cleanup(): Promise<void>;
@@ -174,21 +175,9 @@ async function createHarness(): Promise<Harness> {
 }
 
 function createDescriptor(worker: FakeWorker) {
-    return {
-        enabled: true,
-        mcpEnabled: false,
-        mcpPath: "",
-        name: "alpha",
-        todo: {
-            async read() {
-                return { items: [], revision: 0, summary: { completed: 0, total: 0 } };
-            },
-            summary() {
-                return undefined;
-            }
-        },
-        worker: worker as unknown as WorkerInstance
-    };
+    return createTestInstanceDescriptor(worker as unknown as WorkerInstance, {
+        name: "alpha"
+    });
 }
 
 function createClient(socketPath: string, peer: Exclude<Peer, "server">): ClientConnection {

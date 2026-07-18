@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { asInstanceName } from "@portable-devshell/shared";
+
 import { TuiAppStore } from "../../src/testing.ts";
 import { TuiRuntimeAttachOperations } from "../../src/runtime/operation/TuiRuntimeAttachOperations.ts";
 
@@ -40,7 +42,7 @@ test("attach operation reports resolver failures before suspending the TUI", asy
         connectionState: "disconnected",
         daemonState: "stopped",
         lastSeq: 0,
-        name: "alpha",
+        name: asInstanceName("alpha"),
         ready: false,
         status: "stopped"
     });

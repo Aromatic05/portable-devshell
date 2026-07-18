@@ -6,19 +6,22 @@ import { dirname, resolve } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
+import { requireTcpPort } from "../../../../test/TestHttpSupport.ts";
+
 import { McpEndpointBinding, McpEndpointWorker, type McpInstanceGateway } from "@portable-devshell/mcp/testing";
 
 const fixturesDirectory = resolve(dirname(fileURLToPath(import.meta.url)), "../fixtures");
 type JsonValue = boolean | number | null | string | JsonValue[] | { [key: string]: JsonValue };
 
-interface CommandResult {
+type CommandResult = {
     exitCode: number | null;
     stderr: string;
     stdout: string;
-}
+} & Record<string, JsonValue>;
 
 interface ToolDefinition {
-    requiredCapabilities: readonly ("read" | "write" | "execute" | "session")[];
+    group: string;
+    requiredCapabilities: readonly ("read" | "write" | "execute" | "manage")[];
     description: string;
     inputSchema: JsonValue;
     name: string;
@@ -154,7 +157,7 @@ test("environment and control-owned tools execute through the endpoint audit pat
             return [];
         },
         async shareArtifact(_defaultInstance, input) {
-            return { path: input.path, shareId: "share-1" };
+            return { ...(input.path === undefined ? {} : { path: input.path }), shareId: "share-1" };
         },
         async transferArtifact() {
             return {};
@@ -378,6 +381,9 @@ test("instance_list returns object structured content through SDK transport", as
         async listInstances() {
             return [{ name: "demo" }];
         },
+        async readTodo() {
+            return { items: [], revision: 0, summary: { completed: 0, total: 0 } };
+        },
         listTools() {
             return [];
         },
@@ -389,6 +395,9 @@ test("instance_list returns object structured content through SDK transport", as
         },
         async stopInstance() {
             return {};
+        },
+        async writeTodo() {
+            return { items: [], revision: 0, summary: { completed: 0, total: 0 } };
         }
     };
     const binding = new McpEndpointBinding(
@@ -570,9 +579,7 @@ async function createBindingServer(binding: McpEndpointBinding) {
         server.listen(0, "127.0.0.1", () => resolve());
     });
 
-    const address = server.address();
-    assert.notEqual(address, null);
-    assert.equal(typeof address, "object");
+    const port = requireTcpPort(server.address());
 
     return {
         close: async () => {
@@ -587,7 +594,7 @@ async function createBindingServer(binding: McpEndpointBinding) {
                 });
             });
         },
-        url: `http://127.0.0.1:${address.port}/mcp`
+        url: `http://127.0.0.1:${port}/mcp`
     };
 }
 
@@ -606,9 +613,11 @@ async function initialize(url: string): Promise<{ headers: Record<string, string
     const response = await postJson(url, await readFixture("mcp-initialize.json"));
     assert.equal(response.status, 200);
     const sessionId = response.headers.get("mcp-session-id");
-    assert.equal(typeof sessionId, "string");
+    if (sessionId === null) {
+        throw new Error("MCP initialize response omitted mcp-session-id");
+    }
 
-    const headers = {
+    const headers: Record<string, string> = {
         "mcp-protocol-version": String(response.body.result?.protocolVersion ?? ""),
         "mcp-session-id": sessionId
     };
@@ -698,9 +707,9 @@ function createWorkerHarness(options?: {
     }> = [];
     const calls: Array<{ input: JsonValue; toolName: string }> = [];
     const events: Array<{ data: Record<string, JsonValue>; type: string }> = [];
-    const tools = options?.tools ?? [
+    const tools: ToolDefinition[] = options?.tools ?? [
         { requiredCapabilities: ["execute"] as const, group: "bash", name: "bash_run", description: "Run shell", inputSchema: { type: "object", properties: { command: { type: "string" } } }, outputSchema: { type: "object" } },
-        { requiredCapabilities: ["read"] as const, name: "read_logs", description: "Read logs", inputSchema: { type: "object" }, outputSchema: { type: "object" } }
+        { requiredCapabilities: ["read"] as const, group: "file", name: "read_logs", description: "Read logs", inputSchema: { type: "object" }, outputSchema: { type: "object" } }
     ];
     const hasToolSchemaCache = options?.hasToolSchemaCache ?? true;
     const ready = options?.ready ?? true;

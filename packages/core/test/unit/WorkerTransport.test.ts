@@ -1433,11 +1433,6 @@ function createSpawnRecorder(
     };
 }
 
-async function createDummyWorkerBinary(): Promise<{
-    path: string;
-    contents: Buffer;
-    cleanup: () => Promise<void>;
-}>;
 async function createDummyWorkerBinary(tag: string = "remote"): Promise<{
     path: string;
     contents: Buffer;

@@ -6,6 +6,8 @@ import { join, resolve } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
+import { requireTcpPort } from "../../../../test/TestHttpSupport.ts";
+
 import { WorkerTransportDriverLocal, WorkerBinary, WorkerInstanceFactory } from "@portable-devshell/core/testing";
 import { McpHost } from "@portable-devshell/mcp/testing";
 import { asInstanceName, asWorkspacePath } from "@portable-devshell/shared";
@@ -119,25 +121,36 @@ test("MCP tmux rejects foreign control while the owner can recover and close wit
     });
 });
 
+interface ToolStructuredContent {
+    closedPaneId?: string;
+    ctxId?: string;
+    output?: string[];
+    pane?: { id?: string };
+    task?: { id?: string; status?: string };
+}
+
+interface ToolSummary {
+    inputSchema: { properties?: { timeMs?: { maximum?: number; minimum?: number } } };
+    name: string;
+}
+
 interface ToolResponse {
     error?: { data?: { code?: string } };
     result?: {
-        structuredContent?: {
-            closedPaneId?: string;
-            output?: string[];
-            pane?: { id?: string };
-            task?: { id?: string; status?: string };
-        };
+        protocolVersion?: string;
+        structuredContent?: ToolStructuredContent;
+        tools?: ToolSummary[];
     };
+}
+
+interface JsonRpcResponse extends ToolResponse {
+    headers: Headers;
 }
 
 interface TmuxHarness {
     callTool(requestId: string, name: string, args: Record<string, JsonValue>): Promise<ToolResponse>;
     createContext(): Promise<string>;
-    listTools(): Promise<Array<{
-        inputSchema: { properties?: { timeMs?: { maximum?: number; minimum?: number } } };
-        name: string;
-    }>>;
+    listTools(): Promise<ToolSummary[]>;
 }
 
 async function withTmuxHarness(instanceName: string, body: (harness: TmuxHarness) => Promise<void>): Promise<void> {
@@ -172,10 +185,8 @@ async function withTmuxHarness(instanceName: string, body: (harness: TmuxHarness
     try {
         await instance.start();
         await host.start();
-        const address = host.server.address;
-        assert.notEqual(address, null);
-        assert.equal(typeof address, "object");
-        const endpoint = `http://127.0.0.1:${address.port}/${instanceName}/mcp`;
+        const port = requireTcpPort(host.server.address);
+        const endpoint = `http://127.0.0.1:${port}/${instanceName}/mcp`;
         const initialize = await postJson(endpoint, {
             id: "initialize",
             jsonrpc: "2.0",
@@ -216,10 +227,7 @@ async function withTmuxHarness(instanceName: string, body: (harness: TmuxHarness
                 jsonrpc: "2.0",
                 method: "tools/list"
             }, headers);
-            return response.result?.tools as Array<{
-                inputSchema: { properties?: { timeMs?: { maximum?: number; minimum?: number } } };
-                name: string;
-            }>;
+            return response.result?.tools ?? [];
         };
 
         await body({ callTool, createContext, listTools });
@@ -260,16 +268,18 @@ async function waitForTask(
 }
 
 function readString(value: unknown, name: string): string {
-    assert.equal(typeof value, "string", `${name} must be a string`);
+    if (typeof value !== "string") {
+        throw new TypeError(`${name} must be a string`);
+    }
     return value;
 }
 
-async function postJson(url: string, body: JsonValue, extraHeaders?: Record<string, string>) {
+async function postJson(url: string, body: JsonValue, extraHeaders?: Record<string, string>): Promise<JsonRpcResponse> {
     const response = await postRawJson(url, body, extraHeaders);
     assert.equal(response.status, 200, response.text);
     return {
         headers: response.headers,
-        ...JSON.parse(response.text) as Record<string, unknown>
+        ...(JSON.parse(response.text) as ToolResponse)
     };
 }
 

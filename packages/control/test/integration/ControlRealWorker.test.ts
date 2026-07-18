@@ -21,6 +21,7 @@ import {
     ControlPathHome,
     ControlPathRuntime,
     type Destination,
+    type ConfigInstanceDraft,
     type JsonValue,
 } from "@portable-devshell/shared";
 
@@ -222,7 +223,7 @@ async function runIsolatedScenario(): Promise<void> {
     );
     const testPath = fileURLToPath(import.meta.url);
     await new Promise<void>((resolvePromise, rejectPromise) => {
-        const childEnv = {
+        const childEnv: NodeJS.ProcessEnv = {
             ...process.env,
             PORTABLE_DEVSHELL_REAL_WORKER_CHILD: "1",
             ...(process.platform === "win32"
@@ -279,7 +280,7 @@ function createGlobalConfig() {
     };
 }
 
-function createInstanceConfig(workspacePath: string) {
+function createInstanceConfig(workspacePath: string): ConfigInstanceDraft {
     return {
         enabled: true,
         logs: {

@@ -111,7 +111,6 @@ test("McpEndpointWorker exposes environ_info and requires ctxId on every other t
                 return { ok: true };
             },
             handshake: {
-                capabilities: { cancel: true, streaming: false, tools: true },
                 instance: "demo-local",
                 platform: {
                     arch: "x86_64",
@@ -120,8 +119,6 @@ test("McpEndpointWorker exposes environ_info and requires ctxId on every other t
                     packageManager: "pacman",
                     shell: { executable: "/bin/bash", kind: "bash", version: "5.3" }
                 },
-                protocolVersion: 1,
-                workerVersion: "0.4.1",
                 workspace: "/workspace"
             },
             listTools: () => [bashRun],

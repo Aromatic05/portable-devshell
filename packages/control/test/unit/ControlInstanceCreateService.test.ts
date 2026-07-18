@@ -77,9 +77,6 @@ function createService(platform?: NodeJS.Platform) {
 
     return new InstanceCreateCoordinator({
         configStore: {
-            async readOrCreate() {
-                return config;
-            },
             async write(nextConfig) {
                 config = nextConfig;
             }
@@ -129,9 +126,6 @@ test("MCP instance_create creates only SSH and strips instance management from i
     const gateway = {} as never;
     const service = new InstanceCreateCoordinator({
         configStore: {
-            async readOrCreate() {
-                return config;
-            },
             async write(nextConfig) {
                 config = nextConfig;
             }
@@ -222,9 +216,6 @@ function createMcpCreateService() {
 
     return new InstanceCreateCoordinator({
         configStore: {
-            async readOrCreate() {
-                return config;
-            },
             async write(nextConfig) {
                 config = nextConfig;
             }

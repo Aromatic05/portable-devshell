@@ -6,6 +6,8 @@ import { PassThrough } from "node:stream";
 import type { ReadStream, WriteStream } from "node:tty";
 import test from "node:test";
 
+import { asInstanceName } from "@portable-devshell/shared";
+
 import type { TuiClients } from "../../src/runtime/client/TuiClientComposition.ts";
 import { TuiRuntime } from "../../src/runtime/TuiRuntime.ts";
 import { TuiTerminalSession, type TuiTerminalPty } from "../../src/testing.ts";
@@ -103,7 +105,7 @@ test("real Ink runtime buffers split mouse input and enters then discards the cr
         await writeCharacters(terminal, "demo-instance");
         await waitUntil(() => {
             const draft = runtime.store.getState().ui.formDrafts.create;
-            return draft?.name === "demo-instance";
+            return (draft as { name?: unknown } | undefined)?.name === "demo-instance";
         });
 
         terminal.write("\u0004");
@@ -386,7 +388,7 @@ test(
                 connectionState: "connected",
                 daemonState: "running",
                 lastSeq: 1,
-                name: "alpha",
+                name: asInstanceName("alpha"),
                 ready: true,
                 status: "ready"
             });

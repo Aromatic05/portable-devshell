@@ -169,6 +169,7 @@ function createInstance(
             onDisconnect: () => () => undefined
         } as never,
         stateMachine: new InstanceStateMachine(asInstanceName("demo-local")),
+        toolCallScheduler: {} as never,
         toolCallHistory: {
             read: async () => []
         } as never,

@@ -208,7 +208,7 @@ test("stop sends control.shutdown over rpc", async () => {
         },
         processIsRunning: () => false,
         rpcClient: {
-            async request(method: string) {
+            async request(method: "status" | "shutdown"): Promise<JsonValue> {
                 methods.push(method);
 
                 if (method === "status") {
@@ -252,7 +252,7 @@ test("stop waits for the daemon process after the control socket closes", async 
         },
         processIsRunning: () => processAlive,
         rpcClient: {
-            async request(method: string) {
+            async request(method: "status" | "shutdown"): Promise<JsonValue> {
                 if (method === "shutdown") {
                     shutdownRequested = true;
                     rpcRunning = false;
@@ -479,7 +479,7 @@ async function createHarness(): Promise<{
     cleanup: () => Promise<void>;
     homeDirectory: string;
     manager: ControlLifecycleManager;
-    paths: ControlPathHome & ControlPathRuntime;
+    paths: { controlHomeDir: string; socketFile: string };
     xdgRuntimeDir: string;
 }> {
     const homeDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-control-home-"));

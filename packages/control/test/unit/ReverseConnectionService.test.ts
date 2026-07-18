@@ -5,7 +5,7 @@ import { join } from "node:path";
 import test from "node:test";
 
 import type { WorkerRpcChannel } from "@portable-devshell/core/testing";
-import type { JsonValue } from "@portable-devshell/shared";
+import { asInstanceName, type InstanceSnapshot, type JsonValue } from "@portable-devshell/shared";
 
 import { ReverseConnectionService } from "../../src/control/reverse/connection/ReverseConnectionService.ts";
 import { ReverseCredentialStore } from "../../src/control/reverse/credential/ReverseCredentialStore.ts";
@@ -50,13 +50,21 @@ test("ReverseConnectionService enrolls and authenticates without an HTTP server"
     const credentialStore = new ReverseCredentialStore(home);
     const enrollmentStates: string[] = [];
     const descriptor = {
-        name: "remote-test",
+        name: asInstanceName("remote-test"),
         provider: "reverse" as const,
         reverseConnector: {} as never,
         worker: {
-            acceptReverseChannel: async () => undefined,
-            setReverseEnrollmentState: async (state: string) => {
+            acceptReverseChannel: async (): Promise<InstanceSnapshot> => ({
+                connectionState: "connected",
+                daemonState: "running",
+                lastSeq: 0,
+                name: asInstanceName("remote-test"),
+                ready: true,
+                status: "ready"
+            }),
+            setReverseEnrollmentState: async (state: string): Promise<InstanceSnapshot> => {
                 enrollmentStates.push(state);
+                return reverseSnapshot();
             },
             snapshot: () => ({}) as never
         },
@@ -103,18 +111,26 @@ test("ReverseConnectionService owns generation replacement and disconnect state"
     let generation = 0;
     const accepted: Array<{ channel: WorkerRpcChannel; generation: number; transport: string }> = [];
     const descriptor = {
-        name: "remote-test",
+        name: asInstanceName("remote-test"),
         provider: "reverse" as const,
         reverseConnector: {} as never,
         worker: {
             acceptReverseChannel: async (
                 channel: WorkerRpcChannel,
                 options: { generation: number; transport: "sse" | "wss" }
-            ) => {
+            ): Promise<InstanceSnapshot> => {
                 generation = options.generation;
                 accepted.push({ channel, ...options });
+                return {
+                    connectionState: "connected",
+                    daemonState: "running",
+                    lastSeq: 0,
+                    name: asInstanceName("remote-test"),
+                    ready: true,
+                    status: "ready"
+                };
             },
-            setReverseEnrollmentState: async () => undefined,
+            setReverseEnrollmentState: async (): Promise<InstanceSnapshot> => reverseSnapshot(),
             snapshot: () => ({
                 reverse: generation === 0 ? undefined : { generation }
             }) as never
@@ -165,6 +181,18 @@ test("ReverseConnectionService owns generation replacement and disconnect state"
     assert.equal(second.closed, true);
     service.stop();
 });
+
+
+function reverseSnapshot(): InstanceSnapshot {
+    return {
+        connectionState: "connected",
+        daemonState: "running",
+        lastSeq: 0,
+        name: asInstanceName("remote-test"),
+        ready: true,
+        status: "ready"
+    };
+}
 
 function hasCode(error: unknown, code: string): boolean {
     return typeof error === "object" &&

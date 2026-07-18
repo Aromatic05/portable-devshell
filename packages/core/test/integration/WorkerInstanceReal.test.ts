@@ -240,14 +240,14 @@ test("WorkerInstance audits control-owned tool calls while the worker is stopped
         const replay = instance.subscribe(1);
         assert.equal(replay.kind, "events");
         const eventTypesForCall = (callId: string | undefined) =>
-            replay.events.filter((event) => event.data?.callId === callId).map((event) => event.type);
+            replay.events.filter((event) => jsonRecord(event.data)?.callId === callId).map((event) => event.type);
         assert.deepEqual(eventTypesForCall(records[0]?.callId), ["toolCall.running", "toolCall.completed"]);
         assert.deepEqual(eventTypesForCall(records[1]?.callId), ["toolCall.running", "toolCall.failed"]);
         assert.deepEqual(eventTypesForCall(records[2]?.callId), ["toolCall.running", "toolCall.cancelled"]);
         const completedEvent = replay.events.find(
-            (event) => event.type === "toolCall.completed" && event.data?.callId === records[0]?.callId
+            (event) => event.type === "toolCall.completed" && jsonRecord(event.data)?.callId === records[0]?.callId
         );
-        assert.deepEqual(completedEvent?.data?.output, { revision: 7 });
+        assert.deepEqual(jsonRecord(completedEvent?.data)?.output, { revision: 7 });
     } finally {
         await instance.close();
         await rm(homeDirectory, { force: true, recursive: true });
@@ -297,7 +297,7 @@ test("WorkerInstance rejects not-ready and schedules concurrent tool calls while
         });
 
         const result = await firstCall;
-        assert.equal(result.stdout, stdout);
+        assert.equal(jsonRecord(result)?.stdout, stdout);
 
         harness.respond("bash_run", {
             exitCode: 0,
@@ -306,7 +306,7 @@ test("WorkerInstance rejects not-ready and schedules concurrent tool calls while
         });
 
         const secondResult = await secondCall;
-        assert.equal(secondResult.stdout, "ls output\n");
+        assert.equal(jsonRecord(secondResult)?.stdout, "ls output\n");
 
         const invalidCall = instance.callTool("bash_run", { bad: true } as JsonValue, cliToolCallContext);
         await assert.rejects(invalidCall, (error: unknown) => {
@@ -354,7 +354,7 @@ test("WorkerInstance rejects not-ready and schedules concurrent tool calls while
         );
 
         const eventTypesForCall = (callId: string | undefined) =>
-            replay.events.filter((event) => event.data?.callId === callId).map((event) => event.type);
+            replay.events.filter((event) => jsonRecord(event.data)?.callId === callId).map((event) => event.type);
 
         assert.deepEqual(eventTypesForCall(records[0]?.callId), [
             "toolCall.queued",
@@ -375,25 +375,25 @@ test("WorkerInstance rejects not-ready and schedules concurrent tool calls while
         ]);
 
         const firstQueued = replay.events.find(
-            (event) => event.type === "toolCall.queued" && event.data?.callId === records[0]?.callId
+            (event) => event.type === "toolCall.queued" && jsonRecord(event.data)?.callId === records[0]?.callId
         );
         const firstRunning = replay.events.find(
-            (event) => event.type === "toolCall.running" && event.data?.callId === records[0]?.callId
+            (event) => event.type === "toolCall.running" && jsonRecord(event.data)?.callId === records[0]?.callId
         );
         const failedEvent = replay.events.find(
-            (event) => event.type === "toolCall.failed" && event.data?.callId === records[2]?.callId
+            (event) => event.type === "toolCall.failed" && jsonRecord(event.data)?.callId === records[2]?.callId
         );
         const completedEvent = replay.events.find(
-            (event) => event.type === "toolCall.completed" && event.data?.callId === records[0]?.callId
+            (event) => event.type === "toolCall.completed" && jsonRecord(event.data)?.callId === records[0]?.callId
         );
 
         assert.deepEqual(firstQueued?.data, {
             callId: records[0]?.callId,
             input: { command: "pwd" },
             inputSummary: "{\"command\":\"pwd\"}",
-            queuedAt: firstQueued?.data.queuedAt,
+            queuedAt: jsonRecord(firstQueued?.data)?.queuedAt,
             source: "cli",
-            startedAt: firstQueued?.data.startedAt,
+            startedAt: jsonRecord(firstQueued?.data)?.startedAt,
             status: "queued",
             toolName: "bash_run"
         });
@@ -402,19 +402,19 @@ test("WorkerInstance rejects not-ready and schedules concurrent tool calls while
             input: { command: "pwd" },
             inputSummary: "{\"command\":\"pwd\"}",
             source: "cli",
-            startedAt: firstQueued?.data.startedAt,
+            startedAt: jsonRecord(firstQueued?.data)?.startedAt,
             status: "running",
             toolName: "bash_run"
         });
-        assert.deepEqual(completedEvent?.data?.output, { exitCode: 0, stderr: "", stdout });
+        assert.deepEqual(jsonRecord(completedEvent?.data)?.output, { exitCode: 0, stderr: "", stdout });
         assert.deepEqual(failedEvent?.data, {
             callId: records[2]?.callId,
-            completedAt: failedEvent?.data.completedAt,
+            completedAt: jsonRecord(failedEvent?.data)?.completedAt,
             errorCode: errorCodes.coreToolSchemaUnavailable,
             input: { bad: true },
             inputSummary: "{\"bad\":true}",
             source: "cli",
-            startedAt: failedEvent?.data.startedAt,
+            startedAt: jsonRecord(failedEvent?.data)?.startedAt,
             status: "failed",
             toolName: "bash_run"
         });
@@ -486,7 +486,7 @@ test("WorkerInstance waits for approval before invoking tools and persists appro
         });
 
         const result = await callPromise;
-        assert.equal(result.stdout, "/tmp/workspace\n");
+        assert.equal(jsonRecord(result)?.stdout, "/tmp/workspace\n");
 
         const records = await instance.readToolCalls();
         assert.equal(records[0]?.status, "completed");
@@ -829,9 +829,18 @@ test("WorkerInstance reconnectRpc refreshes schema after an rpc disconnect", asy
     }
 });
 
+type HarnessTool = {
+    requiredCapabilities: ["execute"];
+    description: string;
+    group: string;
+    inputSchema: JsonValue;
+    name: string;
+    outputSchema: JsonValue;
+};
+
 function createWorkerInstanceHarness(): {
     disconnect: () => void;
-    setTools: (tools: Array<{ requiredCapabilities: ["execute"]; description: string; group: string; inputSchema: JsonValue; name: string; outputSchema: JsonValue }>) => void;
+    setTools: (tools: HarnessTool[]) => void;
     transport: WorkerCommandTransport;
     requestedMethods: () => number;
     respond: (method: string, result: Record<string, JsonValue>) => void;
@@ -843,9 +852,9 @@ function createWorkerInstanceHarness(): {
     const requestMethods: string[] = [];
     const methodWaiters = new Map<string, Array<() => void>>();
     let commandStatus: "running" | "stale" | "stopped" = "stopped";
-    let tools = [
+    let tools: HarnessTool[] = [
         {
-            requiredCapabilities: ["execute"] as const,
+            requiredCapabilities: ["execute"] as ["execute"],
             description: "Run a shell command.",
             group: "bash",
             inputSchema: toolSchemaFor("command"),
@@ -950,8 +959,10 @@ function createWorkerInstanceHarness(): {
         },
         respond(method, result) {
             const requestIds = pending.get(method);
-            const requestId = requestIds?.shift();
-
+            if (requestIds === undefined) {
+                throw new Error(`No pending request for ${method}.`);
+            }
+            const requestId = requestIds.shift();
             if (requestId === undefined) {
                 throw new Error(`No pending request for ${method}.`);
             }
@@ -1002,6 +1013,13 @@ function createWorkerInstanceHarness(): {
     };
 }
 
+
+function jsonRecord(value: JsonValue | undefined): Record<string, JsonValue> | undefined {
+    return typeof value === "object" && value !== null && !Array.isArray(value)
+        ? value
+        : undefined;
+}
+
 function isRequestFrame(value: unknown): value is { id: string; method: string } {
     if (typeof value !== "object" || value === null || Array.isArray(value)) {
         return false;
@@ -1014,7 +1032,7 @@ function isRequestFrame(value: unknown): value is { id: string; method: string }
 function createLifecycleResponse(
     method: string,
     id: string,
-    tools: Array<{ requiredCapabilities: ["execute"]; description: string; inputSchema: JsonValue; name: string; outputSchema: JsonValue }>
+    tools: HarnessTool[]
 ): WorkerRpcResponseEnvelope {
     if (method === "worker.ping") {
         return {

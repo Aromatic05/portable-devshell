@@ -124,7 +124,7 @@ test("reverse CLI renderers include copyable enrollment and credential instructi
             controllerUrl: "https://controller.example/base",
             deviceCode: "ABCD-EFGH",
             expiresAt: "2026-07-16T12:00:00.000Z",
-            instance: "reverse-one"
+            instance: asInstanceName("reverse-one")
         }),
         [
             "instance: reverse-one",
@@ -135,11 +135,11 @@ test("reverse CLI renderers include copyable enrollment and credential instructi
         ].join("\n")
     );
     assert.match(
-        renderReverseTokenRotation({ deviceToken: "new-secret", instance: "reverse-one" }),
+        renderReverseTokenRotation({ deviceToken: "new-secret", instance: asInstanceName("reverse-one") }),
         /new device token: new-secret[\s\S]*Update the remote worker credential/u
     );
     assert.equal(
-        renderReverseTokenRevocation({ instance: "reverse-one", revoked: true }),
+        renderReverseTokenRevocation({ instance: asInstanceName("reverse-one"), revoked: true }),
         "instance: reverse-one\ndevice token revoked\n"
     );
 });

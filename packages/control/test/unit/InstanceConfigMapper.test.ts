@@ -47,7 +47,7 @@ test("instance config mapper passes effective security mode, worker env, and app
             maxBytes: 33_554_432,
             retentionDays: 14
         },
-        mcp: { enabled: true, tools: { capabilities: ["read", "write", "execute"], groups: ["file", "bash", "artifact"] } },
+        mcp: { enabled: true, path: "/demo-local/mcp", tools: { capabilities: ["read", "write", "execute"], groups: ["file", "bash", "artifact"] } },
         name: "demo-local",
         provider: "local",
         security: {

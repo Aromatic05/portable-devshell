@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { Readable } from "node:stream";
 import test from "node:test";
 
+import { normalizeConfigInstanceDraft } from "@portable-devshell/shared";
 import type {
     InstanceCreateDraft,
     InstanceCreateSchema,
@@ -194,26 +195,27 @@ function createWizard(lines: string[], output: ReturnType<typeof createBuffer>):
 }
 
 function summaryFor(draft: InstanceCreateDraft): InstanceCreateSummary {
+    const instance = normalizeConfigInstanceDraft(draft);
     return {
-        ...(draft.container === undefined ? {} : { container: draft.container }),
-        ...(draft.dockerBinary === undefined ? {} : { dockerBinary: draft.dockerBinary }),
-        ...(draft.podmanBinary === undefined ? {} : { podmanBinary: draft.podmanBinary }),
-        ...(draft.ssh === undefined ? {} : { ssh: draft.ssh }),
-        enabled: draft.enabled ?? true,
+        ...(instance.container === undefined ? {} : { container: instance.container }),
+        ...(instance.dockerBinary === undefined ? {} : { dockerBinary: instance.dockerBinary }),
+        ...(instance.podmanBinary === undefined ? {} : { podmanBinary: instance.podmanBinary }),
+        ...(instance.ssh === undefined ? {} : { ssh: instance.ssh }),
+        enabled: instance.enabled,
         mcp: {
-            enabled: draft.mcp?.enabled ?? true,
-            path: `/${draft.name}/mcp`,
+            enabled: instance.mcp.enabled,
+            path: instance.mcp.path,
             tools: {
-                capabilities: [...(draft.mcp?.tools?.capabilities ?? [])],
-                groups: [...(draft.mcp?.tools?.groups ?? [])]
+                capabilities: [...instance.mcp.tools.capabilities],
+                groups: [...instance.mcp.tools.groups]
             }
         },
-        name: draft.name,
-        provider: draft.provider,
+        name: instance.name,
+        provider: instance.provider,
         security: {
-            mode: draft.security?.mode ?? "disabled"
+            mode: instance.security.mode
         },
-        workspace: draft.workspace
+        workspace: instance.workspace
     };
 }
 

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { asInstanceName, type ArtifactShareResult, type ArtifactTransferRecord } from "@portable-devshell/shared";
+import { asInstanceName, type ArtifactShareResult, type ArtifactTransferRecord, type JsonValue } from "@portable-devshell/shared";
 import {
     buildFocusGraphForState,
     TuiCommandDispatcher,
@@ -34,6 +34,11 @@ const transfer: ArtifactTransferRecord = {
     transferredBytes: 4,
     updatedAt: "2026-07-13T00:00:01.000Z"
 };
+
+
+function toJsonValue(value: unknown): JsonValue {
+    return JSON.parse(JSON.stringify(value)) as JsonValue;
+}
 
 test("TUI startup pulls artifact shares and transfers from Control", async () => {
     const store = new TuiAppStore();
@@ -71,20 +76,23 @@ test("artifact stream events upsert complete records without replacing shares fr
     const store = new TuiAppStore();
     store.applyEvent({
         destination: asInstanceName("instance-a"),
+        id: "artifact-share-created",
         name: "artifact.shareCreated",
-        payload: { at: "2026-07-13T00:00:00.000Z", data: share },
+        payload: { at: "2026-07-13T00:00:00.000Z", data: toJsonValue(share) },
         seq: 1
     });
     store.applyEvent({
         destination: asInstanceName("instance-a"),
+        id: "artifact-share-downloaded",
         name: "artifact.shareDownloaded",
         payload: { at: "2026-07-13T00:00:01.000Z", data: { shareId: share.shareId } },
         seq: 2
     });
     store.applyEvent({
         destination: asInstanceName("instance-a"),
+        id: "artifact-transfer-progress",
         name: "artifact.transferProgress",
-        payload: { at: "2026-07-13T00:00:02.000Z", data: transfer },
+        payload: { at: "2026-07-13T00:00:02.000Z", data: toJsonValue(transfer) },
         seq: 3
     });
 

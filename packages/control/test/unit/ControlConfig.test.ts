@@ -155,7 +155,7 @@ test("instance name and audit limits are semantic validation rules", () => {
     );
 
     const invalidLogs = createInstanceConfig("/tmp/demo");
-    invalidLogs.logs.maxBytes = 0;
+    invalidLogs.logs!.maxBytes = 0;
     assert.throws(
         () => validator.validate({ ...createDefaultControlConfig(), instances: [invalidLogs] }),
         /logs\.maxBytes must be an integer of at least 1048576/u
