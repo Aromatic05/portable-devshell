@@ -343,3 +343,9 @@ function run(command, args) {
     const result = spawnSync(command, args, { encoding: "utf8" });
     assert.equal(result.status, 0, `${result.error?.stack ?? ""}\n${result.stdout}${result.stderr}`);
 }
+
+test("Windows installer smoke allows slower ARM package activation", async () => {
+    const source = await readFile(resolve(repositoryRoot, "scripts", "smoke-install-release-windows.mjs"), "utf8");
+    assert.match(source, /install-release\.ps1"\)\n\s*\], false, false, 180_000\);/u);
+    assert.match(source, /timeoutMs = 45_000/u);
+});

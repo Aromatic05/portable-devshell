@@ -41,6 +41,7 @@ try {
         "--filter=./packages/cli",
         "--prod",
         "deploy",
+        "--legacy",
         appDirectory,
     ]);
     await writePortableApplicationManifest(appDirectory, { minimumNodeMajor: 24, version });

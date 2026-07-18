@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { resolve } from "node:path";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
@@ -21,4 +22,10 @@ test("application packaging selects CLI by workspace directory", async () => {
     const source = await readFile(script, "utf8");
     assert.match(source, /--filter=\.\/packages\/cli/u);
     assert.doesNotMatch(source, /--filter["\s,]+@portable-devshell\/cli/u);
+    assert.match(source, /"deploy",\s*"--legacy"/u);
+});
+
+test("application packaging forces pnpm legacy deploy for Windows-compatible workspace links", async () => {
+    const source = await readFile(script, "utf8");
+    assert.match(source, /"deploy",\s*"--legacy",/u);
 });

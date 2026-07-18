@@ -58,7 +58,7 @@ try {
         "Bypass",
         "-File",
         resolve(repositoryRoot, "scripts", "install-release.ps1")
-    ]);
+    ], false, false, 180_000);
     assert.equal(install.status, 0, `${install.stdout}${install.stderr}`);
 
     const command = resolve(binDirectory, "devshell.cmd");
@@ -83,13 +83,13 @@ function hostTarget() {
     throw new Error(`unsupported Windows architecture: ${process.arch}`);
 }
 
-function run(executable, args, shell = false, ignoreFailure = false) {
+function run(executable, args, shell = false, ignoreFailure = false, timeoutMs = 45_000) {
     const result = spawnSync(executable, args, {
         cwd: repositoryRoot,
         encoding: "utf8",
         env: environment,
         shell,
-        timeout: 45_000,
+        timeout: timeoutMs,
         windowsHide: true
     });
     if (!ignoreFailure && (result.error !== undefined || result.status !== 0)) {
