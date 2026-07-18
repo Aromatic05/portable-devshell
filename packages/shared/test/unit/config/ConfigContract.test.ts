@@ -39,10 +39,7 @@ test("config parser trims values and preserves explicit patch removals", () => {
     assert.deepEqual(parsed.mcp?.auth, {
         mode: "oauth2",
         oauth2: {
-            audience: undefined,
             documentationUrl: undefined,
-            issuer: undefined,
-            jwksUri: undefined,
             requiredScopes: ["mcp", "artifacts"],
             resourceName: "aromatic"
         }
@@ -107,6 +104,48 @@ test("config parser rejects unknown fields and invalid OAuth2 structure with exa
         "parse",
         ["mcp", "auth", "oauth2"],
         "config.auth.unexpectedOauth2"
+    );
+    assertConfigIssue(
+        () => parseConfigDraft({ mcp: { auth: { mode: "token" } } }),
+        "parse",
+        ["mcp", "auth", "token"],
+        "config.auth.tokenRequired"
+    );
+    assertConfigIssue(
+        () =>
+            parseConfigDraft({
+                mcp: {
+                    auth: {
+                        mode: "oauth2",
+                        oauth2: {
+                            issuer: "https://issuer.example",
+                            resourceName: "aromatic"
+                        }
+                    }
+                }
+            }),
+        "parse",
+        ["mcp", "auth", "oauth2", "issuer"],
+        "config.field.unknown"
+    );
+});
+
+test("token auth requires a non-trivial configured secret", () => {
+    const token = "0123456789abcdef0123456789abcdef";
+    assert.deepEqual(
+        normalizeConfigDraft({ instances: [], mcp: { auth: { mode: "token", token } } }).mcp.auth,
+        { mode: "token", token }
+    );
+
+    const weak = normalizeConfigDraft({
+        instances: [],
+        mcp: { auth: { mode: "token", token: "too-short" } }
+    });
+    assertConfigIssue(
+        () => validateConfigSemantics(weak),
+        "semantic",
+        ["mcp", "auth", "token"],
+        "config.auth.tokenWeak"
     );
 });
 
@@ -229,7 +268,11 @@ test("semantic validation requires authenticated public MCP and a public reverse
 
     const reverseWithoutPublicBaseUrl = normalizeConfigDraft({
         instances: [{ name: "reverse-one", provider: "reverse", workspace: "/workspace" }],
-        mcp: { auth: { mode: "token" }, enabled: true, publicBaseUrl: null }
+        mcp: {
+            auth: { mode: "token", token: "0123456789abcdef0123456789abcdef" },
+            enabled: true,
+            publicBaseUrl: null
+        }
     });
     assertConfigIssue(
         () => validateConfigSemantics(reverseWithoutPublicBaseUrl),

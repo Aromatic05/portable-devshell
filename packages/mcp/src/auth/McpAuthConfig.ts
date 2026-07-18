@@ -12,6 +12,7 @@ export type McpAuthConfig =
     | {
           enabled: true;
           provider: "token";
+          token: string;
       }
     | {
           enabled: true;

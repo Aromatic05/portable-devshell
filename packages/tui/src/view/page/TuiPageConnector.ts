@@ -4,7 +4,7 @@ import type { BoxModel } from "../component/TuiComponentExpandableBox.js";
 import type { TuiAppState } from "../../state/reducer/TuiStoreModel.js";
 import { compactSummary, makeBox } from "./TuiPageBoxSupport.js";
 import { asRecord, editorDraft, readPath } from "../../state/editor/TuiEditorDraft.js";
-import { buttonLine, editorErrorLine, fieldLine } from "../editor/TuiEditorView.js";
+import { buttonLine, editorErrorLine, fieldLine, secretFieldLine } from "../editor/TuiEditorView.js";
 
 export function buildConnectorPageBoxes(state: TuiAppState, instanceName: string): BoxModel[] {
     const instanceDraft = editorDraft(state, `config:${instanceName}`, selectedInstanceDraft(state, instanceName));
@@ -16,6 +16,7 @@ export function buildConnectorPageBoxes(state: TuiAppState, instanceName: string
     const endpoint = endpointPreview(mcpDraft, readPath(instanceDraft, "mcp.path"), instanceName);
     const runtime = runtimeStatus(state, instanceDraft, mcpDraft, endpoint);
     const authNonePublic = isPublic(mcpDraft) && readPath(mcpDraft, "auth.mode") === "none";
+    const authMode = readPath(mcpDraft, "auth.mode");
 
     return [
         makeBox(state, "connector", instanceName, {
@@ -45,7 +46,10 @@ export function buildConnectorPageBoxes(state: TuiAppState, instanceName: string
         }),
         makeBox(state, "connector", instanceName, {
             detailLines: [
-                fieldLine("auth.mode", "auth.mode", readPath(mcpDraft, "auth.mode")),
+                fieldLine("auth.mode", "auth.mode", authMode),
+                ...(authMode === "token"
+                    ? [secretFieldLine("auth.token", "auth.token", readPath(mcpDraft, "auth.token"))]
+                    : []),
                 ...(authNonePublic ? [{ id: "auth-warning", text: "auth.mode=none is not valid for a public endpoint", tone: "danger" as const }] : []),
                 ...editorErrorLine(state, "connector", "auth", ["auth"])
             ],

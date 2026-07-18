@@ -113,17 +113,14 @@ export type ControlInstanceConfig =
     | ControlSshInstanceConfig;
 
 export interface ControlMcpOAuth2Config {
-    audience?: string;
     documentationUrl?: string;
-    issuer?: string;
-    jwksUri?: string;
     requiredScopes: string[];
     resourceName: string;
 }
 
 export type ControlMcpAuthConfig =
     | { mode: "none"; oauth2?: undefined }
-    | { mode: "token"; oauth2?: undefined }
+    | { mode: "token"; oauth2?: undefined; token: string }
     | { mode: "oauth2"; oauth2: ControlMcpOAuth2Config };
 
 export interface ControlGlobalConfig {
@@ -218,17 +215,14 @@ export interface ConfigInstanceDraft {
 }
 
 export interface ConfigMcpOAuth2Draft {
-    audience?: string;
     documentationUrl?: string;
-    issuer?: string;
-    jwksUri?: string;
     requiredScopes?: string[];
     resourceName: string;
 }
 
 export type ConfigMcpAuthDraft =
     | { mode: "none" }
-    | { mode: "token" }
+    | { mode: "token"; token: string }
     | { mode: "oauth2"; oauth2: ConfigMcpOAuth2Draft };
 
 export interface ConfigGlobalDraft {

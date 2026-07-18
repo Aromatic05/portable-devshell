@@ -65,6 +65,7 @@ function toMcpHostAuth(config: ControlConfig): McpAuthConfig | undefined {
 
     return {
         enabled: true as const,
-        provider: "token"
+        provider: "token",
+        token: config.mcp.auth.token
     };
 }

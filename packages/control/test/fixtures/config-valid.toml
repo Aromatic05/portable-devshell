@@ -11,3 +11,4 @@ publicBaseUrl = "http://127.0.0.1:17890"
 
 [mcp.auth]
 mode = "token"
+token = "0123456789abcdef0123456789abcdef"

@@ -43,7 +43,9 @@ export class ControlGlobalTomlDocument {
                               mode: "oauth2",
                               oauth2: compact(config.mcp.auth.oauth2)
                           }
-                        : { mode: config.mcp.auth.mode }
+                        : config.mcp.auth.mode === "token"
+                            ? { mode: "token", token: config.mcp.auth.token }
+                            : { mode: "none" }
             }
         });
     }

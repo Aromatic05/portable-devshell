@@ -57,7 +57,7 @@ test("config editor validates drafts and accumulates patch apply summaries", asy
 
     await service.updateMcpConfig({
         patch: {
-            auth: { mode: "token" },
+            auth: { mode: "token", token: "0123456789abcdef0123456789abcdef" },
             enabled: true,
             listenHost: "127.0.0.1",
             listenPort: 17891,

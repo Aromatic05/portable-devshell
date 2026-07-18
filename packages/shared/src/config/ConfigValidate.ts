@@ -84,8 +84,14 @@ function validateGlobalMcp(config: ControlConfig): void {
     if (config.mcp.auth.mode === "oauth2") {
         const oauth2 = config.mcp.auth.oauth2;
         if (oauth2.documentationUrl !== undefined) parseUrl(oauth2.documentationUrl, ["mcp", "auth", "oauth2", "documentationUrl"]);
-        if (oauth2.issuer !== undefined) parseUrl(oauth2.issuer, ["mcp", "auth", "oauth2", "issuer"]);
-        if (oauth2.jwksUri !== undefined) parseUrl(oauth2.jwksUri, ["mcp", "auth", "oauth2", "jwksUri"]);
+    }
+    if (config.mcp.auth.mode === "token" && Buffer.byteLength(config.mcp.auth.token, "utf8") < 32) {
+        throw configInputError(
+            "semantic",
+            ["mcp", "auth", "token"],
+            "config.auth.tokenWeak",
+            "must contain at least 32 UTF-8 bytes"
+        );
     }
 
     const publicHost = config.mcp.listenHost === "0.0.0.0" || config.mcp.listenHost === "::";

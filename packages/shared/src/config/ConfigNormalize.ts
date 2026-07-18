@@ -255,14 +255,11 @@ export function toConfigInstanceDraft(instance: ControlInstanceConfig): ConfigIn
 
 function normalizeMcpAuth(draft: ConfigMcpAuthDraft | undefined): ControlMcpAuthConfig {
     if (draft === undefined || draft.mode === "none") return { mode: "none" };
-    if (draft.mode === "token") return { mode: "token" };
+    if (draft.mode === "token") return { mode: "token", token: draft.token };
     return {
         mode: "oauth2",
         oauth2: {
-            audience: draft.oauth2.audience,
             documentationUrl: draft.oauth2.documentationUrl,
-            issuer: draft.oauth2.issuer,
-            jwksUri: draft.oauth2.jwksUri,
             requiredScopes: deduplicate(draft.oauth2.requiredScopes ?? []),
             resourceName: draft.oauth2.resourceName
         }
@@ -337,7 +334,8 @@ function normalizeManagedContainer(
 }
 
 function toMcpAuthDraft(auth: ControlMcpAuthConfig): ConfigMcpAuthDraft {
-    if (auth.mode !== "oauth2") return { mode: auth.mode };
+    if (auth.mode === "none") return { mode: "none" };
+    if (auth.mode === "token") return { mode: "token", token: auth.token };
     return {
         mode: "oauth2",
         oauth2: {
@@ -348,7 +346,8 @@ function toMcpAuthDraft(auth: ControlMcpAuthConfig): ConfigMcpAuthDraft {
 }
 
 function cloneMcpAuth(auth: ControlMcpAuthConfig): ControlMcpAuthConfig {
-    if (auth.mode !== "oauth2") return { mode: auth.mode };
+    if (auth.mode === "none") return { mode: "none" };
+    if (auth.mode === "token") return { mode: "token", token: auth.token };
     return {
         mode: "oauth2",
         oauth2: {

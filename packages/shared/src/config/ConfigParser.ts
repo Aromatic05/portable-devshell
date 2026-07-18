@@ -225,14 +225,34 @@ function parseGlobalMcpDraft(value: unknown, path: readonly ConfigPathSegment[])
 
 function parseMcpAuthDraft(value: unknown, path: readonly ConfigPathSegment[]): ConfigMcpAuthDraft {
     const record = readRecord(value, path);
-    assertKnownKeys(record, ["mode", "oauth2"], path);
+    assertKnownKeys(record, ["mode", "oauth2", "token"], path);
     const mode = readEnum(record.mode, [...path, "mode"], ["none", "oauth2", "token"]);
 
-    if (mode !== "oauth2") {
+    if (mode === "none") {
         if (record.oauth2 !== undefined) {
             throw configInputError("parse", [...path, "oauth2"], "config.auth.unexpectedOauth2", `must be omitted when mode=${mode}`);
         }
+        if (record.token !== undefined) {
+            throw configInputError("parse", [...path, "token"], "config.auth.unexpectedToken", "must be omitted when mode=none");
+        }
         return { mode };
+    }
+
+    if (mode === "token") {
+        if (record.oauth2 !== undefined) {
+            throw configInputError("parse", [...path, "oauth2"], "config.auth.unexpectedOauth2", "must be omitted when mode=token");
+        }
+        if (record.token === undefined) {
+            throw configInputError("parse", [...path, "token"], "config.auth.tokenRequired", "is required when mode=token");
+        }
+        return {
+            mode,
+            token: readRequiredTrimmedString(record.token, [...path, "token"])
+        };
+    }
+
+    if (record.token !== undefined) {
+        throw configInputError("parse", [...path, "token"], "config.auth.unexpectedToken", "must be omitted when mode=oauth2");
     }
 
     if (record.oauth2 === undefined) {
@@ -242,17 +262,14 @@ function parseMcpAuthDraft(value: unknown, path: readonly ConfigPathSegment[]): 
     const oauth2 = readRecord(record.oauth2, [...path, "oauth2"]);
     assertKnownKeys(
         oauth2,
-        ["audience", "documentationUrl", "issuer", "jwksUri", "requiredScopes", "resourceName"],
+        ["documentationUrl", "requiredScopes", "resourceName"],
         [...path, "oauth2"]
     );
 
     return {
         mode,
         oauth2: {
-            audience: readOptionalTrimmedString(oauth2.audience, [...path, "oauth2", "audience"]),
             documentationUrl: readOptionalTrimmedString(oauth2.documentationUrl, [...path, "oauth2", "documentationUrl"]),
-            issuer: readOptionalTrimmedString(oauth2.issuer, [...path, "oauth2", "issuer"]),
-            jwksUri: readOptionalTrimmedString(oauth2.jwksUri, [...path, "oauth2", "jwksUri"]),
             requiredScopes:
                 oauth2.requiredScopes === undefined
                     ? undefined

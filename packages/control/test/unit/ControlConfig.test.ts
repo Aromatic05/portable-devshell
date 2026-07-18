@@ -103,7 +103,7 @@ test("public MCP without auth is rejected by semantic validation", async () => {
     }
 });
 
-test("OAuth2 document structure is parsed before normalization", () => {
+test("OAuth2 document structure rejects unsupported external-provider fields", () => {
     assert.throws(
         () => globalDocument.decode(toml.decode([
             "version = 1",
@@ -119,34 +119,23 @@ test("OAuth2 document structure is parsed before normalization", () => {
         /mcp\.auth\.oauth2 is required when mode=oauth2/u
     );
 
-    const config = normalizeConfigGlobalDraft(globalDocument.decode(toml.decode([
-        "version = 1",
-        "[control]",
-        'logLevel = "info"',
-        "[mcp]",
-        "enabled = true",
-        'listenHost = "127.0.0.1"',
-        "listenPort = 17890",
-        "[mcp.auth]",
-        'mode = "oauth2"',
-        "[mcp.auth.oauth2]",
-        'issuer = "http://127.0.0.1:9000"',
-        'audience = "aromatic-mcp"',
-        'resourceName = "aromatic"',
-        'requiredScopes = ["mcp", "mcp"]'
-    ].join("\n"))));
-
-    assert.deepEqual(config.mcp.auth, {
-        mode: "oauth2",
-        oauth2: {
-            audience: "aromatic-mcp",
-            documentationUrl: undefined,
-            issuer: "http://127.0.0.1:9000",
-            jwksUri: undefined,
-            requiredScopes: ["mcp"],
-            resourceName: "aromatic"
-        }
-    });
+    assert.throws(
+        () => globalDocument.decode(toml.decode([
+            "version = 1",
+            "[control]",
+            'logLevel = "info"',
+            "[mcp]",
+            "enabled = true",
+            'listenHost = "127.0.0.1"',
+            "listenPort = 17890",
+            "[mcp.auth]",
+            'mode = "oauth2"',
+            "[mcp.auth.oauth2]",
+            'issuer = "http://127.0.0.1:9000"',
+            'resourceName = "aromatic"'
+        ].join("\n"))),
+        /mcp\.auth\.oauth2\.issuer is not supported/u
+    );
 });
 
 test("instance name and audit limits are semantic validation rules", () => {

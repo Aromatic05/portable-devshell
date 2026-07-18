@@ -6,6 +6,14 @@ export function fieldLine(id: string, label: string, value: JsonValue | undefine
     return { id: `field:${id}`, text: `${label.padEnd(18, " ")} [ ${displayValue(value)} ]  (${valueType(value)})` };
 }
 
+export function secretFieldLine(id: string, label: string, value: JsonValue | undefined): { id: string; text: string } {
+    const configured = typeof value === "string" && value.length > 0;
+    return {
+        id: `field:${id}`,
+        text: `${label.padEnd(18, " ")} [ ${configured ? "********" : ""} ]  (secret)`
+    };
+}
+
 export function choiceLine(id: string, label: string, value: JsonValue | undefined): { id: string; text: string } {
     return { id: `field:${id}`, text: `${label.padEnd(18, " ")} <${displayValue(value)}>` };
 }

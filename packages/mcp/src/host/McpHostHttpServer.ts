@@ -19,6 +19,11 @@ interface McpHostHttpServerOptions {
     publicBaseUrl?: string;
 }
 
+const MCP_MAX_REQUEST_BODY_BYTES = 1024 * 1024;
+const MCP_HEADERS_TIMEOUT_MS = 10_000;
+const MCP_REQUEST_TIMEOUT_MS = 30_000;
+const MCP_KEEP_ALIVE_TIMEOUT_MS = 5_000;
+
 function isRecord(value: unknown): value is Record<string, JsonValue> {
     return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -33,7 +38,7 @@ export class McpHostHttpServer {
     #oauthInstalled = false;
     readonly #publicBaseUrl?: string;
     readonly #registeredPaths = new Set<string>();
-    readonly #tokenProvider = new McpAuthProviderToken();
+    readonly #tokenProvider?: McpAuthProviderToken;
     readonly #upgradeHandlers = new Map<
         string,
         (request: IncomingMessage, socket: Duplex, head: Buffer) => void | Promise<void>
@@ -46,6 +51,9 @@ export class McpHostHttpServer {
         this.#listenPort = options.listenPort;
         this.#oauth = options.oauth;
         this.#publicBaseUrl = options.publicBaseUrl;
+        this.#tokenProvider = options.auth?.provider === "token"
+            ? new McpAuthProviderToken(options.auth.token)
+            : undefined;
 
         this.#app.disable("x-powered-by");
     }
@@ -60,7 +68,10 @@ export class McpHostHttpServer {
             this.#oauthInstalled = true;
         }
 
-        this.#server = createServer(this.#app);
+        this.#server = createServer({ maxHeaderSize: 16 * 1024 }, this.#app);
+        this.#server.headersTimeout = MCP_HEADERS_TIMEOUT_MS;
+        this.#server.requestTimeout = MCP_REQUEST_TIMEOUT_MS;
+        this.#server.keepAliveTimeout = MCP_KEEP_ALIVE_TIMEOUT_MS;
         this.#server.on("upgrade", (request, socket, head) => {
             const pathname = readRequestPathname(request);
             const handler = pathname === undefined ? undefined : this.#upgradeHandlers.get(pathname);
@@ -146,7 +157,7 @@ export class McpHostHttpServer {
             this.#app.use(this.#oauthProtectedResourceMetadataPath(resourceServerUrl), this.#oauth.protectedResourceMetadataHandler(resourceServerUrl));
         } else if (this.#auth?.provider === "token") {
             routeHandlers.push((request: Request, response: Response, next: NextFunction) => {
-                const auth = this.#tokenProvider.authenticate(request.headers.authorization);
+                const auth = this.#tokenProvider?.authenticate(request.headers.authorization);
 
                 if (auth === undefined) {
                     response.status(401).json({ error: "Unauthorized" });
@@ -164,13 +175,25 @@ export class McpHostHttpServer {
         }
 
         this.#app.all(path, ...routeHandlers, async (request: Request, response: Response) => {
-            const currentBinding = this.#bindings.get(path);
-            if (currentBinding === undefined) {
-                response.status(404).json({ error: "Instance endpoint not found" });
-                return;
+            try {
+                const currentBinding = this.#bindings.get(path);
+                if (currentBinding === undefined) {
+                    response.status(404).json({ error: "Instance endpoint not found" });
+                    return;
+                }
+                const body = await this.#readJsonBody(request as IncomingMessage);
+                await currentBinding.handleRequest(request, response, body);
+            } catch (error) {
+                if (response.headersSent) {
+                    response.end();
+                    return;
+                }
+                if (error instanceof McpHttpInputError) {
+                    response.status(error.statusCode).json({ error: error.message });
+                    return;
+                }
+                response.status(500).json({ error: "Internal server error" });
             }
-            const body = await this.#readJsonBody(request as IncomingMessage);
-            await currentBinding.handleRequest(request, response, body);
         });
     }
 
@@ -180,16 +203,33 @@ export class McpHostHttpServer {
 
     async #readJsonBody(request: IncomingMessage): Promise<JsonValue> {
         const chunks: Buffer[] = [];
+        let totalBytes = 0;
+        const contentLength = readContentLength(request.headers["content-length"]);
+        if (contentLength !== undefined && contentLength > MCP_MAX_REQUEST_BODY_BYTES) {
+            request.resume();
+            throw new McpHttpInputError(413, `Request body exceeds ${MCP_MAX_REQUEST_BODY_BYTES} bytes.`);
+        }
 
         for await (const chunk of request) {
-            chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+            const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+            totalBytes += bytes.length;
+            if (totalBytes > MCP_MAX_REQUEST_BODY_BYTES) {
+                request.resume();
+                throw new McpHttpInputError(413, `Request body exceeds ${MCP_MAX_REQUEST_BODY_BYTES} bytes.`);
+            }
+            chunks.push(bytes);
         }
 
         if (chunks.length === 0) {
             return {};
         }
 
-        const value = JSON.parse(Buffer.concat(chunks).toString("utf8")) as unknown;
+        let value: unknown;
+        try {
+            value = JSON.parse(Buffer.concat(chunks, totalBytes).toString("utf8")) as unknown;
+        } catch {
+            throw new McpHttpInputError(400, "Request body must contain valid JSON.");
+        }
         return isRecord(value) ? value : {};
     }
 
@@ -209,6 +249,21 @@ export class McpHostHttpServer {
         url.hash = "";
         return url;
     }
+}
+
+class McpHttpInputError extends Error {
+    constructor(readonly statusCode: 400 | 413, message: string) {
+        super(message);
+    }
+}
+
+function readContentLength(value: string | string[] | undefined): number | undefined {
+    const source = Array.isArray(value) ? value[0] : value;
+    if (source === undefined || !/^\d+$/u.test(source)) {
+        return undefined;
+    }
+    const parsed = Number(source);
+    return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : undefined;
 }
 
 function readRequestPathname(request: IncomingMessage): string | undefined {

@@ -6,7 +6,6 @@ import { McpAuthProviderToken } from "./provider/McpAuthProviderToken.js";
 
 export class McpAuthMiddleware {
     readonly #noneProvider = new McpAuthProviderNone();
-    readonly #tokenProvider = new McpAuthProviderToken();
 
     authorize(request: IncomingMessage, response: ServerResponse, config: McpAuthConfig | undefined): boolean {
         if (config?.enabled !== true) {
@@ -15,7 +14,7 @@ export class McpAuthMiddleware {
         }
 
         if (config.provider === "token") {
-            const authorized = this.#tokenProvider.authorize(request.headers.authorization);
+            const authorized = new McpAuthProviderToken(config.token).authorize(request.headers.authorization);
 
             if (!authorized) {
                 response.writeHead(401, { "content-type": "application/json" });

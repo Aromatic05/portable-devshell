@@ -13,24 +13,26 @@ test("none auth provider always authorizes", () => {
 });
 
 test("token auth provider accepts a single case-insensitive Bearer credential and hashes its client id", () => {
-    const provider = new McpAuthProviderToken();
-    const expectedClientId = `token:${createHash("sha256").update("secret-token").digest("hex")}`;
+    const token = "secret-token-secret-token-secret-token";
+    const provider = new McpAuthProviderToken(token);
+    const expectedClientId = `token:${createHash("sha256").update(token).digest("hex")}`;
 
-    assert.deepEqual(provider.authenticate("Bearer secret-token"), {
+    assert.deepEqual(provider.authenticate(`Bearer ${token}`), {
         clientId: expectedClientId,
         scopes: [],
-        token: "secret-token"
+        token
     });
-    assert.deepEqual(provider.authenticate("bearer secret-token"), {
+    assert.deepEqual(provider.authenticate(`bearer ${token}`), {
         clientId: expectedClientId,
         scopes: [],
-        token: "secret-token"
+        token
     });
-    assert.equal(provider.authorize("BEARER secret-token"), true);
+    assert.equal(provider.authorize(`BEARER ${token}`), true);
+    assert.equal(provider.authorize("Bearer attacker-selected-token-value-0000"), false);
 });
 
 test("token auth provider rejects missing, empty, wrong-scheme, and multi-token headers", () => {
-    const provider = new McpAuthProviderToken();
+    const provider = new McpAuthProviderToken("secret-token-secret-token-secret-token");
 
     for (const header of [
         undefined,
@@ -68,7 +70,11 @@ test("auth middleware returns a JSON 401 for an invalid token", () => {
         middleware.authorize(
             { headers: { authorization: "Basic invalid" } } as never,
             response as never,
-            { enabled: true, provider: "token" }
+            {
+                enabled: true,
+                provider: "token",
+                token: "secret-token-secret-token-secret-token"
+            }
         ),
         false
     );

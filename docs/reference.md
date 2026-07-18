@@ -75,6 +75,16 @@ token
 oauth2
 ```
 
+`token` 模式必须配置至少 32 字节的随机密钥：
+
+```toml
+[mcp.auth]
+mode = "token"
+token = "replace-with-a-random-secret-of-at-least-32-bytes"
+```
+
+客户端必须发送完全匹配的 `Authorization: Bearer <token>`。配置文件会以当前用户可读写权限保存；不要把真实 token 提交到仓库。
+
 公网建议只使用 `oauth2`。
 
 ## 本地实例配置
