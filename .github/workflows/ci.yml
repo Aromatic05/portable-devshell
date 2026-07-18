@@ -90,6 +90,18 @@ jobs:
             - name: Unix release installer smoke
               if: runner.os != 'Windows'
               run: pnpm smoke:install-release -- ./ci-artifacts/portable-devshell-app-${{ matrix.target }}.tar.gz
+            - name: 运行最终验收
+              if: matrix.target == 'linux-x64'
+              shell: bash
+              run: |
+                  set -o pipefail
+                  bash acceptance/run-final-acceptance.sh 2>&1 | tee acceptance.log
+            - name: 上传最终验收日志
+              if: always() && matrix.target == 'linux-x64'
+              uses: actions/upload-artifact@v7
+              with:
+                  name: linux-acceptance-${{ github.sha }}
+                  path: acceptance.log
             - uses: actions/upload-artifact@v7
               with:
                   name: release-assets-${{ matrix.target }}-${{ github.sha }}
