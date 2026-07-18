@@ -18,7 +18,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use crate::security::path::{
-    FilesystemCapability, PathNamespace, RequestedPath, parse_requested_path,
+    FilesystemCapability, PathNamespace, RequestedPath, ResolvedPath, parse_requested_path,
     resolve_create_target, resolve_existing_target,
 };
 use crate::tools::{ToolCall, ToolError};
@@ -56,20 +56,20 @@ pub fn resolve_existing(
     call: &ToolCall,
     raw: &str,
     write: bool,
-) -> Result<(RequestedPath, std::path::PathBuf), ToolError> {
+) -> Result<(RequestedPath, ResolvedPath), ToolError> {
     let requested = parse_requested_path(raw)?;
     authorize(call, requested.namespace, write)?;
     let resolved = resolve_existing_target(&call.workspace, &requested)?;
-    Ok((requested, resolved.canonical))
+    Ok((requested, resolved))
 }
 pub fn resolve_create(
     call: &ToolCall,
     raw: &str,
-) -> Result<(RequestedPath, std::path::PathBuf), ToolError> {
+) -> Result<(RequestedPath, ResolvedPath), ToolError> {
     let requested = parse_requested_path(raw)?;
     authorize(call, requested.namespace, true)?;
     let resolved = resolve_create_target(&call.workspace, &requested)?;
-    Ok((requested, resolved.canonical))
+    Ok((requested, resolved))
 }
 
 pub fn resolve_info(

@@ -1,16 +1,15 @@
 use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
 
 use globset::Glob;
 use ignore::WalkBuilder;
 
-use crate::security::path::parse_requested_path;
+use crate::security::path::{ResolvedPath, parse_requested_path};
 use crate::tools::file::{authorize, resolve_existing};
 use crate::tools::{ToolCall, ToolError};
 
 pub struct DiscoveredEntry {
     pub display: String,
-    pub path: PathBuf,
+    pub resolved: ResolvedPath,
     pub entry_type: &'static str,
 }
 
@@ -46,17 +45,25 @@ fn discover_exact(
     gitignore: bool,
     found: &mut BTreeMap<String, DiscoveredEntry>,
 ) -> Result<(), ToolError> {
-    let (requested, path) = resolve_existing(call, spec, false)?;
-    let metadata = std::fs::symlink_metadata(&path)
+    let (requested, resolved) = resolve_existing(call, spec, false)?;
+    let metadata = std::fs::metadata(resolved.access_path())
         .map_err(|error| ToolError::new("file.notFound", error.to_string()))?;
     if metadata.is_file() || metadata.file_type().is_symlink() {
-        insert(found, requested.raw, path, kind(&metadata));
+        insert(found, requested.raw, resolved, kind(&metadata));
         return Ok(());
     }
     if !metadata.is_dir() {
         return Ok(());
     }
-    walk(call, &path, &requested.raw, None, hidden, gitignore, found)
+    walk(
+        call,
+        &resolved,
+        &requested.raw,
+        None,
+        hidden,
+        gitignore,
+        found,
+    )
 }
 
 fn discover_glob(
@@ -81,7 +88,7 @@ fn discover_glob(
     };
     let pattern = spec[slash + 1..].to_string();
     let (root_requested, root) = resolve_existing(call, root_raw, false)?;
-    if !root.is_dir() {
+    if !root.access_path().is_dir() {
         return Err(ToolError::new(
             "file.notDirectory",
             "glob root is not a directory",
@@ -103,14 +110,16 @@ fn discover_glob(
 
 fn walk(
     call: &ToolCall,
-    root: &Path,
+    root: &ResolvedPath,
     display_root: &str,
     matcher: Option<&globset::GlobMatcher>,
     hidden: bool,
     gitignore: bool,
     found: &mut BTreeMap<String, DiscoveredEntry>,
 ) -> Result<(), ToolError> {
-    let mut builder = WalkBuilder::new(root);
+    let anchored_root = root.access_path().join(".");
+    let walk_root = anchored_root.as_path();
+    let mut builder = WalkBuilder::new(walk_root);
     builder
         .follow_links(false)
         .hidden(!hidden)
@@ -123,28 +132,26 @@ fn walk(
         call.check_cancelled()?;
         let entry = entry.map_err(|error| ToolError::new("file.readFailed", error.to_string()))?;
         let path = entry.path();
-        if path == root {
+        if path == walk_root {
             continue;
         }
-        let relative = path
-            .strip_prefix(root)
-            .unwrap()
-            .to_string_lossy()
-            .replace('\\', "/");
+        let relative_path = path.strip_prefix(walk_root).unwrap();
+        let relative = relative_path.to_string_lossy().replace('\\', "/");
         if relative == ".git" || relative.starts_with(".git/") {
             continue;
         }
         if matcher.is_some_and(|matcher| !matcher.is_match(&relative)) {
             continue;
         }
-        let metadata = std::fs::symlink_metadata(path)
+        let resolved = root.join(relative_path);
+        let metadata = std::fs::symlink_metadata(resolved.access_path())
             .map_err(|error| ToolError::new("file.readFailed", error.to_string()))?;
         let display = if display_root == "./" {
             format!("./{relative}")
         } else {
             format!("{}/{}", display_root.trim_end_matches('/'), relative)
         };
-        insert(found, display, path.to_path_buf(), kind(&metadata));
+        insert(found, display, resolved, kind(&metadata));
     }
     Ok(())
 }
@@ -152,12 +159,12 @@ fn walk(
 fn insert(
     found: &mut BTreeMap<String, DiscoveredEntry>,
     display: String,
-    path: PathBuf,
+    resolved: ResolvedPath,
     entry_type: &'static str,
 ) {
     found.entry(display.clone()).or_insert(DiscoveredEntry {
         display,
-        path,
+        resolved,
         entry_type,
     });
 }

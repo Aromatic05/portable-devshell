@@ -46,19 +46,35 @@ impl ToolHandler for FileReadTool {
         }
 
         let ordinal = self.state.next_snapshot_ordinal();
-        let (requested, path) = resolve_existing(&call, &input.path, false)?;
+        let (requested, resolved) = resolve_existing(&call, &input.path, false)?;
+        let path = resolved.access_path();
         if !path.is_file() {
             return Err(ToolError::new("file.notFile", "path is not a file"));
         }
         let metadata = TextMetadata::inspect(&path)?;
-        let resolved_view = resolve_view(&input, &path, &metadata);
+        let resolved_view = resolve_view(&input, &resolved.canonical, &metadata);
 
         let output = match resolved_view {
             FileReadView::Outline => {
-                self.read_outline(&call, requested.raw, &path, &metadata, ordinal)?
+                self.read_outline(
+                    &call,
+                    requested.raw,
+                    path,
+                    &resolved.canonical,
+                    &metadata,
+                    ordinal,
+                )?
             }
             FileReadView::Content | FileReadView::Auto => {
-                self.read_content(&call, requested.raw, &path, &metadata, &input, ordinal)?
+                self.read_content(
+                    &call,
+                    requested.raw,
+                    path,
+                    &resolved.canonical,
+                    &metadata,
+                    &input,
+                    ordinal,
+                )?
             }
         };
         crate::tools::contract::serialize(output)
@@ -70,7 +86,8 @@ impl FileReadTool {
         &self,
         call: &ToolCall,
         requested: String,
-        path: &std::path::Path,
+        access_path: &std::path::Path,
+        canonical_path: &std::path::Path,
         metadata: &TextMetadata,
         ordinal: u64,
     ) -> Result<FileReadOutput, ToolError> {
@@ -80,7 +97,7 @@ impl FileReadTool {
                 "outline view is limited to files that fit in a full snapshot",
             ));
         }
-        let text = TextFile::read(path)?;
+        let text = TextFile::read(access_path)?;
         call.check_cancelled()?;
         if text.revision != metadata.revision {
             return Err(ToolError::retryable(
@@ -88,7 +105,7 @@ impl FileReadTool {
                 "file changed while it was being read",
             ));
         }
-        let outline = structure::outline(path, &text.normalized())?.ok_or_else(|| {
+        let outline = structure::outline(canonical_path, &text.normalized())?.ok_or_else(|| {
             ToolError::new(
                 "file.outlineUnavailable",
                 "no supported syntax outline is available for this file",
@@ -97,7 +114,7 @@ impl FileReadTool {
         call.check_cancelled()?;
         self.remember(
             call,
-            path,
+            canonical_path,
             &text,
             metadata,
             outline.seen_lines.clone(),
@@ -121,7 +138,8 @@ impl FileReadTool {
         &self,
         call: &ToolCall,
         requested: String,
-        path: &std::path::Path,
+        access_path: &std::path::Path,
+        canonical_path: &std::path::Path,
         metadata: &TextMetadata,
         input: &FileReadInput,
         ordinal: u64,
@@ -143,7 +161,11 @@ impl FileReadTool {
         } else {
             parse_selector(input.selector.as_deref(), metadata.total_lines)?
         };
-        let selected = TextMetadata::read_selected(path, &selector.ranges, MAX_CONTENT_BYTES)?;
+        let selected = TextMetadata::read_selected(
+            access_path,
+            &selector.ranges,
+            MAX_CONTENT_BYTES,
+        )?;
         call.check_cancelled()?;
         if selected.metadata.revision != metadata.revision {
             return Err(ToolError::retryable(
@@ -174,7 +196,7 @@ impl FileReadTool {
 
         call.check_cancelled()?;
         if metadata.total_bytes <= FULL_SNAPSHOT_LIMIT {
-            let text = TextFile::read(path)?;
+            let text = TextFile::read(access_path)?;
             call.check_cancelled()?;
             if text.revision != metadata.revision {
                 return Err(ToolError::retryable(
@@ -184,7 +206,7 @@ impl FileReadTool {
             }
             self.state.context_snapshots.lock().unwrap().remember_full(
                 &call.ctx_id,
-                path,
+                canonical_path,
                 &text,
                 seen.clone(),
                 ordinal,
@@ -194,7 +216,13 @@ impl FileReadTool {
                 .context_snapshots
                 .lock()
                 .unwrap()
-                .remember_sparse(&call.ctx_id, path, metadata, seen.clone(), ordinal);
+                .remember_sparse(
+                    &call.ctx_id,
+                    canonical_path,
+                    metadata,
+                    seen.clone(),
+                    ordinal,
+                );
         }
 
         Ok(FileReadOutput {

@@ -7,6 +7,7 @@ use std::sync::Arc;
 use regex::RegexBuilder;
 use serde_json::json;
 
+use crate::security::path::ResolvedPath;
 use crate::tools::file::FileToolState;
 use crate::tools::file::discover::discover;
 use crate::tools::file::state::{FULL_SNAPSHOT_LIMIT, TextFile, TextMetadata};
@@ -26,7 +27,7 @@ pub struct FileSearchTool {
 
 struct MatchedFile {
     output: FileSearchFile,
-    path: PathBuf,
+    resolved: ResolvedPath,
     metadata: TextMetadata,
     seen: Vec<usize>,
     ordinal: u64,
@@ -105,7 +106,7 @@ impl ToolHandler for FileSearchTool {
             .collect::<Result<Vec<_>, _>>()?;
         let mut seen_candidates = HashSet::new();
         for group in &mut discovered_groups {
-            group.retain(|entry| seen_candidates.insert(entry.path.clone()));
+            group.retain(|entry| seen_candidates.insert(entry.resolved.canonical.clone()));
         }
         let file_count = discovered_groups.iter().map(Vec::len).sum::<usize>();
         let per_file = if file_count == 1 {
@@ -121,7 +122,13 @@ impl ToolHandler for FileSearchTool {
                 call.check_cancelled()?;
                 let ordinal = self.state.next_snapshot_ordinal();
                 let Ok((metadata, matches, shown)) =
-                    search_stream(&entry.path, &matcher, per_file, context, &call.cancellation)
+                    search_stream(
+                        entry.resolved.access_path(),
+                        &matcher,
+                        per_file,
+                        context,
+                        &call.cancellation,
+                    )
                 else {
                     continue;
                 };
@@ -135,7 +142,7 @@ impl ToolHandler for FileSearchTool {
                         content: body,
                         match_count: matches.len(),
                     },
-                    path: entry.path,
+                    resolved: entry.resolved,
                     metadata,
                     seen,
                     ordinal,
@@ -196,7 +203,7 @@ impl ToolHandler for FileSearchTool {
         for matched in page {
             call.check_cancelled()?;
             if matched.metadata.total_bytes <= FULL_SNAPSHOT_LIMIT {
-                let text = TextFile::read(&matched.path)?;
+                let text = TextFile::read(matched.resolved.access_path())?;
                 if text.revision != matched.metadata.revision {
                     return Err(ToolError::retryable(
                         "file.revisionMismatch",
@@ -204,13 +211,13 @@ impl ToolHandler for FileSearchTool {
                     ));
                 }
                 prepared_snapshots.push(PreparedSearchSnapshot::Full {
-                    path: matched.path,
+                    path: matched.resolved.canonical.clone(),
                     text,
                     seen: matched.seen,
                     ordinal: matched.ordinal,
                 });
             } else {
-                let metadata = TextMetadata::inspect(&matched.path)?;
+                let metadata = TextMetadata::inspect(matched.resolved.access_path())?;
                 if metadata.revision != matched.metadata.revision {
                     return Err(ToolError::retryable(
                         "file.revisionMismatch",
@@ -218,7 +225,7 @@ impl ToolHandler for FileSearchTool {
                     ));
                 }
                 prepared_snapshots.push(PreparedSearchSnapshot::Sparse {
-                    path: matched.path,
+                    path: matched.resolved.canonical.clone(),
                     metadata,
                     seen: matched.seen,
                     ordinal: matched.ordinal,
