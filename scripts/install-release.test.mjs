@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { chmod, lstat, mkdir, mkdtemp, readFile, readlink, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { resolve } from "node:path";
+import { basename, resolve } from "node:path";
 import test from "node:test";
 import { pathToFileURL, fileURLToPath } from "node:url";
 
@@ -322,7 +322,7 @@ function runInstaller(environment) {
 async function writeChecksum(path) {
     const payload = await readFile(path);
     const sha256 = createHash("sha256").update(payload).digest("hex");
-    await writeFile(`${path}.sha256`, `${sha256}  ${path.split("/").at(-1)}\n`, "utf8");
+    await writeFile(`${path}.sha256`, `${sha256}  ${basename(path)}\n`, "utf8");
 }
 
 function hostTarget() {

@@ -7,6 +7,8 @@ import { spawnSync } from "node:child_process";
 
 const CARGO_ZIGBUILD_VERSION = "0.23.0";
 const ZIG_VERSION = "0.14.1";
+const CARGO_COMMAND = readCommandSpec("PORTABLE_DEVSHELL_BUILD_CARGO", "cargo");
+const ZIG_COMMAND = readCommandSpec("PORTABLE_DEVSHELL_BUILD_ZIG", "zig");
 
 const TARGETS = {
     "linux-x64": {
@@ -48,7 +50,7 @@ const cargoSubcommand = target.key.startsWith("linux-") ? "zigbuild" : "build";
 const buildEnvironment = target.key.startsWith("linux-") ? ensureZigBuild(process.env) : process.env;
 
 run(
-    "cargo",
+    CARGO_COMMAND,
     [
         cargoSubcommand,
         "--locked",
@@ -77,21 +79,21 @@ if (outputDirectory !== undefined) {
 function ensureZigBuild(baseEnvironment) {
     const environment = { ...baseEnvironment };
 
-    if (!commandSucceeds("cargo", ["zigbuild", "--version"], environment)) {
+    if (!commandSucceeds(CARGO_COMMAND, ["zigbuild", "--version"], environment)) {
         run(
-            "cargo",
+            CARGO_COMMAND,
             ["install", "--locked", "cargo-zigbuild", "--version", CARGO_ZIGBUILD_VERSION],
             { env: environment }
         );
     }
 
-    if (commandSucceeds("zig", ["version"], environment)) {
+    if (commandSucceeds(ZIG_COMMAND, ["version"], environment)) {
         return environment;
     }
 
     const zigDirectory = installZig();
     environment.PATH = `${zigDirectory}${delimiter}${environment.PATH ?? ""}`;
-    if (!commandSucceeds("zig", ["version"], environment)) {
+    if (!commandSucceeds(ZIG_COMMAND, ["version"], environment)) {
         throw new Error(`Zig ${ZIG_VERSION} was installed but is not executable from ${zigDirectory}`);
     }
     return environment;
@@ -128,7 +130,8 @@ function zigHost() {
 }
 
 function commandSucceeds(command, args, environment) {
-    const result = spawnSync(command, args, {
+    const spec = normalizeCommandSpec(command);
+    const result = spawnSync(spec.command, [...spec.args, ...args], {
         cwd: repoRoot,
         env: environment,
         stdio: "ignore"
@@ -137,7 +140,8 @@ function commandSucceeds(command, args, environment) {
 }
 
 function run(command, args, options = {}) {
-    const result = spawnSync(command, args, {
+    const spec = normalizeCommandSpec(command);
+    const result = spawnSync(spec.command, [...spec.args, ...args], {
         env: options.env,
         cwd: repoRoot,
         stdio: "inherit"
@@ -146,6 +150,27 @@ function run(command, args, options = {}) {
     if (result.status !== 0) {
         process.exit(result.status ?? 1);
     }
+}
+
+function readCommandSpec(environmentName, fallback) {
+    const configured = process.env[environmentName];
+    if (configured === undefined || configured.length === 0) {
+        return { args: [], command: fallback };
+    }
+    let parsed;
+    try {
+        parsed = JSON.parse(configured);
+    } catch (error) {
+        throw new Error(`${environmentName} must be a JSON string array`, { cause: error });
+    }
+    if (!Array.isArray(parsed) || parsed.length === 0 || parsed.some((value) => typeof value !== "string" || value.length === 0)) {
+        throw new Error(`${environmentName} must be a non-empty JSON string array`);
+    }
+    return { args: parsed.slice(1), command: parsed[0] };
+}
+
+function normalizeCommandSpec(command) {
+    return typeof command === "string" ? { args: [], command } : command;
 }
 
 function readOption(values, name) {

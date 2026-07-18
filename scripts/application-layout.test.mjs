@@ -86,15 +86,17 @@ test("package bin file assertion accepts a regular file and rejects directories 
             /not a regular file/u
         );
 
-        await symlink(resolve(root, "dist", "CliMain.js"), resolve(root, "dist", "linked.js"));
-        await assert.rejects(
-            () => assertPackageBinFile({
-                absolutePath: resolve(root, "dist", "linked.js"),
-                command: "devshell",
-                relativePath: "dist/linked.js"
-            }),
-            /must not be a symbolic link/u
-        );
+        if (process.platform !== "win32") {
+            await symlink(resolve(root, "dist", "CliMain.js"), resolve(root, "dist", "linked.js"));
+            await assert.rejects(
+                () => assertPackageBinFile({
+                    absolutePath: resolve(root, "dist", "linked.js"),
+                    command: "devshell",
+                    relativePath: "dist/linked.js"
+                }),
+                /must not be a symbolic link/u
+            );
+        }
     } finally {
         await rm(root, { force: true, recursive: true });
     }

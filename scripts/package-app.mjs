@@ -77,7 +77,21 @@ function readOption(name) {
 }
 
 function runPnpm(commandArgs) {
-    run(process.platform === "win32" ? "pnpm.cmd" : "pnpm", commandArgs);
+    if (process.platform === "win32") {
+        run(process.env.ComSpec ?? "cmd.exe", [
+            "/d",
+            "/s",
+            "/c",
+            ["pnpm", ...commandArgs].map(quoteWindowsCommandArgument).join(" "),
+        ]);
+        return;
+    }
+    run("pnpm", commandArgs);
+}
+
+function quoteWindowsCommandArgument(value) {
+    if (/^[A-Za-z0-9_./:=+-]+$/u.test(value)) return value;
+    return `"${String(value).replaceAll('"', '""')}"`;
 }
 
 function run(command, commandArgs) {

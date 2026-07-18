@@ -1,11 +1,12 @@
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { chmod, copyFile, lstat, mkdir, mkdtemp, readFile, readlink, rename, rm, symlink, writeFile } from "node:fs/promises";
-import { homedir, tmpdir } from "node:os";
+import { tmpdir } from "node:os";
 import { delimiter, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { assertPackageBinFile, readPackageBinPath, writePortableApplicationManifest, tryReadPackageBinPath } from "./application-layout.mjs";
+import { resolveInstallHome } from "./install-home.mjs";
 
 const installStepTotal = 5;
 let installStep = 0;
@@ -31,7 +32,7 @@ const packageJson = JSON.parse(await readFile(resolve(repoRoot, "package.json"),
 const version = requireString(packageJson.version, "package.json version");
 const releaseTag = process.env.PORTABLE_DEVSHELL_WORKER_RELEASE_TAG || `v${version}`;
 const releaseBaseUrl = resolveReleaseBaseUrl();
-const home = process.env.HOME || homedir();
+const home = resolveInstallHome();
 const dataHome =
     process.env.XDG_DATA_HOME ||
     (process.platform === "win32"
@@ -459,7 +460,21 @@ async function cleanupControlRuntime(pidFile) {
 }
 
 function runPnpm(args) {
-    run(process.platform === "win32" ? "pnpm.cmd" : "pnpm", args);
+    if (process.platform === "win32") {
+        run(process.env.ComSpec ?? "cmd.exe", [
+            "/d",
+            "/s",
+            "/c",
+            ["pnpm", ...args].map(quoteWindowsCommandArgument).join(" ")
+        ]);
+        return;
+    }
+    run("pnpm", args);
+}
+
+function quoteWindowsCommandArgument(value) {
+    if (/^[A-Za-z0-9_./:=+-]+$/u.test(value)) return value;
+    return `"${String(value).replaceAll('"', '""')}"`;
 }
 
 function runNode(args) {
