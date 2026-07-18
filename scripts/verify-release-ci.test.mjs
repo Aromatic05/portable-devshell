@@ -61,5 +61,5 @@ test("release workflow requires the development CI gate before packaging any rel
     assert.match(workflow, /verify-development-ci:/u);
     assert.match(workflow, /node \.\/scripts\/verify-release-ci\.mjs/u);
     assert.match(workflow, /build-worker:\r?\n\s+needs: verify-development-ci/u);
-    assert.match(workflow, /package-app:\r?\n\s+needs: verify-development-ci/u);
+    assert.match(workflow, /pnpm package:app -- --target "\$\{\{ matrix\.target \}\}"/u);
 });

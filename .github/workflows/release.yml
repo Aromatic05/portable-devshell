@@ -32,19 +32,21 @@ jobs:
                     - runner: ubuntu-24.04
                       target: linux-x64
                       rust_target: x86_64-unknown-linux-musl
-                    - runner: ubuntu-24.04
+                      zig_arch: x86_64
+                    - runner: ubuntu-24.04-arm
                       target: linux-arm64
                       rust_target: aarch64-unknown-linux-musl
-                    - runner: macos-14
+                      zig_arch: x86_64
+                    - runner: macos-15
                       target: darwin-arm64
                       rust_target: aarch64-apple-darwin
-                    - runner: macos-14
+                    - runner: macos-15-intel
                       target: darwin-x64
                       rust_target: x86_64-apple-darwin
                     - runner: windows-2022
                       target: windows-x64
                       rust_target: x86_64-pc-windows-msvc
-                    - runner: windows-2022
+                    - runner: windows-11-arm
                       target: windows-arm64
                       rust_target: aarch64-pc-windows-msvc
 
@@ -74,7 +76,7 @@ jobs:
               run: |
                   set -euo pipefail
                   zig_root="$RUNNER_TEMP/zig-0.14.1"
-                  curl -fsSL https://ziglang.org/download/0.14.1/zig-x86_64-linux-0.14.1.tar.xz -o "$RUNNER_TEMP/zig.tar.xz"
+                  curl -fsSL "https://ziglang.org/download/0.14.1/zig-${{ matrix.zig_arch }}-linux-0.14.1.tar.xz" -o "$RUNNER_TEMP/zig.tar.xz"
                   mkdir -p "$zig_root"
                   tar -xJf "$RUNNER_TEMP/zig.tar.xz" --strip-components=1 -C "$zig_root"
                   echo "$zig_root" >> "$GITHUB_PATH"
@@ -83,54 +85,20 @@ jobs:
               if: runner.os == 'Linux'
               run: cargo install --locked cargo-zigbuild --version 0.23.0
 
-            - name: 构建 Linux worker
-              if: runner.os == 'Linux'
-              run: pnpm build:worker "${{ matrix.target }}" --output-dir ./release-assets
-
-            - name: 构建 macOS worker
-              if: runner.os == 'macOS'
-              run: pnpm build:worker "${{ matrix.target }}" --output-dir ./release-assets
-
-            - name: 构建 Windows worker
-              if: runner.os == 'Windows'
-              run: pnpm build:worker "${{ matrix.target }}" --output-dir ./release-assets
-
-            - uses: actions/upload-artifact@v7
-              with:
-                  name: worker-${{ matrix.target }}
-                  path: release-assets/*
-
-    package-app:
-        needs: verify-development-ci
-        runs-on: ubuntu-24.04
-
-        steps:
-            - uses: actions/checkout@v5
-
-            - uses: pnpm/action-setup@v5
-              with:
-                  version: 10.13.1
-
-            - uses: actions/setup-node@v5
-              with:
-                  node-version: 24
-                  cache: pnpm
-
-            - name: 安装依赖并构建应用
+            - name: 安装依赖并构建目标应用
               run: |
                   pnpm install --frozen-lockfile
                   pnpm build
 
-            - name: 打包可分发应用
+            - name: 构建目标发布资产
               run: |
-                  pnpm package:app -- --output-dir ./release-assets
-                  pnpm smoke:package -- ./release-assets/portable-devshell-app.tar.gz
-                  pnpm smoke:install-release -- ./release-assets/portable-devshell-app.tar.gz
-                  cp ./scripts/install-release.sh ./release-assets/install-release.sh
-                  chmod 755 ./release-assets/install-release.sh
-                  (cd ./release-assets && sha256sum install-release.sh > install-release.sh.sha256)
-                  cp ./scripts/install-release.ps1 ./release-assets/install-release.ps1
-                  sha256sum ./release-assets/install-release.ps1 > ./release-assets/install-release.ps1.sha256
+                  pnpm build:worker "${{ matrix.target }}" --output-dir ./release-assets
+                  pnpm package:app -- --target "${{ matrix.target }}" --output-dir ./release-assets
+
+            - uses: actions/upload-artifact@v7
+              with:
+                  name: release-assets-${{ matrix.target }}
+                  path: release-assets/*
 
             - uses: actions/upload-artifact@v7
               with:
@@ -140,7 +108,6 @@ jobs:
     publish:
         needs:
             - build-worker
-            - package-app
         runs-on: ubuntu-24.04
 
         steps:
@@ -152,6 +119,14 @@ jobs:
               with:
                   merge-multiple: true
                   path: release-assets
+
+            - name: 附加安装脚本
+              run: |
+                  cp ./scripts/install-release.sh ./release-assets/install-release.sh
+                  chmod 755 ./release-assets/install-release.sh
+                  (cd ./release-assets && sha256sum install-release.sh > install-release.sh.sha256)
+                  cp ./scripts/install-release.ps1 ./release-assets/install-release.ps1
+                  sha256sum ./release-assets/install-release.ps1 > ./release-assets/install-release.ps1.sha256
 
             - name: 发布 GitHub Release
               env:
