@@ -36,7 +36,7 @@ jobs:
                     - runner: ubuntu-24.04-arm
                       target: linux-arm64
                       rust_target: aarch64-unknown-linux-musl
-                      zig_arch: x86_64
+                      zig_arch: aarch64
                     - runner: macos-15
                       target: darwin-arm64
                       rust_target: aarch64-apple-darwin
@@ -98,11 +98,6 @@ jobs:
             - uses: actions/upload-artifact@v7
               with:
                   name: release-assets-${{ matrix.target }}
-                  path: release-assets/*
-
-            - uses: actions/upload-artifact@v7
-              with:
-                  name: app
                   path: release-assets/*
 
     publish:
