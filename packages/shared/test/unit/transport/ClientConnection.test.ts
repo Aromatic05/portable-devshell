@@ -287,6 +287,8 @@ test("unexpected replyTo closes a persistent connection and rejects its pending 
 
     const firstPending = connection.requestEvent("@control", "service", "first");
     const secondPending = connection.requestEvent("@control", "service", "second");
+    const firstRejected = assert.rejects(firstPending, /Unexpected replyTo/u);
+    const secondRejected = assert.rejects(secondPending, /Unexpected replyTo/u);
     const received = await peer.nextEvent();
     await peer.nextEvent();
     await received.codec.send({
@@ -296,6 +298,5 @@ test("unexpected replyTo closes a persistent connection and rejects its pending 
         name: "service.first"
     });
 
-    await assert.rejects(firstPending, /Unexpected replyTo/u);
-    await assert.rejects(secondPending, /Unexpected replyTo/u);
+    await Promise.all([firstRejected, secondRejected]);
 });

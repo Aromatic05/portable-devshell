@@ -3,7 +3,7 @@ import { existsSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { createConnection } from "node:net";
 import { fileURLToPath } from "node:url";
-import { join, resolve } from "node:path";
+import { join, posix, resolve } from "node:path";
 
 export const repositoryRoot = fileURLToPath(new URL("../", import.meta.url));
 
@@ -18,11 +18,23 @@ export async function ipcEndpointAcceptsConnections(path: string): Promise<boole
     });
 }
 
-export function createTestIpcPath(name: string, directory: string): string {
+export function createTestIpcPath(
+    name: string,
+    directory: string,
+    platform = process.platform
+): string {
     const normalized = name.replaceAll(/[^A-Za-z0-9._-]/gu, "-");
-    return process.platform === "win32"
-        ? `\\\\.\\pipe\\portable-devshell-test-${normalized}-${process.pid}-${randomUUID()}`
-        : join(directory, `${normalized}.sock`);
+    if (platform === "win32") {
+        return `\\\\.\\pipe\\portable-devshell-test-${normalized}-${process.pid}-${randomUUID()}`;
+    }
+    if (platform === "darwin") {
+        const shortName = normalized.slice(0, 16) || "ipc";
+        return posix.join(
+            "/tmp",
+            `pds-${shortName}-${process.pid}-${randomUUID().slice(0, 8)}.sock`
+        );
+    }
+    return join(directory, `${normalized}.sock`);
 }
 
 export function resolveTestWorkerBinary(): string | undefined {
