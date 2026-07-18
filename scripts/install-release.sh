@@ -308,7 +308,7 @@ temporary=$(mktemp -d "${TMPDIR:-/tmp}/portable-devshell-install.XXXXXX")
 trap 'rm -rf "$temporary"' EXIT HUP INT TERM
 
 app_asset="portable-devshell-app-$host_target.tar.gz"
-step "下载应用包（$host_target）"
+step "下载应用包（${host_target}）"
 download "$release_base/$app_asset" "$temporary/app.tar.gz" "$app_asset"
 download "$release_base/$app_asset.sha256" "$temporary/app.sha256" "应用包校验文件"
 verify_sha256 "$temporary/app.tar.gz" "$temporary/app.sha256"

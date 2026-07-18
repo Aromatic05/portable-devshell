@@ -1278,7 +1278,7 @@ test("local transport executes frozen devshell-worker start status logs stop rpc
     const env = { ...process.env, HOME: homeDirectory, XDG_RUNTIME_DIR: runtimeDirectory };
     const repoRoot = fileURLToPath(new URL("../../../../", import.meta.url));
     const transport = new WorkerTransportDriverLocal({
-        workerBinary: new WorkerBinary(resolve(repoRoot, "target/debug/devshell-worker")),
+        workerBinary: new WorkerBinary(resolve(repoRoot, "target", "debug", `devshell-worker${process.platform === "win32" ? ".exe" : ""}`)),
         spawnFunction: nodeSpawn
     });
 
