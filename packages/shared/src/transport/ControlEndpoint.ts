@@ -1,6 +1,6 @@
 import { chmod, mkdir, unlink } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
-import { join, win32 } from "node:path";
+import { join, posix, win32 } from "node:path";
 
 const runtimeDirectoryName = "portable-devshell";
 const windowsPipePrefix = "\\\\.\\pipe\\portable-devshell-control-";
@@ -100,9 +100,10 @@ export function resolveControlRuntimeDirectory(
     }
     const explicit = xdgRuntimeDir ?? environment.XDG_RUNTIME_DIR;
     if (explicit !== undefined && explicit.length > 0) {
-        return join(explicit, runtimeDirectoryName);
+        return posix.join(explicit, runtimeDirectoryName);
     }
-    return join(tmpdir(), `${runtimeDirectoryName}-${resolveUnixUserIdentity(environment)}`);
+    const temporaryDirectory = process.platform === "win32" ? "/tmp" : tmpdir();
+    return posix.join(temporaryDirectory, `${runtimeDirectoryName}-${resolveUnixUserIdentity(environment)}`);
 }
 
 export function resolveControlSocketPath(
@@ -112,7 +113,7 @@ export function resolveControlSocketPath(
 ): string {
     return platform === "win32"
         ? `${windowsPipePrefix}${normalizeIdentity(environment.USERNAME ?? environment.USER ?? "user")}`
-        : join(resolveControlRuntimeDirectory(xdgRuntimeDir, platform, environment), "control.sock");
+        : posix.join(resolveControlRuntimeDirectory(xdgRuntimeDir, platform, environment), "control.sock");
 }
 
 export function isWindowsNamedPipePath(path: string): boolean {

@@ -5,13 +5,29 @@ import { resolveWorkerDevshellHomeDirectory, resolveWorkerHomeDirectory } from "
 
 test("worker home keeps HOME precedence on Unix-style environments", () => {
     assert.equal(
-        resolveWorkerHomeDirectory({ HOME: "/home/alice", USERPROFILE: "C:\\Users\\alice" }),
+        resolveWorkerHomeDirectory(
+            { HOME: "/home/alice", USERPROFILE: "C:\\Users\\alice" },
+            "linux"
+        ),
         "/home/alice"
     );
 });
 
-test("worker home accepts USERPROFILE on Windows-style environments", () => {
-    assert.equal(resolveWorkerHomeDirectory({ USERPROFILE: "C:\\Users\\alice" }), "C:\\Users\\alice");
+test("worker home keeps USERPROFILE precedence on Windows", () => {
+    assert.equal(
+        resolveWorkerHomeDirectory(
+            { HOME: "C:\\msys64\\home\\alice", USERPROFILE: "C:\\Users\\alice" },
+            "win32"
+        ),
+        "C:\\Users\\alice"
+    );
+});
+
+test("worker home reconstructs HOMEDRIVE and HOMEPATH on Windows", () => {
+    assert.equal(
+        resolveWorkerHomeDirectory({ HOMEDRIVE: "D:", HOMEPATH: "\\Users\\alice" }, "win32"),
+        "D:\\Users\\alice"
+    );
 });
 
 test("worker devshell home honors PORTABLE_DEVSHELL_HOME", () => {
@@ -21,6 +37,13 @@ test("worker devshell home honors PORTABLE_DEVSHELL_HOME", () => {
     );
 });
 
-test("worker devshell home defaults below the resolved user home", () => {
-    assert.equal(resolveWorkerDevshellHomeDirectory({ HOME: "/home/alice" }), "/home/alice/.devshell");
+test("worker devshell home uses target-platform path semantics", () => {
+    assert.equal(
+        resolveWorkerDevshellHomeDirectory({ USERPROFILE: "C:\\Users\\alice" }, "win32"),
+        "C:\\Users\\alice\\.devshell"
+    );
+    assert.equal(
+        resolveWorkerDevshellHomeDirectory({ HOME: "/home/alice" }, "linux"),
+        "/home/alice/.devshell"
+    );
 });
