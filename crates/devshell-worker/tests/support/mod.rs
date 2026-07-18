@@ -16,7 +16,10 @@ pub struct TestEnv {
 impl TestEnv {
     pub fn new() -> Self {
         let home = tempfile::tempdir().unwrap();
-        let runtime = tempfile::tempdir().unwrap();
+        let runtime = tempfile::Builder::new()
+            .prefix("devshell-test-")
+            .tempdir_in("/tmp")
+            .unwrap();
         let workspace = tempfile::tempdir().unwrap();
         Self {
             home_root: home.path().join(".devshell"),
