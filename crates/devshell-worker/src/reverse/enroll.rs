@@ -8,6 +8,7 @@ use url::Url;
 use crate::instance::{
     InstanceLock, InstanceName, WorkerReverseConfig, build_config, read_config, write_config,
 };
+use crate::platform::protocol_path;
 use crate::reverse::install::{install_current_binary, start_installed_worker};
 use crate::storage::InstancePaths;
 use crate::storage::permissions::ensure_dir;
@@ -101,10 +102,10 @@ pub fn run(options: EnrollOptions) -> Result<String, String> {
     start_installed_worker(&installed_binary, &instance, &workspace)?;
     serde_json::to_string_pretty(&EnrollResult {
         instance: instance.as_str().to_string(),
-        installed_binary: installed_binary.to_string_lossy().into_owned(),
+        installed_binary: protocol_path(&installed_binary),
         ok: true,
         started: true,
-        workspace: workspace.to_string_lossy().into_owned(),
+        workspace: protocol_path(&workspace),
     })
     .map_err(|error| error.to_string())
 }

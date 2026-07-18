@@ -4,7 +4,7 @@ use serde_json::json;
 
 use crate::daemon::process::WorkerRuntimeContext;
 use crate::instance::WorkerConfig;
-use crate::platform::detect_environment;
+use crate::platform::{detect_environment, protocol_path};
 use crate::rpc::codec::PROTOCOL_VERSION;
 use crate::rpc::error::RpcError;
 use crate::rpc::router::{ControlHandler, control_handler};
@@ -41,7 +41,7 @@ pub fn handler(config: WorkerConfig, runtime: WorkerRuntimeContext) -> Arc<dyn C
         let environment = detect_environment();
         Ok(json!({
             "instance": config.instance,
-            "workspace": runtime.workspace,
+            "workspace": protocol_path(&runtime.workspace),
             "workerVersion": env!("CARGO_PKG_VERSION"),
             "workerSha256": runtime.worker_sha256,
             "protocolVersion": PROTOCOL_VERSION,

@@ -1,4 +1,5 @@
 mod environment;
+mod path;
 use std::time::{SystemTime, UNIX_EPOCH};
 #[cfg(unix)]
 mod unix;
@@ -16,6 +17,7 @@ pub use windows::{
 };
 
 pub use environment::detect_environment;
+pub use path::protocol_path;
 
 pub(crate) fn unix_time_millis() -> u128 {
     SystemTime::now()
