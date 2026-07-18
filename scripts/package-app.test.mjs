@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { resolve } from "node:path";
+import { resolve, win32 } from "node:path";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
@@ -28,4 +28,17 @@ test("application packaging selects CLI by workspace directory", async () => {
 test("application packaging forces pnpm legacy deploy for Windows-compatible workspace links", async () => {
     const source = await readFile(script, "utf8");
     assert.match(source, /"deploy",\s*"--legacy",/u);
+});
+
+test("application packaging keeps deploy staging on the repository volume", async () => {
+    const source = await readFile(script, "utf8");
+    assert.match(source, /mkdtemp\(resolve\(repoRoot, "\.portable-devshell-app-"\)\)/u);
+    assert.match(source, /const deployDirectory = relative\(repoRoot, appDirectory\)/u);
+    assert.doesNotMatch(source, /tmpdir\(\)/u);
+
+    const repository = "D:\\a\\portable-devshell";
+    const application = win32.resolve(repository, ".portable-devshell-app-test", "app");
+    const deployTarget = win32.relative(repository, application);
+    assert.equal(win32.isAbsolute(deployTarget), false);
+    assert.equal(deployTarget.startsWith(".."), false);
 });

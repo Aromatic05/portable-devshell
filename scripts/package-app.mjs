@@ -8,8 +8,7 @@ import {
     rm,
     writeFile,
 } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { resolve } from "node:path";
+import { relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { assertPackageBinFile, readPackageBinPath, writePortableApplicationManifest } from "./application-layout.mjs";
@@ -29,8 +28,9 @@ const packageJson = JSON.parse(
     await readFile(resolve(repoRoot, "package.json"), "utf8"),
 );
 const version = requireString(packageJson.version, "package.json version");
-const stagingRoot = await mkdtemp(resolve(tmpdir(), "portable-devshell-app-"));
+const stagingRoot = await mkdtemp(resolve(repoRoot, ".portable-devshell-app-"));
 const appDirectory = resolve(stagingRoot, "app");
+const deployDirectory = relative(repoRoot, appDirectory);
 const assetName = `portable-devshell-app-${target}.tar.gz`;
 const assetPath = resolve(outputDirectory, assetName);
 
@@ -42,7 +42,7 @@ try {
         "--prod",
         "deploy",
         "--legacy",
-        appDirectory,
+        deployDirectory,
     ]);
     await writePortableApplicationManifest(appDirectory, { minimumNodeMajor: 24, version });
     const cli = await assertPackageBinFile(await readPackageBinPath(appDirectory, "devshell"));
