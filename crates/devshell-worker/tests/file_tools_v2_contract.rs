@@ -375,7 +375,10 @@ fn file_edit_keeps_applied_operations_and_stops_after_runtime_failure() {
     let env = TestEnv::new();
     let instance = "aromatic-file-partial-v2";
     start(&env, instance);
+    #[cfg(target_os = "linux")]
     let unavailable = format!("/proc/portable-devshell-test-{}", std::process::id());
+    #[cfg(target_os = "macos")]
+    let unavailable = format!("/System/portable-devshell-test-{}", std::process::id());
     let changes = format!(
         "*** Begin Edit\n*** Write File: ./created.txt\ncreated\n*** Move File: ./created.txt\n*** To: {unavailable}\n*** Write File: ./never.txt\nnever\n*** End Edit"
     );
