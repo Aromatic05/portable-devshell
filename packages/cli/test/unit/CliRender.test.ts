@@ -14,7 +14,7 @@ import { renderToolResult } from "../../src/render/tool/CliRenderToolResult.ts";
 
 test("renderers format control, instance, and tool outputs", async () => {
     const statusFixturePath = fileURLToPath(new URL("../fixtures/cli-status-output.txt", import.meta.url));
-    const expectedStatus = await readFile(statusFixturePath, "utf8");
+    const expectedStatus = (await readFile(statusFixturePath, "utf8")).replaceAll("\r\n", "\n");
 
     assert.equal(renderControlStatus({ instanceCount: 1, pid: 42, running: true }), expectedStatus);
     assert.equal(

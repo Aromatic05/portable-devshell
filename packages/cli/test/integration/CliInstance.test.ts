@@ -10,7 +10,7 @@ import { Channel, Codec, resolveControlSocketPath, type Event, type JsonValue } 
 
 import { createCliClients } from "../../src/client/CliClientComposition.ts";
 import { CliMain } from "../../src/CliMain.ts";
-import { createTestIpcPath, installUniqueWindowsTestIdentity, ipcEndpointAcceptsConnections, realWorkerTestOptions, resolveTestWorkerBinary, workerPathEnvironmentName } from "../../../../test/TestPlatformSupport.ts";
+import { createTestIpcPath, installUniqueWindowsTestIdentity, ipcEndpointAcceptsConnections, realWorkerTestOptions, readRelativeMarkerCommand, resolveTestWorkerBinary, workerPathEnvironmentName } from "../../../../test/TestPlatformSupport.ts";
 
 const workerBinaryPath = resolveTestWorkerBinary();
 
@@ -71,6 +71,9 @@ async function runRealWorkerSmoke(): Promise<void> {
     const homeDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-cli-real-home-"));
     const xdgRuntimeDir = await mkdtemp(join(tmpdir(), "portable-devshell-cli-real-runtime-"));
     const workspacePath = await mkdtemp(join(tmpdir(), "portable-devshell-cli-real-workspace-"));
+    const workspaceMarkerName = "cli-real-workspace-marker.txt";
+    const workspaceMarker = "portable-devshell-cli-real-workspace";
+    await writeFile(join(workspacePath, workspaceMarkerName), workspaceMarker, "utf8");
     const stdout = createBuffer();
     const stderr = createBuffer();
     const workerEnvName = workerPathEnvironmentName();
@@ -119,9 +122,18 @@ async function runRealWorkerSmoke(): Promise<void> {
         assert.equal(await cli.run(["instance", "status", "aromatic-pc"]), 0);
         assert.match(stdout.flush(), /ready: true/u);
 
-        assert.equal(await cli.run(["instance", "call", "aromatic-pc", "bash_run", "{\"command\":\"pwd\"}"]), 0);
-        const pwdOutput = stdout.flush();
-        assert.match(pwdOutput, new RegExp(workspacePath.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"), "u"));
+        assert.equal(
+            await cli.run([
+                "instance",
+                "call",
+                "aromatic-pc",
+                "bash_run",
+                JSON.stringify({ command: readRelativeMarkerCommand(workspaceMarkerName) })
+            ]),
+            0
+        );
+        const markerOutput = stdout.flush();
+        assert.match(markerOutput, new RegExp(workspaceMarker, "u"));
 
         assert.equal(
             await cli.run(["instance", "call", "aromatic-pc", "bash_run", "{\"command\":\"echo portable-devshell\"}"]),
@@ -132,7 +144,7 @@ async function runRealWorkerSmoke(): Promise<void> {
         assert.equal(await cli.run(["instance", "logs", "aromatic-pc"]), 0);
         const logsOutput = stdout.flush();
         assert.match(logsOutput, /portable-devshell/u);
-        assert.match(logsOutput, new RegExp(workspacePath.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"), "u"));
+        assert.match(logsOutput, new RegExp(workspaceMarker, "u"));
 
         assert.equal(await cli.run(["stop"]), 0);
         controlStopped = true;
@@ -161,6 +173,9 @@ async function runInteractiveCreateFlow(t: { after(callback: () => Promise<void>
     const homeDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-cli-create-home-"));
     const xdgRuntimeDir = await mkdtemp(join(tmpdir(), "portable-devshell-cli-create-runtime-"));
     const workspacePath = await mkdtemp(join(tmpdir(), "portable-devshell-cli-create-workspace-"));
+    const workspaceMarkerName = "cli-create-workspace-marker.txt";
+    const workspaceMarker = "portable-devshell-cli-create-workspace";
+    await writeFile(join(workspacePath, workspaceMarkerName), workspaceMarker, "utf8");
     const stdout = createBuffer();
     const stderr = createBuffer();
     const workerEnvName = workerPathEnvironmentName();
@@ -221,8 +236,17 @@ async function runInteractiveCreateFlow(t: { after(callback: () => Promise<void>
     assert.equal(await cli.run(["instance", "start", "aromatic-pc"]), 0);
     assert.match(stdout.flush(), /status: ready/u);
 
-    assert.equal(await cli.run(["instance", "call", "aromatic-pc", "bash_run", "{\"command\":\"pwd\"}"]), 0);
-    assert.match(stdout.flush(), new RegExp(workspacePath.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"), "u"));
+    assert.equal(
+        await cli.run([
+            "instance",
+            "call",
+            "aromatic-pc",
+            "bash_run",
+            JSON.stringify({ command: readRelativeMarkerCommand(workspaceMarkerName) })
+        ]),
+        0
+    );
+    assert.match(stdout.flush(), new RegExp(workspaceMarker, "u"));
 
     assert.doesNotMatch(await readFile(join(homeDirectory, ".devshell", "control", "config.toml"), "utf8"), /\[\[instances\]\]/u);
     assert.match(
