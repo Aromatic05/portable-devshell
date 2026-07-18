@@ -11,7 +11,7 @@ Windows x86-64
 Windows arm64
 ```
 
-主程序需要 Node.js 24 或更高版本。发布包已经包含 TypeScript 应用依赖；安装器会预装 `linux-x64` 和当前主机对应的 worker。使用发布包时不需要 pnpm 或 Rust。
+主程序需要 Node.js 24 或更高版本。发布包已经包含 TypeScript 应用依赖；安装器会预装当前主机对应的 worker。使用发布包时不需要 pnpm 或 Rust。
 
 ## 从 GitHub Release 安装
 
@@ -32,9 +32,7 @@ sh install-release.sh
 
 安装脚本会下载并校验：
 
-1. `linux-x64` worker；
-2. 当前 control 主机对应的 worker；
-3. 若当前主机本身就是 Linux x86-64，则只下载一个 worker。
+1. 当前 control 主机对应的 worker。
 
 连接到其他操作系统或架构时，control 会根据探测到的目标从同一版本 Release 按需下载并校验 worker。安装器会把实际 Release 资产目录记录到安装清单中，因此使用镜像或其他仓库安装后，后续按需下载仍沿用该来源。
 
@@ -84,15 +82,15 @@ pnpm install:local
 `install:local` 会：
 
 1. 构建 TypeScript 应用；
-2. 从指定 GitHub Release 下载 `linux-x64` 和当前主机对应的 worker；
+2. 从指定 GitHub Release 下载当前主机对应的 worker；
 3. 对预装 worker 校验 SHA-256 并安装到版本化目录；
 4. 只有某个 Release asset 找不到或下载失败时，才尝试在本地构建该 target；
 5. 在切换版本前后分别执行 CLI 启动验证；
 6. 安装应用，并在 Unix 创建 `~/.local/bin/devshell`，在 Windows 创建 `%USERPROFILE%\.local\bin\devshell.cmd`。
 
-`linux-x64` 是常用远程目标，因此始终预装；当前主机 worker 用于本地实例。其他远程目标由 control 在首次连接时根据探测结果按需取得，不应在每次安装时下载全部平台。
+当前主机 worker 用于本地实例。其他远程目标由 control 在首次连接时根据探测结果按需取得，不应在每次安装时下载全部平台。
 
-本地回退构建受宿主工具链能力限制。正式发布仍必须保证六个 Release asset 全部存在，按需下载不能依赖安装端跨操作系统构建。
+本地回退构建受宿主工具链能力限制。正式发布仍必须保证六个目标的 Worker 资产全部存在，按需下载不能依赖安装端跨操作系统构建。
 
 ## 安装位置
 
