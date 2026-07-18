@@ -136,7 +136,7 @@ function readCargoPackageVersion(content, source) {
 }
 
 function readCargoLockVersion(content) {
-    const version = /\[\[package\]\]\nname = "devshell-worker"\nversion = "([^"]+)"/u.exec(content)?.[1];
+    const version = /\[\[package\]\]\r?\nname = "devshell-worker"\r?\nversion = "([^"]+)"/u.exec(content)?.[1];
     if (version === undefined) throw new Error("Cargo.lock devshell-worker version is missing");
     return requireVersion(version, "Cargo.lock");
 }
@@ -151,7 +151,7 @@ function replaceCargoPackageVersion(content, version) {
 }
 
 function replaceCargoLockVersion(content, version) {
-    const pattern = /(\[\[package\]\]\nname = "devshell-worker"\nversion = ")[^"]+("\n)/u;
+    const pattern = /(\[\[package\]\]\r?\nname = "devshell-worker"\r?\nversion = ")[^"]+("\r?\n)/u;
     if (!pattern.test(content)) throw new Error("Cargo.lock devshell-worker version is missing");
     return content.replace(pattern, `$1${version}$2`);
 }

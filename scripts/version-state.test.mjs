@@ -58,6 +58,17 @@ test("set keeps app and worker versions synchronized", async () => {
     }
 });
 
+test("version checks accept a CRLF Cargo lockfile", async () => {
+    const root = await createRepository("0.4.2", "v0.4.1");
+    try {
+        const lockPath = join(root, "Cargo.lock");
+        await writeFile(lockPath, (await readFile(lockPath, "utf8")).replaceAll("\n", "\r\n"), "utf8");
+        assert.equal(run(root, "check-development").status, 0);
+    } finally {
+        await rm(root, { force: true, recursive: true });
+    }
+});
+
 test("release check requires an exact tag and post-release advance bumps one patch", async () => {
     const root = await createRepository("0.4.2", "v0.4.1");
     try {

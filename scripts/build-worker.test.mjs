@@ -73,7 +73,8 @@ test(
     "build-worker defaults to the host target when no target is provided",
     { skip },
     async () => {
-        const fixture = await createFixture("x86_64-unknown-linux-musl");
+        const target = hostTarget();
+        const fixture = await createFixture(target.rustTarget);
         try {
             const result = spawnSync(
                 process.execPath,
@@ -84,7 +85,7 @@ test(
                     env: {
                         ...process.env,
                         BUILD_WORKER_TEST_ROOT: fixture.root,
-                        BUILD_WORKER_TEST_TARGET: "x86_64-unknown-linux-musl",
+                        BUILD_WORKER_TEST_TARGET: target.rustTarget,
                         PATH: `${fixture.binDirectory}${delimiter}${process.env.PATH ?? ""}`,
                     },
                 },
@@ -94,8 +95,8 @@ test(
             const cargoArgs = (await readFile(fixture.argsPath, "utf8"))
                 .trim()
                 .split("\n");
-            assert.equal(cargoArgs[0], "zigbuild");
-            assert.equal(valueAfter(cargoArgs, "--target"), "x86_64-unknown-linux-musl");
+            assert.equal(cargoArgs[0], target.cargoSubcommand);
+            assert.equal(valueAfter(cargoArgs, "--target"), target.rustTarget);
             assert.ok(cargoArgs.includes("--release"));
         } finally {
             await rm(fixture.root, { force: true, recursive: true });
@@ -154,6 +155,20 @@ async function createFixture(rustTarget) {
         ].join("\n") + "\n",
     );
     return { argsPath, binDirectory, root, rustTarget, script };
+}
+
+function hostTarget() {
+    if (process.platform === "linux") {
+        return process.arch === "arm64"
+            ? { cargoSubcommand: "zigbuild", rustTarget: "aarch64-unknown-linux-musl" }
+            : { cargoSubcommand: "zigbuild", rustTarget: "x86_64-unknown-linux-musl" };
+    }
+    if (process.platform === "darwin") {
+        return process.arch === "arm64"
+            ? { cargoSubcommand: "build", rustTarget: "aarch64-apple-darwin" }
+            : { cargoSubcommand: "build", rustTarget: "x86_64-apple-darwin" };
+    }
+    throw new Error(`unsupported host platform for build-worker test: ${process.platform}-${process.arch}`);
 }
 
 async function writeExecutable(path, body) {
