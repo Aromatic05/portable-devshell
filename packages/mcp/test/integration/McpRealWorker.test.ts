@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn as nodeSpawn } from "node:child_process";
-import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
+import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import test from "node:test";
@@ -22,6 +22,9 @@ test("MCP initialize tools/list and tools/call succeed against the frozen worker
     const instanceName = "aromatic-pc-mcp-real";
     const homeDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-mcp-real-home-"));
     const workspacePath = await mkdtemp(join(tmpdir(), "portable-devshell-mcp-real-workspace-"));
+    const workspaceMarkerName = "mcp-real-workspace-marker.txt";
+    const workspaceMarker = "portable-devshell-mcp-real-workspace";
+    await writeFile(join(workspacePath, workspaceMarkerName), workspaceMarker, "utf8");
     const instance = new WorkerInstanceFactory().create({
         defaultWorkspace: asWorkspacePath(workspacePath),
         env: { ...process.env, HOME: homeDirectory },
@@ -113,14 +116,20 @@ test("MCP initialize tools/list and tools/call succeed against the frozen worker
         );
 
         const ctxId = await createContext(endpoint, sessionHeaders);
-        const call = await postJson(
-            endpoint,
-            withToolContext(await readFixture("mcp-tools-call.json"), ctxId),
-            sessionHeaders
-        );
+        const callRequest = withToolContext(
+            await readFixture("mcp-tools-call.json"),
+            ctxId
+        ) as { params: { arguments: Record<string, JsonValue> } };
+        callRequest.params.arguments.command = process.platform === "win32"
+            ? `[Console]::Out.Write((Get-Content -Raw -LiteralPath '.\\${workspaceMarkerName}'))`
+            : `cat -- './${workspaceMarkerName}'`;
+        const call = await postJson(endpoint, callRequest as JsonValue, sessionHeaders);
         assert.equal(call.error, undefined);
         assert.equal(call.result?.isError, false);
-        assert.match(String(call.result?.content?.[0]?.text ?? ""), new RegExp(workspacePath.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"), "u"));
+        assert.match(
+            String(call.result?.content?.[0]?.text ?? ""),
+            new RegExp(workspaceMarker, "u")
+        );
 
         const toolCalls = await instance.readToolCalls();
         assert.equal(toolCalls.some((record) => record.toolName === "bash_run" && record.status === "completed"), true);
