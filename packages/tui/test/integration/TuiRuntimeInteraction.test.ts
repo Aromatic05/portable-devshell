@@ -25,7 +25,7 @@ test("real Ink runtime handles keyboard navigation, search, redraw, and terminal
         await waitUntil(() => runtime.store.getState().connection.status === "connected");
         await waitUntil(() => terminal.output.includes("Create Instance"));
 
-        assert.equal(terminal.rawModes.includes(true), true);
+        await waitUntil(() => terminal.rawModes.includes(true));
         assert.match(terminal.output, /instances 0 \| live 0/u);
         assert.match(terminal.output, /Create Instance/u);
 
