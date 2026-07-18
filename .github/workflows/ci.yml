@@ -90,6 +90,9 @@ jobs:
             - name: Unix release installer smoke
               if: runner.os != 'Windows'
               run: pnpm smoke:install-release -- ./ci-artifacts/portable-devshell-app-${{ matrix.target }}.tar.gz
+            - name: Windows release installer smoke
+              if: runner.os == 'Windows'
+              run: node ./scripts/smoke-install-release-windows.mjs ./ci-artifacts/portable-devshell-app-${{ matrix.target }}.tar.gz
             - name: 运行最终验收
               if: matrix.target == 'linux-x64'
               shell: bash
