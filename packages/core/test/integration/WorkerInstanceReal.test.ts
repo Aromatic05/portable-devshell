@@ -22,14 +22,14 @@ import {
     type WorkerCommandTransport,
     type WorkerRpcResponseEnvelope
 } from "@portable-devshell/core/testing";
-import { realWorkerTestOptions, resolveTestWorkerBinary } from "../../../../test/TestPlatformSupport.ts";
+import { createCanonicalTestDirectory, realWorkerTestOptions, resolveTestWorkerBinary } from "../../../../test/TestPlatformSupport.ts";
 
 const workerBinaryPath = resolveTestWorkerBinary();
 
 const cliToolCallContext = { source: "cli" } as const;
 
 test("WorkerInstance completes lifecycle against frozen devshell-worker", realWorkerTestOptions(workerBinaryPath), async (t) => {
-    const workspacePath = await mkdtemp(join(tmpdir(), "portable-devshell-instance-"));
+    const workspacePath = await createCanonicalTestDirectory("portable-devshell-instance-");
     const homeDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-instance-home-"));
     const runtimeDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-instance-runtime-"));
     const instanceName = asInstanceName(`task-6-${process.pid}`);

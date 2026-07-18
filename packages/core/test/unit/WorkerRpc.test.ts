@@ -21,7 +21,7 @@ import {
     type WorkerCommandTransport,
     type WorkerRpcResponseEnvelope
 } from "@portable-devshell/core/testing";
-import { realWorkerTestOptions, resolveTestWorkerBinary } from "../../../../test/TestPlatformSupport.ts";
+import { createCanonicalTestDirectory, realWorkerTestOptions, resolveTestWorkerBinary } from "../../../../test/TestPlatformSupport.ts";
 
 const workerBinaryPath = resolveTestWorkerBinary();
 
@@ -205,7 +205,7 @@ test("WorkerRpcBridge surfaces spawn failures as structured rpc spawn errors", a
 });
 
 test("WorkerProtocolClient performs ping, handshake, and tools.list against frozen devshell-worker", realWorkerTestOptions(workerBinaryPath), async (t) => {
-    const workspacePath = await mkdtemp(join(tmpdir(), "portable-devshell-core-rpc-"));
+    const workspacePath = await createCanonicalTestDirectory("portable-devshell-core-rpc-");
     const homeDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-core-rpc-home-"));
     const runtimeDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-core-rpc-runtime-"));
     const instanceName = `task-4-${process.pid}`;

@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import { Buffer } from "node:buffer";
+import { rm, realpath } from "node:fs/promises";
 import test from "node:test";
 
-import { createTestIpcPath } from "../../../../../test/TestPlatformSupport.ts";
+import { createCanonicalTestDirectory, createTestIpcPath } from "../../../../../test/TestPlatformSupport.ts";
 
 test("Darwin test IPC paths stay below the conservative Unix socket limit", () => {
     const longTemporaryDirectory = `/var/folders/${"x".repeat(180)}/T`;
@@ -31,4 +32,11 @@ test("Windows test IPC paths use a named pipe", () => {
         ),
         true
     );
+});
+
+test("canonical test directories resolve platform aliases", async (t) => {
+    const directory = await createCanonicalTestDirectory("portable-devshell-canonical-");
+    t.after(async () => await rm(directory, { force: true, recursive: true }));
+
+    assert.equal(directory, await realpath(directory));
 });

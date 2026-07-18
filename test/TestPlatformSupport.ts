@@ -1,7 +1,9 @@
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
+import { mkdtemp, realpath } from "node:fs/promises";
 import { spawnSync } from "node:child_process";
 import { createConnection } from "node:net";
+import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { join, posix, resolve } from "node:path";
 
@@ -34,7 +36,11 @@ export function createTestIpcPath(
             `pds-${shortName}-${process.pid}-${randomUUID().slice(0, 8)}.sock`
         );
     }
-    return join(directory, `${normalized}.sock`);
+    return posix.join(directory, `${normalized}.sock`);
+}
+
+export async function createCanonicalTestDirectory(prefix: string): Promise<string> {
+    return await realpath(await mkdtemp(join(tmpdir(), prefix)));
 }
 
 export function resolveTestWorkerBinary(): string | undefined {

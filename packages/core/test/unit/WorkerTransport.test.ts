@@ -19,7 +19,7 @@ import {
     probeLocalWorkerTarget
 } from "@portable-devshell/core/testing";
 import { createError, errorCodes } from "@portable-devshell/shared";
-import { realWorkerTestOptions, resolveTestWorkerBinary } from "../../../../test/TestPlatformSupport.ts";
+import { createCanonicalTestDirectory, realWorkerTestOptions, resolveTestWorkerBinary } from "../../../../test/TestPlatformSupport.ts";
 
 const workerBinaryPath = resolveTestWorkerBinary();
 
@@ -1280,7 +1280,7 @@ test("podman transport rejects already running existing stopped containers", asy
 });
 
 test("local transport executes frozen devshell-worker start status logs stop rpc", realWorkerTestOptions(workerBinaryPath), async (t) => {
-    const workspacePath = await mkdtemp(join(tmpdir(), "portable-devshell-core-"));
+    const workspacePath = await createCanonicalTestDirectory("portable-devshell-core-");
     const homeDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-core-home-"));
     const runtimeDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-core-runtime-"));
     const instanceName = `task-3-${process.pid}`;
