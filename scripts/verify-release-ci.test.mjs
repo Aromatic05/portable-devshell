@@ -23,10 +23,9 @@ function run(path, overrides = {}) {
     };
 }
 
-test("release CI gate accepts successful Linux and Windows dev-tag runs for the exact commit", () => {
+test("release CI gate accepts a successful target-matrix dev-tag run for the exact commit", () => {
     const result = evaluateDevelopmentCiRuns([
-        run(".github/workflows/ci.yml"),
-        run(".github/workflows/windows.yml")
+        run(".github/workflows/ci.yml")
     ], sha);
 
     assert.equal(result.ok, true);
@@ -36,22 +35,25 @@ test("release CI gate accepts successful Linux and Windows dev-tag runs for the 
 test("release CI gate rejects failures, release-tag runs, and runs for another commit", () => {
     const result = evaluateDevelopmentCiRuns([
         run(".github/workflows/ci.yml", { conclusion: "failure" }),
-        run(".github/workflows/windows.yml", { head_branch: "v0.4.5" }),
-        run(".github/workflows/windows.yml", { head_sha: "b".repeat(40) })
+        run(".github/workflows/ci.yml", { head_branch: "v0.4.5" }),
+        run(".github/workflows/ci.yml", { head_sha: "b".repeat(40) })
     ], sha);
 
     assert.equal(result.ok, false);
     assert.equal(result.workflows[0].successful, undefined);
-    assert.equal(result.workflows[1].candidates.length, 0);
+    assert.equal(result.workflows[0].candidates.length, 1);
 });
 
-test("development CI installs dependencies before script tests and exercises the release installer", async () => {
+test("development CI validates every native target and exercises its target-specific package", async () => {
     const workflow = await readFile(resolve(repositoryRoot, ".github", "workflows", "ci.yml"), "utf8");
     const installIndex = workflow.indexOf("pnpm install --frozen-lockfile");
     const scriptTestIndex = workflow.indexOf("node --test ./scripts/*.test.mjs");
     assert.ok(installIndex >= 0 && scriptTestIndex > installIndex);
-    assert.match(workflow, /pnpm smoke:install-release -- \.\/ci-artifacts\/portable-devshell-app\.tar\.gz/u);
-    assert.match(workflow, /linux-acceptance-\$\{\{ github\.sha \}\}/u);
+    for (const target of ["linux-x64", "linux-arm64", "darwin-x64", "darwin-arm64", "windows-x64", "windows-arm64"]) {
+        assert.match(workflow, new RegExp(`target: ${target}`, "u"));
+    }
+    assert.match(workflow, /node \.\/scripts\/smoke-pty\.mjs/u);
+    assert.match(workflow, /portable-devshell-app-\$\{\{ matrix\.target \}\}\.tar\.gz/u);
 });
 
 test("release workflow requires the development CI gate before packaging any release assets", async () => {

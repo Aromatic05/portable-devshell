@@ -2,8 +2,7 @@ import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 export const requiredDevelopmentWorkflows = [
-    { label: "Linux CI", path: ".github/workflows/ci.yml" },
-    { label: "Windows CI", path: ".github/workflows/windows.yml" }
+    { label: "Target CI", path: ".github/workflows/ci.yml" }
 ];
 
 export function evaluateDevelopmentCiRuns(runs, commitSha) {

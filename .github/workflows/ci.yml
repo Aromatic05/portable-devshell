@@ -11,8 +11,35 @@ permissions:
     contents: read
 
 jobs:
-    build:
-        runs-on: ubuntu-24.04
+    verify-target:
+        strategy:
+            fail-fast: false
+            matrix:
+                include:
+                    - runner: ubuntu-24.04
+                      target: linux-x64
+                      rust_target: x86_64-unknown-linux-musl
+                      zig_arch: x86_64
+                    - runner: ubuntu-24.04-arm
+                      target: linux-arm64
+                      rust_target: aarch64-unknown-linux-musl
+                      zig_arch: aarch64
+                    - runner: macos-15-intel
+                      target: darwin-x64
+                      rust_target: x86_64-apple-darwin
+                    - runner: macos-15
+                      target: darwin-arm64
+                      rust_target: aarch64-apple-darwin
+                    - runner: windows-2022
+                      target: windows-x64
+                      rust_target: x86_64-pc-windows-msvc
+                    - runner: windows-11-arm
+                      target: windows-arm64
+                      rust_target: aarch64-pc-windows-msvc
+
+        name: ${{ matrix.target }}
+        runs-on: ${{ matrix.runner }}
+
         steps:
             - uses: actions/checkout@v5
               with:
@@ -28,60 +55,42 @@ jobs:
               run: |
                   rustup toolchain install stable --profile minimal
                   rustup default stable
-                  rustup target add x86_64-unknown-linux-musl
+                  rustup target add "${{ matrix.rust_target }}"
             - name: 安装 Zig 工具链
+              if: runner.os == 'Linux'
               shell: bash
               run: |
                   set -euo pipefail
                   zig_root="$RUNNER_TEMP/zig-0.14.1"
-                  curl -fsSL https://ziglang.org/download/0.14.1/zig-x86_64-linux-0.14.1.tar.xz -o "$RUNNER_TEMP/zig.tar.xz"
+                  curl -fsSL "https://ziglang.org/download/0.14.1/zig-${{ matrix.zig_arch }}-linux-0.14.1.tar.xz" -o "$RUNNER_TEMP/zig.tar.xz"
                   mkdir -p "$zig_root"
                   tar -xJf "$RUNNER_TEMP/zig.tar.xz" --strip-components=1 -C "$zig_root"
                   echo "$zig_root" >> "$GITHUB_PATH"
             - name: 安装 cargo-zigbuild
+              if: runner.os == 'Linux'
               run: cargo install --locked cargo-zigbuild --version 0.23.0
             - run: node ./scripts/version-state.mjs check-development
             - run: pnpm install --frozen-lockfile
             - run: node --test ./scripts/*.test.mjs
             - run: pnpm lint
             - run: pnpm build
-            - run: cargo build --locked --workspace
-            - run: pnpm build:worker linux-x64
-            - run: pnpm package:app -- --output-dir ./ci-artifacts
-            - run: pnpm smoke:package -- ./ci-artifacts/portable-devshell-app.tar.gz
-            - run: pnpm smoke:install-release -- ./ci-artifacts/portable-devshell-app.tar.gz
+            - run: pnpm typecheck
+            - run: cargo test --locked --workspace
+            - run: pnpm test
+            - run: node ./scripts/smoke-pty.mjs
+            - run: pnpm build:worker "${{ matrix.target }}" --output-dir ./ci-artifacts
+            - name: Worker daemon smoke
+              timeout-minutes: 3
+              run: node ./scripts/smoke-worker.mjs ./ci-artifacts/devshell-worker-${{ matrix.target }}${{ runner.os == 'Windows' && '.exe' || '' }}
+            - name: Client and local instance smoke
+              timeout-minutes: 3
+              run: node ./scripts/smoke-client.mjs ./ci-artifacts/devshell-worker-${{ matrix.target }}${{ runner.os == 'Windows' && '.exe' || '' }}
+            - run: pnpm package:app -- --target "${{ matrix.target }}" --output-dir ./ci-artifacts
+            - run: pnpm smoke:package -- ./ci-artifacts/portable-devshell-app-${{ matrix.target }}.tar.gz
+            - name: Unix release installer smoke
+              if: runner.os != 'Windows'
+              run: pnpm smoke:install-release -- ./ci-artifacts/portable-devshell-app-${{ matrix.target }}.tar.gz
             - uses: actions/upload-artifact@v7
               with:
-                  name: portable-devshell-app-${{ github.sha }}
+                  name: release-assets-${{ matrix.target }}-${{ github.sha }}
                   path: ci-artifacts/*
-
-    test:
-        needs: build
-        runs-on: ubuntu-24.04
-        steps:
-            - uses: actions/checkout@v5
-              with:
-                  fetch-depth: 0
-            - uses: pnpm/action-setup@v5
-              with:
-                  version: 10.13.1
-            - uses: actions/setup-node@v5
-              with:
-                  node-version: 24
-                  cache: pnpm
-            - name: 安装 Rust 工具链
-              run: |
-                  rustup toolchain install stable --profile minimal
-                  rustup default stable
-            - run: pnpm install --frozen-lockfile
-            - name: 运行最终验收
-              shell: bash
-              run: |
-                  set -o pipefail
-                  bash acceptance/run-final-acceptance.sh 2>&1 | tee acceptance.log
-            - name: 上传最终验收日志
-              if: always()
-              uses: actions/upload-artifact@v7
-              with:
-                  name: linux-acceptance-${{ github.sha }}
-                  path: acceptance.log
