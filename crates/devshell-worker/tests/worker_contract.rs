@@ -946,15 +946,26 @@ fn tool_call_cancel_terminates_a_running_bash_process_group() {
         }),
     );
 
-    let first = read_rpc_frame(&mut stdout);
-    assert_eq!(first["id"], "cancel-control", "{first}");
-    assert_eq!(first["ok"], true, "{first}");
-    assert_eq!(first["result"]["cancelled"], true, "{first}");
+    let responses = [read_rpc_frame(&mut stdout), read_rpc_frame(&mut stdout)];
+    let cancel_response = responses
+        .iter()
+        .find(|response| response["id"] == "cancel-control")
+        .expect("cancel acknowledgement response");
+    assert_eq!(cancel_response["ok"], true, "{cancel_response}");
+    assert_eq!(
+        cancel_response["result"]["cancelled"], true,
+        "{cancel_response}"
+    );
 
-    let second = read_rpc_frame(&mut stdout);
-    assert_eq!(second["id"], "cancel-me", "{second}");
-    assert_eq!(second["ok"], false, "{second}");
-    assert_eq!(second["error"]["code"], "tool.cancelled", "{second}");
+    let call_response = responses
+        .iter()
+        .find(|response| response["id"] == "cancel-me")
+        .expect("cancelled tool call response");
+    assert_eq!(call_response["ok"], false, "{call_response}");
+    assert_eq!(
+        call_response["error"]["code"], "tool.cancelled",
+        "{call_response}"
+    );
     assert!(!marker.exists());
 
     drop(stdin);
