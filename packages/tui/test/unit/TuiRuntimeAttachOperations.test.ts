@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { TuiAppStore } from "../../dist/testing.js";
-import { TuiRuntimeAttachOperations } from "../../dist/runtime/operation/TuiRuntimeAttachOperations.js";
+import { TuiAppStore } from "../../src/testing.ts";
+import { TuiRuntimeAttachOperations } from "../../src/runtime/operation/TuiRuntimeAttachOperations.ts";
 
 test("attach operation reports an unavailable selected instance without invoking control", async () => {
     const harness = createHarness();

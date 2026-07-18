@@ -9,7 +9,7 @@ import { McpHostHttpServer } from "@portable-devshell/mcp/testing";
 import { asInstanceName, asWorkspacePath, type JsonValue } from "@portable-devshell/shared";
 import WebSocket from "ws";
 
-import { ReverseRpcFrameCodec as FrameCodec } from "../../dist/control/reverse/rpc/ReverseRpcFrameCodec.js";
+import { ReverseRpcFrameCodec as FrameCodec } from "../../src/control/reverse/rpc/ReverseRpcFrameCodec.ts";
 
 import {
     InstanceRegistry,
@@ -17,7 +17,7 @@ import {
     ReverseCredentialService,
     ReverseCredentialStore,
     TodoService
-} from "../../dist/testing.js";
+} from "../../src/testing.ts";
 
 test("WSS reverse connection authenticates, handshakes, and a higher generation replaces the old channel", async () => {
     const home = await mkdtemp(join(tmpdir(), "devshell-reverse-gateway-"));

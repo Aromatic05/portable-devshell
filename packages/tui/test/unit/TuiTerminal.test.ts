@@ -16,7 +16,7 @@ import {
     type TuiTerminalInputAction,
     type TuiTerminalPty,
     type TuiTerminalPtyFactory
-} from "../../dist/testing.js";
+} from "../../src/testing.ts";
 
 function lineText(line: { segments: Array<{ text: string }> }): string {
     return line.segments.map((segment) => segment.text).join("");

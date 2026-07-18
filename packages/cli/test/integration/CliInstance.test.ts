@@ -1,21 +1,22 @@
 import assert from "node:assert/strict";
-import { access, mkdtemp, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { createServer, type Socket } from "node:net";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import { Readable } from "node:stream";
 import test from "node:test";
-import { fileURLToPath } from "node:url";
 
-import { Channel, Codec, type Event, type JsonValue } from "@portable-devshell/shared";
+import { Channel, Codec, resolveControlSocketPath, type Event, type JsonValue } from "@portable-devshell/shared";
 
-import { CliMain } from "../../dist/CliMain.js";
+import { createCliClients } from "../../src/client/CliClientComposition.ts";
+import { CliMain } from "../../src/CliMain.ts";
+import { createTestIpcPath, installUniqueWindowsTestIdentity, ipcEndpointAcceptsConnections, realWorkerTestOptions, resolveTestWorkerBinary, workerPathEnvironmentName } from "../../../../test/TestPlatformSupport.ts";
+
+const workerBinaryPath = resolveTestWorkerBinary();
 
 async function runInstanceCommandsThroughControlRpc(t: { after(callback: () => Promise<void> | void): void }): Promise<void> {
     const runtimeRoot = await mkdtemp(join(tmpdir(), "portable-devshell-cli-instance-"));
-    const socketDir = join(runtimeRoot, "portable-devshell");
-    const socketPath = join(socketDir, "control.sock");
-    await mkdir(socketDir, { recursive: true });
+    const socketPath = createTestIpcPath("cli-instance", runtimeRoot);
     const harness = createInstanceHarness();
     const server = createServer((socket) => {
         harness.attach(socket);
@@ -34,6 +35,7 @@ async function runInstanceCommandsThroughControlRpc(t: { after(callback: () => P
     const stdout = createBuffer();
     const stderr = createBuffer();
     const cli = new CliMain({
+        createCliClients: () => createCliClients({ socketPath }),
         followEventLimit: 1,
         stderr,
         stdout,
@@ -69,11 +71,11 @@ async function runRealWorkerSmoke(): Promise<void> {
     const homeDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-cli-real-home-"));
     const xdgRuntimeDir = await mkdtemp(join(tmpdir(), "portable-devshell-cli-real-runtime-"));
     const workspacePath = await mkdtemp(join(tmpdir(), "portable-devshell-cli-real-workspace-"));
-    const workerBinaryPath = resolve(fileURLToPath(new URL("../../../../", import.meta.url)), "target/debug/devshell-worker");
     const stdout = createBuffer();
     const stderr = createBuffer();
-    const workerEnvName = hostWorkerEnvName();
+    const workerEnvName = workerPathEnvironmentName();
     const previousWorkerPath = process.env[workerEnvName];
+    const restoreWindowsIdentity = installUniqueWindowsTestIdentity("cli-real-worker");
     let controlStopped = false;
     const cli = new CliMain({
         homeDirectory,
@@ -82,23 +84,22 @@ async function runRealWorkerSmoke(): Promise<void> {
         xdgRuntimeDir
     });
 
-    process.env[workerEnvName] = workerBinaryPath;
-
-    await mkdir(join(homeDirectory, ".devshell", "control"), { recursive: true });
-    await mkdir(join(homeDirectory, ".devshell", "control", "instances"), { recursive: true });
-    await writeFile(
-        join(homeDirectory, ".devshell", "control", "config.toml"),
-        createRealConfig(),
-        "utf8"
-    );
-    await writeFile(
-        join(homeDirectory, ".devshell", "control", "instances", "aromatic-pc.toml"),
-        createLocalInstanceConfig("aromatic-pc", workspacePath),
-        "utf8"
-    );
+    process.env[workerEnvName] = workerBinaryPath!;
     let controlPid: number | undefined;
 
     try {
+        await mkdir(join(homeDirectory, ".devshell", "control"), { recursive: true });
+        await mkdir(join(homeDirectory, ".devshell", "control", "instances"), { recursive: true });
+        await writeFile(
+            join(homeDirectory, ".devshell", "control", "config.toml"),
+            createRealConfig(),
+            "utf8"
+        );
+        await writeFile(
+            join(homeDirectory, ".devshell", "control", "instances", "aromatic-pc.toml"),
+            createLocalInstanceConfig("aromatic-pc", workspacePath),
+            "utf8"
+        );
         assert.equal(await cli.run(["start"]), 0);
         assert.match(stdout.flush(), /control: running/u);
         controlPid = await readControlPid(homeDirectory);
@@ -149,6 +150,7 @@ async function runRealWorkerSmoke(): Promise<void> {
         }
         await ensureProcessExit(controlPid).catch(() => undefined);
         restoreEnv(workerEnvName, previousWorkerPath);
+        restoreWindowsIdentity();
         await rm(homeDirectory, { force: true, recursive: true });
         await rm(xdgRuntimeDir, { force: true, recursive: true });
         await rm(workspacePath, { force: true, recursive: true });
@@ -159,11 +161,11 @@ async function runInteractiveCreateFlow(t: { after(callback: () => Promise<void>
     const homeDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-cli-create-home-"));
     const xdgRuntimeDir = await mkdtemp(join(tmpdir(), "portable-devshell-cli-create-runtime-"));
     const workspacePath = await mkdtemp(join(tmpdir(), "portable-devshell-cli-create-workspace-"));
-    const workerBinaryPath = resolve(fileURLToPath(new URL("../../../../", import.meta.url)), "target/debug/devshell-worker");
     const stdout = createBuffer();
     const stderr = createBuffer();
-    const workerEnvName = hostWorkerEnvName();
+    const workerEnvName = workerPathEnvironmentName();
     const previousWorkerPath = process.env[workerEnvName];
+    const restoreWindowsIdentity = installUniqueWindowsTestIdentity("cli-create");
     let controlStopped = false;
     const cli = new CliMain({
         homeDirectory,
@@ -183,11 +185,6 @@ async function runInteractiveCreateFlow(t: { after(callback: () => Promise<void>
         xdgRuntimeDir
     });
 
-    process.env[workerEnvName] = workerBinaryPath;
-
-    await mkdir(join(homeDirectory, ".devshell", "control"), { recursive: true });
-    await mkdir(join(homeDirectory, ".devshell", "control", "instances"), { recursive: true });
-    await writeFile(join(homeDirectory, ".devshell", "control", "config.toml"), createCreateConfig(), "utf8");
     let controlPid: number | undefined = undefined;
 
     t.after(async () => {
@@ -197,10 +194,16 @@ async function runInteractiveCreateFlow(t: { after(callback: () => Promise<void>
         }
         await ensureProcessExit(controlPid).catch(() => undefined);
         restoreEnv(workerEnvName, previousWorkerPath);
+        restoreWindowsIdentity();
         await rm(homeDirectory, { force: true, recursive: true });
         await rm(xdgRuntimeDir, { force: true, recursive: true });
         await rm(workspacePath, { force: true, recursive: true });
     });
+
+    process.env[workerEnvName] = workerBinaryPath!;
+    await mkdir(join(homeDirectory, ".devshell", "control"), { recursive: true });
+    await mkdir(join(homeDirectory, ".devshell", "control", "instances"), { recursive: true });
+    await writeFile(join(homeDirectory, ".devshell", "control", "config.toml"), createCreateConfig(), "utf8");
 
     assert.equal(await cli.run(["start"]), 0);
     assert.match(stdout.flush(), /control: running/u);
@@ -240,10 +243,10 @@ test("CliInstance integration", async (t) => {
     await t.test("CliMain covers Task 11 instance commands through control rpc", async (subtest) => {
         await runInstanceCommandsThroughControlRpc(subtest);
     });
-    await t.test("CliMain runs Task 12 real worker smoke through control lifecycle", async () => {
+    await t.test("CliMain runs Task 12 real worker smoke through control lifecycle", realWorkerTestOptions(workerBinaryPath), async () => {
         await runRealWorkerSmoke();
     });
-    await t.test("CliMain creates an instance interactively and uses it through the real control lifecycle", async (subtest) => {
+    await t.test("CliMain creates an instance interactively and uses it through the real control lifecycle", realWorkerTestOptions(workerBinaryPath), async (subtest) => {
         await runInteractiveCreateFlow(subtest);
     });
 });
@@ -482,16 +485,13 @@ async function closeServer(server: ReturnType<typeof createServer>): Promise<voi
 
 async function waitForControlShutdown(xdgRuntimeDir: string, timeoutMs = 3_000): Promise<void> {
     const origin = captureStack(`waitForControlShutdown(${xdgRuntimeDir})`);
-    const socketPath = join(xdgRuntimeDir, "portable-devshell", "control.sock");
+    const socketPath = resolveControlSocketPath(xdgRuntimeDir);
     const deadline = Date.now() + timeoutMs;
 
     while (Date.now() < deadline) {
-        try {
-            await access(socketPath);
-        } catch {
+        if (!await ipcEndpointAcceptsConnections(socketPath)) {
             return;
         }
-
         await new Promise((resolve) => setTimeout(resolve, 20));
     }
 
@@ -559,30 +559,4 @@ function restoreEnv(name: keyof NodeJS.ProcessEnv, value: string | undefined): v
     }
 
     process.env[name] = value;
-}
-
-function hostWorkerEnvName(): keyof NodeJS.ProcessEnv {
-    return `PORTABLE_DEVSHELL_WORKER_${normalizePlatform(process.platform)}_${normalizeArch(process.arch)}_PATH`;
-}
-
-function normalizePlatform(platform: NodeJS.Platform): string {
-    switch (platform) {
-        case "linux":
-            return "LINUX";
-        case "darwin":
-            return "DARWIN";
-        default:
-            throw new Error(`unsupported platform in test: ${platform}`);
-    }
-}
-
-function normalizeArch(arch: string): string {
-    switch (arch) {
-        case "x64":
-            return "X64";
-        case "arm64":
-            return "ARM64";
-        default:
-            throw new Error(`unsupported architecture in test: ${arch}`);
-    }
 }

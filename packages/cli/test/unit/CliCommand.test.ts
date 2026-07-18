@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { Readable } from "node:stream";
 import test from "node:test";
 
-import { CliMain } from "../../dist/CliMain.js";
+import { CliMain } from "../../src/CliMain.ts";
 
 test("CliMain handles control lifecycle commands and exit code mapping", async () => {
     const stdout = createBuffer();

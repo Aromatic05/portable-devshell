@@ -9,25 +9,25 @@ import {
     readDefaultInstance,
     readShareId,
     readTransferId
-} from "../../dist/control/artifact/route/ArtifactRouteInput.js";
+} from "../../src/control/artifact/route/ArtifactRouteInput.ts";
 import {
     readMcpApprovalDecision,
     readMcpApprovalId
-} from "../../dist/control/mcp/McpRouteInput.js";
-import { readReverseInstanceName } from "../../dist/control/reverse/route/ReverseRouteInput.js";
+} from "../../src/control/mcp/McpRouteInput.ts";
+import { readReverseInstanceName } from "../../src/control/reverse/route/ReverseRouteInput.ts";
 import {
     limitRuntimeLogResponse,
     readRuntimeLogQuery,
     readRuntimeSubscriptionFromSeq,
     readRuntimeWorkspacePath
-} from "../../dist/instance/runtime/RuntimeRouteInput.js";
-import { readTodoSubscriptionFromSeq } from "../../dist/instance/todo/TodoRouteInput.js";
+} from "../../src/instance/runtime/RuntimeRouteInput.ts";
+import { readTodoSubscriptionFromSeq } from "../../src/instance/todo/TodoRouteInput.ts";
 import {
     readToolApprovalDecision,
     readToolApprovalId,
     readToolCall,
     readToolCallQuery
-} from "../../dist/instance/tool/ToolRouteInput.js";
+} from "../../src/instance/tool/ToolRouteInput.ts";
 
 test("artifact route inputs preserve the two supported source forms", () => {
     assert.deepEqual(

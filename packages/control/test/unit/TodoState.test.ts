@@ -4,8 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { TodoState } from "../../dist/instance/todo/TodoState.js";
-import { TodoStore } from "../../dist/instance/todo/TodoStore.js";
+import { TodoState } from "../../src/instance/todo/TodoState.ts";
+import { TodoStore } from "../../src/instance/todo/TodoStore.ts";
 
 test("TodoState owns validation, transitions, summaries, and associations", () => {
     const state = new TodoState("aromatic-pc", {

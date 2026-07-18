@@ -3,9 +3,9 @@ import test from "node:test";
 
 import type { PrefixRouteContext } from "@portable-devshell/shared";
 
-import type { ArtifactService } from "../../dist/control/artifact/ArtifactService.js";
-import { InstanceRegistry } from "../../dist/control/instance/registry/InstanceRegistry.js";
-import { ControlRouteComposition } from "../../dist/composition/ControlRouteComposition.js";
+import type { ArtifactService } from "../../src/control/artifact/ArtifactService.ts";
+import { InstanceRegistry } from "../../src/control/instance/registry/InstanceRegistry.ts";
+import { ControlRouteComposition } from "../../src/composition/ControlRouteComposition.ts";
 
 
 

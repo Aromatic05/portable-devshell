@@ -1,3 +1,5 @@
+#![cfg(unix)]
+
 mod support;
 
 use std::process::Command;
@@ -120,10 +122,12 @@ fn wait_for_terminal(env: &TestEnv, instance: &str, task: &str, ctx_id: &str) ->
 }
 
 #[test]
+#[ignore = "requires tmux on PATH"]
 fn tmux_catalog_exposes_task_scoped_tools() {
-    if !tmux_available() {
-        return;
-    }
+    assert!(
+        tmux_available(),
+        "tmux is required to run this ignored contract test"
+    );
     let env = TestEnv::new();
     let instance = "aromatic-tmux-catalog";
     start(&env, instance);
@@ -207,10 +211,12 @@ fn tmux_catalog_exposes_task_scoped_tools() {
 }
 
 #[test]
+#[ignore = "requires tmux on PATH"]
 fn tmux_zero_time_ms_returns_immediate_observations() {
-    if !tmux_available() {
-        return;
-    }
+    assert!(
+        tmux_available(),
+        "tmux is required to run this ignored contract test"
+    );
     let env = TestEnv::new();
     let instance = "aromatic-tmux-zero-time";
     start(&env, instance);
@@ -251,10 +257,12 @@ fn tmux_zero_time_ms_returns_immediate_observations() {
 }
 
 #[test]
+#[ignore = "requires tmux on PATH"]
 fn tmux_run_returns_a_task_and_preserves_clean_first_output() {
-    if !tmux_available() {
-        return;
-    }
+    assert!(
+        tmux_available(),
+        "tmux is required to run this ignored contract test"
+    );
     let env = TestEnv::new();
     let instance = "aromatic-tmux-run";
     start(&env, instance);
@@ -287,10 +295,12 @@ fn tmux_run_returns_a_task_and_preserves_clean_first_output() {
 }
 
 #[test]
+#[ignore = "requires tmux on PATH"]
 fn tmux_task_lock_controls_input_read_and_close_but_not_inspect() {
-    if !tmux_available() {
-        return;
-    }
+    assert!(
+        tmux_available(),
+        "tmux is required to run this ignored contract test"
+    );
     let env = TestEnv::new();
     let instance = "aromatic-tmux-lock";
     start(&env, instance);
@@ -382,10 +392,12 @@ fn tmux_task_lock_controls_input_read_and_close_but_not_inspect() {
 }
 
 #[test]
+#[ignore = "requires tmux on PATH"]
 fn tmux_run_without_pane_reuses_idle_then_creates_auto_pane() {
-    if !tmux_available() {
-        return;
-    }
+    assert!(
+        tmux_available(),
+        "tmux is required to run this ignored contract test"
+    );
     let env = TestEnv::new();
     let instance = "aromatic-tmux-auto";
     start(&env, instance);
@@ -463,10 +475,12 @@ fn tmux_run_without_pane_reuses_idle_then_creates_auto_pane() {
 }
 
 #[test]
+#[ignore = "requires tmux on PATH"]
 fn concurrent_duplicate_run_requests_share_one_in_flight_execution() {
-    if !tmux_available() {
-        return;
-    }
+    assert!(
+        tmux_available(),
+        "tmux is required to run this ignored contract test"
+    );
     let env = TestEnv::new();
     let instance = "aromatic-tmux-replay-race";
     start(&env, instance);
@@ -525,10 +539,12 @@ fn concurrent_duplicate_run_requests_share_one_in_flight_execution() {
 }
 
 #[test]
+#[ignore = "requires tmux on PATH"]
 fn block_wait_does_not_prevent_same_context_interrupt() {
-    if !tmux_available() {
-        return;
-    }
+    assert!(
+        tmux_available(),
+        "tmux is required to run this ignored contract test"
+    );
     let env = TestEnv::new();
     let instance = "aromatic-tmux-concurrent";
     start(&env, instance);
@@ -582,12 +598,16 @@ fn block_wait_does_not_prevent_same_context_interrupt() {
 }
 
 #[test]
+#[ignore = "requires tmux on PATH"]
 fn bash_shell_preserves_task_identity_through_exit() {
-    if !tmux_available()
-        || !Command::new("bash")
-            .arg("--version")
-            .output()
-            .is_ok_and(|output| output.status.success())
+    assert!(
+        tmux_available(),
+        "tmux is required to run this ignored contract test"
+    );
+    if !Command::new("bash")
+        .arg("--version")
+        .output()
+        .is_ok_and(|output| output.status.success())
     {
         return;
     }
@@ -627,6 +647,7 @@ fn bash_shell_preserves_task_identity_through_exit() {
 }
 
 #[test]
+#[ignore = "requires tmux on PATH"]
 fn fish_shell_preserves_task_identity_through_exit() {
     let fish = Command::new("sh")
         .args(["-c", "command -v fish"])
@@ -636,7 +657,11 @@ fn fish_shell_preserves_task_identity_through_exit() {
         .and_then(|output| String::from_utf8(output.stdout).ok())
         .map(|path| path.trim().to_string())
         .filter(|path| !path.is_empty());
-    let Some(fish) = fish.filter(|_| tmux_available()) else {
+    assert!(
+        tmux_available(),
+        "tmux is required to run this ignored contract test"
+    );
+    let Some(fish) = fish else {
         return;
     };
     let env = TestEnv::new();
@@ -682,10 +707,12 @@ fn fish_shell_preserves_task_identity_through_exit() {
 }
 
 #[test]
+#[ignore = "requires tmux on PATH"]
 fn transport_session_close_does_not_invalidate_context_owned_task() {
-    if !tmux_available() {
-        return;
-    }
+    assert!(
+        tmux_available(),
+        "tmux is required to run this ignored contract test"
+    );
     let env = TestEnv::new();
     let instance = "aromatic-tmux-context-reconnect";
     start(&env, instance);
@@ -766,10 +793,12 @@ fn transport_session_close_does_not_invalidate_context_owned_task() {
 }
 
 #[test]
+#[ignore = "requires tmux on PATH"]
 fn worker_restart_adopts_existing_panes() {
-    if !tmux_available() {
-        return;
-    }
+    assert!(
+        tmux_available(),
+        "tmux is required to run this ignored contract test"
+    );
     let env = TestEnv::new();
     let instance = "aromatic-tmux-adopt";
     start(&env, instance);

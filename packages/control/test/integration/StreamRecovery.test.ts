@@ -12,13 +12,14 @@ import {
     type JsonValue
 } from "@portable-devshell/shared";
 
-import { ControlRouteComposition } from "../../dist/composition/ControlRouteComposition.js";
-import { ControlSocketServer } from "../../dist/server/socket/ControlSocketServer.js";
-import { InstanceRegistry } from "../../dist/control/instance/registry/InstanceRegistry.js";
+import { ControlRouteComposition } from "../../src/composition/ControlRouteComposition.ts";
+import { ControlSocketServer } from "../../src/server/socket/ControlSocketServer.ts";
+import { InstanceRegistry } from "../../src/control/instance/registry/InstanceRegistry.ts";
+import { createTestIpcPath } from "../../../../test/TestPlatformSupport.ts";
 
 test("stream gap is non-terminal and the dedicated subscription remains usable", async (t) => {
     const directory = await mkdtemp(join(tmpdir(), "portable-devshell-stream-recovery-"));
-    const socketPath = join(directory, "control.sock");
+    const socketPath = createTestIpcPath("stream-recovery", directory);
     const worker = new FakeWorker("alpha");
     worker.emit("instance.started", { workspacePath: "/tmp/ws" });
     const registry = new InstanceRegistry([
@@ -85,7 +86,7 @@ test("stream gap is non-terminal and the dedicated subscription remains usable",
 
 test("an initial unavailable sequence returns a normal stream.gap error reply", async (t) => {
     const directory = await mkdtemp(join(tmpdir(), "portable-devshell-stream-initial-gap-"));
-    const socketPath = join(directory, "control.sock");
+    const socketPath = createTestIpcPath("stream-recovery", directory);
     const worker = new FakeWorker("alpha");
     worker.emit("instance.started", {});
     worker.emit("toolCall.completed", {});

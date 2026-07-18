@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { InstanceRegistry, createDefaultControlConfig } from "../../dist/testing.js";
-import { InstanceCreateCoordinator } from "../../dist/control/instance/create/InstanceCreateCoordinator.js";
+import { InstanceRegistry, createDefaultControlConfig } from "../../src/testing.ts";
+import { InstanceCreateCoordinator } from "../../src/control/instance/create/InstanceCreateCoordinator.ts";
 import { normalizeConfigInstanceDraft } from "@portable-devshell/shared";
 
 test("instance create schema exposes supported container modes without running container attach", () => {

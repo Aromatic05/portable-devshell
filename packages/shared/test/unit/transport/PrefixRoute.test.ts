@@ -19,6 +19,7 @@ import {
     type PrefixRouteSnapshot,
     type PrefixRouteStream
 } from "@portable-devshell/shared";
+import { createTestIpcPath } from "../../../../../test/TestPlatformSupport.ts";
 
 class EventQueue {
     readonly #events: PrefixRouteIncoming[] = [];
@@ -48,7 +49,7 @@ interface RoutePair {
 
 async function pair(snapshot: () => PrefixRouteSnapshot): Promise<RoutePair> {
     const directory = await mkdtemp(join(tmpdir(), "portable-devshell-prefix-route-"));
-    const socketPath = join(directory, "route.sock");
+    const socketPath = createTestIpcPath("prefix-route", directory);
     const listener = createServer();
     await new Promise<void>((resolve, reject) => {
         listener.once("error", reject);

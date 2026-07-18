@@ -3,12 +3,12 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { renderCliError } from "../../dist/render/CliRenderError.js";
-import { renderControlStatus } from "../../dist/render/control/CliRenderControlStatus.js";
-import { renderInstanceList } from "../../dist/render/instance/CliRenderInstanceList.js";
-import { renderInstanceLogs } from "../../dist/render/instance/CliRenderInstanceLogs.js";
-import { renderInstanceSnapshot } from "../../dist/render/instance/CliRenderInstanceSnapshot.js";
-import { renderToolResult } from "../../dist/render/tool/CliRenderToolResult.js";
+import { renderCliError } from "../../src/render/CliRenderError.ts";
+import { renderControlStatus } from "../../src/render/control/CliRenderControlStatus.ts";
+import { renderInstanceList } from "../../src/render/instance/CliRenderInstanceList.ts";
+import { renderInstanceLogs } from "../../src/render/instance/CliRenderInstanceLogs.ts";
+import { renderInstanceSnapshot } from "../../src/render/instance/CliRenderInstanceSnapshot.ts";
+import { renderToolResult } from "../../src/render/tool/CliRenderToolResult.ts";
 
 test("renderers format control, instance, and tool outputs", async () => {
     const statusFixturePath = fileURLToPath(new URL("../fixtures/cli-status-output.txt", import.meta.url));

@@ -1,0 +1,31 @@
+{
+    "extends": "./tsconfig.base.json",
+    "compilerOptions": {
+        "allowImportingTsExtensions": true,
+        "composite": false,
+        "declaration": false,
+        "declarationMap": false,
+        "jsx": "react-jsx",
+        "noEmit": true,
+        "paths": {
+            "@portable-devshell/shared": ["./packages/shared/src/index.ts"],
+            "@portable-devshell/shared/transport/frame": ["./packages/shared/src/transport/Frame.ts"],
+            "@portable-devshell/core": ["./packages/core/src/index.ts"],
+            "@portable-devshell/core/testing": ["./packages/core/src/testing.ts"],
+            "@portable-devshell/control": ["./packages/control/src/index.ts"],
+            "@portable-devshell/control/testing": ["./packages/control/src/testing.ts"],
+            "@portable-devshell/mcp": ["./packages/mcp/src/index.ts"],
+            "@portable-devshell/mcp/testing": ["./packages/mcp/src/testing.ts"],
+            "@portable-devshell/cli": ["./packages/cli/src/index.ts"],
+            "@portable-devshell/tui": ["./packages/tui/src/index.ts"],
+            "@portable-devshell/tui/testing": ["./packages/tui/src/testing.ts"]
+        },
+        "rootDir": "."
+    },
+    "include": [
+        "test/**/*.ts",
+        "packages/*/src/**/*.ts",
+        "packages/*/src/**/*.tsx",
+        "packages/*/test/**/*.ts"
+    ]
+}

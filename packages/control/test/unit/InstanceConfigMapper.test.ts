@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { InstanceFactory } from "../../dist/testing.js";
+import { InstanceFactory } from "../../src/testing.ts";
 
 test("instance config mapper passes effective security mode, worker env, and approval policy into runtime config", () => {
     let capturedConfig: Record<string, unknown> | undefined;

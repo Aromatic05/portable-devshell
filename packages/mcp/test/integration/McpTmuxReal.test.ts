@@ -9,10 +9,13 @@ import { fileURLToPath } from "node:url";
 import { WorkerTransportDriverLocal, WorkerBinary, WorkerInstanceFactory } from "@portable-devshell/core/testing";
 import { McpHost } from "@portable-devshell/mcp/testing";
 import { asInstanceName, asWorkspacePath } from "@portable-devshell/shared";
+import { resolveTestWorkerBinary, tmuxTestOptions } from "../../../../test/TestPlatformSupport.ts";
+
+const workerBinaryPath = resolveTestWorkerBinary();
 
 type JsonValue = boolean | number | null | string | JsonValue[] | { [key: string]: JsonValue };
 
-test("MCP tmux supports a complete interactive lifecycle when JSON-RPC request ids are reused", async () => {
+test("MCP tmux supports a complete interactive lifecycle when JSON-RPC request ids are reused", tmuxTestOptions(workerBinaryPath), async () => {
     await withTmuxHarness("aromatic-mcp-tmux-lifecycle", async ({ callTool, createContext, listTools }) => {
         const tools = await listTools();
         for (const toolName of ["tmux_run", "tmux_input", "tmux_read"]) {
@@ -63,7 +66,7 @@ test("MCP tmux supports a complete interactive lifecycle when JSON-RPC request i
     });
 });
 
-test("MCP tmux rejects foreign control while the owner can recover and close with a reused request id", async () => {
+test("MCP tmux rejects foreign control while the owner can recover and close with a reused request id", tmuxTestOptions(workerBinaryPath), async () => {
     await withTmuxHarness("aromatic-mcp-tmux-ownership", async ({ callTool, createContext }) => {
         const ownerCtxId = await createContext();
         const foreignCtxId = await createContext();
@@ -141,7 +144,6 @@ async function withTmuxHarness(instanceName: string, body: (harness: TmuxHarness
     const homeDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-mcp-tmux-home-"));
     const runtimeDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-mcp-tmux-runtime-"));
     const workspacePath = await mkdtemp(join(tmpdir(), "portable-devshell-mcp-tmux-workspace-"));
-    const workerBinaryPath = resolve(fileURLToPath(new URL("../../../../", import.meta.url)), "target/debug/devshell-worker");
     const instance = new WorkerInstanceFactory().create({
         defaultWorkspace: asWorkspacePath(workspacePath),
         env: {
@@ -153,7 +155,7 @@ async function withTmuxHarness(instanceName: string, body: (harness: TmuxHarness
         name: asInstanceName(instanceName),
         transport: new WorkerTransportDriverLocal({
             spawnFunction: nodeSpawn,
-            workerBinary: new WorkerBinary(workerBinaryPath)
+            workerBinary: new WorkerBinary(workerBinaryPath!)
         })
     });
     const host = new McpHost({

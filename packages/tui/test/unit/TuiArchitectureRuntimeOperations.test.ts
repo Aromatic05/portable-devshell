@@ -3,7 +3,7 @@ import test from "node:test";
 
 import type { InstanceCreateDraft, JsonValue } from "@portable-devshell/shared";
 
-import { TuiAppStore, TuiRuntimeOperations } from "../../dist/testing.js";
+import { TuiAppStore, TuiRuntimeOperations } from "../../src/testing.ts";
 
 function createHarness(options: { failStart?: boolean } = {}) {
     const store = new TuiAppStore();

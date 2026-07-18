@@ -74,7 +74,7 @@ test("host source snapshots arbitrary paths when security is disabled and persis
     await reopenedEndpoint.closeArtifactPayload(opened.payloadId);
 });
 
-test("host source workspace mode permits only a local provider workspace and rejects symlinks", async (t) => {
+test("host source workspace mode permits only a local provider workspace and rejects symlinks", { skip: process.platform === "win32" ? "requires Unix symlink semantics" : false }, async (t) => {
     const { bridge, root } = await fixture(t);
     const workspace = join(root, "workspace");
     const outside = join(root, "outside.txt");
@@ -150,7 +150,9 @@ test("host directory payload round-trips through tar.zst and restores executable
     await mkdir(join(source, "assets"), { recursive: true });
     await writeFile(join(source, "index.html"), "index");
     await writeFile(join(source, "assets", "app.sh"), "#!/bin/sh\necho app\n");
-    await chmod(join(source, "assets", "app.sh"), 0o755);
+    if (process.platform !== "win32") {
+        await chmod(join(source, "assets", "app.sh"), 0o755);
+    }
     const endpoint = bridge.endpointFor(context());
     const opened = await endpoint.openArtifactPayload({ expiresAtMs: Date.now() + 60_000, path: source });
     assert.equal(opened.descriptor.type, "directoryArchive");
@@ -168,7 +170,9 @@ test("host directory payload round-trips through tar.zst and restores executable
     await endpoint.finishArtifactReceive(receive.receiveId);
 
     assert.equal(await readFile(join(homeDirectory, "Download", "app", "index.html"), "utf8"), "index");
-    assert.equal((await stat(join(homeDirectory, "Download", "app", "assets", "app.sh"))).mode & 0o777, 0o755);
+    if (process.platform !== "win32") {
+        assert.equal((await stat(join(homeDirectory, "Download", "app", "assets", "app.sh"))).mode & 0o777, 0o755);
+    }
 });
 
 test("artifact service routes hidden host source and target with the real authority instance", async (t) => {

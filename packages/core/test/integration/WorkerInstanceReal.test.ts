@@ -2,10 +2,9 @@ import assert from "node:assert/strict";
 import { spawn as nodeSpawn } from "node:child_process";
 import { mkdtemp, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import test from "node:test";
-import { fileURLToPath } from "node:url";
 
 import {
     asInstanceName,
@@ -23,15 +22,17 @@ import {
     type WorkerCommandTransport,
     type WorkerRpcResponseEnvelope
 } from "@portable-devshell/core/testing";
+import { realWorkerTestOptions, resolveTestWorkerBinary } from "../../../../test/TestPlatformSupport.ts";
+
+const workerBinaryPath = resolveTestWorkerBinary();
 
 const cliToolCallContext = { source: "cli" } as const;
 
-test("WorkerInstance completes lifecycle against frozen devshell-worker", async (t) => {
+test("WorkerInstance completes lifecycle against frozen devshell-worker", realWorkerTestOptions(workerBinaryPath), async (t) => {
     const workspacePath = await mkdtemp(join(tmpdir(), "portable-devshell-instance-"));
     const homeDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-instance-home-"));
     const runtimeDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-instance-runtime-"));
     const instanceName = asInstanceName(`task-6-${process.pid}`);
-    const repoRoot = fileURLToPath(new URL("../../../../", import.meta.url));
     const factory = new WorkerInstanceFactory();
     const instance = factory.create({
         defaultWorkspace: asWorkspacePath(workspacePath),
@@ -39,7 +40,7 @@ test("WorkerInstance completes lifecycle against frozen devshell-worker", async 
         homeDirectory,
         name: instanceName,
         transport: new WorkerTransportDriverLocal({
-            workerBinary: new WorkerBinary(resolve(repoRoot, "target/debug/devshell-worker")),
+            workerBinary: new WorkerBinary(workerBinaryPath!),
             spawnFunction: nodeSpawn
         })
     });

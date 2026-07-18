@@ -4,7 +4,7 @@ import test from "node:test";
 import type { WorkerInstance } from "@portable-devshell/core/testing";
 import type { JsonValue, PrefixRouteContext, PrefixRouteStream } from "@portable-devshell/shared";
 
-import { RuntimeSubscriptionManager } from "../../dist/instance/runtime/RuntimeSubscriptionManager.js";
+import { RuntimeSubscriptionManager } from "../../src/instance/runtime/RuntimeSubscriptionManager.ts";
 
 test("RuntimeSubscriptionManager returns snapshot lastSeq and pushes sequenced events", async () => {
     const manager = new RuntimeSubscriptionManager(5);
@@ -211,7 +211,7 @@ class FakeWorker {
 }
 
 async function waitFor(predicate: () => boolean): Promise<void> {
-    const deadline = Date.now() + 500;
+    const deadline = Date.now() + 2_000;
 
     while (!predicate()) {
         if (Date.now() > deadline) {

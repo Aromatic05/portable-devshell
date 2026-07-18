@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { McpOAuthApprovalService } from "../../dist/auth/oauth/McpOAuthApprovalService.js";
+import { McpOAuthApprovalService } from "../../src/auth/oauth/McpOAuthApprovalService.ts";
 
 test("OAuth approvals persist registration and authorization decisions", async () => {
     const storageDir = await mkdtemp(join(tmpdir(), "portable-devshell-oauth-approvals-"));

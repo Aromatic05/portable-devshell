@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { ReverseCredentialStore, reverseRoute } from "../../dist/testing.js";
+import { ReverseCredentialStore, reverseRoute } from "../../src/testing.ts";
 
 test("reverse device code is single-use and device token is stored in user-only files", async () => {
     const home = await mkdtemp(join(tmpdir(), "devshell-reverse-"));
@@ -22,7 +22,9 @@ test("reverse device code is single-use and device token is stored in user-only 
     );
 
     const record = await stat(join(home, ".devshell", "control", "reverse", "remote-test.json"));
-    assert.equal(record.mode & 0o777, 0o600);
+    if (process.platform !== "win32") {
+        assert.equal(record.mode & 0o777, 0o600);
+    }
 });
 
 test("issuing a replacement code keeps the old token valid until the code is consumed", async () => {

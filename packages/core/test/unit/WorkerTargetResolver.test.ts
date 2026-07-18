@@ -128,10 +128,11 @@ test("WorkerAssetResolver allows host target to use dev fallback", async (t) => 
     t.after(fixture.cleanup);
 
     const hostTarget = probeLocalWorkerTarget();
+    const hostBinaryName = hostTarget.os === "windows" ? "devshell-worker.exe" : "devshell-worker";
     const fallbackPath =
         hostTarget.os === "linux"
-            ? join(fixture.root, "target", hostTarget.rustTarget, "debug", "devshell-worker")
-            : join(fixture.root, "target", "debug", "devshell-worker");
+            ? join(fixture.root, "target", hostTarget.rustTarget, "debug", hostBinaryName)
+            : join(fixture.root, "target", "debug", hostBinaryName);
     await writeExecutable(fallbackPath, "#!/bin/sh\necho host\n");
 
     const asset = await fixture.resolver.resolve(hostTarget);
@@ -190,7 +191,12 @@ test("WorkerAssetResolver does not use host dev fallback for non-host target", a
     assert.notEqual(nonHostTarget, undefined);
     process.env.PORTABLE_DEVSHELL_WORKER_RELEASE_TAG = "v0.2.2";
 
-    await writeExecutable(join(fixture.root, "src", "worker", "target", "debug", "devshell-worker"), "#!/bin/sh\necho host\n");
+    const hostBinaryName = hostTarget.os === "windows" ? "devshell-worker.exe" : "devshell-worker";
+    const hostFallbackPaths = [
+        join(fixture.root, "target", hostTarget.rustTarget, "debug", hostBinaryName),
+        ...(hostTarget.os === "linux" ? [] : [join(fixture.root, "target", "debug", hostBinaryName)])
+    ];
+    await writeExecutable(hostFallbackPaths[0]!, "#!/bin/sh\necho host\n");
     globalThis.fetch = async () => new Response("missing", { status: 404 });
 
     await assert.rejects(fixture.resolver.resolve(nonHostTarget!), (error: unknown) => {
@@ -199,7 +205,10 @@ test("WorkerAssetResolver does not use host dev fallback for non-host target", a
         const details = (error as { details?: Record<string, unknown> }).details;
         assert.equal(details?.targetKey, nonHostTarget?.key);
         assert.equal(Array.isArray(details?.searchedPaths), true);
-        assert.equal((details?.searchedPaths as string[]).some((entry) => entry.includes("/target/debug/devshell-worker")), false);
+        const searchedPaths = details?.searchedPaths as string[];
+        for (const hostFallbackPath of hostFallbackPaths) {
+            assert.equal(searchedPaths.includes(hostFallbackPath), false);
+        }
         return true;
     });
 });
@@ -292,7 +301,11 @@ test("WorkerAssetResolver uses an installed target worker before release lookup"
     t.after(fixture.cleanup);
 
     const target = supportedWorkerTargets.find((candidate) => candidate.key !== probeLocalWorkerTarget().key) ?? probeLocalWorkerTarget();
-    const installedPath = join(fixture.devshellHome, "bin", `devshell-worker-${target.key}`);
+    const installedPath = join(
+        fixture.devshellHome,
+        "bin",
+        `devshell-worker-${target.key}${target.os === "windows" ? ".exe" : ""}`
+    );
     await writeExecutable(installedPath, "#!/bin/sh\necho installed\n");
 
     globalThis.fetch = async () => {

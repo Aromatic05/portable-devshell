@@ -10,8 +10,8 @@ import {
     sourceDescriptor,
     sourceTypeFromPayload,
     validateTransferStart
-} from "../../dist/control/artifact/ArtifactSource.js";
-import { ReverseCredentialService } from "../../dist/control/reverse/credential/ReverseCredentialService.js";
+} from "../../src/control/artifact/ArtifactSource.ts";
+import { ReverseCredentialService } from "../../src/control/reverse/credential/ReverseCredentialService.ts";
 
 test("artifact source helpers preserve handle and path variants", () => {
     assert.deepEqual(readSharePayloadSourceInput({ handle: "artifact:stdout:1" }), {

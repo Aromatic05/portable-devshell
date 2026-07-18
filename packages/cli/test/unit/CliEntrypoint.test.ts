@@ -5,7 +5,7 @@ import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import test from "node:test";
 
-import { isCliEntrypoint } from "../../dist/CliEntrypoint.js";
+import { isCliEntrypoint } from "../../src/CliEntrypoint.ts";
 
 test("isCliEntrypoint compares the module URL with the platform-native argv path", () => {
     const argvPath = process.argv[1] ?? process.execPath;

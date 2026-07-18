@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { ControlServer } from "../../dist/server/ControlServer.js";
+import { ControlServer } from "../../src/server/ControlServer.ts";
 
 test("concurrent restart then shutdown preserves lifecycle request order", async (t) => {
     const xdgRuntimeDir = await mkdtemp(join(tmpdir(), "portable-devshell-control-server-"));

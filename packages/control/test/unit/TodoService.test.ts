@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { TodoService } from "../../dist/instance/todo/TodoService.js";
+import { TodoService } from "../../src/instance/todo/TodoService.ts";
 
 test("TodoService creates, validates revisions, persists atomically, and emits derived summaries", async () => {
     const root = await mkdtemp(join(tmpdir(), "portable-devshell-todo-"));

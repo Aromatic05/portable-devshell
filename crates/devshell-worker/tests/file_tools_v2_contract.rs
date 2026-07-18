@@ -369,7 +369,7 @@ fn file_edit_static_preflight_prevents_partial_changes() {
     env.json_command(&["stop", "--instance", instance]);
 }
 
-#[cfg(unix)]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 #[test]
 fn file_edit_keeps_applied_operations_and_stops_after_runtime_failure() {
     let env = TestEnv::new();

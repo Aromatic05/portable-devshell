@@ -64,6 +64,7 @@ export class ControlDaemonLauncher {
     static spawnDetached(options: ControlDaemonLaunchOptions): ChildProcess {
         const spawnFunction = options.spawnFunction ?? spawn;
         const env: NodeJS.ProcessEnv = { ...process.env, ...options.env };
+        delete env.NODE_TEST_CONTEXT;
         if (options.homeDirectory !== undefined) {
             env.HOME = options.homeDirectory;
             if (process.platform === "win32") {
@@ -435,6 +436,8 @@ function collectNodeBootstrapArgs(execArgv: readonly string[]): string[] {
             args.push(current, execArgv[index + 1]!);
             index += 1;
         } else if (current.startsWith("--import=") || current.startsWith("--loader=")) {
+            args.push(current);
+        } else if (current === "--experimental-transform-types") {
             args.push(current);
         }
     }

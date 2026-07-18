@@ -5,7 +5,7 @@ import type {
     ArtifactShareInput,
     ArtifactTransferStartInput
 } from "@portable-devshell/shared";
-import { CliMain } from "../../dist/CliMain.js";
+import { CliMain } from "../../src/CliMain.ts";
 
 function createBuffer(): { flush(): string; write(chunk: string): void } {
     const chunks: string[] = [];

@@ -20,7 +20,7 @@
     ],
     "scripts": {
         "build": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && tsc -b --force",
-        "typecheck": "tsc --noEmit -p tsconfig.json",
-        "test": "pnpm run build && node --import ./test/RegisterWorkspacePackages.mjs --test test/integration/*.test.mjs test/unit/config/*.test.ts test/unit/runtime/*.test.ts test/unit/schema/*.test.ts test/unit/transport/*.test.ts"
+        "typecheck": "tsc --noEmit -p ../../tsconfig.typecheck.json",
+        "test": "node ../../test/RunPackageTests.mjs --loader ./test/RegisterWorkspacePackages.mjs \"test/integration/*.test.mjs\" \"test/unit/config/*.test.ts\" \"test/unit/runtime/*.test.ts\" \"test/unit/schema/*.test.ts\" \"test/unit/transport/*.test.ts\""
     }
 }

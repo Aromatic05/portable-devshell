@@ -6,7 +6,7 @@ import {
     InstanceRegistry,
     InstanceRegistryFactory,
     createDefaultControlConfig
-} from "../../dist/testing.js";
+} from "../../src/testing.ts";
 import { normalizeConfigInstanceDraft } from "@portable-devshell/shared";
 
 test("config editor validates drafts and accumulates patch apply summaries", async () => {

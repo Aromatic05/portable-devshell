@@ -55,27 +55,23 @@ impl ToolHandler for FileReadTool {
         let resolved_view = resolve_view(&input, &resolved.canonical, &metadata);
 
         let output = match resolved_view {
-            FileReadView::Outline => {
-                self.read_outline(
-                    &call,
-                    requested.raw,
-                    path,
-                    &resolved.canonical,
-                    &metadata,
-                    ordinal,
-                )?
-            }
-            FileReadView::Content | FileReadView::Auto => {
-                self.read_content(
-                    &call,
-                    requested.raw,
-                    path,
-                    &resolved.canonical,
-                    &metadata,
-                    &input,
-                    ordinal,
-                )?
-            }
+            FileReadView::Outline => self.read_outline(
+                &call,
+                requested.raw,
+                path,
+                &resolved.canonical,
+                &metadata,
+                ordinal,
+            )?,
+            FileReadView::Content | FileReadView::Auto => self.read_content(
+                &call,
+                requested.raw,
+                path,
+                &resolved.canonical,
+                &metadata,
+                &input,
+                ordinal,
+            )?,
         };
         crate::tools::contract::serialize(output)
     }
@@ -161,11 +157,8 @@ impl FileReadTool {
         } else {
             parse_selector(input.selector.as_deref(), metadata.total_lines)?
         };
-        let selected = TextMetadata::read_selected(
-            access_path,
-            &selector.ranges,
-            MAX_CONTENT_BYTES,
-        )?;
+        let selected =
+            TextMetadata::read_selected(access_path, &selector.ranges, MAX_CONTENT_BYTES)?;
         call.check_cancelled()?;
         if selected.metadata.revision != metadata.revision {
             return Err(ToolError::retryable(

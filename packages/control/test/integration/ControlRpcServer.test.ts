@@ -16,9 +16,10 @@ import {
     type Peer
 } from "@portable-devshell/shared";
 
-import { ControlRouteComposition } from "../../dist/composition/ControlRouteComposition.js";
-import { ControlSocketServer } from "../../dist/server/socket/ControlSocketServer.js";
-import { InstanceRegistry } from "../../dist/control/instance/registry/InstanceRegistry.js";
+import { ControlRouteComposition } from "../../src/composition/ControlRouteComposition.ts";
+import { ControlSocketServer } from "../../src/server/socket/ControlSocketServer.ts";
+import { InstanceRegistry } from "../../src/control/instance/registry/InstanceRegistry.ts";
+import { createTestIpcPath } from "../../../../test/TestPlatformSupport.ts";
 
 interface Harness {
     cleanup(): Promise<void>;
@@ -80,7 +81,7 @@ test("ControlSocketServer routes canonical control and instance operations over 
 
 test("ControlSocketServer rebuilds the immutable route snapshot after registry changes", async (t) => {
     const directory = await mkdtemp(join(tmpdir(), "portable-devshell-route-snapshot-"));
-    const socketPath = join(directory, "control.sock");
+    const socketPath = createTestIpcPath("control-rpc", directory);
     const registry = new InstanceRegistry([]);
     const routes = new ControlRouteComposition({ instances: registry, shutdown() {} });
     const server = new ControlSocketServer({ routes, socketPath });
@@ -129,7 +130,7 @@ test("interactive runtime receives stream input while the root handler is still 
 
 test("service.shutdown replies before invoking the shutdown action", async (t) => {
     const directory = await mkdtemp(join(tmpdir(), "portable-devshell-shutdown-reply-"));
-    const socketPath = join(directory, "control.sock");
+    const socketPath = createTestIpcPath("control-rpc", directory);
     let shutdownRequested = false;
     const routes = new ControlRouteComposition({
         instances: new InstanceRegistry([]),
@@ -152,7 +153,7 @@ test("service.shutdown replies before invoking the shutdown action", async (t) =
 
 async function createHarness(): Promise<Harness> {
     const directory = await mkdtemp(join(tmpdir(), "portable-devshell-control-socket-"));
-    const socketPath = join(directory, "control.sock");
+    const socketPath = createTestIpcPath("control-rpc", directory);
     const worker = new FakeWorker("alpha");
     const registry = new InstanceRegistry([createDescriptor(worker)]);
     const routes = new ControlRouteComposition({ instances: registry, shutdown() {} });

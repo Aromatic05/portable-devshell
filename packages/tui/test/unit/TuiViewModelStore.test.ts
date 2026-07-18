@@ -3,7 +3,7 @@ import test from "node:test";
 
 import { asInstanceName } from "@portable-devshell/shared";
 
-import { TuiRenderScheduler, TuiAppStore, selectMainScreenModel } from "../../dist/testing.js";
+import { TuiRenderScheduler, TuiAppStore, selectMainScreenModel } from "../../src/testing.ts";
 
 test("TuiAppStore keeps page, instance, and expanded boxes stable across events", () => {
     const store = new TuiAppStore({ maxRawEvents: 2 });

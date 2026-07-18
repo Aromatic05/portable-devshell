@@ -598,10 +598,7 @@ impl FileEditTool {
                 "Move File target already exists",
             ));
         }
-        atomic_move_no_replace(
-            source_resolved.target_path(),
-            target_resolved.target_path(),
-        )?;
+        atomic_move_no_replace(source_resolved.target_path(), target_resolved.target_path())?;
         self.state
             .context_snapshots
             .lock()

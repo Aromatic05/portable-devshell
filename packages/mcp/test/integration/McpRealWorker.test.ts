@@ -9,15 +9,17 @@ import { fileURLToPath } from "node:url";
 import { asInstanceName, asWorkspacePath, errorCodes } from "@portable-devshell/shared";
 import { WorkerTransportDriverLocal, WorkerBinary, WorkerInstanceFactory } from "@portable-devshell/core/testing";
 import { McpHost } from "@portable-devshell/mcp/testing";
+import { commandAvailable, realWorkerTestOptions, resolveTestWorkerBinary } from "../../../../test/TestPlatformSupport.ts";
 
 const fixturesDirectory = resolve(dirname(fileURLToPath(import.meta.url)), "../fixtures");
+const workerBinaryPath = resolveTestWorkerBinary();
+const tmuxAvailable = process.platform !== "win32" && commandAvailable("tmux", ["-V"]);
 type JsonValue = boolean | number | null | string | JsonValue[] | { [key: string]: JsonValue };
 
-test("MCP initialize tools/list and tools/call succeed against the frozen worker", async () => {
+test("MCP initialize tools/list and tools/call succeed against the frozen worker", realWorkerTestOptions(workerBinaryPath), async () => {
     const instanceName = "aromatic-pc-mcp-real";
     const homeDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-mcp-real-home-"));
     const workspacePath = await mkdtemp(join(tmpdir(), "portable-devshell-mcp-real-workspace-"));
-    const workerBinaryPath = resolve(fileURLToPath(new URL("../../../../", import.meta.url)), "target/debug/devshell-worker");
     const instance = new WorkerInstanceFactory().create({
         defaultWorkspace: asWorkspacePath(workspacePath),
         env: { ...process.env, HOME: homeDirectory },
@@ -25,7 +27,7 @@ test("MCP initialize tools/list and tools/call succeed against the frozen worker
         name: asInstanceName(instanceName),
         transport: new WorkerTransportDriverLocal({
             spawnFunction: nodeSpawn,
-            workerBinary: new WorkerBinary(workerBinaryPath)
+            workerBinary: new WorkerBinary(workerBinaryPath!)
         })
     });
     const host = new McpHost({
@@ -78,26 +80,30 @@ test("MCP initialize tools/list and tools/call succeed against the frozen worker
         const bash = tools.find((tool) => tool.name === "bash_run");
         const tmuxCreate = tools.find((tool) => tool.name === "tmux_create");
         assert.notEqual(bash, undefined);
-        assert.notEqual(tmuxCreate, undefined);
+        assert.equal(tmuxCreate === undefined, !tmuxAvailable);
         const workerBashSchema = instance.listTools().find((tool) => tool.name === "bash_run")?.inputSchema as Record<string, unknown>;
-        const workerTmuxSchema = instance.listTools().find((tool) => tool.name === "tmux_create")?.inputSchema as Record<string, unknown>;
+        const workerTmuxSchema = instance.listTools().find((tool) => tool.name === "tmux_create")?.inputSchema as Record<string, unknown> | undefined;
         assert.deepEqual(
             Object.fromEntries(Object.entries(bash?.inputSchema ?? {}).filter(([key]) => key !== "properties" && key !== "required")),
             Object.fromEntries(Object.entries(workerBashSchema).filter(([key]) => key !== "properties" && key !== "required"))
         );
-        assert.deepEqual(
-            Object.fromEntries(Object.entries(tmuxCreate?.inputSchema ?? {}).filter(([key]) => key !== "properties" && key !== "required")),
-            Object.fromEntries(Object.entries(workerTmuxSchema).filter(([key]) => key !== "properties" && key !== "required"))
-        );
+        if (tmuxCreate !== undefined && workerTmuxSchema !== undefined) {
+            assert.deepEqual(
+                Object.fromEntries(Object.entries(tmuxCreate.inputSchema).filter(([key]) => key !== "properties" && key !== "required")),
+                Object.fromEntries(Object.entries(workerTmuxSchema).filter(([key]) => key !== "properties" && key !== "required"))
+            );
+        }
         assert.deepEqual((bash?.inputSchema.properties as Record<string, unknown>).ctxId, {
             description: "Session context ID.",
             minLength: 1,
             type: "string"
         });
         assert.equal((bash?.inputSchema.required as string[]).includes("ctxId"), true);
-        assert.equal((tmuxCreate?.inputSchema.required as string[]).includes("ctxId"), true);
-        assert.deepEqual(
-            (tmuxCreate?.inputSchema.properties as Record<string, unknown>).name,
+        if (tmuxCreate !== undefined) {
+            assert.equal((tmuxCreate.inputSchema.required as string[]).includes("ctxId"), true);
+        }
+        if (tmuxCreate !== undefined) assert.deepEqual(
+            (tmuxCreate.inputSchema.properties as Record<string, unknown>).name,
             {
                 maxLength: 64,
                 minLength: 1,
@@ -135,11 +141,10 @@ test("MCP initialize tools/list and tools/call succeed against the frozen worker
     }
 });
 
-test("MCP tools/call waits for approval before invoking the worker tool", async () => {
+test("MCP tools/call waits for approval before invoking the worker tool", realWorkerTestOptions(workerBinaryPath), async () => {
     const instanceName = "aromatic-pc-mcp-approval";
     const homeDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-mcp-approval-home-"));
     const workspacePath = await mkdtemp(join(tmpdir(), "portable-devshell-mcp-approval-workspace-"));
-    const workerBinaryPath = resolve(fileURLToPath(new URL("../../../../", import.meta.url)), "target/debug/devshell-worker");
     const instance = new WorkerInstanceFactory().create({
         approvalPolicy: { mode: "ask" },
         defaultWorkspace: asWorkspacePath(workspacePath),
@@ -148,7 +153,7 @@ test("MCP tools/call waits for approval before invoking the worker tool", async 
         name: asInstanceName(instanceName),
         transport: new WorkerTransportDriverLocal({
             spawnFunction: nodeSpawn,
-            workerBinary: new WorkerBinary(workerBinaryPath)
+            workerBinary: new WorkerBinary(workerBinaryPath!)
         })
     });
     const host = new McpHost({

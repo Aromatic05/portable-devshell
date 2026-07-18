@@ -1,14 +1,15 @@
 import assert from "node:assert/strict";
-import { access, mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { ControlRuntime } from "../../dist/testing.js";
+import { ControlRuntime } from "../../src/testing.ts";
+import { createTestIpcPath, ipcEndpointAcceptsConnections } from "../../../../test/TestPlatformSupport.ts";
 
 test("runtime stop does not settle until owned cleanup completes", async (t) => {
     const runtimeDir = await mkdtemp(join(tmpdir(), "portable-devshell-runtime-stop-"));
-    const socketPath = join(runtimeDir, "control.sock");
+    const socketPath = createTestIpcPath("control-runtime", runtimeDir);
     let releaseArtifact!: () => void;
     const artifactGate = new Promise<void>((resolve) => {
         releaseArtifact = resolve;
@@ -60,7 +61,7 @@ test("runtime stop does not settle until owned cleanup completes", async (t) => 
 
     releaseArtifact();
     await stopping;
-    await assert.rejects(access(socketPath));
+    assert.equal(await ipcEndpointAcceptsConnections(socketPath), false);
 });
 
 async function waitFor(predicate: () => boolean): Promise<void> {
@@ -74,7 +75,7 @@ async function waitFor(predicate: () => boolean): Promise<void> {
 
 test("runtime stop attempts every cleanup step after failures", async (t) => {
     const runtimeDir = await mkdtemp(join(tmpdir(), "portable-devshell-runtime-failure-"));
-    const socketPath = join(runtimeDir, "control.sock");
+    const socketPath = createTestIpcPath("control-runtime", runtimeDir);
     const calls: string[] = [];
     const runtime = new ControlRuntime({
         artifact: {
@@ -122,5 +123,5 @@ test("runtime stop attempts every cleanup step after failures", async (t) => {
     await assert.rejects(runtime.stop(), AggregateError);
 
     assert.deepEqual(calls, ["reverse", "mcp", "artifact", "instances"]);
-    await assert.rejects(access(socketPath));
+    assert.equal(await ipcEndpointAcceptsConnections(socketPath), false);
 });

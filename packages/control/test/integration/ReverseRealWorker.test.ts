@@ -3,9 +3,8 @@ import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import test from "node:test";
-import { fileURLToPath } from "node:url";
 
 import {
     asInstanceName,
@@ -15,26 +14,35 @@ import {
     type JsonValue
 } from "@portable-devshell/shared";
 
-import { ControlServer } from "../../dist/server/ControlServer.js";
+import { ControlServer } from "../../src/server/ControlServer.ts";
 import { ControlPathHome } from "@portable-devshell/shared";
-import { ReverseCredentialStore } from "../../dist/control/reverse/credential/ReverseCredentialStore.js";
+import { ReverseCredentialStore } from "../../src/control/reverse/credential/ReverseCredentialStore.ts";
 import { encodeGlobalConfig, encodeInstanceConfig } from "../ConfigTomlTestSupport.ts";
+import { installUniqueWindowsTestIdentity, realWorkerTestOptions, resolveTestWorkerBinary, workingDirectoryMarkerCommand } from "../../../../test/TestPlatformSupport.ts";
 
-test("real Rust reverse worker connects to the TS gateway and executes a tool call", async (t) => {
+const workerBinary = resolveTestWorkerBinary();
+
+test("real Rust reverse worker connects to the TS gateway and executes a tool call", realWorkerTestOptions(workerBinary), async (t) => {
     const homeDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-reverse-real-home-"));
     const xdgRuntimeDir = await mkdtemp(join(tmpdir(), "portable-devshell-reverse-real-runtime-"));
     const workspace = await mkdtemp(join(tmpdir(), "portable-devshell-reverse-real-workspace-"));
     const port = await reservePort();
     const publicBaseUrl = `http://127.0.0.1:${port}`;
+    const restoreWindowsIdentity = installUniqueWindowsTestIdentity("reverse-real-worker");
     const paths = new ControlPathHome(homeDirectory);
-    const workerBinary = resolve(
-        fileURLToPath(new URL("../../../../", import.meta.url)),
-        "target/debug/devshell-worker"
-    );
     const server = new ControlServer({ homeDirectory, xdgRuntimeDir });
     const workerRef: { value?: ChildProcessWithoutNullStreams } = {};
     let workerStdout = "";
     let workerStderr = "";
+
+    t.after(async () => {
+        workerRef.value?.kill("SIGTERM");
+        await server.stop().catch(() => undefined);
+        restoreWindowsIdentity();
+        await rm(homeDirectory, { force: true, recursive: true });
+        await rm(xdgRuntimeDir, { force: true, recursive: true });
+        await rm(workspace, { force: true, recursive: true });
+    });
 
     await mkdir(paths.controlHomeDir, { recursive: true });
     await mkdir(paths.instancesDir, { recursive: true });
@@ -91,16 +99,8 @@ test("real Rust reverse worker connects to the TS gateway and executes a tool ca
         { encoding: "utf8", mode: 0o600 }
     );
 
-    t.after(async () => {
-        workerRef.value?.kill("SIGTERM");
-        await server.stop().catch(() => undefined);
-        await rm(homeDirectory, { force: true, recursive: true });
-        await rm(xdgRuntimeDir, { force: true, recursive: true });
-        await rm(workspace, { force: true, recursive: true });
-    });
-
     await server.start();
-    const worker = spawn(workerBinary, [], {
+    const worker = spawn(workerBinary!, [], {
         env: {
             ...process.env,
             DEVSHELL_WORKER_INTERNAL_INSTANCE: "reverse-test",
@@ -134,7 +134,7 @@ test("real Rust reverse worker connects to the TS gateway and executes a tool ca
         server.socketPath,
         "tool.call",
         asInstanceName("reverse-test"),
-        { input: { command: "pwd && printf ' reverse-real-worker'" }, toolName: "bash_run" }
+        { input: { command: workingDirectoryMarkerCommand("reverse-real-worker") }, toolName: "bash_run" }
     );
     assert.equal(result.exitCode, 0);
     assert.match(result.stdout, /reverse-real-worker/u);

@@ -13,11 +13,12 @@ import {
     ControlSocketServer,
     InstanceRegistry
 } from "@portable-devshell/control/testing";
-import { createTuiClients, TuiControlSession } from "../../dist/testing.js";
+import { createTuiClients, TuiControlSession } from "../../src/testing.ts";
+import { createTestIpcPath } from "../../../../test/TestPlatformSupport.ts";
 
 test("TuiControlSession pulls instances, snapshots, subscribes, and recovers from stream.gap", async (t) => {
     const runtimeDir = await mkdtemp(join(tmpdir(), "portable-devshell-tui-session-"));
-    const socketPath = join(runtimeDir, "control.sock");
+    const socketPath = createTestIpcPath("tui-control", runtimeDir);
     const worker = new FakeWorker("alpha");
     const server = createServer(socketPath, worker, () => 7);
     let socketCount = 0;
@@ -124,7 +125,7 @@ test("TuiControlSession pulls instances, snapshots, subscribes, and recovers fro
 
 test("TuiControlSession reports missing control without auto-starting it", async () => {
     const runtimeDir = await mkdtemp(join(tmpdir(), "portable-devshell-tui-not-running-"));
-    const socketPath = join(runtimeDir, "control.sock");
+    const socketPath = createTestIpcPath("tui-control", runtimeDir);
     const session = new TuiControlSession({
         clients: createTuiClients({ socketPath })
     });
@@ -143,7 +144,7 @@ test("TuiControlSession reports missing control without auto-starting it", async
 
 test("module TUI clients send explicit instance operations and preserve start relay output", async (t) => {
     const runtimeDir = await mkdtemp(join(tmpdir(), "portable-devshell-tui-operations-"));
-    const socketPath = join(runtimeDir, "control.sock");
+    const socketPath = createTestIpcPath("tui-control", runtimeDir);
     const worker = new FakeWorker("alpha");
     const server = createServer(socketPath, worker, () => 7);
     const clients = createTuiClients({ socketPath });

@@ -53,7 +53,6 @@ pub struct ReturnedRange {
     pub end_line: usize,
 }
 
-
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct FileChangeSetInput {
@@ -127,7 +126,6 @@ pub struct FileChangeSetOutput {
     pub complete: bool,
     pub operations: Vec<FileChangeOperationOutput>,
 }
-
 
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]

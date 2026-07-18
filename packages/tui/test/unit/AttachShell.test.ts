@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import test from "node:test";
 
-import { TuiAttachShellCommandResolver, TuiAttachShellResolutionError, TuiAttachShellRunner, editableProviderChoices, isTuiAttachShellSupported } from "../../dist/testing.js";
+import { TuiAttachShellCommandResolver, TuiAttachShellResolutionError, TuiAttachShellRunner, editableProviderChoices, isTuiAttachShellSupported } from "../../src/testing.ts";
 
 test("Attach Shell resolves a local login shell from control-provided instance data", () => {
     const command = new TuiAttachShellCommandResolver().resolve({

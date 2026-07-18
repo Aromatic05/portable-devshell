@@ -121,15 +121,13 @@ impl ToolHandler for FileSearchTool {
             for entry in group {
                 call.check_cancelled()?;
                 let ordinal = self.state.next_snapshot_ordinal();
-                let Ok((metadata, matches, shown)) =
-                    search_stream(
-                        entry.resolved.access_path(),
-                        &matcher,
-                        per_file,
-                        context,
-                        &call.cancellation,
-                    )
-                else {
+                let Ok((metadata, matches, shown)) = search_stream(
+                    entry.resolved.access_path(),
+                    &matcher,
+                    per_file,
+                    context,
+                    &call.cancellation,
+                ) else {
                     continue;
                 };
                 if matches.is_empty() {

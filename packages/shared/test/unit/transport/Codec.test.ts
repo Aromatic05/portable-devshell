@@ -6,6 +6,7 @@ import { join } from "node:path";
 import test from "node:test";
 
 import { asInstanceName, Channel, Codec, type Event } from "@portable-devshell/shared";
+import { createTestIpcPath } from "../../../../../test/TestPlatformSupport.ts";
 
 interface CodecPair {
     client: Codec;
@@ -17,7 +18,7 @@ interface CodecPair {
 
 async function pair(): Promise<CodecPair> {
     const directory = await mkdtemp(join(tmpdir(), "portable-devshell-codec-"));
-    const socketPath = join(directory, "codec.sock");
+    const socketPath = createTestIpcPath("codec", directory);
     const listener = createServer();
     await new Promise<void>((resolve, reject) => {
         listener.once("error", reject);

@@ -328,4 +328,3 @@ fn is_container(kind: &str) -> bool {
             | "section"
     )
 }
-

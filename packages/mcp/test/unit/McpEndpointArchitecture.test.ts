@@ -7,8 +7,8 @@ import type {
     ToolDefinition
 } from "@portable-devshell/shared";
 
-import { McpEndpointCatalog } from "../../dist/endpoint/McpEndpointCatalog.js";
-import { McpEndpointDispatch } from "../../dist/endpoint/McpEndpointDispatch.js";
+import { McpEndpointCatalog } from "../../src/endpoint/McpEndpointCatalog.ts";
+import { McpEndpointDispatch } from "../../src/endpoint/McpEndpointDispatch.ts";
 
 function workerTool(name: string = "bash_run"): ToolDefinition {
     return {

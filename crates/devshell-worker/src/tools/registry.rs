@@ -92,13 +92,16 @@ mod tests {
             "type": "object"
         });
         normalize_schema(&mut schema);
-        assert_eq!(schema, json!({
-            "properties": {
-                "line": { "type": "integer" },
-                "nested": { "items": { "type": ["integer", "null"] }, "type": "array" },
-                "text": { "format": "date-time", "type": "string" }
-            },
-            "type": "object"
-        }));
+        assert_eq!(
+            schema,
+            json!({
+                "properties": {
+                    "line": { "type": "integer" },
+                    "nested": { "items": { "type": ["integer", "null"] }, "type": "array" },
+                    "text": { "format": "date-time", "type": "string" }
+                },
+                "type": "object"
+            })
+        );
     }
 }

@@ -85,7 +85,7 @@ export class ControlDaemon {
 }
 
 export function controlDaemonModulePath(): string {
-    return fileURLToPath(new URL("./ControlDaemon.js", import.meta.url));
+    return fileURLToPath(import.meta.url);
 }
 
 async function main(): Promise<void> {

@@ -1,10 +1,10 @@
-use std::path::PathBuf;
 #[cfg(unix)]
 use std::os::unix::ffi::OsStrExt;
+use std::path::PathBuf;
 
 use crate::instance::InstanceName;
-use crate::storage::devshell_home;
 use crate::socket::xdg_runtime_dir::xdg_runtime_dir;
+use crate::storage::devshell_home;
 
 #[cfg(unix)]
 const MAX_UNIX_SOCKET_PATH_BYTES: usize = 100;

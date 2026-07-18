@@ -7,14 +7,13 @@ import test from "node:test";
 
 import { Channel, Codec, type JsonValue } from "@portable-devshell/shared";
 
-import { createCliClients } from "../../dist/client/CliClientComposition.js";
-import { CliMain } from "../../dist/CliMain.js";
+import { createCliClients } from "../../src/client/CliClientComposition.ts";
+import { createTestIpcPath } from "../../../../test/TestPlatformSupport.ts";
+import { CliMain } from "../../src/CliMain.ts";
 
 test("module CLI clients perform control rpc over unix socket", async (t) => {
     const runtimeRoot = await mkdtemp(join(tmpdir(), "portable-devshell-cli-control-"));
-    const socketDir = join(runtimeRoot, "portable-devshell");
-    const socketPath = join(socketDir, "control.sock");
-    await mkdir(socketDir, { recursive: true });
+    const socketPath = createTestIpcPath("cli-control", runtimeRoot);
     const methods: string[] = [];
     const server = createServer((socket) => {
         const codec = new Codec(Channel.accept(socket), { local: "server" });

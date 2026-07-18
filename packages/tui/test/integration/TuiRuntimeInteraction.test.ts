@@ -6,11 +6,11 @@ import { PassThrough } from "node:stream";
 import type { ReadStream, WriteStream } from "node:tty";
 import test from "node:test";
 
-import type { TuiClients } from "../../dist/runtime/client/TuiClientComposition.js";
-import { TuiRuntime } from "../../dist/runtime/TuiRuntime.js";
-import { TuiTerminalSession, type TuiTerminalPty } from "../../dist/testing.js";
-import { buildTuiHitRegions, buildTuiTerminalViewportRegion, hitTargetAt } from "../../dist/view/TuiHitRegions.js";
-import { selectMainScreenModel, selectMainScrollKey } from "../../dist/view/model/TuiViewProjection.js";
+import type { TuiClients } from "../../src/runtime/client/TuiClientComposition.ts";
+import { TuiRuntime } from "../../src/runtime/TuiRuntime.ts";
+import { TuiTerminalSession, type TuiTerminalPty } from "../../src/testing.ts";
+import { buildTuiHitRegions, buildTuiTerminalViewportRegion, hitTargetAt } from "../../src/view/TuiHitRegions.ts";
+import { selectMainScreenModel, selectMainScrollKey } from "../../src/view/model/TuiViewProjection.ts";
 
 test("real Ink runtime handles keyboard navigation, search, redraw, and terminal cleanup", async () => {
     const terminal = createTerminal();

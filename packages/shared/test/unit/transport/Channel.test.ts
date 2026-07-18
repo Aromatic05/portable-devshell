@@ -6,6 +6,7 @@ import { join } from "node:path";
 import test from "node:test";
 
 import { CHANNEL_MAX_FRAME_SIZE, Channel } from "@portable-devshell/shared";
+import { createTestIpcPath } from "../../../../../test/TestPlatformSupport.ts";
 
 interface ListeningSocket {
     directory: string;
@@ -15,7 +16,7 @@ interface ListeningSocket {
 
 async function listen(): Promise<ListeningSocket> {
     const directory = await mkdtemp(join(tmpdir(), "portable-devshell-channel-"));
-    const socketPath = join(directory, "channel.sock");
+    const socketPath = createTestIpcPath("channel", directory);
     const server = createServer();
     await new Promise<void>((resolve, reject) => {
         server.once("error", reject);

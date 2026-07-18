@@ -13,6 +13,7 @@ import {
     type Event,
     type JsonValue
 } from "@portable-devshell/shared";
+import { createTestIpcPath } from "../../../../../test/TestPlatformSupport.ts";
 
 interface ReceivedEvent {
     codec: Codec;
@@ -36,7 +37,7 @@ class ControlPeer {
 
     static async create(): Promise<ControlPeer> {
         const directory = await mkdtemp(join(tmpdir(), "portable-devshell-client-connection-"));
-        const socketPath = join(directory, "control.sock");
+        const socketPath = createTestIpcPath("client-connection", directory);
         const listener = createServer();
         const peer = new ControlPeer(directory, listener, socketPath);
         listener.on("connection", (socket) => peer.#accept(socket));

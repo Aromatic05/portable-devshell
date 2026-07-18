@@ -4,11 +4,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { McpOAuthApprovalService } from "../../dist/auth/oauth/McpOAuthApprovalService.js";
-import { McpOAuthInteraction } from "../../dist/auth/oauth/McpOAuthInteraction.js";
-import { createMcpOAuthOidcFileAdapterFactory } from "../../dist/auth/oauth/McpOAuthOidcFileAdapter.js";
-import { McpOAuthProviderRuntime } from "../../dist/auth/oauth/McpOAuthProviderRuntime.js";
-import { McpOAuthRegistrationLimiter } from "../../dist/auth/oauth/McpOAuthRegistrationLimiter.js";
+import { McpOAuthApprovalService } from "../../src/auth/oauth/McpOAuthApprovalService.ts";
+import { McpOAuthInteraction } from "../../src/auth/oauth/McpOAuthInteraction.ts";
+import { createMcpOAuthOidcFileAdapterFactory } from "../../src/auth/oauth/McpOAuthOidcFileAdapter.ts";
+import { McpOAuthProviderRuntime } from "../../src/auth/oauth/McpOAuthProviderRuntime.ts";
+import { McpOAuthRegistrationLimiter } from "../../src/auth/oauth/McpOAuthRegistrationLimiter.ts";
 
 const config = {
     documentationUrl: "https://docs.example.test/aromatic",

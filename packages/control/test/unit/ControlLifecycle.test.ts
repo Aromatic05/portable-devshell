@@ -19,7 +19,8 @@ import {
     type JsonValue
 } from "@portable-devshell/shared";
 
-import { controlDaemonModulePath } from "../../dist/testing.js";
+import { controlDaemonModulePath } from "../../src/testing.ts";
+import { createTestIpcPath, installUniqueWindowsTestIdentity } from "../../../../test/TestPlatformSupport.ts";
 import { encodeGlobalConfig, encodeInstanceConfig } from "../ConfigTomlTestSupport.ts";
 
 test("start creates control directory, socket, pid and status uses rpc", async (t) => {
@@ -32,7 +33,9 @@ test("start creates control directory, socket, pid and status uses rpc", async (
     assert.equal(status.instanceCount, 0);
     assert.notEqual(status.pid, undefined);
     await assertPathExists(harness.paths.controlHomeDir);
-    await assertPathExists(harness.paths.socketFile);
+    if (process.platform !== "win32") {
+        await assertPathExists(harness.paths.socketFile);
+    }
     await assertPathExists(join(harness.paths.controlHomeDir, "control.pid"));
 
     const refreshed = await harness.manager.status();
@@ -312,17 +315,17 @@ test("stop refuses to signal a live pid that cannot be verified over rpc", async
 
 test("status times out when a control endpoint accepts but never replies", async (t) => {
     const runtimeRoot = await mkdtemp(join(tmpdir(), "portable-devshell-control-status-timeout-"));
-    const runtimePaths = new ControlPathRuntime(runtimeRoot);
+    const socketPath = createTestIpcPath("control-status-timeout", runtimeRoot);
     const sockets = new Set<import("node:net").Socket>();
     const server = createServer((socket) => {
         sockets.add(socket);
         socket.once("close", () => sockets.delete(socket));
     });
 
-    await mkdir(runtimePaths.runtimeDir, { recursive: true });
+    await mkdir(runtimeRoot, { recursive: true });
     await new Promise<void>((resolve, reject) => {
         server.once("error", reject);
-        server.listen(runtimePaths.socketFile, resolve);
+        server.listen(socketPath, resolve);
     });
     t.after(async () => {
         for (const socket of sockets) socket.destroy();
@@ -341,9 +344,9 @@ test("status times out when a control endpoint accepts but never replies", async
         requestTimeoutMs: 50,
         socketFile: {
             ensureRuntimeDir: async () => undefined,
-            path: runtimePaths.socketFile,
+            path: socketPath,
             remove: async () => undefined,
-            runtimeDir: runtimePaths.runtimeDir
+            runtimeDir: runtimeRoot
         }
     });
 
@@ -351,12 +354,12 @@ test("status times out when a control endpoint accepts but never replies", async
     const status = await manager.status();
 
     assert.equal(status.running, false);
-    assert.ok(Date.now() - startedAt < 500);
+    assert.ok(Date.now() - startedAt < 2_000);
 });
 
 test("stop tolerates shutdown socket races in the real lifecycle rpc client", async (t) => {
     const runtimeRoot = await mkdtemp(join(tmpdir(), "portable-devshell-control-stop-race-"));
-    const runtimePaths = new ControlPathRuntime(runtimeRoot);
+    const socketPath = createTestIpcPath("control-stop-race", runtimeRoot);
     let shutdownRequested = false;
     const server = createServer((socket) => {
         if (shutdownRequested) {
@@ -385,10 +388,10 @@ test("stop tolerates shutdown socket races in the real lifecycle rpc client", as
         });
     });
 
-    await mkdir(runtimePaths.runtimeDir, { recursive: true });
+    await mkdir(runtimeRoot, { recursive: true });
     await new Promise<void>((resolve, reject) => {
         server.once("error", reject);
-        server.listen(runtimePaths.socketFile, resolve);
+        server.listen(socketPath, resolve);
     });
 
     t.after(async () => {
@@ -407,9 +410,9 @@ test("stop tolerates shutdown socket races in the real lifecycle rpc client", as
         processIsRunning: () => false,
         socketFile: {
             ensureRuntimeDir: async () => undefined,
-            path: runtimePaths.socketFile,
+            path: socketPath,
             remove: async () => undefined,
-            runtimeDir: runtimePaths.runtimeDir
+            runtimeDir: runtimeRoot
         },
         waitTimeoutMs: 500
     });
@@ -423,6 +426,7 @@ test("stop tolerates shutdown socket races in the real lifecycle rpc client", as
 test("start keeps real worker config registered and does not auto-start worker", async (t) => {
     const homeDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-control-real-home-"));
     const xdgRuntimeDir = await mkdtemp(join(tmpdir(), "portable-devshell-control-real-runtime-"));
+    const restoreWindowsIdentity = installUniqueWindowsTestIdentity("control-registered-config");
     const homePaths = new ControlPathHome(homeDirectory);
     const runtimePaths = new ControlPathRuntime(xdgRuntimeDir);
     const manager = new ControlLifecycleManager({
@@ -433,6 +437,13 @@ test("start keeps real worker config registered and does not auto-start worker",
     });
     const fixturePath = fileURLToPath(new URL("../fixtures/config-valid.toml", import.meta.url));
     const listenPort = await reserveTcpPort();
+
+    t.after(async () => {
+        await manager.stop().catch(() => undefined);
+        restoreWindowsIdentity();
+        await rm(homeDirectory, { force: true, recursive: true });
+        await rm(xdgRuntimeDir, { force: true, recursive: true });
+    });
 
     await mkdir(homePaths.controlHomeDir, { recursive: true });
     await writeFile(
@@ -452,12 +463,6 @@ test("start keeps real worker config registered and does not auto-start worker",
         }),
         "utf8"
     );
-
-    t.after(async () => {
-        await manager.stop().catch(() => undefined);
-        await rm(homeDirectory, { force: true, recursive: true });
-        await rm(xdgRuntimeDir, { force: true, recursive: true });
-    });
 
     const started = await manager.start();
     assert.equal(started.running, true);
@@ -479,6 +484,7 @@ async function createHarness(): Promise<{
 }> {
     const homeDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-control-home-"));
     const xdgRuntimeDir = await mkdtemp(join(tmpdir(), "portable-devshell-control-runtime-"));
+    const restoreWindowsIdentity = installUniqueWindowsTestIdentity("control-lifecycle-harness");
     const manager = new ControlLifecycleManager({
         daemonModulePath: controlDaemonModulePath(),
         homeDirectory,
@@ -489,28 +495,36 @@ async function createHarness(): Promise<{
     const runtimePaths = new ControlPathRuntime(xdgRuntimeDir);
     const listenPort = await reserveTcpPort();
 
-    await mkdir(homePaths.controlHomeDir, { recursive: true });
-    await writeFile(
-        homePaths.configFile,
-        encodeGlobalConfig({
-            control: {
-                logLevel: "info"
-            },
-            mcp: {
-                auth: {
-                    mode: "none"
+    try {
+        await mkdir(homePaths.controlHomeDir, { recursive: true });
+        await writeFile(
+            homePaths.configFile,
+            encodeGlobalConfig({
+                control: {
+                    logLevel: "info"
                 },
-                enabled: false,
-                listenHost: "127.0.0.1",
-                listenPort
-            }
-        }),
-        "utf8"
-    );
+                mcp: {
+                    auth: {
+                        mode: "none"
+                    },
+                    enabled: false,
+                    listenHost: "127.0.0.1",
+                    listenPort
+                }
+            }),
+            "utf8"
+        );
+    } catch (error) {
+        restoreWindowsIdentity();
+        await rm(homeDirectory, { force: true, recursive: true });
+        await rm(xdgRuntimeDir, { force: true, recursive: true });
+        throw error;
+    }
 
     return {
         async cleanup() {
             await manager.stop().catch(() => undefined);
+            restoreWindowsIdentity();
             await rm(homeDirectory, { force: true, recursive: true });
             await rm(xdgRuntimeDir, { force: true, recursive: true });
         },

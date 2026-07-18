@@ -12,7 +12,7 @@ import {
     ControlInstanceTomlDocument,
     ControlConfigTomlCodec,
     createDefaultControlConfig
-} from "../../dist/testing.js";
+} from "../../src/testing.ts";
 import {
     ControlPathHome,
     ControlPathRuntime,
@@ -35,9 +35,9 @@ test("default config is generated at the fixed control config path", async () =>
 
         assert.deepEqual(config, createDefaultControlConfig());
         assert.equal(paths.configFile, join(homeDirectory, ".devshell", "control", "config.toml"));
-        assert.equal(new ControlPathRuntime("/tmp/runtime-task-8").socketFile, "/tmp/runtime-task-8/portable-devshell/control.sock");
+        assert.equal(new ControlPathRuntime("/tmp/runtime-task-8", "linux", {}).socketFile, "/tmp/runtime-task-8/portable-devshell/control.sock");
         assert.equal(
-            new ControlPathRuntime("").socketFile,
+            new ControlPathRuntime("", "linux", process.env).socketFile,
             join(tmpdir(), `portable-devshell-${typeof process.getuid === "function" ? process.getuid() : process.env.USER ?? process.env.USERNAME ?? "user"}`, "control.sock")
         );
 

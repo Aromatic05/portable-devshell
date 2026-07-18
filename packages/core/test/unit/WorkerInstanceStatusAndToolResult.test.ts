@@ -6,18 +6,18 @@ import { createError, errorCodes } from "@portable-devshell/shared";
 import {
     normalizeLifecycleStatus,
     parseWorkerStatus
-} from "../../dist/worker/instance/WorkerInstanceStatus.js";
+} from "../../src/worker/instance/WorkerInstanceStatus.ts";
 import {
     normalizeToolSchedulerError,
     readNonRunningSchedulerStatus,
     throwIfToolCallAborted
-} from "../../dist/worker/instance/tool/WorkerInstanceToolError.js";
+} from "../../src/worker/instance/tool/WorkerInstanceToolError.ts";
 import {
     asBashToolResult,
     asCommandResult,
     commandResultOutput,
     readByteLength
-} from "../../dist/worker/instance/tool/WorkerInstanceToolResult.js";
+} from "../../src/worker/instance/tool/WorkerInstanceToolResult.ts";
 
 test("worker lifecycle status normalization maps ready to running and preserves terminal states", () => {
     assert.equal(normalizeLifecycleStatus("ready"), "running");

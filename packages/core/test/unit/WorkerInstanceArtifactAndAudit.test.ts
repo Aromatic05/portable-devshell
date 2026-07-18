@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { WorkerInstanceArtifact } from "../../dist/worker/instance/WorkerInstanceArtifact.js";
-import { WorkerInstanceAudit } from "../../dist/worker/instance/WorkerInstanceAudit.js";
+import { WorkerInstanceArtifact } from "../../src/worker/instance/WorkerInstanceArtifact.ts";
+import { WorkerInstanceAudit } from "../../src/worker/instance/WorkerInstanceAudit.ts";
 
 test("worker artifact facade checks readiness and delegates every payload lifecycle operation", async () => {
     const calls: Array<[string, unknown]> = [];

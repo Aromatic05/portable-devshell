@@ -19,7 +19,7 @@ import {
     tuiLayoutMetrics,
     tuiViewProjection,
     wrapTerminalText
-} from "../../dist/testing.js";
+} from "../../src/testing.ts";
 
 test("Prompt 3 urgent fix uses page + instance coordinates with a two-stage Tab cycle", async () => {
     const harness = createHarness();

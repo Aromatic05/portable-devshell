@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { ControlDaemon } from "../../dist/testing.js";
+import { ControlDaemon } from "../../src/testing.ts";
 
 test("a stopping daemon preserves successor lifecycle state", async () => {
     const lifecycle = { pid: "old", socket: "old" };

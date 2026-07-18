@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { InstanceRegistryFactory, McpEndpointFactory, McpRuntimeFactory, createDefaultControlConfig } from "../../dist/testing.js";
+import { InstanceRegistryFactory, McpEndpointFactory, McpRuntimeFactory, createDefaultControlConfig } from "../../src/testing.ts";
 import { normalizeConfigInstanceDraft } from "@portable-devshell/shared";
 
 test("disabled instances are skipped and registry does not auto start workers", () => {
@@ -67,7 +67,7 @@ test("mcp endpoint path is generated and wiring only builds host configuration",
 
 test("stopOwned only stops workers started by this control and keeps failed ownership", async () => {
     const stopped: string[] = [];
-    const registry = new (await import("../../dist/control/instance/registry/InstanceRegistry.js")).InstanceRegistry([
+    const registry = new (await import("../../src/control/instance/registry/InstanceRegistry.js")).InstanceRegistry([
         {
             tools: { capabilities: ["read", "write", "execute"], groups: ["file", "bash", "artifact"] },
             enabled: true,

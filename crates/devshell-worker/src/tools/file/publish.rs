@@ -37,7 +37,6 @@ pub fn publish(temp: NamedTempFile, target: &Path, mode: PublishMode) -> Result<
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use std::fs;

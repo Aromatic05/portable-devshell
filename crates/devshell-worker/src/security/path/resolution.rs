@@ -1,6 +1,6 @@
-use std::path::{Path, PathBuf};
 #[cfg(target_os = "linux")]
 use std::os::fd::{AsRawFd, OwnedFd};
+use std::path::{Path, PathBuf};
 #[cfg(target_os = "linux")]
 use std::sync::Arc;
 
@@ -116,7 +116,7 @@ fn resolve_workspace_existing(
     workspace: &Path,
     requested: &RequestedPath,
 ) -> Result<ResolvedPath, ToolError> {
-    use nix::fcntl::{open, openat, OFlag};
+    use nix::fcntl::{OFlag, open, openat};
     use nix::sys::stat::Mode;
 
     let root = workspace
@@ -164,7 +164,9 @@ fn resolve_workspace_existing(
     let target = descriptor_path(parent).join(name);
     anchors.push(final_fd);
     Ok(ResolvedPath {
-        canonical: segments.iter().fold(root, |path, segment| path.join(segment)),
+        canonical: segments
+            .iter()
+            .fold(root, |path, segment| path.join(segment)),
         access,
         target,
         _anchors: Some(Arc::new(anchors)),
@@ -176,7 +178,7 @@ fn resolve_workspace_create(
     workspace: &Path,
     requested: &RequestedPath,
 ) -> Result<ResolvedPath, ToolError> {
-    use nix::fcntl::{open, openat, OFlag};
+    use nix::fcntl::{OFlag, open, openat};
     use nix::sys::stat::Mode;
 
     let root = workspace
@@ -207,7 +209,9 @@ fn resolve_workspace_create(
     let parent = anchors.last().expect("workspace parent anchor exists");
     let target = descriptor_path(parent).join(name);
     Ok(ResolvedPath {
-        canonical: segments.iter().fold(root, |path, segment| path.join(segment)),
+        canonical: segments
+            .iter()
+            .fold(root, |path, segment| path.join(segment)),
         access: target.clone(),
         target,
         _anchors: Some(Arc::new(anchors)),
@@ -216,9 +220,10 @@ fn resolve_workspace_create(
 
 #[cfg(target_os = "linux")]
 fn workspace_segments(requested: &RequestedPath) -> Result<Vec<std::ffi::OsString>, ToolError> {
-    let relative = requested.raw.strip_prefix("./").ok_or_else(|| {
-        ToolError::new("file.invalidPath", "workspace path must start with ./")
-    })?;
+    let relative = requested
+        .raw
+        .strip_prefix("./")
+        .ok_or_else(|| ToolError::new("file.invalidPath", "workspace path must start with ./"))?;
     if relative.is_empty() {
         return Ok(Vec::new());
     }
@@ -242,7 +247,10 @@ fn map_resolution_error(error: nix::errno::Errno, requested: &RequestedPath) -> 
     };
     ToolError::new(
         code,
-        format!("failed to resolve {} without symbolic links: {error}", requested.raw),
+        format!(
+            "failed to resolve {} without symbolic links: {error}",
+            requested.raw
+        ),
     )
 }
 
@@ -266,9 +274,10 @@ fn require_workspace_containment(
     Ok(())
 }
 
-#[cfg(all(test, target_os = "linux"))]
+#[cfg(test)]
 mod tests {
     use std::fs;
+    #[cfg(target_os = "linux")]
     use std::os::unix::fs::symlink;
 
     use tempfile::tempdir;
@@ -277,6 +286,44 @@ mod tests {
 
     use super::{resolve_create_target, resolve_existing_target};
 
+    #[test]
+    fn existing_workspace_path_resolves_inside_the_workspace() {
+        let root = tempdir().unwrap();
+        fs::write(root.path().join("file.txt"), "inside").unwrap();
+        let requested = parse_requested_path("./file.txt").unwrap();
+
+        let resolved = resolve_existing_target(root.path(), &requested).unwrap();
+
+        assert_eq!(
+            fs::read_to_string(resolved.access_path()).unwrap(),
+            "inside"
+        );
+        assert_eq!(
+            resolved.canonical,
+            root.path().canonicalize().unwrap().join("file.txt")
+        );
+    }
+
+    #[test]
+    fn create_workspace_path_resolves_inside_an_existing_parent() {
+        let root = tempdir().unwrap();
+        fs::create_dir(root.path().join("safe")).unwrap();
+        let requested = parse_requested_path("./safe/new.txt").unwrap();
+
+        let resolved = resolve_create_target(root.path(), &requested).unwrap();
+        fs::write(resolved.target_path(), "inside").unwrap();
+
+        assert_eq!(
+            fs::read_to_string(root.path().join("safe/new.txt")).unwrap(),
+            "inside"
+        );
+        assert_eq!(
+            resolved.canonical,
+            root.path().canonicalize().unwrap().join("safe/new.txt")
+        );
+    }
+
+    #[cfg(target_os = "linux")]
     #[test]
     fn existing_workspace_path_remains_anchored_after_parent_swap() {
         let root = tempdir().unwrap();
@@ -290,10 +337,17 @@ mod tests {
         fs::rename(root.path().join("safe"), root.path().join("safe-old")).unwrap();
         symlink(outside.path(), root.path().join("safe")).unwrap();
 
-        assert_eq!(fs::read_to_string(resolved.access_path()).unwrap(), "inside");
-        assert_ne!(fs::read_to_string(resolved.access_path()).unwrap(), "outside");
+        assert_eq!(
+            fs::read_to_string(resolved.access_path()).unwrap(),
+            "inside"
+        );
+        assert_ne!(
+            fs::read_to_string(resolved.access_path()).unwrap(),
+            "outside"
+        );
     }
 
+    #[cfg(target_os = "linux")]
     #[test]
     fn create_workspace_path_remains_anchored_after_parent_swap() {
         let root = tempdir().unwrap();
@@ -306,7 +360,10 @@ mod tests {
         symlink(outside.path(), root.path().join("safe")).unwrap();
         fs::write(resolved.target_path(), "inside").unwrap();
 
-        assert_eq!(fs::read_to_string(root.path().join("safe-old/new.txt")).unwrap(), "inside");
+        assert_eq!(
+            fs::read_to_string(root.path().join("safe-old/new.txt")).unwrap(),
+            "inside"
+        );
         assert!(!outside.path().join("new.txt").exists());
     }
 }

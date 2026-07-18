@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { McpToolCatalogTodo } from "../../dist/tool/catalog/McpToolCatalogTodo.js";
+import { McpToolCatalogTodo } from "../../src/tool/catalog/McpToolCatalogTodo.ts";
 
 test("todo write documents the complete replacement item contract", () => {
     const tool = new McpToolCatalogTodo().get("todo_write")!;

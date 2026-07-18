@@ -51,7 +51,7 @@ test("control daemon launcher preserves bootstrap loaders and isolates daemon en
 
     const child = ControlDaemonLauncher.spawnDetached({
         daemonModulePath: "/app/ControlDaemon.js",
-        env: { PORTABLE_DEVSHELL_TEST: "yes" },
+        env: { NODE_TEST_CONTEXT: "child-v8", PORTABLE_DEVSHELL_TEST: "yes" },
         homeDirectory: "/home/tester",
         spawnFunction(command, args, options) {
             recorded = { args, command, options };
@@ -72,11 +72,13 @@ test("control daemon launcher preserves bootstrap loaders and isolates daemon en
     assert.equal(recorded?.options.env?.HOME, "/home/tester");
     assert.equal(recorded?.options.env?.XDG_RUNTIME_DIR, "/run/tester");
     assert.equal(recorded?.options.env?.PORTABLE_DEVSHELL_TEST, "yes");
+    assert.equal(recorded?.options.env?.NODE_TEST_CONTEXT, undefined);
     assert.equal(unrefCount, 1);
 
     const bootstrap = recorded?.args.slice(0, -1) ?? [];
+    assert.equal(bootstrap.includes("--experimental-transform-types"), process.execArgv.includes("--experimental-transform-types"));
     for (const argument of bootstrap) {
-        assert.match(argument, /^(--import|--loader)(=|$)|^\.\/?|^file:/u);
+        assert.match(argument, /^(--experimental-transform-types|--import|--loader)(=|$)|^\.\/?|^file:|^[A-Za-z@][A-Za-z0-9@/._+-]*$/u);
     }
 });
 

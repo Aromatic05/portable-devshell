@@ -5,7 +5,7 @@ import {
     InstanceRegistry,
     McpInstanceGatewayControl,
     createDefaultControlConfig
-} from "../../dist/testing.js";
+} from "../../src/testing.ts";
 
 function createGateway(ready: boolean): McpInstanceGatewayControl {
     const registry = new InstanceRegistry([

@@ -2,10 +2,9 @@ import assert from "node:assert/strict";
 import { spawn as nodeSpawn } from "node:child_process";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import test from "node:test";
-import { fileURLToPath } from "node:url";
 
 import { errorCodes, type JsonValue } from "@portable-devshell/shared";
 import {
@@ -22,6 +21,9 @@ import {
     type WorkerCommandTransport,
     type WorkerRpcResponseEnvelope
 } from "@portable-devshell/core/testing";
+import { realWorkerTestOptions, resolveTestWorkerBinary } from "../../../../test/TestPlatformSupport.ts";
+
+const workerBinaryPath = resolveTestWorkerBinary();
 
 test("WorkerRpcBridge reuses one spawned rpc process across multiple calls", async () => {
     const harness = createRpcHarness();
@@ -202,15 +204,14 @@ test("WorkerRpcBridge surfaces spawn failures as structured rpc spawn errors", a
     });
 });
 
-test("WorkerProtocolClient performs ping, handshake, and tools.list against frozen devshell-worker", async (t) => {
+test("WorkerProtocolClient performs ping, handshake, and tools.list against frozen devshell-worker", realWorkerTestOptions(workerBinaryPath), async (t) => {
     const workspacePath = await mkdtemp(join(tmpdir(), "portable-devshell-core-rpc-"));
     const homeDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-core-rpc-home-"));
     const runtimeDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-core-rpc-runtime-"));
     const instanceName = `task-4-${process.pid}`;
     const env = { ...process.env, HOME: homeDirectory, XDG_RUNTIME_DIR: runtimeDirectory };
-    const repoRoot = fileURLToPath(new URL("../../../../", import.meta.url));
     const transport = new WorkerTransportDriverLocal({
-        workerBinary: new WorkerBinary(resolve(repoRoot, "target/debug/devshell-worker")),
+        workerBinary: new WorkerBinary(workerBinaryPath!),
         spawnFunction: nodeSpawn
     });
     const commandResult = await transport.runWorkerCommand("start", { env, instanceName, workspacePath });

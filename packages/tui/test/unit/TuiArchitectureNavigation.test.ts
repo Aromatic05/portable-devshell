@@ -3,7 +3,7 @@ import test from "node:test";
 
 import { asInstanceName } from "@portable-devshell/shared";
 
-import { buildFocusGraphForState, tuiViewProjection, TuiAppStore, TuiCommandDispatcherFocus, TuiCommandDispatcherNavigation, TuiFocusManager } from "../../dist/testing.js";
+import { buildFocusGraphForState, tuiViewProjection, TuiAppStore, TuiCommandDispatcherFocus, TuiCommandDispatcherNavigation, TuiFocusManager } from "../../src/testing.ts";
 
 function createHarness() {
     const store = new TuiAppStore();

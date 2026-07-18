@@ -8,7 +8,7 @@ import type {
     InstanceCreateSummary
 } from "@portable-devshell/shared";
 
-import { CliWizardInstanceCreate } from "../../dist/wizard/CliWizardInstanceCreate.js";
+import { CliWizardInstanceCreate } from "../../src/wizard/CliWizardInstanceCreate.ts";
 
 const schema: InstanceCreateSchema = {
     container: {

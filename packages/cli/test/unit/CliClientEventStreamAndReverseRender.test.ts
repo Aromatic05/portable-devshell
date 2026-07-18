@@ -11,12 +11,12 @@ import {
 import {
     CliClientEventStream,
     createCliClientEventStream
-} from "../../dist/client/CliClientEventStream.js";
+} from "../../src/client/CliClientEventStream.ts";
 import {
     renderReverseDeviceCode,
     renderReverseTokenRevocation,
     renderReverseTokenRotation
-} from "../../dist/render/instance/CliRenderInstanceReverse.js";
+} from "../../src/render/instance/CliRenderInstanceReverse.ts";
 
 const destination = asInstanceName("demo-local");
 

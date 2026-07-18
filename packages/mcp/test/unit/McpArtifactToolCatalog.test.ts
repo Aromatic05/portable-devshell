@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { McpToolCatalogArtifact } from "../../dist/tool/catalog/McpToolCatalogArtifact.js";
+import { McpToolCatalogArtifact } from "../../src/tool/catalog/McpToolCatalogArtifact.ts";
 
 test("artifact control catalog exposes image viewing, sharing, and transfer without documenting hidden host", () => {
     const tools = new McpToolCatalogArtifact().list();

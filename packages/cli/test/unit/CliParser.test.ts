@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { CliParser } from "../../dist/CliParser.js";
+import { CliParser } from "../../src/CliParser.ts";
 
 test("CliParser parses Task 11 command fixture", async () => {
     const fixturePath = fileURLToPath(new URL("../fixtures/cli-argv.json", import.meta.url));

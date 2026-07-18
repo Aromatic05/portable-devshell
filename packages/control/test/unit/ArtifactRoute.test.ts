@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { readArtifactViewImageInput } from "../../dist/control/artifact/route/ArtifactRouteInput.js";
+import { readArtifactViewImageInput } from "../../src/control/artifact/route/ArtifactRouteInput.ts";
 
 test("artifact viewImage route accepts exactly one path or handle", () => {
     assert.deepEqual(

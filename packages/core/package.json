@@ -25,7 +25,7 @@
     },
     "scripts": {
         "build": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && tsc -b --force",
-        "typecheck": "tsc --noEmit -p tsconfig.json",
-        "test": "pnpm run build && node --import ./test/RegisterWorkspacePackages.mjs --test test/unit/*.test.ts test/integration/*.test.ts"
+        "typecheck": "tsc --noEmit -p ../../tsconfig.typecheck.json",
+        "test": "node ../../test/RunPackageTests.mjs --loader ./test/RegisterWorkspacePackages.mjs --concurrency 1 \"test/unit/*.test.ts\" \"test/integration/*.test.ts\""
     }
 }

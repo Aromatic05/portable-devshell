@@ -2,12 +2,11 @@ import assert from "node:assert/strict";
 import { spawn as nodeSpawn, type ChildProcess, type SpawnOptions } from "node:child_process";
 import { createHash } from "node:crypto";
 import { EventEmitter } from "node:events";
-import { mkdtemp, readlink, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, readlink, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { PassThrough } from "node:stream";
 import test from "node:test";
-import { fileURLToPath } from "node:url";
 
 import {
     WorkerTransportDriverDocker,
@@ -20,6 +19,9 @@ import {
     probeLocalWorkerTarget
 } from "@portable-devshell/core/testing";
 import { createError, errorCodes } from "@portable-devshell/shared";
+import { realWorkerTestOptions, resolveTestWorkerBinary } from "../../../../test/TestPlatformSupport.ts";
+
+const workerBinaryPath = resolveTestWorkerBinary();
 
 const shellEscape = (value: string): string => `'${value.replaceAll("'", `'\\''`)}'`;
 
@@ -102,12 +104,19 @@ test("local transport honors command PORTABLE_DEVSHELL_HOME for worker lookup an
     });
 
     assert.equal(result.exitCode, 0);
-    assert.equal(recorder.calls[0]?.command, join(devshellHome, "bin", "devshell-worker"));
-    assert.equal(await readlink(join(devshellHome, "bin", "devshell-worker")), `devshell-worker-${target.key}`);
-    assert.match(
-        await readlink(join(devshellHome, "bin", `devshell-worker-${target.key}`)),
-        new RegExp(`^\\.\\./workers/${target.key}/[a-f0-9]{64}/devshell-worker(?:\\.exe)?$`, "u")
-    );
+    const workerSha = createHash("sha256").update(worker.contents).digest("hex");
+    const targetAlias = join(devshellHome, "bin", `devshell-worker-${target.key}${target.os === "windows" ? ".exe" : ""}`);
+    if (target.os === "windows") {
+        assert.equal(
+            recorder.calls[0]?.command,
+            join(devshellHome, "workers", target.key, workerSha, "devshell-worker.exe")
+        );
+        assert.equal(await installedWorkerSha(targetAlias), workerSha);
+    } else {
+        assert.equal(recorder.calls[0]?.command, join(devshellHome, "bin", "devshell-worker"));
+        assert.equal(await readlink(join(devshellHome, "bin", "devshell-worker")), `devshell-worker-${target.key}`);
+        assert.equal(await installedWorkerSha(targetAlias), workerSha);
+    }
 });
 
 test("local start upgrades a changed worker while status keeps the active worker stable", async (t) => {
@@ -150,18 +159,18 @@ test("local start upgrades a changed worker while status keeps the active worker
     };
 
     await transport.runWorkerCommand("status", { ...baseOptions, env: oldEnv });
-    const targetAlias = join(devshellHome, "bin", `devshell-worker-${target.key}`);
-    assert.match(await readlink(targetAlias), new RegExp(`/${oldSha}/`, "u"));
+    const targetAlias = join(devshellHome, "bin", `devshell-worker-${target.key}${target.os === "windows" ? ".exe" : ""}`);
+    assert.equal(await installedWorkerSha(targetAlias), oldSha);
 
     recorder.calls.length = 0;
     await transport.runWorkerCommand("status", { ...baseOptions, env: newEnv });
     assert.deepEqual(recorder.calls.map((call) => call.args[0]), ["status"]);
-    assert.match(await readlink(targetAlias), new RegExp(`/${oldSha}/`, "u"));
+    assert.equal(await installedWorkerSha(targetAlias), oldSha);
 
     recorder.calls.length = 0;
     await transport.runWorkerCommand("start", { ...baseOptions, env: newEnv });
     assert.deepEqual(recorder.calls.map((call) => call.args[0]), ["status", "stop", "start"]);
-    assert.match(await readlink(targetAlias), new RegExp(`/${newSha}/`, "u"));
+    assert.equal(await installedWorkerSha(targetAlias), newSha);
 
     recorder.calls.length = 0;
     await transport.runWorkerCommand("start", { ...baseOptions, env: newEnv });
@@ -1270,15 +1279,14 @@ test("podman transport rejects already running existing stopped containers", asy
     );
 });
 
-test("local transport executes frozen devshell-worker start status logs stop rpc", async (t) => {
+test("local transport executes frozen devshell-worker start status logs stop rpc", realWorkerTestOptions(workerBinaryPath), async (t) => {
     const workspacePath = await mkdtemp(join(tmpdir(), "portable-devshell-core-"));
     const homeDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-core-home-"));
     const runtimeDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-core-runtime-"));
     const instanceName = `task-3-${process.pid}`;
     const env = { ...process.env, HOME: homeDirectory, XDG_RUNTIME_DIR: runtimeDirectory };
-    const repoRoot = fileURLToPath(new URL("../../../../", import.meta.url));
     const transport = new WorkerTransportDriverLocal({
-        workerBinary: new WorkerBinary(resolve(repoRoot, "target", "debug", `devshell-worker${process.platform === "win32" ? ".exe" : ""}`)),
+        workerBinary: new WorkerBinary(workerBinaryPath!),
         spawnFunction: nodeSpawn
     });
 
@@ -1307,7 +1315,12 @@ test("local transport executes frozen devshell-worker start status logs stop rpc
     assert.notEqual(rpcProcess.stdout, null);
     assert.notEqual(rpcProcess.stderr, null);
     assert.equal(rpcProcess.kill("SIGTERM"), true);
-    assert.deepEqual(await rpcProcess.exit, { code: null, signal: "SIGTERM" });
+    const rpcExit = await rpcProcess.exit;
+    if (process.platform === "win32") {
+        assert.notDeepEqual(rpcExit, { code: 0, signal: null });
+    } else {
+        assert.deepEqual(rpcExit, { code: null, signal: "SIGTERM" });
+    }
 
     const stopResult = await transport.runWorkerCommand("stop", { env, instanceName });
     assert.equal(stopResult.exitCode, 0);
@@ -1443,6 +1456,16 @@ async function createDummyWorkerBinary(tag: string = "remote"): Promise<{
             await rm(directory, { recursive: true, force: true });
         }
     };
+}
+
+async function installedWorkerSha(path: string): Promise<string> {
+    if (process.platform === "win32") {
+        return createHash("sha256").update(await readFile(path)).digest("hex");
+    }
+    const target = await readlink(path);
+    const match = target.match(/[a-f0-9]{64}/u);
+    assert.notEqual(match, null, `installed worker symlink does not contain a sha256: ${target}`);
+    return match![0];
 }
 
 function closeRecordedChild(
