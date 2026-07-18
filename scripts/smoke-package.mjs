@@ -146,11 +146,11 @@ function run(command, args) {
 
 function smokeNativePty(applicationDirectory) {
     const requireFromApplication = createRequire(resolve(applicationDirectory, "package.json"));
-    const { spawn } = requireFromApplication("node-pty");
+    const nodePtyPath = requireFromApplication.resolve("node-pty");
     const shell = process.platform === "win32" ? process.env.ComSpec ?? "cmd.exe" : "/bin/sh";
     const args = process.platform === "win32" ? ["/d", "/s", "/c", "echo package-pty-ok"] : ["-c", "printf package-pty-ok"];
     const result = spawnSync(process.execPath, ["-e", [
-        `const { spawn } = require(${JSON.stringify(requireFromApplication.resolve("node-pty"))});`,
+        `const { spawn } = require(${JSON.stringify(nodePtyPath)});`,
         `const pty = spawn(${JSON.stringify(shell)}, ${JSON.stringify(args)}, { cols: 80, rows: 24 });`,
         "let output = '';",
         "pty.onData((data) => { output += data; });",
