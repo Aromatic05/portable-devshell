@@ -346,6 +346,6 @@ function run(command, args) {
 
 test("Windows installer smoke allows slower ARM package activation", async () => {
     const source = await readFile(resolve(repositoryRoot, "scripts", "smoke-install-release-windows.mjs"), "utf8");
-    assert.match(source, /install-release\.ps1"\)\n\s*\], false, false, 180_000\);/u);
+    assert.match(source, /install-release\.ps1"\)\r?\n\s*\], false, false, 180_000\);/u);
     assert.match(source, /timeoutMs = 45_000/u);
 });
