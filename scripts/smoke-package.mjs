@@ -1,5 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { lstat, mkdir, mkdtemp, readdir, rm, symlink } from "node:fs/promises";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { isAbsolute, resolve } from "node:path";
 
@@ -35,6 +36,8 @@ try {
 
     const cli = await assertPackageBinFile(await readPackageBinPath(app, "devshell"));
     command = await createInstalledCommand(root, cli.absolutePath);
+
+    smokeNativePty(app);
 
     assertCommandOutput(
         runInstalled(command, ["status"], environment),
@@ -138,5 +141,24 @@ function run(command, args) {
     }
     if (result.status !== 0) {
         throw new Error(`${command} ${args.join(" ")} failed (${result.status ?? "unknown"})\n${result.stdout}${result.stderr}`);
+    }
+}
+
+function smokeNativePty(applicationDirectory) {
+    const requireFromApplication = createRequire(resolve(applicationDirectory, "package.json"));
+    const { spawn } = requireFromApplication("node-pty");
+    const shell = process.platform === "win32" ? process.env.ComSpec ?? "cmd.exe" : "/bin/sh";
+    const args = process.platform === "win32" ? ["/d", "/s", "/c", "echo package-pty-ok"] : ["-c", "printf package-pty-ok"];
+    const result = spawnSync(process.execPath, ["-e", [
+        `const { spawn } = require(${JSON.stringify(requireFromApplication.resolve("node-pty"))});`,
+        `const pty = spawn(${JSON.stringify(shell)}, ${JSON.stringify(args)}, { cols: 80, rows: 24 });`,
+        "let output = '';",
+        "pty.onData((data) => { output += data; });",
+        "pty.onExit(({ exitCode }) => {",
+        "  if (exitCode !== 0 || !output.includes('package-pty-ok')) process.exitCode = 1;",
+        "});"
+    ].join("\n")], { encoding: "utf8" });
+    if (result.error !== undefined || result.status !== 0) {
+        throw new Error(`packaged node-pty smoke failed (${result.status ?? "unknown"})\n${result.stderr ?? ""}`);
     }
 }
