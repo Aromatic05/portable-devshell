@@ -10,7 +10,7 @@ import type { TuiClients } from "../../dist/runtime/client/TuiClientComposition.
 import { TuiRuntime } from "../../dist/runtime/TuiRuntime.js";
 import { TuiTerminalSession, type TuiTerminalPty } from "../../dist/testing.js";
 import { buildTuiHitRegions, buildTuiTerminalViewportRegion, hitTargetAt } from "../../dist/view/TuiHitRegions.js";
-import { selectMainScrollKey } from "../../dist/view/model/TuiViewProjection.js";
+import { selectMainScreenModel, selectMainScrollKey } from "../../dist/view/model/TuiViewProjection.js";
 
 test("real Ink runtime handles keyboard navigation, search, redraw, and terminal cleanup", async () => {
     const terminal = createTerminal();
@@ -547,12 +547,95 @@ test("real Ink runtime routes terminal scrollback and mouse without trapping sid
     assert.equal(host.rawModes.at(-1), false);
 });
 
-function createClients(options: { pingError?: Error } = {}) {
+test("real Ink runtime renders artifact_viewImage audit output in the detail panel", async () => {
+    const host = createTerminal();
+    const clients = createClients({
+        image: {
+            bytes: 68,
+            content: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+            encoding: "base64",
+            mediaType: "image/png",
+            name: "preview.png",
+            source: { instance: "alpha", path: "./preview.png", type: "file" }
+        }
+    });
+    const runtime = new TuiRuntime(
+        { stdin: host.stdin, stdout: host.stdout },
+        { clients: clients.value, graphicsMode: "kitty", inkDebug: true }
+    );
+    const running = runtime.run();
+
+    try {
+        await waitUntil(() => runtime.store.getState().connection.status === "connected");
+        runtime.store.replaceInstances([{ enabled: true, mcpEnabled: true, name: "alpha", provider: "local" }]);
+        runtime.store.setSelectedInstance("alpha");
+        runtime.store.replaceToolCalls("alpha", [{
+            callId: "image-call",
+            completedAt: "2026-07-18T00:00:01.000Z",
+            input: { path: "./preview.png" },
+            inputSummary: "{\"path\":\"./preview.png\"}",
+            instance: "alpha" as never,
+            output: {
+                bytes: 68,
+                mediaType: "image/png",
+                name: "preview.png",
+                source: { instance: "alpha", path: "./preview.png", type: "file" }
+            },
+            source: "mcp",
+            startedAt: "2026-07-18T00:00:00.000Z",
+            status: "completed",
+            toolName: "artifact_viewImage"
+        }]);
+        runtime.store.setSelectedPage("audit");
+
+        const box = selectMainScreenModel(runtime.store.getState()).boxes.find((candidate) => candidate.id === "audit-image-call")!;
+        runtime.store.toggleExpanded(box.expandedKey);
+        runtime.store.setFocusScope("boxDetail");
+        runtime.store.setMainFocusId(box.id);
+        runtime.store.setSelectedDetailLine(box.expandedKey, "audit-image-call:output");
+        await runtime.commandDispatcher.dispatch({ type: "focus.activate" });
+
+        await waitUntil(() => runtime.store.getState().interaction.textDetail.image?.name === "preview.png");
+        await waitUntil(() => host.output.includes("a=T,f=100"));
+        assert.equal(host.output.includes("c="), true);
+
+        const beforeClose = host.output.length;
+        await runtime.commandDispatcher.dispatch({ type: "textDetail.close" });
+        await waitUntil(() => host.output.slice(beforeClose).includes("a=d,d=A"));
+
+        host.write("\u0004");
+        await running;
+    } finally {
+        await runtime.stop();
+    }
+
+    assert.deepEqual(clients.imageReads(), [{ input: { path: "./preview.png" }, instance: "alpha" }]);
+});
+
+function createClients(options: {
+    image?: {
+        bytes: number;
+        content: string;
+        encoding: "base64";
+        mediaType: "image/gif" | "image/jpeg" | "image/png" | "image/webp";
+        name: string;
+        source: { handle?: string; instance: string; path?: string; type?: "artifact" | "directory" | "file" };
+    };
+    pingError?: Error;
+} = {}) {
     let closeCount = 0;
+    const imageReads: Array<{ input: unknown; instance: string }> = [];
     let refreshCount = 0;
     let schemaCalls = 0;
     const value = {
         artifact: {
+            async viewImage(instance: string, input: unknown) {
+                imageReads.push({ input, instance });
+                if (options.image === undefined) {
+                    throw new Error("No image fixture configured.");
+                }
+                return options.image;
+            },
             async listShares() {
                 return [];
             },
@@ -627,6 +710,7 @@ function createClients(options: { pingError?: Error } = {}) {
     return {
         closed: () => closeCount,
         createSchemaCalls: () => schemaCalls,
+        imageReads: () => imageReads,
         refreshCalls: () => refreshCount,
         value
     };

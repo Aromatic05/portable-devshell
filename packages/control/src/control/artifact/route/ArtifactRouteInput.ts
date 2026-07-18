@@ -3,8 +3,20 @@ import {
     errorCodes,
     type ArtifactShareInput,
     type ArtifactTransferStartInput,
+    type ArtifactViewImageInput,
     type JsonValue
 } from "@portable-devshell/shared";
+
+export function readArtifactViewImageInput(params?: JsonValue): ArtifactViewImageInput {
+    if (!isRecord(params)) throw invalid("artifact.viewImage requires parameters.");
+    const instance = readOptionalString(params.instance, "instance");
+    const handle = readOptionalString(params.handle, "handle");
+    const path = readOptionalString(params.path, "path");
+    if ((handle === undefined) === (path === undefined)) throw invalid("Exactly one of handle or path is required.");
+    return handle === undefined
+        ? { ...(instance === undefined ? {} : { instance }), path: path! }
+        : { handle, ...(instance === undefined ? {} : { instance }) };
+}
 
 export function readArtifactShareInput(params?: JsonValue): ArtifactShareInput {
     if (!isRecord(params)) throw invalid("artifact.createShare requires parameters.");

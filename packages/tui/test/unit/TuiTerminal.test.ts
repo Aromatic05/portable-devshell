@@ -3,8 +3,10 @@ import test from "node:test";
 
 import {
     detectTerminalGraphicsSupport,
+    detectTerminalImageSupport,
     pageFromShortcut,
     renderTerminalGraphicsFrame,
+    renderTerminalImageFrame,
     selectSidebarModel,
     TuiAppStore,
     TuiTerminalBuffer,
@@ -222,6 +224,46 @@ test("terminal graphics renderer detects support and positions native protocol o
     assert.equal(frame.includes("\u001B_Ga=d,d=A;\u001B\\"), true);
     assert.equal(frame.includes("\u001B[10;32H\u001B_Ga=T;AAAA\u001B\\"), true);
     assert.equal(frame.includes("\u001BPqabc"), false);
+});
+
+test("terminal image renderer emits Kitty PNG and iTerm2 fallback frames", () => {
+    assert.deepEqual(detectTerminalImageSupport({ TERM_PROGRAM: "iTerm.app" }, "auto"), {
+        iterm2: true,
+        kitty: false
+    });
+
+    const png = renderTerminalImageFrame({
+        image: {
+            bytes: 3,
+            content: "AAAA",
+            encoding: "base64",
+            mediaType: "image/png",
+            name: "preview.png",
+            source: { instance: "alpha", path: "./preview.png", type: "file" }
+        },
+        region: { height: 6, width: 20, x: 30, y: 8 },
+        support: { iterm2: false, kitty: true }
+    });
+    assert.equal(png.protocol, "kitty");
+    assert.equal(png.sequence.includes("\u001B[8;30H"), true);
+    assert.equal(png.sequence.includes("a=T,f=100"), true);
+    assert.equal(png.sequence.includes("c=20,r=6"), true);
+
+    const jpeg = renderTerminalImageFrame({
+        image: {
+            bytes: 3,
+            content: "BBBB",
+            encoding: "base64",
+            mediaType: "image/jpeg",
+            name: "photo.jpg",
+            source: { instance: "alpha", path: "./photo.jpg", type: "file" }
+        },
+        region: { height: 6, width: 20, x: 30, y: 8 },
+        support: { iterm2: true, kitty: true }
+    });
+    assert.equal(jpeg.protocol, "iterm2");
+    assert.equal(jpeg.sequence.includes("1337;File="), true);
+    assert.equal(jpeg.sequence.includes(":BBBB"), true);
 });
 
 test("terminal session connects PTY output, input, resize, and disposal", async () => {

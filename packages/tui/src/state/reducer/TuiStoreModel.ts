@@ -124,7 +124,7 @@ export type TuiAppAction =
     | { page: TuiPageId; query: string; type: "search.setQuery" }
     | { input: string; instance: string; toolName: string; type: "toolForm.set" }
     | { type: "toolForm.clear" }
-    | { body: string; open: boolean; scrollOffset: number; title: string; type: "textDetail.set" }
+    | { body: string; image?: import("@portable-devshell/shared").ArtifactViewImageResult; open: boolean; scrollOffset: number; title: string; type: "textDetail.set" }
     | { editor?: TuiEditorState; type: "editor.set" }
     | { dirty: boolean; key: string; value: unknown; type: "formDraft.set" }
     | { key: string; type: "formDraft.clear" }

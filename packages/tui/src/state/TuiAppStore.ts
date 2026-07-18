@@ -249,9 +249,16 @@ export class TuiAppStore {
         });
     }
 
-    setTextDetail(input: { body: string; open: boolean; scrollOffset?: number; title: string }): void {
+    setTextDetail(input: {
+        body: string;
+        image?: import("@portable-devshell/shared").ArtifactViewImageResult;
+        open: boolean;
+        scrollOffset?: number;
+        title: string;
+    }): void {
         this.dispatch({
             body: input.body,
+            image: input.image,
             open: input.open,
             scrollOffset: input.scrollOffset ?? 0,
             title: input.title,

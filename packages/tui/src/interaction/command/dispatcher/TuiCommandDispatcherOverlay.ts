@@ -57,6 +57,7 @@ export class TuiCommandDispatcherOverlay {
                 this.#focusManager.pushRestore("textDetail");
                 this.#store.setTextDetail({
                     body: intent.body,
+                    image: intent.image,
                     open: true,
                     title: intent.title
                 });

@@ -137,6 +137,7 @@ export function reduceTuiStoreReducerInteraction(state: TuiAppState, action: Tui
                     ...state.interaction,
                     textDetail: {
                         body: action.body,
+                        image: action.image,
                         open: action.open,
                         scrollOffset: action.scrollOffset,
                         title: action.title

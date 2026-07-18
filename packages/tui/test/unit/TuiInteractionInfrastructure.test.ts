@@ -627,6 +627,57 @@ test("audit truncates input and output previews while opening complete structure
     assert.equal(harness.store.getState().interaction.textDetail.body.includes("src/example.ts"), true);
 });
 
+test("artifact_viewImage audit output loads an image into the detail panel", async () => {
+    const calls: Array<{ input: unknown; instance: string }> = [];
+    const png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
+    const harness = createHarness({
+        onArtifactViewImage: async (instance, input) => {
+            calls.push({ input, instance });
+            return {
+                bytes: 68,
+                content: png,
+                encoding: "base64",
+                mediaType: "image/png",
+                name: "preview.png",
+                source: { instance, path: "./preview.png", type: "file" }
+            };
+        }
+    });
+    harness.store.replaceToolCalls("alpha", [{
+        callId: "image-call",
+        completedAt: "2026-07-18T00:00:01.000Z",
+        input: { path: "./preview.png" },
+        inputSummary: "{\"path\":\"./preview.png\"}",
+        instance: "alpha" as never,
+        output: {
+            bytes: 68,
+            mediaType: "image/png",
+            name: "preview.png",
+            source: { instance: "alpha", path: "./preview.png", type: "file" }
+        },
+        source: "mcp",
+        startedAt: "2026-07-18T00:00:00.000Z",
+        status: "completed",
+        toolName: "artifact_viewImage"
+    }]);
+
+    await harness.press("5");
+    const audit = selectMainScreenModel(harness.store.getState()).boxes.find((box) => box.id === "audit-image-call")!;
+    harness.store.toggleExpanded(audit.expandedKey);
+    harness.store.setFocusScope("boxDetail");
+    harness.store.setMainFocusId("audit-image-call");
+    harness.store.setSelectedDetailLine(audit.expandedKey, "audit-image-call:output");
+    await harness.dispatch({ type: "focus.activate" });
+
+    const detail = harness.store.getState().interaction.textDetail;
+    assert.deepEqual(calls, [{ input: { path: "./preview.png" }, instance: "alpha" }]);
+    assert.equal(detail.open, true);
+    assert.equal(detail.title, "artifact_viewImage · output");
+    assert.equal(detail.image?.content, png);
+    assert.equal(detail.image?.mediaType, "image/png");
+    assert.equal(detail.body.includes("preview.png"), true);
+});
+
 test("audit renders legacy records without an input summary", async () => {
     const harness = createHarness();
     harness.store.replaceToolCalls("alpha", [{
@@ -1112,6 +1163,14 @@ async function openCreateWizard(harness: ReturnType<typeof createHarness>): Prom
 }
 
 function createHarness(options: {
+    onArtifactViewImage?: (instance: string, input: { handle?: string; instance?: string; path?: string }) => Promise<{
+        bytes: number;
+        content: string;
+        encoding: "base64";
+        mediaType: "image/gif" | "image/jpeg" | "image/png" | "image/webp";
+        name: string;
+        source: unknown;
+    }>;
     onAttachShell?: (instance: string) => Promise<void>;
     onOAuthApprovalDecision?: (approvalId: string, decision: "approve" | "deny") => Promise<void>;
     onInstanceConfigUpdate?: (instanceName: string, patch: Record<string, unknown>) => Promise<void>;
@@ -1152,6 +1211,7 @@ function createHarness(options: {
         onApprovalDecision: async (instance, approvalId, decision) => {
             approvalDecisions.push({ approvalId, decision, instance });
         },
+        onArtifactViewImage: options.onArtifactViewImage as never,
         onInstanceAction: async (action, instance) => {
             instanceActions.push({ action, instance });
         },

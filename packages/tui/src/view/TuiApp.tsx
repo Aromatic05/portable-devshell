@@ -55,6 +55,10 @@ export function TuiApp(props: TuiAppProps) {
         (visible: boolean) => props.runtime.renderTerminalGraphics(visible),
         [props.runtime]
     );
+    const renderTextDetailImage = useCallback(
+        (visible: boolean) => props.runtime.renderTextDetailImage(visible),
+        [props.runtime]
+    );
     useInput((input, key) => {
         void props.runtime.handleInput(input, key);
     });
@@ -87,7 +91,12 @@ export function TuiApp(props: TuiAppProps) {
                             source={props.runtime.terminal}
                         />
                     ) : (
-                        <TuiScreenRouter boxInnerWidth={boxInnerWidth} state={state} viewportRows={viewportRows} />
+                        <TuiScreenRouter
+                            boxInnerWidth={boxInnerWidth}
+                            onTextDetailImageVisibility={renderTextDetailImage}
+                            state={state}
+                            viewportRows={viewportRows}
+                        />
                     )}
                     {!auditDetailOpen ? (
                         <TuiComponentConfirmDialog

@@ -4,6 +4,7 @@ import { requirePort, routeModule } from "../../../route/ControlRouteFactory.js"
 import {
     readArtifactShareInput,
     readArtifactTransferStartInput,
+    readArtifactViewImageInput,
     readDefaultInstance,
     readShareId,
     readTransferId
@@ -13,6 +14,10 @@ import type { ArtifactService } from "../ArtifactService.js";
 export function createArtifactRouteModule(service?: ArtifactService): PrefixRouteModuleDefinition {
     const artifact = () => requirePort(service, "Artifact service is not available.");
     return routeModule("artifact", {
+        viewImage: async (request) => await artifact().viewImage(
+            readArtifactViewImageInput(request.payload),
+            readDefaultInstance(request.payload)
+        ) as never,
         createShare: async (request) => await artifact().createShare(
             readArtifactShareInput(request.payload),
             readDefaultInstance(request.payload)

@@ -4,6 +4,7 @@ import type { ApprovalRequest, ToolCallRecord } from "@portable-devshell/shared"
 
 import { renderExpandableBoxLines } from "../component/TuiComponentExpandableBox.js";
 import { TuiComponentErrorBanner } from "../component/TuiComponentErrorBanner.js";
+import { TuiComponentTextDetail } from "../component/TuiComponentTextDetail.js";
 import { TuiFocusGraph, type TuiFocusNode } from "../../state/focus/TuiFocusGraph.js";
 import type { TuiPageId } from "../../state/TuiUiState.js";
 import type { TuiAppState } from "../../state/reducer/TuiStoreModel.js";
@@ -13,6 +14,7 @@ export const orderedPages: TuiPageId[] = ["instances", "config", "connector", "o
 
 export interface TuiScreenRouterProps {
     boxInnerWidth: number;
+    onTextDetailImageVisibility?(visible: boolean): void;
     state: TuiAppState;
     viewportRows: number;
 }
@@ -20,17 +22,7 @@ export interface TuiScreenRouterProps {
 export function TuiScreenRouter(props: TuiScreenRouterProps) {
     const textDetail = props.state.interaction.textDetail;
     if (textDetail.open) {
-        const width = Math.max(20, props.boxInnerWidth);
-        const lines = wrapText(textDetail.body, width);
-        const viewport = Math.max(1, props.viewportRows - 2);
-        const offset = clamp(textDetail.scrollOffset, 0, Math.max(0, lines.length - viewport));
-        return (
-            <Box flexDirection="column">
-                <Text bold>{textDetail.title}</Text>
-                {lines.slice(offset, offset + viewport).map((line, index) => <Text color={detailLineColor(line)} key={`${offset + index}:${line}`}>{line}</Text>)}
-                <Text dimColor>{`line ${Math.min(offset + 1, Math.max(lines.length, 1))}-${Math.min(offset + viewport, lines.length)} / ${lines.length} · Esc/Enter back`}</Text>
-            </Box>
-        );
+        return <TuiComponentTextDetail detail={textDetail} onImageVisibility={props.onTextDetailImageVisibility} viewportRows={props.viewportRows} width={props.boxInnerWidth} />;
     }
     const auditPage = props.state.interaction.auditPage;
     if (props.state.ui.selectedPage === "audit" && auditPage.mode !== "list") {
@@ -192,35 +184,4 @@ function buildLinearGraph(items: TuiFocusItem[]): TuiFocusGraph {
         up: items[(index - 1 + items.length) % items.length]
     }));
     return new TuiFocusGraph(nodes);
-}
-
-function wrapText(value: string, width: number): string[] {
-    const output: string[] = [];
-    for (const sourceLine of value.split(/\r?\n/u)) {
-        if (sourceLine.length === 0) {
-            output.push("");
-            continue;
-        }
-        for (let offset = 0; offset < sourceLine.length; offset += width) {
-            output.push(sourceLine.slice(offset, offset + width));
-        }
-    }
-    return output.length === 0 ? [""] : output;
-}
-
-function detailLineColor(line: string): string | undefined {
-    const value = line.trimStart();
-    if (/^(command|path|target|cwd):/u.test(value)) {
-        return "yellow";
-    }
-    if (value.startsWith("+++") || value.startsWith("+")) {
-        return "green";
-    }
-    if (value.startsWith("---") || value.startsWith("-")) {
-        return "red";
-    }
-    if (value.startsWith("@@") || value.startsWith("***")) {
-        return "cyan";
-    }
-    return undefined;
 }

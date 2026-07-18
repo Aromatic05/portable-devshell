@@ -1,4 +1,4 @@
-import type { InstanceCreateSchema, InstanceCreateSummary } from "@portable-devshell/shared";
+import type { ArtifactViewImageResult, InstanceCreateSchema, InstanceCreateSummary } from "@portable-devshell/shared";
 
 import type { TuiAuditPageState, TuiFocusScope, TuiPageId, TuiSidebarCursor } from "./TuiUiState.js";
 
@@ -32,6 +32,7 @@ export interface TuiSearchState {
 
 export interface TuiTextDetailState {
     body: string;
+    image?: ArtifactViewImageResult;
     open: boolean;
     scrollOffset: number;
     title: string;
@@ -105,7 +106,7 @@ export type TuiUiIntent =
     | { type: "screen.home" }
     | { type: "screen.end" }
     | { type: "screen.toggle" }
-    | { body: string; title: string; type: "textDetail.open" }
+    | { body: string; image?: ArtifactViewImageResult; title: string; type: "textDetail.open" }
     | { type: "textDetail.close" }
     | { delta: number; type: "textDetail.scroll" }
     | { type: "logs.toggleFollow" }

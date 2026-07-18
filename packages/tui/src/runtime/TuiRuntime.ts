@@ -21,6 +21,7 @@ import { TuiApp } from "../view/TuiApp.js";
 import type { TuiAppKey } from "../view/TuiAppController.js";
 import {
     buildTuiHitRegions,
+    buildTuiTextDetailImageRegion,
     buildTuiTerminalViewportRegion,
     hitTargetAt,
     type TuiHitTarget
@@ -34,6 +35,12 @@ import {
     type TuiTerminalGraphicsMode,
     type TuiTerminalGraphicsSupport
 } from "./terminal/TuiTerminalGraphicsRenderer.js";
+import {
+    detectTerminalImageSupport,
+    renderTerminalImageFrame,
+    terminalImageClearSequence,
+    type TuiTerminalImageSupport
+} from "./terminal/TuiTerminalImageRenderer.js";
 import { TuiTerminalInputRouter } from "./terminal/TuiTerminalInputRouter.js";
 import { TuiTerminalSession } from "./terminal/TuiTerminalSession.js";
 
@@ -66,6 +73,7 @@ export class TuiRuntime {
     readonly #storeUnsubscribe: () => void;
     readonly #stdout: WriteStream;
     readonly #terminalGraphicsSupport: TuiTerminalGraphicsSupport;
+    readonly #terminalImageSupport: TuiTerminalImageSupport;
     readonly #terminalInputRouter = new TuiTerminalInputRouter();
     #attachResume?: () => void;
     #attachWait?: Promise<void>;
@@ -88,6 +96,7 @@ export class TuiRuntime {
         this.#stdout = options.stdout ?? process.stdout;
         this.#inkDebug = dependencies.inkDebug ?? false;
         this.#terminalGraphicsSupport = detectTerminalGraphicsSupport(process.env, dependencies.graphicsMode);
+        this.#terminalImageSupport = detectTerminalImageSupport(process.env, dependencies.graphicsMode);
         this.#inkStdin = createInkStdin(this.#stdin);
         this.#alternateScreen = new AlternateScreen(this.#stdout);
         this.store = new TuiAppStore();
@@ -144,6 +153,8 @@ export class TuiRuntime {
             onArtifactRevokeShare: async (shareId) => {
                 await this.#operations.revokeArtifactShare(shareId);
             },
+            onArtifactViewImage: async (instance, input) =>
+                await clients.artifact.viewImage(instance, input),
             onAttachShell: async (instance) => {
                 await this.#operations.attachShell(instance);
             },
@@ -332,6 +343,7 @@ export class TuiRuntime {
         }
         this.#stopped = true;
         this.#stopCursorBlink();
+        this.renderTextDetailImage(false);
         this.renderTerminalGraphics(false);
         this.#storeUnsubscribe();
         this.terminal.dispose();
@@ -345,6 +357,37 @@ export class TuiRuntime {
 
     redraw(): void {
         this.#stdout.write("\u001B[2J\u001B[H");
+        queueMicrotask(() => {
+            this.renderTextDetailImage(true);
+            this.renderTerminalGraphics(true);
+        });
+    }
+
+    renderTextDetailImage(visible: boolean): void {
+        const detail = this.store.getState().interaction.textDetail;
+        if (!visible || detail.open !== true || detail.image === undefined) {
+            const clear = terminalImageClearSequence(this.#terminalImageSupport);
+            if (clear.length > 0) {
+                this.#stdout.write(clear);
+            }
+            return;
+        }
+
+        const region = buildTuiTextDetailImageRegion(this.store.getState(), {
+            columns: this.columns,
+            rows: this.rows
+        });
+        if (region === undefined) {
+            return;
+        }
+        const frame = renderTerminalImageFrame({
+            image: detail.image,
+            region,
+            support: this.#terminalImageSupport
+        });
+        if (frame.sequence.length > 0) {
+            this.#stdout.write(frame.sequence);
+        }
     }
 
     renderTerminalGraphics(visible: boolean): void {

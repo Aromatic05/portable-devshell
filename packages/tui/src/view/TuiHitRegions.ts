@@ -1,6 +1,7 @@
 import { selectErrorMessage, selectMainBoxFlowMetrics, selectMainScreenModel, selectSearchModel, selectSidebarModel } from "./model/TuiViewProjection.js";
 import type { TuiAppState } from "../state/reducer/TuiStoreModel.js";
 import { isTerminalSizeSupported, mainInnerWidth, tuiLayoutMetrics } from "./TuiRootLayout.js";
+import { tuiTextDetailImageRows } from "./TuiTextDetailLayout.js";
 
 export type TuiHitTarget =
     | { boxId: string; kind: "boxBody"; lineId?: string }
@@ -51,6 +52,40 @@ export function buildTuiTerminalViewportRegion(
         width: Math.max(1, mainInnerWidth(viewport.columns)),
         x: compact ? 2 : layout.outerGap + layout.sidebarWidth + layout.panelGap + 2,
         y: (compact ? 6 : 5) + globalErrorHeight + (search.open ? 1 : 0) + toolFormHeight + 1
+    };
+}
+
+export function buildTuiTextDetailImageRegion(
+    state: TuiAppState,
+    viewport: { columns: number; rows: number }
+): TuiTerminalViewportRegion | undefined {
+    if (
+        state.interaction.textDetail.open !== true
+        || state.interaction.textDetail.image === undefined
+        || !isTerminalSizeSupported(viewport.columns, viewport.rows)
+    ) {
+        return undefined;
+    }
+
+    const layout = tuiLayoutMetrics(viewport.columns);
+    const compact = layout.mode === "compact";
+    const search = selectSearchModel(state);
+    const globalErrorHeight = blockHeight(selectErrorMessage(state));
+    const toolFormHeight = state.interaction.toolForm?.open === true ? 6 : 0;
+    const viewportRows = Math.max(
+        0,
+        viewport.rows
+            - (compact ? 10 : 7)
+            - globalErrorHeight
+            - (search.open ? 1 : 0)
+            - (state.connection.status === "connecting" ? 1 : 0)
+    );
+
+    return {
+        height: tuiTextDetailImageRows(viewportRows),
+        width: Math.max(1, mainInnerWidth(viewport.columns)),
+        x: compact ? 2 : layout.outerGap + layout.sidebarWidth + layout.panelGap + 2,
+        y: (compact ? 6 : 5) + globalErrorHeight + (search.open ? 1 : 0) + toolFormHeight + 2
     };
 }
 

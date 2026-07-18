@@ -5,6 +5,8 @@ import type {
     ConfigDraft,
     ConfigInstancePatch,
     ConfigMcpPatch,
+    ArtifactViewImageInput,
+    ArtifactViewImageResult,
     JsonValue
 } from "@portable-devshell/shared";
 
@@ -28,6 +30,10 @@ export interface TuiCommandDispatcherOptions {
     ): Promise<void>;
     onArtifactRevokeShare?(shareId: string): Promise<void>;
     onArtifactCancelTransfer?(transferId: string): Promise<void>;
+    onArtifactViewImage?(
+        instance: string,
+        input: ArtifactViewImageInput
+    ): Promise<ArtifactViewImageResult>;
     onInstanceAction(
         action: "refresh" | "restart" | "start" | "stop",
         instance: string
@@ -87,6 +93,7 @@ export class TuiCommandDispatcher {
         });
         this.#audit = new TuiCommandDispatcherAudit({
             dispatch: (intent) => this.dispatch(intent),
+            onArtifactViewImage: options.onArtifactViewImage,
             projection: options.projection,
             store: this.#store
         });
