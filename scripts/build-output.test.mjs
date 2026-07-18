@@ -46,10 +46,12 @@ test("source test launchers pass filesystem loaders to Node as file URLs", async
     }
 });
 
-test("Windows pnpm launchers execute through cmd.exe instead of spawning pnpm.cmd directly", async () => {
-    for (const relativePath of ["scripts/package-app.mjs", "scripts/install-local.mjs"]) {
-        const source = await readFile(resolve(repositoryRoot, relativePath), "utf8");
-        assert.match(source, /process\.env\.ComSpec \?\? "cmd\.exe"/u, relativePath);
-        assert.doesNotMatch(source, /pnpm\.cmd/u, relativePath);
-    }
+test("Windows pnpm launchers avoid spawning pnpm.cmd directly", async () => {
+    const packageSource = await readFile(resolve(repositoryRoot, "scripts/package-app.mjs"), "utf8");
+    assert.match(packageSource, /resolvePnpmCommand/u);
+    assert.doesNotMatch(packageSource, /pnpm\.cmd|ComSpec/u);
+
+    const installSource = await readFile(resolve(repositoryRoot, "scripts/install-local.mjs"), "utf8");
+    assert.match(installSource, /process\.env\.ComSpec \?\? "cmd\.exe"/u);
+    assert.doesNotMatch(installSource, /pnpm\.cmd/u);
 });

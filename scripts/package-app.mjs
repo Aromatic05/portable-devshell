@@ -13,6 +13,7 @@ import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { assertPackageBinFile, readPackageBinPath, writePortableApplicationManifest } from "./application-layout.mjs";
+import { resolvePnpmCommand } from "./PnpmCommand.mjs";
 
 const repoRoot = fileURLToPath(new URL("../", import.meta.url));
 const args = process.argv.slice(2);
@@ -76,21 +77,8 @@ function readOption(name) {
 }
 
 function runPnpm(commandArgs) {
-    if (process.platform === "win32") {
-        run(process.env.ComSpec ?? "cmd.exe", [
-            "/d",
-            "/s",
-            "/c",
-            ["pnpm", ...commandArgs].map(quoteWindowsCommandArgument).join(" "),
-        ]);
-        return;
-    }
-    run("pnpm", commandArgs);
-}
-
-function quoteWindowsCommandArgument(value) {
-    if (/^[A-Za-z0-9_./:=+-]+$/u.test(value)) return value;
-    return `"${String(value).replaceAll('"', '""')}"`;
+    const command = resolvePnpmCommand();
+    run(command.command, [...command.args, ...commandArgs]);
 }
 
 function run(command, commandArgs) {
