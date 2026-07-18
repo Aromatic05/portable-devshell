@@ -21,7 +21,6 @@ import {
 import { InstanceFactory } from "../InstanceFactory.js";
 import type { InstanceRegistry } from "../registry/InstanceRegistry.js";
 import { McpEndpointFactory } from "../../../composition/McpEndpointFactory.js";
-import { ControlConfigStore } from "../../config/ControlConfigStore.js";
 import { ControlConfigValidator } from "../../config/ControlConfigValidator.js";
 import { listInstanceCreateProviders } from "./InstanceCreateProviderCatalog.js";
 
@@ -42,8 +41,12 @@ const instanceCreateSchema: InstanceCreateSchema = {
     providers: ["local", "ssh", "docker", "podman", "reverse"]
 };
 
+interface ControlConfigWriter {
+    write(config: ControlConfig, homeDirectory?: string): Promise<void>;
+}
+
 export interface InstanceCreateCoordinatorOptions {
-    configStore: ControlConfigStore;
+    configStore: ControlConfigWriter;
     getConfig: () => ControlConfig;
     getMcpHost: () => McpHost | undefined;
     getMcpInstanceGateway?: () => McpInstanceGateway | undefined;
@@ -57,7 +60,7 @@ export interface InstanceCreateCoordinatorOptions {
 }
 
 export class InstanceCreateCoordinator {
-    readonly #configStore: ControlConfigStore;
+    readonly #configStore: ControlConfigWriter;
     readonly #getConfig: () => ControlConfig;
     readonly #getMcpHost: () => McpHost | undefined;
     readonly #getMcpInstanceGateway: () => McpInstanceGateway | undefined;

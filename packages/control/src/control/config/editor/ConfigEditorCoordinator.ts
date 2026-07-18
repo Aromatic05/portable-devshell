@@ -21,7 +21,6 @@ import {
 import { InstanceFactory } from "../../instance/InstanceFactory.js";
 import type { InstanceRegistry } from "../../instance/registry/InstanceRegistry.js";
 import { McpEndpointFactory } from "../../../composition/McpEndpointFactory.js";
-import { ControlConfigStore } from "../ControlConfigStore.js";
 import { ControlConfigValidator } from "../ControlConfigValidator.js";
 import {
     buildApplyResult,
@@ -32,8 +31,12 @@ import {
     type ConfigApplyResult
 } from "./ConfigEditorResult.js";
 
+interface ControlConfigWriter {
+    write(config: ControlConfig, homeDirectory?: string): Promise<void>;
+}
+
 interface ConfigEditorCoordinatorOptions {
-    configStore: ControlConfigStore;
+    configStore: ControlConfigWriter;
     getConfig: () => ControlConfig;
     getMcpHost?: () => McpHost | undefined;
     getMcpInstanceGateway?: () => McpInstanceGateway | undefined;
@@ -46,7 +49,7 @@ interface ConfigEditorCoordinatorOptions {
 }
 
 export class ConfigEditorCoordinator {
-    readonly #configStore: ControlConfigStore;
+    readonly #configStore: ControlConfigWriter;
     readonly #getConfig: () => ControlConfig;
     readonly #getMcpHost: () => McpHost | undefined;
     readonly #getMcpInstanceGateway: () => McpInstanceGateway | undefined;
