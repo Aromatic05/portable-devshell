@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { EventEmitter } from "node:events";
 import test from "node:test";
 
 import { asInstanceName } from "@portable-devshell/shared";
@@ -59,17 +60,7 @@ test("attach operation reports resolver failures before suspending the TUI", asy
 test(
     "attach operation restores the TUI and refreshes control state after a local shell exits",
     { skip: process.platform === "win32" },
-    async (context) => {
-        const previousShell = process.env.SHELL;
-        process.env.SHELL = "/bin/true";
-        context.after(() => {
-            if (previousShell === undefined) {
-                delete process.env.SHELL;
-            } else {
-                process.env.SHELL = previousShell;
-            }
-        });
-
+    async () => {
         const harness = createHarness();
         harness.store.replaceInstances([
             {
@@ -108,6 +99,11 @@ function createHarness() {
             suspend() {
                 calls.push("suspend");
             }
+        },
+        attachSpawn: () => {
+            const child = new EventEmitter();
+            queueMicrotask(() => child.emit("close", 0));
+            return child as never;
         },
         clients: {
             runtime: {

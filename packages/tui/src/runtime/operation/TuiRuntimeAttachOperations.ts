@@ -1,5 +1,5 @@
 import { TuiAttachShellCommandResolver } from "../attach/TuiAttachShellCommandResolver.js";
-import { TuiAttachShellRunner } from "../attach/TuiAttachShellRunner.js";
+import { TuiAttachShellRunner, type TuiAttachShellSpawn } from "../attach/TuiAttachShellRunner.js";
 import type { TuiClients } from "../client/TuiClientComposition.js";
 import type { TuiControlSession } from "../control/TuiControlSession.js";
 import type { TuiAppStore } from "../../state/TuiAppStore.js";
@@ -7,6 +7,7 @@ import type { TuiAppStore } from "../../state/TuiAppStore.js";
 export class TuiRuntimeAttachOperations {
     constructor(private readonly options: {
         attachHooks?: { resume(): void; suspend(): void };
+        attachSpawn?: TuiAttachShellSpawn;
         clients: TuiClients;
         session: TuiControlSession;
         store: TuiAppStore;
@@ -33,7 +34,10 @@ export class TuiRuntimeAttachOperations {
                 hooks: {
                     resume: () => this.options.attachHooks?.resume(),
                     suspend: () => this.options.attachHooks?.suspend()
-                }
+                },
+                ...(this.options.attachSpawn === undefined
+                    ? {}
+                    : { spawn: this.options.attachSpawn })
             }).run(command);
         } catch (error) {
             this.options.store.setScreenStatus(
