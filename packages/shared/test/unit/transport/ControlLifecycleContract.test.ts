@@ -136,6 +136,7 @@ test("control lifecycle start is idempotent and stop tolerates the shutdown sock
             }
         },
         pidFile,
+        processIsRunning: (pid) => pid === 4321 && running,
         rpcClient,
         socketFile,
         spawnFunction() {
