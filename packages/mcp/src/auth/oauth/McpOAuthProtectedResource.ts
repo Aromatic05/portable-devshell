@@ -8,6 +8,7 @@ import type { McpOAuth2Config } from "../McpAuthConfig.js";
 import { McpOAuthApprovalService } from "./McpOAuthApprovalService.js";
 import { McpOAuthInteraction } from "./McpOAuthInteraction.js";
 import { McpOAuthProviderRuntime } from "./McpOAuthProviderRuntime.js";
+import { McpOAuthRegistrationLimiter } from "./McpOAuthRegistrationLimiter.js";
 
 export interface McpOAuthProtectedResourceOptions {
     trustProxy?: boolean;
@@ -16,6 +17,7 @@ export interface McpOAuthProtectedResourceOptions {
 export class McpOAuthProtectedResource {
     readonly #approvals: McpOAuthApprovalService;
     readonly #interaction: McpOAuthInteraction;
+    readonly #registrationLimiter = new McpOAuthRegistrationLimiter();
     readonly #runtime: McpOAuthProviderRuntime;
 
     constructor(
@@ -53,6 +55,7 @@ export class McpOAuthProtectedResource {
     }
 
     install(app: Express): void {
+        this.#installRegistrationGuard(app);
         this.#interaction.install(app);
         this.#installProvider(app);
     }
@@ -85,6 +88,24 @@ export class McpOAuthProtectedResource {
                 return;
             }
             callback(request, response);
+        });
+    }
+
+    #installRegistrationGuard(app: Express): void {
+        const registrationPath = `${this.#runtime.basePath}/register`;
+        app.use((request, response, next) => {
+            const pathname = this.#requestPathname(request.url);
+            if (request.method !== "POST" || pathname !== registrationPath) {
+                next();
+                return;
+            }
+            const key = request.socket.remoteAddress ?? "unknown";
+            if (!this.#registrationLimiter.accept(key)) {
+                response.setHeader("retry-after", "60");
+                response.status(429).json({ error: "OAuth client registration rate limit exceeded." });
+                return;
+            }
+            next();
         });
     }
 

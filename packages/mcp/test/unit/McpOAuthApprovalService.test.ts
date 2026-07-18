@@ -78,3 +78,20 @@ test("expired OAuth registration can be requested again for the same client", as
         await rm(storageDir, { force: true, recursive: true });
     }
 });
+
+test("OAuth approvals enforce a pending registration quota", async () => {
+    const storageDir = await mkdtemp(join(tmpdir(), "portable-devshell-oauth-registration-limit-"));
+    const service = new McpOAuthApprovalService(storageDir, { maxPendingRegistrations: 2 });
+
+    try {
+        await service.warmup();
+        await service.registerClient({ clientId: "client-a", clientName: "A", redirectUris: [] });
+        await service.registerClient({ clientId: "client-b", clientName: "B", redirectUris: [] });
+        await assert.rejects(
+            service.registerClient({ clientId: "client-c", clientName: "C", redirectUris: [] }),
+            /pending OAuth registration limit/u
+        );
+    } finally {
+        await rm(storageDir, { force: true, recursive: true });
+    }
+});

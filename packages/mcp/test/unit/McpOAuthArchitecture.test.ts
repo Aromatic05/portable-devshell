@@ -1,12 +1,14 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
 import { McpOAuthApprovalService } from "../../dist/auth/oauth/McpOAuthApprovalService.js";
 import { McpOAuthInteraction } from "../../dist/auth/oauth/McpOAuthInteraction.js";
+import { createMcpOAuthOidcFileAdapterFactory } from "../../dist/auth/oauth/McpOAuthOidcFileAdapter.js";
 import { McpOAuthProviderRuntime } from "../../dist/auth/oauth/McpOAuthProviderRuntime.js";
+import { McpOAuthRegistrationLimiter } from "../../dist/auth/oauth/McpOAuthRegistrationLimiter.js";
 
 const config = {
     documentationUrl: "https://docs.example.test/aromatic",
@@ -49,6 +51,9 @@ test("McpOAuthProviderRuntime owns provider lifecycle, resources, metadata, and 
         );
 
         const firstJwks = await readFile(join(storageDir, "jwks.json"), "utf8");
+        if (process.platform !== "win32") {
+            assert.equal((await stat(join(storageDir, "jwks.json"))).mode & 0o777, 0o600);
+        }
         const reloaded = new McpOAuthProviderRuntime({
             approvals: new McpOAuthApprovalService(storageDir),
             config,
@@ -136,4 +141,35 @@ test("McpOAuthInteraction renders approved registration as a reload flow", async
     } finally {
         await rm(storageDir, { force: true, recursive: true });
     }
+});
+
+test("OIDC file adapter serializes concurrent updates without losing records", async () => {
+    const storageDir = await mkdtemp(join(tmpdir(), "mcp-oauth-adapter-"));
+    const adapter = createMcpOAuthOidcFileAdapterFactory(storageDir)("Client");
+
+    try {
+        await Promise.all(
+            Array.from({ length: 64 }, async (_, index) => {
+                await adapter.upsert(`client-${index}`, { clientId: `client-${index}` } as never, 3600);
+            })
+        );
+        for (let index = 0; index < 64; index += 1) {
+            assert.equal((await adapter.find(`client-${index}`))?.clientId, `client-${index}`);
+        }
+        if (process.platform !== "win32") {
+            assert.equal((await stat(join(storageDir, "Client.json"))).mode & 0o777, 0o600);
+        }
+    } finally {
+        await rm(storageDir, { force: true, recursive: true });
+    }
+});
+
+test("OAuth registration limiter rejects bursts above its configured quota", () => {
+    let now = 0;
+    const limiter = new McpOAuthRegistrationLimiter({ maxRequests: 2, now: () => now, windowMs: 1000 });
+    assert.equal(limiter.accept("client-a"), true);
+    assert.equal(limiter.accept("client-a"), true);
+    assert.equal(limiter.accept("client-a"), false);
+    now = 1001;
+    assert.equal(limiter.accept("client-a"), true);
 });

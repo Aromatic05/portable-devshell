@@ -1,4 +1,5 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import { chmod, mkdir, open, readFile, rename, rm } from "node:fs/promises";
 import { userInfo } from "node:os";
 import { join } from "node:path";
 
@@ -95,7 +96,10 @@ export class McpOAuthProviderRuntime {
             return;
         }
 
-        await mkdir(this.#storageDir, { recursive: true });
+        await mkdir(this.#storageDir, { mode: 0o700, recursive: true });
+        if (process.platform !== "win32") {
+            await chmod(this.#storageDir, 0o700);
+        }
         await this.#approvals.warmup();
         const jwks = await readOrCreateJwks(this.#storageDir);
         const provider = new Provider(stripTrailingSlash(this.#issuerUrl.href), {
@@ -381,9 +385,13 @@ async function readOrCreateJwks(
 ): Promise<{ keys: Array<Record<string, unknown>> }> {
     const jwksPath = join(storageDir, "jwks.json");
     try {
-        return JSON.parse(await readFile(jwksPath, "utf8")) as {
+        const jwks = JSON.parse(await readFile(jwksPath, "utf8")) as {
             keys: Array<Record<string, unknown>>;
         };
+        if (process.platform !== "win32") {
+            await chmod(jwksPath, 0o600);
+        }
+        return jwks;
     } catch (error) {
         if (!isMissing(error)) {
             throw error;
@@ -400,7 +408,32 @@ async function readOrCreateJwks(
     const jwks = {
         keys: [jwk as unknown as Record<string, unknown>]
     };
-    await writeFile(jwksPath, JSON.stringify(jwks), "utf8");
+    const temporary = `${jwksPath}.${process.pid}.${randomUUID()}.tmp`;
+    const file = await open(temporary, "wx", 0o600);
+    try {
+        await file.writeFile(JSON.stringify(jwks), "utf8");
+        await file.sync();
+    } catch (error) {
+        await file.close().catch(() => undefined);
+        await rm(temporary, { force: true }).catch(() => undefined);
+        throw error;
+    }
+    await file.close();
+    try {
+        await rename(temporary, jwksPath);
+        if (process.platform !== "win32") {
+            await chmod(jwksPath, 0o600);
+            const directory = await open(storageDir, "r");
+            try {
+                await directory.sync();
+            } finally {
+                await directory.close();
+            }
+        }
+    } catch (error) {
+        await rm(temporary, { force: true }).catch(() => undefined);
+        throw error;
+    }
     return jwks;
 }
 
