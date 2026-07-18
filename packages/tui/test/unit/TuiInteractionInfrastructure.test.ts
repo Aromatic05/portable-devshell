@@ -1147,6 +1147,11 @@ test("approval detail Back restores the audit list focus and scroll position", a
 
 test("Attach Shell is invoked directly from the expanded instance box", async () => {
     const harness = createHarness();
+    harness.store.replaceInstances(
+        harness.store.getState().instances.map((instance) =>
+            instance.name === "alpha" ? { ...instance, provider: "ssh" } : instance
+        )
+    );
 
     await harness.press("", { tab: true });
     await harness.press("", { downArrow: true });

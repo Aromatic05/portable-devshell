@@ -9,11 +9,13 @@ import {
 } from "./TuiAttachShellModel.js";
 
 export class TuiAttachShellCommandResolver {
+    constructor(private readonly hostPlatform = process.platform) {}
+
     resolve(input: TuiAttachShellResolutionInput): TuiAttachShellCommand {
         const configured = readInstanceConfig(input.configView, input.instance.name);
         const provider = readProvider(configured, input.instance.provider);
 
-        if (provider !== "reverse" && !isTuiAttachShellSupported(provider)) {
+        if (provider !== "reverse" && !isTuiAttachShellSupported(provider, this.hostPlatform)) {
             throw new TuiAttachShellResolutionError(
                 `Attach Shell is not supported for ${provider} instances on Windows.`
             );

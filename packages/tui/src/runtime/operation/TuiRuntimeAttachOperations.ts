@@ -9,6 +9,7 @@ export class TuiRuntimeAttachOperations {
         attachHooks?: { resume(): void; suspend(): void };
         attachSpawn?: TuiAttachShellSpawn;
         clients: TuiClients;
+        hostPlatform?: NodeJS.Platform;
         session: TuiControlSession;
         store: TuiAppStore;
     }) {}
@@ -24,7 +25,7 @@ export class TuiRuntimeAttachOperations {
         }
 
         try {
-            const command = new TuiAttachShellCommandResolver().resolve({
+            const command = new TuiAttachShellCommandResolver(this.options.hostPlatform).resolve({
                 configView: this.options.store.getState().configView,
                 environment: process.env,
                 instance: entry,

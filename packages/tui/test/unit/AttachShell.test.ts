@@ -5,7 +5,7 @@ import test from "node:test";
 import { TuiAttachShellCommandResolver, TuiAttachShellResolutionError, TuiAttachShellRunner, editableProviderChoices, isTuiAttachShellSupported } from "../../src/testing.ts";
 
 test("Attach Shell resolves a local login shell from control-provided instance data", () => {
-    const command = new TuiAttachShellCommandResolver().resolve({
+    const command = new TuiAttachShellCommandResolver("linux").resolve({
         environment: { SHELL: "/bin/zsh" },
         instance: { defaultWorkspace: "/workspace/alpha", name: "alpha", provider: "local" }
     });
@@ -44,7 +44,7 @@ test("Attach Shell keeps the configured ssh command intact", () => {
 
 test("Attach Shell refuses a stopped container without starting it", () => {
     assert.throws(
-        () => new TuiAttachShellCommandResolver().resolve({
+        () => new TuiAttachShellCommandResolver("linux").resolve({
             configView: {
                 instances: [{ container: { containerName: "alpha", mode: "preset" }, name: "alpha", provider: "docker" }]
             },
@@ -56,7 +56,7 @@ test("Attach Shell refuses a stopped container without starting it", () => {
 });
 
 test("Attach Shell probes a running container before opening its shell", () => {
-    const command = new TuiAttachShellCommandResolver().resolve({
+    const command = new TuiAttachShellCommandResolver("linux").resolve({
         configView: {
             instances: [{ container: { containerName: "alpha", mode: "preset" }, name: "alpha", provider: "docker" }]
         },

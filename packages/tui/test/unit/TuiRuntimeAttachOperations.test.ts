@@ -105,6 +105,7 @@ function createHarness() {
             queueMicrotask(() => child.emit("close", 0));
             return child as never;
         },
+        hostPlatform: "linux",
         clients: {
             runtime: {
                 async refresh(instance: string) {

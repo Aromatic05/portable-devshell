@@ -473,9 +473,14 @@ test("real Ink runtime routes terminal scrollback and mouse without trapping sid
                 enabled: true,
                 mcpEnabled: true,
                 name: "alpha",
-                provider: "local"
+                provider: "ssh"
             }
         ]);
+        runtime.store.setConfigView({
+            instances: [
+                { name: "alpha", provider: "ssh", ssh: { command: "ssh example.test" } }
+            ]
+        } as never);
         runtime.store.setSelectedInstance("alpha");
 
         host.write("9");
