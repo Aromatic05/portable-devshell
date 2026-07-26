@@ -214,7 +214,7 @@ impl ToolHandler for BashRunTool {
             stderr_truncated: stderr.truncated,
             stdout_artifact,
             stderr_artifact,
-            artifact_warnings,
+            artifact_warnings: (!artifact_warnings.is_empty()).then_some(artifact_warnings),
             duration_ms: started.elapsed().as_millis(),
             termination,
         })
