@@ -111,12 +111,11 @@ nonblock  shell 确认 task 已启动后返回
 
 ```text
 ^M  Enter / CR
+^B  Ctrl-B
 ^C  interrupt
 ^D  EOF
 ^I  Tab
 ```
-
-`^B` / Ctrl-B 被禁止，避免通过 tmux prefix 绕过受管接口。
 
 相同 `contextId + requestId` 的副作用调用会返回首次执行结果，不会重复发送命令、按键、创建或关闭 pane。相同 request id 携带不同参数时返回 `tmux.requestIdConflict`。
 

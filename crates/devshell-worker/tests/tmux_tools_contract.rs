@@ -1195,3 +1195,43 @@ fn worker_restart_allows_explicit_orphan_reclaim() {
     assert_ne!(finished["result"]["task"]["status"], "running");
     stop(&env, instance);
 }
+
+#[test]
+#[ignore = "requires tmux on PATH"]
+fn tmux_input_delivers_ctrl_b_to_foreground_process() {
+    assert!(
+        tmux_available(),
+        "tmux is required to run this ignored contract test"
+    );
+    let env = TestEnv::new();
+    let instance = "aromatic-tmux-ctrl-b";
+    start(&env, instance);
+    let run = call(
+        &env,
+        instance,
+        "1",
+        "tmux_run",
+        json!({
+            "pane": "main",
+            "command": "stty raw -echo; od -An -t x1 -N 1; stty sane",
+            "wait": "nonblock"
+        }),
+        "ctx-a",
+        "run-od",
+    );
+    assert_eq!(run["ok"], true, "{run}");
+    let task = run["result"]["task"]["id"].as_str().unwrap();
+    let input = call(
+        &env,
+        instance,
+        "2",
+        "tmux_input",
+        json!({ "task": task, "input": "^B", "timeMs": 1000, "line": 20 }),
+        "ctx-a",
+        "send-ctrl-b",
+    );
+    assert_eq!(input["ok"], true, "{input}");
+    let finished = wait_for_terminal(&env, instance, task, "ctx-a");
+    assert_ne!(finished["result"]["task"]["status"], "running");
+    stop(&env, instance);
+}

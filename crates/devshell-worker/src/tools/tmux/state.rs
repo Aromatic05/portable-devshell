@@ -11,7 +11,6 @@ use crate::security::path::{
     FilesystemCapability, PathNamespace, parse_requested_path, resolve_existing_target,
 };
 use crate::tools::tmux::backend::{BackendPane, BackendWorkspace, MAX_PANES, TmuxBackend};
-use crate::tools::tmux::codec::contains_tmux_prefix_input;
 use crate::tools::tmux::output::{OutputWindow, take_output};
 use crate::tools::tmux::replay::ReplayCache;
 use crate::tools::tmux::task::{
@@ -248,12 +247,6 @@ impl TmuxState {
             return Err(ToolError::new(
                 "tool.invalidArguments",
                 "input must not be empty",
-            ));
-        }
-        if contains_tmux_prefix_input(&params.input) {
-            return Err(ToolError::new(
-                "tmux.forbiddenInput",
-                "tmux prefix input (^B / Ctrl-B) is forbidden",
             ));
         }
         let time_ms = validate_time(params.time_ms.unwrap_or(DEFAULT_INPUT_TIME_MS))?;

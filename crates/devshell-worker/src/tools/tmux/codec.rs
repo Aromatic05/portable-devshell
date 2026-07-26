@@ -43,10 +43,6 @@ pub fn decode_caret_input(input: &str) -> String {
     out
 }
 
-pub fn contains_tmux_prefix_input(input: &str) -> bool {
-    decode_caret_input(input).contains('\u{0002}')
-}
-
 pub fn parse_tmux_input(input: &str) -> Result<Vec<TmuxInputChunk>, ToolError> {
     let decoded = decode_caret_input(input);
     let mut out = Vec::new();
@@ -197,8 +193,7 @@ mod tests {
     fn caret_notation_is_generic_terminal_input() {
         assert_eq!(decode_caret_input("echo hi^M"), "echo hi\n");
         assert_eq!(decode_caret_input("^C^D^I"), "\u{0003}\u{0004}\u{0009}");
+        assert_eq!(decode_caret_input("^B"), "\u{0002}");
         assert_eq!(decode_caret_input("^^"), "^");
-        assert!(contains_tmux_prefix_input("^B"));
-        assert!(!contains_tmux_prefix_input("^C"));
     }
 }
