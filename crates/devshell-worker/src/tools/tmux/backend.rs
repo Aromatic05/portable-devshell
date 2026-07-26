@@ -22,6 +22,8 @@ use crate::tools::tmux::shell::prepare_shell_launch;
 pub const TMUX_SESSION: &str = "devshell";
 pub const MAX_PANES: usize = 8;
 const PANE_HISTORY_LINES: i64 = 400;
+const TERMINAL_COLUMNS: usize = 240;
+const TERMINAL_ROWS: usize = 60;
 
 #[derive(Debug, Clone)]
 pub struct BackendPane {
@@ -133,6 +135,7 @@ impl TmuxBackend {
     pub fn ensure_session(&self) -> Result<(), ToolError> {
         if session_exists(&self.socket) {
             self.validate_existing_session()?;
+            self.configure_terminal_size()?;
             self.normalize_managed_windows()?;
             self.reconcile_registry()?;
             return Ok(());
@@ -148,6 +151,10 @@ impl TmuxBackend {
             "-d".to_string(),
             "-s".to_string(),
             TMUX_SESSION.to_string(),
+            "-x".to_string(),
+            TERMINAL_COLUMNS.to_string(),
+            "-y".to_string(),
+            TERMINAL_ROWS.to_string(),
             "-n".to_string(),
             "main".to_string(),
             "-c".to_string(),
@@ -155,6 +162,7 @@ impl TmuxBackend {
             launch.command,
         ];
         self.run(&args)?;
+        self.configure_terminal_size()?;
         self.mark_session(&session)?;
         let tmux_pane_id = self
             .run(&[
@@ -441,6 +449,36 @@ impl TmuxBackend {
                     self.instance
                 ),
             ));
+        }
+        Ok(())
+    }
+
+    fn configure_terminal_size(&self) -> Result<(), ToolError> {
+        self.run(&[
+            "set-option".into(),
+            "-g".into(),
+            "-t".into(),
+            TMUX_SESSION.into(),
+            "default-size".into(),
+            format!("{TERMINAL_COLUMNS}x{TERMINAL_ROWS}"),
+        ])?;
+        let windows = self.run(&[
+            "list-windows".into(),
+            "-t".into(),
+            TMUX_SESSION.into(),
+            "-F".into(),
+            "#{window_id}".into(),
+        ])?;
+        for window_id in windows.lines().filter(|line| !line.is_empty()) {
+            self.run(&[
+                "resize-window".into(),
+                "-t".into(),
+                window_id.into(),
+                "-x".into(),
+                TERMINAL_COLUMNS.to_string(),
+                "-y".into(),
+                TERMINAL_ROWS.to_string(),
+            ])?;
         }
         Ok(())
     }

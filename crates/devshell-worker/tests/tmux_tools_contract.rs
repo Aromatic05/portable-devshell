@@ -130,6 +130,38 @@ fn tmux_window_layout(env: &TestEnv, instance: &str) -> Vec<(String, usize, Stri
         .collect()
 }
 
+fn tmux_pane_sizes(env: &TestEnv, instance: &str) -> Vec<(usize, usize)> {
+    let socket = env.tmux_socket_file(instance);
+    let output = Command::new("tmux")
+        .args([
+            "-S",
+            socket.to_string_lossy().as_ref(),
+            "list-panes",
+            "-s",
+            "-t",
+            "devshell",
+            "-F",
+            "#{pane_width}|#{pane_height}",
+        ])
+        .output()
+        .expect("tmux list-panes should run");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8(output.stdout)
+        .expect("tmux pane sizes should be UTF-8")
+        .lines()
+        .map(|line| {
+            let mut fields = line.split('|');
+            let width = fields.next().unwrap().parse::<usize>().unwrap();
+            let height = fields.next().unwrap().parse::<usize>().unwrap();
+            (width, height)
+        })
+        .collect()
+}
+
 fn wait_for_terminal(env: &TestEnv, instance: &str, task: &str, ctx_id: &str) -> Value {
     let deadline = Instant::now() + Duration::from_secs(5);
     let mut attempt = 0;
@@ -550,6 +582,13 @@ fn managed_panes_use_independent_single_pane_windows() {
         .map(|(window_id, _, _)| window_id)
         .collect::<HashSet<_>>();
     assert_eq!(windows.len(), layout.len(), "{layout:?}");
+    let sizes = tmux_pane_sizes(&env, instance);
+    assert!(
+        sizes
+            .iter()
+            .all(|(width, height)| *width >= 240 && *height >= 60),
+        "managed terminals must have a useful detached canvas: {sizes:?}"
+    );
 
     stop(&env, instance);
 }
