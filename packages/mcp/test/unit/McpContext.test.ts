@@ -171,7 +171,7 @@ function hasCode(expected: string): (error: unknown) => boolean {
     };
 }
 
-test("only environ_info omits ctxId across the complete 25-tool endpoint catalog", () => {
+test("only environ_info omits ctxId across the complete 26-tool endpoint catalog", () => {
     const workerToolNames = [
         "artifact_read",
         "bash_run",
@@ -183,6 +183,7 @@ test("only environ_info omits ctxId across the complete 25-tool endpoint catalog
         "tmux_create",
         "tmux_run",
         "tmux_read",
+        "tmux_reclaim",
         "tmux_input",
         "tmux_close",
         "tmux_inspect",
@@ -242,7 +243,7 @@ test("only environ_info omits ctxId across the complete 25-tool endpoint catalog
     });
 
     const tools = endpoint.listTools();
-    assert.equal(tools.length, 25);
+    assert.equal(tools.length, 26);
     assert.equal(tools[0]?.name, "environ_info");
     assert.equal(
         tools[0]?.description,
