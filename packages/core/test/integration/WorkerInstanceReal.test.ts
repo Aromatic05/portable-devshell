@@ -667,6 +667,10 @@ test("WorkerInstance restores a stopped disconnected snapshot when start fails",
         assert.equal(snapshot.connectionState, "disconnected");
         assert.equal(snapshot.ready, false);
         assert.equal(snapshot.lastErrorCode, errorCodes.coreWorkerStartFailed);
+        assert.equal(
+            snapshot.lastErrorMessage,
+            "Worker start failed for instance task-6-start-failure."
+        );
 
         const replay = instance.subscribe(1);
         assert.equal(replay.kind, "events");
@@ -716,6 +720,10 @@ test("WorkerInstance refreshes actual daemon state when stop fails", async () =>
         assert.equal(snapshot.connectionState, "connected");
         assert.equal(snapshot.ready, true);
         assert.equal(snapshot.lastErrorCode, errorCodes.coreWorkerStopFailed);
+        assert.equal(
+            snapshot.lastErrorMessage,
+            "Worker stop failed for instance task-6-stop-failure."
+        );
     } finally {
         await instance.close();
         await rm(homeDirectory, { force: true, recursive: true });

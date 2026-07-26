@@ -16,6 +16,7 @@ export interface InstanceSnapshot {
     effectiveSecurityMode?: EffectiveSecurityMode;
     lastSeq: number;
     lastErrorCode?: string;
+    lastErrorMessage?: string;
     name: InstanceName;
     pid?: number;
     reverse?: ReverseInstanceStatus;

@@ -7,6 +7,7 @@ export interface InstanceStateUpdate {
     connectionState?: ConnectionState;
     daemonState?: DaemonState;
     lastErrorCode?: string;
+    lastErrorMessage?: string;
     lastSeq?: number;
     pid?: number;
 }
@@ -34,11 +35,15 @@ export class InstanceStateMachine {
         const lastErrorCode = Object.prototype.hasOwnProperty.call(update, "lastErrorCode")
             ? update.lastErrorCode
             : this.#state.lastErrorCode;
+        const lastErrorMessage = Object.prototype.hasOwnProperty.call(update, "lastErrorMessage")
+            ? update.lastErrorMessage
+            : this.#state.lastErrorMessage;
 
         this.#state = {
             connectionState,
             daemonState,
             lastErrorCode,
+            lastErrorMessage,
             lastSeq,
             pid,
             ready: isReadyState(daemonState, connectionState),
@@ -53,6 +58,7 @@ export class InstanceStateMachine {
             connectionState: this.#state.connectionState,
             daemonState: this.#state.daemonState,
             lastErrorCode: this.#state.lastErrorCode,
+            lastErrorMessage: this.#state.lastErrorMessage,
             lastSeq: this.#state.lastSeq,
             name: this.#name,
             pid: this.#state.pid

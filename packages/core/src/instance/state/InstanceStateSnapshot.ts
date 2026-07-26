@@ -13,6 +13,7 @@ export interface InstanceSnapshotInput {
     connectionState: ConnectionState;
     daemonState: DaemonState;
     lastErrorCode?: string;
+    lastErrorMessage?: string;
     lastSeq: number;
     name: InstanceName;
     pid?: number;
@@ -25,6 +26,7 @@ export function createInstanceSnapshot(input: InstanceSnapshotInput): InstanceSn
         connectionState: input.connectionState,
         daemonState: input.daemonState,
         lastErrorCode: input.lastErrorCode,
+        lastErrorMessage: input.lastErrorMessage,
         lastSeq: input.lastSeq,
         name: input.name,
         pid: input.pid,

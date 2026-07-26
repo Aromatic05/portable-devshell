@@ -10,6 +10,11 @@ export function renderInstanceSnapshot(snapshot: InstanceSnapshot): string {
         `lastSeq: ${snapshot.lastSeq}`
     ];
 
+    if (snapshot.lastErrorCode !== undefined || snapshot.lastErrorMessage !== undefined) {
+        lines.push(`lastErrorCode: ${snapshot.lastErrorCode ?? "-"}`);
+        lines.push(`lastErrorMessage: ${snapshot.lastErrorMessage ?? "-"}`);
+    }
+
     if (snapshot.reverse !== undefined) {
         lines.push(`management: ${snapshot.reverse.managementMode}`);
         lines.push(`reverseEnrollment: ${snapshot.reverse.enrollmentState}`);

@@ -17,7 +17,7 @@ import type { WorkerRpcBridge } from "../rpc/WorkerRpcBridge.js";
 import type { WorkerRpcChannel } from "../rpc/WorkerRpcChannel.js";
 import type { WorkerToolCatalog } from "../tool/WorkerToolCatalog.js";
 import type { ResolvedWorkerInstanceConfig } from "./WorkerInstanceConfig.js";
-import { getErrorCode, isKnownErrorCode, readReverseErrorMessage, wrapWorkerCommandError } from "./WorkerInstanceError.js";
+import { getErrorCode, isKnownErrorCode, readErrorMessage, wrapWorkerCommandError } from "./WorkerInstanceError.js";
 import { toEventData } from "./WorkerInstanceEvent.js";
 
 interface WorkerInstanceConnectionOptions {
@@ -101,7 +101,11 @@ export class WorkerInstanceConnection {
                 workspace: this.#handshake.workspace,
                 workerVersion: this.#handshake.workerVersion
             });
-            await this.#applyStateUpdate({ daemonState: "running", lastErrorCode: undefined });
+            await this.#applyStateUpdate({
+                daemonState: "running",
+                lastErrorCode: undefined,
+                lastErrorMessage: undefined
+            });
             return await this.#applyStateUpdate({ connectionState: "connected" });
         } catch (error) {
             const wrappedError = wrapWorkerCommandError(
@@ -115,7 +119,8 @@ export class WorkerInstanceConnection {
             await this.#applyStateUpdate({
                 connectionState: "disconnected",
                 daemonState: "running",
-                lastErrorCode: getErrorCode(wrappedError, errorCodes.coreWorkerHandshakeFailed)
+                lastErrorCode: getErrorCode(wrappedError, errorCodes.coreWorkerHandshakeFailed),
+                lastErrorMessage: readErrorMessage(wrappedError)
             });
             if (wrappedError !== error) throw wrappedError;
             if (isKnownErrorCode(error)) throw error;
@@ -135,7 +140,11 @@ export class WorkerInstanceConnection {
         if (this.#config.managementMode === "selfManaged") {
             this.markReverseOffline();
         }
-        await this.#applyStateUpdate({ connectionState: "disconnected", lastErrorCode: undefined });
+        await this.#applyStateUpdate({
+            connectionState: "disconnected",
+            lastErrorCode: undefined,
+            lastErrorMessage: undefined
+        });
     }
 
     async setReverseEnrollmentState(enrollmentState: ReverseEnrollmentState): Promise<InstanceSnapshot> {
@@ -223,6 +232,7 @@ export class WorkerInstanceConnection {
             connectionState,
             daemonState: "running",
             lastErrorCode: undefined,
+            lastErrorMessage: undefined,
             pid
         });
 
@@ -255,6 +265,7 @@ export class WorkerInstanceConnection {
                 connectionState: "connected",
                 daemonState: "running",
                 lastErrorCode: undefined,
+                lastErrorMessage: undefined,
                 pid
             });
         } catch (error) {
@@ -273,6 +284,7 @@ export class WorkerInstanceConnection {
                 connectionState: "failed",
                 daemonState: "running",
                 lastErrorCode: getErrorCode(wrappedError, errorCodes.coreWorkerHandshakeFailed),
+                lastErrorMessage: readErrorMessage(wrappedError),
                 pid
             });
 
@@ -308,7 +320,8 @@ export class WorkerInstanceConnection {
         await this.#applyStateUpdate({
             connectionState: "connected",
             daemonState: "stopping",
-            lastErrorCode: undefined
+            lastErrorCode: undefined,
+            lastErrorMessage: undefined
         });
 
         try {
@@ -317,7 +330,8 @@ export class WorkerInstanceConnection {
             await this.#applyStateUpdate({
                 connectionState: "failed",
                 daemonState: "failed",
-                lastErrorCode: getErrorCode(error, errorCodes.coreWorkerStopFailed)
+                lastErrorCode: getErrorCode(error, errorCodes.coreWorkerStopFailed),
+                lastErrorMessage: readErrorMessage(error)
             });
             throw error;
         } finally {
@@ -331,6 +345,7 @@ export class WorkerInstanceConnection {
             connectionState: "disconnected",
             daemonState: "stopped",
             lastErrorCode: undefined,
+            lastErrorMessage: undefined,
             pid: undefined
         });
     }
@@ -345,7 +360,7 @@ export class WorkerInstanceConnection {
                 ? {}
                 : {
                       lastErrorCode: getErrorCode(error, errorCodes.coreWorkerRpcDisconnected),
-                      lastErrorMessage: readReverseErrorMessage(error)
+                      lastErrorMessage: readErrorMessage(error)
                   }),
             lastSeenAt: new Date().toISOString(),
             managementMode: "selfManaged"
@@ -384,6 +399,7 @@ export class WorkerInstanceConnection {
                 connectionState: "disconnected",
                 daemonState: "stopped",
                 lastErrorCode: getErrorCode(error, errorCodes.coreWorkerRpcDisconnected),
+                lastErrorMessage: readErrorMessage(error),
                 pid: undefined
             });
             return;
@@ -399,7 +415,8 @@ export class WorkerInstanceConnection {
         await this.#applyStateUpdate({
             connectionState: daemonState === "running" ? "reconnecting" : "disconnected",
             daemonState,
-            lastErrorCode: getErrorCode(error, errorCodes.coreWorkerRpcDisconnected)
+            lastErrorCode: getErrorCode(error, errorCodes.coreWorkerRpcDisconnected),
+            lastErrorMessage: readErrorMessage(error)
         });
 
         if (daemonState !== "running") {

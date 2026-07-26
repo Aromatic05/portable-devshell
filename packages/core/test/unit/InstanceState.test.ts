@@ -43,17 +43,28 @@ test("InstanceStateMachine derives ready running stale failed and stopped snapsh
 
     const failed = stateMachine.apply({
         connectionState: "failed",
-        daemonState: "running"
+        daemonState: "running",
+        lastErrorCode: "core.workerRpcDisconnected",
+        lastErrorMessage: "Worker RPC connection closed unexpectedly."
     });
     assert.equal(failed.ready, false);
     assert.equal(failed.status, "failed");
+    assert.equal(failed.lastErrorCode, "core.workerRpcDisconnected");
+    assert.equal(failed.lastErrorMessage, "Worker RPC connection closed unexpectedly.");
+
+    const retained = stateMachine.apply({ lastSeq: 5 });
+    assert.equal(retained.lastErrorMessage, "Worker RPC connection closed unexpectedly.");
 
     const stopped = stateMachine.apply({
         connectionState: "disconnected",
-        daemonState: "stopped"
+        daemonState: "stopped",
+        lastErrorCode: undefined,
+        lastErrorMessage: undefined
     });
     assert.equal(stopped.ready, false);
     assert.equal(stopped.status, "stopped");
+    assert.equal(stopped.lastErrorCode, undefined);
+    assert.equal(stopped.lastErrorMessage, undefined);
 });
 
 test("InstancePaths writes only into per-instance control-worker files", () => {

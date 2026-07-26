@@ -13,6 +13,7 @@ import type { WorkerInstanceConnection } from "./WorkerInstanceConnection.js";
 import type { ResolvedWorkerInstanceConfig } from "./WorkerInstanceConfig.js";
 import {
     getErrorCode,
+    readErrorMessage,
     toJsonDetails,
     withInstanceDetails,
     wrapWorkerCommandError
@@ -84,7 +85,8 @@ export class WorkerInstanceLifecycle {
         await this.#applyStateUpdate({
             connectionState: "disconnected",
             daemonState: "starting",
-            lastErrorCode: undefined
+            lastErrorCode: undefined,
+            lastErrorMessage: undefined
         });
 
         try {
@@ -107,7 +109,8 @@ export class WorkerInstanceLifecycle {
             await this.#applyStateUpdate({
                 connectionState: "disconnected",
                 daemonState: "stopped",
-                lastErrorCode: getErrorCode(wrappedError, errorCodes.coreWorkerStartFailed)
+                lastErrorCode: getErrorCode(wrappedError, errorCodes.coreWorkerStartFailed),
+                lastErrorMessage: readErrorMessage(wrappedError)
             });
             throw wrappedError;
         }
@@ -128,7 +131,8 @@ export class WorkerInstanceLifecycle {
         await this.#applyStateUpdate({
             connectionState: "disconnected",
             daemonState: "stopping",
-            lastErrorCode: undefined
+            lastErrorCode: undefined,
+            lastErrorMessage: undefined
         });
         this.#connection.closeBridge();
         this.#connection.clearHandshake();
@@ -151,7 +155,8 @@ export class WorkerInstanceLifecycle {
             );
             await this.#refreshStatus().catch(() => undefined);
             await this.#applyStateUpdate({
-                lastErrorCode: getErrorCode(wrappedError, errorCodes.coreWorkerStopFailed)
+                lastErrorCode: getErrorCode(wrappedError, errorCodes.coreWorkerStopFailed),
+                lastErrorMessage: readErrorMessage(wrappedError)
             });
             throw wrappedError;
         }
@@ -160,7 +165,8 @@ export class WorkerInstanceLifecycle {
         await this.#applyStateUpdate({ daemonState: "stopped" });
         return await this.#applyStateUpdate({
             connectionState: "disconnected",
-            lastErrorCode: undefined
+            lastErrorCode: undefined,
+            lastErrorMessage: undefined
         });
     }
 
@@ -185,6 +191,7 @@ export class WorkerInstanceLifecycle {
                     connectionState: "disconnected",
                     daemonState: "stopped",
                     lastErrorCode: undefined,
+                    lastErrorMessage: undefined,
                     pid: undefined
                 });
             }
@@ -206,6 +213,7 @@ export class WorkerInstanceLifecycle {
                     connectionState: "disconnected",
                     daemonState: status.daemonState,
                     lastErrorCode: undefined,
+                    lastErrorMessage: undefined,
                     pid: status.pid
                 });
             case "running":
@@ -215,6 +223,7 @@ export class WorkerInstanceLifecycle {
                     connectionState: "failed",
                     daemonState: "failed",
                     lastErrorCode: errorCodes.coreWorkerStatusFailed,
+                    lastErrorMessage: `Worker returned an unsupported status for instance ${this.#config.name}.`,
                     pid: status.pid
                 });
         }
@@ -261,7 +270,8 @@ export class WorkerInstanceLifecycle {
             await this.#applyStateUpdate({
                 connectionState: "failed",
                 daemonState: "failed",
-                lastErrorCode: getErrorCode(wrappedError, errorCodes.coreWorkerStatusFailed)
+                lastErrorCode: getErrorCode(wrappedError, errorCodes.coreWorkerStatusFailed),
+                lastErrorMessage: readErrorMessage(wrappedError)
             });
             throw wrappedError;
         }
@@ -276,7 +286,8 @@ export class WorkerInstanceLifecycle {
             await this.#applyStateUpdate({
                 connectionState: "failed",
                 daemonState: "failed",
-                lastErrorCode: error.code
+                lastErrorCode: error.code,
+                lastErrorMessage: readErrorMessage(error)
             });
             throw error;
         }
@@ -287,7 +298,8 @@ export class WorkerInstanceLifecycle {
             await this.#applyStateUpdate({
                 connectionState: "failed",
                 daemonState: "failed",
-                lastErrorCode: getErrorCode(error, errorCodes.coreWorkerStatusFailed)
+                lastErrorCode: getErrorCode(error, errorCodes.coreWorkerStatusFailed),
+                lastErrorMessage: readErrorMessage(error)
             });
             throw error;
         }

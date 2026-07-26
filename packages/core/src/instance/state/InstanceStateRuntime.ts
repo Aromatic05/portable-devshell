@@ -4,6 +4,7 @@ export interface InstanceRuntimeState {
     connectionState: ConnectionState;
     daemonState: DaemonState;
     lastErrorCode?: string;
+    lastErrorMessage?: string;
     lastSeq: number;
     pid?: number;
     ready: boolean;

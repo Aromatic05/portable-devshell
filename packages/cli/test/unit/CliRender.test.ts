@@ -33,6 +33,19 @@ test("renderers format control, instance, and tool outputs", async () => {
         "instance: demo-local\nstatus: stopped\nready: false\ndaemonState: stopped\nconnectionState: disconnected\nlastSeq: 0\nTodo: none\n"
     );
     assert.equal(
+        renderInstanceSnapshot({
+            connectionState: "failed",
+            daemonState: "running",
+            lastErrorCode: "core.workerHandshakeFailed",
+            lastErrorMessage: "Worker handshake failed for instance demo-local.",
+            lastSeq: 1,
+            name: asInstanceName("demo-local"),
+            ready: false,
+            status: "failed"
+        }),
+        "instance: demo-local\nstatus: failed\nready: false\ndaemonState: running\nconnectionState: failed\nlastSeq: 1\nlastErrorCode: core.workerHandshakeFailed\nlastErrorMessage: Worker handshake failed for instance demo-local.\nTodo: none\n"
+    );
+    assert.equal(
         renderInstanceLogs([{ at: "", instanceName: "demo-local", message: "hello\n", seq: 1, stream: "stdout" }]),
         "[1] stdout hello\n"
     );

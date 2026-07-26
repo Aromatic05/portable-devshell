@@ -8,7 +8,7 @@ export function getErrorCode(error: unknown, fallback: string): string {
     return fallback;
 }
 
-export function readReverseErrorMessage(error: unknown): string {
+export function readErrorMessage(error: unknown): string {
     if (typeof error === "object" && error !== null && "details" in error) {
         const details = error.details;
         if (typeof details === "object" && details !== null && !Array.isArray(details)) {
