@@ -111,7 +111,7 @@ pub fn register_tools(
     ))?;
     registry.register(tool::<TmuxInputParams, TmuxTaskOperationOutput>(
         ToolName::parse("tmux_input").unwrap(),
-        "Send terminal input to a running task. Caret notation supports control keys such as ^B, ^C, ^D, ^I, and ^M.",
+        "Send terminal input to a running task. Returns immediately by default; set timeMs to wait for output. Caret notation supports control keys such as ^B, ^C, ^D, ^I, and ^M.",
         ToolCapability::Execute,
         Arc::clone(&state),
         TmuxState::input,

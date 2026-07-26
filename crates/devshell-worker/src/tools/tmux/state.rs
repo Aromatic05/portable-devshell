@@ -27,7 +27,7 @@ use crate::tools::{ToolCall, ToolError};
 
 const DEFAULT_LINE: i64 = 80;
 const DEFAULT_RUN_TIME_MS: u64 = 30_000;
-const DEFAULT_INPUT_TIME_MS: u64 = 1_000;
+const DEFAULT_INPUT_TIME_MS: u64 = 0;
 const DEFAULT_READ_TIME_MS: u64 = 0;
 const MAX_TIME_MS: u64 = 300_000;
 const START_CONFIRM_TIME_MS: u64 = 3_000;

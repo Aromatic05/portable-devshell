@@ -35,7 +35,7 @@ pub struct TmuxInputParams {
     pub task: String,
     pub input: String,
     #[serde(default)]
-    /// Maximum time this call waits for new output. Defaults to 1000.
+    /// Maximum time this call waits for new output. Defaults to 0, so input returns after send.
     #[schemars(range(min = 0, max = 300000))]
     pub time_ms: Option<u64>,
     #[serde(default)]

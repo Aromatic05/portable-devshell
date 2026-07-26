@@ -1235,3 +1235,61 @@ fn tmux_input_delivers_ctrl_b_to_foreground_process() {
     assert_ne!(finished["result"]["task"]["status"], "running");
     stop(&env, instance);
 }
+
+#[test]
+#[ignore = "requires tmux on PATH"]
+fn tmux_input_returns_immediately_by_default() {
+    assert!(
+        tmux_available(),
+        "tmux is required to run this ignored contract test"
+    );
+    let env = TestEnv::new();
+    let instance = "aromatic-tmux-input-immediate";
+    start(&env, instance);
+    let run = call(
+        &env,
+        instance,
+        "1",
+        "tmux_run",
+        json!({
+            "pane": "main",
+            "command": "stty raw -echo; dd bs=1 count=1 of=/dev/null 2>/dev/null; stty sane; sleep 30",
+            "wait": "nonblock"
+        }),
+        "ctx-a",
+        "run-no-output-input",
+    );
+    assert_eq!(run["ok"], true, "{run}");
+    let task = run["result"]["task"]["id"].as_str().unwrap();
+
+    let started = Instant::now();
+    let input = call(
+        &env,
+        instance,
+        "2",
+        "tmux_input",
+        json!({ "task": task, "input": "x" }),
+        "ctx-a",
+        "send-no-output-input",
+    );
+    let elapsed = started.elapsed();
+    assert_eq!(input["ok"], true, "{input}");
+    assert!(
+        elapsed < Duration::from_millis(750),
+        "default tmux_input waited instead of returning after send: {elapsed:?}"
+    );
+
+    let interrupted = call(
+        &env,
+        instance,
+        "3",
+        "tmux_input",
+        json!({ "task": task, "input": "^C", "timeMs": 1000 }),
+        "ctx-a",
+        "interrupt-after-input",
+    );
+    assert_eq!(interrupted["ok"], true, "{interrupted}");
+    let finished = wait_for_terminal(&env, instance, task, "ctx-a");
+    assert_ne!(finished["result"]["task"]["status"], "running");
+    stop(&env, instance);
+}

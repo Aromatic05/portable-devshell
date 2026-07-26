@@ -102,10 +102,12 @@ nonblock  shell 确认 task 已启动后返回
 {
     "task": "task-...",
     "input": "^C",
-    "timeMs": 1000,
+    "timeMs": 0,
     "line": 40
 }
 ```
+
+`timeMs` 默认是 `0`，按键发送成功后立即返回。只有希望顺便等待新行式输出时才设置正数；curses 或全屏程序应在发送后调用 `tmux_inspect` 查看重绘后的画面。
 
 `input` 使用 caret notation：
 
