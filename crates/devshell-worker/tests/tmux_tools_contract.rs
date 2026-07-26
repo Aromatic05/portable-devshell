@@ -955,6 +955,7 @@ fn fish_shell_preserves_task_identity_through_exit() {
         .args(["start", "--instance", instance])
         .assert()
         .success();
+    let started = Instant::now();
     let run = call(
         &env,
         instance,
@@ -970,7 +971,12 @@ fn fish_shell_preserves_task_identity_through_exit() {
         "ctx-fish",
         "run-fish",
     );
+    let elapsed = started.elapsed();
     assert_eq!(run["ok"], true, "{run}");
+    assert!(
+        elapsed < Duration::from_secs(2),
+        "Fish pane initialization waited for the prompt timeout: {elapsed:?}"
+    );
     assert_eq!(run["result"]["task"]["status"], "0", "{run}");
     assert!(
         run["result"]["output"]

@@ -642,7 +642,7 @@ impl TmuxBackend {
                 .iter()
                 .find(|pane| pane.id == pane_id)
                 .ok_or_else(|| ToolError::new("tmux.paneNotFound", "created pane disappeared"))?;
-            let shell_idle = matches!(pane.command.as_str(), "bash" | "zsh");
+            let shell_idle = matches!(pane.command.as_str(), "bash" | "zsh" | "fish");
 
             if previous_lines.as_ref() == Some(&pane.lines) && shell_idle {
                 if unchanged_since.elapsed() >= QUIET_PERIOD {
