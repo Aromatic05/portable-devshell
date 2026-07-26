@@ -197,11 +197,15 @@ impl ToolHandler for BashRunTool {
             } else {
                 None
             },
-            term_signal: if matches!(termination, BashTermination::Signaled) {
+            term_signal: if matches!(
+                termination,
+                BashTermination::Signaled | BashTermination::Timeout
+            ) {
                 term_signal
             } else {
                 None
             },
+            timed_out: matches!(termination, BashTermination::Timeout).then_some(true),
             stdout: String::from_utf8_lossy(&stdout.kept).to_string(),
             stderr: String::from_utf8_lossy(&stderr.kept).to_string(),
             stdout_bytes: stdout_bytes.load(Ordering::SeqCst),

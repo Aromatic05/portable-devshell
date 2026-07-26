@@ -33,6 +33,8 @@ pub struct BashRunOutput {
     pub exit_code: Option<i32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub term_signal: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub timed_out: Option<bool>,
     pub stdout: String,
     pub stderr: String,
     pub stdout_bytes: usize,
@@ -43,6 +45,7 @@ pub struct BashRunOutput {
     pub stdout_artifact: Option<ArtifactReference>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub stderr_artifact: Option<ArtifactReference>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub artifact_warnings: Vec<String>,
     pub duration_ms: u128,
     pub termination: BashTermination,

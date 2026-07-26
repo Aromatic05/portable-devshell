@@ -187,6 +187,8 @@ fn handshake_tools_and_bash_run_flow_work_over_framed_rpc() {
     assert_eq!(bash_run["result"]["stdoutTruncated"], false);
     assert_eq!(bash_run["result"]["stderrTruncated"], false);
     assert_eq!(bash_run["result"]["stdout"], "ready");
+    assert!(bash_run["result"].get("timedOut").is_none());
+    assert!(bash_run["result"].get("artifactWarnings").is_none());
 
     let stopped = env.json_command(&["stop", "--instance", instance]);
     assert_eq!(stopped["stopped"], true);
@@ -260,8 +262,13 @@ fn bash_run_returns_success_for_timeout_and_capture_truncation() {
     );
     assert_eq!(timed_out["ok"], true);
     assert_eq!(timed_out["result"]["termination"], "timeout");
+    assert_eq!(timed_out["result"]["timedOut"], true);
     assert!(timed_out["result"].get("exitCode").is_none());
+    #[cfg(unix)]
+    assert!(timed_out["result"]["termSignal"].as_i64().is_some());
+    #[cfg(windows)]
     assert!(timed_out["result"].get("termSignal").is_none());
+    assert!(timed_out["result"].get("artifactWarnings").is_none());
 
     let too_long = env.rpc(
         instance,
@@ -305,6 +312,8 @@ fn bash_run_returns_success_for_timeout_and_capture_truncation() {
     assert_eq!(output_limited["result"]["termination"], "exited");
     assert_eq!(output_limited["result"]["stdoutTruncated"], true);
     assert_eq!(output_limited["result"]["stderrTruncated"], false);
+    assert!(output_limited["result"].get("timedOut").is_none());
+    assert!(output_limited["result"].get("artifactWarnings").is_none());
     assert!(output_limited["result"].get("stderrArtifact").is_none());
     let handle = output_limited["result"]["stdoutArtifact"]["handle"]
         .as_str()
