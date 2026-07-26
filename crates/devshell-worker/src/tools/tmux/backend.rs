@@ -4,6 +4,7 @@ use std::io::Write;
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::Duration;
 
@@ -91,6 +92,7 @@ pub struct TmuxBackend {
     session_file: PathBuf,
     observation_epoch: String,
     observation_reset: bool,
+    session_prepared: AtomicBool,
 }
 
 impl TmuxBackend {
@@ -124,6 +126,7 @@ impl TmuxBackend {
             session_file: root.join("session.json"),
             observation_epoch: Uuid::new_v4().to_string(),
             observation_reset,
+            session_prepared: AtomicBool::new(false),
         })
     }
 
@@ -137,13 +140,17 @@ impl TmuxBackend {
 
     pub fn ensure_session(&self) -> Result<(), ToolError> {
         if session_exists(&self.socket) {
-            self.validate_existing_session()?;
-            self.configure_terminal_size()?;
-            self.normalize_managed_windows()?;
-            self.reconcile_registry()?;
+            if !self.session_prepared.load(Ordering::Acquire) {
+                self.validate_existing_session()?;
+                self.configure_terminal_size()?;
+                self.normalize_managed_windows()?;
+                self.reconcile_registry()?;
+                self.session_prepared.store(true, Ordering::Release);
+            }
             return Ok(());
         }
 
+        self.session_prepared.store(false, Ordering::Release);
         self.clear_stale_pane_records()?;
         let session = self.new_session_record();
         atomic_write_json(&self.session_file, &session)?;
@@ -187,24 +194,41 @@ impl TmuxBackend {
         self.persist_pane(&pane)?;
         self.wait_until_ready(&pane.pane_id, Duration::from_secs(3))?;
         self.discard_initial_prompt_output(&pane.pane_id, Duration::from_secs(3))?;
+        self.session_prepared.store(true, Ordering::Release);
         Ok(())
     }
 
     pub fn capture_workspace(&self) -> Result<BackendWorkspace, ToolError> {
+        let pane_format = [
+            "#{pane_id}",
+            "#{@devshell_worker_pane_id}",
+            "#{@devshell_worker_pane_name}",
+            "#{@devshell_worker_pane_incarnation_id}",
+            "#{@devshell_worker_created_at}",
+            "#{pane_active}",
+            "#{window_active}",
+            "#{window_id}",
+            "#{window_panes}",
+            "#{pane_width}",
+            "#{pane_height}",
+            "#{qa:pane_current_path}",
+            "#{qa:pane_current_command}",
+        ]
+        .join("\u{1f}");
         let raw = self.run(&[
             "list-panes".into(),
             "-s".into(),
             "-t".into(),
             TMUX_SESSION.into(),
             "-F".into(),
-            "#{pane_id}|#{@devshell_worker_pane_id}|#{@devshell_worker_pane_name}|#{@devshell_worker_pane_incarnation_id}|#{@devshell_worker_created_at}|#{pane_active}|#{window_active}|#{window_id}|#{window_panes}|#{pane_width}|#{pane_height}".into(),
+            pane_format,
         ])?;
         let mut panes = Vec::new();
         let mut total_panes = 0;
         let mut foreign_panes = 0;
         for line in raw.lines().filter(|line| !line.trim().is_empty()) {
             total_panes += 1;
-            let fields = line.split('|').collect::<Vec<_>>();
+            let fields = line.split('\u{1f}').collect::<Vec<_>>();
             let Some(tmux_pane_id) = fields.first().copied() else {
                 continue;
             };
@@ -246,8 +270,8 @@ impl TmuxBackend {
                 pane_incarnation_id: pane_incarnation_id.to_string(),
                 created_at_ms,
                 active: fields.get(5).copied() == Some("1"),
-                cwd: self.read_pane_format(tmux_pane_id, "#{pane_current_path}")?,
-                command: self.read_pane_format(tmux_pane_id, "#{pane_current_command}")?,
+                cwd: decode_tmux_argument(fields.get(11).copied().unwrap_or_default())?,
+                command: decode_tmux_argument(fields.get(12).copied().unwrap_or_default())?,
                 lines,
                 status: status.as_ref().map(status_text),
                 status_seq: status.as_ref().map(|record| record.seq),
@@ -260,23 +284,6 @@ impl TmuxBackend {
             total_panes,
             foreign_panes,
         })
-    }
-
-    fn read_pane_format(&self, tmux_pane_id: &str, format: &str) -> Result<String, ToolError> {
-        let mut value = self.run(&[
-            "display-message".into(),
-            "-p".into(),
-            "-t".into(),
-            tmux_pane_id.into(),
-            format.into(),
-        ])?;
-        if value.ends_with('\n') {
-            value.pop();
-            if value.ends_with('\r') {
-                value.pop();
-            }
-        }
-        Ok(value)
     }
 
     pub fn capture_lines(
@@ -785,6 +792,45 @@ fn status_text(record: &PaneStatusRecord) -> String {
     }
 }
 
+fn decode_tmux_argument(value: &str) -> Result<String, ToolError> {
+    let value = value
+        .strip_prefix('"')
+        .and_then(|value| value.strip_suffix('"'))
+        .unwrap_or(value);
+    let mut chars = value.chars().peekable();
+    let mut decoded = String::new();
+    while let Some(character) = chars.next() {
+        if character != '\\' {
+            decoded.push(character);
+            continue;
+        }
+        let Some(escaped) = chars.next() else {
+            return Err(ToolError::new(
+                "tmux.invalidFormat",
+                "tmux returned a dangling argument escape",
+            ));
+        };
+        match escaped {
+            'n' => decoded.push('\n'),
+            'r' => decoded.push('\r'),
+            't' => decoded.push('\t'),
+            'e' => decoded.push('\u{001b}'),
+            '0'..='7' => {
+                let mut octal = String::from(escaped);
+                while octal.len() < 3 && chars.peek().is_some_and(|next| matches!(next, '0'..='7'))
+                {
+                    octal.push(chars.next().unwrap());
+                }
+                let byte = u8::from_str_radix(&octal, 8)
+                    .map_err(|error| ToolError::new("tmux.invalidFormat", error.to_string()))?;
+                decoded.push(char::from(byte));
+            }
+            other => decoded.push(other),
+        }
+    }
+    Ok(decoded)
+}
+
 fn escape_id(value: &str) -> String {
     value
         .chars()
@@ -842,4 +888,18 @@ fn atomic_write_json<T: Serialize>(path: &Path, value: &T) -> Result<(), ToolErr
 
 fn storage_error(error: std::io::Error) -> ToolError {
     ToolError::new("tmux.storageFailed", error.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::decode_tmux_argument;
+
+    #[test]
+    fn decodes_tmux_command_argument_escaping() {
+        assert_eq!(decode_tmux_argument("plain").unwrap(), "plain");
+        assert_eq!(
+            decode_tmux_argument(r#""/tmp/a b\\c\t\037d""#).unwrap(),
+            "/tmp/a b\\c\t\u{001f}d"
+        );
+    }
 }

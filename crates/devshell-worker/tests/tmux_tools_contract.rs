@@ -3,6 +3,7 @@
 mod support;
 
 use std::collections::HashSet;
+use std::os::unix::fs::PermissionsExt;
 use std::process::Command;
 use std::thread;
 use std::time::{Duration, Instant};
@@ -1335,5 +1336,95 @@ fn tmux_input_returns_immediately_by_default() {
     assert_eq!(interrupted["ok"], true, "{interrupted}");
     let finished = wait_for_terminal(&env, instance, task, "ctx-a");
     assert_ne!(finished["result"]["task"]["status"], "running");
+    stop(&env, instance);
+}
+
+#[test]
+#[ignore = "requires tmux on PATH"]
+fn repeated_tmux_list_skips_session_reinitialization() {
+    assert!(
+        tmux_available(),
+        "tmux is required to run this ignored contract test"
+    );
+    let real_tmux = Command::new("sh")
+        .args(["-c", "command -v tmux"])
+        .output()
+        .expect("tmux path lookup should run");
+    assert!(real_tmux.status.success());
+    let real_tmux = String::from_utf8(real_tmux.stdout)
+        .unwrap()
+        .trim()
+        .to_string();
+    assert!(!real_tmux.contains('\''));
+
+    let env = TestEnv::new();
+    let bin_dir = env.home().join("tmux-wrapper-bin");
+    std::fs::create_dir_all(&bin_dir).unwrap();
+    let wrapper = bin_dir.join("tmux");
+    let log = env.home().join("tmux-invocations.log");
+    std::fs::write(
+        &wrapper,
+        format!("#!/bin/sh\nprintf 'x\\n' >> \"$TMUX_COUNT_LOG\"\nexec '{real_tmux}' \"$@\"\n"),
+    )
+    .unwrap();
+    let mut permissions = std::fs::metadata(&wrapper).unwrap().permissions();
+    permissions.set_mode(0o755);
+    std::fs::set_permissions(&wrapper, permissions).unwrap();
+    let path = format!(
+        "{}:{}",
+        bin_dir.display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+
+    let instance = "aromatic-tmux-scan-count";
+    env.command()
+        .env("PATH", path)
+        .env("TMUX_COUNT_LOG", &log)
+        .current_dir(env.workspace())
+        .args(["start", "--instance", instance])
+        .assert()
+        .success();
+    let warm = call(
+        &env,
+        instance,
+        "1",
+        "tmux_list",
+        json!({}),
+        "ctx-a",
+        "warm-list",
+    );
+    assert_eq!(warm["ok"], true, "{warm}");
+    for index in 1..8 {
+        let created = call(
+            &env,
+            instance,
+            &format!("create-{index}"),
+            "tmux_create",
+            json!({ "name": format!("perf-{index}") }),
+            "ctx-a",
+            &format!("create-perf-{index}"),
+        );
+        assert_eq!(created["ok"], true, "{created}");
+    }
+    std::fs::write(&log, "").unwrap();
+
+    let listed = call(
+        &env,
+        instance,
+        "2",
+        "tmux_list",
+        json!({}),
+        "ctx-a",
+        "measured-list",
+    );
+    assert_eq!(listed["ok"], true, "{listed}");
+    let invocation_count = std::fs::read_to_string(&log)
+        .unwrap_or_default()
+        .lines()
+        .count();
+    assert!(
+        invocation_count <= 11,
+        "repeated full-capacity tmux_list used {invocation_count} tmux commands"
+    );
     stop(&env, instance);
 }
