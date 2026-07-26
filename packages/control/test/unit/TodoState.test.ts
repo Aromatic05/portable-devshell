@@ -47,6 +47,31 @@ test("TodoState owns validation, transitions, summaries, and associations", () =
     });
 });
 
+test("TodoState exposes only actionable work as activeTodo", () => {
+    const state = new TodoState("aromatic-pc", {
+        taskId: () => "task-fixed"
+    });
+    const transition = (status: "cancelled" | "completed" | "failed") => state.transition(
+        state.emptyDocument(),
+        {
+            revision: 0,
+            todos: [{
+                content: "Work",
+                ...(status === "failed" ? { detail: "Needs attention" } : {}),
+                id: "work",
+                status
+            }]
+        },
+        "ctx-1"
+    ).document;
+
+    const completed = transition("completed");
+    assert.equal(state.activeSummary(completed), undefined);
+    assert.equal(state.readResult(completed).taskId, "task-fixed");
+    assert.equal(state.activeSummary(transition("cancelled")), undefined);
+    assert.equal(state.activeSummary(transition("failed"))?.status, "failed");
+});
+
 test("TodoState archives terminal work before creating a replacement task", () => {
     const timestamps = [
         "2026-07-16T00:00:00.000Z",

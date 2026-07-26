@@ -79,7 +79,7 @@ todo.completed
 todo.archived
 ```
 
-完整状态通过 `instance.todo.get` 获取；`instance.getSnapshot` 只包含 active Todo 摘要。
+完整状态通过 `instance.todo.get` 获取；`instance.getSnapshot` 只包含仍需处理的 active Todo 摘要。全部完成、全部取消或空计划仍可通过 `todo_read` 读取，但不会继续作为 `activeTodo` 出现在 instance snapshot 中；`failed` 和 `blocked` 仍会保留，便于诊断和恢复。
 
 ## CLI
 

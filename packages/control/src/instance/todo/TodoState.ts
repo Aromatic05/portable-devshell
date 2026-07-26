@@ -111,6 +111,10 @@ export class TodoState {
     activeSummary(document: TodoDocument): ActiveTodoSummary | undefined {
         const state = document.active;
         if (state === undefined) return undefined;
+        const status = deriveStatus(state.items);
+        if (status === "completed" || status === "cancelled" || status === "none") {
+            return undefined;
+        }
         const summary = summarize(state.items);
         const current = summary.currentItemId === undefined
             ? undefined
@@ -119,7 +123,7 @@ export class TodoState {
             completed: summary.completed,
             currentItem: current?.content,
             revision: state.revision,
-            status: deriveStatus(state.items),
+            status,
             taskId: state.taskId,
             title: state.title,
             total: summary.total
