@@ -173,10 +173,7 @@ fn tmux_capture_range(
     let output = Command::new("tmux")
         .arg("-S")
         .arg(socket)
-        .args(["capture-pane", "-p", "-t", pane_id, "-S"])
-        .arg((start + 1).to_string())
-        .arg("-E")
-        .arg(end.to_string())
+        .args(["capture-pane", "-p", "-t", pane_id, "-S", "-", "-E", "-"])
         .output()
         .expect("tmux capture-pane should run");
     assert!(
@@ -184,15 +181,18 @@ fn tmux_capture_range(
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
-    let mut lines = String::from_utf8(output.stdout)
+    let lines = String::from_utf8(output.stdout)
         .expect("tmux capture should be UTF-8")
         .lines()
         .map(ToOwned::to_owned)
         .collect::<Vec<_>>();
-    while lines.last().is_some_and(String::is_empty) {
-        lines.pop();
+    let logical_start = lines.len().saturating_sub(start.unsigned_abs() as usize);
+    let logical_end = lines.len().saturating_sub(end.unsigned_abs() as usize);
+    let mut selected = lines[logical_start.min(logical_end)..logical_end].to_vec();
+    while selected.last().is_some_and(String::is_empty) {
+        selected.pop();
     }
-    lines
+    selected
 }
 
 fn wait_for_terminal(env: &TestEnv, instance: &str, task: &str, ctx_id: &str) -> Value {

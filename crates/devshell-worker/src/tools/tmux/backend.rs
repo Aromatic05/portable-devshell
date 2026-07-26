@@ -279,16 +279,19 @@ impl TmuxBackend {
             "-t".into(),
             tmux_pane_id.into(),
             "-S".into(),
-            start.saturating_add(1).to_string(),
+            "-".into(),
             "-E".into(),
-            end.to_string(),
+            "-".into(),
         ])?;
         let sanitized = sanitize_terminal_output(&raw);
-        let mut lines = sanitized.lines().map(ToOwned::to_owned).collect::<Vec<_>>();
-        while lines.last().is_some_and(String::is_empty) {
-            lines.pop();
+        let lines = sanitized.lines().map(ToOwned::to_owned).collect::<Vec<_>>();
+        let logical_start = lines.len().saturating_sub(start.unsigned_abs() as usize);
+        let logical_end = lines.len().saturating_sub(end.unsigned_abs() as usize);
+        let mut selected = lines[logical_start.min(logical_end)..logical_end].to_vec();
+        while selected.last().is_some_and(String::is_empty) {
+            selected.pop();
         }
-        Ok(lines)
+        Ok(selected)
     }
 
     pub fn prepare_task(&self, pane_id: &str, task_id: &str) -> Result<(), ToolError> {
