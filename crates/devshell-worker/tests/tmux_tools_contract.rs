@@ -251,6 +251,7 @@ fn tmux_catalog_exposes_task_scoped_tools() {
         "tmux_inspect",
         "tmux_list",
         "tmux_read",
+        "tmux_reclaim",
         "tmux_run",
     ] {
         assert!(names.contains(&expected), "missing {expected}: {names:?}");
@@ -1111,5 +1112,86 @@ fn worker_restart_adopts_existing_panes() {
         .unwrap();
     assert_eq!(persistent["id"], pane_id);
     assert_eq!(listed["result"]["observationReset"], true);
+    stop(&env, instance);
+}
+
+#[test]
+#[ignore = "requires tmux on PATH"]
+fn worker_restart_allows_explicit_orphan_reclaim() {
+    assert!(
+        tmux_available(),
+        "tmux is required to run this ignored contract test"
+    );
+    let env = TestEnv::new();
+    let instance = "aromatic-tmux-reclaim";
+    start(&env, instance);
+    let run = call(
+        &env,
+        instance,
+        "1",
+        "tmux_run",
+        json!({ "pane": "main", "command": "sleep 30", "wait": "nonblock" }),
+        "ctx-a",
+        "run-before-restart",
+    );
+    assert_eq!(run["ok"], true, "{run}");
+    let task = run["result"]["task"]["id"].as_str().unwrap();
+
+    env.json_command(&["stop", "--instance", instance]);
+    assert!(env.tmux_socket_file(instance).exists());
+    start(&env, instance);
+
+    let listed = call(
+        &env,
+        instance,
+        "2",
+        "tmux_list",
+        json!({}),
+        "ctx-b",
+        "list-orphan",
+    );
+    assert_eq!(listed["ok"], true, "{listed}");
+    assert_eq!(listed["result"]["panes"][0]["task"]["id"], task);
+    assert_eq!(listed["result"]["panes"][0]["ownedByCurrentContext"], false);
+
+    let reclaimed = call(
+        &env,
+        instance,
+        "3",
+        "tmux_reclaim",
+        json!({ "task": task }),
+        "ctx-b",
+        "reclaim-orphan",
+    );
+    assert_eq!(reclaimed["ok"], true, "{reclaimed}");
+    assert_eq!(reclaimed["result"]["task"]["id"], task);
+    assert_eq!(reclaimed["result"]["pane"]["ownedByCurrentContext"], true);
+
+    let foreign_reclaim = call(
+        &env,
+        instance,
+        "4",
+        "tmux_reclaim",
+        json!({ "task": task }),
+        "ctx-c",
+        "reclaim-owned",
+    );
+    assert_eq!(
+        foreign_reclaim["error"]["code"], "tmux.taskLocked",
+        "{foreign_reclaim}"
+    );
+
+    let interrupted = call(
+        &env,
+        instance,
+        "5",
+        "tmux_input",
+        json!({ "task": task, "input": "^C", "timeMs": 1000 }),
+        "ctx-b",
+        "interrupt-reclaimed",
+    );
+    assert_eq!(interrupted["ok"], true, "{interrupted}");
+    let finished = wait_for_terminal(&env, instance, task, "ctx-b");
+    assert_ne!(finished["result"]["task"]["status"], "running");
     stop(&env, instance);
 }

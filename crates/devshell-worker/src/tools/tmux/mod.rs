@@ -21,7 +21,7 @@ use crate::tools::tmux::state::TmuxState;
 use crate::tools::tmux::types::{
     TmuxCloseOutput, TmuxCloseParams, TmuxCreateOutput, TmuxCreateParams, TmuxInputParams,
     TmuxInspectParams, TmuxListOutput, TmuxListParams, TmuxPaneOperationOutput, TmuxReadParams,
-    TmuxRunParams, TmuxTaskOperationOutput, TmuxWarning,
+    TmuxReclaimOutput, TmuxReclaimParams, TmuxRunParams, TmuxTaskOperationOutput, TmuxWarning,
 };
 use crate::tools::{
     ToolCall, ToolCapability, ToolCatalogEntry, ToolError, ToolHandler, ToolName, ToolRegistry,
@@ -122,6 +122,13 @@ pub fn register_tools(
         ToolCapability::Read,
         Arc::clone(&state),
         TmuxState::read,
+    ))?;
+    registry.register(tool::<TmuxReclaimParams, TmuxReclaimOutput>(
+        ToolName::parse("tmux_reclaim").unwrap(),
+        "Claim control of a running task adopted after worker restart. Only orphaned tasks may be reclaimed.",
+        ToolCapability::Execute,
+        Arc::clone(&state),
+        TmuxState::reclaim,
     ))?;
     registry.register(tool::<TmuxInspectParams, TmuxPaneOperationOutput>(
         ToolName::parse("tmux_inspect").unwrap(),

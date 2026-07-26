@@ -58,6 +58,13 @@ pub struct TmuxReadParams {
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
+pub struct TmuxReclaimParams {
+    pub task: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum TmuxInspectAll {
     All,
@@ -162,6 +169,17 @@ pub struct TmuxTaskOperationOutput {
     pub task: TmuxTaskView,
     pub pane: TmuxPaneView,
     pub output: Vec<String>,
+    pub warnings: Vec<TmuxWarning>,
+    pub observation_epoch: String,
+    pub observation_reset: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct TmuxReclaimOutput {
+    pub kind: String,
+    pub task: TmuxTaskView,
+    pub pane: TmuxPaneView,
     pub warnings: Vec<TmuxWarning>,
     pub observation_epoch: String,
     pub observation_reset: bool,

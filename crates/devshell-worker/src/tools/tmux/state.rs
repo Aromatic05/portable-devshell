@@ -21,7 +21,8 @@ use crate::tools::tmux::task::{
 use crate::tools::tmux::types::{
     TmuxCapacity, TmuxCloseOutput, TmuxCloseParams, TmuxCreateOutput, TmuxCreateParams,
     TmuxInputParams, TmuxInspectParams, TmuxListOutput, TmuxPaneOperationOutput, TmuxPaneView,
-    TmuxReadParams, TmuxRunParams, TmuxTaskOperationOutput, TmuxWaitMode, TmuxWarning,
+    TmuxReadParams, TmuxReclaimOutput, TmuxReclaimParams, TmuxRunParams, TmuxTaskOperationOutput,
+    TmuxWaitMode, TmuxWarning,
 };
 use crate::tools::{ToolCall, ToolError};
 
@@ -34,6 +35,7 @@ const START_CONFIRM_TIME_MS: u64 = 3_000;
 const DEFAULT_INSPECT_START: i64 = -80;
 const DEFAULT_INSPECT_END: i64 = 0;
 const MAX_INSPECT_LINES: i64 = 200;
+const ORPHANED_OWNER_CONTEXT: &str = "__orphaned__";
 
 pub struct TmuxState {
     backend: TmuxBackend,
@@ -404,6 +406,59 @@ impl TmuxState {
         })
     }
 
+    pub fn reclaim(
+        &self,
+        call: &ToolCall,
+        params: TmuxReclaimParams,
+    ) -> Result<TmuxReclaimOutput, ToolError> {
+        call.check_cancelled()?;
+        self.replays
+            .execute(call, "tmux_reclaim", || self.reclaim_once(call, params))
+    }
+
+    fn reclaim_once(
+        &self,
+        call: &ToolCall,
+        params: TmuxReclaimParams,
+    ) -> Result<TmuxReclaimOutput, ToolError> {
+        require_execute(call)?;
+        self.ensure_session()?;
+        let workspace = self.backend.capture_workspace()?;
+        self.refresh_tasks_with_workspace(&workspace)?;
+        let mut tasks = self.tasks.lock().map_err(|_| lock_error("tmux tasks"))?;
+        let task = tasks
+            .tasks
+            .get_mut(&params.task)
+            .ok_or_else(|| task_expired(&params.task))?;
+        if !task.state.is_active() {
+            return Err(ToolError::new(
+                "tmux.taskNotRunning",
+                format!("task {} is no longer running", params.task),
+            ));
+        }
+        if task.owner_context_id == ORPHANED_OWNER_CONTEXT {
+            task.owner_context_id = call.ctx_id.clone();
+            task.warnings.push(warning(
+                Some(&task.pane_id),
+                "tmux.taskReclaimed",
+                "the orphaned task is now owned by the current context",
+            ));
+        } else if task.owner_context_id != call.ctx_id {
+            return Err(task_locked(task));
+        }
+        let warnings = std::mem::take(&mut task.warnings);
+        let view = task_view(task);
+        let pane = pane_view(&task.last_pane, Some(task), &call.ctx_id, None);
+        Ok(TmuxReclaimOutput {
+            kind: "reclaim".to_string(),
+            task: view,
+            pane,
+            warnings,
+            observation_epoch: self.backend.observation_epoch().to_string(),
+            observation_reset: self.backend.observation_reset(),
+        })
+    }
+
     pub fn create(
         &self,
         call: &ToolCall,
@@ -670,7 +725,7 @@ impl TmuxState {
                     id: task_id.clone(),
                     pane_id: pane.id.clone(),
                     pane_incarnation_id: pane.pane_incarnation_id.clone(),
-                    owner_context_id: "__orphaned__".to_string(),
+                    owner_context_id: ORPHANED_OWNER_CONTEXT.to_string(),
                     state: TaskState::Running,
                     window: OutputWindow {
                         anchor: pane.lines.clone(),

@@ -8,6 +8,7 @@
 tmux_run
 tmux_input
 tmux_read
+tmux_reclaim
 tmux_inspect
 tmux_list
 tmux_create
@@ -39,7 +40,13 @@ running / numeric exit code / unknown
 - `tmux_inspect` 始终可以观察终端画面；
 - task 退出后，输出被冻结到 task，pane 立即释放并可运行下一个 task。
 
-MCP/RPC transport session 关闭不会改变 task 所有权；只要继续携带原 contextId 和 taskId，重连后仍可读取输出和发送输入。worker 重启时仍在运行的 task 会作为 orphaned task 被接管，但不会允许任意 context 直接输入。
+MCP/RPC transport session 关闭不会改变 task 所有权；只要继续携带原 contextId 和 taskId，重连后仍可读取输出和发送输入。worker 重启时仍在运行的 task 会作为 orphaned task 被接管。新的 context 必须显式调用 `tmux_reclaim` 才能取得控制权；已经被其他 context 接管的 task 仍返回 `tmux.taskLocked`。
+
+```json
+{
+    "task": "task-..."
+}
+```
 
 ## 运行命令
 
