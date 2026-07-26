@@ -86,13 +86,6 @@ pub struct TmuxInspectParams {
 #[serde(deny_unknown_fields)]
 pub struct TmuxListParams {}
 
-#[derive(Clone, Copy, Debug, Deserialize, JsonSchema, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
-pub enum TmuxPanePosition {
-    Right,
-    Below,
-}
-
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 #[serde(rename_all = "camelCase")]
@@ -102,14 +95,6 @@ pub struct TmuxCreateParams {
         regex(pattern = r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
     )]
     pub name: String,
-    #[serde(default)]
-    /// Managed pane name returned by tmux_list or tmux_create.
-    pub relative_to: Option<String>,
-    #[serde(default)]
-    pub position: Option<TmuxPanePosition>,
-    #[serde(default)]
-    #[schemars(range(min = 10, max = 90))]
-    pub size_percent: Option<u8>,
     #[serde(default)]
     pub cwd: Option<String>,
 }

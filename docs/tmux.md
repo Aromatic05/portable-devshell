@@ -177,14 +177,13 @@ task                     当前运行中的 task
 
 ## 创建与关闭 pane
 
+每个受管 pane 都位于独立的 tmux window 中。window 默认只包含这一个 pane，因此任务始终获得完整终端尺寸，不会因为其他并发任务而被继续切割。
+
 显式创建：
 
 ```json
 {
     "name": "server",
-    "relativeTo": "main",
-    "position": "right",
-    "sizePercent": 40,
     "cwd": "./"
 }
 ```

@@ -2,6 +2,7 @@
 
 mod support;
 
+use std::collections::HashSet;
 use std::process::Command;
 use std::thread;
 use std::time::{Duration, Instant};
@@ -96,6 +97,39 @@ fn stop(env: &TestEnv, instance: &str) {
     kill_tmux_server(env, instance);
 }
 
+fn tmux_window_layout(env: &TestEnv, instance: &str) -> Vec<(String, usize, String)> {
+    let socket = env.tmux_socket_file(instance);
+    let output = Command::new("tmux")
+        .args([
+            "-S",
+            socket.to_string_lossy().as_ref(),
+            "list-panes",
+            "-s",
+            "-t",
+            "devshell",
+            "-F",
+            "#{window_id}|#{window_panes}|#{pane_id}",
+        ])
+        .output()
+        .expect("tmux list-panes should run");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8(output.stdout)
+        .expect("tmux layout should be UTF-8")
+        .lines()
+        .map(|line| {
+            let mut fields = line.split('|');
+            let window_id = fields.next().unwrap().to_string();
+            let window_panes = fields.next().unwrap().parse::<usize>().unwrap();
+            let pane_id = fields.next().unwrap().to_string();
+            (window_id, window_panes, pane_id)
+        })
+        .collect()
+}
+
 fn wait_for_terminal(env: &TestEnv, instance: &str, task: &str, ctx_id: &str) -> Value {
     let deadline = Instant::now() + Duration::from_secs(5);
     let mut attempt = 0;
@@ -172,6 +206,17 @@ fn tmux_catalog_exposes_task_scoped_tools() {
         .find(|tool| tool["name"] == "tmux_input")
         .unwrap();
     assert_eq!(input["inputSchema"]["required"], json!(["task", "input"]));
+    let create = catalog
+        .iter()
+        .find(|tool| tool["name"] == "tmux_create")
+        .unwrap();
+    assert_eq!(create["inputSchema"]["required"], json!(["name"]));
+    for removed in ["relativeTo", "position", "sizePercent"] {
+        assert!(
+            create["inputSchema"]["properties"].get(removed).is_none(),
+            "obsolete split option remains in tmux_create: {removed}"
+        );
+    }
     let read = catalog
         .iter()
         .find(|tool| tool["name"] == "tmux_read")
@@ -182,11 +227,7 @@ fn tmux_catalog_exposes_task_scoped_tools() {
             .unwrap()
             .contains("not raw process stdout")
     );
-    for (tool_name, field) in [
-        ("tmux_close", "pane"),
-        ("tmux_create", "relativeTo"),
-        ("tmux_inspect", "pane"),
-    ] {
+    for (tool_name, field) in [("tmux_close", "pane"), ("tmux_inspect", "pane")] {
         let tool = catalog
             .iter()
             .find(|tool| tool["name"] == tool_name)
@@ -471,6 +512,118 @@ fn tmux_run_without_pane_reuses_idle_then_creates_auto_pane() {
         "stop-main",
     );
     let _ = wait_for_terminal(&env, instance, first_task, "ctx-a");
+    stop(&env, instance);
+}
+
+#[test]
+#[ignore = "requires tmux on PATH"]
+fn managed_panes_use_independent_single_pane_windows() {
+    assert!(
+        tmux_available(),
+        "tmux is required to run this ignored contract test"
+    );
+    let env = TestEnv::new();
+    let instance = "aromatic-tmux-windows";
+    start(&env, instance);
+
+    for (id, name) in [("1", "server"), ("2", "watcher")] {
+        let created = call(
+            &env,
+            instance,
+            id,
+            "tmux_create",
+            json!({ "name": name }),
+            "ctx-a",
+            &format!("create-{name}"),
+        );
+        assert_eq!(created["ok"], true, "{created}");
+    }
+
+    let layout = tmux_window_layout(&env, instance);
+    assert_eq!(layout.len(), 3, "{layout:?}");
+    assert!(
+        layout.iter().all(|(_, pane_count, _)| *pane_count == 1),
+        "every managed task must have a full single-pane window: {layout:?}"
+    );
+    let windows = layout
+        .iter()
+        .map(|(window_id, _, _)| window_id)
+        .collect::<HashSet<_>>();
+    assert_eq!(windows.len(), layout.len(), "{layout:?}");
+
+    stop(&env, instance);
+}
+
+#[test]
+#[ignore = "requires tmux on PATH"]
+fn existing_split_layout_is_migrated_without_restarting_tasks() {
+    assert!(
+        tmux_available(),
+        "tmux is required to run this ignored contract test"
+    );
+    let env = TestEnv::new();
+    let instance = "aromatic-tmux-migrate";
+    start(&env, instance);
+
+    let created = call(
+        &env,
+        instance,
+        "1",
+        "tmux_create",
+        json!({ "name": "server" }),
+        "ctx-a",
+        "create-server",
+    );
+    assert_eq!(created["ok"], true, "{created}");
+    let server_pane = created["result"]["pane"]["tmuxPaneId"].as_str().unwrap();
+    let socket = env.tmux_socket_file(instance);
+    let main_pane = tmux_window_layout(&env, instance)
+        .into_iter()
+        .map(|(_, _, pane_id)| pane_id)
+        .find(|pane_id| pane_id != server_pane)
+        .unwrap();
+    let joined = Command::new("tmux")
+        .args([
+            "-S",
+            socket.to_string_lossy().as_ref(),
+            "join-pane",
+            "-d",
+            "-h",
+            "-s",
+            server_pane,
+            "-t",
+            &main_pane,
+        ])
+        .output()
+        .expect("tmux join-pane should run");
+    assert!(
+        joined.status.success(),
+        "{}",
+        String::from_utf8_lossy(&joined.stderr)
+    );
+    assert!(
+        tmux_window_layout(&env, instance)
+            .iter()
+            .all(|(_, pane_count, _)| *pane_count == 2)
+    );
+
+    let listed = call(
+        &env,
+        instance,
+        "2",
+        "tmux_list",
+        json!({}),
+        "ctx-a",
+        "list-after-legacy-layout",
+    );
+    assert_eq!(listed["ok"], true, "{listed}");
+    let layout = tmux_window_layout(&env, instance);
+    assert_eq!(layout.len(), 2, "{layout:?}");
+    assert!(
+        layout.iter().all(|(_, pane_count, _)| *pane_count == 1),
+        "legacy panes should be moved into full windows without task restart: {layout:?}"
+    );
+
     stop(&env, instance);
 }
 

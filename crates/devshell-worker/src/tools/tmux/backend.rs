@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::Write;
 use std::os::unix::fs::OpenOptionsExt;
@@ -28,6 +28,8 @@ pub struct BackendPane {
     pub id: String,
     pub name: String,
     pub tmux_pane_id: String,
+    pub tmux_window_id: String,
+    pub window_panes: usize,
     pub pane_incarnation_id: String,
     pub created_at_ms: u128,
     pub active: bool,
@@ -131,6 +133,7 @@ impl TmuxBackend {
     pub fn ensure_session(&self) -> Result<(), ToolError> {
         if session_exists(&self.socket) {
             self.validate_existing_session()?;
+            self.normalize_managed_windows()?;
             self.reconcile_registry()?;
             return Ok(());
         }
@@ -145,6 +148,8 @@ impl TmuxBackend {
             "-d".to_string(),
             "-s".to_string(),
             TMUX_SESSION.to_string(),
+            "-n".to_string(),
+            "main".to_string(),
             "-c".to_string(),
             self.workspace.to_string_lossy().to_string(),
             launch.command,
@@ -177,10 +182,11 @@ impl TmuxBackend {
     pub fn capture_workspace(&self) -> Result<BackendWorkspace, ToolError> {
         let raw = self.run(&[
             "list-panes".into(),
+            "-s".into(),
             "-t".into(),
             TMUX_SESSION.into(),
             "-F".into(),
-            "#{pane_id}|#{@devshell_worker_pane_id}|#{@devshell_worker_pane_name}|#{@devshell_worker_pane_incarnation_id}|#{@devshell_worker_created_at}|#{pane_active}".into(),
+            "#{pane_id}|#{@devshell_worker_pane_id}|#{@devshell_worker_pane_name}|#{@devshell_worker_pane_incarnation_id}|#{@devshell_worker_created_at}|#{pane_active}|#{window_active}|#{window_id}|#{window_panes}".into(),
         ])?;
         let mut panes = Vec::new();
         let mut total_panes = 0;
@@ -212,9 +218,14 @@ impl TmuxBackend {
                 id: id.to_string(),
                 name: name.to_string(),
                 tmux_pane_id: tmux_pane_id.to_string(),
+                tmux_window_id: fields.get(7).copied().unwrap_or_default().to_string(),
+                window_panes: fields
+                    .get(8)
+                    .and_then(|value| value.parse::<usize>().ok())
+                    .unwrap_or(1),
                 pane_incarnation_id: pane_incarnation_id.to_string(),
                 created_at_ms,
-                active: fields.get(5).copied() == Some("1"),
+                active: fields.get(5).copied() == Some("1") && fields.get(6).copied() == Some("1"),
                 cwd: self.read_pane_format(tmux_pane_id, "#{pane_current_path}")?,
                 command: self.read_pane_format(tmux_pane_id, "#{pane_current_command}")?,
                 lines,
@@ -326,35 +337,28 @@ impl TmuxBackend {
         Ok(())
     }
 
-    pub fn create_pane(
-        &self,
-        name: &str,
-        relative_to: &BackendPane,
-        position_right: bool,
-        size_percent: Option<u8>,
-        cwd: &Path,
-    ) -> Result<BackendPane, ToolError> {
+    pub fn create_pane(&self, name: &str, cwd: &Path) -> Result<BackendPane, ToolError> {
         let pane = PaneRecord::new(name)?;
         let launch = prepare_shell_launch(&self.shell_dir, &self.status_dir, &pane.pane_id)?;
-        let mut args = vec![
-            "split-window".to_string(),
+        let args = vec![
+            "new-window".to_string(),
             "-d".to_string(),
             "-P".to_string(),
             "-F".to_string(),
             "#{pane_id}".to_string(),
             "-t".to_string(),
-            relative_to.tmux_pane_id.clone(),
-            if position_right { "-h" } else { "-v" }.to_string(),
+            format!("{TMUX_SESSION}:"),
+            "-n".to_string(),
+            name.to_string(),
             "-c".to_string(),
             cwd.to_string_lossy().to_string(),
+            launch.command,
         ];
-        append_split_size(&mut args, size_percent);
-        args.push(launch.command);
         let tmux_pane_id = self.run(&args)?.trim().to_string();
         if tmux_pane_id.is_empty() {
             return Err(ToolError::new(
                 "tmux.createFailed",
-                "tmux split-window returned an empty pane id",
+                "tmux new-window returned an empty pane id",
             ));
         }
         if let Err(error) = self.mark_pane(&tmux_pane_id, &pane) {
@@ -437,6 +441,43 @@ impl TmuxBackend {
                     self.instance
                 ),
             ));
+        }
+        Ok(())
+    }
+
+    fn normalize_managed_windows(&self) -> Result<(), ToolError> {
+        let workspace = self.capture_workspace()?;
+        let mut by_window = HashMap::<String, Vec<&BackendPane>>::new();
+        for pane in &workspace.panes {
+            by_window
+                .entry(pane.tmux_window_id.clone())
+                .or_default()
+                .push(pane);
+        }
+
+        for panes in by_window.values_mut() {
+            if panes.is_empty() {
+                continue;
+            }
+            let window_panes = panes[0].window_panes;
+            if window_panes <= 1 {
+                continue;
+            }
+
+            panes.sort_by_key(|pane| (pane.name != "main", pane.created_at_ms));
+            let keep_count = usize::from(window_panes == panes.len());
+            for pane in panes.iter().skip(keep_count) {
+                self.run(&[
+                    "break-pane".into(),
+                    "-d".into(),
+                    "-s".into(),
+                    pane.tmux_pane_id.clone(),
+                    "-t".into(),
+                    format!("{TMUX_SESSION}:"),
+                    "-n".into(),
+                    pane.name.clone(),
+                ])?;
+            }
         }
         Ok(())
     }
@@ -675,13 +716,6 @@ pub fn validate_pane_name(name: &str) -> Result<(), ToolError> {
     Ok(())
 }
 
-fn append_split_size(args: &mut Vec<String>, size_percent: Option<u8>) {
-    if let Some(size) = size_percent {
-        args.push("-l".to_string());
-        args.push(format!("{size}%"));
-    }
-}
-
 fn session_exists(socket: &Path) -> bool {
     socket.exists()
         && Command::new("tmux")
@@ -758,16 +792,4 @@ fn atomic_write_json<T: Serialize>(path: &Path, value: &T) -> Result<(), ToolErr
 
 fn storage_error(error: std::io::Error) -> ToolError {
     ToolError::new("tmux.storageFailed", error.to_string())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::append_split_size;
-
-    #[test]
-    fn split_size_uses_tmux_length_percentage_syntax() {
-        let mut args = Vec::new();
-        append_split_size(&mut args, Some(40));
-        assert_eq!(args, ["-l", "40%"]);
-    }
 }

@@ -20,9 +20,8 @@ use crate::tools::tmux::task::{
 };
 use crate::tools::tmux::types::{
     TmuxCapacity, TmuxCloseOutput, TmuxCloseParams, TmuxCreateOutput, TmuxCreateParams,
-    TmuxInputParams, TmuxInspectParams, TmuxListOutput, TmuxPaneOperationOutput, TmuxPanePosition,
-    TmuxPaneView, TmuxReadParams, TmuxRunParams, TmuxTaskOperationOutput, TmuxWaitMode,
-    TmuxWarning,
+    TmuxInputParams, TmuxInspectParams, TmuxListOutput, TmuxPaneOperationOutput, TmuxPaneView,
+    TmuxReadParams, TmuxRunParams, TmuxTaskOperationOutput, TmuxWaitMode, TmuxWarning,
 };
 use crate::tools::{ToolCall, ToolError};
 
@@ -108,16 +107,8 @@ impl TmuxState {
                         ),
                     ));
                 }
-                let relative = workspace
-                    .panes
-                    .iter()
-                    .find(|pane| pane.name == "main")
-                    .or_else(|| workspace.panes.first())
-                    .ok_or_else(|| ToolError::new("tmux.paneNotFound", "no managed pane exists"))?;
                 let name = next_auto_name(&workspace);
-                let pane =
-                    self.backend
-                        .create_pane(&name, relative, true, None, &call.workspace)?;
+                let pane = self.backend.create_pane(&name, &call.workspace)?;
                 workspace = self.backend.capture_workspace()?;
                 auto_created = true;
                 pane
@@ -429,14 +420,6 @@ impl TmuxState {
         params: TmuxCreateParams,
     ) -> Result<TmuxCreateOutput, ToolError> {
         require_execute(call)?;
-        if let Some(size) = params.size_percent
-            && !(10..=90).contains(&size)
-        {
-            return Err(ToolError::new(
-                "tool.invalidArguments",
-                "sizePercent must be between 10 and 90",
-            ));
-        }
         let cwd = resolve_cwd(call, params.cwd.as_deref())?;
         let _structure_guard = self
             .structure
@@ -456,23 +439,7 @@ impl TmuxState {
                 format!("pane name already exists: {}", params.name),
             ));
         }
-        let relative = if let Some(selector) = params.relative_to.as_deref() {
-            self.backend.resolve(&workspace, Some(selector))?
-        } else {
-            workspace
-                .panes
-                .iter()
-                .find(|pane| pane.name == "main")
-                .or_else(|| workspace.panes.first())
-                .ok_or_else(|| ToolError::new("tmux.paneNotFound", "no managed pane exists"))?
-        };
-        let pane = self.backend.create_pane(
-            &params.name,
-            relative,
-            params.position.unwrap_or(TmuxPanePosition::Right) == TmuxPanePosition::Right,
-            params.size_percent,
-            &cwd,
-        )?;
+        let pane = self.backend.create_pane(&params.name, &cwd)?;
         let after = self.backend.capture_workspace()?;
         Ok(TmuxCreateOutput {
             kind: "create".to_string(),
@@ -914,6 +881,8 @@ mod tests {
             id: name.to_string(),
             name: name.to_string(),
             tmux_pane_id: "%1".to_string(),
+            tmux_window_id: "@0".to_string(),
+            window_panes: 1,
             pane_incarnation_id: name.to_string(),
             created_at_ms: 1,
             active: false,
