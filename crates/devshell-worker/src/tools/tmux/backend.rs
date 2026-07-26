@@ -32,6 +32,9 @@ pub struct BackendPane {
     pub tmux_pane_id: String,
     pub tmux_window_id: String,
     pub window_panes: usize,
+    pub window_active: bool,
+    pub columns: usize,
+    pub rows: usize,
     pub pane_incarnation_id: String,
     pub created_at_ms: u128,
     pub active: bool,
@@ -194,7 +197,7 @@ impl TmuxBackend {
             "-t".into(),
             TMUX_SESSION.into(),
             "-F".into(),
-            "#{pane_id}|#{@devshell_worker_pane_id}|#{@devshell_worker_pane_name}|#{@devshell_worker_pane_incarnation_id}|#{@devshell_worker_created_at}|#{pane_active}|#{window_active}|#{window_id}|#{window_panes}".into(),
+            "#{pane_id}|#{@devshell_worker_pane_id}|#{@devshell_worker_pane_name}|#{@devshell_worker_pane_incarnation_id}|#{@devshell_worker_created_at}|#{pane_active}|#{window_active}|#{window_id}|#{window_panes}|#{pane_width}|#{pane_height}".into(),
         ])?;
         let mut panes = Vec::new();
         let mut total_panes = 0;
@@ -231,9 +234,18 @@ impl TmuxBackend {
                     .get(8)
                     .and_then(|value| value.parse::<usize>().ok())
                     .unwrap_or(1),
+                window_active: fields.get(6).copied() == Some("1"),
+                columns: fields
+                    .get(9)
+                    .and_then(|value| value.parse::<usize>().ok())
+                    .unwrap_or_default(),
+                rows: fields
+                    .get(10)
+                    .and_then(|value| value.parse::<usize>().ok())
+                    .unwrap_or_default(),
                 pane_incarnation_id: pane_incarnation_id.to_string(),
                 created_at_ms,
-                active: fields.get(5).copied() == Some("1") && fields.get(6).copied() == Some("1"),
+                active: fields.get(5).copied() == Some("1"),
                 cwd: self.read_pane_format(tmux_pane_id, "#{pane_current_path}")?,
                 command: self.read_pane_format(tmux_pane_id, "#{pane_current_command}")?,
                 lines,

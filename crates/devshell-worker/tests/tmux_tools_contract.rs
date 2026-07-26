@@ -685,6 +685,33 @@ fn managed_panes_use_independent_single_pane_windows() {
             .all(|(width, height)| *width >= 240 && *height >= 60),
         "managed terminals must have a useful detached canvas: {sizes:?}"
     );
+    let listed = call(
+        &env,
+        instance,
+        "3",
+        "tmux_list",
+        json!({}),
+        "ctx-a",
+        "list-window-metadata",
+    );
+    assert_eq!(listed["ok"], true, "{listed}");
+    let panes = listed["result"]["panes"].as_array().unwrap();
+    assert!(panes.iter().all(|pane| pane["active"] == true), "{listed}");
+    assert_eq!(
+        panes
+            .iter()
+            .filter(|pane| pane["windowActive"] == true)
+            .count(),
+        1,
+        "{listed}"
+    );
+    assert!(panes.iter().all(|pane| {
+        pane["tmuxWindowId"]
+            .as_str()
+            .is_some_and(|id| !id.is_empty())
+            && pane["columns"].as_u64().is_some_and(|value| value >= 240)
+            && pane["rows"].as_u64().is_some_and(|value| value >= 60)
+    }));
 
     stop(&env, instance);
 }

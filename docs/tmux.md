@@ -180,6 +180,10 @@ unknown
 id                       稳定逻辑 ID
 name                     instance 内唯一名称
 tmuxPaneId               底层 tmux 坐标，仅用于诊断
+tmuxWindowId             底层 tmux window 坐标，仅用于诊断
+active                   pane 是否为所在 window 的活动 pane
+windowActive             所在 window 是否为 session 当前选中的 window
+columns / rows           terminal 的实际字符尺寸
 locked                   是否被运行中 task 或外部前台命令占用
 ownedByCurrentContext     当前 context 是否为 task owner
 task                     当前运行中的 task
