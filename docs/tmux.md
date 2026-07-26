@@ -65,9 +65,11 @@ MCP/RPC transport session 关闭不会改变 task 所有权；只要继续携带
 不指定 pane 时，worker 在同一个结构临界区内：
 
 1. 优先选择空闲的 `main`；
-2. 否则选择创建时间最早的空闲 pane；
+2. 否则选择创建时间最早的空闲 `auto-*` pane；
 3. 没有空闲 pane 且未达到容量时，创建 `auto-1`、`auto-2` 等 pane；
 4. 达到容量时返回 `tmux.capacityReached`。
+
+通过 `tmux_create` 显式命名的 pane 不参与自动复用，只有调用方明确指定名称时才会运行任务。
 
 `wait` 支持：
 

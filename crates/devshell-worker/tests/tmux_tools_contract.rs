@@ -571,6 +571,17 @@ fn tmux_run_without_pane_reuses_idle_then_creates_auto_pane() {
     assert_eq!(first["result"]["pane"]["name"], "main", "{first}");
     let first_task = first["result"]["task"]["id"].as_str().unwrap();
 
+    let dedicated = call(
+        &env,
+        instance,
+        "1b",
+        "tmux_create",
+        json!({ "name": "server" }),
+        "ctx-a",
+        "create-dedicated",
+    );
+    assert_eq!(dedicated["ok"], true, "{dedicated}");
+
     let second = call_with_identity(
         &env,
         instance,

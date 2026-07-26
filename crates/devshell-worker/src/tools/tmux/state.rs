@@ -592,6 +592,7 @@ impl TmuxState {
         Ok(workspace
             .panes
             .iter()
+            .filter(|pane| pane.name == "main" || pane.name.starts_with("auto-"))
             .filter(available)
             .min_by_key(|pane| (pane.name != "main", pane.created_at_ms))
             .cloned())
