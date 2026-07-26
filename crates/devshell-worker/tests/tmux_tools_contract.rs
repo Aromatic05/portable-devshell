@@ -770,6 +770,10 @@ fn existing_split_layout_is_migrated_without_restarting_tasks() {
             .all(|(_, pane_count, _)| *pane_count == 2)
     );
 
+    env.json_command(&["stop", "--instance", instance]);
+    assert!(env.tmux_socket_file(instance).exists());
+    start(&env, instance);
+
     let listed = call(
         &env,
         instance,
