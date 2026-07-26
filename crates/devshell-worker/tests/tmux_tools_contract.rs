@@ -162,6 +162,39 @@ fn tmux_pane_sizes(env: &TestEnv, instance: &str) -> Vec<(usize, usize)> {
         .collect()
 }
 
+fn tmux_capture_range(
+    env: &TestEnv,
+    instance: &str,
+    pane_id: &str,
+    start: i64,
+    end: i64,
+) -> Vec<String> {
+    let socket = env.tmux_socket_file(instance);
+    let output = Command::new("tmux")
+        .arg("-S")
+        .arg(socket)
+        .args(["capture-pane", "-p", "-t", pane_id, "-S"])
+        .arg((start + 1).to_string())
+        .arg("-E")
+        .arg(end.to_string())
+        .output()
+        .expect("tmux capture-pane should run");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let mut lines = String::from_utf8(output.stdout)
+        .expect("tmux capture should be UTF-8")
+        .lines()
+        .map(ToOwned::to_owned)
+        .collect::<Vec<_>>();
+    while lines.last().is_some_and(String::is_empty) {
+        lines.pop();
+    }
+    lines
+}
+
 fn wait_for_terminal(env: &TestEnv, instance: &str, task: &str, ctx_id: &str) -> Value {
     let deadline = Instant::now() + Duration::from_secs(5);
     let mut attempt = 0;
@@ -461,6 +494,57 @@ fn tmux_task_lock_controls_input_read_and_close_but_not_inspect() {
     assert_eq!(interrupted["ok"], true, "{interrupted}");
     let finished = wait_for_terminal(&env, instance, task, "ctx-a");
     assert_ne!(finished["result"]["task"]["status"], "running");
+    stop(&env, instance);
+}
+
+#[test]
+#[ignore = "requires tmux on PATH"]
+fn tmux_inspect_honors_nonzero_end_offsets() {
+    assert!(
+        tmux_available(),
+        "tmux is required to run this ignored contract test"
+    );
+    let env = TestEnv::new();
+    let instance = "aromatic-tmux-inspect-range";
+    start(&env, instance);
+    let run = call(
+        &env,
+        instance,
+        "1",
+        "tmux_run",
+        json!({
+            "pane": "main",
+            "command": "i=1; while [ $i -le 200 ]; do printf 'LINE-%03d\\n' $i; i=$((i+1)); done",
+            "wait": "block",
+            "timeMs": 3000,
+            "line": 300
+        }),
+        "ctx-a",
+        "fill-history",
+    );
+    assert_eq!(run["ok"], true, "{run}");
+    let pane_id = run["result"]["pane"]["tmuxPaneId"].as_str().unwrap();
+    let expected = tmux_capture_range(&env, instance, pane_id, -100, -90);
+    assert_eq!(expected.len(), 10, "{expected:?}");
+
+    let inspect = call(
+        &env,
+        instance,
+        "2",
+        "tmux_inspect",
+        json!({ "pane": "main", "start": -100, "end": -90 }),
+        "ctx-a",
+        "inspect-range",
+    );
+    assert_eq!(inspect["ok"], true, "{inspect}");
+    let actual = inspect["result"]["panes"][0]["lines"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|line| line.as_str().unwrap().to_string())
+        .collect::<Vec<_>>();
+    assert_eq!(actual, expected);
+
     stop(&env, instance);
 }
 
