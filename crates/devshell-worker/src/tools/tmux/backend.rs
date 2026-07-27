@@ -30,6 +30,7 @@ const TERMINAL_ROWS: usize = 60;
 pub struct BackendPane {
     pub id: String,
     pub name: String,
+    pub automatic: bool,
     pub tmux_pane_id: String,
     pub tmux_window_id: String,
     pub window_panes: usize,
@@ -70,6 +71,8 @@ struct PaneRecord {
     pane_id: String,
     pane_incarnation_id: String,
     name: String,
+    #[serde(default)]
+    automatic: bool,
     created_at_ms: u128,
 }
 
@@ -138,6 +141,10 @@ impl TmuxBackend {
         self.observation_reset
     }
 
+    pub fn has_session(&self) -> bool {
+        session_exists(&self.socket)
+    }
+
     pub fn ensure_session(&self) -> Result<(), ToolError> {
         if session_exists(&self.socket) {
             if !self.session_prepared.load(Ordering::Acquire) {
@@ -154,7 +161,7 @@ impl TmuxBackend {
         self.clear_stale_pane_records()?;
         let session = self.new_session_record();
         atomic_write_json(&self.session_file, &session)?;
-        let pane = PaneRecord::new("main")?;
+        let pane = PaneRecord::new("main", false)?;
         let launch = prepare_shell_launch(&self.shell_dir, &self.status_dir, &pane.pane_id)?;
         let args = vec![
             "new-session".to_string(),
@@ -213,6 +220,7 @@ impl TmuxBackend {
             "#{pane_height}",
             "#{q:pane_current_path}",
             "#{q:pane_current_command}",
+            "#{@devshell_worker_automatic}",
         ]
         .join("|");
         let raw = self.run(&[
@@ -252,6 +260,7 @@ impl TmuxBackend {
             panes.push(BackendPane {
                 id: id.to_string(),
                 name: name.to_string(),
+                automatic: fields.get(13).copied() == Some("1"),
                 tmux_pane_id: tmux_pane_id.to_string(),
                 tmux_window_id: fields.get(7).copied().unwrap_or_default().to_string(),
                 window_panes: fields
@@ -364,8 +373,13 @@ impl TmuxBackend {
         Ok(())
     }
 
-    pub fn create_pane(&self, name: &str, cwd: &Path) -> Result<BackendPane, ToolError> {
-        let pane = PaneRecord::new(name)?;
+    pub fn create_pane(
+        &self,
+        name: &str,
+        cwd: &Path,
+        automatic: bool,
+    ) -> Result<BackendPane, ToolError> {
+        let pane = PaneRecord::new(name, automatic)?;
         let launch = prepare_shell_launch(&self.shell_dir, &self.status_dir, &pane.pane_id)?;
         let args = vec![
             "new-window".to_string(),
@@ -552,6 +566,7 @@ impl TmuxBackend {
                 pane_id: pane.id.clone(),
                 pane_incarnation_id: pane.pane_incarnation_id.clone(),
                 name: pane.name.clone(),
+                automatic: pane.automatic,
                 created_at_ms: pane.created_at_ms,
             })?;
         }
@@ -610,6 +625,10 @@ impl TmuxBackend {
             (
                 "@devshell_worker_created_at",
                 pane.created_at_ms.to_string(),
+            ),
+            (
+                "@devshell_worker_automatic",
+                if pane.automatic { "1" } else { "0" }.to_string(),
             ),
         ] {
             self.run(&[
@@ -743,13 +762,14 @@ impl TmuxBackend {
 }
 
 impl PaneRecord {
-    fn new(name: &str) -> Result<Self, ToolError> {
+    fn new(name: &str, automatic: bool) -> Result<Self, ToolError> {
         validate_pane_name(name)?;
         Ok(Self {
             schema_version: 1,
             pane_id: new_pane_id(),
             pane_incarnation_id: Uuid::new_v4().to_string(),
             name: name.to_string(),
+            automatic,
             created_at_ms: unix_time_millis(),
         })
     }

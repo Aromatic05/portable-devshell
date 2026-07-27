@@ -39,7 +39,6 @@ pub struct TaskRecord {
     pub id: String,
     pub pane_id: String,
     pub pane_incarnation_id: String,
-    pub owner_context_id: String,
     pub state: TaskState,
     pub window: OutputWindow,
     pub start_status_seq: Option<u64>,
@@ -76,6 +75,12 @@ impl TaskRegistry {
             .id
             .clone();
         self.tasks.get_mut(&id)
+    }
+
+    pub fn has_unread_for_pane(&self, pane_id: &str) -> bool {
+        self.tasks
+            .values()
+            .any(|task| task.pane_id == pane_id && !task.window.unread.is_empty())
     }
 
     pub fn prune(&mut self) {
@@ -148,7 +153,6 @@ pub fn refresh_task_record(task: &mut TaskRecord, pane: &BackendPane) {
 pub fn pane_view(
     pane: &BackendPane,
     task: Option<&TaskRecord>,
-    ctx_id: &str,
     lines: Option<Vec<String>>,
 ) -> TmuxPaneView {
     let unmanaged_running = task.is_none() && pane.status.as_deref() == Some("running");
@@ -172,9 +176,6 @@ pub fn pane_view(
         command: pane.command.clone(),
         created_at: pane.created_at_ms,
         locked,
-        owned_by_current_context: task
-            .filter(|task| task.state.is_active())
-            .map(|task| task.owner_context_id == ctx_id),
         task: task.filter(|task| task.state.is_active()).map(task_view),
         lines,
     }
@@ -194,30 +195,14 @@ pub fn current_task<'a>(tasks: &'a TaskRegistry, pane_id: &str) -> Option<&'a Ta
     tasks.active_for_pane(pane_id)
 }
 
-pub fn require_owned_task<'a>(
+pub fn require_task<'a>(
     tasks: &'a TaskRegistry,
     task_id: &str,
-    ctx_id: &str,
 ) -> Result<&'a TaskRecord, ToolError> {
-    let task = tasks
+    tasks
         .tasks
         .get(task_id)
-        .ok_or_else(|| task_expired(task_id))?;
-    if task.owner_context_id != ctx_id {
-        return Err(task_locked(task));
-    }
-    Ok(task)
-}
-
-pub fn task_locked(task: &TaskRecord) -> ToolError {
-    ToolError::new(
-        "tmux.taskLocked",
-        format!("task {} is owned by another context", task.id),
-    )
-    .with_details(serde_json::json!({
-        "task": task.id,
-        "pane": task.pane_id,
-    }))
+        .ok_or_else(|| task_expired(task_id))
 }
 
 pub fn task_expired(task_id: &str) -> ToolError {
@@ -240,6 +225,7 @@ mod tests {
         BackendPane {
             id: "pane-main".to_string(),
             name: "main".to_string(),
+            automatic: false,
             tmux_pane_id: "%0".to_string(),
             tmux_window_id: "@0".to_string(),
             window_panes: 1,
@@ -263,7 +249,6 @@ mod tests {
             id: id.to_string(),
             pane_id: "pane-main".to_string(),
             pane_incarnation_id: "incarnation".to_string(),
-            owner_context_id: "ctx-test".to_string(),
             state,
             window: OutputWindow::default(),
             start_status_seq: Some(1),

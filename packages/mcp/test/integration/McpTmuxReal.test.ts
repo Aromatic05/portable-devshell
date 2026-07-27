@@ -68,56 +68,55 @@ test("MCP tmux supports a complete interactive lifecycle when JSON-RPC request i
     });
 });
 
-test("MCP tmux rejects foreign control while the owner can recover and close with a reused request id", tmuxTestOptions(workerBinaryPath), async () => {
-    await withTmuxHarness("aromatic-mcp-tmux-ownership", async ({ callTool, createContext }) => {
-        const ownerCtxId = await createContext();
-        const foreignCtxId = await createContext();
+test("MCP tmux lets a refreshed context continue a task while preserving busy checks", tmuxTestOptions(workerBinaryPath), async () => {
+    await withTmuxHarness("aromatic-mcp-tmux-cross-context", async ({ callTool, createContext }) => {
+        const firstCtxId = await createContext();
+        const refreshedCtxId = await createContext();
         const requestId = "reused-tools-call-id";
         const created = await callTool(requestId, "tmux_create", {
-            ctxId: ownerCtxId,
-            name: "owned"
+            ctxId: firstCtxId,
+            name: "continued"
         });
         assert.equal(created.error, undefined, JSON.stringify(created));
 
         const run = await callTool(requestId, "tmux_run", {
             command: "sleep 10",
-            ctxId: ownerCtxId,
-            pane: "owned",
+            ctxId: firstCtxId,
+            pane: "continued",
             wait: "nonblock"
         });
         assert.equal(run.error, undefined, JSON.stringify(run));
+        assert.equal(run.result?.structuredContent?.pane?.ownedByCurrentContext, undefined);
         const task = readString(run.result?.structuredContent?.task?.id, "tmux_run task id");
 
-        const foreignInput = await callTool(requestId, "tmux_input", {
-            ctxId: foreignCtxId,
-            input: "^C",
+        const read = await callTool(requestId, "tmux_read", {
+            ctxId: refreshedCtxId,
             task
         });
-        assert.equal(foreignInput.error?.data?.code, "tmux.taskLocked", JSON.stringify(foreignInput));
+        assert.equal(read.error, undefined, JSON.stringify(read));
 
-        const foreignClose = await callTool(requestId, "tmux_close", {
-            ctxId: foreignCtxId,
-            force: true,
-            pane: "owned"
+        const busyClose = await callTool(requestId, "tmux_close", {
+            ctxId: refreshedCtxId,
+            pane: "continued"
         });
-        assert.equal(foreignClose.error?.data?.code, "tmux.taskLocked", JSON.stringify(foreignClose));
+        assert.equal(busyClose.error?.data?.code, "tmux.paneBusy", JSON.stringify(busyClose));
 
-        const ownerInput = await callTool(requestId, "tmux_input", {
-            ctxId: ownerCtxId,
+        const interrupted = await callTool(requestId, "tmux_input", {
+            ctxId: refreshedCtxId,
             input: "^C",
             task,
             timeMs: 1000
         });
-        assert.equal(ownerInput.error, undefined, JSON.stringify(ownerInput));
-        const finished = await waitForTask(callTool, requestId, ownerCtxId, task);
+        assert.equal(interrupted.error, undefined, JSON.stringify(interrupted));
+        const finished = await waitForTask(callTool, requestId, refreshedCtxId, task);
         assert.notEqual(finished.task.status, "running");
 
-        const ownerClose = await callTool(requestId, "tmux_close", {
-            ctxId: ownerCtxId,
-            pane: "owned"
+        const closed = await callTool(requestId, "tmux_close", {
+            ctxId: refreshedCtxId,
+            pane: "continued"
         });
-        assert.equal(ownerClose.error, undefined, JSON.stringify(ownerClose));
-        assert.equal(ownerClose.result?.structuredContent?.closedPaneId, created.result?.structuredContent?.pane?.id);
+        assert.equal(closed.error, undefined, JSON.stringify(closed));
+        assert.equal(closed.result?.structuredContent?.closedPaneId, created.result?.structuredContent?.pane?.id);
     });
 });
 
@@ -125,7 +124,7 @@ interface ToolStructuredContent {
     closedPaneId?: string;
     ctxId?: string;
     output?: string[];
-    pane?: { id?: string };
+    pane?: { id?: string; ownedByCurrentContext?: boolean };
     task?: { id?: string; status?: string };
 }
 

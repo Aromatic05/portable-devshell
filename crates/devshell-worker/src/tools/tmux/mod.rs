@@ -21,7 +21,7 @@ use crate::tools::tmux::state::TmuxState;
 use crate::tools::tmux::types::{
     TmuxCloseOutput, TmuxCloseParams, TmuxCreateOutput, TmuxCreateParams, TmuxInputParams,
     TmuxInspectParams, TmuxListOutput, TmuxListParams, TmuxPaneOperationOutput, TmuxReadParams,
-    TmuxReclaimOutput, TmuxReclaimParams, TmuxRunParams, TmuxTaskOperationOutput, TmuxWarning,
+    TmuxRunParams, TmuxTaskOperationOutput, TmuxWarning,
 };
 use crate::tools::{
     ToolCall, ToolCapability, ToolCatalogEntry, ToolError, ToolHandler, ToolName, ToolRegistry,
@@ -102,6 +102,7 @@ pub fn register_tools(
         socket_paths,
         runtime,
     )?));
+    TmuxState::start_gc(&state);
     registry.register(tool::<TmuxRunParams, TmuxTaskOperationOutput>(
         ToolName::parse("tmux_run").unwrap(),
         "Run a long-running or interactive shell task from one shell line. wait defaults to block; timeMs limits only this call's wait and never stops the task. Use wait=nonblock to return after start, then use tmux_read, tmux_input, or tmux_inspect.",
@@ -122,13 +123,6 @@ pub fn register_tools(
         ToolCapability::Read,
         Arc::clone(&state),
         TmuxState::read,
-    ))?;
-    registry.register(tool::<TmuxReclaimParams, TmuxReclaimOutput>(
-        ToolName::parse("tmux_reclaim").unwrap(),
-        "Claim control of a running task adopted after worker restart. Only orphaned tasks may be reclaimed.",
-        ToolCapability::Execute,
-        Arc::clone(&state),
-        TmuxState::reclaim,
     ))?;
     registry.register(tool::<TmuxInspectParams, TmuxPaneOperationOutput>(
         ToolName::parse("tmux_inspect").unwrap(),
