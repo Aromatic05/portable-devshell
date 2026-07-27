@@ -499,6 +499,162 @@ fn tmux_tasks_are_controllable_across_contexts_while_busy_guards_remain() {
 
 #[test]
 #[ignore = "requires tmux on PATH"]
+fn tmux_force_close_is_not_owned_by_the_creating_context() {
+    assert!(
+        tmux_available(),
+        "tmux is required to run this ignored contract test"
+    );
+    let env = TestEnv::new();
+    let instance = "aromatic-tmux-force-close";
+    start(&env, instance);
+    let created = call(
+        &env,
+        instance,
+        "1",
+        "tmux_create",
+        json!({ "name": "server" }),
+        "ctx-a",
+        "create-server",
+    );
+    assert_eq!(created["ok"], true, "{created}");
+    let pane_id = created["result"]["pane"]["id"].as_str().unwrap();
+    let run = call(
+        &env,
+        instance,
+        "2",
+        "tmux_run",
+        json!({ "pane": "server", "command": "sleep 30", "wait": "nonblock" }),
+        "ctx-a",
+        "run-server",
+    );
+    assert_eq!(run["ok"], true, "{run}");
+    let task = run["result"]["task"]["id"].as_str().unwrap();
+
+    let closed = call(
+        &env,
+        instance,
+        "3",
+        "tmux_close",
+        json!({ "pane": "server", "force": true }),
+        "ctx-b",
+        "force-close-cross-context",
+    );
+    assert_eq!(closed["ok"], true, "{closed}");
+    assert_eq!(closed["result"]["closedPaneId"], pane_id, "{closed}");
+
+    let stale_input = call(
+        &env,
+        instance,
+        "4",
+        "tmux_input",
+        json!({ "task": task, "input": "^C" }),
+        "ctx-c",
+        "input-after-force-close",
+    );
+    assert_eq!(
+        stale_input["error"]["code"], "tmux.taskNotRunning",
+        "{stale_input}"
+    );
+    stop(&env, instance);
+}
+
+#[test]
+#[ignore = "requires tmux on PATH"]
+fn pane_incarnation_change_invalidates_stale_task_control() {
+    assert!(
+        tmux_available(),
+        "tmux is required to run this ignored contract test"
+    );
+    let env = TestEnv::new();
+    let instance = "aromatic-tmux-incarnation";
+    start(&env, instance);
+    let created = call(
+        &env,
+        instance,
+        "1",
+        "tmux_create",
+        json!({ "name": "server" }),
+        "ctx-a",
+        "create-server",
+    );
+    assert_eq!(created["ok"], true, "{created}");
+    let run = call(
+        &env,
+        instance,
+        "2",
+        "tmux_run",
+        json!({ "pane": "server", "command": "sleep 30", "wait": "nonblock" }),
+        "ctx-a",
+        "run-server",
+    );
+    assert_eq!(run["ok"], true, "{run}");
+    let task = run["result"]["task"]["id"].as_str().unwrap();
+    let tmux_pane_id = run["result"]["pane"]["tmuxPaneId"].as_str().unwrap();
+
+    let changed = Command::new("tmux")
+        .arg("-S")
+        .arg(env.tmux_socket_file(instance))
+        .args([
+            "set-option",
+            "-p",
+            "-q",
+            "-t",
+            tmux_pane_id,
+            "@devshell_worker_pane_incarnation_id",
+            "replacement-incarnation",
+        ])
+        .output()
+        .expect("tmux set-option should run");
+    assert!(
+        changed.status.success(),
+        "{}",
+        String::from_utf8_lossy(&changed.stderr)
+    );
+
+    let stale_read = call(
+        &env,
+        instance,
+        "3",
+        "tmux_read",
+        json!({ "task": task }),
+        "ctx-b",
+        "read-stale-incarnation",
+    );
+    assert_eq!(stale_read["ok"], true, "{stale_read}");
+    assert_eq!(
+        stale_read["result"]["task"]["status"], "unknown",
+        "{stale_read}"
+    );
+
+    let stale_input = call(
+        &env,
+        instance,
+        "4",
+        "tmux_input",
+        json!({ "task": task, "input": "^C" }),
+        "ctx-c",
+        "input-stale-incarnation",
+    );
+    assert_eq!(
+        stale_input["error"]["code"], "tmux.taskNotRunning",
+        "{stale_input}"
+    );
+
+    let closed = call(
+        &env,
+        instance,
+        "5",
+        "tmux_close",
+        json!({ "pane": "server", "force": true }),
+        "ctx-c",
+        "close-reincarnated-pane",
+    );
+    assert_eq!(closed["ok"], true, "{closed}");
+    stop(&env, instance);
+}
+
+#[test]
+#[ignore = "requires tmux on PATH"]
 fn tmux_inspect_honors_nonzero_end_offsets() {
     assert!(
         tmux_available(),
@@ -1252,6 +1408,28 @@ fn capacity_pressure_collects_only_idle_automatic_panes() {
     );
     assert_eq!(interrupted["ok"], true, "{interrupted}");
     let _ = wait_for_terminal(&env, instance, main_task_id, "ctx-b");
+
+    env.json_command(&["stop", "--instance", instance]);
+    assert!(env.tmux_socket_file(instance).exists());
+    start(&env, instance);
+    let after_restart = call(
+        &env,
+        instance,
+        "restart-list",
+        "tmux_list",
+        json!({}),
+        "ctx-b",
+        "list-before-pressure-gc",
+    );
+    assert_eq!(after_restart["ok"], true, "{after_restart}");
+    assert!(
+        after_restart["result"]["panes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|pane| pane["name"] == "auto-1"),
+        "{after_restart}"
+    );
 
     for index in 1..=5 {
         let created = call(
