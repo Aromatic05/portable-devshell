@@ -8,6 +8,7 @@ export interface WorkerTransportDriverPodmanOptions {
     container: InstanceContainerConfig;
     podmanBinary?: string;
     remoteCwd?: string;
+    skillsDirectory?: string;
     spawnFunction?: SpawnFunction;
     workerBinary?: WorkerBinary;
 }
@@ -20,6 +21,7 @@ export class WorkerTransportDriverPodman extends WorkerTransportDriverContainerB
             keepIdUserNamespace: true,
             provider: "podman",
             remoteCwd: options.remoteCwd,
+            skillsDirectory: options.skillsDirectory,
             spawnFunction: options.spawnFunction,
             workerBinary: options.workerBinary
         });

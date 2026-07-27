@@ -2,11 +2,13 @@ import assert from "node:assert/strict";
 import { spawn as nodeSpawn, type ChildProcess, type SpawnOptions } from "node:child_process";
 import { createHash } from "node:crypto";
 import { EventEmitter } from "node:events";
-import { mkdtemp, readFile, readlink, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, readlink, rm, stat, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { PassThrough } from "node:stream";
 import test from "node:test";
+
+import { extract } from "tar-stream";
 
 import {
     WorkerTransportDriverDocker,
@@ -383,6 +385,103 @@ test("ssh transport runs installWorker probe via remote shell", async () => {
     });
 });
 
+test("ssh transport mirrors control skills to the remote user skill directory", async (t) => {
+    const root = await mkdtemp(join(tmpdir(), "portable-devshell-skills-"));
+    const skillsDirectory = join(root, "skill");
+    await mkdir(join(skillsDirectory, "review", "scripts"), { recursive: true });
+    await writeFile(join(skillsDirectory, "review", "SKILL.md"), "# Review\n");
+    const scriptPath = join(skillsDirectory, "review", "scripts", "run.sh");
+    await writeFile(scriptPath, "#!/bin/sh\nprintf review\n");
+    await chmod(scriptPath, 0o755);
+    t.after(() => rm(root, { recursive: true, force: true }));
+
+    const recorder = createSpawnRecorder((_call, child, callIndex) => {
+        if (callIndex === 0) {
+            closeRecordedChild(child, { stdout: "/home/dev" });
+            return true;
+        }
+        if (callIndex === 1) {
+            child.stdin.once("finish", () => closeRecordedChild(child));
+            return true;
+        }
+        return false;
+    });
+    const transport = new WorkerTransportDriverSsh({
+        command: "ssh-bin devbox",
+        skillsDirectory,
+        workerBinary: new WorkerBinary("/usr/local/bin/devshell-worker"),
+        spawnFunction: recorder.spawn
+    });
+
+    await transport.installWorker();
+    await transport.installWorker();
+
+    assert.equal(recorder.calls.length, 4);
+    assert.equal(recorder.calls[1]?.args[8]?.includes("/home/dev/.devshell/skill"), true);
+    assert.equal(recorder.calls[1]?.args[8]?.includes("tar -xpf -"), true);
+    assert.deepEqual(recorder.calls[1]?.options.stdio, ["pipe", "pipe", "pipe"]);
+    assert.equal(recorder.calls[2]?.args[8], shellEscape("'/usr/local/bin/devshell-worker' '--version'"));
+    assert.equal(recorder.calls[3]?.args[8], shellEscape("'/usr/local/bin/devshell-worker' '--version'"));
+
+    const entries = await readTarEntries(Buffer.concat(recorder.children[1]?.stdinChunks ?? []));
+    assert.deepEqual(entries, {
+        "review/": { content: "", mode: 0o755, type: "directory" },
+        "review/SKILL.md": { content: "# Review\n", mode: 0o644, type: "file" },
+        "review/scripts/": { content: "", mode: 0o755, type: "directory" },
+        "review/scripts/run.sh": { content: "#!/bin/sh\nprintf review\n", mode: 0o755, type: "file" }
+    });
+});
+
+test("remote skill synchronization atomically replaces the real target directory", async (t) => {
+    if (process.platform === "win32") {
+        t.skip("requires sh and tar");
+        return;
+    }
+
+    const root = await mkdtemp(join(tmpdir(), "portable-devshell-real-skill-sync-"));
+    const source = join(root, "control", "skill");
+    const remoteHome = join(root, "remote-home");
+    await mkdir(join(source, "review", "scripts"), { recursive: true });
+    await mkdir(join(remoteHome, ".devshell", "skill", "stale"), { recursive: true });
+    await writeFile(join(source, "review", "SKILL.md"), "first\n");
+    const sourceScript = join(source, "review", "scripts", "run.sh");
+    await writeFile(sourceScript, "#!/bin/sh\nprintf first\n");
+    await chmod(sourceScript, 0o755);
+    await writeFile(join(remoteHome, ".devshell", "skill", "stale", "old.txt"), "stale\n");
+    t.after(() => rm(root, { recursive: true, force: true }));
+
+    const installer = new WorkerInstallerRemote({
+        createContext(operation, command) {
+            return { command: [...command], commandDisplay: command.join(" "), operation, provider: "ssh" };
+        },
+        createProviderError(context, cause) {
+            return createError({
+                code: errorCodes.coreWorkerProvisionFailed,
+                details: { operation: context.operation, provider: context.provider },
+                message: cause instanceof Error ? cause.message : String(cause),
+                retryable: false
+            });
+        },
+        probeTarget: async () => getWorkerTargetByKey("linux-x64"),
+        skillsDirectory: source,
+        spawnShell(commandLine, stdio) {
+            return nodeSpawn("sh", ["-lc", commandLine], { env: { ...process.env, HOME: remoteHome }, stdio });
+        }
+    });
+
+    await installer.syncSkills();
+    assert.equal(await readFile(join(remoteHome, ".devshell", "skill", "review", "SKILL.md"), "utf8"), "first\n");
+    assert.equal((await stat(join(remoteHome, ".devshell", "skill", "review", "scripts", "run.sh"))).mode & 0o777, 0o755);
+    await assert.rejects(readFile(join(remoteHome, ".devshell", "skill", "stale", "old.txt")), hasFsCode("ENOENT"));
+
+    await writeFile(join(source, "review", "SKILL.md"), "second\n");
+    await unlink(sourceScript);
+    await installer.syncSkills();
+
+    assert.equal(await readFile(join(remoteHome, ".devshell", "skill", "review", "SKILL.md"), "utf8"), "second\n");
+    await assert.rejects(readFile(join(remoteHome, ".devshell", "skill", "review", "scripts", "run.sh")), hasFsCode("ENOENT"));
+});
+
 test("ssh transport probes remote target before installing default worker", async (t) => {
     const worker = await createDummyWorkerBinary();
     t.after(worker.cleanup);
@@ -582,17 +681,17 @@ test("ssh transport reinstalls default worker when target asset changes", async 
             return true;
         }
 
-        if (callIndex === 1 || callIndex === 6) {
+        if (callIndex === 1) {
             closeRecordedChild(child, { stdout: "/home/dev" });
             return true;
         }
 
-        if (callIndex === 2 || callIndex === 7) {
+        if (callIndex === 2 || callIndex === 6) {
             closeRecordedChild(child, { stdout: "missing" });
             return true;
         }
 
-        if (callIndex === 3 || callIndex === 8) {
+        if (callIndex === 3 || callIndex === 7) {
             child.stdin.once("finish", () => {
                 closeRecordedChild(child);
             });
@@ -612,8 +711,8 @@ test("ssh transport reinstalls default worker when target asset changes", async 
     await transport.installWorker();
 
     assert.equal(Buffer.concat(recorder.children[3]?.stdinChunks ?? []).equals(firstWorker.contents), true);
-    assert.equal(Buffer.concat(recorder.children[8]?.stdinChunks ?? []).equals(secondWorker.contents), true);
-    assert.notEqual(recorder.calls[3]?.args[8], recorder.calls[8]?.args[8]);
+    assert.equal(Buffer.concat(recorder.children[7]?.stdinChunks ?? []).equals(secondWorker.contents), true);
+    assert.notEqual(recorder.calls[3]?.args[8], recorder.calls[7]?.args[8]);
 });
 
 test("ssh transport appends interactive-auth hint when batch mode authentication fails", async () => {
@@ -779,6 +878,48 @@ test("docker transport runs installWorker probe via exec", async () => {
         args: ["exec", "-i", "worker-container", "/usr/local/bin/devshell-worker", "--version"],
         options: { cwd: undefined, env: undefined, stdio: ["ignore", "pipe", "pipe"] }
     });
+});
+
+test("docker transport mirrors control skills into the container user home", async (t) => {
+    const root = await mkdtemp(join(tmpdir(), "portable-devshell-container-skills-"));
+    const skillsDirectory = join(root, "skill");
+    await mkdir(join(skillsDirectory, "build"), { recursive: true });
+    await writeFile(join(skillsDirectory, "build", "SKILL.md"), "# Build\n");
+    t.after(() => rm(root, { recursive: true, force: true }));
+
+    const recorder = createSpawnRecorder((_call, child, callIndex) => {
+        if (callIndex === 0) {
+            closeRecordedChild(child, { stdout: "running\n" });
+            return true;
+        }
+        if (callIndex === 1) {
+            closeRecordedChild(child, { stdout: "/home/dev" });
+            return true;
+        }
+        if (callIndex === 2) {
+            child.stdin.once("finish", () => closeRecordedChild(child));
+            return true;
+        }
+        return false;
+    });
+    const transport = new WorkerTransportDriverDocker({
+        container: createManagedContainerConfig(),
+        dockerBinary: "docker-bin",
+        skillsDirectory,
+        workerBinary: new WorkerBinary("/usr/local/bin/devshell-worker"),
+        spawnFunction: recorder.spawn
+    });
+
+    await transport.installWorker();
+
+    assert.equal(recorder.calls.length, 4);
+    assert.deepEqual(recorder.calls[1]?.args.slice(0, 5), ["exec", "-i", "worker-container", "sh", "-lc"]);
+    assert.equal(recorder.calls[2]?.args[5]?.includes("/home/dev/.devshell/skill"), true);
+    assert.equal(recorder.calls[2]?.args[5]?.includes("tar -xpf -"), true);
+    assert.ok(Buffer.concat(recorder.children[2]?.stdinChunks ?? []).length > 0);
+    assert.deepEqual(recorder.calls[3]?.args, [
+        "exec", "-i", "worker-container", "/usr/local/bin/devshell-worker", "--version"
+    ]);
 });
 
 test("docker transport installs default worker before exec command", async (t) => {
@@ -1461,6 +1602,40 @@ async function installedWorkerSha(path: string): Promise<string> {
     const match = target.match(/[a-f0-9]{64}/u);
     assert.notEqual(match, null, `installed worker symlink does not contain a sha256: ${target}`);
     return match![0];
+}
+
+async function readTarEntries(bytes: Buffer): Promise<Record<string, { content: string; mode: number; type: string }>> {
+    const parser = extract();
+    const entries: Record<string, { content: string; mode: number; type: string }> = {};
+
+    await new Promise<void>((resolve, reject) => {
+        parser.on("entry", (header, stream, next) => {
+            const chunks: Buffer[] = [];
+            stream.on("data", (chunk: Buffer) => chunks.push(Buffer.from(chunk)));
+            stream.once("error", reject);
+            stream.once("end", () => {
+                entries[header.name] = {
+                    content: Buffer.concat(chunks).toString("utf8"),
+                    mode: header.mode ?? 0,
+                    type: header.type ?? "file"
+                };
+                next();
+            });
+            stream.resume();
+        });
+        parser.once("error", reject);
+        parser.once("finish", resolve);
+        parser.end(bytes);
+    });
+
+    return entries;
+}
+
+function hasFsCode(expected: string): (error: unknown) => boolean {
+    return (error: unknown) => {
+        assert.equal((error as { code?: string }).code, expected);
+        return true;
+    };
 }
 
 function closeRecordedChild(

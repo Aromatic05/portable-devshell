@@ -8,6 +8,7 @@ export interface WorkerTransportDriverDockerOptions {
     container: InstanceContainerConfig;
     dockerBinary?: string;
     remoteCwd?: string;
+    skillsDirectory?: string;
     spawnFunction?: SpawnFunction;
     workerBinary?: WorkerBinary;
 }
@@ -19,6 +20,7 @@ export class WorkerTransportDriverDocker extends WorkerTransportDriverContainerB
             container: options.container,
             provider: "docker",
             remoteCwd: options.remoteCwd,
+            skillsDirectory: options.skillsDirectory,
             spawnFunction: options.spawnFunction,
             workerBinary: options.workerBinary
         });

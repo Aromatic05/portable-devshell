@@ -29,6 +29,7 @@ export interface WorkerTransportDriverContainerBaseOptions {
     keepIdUserNamespace?: boolean;
     provider: "docker" | "podman";
     remoteCwd?: string;
+    skillsDirectory?: string;
     spawnFunction?: SpawnFunction;
     workerBinary?: WorkerBinary;
 }
@@ -63,13 +64,15 @@ export class WorkerTransportDriverContainerBase implements WorkerCommandTranspor
             createContext: (operation, command) => this.#createShellContext(operation, command),
             createProviderError: this.#process.createError,
             probeTarget: () => this.#probeTarget(),
-            spawnShell: (commandLine, stdio, context) => this.#spawnShell(commandLine, stdio, context)
+            spawnShell: (commandLine, stdio, context) => this.#spawnShell(commandLine, stdio, context),
+            skillsDirectory: options.skillsDirectory
         });
     }
 
     async installWorker(): Promise<void> {
         await this.#provision.ensureReady("installWorker");
         const installCommand = new WorkerBinary(await this.#resolveExecutable()).buildInstallCommand();
+        await this.#installer.syncSkills();
         const invocation = this.#createExecInvocation("installWorker", [installCommand.command, ...installCommand.args]);
         const result = await this.#process.run(invocation.context, {
             stdio: ["ignore", "pipe", "pipe"]
@@ -100,7 +103,11 @@ export class WorkerTransportDriverContainerBase implements WorkerCommandTranspor
                 break;
         }
 
-        const workerCommand = new WorkerBinary(await this.#resolveExecutable()).buildCommand(
+        const executable = await this.#resolveExecutable();
+        if (command === "start") {
+            await this.#installer.syncSkills();
+        }
+        const workerCommand = new WorkerBinary(executable).buildCommand(
             command,
             options.instanceName,
             options.extraArgs
@@ -119,7 +126,9 @@ export class WorkerTransportDriverContainerBase implements WorkerCommandTranspor
 
     async spawnWorkerRpc(options: WorkerRpcOptions): Promise<WorkerRpcProcess> {
         await this.#provision.ensureReady("spawnWorkerRpc");
-        const workerCommand = new WorkerBinary(await this.#resolveExecutable()).buildCommand("rpc", options.instanceName);
+        const executable = await this.#resolveExecutable();
+        await this.#installer.syncSkills();
+        const workerCommand = new WorkerBinary(executable).buildCommand("rpc", options.instanceName);
         const invocation = this.#createExecInvocation(
             "spawnWorkerRpc",
             [workerCommand.command, ...workerCommand.args],
