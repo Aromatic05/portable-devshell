@@ -18,6 +18,7 @@ interface SkillEntry {
 
 export async function createWorkerSkillArchive(
     sourceDirectory: string,
+    platform = process.platform,
 ): Promise<WorkerSkillArchive | undefined> {
     let source;
     try {
@@ -45,12 +46,22 @@ export async function createWorkerSkillArchive(
     try {
         for (const entry of entries) {
             if (entry.type === "directory") {
-                await appendEntry(archive, skillHeader(entry));
-            } else {
                 await appendEntry(
                     archive,
-                    skillHeader(entry),
-                    await readFile(entry.absolutePath),
+                    skillHeader(
+                        entry,
+                        portableSkillMode(entry, undefined, platform),
+                    ),
+                );
+            } else {
+                const content = await readFile(entry.absolutePath);
+                await appendEntry(
+                    archive,
+                    skillHeader(
+                        entry,
+                        portableSkillMode(entry, content, platform),
+                    ),
+                    content,
                 );
             }
         }
@@ -127,11 +138,27 @@ async function collectSkillEntries(
     }
 }
 
-function skillHeader(entry: SkillEntry): Headers {
+function portableSkillMode(
+    entry: SkillEntry,
+    content: Buffer | undefined,
+    platform: NodeJS.Platform,
+): number {
+    if (platform !== "win32") {
+        return entry.mode;
+    }
+    if (entry.type === "directory") {
+        return 0o755;
+    }
+    return content?.subarray(0, 2).equals(Buffer.from("#!")) === true
+        ? 0o755
+        : 0o644;
+}
+
+function skillHeader(entry: SkillEntry, mode: number): Headers {
     return {
         gid: 0,
         gname: "",
-        mode: entry.mode,
+        mode,
         mtime: new Date(0),
         name:
             entry.type === "directory"

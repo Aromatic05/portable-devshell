@@ -15,6 +15,7 @@ import {
     WorkerTransportDriverLocal,
     WorkerTransportDriverPodman,
     WorkerInstallerRemote,
+    createWorkerSkillArchive,
     WorkerTransportDriverSsh,
     WorkerBinary,
     getWorkerTargetByKey,
@@ -382,6 +383,29 @@ test("ssh transport runs installWorker probe via remote shell", async () => {
             shellEscape("'/usr/local/bin/devshell-worker' '--version'")
         ],
         options: { cwd: undefined, env: undefined, stdio: ["ignore", "pipe", "pipe"] }
+    });
+});
+
+
+test("Windows skill archives assign portable Unix modes from entry type and shebang", async (t) => {
+    const root = await mkdtemp(join(tmpdir(), "portable-devshell-windows-skill-mode-"));
+    const skillsDirectory = join(root, "skill");
+    await mkdir(join(skillsDirectory, "review", "scripts"), { recursive: true });
+    await writeFile(join(skillsDirectory, "review", "SKILL.md"), "# Review\n");
+    await writeFile(join(skillsDirectory, "review", "scripts", "run.sh"), "#!/bin/sh\nprintf review\n");
+    await writeFile(join(skillsDirectory, "review", "scripts", "helper.py"), "print('review')\n");
+    t.after(() => rm(root, { recursive: true, force: true }));
+
+    const archive = await createWorkerSkillArchive(skillsDirectory, "win32");
+    assert.notEqual(archive, undefined);
+    const entries = await readTarEntries(archive!.bytes);
+
+    assert.deepEqual(entries, {
+        "review/": { content: "", mode: 0o755, type: "directory" },
+        "review/SKILL.md": { content: "# Review\n", mode: 0o644, type: "file" },
+        "review/scripts/": { content: "", mode: 0o755, type: "directory" },
+        "review/scripts/helper.py": { content: "print('review')\n", mode: 0o644, type: "file" },
+        "review/scripts/run.sh": { content: "#!/bin/sh\nprintf review\n", mode: 0o755, type: "file" }
     });
 });
 

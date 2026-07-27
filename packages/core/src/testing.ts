@@ -21,6 +21,7 @@ export * from "./worker/command/WorkerCommandOptions.js";
 export * from "./worker/command/WorkerCommandTransport.js";
 export * from "./worker/install/WorkerInstallerLocal.js";
 export * from "./worker/install/WorkerInstallerRemote.js";
+export * from "./worker/install/WorkerSkillArchive.js";
 export * from "./worker/instance/WorkerInstance.js";
 export * from "./worker/instance/WorkerInstanceConfig.js";
 export * from "./worker/instance/WorkerInstanceFactory.js";
