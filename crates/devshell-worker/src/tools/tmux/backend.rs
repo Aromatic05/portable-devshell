@@ -211,10 +211,10 @@ impl TmuxBackend {
             "#{window_panes}",
             "#{pane_width}",
             "#{pane_height}",
-            "#{qa:pane_current_path}",
-            "#{qa:pane_current_command}",
+            "#{q:pane_current_path}",
+            "#{q:pane_current_command}",
         ]
-        .join("\u{1f}");
+        .join("|");
         let raw = self.run(&[
             "list-panes".into(),
             "-s".into(),
@@ -228,7 +228,7 @@ impl TmuxBackend {
         let mut foreign_panes = 0;
         for line in raw.lines().filter(|line| !line.trim().is_empty()) {
             total_panes += 1;
-            let fields = line.split('\u{1f}').collect::<Vec<_>>();
+            let fields = split_tmux_fields(line);
             let Some(tmux_pane_id) = fields.first().copied() else {
                 continue;
             };
@@ -792,11 +792,29 @@ fn status_text(record: &PaneStatusRecord) -> String {
     }
 }
 
+fn split_tmux_fields(line: &str) -> Vec<&str> {
+    let bytes = line.as_bytes();
+    let mut fields = Vec::new();
+    let mut field_start = 0;
+    for (index, byte) in bytes.iter().enumerate() {
+        if *byte != b'|' {
+            continue;
+        }
+        let preceding_backslashes = bytes[field_start..index]
+            .iter()
+            .rev()
+            .take_while(|byte| **byte == b'\\')
+            .count();
+        if preceding_backslashes % 2 == 0 {
+            fields.push(&line[field_start..index]);
+            field_start = index + 1;
+        }
+    }
+    fields.push(&line[field_start..]);
+    fields
+}
+
 fn decode_tmux_argument(value: &str) -> Result<String, ToolError> {
-    let value = value
-        .strip_prefix('"')
-        .and_then(|value| value.strip_suffix('"'))
-        .unwrap_or(value);
     let mut chars = value.chars().peekable();
     let mut decoded = String::new();
     while let Some(character) = chars.next() {
@@ -892,14 +910,19 @@ fn storage_error(error: std::io::Error) -> ToolError {
 
 #[cfg(test)]
 mod tests {
-    use super::decode_tmux_argument;
+    use super::{decode_tmux_argument, split_tmux_fields};
 
     #[test]
-    fn decodes_tmux_command_argument_escaping() {
-        assert_eq!(decode_tmux_argument("plain").unwrap(), "plain");
-        assert_eq!(
-            decode_tmux_argument(r#""/tmp/a b\\c\t\037d""#).unwrap(),
-            "/tmp/a b\\c\t\u{001f}d"
-        );
+    fn parses_tmux_34_quoted_fields_without_splitting_escaped_pipes() {
+        let fields = split_tmux_fields(r"%0|pane-id|/tmp/a\ b\|c\\037d|sleep");
+        assert_eq!(fields, [r"%0", "pane-id", r"/tmp/a\ b\|c\\037d", "sleep"]);
+        assert_eq!(decode_tmux_argument(fields[2]).unwrap(), r"/tmp/a b|c\037d");
+    }
+
+    #[test]
+    fn treats_pipe_after_even_backslashes_as_a_field_separator() {
+        let fields = split_tmux_fields(r"%0|/tmp/trailing\\|sleep");
+        assert_eq!(fields, [r"%0", r"/tmp/trailing\\", "sleep"]);
+        assert_eq!(decode_tmux_argument(fields[1]).unwrap(), "/tmp/trailing\\");
     }
 }

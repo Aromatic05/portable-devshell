@@ -86,6 +86,11 @@ impl TestEnv {
             .env_remove("DEVSHELL_WORKER_INTERNAL_INSTANCE")
             .env_remove("DEVSHELL_WORKER_INTERNAL_WORKSPACE")
             .env_remove("DEVSHELL_WORKER_INTERNAL_SECURITY_MODE");
+        #[cfg(windows)]
+        command
+            .env("USERPROFILE", self._home_guard.path())
+            .env_remove("HOMEDRIVE")
+            .env_remove("HOMEPATH");
         command
     }
 
@@ -118,6 +123,11 @@ impl TestEnv {
             .env_remove("DEVSHELL_WORKER_INTERNAL_INSTANCE")
             .env_remove("DEVSHELL_WORKER_INTERNAL_WORKSPACE")
             .env_remove("DEVSHELL_WORKER_INTERNAL_SECURITY_MODE");
+        #[cfg(windows)]
+        command
+            .env("USERPROFILE", self._home_guard.path())
+            .env_remove("HOMEDRIVE")
+            .env_remove("HOMEPATH");
         command
     }
 
@@ -164,6 +174,11 @@ impl TestEnv {
             .env_remove("DEVSHELL_WORKER_INTERNAL_INSTANCE")
             .env_remove("DEVSHELL_WORKER_INTERNAL_WORKSPACE")
             .env_remove("DEVSHELL_WORKER_INTERNAL_SECURITY_MODE");
+        #[cfg(windows)]
+        command
+            .env("USERPROFILE", self._home_guard.path())
+            .env_remove("HOMEDRIVE")
+            .env_remove("HOMEPATH");
     }
 }
 
