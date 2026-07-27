@@ -282,6 +282,7 @@ function createWorker(options: {
         },
         handshake: {
             instance: "main-pc",
+            skillsDirectory: "/home/demo/.devshell/skill",
             workspace: "/workspace",
             platform: {
                 arch: "x86_64",

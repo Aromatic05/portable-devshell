@@ -43,18 +43,11 @@ impl TestEnv {
     }
 
     pub fn protocol_workspace(&self) -> String {
-        let canonical = self.workspace().canonicalize().unwrap();
-        let value = canonical.to_string_lossy();
-        #[cfg(windows)]
-        {
-            if let Some(rest) = value.strip_prefix(r"\\?\UNC\") {
-                return format!(r"\\{rest}");
-            }
-            if let Some(rest) = value.strip_prefix(r"\\?\") {
-                return rest.to_string();
-            }
-        }
-        value.into_owned()
+        protocol_path(&self.workspace().canonicalize().unwrap())
+    }
+
+    pub fn protocol_skills_directory(&self) -> String {
+        protocol_path(&self.home().join(".devshell").join("skill"))
     }
 
     pub fn instance_root(&self, instance: &str) -> PathBuf {
@@ -172,4 +165,18 @@ impl TestEnv {
             .env_remove("DEVSHELL_WORKER_INTERNAL_WORKSPACE")
             .env_remove("DEVSHELL_WORKER_INTERNAL_SECURITY_MODE");
     }
+}
+
+fn protocol_path(path: &Path) -> String {
+    let value = path.to_string_lossy();
+    #[cfg(windows)]
+    {
+        if let Some(rest) = value.strip_prefix(r"\\?\UNC\") {
+            return format!(r"\\{rest}");
+        }
+        if let Some(rest) = value.strip_prefix(r"\\?\") {
+            return rest.to_string();
+        }
+    }
+    value.into_owned()
 }

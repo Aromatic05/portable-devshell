@@ -71,6 +71,7 @@ function createWorker(options: {
         },
         handshake: {
             instance: "demo-local",
+            skillsDirectory: "/home/demo/.devshell/skill",
             platform: {
                 arch: "x86_64",
                 distribution: { id: "arch", name: "Arch Linux" },

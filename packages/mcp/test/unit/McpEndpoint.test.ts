@@ -754,6 +754,7 @@ function createWorkerHarness(options?: {
             },
             handshake: {
                 instance: "demo",
+                skillsDirectory: "/home/demo/.devshell/skill",
                 workspace: "/workspace",
                 platform: {
                     arch: "x86_64",

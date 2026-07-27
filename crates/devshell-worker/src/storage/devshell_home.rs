@@ -14,3 +14,7 @@ pub fn devshell_home() -> Result<PathBuf, String> {
 
     Ok(platform::user_home()?.join(".devshell"))
 }
+
+pub fn skill_directory() -> Result<PathBuf, String> {
+    Ok(platform::user_home()?.join(".devshell").join("skill"))
+}

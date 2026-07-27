@@ -86,6 +86,10 @@ fn handshake_tools_and_bash_run_flow_work_over_framed_rpc() {
     );
     assert!(handshake["result"]["workerSha256"].is_null());
     assert_eq!(handshake["result"]["workspace"], env.protocol_workspace());
+    assert_eq!(
+        handshake["result"]["skillsDirectory"],
+        env.protocol_skills_directory()
+    );
     assert!(handshake["result"].get("tools").is_none());
 
     let tools = env.rpc(

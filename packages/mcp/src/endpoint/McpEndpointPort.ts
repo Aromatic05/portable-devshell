@@ -28,6 +28,7 @@ export interface McpEndpointWorkerPort extends McpEndpointCatalogWorker {
 
 export interface McpEndpointEnvironmentHandshake {
     instance: string;
+    skillsDirectory: string;
     workspace: string;
     platform: {
         arch: string;

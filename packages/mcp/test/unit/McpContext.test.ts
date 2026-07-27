@@ -112,6 +112,7 @@ test("McpEndpointWorker exposes environ_info and requires ctxId on every other t
             },
             handshake: {
                 instance: "demo-local",
+                skillsDirectory: "/home/demo/.devshell/skill",
                 platform: {
                     arch: "x86_64",
                     distribution: { id: "arch", name: "Arch Linux", version: "rolling" },
@@ -137,7 +138,12 @@ test("McpEndpointWorker exposes environ_info and requires ctxId on every other t
     assert.equal(environmentRecord.ctxId, "ctx-created");
     assert.equal(typeof environmentRecord.expiresAt, "string");
     assert.equal(environmentRecord.instance, "demo-local");
+    assert.equal(environmentRecord.skillsDirectory, "/home/demo/.devshell/skill");
     assert.equal(environmentRecord.workspace, "/workspace");
+    assert.deepEqual(environmentRecord.guidance, [
+        "Skills are available in /home/demo/.devshell/skill. Read the relevant SKILL.md before using a skill.",
+        "Every project may contain AGENT.md. Read and follow the applicable AGENT.md before working in that project, and maintain it when project-specific knowledge changes."
+    ]);
     assert.deepEqual(environmentRecord.platform, {
         arch: "x86_64",
         distribution: { id: "arch", name: "Arch Linux", version: "rolling" },

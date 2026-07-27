@@ -24,6 +24,7 @@ export interface WorkerShellRuntime {
 
 export interface WorkerHandshakeResult {
     instance: string;
+    skillsDirectory: string;
     workspace: string;
     workerVersion: string;
     workerSha256?: string;

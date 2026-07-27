@@ -8,6 +8,7 @@ use crate::platform::{detect_environment, protocol_path};
 use crate::rpc::codec::PROTOCOL_VERSION;
 use crate::rpc::error::RpcError;
 use crate::rpc::router::{ControlHandler, control_handler};
+use crate::storage::skill_directory;
 use crate::tools::bash::runtime::ShellRuntime;
 
 pub fn handler(config: WorkerConfig, runtime: WorkerRuntimeContext) -> Arc<dyn ControlHandler> {
@@ -39,9 +40,12 @@ pub fn handler(config: WorkerConfig, runtime: WorkerRuntimeContext) -> Arc<dyn C
 
         let shell = ShellRuntime::detect().ok();
         let environment = detect_environment();
+        let skills_directory = skill_directory()
+            .map_err(|error| RpcError::new("worker.environmentUnavailable", error))?;
         Ok(json!({
             "instance": config.instance,
             "workspace": protocol_path(&runtime.workspace),
+            "skillsDirectory": protocol_path(&skills_directory),
             "workerVersion": env!("CARGO_PKG_VERSION"),
             "workerSha256": runtime.worker_sha256,
             "protocolVersion": PROTOCOL_VERSION,

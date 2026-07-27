@@ -77,6 +77,22 @@ capabilities = ["read", "write", "execute"]
 
 默认创建的实例不包含 `instance` group，也不授予 `manage`。
 
+## Skills 与项目记忆提示
+
+Control 机器上的 Skill 目录固定为：
+
+```text
+~/.devshell/skill
+```
+
+- local instance 直接使用同一台机器上的目录，不进行复制；
+- SSH、Docker 和 Podman instance 在启动或重新连接 worker 时，将该目录镜像到 worker 用户的 `~/.devshell/skill`；
+- self-managed reverse instance 由 worker 所在机器自行维护该目录，Control 不主动推送。
+
+`environ_info` 返回 worker 上展开后的绝对 `skillsDirectory`，并提示 Agent 按需读取其中相关 Skill 的 `SKILL.md`。
+
+`environ_info` 还会提示：**Every project may contain `AGENT.md`**。Agent 在同时处理多个项目时，应分别读取、遵守和维护每个项目适用的 `AGENT.md`，不能把某个项目的项目记忆当成 instance 全局规则。
+
 ## 可选实例管理与跨实例路由
 
 只有显式配置：
