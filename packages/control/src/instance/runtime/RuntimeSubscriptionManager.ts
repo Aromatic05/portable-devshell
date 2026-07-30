@@ -101,8 +101,8 @@ export class RuntimeSubscriptionManager {
 
     async #pollSubscriptions(): Promise<void> {
         for (const [key, subscription] of [...this.#subscriptions]) {
-            const slice = subscription.instance.subscribe(subscription.nextSeq);
             try {
+                const slice = subscription.instance.subscribe(subscription.nextSeq);
                 if (slice.kind === "gap") {
                     await subscription.stream.emit(
                         "gap",

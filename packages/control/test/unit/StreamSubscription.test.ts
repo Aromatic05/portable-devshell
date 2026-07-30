@@ -120,6 +120,44 @@ test("RuntimeSubscriptionManager does not overlap polls while an event emit is p
     manager.unsubscribeConnection("conn-4");
 });
 
+test("RuntimeSubscriptionManager isolates a throwing subscription poll", async () => {
+    const manager = new RuntimeSubscriptionManager(1);
+    const badWorker = new FakeWorker("bad");
+    const healthyWorker = new FakeWorker("healthy");
+    await Promise.all([badWorker.start("/tmp/ws"), healthyWorker.start("/tmp/ws")]);
+    let failPoll = false;
+    const throwingWorker = {
+        subscribe(fromSeq: number) {
+            if (failPoll) {
+                throw new Error("bad instance subscription");
+            }
+            return badWorker.subscribe(fromSeq);
+        }
+    };
+    const unhandled: unknown[] = [];
+    const onUnhandledRejection = (reason: unknown) => unhandled.push(reason);
+    process.on("unhandledRejection", onUnhandledRejection);
+    const bad = createStreamContext("conn-bad", "subscribe-bad");
+    const healthy = createStreamContext("conn-healthy", "subscribe-healthy");
+
+    try {
+        await manager.subscribe(bad.context, "bad", throwingWorker as WorkerInstance, 1);
+        await manager.subscribe(healthy.context, "healthy", healthyWorker as unknown as WorkerInstance, 1);
+        failPoll = true;
+        healthyWorker.emit("toolCall.completed", { toolName: "bash_run" });
+
+        await waitFor(() => healthy.events.length === 1);
+        await new Promise((resolve) => setTimeout(resolve, 10));
+
+        assert.equal(unhandled.length, 0);
+        assert.equal(healthy.events[0]?.seq, 2);
+    } finally {
+        process.off("unhandledRejection", onUnhandledRejection);
+        manager.unsubscribeConnection("conn-bad");
+        manager.unsubscribeConnection("conn-healthy");
+    }
+});
+
 function createStreamContext(
     connectionId: string,
     requestId: string,
