@@ -65,6 +65,17 @@ test("ControlSocketServer routes canonical control and instance operations over 
     }>;
     assert.equal(listed[0]?.name, "alpha");
 
+    const overview = (await request(
+        harness.socketPath,
+        "@control",
+        "overview.get"
+    )).payload as {
+        counts: { instancesTotal: number };
+        health: string;
+    };
+    assert.equal(overview.counts.instancesTotal, 1);
+    assert.equal(overview.health, "attention");
+
     const snapshot = await request(harness.socketPath, asInstanceName("alpha"), "runtime.snapshot");
     assert.equal((snapshot.payload as { lastSeq: number }).lastSeq, 0);
 

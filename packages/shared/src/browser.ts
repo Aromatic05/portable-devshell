@@ -40,6 +40,17 @@ export type {
     OAuthApprovalDecision,
     OAuthApprovalRequest
 } from "./dto/oauth/DtoOAuthApproval.js";
+export type {
+    OperationalAlertSeverity,
+    OperationalHealth,
+    OperationalOverview,
+    OperationalOverviewActivity,
+    OperationalOverviewAlert,
+    OperationalOverviewController,
+    OperationalOverviewCounts,
+    OperationalOverviewInstance,
+    OperationalOverviewTodo
+} from "./dto/overview/DtoOperationalOverview.js";
 export { asInstanceName } from "./type/identity/TypeIdentityInstanceName.js";
 export type { InstanceName } from "./type/identity/TypeIdentityInstanceName.js";
 export type { JsonValue } from "./type/TypeJsonValue.js";

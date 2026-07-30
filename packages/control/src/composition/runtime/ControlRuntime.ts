@@ -1,4 +1,5 @@
 import type { InstanceRegistry } from "../../control/instance/registry/InstanceRegistry.js";
+import { OperationalOverviewService } from "../../control/overview/OperationalOverviewService.js";
 import { ControlChannelServer, type ControlChannelProvider } from "../../server/channel/ControlChannelServer.js";
 import { ControlSocketChannelProvider } from "../../server/socket/ControlSocketChannelProvider.js";
 import { resolveControlWebAssetsDirectory } from "../../server/web/ControlWebAssets.js";
@@ -40,6 +41,10 @@ export class ControlRuntime {
             instances: options.instances,
             mcpStatus: () => options.mcp.status(),
             oauthApprovals: () => options.mcp.oauthApprovals,
+            overview: new OperationalOverviewService({
+                instances: options.instances,
+                oauthApprovals: () => options.mcp.oauthApprovals
+            }),
             restart: options.restart,
             reverse: options.reverse.service,
             shutdown: options.shutdown

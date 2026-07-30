@@ -13,6 +13,7 @@ export * from "./dto/instance/DtoInstanceRuntime.js";
 export * from "./dto/instance/DtoInstanceSnapshot.js";
 export * from "./dto/instance/DtoTodo.js";
 export * from "./dto/oauth/index.js";
+export * from "./dto/overview/DtoOperationalOverview.js";
 export * from "./dto/reverse/DtoReverseConnection.js";
 export * from "./dto/tool/DtoToolApproval.js";
 export * from "./dto/tool/DtoToolCallRecord.js";
