@@ -1,0 +1,80 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+
+import { createError, type JsonValue, type PrefixRouteContext } from "@portable-devshell/shared";
+
+import { createToolRouteModule } from "../../src/instance/tool/ToolRouteModule.ts";
+
+function routeContext(connectionId: string): PrefixRouteContext {
+    return {
+        connectionId,
+        peer: "tui",
+        requestId: "req-1"
+    } as unknown as PrefixRouteContext;
+}
+
+function callHandler(callTool: (toolName: string, input: JsonValue) => Promise<JsonValue>) {
+    const module = createToolRouteModule({
+        todo: { commentsFor: () => ["Do not change permissions globally."] },
+        worker: {
+            async callTool(toolName: string, input: JsonValue) {
+                return callTool(toolName, input);
+            },
+            async decideApproval() {
+                throw new Error("unused");
+            },
+            async getApproval() {
+                throw new Error("unused");
+            },
+            async listApprovals() {
+                throw new Error("unused");
+            },
+            async readToolCalls() {
+                throw new Error("unused");
+            }
+        }
+    });
+    const operation = module.operations.find((entry) => entry.name === "call");
+    if (operation === undefined) throw new Error("tool.call operation is missing");
+    return operation.handle;
+}
+
+test("control tool route appends the same worker result hint after user comments", async () => {
+    const handle = callHandler(async () => ({
+        exitCode: 7,
+        stderr: "boom",
+        stdout: "",
+        termination: "exited"
+    }) as JsonValue);
+
+    const result = await handle(
+        { id: "1", name: "call", payload: { input: { command: "pwd" }, toolName: "bash_run" } },
+        routeContext("conn-1")
+    ) as Record<string, JsonValue>;
+
+    assert.equal(result.exitCode, 7);
+    assert.equal(result.stderr, "boom");
+    assert.equal("result" in result, false);
+    assert.deepEqual(result.comment, [
+        "Do not change permissions globally.",
+        "Error hint [bash.nonZeroExit]: The command ran but exited with code 7. Inspect the original stdout and stderr, then correct the command, dependencies, input, or environment before calling again. Do not report completion or retry the same command unchanged."
+    ]);
+});
+
+test("control tool route turns a thrown error into a structured hint instead of copying the message", async () => {
+    const handle = callHandler(async () => {
+        throw createError({ code: "file.revisionMismatch", message: "stale revision", retryable: true });
+    });
+
+    const result = await handle(
+        { id: "1", name: "call", payload: { input: {}, toolName: "file_edit" } },
+        routeContext("conn-2")
+    ) as Record<string, JsonValue>;
+
+    assert.equal(result.result, null);
+    assert.deepEqual(result.error, { code: "file.revisionMismatch", message: "stale revision", retryable: true });
+    assert.deepEqual(result.comment, [
+        "Do not change permissions globally.",
+        "Error hint [file.revisionMismatch]: The file changed after it was read or searched. Read the latest content and regenerate the edit or search; do not overwrite or rely on the older revision."
+    ]);
+});

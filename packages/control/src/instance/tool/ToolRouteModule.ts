@@ -1,5 +1,15 @@
 import type { WorkerInstance } from "@portable-devshell/core";
-import { ControlError, createError, errorCodes, type JsonValue, type PrefixRouteModuleDefinition } from "@portable-devshell/shared";
+import {
+    ControlError,
+    createError,
+    errorCodes,
+    mergeComments,
+    resolveErrorHints,
+    resolveResultHints,
+    toControlErrorBody,
+    type JsonValue,
+    type PrefixRouteModuleDefinition
+} from "@portable-devshell/shared";
 
 import { routeModule } from "../../route/ControlRouteFactory.js";
 import {
@@ -22,21 +32,24 @@ export function createToolRouteModule(instance: ToolRouteInstancePort): PrefixRo
     return routeModule("tool", {
         call: async (request, context) => {
             const { input, toolName } = readToolCall(request.payload);
+            const userComments = instance.todo.commentsFor(context.connectionId);
             try {
                 const result = await instance.worker.callTool(toolName, input, {
                     requestId: context.requestId,
                     ctxId: context.connectionId,
                     source: context.peer
                 });
-                return { comment: instance.todo.commentsFor(context.connectionId), result } as unknown as JsonValue;
+                return attachComments(result, mergeComments(userComments, resolveResultHints(toolName, result)));
             } catch (error) {
                 const failure = error instanceof ControlError ? error : createError({
                     code: errorCodes.targetInvalid,
                     message: error instanceof Error ? error.message : String(error),
                     retryable: false
                 });
+                const body = toControlErrorBody(error);
+                const hints = body === undefined ? [] : resolveErrorHints(toolName, body);
                 return {
-                    comment: [...instance.todo.commentsFor(context.connectionId), failure.message],
+                    comment: mergeComments(userComments, hints),
                     error: { code: failure.code, message: failure.message, retryable: failure.retryable },
                     result: null
                 } as unknown as JsonValue;
@@ -54,4 +67,11 @@ export function createToolRouteModule(instance: ToolRouteInstancePort): PrefixRo
             { ...readToolApprovalDecision(request.payload), decidedBy: context.peer }
         ) as unknown as JsonValue
     });
+}
+
+function attachComments(result: JsonValue, comments: readonly string[]): JsonValue {
+    if (typeof result !== "object" || result === null || Array.isArray(result)) {
+        throw new Error("Tool results must be objects when context comments are enabled.");
+    }
+    return { ...result, comment: [...comments] };
 }

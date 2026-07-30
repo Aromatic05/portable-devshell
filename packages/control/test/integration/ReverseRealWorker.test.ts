@@ -140,8 +140,8 @@ test("real Rust reverse worker connects to the TS gateway and executes a tool ca
         asInstanceName("reverse-test"),
         { input: { command: readRelativeMarkerCommand(workspaceMarkerName) }, toolName: "bash_run" }
     );
-    assert.equal(result.result.exitCode, 0);
-    assert.match(result.result.stdout, new RegExp(workspaceMarker, "u"));
+    assert.equal(result.exitCode, 0);
+    assert.match(result.stdout, new RegExp(workspaceMarker, "u"));
 
     const stopped = await request(
         server.socketPath,
