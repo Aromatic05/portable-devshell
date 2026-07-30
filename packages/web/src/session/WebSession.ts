@@ -1,3 +1,5 @@
+import { CONTROL_WEB_SESSION_PATH } from "@portable-devshell/shared/browser";
+
 export interface WebSession {
     check(): Promise<boolean>;
     establish(token?: string): Promise<boolean>;
@@ -16,7 +18,7 @@ export class BrowserWebSession implements WebSession {
     }
 
     async logout(): Promise<void> {
-        const response = await this.request("/web/session", {
+        const response = await this.request(CONTROL_WEB_SESSION_PATH, {
             credentials: "same-origin",
             method: "DELETE",
         });
@@ -29,7 +31,7 @@ export class BrowserWebSession implements WebSession {
         method: "GET" | "POST",
         token?: string,
     ): Promise<boolean> {
-        const response = await this.request("/web/session", {
+        const response = await this.request(CONTROL_WEB_SESSION_PATH, {
             credentials: "same-origin",
             headers:
                 token === undefined

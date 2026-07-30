@@ -206,9 +206,16 @@ export class ConfigEditorCoordinator {
     #syncMcpEndpoint(instanceName: string): void {
         const host = this.#getMcpHost();
         if (host === undefined) return;
-        const instance = this.#getConfig().instances.find((entry) => entry.name === instanceName);
+        const config = this.#getConfig();
+        const instance = config.instances.find((entry) => entry.name === instanceName);
         const descriptor = this.#instanceRegistry.get(instanceName);
-        if (instance === undefined || !instance.enabled || !instance.mcp.enabled || descriptor === undefined) {
+        if (
+            !config.mcp.enabled ||
+            instance === undefined ||
+            !instance.enabled ||
+            !instance.mcp.enabled ||
+            descriptor === undefined
+        ) {
             host.unregisterInstance(instanceName);
             return;
         }

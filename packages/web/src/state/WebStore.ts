@@ -161,11 +161,15 @@ export class WebStore {
                     `Incompatible control protocol version: ${hello.protocolVersion}.`,
                 );
             }
-            const [service, instances, oauthApprovals] = await Promise.all([
+            const [service, instances, mcpStatus] = await Promise.all([
                 this.clients.service.status(),
                 this.clients.instance.list(),
-                this.clients.mcp.listApprovals(),
+                this.clients.mcp.status(),
             ]);
+            const oauthApprovals =
+                mcpStatus.authMode === "oauth2" && mcpStatus.oauthReady === true
+                    ? await this.clients.mcp.listApprovals()
+                    : [];
             const approvals = Object.fromEntries(
                 await Promise.all(
                     instances.map(async ({ name }) => [

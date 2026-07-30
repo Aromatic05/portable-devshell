@@ -17,6 +17,16 @@ const snapshot: InstanceSnapshot = {
 };
 
 describe("WebStore", () => {
+    it("does not request OAuth approvals when OAuth is disabled", async () => {
+        const clients = fakeClients();
+        const listApprovals = vi.fn(async () => []);
+        clients.mcp.listApprovals = listApprovals;
+
+        await new WebStore(clients).load();
+
+        expect(listApprovals).not.toHaveBeenCalled();
+    });
+
     it("reconnects once and restores bounded subscriptions from the last sequence", async () => {
         const subscriptions: number[] = [];
         const clients = fakeClients({
@@ -87,6 +97,7 @@ function fakeClients(
             },
         },
         mcp: {
+            status: async () => ({ authMode: "none", oauthReady: false, running: true }),
             listApprovals: async () => [],
             decideApproval: async () => {
                 throw new Error("Not used.");

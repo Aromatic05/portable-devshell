@@ -16,14 +16,16 @@ export class McpRuntimeFactory {
         registry: InstanceRegistry,
         options?: { contextFile?: string; gateway?: McpInstanceGateway; storageDir?: string }
     ): McpHost | undefined {
-        if (!config.mcp.enabled) {
+        if (!config.mcp.enabled && !config.web.enabled) {
             return undefined;
         }
 
-        const endpoints = registry
-            .list()
-            .filter((descriptor) => descriptor.mcpEnabled)
-            .map((descriptor) => this.#mapper.map(descriptor, options?.gateway));
+        const endpoints = config.mcp.enabled
+            ? registry
+                  .list()
+                  .filter((descriptor) => descriptor.mcpEnabled)
+                  .map((descriptor) => this.#mapper.map(descriptor, options?.gateway))
+            : [];
 
         return new McpHost({
             auth: toMcpHostAuth(config),

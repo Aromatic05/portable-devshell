@@ -19,6 +19,23 @@ const snapshot: InstanceSnapshot = {
 };
 
 describe("authenticated application shell", () => {
+    it("keeps the default browser session stable across React renders", async () => {
+        const request = vi.fn<typeof fetch>().mockResolvedValue(
+            new Response(null, { status: 204 }),
+        );
+        vi.stubGlobal("fetch", request);
+        const createClients = vi.fn(fakeClients);
+
+        render(<App createClients={createClients} />);
+
+        expect(
+            await screen.findByRole("heading", { name: "Overview" }),
+        ).toBeInTheDocument();
+        await waitFor(() => expect(createClients).toHaveBeenCalledOnce());
+        expect(request).toHaveBeenCalledOnce();
+        vi.unstubAllGlobals();
+    });
+
     it("boots auth=none anonymously before creating clients", async () => {
         const session = fakeSession({ check: false, establish: true });
         const createClients = vi.fn(fakeClients);
@@ -131,6 +148,7 @@ function fakeClients(): WebClients {
             },
         },
         mcp: {
+            status: async () => ({ authMode: "none", oauthReady: false, running: true }),
             listApprovals: async () => [],
             decideApproval: async () => {
                 throw new Error("Not used.");

@@ -60,6 +60,9 @@ importers:
       '@portable-devshell/shared':
         specifier: workspace:*
         version: link:../shared
+      '@portable-devshell/web':
+        specifier: workspace:*
+        version: link:../web
       hash-wasm:
         specifier: ^4.12.0
         version: 4.12.0
@@ -154,13 +157,25 @@ importers:
         version: 7.2.0
 
   packages/web:
-    dependencies:
+    devDependencies:
       '@portable-devshell/shared':
         specifier: workspace:*
         version: link:../shared
+      '@testing-library/jest-dom':
+        specifier: ^7.0.0
+        version: 7.0.0(@testing-library/dom@10.4.1)
+      '@testing-library/react':
+        specifier: ^16.3.2
+        version: 16.3.2(@testing-library/dom@10.4.1)(@types/react-dom@18.3.7(@types/react@18.3.31))(@types/react@18.3.31)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
+      '@types/react-dom':
+        specifier: ^18.3.7
+        version: 18.3.7(@types/react@18.3.31)
       '@vitejs/plugin-react':
-        specifier: latest
+        specifier: ^6.0.5
         version: 6.0.5(vite@8.2.0(@types/node@24.13.2)(esbuild@0.28.1)(tsx@4.23.0))
+      jsdom:
+        specifier: ^30.0.1
+        version: 30.0.1
       react:
         specifier: ^18.3.1
         version: 18.3.1
@@ -168,24 +183,11 @@ importers:
         specifier: ^18.3.1
         version: 18.3.1(react@18.3.1)
       vite:
-        specifier: latest
+        specifier: ^8.2.0
         version: 8.2.0(@types/node@24.13.2)(esbuild@0.28.1)(tsx@4.23.0)
       vitest:
-        specifier: latest
+        specifier: ^4.1.10
         version: 4.1.10(@types/node@24.13.2)(jsdom@30.0.1)(vite@8.2.0(@types/node@24.13.2)(esbuild@0.28.1)(tsx@4.23.0))
-    devDependencies:
-      '@testing-library/jest-dom':
-        specifier: latest
-        version: 7.0.0(@testing-library/dom@10.4.1)
-      '@testing-library/react':
-        specifier: latest
-        version: 16.3.2(@testing-library/dom@10.4.1)(@types/react-dom@18.3.7(@types/react@18.3.31))(@types/react@18.3.31)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
-      '@types/react-dom':
-        specifier: ^18.3.0
-        version: 18.3.7(@types/react@18.3.31)
-      jsdom:
-        specifier: latest
-        version: 30.0.1
 
 packages:
 
@@ -538,6 +540,9 @@ packages:
 
   '@portable-devshell/shared@file:packages/shared':
     resolution: {directory: packages/shared, type: directory}
+
+  '@portable-devshell/web@file:packages/web':
+    resolution: {directory: packages/web, type: directory}
 
   '@rolldown/binding-android-arm64@1.2.1':
     resolution: {integrity: sha512-02hOeOSryYxVrOIphmLAsqnCJWxwlzFk+pEt/N/i6OgT3lShHO7xGCU5cpgchRDHboAEbSjzgGh+O/u1GswQmA==}
@@ -2544,6 +2549,7 @@ snapshots:
       '@portable-devshell/core': file:packages/core
       '@portable-devshell/mcp': file:packages/mcp(zod@3.25.76)
       '@portable-devshell/shared': file:packages/shared
+      '@portable-devshell/web': file:packages/web
       hash-wasm: 4.12.0
       smol-toml: 1.7.0
       tar-stream: 3.2.0
@@ -2583,6 +2589,8 @@ snapshots:
       - zod
 
   '@portable-devshell/shared@file:packages/shared': {}
+
+  '@portable-devshell/web@file:packages/web': {}
 
   '@rolldown/binding-android-arm64@1.2.1':
     optional: true

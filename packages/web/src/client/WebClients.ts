@@ -58,12 +58,20 @@ export interface WebClients {
         ): Promise<ApprovalRequest>;
     };
     mcp: {
+        status(): Promise<McpStatus>;
         listApprovals(): Promise<OAuthApprovalRequest[]>;
         decideApproval(
             approvalId: string,
             decision: OAuthApprovalDecision,
         ): Promise<OAuthApprovalRequest>;
     };
+}
+
+export interface McpStatus {
+    authMode?: "none" | "oauth2" | "token";
+    oauthReady?: boolean;
+    reason?: string;
+    running: boolean;
 }
 
 export class WebRuntimeStream {
@@ -168,6 +176,7 @@ export function createWebClients(
                 tool.request(name, "decideApproval", { approvalId, decision }),
         },
         mcp: {
+            status: () => mcp.request("status"),
             listApprovals: () => mcp.request("listApprovals"),
             decideApproval: (approvalId, decision) =>
                 mcp.request("decideApproval", { approvalId, decision }),

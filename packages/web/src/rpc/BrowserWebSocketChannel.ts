@@ -46,6 +46,10 @@ export class BrowserWebSocketChannel implements FrameChannel {
         return () => this.#frames.delete(listener);
     }
     onClose(listener: (error?: Error) => void): () => void {
+        if (this.#closed) {
+            queueMicrotask(() => listener(new Error("WebSocket channel is closed.")));
+            return () => undefined;
+        }
         this.#closes.add(listener);
         return () => this.#closes.delete(listener);
     }

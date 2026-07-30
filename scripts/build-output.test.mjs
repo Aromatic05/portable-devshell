@@ -33,6 +33,41 @@ test("TUI tests serialize files that exercise Ink global runtime state", async (
     assert.match(manifest.scripts.test, /--concurrency 1/u);
 });
 
+test("WebUI is packaged as control-owned static application assets", async () => {
+    const control = JSON.parse(
+        await readFile(resolve(repositoryRoot, "packages", "control", "package.json"), "utf8")
+    );
+    const web = JSON.parse(
+        await readFile(resolve(repositoryRoot, "packages", "web", "package.json"), "utf8")
+    );
+
+    assert.equal(control.dependencies?.["@portable-devshell/web"], "workspace:*");
+    assert.deepEqual(web.files, ["dist"]);
+    assert.match(String(web.scripts?.build ?? ""), /vite build/u);
+    const viteConfig = await readFile(
+        resolve(repositoryRoot, "packages", "web", "vite.config.ts"),
+        "utf8"
+    );
+    const indexHtml = await readFile(
+        resolve(repositoryRoot, "packages", "web", "index.html"),
+        "utf8"
+    );
+    const manifest = JSON.parse(
+        await readFile(
+            resolve(repositoryRoot, "packages", "web", "public", "manifest.webmanifest"),
+            "utf8"
+        )
+    );
+    assert.match(viteConfig, /base:\s*["']\/web\/["']/u);
+    assert.match(indexHtml, /%BASE_URL%manifest\.webmanifest/u);
+    assert.equal(manifest.start_url, "/web/");
+    assert.equal(manifest.scope, "/web/");
+    for (const buildOnlyDependency of ["@vitejs/plugin-react", "vite", "vitest"]) {
+        assert.equal(web.dependencies?.[buildOnlyDependency], undefined, buildOnlyDependency);
+        assert.equal(typeof web.devDependencies?.[buildOnlyDependency], "string", buildOnlyDependency);
+    }
+});
+
 
 test("source test launchers pass filesystem loaders to Node as file URLs", async () => {
     for (const relativePath of [

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import type {
     ApprovalRequest,
     OAuthApprovalRequest,
@@ -25,8 +25,12 @@ export interface AppProps {
 
 export function App({
     createClients = createWebClients,
-    session = new BrowserWebSession(),
+    session,
 }: AppProps) {
+    const activeSession = useMemo(
+        () => session ?? new BrowserWebSession(),
+        [session],
+    );
     const [sessionState, setSessionState] = useState<SessionState>("checking");
     const [store, setStore] = useState<WebStore>();
     const storeRef = useRef<WebStore>();
@@ -43,7 +47,8 @@ export function App({
         async function bootstrap(): Promise<void> {
             try {
                 const available =
-                    (await session.check()) || (await session.establish());
+                    (await activeSession.check()) ||
+                    (await activeSession.establish());
                 if (disposed) {
                     return;
                 }
@@ -63,11 +68,11 @@ export function App({
                 }
             }
         }
-    }, [createClients, session]);
+    }, [activeSession, createClients]);
 
     async function login(token: string): Promise<void> {
         try {
-            if (!(await session.establish(token))) {
+            if (!(await activeSession.establish(token))) {
                 setError("Sign-in was not accepted.");
                 return;
             }
@@ -84,7 +89,7 @@ export function App({
 
     async function logout(): Promise<void> {
         try {
-            await session.logout();
+            await activeSession.logout();
             storeRef.current?.close();
             storeRef.current = undefined;
             setStore(undefined);

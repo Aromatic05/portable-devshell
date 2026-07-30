@@ -17,6 +17,7 @@ describe("typed web client routing", () => {
         await clients.instance.list();
         await clients.runtime.readLogs("demo", { limit: 5 });
         await clients.tool.listApprovals("demo");
+        await clients.mcp.status();
         await clients.mcp.listApprovals();
 
         expect(hello.protocolVersion).toBe(1);
@@ -26,6 +27,7 @@ describe("typed web client routing", () => {
             "instance.list",
             "runtime.readLogs",
             "tool.listApprovals",
+            "mcp.status",
             "mcp.listApprovals",
         ]);
         expect(channel.payloads[0]).toEqual({

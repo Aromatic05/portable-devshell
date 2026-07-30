@@ -101,7 +101,7 @@ function validateGlobalMcp(config: ControlConfig): void {
             "semantic",
             ["mcp", "auth", "mode"],
             "config.mcp.publicAuthRequired",
-            "must not be none when MCP is publicly exposed"
+            "must not be none when the control HTTP host is publicly exposed"
         );
     }
 }

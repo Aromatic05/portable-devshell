@@ -4,6 +4,7 @@ export * from "./config/ConfigNormalize.js";
 export * from "./config/ConfigParser.js";
 export * from "./config/ConfigValidate.js";
 export * from "./dto/DtoCommandResult.js";
+export * from "./dto/DtoControlProtocol.js";
 export * from "./dto/artifact/DtoArtifact.js";
 export * from "./dto/instance/DtoInstanceCreate.js";
 export * from "./dto/instance/DtoInstanceEvent.js";

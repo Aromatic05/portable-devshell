@@ -1,5 +1,9 @@
 import type { InstanceRegistry } from "../../control/instance/registry/InstanceRegistry.js";
-import { ControlSocketServer } from "../../server/socket/ControlSocketServer.js";
+import { ControlChannelServer, type ControlChannelProvider } from "../../server/channel/ControlChannelServer.js";
+import { ControlSocketChannelProvider } from "../../server/socket/ControlSocketChannelProvider.js";
+import { resolveControlWebAssetsDirectory } from "../../server/web/ControlWebAssets.js";
+import { ControlWebSessionService } from "../../server/web/ControlWebSessionService.js";
+import { ControlWebSocketChannelProvider } from "../../server/web/ControlWebSocketChannelProvider.js";
 import { ControlRouteComposition } from "../ControlRouteComposition.js";
 import type { ControlRuntimeArtifact } from "./ControlRuntimeArtifact.js";
 import type { ControlRuntimeMcp } from "./ControlRuntimeMcp.js";
@@ -17,11 +21,12 @@ export interface ControlRuntimeOptions {
 
 export class ControlRuntime {
     readonly #artifact: ControlRuntimeArtifact;
+    readonly #channels: ControlChannelServer;
     readonly #instances: InstanceRegistry;
     readonly #mcp: ControlRuntimeMcp;
     readonly #reverse: ControlRuntimeReverse;
     readonly #routes: ControlRouteComposition;
-    readonly #socket: ControlSocketServer;
+    readonly #socketProvider: ControlSocketChannelProvider;
 
     constructor(options: ControlRuntimeOptions) {
         this.#artifact = options.artifact;
@@ -39,13 +44,25 @@ export class ControlRuntime {
             reverse: options.reverse.service,
             shutdown: options.shutdown
         });
-        this.#socket = new ControlSocketServer({ routes: this.#routes, socketPath: options.socketPath });
+        this.#socketProvider = new ControlSocketChannelProvider({ socketPath: options.socketPath });
+        const providers: ControlChannelProvider[] = [this.#socketProvider];
+        const http = options.mcp.host?.server;
+        if (http !== undefined && options.mcp.webEnabled) {
+            providers.push(new ControlWebSocketChannelProvider({
+                assetDirectory: resolveControlWebAssetsDirectory(),
+                http,
+                sessions: new ControlWebSessionService({
+                    secureCookie: options.mcp.publicBaseUrl?.startsWith("https://") ?? false
+                })
+            }));
+        }
+        this.#channels = new ControlChannelServer({ providers, routes: this.#routes });
     }
 
     async start(): Promise<void> {
         try {
             await this.#mcp.start();
-            await this.#socket.start();
+            await this.#channels.start();
         } catch (error) {
             await this.stop().catch(() => undefined);
             throw error;
@@ -54,13 +71,13 @@ export class ControlRuntime {
 
     async stop(): Promise<void> {
         const failures: unknown[] = [];
+        await this.#channels.close().catch((error) => failures.push(error));
         try {
             this.#reverse.stop();
         } catch (error) {
             failures.push(error);
         }
         await this.#mcp.stop().catch((error) => failures.push(error));
-        await this.#socket.close().catch((error) => failures.push(error));
         await this.#artifact.stop().catch((error) => failures.push(error));
         await this.#instances.stopOwned().catch((error) => failures.push(error));
         try {
@@ -68,7 +85,7 @@ export class ControlRuntime {
         } catch (error) {
             failures.push(error);
         }
-        await this.#socket.removeEndpoint().catch((error) => failures.push(error));
+        await this.#socketProvider.removeEndpoint().catch((error) => failures.push(error));
         if (failures.length > 0) {
             throw new AggregateError(failures, "Control runtime failed to stop cleanly.");
         }

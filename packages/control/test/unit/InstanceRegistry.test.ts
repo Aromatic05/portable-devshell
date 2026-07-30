@@ -66,6 +66,34 @@ test("mcp endpoint path is generated and wiring only builds host configuration",
     assert.equal(descriptor.worker.snapshot().ready, false);
 });
 
+test("WebUI can create the HTTP host while global MCP remains disabled", () => {
+    const config = createDefaultControlConfig();
+    config.mcp.enabled = false;
+    config.web.enabled = true;
+    config.instances.push(normalizeConfigInstanceDraft({
+        enabled: true,
+        mcp: { enabled: true },
+        name: "demo-local",
+        provider: "local",
+        workspace: "/tmp/demo"
+    }));
+    const registry = new InstanceRegistryFactory().build(config);
+    const mapped: string[] = [];
+    const factory = new McpRuntimeFactory({
+        mapper: {
+            map(descriptor: Parameters<McpEndpointFactory["map"]>[0]) {
+                mapped.push(descriptor.name);
+                return new McpEndpointFactory().map(descriptor);
+            }
+        } as never
+    });
+
+    const host = factory.wire(config, registry);
+
+    assert.ok(host !== undefined);
+    assert.deepEqual(mapped, []);
+});
+
 test("stopOwned only stops workers started by this control and keeps failed ownership", async () => {
     const stopped: string[] = [];
     const registry = new (await import("../../src/control/instance/registry/InstanceRegistry.js")).InstanceRegistry([

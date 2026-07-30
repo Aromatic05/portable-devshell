@@ -46,7 +46,7 @@ const instancePatchKeys = instanceKeys.filter((key) => key !== "name");
 
 export function parseConfigDraft(value: unknown): ConfigDraft {
     const record = readRecord(value, []);
-    assertKnownKeys(record, ["control", "instances", "mcp"], []);
+    assertKnownKeys(record, ["control", "instances", "mcp", "web"], []);
 
     return {
         control: record.control === undefined ? undefined : parseControlDraft(record.control, ["control"]),
@@ -56,17 +56,19 @@ export function parseConfigDraft(value: unknown): ConfigDraft {
                 : readArray(record.instances, ["instances"]).map((entry, index) =>
                       parseConfigInstanceDraft(entry, ["instances", index])
                   ),
-        mcp: record.mcp === undefined ? undefined : parseGlobalMcpDraft(record.mcp, ["mcp"])
+        mcp: record.mcp === undefined ? undefined : parseGlobalMcpDraft(record.mcp, ["mcp"]),
+        web: record.web === undefined ? undefined : parseGlobalWebDraft(record.web, ["web"])
     };
 }
 
 export function parseConfigGlobalDraft(value: unknown): ConfigGlobalDraft {
     const record = readRecord(value, []);
-    assertKnownKeys(record, ["control", "mcp"], []);
+    assertKnownKeys(record, ["control", "mcp", "web"], []);
 
     return {
         control: record.control === undefined ? undefined : parseControlDraft(record.control, ["control"]),
-        mcp: record.mcp === undefined ? undefined : parseGlobalMcpDraft(record.mcp, ["mcp"])
+        mcp: record.mcp === undefined ? undefined : parseGlobalMcpDraft(record.mcp, ["mcp"]),
+        web: record.web === undefined ? undefined : parseGlobalWebDraft(record.web, ["web"])
     };
 }
 
@@ -205,6 +207,17 @@ function parseControlDraft(value: unknown, path: readonly ConfigPathSegment[]): 
     assertKnownKeys(record, ["logLevel"], path);
     return {
         logLevel: readOptionalTrimmedString(record.logLevel, [...path, "logLevel"])
+    };
+}
+
+function parseGlobalWebDraft(
+    value: unknown,
+    path: readonly ConfigPathSegment[]
+): NonNullable<ConfigGlobalDraft["web"]> {
+    const record = readRecord(value, path);
+    assertKnownKeys(record, ["enabled"], path);
+    return {
+        enabled: readOptionalBoolean(record.enabled, [...path, "enabled"])
     };
 }
 

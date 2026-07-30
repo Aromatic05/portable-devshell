@@ -21,10 +21,17 @@ export class ControlRuntimeMcp {
     readonly configEditor: ConfigEditorCoordinator;
     readonly instanceCreate: InstanceCreateCoordinator;
     readonly instanceGateway: McpInstanceGatewayControl;
+    readonly publicBaseUrl?: string;
+    readonly webEnabled: boolean;
     readonly #host?: McpHost;
+    readonly #mcpEnabled: boolean;
 
     constructor(options: ControlRuntimeMcpOptions) {
         const factory = options.factory ?? new McpRuntimeFactory();
+        const config = options.state.requireConfig();
+        this.#mcpEnabled = config.mcp.enabled;
+        this.publicBaseUrl = config.mcp.publicBaseUrl;
+        this.webEnabled = config.web.enabled;
         const gatewayHolder: { value?: McpInstanceGatewayControl } = {};
         this.instanceCreate = new InstanceCreateCoordinator({
             configStore: options.state.configStore,
@@ -63,10 +70,16 @@ export class ControlRuntimeMcp {
     }
 
     get oauthApprovals(): McpOAuthApprovalService | undefined {
-        return this.#host?.oauthApprovals;
+        return this.#mcpEnabled ? this.#host?.oauthApprovals : undefined;
     }
 
     status(): JsonValue {
+        if (!this.#mcpEnabled) {
+            return {
+                running: false,
+                reason: "MCP runtime is disabled."
+            };
+        }
         return (this.#host as unknown as { status(): JsonValue } | undefined)?.status() ?? {
             running: false,
             reason: "MCP runtime is disabled."

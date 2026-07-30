@@ -42,6 +42,23 @@ test("ControlSocketServer routes canonical control and instance operations over 
         ok: true,
         pid: process.pid
     });
+    assert.deepEqual((await request(
+        harness.socketPath,
+        "@control",
+        "service.hello",
+        { clientKind: "web", maxProtocolVersion: 1, minProtocolVersion: 1 },
+        "web"
+    )).payload, {
+        capabilities: ["request", "stream", "streamResume"],
+        protocolVersion: 1
+    });
+    assert.equal((await request(
+        harness.socketPath,
+        "@control",
+        "service.hello",
+        { clientKind: "web", maxProtocolVersion: 2, minProtocolVersion: 2 },
+        "web"
+    )).error?.code, "protocol.versionUnsupported");
 
     const listed = (await request(harness.socketPath, "@control", "instance.list")).payload as Array<{
         name: string;

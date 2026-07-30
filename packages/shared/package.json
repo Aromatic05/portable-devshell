@@ -10,6 +10,10 @@
             "types": "./dist/index.d.ts",
             "default": "./dist/index.js"
         },
+        "./browser": {
+            "types": "./dist/browser.d.ts",
+            "default": "./dist/browser.js"
+        },
         "./transport/frame": {
             "types": "./dist/transport/Frame.d.ts",
             "default": "./dist/transport/Frame.js"

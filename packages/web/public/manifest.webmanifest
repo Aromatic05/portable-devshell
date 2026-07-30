@@ -1,1 +1,9 @@
-{"name":"portable-devshell","short_name":"devshell","display":"standalone","start_url":"/","background_color":"#10151f","theme_color":"#10151f"}
+{
+    "name": "portable-devshell",
+    "short_name": "devshell",
+    "display": "standalone",
+    "start_url": "/web/",
+    "scope": "/web/",
+    "background_color": "#10151f",
+    "theme_color": "#10151f"
+}
