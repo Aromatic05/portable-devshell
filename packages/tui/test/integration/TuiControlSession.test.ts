@@ -171,6 +171,38 @@ test("TuiControlSession refreshes a visible overview after relevant instance eve
     );
 });
 
+test("TuiControlSession polls operational metrics only while Overview is visible", async (t) => {
+    const runtimeDir = await mkdtemp(join(tmpdir(), "portable-devshell-tui-overview-poll-"));
+    const socketPath = createTestIpcPath("tui-overview-poll", runtimeDir);
+    const worker = new FakeWorker("alpha");
+    const server = createServer(socketPath, worker, () => 7);
+    const session = new TuiControlSession({
+        clients: createTuiClients({ socketPath }),
+        overviewRefreshIntervalMs: 25
+    });
+
+    await server.start();
+    t.after(async () => {
+        await session.stop();
+        await server.stop().catch(() => undefined);
+        await rm(runtimeDir, { force: true, recursive: true });
+    });
+
+    await session.start();
+    await waitFor(() => session.store.getState().connection.status === "connected");
+    const hiddenPageReads = worker.toolCallReadCount;
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    assert.equal(worker.toolCallReadCount, hiddenPageReads);
+
+    session.store.setSelectedPage("overview");
+    await waitFor(() => worker.toolCallReadCount > hiddenPageReads);
+
+    session.store.setSelectedPage("instances");
+    const afterVisibleReads = worker.toolCallReadCount;
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    assert.equal(worker.toolCallReadCount, afterVisibleReads);
+});
+
 test("TuiControlSession reports missing control without auto-starting it", async () => {
     const runtimeDir = await mkdtemp(join(tmpdir(), "portable-devshell-tui-not-running-"));
     const socketPath = createTestIpcPath("tui-control", runtimeDir);
@@ -369,6 +401,7 @@ class FakeWorker {
     snapshotCallCount = 0;
     subscribeFromSeqs: number[] = [];
     logReadQueries: Array<{ limit?: number }> = [];
+    toolCallReadCount = 0;
     callToolCount = 0;
     decisions: Array<{ approvalId: string; decision: string }> = [];
 
@@ -453,6 +486,7 @@ class FakeWorker {
     }
 
     async readToolCalls() {
+        this.toolCallReadCount += 1;
         return this.#toolCalls;
     }
 

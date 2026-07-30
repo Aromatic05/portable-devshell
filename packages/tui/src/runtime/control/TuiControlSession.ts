@@ -12,21 +12,26 @@ import { TuiControlSessionSubscriptions } from "./TuiControlSessionSubscriptions
 
 export interface TuiControlSessionOptions {
     clients?: TuiClients;
+    overviewRefreshIntervalMs?: number;
     store?: TuiAppStore;
 }
 
 export class TuiControlSession {
     readonly #clients: TuiClients;
     readonly #refresh: TuiControlSessionRefresh;
+    readonly #overviewRefreshIntervalMs: number;
     readonly #store: TuiAppStore;
     readonly #subscriptions: TuiControlSessionSubscriptions;
     readonly #auditRefreshTimers = new Map<string, ReturnType<typeof setTimeout>>();
     #oauthRefreshTimer?: ReturnType<typeof setInterval>;
+    #overviewPollTimer?: ReturnType<typeof setInterval>;
+    #overviewRefreshRequest?: Promise<void>;
     #overviewRefreshTimer?: ReturnType<typeof setTimeout>;
     #started = false;
 
     constructor(options: TuiControlSessionOptions = {}) {
         this.#clients = options.clients ?? createControlClients();
+        this.#overviewRefreshIntervalMs = options.overviewRefreshIntervalMs ?? 5_000;
         this.#store = options.store ?? new TuiAppStore();
         this.#refresh = new TuiControlSessionRefresh({
             clients: this.#clients,
@@ -63,12 +68,14 @@ export class TuiControlSession {
         await this.refresh();
         if (this.#store.getState().connection.status === "connected") {
             this.#startOAuthRefresh();
+            this.#startOverviewPolling();
         }
     }
 
     async stop(): Promise<void> {
         this.#started = false;
         this.#stopOAuthRefresh();
+        this.#stopOverviewPolling();
         this.#stopOverviewRefresh();
         this.#stopAuditRefreshes();
         this.#subscriptions.closeAll();
@@ -80,11 +87,13 @@ export class TuiControlSession {
             return;
         }
         this.#stopOAuthRefresh();
+        this.#stopOverviewPolling();
         try {
             await this.#clients.reconnect();
             await this.refresh();
             if (this.#store.getState().connection.status === "connected") {
                 this.#startOAuthRefresh();
+                this.#startOverviewPolling();
             }
         } catch (error) {
             this.#applyConnectionFailure(error);
@@ -100,7 +109,7 @@ export class TuiControlSession {
     }
 
     async refreshOverview(): Promise<void> {
-        await this.#refresh.refreshOverview();
+        await this.#requestOverviewRefresh();
     }
 
     async refreshOAuth(): Promise<void> {
@@ -208,6 +217,7 @@ export class TuiControlSession {
 
     #handleDisconnected(): void {
         this.#stopOAuthRefresh();
+        this.#stopOverviewPolling();
         this.#stopOverviewRefresh();
         this.#stopAuditRefreshes();
         this.#store.setConnectionState("disconnected");
@@ -217,6 +227,7 @@ export class TuiControlSession {
     #applyConnectionFailure(error: unknown): void {
         const failure = toFailure(error);
         this.#store.setConnectionState(failure.status, failure.error);
+        this.#stopOverviewPolling();
         this.#stopOverviewRefresh();
         this.#stopAuditRefreshes();
         this.#subscriptions.closeAll();
@@ -239,6 +250,33 @@ export class TuiControlSession {
         this.#oauthRefreshTimer = undefined;
     }
 
+    #startOverviewPolling(): void {
+        if (
+            this.#overviewPollTimer !== undefined ||
+            this.#overviewRefreshIntervalMs <= 0
+        ) {
+            return;
+        }
+        this.#overviewPollTimer = setInterval(() => {
+            if (
+                !this.#started ||
+                this.#store.getState().connection.status !== "connected" ||
+                this.#store.getState().ui.selectedPage !== "overview"
+            ) {
+                return;
+            }
+            void this.#refreshVisibleOverview();
+        }, this.#overviewRefreshIntervalMs);
+    }
+
+    #stopOverviewPolling(): void {
+        if (this.#overviewPollTimer === undefined) {
+            return;
+        }
+        clearInterval(this.#overviewPollTimer);
+        this.#overviewPollTimer = undefined;
+    }
+
     #scheduleOverviewRefresh(): void {
         this.#stopOverviewRefresh();
         this.#overviewRefreshTimer = setTimeout(() => {
@@ -246,13 +284,34 @@ export class TuiControlSession {
             if (!this.#started || this.#store.getState().ui.selectedPage !== "overview") {
                 return;
             }
-            void this.#refresh.refreshOverview().catch((error) => {
-                this.#store.setScreenStatus(
-                    "overview",
-                    `Overview refresh failed: ${readErrorMessage(error)}`
-                );
-            });
+            void this.#refreshVisibleOverview();
         }, 75);
+    }
+
+    async #refreshVisibleOverview(): Promise<void> {
+        try {
+            await this.#requestOverviewRefresh();
+        } catch (error) {
+            this.#store.setScreenStatus(
+                "overview",
+                `Overview refresh failed: ${readErrorMessage(error)}`
+            );
+        }
+    }
+
+    async #requestOverviewRefresh(): Promise<void> {
+        if (this.#overviewRefreshRequest !== undefined) {
+            return await this.#overviewRefreshRequest;
+        }
+        const request = this.#refresh.refreshOverview();
+        this.#overviewRefreshRequest = request;
+        try {
+            await request;
+        } finally {
+            if (this.#overviewRefreshRequest === request) {
+                this.#overviewRefreshRequest = undefined;
+            }
+        }
     }
 
     #stopOverviewRefresh(): void {
