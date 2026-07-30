@@ -12,63 +12,14 @@ import {
     Codec,
     createError,
     type Event,
-    type Frame,
-    type FrameChannel,
-    type JsonValue
+    type JsonValue,
+    SocketChannelProvider
 } from "@portable-devshell/shared";
 import { createTestIpcPath } from "../../../../../test/TestPlatformSupport.ts";
 
 interface ReceivedEvent {
     codec: Codec;
     event: Event;
-}
-
-class ReplyChannel implements FrameChannel {
-    readonly #closeListeners = new Set<(error?: Error) => void>();
-    readonly #frameListeners = new Set<(frame: Frame) => void>();
-    #closed = false;
-
-    get closed(): boolean {
-        return this.#closed;
-    }
-
-    async send(frame: Frame): Promise<void> {
-        const request = JSON.parse(new TextDecoder().decode(frame)) as Event;
-        const reply = Buffer.from(JSON.stringify({
-            id: `reply-${request.id}`,
-            replyTo: request.id,
-            from: "server",
-            to: request.from,
-            destination: request.destination,
-            name: request.name,
-            payload: { pong: true }
-        }), "utf8");
-        queueMicrotask(() => {
-            for (const listener of this.#frameListeners) {
-                listener(reply);
-            }
-        });
-    }
-
-    onFrame(listener: (frame: Frame) => void): () => void {
-        this.#frameListeners.add(listener);
-        return () => this.#frameListeners.delete(listener);
-    }
-
-    onClose(listener: (error?: Error) => void): () => void {
-        this.#closeListeners.add(listener);
-        return () => this.#closeListeners.delete(listener);
-    }
-
-    close(error?: Error): void {
-        if (this.#closed) {
-            return;
-        }
-        this.#closed = true;
-        for (const listener of this.#closeListeners) {
-            listener(error);
-        }
-    }
 }
 
 class ControlPeer {
@@ -174,7 +125,7 @@ function client(socketPath: string, mode: "short" | "persistent" = "persistent")
         mapRemoteError: (error) => createError(error),
         mode,
         peer: "tui",
-        socketPath
+        channelProvider: new SocketChannelProvider({ socketPath })
     });
 }
 
@@ -247,31 +198,6 @@ test("ClientConnection obtains each short session from an injected channel provi
 
     assert.deepEqual((await response).payload, { pong: true });
     assert.equal(connectCount, 1);
-});
-
-test("ClientConnection does not use socket options when a channel provider is supplied", async (t) => {
-    let socketFactoryCalls = 0;
-    const channelProvider: ChannelProvider = {
-        connect: async () => new ReplyChannel()
-    };
-    const connection = new ClientConnection({
-        channelProvider,
-        mapError: (error) => error instanceof Error ? error : new Error(String(error)),
-        mapRemoteError: (error) => createError(error),
-        mode: "short",
-        peer: "tui",
-        socketFactory: () => {
-            socketFactoryCalls += 1;
-            throw new Error("socket factory must not be used");
-        },
-        socketPath: "/unused.sock"
-    });
-    t.after(() => {
-        connection.close();
-    });
-
-    assert.deepEqual((await connection.requestEvent("@control", "service", "ping")).payload, { pong: true });
-    assert.equal(socketFactoryCalls, 0);
 });
 
 test("persistent ClientConnection multiplexes streams and closes one stream without closing the socket", async (t) => {

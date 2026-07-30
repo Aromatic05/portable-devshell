@@ -7,6 +7,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { createError } from "../error/ErrorFactoryCreate.js";
 import type { JsonValue } from "../type/TypeJsonValue.js";
 import { ClientConnection } from "./ClientConnection.js";
+import { SocketChannelProvider } from "./SocketChannelProvider.js";
 import {
     ControlPathHome,
     ControlSocketFile,
@@ -410,18 +411,20 @@ function createSocketControlLifecycleRpcClient(
     requestTimeoutMs: number
 ): ControlLifecycleRpcClient {
     const connection = new ClientConnection({
+        channelProvider: new SocketChannelProvider({
+            socketFactory: (path) => {
+                const socket = createConnection(path);
+                socket.setTimeout(requestTimeoutMs, () => {
+                    socket.destroy(new Error(`Control RPC request timed out after ${requestTimeoutMs}ms.`));
+                });
+                return socket;
+            },
+            socketPath
+        }),
         mapError: toError,
         mapRemoteError: (error) => createError(error),
         mode: "short",
-        peer: "cli",
-        socketFactory: (path) => {
-            const socket = createConnection(path);
-            socket.setTimeout(requestTimeoutMs, () => {
-                socket.destroy(new Error(`Control RPC request timed out after ${requestTimeoutMs}ms.`));
-            });
-            return socket;
-        },
-        socketPath
+        peer: "cli"
     });
     return {
         request: async (operation) => await connection.request("@control", "service", operation)

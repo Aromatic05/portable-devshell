@@ -2,6 +2,7 @@ import type { Socket } from "node:net";
 
 import {
     ClientConnection,
+    SocketChannelProvider,
     type ControlErrorBody
 } from "@portable-devshell/shared";
 
@@ -37,7 +38,7 @@ export interface TuiClients {
 
 export function createTuiClients(options: TuiClientOptions = {}): TuiClients {
     const connection = new ClientConnection({
-        ...options,
+        channelProvider: new SocketChannelProvider(options),
         mode: "persistent",
         peer: "tui",
         mapError: toClientError,

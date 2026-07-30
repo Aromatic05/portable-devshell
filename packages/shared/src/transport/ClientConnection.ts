@@ -1,15 +1,10 @@
-import { randomUUID } from "node:crypto";
-
 import type { ControlErrorBody } from "../error/ErrorBodyControl.js";
 import type { JsonValue } from "../type/TypeJsonValue.js";
 import { asInstanceName, type InstanceName } from "../type/identity/TypeIdentityInstanceName.js";
-import {
-    SocketChannelProvider,
-    type ChannelProvider,
-    type SocketChannelProviderOptions
-} from "./ChannelProvider.js";
+import type { ChannelProvider } from "./ChannelProvider.js";
 import { Codec, type Destination, type Peer } from "./Codec.js";
 import { PrefixRoute, type PrefixRouteEvent, type PrefixRouteIncoming } from "./PrefixRoute.js";
+import { randomUuid } from "./RandomUuid.js";
 
 export interface ClientEvent {
     id: string;
@@ -29,10 +24,7 @@ export interface ClientConnectionOptions {
     mapRemoteError(error: ControlErrorBody): Error;
     mode?: ClientConnectionMode;
     peer: Exclude<Peer, "server">;
-    channelProvider?: ChannelProvider;
-    socketFactory?: SocketChannelProviderOptions["socketFactory"];
-    socketPath?: string;
-    xdgRuntimeDir?: string;
+    channelProvider: ChannelProvider;
 }
 
 export interface OpenedClientStream {
@@ -126,7 +118,7 @@ export class ClientConnection {
         this.#mapRemoteError = options.mapRemoteError;
         this.#mode = options.mode ?? "short";
         this.#peer = options.peer;
-        this.#channelProvider = options.channelProvider ?? new SocketChannelProvider(options);
+        this.#channelProvider = options.channelProvider;
     }
 
     async request<TResult>(
@@ -337,7 +329,7 @@ class ClientSession {
         expectsStream: boolean
     ): Promise<ClientEvent> {
         this.#assertOpen();
-        const id = `${this.#peer}-${randomUUID()}`;
+        const id = `${this.#peer}-${randomUuid()}`;
         const response = new Promise<ClientEvent>((resolve, reject) => {
             this.#pending.set(id, { destination, expectsStream, id, module, reject, resolve });
         });
@@ -379,7 +371,7 @@ class ClientSession {
             throw stream.closeError ?? this.#closeError ?? new Error("Client stream is closed.");
         }
         await this.#route.send(stream.destination, stream.module, {
-            id: `${this.#peer}-${randomUUID()}`,
+            id: `${this.#peer}-${randomUuid()}`,
             streamId,
             name: operation,
             ...(payload === undefined ? {} : { payload })
@@ -402,7 +394,7 @@ class ClientSession {
             waiter.reject(stream.closeError);
         }
         void this.#route.send(stream.destination, "stream", {
-            id: `${this.#peer}-${randomUUID()}`,
+            id: `${this.#peer}-${randomUuid()}`,
             streamId,
             name: "cancel"
         }).catch((error) => {

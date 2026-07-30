@@ -1,11 +1,8 @@
-import { TextDecoder } from "node:util";
-
 import { isControlErrorBody, type ControlErrorBody } from "../error/ErrorBodyControl.js";
 import type { ErrorCode } from "../error/ErrorCodeCatalog.js";
 import { createError } from "../error/ErrorFactoryCreate.js";
 import type { JsonValue } from "../type/TypeJsonValue.js";
 import type { InstanceName } from "../type/identity/TypeIdentityInstanceName.js";
-import type { Frame } from "./Frame.js";
 import type { FrameChannel } from "./FrameChannel.js";
 
 export type Peer = "cli" | "tui" | "web" | "server";
@@ -32,6 +29,7 @@ export interface CodecOptions {
 }
 
 const decoder = new TextDecoder("utf-8", { fatal: true });
+const encoder = new TextEncoder();
 
 export class Codec {
     readonly #channel: FrameChannel;
@@ -70,7 +68,7 @@ export class Codec {
             throw protocolError("protocol.invalidDirection", "Remote peer is not bound yet.");
         }
         const event = validateEvent({ ...input, from: this.#local, to: this.#remote });
-        await this.#channel.send(Buffer.from(JSON.stringify(event), "utf8"));
+        await this.#channel.send(encoder.encode(JSON.stringify(event)));
     }
 
     onEvent(listener: (event: Event) => void): () => void {
@@ -95,7 +93,7 @@ export class Codec {
         this.#finishClose(error);
     }
 
-    #accept(frame: Frame): void {
+    #accept(frame: Uint8Array): void {
         if (this.#closed) {
             return;
         }
@@ -110,7 +108,7 @@ export class Codec {
                 try {
                     listener(event);
                 } catch (error) {
-                    process.emitWarning(error instanceof Error ? error : new Error(String(error)));
+                    console.warn(error instanceof Error ? error : new Error(String(error)));
                 }
             }
         } catch (error) {
@@ -157,7 +155,7 @@ export class Codec {
             try {
                 listener(this.#closeError);
             } catch (listenerError) {
-                process.emitWarning(listenerError instanceof Error ? listenerError : new Error(String(listenerError)));
+                console.warn(listenerError instanceof Error ? listenerError : new Error(String(listenerError)));
             }
         }
     }

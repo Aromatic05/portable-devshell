@@ -2,6 +2,7 @@ import type { Socket } from "node:net";
 
 import {
     ClientConnection,
+    SocketChannelProvider,
     type ControlErrorBody
 } from "@portable-devshell/shared";
 
@@ -30,7 +31,7 @@ export interface CliClients {
 
 export function createCliClients(options: CliClientOptions = {}): CliClients {
     const connection = new ClientConnection({
-        ...options,
+        channelProvider: new SocketChannelProvider(options),
         mode: "short",
         peer: "cli",
         mapError: toClientError,

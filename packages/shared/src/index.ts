@@ -22,6 +22,7 @@ export * from "./error/ErrorFactoryCreate.js";
 export * from "./schema/SchemaTool.js";
 export * from "./transport/Channel.js";
 export * from "./transport/ChannelProvider.js";
+export * from "./transport/SocketChannelProvider.js";
 export * from "./transport/Codec.js";
 export * from "./transport/PrefixRoute.js";
 export * from "./transport/ClientConnection.js";
