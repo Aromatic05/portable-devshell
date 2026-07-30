@@ -88,7 +88,43 @@ test("RuntimeSubscriptionManager emits a non-terminal runtime stream.gap", async
     manager.unsubscribeConnection("conn-3");
 });
 
-function createStreamContext(connectionId: string, requestId: string): {
+test("RuntimeSubscriptionManager does not overlap polls while an event emit is pending", async () => {
+    const manager = new RuntimeSubscriptionManager(1);
+    const worker = new FakeWorker("alpha");
+    await worker.start("/tmp/ws");
+    let emitCount = 0;
+    let releaseFirstEmit!: () => void;
+    const firstEmitStarted = new Promise<void>((resolve) => {
+        releaseFirstEmit = resolve;
+    });
+    let signalFirstEmit!: () => void;
+    const emitStarted = new Promise<void>((resolve) => {
+        signalFirstEmit = resolve;
+    });
+    const harness = createStreamContext("conn-4", "subscribe-4", async () => {
+        emitCount += 1;
+        if (emitCount === 1) {
+            signalFirstEmit();
+            await firstEmitStarted;
+        }
+    });
+
+    await manager.subscribe(harness.context, "alpha", worker as unknown as WorkerInstance, 1);
+    worker.emit("toolCall.completed", { toolName: "bash_run" });
+    await emitStarted;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    assert.equal(emitCount, 1);
+    releaseFirstEmit();
+    await waitFor(() => harness.events.length === 1);
+    manager.unsubscribeConnection("conn-4");
+});
+
+function createStreamContext(
+    connectionId: string,
+    requestId: string,
+    beforeEmit?: () => Promise<void>
+): {
     context: PrefixRouteContext;
     events: Array<{ module?: string; name: string; payload?: JsonValue; seq?: number }>;
     initialPayload?: JsonValue;
@@ -106,6 +142,7 @@ function createStreamContext(connectionId: string, requestId: string): {
         async cancel() {},
         async complete() {},
         async emit(name, payload, seq, module) {
+            await beforeEmit?.();
             result.events.push({
                 ...(module === undefined ? {} : { module }),
                 name,

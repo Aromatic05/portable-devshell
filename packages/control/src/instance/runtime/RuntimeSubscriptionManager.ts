@@ -12,6 +12,7 @@ export class RuntimeSubscriptionManager {
     readonly #pollIntervalMs: number;
     readonly #subscriptions = new Map<string, RuntimeSubscription>();
     #timer?: NodeJS.Timeout;
+    #pollPromise?: Promise<void>;
 
     constructor(pollIntervalMs = 25) {
         this.#pollIntervalMs = pollIntervalMs;
@@ -84,6 +85,21 @@ export class RuntimeSubscriptionManager {
     }
 
     async #poll(): Promise<void> {
+        if (this.#pollPromise !== undefined) {
+            return await this.#pollPromise;
+        }
+        const poll = this.#pollSubscriptions();
+        this.#pollPromise = poll;
+        try {
+            await poll;
+        } finally {
+            if (this.#pollPromise === poll) {
+                this.#pollPromise = undefined;
+            }
+        }
+    }
+
+    async #pollSubscriptions(): Promise<void> {
         for (const [key, subscription] of [...this.#subscriptions]) {
             const slice = subscription.instance.subscribe(subscription.nextSeq);
             try {
