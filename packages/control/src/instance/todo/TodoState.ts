@@ -51,16 +51,44 @@ export class TodoState {
     }
 
     normalizeDocument(value: unknown): TodoDocument {
-        if (!isRecord(value) || value.version !== 3 || !Array.isArray(value.active) || !Array.isArray(value.archived) || !Array.isArray(value.comments)) {
-            throw new Error("todo document must contain version=3 with active, archived, and comments arrays");
+        if (!isRecord(value) || !Array.isArray(value.archived)) {
+            throw new Error("todo document must contain a supported version and archived array");
         }
-        const active = value.active.map((entry) => this.#normalizeStoredState(entry));
+
+        const version = value.version;
+        let activeValues: unknown[];
+        let commentValues: unknown[];
+        if (version === 1) {
+            activeValues = value.active === undefined ? [] : [value.active];
+            commentValues = [];
+        } else if (version === 2 || version === 3) {
+            if (!Array.isArray(value.active)) {
+                throw new Error(`todo document version ${version} must contain an active array`);
+            }
+            activeValues = value.active;
+            if (value.comments === undefined && version === 2) {
+                commentValues = [];
+            } else if (Array.isArray(value.comments)) {
+                commentValues = value.comments;
+            } else {
+                throw new Error(`todo document version ${version} must contain a comments array`);
+            }
+        } else {
+            throw new Error("todo document version is unsupported");
+        }
+
+        const active = activeValues.map((entry) => this.#normalizeStoredState(entry, version === 1));
         const titles = new Set(active.map((entry) => entry.title));
         if (titles.size !== active.length) throw new Error("active todo titles must be unique");
+        const activeCtxIds = [...new Set(active.flatMap((entry) => entry.activeCtxId === undefined ? [] : [entry.activeCtxId]))];
+        const legacyCommentCtxId = activeCtxIds.length === 1 ? activeCtxIds[0] : undefined;
         return {
             active,
-            archived: value.archived.map((entry) => this.#normalizeStoredState(entry)),
-            comments: value.comments.map(normalizeComment),
+            archived: value.archived.map((entry) => this.#normalizeStoredState(entry, version === 1)),
+            comments: commentValues.map((entry) => normalizeComment(entry, {
+                fallbackCtxId: legacyCommentCtxId,
+                requireCtxId: version === 3
+            })),
             version: 3
         };
     }
@@ -148,10 +176,15 @@ export class TodoState {
     }
 
     currentAssociation(document: TodoDocument, ctxId?: string): ToolCallAssociation | undefined {
-        const active = document.active.find((entry) => entry.activeCtxId === ctxId);
-        const current = active?.items.find((item) => item.status === "in_progress");
-        if (active === undefined || current === undefined) return undefined;
-        return { taskId: active.taskId, todoItemId: current.id };
+        if (ctxId === undefined) return undefined;
+        const associations = document.active.flatMap((active) => {
+            if (active.activeCtxId !== ctxId) return [];
+            const current = active.items.find((item) => item.status === "in_progress");
+            return current === undefined
+                ? []
+                : [{ taskId: active.taskId, todoItemId: current.id }];
+        });
+        return associations.length === 1 ? associations[0] : undefined;
     }
 
     #createState(input: TodoWriteInput, ctxId: string): SharedTodoState {
@@ -169,11 +202,12 @@ export class TodoState {
         };
     }
 
-    #normalizeStoredState(value: unknown): SharedTodoState {
+    #normalizeStoredState(value: unknown, allowMissingTitle = false): SharedTodoState {
         if (!isRecord(value)) throw new Error("todo state must be an object");
         const activeCtxId = optionalString(value.activeCtxId ?? value.activeSessionId);
         const archivedAt = optionalString(value.archivedAt);
-        const title = requiredString(value.title, "title");
+        const taskId = requiredString(value.taskId, "taskId");
+        const title = optionalString(value.title) ?? (allowMissingTitle ? taskId : requiredString(value.title, "title"));
         const state: SharedTodoState = {
             ...(activeCtxId === undefined ? {} : { activeCtxId }),
             ...(archivedAt === undefined ? {} : { archivedAt }),
@@ -185,7 +219,7 @@ export class TodoState {
             items: normalizeItems(value.items),
             originInstance: requiredString(value.originInstance, "originInstance"),
             revision: requiredRevision(value.revision),
-            taskId: requiredString(value.taskId, "taskId"),
+            taskId,
             title,
             updatedAt: requiredString(value.updatedAt, "updatedAt")
         };
@@ -225,12 +259,21 @@ function normalizeInput(input: TodoWriteInput): TodoWriteInput {
     };
 }
 
-function normalizeComment(value: unknown): TodoComment {
+function normalizeComment(
+    value: unknown,
+    options: { fallbackCtxId?: string; requireCtxId: boolean }
+): TodoComment {
     if (!isRecord(value)) throw new Error("todo comment must be an object");
+    const id = requiredString(value.id, "comment.id");
+    const storedCtxId = optionalString(value.ctxId);
+    const ctxId = storedCtxId ?? options.fallbackCtxId ?? `legacy-unscoped:${id}`;
+    if (options.requireCtxId && storedCtxId === undefined) {
+        throw new Error("comment.ctxId must be a non-empty string");
+    }
     return {
         createdAt: requiredString(value.createdAt, "comment.createdAt"),
-        ctxId: requiredString(value.ctxId, "comment.ctxId"),
-        id: requiredString(value.id, "comment.id"),
+        ctxId,
+        id,
         text: normalizeText(value.text, "comment.text")
     };
 }
