@@ -62,7 +62,7 @@ interface WorkerInstanceDependencies {
     protocolClient: WorkerProtocolClient;
     rpcBridge: WorkerRpcBridge;
     stateMachine: InstanceStateMachine;
-    toolCallAssociationProvider?: () => ToolCallAssociation | undefined;
+    toolCallAssociationProvider?: (context: ToolCallContext) => ToolCallAssociation | undefined;
     toolCallHistory: AuditToolCallHistory;
     toolCallScheduler: WorkerToolCallScheduler;
     toolInvoker: WorkerToolInvoker;

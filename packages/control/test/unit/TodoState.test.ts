@@ -27,9 +27,9 @@ test("TodoState owns validation, transitions, summaries, and associations", () =
         "ctx-1"
     );
 
-    assert.equal(created.document.active?.taskId, "task-fixed");
+    assert.equal(created.document.active[0]?.taskId, "task-fixed");
     assert.deepEqual(created.events.map((event) => event.type), ["todo.created"]);
-    assert.deepEqual(state.readResult(created.document), {
+    assert.deepEqual(state.readResult(created.document, "Implement"), {
         items: [
             { content: "Inspect", id: "inspect", status: "completed" },
             { content: "Implement", id: "implement", status: "in_progress" },
@@ -38,10 +38,20 @@ test("TodoState owns validation, transitions, summaries, and associations", () =
         revision: 1,
         summary: { completed: 1, currentItemId: "implement", total: 3 },
         taskId: "task-fixed",
-        title: "Implement"
+        title: "Implement",
+        tasks: [{
+            completed: 1,
+            currentItem: "Implement",
+            revision: 1,
+            status: "in_progress",
+            taskId: "task-fixed",
+            title: "Implement",
+            total: 3,
+            updatedAt: "2026-07-16T00:00:00.000Z"
+        }]
     });
     assert.equal(state.activeSummary(created.document)?.status, "in_progress");
-    assert.deepEqual(state.currentAssociation(created.document), {
+    assert.deepEqual(state.currentAssociation(created.document, "ctx-1"), {
         taskId: "task-fixed",
         todoItemId: "implement"
     });
@@ -55,6 +65,7 @@ test("TodoState exposes only actionable work as activeTodo", () => {
         state.emptyDocument(),
         {
             revision: 0,
+            title: "Work",
             todos: [{
                 content: "Work",
                 ...(status === "failed" ? { detail: "Needs attention" } : {}),
@@ -67,9 +78,9 @@ test("TodoState exposes only actionable work as activeTodo", () => {
 
     const completed = transition("completed");
     assert.equal(state.activeSummary(completed), undefined);
-    assert.equal(state.readResult(completed).taskId, "task-fixed");
+    assert.equal(state.readResult(completed).taskId, undefined);
     assert.equal(state.activeSummary(transition("cancelled")), undefined);
-    assert.equal(state.activeSummary(transition("failed"))?.status, "failed");
+    assert.equal(state.activeSummary(transition("failed")), undefined);
 });
 
 test("TodoState archives terminal work before creating a replacement task", () => {
@@ -87,6 +98,7 @@ test("TodoState archives terminal work before creating a replacement task", () =
         state.emptyDocument(),
         {
             revision: 0,
+            title: "Done",
             todos: [{ content: "Done", id: "done", status: "completed" }]
         },
         "ctx-1"
@@ -95,6 +107,7 @@ test("TodoState archives terminal work before creating a replacement task", () =
         first.document,
         {
             revision: 0,
+            title: "Continue",
             todos: [{ content: "Continue", id: "continue", status: "pending" }]
         },
         "ctx-2"
@@ -102,11 +115,29 @@ test("TodoState archives terminal work before creating a replacement task", () =
 
     assert.equal(second.document.archived.length, 1);
     assert.equal(second.document.archived[0]?.taskId, "task-1");
-    assert.equal(second.document.active?.taskId, "task-2");
-    assert.deepEqual(second.events.map((event) => event.type), [
-        "todo.archived",
-        "todo.created"
-    ]);
+    assert.equal(second.document.active[0]?.taskId, "task-2");
+    assert.deepEqual(first.events.map((event) => event.type), ["todo.created", "todo.archived"]);
+    assert.deepEqual(second.events.map((event) => event.type), ["todo.created"]);
+});
+
+test("TodoState lists live titles and isolates concurrent task revisions", () => {
+    let sequence = 0;
+    const state = new TodoState("aromatic-pc", { taskId: () => `task-${++sequence}` });
+    const first = state.transition(state.emptyDocument(), {
+        revision: 0,
+        title: "First",
+        todos: [{ content: "First work", id: "first", status: "in_progress" }]
+    }, "ctx-first");
+    const second = state.transition(first.document, {
+        revision: 0,
+        title: "Second",
+        todos: [{ content: "Second work", id: "second", status: "pending" }]
+    }, "ctx-second");
+
+    assert.deepEqual(state.readResult(second.document).tasks?.map((task) => task.title), ["First", "Second"]);
+    assert.equal(state.readResult(second.document, "First").taskId, "task-1");
+    assert.equal(state.currentAssociation(second.document, "ctx-first")?.taskId, "task-1");
+    assert.equal(state.currentAssociation(second.document, "ctx-second"), undefined);
 });
 
 test("TodoState rejects invalid item sets and stale revisions", () => {
@@ -115,6 +146,7 @@ test("TodoState rejects invalid item sets and stale revisions", () => {
         state.emptyDocument(),
         {
             revision: 0,
+            title: "Invalid",
             todos: [
                 { content: "One", id: "same", status: "in_progress" },
                 { content: "Two", id: "same", status: "in_progress" }
@@ -126,6 +158,7 @@ test("TodoState rejects invalid item sets and stale revisions", () => {
         state.emptyDocument(),
         {
             revision: 0,
+            title: "Blocked",
             todos: [{ content: "Blocked", id: "blocked", status: "blocked" }]
         },
         "ctx"
@@ -135,6 +168,7 @@ test("TodoState rejects invalid item sets and stale revisions", () => {
         state.emptyDocument(),
         {
             revision: 0,
+            title: "Pending",
             todos: [{ content: "Pending", id: "pending", status: "pending" }]
         },
         "ctx"
@@ -143,6 +177,7 @@ test("TodoState rejects invalid item sets and stale revisions", () => {
         created.document,
         {
             revision: 0,
+            title: "Pending",
             todos: [{ content: "Stale", id: "stale", status: "pending" }]
         },
         "ctx"
@@ -170,5 +205,5 @@ test("TodoStore persists and reloads normalized state independently", async () =
     await store.write(transition.document);
     const reloaded = new TodoStore({ filePath, instanceName: "aromatic-pc", state });
     assert.deepEqual(reloaded.read(), transition.document);
-    assert.equal(state.readResult(reloaded.read()).summary.currentItemId, "write");
+    assert.equal(state.readResult(reloaded.read(), "Persist").summary.currentItemId, "write");
 });

@@ -35,17 +35,17 @@ export class TodoService {
         });
     }
 
-    async read(): Promise<TodoReadResult> {
+    async read(title?: string): Promise<TodoReadResult> {
         await this.#operation;
-        return this.#readDocument(this.#store.read());
+        return this.#readDocument(this.#store.read(), title);
     }
 
     summary(): ActiveTodoSummary | undefined {
         return this.#state.activeSummary(this.#store.read());
     }
 
-    currentAssociation(): ToolCallAssociation | undefined {
-        return this.#state.currentAssociation(this.#store.read());
+    currentAssociation(ctxId?: string): ToolCallAssociation | undefined {
+        return this.#state.currentAssociation(this.#store.read(), ctxId);
     }
 
     async write(
@@ -56,7 +56,7 @@ export class TodoService {
             const transition = this.#createTransition(input, ctxId);
             await this.#persistTransition(transition);
             await this.#emitTransition(transition);
-            return this.#readDocument(transition.document);
+            return this.#readDocument(transition.document, input.title);
         });
     }
 
@@ -81,8 +81,8 @@ export class TodoService {
         }
     }
 
-    #readDocument(document: TodoDocument): TodoReadResult {
-        return this.#state.readResult(document);
+    #readDocument(document: TodoDocument, title?: string): TodoReadResult {
+        return this.#state.readResult(document, title);
     }
 
     async #runExclusive<T>(

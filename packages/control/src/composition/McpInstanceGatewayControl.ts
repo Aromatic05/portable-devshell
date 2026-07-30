@@ -80,8 +80,8 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
         }) as unknown as JsonValue;
     }
 
-    async readTodo(instance: string): Promise<JsonValue> {
-        return (await this.#requireDescriptor(instance).todo.read()) as unknown as JsonValue;
+    async readTodo(instance: string, title?: string): Promise<JsonValue> {
+        return (await this.#requireDescriptor(instance).todo.read(title)) as unknown as JsonValue;
     }
 
     listTools(instance: string): ToolDefinition[] {

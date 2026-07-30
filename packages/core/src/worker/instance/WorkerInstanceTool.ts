@@ -27,7 +27,7 @@ interface WorkerToolOptions {
     assertReady(): void;
     instanceName: InstanceName;
     logStore: LogStoreInstance;
-    toolCallAssociationProvider?: () => ToolCallAssociation | undefined;
+    toolCallAssociationProvider?: (context: ToolCallContext) => ToolCallAssociation | undefined;
     toolCallHistory: AuditToolCallHistory;
     toolCallScheduler: WorkerToolCallScheduler;
     toolInvoker: WorkerToolInvoker;

@@ -25,7 +25,7 @@ export interface ActiveTodoSummary {
     revision: number;
     status: TodoStatus | "none";
     taskId: string;
-    title?: string;
+    title: string;
     total: number;
 }
 
@@ -38,7 +38,7 @@ export interface TodoState {
     originInstance: string;
     revision: number;
     taskId: string;
-    title?: string;
+    title: string;
     updatedAt: string;
 }
 
@@ -48,11 +48,16 @@ export interface TodoReadResult {
     summary: TodoSummary;
     taskId?: string;
     title?: string;
+    tasks?: TodoTaskSummary[];
+}
+
+export interface TodoTaskSummary extends ActiveTodoSummary {
+    updatedAt: string;
 }
 
 export interface TodoWriteInput {
     revision: number;
-    title?: string;
+    title: string;
     todos: TodoItem[];
 }
 

@@ -22,6 +22,7 @@ test("TodoService creates, validates revisions, persists atomically, and emits d
         items: [],
         revision: 0,
         summary: { completed: 0, total: 0 },
+        tasks: [],
     });
 
     const created = await service.write(
@@ -46,18 +47,19 @@ test("TodoService creates, validates revisions, persists atomically, and emits d
     assert.equal(created.summary.completed, 1);
     assert.equal(created.summary.total, 3);
     assert.equal(created.summary.currentItemId, "implement");
-    assert.equal(service.currentAssociation()?.todoItemId, "implement");
+    assert.equal(service.currentAssociation("mcp-session")?.todoItemId, "implement");
     assert.equal(events[0]?.type, "todo.created");
 
     const persisted = JSON.parse(await readFile(filePath, "utf8")) as {
-        active: { revision: number };
+        active: Array<{ revision: number }>;
     };
-    assert.equal(persisted.active.revision, 1);
+    assert.equal(persisted.active[0]?.revision, 1);
 
     await assert.rejects(
         service.write(
             {
                 revision: 0,
+                title: "Implement todo",
                 todos: [{ content: "Stale", id: "stale", status: "pending" }],
             },
             "mcp-session",
@@ -84,6 +86,7 @@ test("TodoService rejects duplicate ids, multiple in-progress items, and missing
         service.write(
             {
                 revision: 0,
+                title: "Invalid",
                 todos: [
                     { content: "One", id: "same", status: "in_progress" },
                     { content: "Two", id: "same", status: "in_progress" },
@@ -97,6 +100,7 @@ test("TodoService rejects duplicate ids, multiple in-progress items, and missing
         service.write(
             {
                 revision: 0,
+                title: "Invalid",
                 todos: [
                     { content: "Blocked", id: "blocked", status: "blocked" },
                 ],
@@ -159,7 +163,7 @@ test("TodoService emits terminal events once, archives terminal tasks, and reloa
     assert.equal(next.title, "Second task");
 
     const reloaded = createService();
-    assert.deepEqual(await reloaded.read(), next);
+    assert.deepEqual(await reloaded.read("Second task"), next);
     const persisted = JSON.parse(await readFile(filePath, "utf8")) as {
         archived: unknown[];
     };

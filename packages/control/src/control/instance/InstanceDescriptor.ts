@@ -9,7 +9,7 @@ import type {
 
 export interface InstanceTodoPort {
     currentAssociation(): ToolCallAssociation | undefined;
-    read(): Promise<TodoReadResult>;
+    read(title?: string): Promise<TodoReadResult>;
     summary(): ActiveTodoSummary | undefined;
     write(input: TodoWriteInput, ctxId: string): Promise<TodoReadResult>;
 }

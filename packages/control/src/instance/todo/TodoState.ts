@@ -11,14 +11,15 @@ import {
     type TodoState as SharedTodoState,
     type TodoStatus,
     type TodoSummary,
+    type TodoTaskSummary,
     type TodoWriteInput,
     type ToolCallAssociation
 } from "@portable-devshell/shared";
 
 export interface TodoDocument {
-    active?: SharedTodoState;
+    active: SharedTodoState[];
     archived: SharedTodoState[];
-    version: 1;
+    version: 2;
 }
 
 export interface TodoTransition {
@@ -44,72 +45,84 @@ export class TodoState {
     }
 
     emptyDocument(): TodoDocument {
-        return { archived: [], version: 1 };
+        return { active: [], archived: [], version: 2 };
     }
 
     normalizeDocument(value: unknown): TodoDocument {
-        if (!isRecord(value) || value.version !== 1 || !Array.isArray(value.archived)) {
-            throw new Error("todo document must contain version=1 and archived array");
+        if (!isRecord(value) || value.version !== 2 || !Array.isArray(value.active) || !Array.isArray(value.archived)) {
+            throw new Error("todo document must contain version=2 with active and archived arrays");
         }
+        const active = value.active.map((entry) => this.#normalizeStoredState(entry));
+        const titles = new Set(active.map((entry) => entry.title));
+        if (titles.size !== active.length) throw new Error("active todo titles must be unique");
         return {
-            ...(value.active === undefined ? {} : { active: this.#normalizeStoredState(value.active) }),
+            active,
             archived: value.archived.map((entry) => this.#normalizeStoredState(entry)),
-            version: 1
+            version: 2
         };
     }
 
     transition(document: TodoDocument, input: TodoWriteInput, ctxId: string): TodoTransition {
         const normalized = normalizeInput(input);
-        const previous = document.active;
+        const previousIndex = document.active.findIndex((entry) => entry.title === normalized.title);
+        const previous = previousIndex === -1 ? undefined : document.active[previousIndex];
         const events: TodoTransition["events"] = [];
+        const active = [...document.active];
         const archived = [...document.archived];
-        let active: SharedTodoState;
+        let next: SharedTodoState;
 
         if (previous === undefined) {
             requireRevision(normalized.revision, 0);
-            active = this.#createState(normalized, ctxId);
-            events.push(todoEvent("todo.created", active));
-        } else if (normalized.revision === 0 && isTerminal(previous)) {
-            const archivedState = { ...previous, archivedAt: this.#now() };
-            archived.push(archivedState);
-            events.push(todoEvent("todo.archived", archivedState));
-            active = this.#createState(normalized, ctxId);
-            events.push(todoEvent("todo.created", active));
+            next = this.#createState(normalized, ctxId);
+            active.push(next);
+            events.push(todoEvent("todo.created", next));
         } else {
             requireRevision(normalized.revision, previous.revision);
-            active = {
+            next = {
                 ...previous,
                 activeCtxId: ctxId,
                 items: normalized.todos,
                 revision: previous.revision + 1,
-                title: normalized.title,
                 updatedAt: this.#now()
             };
             events.push(todoEvent(
-                !isCompleted(previous) && isCompleted(active) ? "todo.completed" : "todo.updated",
-                active
+                !isCompleted(previous) && isCompleted(next) ? "todo.completed" : "todo.updated",
+                next
             ));
+            active[previousIndex] = next;
         }
 
-        return { document: { active, archived, version: 1 }, events };
+        if (isTerminal(next)) {
+            const archivedState = { ...next, archivedAt: this.#now() };
+            const activeIndex = active.findIndex((entry) => entry.taskId === next.taskId);
+            active.splice(activeIndex, 1);
+            archived.push(archivedState);
+            events.push(todoEvent("todo.archived", archivedState));
+        }
+        return { document: { active, archived, version: 2 }, events };
     }
 
-    readResult(document: TodoDocument): TodoReadResult {
-        const state = document.active;
+    readResult(document: TodoDocument, title?: string): TodoReadResult {
+        const tasks = this.#taskSummaries(document);
+        if (title === undefined) {
+            return { items: [], revision: 0, summary: { completed: 0, total: 0 }, tasks };
+        }
+        const state = document.active.find((entry) => entry.title === title);
         if (state === undefined) {
-            return { items: [], revision: 0, summary: { completed: 0, total: 0 } };
+            return { items: [], revision: 0, summary: { completed: 0, total: 0 }, tasks };
         }
         return {
             items: state.items.map((item) => ({ ...item })),
             revision: state.revision,
             summary: summarize(state.items),
             taskId: state.taskId,
-            title: state.title
+            title: state.title,
+            tasks
         };
     }
 
     activeSummary(document: TodoDocument): ActiveTodoSummary | undefined {
-        const state = document.active;
+        const state = document.active[0];
         if (state === undefined) return undefined;
         const status = deriveStatus(state.items);
         if (status === "completed" || status === "cancelled" || status === "none") {
@@ -130,8 +143,8 @@ export class TodoState {
         };
     }
 
-    currentAssociation(document: TodoDocument): ToolCallAssociation | undefined {
-        const active = document.active;
+    currentAssociation(document: TodoDocument, ctxId?: string): ToolCallAssociation | undefined {
+        const active = document.active.find((entry) => entry.activeCtxId === ctxId);
         const current = active?.items.find((item) => item.status === "in_progress");
         if (active === undefined || current === undefined) return undefined;
         return { taskId: active.taskId, todoItemId: current.id };
@@ -156,7 +169,7 @@ export class TodoState {
         if (!isRecord(value)) throw new Error("todo state must be an object");
         const activeCtxId = optionalString(value.activeCtxId ?? value.activeSessionId);
         const archivedAt = optionalString(value.archivedAt);
-        const title = optionalString(value.title);
+        const title = requiredString(value.title, "title");
         const state: SharedTodoState = {
             ...(activeCtxId === undefined ? {} : { activeCtxId }),
             ...(archivedAt === undefined ? {} : { archivedAt }),
@@ -169,7 +182,7 @@ export class TodoState {
             originInstance: requiredString(value.originInstance, "originInstance"),
             revision: requiredRevision(value.revision),
             taskId: requiredString(value.taskId, "taskId"),
-            ...(title === undefined ? {} : { title }),
+            title,
             updatedAt: requiredString(value.updatedAt, "updatedAt")
         };
         if (state.originInstance !== this.#instanceName) {
@@ -177,13 +190,32 @@ export class TodoState {
         }
         return state;
     }
+
+    #taskSummaries(document: TodoDocument): TodoTaskSummary[] {
+        return document.active.map((state) => {
+            const summary = summarize(state.items);
+            const current = summary.currentItemId === undefined
+                ? undefined
+                : state.items.find((item) => item.id === summary.currentItemId);
+            return {
+                completed: summary.completed,
+                currentItem: current?.content,
+                revision: state.revision,
+                status: deriveStatus(state.items),
+                taskId: state.taskId,
+                title: state.title,
+                total: summary.total,
+                updatedAt: state.updatedAt
+            };
+        });
+    }
 }
 
 function normalizeInput(input: TodoWriteInput): TodoWriteInput {
     if (!isRecord(input)) throw invalidTodo("todo_write requires an object input");
     return {
         revision: requiredRevision(input.revision),
-        title: input.title === undefined ? undefined : normalizeText(input.title, "title"),
+        title: normalizeText(input.title, "title"),
         todos: normalizeItems(input.todos)
     };
 }

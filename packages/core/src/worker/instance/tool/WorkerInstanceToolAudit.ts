@@ -20,7 +20,7 @@ import { throwIfToolCallAborted } from "./WorkerInstanceToolError.js";
 
 interface WorkerInstanceToolAuditOptions {
     appendEvent(type: InstanceEventInput["type"], data?: JsonValue): Promise<unknown>;
-    toolCallAssociationProvider?: () => ToolCallAssociation | undefined;
+    toolCallAssociationProvider?: (context: ToolCallContext) => ToolCallAssociation | undefined;
     toolCallHistory: AuditToolCallHistory;
 }
 
@@ -35,7 +35,7 @@ export type WorkerInstanceToolRunningContext = WorkerInstanceToolCallScope["even
 
 export class WorkerInstanceToolAudit {
     readonly #appendEvent: WorkerInstanceToolAuditOptions["appendEvent"];
-    readonly #toolCallAssociationProvider?: () => ToolCallAssociation | undefined;
+    readonly #toolCallAssociationProvider?: (context: ToolCallContext) => ToolCallAssociation | undefined;
     readonly #toolCallHistory: AuditToolCallHistory;
 
     constructor(options: WorkerInstanceToolAuditOptions) {
@@ -45,7 +45,7 @@ export class WorkerInstanceToolAudit {
     }
 
     createScope(toolName: string, input: JsonValue, context: ToolCallContext): WorkerInstanceToolCallScope {
-        return createWorkerInstanceToolCallScope(toolName, input, context, this.#toolCallAssociationProvider?.());
+        return createWorkerInstanceToolCallScope(toolName, input, context, this.#toolCallAssociationProvider?.(context));
     }
 
     runningContext(

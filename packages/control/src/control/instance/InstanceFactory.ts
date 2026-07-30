@@ -25,7 +25,7 @@ export class InstanceFactory {
             instanceName: instance.name
         });
         const worker = this.#workerInstanceFactory.create(this.#toWorkerConfig(instance, reverseConnector, homeDirectory), {
-            toolCallAssociationProvider: () => todo.currentAssociation()
+            toolCallAssociationProvider: (context) => todo.currentAssociation(context.ctxId)
         });
         workerHolder.value = worker;
 

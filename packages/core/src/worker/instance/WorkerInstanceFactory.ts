@@ -1,4 +1,4 @@
-import type { ApprovalRequest, InstanceEvent, ToolCallAssociation, ToolCallRecord } from "@portable-devshell/shared";
+import type { ApprovalRequest, InstanceEvent, ToolCallAssociation, ToolCallContext, ToolCallRecord } from "@portable-devshell/shared";
 import type { InstanceLogEntry } from "../../log/store/LogStoreInstance.js";
 
 import { ApprovalManager, ApprovalStore } from "../../approval/ApprovalManager.js";
@@ -25,7 +25,7 @@ import {
 export class WorkerInstanceFactory {
     create(
         config: WorkerInstanceConfig,
-        options: { toolCallAssociationProvider?: () => ToolCallAssociation | undefined } = {}
+        options: { toolCallAssociationProvider?: (context: ToolCallContext) => ToolCallAssociation | undefined } = {}
     ): WorkerInstance {
         const resolved = resolveWorkerInstanceConfig(config);
         const paths = new InstancePaths(resolved.name, resolved.homeDirectory);
