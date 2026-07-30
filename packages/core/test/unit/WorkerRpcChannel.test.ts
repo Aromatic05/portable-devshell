@@ -57,11 +57,16 @@ test("WorkerRpcChannelBase isolates disconnect cleanup and listeners", async () 
         channel.disconnect(error, () => {
             throw new Error("cleanup failed");
         });
+        let lateMessages = 0;
+        channel.onMessage(() => {
+            lateMessages += 1;
+        });
         channel.publish({ ignored: true });
         channel.onDisconnect((value) => received.push(value));
         await new Promise((resolve) => setImmediate(resolve));
 
         assert.deepEqual(received, [error, error]);
+        assert.equal(lateMessages, 0);
         assert.equal(warnings.length, 2);
     } finally {
         console.warn = originalWarn;

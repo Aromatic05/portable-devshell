@@ -18,6 +18,9 @@ export abstract class WorkerRpcChannelBase implements WorkerRpcChannel {
     }
 
     onMessage(listener: (message: JsonValue) => void): () => void {
+        if (this.#disconnected) {
+            return () => undefined;
+        }
         this.#messageListeners.add(listener);
         return () => this.#messageListeners.delete(listener);
     }
