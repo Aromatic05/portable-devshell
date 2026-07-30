@@ -15,6 +15,7 @@ describe("typed web client routing", () => {
         const hello = await clients.service.hello();
         await clients.service.status();
         await clients.instance.list();
+        await clients.overview.get();
         await clients.runtime.readLogs("demo", { limit: 5 });
         await clients.tool.listApprovals("demo");
         await clients.mcp.status();
@@ -25,6 +26,7 @@ describe("typed web client routing", () => {
             "service.hello",
             "service.status",
             "instance.list",
+            "overview.get",
             "runtime.readLogs",
             "tool.listApprovals",
             "mcp.status",

@@ -27,6 +27,18 @@ describe("WebStore", () => {
         expect(listApprovals).not.toHaveBeenCalled();
     });
 
+    it("uses the server overview as the authoritative operational read model", async () => {
+        const clients = fakeClients();
+        const overview = { ...operationalOverview(), alerts: [{ detail: "The server classified this alert.", id: "server-alert", kind: "overview.partial" as const, severity: "attention" as const, title: "Server alert" }], health: "critical" as const };
+        clients.overview.get = vi.fn(async () => overview);
+
+        const store = new WebStore(clients);
+        await store.load();
+
+        expect(store.state.overview).toBe(overview);
+        expect(clients.overview.get).toHaveBeenCalledOnce();
+    });
+
     it("reconnects once and restores bounded subscriptions from the last sequence", async () => {
         const subscriptions: number[] = [];
         const clients = fakeClients({
@@ -94,6 +106,32 @@ describe("WebStore", () => {
         await Promise.all([first, second]);
         expect(store.state.operations["stop:demo"]).toBeUndefined();
     });
+
+    it("debounces an overview refresh after a runtime event", async () => {
+        vi.useFakeTimers();
+        const clients = fakeClients({ subscribe: async () => eventStream() });
+        clients.overview.get = vi.fn(async () => operationalOverview());
+        const store = new WebStore(clients);
+        await store.load();
+
+        await vi.waitFor(() => expect(clients.overview.get).toHaveBeenCalledOnce());
+        await vi.runAllTimersAsync();
+        await vi.waitFor(() => expect(clients.overview.get).toHaveBeenCalledTimes(2));
+        vi.useRealTimers();
+    });
+
+    it("enters offline state when initial overview loading fails", async () => {
+        const clients = fakeClients();
+        clients.overview.get = vi.fn(async () => {
+            throw new Error("overview unavailable");
+        });
+
+        const store = new WebStore(clients);
+        await store.load();
+
+        expect(store.state.connection).toBe("offline");
+        expect(store.state.error).toBe("overview unavailable");
+    });
 });
 
 function fakeClients(
@@ -119,6 +157,7 @@ function fakeClients(
         instance: {
             list: async () => [{ mcpEnabled: true, name: "demo", snapshot }],
         },
+        overview: { get: async () => operationalOverview() },
         tool: {
             listApprovals: async () => [],
             getApproval: async () => {
@@ -152,6 +191,12 @@ function fakeClients(
     };
 }
 
+function operationalOverview() {
+    return {
+        activity: [], alerts: [], controller: { pid: 1, uptimeSeconds: 1 }, counts: { activeTodos: 0, failedCalls24h: 0, instancesAttention: 0, instancesCritical: 0, instancesReady: 1, instancesTotal: 1, pendingApprovals: 0 }, generatedAt: "2026-07-31T00:00:00Z", health: "healthy" as const, instances: [], todos: [],
+    };
+}
+
 function pendingStream(): WebRuntimeStream {
     return {
         close() {},
@@ -163,5 +208,19 @@ function gapStream(): WebRuntimeStream {
     return {
         close() {},
         next: async () => ({ kind: "gap" }),
+    } as unknown as WebRuntimeStream;
+}
+
+function eventStream(): WebRuntimeStream {
+    let emitted = false;
+    return {
+        close() {},
+        next: async () => {
+            if (!emitted) {
+                emitted = true;
+                return { kind: "event", event: { at: "2026-07-31T00:00:00Z", instanceName: asInstanceName("demo"), seq: 4, type: "instance.statusChanged" } };
+            }
+            return await new Promise<never>(() => undefined);
+        },
     } as unknown as WebRuntimeStream;
 }

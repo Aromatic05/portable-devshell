@@ -1,32 +1,47 @@
 import type { WebState } from "../state/WebStore.js";
-import { alerts, openTodos, pendingApprovals, recentActivity } from "../selectors/readModel.js";
+import type { InstanceEvent } from "@portable-devshell/shared/browser";
+import { overviewActivity, overviewAlerts } from "../selectors/readModel.js";
 
 export function Overview({ state }: { state: WebState }) {
-    const currentAlerts = alerts(state);
+    if (state.overview === undefined) {
+        return <section><h2>Overview</h2><p className="empty">{state.connection === "offline" ? "Overview is unavailable while offline." : "Loading operational overview…"}</p></section>;
+    }
+    const overview = state.overview;
+    const currentAlerts = overviewAlerts(overview);
     return (
         <section>
             <h2>Overview</h2>
             <div className="metrics" aria-label="Operational summary">
-                <Metric label="Service" value={state.service?.ok ? "Ready" : "Unavailable"} />
-                <Metric label="Instances" value={`${state.instances.length} total · ${currentAlerts.filter((alert) => alert.id.startsWith("instance:")).length} attention`} />
-                <Metric label="Pending approvals" value={String(pendingApprovals(state))} />
-                <Metric label="Open todos" value={String(openTodos(state))} />
+                <Metric label="Health" value={overview.health} />
+                <Metric label="Instances" value={`${overview.counts.instancesTotal} total · ${overview.counts.instancesAttention} attention · ${overview.counts.instancesCritical} critical`} />
+                <Metric label="Pending approvals" value={String(overview.counts.pendingApprovals)} />
+                <Metric label="Open todos" value={String(overview.counts.activeTodos)} />
             </div>
             <div className="overview-grid">
                 <section>
                     <h3>Alerts</h3>
-                    {currentAlerts.length === 0 ? <p className="empty">No current alerts.</p> : <ul className="alerts">{currentAlerts.slice(0, 8).map((alert) => <li className={alert.severity} key={alert.id}>{alert.message}</li>)}</ul>}
+                    {currentAlerts.length === 0 ? <p className="empty">No current alerts.</p> : <ul className="alerts">{currentAlerts.map((alert) => <li className={alert.severity} key={alert.id}><strong>{alert.title}</strong><br />{alert.detail}</li>)}</ul>}
                 </section>
                 <section>
                     <h3>Recent activity</h3>
-                    <ActivityList events={recentActivity(state).slice(0, 6)} empty="No recent activity." />
+                    {overviewActivity(overview).length === 0 ? <p className="empty">No recent activity.</p> : <ol className="feed">{overviewActivity(overview).map((activity) => <li key={activity.callId}><time>{activity.completedAt ?? activity.startedAt}</time><strong>{activity.instance}</strong> {activity.toolName} · {activity.status}</li>)}</ol>}
+                </section>
+            </div>
+            <div className="overview-grid">
+                <section>
+                    <h3>Instances</h3>
+                    {overview.instances.length === 0 ? <p className="empty">No instances in the operational overview.</p> : <ul className="summary-list">{overview.instances.slice(0, 6).map((instance) => <li key={instance.name}><strong>{instance.name}</strong> {instance.snapshot.status} · {instance.snapshot.connectionState} · {instance.pendingApprovals} pending approvals</li>)}</ul>}
+                </section>
+                <section>
+                    <h3>Todo summary</h3>
+                    {overview.todos.length === 0 ? <p className="empty">No active todos.</p> : <ul className="summary-list">{overview.todos.slice(0, 6).map((todo) => <li key={`${todo.instance}-${todo.taskId}`}><strong>{todo.title}</strong> {todo.instance} · {todo.completed}/{todo.total} complete · {todo.status}</li>)}</ul>}
                 </section>
             </div>
         </section>
     );
 }
 
-export function ActivityList({ events, empty }: { events: ReturnType<typeof recentActivity>; empty: string }) {
+export function ActivityList({ events, empty }: { events: InstanceEvent[]; empty: string }) {
     return events.length === 0 ? <p className="empty">{empty}</p> : <ol className="feed">{events.map((event) => <li key={`${event.instanceName}-${event.seq}`}><time>{event.at}</time><strong>{event.instanceName}</strong> {event.type}</li>)}</ol>;
 }
 

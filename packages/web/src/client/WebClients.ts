@@ -24,6 +24,7 @@ import {
     type OAuthApprovalRequest,
 } from "@portable-devshell/shared/browser";
 import type { TodoRpcEnvelope } from "@portable-devshell/shared";
+import type { OperationalOverview } from "../../../shared/src/dto/overview/DtoOperationalOverview.js";
 
 import { BrowserWebSocketChannelProvider } from "../rpc/BrowserWebSocketChannelProvider.js";
 
@@ -35,6 +36,7 @@ export interface WebClients {
         status(): Promise<{ instanceCount: number; ok: boolean; pid?: number }>;
     };
     instance: { list(): Promise<InstanceListEntry[]> };
+    overview: { get(): Promise<OperationalOverview> };
     runtime: {
         snapshot(instance: string): Promise<InstanceRuntimeEnvelope>;
         refresh(instance: string): Promise<InstanceRuntimeEnvelope>;
@@ -127,6 +129,7 @@ export function createWebClients(
     });
     const service = controlClientModule(connection, "service");
     const instance = controlClientModule(connection, "instance");
+    const overview = controlClientModule(connection, "overview");
     const mcp = controlClientModule(connection, "mcp");
     const runtime = instanceClientModule(connection, "runtime");
     const tool = instanceClientModule(connection, "tool");
@@ -144,6 +147,7 @@ export function createWebClients(
             status: () => service.request("status"),
         },
         instance: { list: () => instance.request("list") },
+        overview: { get: () => overview.request("get") },
         runtime: {
             snapshot: (name) => runtime.request(name, "snapshot"),
             refresh: (name) => runtime.request(name, "refresh"),

@@ -7,6 +7,7 @@ import {
     type OAuthApprovalRequest,
 } from "@portable-devshell/shared/browser";
 import type { TodoReadResult } from "@portable-devshell/shared";
+import type { OperationalOverview } from "../../../shared/src/dto/overview/DtoOperationalOverview.js";
 
 import type { WebClients, WebRuntimeStream } from "../client/WebClients.js";
 
@@ -25,6 +26,7 @@ export interface WebState {
     partialFailures: Record<string, string>;
     operations: Record<string, "pending">;
     notice?: string;
+    overview?: OperationalOverview;
 }
 
 const initial: WebState = {
@@ -47,6 +49,8 @@ export class WebStore {
     #stopped = false;
     #loadPromise?: Promise<void>;
     #reconnectPromise?: Promise<void>;
+    #overviewRefresh?: ReturnType<typeof setTimeout>;
+    #overviewPromise?: Promise<void>;
 
     constructor(readonly clients: WebClients) {}
 
@@ -153,6 +157,9 @@ export class WebStore {
             clearTimeout(timeout);
         }
         this.#logRefreshes.clear();
+        if (this.#overviewRefresh !== undefined) {
+            clearTimeout(this.#overviewRefresh);
+        }
         this.clients.close();
     }
 
@@ -169,10 +176,11 @@ export class WebStore {
                     `Incompatible control protocol version: ${hello.protocolVersion}.`,
                 );
             }
-            const [service, instances, mcpStatus] = await Promise.all([
+            const [service, instances, mcpStatus, overview] = await Promise.all([
                 this.clients.service.status(),
                 this.clients.instance.list(),
                 this.clients.mcp.status(),
+                this.clients.overview.get(),
             ]);
             const oauthApprovals =
                 mcpStatus.authMode === "oauth2" && mcpStatus.oauthReady === true
@@ -208,6 +216,7 @@ export class WebStore {
                 approvals,
                 todos,
                 partialFailures,
+                overview,
             });
             await Promise.all(
                 instances.map(({ name, snapshot }) =>
@@ -215,7 +224,11 @@ export class WebStore {
                 ),
             );
         } catch (error) {
-            this.setPartialFailure(`stream:${name}`, error);
+            this.set({
+                ...this.#state,
+                connection: "offline",
+                error: message(error),
+            });
         }
     }
 
@@ -314,6 +327,9 @@ export class WebStore {
         if (event.type.startsWith("approval.")) {
             void this.refreshApprovals(name);
         }
+        if (event.type !== "log.appended") {
+            this.scheduleOverviewRefresh();
+        }
     }
 
     private scheduleLogRefresh(name: string): void {
@@ -353,6 +369,33 @@ export class WebStore {
         }
     }
 
+    private scheduleOverviewRefresh(): void {
+        if (this.#overviewRefresh !== undefined) {
+            return;
+        }
+        this.#overviewRefresh = setTimeout(() => {
+            this.#overviewRefresh = undefined;
+            void this.refreshOverview();
+        }, 250);
+    }
+
+    private async refreshOverview(): Promise<void> {
+        if (this.#overviewPromise !== undefined) {
+            return await this.#overviewPromise;
+        }
+        this.#overviewPromise = this.clients.overview.get()
+            .then((overview) => {
+                this.set({ ...this.#state, overview });
+            })
+            .catch((error: unknown) => {
+                this.setPartialFailure("overview", error);
+            })
+            .finally(() => {
+                this.#overviewPromise = undefined;
+            });
+        return await this.#overviewPromise;
+    }
+
     private async mutate(
         operation: string,
         success: string,
@@ -368,6 +411,7 @@ export class WebStore {
         });
         try {
             await action();
+            await this.refreshOverview();
             const { [operation]: _completed, ...operations } = this.#state.operations;
             this.set({ ...this.#state, notice: success, operations });
         } catch (error) {

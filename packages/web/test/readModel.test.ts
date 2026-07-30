@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { asInstanceName, type InstanceSnapshot } from "@portable-devshell/shared/browser";
 
-import { alerts, openTodos, todoSummaries } from "../src/selectors/readModel.js";
+import { openTodos, todoSummaries } from "../src/selectors/readModel.js";
 import type { WebState } from "../src/state/WebStore.js";
 
 const snapshot: InstanceSnapshot = {
@@ -13,7 +13,7 @@ const snapshot: InstanceSnapshot = {
     status: "failed",
 };
 
-it("aggregates read-only todos and derives alerts from actual state", () => {
+it("aggregates read-only todos without assigning operational health", () => {
     const state: WebState = {
         activity: [{ at: "2026-07-31T00:00:00Z", instanceName: asInstanceName("failed-instance"), seq: 4, type: "toolCall.failed" }],
         approvals: { "failed-instance": [] }, connection: "online", instances: [{ mcpEnabled: true, name: "failed-instance", snapshot }], logs: {}, oauthApprovals: [], operations: {}, partialFailures: {}, todos: {
@@ -23,8 +23,4 @@ it("aggregates read-only todos and derives alerts from actual state", () => {
 
     expect(todoSummaries(state)).toEqual([{ completed: 1, instance: "failed-instance", revision: 7, status: "in_progress", title: "Deploy service", total: 3 }]);
     expect(openTodos(state)).toBe(1);
-    expect(alerts(state).map((alert) => alert.id)).toEqual([
-        "instance:failed-instance",
-        "activity:failed-instance:4",
-    ]);
 });

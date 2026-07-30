@@ -130,6 +130,9 @@ function fakeClients(): WebClients {
         instance: {
             list: async () => [{ mcpEnabled: true, name: "demo", snapshot }],
         },
+        overview: {
+            get: async () => ({ activity: [], alerts: [], controller: { pid: 1, uptimeSeconds: 1 }, counts: { activeTodos: 0, failedCalls24h: 0, instancesAttention: 0, instancesCritical: 0, instancesReady: 1, instancesTotal: 1, pendingApprovals: 0 }, generatedAt: "2026-07-31T00:00:00Z", health: "healthy", instances: [], todos: [] }),
+        },
         runtime: {
             snapshot: async () => ({ lastSeq: 1, snapshot }),
             refresh: async () => ({ lastSeq: 1, snapshot }),

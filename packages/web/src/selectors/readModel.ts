@@ -1,12 +1,14 @@
-import type { ApprovalRequest, InstanceEvent } from "@portable-devshell/shared/browser";
+import type {
+    ApprovalRequest,
+    InstanceEvent,
+} from "@portable-devshell/shared/browser";
+import type {
+    OperationalOverview,
+    OperationalOverviewActivity,
+    OperationalOverviewAlert,
+} from "../../../shared/src/dto/overview/DtoOperationalOverview.js";
 
 import type { WebState } from "../state/WebStore.js";
-
-export interface Alert {
-    id: string;
-    message: string;
-    severity: "attention" | "critical";
-}
 
 export interface TodoSummary {
     completed: number;
@@ -58,27 +60,16 @@ export function openTodos(state: WebState): number {
     ).length;
 }
 
-export function alerts(state: WebState): Alert[] {
-    const result: Alert[] = [];
-    if (state.connection === "offline") {
-        result.push({ id: "connection", message: "Control connection is offline.", severity: "critical" });
-    }
-    for (const entry of state.instances) {
-        const snapshot = entry.snapshot;
-        if (["failed", "stale"].includes(snapshot.status) || ["failed", "disconnected"].includes(snapshot.connectionState)) {
-            result.push({
-                id: `instance:${entry.name}`,
-                message: `${entry.name}: ${snapshot.lastErrorMessage ?? `${snapshot.status} / ${snapshot.connectionState}`}`,
-                severity: snapshot.status === "failed" || snapshot.connectionState === "failed" ? "critical" : "attention",
-            });
-        }
-    }
-    const pending = pendingApprovals(state);
-    if (pending > 0) result.push({ id: "approvals", message: `${pending} approval${pending === 1 ? "" : "s"} pending.`, severity: "attention" });
-    for (const event of state.activity.filter((item) => item.type === "toolCall.failed")) {
-        result.push({ id: `activity:${event.instanceName}:${event.seq}`, message: `${event.instanceName}: failed activity.`, severity: "critical" });
-    }
-    return result;
+export function overviewAlerts(
+    overview: OperationalOverview,
+): OperationalOverviewAlert[] {
+    return overview.alerts.slice(0, 8);
+}
+
+export function overviewActivity(
+    overview: OperationalOverview,
+): OperationalOverviewActivity[] {
+    return overview.activity.slice(0, 6);
 }
 
 export function recentActivity(state: WebState, query = "", type = "all"): InstanceEvent[] {
