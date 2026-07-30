@@ -23,6 +23,7 @@ test("TodoService creates, validates revisions, persists atomically, and emits d
         revision: 0,
         summary: { completed: 0, total: 0 },
         tasks: [],
+        comments: [],
     });
 
     const created = await service.write(
@@ -108,6 +109,21 @@ test("TodoService rejects duplicate ids, multiple in-progress items, and missing
             "session",
         ),
     );
+});
+
+test("TodoService persists, deletes, and atomically consumes pending comments", async () => {
+    const root = await mkdtemp(join(tmpdir(), "portable-devshell-todo-comments-"));
+    const service = new TodoService({
+        appendEvent: async () => undefined,
+        filePath: join(root, "todo.json"),
+        instanceName: "aromatic-pc"
+    });
+    await service.addComment("First");
+    await service.addComment("Second");
+    const comments = (await service.read()).comments ?? [];
+    await service.deleteComment(comments[0]!.id);
+    assert.deepEqual(await service.consumeComments(), ["Second"]);
+    assert.deepEqual((await service.read()).comments, []);
 });
 
 test("TodoService emits terminal events once, archives terminal tasks, and reloads persisted state", async () => {

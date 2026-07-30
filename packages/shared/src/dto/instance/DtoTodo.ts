@@ -13,6 +13,12 @@ export interface TodoItem {
     status: TodoStatus;
 }
 
+export interface TodoComment {
+    createdAt: string;
+    id: string;
+    text: string;
+}
+
 export interface TodoSummary {
     completed: number;
     currentItemId?: string;
@@ -49,6 +55,7 @@ export interface TodoReadResult {
     taskId?: string;
     title?: string;
     tasks?: TodoTaskSummary[];
+    comments?: TodoComment[];
 }
 
 export interface TodoTaskSummary extends ActiveTodoSummary {

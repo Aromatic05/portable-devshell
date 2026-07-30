@@ -19,6 +19,7 @@ export class McpToolCatalogEnvironment {
                     ctxId: { description: "Session context ID.", minLength: 1, type: "string" },
                     expiresAt: { description: "Context expiration time.", minLength: 1, type: "string" },
                     comment: {
+                        description: "Session guidance comments.",
                         items: { minLength: 1, type: "string" },
                         minItems: 2,
                         type: "array"

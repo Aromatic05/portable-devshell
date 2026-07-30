@@ -8,8 +8,10 @@ import {
     readToolCall,
     readToolCallQuery
 } from "./ToolRouteInput.js";
+import type { TodoService } from "../todo/TodoService.js";
 
 export interface ToolRouteInstancePort {
+    todo: Pick<TodoService, "consumeComments">;
     worker: Pick<
         WorkerInstance,
         "callTool" | "decideApproval" | "getApproval" | "listApprovals" | "readToolCalls"
@@ -26,7 +28,7 @@ export function createToolRouteModule(instance: ToolRouteInstancePort): PrefixRo
                     ctxId: context.connectionId,
                     source: context.peer
                 });
-                return { comment: [], result } as unknown as JsonValue;
+                return { comment: await instance.todo.consumeComments(), result } as unknown as JsonValue;
             } catch (error) {
                 const failure = error instanceof ControlError ? error : createError({
                     code: errorCodes.targetInvalid,
@@ -34,7 +36,7 @@ export function createToolRouteModule(instance: ToolRouteInstancePort): PrefixRo
                     retryable: false
                 });
                 return {
-                    comment: [failure.message],
+                    comment: [...await instance.todo.consumeComments(), failure.message],
                     error: { code: failure.code, message: failure.message, retryable: failure.retryable },
                     result: null
                 } as unknown as JsonValue;

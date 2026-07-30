@@ -5,6 +5,7 @@ import type {
     PrefixRouteContext,
     PrefixRouteModuleDefinition
 } from "@portable-devshell/shared";
+import { createError, errorCodes } from "@portable-devshell/shared";
 
 import { routeModule } from "../../route/ControlRouteFactory.js";
 import { readTodoSubscriptionFromSeq } from "./TodoRouteInput.js";
@@ -22,7 +23,7 @@ export interface TodoRouteSubscriptionPort {
 
 export interface TodoRouteInstancePort {
     name: string;
-    todo: Pick<TodoService, "read">;
+    todo: Pick<TodoService, "addComment" | "deleteComment" | "read">;
     worker: Pick<WorkerInstance, "snapshot" | "subscribe">;
 }
 
@@ -35,6 +36,15 @@ export function createTodoRouteModule(
             lastSeq: instance.worker.snapshot().lastSeq,
             todo: await instance.todo.read()
         }) as unknown as JsonValue,
+        addComment: async (request) => {
+            const text = readCommentText(request.payload ?? null);
+            await instance.todo.addComment(text);
+            return undefined;
+        },
+        deleteComment: async (request) => {
+            await instance.todo.deleteComment(readCommentId(request.payload ?? null));
+            return undefined;
+        },
         subscribe: async (request, context) => {
             await subscriptions.subscribe(
                 context,
@@ -46,4 +56,18 @@ export function createTodoRouteModule(
             return undefined;
         }
     });
+}
+
+function readCommentText(value: JsonValue): string {
+    if (typeof value !== "object" || value === null || Array.isArray(value) || typeof value.text !== "string" || value.text.trim().length === 0) {
+        throw createError({ code: errorCodes.targetInvalid, message: "todo.addComment requires non-empty text.", retryable: false });
+    }
+    return value.text.trim();
+}
+
+function readCommentId(value: JsonValue): string {
+    if (typeof value !== "object" || value === null || Array.isArray(value) || typeof value.id !== "string" || value.id.trim().length === 0) {
+        throw createError({ code: errorCodes.targetInvalid, message: "todo.deleteComment requires id.", retryable: false });
+    }
+    return value.id.trim();
 }

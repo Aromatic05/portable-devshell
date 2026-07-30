@@ -48,7 +48,8 @@ test("TodoState owns validation, transitions, summaries, and associations", () =
             title: "Implement",
             total: 3,
             updatedAt: "2026-07-16T00:00:00.000Z"
-        }]
+        }],
+        comments: []
     });
     assert.equal(state.activeSummary(created.document)?.status, "in_progress");
     assert.deepEqual(state.currentAssociation(created.document, "ctx-1"), {

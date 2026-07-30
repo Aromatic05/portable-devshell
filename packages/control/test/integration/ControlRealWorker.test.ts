@@ -140,8 +140,8 @@ if (process.env.PORTABLE_DEVSHELL_REAL_WORKER_CHILD !== "1") {
                     toolName: "bash_run",
                 },
             );
-            assert.equal(toolCall.exitCode, 0);
-            assert.match(toolCall.stdout, new RegExp(workspaceMarker, "u"));
+            assert.equal(toolCall.result.exitCode, 0);
+            assert.match(toolCall.result.stdout, new RegExp(workspaceMarker, "u"));
 
             const logs = await request(
                 runtimePaths.socketFile,

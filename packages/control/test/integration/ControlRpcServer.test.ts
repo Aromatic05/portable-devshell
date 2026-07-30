@@ -60,7 +60,7 @@ test("ControlSocketServer routes canonical control and instance operations over 
         { input: { command: "pwd" }, toolName: "bash_run" },
         "tui"
     );
-    assert.equal((toolReply.payload as { exitCode: number }).exitCode, 0);
+    assert.equal((toolReply.payload as { result: { exitCode: number } }).result.exitCode, 0);
     assert.equal(harness.worker.lastToolCall?.source, "tui");
     assert.equal(typeof harness.worker.lastToolCall?.requestId, "string");
     assert.equal(typeof harness.worker.lastToolCall?.ctxId, "string");

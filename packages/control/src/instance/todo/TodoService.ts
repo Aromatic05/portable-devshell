@@ -6,6 +6,7 @@ import type {
     TodoWriteInput,
     ToolCallAssociation
 } from "@portable-devshell/shared";
+import { randomUUID } from "node:crypto";
 
 import { TodoState, type TodoDocument, type TodoTransition } from "./TodoState.js";
 import { TodoStore } from "./TodoStore.js";
@@ -46,6 +47,38 @@ export class TodoService {
 
     currentAssociation(ctxId?: string): ToolCallAssociation | undefined {
         return this.#state.currentAssociation(this.#store.read(), ctxId);
+    }
+
+    async addComment(text: string): Promise<void> {
+        await this.#runExclusive(async () => {
+            const document = this.#store.read();
+            await this.#store.write({
+                ...document,
+                comments: [...document.comments, {
+                    createdAt: new Date().toISOString(),
+                    id: `comment-${randomUUID()}`,
+                    text
+                }]
+            });
+        });
+    }
+
+    async deleteComment(id: string): Promise<void> {
+        await this.#runExclusive(async () => {
+            const document = this.#store.read();
+            await this.#store.write({
+                ...document,
+                comments: document.comments.filter((comment) => comment.id !== id)
+            });
+        });
+    }
+
+    async consumeComments(): Promise<string[]> {
+        return await this.#runExclusive(async () => {
+            const document = this.#store.read();
+            await this.#store.write({ ...document, comments: [] });
+            return document.comments.map((comment) => comment.text);
+        });
     }
 
     async write(

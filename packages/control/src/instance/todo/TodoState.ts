@@ -7,6 +7,7 @@ import {
     type InstanceEventType,
     type JsonValue,
     type TodoItem,
+    type TodoComment,
     type TodoReadResult,
     type TodoState as SharedTodoState,
     type TodoStatus,
@@ -19,6 +20,7 @@ import {
 export interface TodoDocument {
     active: SharedTodoState[];
     archived: SharedTodoState[];
+    comments: TodoComment[];
     version: 2;
 }
 
@@ -45,12 +47,12 @@ export class TodoState {
     }
 
     emptyDocument(): TodoDocument {
-        return { active: [], archived: [], version: 2 };
+        return { active: [], archived: [], comments: [], version: 2 };
     }
 
     normalizeDocument(value: unknown): TodoDocument {
-        if (!isRecord(value) || value.version !== 2 || !Array.isArray(value.active) || !Array.isArray(value.archived)) {
-            throw new Error("todo document must contain version=2 with active and archived arrays");
+        if (!isRecord(value) || value.version !== 2 || !Array.isArray(value.active) || !Array.isArray(value.archived) || !Array.isArray(value.comments)) {
+            throw new Error("todo document must contain version=2 with active, archived, and comments arrays");
         }
         const active = value.active.map((entry) => this.#normalizeStoredState(entry));
         const titles = new Set(active.map((entry) => entry.title));
@@ -58,6 +60,7 @@ export class TodoState {
         return {
             active,
             archived: value.archived.map((entry) => this.#normalizeStoredState(entry)),
+            comments: value.comments.map(normalizeComment),
             version: 2
         };
     }
@@ -99,17 +102,17 @@ export class TodoState {
             archived.push(archivedState);
             events.push(todoEvent("todo.archived", archivedState));
         }
-        return { document: { active, archived, version: 2 }, events };
+        return { document: { active, archived, comments: document.comments, version: 2 }, events };
     }
 
     readResult(document: TodoDocument, title?: string): TodoReadResult {
         const tasks = this.#taskSummaries(document);
         if (title === undefined) {
-            return { items: [], revision: 0, summary: { completed: 0, total: 0 }, tasks };
+            return { items: [], revision: 0, summary: { completed: 0, total: 0 }, tasks, comments: document.comments };
         }
         const state = document.active.find((entry) => entry.title === title);
         if (state === undefined) {
-            return { items: [], revision: 0, summary: { completed: 0, total: 0 }, tasks };
+            return { items: [], revision: 0, summary: { completed: 0, total: 0 }, tasks, comments: document.comments };
         }
         return {
             items: state.items.map((item) => ({ ...item })),
@@ -117,7 +120,8 @@ export class TodoState {
             summary: summarize(state.items),
             taskId: state.taskId,
             title: state.title,
-            tasks
+            tasks,
+            comments: document.comments
         };
     }
 
@@ -217,6 +221,15 @@ function normalizeInput(input: TodoWriteInput): TodoWriteInput {
         revision: requiredRevision(input.revision),
         title: normalizeText(input.title, "title"),
         todos: normalizeItems(input.todos)
+    };
+}
+
+function normalizeComment(value: unknown): TodoComment {
+    if (!isRecord(value)) throw new Error("todo comment must be an object");
+    return {
+        createdAt: requiredString(value.createdAt, "comment.createdAt"),
+        id: requiredString(value.id, "comment.id"),
+        text: normalizeText(value.text, "comment.text")
     };
 }
 
