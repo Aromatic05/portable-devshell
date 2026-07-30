@@ -328,8 +328,8 @@ function createGateway(overrides: Partial<McpInstanceGateway> = {}): McpInstance
         listTools(instance) {
             return overrides.listTools?.(instance) ?? [bashTool];
         },
-        async readTodo(instance) {
-            return await (overrides.readTodo?.(instance) ?? Promise.resolve({ items: [], revision: 0, summary: { completed: 0, total: 0 } }));
+        async readTodo(instance, title) {
+            return await (overrides.readTodo?.(instance, title) ?? Promise.resolve({ items: [], revision: 0, summary: { completed: 0, total: 0 } }));
         },
         async startInstance(instance) {
             return await (overrides.startInstance?.(instance) ?? Promise.resolve({ instance }));
@@ -349,8 +349,8 @@ function createGateway(overrides: Partial<McpInstanceGateway> = {}): McpInstance
 test("todo tools are control-side, group-controlled, capability-free, and available while the worker is stopped", async () => {
     const calls: string[] = [];
     const gateway = createGateway({
-        async readTodo(instance) {
-            calls.push(`read:${instance}`);
+        async readTodo(instance, title) {
+            calls.push(`read:${instance}:${title ?? "all"}`);
             return { items: [], revision: 0, summary: { completed: 0, total: 0 } };
         },
         async writeTodo(instance, input, callContext) {
@@ -372,8 +372,9 @@ test("todo tools are control-side, group-controlled, capability-free, and availa
         revision: 0,
         summary: { completed: 0, total: 0 }
     });
-    await endpoint.callTool("todo_write", withContext({ revision: 0, todos: [] }), context);
-    assert.deepEqual(calls, ["read:main-pc", "write:main-pc:ctx-instance-test:0"]);
+    await endpoint.callTool("todo_read", withContext({ title: "Recover" }), context);
+    await endpoint.callTool("todo_write", withContext({ revision: 0, title: "Recover", todos: [] }), context);
+    assert.deepEqual(calls, ["read:main-pc:all", "read:main-pc:Recover", "write:main-pc:ctx-instance-test:0"]);
 
     const hidden = new McpEndpointWorker({
         contextRegistry,

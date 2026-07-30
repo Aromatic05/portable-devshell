@@ -29,7 +29,7 @@ export interface McpInstanceGateway {
     closeToolSession?(sessionId: string): Promise<void>;
     createSshInstance(sourceInstance: string, input: McpSshInstanceCreateInput): Promise<JsonValue>;
     listInstances(): Promise<JsonValue>;
-    readTodo(instance: string): Promise<JsonValue>;
+    readTodo(instance: string, title?: string): Promise<JsonValue>;
     listTools(instance: string): ToolDefinition[];
     startInstance(instance: string): Promise<JsonValue>;
     statusInstance(instance: string): Promise<JsonValue>;
