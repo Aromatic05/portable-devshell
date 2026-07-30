@@ -41,21 +41,22 @@ export class TodoService {
         return this.#readDocument(this.#store.read(), title);
     }
 
-    summary(): ActiveTodoSummary | undefined {
-        return this.#state.activeSummary(this.#store.read());
+    summaries(): ActiveTodoSummary[] {
+        return this.#state.activeSummaries(this.#store.read());
     }
 
     currentAssociation(ctxId?: string): ToolCallAssociation | undefined {
         return this.#state.currentAssociation(this.#store.read(), ctxId);
     }
 
-    async addComment(text: string): Promise<void> {
+    async addComment(ctxId: string, text: string): Promise<void> {
         await this.#runExclusive(async () => {
             const document = this.#store.read();
             await this.#store.write({
                 ...document,
                 comments: [...document.comments, {
                     createdAt: new Date().toISOString(),
+                    ctxId,
                     id: `comment-${randomUUID()}`,
                     text
                 }]
@@ -73,12 +74,12 @@ export class TodoService {
         });
     }
 
-    async consumeComments(): Promise<string[]> {
-        return await this.#runExclusive(async () => {
-            const document = this.#store.read();
-            await this.#store.write({ ...document, comments: [] });
-            return document.comments.map((comment) => comment.text);
-        });
+    commentsFor(ctxId: string): string[] {
+        return this.#store
+            .read()
+            .comments
+            .filter((comment) => comment.ctxId === ctxId)
+            .map((comment) => comment.text);
     }
 
     async write(

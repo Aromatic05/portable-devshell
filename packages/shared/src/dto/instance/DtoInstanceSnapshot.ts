@@ -10,7 +10,7 @@ export type RuntimeStatus = "ready" | "running" | "stale" | "stopped" | "failed"
 export type EffectiveSecurityMode = "disabled" | "workspace";
 
 export interface InstanceSnapshot {
-    activeTodo?: ActiveTodoSummary;
+    activeTodos?: ActiveTodoSummary[];
     connectionState: ConnectionState;
     daemonState: DaemonState;
     effectiveSecurityMode?: EffectiveSecurityMode;

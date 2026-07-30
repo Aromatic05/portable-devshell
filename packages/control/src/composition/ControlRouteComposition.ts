@@ -98,7 +98,7 @@ export class ControlRouteComposition {
                         {
                             enabled: descriptor.enabled,
                             name: descriptor.name,
-                            todoSummary: () => descriptor.todo.summary(),
+                            todoSummaries: () => descriptor.todo.summaries(),
                             worker: descriptor.worker
                         },
                         this.#options.instances,

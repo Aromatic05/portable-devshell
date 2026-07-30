@@ -28,13 +28,11 @@ export function renderInstanceSnapshot(snapshot: InstanceSnapshot): string {
         }
     }
 
-    lines.push(renderTodoSummary(snapshot.activeTodo));
+    const activeTodos = snapshot.activeTodos ?? [];
+    lines.push(...(activeTodos.length === 0 ? ["Todo: none"] : activeTodos.map(renderTodoSummary)));
     return `${lines.join("\n")}\n`;
 }
 
-function renderTodoSummary(todo: import("@portable-devshell/shared").ActiveTodoSummary | undefined): string {
-    if (todo === undefined) {
-        return "Todo: none";
-    }
+function renderTodoSummary(todo: import("@portable-devshell/shared").ActiveTodoSummary): string {
     return `Todo: ${todo.completed}/${todo.total} completed${todo.currentItem === undefined ? "" : ` — ${todo.currentItem}`}`;
 }

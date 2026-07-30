@@ -257,7 +257,7 @@ function createServer(socketPath: string, worker: FakeWorker, getConfigVersion: 
             provider: "local",
             todo: {
                 async addComment() {},
-                async consumeComments() { return []; },
+                commentsFor() { return []; },
                 currentAssociation() {
                     return undefined;
                 },
@@ -265,8 +265,8 @@ function createServer(socketPath: string, worker: FakeWorker, getConfigVersion: 
                 async read() {
                     return { items: [], revision: 0, summary: { completed: 0, total: 0 } };
                 },
-                summary() {
-                    return undefined;
+                summaries() {
+                    return [];
                 },
                 async write() {
                     return { items: [], revision: 0, summary: { completed: 0, total: 0 } };

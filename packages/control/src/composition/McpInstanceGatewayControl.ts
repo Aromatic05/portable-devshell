@@ -62,6 +62,10 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
         );
     }
 
+    async todoCommentsFor(instance: string, ctxId: string): Promise<string[]> {
+        return this.#requireDescriptor(instance).todo.commentsFor(ctxId);
+    }
+
     async createSshInstance(sourceInstance: string, input: McpSshInstanceCreateInput): Promise<JsonValue> {
         return (await this.#createService.createSshInstanceFromMcp(sourceInstance, input)) as unknown as JsonValue;
     }
@@ -75,7 +79,7 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
                 mcpEnabled: descriptor.mcpEnabled,
                 name: descriptor.name,
                 provider: config?.provider,
-                snapshot: withTodoSummary(descriptor.worker.snapshot(), descriptor.todo.summary())
+                snapshot: withTodoSummaries(descriptor.worker.snapshot(), descriptor.todo.summaries())
             };
         }) as unknown as JsonValue;
     }
@@ -111,7 +115,7 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
             mcpEnabled: descriptor.mcpEnabled,
             name: descriptor.name,
             provider: config?.provider,
-            snapshot: withTodoSummary(descriptor.worker.snapshot(), descriptor.todo.summary())
+            snapshot: withTodoSummaries(descriptor.worker.snapshot(), descriptor.todo.summaries())
         } as unknown as JsonValue;
     }
 
@@ -144,10 +148,10 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
     }
 }
 
-function withTodoSummary<T extends object>(snapshot: T, activeTodo: import("@portable-devshell/shared").ActiveTodoSummary | undefined): T & { activeTodo?: import("@portable-devshell/shared").ActiveTodoSummary } {
+function withTodoSummaries<T extends object>(snapshot: T, activeTodos: import("@portable-devshell/shared").ActiveTodoSummary[]): T & { activeTodos?: import("@portable-devshell/shared").ActiveTodoSummary[] } {
     return {
         ...snapshot,
-        ...(activeTodo === undefined ? {} : { activeTodo })
+        ...(activeTodos.length === 0 ? {} : { activeTodos })
     };
 }
 

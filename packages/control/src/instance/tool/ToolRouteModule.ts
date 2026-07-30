@@ -11,7 +11,7 @@ import {
 import type { TodoService } from "../todo/TodoService.js";
 
 export interface ToolRouteInstancePort {
-    todo: Pick<TodoService, "consumeComments">;
+    todo: Pick<TodoService, "commentsFor">;
     worker: Pick<
         WorkerInstance,
         "callTool" | "decideApproval" | "getApproval" | "listApprovals" | "readToolCalls"
@@ -28,7 +28,7 @@ export function createToolRouteModule(instance: ToolRouteInstancePort): PrefixRo
                     ctxId: context.connectionId,
                     source: context.peer
                 });
-                return { comment: await instance.todo.consumeComments(), result } as unknown as JsonValue;
+                return { comment: instance.todo.commentsFor(context.connectionId), result } as unknown as JsonValue;
             } catch (error) {
                 const failure = error instanceof ControlError ? error : createError({
                     code: errorCodes.targetInvalid,
@@ -36,7 +36,7 @@ export function createToolRouteModule(instance: ToolRouteInstancePort): PrefixRo
                     retryable: false
                 });
                 return {
-                    comment: [...await instance.todo.consumeComments(), failure.message],
+                    comment: [...instance.todo.commentsFor(context.connectionId), failure.message],
                     error: { code: failure.code, message: failure.message, retryable: failure.retryable },
                     result: null
                 } as unknown as JsonValue;

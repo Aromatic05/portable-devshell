@@ -8,12 +8,12 @@ import type {
 } from "@portable-devshell/shared";
 
 export interface InstanceTodoPort {
-    addComment(text: string): Promise<void>;
-    consumeComments(): Promise<string[]>;
+    addComment(ctxId: string, text: string): Promise<void>;
+    commentsFor(ctxId: string): string[];
     currentAssociation(): ToolCallAssociation | undefined;
     deleteComment(id: string): Promise<void>;
     read(title?: string): Promise<TodoReadResult>;
-    summary(): ActiveTodoSummary | undefined;
+    summaries(): ActiveTodoSummary[];
     write(input: TodoWriteInput, ctxId: string): Promise<TodoReadResult>;
 }
 

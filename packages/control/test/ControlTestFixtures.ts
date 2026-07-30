@@ -14,7 +14,7 @@ export function createTestTodoPort(): InstanceTodoPort {
     };
     return {
         async addComment() {},
-        async consumeComments() { return []; },
+        commentsFor() { return []; },
         currentAssociation() {
             return undefined;
         },
@@ -22,8 +22,8 @@ export function createTestTodoPort(): InstanceTodoPort {
         async read() {
             return empty;
         },
-        summary() {
-            return undefined;
+        summaries() {
+            return [];
         },
         async write() {
             return empty;

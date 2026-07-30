@@ -21,7 +21,7 @@ export interface TodoDocument {
     active: SharedTodoState[];
     archived: SharedTodoState[];
     comments: TodoComment[];
-    version: 2;
+    version: 3;
 }
 
 export interface TodoTransition {
@@ -47,12 +47,12 @@ export class TodoState {
     }
 
     emptyDocument(): TodoDocument {
-        return { active: [], archived: [], comments: [], version: 2 };
+        return { active: [], archived: [], comments: [], version: 3 };
     }
 
     normalizeDocument(value: unknown): TodoDocument {
-        if (!isRecord(value) || value.version !== 2 || !Array.isArray(value.active) || !Array.isArray(value.archived) || !Array.isArray(value.comments)) {
-            throw new Error("todo document must contain version=2 with active, archived, and comments arrays");
+        if (!isRecord(value) || value.version !== 3 || !Array.isArray(value.active) || !Array.isArray(value.archived) || !Array.isArray(value.comments)) {
+            throw new Error("todo document must contain version=3 with active, archived, and comments arrays");
         }
         const active = value.active.map((entry) => this.#normalizeStoredState(entry));
         const titles = new Set(active.map((entry) => entry.title));
@@ -61,7 +61,7 @@ export class TodoState {
             active,
             archived: value.archived.map((entry) => this.#normalizeStoredState(entry)),
             comments: value.comments.map(normalizeComment),
-            version: 2
+            version: 3
         };
     }
 
@@ -102,7 +102,7 @@ export class TodoState {
             archived.push(archivedState);
             events.push(todoEvent("todo.archived", archivedState));
         }
-        return { document: { active, archived, comments: document.comments, version: 2 }, events };
+        return { document: { active, archived, comments: document.comments, version: 3 }, events };
     }
 
     readResult(document: TodoDocument, title?: string): TodoReadResult {
@@ -125,26 +125,26 @@ export class TodoState {
         };
     }
 
-    activeSummary(document: TodoDocument): ActiveTodoSummary | undefined {
-        const state = document.active[0];
-        if (state === undefined) return undefined;
-        const status = deriveStatus(state.items);
-        if (status === "completed" || status === "cancelled" || status === "none") {
-            return undefined;
-        }
-        const summary = summarize(state.items);
-        const current = summary.currentItemId === undefined
-            ? undefined
-            : state.items.find((item) => item.id === summary.currentItemId);
-        return {
-            completed: summary.completed,
-            currentItem: current?.content,
-            revision: state.revision,
-            status,
-            taskId: state.taskId,
-            title: state.title,
-            total: summary.total
-        };
+    activeSummaries(document: TodoDocument): ActiveTodoSummary[] {
+        return document.active.flatMap((state) => {
+            const status = deriveStatus(state.items);
+            if (status === "completed" || status === "cancelled" || status === "none") {
+                return [];
+            }
+            const summary = summarize(state.items);
+            const current = summary.currentItemId === undefined
+                ? undefined
+                : state.items.find((item) => item.id === summary.currentItemId);
+            return [{
+                completed: summary.completed,
+                currentItem: current?.content,
+                revision: state.revision,
+                status,
+                taskId: state.taskId,
+                title: state.title,
+                total: summary.total
+            }];
+        });
     }
 
     currentAssociation(document: TodoDocument, ctxId?: string): ToolCallAssociation | undefined {
@@ -203,6 +203,7 @@ export class TodoState {
                 : state.items.find((item) => item.id === summary.currentItemId);
             return {
                 completed: summary.completed,
+                ...(state.activeCtxId === undefined ? {} : { ctxId: state.activeCtxId }),
                 currentItem: current?.content,
                 revision: state.revision,
                 status: deriveStatus(state.items),
@@ -228,6 +229,7 @@ function normalizeComment(value: unknown): TodoComment {
     if (!isRecord(value)) throw new Error("todo comment must be an object");
     return {
         createdAt: requiredString(value.createdAt, "comment.createdAt"),
+        ctxId: requiredString(value.ctxId, "comment.ctxId"),
         id: requiredString(value.id, "comment.id"),
         text: normalizeText(value.text, "comment.text")
     };

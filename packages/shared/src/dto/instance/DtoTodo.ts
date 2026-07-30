@@ -15,6 +15,7 @@ export interface TodoItem {
 
 export interface TodoComment {
     createdAt: string;
+    ctxId: string;
     id: string;
     text: string;
 }
@@ -59,6 +60,7 @@ export interface TodoReadResult {
 }
 
 export interface TodoTaskSummary extends ActiveTodoSummary {
+    ctxId?: string;
     updatedAt: string;
 }
 

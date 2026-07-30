@@ -37,8 +37,8 @@ export function createTodoRouteModule(
             todo: await instance.todo.read()
         }) as unknown as JsonValue,
         addComment: async (request) => {
-            const text = readCommentText(request.payload ?? null);
-            await instance.todo.addComment(text);
+            const comment = readComment(request.payload ?? null);
+            await instance.todo.addComment(comment.ctxId, comment.text);
             return undefined;
         },
         deleteComment: async (request) => {
@@ -58,11 +58,11 @@ export function createTodoRouteModule(
     });
 }
 
-function readCommentText(value: JsonValue): string {
-    if (typeof value !== "object" || value === null || Array.isArray(value) || typeof value.text !== "string" || value.text.trim().length === 0) {
-        throw createError({ code: errorCodes.targetInvalid, message: "todo.addComment requires non-empty text.", retryable: false });
+function readComment(value: JsonValue): { ctxId: string; text: string } {
+    if (typeof value !== "object" || value === null || Array.isArray(value) || typeof value.text !== "string" || value.text.trim().length === 0 || typeof value.ctxId !== "string" || value.ctxId.trim().length === 0) {
+        throw createError({ code: errorCodes.targetInvalid, message: "todo.addComment requires non-empty ctxId and text.", retryable: false });
     }
-    return value.text.trim();
+    return { ctxId: value.ctxId.trim(), text: value.text.trim() };
 }
 
 function readCommentId(value: JsonValue): string {

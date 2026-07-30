@@ -20,7 +20,7 @@ import type { RuntimeSubscriptionManager } from "./RuntimeSubscriptionManager.js
 export interface RuntimeRouteInstancePort {
     enabled: boolean;
     name: string;
-    todoSummary(): ActiveTodoSummary | undefined;
+    todoSummaries(): ActiveTodoSummary[];
     worker: Pick<
         WorkerInstance,
         "readLogs" | "refreshStatus" | "snapshot" | "startInteractive" | "stop" | "subscribe"
@@ -40,11 +40,11 @@ export function createRuntimeRouteModule(
 ): PrefixRouteModuleDefinition {
     return routeModule("runtime", {
         snapshot: () => {
-            const snapshot = withTodoSummary(instance.worker.snapshot(), instance.todoSummary());
+            const snapshot = withTodoSummaries(instance.worker.snapshot(), instance.todoSummaries());
             return { lastSeq: snapshot.lastSeq, snapshot } as unknown as JsonValue;
         },
         refresh: async () => {
-            const snapshot = withTodoSummary(await instance.worker.refreshStatus(), instance.todoSummary());
+            const snapshot = withTodoSummaries(await instance.worker.refreshStatus(), instance.todoSummaries());
             return { lastSeq: snapshot.lastSeq, snapshot } as unknown as JsonValue;
         },
         start: async (request, context) => {
@@ -97,9 +97,9 @@ export function createRuntimeRouteModule(
     });
 }
 
-function withTodoSummary<T extends { lastSeq: number }>(
+function withTodoSummaries<T extends { lastSeq: number }>(
     snapshot: T,
-    activeTodo: ActiveTodoSummary | undefined
-): T & { activeTodo?: ActiveTodoSummary } {
-    return { ...snapshot, ...(activeTodo === undefined ? {} : { activeTodo }) };
+    activeTodos: ActiveTodoSummary[]
+): T & { activeTodos?: ActiveTodoSummary[] } {
+    return { ...snapshot, ...(activeTodos.length === 0 ? {} : { activeTodos }) };
 }

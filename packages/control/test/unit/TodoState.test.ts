@@ -41,6 +41,7 @@ test("TodoState owns validation, transitions, summaries, and associations", () =
         title: "Implement",
         tasks: [{
             completed: 1,
+            ctxId: "ctx-1",
             currentItem: "Implement",
             revision: 1,
             status: "in_progress",
@@ -51,14 +52,24 @@ test("TodoState owns validation, transitions, summaries, and associations", () =
         }],
         comments: []
     });
-    assert.equal(state.activeSummary(created.document)?.status, "in_progress");
+    assert.equal(state.activeSummaries(created.document)[0]?.status, "in_progress");
+    const parallel = state.transition(
+        created.document,
+        {
+            revision: 0,
+            title: "Verify",
+            todos: [{ content: "Verify", id: "verify", status: "pending" }]
+        },
+        "ctx-2"
+    ).document;
+    assert.deepEqual(state.activeSummaries(parallel).map((summary) => summary.title), ["Implement", "Verify"]);
     assert.deepEqual(state.currentAssociation(created.document, "ctx-1"), {
         taskId: "task-fixed",
         todoItemId: "implement"
     });
 });
 
-test("TodoState exposes only actionable work as activeTodo", () => {
+test("TodoState exposes only actionable work as active todos", () => {
     const state = new TodoState("aromatic-pc", {
         taskId: () => "task-fixed"
     });
@@ -78,10 +89,10 @@ test("TodoState exposes only actionable work as activeTodo", () => {
     ).document;
 
     const completed = transition("completed");
-    assert.equal(state.activeSummary(completed), undefined);
+    assert.deepEqual(state.activeSummaries(completed), []);
     assert.equal(state.readResult(completed).taskId, undefined);
-    assert.equal(state.activeSummary(transition("cancelled")), undefined);
-    assert.equal(state.activeSummary(transition("failed")), undefined);
+    assert.deepEqual(state.activeSummaries(transition("cancelled")), []);
+    assert.deepEqual(state.activeSummaries(transition("failed")), []);
 });
 
 test("TodoState archives terminal work before creating a replacement task", () => {
