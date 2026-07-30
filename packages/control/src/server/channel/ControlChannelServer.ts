@@ -26,6 +26,7 @@ export class ControlChannelServer {
     readonly #connections = new Map<string, PrefixRoute>();
     readonly #startedProviders: ControlChannelProvider[] = [];
     #closePromise?: Promise<void>;
+    #startPromise?: Promise<void>;
     #started = false;
     #stopping = false;
 
@@ -38,9 +39,46 @@ export class ControlChannelServer {
     }
 
     async start(): Promise<void> {
+        if (this.#startPromise !== undefined) {
+            return await this.#startPromise;
+        }
+        if (this.#closePromise !== undefined) {
+            await this.#closePromise;
+        }
         if (this.#started) {
             return;
         }
+        if (this.#startPromise !== undefined) {
+            return await this.#startPromise;
+        }
+        const start = this.#startInternal();
+        this.#startPromise = start;
+        try {
+            await start;
+        } finally {
+            if (this.#startPromise === start) {
+                this.#startPromise = undefined;
+            }
+        }
+    }
+
+    async close(): Promise<void> {
+        this.#stopping = true;
+        if (this.#closePromise !== undefined) {
+            return await this.#closePromise;
+        }
+        const close = this.#closeAfterStart();
+        this.#closePromise = close;
+        try {
+            await close;
+        } finally {
+            if (this.#closePromise === close) {
+                this.#closePromise = undefined;
+            }
+        }
+    }
+
+    async #startInternal(): Promise<void> {
         this.#stopping = false;
         try {
             for (const provider of this.#providers) {
@@ -63,16 +101,9 @@ export class ControlChannelServer {
         }
     }
 
-    async close(): Promise<void> {
-        if (this.#closePromise !== undefined) {
-            return await this.#closePromise;
-        }
-        this.#closePromise = this.#closeInternal();
-        try {
-            await this.#closePromise;
-        } finally {
-            this.#closePromise = undefined;
-        }
+    async #closeAfterStart(): Promise<void> {
+        await this.#startPromise?.catch(() => undefined);
+        await this.#closeInternal();
     }
 
     #accept(channel: FrameChannel): void {

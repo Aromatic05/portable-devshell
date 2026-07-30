@@ -121,6 +121,37 @@ class MemoryControlChannelProvider implements ControlChannelProvider {
     }
 }
 
+class BlockingControlChannelProvider implements ControlChannelProvider {
+    readonly started: Promise<void>;
+    closeCount = 0;
+    startCount = 0;
+    #releaseStart!: () => void;
+    #signalStarted!: () => void;
+
+    constructor() {
+        this.started = new Promise<void>((resolve) => {
+            this.#signalStarted = resolve;
+        });
+    }
+
+    async start(): Promise<void> {
+        this.startCount += 1;
+        this.#signalStarted();
+        await new Promise<void>((resolve) => {
+            this.#releaseStart = resolve;
+        });
+    }
+
+    async close(): Promise<void> {
+        this.closeCount += 1;
+    }
+
+    releaseStart(): void {
+        this.#releaseStart();
+    }
+}
+
+
 test("ControlChannelServer serves the same routes through multiple channel providers", async (t) => {
     const socketProvider = new MemoryControlChannelProvider();
     const webProvider = new MemoryControlChannelProvider();
@@ -183,6 +214,51 @@ test("ControlChannelServer closes earlier providers when a later provider fails 
     await assert.rejects(server.start(), /provider failed to start/iu);
     assert.equal(first.closed, true);
 });
+
+test("ControlChannelServer coalesces concurrent start calls", async (t) => {
+    const provider = new BlockingControlChannelProvider();
+    const server = new ControlChannelServer({
+        providers: [provider],
+        routes: {
+            connectionClosed() {},
+            snapshot: createRouteSnapshot
+        }
+    });
+    t.after(async () => await server.close().catch(() => undefined));
+
+    const first = server.start();
+    await provider.started;
+    const second = server.start();
+    await new Promise((resolve) => setTimeout(resolve));
+
+    assert.equal(provider.startCount, 1);
+    provider.releaseStart();
+    await Promise.all([first, second]);
+    assert.equal(provider.startCount, 1);
+});
+
+test("ControlChannelServer waits for an active start before closing providers", async () => {
+    const provider = new BlockingControlChannelProvider();
+    const server = new ControlChannelServer({
+        providers: [provider],
+        routes: {
+            connectionClosed() {},
+            snapshot: createRouteSnapshot
+        }
+    });
+
+    const start = server.start();
+    await provider.started;
+    const close = server.close();
+    await new Promise((resolve) => setTimeout(resolve));
+    assert.equal(provider.closeCount, 0);
+
+    provider.releaseStart();
+    await Promise.all([start, close]);
+    assert.equal(provider.startCount, 1);
+    assert.equal(provider.closeCount, 1);
+});
+
 
 function createClient(
     provider: MemoryControlChannelProvider,
