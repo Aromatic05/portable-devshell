@@ -61,7 +61,16 @@ export class TuiRuntimeExecutionOperations {
     async callTool(instance: string, toolName: string, input: string): Promise<boolean> {
         return await this.#runCommand(`Call Tool: ${toolName}`, instance, async () => {
             const parsed = JSON.parse(input) as JsonValue;
-            await this.options.clients.tool.call(instance, toolName, parsed);
+            const feedback = await this.options.clients.tool.call(instance, toolName, parsed) as {
+                comment?: string[];
+                error?: { code: string; message: string; retryable: boolean };
+            };
+            if (feedback.error !== undefined) {
+                throw createError(feedback.error);
+            }
+            if ((feedback.comment?.length ?? 0) > 0) {
+                this.options.store.setScreenStatus("todo", feedback.comment!.join(" "));
+            }
             await this.options.session.refreshInstance(instance);
         });
     }

@@ -18,7 +18,7 @@ export class McpToolCatalogEnvironment {
                 properties: {
                     ctxId: { description: "Session context ID.", minLength: 1, type: "string" },
                     expiresAt: { description: "Context expiration time.", minLength: 1, type: "string" },
-                    guidance: {
+                    comment: {
                         items: { minLength: 1, type: "string" },
                         minItems: 2,
                         type: "array"
@@ -28,7 +28,7 @@ export class McpToolCatalogEnvironment {
                     skillsDirectory: { minLength: 1, type: "string" },
                     workspace: { minLength: 1, type: "string" }
                 },
-                required: ["ctxId", "expiresAt", "guidance", "instance", "workspace", "platform", "skillsDirectory"],
+                required: ["ctxId", "expiresAt", "comment", "instance", "workspace", "platform", "skillsDirectory"],
                 type: "object"
             },
             requiredCapabilities: []

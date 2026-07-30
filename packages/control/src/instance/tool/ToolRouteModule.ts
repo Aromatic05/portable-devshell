@@ -1,5 +1,5 @@
 import type { WorkerInstance } from "@portable-devshell/core";
-import type { JsonValue, PrefixRouteModuleDefinition } from "@portable-devshell/shared";
+import { ControlError, createError, errorCodes, type JsonValue, type PrefixRouteModuleDefinition } from "@portable-devshell/shared";
 
 import { routeModule } from "../../route/ControlRouteFactory.js";
 import {
@@ -20,11 +20,25 @@ export function createToolRouteModule(instance: ToolRouteInstancePort): PrefixRo
     return routeModule("tool", {
         call: async (request, context) => {
             const { input, toolName } = readToolCall(request.payload);
-            return await instance.worker.callTool(toolName, input, {
-                requestId: context.requestId,
-                ctxId: context.connectionId,
-                source: context.peer
-            }) as JsonValue;
+            try {
+                const result = await instance.worker.callTool(toolName, input, {
+                    requestId: context.requestId,
+                    ctxId: context.connectionId,
+                    source: context.peer
+                });
+                return { comment: [], result } as unknown as JsonValue;
+            } catch (error) {
+                const failure = error instanceof ControlError ? error : createError({
+                    code: errorCodes.targetInvalid,
+                    message: error instanceof Error ? error.message : String(error),
+                    retryable: false
+                });
+                return {
+                    comment: [failure.message],
+                    error: { code: failure.code, message: failure.message, retryable: failure.retryable },
+                    result: null
+                } as unknown as JsonValue;
+            }
         },
         listCalls: async (request) => await instance.worker.readToolCalls(
             readToolCallQuery(request.payload)

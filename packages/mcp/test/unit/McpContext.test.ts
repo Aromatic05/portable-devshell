@@ -140,7 +140,7 @@ test("McpEndpointWorker exposes environ_info and requires ctxId on every other t
     assert.equal(environmentRecord.instance, "demo-local");
     assert.equal(environmentRecord.skillsDirectory, "/home/demo/.devshell/skill");
     assert.equal(environmentRecord.workspace, "/workspace");
-    assert.deepEqual(environmentRecord.guidance, [
+    assert.deepEqual(environmentRecord.comment, [
         "Skills are available in /home/demo/.devshell/skill. Read the relevant SKILL.md before using a skill.",
         "Every project may contain AGENT.md. Read and follow the applicable AGENT.md before working in that project, and maintain it when project-specific knowledge changes."
     ]);
