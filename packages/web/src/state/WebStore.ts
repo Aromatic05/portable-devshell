@@ -382,6 +382,7 @@ export class WebStore {
             this.set({
                 ...this.#state,
                 logs: { ...this.#state.logs, [name]: logs.slice(-100) },
+                partialFailures: this.withoutPartialFailure(`logs:${name}`),
             });
         } catch (error) {
             this.setPartialFailure(`logs:${name}`, error);
@@ -405,6 +406,7 @@ export class WebStore {
             this.set({
                 ...this.#state,
                 todos: { ...this.#state.todos, [name]: todo },
+                partialFailures: this.withoutPartialFailure(`todos:${name}`),
             });
         } catch (error) {
             this.setPartialFailure(`todos:${name}`, error);
@@ -417,6 +419,7 @@ export class WebStore {
             this.set({
                 ...this.#state,
                 approvals: { ...this.#state.approvals, [name]: approvals },
+                partialFailures: this.withoutPartialFailure(`approvals:${name}`),
             });
         } catch (error) {
             this.setPartialFailure(`approvals:${name}`, error);
@@ -468,7 +471,11 @@ export class WebStore {
         }
         this.#overviewPromise = this.clients.overview.get()
             .then((overview) => {
-                this.set({ ...this.#state, overview });
+                this.set({
+                    ...this.#state,
+                    overview,
+                    partialFailures: this.withoutPartialFailure("overview"),
+                });
             })
             .catch((error: unknown) => {
                 this.setPartialFailure("overview", error);
@@ -522,6 +529,11 @@ export class WebStore {
                 [key]: message(error),
             },
         });
+    }
+
+    private withoutPartialFailure(key: string): Record<string, string> {
+        const { [key]: _recovered, ...partialFailures } = this.#state.partialFailures;
+        return partialFailures;
     }
 
     private set(state: WebState): void {

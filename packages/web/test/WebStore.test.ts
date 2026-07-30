@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
     asInstanceName,
+    type InstanceEvent,
     type InstanceSnapshot,
 } from "@portable-devshell/shared/browser";
 
@@ -131,7 +132,6 @@ describe("WebStore", () => {
                     content: "Refresh browser state",
                     id: "task-1",
                     status: "in_progress" as const,
-                    title: "Refresh browser state",
                 }],
                 revision: revision++,
                 summary: { completed: 0, currentItemId: "task-1", total: 1 },
@@ -173,6 +173,45 @@ describe("WebStore", () => {
         unsubscribe();
         await vi.advanceTimersByTimeAsync(1_000);
         expect(clients.overview.get).toHaveBeenCalledTimes(2);
+        store.close();
+        vi.useRealTimers();
+    });
+
+    it("clears partial failures after the corresponding stream refresh recovers", async () => {
+        vi.useFakeTimers();
+        const stream = controllableStream();
+        const clients = fakeClients({ subscribe: async () => stream });
+        const store = new WebStore(clients);
+        await store.load();
+
+        clients.runtime.readLogs = vi.fn()
+            .mockRejectedValueOnce(new Error("logs unavailable"))
+            .mockResolvedValueOnce([]);
+        clients.todo.get = vi.fn()
+            .mockRejectedValueOnce(new Error("todos unavailable"))
+            .mockResolvedValueOnce({ lastSeq: 5, todo: { items: [], revision: 2, summary: { completed: 0, total: 0 } } });
+        clients.tool.listApprovals = vi.fn()
+            .mockRejectedValueOnce(new Error("approvals unavailable"))
+            .mockResolvedValueOnce([]);
+        clients.overview.get = vi.fn()
+            .mockRejectedValueOnce(new Error("overview unavailable"))
+            .mockResolvedValueOnce({ ...operationalOverview(), generatedAt: "2026-07-31T00:00:01Z" });
+
+        for (const type of ["log.appended", "todo.updated", "approval.requested", "instance.statusChanged"] as const) {
+            stream.push(instanceEvent(type));
+        }
+        await vi.advanceTimersByTimeAsync(250);
+        await vi.waitFor(() => expect(Object.keys(store.state.partialFailures)).toHaveLength(4));
+
+        for (const type of ["log.appended", "todo.updated", "approval.requested", "instance.statusChanged"] as const) {
+            stream.push(instanceEvent(type));
+        }
+        await vi.advanceTimersByTimeAsync(250);
+        await vi.waitFor(() => expect(store.state.todos.demo?.revision).toBe(2));
+
+        expect(store.state.logs.demo).toEqual([]);
+        expect(store.state.overview?.generatedAt).toBe("2026-07-31T00:00:01Z");
+        expect(store.state.partialFailures).toEqual({});
         store.close();
         vi.useRealTimers();
     });
@@ -294,4 +333,32 @@ function todoEventStream(): WebRuntimeStream {
             return await new Promise<never>(() => undefined);
         },
     } as unknown as WebRuntimeStream;
+}
+
+function controllableStream(): WebRuntimeStream & { push(event: InstanceEvent): void } {
+    const queued: InstanceEvent[] = [];
+    let resolveNext: ((value: { event: InstanceEvent; kind: "event" }) => void) | undefined;
+    return {
+        close() {},
+        next: async () => {
+            const event = queued.shift();
+            if (event !== undefined) return { event, kind: "event" as const };
+            return await new Promise<{ event: InstanceEvent; kind: "event" }>((resolve) => {
+                resolveNext = resolve;
+            });
+        },
+        push(event) {
+            if (resolveNext !== undefined) {
+                const resolve = resolveNext;
+                resolveNext = undefined;
+                resolve({ event, kind: "event" });
+                return;
+            }
+            queued.push(event);
+        },
+    } as WebRuntimeStream & { push(event: InstanceEvent): void };
+}
+
+function instanceEvent(type: InstanceEvent["type"]): InstanceEvent {
+    return { at: "2026-07-31T00:00:00Z", instanceName: asInstanceName("demo"), seq: 4, type };
 }
