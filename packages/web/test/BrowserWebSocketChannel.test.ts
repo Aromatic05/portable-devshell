@@ -1,0 +1,9 @@
+import { describe, expect, it } from "vitest";
+import { BrowserWebSocketChannel } from "../src/rpc/BrowserWebSocketChannel.js";
+
+class FakeSocket extends EventTarget { static CONNECTING = 0; static OPEN = 1; static CLOSING = 2; static CLOSED = 3; readyState = 0; binaryType = ""; sent: Uint8Array[] = []; send(data: Uint8Array) { this.sent.push(data); } close() { this.readyState = 3; this.dispatchEvent(new Event("close")); } open() { this.readyState = 1; this.dispatchEvent(new Event("open")); } message(data: ArrayBuffer | Blob) { this.dispatchEvent(new MessageEvent("message", { data })); } }
+(globalThis as unknown as { WebSocket: typeof FakeSocket }).WebSocket = FakeSocket;
+describe("BrowserWebSocketChannel", () => {
+    it("queues only initial sends and sends one raw JSON frame per WebSocket message", async () => { const socket = new FakeSocket(); const channel = new BrowserWebSocketChannel(socket as never); const sent = channel.send(new TextEncoder().encode('{"name":"service.status"}')); socket.open(); await sent; expect(new TextDecoder().decode(socket.sent[0]!)).toBe('{"name":"service.status"}'); expect(socket.sent[0]![0]).toBe(123); channel.close(); await expect(channel.send(new Uint8Array())).rejects.toThrow("closed"); });
+    it("decodes ArrayBuffer and Blob, unregisters listeners, and closes once", async () => { const socket = new FakeSocket(); const channel = new BrowserWebSocketChannel(socket as never); socket.open(); const frames: string[] = []; let closes = 0; const off = channel.onFrame((frame) => frames.push(new TextDecoder().decode(frame))); channel.onClose(() => closes++); socket.message(new TextEncoder().encode("one").buffer); socket.message(new Blob(["two"])); await new Promise((resolve) => setTimeout(resolve)); off(); socket.message(new TextEncoder().encode("three").buffer); channel.close(); channel.close(); expect(frames).toEqual(["one", "two"]); expect(closes).toBe(1); });
+});

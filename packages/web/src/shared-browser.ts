@@ -1,0 +1,11 @@
+export { ClientConnection, ClientStream } from "../../shared/src/transport/ClientConnection.js";
+export { controlClientModule, instanceClientModule, readClientSubscriptionEvents } from "../../shared/src/transport/ClientConnection.js";
+export type { ChannelProvider } from "../../shared/src/transport/ChannelProvider.js";
+export type { FrameChannel } from "../../shared/src/transport/FrameChannel.js";
+export type { ClientConnectionOptions, ClientEvent } from "../../shared/src/transport/ClientConnection.js";
+export type { ApprovalDecisionValue, ApprovalRequest } from "../../shared/src/dto/tool/DtoToolApproval.js";
+export type { InstanceEvent } from "../../shared/src/dto/instance/DtoInstanceEvent.js";
+export type { InstanceListEntry, InstanceRuntimeEnvelope } from "../../shared/src/dto/instance/DtoInstanceRuntime.js";
+export type { InstanceLogEntry } from "../../shared/src/dto/instance/DtoInstanceLog.js";
+export type { InstanceSnapshot } from "../../shared/src/dto/instance/DtoInstanceSnapshot.js";
+export type { OAuthApprovalDecision, OAuthApprovalRequest } from "../../shared/src/dto/oauth/DtoOAuthApproval.js";
