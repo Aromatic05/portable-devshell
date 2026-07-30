@@ -72,6 +72,14 @@ export function overviewActivity(
     return overview.activity.slice(0, 6);
 }
 
+export function overviewAlertRoute(kind: OperationalOverviewAlert["kind"]): string {
+    if (kind.startsWith("approval.")) return "#/approvals";
+    if (kind.startsWith("todo.")) return "#/todos";
+    if (kind.startsWith("activity.")) return "#/activity";
+    if (kind.startsWith("instance.")) return "#/instances";
+    return "#/overview";
+}
+
 export function recentActivity(state: WebState, query = "", type = "all"): InstanceEvent[] {
     const needle = query.trim().toLowerCase();
     return [...state.activity]

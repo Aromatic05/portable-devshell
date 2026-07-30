@@ -1,6 +1,7 @@
 import type { WebState } from "../state/WebStore.js";
 import type { InstanceEvent } from "@portable-devshell/shared/browser";
-import { overviewActivity, overviewAlerts } from "../selectors/readModel.js";
+import { SystemResources } from "../components/diagnostics/SystemResources.js";
+import { overviewActivity, overviewAlertRoute, overviewAlerts } from "../selectors/readModel.js";
 
 export function Overview({ state }: { state: WebState }) {
     if (state.overview === undefined) {
@@ -17,10 +18,11 @@ export function Overview({ state }: { state: WebState }) {
                 <Metric label="Pending approvals" value={String(overview.counts.pendingApprovals)} />
                 <Metric label="Open todos" value={String(overview.counts.activeTodos)} />
             </div>
+            <SystemResources system={overview.controller.system} uptimeSeconds={overview.controller.uptimeSeconds} />
             <div className="overview-grid">
                 <section>
-                    <h3><a href="#/approvals">Alerts</a></h3>
-                    {currentAlerts.length === 0 ? <p className="empty">No current alerts.</p> : <ul className="alerts">{currentAlerts.map((alert) => <li className={alert.severity} key={alert.id}><a href={alertRoute(alert.kind)}><strong>{alert.title}</strong><br />{alert.detail}</a></li>)}</ul>}
+                    <h3><a href="#/overview">Alerts</a></h3>
+                    {currentAlerts.length === 0 ? <p className="empty">No current alerts.</p> : <ul className="alerts">{currentAlerts.map((alert) => <li className={alert.severity} key={alert.id}><a href={overviewAlertRoute(alert.kind)}><strong>{alert.title}</strong><br />{alert.detail}</a></li>)}</ul>}
                 </section>
                 <section>
                     <h3><a href="#/activity">Recent activity</a></h3>
@@ -39,13 +41,6 @@ export function Overview({ state }: { state: WebState }) {
             </div>
         </section>
     );
-}
-
-function alertRoute(kind: string): string {
-    if (kind.startsWith("approval.")) return "#/approvals";
-    if (kind.startsWith("todo.")) return "#/todos";
-    if (kind.startsWith("activity.")) return "#/activity";
-    return "#/instances";
 }
 
 export function ActivityList({ events, empty }: { events: InstanceEvent[]; empty: string }) {
