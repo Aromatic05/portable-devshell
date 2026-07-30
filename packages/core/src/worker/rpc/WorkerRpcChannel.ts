@@ -11,6 +11,7 @@ export abstract class WorkerRpcChannelBase implements WorkerRpcChannel {
     readonly #messageListeners = new Set<(message: JsonValue) => void>();
     readonly #disconnectListeners = new Set<(error: unknown) => void>();
     #disconnected = false;
+    #disconnectError?: unknown;
 
     protected get disconnected(): boolean {
         return this.#disconnected;
@@ -22,13 +23,20 @@ export abstract class WorkerRpcChannelBase implements WorkerRpcChannel {
     }
 
     onDisconnect(listener: (error: unknown) => void): () => void {
+        if (this.#disconnected) {
+            queueMicrotask(() => this.#notifyListener(listener, this.#disconnectError));
+            return () => undefined;
+        }
         this.#disconnectListeners.add(listener);
         return () => this.#disconnectListeners.delete(listener);
     }
 
     protected emitMessage(message: JsonValue): void {
-        for (const listener of this.#messageListeners) {
-            listener(message);
+        if (this.#disconnected) {
+            return;
+        }
+        for (const listener of [...this.#messageListeners]) {
+            this.#notifyListener(listener, message);
         }
     }
 
@@ -37,10 +45,30 @@ export abstract class WorkerRpcChannelBase implements WorkerRpcChannel {
             return;
         }
         this.#disconnected = true;
-        cleanup?.();
-        for (const listener of this.#disconnectListeners) {
-            listener(error);
+        this.#disconnectError = error;
+        try {
+            cleanup?.();
+        } catch (cleanupError) {
+            this.#warn(cleanupError);
         }
+        this.#messageListeners.clear();
+        const listeners = [...this.#disconnectListeners];
+        this.#disconnectListeners.clear();
+        for (const listener of listeners) {
+            this.#notifyListener(listener, error);
+        }
+    }
+
+    #notifyListener<T>(listener: (value: T) => void, value: T): void {
+        try {
+            listener(value);
+        } catch (error) {
+            this.#warn(error);
+        }
+    }
+
+    #warn(error: unknown): void {
+        console.warn(error instanceof Error ? error : new Error(String(error)));
     }
 
     abstract close(): void;
