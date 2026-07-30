@@ -5,10 +5,10 @@ import type { ErrorCode } from "../error/ErrorCodeCatalog.js";
 import { createError } from "../error/ErrorFactoryCreate.js";
 import type { JsonValue } from "../type/TypeJsonValue.js";
 import type { InstanceName } from "../type/identity/TypeIdentityInstanceName.js";
-import { Channel } from "./Channel.js";
 import type { Frame } from "./Frame.js";
+import type { FrameChannel } from "./FrameChannel.js";
 
-export type Peer = "cli" | "tui" | "server";
+export type Peer = "cli" | "tui" | "web" | "server";
 export type Destination = "@control" | InstanceName;
 
 export interface Event {
@@ -34,7 +34,7 @@ export interface CodecOptions {
 const decoder = new TextDecoder("utf-8", { fatal: true });
 
 export class Codec {
-    readonly #channel: Channel;
+    readonly #channel: FrameChannel;
     readonly #local: Peer;
     readonly #eventListeners = new Set<(event: Event) => void>();
     readonly #closeListeners = new Set<(error?: Error) => void>();
@@ -42,7 +42,7 @@ export class Codec {
     #closed = false;
     #closeError?: Error;
 
-    constructor(channel: Channel, options: CodecOptions) {
+    constructor(channel: FrameChannel, options: CodecOptions) {
         this.#channel = channel;
         this.#local = options.local;
         this.#remote = options.remote;
@@ -129,8 +129,8 @@ export class Codec {
             throw protocolError("protocol.invalidDirection", "Event source and destination peers must differ.");
         }
         if (this.#remote === undefined) {
-            if (this.#local === "server" && event.from !== "cli" && event.from !== "tui") {
-                throw protocolError("protocol.invalidDirection", "Server connections only accept cli or tui peers.");
+            if (this.#local === "server" && event.from !== "cli" && event.from !== "tui" && event.from !== "web") {
+                throw protocolError("protocol.invalidDirection", "Server connections only accept cli, tui, or web peers.");
             }
             this.#remote = event.from;
             return;
@@ -205,10 +205,10 @@ export function validateEvent(value: unknown): Event {
 }
 
 function readPeer(value: unknown, field: string): Peer {
-    if (value === "cli" || value === "tui" || value === "server") {
+    if (value === "cli" || value === "tui" || value === "web" || value === "server") {
         return value;
     }
-    throw protocolError("protocol.invalidDirection", `Event ${field} must be cli, tui, or server.`);
+    throw protocolError("protocol.invalidDirection", `Event ${field} must be cli, tui, web, or server.`);
 }
 
 function readNonEmptyString(value: unknown, field: string): string {

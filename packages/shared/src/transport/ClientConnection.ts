@@ -1,12 +1,14 @@
 import { randomUUID } from "node:crypto";
-import type { Socket } from "node:net";
 
 import type { ControlErrorBody } from "../error/ErrorBodyControl.js";
 import type { JsonValue } from "../type/TypeJsonValue.js";
 import { asInstanceName, type InstanceName } from "../type/identity/TypeIdentityInstanceName.js";
-import { Channel } from "./Channel.js";
+import {
+    SocketChannelProvider,
+    type ChannelProvider,
+    type SocketChannelProviderOptions
+} from "./ChannelProvider.js";
 import { Codec, type Destination, type Peer } from "./Codec.js";
-import { resolveControlSocketPath } from "./ControlEndpoint.js";
 import { PrefixRoute, type PrefixRouteEvent, type PrefixRouteIncoming } from "./PrefixRoute.js";
 
 export interface ClientEvent {
@@ -27,7 +29,8 @@ export interface ClientConnectionOptions {
     mapRemoteError(error: ControlErrorBody): Error;
     mode?: ClientConnectionMode;
     peer: Exclude<Peer, "server">;
-    socketFactory?: (path: string) => Socket;
+    channelProvider?: ChannelProvider;
+    socketFactory?: SocketChannelProviderOptions["socketFactory"];
     socketPath?: string;
     xdgRuntimeDir?: string;
 }
@@ -111,8 +114,7 @@ export class ClientConnection {
     readonly #mapRemoteError: (error: ControlErrorBody) => Error;
     readonly #mode: ClientConnectionMode;
     readonly #peer: Exclude<Peer, "server">;
-    readonly #socketFactory?: (path: string) => Socket;
-    readonly #socketPath: string;
+    readonly #channelProvider: ChannelProvider;
     #closed = false;
     #persistentFailure?: Error;
     #persistentGeneration = 0;
@@ -124,8 +126,7 @@ export class ClientConnection {
         this.#mapRemoteError = options.mapRemoteError;
         this.#mode = options.mode ?? "short";
         this.#peer = options.peer;
-        this.#socketFactory = options.socketFactory;
-        this.#socketPath = options.socketPath ?? resolveControlSocketPath(options.xdgRuntimeDir);
+        this.#channelProvider = options.channelProvider ?? new SocketChannelProvider(options);
     }
 
     async request<TResult>(
@@ -289,7 +290,7 @@ export class ClientConnection {
     }
 
     async #connect(onClose?: (session: ClientSession, error?: Error) => void): Promise<ClientSession> {
-        const channel = await Channel.connect(this.#socketPath, { socketFactory: this.#socketFactory });
+        const channel = await this.#channelProvider.connect();
         const route = new PrefixRoute(new Codec(channel, { local: this.#peer, remote: "server" }), {
             eventIdPrefix: this.#peer
         });
