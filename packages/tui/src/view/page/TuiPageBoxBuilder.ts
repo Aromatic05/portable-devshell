@@ -97,5 +97,5 @@ function filterAuditBoxes(boxes: BoxModel[], query: string): BoxModel[] {
 }
 
 function searchableText(box: BoxModel): string {
-    return [box.title, ...box.collapsedLines.map((line) => line.text), ...box.expandedLines.map((line) => line.text)].join("\n").toLowerCase();
+    return [box.title, box.searchText ?? "", ...box.collapsedLines.map((line) => line.text), ...box.expandedLines.map((line) => line.text)].join("\n").toLowerCase();
 }

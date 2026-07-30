@@ -2,6 +2,9 @@ import type { ApprovalRequest, JsonValue, ToolCallRecord } from "@portable-devsh
 
 import type { TuiAppState, TuiInstanceListEntry, TuiLogEntry } from "./TuiStoreModel.js";
 
+const MAX_LOGS_PER_INSTANCE = 100;
+const MAX_TOOL_CALLS_PER_INSTANCE = 100;
+
 export function selectInstanceAfterListReplace(state: TuiAppState): TuiAppState {
     const names = new Set(state.instances.map((instance) => instance.name));
     const selectedInstance =
@@ -72,7 +75,9 @@ export function compareToolCallRecord(left: ToolCallRecord, right: ToolCallRecor
 
 export function upsertToolCall(current: ToolCallRecord[], next: ToolCallRecord): ToolCallRecord[] {
     const without = current.filter((record) => record.callId !== next.callId);
-    return [...without, next].sort(compareToolCallRecord);
+    return [...without, next]
+        .sort(compareToolCallRecord)
+        .slice(0, MAX_TOOL_CALLS_PER_INSTANCE);
 }
 
 export function upsertApproval(current: ApprovalRequest[], next: ApprovalRequest): ApprovalRequest[] {
@@ -93,7 +98,14 @@ export function dedupeLogs(logs: TuiLogEntry[]): TuiLogEntry[] {
 
             return left.seq - right.seq;
         })
-        .filter((entry, index, entries) => index === 0 || !(entries[index - 1]?.instance === entry.instance && entries[index - 1]?.seq === entry.seq));
+        .filter((entry, index, entries) => index === 0 || !(entries[index - 1]?.instance === entry.instance && entries[index - 1]?.seq === entry.seq))
+        .slice(-MAX_LOGS_PER_INSTANCE);
+}
+
+export function boundToolCalls(records: readonly ToolCallRecord[]): ToolCallRecord[] {
+    return [...records]
+        .sort(compareToolCallRecord)
+        .slice(0, MAX_TOOL_CALLS_PER_INSTANCE);
 }
 
 export function pruneByInstances<T>(value: Record<string, T>, instances: TuiInstanceListEntry[]): Record<string, T> {

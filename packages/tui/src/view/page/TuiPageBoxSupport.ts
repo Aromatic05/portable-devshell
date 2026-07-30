@@ -36,6 +36,7 @@ export function makeBox(
         disabled?: boolean;
         expandedKey?: string;
         id: string;
+        searchText?: string;
         severity?: BoxLine["tone"];
         status?: TuiExpandableBoxStatus;
         summaryLines: string[];
@@ -65,6 +66,7 @@ export function makeBox(
                 state.interaction.focusScope === "form" ||
                 state.interaction.focusScope === "wizard"),
         id: input.id,
+        searchText: input.searchText,
         severity: input.severity,
         selectedDetailLineId: expandedLines.some((line) => line.id === selectedDetailLineId) ? selectedDetailLineId : expandedLines[0]?.id,
         status: input.status ?? "normal",

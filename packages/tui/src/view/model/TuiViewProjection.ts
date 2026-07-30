@@ -4,7 +4,7 @@ import type { TuiActivePage, TuiPageId } from "../../state/TuiUiState.js";
 import { buildBoxesForPage } from "../page/TuiPageBoxBuilder.js";
 import { buildHelpLines } from "../page/TuiPageHelp.js";
 import type { TuiAppState, TuiConnectionState } from "../../state/reducer/TuiStoreModel.js";
-import type { TuiMainBoxFlowMetrics, TuiMainScreenModel, TuiSidebarModel } from "../../state/TuiViewModel.js";
+import type { TuiBoxModel, TuiMainBoxFlowMetrics, TuiMainScreenModel, TuiSidebarModel } from "../../state/TuiViewModel.js";
 
 const pageEntries: Array<{ id: TuiPageId; label: string }> = [
     { id: "instances", label: "instances" },
@@ -34,7 +34,7 @@ export function selectHeaderTitle(): string {
 }
 
 export function selectHeaderSummary(state: TuiAppState): string {
-    return `instances ${state.instances.length} | live ${state.globalDerived.connectedInstanceCount} | approvals ${state.globalDerived.pendingApprovalCount} | events ${state.globalDerived.totalEventCount}`;
+    return `instances ${state.instances.length} | live ${state.globalDerived.connectedInstanceCount} | approvals ${state.globalDerived.pendingApprovalCount}`;
 }
 
 export function selectSidebarModel(state: TuiAppState): TuiSidebarModel {
@@ -93,10 +93,14 @@ export function selectMainBoxIds(state: TuiAppState): string[] {
 
 export function selectMainBoxFlowMetrics(state: TuiAppState, boxInnerWidth = 80): TuiMainBoxFlowMetrics {
     const model = selectMainScreenModel(state);
+    return measureMainBoxFlowMetrics(model.boxes, selectMainScrollKey(state), boxInnerWidth);
+}
+
+export function measureMainBoxFlowMetrics(boxes: readonly TuiBoxModel[], scrollKey: string, boxInnerWidth = 80): TuiMainBoxFlowMetrics {
     let cursor = 0;
     const boxRanges: Record<string, { end: number; start: number }> = {};
 
-    for (const box of model.boxes) {
+    for (const box of boxes) {
         const start = cursor;
         cursor += measureExpandableBoxHeight(box, boxInnerWidth);
         boxRanges[box.id] = { end: cursor, start };
@@ -104,7 +108,7 @@ export function selectMainBoxFlowMetrics(state: TuiAppState, boxInnerWidth = 80)
 
     return {
         boxRanges,
-        scrollKey: selectMainScrollKey(state),
+        scrollKey,
         totalLines: cursor
     };
 }

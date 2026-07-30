@@ -20,6 +20,7 @@ export class TuiControlSession {
     readonly #refresh: TuiControlSessionRefresh;
     readonly #store: TuiAppStore;
     readonly #subscriptions: TuiControlSessionSubscriptions;
+    readonly #auditRefreshTimers = new Map<string, ReturnType<typeof setTimeout>>();
     #oauthRefreshTimer?: ReturnType<typeof setInterval>;
     #started = false;
 
@@ -67,6 +68,7 @@ export class TuiControlSession {
     async stop(): Promise<void> {
         this.#started = false;
         this.#stopOAuthRefresh();
+        this.#stopAuditRefreshes();
         this.#subscriptions.closeAll();
         this.#clients.close();
     }
@@ -89,6 +91,10 @@ export class TuiControlSession {
 
     async refreshConfig(): Promise<void> {
         await this.#refresh.refreshConfig();
+        if (this.#store.getState().connection.status === "connected") {
+            this.#stopOAuthRefresh();
+            this.#startOAuthRefresh();
+        }
     }
 
     async refreshOAuth(): Promise<void> {
@@ -149,10 +155,16 @@ export class TuiControlSession {
             { kind: "instance.event" }
         >
     ): void {
-        this.#store.applyEvent(message.event);
         const instance = message.event.destination;
+        if (!isTuiPresentationEvent(message.event.name)) {
+            return;
+        }
+        this.#store.applyEvent(message.event);
         if (message.event.name.startsWith("todo.")) {
             void this.#refresh.refreshTodo(instance).catch(() => undefined);
+        }
+        if (isTerminalToolCallEvent(message.event.name)) {
+            this.#scheduleAuditRefresh(instance);
         }
         const state = this.#store.getState();
         if (
@@ -184,6 +196,7 @@ export class TuiControlSession {
 
     #handleDisconnected(): void {
         this.#stopOAuthRefresh();
+        this.#stopAuditRefreshes();
         this.#store.setConnectionState("disconnected");
         this.#subscriptions.closeAll();
     }
@@ -191,11 +204,12 @@ export class TuiControlSession {
     #applyConnectionFailure(error: unknown): void {
         const failure = toFailure(error);
         this.#store.setConnectionState(failure.status, failure.error);
+        this.#stopAuditRefreshes();
         this.#subscriptions.closeAll();
     }
 
     #startOAuthRefresh(): void {
-        if (this.#oauthRefreshTimer !== undefined) {
+        if (this.#oauthRefreshTimer !== undefined || !this.#refresh.oauthApprovalsAvailable()) {
             return;
         }
         this.#oauthRefreshTimer = setInterval(() => {
@@ -210,6 +224,55 @@ export class TuiControlSession {
         clearInterval(this.#oauthRefreshTimer);
         this.#oauthRefreshTimer = undefined;
     }
+
+    #scheduleAuditRefresh(instance: string): void {
+        const state = this.#store.getState();
+        if (state.ui.selectedPage !== "audit" || state.ui.selectedInstance !== instance) {
+            return;
+        }
+        const current = this.#auditRefreshTimers.get(instance);
+        if (current !== undefined) {
+            clearTimeout(current);
+        }
+        this.#auditRefreshTimers.set(instance, setTimeout(() => {
+            this.#auditRefreshTimers.delete(instance);
+            if (!this.#started) {
+                return;
+            }
+            const latest = this.#store.getState();
+            if (latest.ui.selectedPage === "audit" && latest.ui.selectedInstance === instance) {
+                void this.#refresh.refreshAudit(instance).catch(() => undefined);
+            }
+        }, 50));
+    }
+
+    #stopAuditRefreshes(): void {
+        for (const timer of this.#auditRefreshTimers.values()) {
+            clearTimeout(timer);
+        }
+        this.#auditRefreshTimers.clear();
+    }
+}
+
+function isTuiPresentationEvent(name: string): boolean {
+    return name === "instance.statusChanged" ||
+        name === "instance.connectionChanged" ||
+        name === "instance.readyChanged" ||
+        name === "log.appended" ||
+        name.startsWith("toolCall.") ||
+        name.startsWith("approval.") ||
+        name.startsWith("todo.") ||
+        name.startsWith("artifact.share") ||
+        name.startsWith("artifact.transfer");
+}
+
+function isTerminalToolCallEvent(name: string): boolean {
+    return name === "toolCall.completed" ||
+        name === "toolCall.failed" ||
+        name === "toolCall.denied" ||
+        name === "toolCall.expired" ||
+        name === "toolCall.queueTimeout" ||
+        name === "toolCall.cancelled";
 }
 
 function toFailure(error: unknown): {

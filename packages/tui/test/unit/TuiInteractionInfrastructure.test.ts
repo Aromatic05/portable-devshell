@@ -99,6 +99,7 @@ test("page shortcuts include Todo, Help, and Terminal and reload works on every 
         { instance: "alpha", page: "connector" },
         { instance: "alpha", page: "oauth" },
         { instance: "alpha", page: "audit" },
+        { instance: "alpha", page: "audit" },
         { instance: "alpha", page: "logs" },
         { instance: "alpha", page: "todo" },
         { instance: "alpha", page: "help" },
@@ -613,6 +614,8 @@ test("audit truncates input and output previews while opening complete structure
     });
     await harness.press("5");
 
+    const collapsedAudit = selectMainScreenModel(harness.store.getState()).boxes.find((box) => box.id === "audit-live-patch")!;
+    harness.store.toggleExpanded(collapsedAudit.expandedKey);
     const audit = selectMainScreenModel(harness.store.getState()).boxes.find((box) => box.id === "audit-live-patch")!;
     assert.equal((harness.store.getState().toolCallsByInstance.alpha ?? []).find((record) => record.callId === "live-patch")?.input !== undefined, true);
     const inputLine = audit.expandedLines.find((line) => line.id === "audit-live-patch:input")!;
@@ -624,7 +627,6 @@ test("audit truncates input and output previews while opening complete structure
     assert.equal(outputLine.text.endsWith("…"), true);
     assert.equal(audit.expandedLines.some((line) => line.text.includes("*** End Patch")), false);
 
-    harness.store.toggleExpanded(audit.expandedKey);
     harness.store.setFocusScope("boxDetail");
     harness.store.setMainFocusId("audit-live-patch");
     harness.store.setSelectedDetailLine(audit.expandedKey, "audit-live-patch:input");
@@ -719,6 +721,8 @@ test("audit renders legacy records without an input summary", async () => {
 
     await harness.press("5");
 
+    const collapsedAudit = selectMainScreenModel(harness.store.getState()).boxes.find((box) => box.id === "audit-legacy-call")!;
+    harness.store.toggleExpanded(collapsedAudit.expandedKey);
     const audit = selectMainScreenModel(harness.store.getState()).boxes.find((box) => box.id === "audit-legacy-call")!;
     assert.equal(audit.expandedLines.some((line) => line.text === "input -"), true);
     assert.equal(audit.expandedLines.some((line) => line.text === "ctxId ctx-legacy"), true);

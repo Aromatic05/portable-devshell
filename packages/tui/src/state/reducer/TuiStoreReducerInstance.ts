@@ -1,5 +1,5 @@
 import { applyEventRecord } from "./TuiStoreReducerEvent.js";
-import { compareToolCallRecord, dedupeLogs, mergeLogEntry, pruneByInstanceNames, pruneByInstances, selectInstanceAfterListReplace, withDerivedState } from "./TuiStoreReducerSupport.js";
+import { boundToolCalls, dedupeLogs, mergeLogEntry, pruneByInstanceNames, pruneByInstances, selectInstanceAfterListReplace, withDerivedState } from "./TuiStoreReducerSupport.js";
 import type { TuiAppAction, TuiAppState } from "./TuiStoreModel.js";
 
 export function reduceTuiStoreReducerInstance(state: TuiAppState, action: TuiAppAction): TuiAppState | undefined {
@@ -64,7 +64,7 @@ export function reduceTuiStoreReducerInstance(state: TuiAppState, action: TuiApp
                 ...state,
                 toolCallsByInstance: {
                     ...state.toolCallsByInstance,
-                    [action.instance]: [...action.records].sort(compareToolCallRecord)
+                    [action.instance]: boundToolCalls(action.records)
                 }
             });
         case "instance.setLastSeq":

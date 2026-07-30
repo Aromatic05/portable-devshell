@@ -113,6 +113,15 @@ test("navigation controller owns page selection and the two-stage sidebar/main c
     });
 
     assert.equal(await harness.navigation.dispatch({
+        page: "audit",
+        type: "page.select"
+    }), true);
+    assert.deepEqual(harness.reloads.at(-1), {
+        instance: "alpha",
+        page: "audit"
+    });
+
+    assert.equal(await harness.navigation.dispatch({
         index: 1,
         type: "instance.selectIndex"
     }), true);

@@ -1,3 +1,5 @@
+import { isDeepStrictEqual } from "node:util";
+
 import { withDerivedState } from "./TuiStoreReducerSupport.js";
 import type { TuiAppAction, TuiAppState } from "./TuiStoreModel.js";
 
@@ -11,11 +13,16 @@ export function reduceTuiStoreReducerControl(state: TuiAppState, action: TuiAppA
                     [action.instance]: [...action.approvals].sort((left, right) => right.createdAt.localeCompare(left.createdAt))
                 }
             });
-        case "oauthApproval.replace":
+        case "oauthApproval.replace": {
+            const nextApprovals = [...action.approvals].sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+            if (isDeepStrictEqual(state.oauthApprovals, nextApprovals)) {
+                return state;
+            }
             return withDerivedState({
                 ...state,
-                oauthApprovals: [...action.approvals].sort((left, right) => right.createdAt.localeCompare(left.createdAt))
+                oauthApprovals: nextApprovals
             });
+        }
         case "command.upsert": {
             const without = state.commandRecords.filter((command) => command.commandId !== action.command.commandId);
             return {

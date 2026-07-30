@@ -17,23 +17,30 @@ export function buildAuditPageBoxes(state: TuiAppState, instanceName: string): B
               title: "Tool Call History"
           })]
         : toolCalls.map((record) => {
-              const output = resolveAuditOutput(record.output, logs, record.callId);
-              const ctxId = resolveAuditCtxId(record.ctxId, logs, record.callId);
+              const id = `audit-${record.callId}`;
+              const expandedKey = `audit:${instanceName}:${id}`;
+              const expanded = state.ui.expandedBoxes[expandedKey] === true;
+              const output = expanded ? resolveAuditOutput(record.output, logs, record.callId) : undefined;
+              const ctxId = expanded ? resolveAuditCtxId(record.ctxId, logs, record.callId) : record.ctxId;
               return makeBox(state, "audit", instanceName, {
-                  detailLines: [
-                      `callId ${record.callId}`,
-                      `tool ${record.toolName}`,
-                      `status ${record.status}`,
-                      `startedAt ${record.startedAt}`,
-                      `completedAt ${record.completedAt ?? "-"}`,
-                      `source ${record.source}`,
-                      `ctxId ${ctxId ?? "-"}`,
-                      `task ${record.taskId ?? "-"}`,
-                      `todo item ${record.todoItemId ?? "-"}`,
-                      { id: "input", text: `input ${auditInputSummary(record.input, record.inputSummary)}` },
-                      { id: "output", text: `output ${auditOutputSummary(output)}` }
-                  ],
-                  id: `audit-${record.callId}`,
+                  detailLines: expanded
+                      ? [
+                            `callId ${record.callId}`,
+                            `tool ${record.toolName}`,
+                            `status ${record.status}`,
+                            `startedAt ${record.startedAt}`,
+                            `completedAt ${record.completedAt ?? "-"}`,
+                            `source ${record.source}`,
+                            `ctxId ${ctxId ?? "-"}`,
+                            `task ${record.taskId ?? "-"}`,
+                            `todo item ${record.todoItemId ?? "-"}`,
+                            { id: "input", text: `input ${auditInputSummary(record.input, record.inputSummary)}` },
+                            { id: "output", text: `output ${auditOutputSummary(output)}` }
+                        ]
+                      : [],
+                  expandedKey,
+                  id,
+                  searchText: auditSearchText(record),
                   status: toolCallStatus(record),
                   summaryLines: [compactSummary(["status", record.status], ["source", record.source], ["time", record.startedAt])],
                   title: `${record.toolName} · ${record.status}`
@@ -41,6 +48,21 @@ export function buildAuditPageBoxes(state: TuiAppState, instanceName: string): B
           });
 
     return [...pending, ...history];
+}
+
+function auditSearchText(record: import("@portable-devshell/shared").ToolCallRecord): string {
+    return [
+        record.callId,
+        `tool=${record.toolName}`,
+        `status=${record.status}`,
+        `source=${record.source}`,
+        record.startedAt,
+        record.completedAt ?? "",
+        record.ctxId ?? "",
+        record.taskId ?? "",
+        record.todoItemId ?? "",
+        (record.inputSummary ?? "").slice(0, 512)
+    ].join(" ").toLowerCase();
 }
 
 function approvalBox(state: TuiAppState, instanceName: string, approval: ApprovalRequest, index: number): BoxModel {

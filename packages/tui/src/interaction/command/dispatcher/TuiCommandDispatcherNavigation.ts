@@ -97,7 +97,7 @@ export class TuiCommandDispatcherNavigation {
             return false;
         }
         this.#focus.syncMainFocus();
-        await this.#reloadLogsIfSelected();
+        await this.#reloadSelectedPage();
         return true;
     }
 
@@ -113,7 +113,7 @@ export class TuiCommandDispatcherNavigation {
         this.#store.setSelectedPage(page);
         this.#store.setSidebarCursor({ id: page, kind: "page" });
         this.#focus.syncMainFocus();
-        await this.#reloadLogsIfSelected();
+        await this.#reloadSelectedPage();
         return true;
     }
 
@@ -148,11 +148,15 @@ export class TuiCommandDispatcherNavigation {
         }
     }
 
-    async #reloadLogsIfSelected(): Promise<void> {
+    async #reloadSelectedPage(): Promise<void> {
         const state = this.#store.getState();
         if (state.ui.selectedPage === "logs" && state.ui.selectedInstance !== undefined) {
             await this.#onLogsReload();
             this.#store.setScreenStatus("logs", "Logs reloaded from instance.readLogs.");
+            return;
+        }
+        if (state.ui.selectedPage === "audit" && state.ui.selectedInstance !== undefined) {
+            await this.#onPageReload("audit", state.ui.selectedInstance);
         }
     }
 }

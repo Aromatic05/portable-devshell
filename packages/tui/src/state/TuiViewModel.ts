@@ -17,6 +17,7 @@ export interface TuiBoxModel {
     expandedLines: readonly TuiBoxLine[];
     focused: boolean;
     id: string;
+    searchText?: string;
     severity?: TuiBoxLineTone;
     selectedDetailLineId?: string;
     status: TuiExpandableBoxStatus;

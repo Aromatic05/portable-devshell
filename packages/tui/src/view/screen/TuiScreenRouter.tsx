@@ -2,13 +2,14 @@ import { TuiFocusItem } from "../../state/focus/TuiFocusItem.js";
 import { Box, Text } from "ink";
 import type { ApprovalRequest, ToolCallRecord } from "@portable-devshell/shared";
 
-import { renderExpandableBoxLines } from "../component/TuiComponentExpandableBox.js";
+import { renderExpandableBoxLines, type TuiComponentExpandableBoxRenderLine } from "../component/TuiComponentExpandableBox.js";
 import { TuiComponentErrorBanner } from "../component/TuiComponentErrorBanner.js";
 import { TuiComponentTextDetail } from "../component/TuiComponentTextDetail.js";
 import { TuiFocusGraph, type TuiFocusNode } from "../../state/focus/TuiFocusGraph.js";
 import type { TuiPageId } from "../../state/TuiUiState.js";
 import type { TuiAppState } from "../../state/reducer/TuiStoreModel.js";
-import { selectMainBoxFlowMetrics, selectMainScreenModel } from "../model/TuiViewProjection.js";
+import type { TuiBoxModel } from "../../state/TuiViewModel.js";
+import { measureMainBoxFlowMetrics, selectMainScreenModel, selectMainScrollKey } from "../model/TuiViewProjection.js";
 
 export const orderedPages: TuiPageId[] = ["instances", "config", "connector", "oauth", "audit", "logs", "todo", "help", "terminal"];
 
@@ -41,12 +42,13 @@ export function TuiScreenRouter(props: TuiScreenRouterProps) {
         return <ApprovalDetail approval={approval} mode={auditPage.mode} relatedCalls={relatedCalls} selectedAction={auditPage.selectedAction} toolCall={toolCall} />;
     }
     const model = selectMainScreenModel(props.state);
-    const flow = selectMainBoxFlowMetrics(props.state, props.boxInnerWidth);
+    const flow = measureMainBoxFlowMetrics(model.boxes, selectMainScrollKey(props.state), props.boxInnerWidth);
     const scrollOffset = props.state.ui.scrollOffsets[flow.scrollKey] ?? 0;
     const boxViewportRows = Math.max(0, props.viewportRows - 1 - (model.statusLine === undefined ? 0 : 1) - (model.emptyState === undefined ? 0 : 1));
-    const renderedLines = model.boxes.flatMap((box) => renderExpandableBoxLines(box, props.boxInnerWidth));
-    const clampedOffset = clamp(scrollOffset, 0, Math.max(0, renderedLines.length - boxViewportRows));
-    const visibleLines = boxViewportRows > 0 ? renderedLines.slice(clampedOffset, clampedOffset + boxViewportRows) : [];
+    const clampedOffset = clamp(scrollOffset, 0, Math.max(0, flow.totalLines - boxViewportRows));
+    const visibleLines = boxViewportRows > 0
+        ? renderVisibleBoxLines(model.boxes, flow.boxRanges, props.boxInnerWidth, clampedOffset, boxViewportRows)
+        : [];
 
     return (
         <Box flexDirection="column">
@@ -63,6 +65,34 @@ export function TuiScreenRouter(props: TuiScreenRouterProps) {
             {model.statusLine !== undefined ? <Text color="yellow">{model.statusLine}</Text> : undefined}
         </Box>
     );
+}
+
+function renderVisibleBoxLines(
+    boxes: readonly TuiBoxModel[],
+    ranges: Record<string, { end: number; start: number }>,
+    width: number,
+    offset: number,
+    viewportRows: number
+): TuiComponentExpandableBoxRenderLine[] {
+    const viewportEnd = offset + viewportRows;
+    const visible: TuiComponentExpandableBoxRenderLine[] = [];
+
+    for (const box of boxes) {
+        const range = ranges[box.id];
+        if (range === undefined || range.end <= offset) {
+            continue;
+        }
+        if (range.start >= viewportEnd) {
+            break;
+        }
+        const lines = renderExpandableBoxLines(box, width);
+        visible.push(...lines.slice(
+            Math.max(0, offset - range.start),
+            Math.min(lines.length, viewportEnd - range.start)
+        ));
+    }
+
+    return visible;
 }
 
 function ApprovalDetail(props: { approval?: ApprovalRequest; mode: "approvalDetail" | "denyConfirm"; relatedCalls: ToolCallRecord[]; selectedAction?: "approve" | "deny" | "back" | "input"; toolCall?: ToolCallRecord }) {

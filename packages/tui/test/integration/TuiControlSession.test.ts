@@ -142,6 +142,58 @@ test("TuiControlSession reports missing control without auto-starting it", async
     }
 });
 
+test("TuiControlSession does not poll OAuth approvals when OAuth is unavailable", async (t) => {
+    const runtimeDir = await mkdtemp(join(tmpdir(), "portable-devshell-tui-no-oauth-poll-"));
+    const socketPath = createTestIpcPath("tui-control", runtimeDir);
+    const worker = new FakeWorker("alpha");
+    const server = createServer(socketPath, worker, () => 7);
+    const session = new TuiControlSession({
+        clients: createTuiClients({ socketPath })
+    });
+
+    await server.start();
+    t.after(async () => {
+        await session.stop();
+        await server.stop().catch(() => undefined);
+        await rm(runtimeDir, { force: true, recursive: true });
+    });
+
+    await session.start();
+    await waitFor(() => session.store.getState().connection.status === "connected");
+    let notifications = 0;
+    const unsubscribe = session.store.subscribe(() => {
+        notifications += 1;
+    });
+    t.after(unsubscribe);
+
+    await new Promise((resolve) => setTimeout(resolve, 1_100));
+    assert.equal(notifications, 0);
+});
+
+test("TuiControlSession drops events that have no TUI presentation", async (t) => {
+    const runtimeDir = await mkdtemp(join(tmpdir(), "portable-devshell-tui-event-filter-"));
+    const socketPath = createTestIpcPath("tui-control", runtimeDir);
+    const worker = new FakeWorker("alpha");
+    const server = createServer(socketPath, worker, () => 7);
+    const session = new TuiControlSession({
+        clients: createTuiClients({ socketPath })
+    });
+
+    await server.start();
+    t.after(async () => {
+        await session.stop();
+        await server.stop().catch(() => undefined);
+        await rm(runtimeDir, { force: true, recursive: true });
+    });
+
+    await session.start();
+    await waitFor(() => worker.subscribeFromSeqs.length === 1);
+    const rawEventCount = session.store.getState().rawEvents.length;
+    worker.emit("mcp.sessionOpened", { sessionId: "invisible-session" });
+    await new Promise((resolve) => setTimeout(resolve, 75));
+    assert.equal(session.store.getState().rawEvents.length, rawEventCount);
+});
+
 test("module TUI clients send explicit instance operations and preserve start relay output", async (t) => {
     const runtimeDir = await mkdtemp(join(tmpdir(), "portable-devshell-tui-operations-"));
     const socketPath = createTestIpcPath("tui-control", runtimeDir);

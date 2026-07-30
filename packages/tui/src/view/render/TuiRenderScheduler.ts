@@ -5,13 +5,20 @@ export class TuiRenderScheduler {
     readonly #listeners = new Set<() => void>();
     readonly #unsubscribeStore: () => void;
     readonly #flushDelayMs: number;
+    #lastObservedState: TuiAppState;
     #scheduled = false;
     #timer?: NodeJS.Timeout;
 
     constructor(readonly store: TuiAppStore, flushDelayMs = 16) {
         this.#flushDelayMs = flushDelayMs;
+        this.#lastObservedState = store.getState();
         this.#unsubscribeStore = store.subscribe(() => {
-            this.#schedule();
+            const nextState = store.getState();
+            const previousState = this.#lastObservedState;
+            this.#lastObservedState = nextState;
+            if (isRenderRelevantChange(previousState, nextState)) {
+                this.#schedule();
+            }
         });
     }
 
@@ -53,4 +60,63 @@ export class TuiRenderScheduler {
             }
         }, this.#flushDelayMs);
     }
+}
+
+export function isRenderRelevantChange(previous: TuiAppState, next: TuiAppState): boolean {
+    if (previous === next) {
+        return false;
+    }
+    if (
+        previous.connection !== next.connection ||
+        previous.instances !== next.instances ||
+        previous.interaction !== next.interaction ||
+        previous.ui !== next.ui ||
+        previous.panelErrors !== next.panelErrors ||
+        previous.commandRecords !== next.commandRecords ||
+        previous.relayByCommand !== next.relayByCommand ||
+        previous.globalDerived.connectedInstanceCount !== next.globalDerived.connectedInstanceCount ||
+        previous.globalDerived.pendingApprovalCount !== next.globalDerived.pendingApprovalCount
+    ) {
+        return true;
+    }
+
+    const page = next.ui.selectedPage;
+    const instance = next.ui.selectedInstance;
+    if (page === "instances") {
+        return previous.snapshotsByInstance !== next.snapshotsByInstance ||
+            previous.lastStatusChangeAtByInstance !== next.lastStatusChangeAtByInstance ||
+            previous.approvalsByInstance !== next.approvalsByInstance ||
+            previous.artifactShares !== next.artifactShares ||
+            previous.artifactTransfers !== next.artifactTransfers ||
+            previous.configView !== next.configView;
+    }
+    if (page === "oauth") {
+        return previous.oauthApprovals !== next.oauthApprovals ||
+            previous.mcpStatus !== next.mcpStatus ||
+            previous.configView !== next.configView;
+    }
+    if (page === "config" || page === "connector") {
+        return previous.configView !== next.configView ||
+            previous.mcpStatus !== next.mcpStatus ||
+            selectedValueChanged(previous.snapshotsByInstance, next.snapshotsByInstance, instance);
+    }
+    if (page === "audit") {
+        return selectedValueChanged(previous.approvalsByInstance, next.approvalsByInstance, instance) ||
+            selectedValueChanged(previous.logsByInstance, next.logsByInstance, instance) ||
+            selectedValueChanged(previous.toolCallsByInstance, next.toolCallsByInstance, instance) ||
+            selectedValueChanged(previous.snapshotsByInstance, next.snapshotsByInstance, instance);
+    }
+    if (page === "logs") {
+        return selectedValueChanged(previous.logsByInstance, next.logsByInstance, instance) ||
+            selectedValueChanged(previous.snapshotsByInstance, next.snapshotsByInstance, instance);
+    }
+    if (page === "todo") {
+        return selectedValueChanged(previous.todoByInstance, next.todoByInstance, instance) ||
+            selectedValueChanged(previous.snapshotsByInstance, next.snapshotsByInstance, instance);
+    }
+    return false;
+}
+
+function selectedValueChanged<T>(previous: Record<string, T>, next: Record<string, T>, instance: string | undefined): boolean {
+    return instance !== undefined && previous[instance] !== next[instance];
 }

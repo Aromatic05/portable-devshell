@@ -71,6 +71,10 @@ export class TuiControlSessionRefresh {
         );
     }
 
+    oauthApprovalsAvailable(): boolean {
+        return !oauthApprovalsUnavailable(this.#store.getState().configView);
+    }
+
     async refreshAudit(instance: string): Promise<void> {
         await this.#reloadToolCalls(instance);
         await this.#reloadApprovals(instance);
