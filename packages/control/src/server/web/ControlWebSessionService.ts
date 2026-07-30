@@ -19,8 +19,10 @@ export interface ControlWebSessionServiceOptions {
 
 export class ControlWebSessionService {
     readonly #basePath: string;
+    readonly #expiryTimers = new Map<string, ReturnType<typeof setTimeout>>();
     readonly #maxSessions: number;
     readonly #now: () => number;
+    readonly #revocationListeners = new Set<(token: string) => void>();
     readonly #secureCookie: boolean;
     readonly #sessionTtlMs: number;
     readonly #tokenFactory: () => string;
@@ -36,6 +38,9 @@ export class ControlWebSessionService {
         this.#now = options.now ?? Date.now;
         this.#secureCookie = options.secureCookie ?? false;
         this.#sessionTtlMs = options.sessionTtlMs ?? DEFAULT_SESSION_TTL_MS;
+        if (!Number.isSafeInteger(this.#sessionTtlMs) || this.#sessionTtlMs < 1) {
+            throw new Error("Control web sessionTtlMs must be a positive safe integer.");
+        }
         this.#tokenFactory = options.tokenFactory ?? (() => randomBytes(32).toString("base64url"));
     }
 
@@ -63,21 +68,32 @@ export class ControlWebSessionService {
     }
 
     authorize(request: IncomingMessage): boolean {
+        return this.authorizeToken(request) !== undefined;
+    }
+
+    authorizeToken(request: IncomingMessage): string | undefined {
         this.#prune();
         const token = readCookie(request.headers.cookie, SESSION_COOKIE_NAME);
         if (token === undefined) {
-            return false;
+            return undefined;
         }
         const expiresAt = this.#sessions.get(token);
         if (expiresAt === undefined || expiresAt <= this.#now()) {
-            this.#sessions.delete(token);
-            return false;
+            this.#deleteSession(token);
+            return undefined;
         }
-        return true;
+        return token;
+    }
+
+    onRevoked(listener: (token: string) => void): () => void {
+        this.#revocationListeners.add(listener);
+        return () => this.#revocationListeners.delete(listener);
     }
 
     clear(): void {
-        this.#sessions.clear();
+        for (const token of [...this.#sessions.keys()]) {
+            this.#deleteSession(token);
+        }
     }
 
     #create(response: ServerResponse): void {
@@ -87,11 +103,17 @@ export class ControlWebSessionService {
             if (oldest === undefined) {
                 break;
             }
-            this.#sessions.delete(oldest);
+            this.#deleteSession(oldest);
         }
         const token = this.#tokenFactory();
+        this.#deleteSession(token);
         const expiresAt = this.#now() + this.#sessionTtlMs;
         this.#sessions.set(token, expiresAt);
+        const expiryTimer = setTimeout(() => {
+            this.#deleteSession(token);
+        }, this.#sessionTtlMs);
+        expiryTimer.unref?.();
+        this.#expiryTimers.set(token, expiryTimer);
         response.setHeader(
             "Set-Cookie",
             this.#cookie(token, Math.max(1, Math.floor(this.#sessionTtlMs / 1_000)))
@@ -102,7 +124,7 @@ export class ControlWebSessionService {
     #revoke(request: IncomingMessage): void {
         const token = readCookie(request.headers.cookie, SESSION_COOKIE_NAME);
         if (token !== undefined) {
-            this.#sessions.delete(token);
+            this.#deleteSession(token);
         }
     }
 
@@ -110,7 +132,25 @@ export class ControlWebSessionService {
         const now = this.#now();
         for (const [token, expiresAt] of this.#sessions) {
             if (expiresAt <= now) {
-                this.#sessions.delete(token);
+                this.#deleteSession(token);
+            }
+        }
+    }
+
+    #deleteSession(token: string): void {
+        if (!this.#sessions.delete(token)) {
+            return;
+        }
+        const expiryTimer = this.#expiryTimers.get(token);
+        if (expiryTimer !== undefined) {
+            clearTimeout(expiryTimer);
+            this.#expiryTimers.delete(token);
+        }
+        for (const listener of [...this.#revocationListeners]) {
+            try {
+                listener(token);
+            } catch (error) {
+                console.warn(error instanceof Error ? error : new Error(String(error)));
             }
         }
     }

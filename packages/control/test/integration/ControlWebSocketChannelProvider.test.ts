@@ -97,8 +97,11 @@ test("web session cookie authenticates the shared control RPC over WebSocket", a
     });
     assert.equal(logout.status, 204);
 
-    connection.close();
     await waitUntil(() => closedConnections.length === 1);
+    await assert.rejects(
+        connection.request("@control", "service", "ping"),
+        /closed|revoked/iu
+    );
     const rejectedAfterLogout = await openRejected(`${origin.replace("http", "ws")}/web/rpc`, {
         cookie: cookie!.split(";", 1)[0]!,
         protocol: "devshell-control-rpc.v1"
@@ -170,6 +173,47 @@ test("web routes and cookies follow the public base URL path prefix", async (t) 
     );
 });
 
+
+test("web session expiry closes its active channel", async (t) => {
+    const http = new McpHostHttpServer({
+        auth: { enabled: false, provider: "none" },
+        listenHost: "127.0.0.1",
+        listenPort: 0
+    });
+    const channels = new ControlChannelServer({
+        providers: [new ControlWebSocketChannelProvider({
+            http,
+            sessions: new ControlWebSessionService({ sessionTtlMs: 30 })
+        })],
+        routes: {
+            connectionClosed() {},
+            snapshot: createRouteSnapshot
+        }
+    });
+    await channels.start();
+    await http.start();
+    t.after(async () => {
+        await channels.close().catch(() => undefined);
+        await http.stop().catch(() => undefined);
+    });
+
+    const origin = httpOrigin(http);
+    const login = await fetch(`${origin}/web/session`, { method: "POST" });
+    const cookie = login.headers.get("set-cookie")?.split(";", 1)[0];
+    assert.equal(login.status, 204);
+    assert.notEqual(cookie, undefined);
+    const channel = await NodeWebSocketFrameChannel.connect(
+        `${origin.replace("http", "ws")}/web/rpc`,
+        cookie!
+    );
+    t.after(() => channel.close());
+
+    await waitUntil(() => channel.closed);
+    assert.equal((await fetch(`${origin}/web/session`, {
+        headers: { cookie: cookie! }
+    })).status, 401);
+});
+
 test("web RPC requires the canonical subprotocol", async (t) => {
     const http = new McpHostHttpServer({
         auth: { enabled: false, provider: "none" },
@@ -206,7 +250,7 @@ test("web RPC requires the canonical subprotocol", async (t) => {
     assert.match(rejected, /426|400/iu);
 });
 
-test("web session capacity evicts the oldest browser session", async (t) => {
+test("web session capacity evicts the oldest browser session and closes its channel", async (t) => {
     const http = new McpHostHttpServer({
         auth: { enabled: false, provider: "none" },
         listenHost: "127.0.0.1",
@@ -238,12 +282,19 @@ test("web session capacity evicts the oldest browser session", async (t) => {
     const origin = httpOrigin(http);
     const first = await fetch(`${origin}/web/session`, { method: "POST" });
     const firstCookie = first.headers.get("set-cookie")?.split(";", 1)[0];
+    assert.equal(first.status, 204);
+    assert.notEqual(firstCookie, undefined);
+    const firstChannel = await NodeWebSocketFrameChannel.connect(
+        `${origin.replace("http", "ws")}/web/rpc`,
+        firstCookie!
+    );
+    t.after(() => firstChannel.close());
+
     const second = await fetch(`${origin}/web/session`, { method: "POST" });
     const secondCookie = second.headers.get("set-cookie")?.split(";", 1)[0];
-    assert.equal(first.status, 204);
     assert.equal(second.status, 204);
-    assert.notEqual(firstCookie, undefined);
     assert.notEqual(secondCookie, undefined);
+    await waitUntil(() => firstChannel.closed);
 
     assert.equal((await fetch(`${origin}/web/session`, {
         headers: { cookie: firstCookie! }

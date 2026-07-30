@@ -24,6 +24,7 @@ export interface ControlWebSocketChannelProviderOptions {
 export class ControlWebSocketChannelProvider implements ControlChannelProvider {
     readonly #assetDirectory?: string;
     readonly #basePath: string;
+    readonly #channelsBySession = new Map<string, Set<ControlWebSocketFrameChannel>>();
     readonly #http: McpHostHttpServer;
     readonly #path: string;
     readonly #sessions: ControlWebSessionService;
@@ -38,6 +39,7 @@ export class ControlWebSocketChannelProvider implements ControlChannelProvider {
         this.#http = options.http;
         this.#path = options.path ?? `${this.#basePath}/rpc`;
         this.#sessions = options.sessions;
+        this.#sessions.onRevoked((token) => this.#closeSessionChannels(token));
     }
 
     async start(accept: (channel: ControlWebSocketFrameChannel) => void): Promise<void> {
@@ -70,6 +72,7 @@ export class ControlWebSocketChannelProvider implements ControlChannelProvider {
         this.#started = false;
         this.#accept = undefined;
         this.#sessions.clear();
+        this.#channelsBySession.clear();
         const server = this.#webSocketServer;
         this.#webSocketServer = undefined;
         if (server === undefined) {
@@ -95,7 +98,8 @@ export class ControlWebSocketChannelProvider implements ControlChannelProvider {
             writeUpgradeError(socket, 403, "Forbidden");
             return;
         }
-        if (!this.#sessions.authorize(request)) {
+        const sessionToken = this.#sessions.authorizeToken(request);
+        if (sessionToken === undefined) {
             writeUpgradeError(socket, 401, "Unauthorized");
             return;
         }
@@ -106,8 +110,33 @@ export class ControlWebSocketChannelProvider implements ControlChannelProvider {
             return;
         }
         server.handleUpgrade(request, socket, head, (webSocket) => {
-            accept(new ControlWebSocketFrameChannel(webSocket));
+            const channel = new ControlWebSocketFrameChannel(webSocket);
+            this.#registerSessionChannel(sessionToken, channel);
+            accept(channel);
         });
+    }
+
+    #registerSessionChannel(token: string, channel: ControlWebSocketFrameChannel): void {
+        const channels = this.#channelsBySession.get(token) ?? new Set<ControlWebSocketFrameChannel>();
+        channels.add(channel);
+        this.#channelsBySession.set(token, channels);
+        channel.onClose(() => {
+            channels.delete(channel);
+            if (channels.size === 0) {
+                this.#channelsBySession.delete(token);
+            }
+        });
+    }
+
+    #closeSessionChannels(token: string): void {
+        const channels = this.#channelsBySession.get(token);
+        if (channels === undefined) {
+            return;
+        }
+        this.#channelsBySession.delete(token);
+        for (const channel of [...channels]) {
+            channel.close(new Error("Control web session was revoked."));
+        }
     }
 }
 
