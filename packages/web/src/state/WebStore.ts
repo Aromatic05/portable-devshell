@@ -60,6 +60,7 @@ export class WebStore {
     #overviewRefresh?: ReturnType<typeof setTimeout>;
     #overviewPoll?: ReturnType<typeof setInterval>;
     #overviewPromise?: Promise<void>;
+    #overviewGeneration?: number;
     readonly #isPageVisible: () => boolean;
     readonly #overviewRefreshIntervalMs: number;
 
@@ -114,13 +115,16 @@ export class WebStore {
         return await this.#reconnectPromise;
     }
 
-    async refreshInstance(name: string): Promise<void> {
+    async refreshInstance(name: string, generation = this.#generation): Promise<void> {
         try {
             const [envelope, logs, approvals] = await Promise.all([
                 this.clients.runtime.refresh(name),
                 this.clients.runtime.readLogs(name, { limit: 50 }),
                 this.clients.tool.listApprovals(name),
             ]);
+            if (!this.isCurrent(generation)) {
+                return;
+            }
             this.set({
                 ...this.#state,
                 instances: this.#state.instances.map((entry) =>
@@ -132,6 +136,9 @@ export class WebStore {
                 approvals: { ...this.#state.approvals, [name]: approvals },
             });
         } catch (error) {
+            if (!this.isCurrent(generation)) {
+                return;
+            }
             this.setError(error);
         }
     }
@@ -324,7 +331,7 @@ export class WebStore {
                 return;
             }
             this.#streams.set(name, stream);
-            void this.consume(name, stream);
+            void this.consume(name, stream, generation);
         } catch (error) {
             if (!this.isCurrent(generation)) {
                 return;
@@ -340,32 +347,42 @@ export class WebStore {
     private async consume(
         name: string,
         stream: WebRuntimeStream,
+        generation: number,
     ): Promise<void> {
-        while (!this.#stopped && this.#streams.get(name) === stream) {
+        while (this.isCurrent(generation) && this.#streams.get(name) === stream) {
             try {
                 const event = await stream.next();
+                if (!this.isCurrent(generation) || this.#streams.get(name) !== stream) {
+                    return;
+                }
                 if (event.kind === "gap") {
-                    await this.refreshInstance(name);
+                    await this.refreshInstance(name, generation);
+                    if (!this.isCurrent(generation)) {
+                        return;
+                    }
                     const lastSeq =
                         this.#state.instances.find(
                             (entry) => entry.name === name,
                         )?.snapshot.lastSeq ?? 0;
-                    await this.beginSubscription(name, lastSeq);
+                    await this.beginSubscription(name, lastSeq, generation);
                     return;
                 }
                 if (event.kind === "closed") {
                     this.setPartialFailure(`stream:${name}`, "Subscription closed.");
                     return;
                 }
-                this.addEvent(name, event.event);
+                this.addEvent(name, event.event, generation);
             } catch (error) {
+                if (!this.isCurrent(generation)) {
+                    return;
+                }
                 this.setPartialFailure(`stream:${name}`, error);
                 return;
             }
         }
     }
 
-    private addEvent(name: string, event: InstanceEvent): void {
+    private addEvent(name: string, event: InstanceEvent, generation: number): void {
         const activity = [...this.#state.activity, event]
             .sort((left, right) => left.at.localeCompare(right.at))
             .slice(-200);
@@ -388,89 +405,107 @@ export class WebStore {
             ),
         });
         if (event.type === "log.appended") {
-            this.scheduleLogRefresh(name);
+            this.scheduleLogRefresh(name, generation);
         }
         if (event.type.startsWith("approval.")) {
-            void this.refreshApprovals(name);
+            void this.refreshApprovals(name, generation);
         }
         if (event.type.startsWith("todo.")) {
-            this.scheduleTodoRefresh(name);
+            this.scheduleTodoRefresh(name, generation);
         }
         if (event.type !== "log.appended") {
-            this.scheduleOverviewRefresh();
+            this.scheduleOverviewRefresh(generation);
         }
     }
 
-    private scheduleLogRefresh(name: string): void {
+    private scheduleLogRefresh(name: string, generation: number): void {
         if (this.#logRefreshes.has(name)) {
             return;
         }
         const timeout = setTimeout(() => {
             this.#logRefreshes.delete(name);
-            void this.readLogs(name);
+            void this.readLogs(name, generation);
         }, 250);
         this.#logRefreshes.set(name, timeout);
     }
 
-    private async readLogs(name: string): Promise<void> {
+    private async readLogs(name: string, generation: number): Promise<void> {
         try {
             const logs = await this.clients.runtime.readLogs(name, {
                 limit: 50,
             });
+            if (!this.isCurrent(generation)) {
+                return;
+            }
             this.set({
                 ...this.#state,
                 logs: { ...this.#state.logs, [name]: logs.slice(-100) },
                 partialFailures: this.withoutPartialFailure(`logs:${name}`),
             });
         } catch (error) {
+            if (!this.isCurrent(generation)) {
+                return;
+            }
             this.setPartialFailure(`logs:${name}`, error);
         }
     }
 
-    private scheduleTodoRefresh(name: string): void {
+    private scheduleTodoRefresh(name: string, generation: number): void {
         if (this.#todoRefreshes.has(name)) {
             return;
         }
         const timeout = setTimeout(() => {
             this.#todoRefreshes.delete(name);
-            void this.refreshTodo(name);
+            void this.refreshTodo(name, generation);
         }, 250);
         this.#todoRefreshes.set(name, timeout);
     }
 
-    private async refreshTodo(name: string): Promise<void> {
+    private async refreshTodo(name: string, generation: number): Promise<void> {
         try {
             const { todo } = await this.clients.todo.get(name);
+            if (!this.isCurrent(generation)) {
+                return;
+            }
             this.set({
                 ...this.#state,
                 todos: { ...this.#state.todos, [name]: todo },
                 partialFailures: this.withoutPartialFailure(`todos:${name}`),
             });
         } catch (error) {
+            if (!this.isCurrent(generation)) {
+                return;
+            }
             this.setPartialFailure(`todos:${name}`, error);
         }
     }
 
-    private async refreshApprovals(name: string): Promise<void> {
+    private async refreshApprovals(name: string, generation: number): Promise<void> {
         try {
             const approvals = await this.clients.tool.listApprovals(name);
+            if (!this.isCurrent(generation)) {
+                return;
+            }
             this.set({
                 ...this.#state,
                 approvals: { ...this.#state.approvals, [name]: approvals },
                 partialFailures: this.withoutPartialFailure(`approvals:${name}`),
             });
         } catch (error) {
+            if (!this.isCurrent(generation)) {
+                return;
+            }
             this.setPartialFailure(`approvals:${name}`, error);
         }
     }
 
-    private scheduleOverviewRefresh(): void {
+    private scheduleOverviewRefresh(generation: number): void {
         if (this.#overviewRefresh !== undefined) {
             return;
         }
         this.#overviewRefresh = setTimeout(() => {
             this.#overviewRefresh = undefined;
-            void this.refreshOverview();
+            void this.refreshOverview(generation);
         }, 250);
     }
 
@@ -491,7 +526,7 @@ export class WebStore {
             ) {
                 return;
             }
-            void this.refreshOverview();
+            void this.refreshOverview(this.#generation);
         }, this.#overviewRefreshIntervalMs);
     }
 
@@ -503,12 +538,16 @@ export class WebStore {
         this.#overviewPoll = undefined;
     }
 
-    private async refreshOverview(): Promise<void> {
-        if (this.#overviewPromise !== undefined) {
+    private async refreshOverview(generation = this.#generation): Promise<void> {
+        if (this.#overviewPromise !== undefined && this.#overviewGeneration === generation) {
             return await this.#overviewPromise;
         }
-        this.#overviewPromise = this.clients.overview.get()
+        this.#overviewGeneration = generation;
+        const request = this.clients.overview.get()
             .then((overview) => {
+                if (!this.isCurrent(generation)) {
+                    return;
+                }
                 this.set({
                     ...this.#state,
                     overview,
@@ -516,11 +555,18 @@ export class WebStore {
                 });
             })
             .catch((error: unknown) => {
+                if (!this.isCurrent(generation)) {
+                    return;
+                }
                 this.setPartialFailure("overview", error);
             })
             .finally(() => {
-                this.#overviewPromise = undefined;
+                if (this.#overviewGeneration === generation) {
+                    this.#overviewPromise = undefined;
+                    this.#overviewGeneration = undefined;
+                }
             });
+        this.#overviewPromise = request;
         return await this.#overviewPromise;
     }
 

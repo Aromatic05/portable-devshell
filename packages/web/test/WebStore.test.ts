@@ -87,6 +87,61 @@ describe("WebStore", () => {
         store.close();
     });
 
+    it("does not apply refresh results from before reconnect", async () => {
+        vi.useFakeTimers();
+        const stream = controllableStream();
+        const clients = fakeClients({ subscribe: async () => stream });
+        const store = new WebStore(clients);
+        await store.load();
+        let releaseLogs!: () => void;
+        let releaseTodo!: () => void;
+        let releaseApprovals!: () => void;
+        let releaseOverview!: () => void;
+        const oldLogs = new Promise<[]>(resolve => { releaseLogs = () => resolve([]); });
+        const oldTodo = new Promise<{ lastSeq: number; todo: { items: []; revision: number; summary: { completed: number; total: number } } }>(resolve => {
+            releaseTodo = () => resolve({ lastSeq: 4, todo: { items: [], revision: 2, summary: { completed: 0, total: 0 } } });
+        });
+        const oldApprovals = new Promise<[]>(resolve => { releaseApprovals = () => resolve([]); });
+        const oldOverview = new Promise<ReturnType<typeof operationalOverview>>(resolve => { releaseOverview = () => resolve(operationalOverview()); });
+        const currentApproval = {
+            approvalId: "current", callId: "call", createdAt: "2026-07-31T00:00:01Z", expiresAt: "2026-07-31T01:00:00Z",
+            inputSummary: "current", instance: asInstanceName("demo"), reason: "current", riskLevel: "low" as const,
+            source: "web" as const, status: "pending" as const, toolName: "bash_run",
+        };
+        clients.runtime.readLogs = vi.fn()
+            .mockReturnValueOnce(oldLogs)
+            .mockResolvedValue([{ at: "2026-07-31T00:00:01Z", instanceName: asInstanceName("demo"), message: "current", seq: 5, stream: "stdout" as const }]);
+        clients.todo.get = vi.fn()
+            .mockReturnValueOnce(oldTodo)
+            .mockResolvedValue({ lastSeq: 5, todo: { items: [], revision: 3, summary: { completed: 0, total: 0 } } });
+        clients.tool.listApprovals = vi.fn()
+            .mockReturnValueOnce(oldApprovals)
+            .mockResolvedValue([currentApproval]);
+        clients.overview.get = vi.fn()
+            .mockReturnValueOnce(oldOverview)
+            .mockResolvedValue({ ...operationalOverview(), generatedAt: "2026-07-31T00:00:02Z" });
+
+        for (const type of ["log.appended", "todo.updated", "approval.requested", "instance.statusChanged"] as const) {
+            stream.push(instanceEvent(type));
+        }
+        await vi.advanceTimersByTimeAsync(250);
+        await vi.waitFor(() => expect(clients.overview.get).toHaveBeenCalledTimes(1));
+        await store.reconnect();
+        stream.push(instanceEvent("log.appended"));
+        await vi.advanceTimersByTimeAsync(250);
+        releaseLogs();
+        releaseTodo();
+        releaseApprovals();
+        releaseOverview();
+        await vi.waitFor(() => expect(store.state.logs.demo?.[0]?.message).toBe("current"));
+
+        expect(store.state.todos.demo?.revision).toBe(3);
+        expect(store.state.approvals.demo?.[0]?.approvalId).toBe("current");
+        expect(store.state.overview?.generatedAt).toBe("2026-07-31T00:00:02Z");
+        store.close();
+        vi.useRealTimers();
+    });
+
     it("refreshes and resubscribes after stream.gap", async () => {
         let count = 0;
         const subscriptions: number[] = [];
