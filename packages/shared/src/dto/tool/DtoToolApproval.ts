@@ -4,7 +4,7 @@ import type { ToolCallSource } from "./DtoToolCallRecord.js";
 
 export type ApprovalStatus = "pending" | "approved" | "denied" | "expired" | "cancelled";
 export type ApprovalDecisionValue = "approve" | "deny";
-export type ApprovalDecisionBy = "cli" | "tui" | "policy";
+export type ApprovalDecisionBy = "cli" | "tui" | "web" | "policy";
 export type ApprovalPolicyMode = "disabled" | "allow" | "ask" | "deny";
 export type ApprovalPolicyDecision = "allow" | "ask" | "deny";
 export type ApprovalPolicySourceScope = ToolCallSource | "all";

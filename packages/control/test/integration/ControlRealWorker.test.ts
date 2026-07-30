@@ -20,6 +20,7 @@ import {
     ControlLifecycleManager,
     ControlPathHome,
     ControlPathRuntime,
+    SocketChannelProvider,
     type Destination,
     type ConfigInstanceDraft,
     type JsonValue,
@@ -317,11 +318,11 @@ async function request(
 ): Promise<any> {
     const [module, method] = operation.split(".");
     const client = new ClientConnection({
+        channelProvider: new SocketChannelProvider({ socketPath }),
         mapError: (error) =>
             error instanceof Error ? error : new Error(String(error)),
         mapRemoteError: (error) => createError(error),
         peer: clientKind,
-        socketPath,
     });
     if (operation === "runtime.start") {
         const opened = await client.openStream(

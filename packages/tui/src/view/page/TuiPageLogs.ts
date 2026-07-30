@@ -69,13 +69,13 @@ export function filterLogEntries(entries: TuiLogEntry[], query: string): TuiLogE
     });
 }
 
-function parseLogQuery(query: string): { after?: string; before?: string; call?: string; source?: "cli" | "mcp" | "tui"; stream?: "stderr" | "stdout"; terms: string[]; tool?: string } {
-    const parsed: { after?: string; before?: string; call?: string; source?: "cli" | "mcp" | "tui"; stream?: "stderr" | "stdout"; terms: string[]; tool?: string } = { terms: [] };
+function parseLogQuery(query: string): { after?: string; before?: string; call?: string; source?: "cli" | "mcp" | "tui" | "web"; stream?: "stderr" | "stdout"; terms: string[]; tool?: string } {
+    const parsed: { after?: string; before?: string; call?: string; source?: "cli" | "mcp" | "tui" | "web"; stream?: "stderr" | "stdout"; terms: string[]; tool?: string } = { terms: [] };
     for (const token of query.trim().toLowerCase().split(/\s+/u).filter(Boolean)) {
         const [field, ...rest] = token.split(":");
         const value = rest.join(":");
         if (field === "stream" && (value === "stdout" || value === "stderr")) parsed.stream = value;
-        else if (field === "source" && (value === "cli" || value === "mcp" || value === "tui")) parsed.source = value;
+        else if (field === "source" && (value === "cli" || value === "mcp" || value === "tui" || value === "web")) parsed.source = value;
         else if (field === "tool" && value.length > 0) parsed.tool = value;
         else if (field === "call" && value.length > 0) parsed.call = value;
         else if ((field === "after" || field === "before") && !Number.isNaN(Date.parse(value))) parsed[field] = new Date(value).toISOString();

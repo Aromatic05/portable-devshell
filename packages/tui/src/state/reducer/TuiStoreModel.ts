@@ -25,7 +25,7 @@ export interface TuiLogEntry {
     requestId?: string;
     seq: number;
     ctxId?: string;
-    source?: "cli" | "tui" | "mcp";
+    source?: "cli" | "tui" | "web" | "mcp";
     stream: "stderr" | "stdout";
     tail?: string;
     toolName?: string;

@@ -9,6 +9,7 @@ import {
     asInstanceName,
     ClientConnection,
     createError,
+    SocketChannelProvider,
     type ClientEvent,
     type ClientStream,
     type Destination,
@@ -64,6 +65,15 @@ test("ControlSocketServer routes canonical control and instance operations over 
     assert.equal(harness.worker.lastToolCall?.source, "tui");
     assert.equal(typeof harness.worker.lastToolCall?.requestId, "string");
     assert.equal(typeof harness.worker.lastToolCall?.ctxId, "string");
+
+    await request(
+        harness.socketPath,
+        asInstanceName("alpha"),
+        "tool.call",
+        { input: { command: "pwd" }, toolName: "bash_run" },
+        "web"
+    );
+    assert.equal(harness.worker.lastToolCall?.source, "web");
 
     const missingDestination = await request(
         harness.socketPath,
@@ -182,10 +192,10 @@ function createDescriptor(worker: FakeWorker) {
 
 function createClient(socketPath: string, peer: Exclude<Peer, "server">): ClientConnection {
     return new ClientConnection({
+        channelProvider: new SocketChannelProvider({ socketPath }),
         mapError: (error) => error instanceof Error ? error : new Error(String(error)),
         mapRemoteError: (error) => createError(error),
-        peer,
-        socketPath
+        peer
     });
 }
 

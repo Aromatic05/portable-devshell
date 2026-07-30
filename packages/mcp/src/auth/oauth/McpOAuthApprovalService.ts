@@ -150,7 +150,11 @@ export class McpOAuthApprovalService {
         });
     }
 
-    async decide(approvalId: string, decision: OAuthApprovalDecision, decidedBy: "cli" | "tui"): Promise<OAuthApprovalRequest> {
+    async decide(
+        approvalId: string,
+        decision: OAuthApprovalDecision,
+        decidedBy: "cli" | "tui" | "web"
+    ): Promise<OAuthApprovalRequest> {
         return await this.#mutex.runExclusive(async () => {
             this.#expirePendingLocked();
             const request = this.#requests.get(approvalId);

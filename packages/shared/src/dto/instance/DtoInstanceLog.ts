@@ -6,7 +6,7 @@ export interface InstanceLogEntry {
     message: string;
     requestId?: string;
     seq: number;
-    source?: "cli" | "mcp" | "tui";
+    source?: "cli" | "mcp" | "tui" | "web";
     stream: "stderr" | "stdout";
     toolName?: string;
 }

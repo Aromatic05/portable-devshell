@@ -10,7 +10,7 @@ export interface OAuthApprovalRequest {
     clientName: string;
     createdAt: string;
     decidedAt?: string;
-    decidedBy?: "cli" | "tui";
+    decidedBy?: "cli" | "tui" | "web";
     expiresAt: string;
     kind: OAuthApprovalKind;
     redirectUris: string[];
