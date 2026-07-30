@@ -94,6 +94,61 @@ test("TUI startup pulls artifact shares and transfers from Control", async () =>
     await session.stop();
 });
 
+test("TUI reports OAuth polling failures while the session remains active", async () => {
+    const store = new TuiAppStore();
+    let approvalReads = 0;
+    const session = new TuiControlSession({
+        clients: {
+            artifact: {
+                async listShares() { return []; },
+                async listTransfers() { return []; }
+            },
+            close() {},
+            config: {
+                async get() { return { mcp: { auth: { mode: "oauth2" } } }; }
+            },
+            instance: {
+                async list() { return []; }
+            },
+            mcp: {
+                async listApprovals() {
+                    approvalReads += 1;
+                    if (approvalReads > 1) throw new Error("OAuth service unavailable");
+                    return [];
+                },
+                async status() { return {}; }
+            },
+            overview: {
+                async get() {
+                    return {
+                        activity: [], alerts: [], controller: { pid: 1, uptimeSeconds: 10 },
+                        counts: { activeTodos: 0, failedCalls24h: 0, instancesAttention: 0, instancesCritical: 0, instancesReady: 0, instancesTotal: 0, pendingApprovals: 0 },
+                        generatedAt: "2026-07-31T00:00:00.000Z", health: "healthy" as const, instances: [], todos: []
+                    };
+                }
+            },
+            async reconnect() {},
+            service: {
+                async ping() { return { pong: true }; }
+            }
+        } as never,
+        store
+    });
+
+    try {
+        await session.start();
+        await waitFor(() => store.getState().interaction.screenStatusByPage.oauth !== undefined);
+
+        assert.equal(
+            store.getState().interaction.screenStatusByPage.oauth,
+            "OAuth refresh failed: OAuth service unavailable"
+        );
+        assert.equal(store.getState().connection.status, "connected");
+    } finally {
+        await session.stop();
+    }
+});
+
 test("artifact stream events upsert complete records without replacing shares from download audit events", () => {
     const store = new TuiAppStore();
     store.applyEvent({
@@ -205,4 +260,14 @@ function seededStore(): TuiAppStore {
     store.setMainFocusId("instance:instance-a");
     store.toggleExpanded("instances:instance-a:instance");
     return store;
+}
+
+async function waitFor(predicate: () => boolean): Promise<void> {
+    const deadline = Date.now() + 2_000;
+    while (!predicate()) {
+        if (Date.now() > deadline) {
+            throw new Error("Timed out waiting for TUI state.");
+        }
+        await new Promise((resolve) => setTimeout(resolve, 10));
+    }
 }

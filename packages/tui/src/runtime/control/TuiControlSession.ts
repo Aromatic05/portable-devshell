@@ -182,7 +182,9 @@ export class TuiControlSession {
             this.#scheduleOverviewRefresh();
         }
         if (message.event.name.startsWith("todo.")) {
-            void this.#refresh.refreshTodo(instance).catch(() => undefined);
+            void this.#refresh.refreshTodo(instance).catch((error: unknown) => {
+                this.#reportRefreshFailure("todo", error);
+            });
         }
         if (isTerminalToolCallEvent(message.event.name)) {
             this.#scheduleAuditRefresh(instance);
@@ -238,7 +240,9 @@ export class TuiControlSession {
             return;
         }
         this.#oauthRefreshTimer = setInterval(() => {
-            void this.#refresh.refreshOAuth().catch(() => undefined);
+            void this.#refresh.refreshOAuth().catch((error: unknown) => {
+                this.#reportRefreshFailure("oauth", error);
+            });
         }, 1_000);
     }
 
@@ -338,7 +342,9 @@ export class TuiControlSession {
             }
             const latest = this.#store.getState();
             if (latest.ui.selectedPage === "audit" && latest.ui.selectedInstance === instance) {
-                void this.#refresh.refreshAudit(instance).catch(() => undefined);
+                void this.#refresh.refreshAudit(instance).catch((error: unknown) => {
+                    this.#reportRefreshFailure("audit", error);
+                });
             }
         }, 50));
     }
@@ -348,6 +354,16 @@ export class TuiControlSession {
             clearTimeout(timer);
         }
         this.#auditRefreshTimers.clear();
+    }
+
+    #reportRefreshFailure(page: "audit" | "oauth" | "todo", error: unknown): void {
+        if (!this.#started) {
+            return;
+        }
+        this.#store.setScreenStatus(
+            page,
+            `${page === "oauth" ? "OAuth" : page[0]!.toUpperCase() + page.slice(1)} refresh failed: ${readErrorMessage(error)}`
+        );
     }
 }
 
