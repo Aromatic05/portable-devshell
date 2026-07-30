@@ -23,6 +23,7 @@ import {
     type OAuthApprovalDecision,
     type OAuthApprovalRequest,
 } from "@portable-devshell/shared/browser";
+import type { TodoRpcEnvelope } from "@portable-devshell/shared";
 
 import { BrowserWebSocketChannelProvider } from "../rpc/BrowserWebSocketChannelProvider.js";
 
@@ -56,6 +57,9 @@ export interface WebClients {
             approvalId: string,
             decision: ApprovalDecisionValue,
         ): Promise<ApprovalRequest>;
+    };
+    todo: {
+        get(instance: string): Promise<TodoRpcEnvelope>;
     };
     mcp: {
         status(): Promise<McpStatus>;
@@ -126,6 +130,7 @@ export function createWebClients(
     const mcp = controlClientModule(connection, "mcp");
     const runtime = instanceClientModule(connection, "runtime");
     const tool = instanceClientModule(connection, "tool");
+    const todo = instanceClientModule(connection, "todo");
 
     return {
         close: () => connection.close(),
@@ -174,6 +179,9 @@ export function createWebClients(
                 tool.request(name, "getApproval", { approvalId }),
             decideApproval: (name, approvalId, decision) =>
                 tool.request(name, "decideApproval", { approvalId, decision }),
+        },
+        todo: {
+            get: (name) => todo.request(name, "get"),
         },
         mcp: {
             status: () => mcp.request("status"),

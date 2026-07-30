@@ -62,6 +62,38 @@ describe("WebStore", () => {
 
         expect(clients.runtime.refresh).toHaveBeenCalledWith("demo");
     });
+
+    it("keeps core data online when one instance todo read fails", async () => {
+        const clients = fakeClients();
+        clients.todo.get = vi.fn(async () => {
+            throw new Error("todo unavailable");
+        });
+
+        const store = new WebStore(clients);
+        await store.load();
+
+        expect(store.state.connection).toBe("online");
+        expect(store.state.instances).toHaveLength(1);
+        expect(store.state.partialFailures["todos:demo"]).toBe("todo unavailable");
+    });
+
+    it("does not send duplicate start or stop mutations while an operation is pending", async () => {
+        const clients = fakeClients();
+        let finish!: () => void;
+        clients.runtime.stop = vi.fn(() => new Promise<InstanceSnapshot>((resolve) => {
+            finish = () => resolve(snapshot);
+        }));
+        const store = new WebStore(clients);
+        await store.load();
+
+        const first = store.stop("demo");
+        const second = store.stop("demo");
+        expect(clients.runtime.stop).toHaveBeenCalledOnce();
+        expect(store.state.operations["stop:demo"]).toBe("pending");
+        finish();
+        await Promise.all([first, second]);
+        expect(store.state.operations["stop:demo"]).toBeUndefined();
+    });
 });
 
 function fakeClients(
@@ -95,6 +127,12 @@ function fakeClients(
             decideApproval: async () => {
                 throw new Error("Not used.");
             },
+        },
+        todo: {
+            get: async () => ({
+                lastSeq: 3,
+                todo: { items: [], revision: 1, summary: { completed: 0, total: 0 } },
+            }),
         },
         mcp: {
             status: async () => ({ authMode: "none", oauthReady: false, running: true }),

@@ -87,7 +87,7 @@ describe("authenticated application shell", () => {
         );
         await screen.findByRole("heading", { name: "Overview" });
 
-        const instances = screen.getAllByRole("button", { name: "Instances" });
+        const instances = screen.getAllByRole("button", { name: /Instances/ });
         expect(instances).toHaveLength(2);
         fireEvent.click(instances[0]!);
         fireEvent.click(await screen.findByText("demo"));
@@ -146,6 +146,12 @@ function fakeClients(): WebClients {
             decideApproval: async () => {
                 throw new Error("Not used.");
             },
+        },
+        todo: {
+            get: async () => ({
+                lastSeq: 1,
+                todo: { items: [], revision: 1, summary: { completed: 0, total: 0 } },
+            }),
         },
         mcp: {
             status: async () => ({ authMode: "none", oauthReady: false, running: true }),

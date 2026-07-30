@@ -6,6 +6,7 @@ import {
     type InstanceLogEntry,
     type OAuthApprovalRequest,
 } from "@portable-devshell/shared/browser";
+import type { TodoReadResult } from "@portable-devshell/shared";
 
 import type { WebClients, WebRuntimeStream } from "../client/WebClients.js";
 
@@ -20,6 +21,10 @@ export interface WebState {
     oauthApprovals: OAuthApprovalRequest[];
     logs: Record<string, InstanceLogEntry[]>;
     activity: InstanceEvent[];
+    todos: Record<string, TodoReadResult>;
+    partialFailures: Record<string, string>;
+    operations: Record<string, "pending">;
+    notice?: string;
 }
 
 const initial: WebState = {
@@ -29,6 +34,9 @@ const initial: WebState = {
     oauthApprovals: [],
     logs: {},
     activity: [],
+    todos: {},
+    partialFailures: {},
+    operations: {},
 };
 
 export class WebStore {
@@ -98,7 +106,7 @@ export class WebStore {
         approvalId: string,
         decision: "approve" | "deny",
     ): Promise<void> {
-        await this.mutate(async () => {
+        await this.mutate(`approval:${approvalId}`, "Approval recorded.", async () => {
             await this.clients.tool.decideApproval(
                 instance,
                 approvalId,
@@ -112,7 +120,7 @@ export class WebStore {
         approvalId: string,
         decision: "approve" | "deny",
     ): Promise<void> {
-        await this.mutate(async () => {
+        await this.mutate(`oauth:${approvalId}`, "Approval recorded.", async () => {
             await this.clients.mcp.decideApproval(approvalId, decision);
             this.set({
                 ...this.#state,
@@ -122,14 +130,14 @@ export class WebStore {
     }
 
     async start(instance: string): Promise<void> {
-        await this.mutate(async () => {
+        await this.mutate(`start:${instance}`, `${instance} start requested.`, async () => {
             await this.clients.runtime.start(instance);
             await this.refreshInstance(instance);
         });
     }
 
     async stop(instance: string): Promise<void> {
-        await this.mutate(async () => {
+        await this.mutate(`stop:${instance}`, `${instance} stop requested.`, async () => {
             await this.clients.runtime.stop(instance);
             await this.refreshInstance(instance);
         });
@@ -170,13 +178,26 @@ export class WebStore {
                 mcpStatus.authMode === "oauth2" && mcpStatus.oauthReady === true
                     ? await this.clients.mcp.listApprovals()
                     : [];
-            const approvals = Object.fromEntries(
-                await Promise.all(
-                    instances.map(async ({ name }) => [
-                        name,
-                        await this.clients.tool.listApprovals(name),
-                    ]),
-                ),
+            const approvals: Record<string, ApprovalRequest[]> = {};
+            const todos: Record<string, TodoReadResult> = {};
+            const partialFailures: Record<string, string> = {};
+            await Promise.all(
+                instances.map(async ({ name }) => {
+                    const [approvalResult, todoResult] = await Promise.allSettled([
+                        this.clients.tool.listApprovals(name),
+                        this.clients.todo.get(name),
+                    ]);
+                    if (approvalResult.status === "fulfilled") {
+                        approvals[name] = approvalResult.value;
+                    } else {
+                        partialFailures[`approvals:${name}`] = message(approvalResult.reason);
+                    }
+                    if (todoResult.status === "fulfilled") {
+                        todos[name] = todoResult.value.todo;
+                    } else {
+                        partialFailures[`todos:${name}`] = message(todoResult.reason);
+                    }
+                }),
             );
             this.set({
                 ...this.#state,
@@ -185,6 +206,8 @@ export class WebStore {
                 instances,
                 oauthApprovals,
                 approvals,
+                todos,
+                partialFailures,
             });
             await Promise.all(
                 instances.map(({ name, snapshot }) =>
@@ -192,11 +215,7 @@ export class WebStore {
                 ),
             );
         } catch (error) {
-            this.set({
-                ...this.#state,
-                connection: "offline",
-                error: message(error),
-            });
+            this.setPartialFailure(`stream:${name}`, error);
         }
     }
 
@@ -256,16 +275,12 @@ export class WebStore {
                     return;
                 }
                 if (event.kind === "closed") {
-                    this.set({ ...this.#state, connection: "offline" });
+                    this.setPartialFailure(`stream:${name}`, "Subscription closed.");
                     return;
                 }
                 this.addEvent(name, event.event);
             } catch (error) {
-                this.set({
-                    ...this.#state,
-                    connection: "offline",
-                    error: message(error),
-                });
+                this.setPartialFailure(`stream:${name}`, error);
                 return;
             }
         }
@@ -322,7 +337,7 @@ export class WebStore {
                 logs: { ...this.#state.logs, [name]: logs.slice(-100) },
             });
         } catch (error) {
-            this.setError(error);
+            this.setPartialFailure(`logs:${name}`, error);
         }
     }
 
@@ -334,15 +349,30 @@ export class WebStore {
                 approvals: { ...this.#state.approvals, [name]: approvals },
             });
         } catch (error) {
-            this.setError(error);
+            this.setPartialFailure(`approvals:${name}`, error);
         }
     }
 
-    private async mutate(action: () => Promise<void>): Promise<void> {
+    private async mutate(
+        operation: string,
+        success: string,
+        action: () => Promise<void>,
+    ): Promise<void> {
+        if (this.#state.operations[operation] !== undefined) {
+            return;
+        }
+        this.set({
+            ...this.#state,
+            notice: undefined,
+            operations: { ...this.#state.operations, [operation]: "pending" },
+        });
         try {
             await action();
+            const { [operation]: _completed, ...operations } = this.#state.operations;
+            this.set({ ...this.#state, notice: success, operations });
         } catch (error) {
-            this.setError(error);
+            const { [operation]: _failed, ...operations } = this.#state.operations;
+            this.set({ ...this.#state, error: message(error), operations });
         }
     }
 
@@ -355,6 +385,16 @@ export class WebStore {
 
     private setError(error: unknown): void {
         this.set({ ...this.#state, error: message(error) });
+    }
+
+    private setPartialFailure(key: string, error: unknown): void {
+        this.set({
+            ...this.#state,
+            partialFailures: {
+                ...this.#state.partialFailures,
+                [key]: message(error),
+            },
+        });
     }
 
     private set(state: WebState): void {
