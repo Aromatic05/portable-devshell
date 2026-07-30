@@ -26,6 +26,16 @@ export class TuiRuntimeControlOperations {
         await this.options.session.refreshArtifacts();
     }
 
+    async addTodoComment(instance: string, text: string): Promise<void> {
+        await this.options.clients.todo.addComment(instance, text);
+        await this.options.session.refreshTodo(instance);
+    }
+
+    async deleteTodoComment(instance: string, id: string): Promise<void> {
+        await this.options.clients.todo.deleteComment(instance, id);
+        await this.options.session.refreshTodo(instance);
+    }
+
     async cancelArtifactTransfer(transferId: string): Promise<void> {
         await this.options.clients.artifact.cancelTransfer(transferId);
         await this.options.session.refreshArtifacts();

@@ -11,6 +11,7 @@ interface CommandDispatcherDetailOptions {
     editor: TuiCommandDispatcherEditor;
     focus: TuiCommandDispatcherFocus;
     onOAuthApprovalDecision(approvalId: string, decision: "approve" | "deny"): Promise<void>;
+    onTodoCommentDelete?(instance: string, id: string): Promise<void>;
     projection: TuiInteractionProjection;
     store: TuiAppStore;
 }
@@ -21,6 +22,7 @@ export class TuiCommandDispatcherDetail {
     readonly #editor: TuiCommandDispatcherEditor;
     readonly #focus: TuiCommandDispatcherFocus;
     readonly #onOAuthApprovalDecision: CommandDispatcherDetailOptions["onOAuthApprovalDecision"];
+    readonly #onTodoCommentDelete: CommandDispatcherDetailOptions["onTodoCommentDelete"];
     readonly #projection: TuiInteractionProjection;
     readonly #store: TuiAppStore;
 
@@ -30,6 +32,7 @@ export class TuiCommandDispatcherDetail {
         this.#editor = options.editor;
         this.#focus = options.focus;
         this.#onOAuthApprovalDecision = options.onOAuthApprovalDecision;
+        this.#onTodoCommentDelete = options.onTodoCommentDelete;
         this.#projection = options.projection;
         this.#store = options.store;
     }
@@ -83,6 +86,14 @@ export class TuiCommandDispatcherDetail {
             }
 
             const button = actionId?.startsWith("button:") ? actionId.slice("button:".length) : undefined;
+
+            if (state.ui.selectedPage === "todo" && state.ui.selectedInstance !== undefined && button === "add-comment") {
+                return await this.#dispatch({ instance: state.ui.selectedInstance, toolName: "__todo_comment", type: "toolForm.open" });
+            }
+            if (state.ui.selectedPage === "todo" && state.ui.selectedInstance !== undefined && button?.startsWith("delete-comment:")) {
+                await (this.#onTodoCommentDelete ?? missingTodoCommentHandler)(state.ui.selectedInstance, button.slice("delete-comment:".length));
+                return true;
+            }
 
             if (state.ui.selectedPage === "connector" && button === "restart-control") {
                 return await this.#dispatch({
@@ -238,4 +249,8 @@ export class TuiCommandDispatcherDetail {
     }
 
 
+}
+
+async function missingTodoCommentHandler(): Promise<never> {
+    throw new Error("Todo comment handler is unavailable.");
 }

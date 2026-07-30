@@ -51,6 +51,14 @@ export class TuiRuntimeOperations {
         await this.#control.cancelArtifactTransfer(transferId);
     }
 
+    async addTodoComment(instance: string, text: string): Promise<void> {
+        await this.#control.addTodoComment(instance, text);
+    }
+
+    async deleteTodoComment(instance: string, id: string): Promise<void> {
+        await this.#control.deleteTodoComment(instance, id);
+    }
+
     async applyConfig(): Promise<JsonValue> {
         return await this.#control.applyConfig();
     }

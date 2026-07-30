@@ -155,6 +155,12 @@ export class TuiRuntime {
             },
             onArtifactViewImage: async (instance, input) =>
                 await clients.artifact.viewImage(instance, input),
+            onTodoComment: async (instance, text) => {
+                await this.#operations.addTodoComment(instance, text);
+            },
+            onTodoCommentDelete: async (instance, id) => {
+                await this.#operations.deleteTodoComment(instance, id);
+            },
             onAttachShell: async (instance) => {
                 await this.#operations.attachShell(instance);
             },

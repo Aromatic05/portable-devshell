@@ -20,15 +20,40 @@ export function buildTodoPageBoxes(
 ): BoxModel[] {
     const todo = state.todoByInstance[instanceName];
 
-    if (todo?.taskId === undefined) {
+    const tasks = todo?.tasks ?? [];
+    if (todo?.taskId === undefined && tasks.length === 0) {
         return [
             makeBox(state, "todo", instanceName, {
-                detailLines: ["No active todo for this instance."],
+                detailLines: ["No active todo for this instance.", { id: "button:add-comment", text: "Add comment" }],
                 id: "todo-empty",
                 status: "normal",
                 summaryLines: [compactSummary(["status", "none"])],
                 title: "Todo",
             }),
+        ];
+    }
+
+    if (todo?.taskId === undefined) {
+        return [
+            ...tasks.map((task) => makeBox(state, "todo", instanceName, {
+                detailLines: [
+                    formatField("Progress", `${task.completed}/${task.total}`),
+                    formatField("Status", task.status),
+                    formatField("Updated", task.updatedAt),
+                    { id: "button:add-comment", text: "Add comment" },
+                ],
+                id: `todo-task:${task.taskId}`,
+                status: task.status === "blocked" ? "warning" : task.status === "in_progress" ? "running" : "normal",
+                summaryLines: [compactSummary(["progress", `${task.completed}/${task.total}`])],
+                title: task.title,
+            })),
+            ...(todo.comments ?? []).map((comment) => makeBox(state, "todo", instanceName, {
+                detailLines: [formatField("Pending", comment.text), formatField("ID", comment.id), { id: `button:delete-comment:${comment.id}`, text: "Delete comment" }],
+                id: `todo-comment:${comment.id}`,
+                status: "warning",
+                summaryLines: [comment.text],
+                title: "Pending comment",
+            }))
         ];
     }
 
@@ -44,6 +69,7 @@ export function buildTodoPageBoxes(
                     `${todo.summary.completed}/${todo.summary.total}`,
                 ),
                 formatField("Current", current?.content ?? "none"),
+                { id: "button:add-comment", text: "Add comment" },
             ],
             id: "todo-summary",
             status: summaryStatus(todo),
@@ -60,6 +86,13 @@ export function buildTodoPageBoxes(
             title: todo.title ?? todo.taskId,
         }),
         ...todo.items.map((item) => todoItemBox(state, instanceName, item)),
+        ...(todo.comments ?? []).map((comment) => makeBox(state, "todo", instanceName, {
+            detailLines: [formatField("Pending", comment.text), formatField("ID", comment.id), { id: `button:delete-comment:${comment.id}`, text: "Delete comment" }],
+            id: `todo-comment:${comment.id}`,
+            status: "warning",
+            summaryLines: [comment.text],
+            title: "Pending comment",
+        }))
     ];
 }
 

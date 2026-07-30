@@ -49,6 +49,8 @@ export interface TuiCommandDispatcherOptions {
         toolName: string,
         input: string
     ): Promise<boolean>;
+    onTodoComment?(instance: string, text: string): Promise<void>;
+    onTodoCommentDelete?(instance: string, id: string): Promise<void>;
     onApplyConfig?(): Promise<JsonValue>;
     onControlRestart?(): Promise<void>;
     onCreateInstance?(draft: InstanceCreateDraft): Promise<string | undefined>;
@@ -122,6 +124,7 @@ export class TuiCommandDispatcher {
             focus: this.#focus,
             onOAuthApprovalDecision:
                 options.onOAuthApprovalDecision ?? unavailable,
+            onTodoCommentDelete: options.onTodoCommentDelete,
             projection: options.projection,
             store: this.#store
         });
@@ -239,7 +242,7 @@ export class TuiCommandDispatcher {
                 this.#store.setToolForm(
                     intent.instance,
                     intent.toolName,
-                    '{"command":""}'
+                    intent.toolName === "__todo_comment" ? "" : '{"command":""}'
                 );
                 return true;
             case "toolForm.append":
@@ -392,6 +395,13 @@ export class TuiCommandDispatcher {
         const form = this.#store.getState().interaction.toolForm;
         if (form === undefined) {
             return false;
+        }
+        if (form.toolName === "__todo_comment") {
+            if (form.input.trim().length === 0) return false;
+            await (this.#options.onTodoComment ?? unavailable)(form.instance, form.input.trim());
+            this.#store.clearToolForm();
+            this.#focusManager.restore();
+            return true;
         }
         if (
             await this.#options.onToolCall(

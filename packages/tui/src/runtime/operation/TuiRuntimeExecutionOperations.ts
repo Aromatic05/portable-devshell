@@ -65,10 +65,10 @@ export class TuiRuntimeExecutionOperations {
                 comment?: string[];
                 error?: { code: string; message: string; retryable: boolean };
             };
-            if (feedback.error !== undefined) {
+            if (feedback?.error !== undefined) {
                 throw createError(feedback.error);
             }
-            if ((feedback.comment?.length ?? 0) > 0) {
+            if ((feedback?.comment?.length ?? 0) > 0) {
                 this.options.store.setScreenStatus("todo", feedback.comment!.join(" "));
             }
             await this.options.session.refreshInstance(instance);
