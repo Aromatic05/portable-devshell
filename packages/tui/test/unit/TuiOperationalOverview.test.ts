@@ -72,6 +72,18 @@ const overview: OperationalOverview = {
             ready: false,
             status: "failed"
         },
+        worker: {
+            capabilities: { cancel: true, streaming: true, tools: true },
+            platform: {
+                arch: "x64",
+                distribution: { id: "arch", name: "Arch Linux" },
+                os: "linux",
+                packageManager: "pacman",
+                shell: { executable: "/bin/bash", kind: "bash", version: "5.3" }
+            },
+            protocolVersion: 2,
+            version: "0.4.10"
+        },
         workspace: "/workspace/alpha"
     }],
     todos: [{
@@ -117,6 +129,18 @@ test("overview page prioritizes health and alerts before read-only operational d
         true
     );
     assert.equal(model.boxes[1]?.severity, "danger");
+    assert.equal(
+        model.boxes[2]?.expandedLines.some((line) => line.text.includes("0.4.10") && line.text.includes("protocol 2")),
+        true
+    );
+    assert.equal(
+        model.boxes[2]?.expandedLines.some((line) => line.text.includes("linux/x64")),
+        true
+    );
+    assert.equal(
+        model.boxes[2]?.expandedLines.some((line) => line.text.includes("tools, streaming, cancel")),
+        true
+    );
     assert.equal(selectMainScrollKey(store.getState()), "overview:-:main");
     assert.equal(
         model.boxes.some((box) => box.expandedLines.some((line) => line.id?.includes(":button:"))),

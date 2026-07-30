@@ -4,7 +4,8 @@ import {
     OperationalOverviewActivity,
     OperationalOverviewAlert,
     OperationalOverviewInstance,
-    OperationalOverviewTodo
+    OperationalOverviewTodo,
+    type OperationalOverviewWorker
 } from "@portable-devshell/shared";
 
 import type { InstanceDescriptor } from "../instance/InstanceDescriptor.js";
@@ -96,11 +97,37 @@ export class OperationalOverviewInstanceCollector {
                 pendingApprovals,
                 provider: descriptor.provider,
                 snapshot,
+                ...(descriptor.worker.handshake === undefined
+                    ? {}
+                    : { worker: toOperationalWorker(descriptor.worker.handshake) }),
                 ...(descriptor.workspace === undefined ? {} : { workspace: descriptor.workspace })
             },
             todos
         };
     }
+}
+
+function toOperationalWorker(
+    handshake: NonNullable<InstanceDescriptor["worker"]["handshake"]>
+): OperationalOverviewWorker {
+    return {
+        capabilities: { ...handshake.capabilities },
+        platform: {
+            arch: handshake.platform.arch,
+            ...(handshake.platform.distribution === undefined
+                ? {}
+                : { distribution: { ...handshake.platform.distribution } }),
+            os: handshake.platform.os,
+            ...(handshake.platform.packageManager === undefined
+                ? {}
+                : { packageManager: handshake.platform.packageManager }),
+            ...(handshake.platform.shell === undefined
+                ? {}
+                : { shell: { ...handshake.platform.shell } })
+        },
+        protocolVersion: handshake.protocolVersion,
+        version: handshake.workerVersion
+    };
 }
 
 function readSnapshot(descriptor: InstanceDescriptor): InstanceSnapshot {

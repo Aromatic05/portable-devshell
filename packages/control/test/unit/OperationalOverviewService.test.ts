@@ -39,6 +39,21 @@ test("operational overview prioritizes failures, approvals, activity, and todos 
         toolName: "bash_run"
     };
     const ready = createTestInstanceDescriptor({
+        handshake: {
+            capabilities: { cancel: true, streaming: true, tools: true },
+            instance: "ready-one",
+            platform: {
+                arch: "x64",
+                distribution: { id: "arch", name: "Arch Linux" },
+                os: "linux",
+                packageManager: "pacman",
+                shell: { executable: "/bin/bash", kind: "bash", version: "5.3" }
+            },
+            protocolVersion: 2,
+            skillsDirectory: "/workspace/.agents/skills",
+            workerVersion: "0.4.10",
+            workspace: "/workspace"
+        },
         listApprovals: async () => [{ id: "approval-1" }],
         readToolCalls: async () => [failedCall],
         snapshot: () => ({
@@ -135,6 +150,21 @@ test("operational overview prioritizes failures, approvals, activity, and todos 
     }]);
     assert.equal("input" in overview.activity[0]!, false);
     assert.equal("output" in overview.activity[0]!, false);
+    assert.deepEqual(
+        overview.instances.find((instance) => instance.name === "ready-one")?.worker,
+        {
+            capabilities: { cancel: true, streaming: true, tools: true },
+            platform: {
+                arch: "x64",
+                distribution: { id: "arch", name: "Arch Linux" },
+                os: "linux",
+                packageManager: "pacman",
+                shell: { executable: "/bin/bash", kind: "bash", version: "5.3" }
+            },
+            protocolVersion: 2,
+            version: "0.4.10"
+        }
+    );
 });
 
 test("operational overview counts the full 24 hour failure window while bounding activity", async () => {

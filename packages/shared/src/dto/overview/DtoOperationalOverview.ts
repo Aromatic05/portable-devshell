@@ -38,12 +38,38 @@ export interface OperationalOverviewCounts {
     pendingApprovals: number;
 }
 
+export interface OperationalOverviewWorker {
+    capabilities: {
+        cancel: boolean;
+        streaming: boolean;
+        tools: boolean;
+    };
+    platform: {
+        arch: string;
+        distribution?: {
+            id: string;
+            name: string;
+            version?: string;
+        };
+        os: string;
+        packageManager?: string;
+        shell?: {
+            executable: string;
+            kind: string;
+            version: string;
+        };
+    };
+    protocolVersion: number;
+    version: string;
+}
+
 export interface OperationalOverviewInstance {
     mcpEnabled: boolean;
     name: InstanceName;
     pendingApprovals: number;
     provider: "docker" | "local" | "podman" | "reverse" | "ssh";
     snapshot: InstanceSnapshot;
+    worker?: OperationalOverviewWorker;
     workspace?: string;
 }
 
