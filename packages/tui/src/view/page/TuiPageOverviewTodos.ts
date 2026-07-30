@@ -3,6 +3,7 @@ import type { OperationalOverviewTodo } from "@portable-devshell/shared";
 import type { TuiAppState } from "../../state/reducer/TuiStoreModel.js";
 import type { TuiExpandableBoxStatus } from "../../state/TuiUiState.js";
 import type { BoxModel } from "../component/TuiComponentExpandableBox.js";
+import { buttonLine } from "../editor/TuiEditorView.js";
 import {
     compactSummary,
     formatField,
@@ -41,7 +42,11 @@ function buildTodoBox(
             ...(todo.currentItem === undefined
                 ? []
                 : [formatField("Current", todo.currentItem)]),
-            formatField("Task ID", todo.taskId)
+            formatField("Task ID", todo.taskId),
+            buttonLine(
+                `overview-open-todo:${encodeURIComponent(todo.instance)}`,
+                "Open Todo"
+            )
         ],
         id: `overview-todo:${todo.instance}:${todo.taskId}`,
         searchText: `${todo.instance} ${todo.title} ${todo.status} ${todo.currentItem ?? ""}`,

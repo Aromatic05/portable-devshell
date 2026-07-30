@@ -2,6 +2,7 @@ import type { OperationalOverviewAlert } from "@portable-devshell/shared";
 
 import type { TuiAppState } from "../../state/reducer/TuiStoreModel.js";
 import type { BoxModel } from "../component/TuiComponentExpandableBox.js";
+import { buttonLine } from "../editor/TuiEditorView.js";
 import {
     compactSummary,
     formatField,
@@ -89,7 +90,8 @@ export function buildOverviewAlertBoxes(
             formatField("Kind", alert.kind),
             ...(alert.instance === undefined ? [] : [formatField("Instance", alert.instance)]),
             formatField("Detail", alert.detail),
-            formatField("Alert ID", alert.id)
+            formatField("Alert ID", alert.id),
+            ...alertNavigationButton(alert)
         ],
         id: `overview-alert:${alert.id}`,
         searchText: `${alert.title} ${alert.detail} ${alert.instance ?? ""}`,
@@ -105,4 +107,18 @@ export function buildOverviewAlertBoxes(
         ],
         title: `Alert · ${alert.title}`
     }));
+}
+
+function alertNavigationButton(
+    alert: OperationalOverviewAlert
+): ReturnType<typeof buttonLine>[] {
+    if (alert.instance === undefined) return [];
+    const instance = encodeURIComponent(alert.instance);
+    if (alert.kind.startsWith("todo.")) {
+        return [buttonLine(`overview-open-todo:${instance}`, "Open Todo")];
+    }
+    if (alert.kind.startsWith("approval.") || alert.kind.startsWith("activity.")) {
+        return [buttonLine(`overview-open-audit:${instance}`, "Open Audit")];
+    }
+    return [buttonLine(`overview-open-instance:${instance}`, "Open Instance")];
 }

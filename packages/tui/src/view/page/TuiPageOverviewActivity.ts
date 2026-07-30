@@ -3,6 +3,7 @@ import type { OperationalOverviewActivity } from "@portable-devshell/shared";
 import type { TuiAppState } from "../../state/reducer/TuiStoreModel.js";
 import type { TuiExpandableBoxStatus } from "../../state/TuiUiState.js";
 import type { BoxModel } from "../component/TuiComponentExpandableBox.js";
+import { buttonLine } from "../editor/TuiEditorView.js";
 import {
     compactSummary,
     formatField,
@@ -42,7 +43,11 @@ function buildActivityBox(
             ...(activity.errorSummary === undefined
                 ? []
                 : [formatField("Error", activity.errorSummary)]),
-            formatField("Call ID", activity.callId)
+            formatField("Call ID", activity.callId),
+            buttonLine(
+                `overview-open-audit:${encodeURIComponent(activity.instance)}:${encodeURIComponent(activity.callId)}`,
+                "Open Audit"
+            )
         ],
         id: `overview-activity:${activity.callId}`,
         searchText: `${activity.instance} ${activity.toolName} ${activity.status} ${activity.errorSummary ?? ""}`,

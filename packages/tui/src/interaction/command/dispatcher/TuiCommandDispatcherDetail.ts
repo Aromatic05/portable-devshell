@@ -87,6 +87,10 @@ export class TuiCommandDispatcherDetail {
 
             const button = actionId?.startsWith("button:") ? actionId.slice("button:".length) : undefined;
 
+            if (state.ui.selectedPage === "overview" && button?.startsWith("overview-open-")) {
+                return await this.#activateOverviewButton(button);
+            }
+
             if (state.ui.selectedPage === "todo" && state.ui.selectedInstance !== undefined && button?.startsWith("add-comment:")) {
                 return await this.#dispatch({ instance: state.ui.selectedInstance, toolName: `__todo_comment:${button.slice("add-comment:".length)}`, type: "toolForm.open" });
             }
@@ -176,6 +180,40 @@ export class TuiCommandDispatcherDetail {
             return await this.#dispatch({ type: "screen.toggle" });
     }
 
+    async #activateOverviewButton(button: string): Promise<boolean> {
+        const [action, encodedInstance, encodedTarget] = button.split(":");
+        const instance = decodeActionPart(encodedInstance);
+        if (instance === undefined) {
+            return false;
+        }
+
+        this.#store.setSelectedInstance(instance);
+        this.#store.setFocusScope("mainBoxes");
+
+        switch (action) {
+            case "overview-open-instance":
+                await this.#dispatch({ page: "instances", type: "page.select" });
+                this.#store.setMainFocusId(`instance:${instance}`);
+                break;
+            case "overview-open-todo":
+                await this.#dispatch({ page: "todo", type: "page.select" });
+                break;
+            case "overview-open-audit": {
+                await this.#dispatch({ page: "audit", type: "page.select" });
+                const callId = decodeActionPart(encodedTarget);
+                if (callId !== undefined) {
+                    this.#store.setMainFocusId(`audit-${callId}`);
+                }
+                break;
+            }
+            default:
+                return false;
+        }
+
+        this.#focus.ensureMainFocusVisible();
+        return true;
+    }
+
     async #activateInstanceButton(boxId: string | undefined, button: string): Promise<boolean> {
         const instance = this.#focus.instanceNameFromBox(boxId);
         if (instance === undefined) {
@@ -253,4 +291,15 @@ export class TuiCommandDispatcherDetail {
 
 async function missingTodoCommentHandler(): Promise<never> {
     throw new Error("Todo comment handler is unavailable.");
+}
+
+function decodeActionPart(value: string | undefined): string | undefined {
+    if (value === undefined || value.length === 0) {
+        return undefined;
+    }
+    try {
+        return decodeURIComponent(value);
+    } catch {
+        return undefined;
+    }
 }

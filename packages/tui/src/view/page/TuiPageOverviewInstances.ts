@@ -3,6 +3,7 @@ import type { OperationalOverviewInstance } from "@portable-devshell/shared";
 import type { TuiAppState } from "../../state/reducer/TuiStoreModel.js";
 import type { TuiExpandableBoxStatus } from "../../state/TuiUiState.js";
 import type { BoxModel } from "../component/TuiComponentExpandableBox.js";
+import { buttonLine } from "../editor/TuiEditorView.js";
 import {
     compactSummary,
     formatField,
@@ -64,7 +65,11 @@ function buildInstanceBox(
                 : [formatField("Last seen", snapshot.reverse.lastSeenAt)]),
             ...(snapshot.lastErrorMessage === undefined
                 ? []
-                : [formatField("Last error", snapshot.lastErrorMessage)])
+                : [formatField("Last error", snapshot.lastErrorMessage)]),
+            buttonLine(
+                `overview-open-instance:${encodeURIComponent(instance.name)}`,
+                "Open Instance"
+            )
         ],
         id: `overview-instance:${instance.name}`,
         searchText: `${instance.name} ${instance.provider} ${instance.workspace ?? ""}`,

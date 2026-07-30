@@ -142,10 +142,11 @@ test("overview page prioritizes health and alerts before read-only operational d
         true
     );
     assert.equal(selectMainScrollKey(store.getState()), "overview:-:main");
-    assert.equal(
-        model.boxes.some((box) => box.expandedLines.some((line) => line.id?.includes(":button:"))),
-        false
+    const actions = model.boxes.flatMap((box) =>
+        box.expandedLines.flatMap((line) => line.id?.includes(":button:") ? [line.id] : [])
     );
+    assert.equal(actions.length > 0, true);
+    assert.equal(actions.every((id) => id.includes(":button:overview-open-")), true);
 });
 
 test("overview uses zero without changing the established one-to-nine page shortcuts", () => {
