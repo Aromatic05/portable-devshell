@@ -5,13 +5,18 @@ import {
     type InstanceListEntry,
     type InstanceLogEntry,
     type OAuthApprovalRequest,
+    type OperationalOverview,
+    type TodoReadResult,
 } from "@portable-devshell/shared/browser";
-import type { TodoReadResult } from "@portable-devshell/shared";
-import type { OperationalOverview } from "../../../shared/src/dto/overview/DtoOperationalOverview.js";
 
 import type { WebClients, WebRuntimeStream } from "../client/WebClients.js";
 
 export type ConnectionState = "connecting" | "online" | "offline";
+
+export interface WebStoreOptions {
+    isPageVisible?: () => boolean;
+    overviewRefreshIntervalMs?: number;
+}
 
 export interface WebState {
     connection: ConnectionState;
@@ -50,9 +55,17 @@ export class WebStore {
     #loadPromise?: Promise<void>;
     #reconnectPromise?: Promise<void>;
     #overviewRefresh?: ReturnType<typeof setTimeout>;
+    #overviewPoll?: ReturnType<typeof setInterval>;
     #overviewPromise?: Promise<void>;
+    readonly #isPageVisible: () => boolean;
+    readonly #overviewRefreshIntervalMs: number;
 
-    constructor(readonly clients: WebClients) {}
+    constructor(readonly clients: WebClients, options: WebStoreOptions = {}) {
+        this.#isPageVisible = options.isPageVisible ?? (() =>
+            typeof document === "undefined" || document.visibilityState !== "hidden"
+        );
+        this.#overviewRefreshIntervalMs = options.overviewRefreshIntervalMs ?? 5_000;
+    }
 
     get state(): WebState {
         return this.#state;
@@ -60,7 +73,13 @@ export class WebStore {
 
     subscribe(listener: () => void): () => void {
         this.#listeners.add(listener);
-        return () => this.#listeners.delete(listener);
+        this.startOverviewPolling();
+        return () => {
+            this.#listeners.delete(listener);
+            if (this.#listeners.size === 0) {
+                this.stopOverviewPolling();
+            }
+        };
     }
 
     async load(): Promise<void> {
@@ -160,6 +179,7 @@ export class WebStore {
         if (this.#overviewRefresh !== undefined) {
             clearTimeout(this.#overviewRefresh);
         }
+        this.stopOverviewPolling();
         this.clients.close();
     }
 
@@ -218,12 +238,14 @@ export class WebStore {
                 partialFailures,
                 overview,
             });
+            this.startOverviewPolling();
             await Promise.all(
                 instances.map(({ name, snapshot }) =>
                     this.beginSubscription(name, snapshot.lastSeq),
                 ),
             );
         } catch (error) {
+            this.stopOverviewPolling();
             this.set({
                 ...this.#state,
                 connection: "offline",
@@ -234,6 +256,7 @@ export class WebStore {
 
     private async reconnectCurrent(): Promise<void> {
         this.closeStreams();
+        this.stopOverviewPolling();
         try {
             await this.clients.reconnect();
             await this.load();
@@ -377,6 +400,35 @@ export class WebStore {
             this.#overviewRefresh = undefined;
             void this.refreshOverview();
         }, 250);
+    }
+
+    private startOverviewPolling(): void {
+        if (
+            this.#overviewPoll !== undefined ||
+            this.#overviewRefreshIntervalMs <= 0 ||
+            this.#listeners.size === 0 ||
+            this.#state.connection !== "online" ||
+            this.#stopped
+        ) {
+            return;
+        }
+        this.#overviewPoll = setInterval(() => {
+            if (
+                this.#state.connection !== "online" ||
+                !this.#isPageVisible()
+            ) {
+                return;
+            }
+            void this.refreshOverview();
+        }, this.#overviewRefreshIntervalMs);
+    }
+
+    private stopOverviewPolling(): void {
+        if (this.#overviewPoll === undefined) {
+            return;
+        }
+        clearInterval(this.#overviewPoll);
+        this.#overviewPoll = undefined;
     }
 
     private async refreshOverview(): Promise<void> {

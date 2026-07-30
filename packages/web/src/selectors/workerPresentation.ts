@@ -1,4 +1,4 @@
-import type { OperationalOverviewWorker } from "../../../shared/src/dto/overview/DtoOperationalOverview.js";
+import type { OperationalOverviewWorker } from "@portable-devshell/shared/browser";
 
 export interface WorkerPresentation {
     capabilities: Array<{ label: string; value: string }>;

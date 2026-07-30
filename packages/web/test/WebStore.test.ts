@@ -120,6 +120,34 @@ describe("WebStore", () => {
         vi.useRealTimers();
     });
 
+    it("polls overview only while online, visible, and observed", async () => {
+        vi.useFakeTimers();
+        let visible = true;
+        const clients = fakeClients();
+        clients.overview.get = vi.fn(async () => operationalOverview());
+        const store = new WebStore(clients, {
+            isPageVisible: () => visible,
+            overviewRefreshIntervalMs: 1_000,
+        });
+        const unsubscribe = store.subscribe(() => undefined);
+        await store.load();
+
+        expect(clients.overview.get).toHaveBeenCalledOnce();
+        await vi.advanceTimersByTimeAsync(1_000);
+        expect(clients.overview.get).toHaveBeenCalledTimes(2);
+
+        visible = false;
+        await vi.advanceTimersByTimeAsync(1_000);
+        expect(clients.overview.get).toHaveBeenCalledTimes(2);
+
+        visible = true;
+        unsubscribe();
+        await vi.advanceTimersByTimeAsync(1_000);
+        expect(clients.overview.get).toHaveBeenCalledTimes(2);
+        store.close();
+        vi.useRealTimers();
+    });
+
     it("enters offline state when initial overview loading fails", async () => {
         const clients = fakeClients();
         clients.overview.get = vi.fn(async () => {

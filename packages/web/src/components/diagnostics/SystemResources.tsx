@@ -1,4 +1,4 @@
-import type { OperationalOverviewSystem } from "../../../../shared/src/dto/overview/DtoOperationalOverview.js";
+import type { OperationalOverviewSystem } from "@portable-devshell/shared/browser";
 
 import { formatBytes, formatDuration, formatPercent } from "../../formatters/resources.js";
 

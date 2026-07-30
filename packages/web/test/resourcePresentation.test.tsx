@@ -8,10 +8,11 @@ import { presentWorker } from "../src/selectors/workerPresentation.js";
 
 it("formats resource boundaries without representing unavailable values as zero", () => {
     expect(formatBytes(0)).toBe("0 B");
-    expect(formatBytes(1024)).toBe("1 KB");
+    expect(formatBytes(1024)).toBe("1 KiB");
     expect(formatPercent(0)).toBe("0%");
     expect(formatPercent(undefined)).toBe("Unavailable");
     expect(formatDuration(3660)).toBe("1h 1m");
+    expect(formatDuration(90_000)).toBe("1d 1h");
     expect(formatBytes(undefined)).toBe("Unavailable");
 });
 

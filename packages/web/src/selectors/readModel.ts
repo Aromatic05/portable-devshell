@@ -1,12 +1,10 @@
 import type {
     ApprovalRequest,
     InstanceEvent,
-} from "@portable-devshell/shared/browser";
-import type {
     OperationalOverview,
     OperationalOverviewActivity,
     OperationalOverviewAlert,
-} from "../../../shared/src/dto/overview/DtoOperationalOverview.js";
+} from "@portable-devshell/shared/browser";
 
 import type { WebState } from "../state/WebStore.js";
 

@@ -37,6 +37,10 @@ export type {
 export type { InstanceLogEntry } from "./dto/instance/DtoInstanceLog.js";
 export type { InstanceSnapshot } from "./dto/instance/DtoInstanceSnapshot.js";
 export type {
+    TodoReadResult,
+    TodoRpcEnvelope
+} from "./dto/instance/DtoTodo.js";
+export type {
     OAuthApprovalDecision,
     OAuthApprovalRequest
 } from "./dto/oauth/DtoOAuthApproval.js";
@@ -49,7 +53,9 @@ export type {
     OperationalOverviewController,
     OperationalOverviewCounts,
     OperationalOverviewInstance,
-    OperationalOverviewTodo
+    OperationalOverviewSystem,
+    OperationalOverviewTodo,
+    OperationalOverviewWorker
 } from "./dto/overview/DtoOperationalOverview.js";
 export { asInstanceName } from "./type/identity/TypeIdentityInstanceName.js";
 export type { InstanceName } from "./type/identity/TypeIdentityInstanceName.js";

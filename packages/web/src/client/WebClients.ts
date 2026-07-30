@@ -22,9 +22,9 @@ import {
     type JsonValue,
     type OAuthApprovalDecision,
     type OAuthApprovalRequest,
+    type OperationalOverview,
+    type TodoRpcEnvelope,
 } from "@portable-devshell/shared/browser";
-import type { TodoRpcEnvelope } from "@portable-devshell/shared";
-import type { OperationalOverview } from "../../../shared/src/dto/overview/DtoOperationalOverview.js";
 
 import { BrowserWebSocketChannelProvider } from "../rpc/BrowserWebSocketChannelProvider.js";
 
