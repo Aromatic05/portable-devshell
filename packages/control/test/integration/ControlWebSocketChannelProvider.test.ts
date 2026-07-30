@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import type { AddressInfo } from "node:net";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 
 import { McpHostHttpServer } from "@portable-devshell/mcp";
@@ -106,6 +109,9 @@ test("web session cookie authenticates the shared control RPC over WebSocket", a
 
 test("web routes and cookies follow the public base URL path prefix", async (t) => {
     const basePath = controlWebBasePath("https://controller.example/devshell");
+    const assetDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-web-prefix-"));
+    await writeFile(join(assetDirectory, "index.html"), '<script src="./assets/app.js"></script>', "utf8");
+    t.after(async () => await rm(assetDirectory, { force: true, recursive: true }));
     const http = new McpHostHttpServer({
         auth: { enabled: false, provider: "none" },
         listenHost: "127.0.0.1",
@@ -114,7 +120,7 @@ test("web routes and cookies follow the public base URL path prefix", async (t) 
     });
     const sessions = new ControlWebSessionService({ basePath });
     const channels = new ControlChannelServer({
-        providers: [new ControlWebSocketChannelProvider({ basePath, http, sessions })],
+        providers: [new ControlWebSocketChannelProvider({ assetDirectory, basePath, http, sessions })],
         routes: {
             connectionClosed() {},
             snapshot: createRouteSnapshot
@@ -128,6 +134,9 @@ test("web routes and cookies follow the public base URL path prefix", async (t) 
     });
 
     const origin = httpOrigin(http);
+    const index = await fetch(`${origin}${basePath}/`);
+    assert.equal(index.status, 200);
+    assert.equal(await index.text(), '<script src="./assets/app.js"></script>');
     assert.equal((await fetch(`${origin}/web/session`, { method: "POST" })).status, 404);
     const login = await fetch(`${origin}${basePath}/session`, { method: "POST" });
     assert.equal(login.status, 204);
