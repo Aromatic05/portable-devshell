@@ -4,21 +4,32 @@ import WebSocket, { type RawData } from "ws";
 const HEARTBEAT_INTERVAL_MS = 20_000;
 const DEAD_CONNECTION_MS = 60_000;
 
+export interface ControlWebSocketFrameChannelOptions {
+    deadConnectionMs?: number;
+    heartbeatIntervalMs?: number;
+    now?: () => number;
+}
+
 export class ControlWebSocketFrameChannel implements FrameChannel {
     readonly #closeListeners = new Set<(error?: Error) => void>();
     readonly #frameListeners = new Set<(frame: Uint8Array) => void>();
     readonly #heartbeat: NodeJS.Timeout;
+    readonly #deadConnectionMs: number;
+    readonly #now: () => number;
     readonly #socket: WebSocket;
     #closed = false;
     #closeError?: Error;
-    #lastSeenAt = Date.now();
+    #lastSeenAt: number;
     #sendTail: Promise<void> = Promise.resolve();
 
-    constructor(socket: WebSocket) {
+    constructor(socket: WebSocket, options: ControlWebSocketFrameChannelOptions = {}) {
         this.#socket = socket;
+        this.#deadConnectionMs = options.deadConnectionMs ?? DEAD_CONNECTION_MS;
+        this.#now = options.now ?? Date.now;
+        this.#lastSeenAt = this.#now();
         socket.on("message", this.#handleMessage);
         socket.on("pong", () => {
-            this.#lastSeenAt = Date.now();
+            this.#lastSeenAt = this.#now();
         });
         socket.once("error", (error) => this.#finish(error));
         socket.once("close", (code, reason) => {
@@ -28,7 +39,10 @@ export class ControlWebSocketFrameChannel implements FrameChannel {
                     : new Error(`Control WebSocket closed: ${code} ${reason.toString()}`)
             );
         });
-        this.#heartbeat = setInterval(() => this.#heartbeatTick(), HEARTBEAT_INTERVAL_MS);
+        this.#heartbeat = setInterval(
+            () => this.#heartbeatTick(),
+            options.heartbeatIntervalMs ?? HEARTBEAT_INTERVAL_MS
+        );
         this.#heartbeat.unref();
     }
 
@@ -74,14 +88,19 @@ export class ControlWebSocketFrameChannel implements FrameChannel {
         if (error !== undefined && this.#closeError === undefined) {
             this.#closeError = error;
         }
-        if (this.#socket.readyState === WebSocket.OPEN || this.#socket.readyState === WebSocket.CONNECTING) {
-            this.#socket.close(error === undefined ? 1000 : 1011, closeReason(error));
+        try {
+            if (this.#socket.readyState === WebSocket.OPEN || this.#socket.readyState === WebSocket.CONNECTING) {
+                this.#socket.close(error === undefined ? 1000 : 1011, closeReason(error));
+            }
+        } catch (closeError) {
+            this.#fail(closeError);
+            return;
         }
         this.#finish(error);
     }
 
     readonly #handleMessage = (data: RawData, isBinary: boolean): void => {
-        this.#lastSeenAt = Date.now();
+        this.#lastSeenAt = this.#now();
         if (!isBinary) {
             this.#socket.close(1003, "binary RPC frame required");
             this.#finish(new Error("Control WebSocket requires binary RPC frames."));
@@ -105,13 +124,26 @@ export class ControlWebSocketFrameChannel implements FrameChannel {
         if (this.#closed) {
             return;
         }
-        if (Date.now() - this.#lastSeenAt >= DEAD_CONNECTION_MS) {
-            this.#socket.terminate();
-            this.#finish(new Error("Control WebSocket heartbeat timed out."));
+        if (this.#now() - this.#lastSeenAt >= this.#deadConnectionMs) {
+            this.#fail(new Error("Control WebSocket heartbeat timed out."));
             return;
         }
         if (this.#socket.readyState === WebSocket.OPEN) {
-            this.#socket.ping();
+            try {
+                this.#socket.ping();
+            } catch (error) {
+                this.#fail(error);
+            }
+        }
+    }
+
+    #fail(error: unknown): void {
+        const normalized = error instanceof Error ? error : new Error(String(error));
+        this.#finish(normalized);
+        try {
+            this.#socket.terminate();
+        } catch {
+            // The channel is already closed locally; transport teardown is best effort.
         }
     }
 
