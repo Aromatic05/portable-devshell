@@ -9,6 +9,7 @@ export class BrowserWebSocketChannel implements FrameChannel {
         reject: (error: Error) => void;
         resolve: () => void;
     }> = [];
+    #messageQueue = Promise.resolve();
 
     constructor(readonly socket: WebSocket) {
         socket.binaryType = "arraybuffer";
@@ -71,19 +72,30 @@ export class BrowserWebSocketChannel implements FrameChannel {
         }
     };
     private message = (event: MessageEvent<ArrayBuffer | Blob>) => {
-        if (isArrayBuffer(event.data)) this.emit(new Uint8Array(event.data));
-        else if (event.data instanceof Blob)
-            void event.data
-                .arrayBuffer()
-                .then((data) => this.emit(new Uint8Array(data)))
-                .catch((error) => this.finish(asError(error)));
+        this.#messageQueue = this.#messageQueue
+            .then(async () => {
+                if (this.#closed) return;
+                const data = isArrayBuffer(event.data)
+                    ? event.data
+                    : await event.data.arrayBuffer();
+                if (!this.#closed) this.emit(new Uint8Array(data));
+            })
+            .catch((error: unknown) => this.finish(asError(error)));
     };
     private closedEvent = () =>
         this.finish(new Error("WebSocket connection closed."));
     private errorEvent = () =>
         this.finish(new Error("WebSocket connection failed."));
     private emit(frame: Uint8Array): void {
-        if (!this.#closed) for (const listener of this.#frames) listener(frame);
+        if (!this.#closed) {
+            for (const listener of this.#frames) {
+                try {
+                    listener(frame);
+                } catch {
+                    // A consumer error must not block the transport or other consumers.
+                }
+            }
+        }
     }
     private finish(error?: Error): void {
         if (this.#closed) return;
@@ -94,7 +106,13 @@ export class BrowserWebSocketChannel implements FrameChannel {
         this.socket.removeEventListener("error", this.errorEvent);
         for (const pending of this.#queue.splice(0))
             pending.reject(error ?? new Error("WebSocket channel is closed."));
-        for (const listener of this.#closes) listener(error);
+        for (const listener of this.#closes) {
+            try {
+                listener(error);
+            } catch {
+                // A consumer error must not block cleanup or other consumers.
+            }
+        }
         this.#frames.clear();
         this.#closes.clear();
     }

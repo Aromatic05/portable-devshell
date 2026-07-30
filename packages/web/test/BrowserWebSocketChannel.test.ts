@@ -49,6 +49,30 @@ describe("BrowserWebSocketChannel", () => {
         expect(frames).toEqual(["one", "two"]);
     });
 
+    it("preserves Blob message order and isolates listener failures", async () => {
+        const socket = new FakeSocket();
+        const channel = new BrowserWebSocketChannel(socket as unknown as WebSocket);
+        socket.open();
+        const frames: string[] = [];
+        channel.onFrame(() => {
+            throw new Error("broken frame listener");
+        });
+        channel.onFrame((frame) => frames.push(new TextDecoder().decode(frame)));
+        const closes: string[] = [];
+        channel.onClose(() => {
+            throw new Error("broken close listener");
+        });
+        channel.onClose(() => closes.push("closed"));
+
+        socket.message(new DelayedBlob("first", 20));
+        socket.message(new DelayedBlob("second", 0));
+        await new Promise((resolve) => setTimeout(resolve, 30));
+        socket.serverClose();
+
+        expect(frames).toEqual(["first", "second"]);
+        expect(closes).toEqual(["closed"]);
+    });
+
     it("derives RPC routes from the deployed WebUI path", () => {
         const location = {
             host: "controller.example",
@@ -91,5 +115,19 @@ class FakeSocket extends EventTarget {
 
     message(data: ArrayBuffer | Blob): void {
         this.dispatchEvent(new MessageEvent("message", { data }));
+    }
+}
+
+class DelayedBlob extends Blob {
+    constructor(
+        private readonly value: string,
+        private readonly delayMs: number,
+    ) {
+        super([value]);
+    }
+
+    override async arrayBuffer(): Promise<ArrayBuffer> {
+        await new Promise((resolve) => setTimeout(resolve, this.delayMs));
+        return await super.arrayBuffer();
     }
 }
