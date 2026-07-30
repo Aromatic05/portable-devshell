@@ -2,14 +2,14 @@ import { randomBytes } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
 
 import type { McpHostHttpServer } from "@portable-devshell/mcp";
-import { CONTROL_WEB_SESSION_PATH } from "@portable-devshell/shared";
+import { CONTROL_WEB_BASE_PATH } from "@portable-devshell/shared";
 
 const DEFAULT_SESSION_TTL_MS = 12 * 60 * 60 * 1_000;
 const DEFAULT_MAX_SESSIONS = 16;
 const SESSION_COOKIE_NAME = "devshell_web_session";
-const SESSION_COOKIE_PATH = "/web";
 
 export interface ControlWebSessionServiceOptions {
+    basePath?: string;
     maxSessions?: number;
     now?: () => number;
     secureCookie?: boolean;
@@ -18,6 +18,7 @@ export interface ControlWebSessionServiceOptions {
 }
 
 export class ControlWebSessionService {
+    readonly #basePath: string;
     readonly #maxSessions: number;
     readonly #now: () => number;
     readonly #secureCookie: boolean;
@@ -27,6 +28,7 @@ export class ControlWebSessionService {
     #installed = false;
 
     constructor(options: ControlWebSessionServiceOptions = {}) {
+        this.#basePath = normalizeBasePath(options.basePath ?? CONTROL_WEB_BASE_PATH);
         this.#maxSessions = options.maxSessions ?? DEFAULT_MAX_SESSIONS;
         if (!Number.isSafeInteger(this.#maxSessions) || this.#maxSessions < 1) {
             throw new Error("Control web maxSessions must be a positive safe integer.");
@@ -42,17 +44,18 @@ export class ControlWebSessionService {
             return;
         }
         this.#installed = true;
-        http.registerAuthenticatedRawRoute("post", CONTROL_WEB_SESSION_PATH, (_request, response) => {
+        const sessionPath = `${this.#basePath}/session`;
+        http.registerAuthenticatedRawRoute("post", sessionPath, (_request, response) => {
             this.#create(response);
         });
-        http.registerRawRoute("get", CONTROL_WEB_SESSION_PATH, (request, response) => {
+        http.registerRawRoute("get", sessionPath, (request, response) => {
             if (!this.authorize(request)) {
                 writeJsonError(response, 401, "Unauthorized");
                 return;
             }
             writeNoContent(response);
         });
-        http.registerRawRoute("delete", CONTROL_WEB_SESSION_PATH, (request, response) => {
+        http.registerRawRoute("delete", sessionPath, (request, response) => {
             this.#revoke(request);
             response.setHeader("Set-Cookie", this.#cookie("", 0));
             writeNoContent(response);
@@ -115,13 +118,20 @@ export class ControlWebSessionService {
     #cookie(value: string, maxAgeSeconds: number): string {
         return [
             `${SESSION_COOKIE_NAME}=${value}`,
-            `Path=${SESSION_COOKIE_PATH}`,
+            `Path=${this.#basePath}`,
             "HttpOnly",
             "SameSite=Strict",
             `Max-Age=${maxAgeSeconds}`,
             ...(this.#secureCookie ? ["Secure"] : [])
         ].join("; ");
     }
+}
+
+function normalizeBasePath(value: string): string {
+    if (!value.startsWith("/") || value === "/") {
+        throw new Error("Control web basePath must be an absolute non-root path.");
+    }
+    return value.replace(/\/+$/u, "");
 }
 
 function readCookie(header: string | undefined, name: string): string | undefined {

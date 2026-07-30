@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import { BrowserWebSocketChannel } from "../src/rpc/BrowserWebSocketChannel.js";
+import { rpcUrl } from "../src/rpc/BrowserWebSocketChannelProvider.js";
+import { webRoutePath } from "../src/routing/webRoute.js";
 
 describe("BrowserWebSocketChannel", () => {
     it("queues initial raw JSON frames and notifies close once", async () => {
@@ -45,6 +47,18 @@ describe("BrowserWebSocketChannel", () => {
         socket.message(new TextEncoder().encode("three").buffer);
 
         expect(frames).toEqual(["one", "two"]);
+    });
+
+    it("derives RPC routes from the deployed WebUI path", () => {
+        const location = {
+            host: "controller.example",
+            pathname: "/devshell/web/",
+            protocol: "https:",
+        } as Location;
+
+        expect(webRoutePath(location.pathname, "/rpc")).toBe("/devshell/web/rpc");
+        expect(rpcUrl(location)).toBe("wss://controller.example/devshell/web/rpc");
+        expect(webRoutePath("/unexpected", "/rpc")).toBe("/web/rpc");
     });
 });
 

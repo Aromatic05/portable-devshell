@@ -1,3 +1,5 @@
+import { controlWebBasePath } from "@portable-devshell/shared";
+
 import type { InstanceRegistry } from "../../control/instance/registry/InstanceRegistry.js";
 import { OperationalOverviewService } from "../../control/overview/OperationalOverviewService.js";
 import { ControlChannelServer, type ControlChannelProvider } from "../../server/channel/ControlChannelServer.js";
@@ -53,10 +55,13 @@ export class ControlRuntime {
         const providers: ControlChannelProvider[] = [this.#socketProvider];
         const http = options.mcp.host?.server;
         if (http !== undefined && options.mcp.webEnabled) {
+            const basePath = controlWebBasePath(options.mcp.publicBaseUrl);
             providers.push(new ControlWebSocketChannelProvider({
                 assetDirectory: resolveControlWebAssetsDirectory(),
+                basePath,
                 http,
                 sessions: new ControlWebSessionService({
+                    basePath,
                     secureCookie: options.mcp.publicBaseUrl?.startsWith("https://") ?? false
                 })
             }));

@@ -1,4 +1,4 @@
-import { CONTROL_WEB_SESSION_PATH } from "@portable-devshell/shared/browser";
+import { webRoutePath } from "../routing/webRoute.js";
 
 export interface WebSession {
     check(): Promise<boolean>;
@@ -7,7 +7,10 @@ export interface WebSession {
 }
 
 export class BrowserWebSession implements WebSession {
-    constructor(private readonly request: typeof fetch = fetch) {}
+    constructor(
+        private readonly request: typeof fetch = fetch,
+        private readonly path = sessionPath(),
+    ) {}
 
     async check(): Promise<boolean> {
         return await this.send("GET");
@@ -18,7 +21,7 @@ export class BrowserWebSession implements WebSession {
     }
 
     async logout(): Promise<void> {
-        const response = await this.request(CONTROL_WEB_SESSION_PATH, {
+        const response = await this.request(this.path, {
             credentials: "same-origin",
             method: "DELETE",
         });
@@ -31,7 +34,7 @@ export class BrowserWebSession implements WebSession {
         method: "GET" | "POST",
         token?: string,
     ): Promise<boolean> {
-        const response = await this.request(CONTROL_WEB_SESSION_PATH, {
+        const response = await this.request(this.path, {
             credentials: "same-origin",
             headers:
                 token === undefined
@@ -47,4 +50,8 @@ export class BrowserWebSession implements WebSession {
         }
         throw new Error("Unable to establish a session.");
     }
+}
+
+export function sessionPath(location: Location = window.location): string {
+    return webRoutePath(location.pathname, "/session");
 }

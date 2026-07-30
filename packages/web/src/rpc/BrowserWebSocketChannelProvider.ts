@@ -1,9 +1,10 @@
 import {
-    CONTROL_WEB_RPC_PATH,
     CONTROL_WEB_RPC_SUBPROTOCOL,
     type ChannelProvider,
     type FrameChannel,
 } from "@portable-devshell/shared/browser";
+
+import { webRoutePath } from "../routing/webRoute.js";
 import { BrowserWebSocketChannel } from "./BrowserWebSocketChannel.js";
 
 export class BrowserWebSocketChannelProvider implements ChannelProvider {
@@ -14,6 +15,7 @@ export class BrowserWebSocketChannelProvider implements ChannelProvider {
             protocols: string,
         ) => WebSocket = (value, protocols) => new WebSocket(value, protocols),
     ) {}
+
     async connect(): Promise<FrameChannel> {
         const socket = this.factory(this.url, CONTROL_WEB_RPC_SUBPROTOCOL);
         const channel = new BrowserWebSocketChannel(socket);
@@ -34,8 +36,10 @@ export class BrowserWebSocketChannelProvider implements ChannelProvider {
         });
     }
 }
+
 export function rpcUrl(location: Location = window.location): string {
     const override = import.meta.env.VITE_DEVSHELL_RPC_URL;
     if (override) return override;
-    return `${location.protocol === "https:" ? "wss:" : "ws:"}//${location.host}${CONTROL_WEB_RPC_PATH}`;
+    const path = webRoutePath(location.pathname, "/rpc");
+    return `${location.protocol === "https:" ? "wss:" : "ws:"}//${location.host}${path}`;
 }

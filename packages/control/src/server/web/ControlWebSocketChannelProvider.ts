@@ -3,7 +3,7 @@ import type { Duplex } from "node:stream";
 
 import type { McpHostHttpServer } from "@portable-devshell/mcp";
 import {
-    CONTROL_WEB_RPC_PATH,
+    CONTROL_WEB_BASE_PATH,
     CONTROL_WEB_RPC_SUBPROTOCOL
 } from "@portable-devshell/shared";
 import { TRANSPORT_MAX_FRAME_SIZE } from "@portable-devshell/shared/transport/frame";
@@ -15,6 +15,7 @@ import { ControlWebSocketFrameChannel } from "./ControlWebSocketFrameChannel.js"
 
 export interface ControlWebSocketChannelProviderOptions {
     assetDirectory?: string;
+    basePath?: string;
     http: McpHostHttpServer;
     path?: string;
     sessions: ControlWebSessionService;
@@ -22,6 +23,7 @@ export interface ControlWebSocketChannelProviderOptions {
 
 export class ControlWebSocketChannelProvider implements ControlChannelProvider {
     readonly #assetDirectory?: string;
+    readonly #basePath: string;
     readonly #http: McpHostHttpServer;
     readonly #path: string;
     readonly #sessions: ControlWebSessionService;
@@ -32,8 +34,9 @@ export class ControlWebSocketChannelProvider implements ControlChannelProvider {
 
     constructor(options: ControlWebSocketChannelProviderOptions) {
         this.#assetDirectory = options.assetDirectory;
+        this.#basePath = normalizeBasePath(options.basePath ?? CONTROL_WEB_BASE_PATH);
         this.#http = options.http;
-        this.#path = options.path ?? CONTROL_WEB_RPC_PATH;
+        this.#path = options.path ?? `${this.#basePath}/rpc`;
         this.#sessions = options.sessions;
     }
 
@@ -45,7 +48,7 @@ export class ControlWebSocketChannelProvider implements ControlChannelProvider {
         if (!this.#routesInstalled) {
             this.#sessions.install(this.#http);
             if (this.#assetDirectory !== undefined) {
-                this.#http.registerStaticDirectory("/web", this.#assetDirectory);
+                this.#http.registerStaticDirectory(this.#basePath, this.#assetDirectory);
             }
             this.#http.registerUpgradeHandler(this.#path, async (request, socket, head) => {
                 await this.#handleUpgrade(request, socket, head);
@@ -106,6 +109,13 @@ export class ControlWebSocketChannelProvider implements ControlChannelProvider {
             accept(new ControlWebSocketFrameChannel(webSocket));
         });
     }
+}
+
+function normalizeBasePath(value: string): string {
+    if (!value.startsWith("/") || value === "/") {
+        throw new Error("Control web basePath must be an absolute non-root path.");
+    }
+    return value.replace(/\/+$/u, "");
 }
 
 function hasProtocol(request: IncomingMessage, expected: string): boolean {

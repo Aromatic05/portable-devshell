@@ -6,6 +6,7 @@ import { McpHostHttpServer } from "@portable-devshell/mcp";
 import {
     ClientConnection,
     PrefixRoute,
+    controlWebBasePath,
     createError,
     type FrameChannel,
     type JsonValue,
@@ -100,6 +101,64 @@ test("web session cookie authenticates the shared control RPC over WebSocket", a
         protocol: "devshell-control-rpc.v1"
     });
     assert.match(rejectedAfterLogout, /401/iu);
+});
+
+
+test("web routes and cookies follow the public base URL path prefix", async (t) => {
+    const basePath = controlWebBasePath("https://controller.example/devshell");
+    const http = new McpHostHttpServer({
+        auth: { enabled: false, provider: "none" },
+        listenHost: "127.0.0.1",
+        listenPort: 0,
+        publicBaseUrl: "https://controller.example/devshell"
+    });
+    const sessions = new ControlWebSessionService({ basePath });
+    const channels = new ControlChannelServer({
+        providers: [new ControlWebSocketChannelProvider({ basePath, http, sessions })],
+        routes: {
+            connectionClosed() {},
+            snapshot: createRouteSnapshot
+        }
+    });
+    await channels.start();
+    await http.start();
+    t.after(async () => {
+        await channels.close().catch(() => undefined);
+        await http.stop().catch(() => undefined);
+    });
+
+    const origin = httpOrigin(http);
+    assert.equal((await fetch(`${origin}/web/session`, { method: "POST" })).status, 404);
+    const login = await fetch(`${origin}${basePath}/session`, { method: "POST" });
+    assert.equal(login.status, 204);
+    const setCookie = login.headers.get("set-cookie");
+    assert.notEqual(setCookie, null);
+    assert.match(setCookie!, /Path=\/devshell\/web(?:;|$)/u);
+    const cookie = setCookie!.split(";", 1)[0]!;
+
+    const rejectedLegacyPath = await openRejected(`${origin.replace("http", "ws")}/web/rpc`, {
+        cookie,
+        protocol: "devshell-control-rpc.v1"
+    });
+    assert.match(rejectedLegacyPath, /404/iu);
+
+    const connection = new ClientConnection({
+        channelProvider: {
+            connect: async () => await NodeWebSocketFrameChannel.connect(
+                `${origin.replace("http", "ws")}${basePath}/rpc`,
+                cookie
+            )
+        },
+        mapError: normalizeError,
+        mapRemoteError: (error) => createError(error),
+        mode: "persistent",
+        peer: "web"
+    });
+    t.after(() => connection.close());
+    assert.deepEqual(
+        await connection.request<JsonValue>("@control", "service", "ping"),
+        { pong: true }
+    );
 });
 
 test("web RPC requires the canonical subprotocol", async (t) => {

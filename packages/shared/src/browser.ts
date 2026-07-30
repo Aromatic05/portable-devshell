@@ -15,9 +15,11 @@ export type { ChannelProvider } from "./transport/ChannelProvider.js";
 export type { FrameChannel } from "./transport/FrameChannel.js";
 export {
     CONTROL_PROTOCOL_VERSION,
+    CONTROL_WEB_BASE_PATH,
     CONTROL_WEB_RPC_PATH,
     CONTROL_WEB_RPC_SUBPROTOCOL,
-    CONTROL_WEB_SESSION_PATH
+    CONTROL_WEB_SESSION_PATH,
+    controlWebBasePath
 } from "./dto/DtoControlProtocol.js";
 export type {
     ControlClientKind,
