@@ -176,6 +176,44 @@ class RetryCloseControlChannelProvider implements ControlChannelProvider {
     }
 }
 
+class BlockingRetryCloseControlChannelProvider implements ControlChannelProvider {
+    readonly cleanupStarted: Promise<void>;
+    readonly events: string[] = [];
+    closeCount = 0;
+    startCount = 0;
+    #releaseCleanup!: () => void;
+    #signalCleanupStarted!: () => void;
+
+    constructor() {
+        this.cleanupStarted = new Promise<void>((resolve) => {
+            this.#signalCleanupStarted = resolve;
+        });
+    }
+
+    async start(): Promise<void> {
+        this.startCount += 1;
+        this.events.push(`start:${this.startCount}`);
+    }
+
+    async close(): Promise<void> {
+        this.closeCount += 1;
+        this.events.push(`close:${this.closeCount}`);
+        if (this.closeCount === 1) {
+            throw new Error("provider close failed");
+        }
+        if (this.closeCount === 2) {
+            this.#signalCleanupStarted();
+            await new Promise<void>((resolve) => {
+                this.#releaseCleanup = resolve;
+            });
+        }
+    }
+
+    releaseCleanup(): void {
+        this.#releaseCleanup();
+    }
+}
+
 
 test("ControlChannelServer serves the same routes through multiple channel providers", async (t) => {
     const socketProvider = new MemoryControlChannelProvider();
@@ -315,6 +353,32 @@ test("ControlChannelServer finishes failed cleanup before restarting providers",
     await server.start();
     await assert.rejects(server.close(), /providers failed to close/iu);
     await server.start();
+
+    assert.deepEqual(provider.events, ["start:1", "close:1", "close:2", "start:2"]);
+    await server.close();
+});
+
+test("ControlChannelServer coalesces restarts while failed cleanup is retried", async () => {
+    const provider = new BlockingRetryCloseControlChannelProvider();
+    const server = new ControlChannelServer({
+        providers: [provider],
+        routes: {
+            connectionClosed() {},
+            snapshot: createRouteSnapshot
+        }
+    });
+
+    await server.start();
+    await assert.rejects(server.close(), /providers failed to close/iu);
+    const first = server.start();
+    await provider.cleanupStarted;
+    const second = server.start();
+    await new Promise((resolve) => setImmediate(resolve));
+
+    assert.equal(provider.startCount, 1);
+    assert.equal(provider.closeCount, 2);
+    provider.releaseCleanup();
+    await Promise.all([first, second]);
 
     assert.deepEqual(provider.events, ["start:1", "close:1", "close:2", "start:2"]);
     await server.close();

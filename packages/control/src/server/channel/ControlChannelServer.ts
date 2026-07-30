@@ -42,19 +42,7 @@ export class ControlChannelServer {
         if (this.#startPromise !== undefined) {
             return await this.#startPromise;
         }
-        if (this.#closePromise !== undefined) {
-            await this.#closePromise;
-        }
-        if (this.#started) {
-            return;
-        }
-        if (this.#startedProviders.length > 0) {
-            await this.#closeProviders();
-        }
-        if (this.#startPromise !== undefined) {
-            return await this.#startPromise;
-        }
-        const start = this.#startInternal();
+        const start = this.#startAfterClose();
         this.#startPromise = start;
         try {
             await start;
@@ -63,6 +51,20 @@ export class ControlChannelServer {
                 this.#startPromise = undefined;
             }
         }
+    }
+
+    async #startAfterClose(): Promise<void> {
+        const close = this.#closePromise;
+        if (close !== undefined) {
+            await close;
+        }
+        if (this.#started) {
+            return;
+        }
+        if (this.#startedProviders.length > 0) {
+            await this.#closeProviders();
+        }
+        await this.#startInternal();
     }
 
     async close(): Promise<void> {
