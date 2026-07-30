@@ -218,9 +218,7 @@ export class PrefixRoute {
             if (incoming.destination !== active.destination) {
                 throw protocolFailure(`Stream ${streamId} was addressed to the wrong destination.`);
             }
-            active.closed = true;
-            this.#serverStreams.delete(streamId);
-            await active.options.onClose?.();
+            await this.#closeServerStream(active);
             await this.send(active.destination, "stream", {
                 id: this.#nextId(),
                 streamId,
@@ -390,16 +388,30 @@ export class PrefixRoute {
         this.#closed = true;
         this.#abortController.abort(this.#closeError);
         for (const active of this.#serverStreams.values()) {
-            if (!active.closed) {
-                active.closed = true;
-                void active.options.onClose?.();
-            }
+            void this.#closeServerStream(active);
         }
         this.#serverStreams.clear();
         const listeners = [...this.#closeListeners];
         this.#closeListeners.clear();
         for (const listener of listeners) {
-            listener(this.#closeError);
+            try {
+                listener(this.#closeError);
+            } catch (error) {
+                console.warn(error instanceof Error ? error : new Error(String(error)));
+            }
+        }
+    }
+
+    async #closeServerStream(active: ActiveServerStream): Promise<void> {
+        if (active.closed) {
+            return;
+        }
+        active.closed = true;
+        this.#serverStreams.delete(active.id);
+        try {
+            await active.options.onClose?.();
+        } catch (error) {
+            console.warn(error instanceof Error ? error : new Error(String(error)));
         }
     }
 

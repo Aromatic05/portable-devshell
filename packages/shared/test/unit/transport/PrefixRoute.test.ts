@@ -300,6 +300,91 @@ test("stream.cancel closes one server stream without closing the routed connecti
     assert.equal(value.server.closed, false);
 });
 
+test("stream.cancel acknowledges even when stream cleanup rejects", async (t) => {
+    const warnings: unknown[] = [];
+    const originalWarn = console.warn;
+    console.warn = (warning) => warnings.push(warning);
+    t.after(() => {
+        console.warn = originalWarn;
+    });
+    const snapshot = PrefixRoute.snapshot([{
+        destination: instance,
+        modules: [{
+            name: "runtime",
+            operations: [{
+                name: "subscribe",
+                handle: async (_request, context) => {
+                    await context.openStream(undefined, {
+                        onClose: async () => {
+                            throw new Error("cleanup failed");
+                        }
+                    });
+                    return undefined;
+                }
+            }]
+        }]
+    }]);
+    const value = await pair(() => snapshot);
+    t.after(() => closePair(value));
+
+    await value.client.send(instance, "runtime", { id: "subscribe-2", name: "subscribe" });
+    const acknowledgement = await value.events.next();
+    await value.client.send(instance, "stream", {
+        id: "cancel-2",
+        streamId: acknowledgement.event.streamId,
+        name: "cancel"
+    });
+    const cancelled = await value.events.next();
+
+    assert.equal(cancelled.event.name, "cancelled");
+    assert.equal(value.server.closed, false);
+    assert.equal(warnings.length, 1);
+});
+
+test("route close isolates stream cleanup and close listener failures", async (t) => {
+    let cleanupCalled = false;
+    const warnings: unknown[] = [];
+    const originalWarn = console.warn;
+    console.warn = (warning) => warnings.push(warning);
+    t.after(() => {
+        console.warn = originalWarn;
+    });
+    const snapshot = PrefixRoute.snapshot([{
+        destination: instance,
+        modules: [{
+            name: "runtime",
+            operations: [{
+                name: "subscribe",
+                handle: async (_request, context) => {
+                    await context.openStream(undefined, {
+                        onClose: async () => {
+                            cleanupCalled = true;
+                            throw new Error("disconnect cleanup failed");
+                        }
+                    });
+                    return undefined;
+                }
+            }]
+        }]
+    }]);
+    const value = await pair(() => snapshot);
+    t.after(() => closePair(value));
+
+    await value.client.send(instance, "runtime", { id: "subscribe-3", name: "subscribe" });
+    await value.events.next();
+    value.server.onClose(() => {
+        throw new Error("broken close listener");
+    });
+    const closed = new Promise<void>((resolve) => value.server.onClose(() => resolve()));
+
+    value.client.close();
+    await closed;
+    await new Promise((resolve) => setImmediate(resolve));
+
+    assert.equal(cleanupCalled, true);
+    assert.equal(warnings.length, 2);
+});
+
 test("PrefixRoute snapshots reject duplicate destinations, modules, and operations", () => {
     assert.throws(
         () => PrefixRoute.snapshot([
