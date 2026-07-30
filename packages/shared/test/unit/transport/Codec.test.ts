@@ -16,7 +16,7 @@ interface CodecPair {
     server: Codec;
 }
 
-async function pair(): Promise<CodecPair> {
+async function pair(clientPeer: "tui" | "web" = "tui"): Promise<CodecPair> {
     const directory = await mkdtemp(join(tmpdir(), "portable-devshell-codec-"));
     const socketPath = createTestIpcPath("codec", directory);
     const listener = createServer();
@@ -28,7 +28,7 @@ async function pair(): Promise<CodecPair> {
     const clientChannel = await Channel.connect(socketPath);
     const serverChannel = await accepted;
     return {
-        client: new Codec(clientChannel, { local: "tui", remote: "server" }),
+        client: new Codec(clientChannel, { local: clientPeer, remote: "server" }),
         clientChannel,
         directory,
         listener,
@@ -72,6 +72,17 @@ test("Codec round-trips Event and binds the first server peer", async (t) => {
         payload: {}
     });
     assert.equal(value.server.remotePeer, "tui");
+});
+
+test("Codec accepts web as a server-bound client peer", async (t) => {
+    const value = await pair("web");
+    t.after(() => closePair(value));
+
+    const incoming = onceEvent(value.server);
+    await value.client.send({ id: "web-1", destination: "@control", name: "service.ping" });
+
+    assert.equal((await incoming).from, "web");
+    assert.equal(value.server.remotePeer, "web");
 });
 
 test("Codec preserves replyTo, streamId, error, and seq", async (t) => {

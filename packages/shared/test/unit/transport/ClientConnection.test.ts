@@ -7,11 +7,13 @@ import test from "node:test";
 
 import {
     Channel,
+    type ChannelProvider,
     ClientConnection,
     Codec,
     createError,
     type Event,
-    type JsonValue
+    type JsonValue,
+    SocketChannelProvider
 } from "@portable-devshell/shared";
 import { createTestIpcPath } from "../../../../../test/TestPlatformSupport.ts";
 
@@ -123,7 +125,7 @@ function client(socketPath: string, mode: "short" | "persistent" = "persistent")
         mapRemoteError: (error) => createError(error),
         mode,
         peer: "tui",
-        socketPath
+        channelProvider: new SocketChannelProvider({ socketPath })
     });
 }
 
@@ -167,6 +169,35 @@ test("short ClientConnection keeps one-request-per-socket behavior", async (t) =
     await secondPromise;
 
     assert.equal(peer.connectionCount, 2);
+});
+
+test("ClientConnection obtains each short session from an injected channel provider", async (t) => {
+    const peer = await ControlPeer.create();
+    let connectCount = 0;
+    const channelProvider: ChannelProvider = {
+        connect: async () => {
+            connectCount += 1;
+            return await Channel.connect(peer.socketPath);
+        }
+    };
+    const connection = new ClientConnection({
+        channelProvider,
+        mapError: (error) => error instanceof Error ? error : new Error(String(error)),
+        mapRemoteError: (error) => createError(error),
+        mode: "short",
+        peer: "tui"
+    });
+    t.after(async () => {
+        connection.close();
+        await peer.close();
+    });
+
+    const response = connection.requestEvent("@control", "service", "ping");
+    const request = await peer.nextEvent();
+    await peer.reply(request, { pong: true });
+
+    assert.deepEqual((await response).payload, { pong: true });
+    assert.equal(connectCount, 1);
 });
 
 test("persistent ClientConnection multiplexes streams and closes one stream without closing the socket", async (t) => {

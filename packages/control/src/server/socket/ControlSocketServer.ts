@@ -1,13 +1,10 @@
-import { createServer, type Server, type Socket } from "node:net";
+import {
+    ControlChannelServer,
+    type ControlChannelRouteProvider
+} from "../channel/ControlChannelServer.js";
+import { ControlSocketChannelProvider } from "./ControlSocketChannelProvider.js";
 
-import { Channel, Codec, PrefixRoute, type PrefixRouteSnapshot } from "@portable-devshell/shared";
-
-import { removeControlIpcEndpoint } from "@portable-devshell/shared";
-
-export interface ControlRouteProvider {
-    connectionClosed(connectionId: string): void;
-    snapshot(): PrefixRouteSnapshot;
-}
+export type ControlRouteProvider = ControlChannelRouteProvider;
 
 export interface ControlSocketServerOptions {
     routes: ControlRouteProvider;
@@ -15,27 +12,19 @@ export interface ControlSocketServerOptions {
 }
 
 export class ControlSocketServer {
-    readonly #routes: ControlRouteProvider;
-    readonly #socketPath: string;
-    readonly #connections = new Map<string, PrefixRoute>();
-    #closePromise?: Promise<void>;
-    #server?: Server;
+    readonly #provider: ControlSocketChannelProvider;
+    readonly #server: ControlChannelServer;
 
     constructor(options: ControlSocketServerOptions) {
-        this.#routes = options.routes;
-        this.#socketPath = options.socketPath;
+        this.#provider = new ControlSocketChannelProvider({ socketPath: options.socketPath });
+        this.#server = new ControlChannelServer({
+            providers: [this.#provider],
+            routes: options.routes
+        });
     }
 
     async start(): Promise<void> {
-        await removeControlIpcEndpoint(this.#socketPath);
-        this.#server = createServer((socket) => this.#attach(socket));
-        await new Promise<void>((resolve, reject) => {
-            this.#server?.once("error", reject);
-            this.#server?.listen(this.#socketPath, () => {
-                this.#server?.off("error", reject);
-                resolve();
-            });
-        });
+        await this.#server.start();
     }
 
     async stop(): Promise<void> {
@@ -44,41 +33,10 @@ export class ControlSocketServer {
     }
 
     async close(): Promise<void> {
-        if (this.#closePromise !== undefined) return await this.#closePromise;
-        this.#closePromise = this.#closeInternal();
-        try {
-            await this.#closePromise;
-        } finally {
-            this.#closePromise = undefined;
-        }
+        await this.#server.close();
     }
 
     async removeEndpoint(): Promise<void> {
-        await removeControlIpcEndpoint(this.#socketPath);
-    }
-
-    #attach(socket: Socket): void {
-        const channel = Channel.accept(socket);
-        const route = new PrefixRoute(new Codec(channel, { local: "server" }), {
-            eventIdPrefix: "server",
-            getSnapshot: () => this.#routes.snapshot(),
-        });
-        this.#connections.set(route.connectionId, route);
-        channel.onClose(() => {
-            this.#connections.delete(route.connectionId);
-            this.#routes.connectionClosed(route.connectionId);
-        });
-    }
-
-    async #closeInternal(): Promise<void> {
-        for (const route of this.#connections.values()) route.close();
-        this.#connections.clear();
-        const server = this.#server;
-        this.#server = undefined;
-        if (server !== undefined) {
-            await new Promise<void>((resolve, reject) => {
-                server.close((error) => error === undefined ? resolve() : reject(error));
-            });
-        }
+        await this.#provider.removeEndpoint();
     }
 }

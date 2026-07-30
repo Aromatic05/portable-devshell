@@ -121,6 +121,9 @@ export class TuiRuntimeControlOperations {
 
     async reloadPage(page: TuiPageId, instance: string | undefined): Promise<void> {
         switch (page) {
+            case "overview":
+                await this.options.session.refreshOverview();
+                return;
             case "instances":
             case "help":
                 await this.options.session.refresh();

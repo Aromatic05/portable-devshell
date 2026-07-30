@@ -9,6 +9,7 @@ import {
     asInstanceName,
     ClientConnection,
     createError,
+    SocketChannelProvider,
     type ClientEvent,
     type ClientStream,
     type Destination,
@@ -41,11 +42,39 @@ test("ControlSocketServer routes canonical control and instance operations over 
         ok: true,
         pid: process.pid
     });
+    assert.deepEqual((await request(
+        harness.socketPath,
+        "@control",
+        "service.hello",
+        { clientKind: "web", maxProtocolVersion: 1, minProtocolVersion: 1 },
+        "web"
+    )).payload, {
+        capabilities: ["request", "stream", "streamResume"],
+        protocolVersion: 1
+    });
+    assert.equal((await request(
+        harness.socketPath,
+        "@control",
+        "service.hello",
+        { clientKind: "web", maxProtocolVersion: 2, minProtocolVersion: 2 },
+        "web"
+    )).error?.code, "protocol.versionUnsupported");
 
     const listed = (await request(harness.socketPath, "@control", "instance.list")).payload as Array<{
         name: string;
     }>;
     assert.equal(listed[0]?.name, "alpha");
+
+    const overview = (await request(
+        harness.socketPath,
+        "@control",
+        "overview.get"
+    )).payload as {
+        counts: { instancesTotal: number };
+        health: string;
+    };
+    assert.equal(overview.counts.instancesTotal, 1);
+    assert.equal(overview.health, "attention");
 
     const snapshot = await request(harness.socketPath, asInstanceName("alpha"), "runtime.snapshot");
     assert.equal((snapshot.payload as { lastSeq: number }).lastSeq, 0);
@@ -64,6 +93,15 @@ test("ControlSocketServer routes canonical control and instance operations over 
     assert.equal(harness.worker.lastToolCall?.source, "tui");
     assert.equal(typeof harness.worker.lastToolCall?.requestId, "string");
     assert.equal(typeof harness.worker.lastToolCall?.ctxId, "string");
+
+    await request(
+        harness.socketPath,
+        asInstanceName("alpha"),
+        "tool.call",
+        { input: { command: "pwd" }, toolName: "bash_run" },
+        "web"
+    );
+    assert.equal(harness.worker.lastToolCall?.source, "web");
 
     const missingDestination = await request(
         harness.socketPath,
@@ -182,10 +220,10 @@ function createDescriptor(worker: FakeWorker) {
 
 function createClient(socketPath: string, peer: Exclude<Peer, "server">): ClientConnection {
     return new ClientConnection({
+        channelProvider: new SocketChannelProvider({ socketPath }),
         mapError: (error) => error instanceof Error ? error : new Error(String(error)),
         mapRemoteError: (error) => createError(error),
-        peer,
-        socketPath
+        peer
     });
 }
 

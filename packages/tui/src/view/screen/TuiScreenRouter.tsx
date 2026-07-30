@@ -7,11 +7,12 @@ import { TuiComponentErrorBanner } from "../component/TuiComponentErrorBanner.js
 import { TuiComponentTextDetail } from "../component/TuiComponentTextDetail.js";
 import { TuiFocusGraph, type TuiFocusNode } from "../../state/focus/TuiFocusGraph.js";
 import type { TuiPageId } from "../../state/TuiUiState.js";
+import { tuiPageOrder } from "../../state/TuiPageCatalog.js";
 import type { TuiAppState } from "../../state/reducer/TuiStoreModel.js";
 import type { TuiBoxModel } from "../../state/TuiViewModel.js";
 import { measureMainBoxFlowMetrics, selectMainScreenModel, selectMainScrollKey } from "../model/TuiViewProjection.js";
 
-export const orderedPages: TuiPageId[] = ["instances", "config", "connector", "oauth", "audit", "logs", "todo", "help", "terminal"];
+export const orderedPages: TuiPageId[] = [...tuiPageOrder];
 
 export interface TuiScreenRouterProps {
     boxInnerWidth: number;

@@ -1,11 +1,10 @@
-import { randomUUID } from "node:crypto";
-
 import type { ControlErrorBody } from "../error/ErrorBodyControl.js";
 import { toControlErrorBody } from "../error/ErrorBodyControl.js";
 import { errorCodes } from "../error/ErrorCodeCatalog.js";
 import { createError } from "../error/ErrorFactoryCreate.js";
 import type { JsonValue } from "../type/TypeJsonValue.js";
 import { Codec, type Destination, type Event, type Peer } from "./Codec.js";
+import { randomUuid } from "./RandomUuid.js";
 
 export interface PrefixRouteEvent {
     id: string;
@@ -138,7 +137,7 @@ export class PrefixRoute {
 
     constructor(codec: Codec, options: PrefixRouteOptions = {}) {
         this.#codec = codec;
-        this.#connectionId = options.connectionId ?? randomUUID();
+        this.#connectionId = options.connectionId ?? randomUuid();
         this.#getSnapshot = options.getSnapshot;
         this.#eventIdPrefix = options.eventIdPrefix ?? codec.localPeer;
         codec.onEvent((event) => {
@@ -319,7 +318,7 @@ export class PrefixRoute {
                 for (const action of afterReply) {
                     queueMicrotask(() => {
                         void Promise.resolve(action()).catch((error) => {
-                            process.emitWarning(error instanceof Error ? error : new Error(String(error)));
+                            console.warn(error instanceof Error ? error : new Error(String(error)));
                         });
                     });
                 }
@@ -405,7 +404,7 @@ export class PrefixRoute {
     }
 
     #nextId(): string {
-        return `${this.#eventIdPrefix}-${randomUUID()}`;
+        return `${this.#eventIdPrefix}-${randomUuid()}`;
     }
 }
 

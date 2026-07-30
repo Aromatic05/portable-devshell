@@ -12,20 +12,26 @@ import { TuiControlSessionSubscriptions } from "./TuiControlSessionSubscriptions
 
 export interface TuiControlSessionOptions {
     clients?: TuiClients;
+    overviewRefreshIntervalMs?: number;
     store?: TuiAppStore;
 }
 
 export class TuiControlSession {
     readonly #clients: TuiClients;
     readonly #refresh: TuiControlSessionRefresh;
+    readonly #overviewRefreshIntervalMs: number;
     readonly #store: TuiAppStore;
     readonly #subscriptions: TuiControlSessionSubscriptions;
     readonly #auditRefreshTimers = new Map<string, ReturnType<typeof setTimeout>>();
     #oauthRefreshTimer?: ReturnType<typeof setInterval>;
+    #overviewPollTimer?: ReturnType<typeof setInterval>;
+    #overviewRefreshRequest?: Promise<void>;
+    #overviewRefreshTimer?: ReturnType<typeof setTimeout>;
     #started = false;
 
     constructor(options: TuiControlSessionOptions = {}) {
         this.#clients = options.clients ?? createControlClients();
+        this.#overviewRefreshIntervalMs = options.overviewRefreshIntervalMs ?? 5_000;
         this.#store = options.store ?? new TuiAppStore();
         this.#refresh = new TuiControlSessionRefresh({
             clients: this.#clients,
@@ -62,12 +68,15 @@ export class TuiControlSession {
         await this.refresh();
         if (this.#store.getState().connection.status === "connected") {
             this.#startOAuthRefresh();
+            this.#startOverviewPolling();
         }
     }
 
     async stop(): Promise<void> {
         this.#started = false;
         this.#stopOAuthRefresh();
+        this.#stopOverviewPolling();
+        this.#stopOverviewRefresh();
         this.#stopAuditRefreshes();
         this.#subscriptions.closeAll();
         this.#clients.close();
@@ -78,11 +87,13 @@ export class TuiControlSession {
             return;
         }
         this.#stopOAuthRefresh();
+        this.#stopOverviewPolling();
         try {
             await this.#clients.reconnect();
             await this.refresh();
             if (this.#store.getState().connection.status === "connected") {
                 this.#startOAuthRefresh();
+                this.#startOverviewPolling();
             }
         } catch (error) {
             this.#applyConnectionFailure(error);
@@ -95,6 +106,10 @@ export class TuiControlSession {
             this.#stopOAuthRefresh();
             this.#startOAuthRefresh();
         }
+    }
+
+    async refreshOverview(): Promise<void> {
+        await this.#requestOverviewRefresh();
     }
 
     async refreshOAuth(): Promise<void> {
@@ -160,6 +175,12 @@ export class TuiControlSession {
             return;
         }
         this.#store.applyEvent(message.event);
+        if (
+            this.#store.getState().ui.selectedPage === "overview" &&
+            isOverviewRefreshEvent(message.event.name)
+        ) {
+            this.#scheduleOverviewRefresh();
+        }
         if (message.event.name.startsWith("todo.")) {
             void this.#refresh.refreshTodo(instance).catch(() => undefined);
         }
@@ -196,6 +217,8 @@ export class TuiControlSession {
 
     #handleDisconnected(): void {
         this.#stopOAuthRefresh();
+        this.#stopOverviewPolling();
+        this.#stopOverviewRefresh();
         this.#stopAuditRefreshes();
         this.#store.setConnectionState("disconnected");
         this.#subscriptions.closeAll();
@@ -204,6 +227,8 @@ export class TuiControlSession {
     #applyConnectionFailure(error: unknown): void {
         const failure = toFailure(error);
         this.#store.setConnectionState(failure.status, failure.error);
+        this.#stopOverviewPolling();
+        this.#stopOverviewRefresh();
         this.#stopAuditRefreshes();
         this.#subscriptions.closeAll();
     }
@@ -223,6 +248,78 @@ export class TuiControlSession {
         }
         clearInterval(this.#oauthRefreshTimer);
         this.#oauthRefreshTimer = undefined;
+    }
+
+    #startOverviewPolling(): void {
+        if (
+            this.#overviewPollTimer !== undefined ||
+            this.#overviewRefreshIntervalMs <= 0
+        ) {
+            return;
+        }
+        this.#overviewPollTimer = setInterval(() => {
+            if (
+                !this.#started ||
+                this.#store.getState().connection.status !== "connected" ||
+                this.#store.getState().ui.selectedPage !== "overview"
+            ) {
+                return;
+            }
+            void this.#refreshVisibleOverview();
+        }, this.#overviewRefreshIntervalMs);
+    }
+
+    #stopOverviewPolling(): void {
+        if (this.#overviewPollTimer === undefined) {
+            return;
+        }
+        clearInterval(this.#overviewPollTimer);
+        this.#overviewPollTimer = undefined;
+    }
+
+    #scheduleOverviewRefresh(): void {
+        this.#stopOverviewRefresh();
+        this.#overviewRefreshTimer = setTimeout(() => {
+            this.#overviewRefreshTimer = undefined;
+            if (!this.#started || this.#store.getState().ui.selectedPage !== "overview") {
+                return;
+            }
+            void this.#refreshVisibleOverview();
+        }, 75);
+    }
+
+    async #refreshVisibleOverview(): Promise<void> {
+        try {
+            await this.#requestOverviewRefresh();
+        } catch (error) {
+            this.#store.setScreenStatus(
+                "overview",
+                `Overview refresh failed: ${readErrorMessage(error)}`
+            );
+        }
+    }
+
+    async #requestOverviewRefresh(): Promise<void> {
+        if (this.#overviewRefreshRequest !== undefined) {
+            return await this.#overviewRefreshRequest;
+        }
+        const request = this.#refresh.refreshOverview();
+        this.#overviewRefreshRequest = request;
+        try {
+            await request;
+        } finally {
+            if (this.#overviewRefreshRequest === request) {
+                this.#overviewRefreshRequest = undefined;
+            }
+        }
+    }
+
+    #stopOverviewRefresh(): void {
+        if (this.#overviewRefreshTimer === undefined) {
+            return;
+        }
+        clearTimeout(this.#overviewRefreshTimer);
+        this.#overviewRefreshTimer = undefined;
     }
 
     #scheduleAuditRefresh(instance: string): void {
@@ -255,9 +352,7 @@ export class TuiControlSession {
 }
 
 function isTuiPresentationEvent(name: string): boolean {
-    return name === "instance.statusChanged" ||
-        name === "instance.connectionChanged" ||
-        name === "instance.readyChanged" ||
+    return isInstanceHealthEvent(name) ||
         name === "log.appended" ||
         name.startsWith("toolCall.") ||
         name.startsWith("approval.") ||
@@ -273,6 +368,27 @@ function isTerminalToolCallEvent(name: string): boolean {
         name === "toolCall.expired" ||
         name === "toolCall.queueTimeout" ||
         name === "toolCall.cancelled";
+}
+
+function isOverviewRefreshEvent(name: string): boolean {
+    return isInstanceHealthEvent(name) ||
+        name.startsWith("toolCall.") ||
+        name.startsWith("approval.") ||
+        name.startsWith("todo.");
+}
+
+function isInstanceHealthEvent(name: string): boolean {
+    return name === "instance.started" ||
+        name === "instance.stopped" ||
+        name === "instance.statusChanged" ||
+        name === "instance.connectionChanged" ||
+        name === "instance.readyChanged" ||
+        name === "worker.rpcConnected" ||
+        name === "worker.rpcDisconnected" ||
+        name === "reverse.connected" ||
+        name === "reverse.disconnected" ||
+        name === "reverse.enrollmentChanged" ||
+        name === "reverse.transportChanged";
 }
 
 function toFailure(error: unknown): {

@@ -1,4 +1,4 @@
-import type { ApprovalRequest, ArtifactShareResult, ArtifactTransferRecord, ClientEvent, ControlError, InstanceSnapshot, JsonValue, OAuthApprovalRequest, TodoReadResult, ToolCallRecord } from "@portable-devshell/shared";
+import type { ApprovalRequest, ArtifactShareResult, ArtifactTransferRecord, ClientEvent, ControlError, InstanceSnapshot, JsonValue, OAuthApprovalRequest, OperationalOverview, TodoReadResult, ToolCallRecord } from "@portable-devshell/shared";
 
 import type { TuiEditorState, TuiInteractionState, TuiUiIntent } from "../TuiInteractionState.js";
 import type { TuiAuditPageState, TuiFocusScope, TuiPageId, TuiSidebarCursor, TuiSidebarFocus, TuiUiState } from "../TuiUiState.js";
@@ -25,7 +25,7 @@ export interface TuiLogEntry {
     requestId?: string;
     seq: number;
     ctxId?: string;
-    source?: "cli" | "tui" | "mcp";
+    source?: "cli" | "tui" | "web" | "mcp";
     stream: "stderr" | "stdout";
     tail?: string;
     toolName?: string;
@@ -84,6 +84,7 @@ export interface TuiAppState {
     logsByInstance: Record<string, TuiLogEntry[]>;
     mcpStatus?: Record<string, JsonValue>;
     oauthApprovals: OAuthApprovalRequest[];
+    operationalOverview?: OperationalOverview;
     rawEvents: TuiRawEventRecord[];
     panelErrors: Record<string, ControlError>;
     relayByCommand: Record<string, TuiRelayRecord>;
@@ -100,6 +101,7 @@ export type TuiAppAction =
     | { transfer: ArtifactTransferRecord; type: "artifact.transfer.upsert" }
     | { approvals: ApprovalRequest[]; instance: string; type: "approval.replace" }
     | { approvals: OAuthApprovalRequest[]; type: "oauthApproval.replace" }
+    | { overview?: OperationalOverview; type: "overview.replace" }
     | { command: TuiCommandRecord; type: "command.upsert" }
     | { error?: ControlError; key: string; type: "panelError.set" }
     | { commandId: string; chunk: string; type: "relay.appendOutput" }

@@ -114,7 +114,7 @@ export class McpHostHttpServer {
     }
 
     registerRawRoute(
-        method: "get" | "head" | "post",
+        method: "delete" | "get" | "head" | "post",
         path: string,
         handler: (request: IncomingMessage, response: ServerResponse) => void | Promise<void>
     ): void {
@@ -133,6 +133,62 @@ export class McpHostHttpServer {
         });
     }
 
+    registerAuthenticatedRawRoute(
+        method: "delete" | "get" | "head" | "post",
+        path: string,
+        handler: (
+            request: IncomingMessage,
+            response: ServerResponse,
+            auth: AuthInfo
+        ) => void | Promise<void>
+    ): void {
+        this.#app[method](path, ...this.#createAuthHandlers(path), (request: Request, response: Response) => {
+            const auth = readRequestAuth(request);
+            if (auth === undefined) {
+                response.status(401).json({ error: "Unauthorized" });
+                return;
+            }
+            void Promise.resolve(
+                handler(request as IncomingMessage, response as unknown as ServerResponse, auth)
+            ).catch((error: unknown) => {
+                if (!response.headersSent) {
+                    response.status(500).json({
+                        error: error instanceof Error ? error.message : "Internal server error"
+                    });
+                    return;
+                }
+                response.end();
+            });
+        });
+    }
+
+    registerStaticDirectory(path: string, directory: string): void {
+        this.#app.use(path, express.static(directory, {
+            fallthrough: false,
+            index: "index.html",
+            redirect: true,
+            setHeaders: (response, filePath) => {
+                response.setHeader("Content-Security-Policy", [
+                    "default-src 'self'",
+                    "base-uri 'none'",
+                    "connect-src 'self'",
+                    "frame-ancestors 'none'",
+                    "img-src 'self' data:",
+                    "object-src 'none'",
+                    "script-src 'self'",
+                    "style-src 'self'"
+                ].join("; "));
+                response.setHeader("Referrer-Policy", "no-referrer");
+                response.setHeader("X-Content-Type-Options", "nosniff");
+                if (/[/\\]assets[/\\].+\.[A-Za-z0-9]+$/u.test(filePath)) {
+                    response.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+                    return;
+                }
+                response.setHeader("Cache-Control", "no-cache");
+            }
+        }));
+    }
+
     registerUpgradeHandler(
         path: string,
         handler: (request: IncomingMessage, socket: Duplex, head: Buffer) => void | Promise<void>
@@ -148,31 +204,7 @@ export class McpHostHttpServer {
 
         this.#registeredPaths.add(path);
 
-        const routeHandlers: RequestHandler[] = [];
-        const resourceServerUrl = this.#toPublicResourceUrl(path);
-
-        if (this.#auth?.provider === "oauth2" && this.#oauth !== undefined && resourceServerUrl !== undefined) {
-            this.#oauth.registerResource(resourceServerUrl);
-            routeHandlers.push(this.#oauth.requestAuthHandler(resourceServerUrl));
-            this.#app.use(this.#oauthProtectedResourceMetadataPath(resourceServerUrl), this.#oauth.protectedResourceMetadataHandler(resourceServerUrl));
-        } else if (this.#auth?.provider === "token") {
-            routeHandlers.push((request: Request, response: Response, next: NextFunction) => {
-                const auth = this.#tokenProvider?.authenticate(request.headers.authorization);
-
-                if (auth === undefined) {
-                    response.status(401).json({ error: "Unauthorized" });
-                    return;
-                }
-
-                setRequestAuth(request, auth);
-                next();
-            });
-        } else {
-            routeHandlers.push((request: Request, _response: Response, next: NextFunction) => {
-                setRequestAuth(request, { clientId: "local", scopes: [], token: "local" });
-                next();
-            });
-        }
+        const routeHandlers = this.#createAuthHandlers(path);
 
         this.#app.all(path, ...routeHandlers, async (request: Request, response: Response) => {
             try {
@@ -199,6 +231,36 @@ export class McpHostHttpServer {
 
     unregisterBinding(path: string): void {
         this.#bindings.delete(path);
+    }
+
+    #createAuthHandlers(path: string): RequestHandler[] {
+        const routeHandlers: RequestHandler[] = [];
+        const resourceServerUrl = this.#toPublicResourceUrl(path);
+
+        if (this.#auth?.provider === "oauth2" && this.#oauth !== undefined && resourceServerUrl !== undefined) {
+            this.#oauth.registerResource(resourceServerUrl);
+            routeHandlers.push(this.#oauth.requestAuthHandler(resourceServerUrl));
+            this.#app.use(
+                this.#oauthProtectedResourceMetadataPath(resourceServerUrl),
+                this.#oauth.protectedResourceMetadataHandler(resourceServerUrl)
+            );
+        } else if (this.#auth?.provider === "token") {
+            routeHandlers.push((request: Request, response: Response, next: NextFunction) => {
+                const auth = this.#tokenProvider?.authenticate(request.headers.authorization);
+                if (auth === undefined) {
+                    response.status(401).json({ error: "Unauthorized" });
+                    return;
+                }
+                setRequestAuth(request, auth);
+                next();
+            });
+        } else {
+            routeHandlers.push((request: Request, _response: Response, next: NextFunction) => {
+                setRequestAuth(request, { clientId: "local", scopes: [], token: "local" });
+                next();
+            });
+        }
+        return routeHandlers;
     }
 
     async #readJsonBody(request: IncomingMessage): Promise<JsonValue> {
@@ -285,4 +347,8 @@ function joinUrlPaths(basePathname: string, nextPathname: string): string {
 
 function setRequestAuth(request: Request, auth: AuthInfo): void {
     (request as Request & { auth?: AuthInfo }).auth = auth;
+}
+
+function readRequestAuth(request: Request): AuthInfo | undefined {
+    return (request as Request & { auth?: AuthInfo }).auth;
 }

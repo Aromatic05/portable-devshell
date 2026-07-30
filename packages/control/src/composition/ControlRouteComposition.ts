@@ -15,6 +15,9 @@ import type { InstanceCreatePort } from "../control/instance/InstanceRouteModule
 import { createInstanceRouteModule } from "../control/instance/InstanceRouteModule.js";
 import type { InstanceRegistry } from "../control/instance/registry/InstanceRegistry.js";
 import { createMcpRouteModule } from "../control/mcp/McpRouteModule.js";
+import type { OperationalOverviewPort } from "../control/overview/OperationalOverviewRouteModule.js";
+import { createOperationalOverviewRouteModule } from "../control/overview/OperationalOverviewRouteModule.js";
+import { OperationalOverviewService } from "../control/overview/OperationalOverviewService.js";
 import type { ReverseCredentialService } from "../control/reverse/credential/ReverseCredentialService.js";
 import { createReverseRouteModule } from "../control/reverse/route/ReverseRouteModule.js";
 import { createRuntimeRouteModule } from "../instance/runtime/RuntimeRouteModule.js";
@@ -30,12 +33,14 @@ export interface ControlRouteCompositionOptions {
     instances: InstanceRegistry;
     mcpStatus?: () => JsonValue;
     oauthApprovals?: () => McpOAuthApprovalService | undefined;
+    overview?: OperationalOverviewPort;
     restart?: () => Promise<void> | void;
     reverse?: ReverseCredentialService;
     shutdown(): Promise<void> | void;
 }
 
 export class ControlRouteComposition {
+    readonly #overview: OperationalOverviewPort;
     readonly #options: ControlRouteCompositionOptions;
     readonly #subscriptions = new RuntimeSubscriptionManager();
     readonly #unsubscribeInstances: () => void;
@@ -43,6 +48,10 @@ export class ControlRouteComposition {
 
     constructor(options: ControlRouteCompositionOptions) {
         this.#options = options;
+        this.#overview = options.overview ?? new OperationalOverviewService({
+            instances: options.instances,
+            oauthApprovals: options.oauthApprovals
+        });
         this.#snapshot = this.#build();
         this.#unsubscribeInstances = options.instances.onChange(() => {
             this.#snapshot = this.#build();
@@ -78,6 +87,7 @@ export class ControlRouteComposition {
                             reason: "MCP runtime is disabled."
                         }))
                     }),
+                    createOperationalOverviewRouteModule(this.#overview),
                     createInstanceRouteModule({
                         create: this.#options.instanceCreate,
                         editor: this.#options.config,

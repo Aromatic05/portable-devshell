@@ -197,6 +197,9 @@ export class TuiKeyDispatcher {
         if (instanceIndex !== undefined) {
             return [{ index: instanceIndex, type: "instance.selectIndex" }];
         }
+        if (press.input === "0") {
+            return [{ page: "overview", type: "page.select" }];
+        }
         if (isShortcutDigit(press.input)) {
             const page = pageFromShortcut(Number(press.input));
             return page === undefined ? [] : [{ page, type: "page.select" }];

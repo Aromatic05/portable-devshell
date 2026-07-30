@@ -1,13 +1,10 @@
-import { randomUUID } from "node:crypto";
-import type { Socket } from "node:net";
-
 import type { ControlErrorBody } from "../error/ErrorBodyControl.js";
 import type { JsonValue } from "../type/TypeJsonValue.js";
 import { asInstanceName, type InstanceName } from "../type/identity/TypeIdentityInstanceName.js";
-import { Channel } from "./Channel.js";
+import type { ChannelProvider } from "./ChannelProvider.js";
 import { Codec, type Destination, type Peer } from "./Codec.js";
-import { resolveControlSocketPath } from "./ControlEndpoint.js";
 import { PrefixRoute, type PrefixRouteEvent, type PrefixRouteIncoming } from "./PrefixRoute.js";
+import { randomUuid } from "./RandomUuid.js";
 
 export interface ClientEvent {
     id: string;
@@ -27,9 +24,7 @@ export interface ClientConnectionOptions {
     mapRemoteError(error: ControlErrorBody): Error;
     mode?: ClientConnectionMode;
     peer: Exclude<Peer, "server">;
-    socketFactory?: (path: string) => Socket;
-    socketPath?: string;
-    xdgRuntimeDir?: string;
+    channelProvider: ChannelProvider;
 }
 
 export interface OpenedClientStream {
@@ -111,8 +106,7 @@ export class ClientConnection {
     readonly #mapRemoteError: (error: ControlErrorBody) => Error;
     readonly #mode: ClientConnectionMode;
     readonly #peer: Exclude<Peer, "server">;
-    readonly #socketFactory?: (path: string) => Socket;
-    readonly #socketPath: string;
+    readonly #channelProvider: ChannelProvider;
     #closed = false;
     #persistentFailure?: Error;
     #persistentGeneration = 0;
@@ -124,8 +118,7 @@ export class ClientConnection {
         this.#mapRemoteError = options.mapRemoteError;
         this.#mode = options.mode ?? "short";
         this.#peer = options.peer;
-        this.#socketFactory = options.socketFactory;
-        this.#socketPath = options.socketPath ?? resolveControlSocketPath(options.xdgRuntimeDir);
+        this.#channelProvider = options.channelProvider;
     }
 
     async request<TResult>(
@@ -289,7 +282,7 @@ export class ClientConnection {
     }
 
     async #connect(onClose?: (session: ClientSession, error?: Error) => void): Promise<ClientSession> {
-        const channel = await Channel.connect(this.#socketPath, { socketFactory: this.#socketFactory });
+        const channel = await this.#channelProvider.connect();
         const route = new PrefixRoute(new Codec(channel, { local: this.#peer, remote: "server" }), {
             eventIdPrefix: this.#peer
         });
@@ -336,7 +329,7 @@ class ClientSession {
         expectsStream: boolean
     ): Promise<ClientEvent> {
         this.#assertOpen();
-        const id = `${this.#peer}-${randomUUID()}`;
+        const id = `${this.#peer}-${randomUuid()}`;
         const response = new Promise<ClientEvent>((resolve, reject) => {
             this.#pending.set(id, { destination, expectsStream, id, module, reject, resolve });
         });
@@ -378,7 +371,7 @@ class ClientSession {
             throw stream.closeError ?? this.#closeError ?? new Error("Client stream is closed.");
         }
         await this.#route.send(stream.destination, stream.module, {
-            id: `${this.#peer}-${randomUUID()}`,
+            id: `${this.#peer}-${randomUuid()}`,
             streamId,
             name: operation,
             ...(payload === undefined ? {} : { payload })
@@ -401,7 +394,7 @@ class ClientSession {
             waiter.reject(stream.closeError);
         }
         void this.#route.send(stream.destination, "stream", {
-            id: `${this.#peer}-${randomUUID()}`,
+            id: `${this.#peer}-${randomUuid()}`,
             streamId,
             name: "cancel"
         }).catch((error) => {

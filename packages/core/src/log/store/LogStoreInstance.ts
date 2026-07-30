@@ -11,7 +11,7 @@ export interface InstanceLogEntry {
     requestId?: string;
     seq: number;
     ctxId?: string;
-    source?: "cli" | "mcp" | "tui";
+    source?: "cli" | "mcp" | "tui" | "web";
     stream: "stderr" | "stdout";
     toolName?: string;
 }

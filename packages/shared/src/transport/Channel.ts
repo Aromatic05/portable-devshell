@@ -3,6 +3,7 @@ import { createConnection, type Socket } from "node:net";
 import type { ErrorCode } from "../error/ErrorCodeCatalog.js";
 import { createError } from "../error/ErrorFactoryCreate.js";
 import { encodeFrame, FrameBuffer, TRANSPORT_MAX_FRAME_SIZE, type Frame } from "./Frame.js";
+import type { FrameChannel } from "./FrameChannel.js";
 
 export const CHANNEL_MAX_FRAME_SIZE = TRANSPORT_MAX_FRAME_SIZE;
 
@@ -11,7 +12,7 @@ export interface ChannelOptions {
     socketFactory?: (path: string) => Socket;
 }
 
-export class Channel {
+export class Channel implements FrameChannel {
     readonly #socket: Socket;
     readonly #maxFrameSize: number;
     readonly #frames: FrameBuffer;

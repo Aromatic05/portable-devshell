@@ -29,6 +29,9 @@ test("config parser trims values and preserves explicit patch removals", () => {
                     resourceName: " aromatic "
                 }
             }
+        },
+        web: {
+            enabled: true
         }
     });
 
@@ -44,6 +47,7 @@ test("config parser trims values and preserves explicit patch removals", () => {
             resourceName: "aromatic"
         }
     });
+    assert.equal(parsed.web?.enabled, true);
 
     const patch = parseConfigInstancePatch({
         container: null,
@@ -173,6 +177,7 @@ test("config normalization applies provider defaults and deduplicates MCP access
     assert.equal(config.control.logLevel, "info");
     assert.equal(config.mcp.listenHost, "127.0.0.1");
     assert.equal(config.mcp.listenPort, 17890);
+    assert.equal(config.web.enabled, false);
     assert.equal(config.instances[0]?.enabled, true);
     assert.equal(config.instances[0]?.security.mode, "disabled");
     assert.equal(config.instances[0]?.mcp.path, "/docker-one/mcp");

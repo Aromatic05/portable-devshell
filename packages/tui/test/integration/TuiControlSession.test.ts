@@ -67,6 +67,7 @@ test("TuiControlSession pulls instances, snapshots, subscribes, and recovers fro
     assert.equal(session.store.getState().logsByInstance.alpha?.length, 1);
     assert.equal(session.store.getState().toolCallsByInstance.alpha?.length, 1);
     assert.equal(session.store.getState().approvalsByInstance.alpha?.length, 1);
+    assert.equal(session.store.getState().operationalOverview?.counts.pendingApprovals, 1);
     assert.equal(socketCount, 1);
 
     worker.emit("toolCall.completed", {
@@ -121,6 +122,85 @@ test("TuiControlSession pulls instances, snapshots, subscribes, and recovers fro
 
     await server.stop();
     await waitFor(() => session.store.getState().connection.status === "disconnected");
+});
+
+test("TuiControlSession refreshes a visible overview after relevant instance events", async (t) => {
+    const runtimeDir = await mkdtemp(join(tmpdir(), "portable-devshell-tui-overview-refresh-"));
+    const socketPath = createTestIpcPath("tui-overview", runtimeDir);
+    const worker = new FakeWorker("alpha");
+    const server = createServer(socketPath, worker, () => 7);
+    const session = new TuiControlSession({
+        clients: createTuiClients({ socketPath })
+    });
+
+    await server.start();
+    t.after(async () => {
+        await session.stop();
+        await server.stop().catch(() => undefined);
+        await rm(runtimeDir, { force: true, recursive: true });
+    });
+
+    await session.start();
+    await waitFor(() => session.store.getState().connection.status === "connected");
+    session.store.setSelectedPage("overview");
+
+    const failedAt = new Date().toISOString();
+    worker.addToolCall({
+        callId: "overview-failure",
+        completedAt: failedAt,
+        error: "worker timed out",
+        inputSummary: "command omitted",
+        instance: asInstanceName("alpha"),
+        source: "mcp",
+        startedAt: failedAt,
+        status: "failed",
+        toolName: "bash_run"
+    });
+    worker.emit("toolCall.failed", {
+        callId: "overview-failure",
+        source: "mcp",
+        toolName: "bash_run"
+    });
+
+    await waitFor(() => session.store.getState().operationalOverview?.counts.failedCalls24h === 1);
+    assert.equal(
+        session.store.getState().operationalOverview?.alerts.some(
+            (alert) => alert.kind === "activity.failed" && alert.instance === "alpha"
+        ),
+        true
+    );
+});
+
+test("TuiControlSession polls operational metrics only while Overview is visible", async (t) => {
+    const runtimeDir = await mkdtemp(join(tmpdir(), "portable-devshell-tui-overview-poll-"));
+    const socketPath = createTestIpcPath("tui-overview-poll", runtimeDir);
+    const worker = new FakeWorker("alpha");
+    const server = createServer(socketPath, worker, () => 7);
+    const session = new TuiControlSession({
+        clients: createTuiClients({ socketPath }),
+        overviewRefreshIntervalMs: 25
+    });
+
+    await server.start();
+    t.after(async () => {
+        await session.stop();
+        await server.stop().catch(() => undefined);
+        await rm(runtimeDir, { force: true, recursive: true });
+    });
+
+    await session.start();
+    await waitFor(() => session.store.getState().connection.status === "connected");
+    const hiddenPageReads = worker.toolCallReadCount;
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    assert.equal(worker.toolCallReadCount, hiddenPageReads);
+
+    session.store.setSelectedPage("overview");
+    await waitFor(() => worker.toolCallReadCount > hiddenPageReads);
+
+    session.store.setSelectedPage("instances");
+    const afterVisibleReads = worker.toolCallReadCount;
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    assert.equal(worker.toolCallReadCount, afterVisibleReads);
 });
 
 test("TuiControlSession reports missing control without auto-starting it", async () => {
@@ -321,6 +401,7 @@ class FakeWorker {
     snapshotCallCount = 0;
     subscribeFromSeqs: number[] = [];
     logReadQueries: Array<{ limit?: number }> = [];
+    toolCallReadCount = 0;
     callToolCount = 0;
     decisions: Array<{ approvalId: string; decision: string }> = [];
 
@@ -405,6 +486,7 @@ class FakeWorker {
     }
 
     async readToolCalls() {
+        this.toolCallReadCount += 1;
         return this.#toolCalls;
     }
 
@@ -443,6 +525,10 @@ class FakeWorker {
             stderr: "",
             stdout: "ok"
         };
+    }
+
+    addToolCall(record: ToolCallRecord): void {
+        this.#toolCalls.push(record);
     }
 
     emit(type: string, data?: Record<string, JsonValue>): void {

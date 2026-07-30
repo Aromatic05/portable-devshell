@@ -5,22 +5,11 @@ import { buildBoxesForPage } from "../page/TuiPageBoxBuilder.js";
 import { buildHelpLines } from "../page/TuiPageHelp.js";
 import type { TuiAppState, TuiConnectionState } from "../../state/reducer/TuiStoreModel.js";
 import type { TuiBoxModel, TuiMainBoxFlowMetrics, TuiMainScreenModel, TuiSidebarModel } from "../../state/TuiViewModel.js";
-
-const pageEntries: Array<{ id: TuiPageId; label: string }> = [
-    { id: "instances", label: "instances" },
-    { id: "config", label: "config" },
-    { id: "connector", label: "connector" },
-    { id: "oauth", label: "oauth" },
-    { id: "audit", label: "audit" },
-    { id: "logs", label: "logs" },
-    { id: "todo", label: "todo" },
-    { id: "help", label: "help" },
-    { id: "terminal", label: "terminal" }
-];
+import { isTuiSearchablePage, tuiPageEntries } from "../../state/TuiPageCatalog.js";
 
 export function selectActivePage(state: TuiAppState): TuiActivePage {
     return {
-        instance: state.ui.selectedPage === "oauth" || state.ui.selectedPage === "help" ? undefined : state.ui.selectedInstance,
+        instance: state.ui.selectedPage === "overview" || state.ui.selectedPage === "oauth" || state.ui.selectedPage === "help" ? undefined : state.ui.selectedInstance,
         page: state.ui.selectedPage
     };
 }
@@ -48,7 +37,7 @@ export function selectSidebarModel(state: TuiAppState): TuiSidebarModel {
             label: instance.name,
             selected: state.ui.selectedInstance === instance.name
         })),
-        pages: pageEntries.map((page) => ({
+        pages: tuiPageEntries.map((page) => ({
             focused: sidebarFocused && cursor?.kind === "page" && cursor.id === page.id,
             id: page.id,
             label: page.label,
@@ -63,7 +52,7 @@ export function selectMainScreenModel(state: TuiAppState): TuiMainScreenModel {
     const panelError = state.panelErrors[`${activePage.page}:${activePage.instance ?? "-"}`];
     const errorLines = panelError === undefined ? undefined : [`${panelError.code}: ${panelError.message}`];
 
-    if (activePage.page !== "instances" && activePage.page !== "help" && activePage.page !== "oauth" && activePage.instance === undefined) {
+    if (activePage.page !== "overview" && activePage.page !== "instances" && activePage.page !== "help" && activePage.page !== "oauth" && activePage.instance === undefined) {
         return {
             activePage,
             boxes: [],
@@ -80,7 +69,7 @@ export function selectMainScreenModel(state: TuiAppState): TuiMainScreenModel {
     return {
         activePage,
         boxes,
-        ...(query.length > 0 && boxes.length === 0 && isSearchablePage(activePage.page) ? { emptyState: `No matches for "${query}".` } : {}),
+        ...(query.length > 0 && boxes.length === 0 && isTuiSearchablePage(activePage.page) ? { emptyState: `No matches for "${query}".` } : {}),
         errorLines,
         pageTitle: pageTitle(activePage.page),
         statusLine
@@ -135,11 +124,11 @@ export function selectFooterShortcuts(state: TuiAppState): string[] {
     switch (state.interaction.focusScope) {
         case "sidebarPages":
         case "sidebarInstances":
-            return ["→ main", "tab", "enter", "1-9", "shift+1-9", "r", "↑↓", "esc"];
+            return ["→ main", "tab", "enter", "0-9", "shift+1-9", "r", "↑↓", "esc"];
         case "mainBoxes":
-            return ["← sidebar", "tab", "enter", "space", "r", "↑↓", ...(isSearchablePage(state.ui.selectedPage) ? ["/"] : []), "esc"];
+            return ["← sidebar", "tab", "enter", "space", "r", "↑↓", ...(isTuiSearchablePage(state.ui.selectedPage) ? ["/"] : []), "esc"];
         case "boxDetail":
-            return ["← sidebar", "enter", "space", "r", "↑↓", ...(isSearchablePage(state.ui.selectedPage) ? ["/"] : []), "esc"];
+            return ["← sidebar", "enter", "space", "r", "↑↓", ...(isTuiSearchablePage(state.ui.selectedPage) ? ["/"] : []), "esc"];
         case "search":
             return ["type", "bs", "enter", "esc"];
         case "toolForm":
@@ -204,12 +193,8 @@ export function selectHelpLines(state: TuiAppState): string[] {
     return buildHelpLines(state);
 }
 
-function isSearchablePage(page: TuiPageId): boolean {
-    return page === "instances" || page === "todo" || page === "config" || page === "audit" || page === "logs";
-}
-
 function pageTitle(page: TuiPageId): string {
-    return pageEntries.find((entry) => entry.id === page)?.label ?? page;
+    return tuiPageEntries.find((entry) => entry.id === page)?.label ?? page;
 }
 export const tuiViewProjection = {
     selectMainBoxFlowMetrics,

@@ -4,6 +4,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
+import {
+    CONTROL_WEB_RPC_PATH,
+    CONTROL_WEB_SESSION_PATH
+} from "@portable-devshell/shared";
+
 import { ControlRuntime } from "../../src/testing.ts";
 import { createTestIpcPath, ipcEndpointAcceptsConnections } from "../../../../test/TestPlatformSupport.ts";
 
@@ -124,4 +129,114 @@ test("runtime stop attempts every cleanup step after failures", async (t) => {
 
     assert.deepEqual(calls, ["reverse", "mcp", "artifact", "instances"]);
     assert.equal(await ipcEndpointAcceptsConnections(socketPath), false);
+});
+
+test("runtime mounts web session and RPC routes on the MCP HTTP host", async (t) => {
+    const runtimeDir = await mkdtemp(join(tmpdir(), "portable-devshell-runtime-web-"));
+    const socketPath = createTestIpcPath("control-runtime", runtimeDir);
+    const rawRoutes: Array<{ method: string; path: string }> = [];
+    const authenticatedRoutes: Array<{ method: string; path: string }> = [];
+    const staticRoutes: Array<{ directory: string; path: string }> = [];
+    const upgradeRoutes: string[] = [];
+    const http = {
+        registerAuthenticatedRawRoute(method: string, path: string) {
+            authenticatedRoutes.push({ method, path });
+        },
+        registerRawRoute(method: string, path: string) {
+            rawRoutes.push({ method, path });
+        },
+        registerStaticDirectory(path: string, directory: string) {
+            staticRoutes.push({ directory, path });
+        },
+        registerUpgradeHandler(path: string) {
+            upgradeRoutes.push(path);
+        }
+    };
+    const runtime = new ControlRuntime({
+        artifact: {
+            service: undefined,
+            async stop() {}
+        } as never,
+        instances: {
+            list: () => [],
+            onChange: () => () => undefined,
+            async stopOwned() {}
+        } as never,
+        mcp: {
+            configEditor: undefined,
+            host: { server: http },
+            instanceCreate: undefined,
+            oauthApprovals: undefined,
+            publicBaseUrl: "https://devshell.example",
+            webEnabled: true,
+            async start() {},
+            status: () => ({ running: true }),
+            async stop() {}
+        } as never,
+        restart: async () => undefined,
+        reverse: {
+            service: undefined,
+            stop() {}
+        } as never,
+        shutdown: async () => undefined,
+        socketPath
+    });
+    t.after(async () => {
+        await runtime.stop().catch(() => undefined);
+        await rm(runtimeDir, { force: true, recursive: true });
+    });
+
+    await runtime.start();
+
+    assert.deepEqual(authenticatedRoutes, [
+        { method: "post", path: CONTROL_WEB_SESSION_PATH }
+    ]);
+    assert.deepEqual(rawRoutes, [
+        { method: "get", path: CONTROL_WEB_SESSION_PATH },
+        { method: "delete", path: CONTROL_WEB_SESSION_PATH }
+    ]);
+    assert.deepEqual(upgradeRoutes, [CONTROL_WEB_RPC_PATH]);
+    assert.equal(staticRoutes.length, 1);
+    assert.equal(staticRoutes[0]?.path, "/web");
+    assert.match(staticRoutes[0]?.directory ?? "", /[/\\]web[/\\]dist[/\\]?$/u);
+});
+
+test("runtime does not mount WebUI routes when web.enabled is false", async (t) => {
+    const runtimeDir = await mkdtemp(join(tmpdir(), "portable-devshell-runtime-no-web-"));
+    const socketPath = createTestIpcPath("control-runtime", runtimeDir);
+    const runtime = new ControlRuntime({
+        artifact: { service: undefined, async stop() {} } as never,
+        instances: {
+            list: () => [],
+            onChange: () => () => undefined,
+            async stopOwned() {}
+        } as never,
+        mcp: {
+            configEditor: undefined,
+            host: {
+                server: new Proxy({}, {
+                    get() {
+                        throw new Error("WebUI routes must not be registered.");
+                    }
+                })
+            },
+            instanceCreate: undefined,
+            oauthApprovals: undefined,
+            publicBaseUrl: "http://127.0.0.1:17890",
+            webEnabled: false,
+            async start() {},
+            status: () => ({ running: true }),
+            async stop() {}
+        } as never,
+        restart: async () => undefined,
+        reverse: { service: undefined, stop() {} } as never,
+        shutdown: async () => undefined,
+        socketPath
+    });
+    t.after(async () => {
+        await runtime.stop().catch(() => undefined);
+        await rm(runtimeDir, { force: true, recursive: true });
+    });
+
+    await runtime.start();
 });

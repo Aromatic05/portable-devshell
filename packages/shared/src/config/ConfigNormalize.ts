@@ -49,6 +49,9 @@ export function normalizeConfigGlobalDraft(draft: ConfigGlobalDraft): ControlGlo
                 draft.mcp?.publicBaseUrl === null
                     ? undefined
                     : draft.mcp?.publicBaseUrl ?? "http://127.0.0.1:17890"
+        },
+        web: {
+            enabled: draft.web?.enabled ?? false
         }
     };
 }
@@ -223,6 +226,9 @@ export function toConfigView(config: ControlConfig): ConfigView {
         mcp: {
             ...config.mcp,
             auth: cloneMcpAuth(config.mcp.auth)
+        },
+        web: {
+            ...config.web
         }
     };
 }

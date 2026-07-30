@@ -150,6 +150,11 @@ export class TuiCommandDispatcherNavigation {
 
     async #reloadSelectedPage(): Promise<void> {
         const state = this.#store.getState();
+        if (state.ui.selectedPage === "overview") {
+            await this.#onPageReload("overview", undefined);
+            this.#store.setScreenStatus("overview", "Overview refreshed from control.");
+            return;
+        }
         if (state.ui.selectedPage === "logs" && state.ui.selectedInstance !== undefined) {
             await this.#onLogsReload();
             this.#store.setScreenStatus("logs", "Logs reloaded from instance.readLogs.");

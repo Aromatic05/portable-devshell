@@ -15,6 +15,7 @@ import {
     ControlLifecycleManager,
     ControlPathHome,
     ControlPathRuntime,
+    SocketChannelProvider,
     type Event,
     type JsonValue
 } from "@portable-devshell/shared";
@@ -606,10 +607,10 @@ async function reserveTcpPort(): Promise<number> {
 async function request(socketPath: string, operation: Event["name"], params?: JsonValue): Promise<any> {
     const [module, method] = operation.split(".");
     const client = new ClientConnection({
+        channelProvider: new SocketChannelProvider({ socketPath }),
         mapError: (error) => error instanceof Error ? error : new Error(String(error)),
         mapRemoteError: (error) => createError(error),
-        peer: "cli",
-        socketPath
+        peer: "cli"
     });
     return await client.request("@control", module!, method!, params);
 }

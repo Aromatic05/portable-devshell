@@ -46,7 +46,9 @@ test("default config is generated at the fixed control config path", async () =>
         );
 
         await access(paths.configFile);
-        assert.match(await readFile(paths.configFile, "utf8"), /\[mcp\]/u);
+        const generated = await readFile(paths.configFile, "utf8");
+        assert.match(generated, /\[mcp\]/u);
+        assert.match(generated, /\[web\]\nenabled = false/u);
         if (process.platform !== "win32") {
             assert.equal((await stat(paths.configFile)).mode & 0o777, 0o600);
             assert.equal((await stat(paths.controlHomeDir)).mode & 0o777, 0o700);
@@ -77,6 +79,17 @@ test("valid global and instance documents are assembled into canonical config", 
     }
 });
 
+test("global TOML round-trips the independent WebUI enable switch", () => {
+    const config = normalizeConfigGlobalDraft({
+        mcp: { enabled: false },
+        web: { enabled: true }
+    });
+
+    const encoded = toml.encode(globalDocument.encode(config));
+    assert.match(encoded, /\[web\]\nenabled = true/u);
+    assert.equal(globalDocument.decode(toml.decode(encoded)).web?.enabled, true);
+});
+
 test("invalid TOML field type is reported with file and structural path", async () => {
     const homeDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-control-home-"));
 
@@ -104,7 +117,7 @@ test("public MCP without auth is rejected by semantic validation", async () => {
         await writeFileWithParents(paths.configFile, await readFixture("config-public-no-auth.toml"));
         await assert.rejects(
             new ControlConfigStore().readOrCreate(homeDirectory),
-            /mcp\.auth\.mode must not be none when MCP is publicly exposed/u
+            /mcp\.auth\.mode must not be none when the control HTTP host is publicly exposed/u
         );
     } finally {
         await rm(homeDirectory, { force: true, recursive: true });

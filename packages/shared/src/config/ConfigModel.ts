@@ -134,6 +134,9 @@ export interface ControlGlobalConfig {
         listenPort: number;
         publicBaseUrl?: string;
     };
+    web: {
+        enabled: boolean;
+    };
 }
 
 export interface ControlConfig extends ControlGlobalConfig {
@@ -236,6 +239,9 @@ export interface ConfigGlobalDraft {
         listenPort?: number;
         publicBaseUrl?: string | null;
     };
+    web?: {
+        enabled?: boolean;
+    };
 }
 
 export interface ConfigDraft extends ConfigGlobalDraft {
@@ -314,6 +320,7 @@ export interface ConfigView {
     control: ControlGlobalConfig["control"];
     instances: ConfigInstanceView[];
     mcp: ControlGlobalConfig["mcp"];
+    web: ControlGlobalConfig["web"];
 }
 
 export interface ConfigPresetDefinition {

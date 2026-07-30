@@ -1,5 +1,7 @@
 import { Box, Text } from "ink";
 
+import { tuiPageShortcut } from "../../state/TuiPageCatalog.js";
+import type { TuiPageId } from "../../state/TuiUiState.js";
 import type { TuiSidebarModel } from "../../state/TuiViewModel.js";
 
 export interface TuiComponentSidebarProps {
@@ -26,9 +28,10 @@ export function TuiComponentSidebar(props: TuiComponentSidebarProps) {
     );
 }
 
-function compactPageLabel(item: TuiSidebarModel["pages"][number], index: number): string {
-    const label = item.id === "instances" ? "inst" : item.id === "connector" ? "conn" : item.label;
-    return `${item.selected ? "▶" : " "}${index + 1}:${label}`;
+function compactPageLabel(item: TuiSidebarModel["pages"][number]): string {
+    const label = item.id === "overview" ? "over" : item.id === "instances" ? "inst" : item.id === "connector" ? "conn" : item.label;
+    const shortcut = tuiPageShortcut(item.id as TuiPageId) ?? "?";
+    return `${item.selected ? "▶" : " "}${shortcut}:${label}`;
 }
 
 function compactInstanceLabel(item: TuiSidebarModel["instances"][number], index: number): string {
@@ -52,7 +55,7 @@ function CompactSidebarLine(props: { items: TuiSidebarModel["pages"] | TuiSideba
         <Text>
             {props.items.map((item, index) => (
                 <Text bold={item.selected} inverse={item.focused} key={item.id}>
-                    {`${props.kind === "page" ? compactPageLabel(item as TuiSidebarModel["pages"][number], index) : compactInstanceLabel(item as TuiSidebarModel["instances"][number], index)} `}
+                    {`${props.kind === "page" ? compactPageLabel(item as TuiSidebarModel["pages"][number]) : compactInstanceLabel(item as TuiSidebarModel["instances"][number], index)} `}
                 </Text>
             ))}
         </Text>

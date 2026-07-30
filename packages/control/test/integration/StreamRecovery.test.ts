@@ -9,6 +9,7 @@ import {
     asInstanceName,
     ClientConnection,
     createError,
+    SocketChannelProvider,
     type JsonValue
 } from "@portable-devshell/shared";
 
@@ -108,10 +109,10 @@ test("an initial unavailable sequence returns a normal stream.gap error reply", 
 
 function connect(socketPath: string): ClientConnection {
     return new ClientConnection({
+        channelProvider: new SocketChannelProvider({ socketPath }),
         mapError: (error) => error instanceof Error ? error : new Error(String(error)),
         mapRemoteError: (error) => createError(error),
-        peer: "cli",
-        socketPath
+        peer: "cli"
     });
 }
 

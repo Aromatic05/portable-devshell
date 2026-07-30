@@ -34,7 +34,7 @@ test("Prompt 3 urgent fix uses page + instance coordinates with a two-stage Tab 
     const sidebar = selectSidebarModel(harness.store.getState());
     assert.deepEqual(
         sidebar.pages.map((item) => item.label),
-        ["instances", "config", "connector", "oauth", "audit", "logs", "todo", "help", "terminal"]
+        ["overview", "instances", "config", "connector", "oauth", "audit", "logs", "todo", "help", "terminal"]
     );
     assert.deepEqual(
         sidebar.instances.map((item) => item.label),
@@ -107,6 +107,89 @@ test("page shortcuts include Todo, Help, and Terminal and reload works on every 
     ]);
 });
 
+test("Overview actions navigate to the matching instance, Todo, and Audit context", async () => {
+    const harness = createHarness();
+    harness.store.replaceOperationalOverview({
+        activity: [{
+            callId: "call-1",
+            instance: asInstanceName("alpha"),
+            source: "mcp",
+            startedAt: "2026-07-31T00:00:00.000Z",
+            status: "failed",
+            toolName: "bash_run"
+        }],
+        alerts: [],
+        controller: { pid: 1, uptimeSeconds: 60 },
+        counts: {
+            activeTodos: 1,
+            failedCalls24h: 1,
+            instancesAttention: 0,
+            instancesCritical: 0,
+            instancesReady: 1,
+            instancesTotal: 1,
+            pendingApprovals: 0
+        },
+        generatedAt: "2026-07-31T00:00:00.000Z",
+        health: "healthy",
+        instances: [{
+            mcpEnabled: true,
+            name: asInstanceName("alpha"),
+            pendingApprovals: 0,
+            provider: "local",
+            snapshot: {
+                connectionState: "connected",
+                daemonState: "running",
+                lastSeq: 1,
+                name: asInstanceName("alpha"),
+                ready: true,
+                status: "ready"
+            }
+        }],
+        todos: [{
+            completed: 0,
+            currentItem: "Investigate failure",
+            instance: asInstanceName("alpha"),
+            revision: 1,
+            status: "in_progress",
+            taskId: "task-1",
+            title: "Recover worker",
+            total: 1
+        }]
+    });
+
+    async function activateOverviewButton(boxId: string, actionId: string): Promise<void> {
+        await harness.dispatch({ page: "overview", type: "page.select" });
+        harness.store.setFocusScope("mainBoxes");
+        harness.store.setMainFocusId(boxId);
+        let box = selectMainScreenModel(harness.store.getState()).boxes.find((candidate) => candidate.id === boxId);
+        assert.notEqual(box, undefined);
+        if (!box!.expanded) {
+            harness.store.toggleExpanded(box!.expandedKey);
+        }
+        box = selectMainScreenModel(harness.store.getState()).boxes.find((candidate) => candidate.id === boxId);
+        const line = box?.expandedLines.find((candidate) => candidate.id?.endsWith(`button:${actionId}`));
+        assert.notEqual(line?.id, undefined);
+        harness.store.setSelectedDetailLine(box!.expandedKey, line!.id);
+        harness.store.setFocusScope("boxDetail");
+        await harness.dispatch({ type: "focus.activate" });
+    }
+
+    await activateOverviewButton("overview-instance:alpha", "overview-open-instance:alpha");
+    assert.equal(harness.store.getState().ui.selectedPage, "instances");
+    assert.equal(harness.store.getState().ui.selectedInstance, "alpha");
+    assert.equal(harness.store.getState().ui.mainFocusId, "instance:alpha");
+
+    await activateOverviewButton("overview-todo:alpha:task-1", "overview-open-todo:alpha");
+    assert.equal(harness.store.getState().ui.selectedPage, "todo");
+    assert.equal(harness.store.getState().ui.selectedInstance, "alpha");
+
+    await activateOverviewButton("overview-activity:call-1", "overview-open-audit:alpha:call-1");
+    assert.equal(harness.store.getState().ui.selectedPage, "audit");
+    assert.equal(harness.store.getState().ui.selectedInstance, "alpha");
+    assert.equal(harness.store.getState().ui.mainFocusId, "audit-call-1");
+    assert.deepEqual(harness.pageReloads().at(-1), { instance: "alpha", page: "audit" });
+});
+
 test("Help describes the implemented navigation and editing actions", () => {
     const harness = createHarness();
     harness.store.setSelectedPage("help");
@@ -118,7 +201,8 @@ test("Help describes the implemented navigation and editing actions", () => {
     assert.equal(actionLines.some((line) => line.includes("Use a to open")), false);
     assert.equal(actionLines.some((line) => line.includes("create, attach, start, restart, stop, or delete")), true);
     assert.equal(actionLines.some((line) => line.includes("Ctrl+S")), true);
-    assert.equal(navigationLines.some((line) => line.includes("1-9 switch pages")), true);
+    assert.equal(navigationLines.some((line) => line.includes("0 opens Overview")), true);
+    assert.equal(navigationLines.some((line) => line.includes("1-9 retain the existing page shortcuts")), true);
     assert.equal(navigationLines.some((line) => line.includes("Ctrl+] returns to the sidebar")), true);
 });
 

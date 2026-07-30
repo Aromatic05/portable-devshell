@@ -47,6 +47,7 @@ export const errorCodes = {
     mcpContextExpired: "mcp.contextExpired",
     mcpContextInvalid: "mcp.contextInvalid",
     mcpPublicAuthRequired: "mcp.publicAuthRequired",
+    protocolVersionUnsupported: "protocol.versionUnsupported",
     reverseConnectionSuperseded: "reverse.connectionSuperseded",
     reverseDeviceCodeConsumed: "reverse.deviceCodeConsumed",
     reverseDeviceCodeExpired: "reverse.deviceCodeExpired",

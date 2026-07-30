@@ -46,6 +46,9 @@ export class ControlGlobalTomlDocument {
                         : config.mcp.auth.mode === "token"
                             ? { mode: "token", token: config.mcp.auth.token }
                             : { mode: "none" }
+            },
+            web: {
+                enabled: config.web.enabled
             }
         });
     }
