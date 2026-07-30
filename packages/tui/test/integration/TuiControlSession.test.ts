@@ -231,7 +231,7 @@ test("module TUI clients send explicit instance operations and preserve start re
     assert.equal(worker.decisions[0]?.decision, "approve");
 
     const result = await clients.tool.call("alpha", "bash_run", { command: "pwd" });
-    assert.equal(jsonRecord(jsonRecord(result)?.result ?? null)?.exitCode, 0);
+    assert.equal(jsonRecord(result)?.exitCode, 0);
     assert.equal(worker.callToolCount, 1);
 });
 

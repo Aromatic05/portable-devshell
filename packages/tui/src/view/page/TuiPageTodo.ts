@@ -48,11 +48,11 @@ export function buildTodoPageBoxes(
                 title: task.title,
             })),
             ...(todo.comments ?? []).map((comment) => makeBox(state, "todo", instanceName, {
-                detailLines: [formatField("Pending", comment.text), formatField("Context", comment.ctxId), formatField("ID", comment.id), { id: `button:delete-comment:${comment.id}`, text: "Delete comment" }],
+                detailLines: [formatField("Comment", comment.text), formatField("Context", comment.ctxId), formatField("ID", comment.id), { id: `button:delete-comment:${comment.id}`, text: "Delete comment" }],
                 id: `todo-comment:${comment.id}`,
                 status: "warning",
                 summaryLines: [comment.text],
-                title: "Pending comment",
+                title: "Context comment",
             }))
         ];
     }
@@ -88,11 +88,11 @@ export function buildTodoPageBoxes(
         }),
         ...todo.items.map((item) => todoItemBox(state, instanceName, item)),
         ...(todo.comments ?? []).map((comment) => makeBox(state, "todo", instanceName, {
-            detailLines: [formatField("Pending", comment.text), formatField("Context", comment.ctxId), formatField("ID", comment.id), { id: `button:delete-comment:${comment.id}`, text: "Delete comment" }],
+            detailLines: [formatField("Comment", comment.text), formatField("Context", comment.ctxId), formatField("ID", comment.id), { id: `button:delete-comment:${comment.id}`, text: "Delete comment" }],
             id: `todo-comment:${comment.id}`,
             status: "warning",
             summaryLines: [comment.text],
-            title: "Pending comment",
+            title: "Context comment",
         }))
     ];
 }
