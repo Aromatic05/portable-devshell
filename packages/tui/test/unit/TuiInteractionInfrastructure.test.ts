@@ -34,7 +34,7 @@ test("Prompt 3 urgent fix uses page + instance coordinates with a two-stage Tab 
     const sidebar = selectSidebarModel(harness.store.getState());
     assert.deepEqual(
         sidebar.pages.map((item) => item.label),
-        ["instances", "config", "connector", "oauth", "audit", "logs", "todo", "help", "terminal"]
+        ["overview", "instances", "config", "connector", "oauth", "audit", "logs", "todo", "help", "terminal"]
     );
     assert.deepEqual(
         sidebar.instances.map((item) => item.label),
@@ -118,7 +118,8 @@ test("Help describes the implemented navigation and editing actions", () => {
     assert.equal(actionLines.some((line) => line.includes("Use a to open")), false);
     assert.equal(actionLines.some((line) => line.includes("create, attach, start, restart, stop, or delete")), true);
     assert.equal(actionLines.some((line) => line.includes("Ctrl+S")), true);
-    assert.equal(navigationLines.some((line) => line.includes("1-9 switch pages")), true);
+    assert.equal(navigationLines.some((line) => line.includes("0 opens Overview")), true);
+    assert.equal(navigationLines.some((line) => line.includes("1-9 retain the existing page shortcuts")), true);
     assert.equal(navigationLines.some((line) => line.includes("Ctrl+] returns to the sidebar")), true);
 });
 

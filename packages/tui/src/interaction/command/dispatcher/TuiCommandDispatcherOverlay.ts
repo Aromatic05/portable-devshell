@@ -1,5 +1,6 @@
 import type { TuiUiIntent } from "../../../state/TuiInteractionState.js";
 import type { TuiAppStore } from "../../../state/TuiAppStore.js";
+import { isTuiSearchablePage } from "../../../state/TuiPageCatalog.js";
 import type { TuiFocusManager } from "../../focus/TuiFocusManager.js";
 import type { TuiCommandDispatcherFocus } from "./TuiCommandDispatcherFocus.js";
 
@@ -97,7 +98,7 @@ export class TuiCommandDispatcherOverlay {
 
     #openSearch(): boolean {
         const page = this.#store.getState().ui.selectedPage;
-        if (!isSearchablePage(page)) {
+        if (!isTuiSearchablePage(page)) {
             return false;
         }
         this.#focusManager.pushRestore("search");
@@ -150,8 +151,4 @@ export class TuiCommandDispatcherOverlay {
             scrollOffset: Math.max(0, detail.scrollOffset + delta)
         });
     }
-}
-
-function isSearchablePage(page: string): boolean {
-    return page === "instances" || page === "config" || page === "audit" || page === "logs";
 }

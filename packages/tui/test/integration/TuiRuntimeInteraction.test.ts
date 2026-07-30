@@ -685,6 +685,28 @@ function createClients(options: {
                 return {};
             }
         },
+        overview: {
+            async get() {
+                return {
+                    activity: [],
+                    alerts: [],
+                    controller: { pid: 1, uptimeSeconds: 10 },
+                    counts: {
+                        activeTodos: 0,
+                        failedCalls24h: 0,
+                        instancesAttention: 0,
+                        instancesCritical: 0,
+                        instancesReady: 0,
+                        instancesTotal: 0,
+                        pendingApprovals: 0
+                    },
+                    generatedAt: "2026-07-31T00:00:00.000Z",
+                    health: "healthy",
+                    instances: [],
+                    todos: []
+                };
+            }
+        },
         async reconnect() {},
         reverse: {},
         runtime: {

@@ -23,6 +23,14 @@ export function reduceTuiStoreReducerControl(state: TuiAppState, action: TuiAppA
                 oauthApprovals: nextApprovals
             });
         }
+        case "overview.replace":
+            if (isDeepStrictEqual(state.operationalOverview, action.overview)) {
+                return state;
+            }
+            return {
+                ...state,
+                operationalOverview: action.overview
+            };
         case "command.upsert": {
             const without = state.commandRecords.filter((command) => command.commandId !== action.command.commandId);
             return {

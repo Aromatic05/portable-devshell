@@ -10,6 +10,7 @@ import { createTuiClientArtifact, type TuiClientArtifact } from "./artifact/TuiC
 import { createTuiClientConfig, type TuiClientConfig } from "./config/TuiClientConfig.js";
 import { createTuiClientInstance, type TuiClientInstance } from "./instance/TuiClientInstance.js";
 import { createTuiClientMcp, type TuiClientMcp } from "./mcp/TuiClientMcp.js";
+import { createTuiClientOverview, type TuiClientOverview } from "./overview/TuiClientOverview.js";
 import { createTuiClientReverse, type TuiClientReverse } from "./reverse/TuiClientReverse.js";
 import { createTuiClientRuntime, type TuiClientRuntime } from "./runtime/TuiClientRuntime.js";
 import { createTuiClientService, type TuiClientService } from "./service/TuiClientService.js";
@@ -28,6 +29,7 @@ export interface TuiClients {
     config: TuiClientConfig;
     instance: TuiClientInstance;
     mcp: TuiClientMcp;
+    overview: TuiClientOverview;
     reconnect(): Promise<void>;
     reverse: TuiClientReverse;
     runtime: TuiClientRuntime;
@@ -50,6 +52,7 @@ export function createTuiClients(options: TuiClientOptions = {}): TuiClients {
         config: createTuiClientConfig(connection),
         instance: createTuiClientInstance(connection),
         mcp: createTuiClientMcp(connection),
+        overview: createTuiClientOverview(connection),
         reconnect: async () => await connection.reconnect(),
         reverse: createTuiClientReverse(connection),
         runtime: createTuiClientRuntime(connection),

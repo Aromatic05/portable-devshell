@@ -7,6 +7,7 @@ import {
     type InstanceSnapshot,
     type JsonValue,
     type OAuthApprovalRequest,
+    type OperationalOverview,
     type TodoReadResult,
     type ToolCallRecord
 } from "@portable-devshell/shared";
@@ -373,6 +374,10 @@ export class TuiAppStore {
             approvals,
             type: "oauthApproval.replace"
         });
+    }
+
+    replaceOperationalOverview(overview?: OperationalOverview): void {
+        this.dispatch({ overview, type: "overview.replace" });
     }
 
     upsertCommand(command: TuiCommandRecord): void {

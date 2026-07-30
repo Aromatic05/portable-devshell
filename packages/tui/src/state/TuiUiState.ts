@@ -1,4 +1,4 @@
-export type TuiPageId = "instances" | "todo" | "config" | "connector" | "oauth" | "audit" | "logs" | "help" | "terminal";
+export type TuiPageId = "overview" | "instances" | "todo" | "config" | "connector" | "oauth" | "audit" | "logs" | "help" | "terminal";
 
 export type TuiSidebarFocus = "pages" | "instances";
 

@@ -22,6 +22,7 @@ export class TuiControlSession {
     readonly #subscriptions: TuiControlSessionSubscriptions;
     readonly #auditRefreshTimers = new Map<string, ReturnType<typeof setTimeout>>();
     #oauthRefreshTimer?: ReturnType<typeof setInterval>;
+    #overviewRefreshTimer?: ReturnType<typeof setTimeout>;
     #started = false;
 
     constructor(options: TuiControlSessionOptions = {}) {
@@ -68,6 +69,7 @@ export class TuiControlSession {
     async stop(): Promise<void> {
         this.#started = false;
         this.#stopOAuthRefresh();
+        this.#stopOverviewRefresh();
         this.#stopAuditRefreshes();
         this.#subscriptions.closeAll();
         this.#clients.close();
@@ -95,6 +97,10 @@ export class TuiControlSession {
             this.#stopOAuthRefresh();
             this.#startOAuthRefresh();
         }
+    }
+
+    async refreshOverview(): Promise<void> {
+        await this.#refresh.refreshOverview();
     }
 
     async refreshOAuth(): Promise<void> {
@@ -160,6 +166,12 @@ export class TuiControlSession {
             return;
         }
         this.#store.applyEvent(message.event);
+        if (
+            this.#store.getState().ui.selectedPage === "overview" &&
+            isOverviewRefreshEvent(message.event.name)
+        ) {
+            this.#scheduleOverviewRefresh();
+        }
         if (message.event.name.startsWith("todo.")) {
             void this.#refresh.refreshTodo(instance).catch(() => undefined);
         }
@@ -196,6 +208,7 @@ export class TuiControlSession {
 
     #handleDisconnected(): void {
         this.#stopOAuthRefresh();
+        this.#stopOverviewRefresh();
         this.#stopAuditRefreshes();
         this.#store.setConnectionState("disconnected");
         this.#subscriptions.closeAll();
@@ -204,6 +217,7 @@ export class TuiControlSession {
     #applyConnectionFailure(error: unknown): void {
         const failure = toFailure(error);
         this.#store.setConnectionState(failure.status, failure.error);
+        this.#stopOverviewRefresh();
         this.#stopAuditRefreshes();
         this.#subscriptions.closeAll();
     }
@@ -223,6 +237,30 @@ export class TuiControlSession {
         }
         clearInterval(this.#oauthRefreshTimer);
         this.#oauthRefreshTimer = undefined;
+    }
+
+    #scheduleOverviewRefresh(): void {
+        this.#stopOverviewRefresh();
+        this.#overviewRefreshTimer = setTimeout(() => {
+            this.#overviewRefreshTimer = undefined;
+            if (!this.#started || this.#store.getState().ui.selectedPage !== "overview") {
+                return;
+            }
+            void this.#refresh.refreshOverview().catch((error) => {
+                this.#store.setScreenStatus(
+                    "overview",
+                    `Overview refresh failed: ${readErrorMessage(error)}`
+                );
+            });
+        }, 75);
+    }
+
+    #stopOverviewRefresh(): void {
+        if (this.#overviewRefreshTimer === undefined) {
+            return;
+        }
+        clearTimeout(this.#overviewRefreshTimer);
+        this.#overviewRefreshTimer = undefined;
     }
 
     #scheduleAuditRefresh(instance: string): void {
@@ -255,9 +293,7 @@ export class TuiControlSession {
 }
 
 function isTuiPresentationEvent(name: string): boolean {
-    return name === "instance.statusChanged" ||
-        name === "instance.connectionChanged" ||
-        name === "instance.readyChanged" ||
+    return isInstanceHealthEvent(name) ||
         name === "log.appended" ||
         name.startsWith("toolCall.") ||
         name.startsWith("approval.") ||
@@ -273,6 +309,27 @@ function isTerminalToolCallEvent(name: string): boolean {
         name === "toolCall.expired" ||
         name === "toolCall.queueTimeout" ||
         name === "toolCall.cancelled";
+}
+
+function isOverviewRefreshEvent(name: string): boolean {
+    return isInstanceHealthEvent(name) ||
+        name.startsWith("toolCall.") ||
+        name.startsWith("approval.") ||
+        name.startsWith("todo.");
+}
+
+function isInstanceHealthEvent(name: string): boolean {
+    return name === "instance.started" ||
+        name === "instance.stopped" ||
+        name === "instance.statusChanged" ||
+        name === "instance.connectionChanged" ||
+        name === "instance.readyChanged" ||
+        name === "worker.rpcConnected" ||
+        name === "worker.rpcDisconnected" ||
+        name === "reverse.connected" ||
+        name === "reverse.disconnected" ||
+        name === "reverse.enrollmentChanged" ||
+        name === "reverse.transportChanged";
 }
 
 function toFailure(error: unknown): {

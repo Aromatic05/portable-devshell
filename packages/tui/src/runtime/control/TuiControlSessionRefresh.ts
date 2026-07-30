@@ -35,6 +35,7 @@ export class TuiControlSessionRefresh {
     }
 
     async refreshAll(): Promise<TuiControlSubscriptionRequest[]> {
+        await this.refreshOverview();
         const configView = await this.#readConfigView();
         const runtimeInstances = await this.#clients.instance.list();
         this.#store.setMcpStatus(await this.#clients.mcp.status());
@@ -63,6 +64,19 @@ export class TuiControlSessionRefresh {
             mergeInstances(configView, runtimeInstances)
         );
         this.#store.setConfigView(configView);
+    }
+
+    async refreshOverview(): Promise<void> {
+        try {
+            this.#store.replaceOperationalOverview(
+                await this.#clients.overview.get()
+            );
+        } catch (error) {
+            if (readErrorCode(error) !== "control.methodNotFound") {
+                throw error;
+            }
+            this.#store.replaceOperationalOverview(undefined);
+        }
     }
 
     async refreshOAuth(): Promise<void> {
