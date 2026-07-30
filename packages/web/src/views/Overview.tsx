@@ -19,26 +19,33 @@ export function Overview({ state }: { state: WebState }) {
             </div>
             <div className="overview-grid">
                 <section>
-                    <h3>Alerts</h3>
-                    {currentAlerts.length === 0 ? <p className="empty">No current alerts.</p> : <ul className="alerts">{currentAlerts.map((alert) => <li className={alert.severity} key={alert.id}><strong>{alert.title}</strong><br />{alert.detail}</li>)}</ul>}
+                    <h3><a href="#/approvals">Alerts</a></h3>
+                    {currentAlerts.length === 0 ? <p className="empty">No current alerts.</p> : <ul className="alerts">{currentAlerts.map((alert) => <li className={alert.severity} key={alert.id}><a href={alertRoute(alert.kind)}><strong>{alert.title}</strong><br />{alert.detail}</a></li>)}</ul>}
                 </section>
                 <section>
-                    <h3>Recent activity</h3>
+                    <h3><a href="#/activity">Recent activity</a></h3>
                     {overviewActivity(overview).length === 0 ? <p className="empty">No recent activity.</p> : <ol className="feed">{overviewActivity(overview).map((activity) => <li key={activity.callId}><time>{activity.completedAt ?? activity.startedAt}</time><strong>{activity.instance}</strong> {activity.toolName} · {activity.status}</li>)}</ol>}
                 </section>
             </div>
             <div className="overview-grid">
                 <section>
-                    <h3>Instances</h3>
+                    <h3><a href="#/instances">Instances</a></h3>
                     {overview.instances.length === 0 ? <p className="empty">No instances in the operational overview.</p> : <ul className="summary-list">{overview.instances.slice(0, 6).map((instance) => <li key={instance.name}><strong>{instance.name}</strong> {instance.snapshot.status} · {instance.snapshot.connectionState} · {instance.pendingApprovals} pending approvals</li>)}</ul>}
                 </section>
                 <section>
-                    <h3>Todo summary</h3>
+                    <h3><a href="#/todos">Todo summary</a></h3>
                     {overview.todos.length === 0 ? <p className="empty">No active todos.</p> : <ul className="summary-list">{overview.todos.slice(0, 6).map((todo) => <li key={`${todo.instance}-${todo.taskId}`}><strong>{todo.title}</strong> {todo.instance} · {todo.completed}/{todo.total} complete · {todo.status}</li>)}</ul>}
                 </section>
             </div>
         </section>
     );
+}
+
+function alertRoute(kind: string): string {
+    if (kind.startsWith("approval.")) return "#/approvals";
+    if (kind.startsWith("todo.")) return "#/todos";
+    if (kind.startsWith("activity.")) return "#/activity";
+    return "#/instances";
 }
 
 export function ActivityList({ events, empty }: { events: InstanceEvent[]; empty: string }) {

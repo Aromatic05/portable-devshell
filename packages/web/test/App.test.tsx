@@ -95,6 +95,17 @@ describe("authenticated application shell", () => {
             await screen.findByText("Back to instances"),
         ).toBeInTheDocument();
     });
+
+    it("uses Overview summary links as bookmarkable navigation", async () => {
+        window.location.hash = "#/overview";
+        render(<App createClients={fakeClients} session={fakeSession({ check: true })} />);
+
+        const activity = await screen.findByRole("link", { name: "Recent activity" });
+        expect(activity).toHaveAttribute("href", "#/activity");
+        fireEvent.click(activity);
+        expect(await screen.findByRole("heading", { name: "Activity" })).toBeInTheDocument();
+        expect(window.location.hash).toBe("#/activity");
+    });
 });
 
 function fakeSession(result: {

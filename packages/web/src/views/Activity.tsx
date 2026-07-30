@@ -1,21 +1,20 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 
-import { recentActivity } from "../selectors/readModel.js";
+import { ActivityFilters } from "../components/activity/ActivityFilters.js";
+import { ActivityRecord } from "../components/activity/ActivityRecord.js";
+import { emptyActivityFilters, filterActivity, hasActiveActivityFilters, type ActivityFilters as Filters } from "../selectors/activity.js";
 import type { WebState } from "../state/WebStore.js";
-import { ActivityList } from "./Overview.js";
 
 export function Activity({ state }: { state: WebState }) {
-    const [query, setQuery] = useState("");
-    const [type, setType] = useState("all");
-    const types = [...new Set(state.activity.map((event) => event.type))].sort();
-    return (
-        <section>
-            <h2>Activity</h2>
-            <div className="filters">
-                <label>Search<input onChange={(event) => setQuery(event.target.value)} placeholder="Instance or event" type="search" value={query} /></label>
-                <label>Type<select onChange={(event) => setType(event.target.value)} value={type}><option value="all">All activity</option>{types.map((value) => <option key={value} value={value}>{value}</option>)}</select></label>
-            </div>
-            <ActivityList empty="No activity matches these filters." events={recentActivity(state, query, type)} />
-        </section>
-    );
+    const [filters, setFilters] = useState<Filters>(emptyActivityFilters);
+    const instances = useMemo(() => [...new Set(state.activity.map((event) => event.instanceName))].sort(), [state.activity]);
+    const types = useMemo(() => [...new Set(state.activity.map((event) => event.type))].sort(), [state.activity]);
+    const events = useMemo(() => filterActivity(state.activity, filters), [filters, state.activity]);
+    const active = hasActiveActivityFilters(filters);
+    return <section>
+        <h2>Activity</h2>
+        <p aria-live="polite" className="hint">{events.length} of {state.activity.length} activity records{active ? " match active filters." : "."}</p>
+        <ActivityFilters filters={filters} instances={instances} onChange={setFilters} onClear={() => setFilters(emptyActivityFilters)} types={types} />
+        {state.connection === "offline" && state.activity.length === 0 ? <p className="empty">Activity is unavailable while offline.</p> : state.connection === "connecting" && state.activity.length === 0 ? <p className="empty">Loading activity…</p> : events.length === 0 ? <p className="empty">{active ? "No activity matches these filters." : "No recent activity."}</p> : <ol className="feed activity-feed">{events.map((event) => <ActivityRecord event={event} key={`${event.instanceName}-${event.seq}`} />)}</ol>}
+    </section>;
 }
