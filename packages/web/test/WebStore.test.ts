@@ -128,8 +128,9 @@ describe("WebStore", () => {
             lastSeq: 4,
             todo: {
                 items: [{
+                    content: "Refresh browser state",
                     id: "task-1",
-                    status: "in_progress",
+                    status: "in_progress" as const,
                     title: "Refresh browser state",
                 }],
                 revision: revision++,
