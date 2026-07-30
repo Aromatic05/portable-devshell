@@ -119,6 +119,47 @@ class ControlPeer {
     }
 }
 
+class BlockingSocketChannelProvider implements ChannelProvider {
+    readonly #delegate: SocketChannelProvider;
+    connectCount = 0;
+    #gate?: Promise<void>;
+    #releaseGate?: () => void;
+    #signalStarted?: () => void;
+
+    constructor(socketPath: string) {
+        this.#delegate = new SocketChannelProvider({ socketPath });
+    }
+
+    blockNextConnect(): Promise<void> {
+        assert.equal(this.#gate, undefined);
+        this.#gate = new Promise<void>((resolve) => {
+            this.#releaseGate = resolve;
+        });
+        return new Promise<void>((resolve) => {
+            this.#signalStarted = resolve;
+        });
+    }
+
+    releaseConnect(): void {
+        this.#releaseGate?.();
+    }
+
+    async connect() {
+        this.connectCount += 1;
+        const gate = this.#gate;
+        if (gate !== undefined) {
+            this.#signalStarted?.();
+            await gate;
+            if (this.#gate === gate) {
+                this.#gate = undefined;
+                this.#releaseGate = undefined;
+                this.#signalStarted = undefined;
+            }
+        }
+        return await this.#delegate.connect();
+    }
+}
+
 function client(socketPath: string, mode: "short" | "persistent" = "persistent"): ClientConnection {
     return new ClientConnection({
         mapError: (error) => error instanceof Error ? error : new Error(String(error)),
@@ -306,6 +347,43 @@ test("disconnect rejects every pending request and active stream waiter until ex
     await peer.reply(recovered, { pong: true });
     assert.deepEqual((await recoveredPromise).payload, { pong: true });
     assert.equal(peer.connectionCount, 2);
+});
+
+test("persistent ClientConnection coalesces concurrent reconnect calls", async (t) => {
+    const peer = await ControlPeer.create();
+    const provider = new BlockingSocketChannelProvider(peer.socketPath);
+    const connection = new ClientConnection({
+        channelProvider: provider,
+        mapError: (error) => error instanceof Error ? error : new Error(String(error)),
+        mapRemoteError: (error) => createError(error),
+        mode: "persistent",
+        peer: "tui"
+    });
+    t.after(async () => {
+        connection.close();
+        await peer.close();
+    });
+
+    const initialRequest = connection.requestEvent("@control", "service", "initial");
+    const initial = await peer.nextEvent();
+    await peer.reply(initial, { ready: true });
+    await initialRequest;
+
+    const reconnectStarted = provider.blockNextConnect();
+    const first = connection.reconnect();
+    await reconnectStarted;
+    const second = connection.reconnect();
+    await new Promise((resolve) => setImmediate(resolve));
+
+    assert.equal(provider.connectCount, 2);
+    provider.releaseConnect();
+    await Promise.all([first, second]);
+    assert.equal(provider.connectCount, 2);
+
+    const recoveredRequest = connection.requestEvent("@control", "service", "recovered");
+    const recovered = await peer.nextEvent();
+    await peer.reply(recovered, { ready: true });
+    assert.deepEqual((await recoveredRequest).payload, { ready: true });
 });
 
 test("unexpected replyTo closes a persistent connection and rejects its pending requests", async (t) => {

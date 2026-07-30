@@ -110,6 +110,7 @@ export class ClientConnection {
     #closed = false;
     #persistentFailure?: Error;
     #persistentGeneration = 0;
+    #reconnectPromise?: Promise<void>;
     #persistentSession?: ClientSession;
     #persistentSessionPromise?: Promise<ClientSession>;
 
@@ -201,6 +202,21 @@ export class ClientConnection {
             return;
         }
         this.#assertOpen();
+        if (this.#reconnectPromise !== undefined) {
+            return await this.#reconnectPromise;
+        }
+        const reconnect = this.#reconnectPersistent();
+        this.#reconnectPromise = reconnect;
+        try {
+            await reconnect;
+        } finally {
+            if (this.#reconnectPromise === reconnect) {
+                this.#reconnectPromise = undefined;
+            }
+        }
+    }
+
+    async #reconnectPersistent(): Promise<void> {
         this.#persistentGeneration += 1;
         const session = this.#persistentSession;
         this.#persistentSession = undefined;
