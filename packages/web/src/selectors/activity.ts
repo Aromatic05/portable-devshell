@@ -19,10 +19,46 @@ export const emptyActivityFilters: ActivityFilters = {
     type: "all",
 };
 
+const failureEvents = new Set([
+    "approval.denied",
+    "approval.expired",
+    "instance.connectionChanged:failed",
+    "reverse.disconnected",
+    "toolCall.cancelled",
+    "toolCall.denied",
+    "toolCall.expired",
+    "toolCall.failed",
+    "toolCall.queueTimeout",
+    "worker.rpcDisconnected",
+]);
+
+const pendingEvents = new Set([
+    "approval.requested",
+    "instance.connectionChanged:connecting",
+    "instance.connectionChanged:reconnecting",
+    "toolCall.pendingApproval",
+    "toolCall.queued",
+    "toolCall.running",
+    "toolCall.started",
+]);
+
+const successEvents = new Set([
+    "approval.approved",
+    "instance.started",
+    "instance.stopped",
+    "reverse.connected",
+    "toolCall.completed",
+    "worker.rpcConnected",
+]);
+
 export function activityResult(event: InstanceEvent): Exclude<ActivityResult, "all"> {
-    if (/(failed|denied|expired|cancelled|queueTimeout)/.test(event.type)) return "failure";
-    if (["toolCall.queued", "toolCall.started", "toolCall.running", "toolCall.pendingApproval"].includes(event.type)) return "pending";
-    if (/(completed|approved|connected|instance.started)/.test(event.type)) return "success";
+    const connectionState = readConnectionState(event);
+    const classifiedType = connectionState === undefined
+        ? event.type
+        : `${event.type}:${connectionState}`;
+    if (failureEvents.has(classifiedType)) return "failure";
+    if (pendingEvents.has(classifiedType)) return "pending";
+    if (successEvents.has(classifiedType)) return "success";
     return "other";
 }
 
@@ -45,4 +81,12 @@ export function filterActivity(
 
 export function hasActiveActivityFilters(filters: ActivityFilters): boolean {
     return Object.entries(filters).some(([key, value]) => key !== "period" ? value !== "all" && value !== "" : value !== "all");
+}
+
+function readConnectionState(event: InstanceEvent): string | undefined {
+    if (event.type !== "instance.connectionChanged") return undefined;
+    const data = event.data;
+    if (typeof data !== "object" || data === null || Array.isArray(data)) return undefined;
+    const state = data.connectionState ?? data.state;
+    return typeof state === "string" ? state : undefined;
 }

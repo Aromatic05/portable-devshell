@@ -1,6 +1,6 @@
 import type { JsonValue } from "@portable-devshell/shared/browser";
 
-const sensitiveKey = /authorization|cookie|input|output|password|secret|token|argument|command|content/i;
+const sensitiveKey = /authorization|cookie|input|output|password|secret|token|argument|command|content|(^|_)(args?|argv|cmd|script|stderr|stdout)($|_)/i;
 const maxDepth = 3;
 const maxEntries = 12;
 const maxLength = 1200;
