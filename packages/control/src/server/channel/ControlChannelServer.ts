@@ -48,6 +48,9 @@ export class ControlChannelServer {
         if (this.#started) {
             return;
         }
+        if (this.#startedProviders.length > 0) {
+            await this.#closeProviders();
+        }
         if (this.#startPromise !== undefined) {
             return await this.#startPromise;
         }
@@ -145,8 +148,18 @@ export class ControlChannelServer {
 
     async #closeProviders(): Promise<void> {
         const failures: unknown[] = [];
-        for (const provider of this.#startedProviders.splice(0).reverse()) {
-            await provider.close().catch((error) => failures.push(error));
+        const providers = this.#startedProviders.splice(0);
+        const failed = new Set<ControlChannelProvider>();
+        for (const provider of [...providers].reverse()) {
+            await provider.close().catch((error) => {
+                failed.add(provider);
+                failures.push(error);
+            });
+        }
+        for (const provider of providers) {
+            if (failed.has(provider)) {
+                this.#startedProviders.push(provider);
+            }
         }
         if (failures.length > 0) {
             throw new AggregateError(failures, "Control channel providers failed to close.");
