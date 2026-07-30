@@ -2,13 +2,14 @@ import { randomUUID } from "node:crypto";
 
 import type { JsonValue, ToolCallAssociation, ToolCallContext } from "@portable-devshell/shared";
 
+const LIVE_INPUT_SUMMARY_MAX_LENGTH = 512;
+
 export interface WorkerInstanceToolCallScope {
     association?: ToolCallAssociation;
     callId: string;
     context: ToolCallContext;
     eventContext: {
         callId: string;
-        input: JsonValue;
         inputSummary: string;
         requestId?: string;
         ctxId?: string;
@@ -39,7 +40,6 @@ export function createWorkerInstanceToolCallScope(
         context,
         eventContext: {
             callId,
-            input,
             inputSummary,
             requestId: context.requestId,
             ctxId: context.ctxId,
@@ -56,6 +56,14 @@ export function createWorkerInstanceToolCallScope(
 }
 
 function toInputSummary(input: JsonValue): string {
+    const summary = serializeInput(input);
+    if (summary.length <= LIVE_INPUT_SUMMARY_MAX_LENGTH) {
+        return summary;
+    }
+    return `${summary.slice(0, LIVE_INPUT_SUMMARY_MAX_LENGTH - 1)}…`;
+}
+
+function serializeInput(input: JsonValue): string {
     if (Array.isArray(input)) {
         return input.map((value) => JSON.stringify(value) ?? "null").join(" ");
     }

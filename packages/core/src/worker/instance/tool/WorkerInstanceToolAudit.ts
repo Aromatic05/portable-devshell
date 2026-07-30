@@ -124,7 +124,6 @@ export class WorkerInstanceToolAudit {
                 completedAt,
                 ...(approvalState.decision === undefined ? {} : { decision: approvalState.decision }),
                 exitCode: bashResult?.exitCode,
-                output: result,
                 startedAt: scope.startedAt,
                 status: "completed",
                 stderrBytes: bashResult?.stderrBytes,
@@ -192,7 +191,6 @@ export class WorkerInstanceToolAudit {
                 ...(approvalState.decision === undefined ? {} : { decision: approvalState.decision }),
                 errorCode,
                 exitCode: result?.exitCode,
-                output: result === undefined ? undefined : commandResultOutput(result),
                 startedAt: scope.startedAt,
                 status: "failed",
                 stderrBytes: result === undefined ? undefined : readByteLength(result.stderr),
@@ -252,7 +250,6 @@ export class WorkerInstanceToolAudit {
                 toEventData({
                     ...scope.eventContext,
                     completedAt,
-                    output: result,
                     startedAt: scope.startedAt,
                     status: "completed"
                 })

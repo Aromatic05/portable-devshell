@@ -247,7 +247,8 @@ test("WorkerInstance audits control-owned tool calls while the worker is stopped
         const completedEvent = replay.events.find(
             (event) => event.type === "toolCall.completed" && jsonRecord(event.data)?.callId === records[0]?.callId
         );
-        assert.deepEqual(jsonRecord(completedEvent?.data)?.output, { revision: 7 });
+        assert.equal(jsonRecord(completedEvent?.data)?.output, undefined);
+        assert.deepEqual(records[0]?.output, { revision: 7 });
     } finally {
         await instance.close();
         await rm(homeDirectory, { force: true, recursive: true });
@@ -389,7 +390,6 @@ test("WorkerInstance rejects not-ready and schedules concurrent tool calls while
 
         assert.deepEqual(firstQueued?.data, {
             callId: records[0]?.callId,
-            input: { command: "pwd" },
             inputSummary: "{\"command\":\"pwd\"}",
             queuedAt: jsonRecord(firstQueued?.data)?.queuedAt,
             source: "cli",
@@ -399,19 +399,18 @@ test("WorkerInstance rejects not-ready and schedules concurrent tool calls while
         });
         assert.deepEqual(firstRunning?.data, {
             callId: records[0]?.callId,
-            input: { command: "pwd" },
             inputSummary: "{\"command\":\"pwd\"}",
             source: "cli",
             startedAt: jsonRecord(firstQueued?.data)?.startedAt,
             status: "running",
             toolName: "bash_run"
         });
-        assert.deepEqual(jsonRecord(completedEvent?.data)?.output, { exitCode: 0, stderr: "", stdout });
+        assert.equal(jsonRecord(completedEvent?.data)?.output, undefined);
+        assert.deepEqual(records[0]?.output, { exitCode: 0, stderr: "", stdout });
         assert.deepEqual(failedEvent?.data, {
             callId: records[2]?.callId,
             completedAt: jsonRecord(failedEvent?.data)?.completedAt,
             errorCode: errorCodes.coreToolSchemaUnavailable,
-            input: { bad: true },
             inputSummary: "{\"bad\":true}",
             source: "cli",
             startedAt: jsonRecord(failedEvent?.data)?.startedAt,
