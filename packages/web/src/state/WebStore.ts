@@ -51,6 +51,7 @@ export class WebStore {
     #listeners = new Set<() => void>();
     #streams = new Map<string, WebRuntimeStream>();
     #logRefreshes = new Map<string, ReturnType<typeof setTimeout>>();
+    #todoRefreshes = new Map<string, ReturnType<typeof setTimeout>>();
     #stopped = false;
     #loadPromise?: Promise<void>;
     #reconnectPromise?: Promise<void>;
@@ -176,6 +177,10 @@ export class WebStore {
             clearTimeout(timeout);
         }
         this.#logRefreshes.clear();
+        for (const timeout of this.#todoRefreshes.values()) {
+            clearTimeout(timeout);
+        }
+        this.#todoRefreshes.clear();
         if (this.#overviewRefresh !== undefined) {
             clearTimeout(this.#overviewRefresh);
         }
@@ -350,6 +355,9 @@ export class WebStore {
         if (event.type.startsWith("approval.")) {
             void this.refreshApprovals(name);
         }
+        if (event.type.startsWith("todo.")) {
+            this.scheduleTodoRefresh(name);
+        }
         if (event.type !== "log.appended") {
             this.scheduleOverviewRefresh();
         }
@@ -377,6 +385,29 @@ export class WebStore {
             });
         } catch (error) {
             this.setPartialFailure(`logs:${name}`, error);
+        }
+    }
+
+    private scheduleTodoRefresh(name: string): void {
+        if (this.#todoRefreshes.has(name)) {
+            return;
+        }
+        const timeout = setTimeout(() => {
+            this.#todoRefreshes.delete(name);
+            void this.refreshTodo(name);
+        }, 250);
+        this.#todoRefreshes.set(name, timeout);
+    }
+
+    private async refreshTodo(name: string): Promise<void> {
+        try {
+            const { todo } = await this.clients.todo.get(name);
+            this.set({
+                ...this.#state,
+                todos: { ...this.#state.todos, [name]: todo },
+            });
+        } catch (error) {
+            this.setPartialFailure(`todos:${name}`, error);
         }
     }
 

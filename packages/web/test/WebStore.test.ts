@@ -120,6 +120,34 @@ describe("WebStore", () => {
         vi.useRealTimers();
     });
 
+    it("refreshes the Todo read model after a Todo stream event", async () => {
+        vi.useFakeTimers();
+        const clients = fakeClients({ subscribe: async () => todoEventStream() });
+        let revision = 1;
+        clients.todo.get = vi.fn(async () => ({
+            lastSeq: 4,
+            todo: {
+                items: [{
+                    id: "task-1",
+                    status: "in_progress",
+                    title: "Refresh browser state",
+                }],
+                revision: revision++,
+                summary: { completed: 0, currentItemId: "task-1", total: 1 },
+            },
+        }));
+        const store = new WebStore(clients);
+
+        await store.load();
+        expect(store.state.todos.demo?.revision).toBe(1);
+        await vi.advanceTimersByTimeAsync(250);
+        await vi.waitFor(() => expect(clients.todo.get).toHaveBeenCalledTimes(2));
+
+        expect(store.state.todos.demo?.revision).toBe(2);
+        store.close();
+        vi.useRealTimers();
+    });
+
     it("polls overview only while online, visible, and observed", async () => {
         vi.useFakeTimers();
         let visible = true;
@@ -247,6 +275,20 @@ function eventStream(): WebRuntimeStream {
             if (!emitted) {
                 emitted = true;
                 return { kind: "event", event: { at: "2026-07-31T00:00:00Z", instanceName: asInstanceName("demo"), seq: 4, type: "instance.statusChanged" } };
+            }
+            return await new Promise<never>(() => undefined);
+        },
+    } as unknown as WebRuntimeStream;
+}
+
+function todoEventStream(): WebRuntimeStream {
+    let emitted = false;
+    return {
+        close() {},
+        next: async () => {
+            if (!emitted) {
+                emitted = true;
+                return { kind: "event", event: { at: "2026-07-31T00:00:00Z", instanceName: asInstanceName("demo"), seq: 4, type: "todo.updated" } };
             }
             return await new Promise<never>(() => undefined);
         },
