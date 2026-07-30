@@ -1,5 +1,5 @@
 {
   "extends": "../../tsconfig.base.json",
-  "compilerOptions": { "composite": false, "rootDir": "../..", "jsx": "react-jsx", "lib": ["ES2022", "DOM"], "outDir": "dist", "types": ["node", "vitest/globals", "vite/client"], "paths": { "@portable-devshell/shared": ["./src/shared-browser.ts"] } },
+  "compilerOptions": { "composite": false, "rootDir": "../..", "jsx": "react-jsx", "lib": ["ES2022", "DOM"], "outDir": "dist", "types": ["node", "vitest/globals"] },
   "include": ["src"]
 }

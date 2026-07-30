@@ -1,16 +1,34 @@
-import type { ChannelProvider, FrameChannel } from "@portable-devshell/shared";
+import type {
+    ChannelProvider,
+    FrameChannel,
+} from "@portable-devshell/shared/browser";
 import { BrowserWebSocketChannel } from "./BrowserWebSocketChannel.js";
 const protocol = "devshell-control-rpc.v1";
 
 export class BrowserWebSocketChannelProvider implements ChannelProvider {
-    constructor(private readonly url = rpcUrl(), private readonly factory: (url: string, protocols: string) => WebSocket = (value, protocols) => new WebSocket(value, protocols)) {}
+    constructor(
+        private readonly url = rpcUrl(),
+        private readonly factory: (
+            url: string,
+            protocols: string,
+        ) => WebSocket = (value, protocols) => new WebSocket(value, protocols),
+    ) {}
     async connect(): Promise<FrameChannel> {
         const socket = this.factory(this.url, protocol);
         const channel = new BrowserWebSocketChannel(socket);
         return await new Promise<FrameChannel>((resolve, reject) => {
-            const offClose = channel.onClose((error) => { offOpen(); reject(error ?? new Error("WebSocket connection closed.")); });
-            const offOpen = () => { socket.removeEventListener("open", opened); };
-            const opened = () => { offOpen(); offClose(); resolve(channel); };
+            const offClose = channel.onClose((error) => {
+                offOpen();
+                reject(error ?? new Error("WebSocket connection closed."));
+            });
+            const offOpen = () => {
+                socket.removeEventListener("open", opened);
+            };
+            const opened = () => {
+                offOpen();
+                offClose();
+                resolve(channel);
+            };
             socket.addEventListener("open", opened);
         });
     }

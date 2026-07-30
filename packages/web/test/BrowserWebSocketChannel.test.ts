@@ -1,9 +1,81 @@
 import { describe, expect, it } from "vitest";
+
 import { BrowserWebSocketChannel } from "../src/rpc/BrowserWebSocketChannel.js";
 
-class FakeSocket extends EventTarget { static CONNECTING = 0; static OPEN = 1; static CLOSING = 2; static CLOSED = 3; readyState = 0; binaryType = ""; sent: Uint8Array[] = []; send(data: Uint8Array) { this.sent.push(data); } close() { this.readyState = 3; this.dispatchEvent(new Event("close")); } open() { this.readyState = 1; this.dispatchEvent(new Event("open")); } message(data: ArrayBuffer | Blob) { this.dispatchEvent(new MessageEvent("message", { data })); } }
-(globalThis as unknown as { WebSocket: typeof FakeSocket }).WebSocket = FakeSocket;
 describe("BrowserWebSocketChannel", () => {
-    it("queues only initial sends and sends one raw JSON frame per WebSocket message", async () => { const socket = new FakeSocket(); const channel = new BrowserWebSocketChannel(socket as never); const sent = channel.send(new TextEncoder().encode('{"name":"service.status"}')); socket.open(); await sent; expect(new TextDecoder().decode(socket.sent[0]!)).toBe('{"name":"service.status"}'); expect(socket.sent[0]![0]).toBe(123); channel.close(); await expect(channel.send(new Uint8Array())).rejects.toThrow("closed"); });
-    it("decodes ArrayBuffer and Blob, unregisters listeners, and closes once", async () => { const socket = new FakeSocket(); const channel = new BrowserWebSocketChannel(socket as never); socket.open(); const frames: string[] = []; let closes = 0; const off = channel.onFrame((frame) => frames.push(new TextDecoder().decode(frame))); channel.onClose(() => closes++); socket.message(new TextEncoder().encode("one").buffer); socket.message(new Blob(["two"])); await new Promise((resolve) => setTimeout(resolve)); off(); socket.message(new TextEncoder().encode("three").buffer); channel.close(); channel.close(); expect(frames).toEqual(["one", "two"]); expect(closes).toBe(1); });
+    it("queues initial raw JSON frames and notifies close once", async () => {
+        const socket = new FakeSocket();
+        const channel = new BrowserWebSocketChannel(
+            socket as unknown as WebSocket,
+        );
+        let closeCount = 0;
+        channel.onClose(() => (closeCount += 1));
+
+        const sent = channel.send(
+            new TextEncoder().encode('{"name":"service.status"}'),
+        );
+        socket.open();
+        await sent;
+        expect(new TextDecoder().decode(socket.sent[0]!)).toBe(
+            '{"name":"service.status"}',
+        );
+        expect(socket.sent[0]![0]).toBe(123);
+
+        socket.serverClose();
+        socket.serverClose();
+        expect(closeCount).toBe(1);
+        await expect(channel.send(new Uint8Array())).rejects.toThrow("closed");
+    });
+
+    it("decodes one binary WebSocket message as one frame", async () => {
+        const socket = new FakeSocket();
+        const channel = new BrowserWebSocketChannel(
+            socket as unknown as WebSocket,
+        );
+        socket.open();
+        const frames: string[] = [];
+        const off = channel.onFrame((frame) =>
+            frames.push(new TextDecoder().decode(frame)),
+        );
+
+        socket.message(new TextEncoder().encode("one").buffer);
+        socket.message(new Blob(["two"]));
+        await new Promise((resolve) => setTimeout(resolve));
+        off();
+        socket.message(new TextEncoder().encode("three").buffer);
+
+        expect(frames).toEqual(["one", "two"]);
+    });
 });
+
+class FakeSocket extends EventTarget {
+    static readonly CONNECTING = 0;
+    static readonly OPEN = 1;
+    static readonly CLOSING = 2;
+    static readonly CLOSED = 3;
+    binaryType = "";
+    readyState = FakeSocket.CONNECTING;
+    sent: Uint8Array[] = [];
+
+    send(data: Uint8Array): void {
+        this.sent.push(data);
+    }
+
+    close(): void {
+        this.serverClose();
+    }
+
+    open(): void {
+        this.readyState = FakeSocket.OPEN;
+        this.dispatchEvent(new Event("open"));
+    }
+
+    serverClose(): void {
+        this.readyState = FakeSocket.CLOSED;
+        this.dispatchEvent(new Event("close"));
+    }
+
+    message(data: ArrayBuffer | Blob): void {
+        this.dispatchEvent(new MessageEvent("message", { data }));
+    }
+}
