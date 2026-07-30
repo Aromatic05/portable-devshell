@@ -58,6 +58,35 @@ describe("WebStore", () => {
         expect(store.state.connection).toBe("online");
     });
 
+    it("abandons an obsolete load when reconnecting", async () => {
+        let releaseFirstHello!: () => void;
+        const firstHello = new Promise<{ capabilities: string[]; protocolVersion: number }>((resolve) => {
+            releaseFirstHello = () => resolve({ capabilities: ["request"], protocolVersion: 1 });
+        });
+        const subscriptions: number[] = [];
+        const clients = fakeClients({
+            subscribe: async (_name, fromSeq) => {
+                subscriptions.push(fromSeq);
+                return pendingStream();
+            },
+        });
+        clients.service.hello = vi.fn()
+            .mockReturnValueOnce(firstHello)
+            .mockResolvedValue({ capabilities: ["request"], protocolVersion: 1 });
+        const store = new WebStore(clients);
+
+        const initialLoad = store.load();
+        await Promise.resolve();
+        await store.reconnect();
+        releaseFirstHello();
+        await initialLoad;
+
+        expect(clients.service.hello).toHaveBeenCalledTimes(2);
+        expect(subscriptions).toEqual([3]);
+        expect(store.state.connection).toBe("online");
+        store.close();
+    });
+
     it("refreshes and resubscribes after stream.gap", async () => {
         let count = 0;
         const subscriptions: number[] = [];

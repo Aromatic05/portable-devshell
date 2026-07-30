@@ -54,7 +54,9 @@ export class WebStore {
     #todoRefreshes = new Map<string, ReturnType<typeof setTimeout>>();
     #stopped = false;
     #loadPromise?: Promise<void>;
+    #loadGeneration?: number;
     #reconnectPromise?: Promise<void>;
+    #generation = 0;
     #overviewRefresh?: ReturnType<typeof setTimeout>;
     #overviewPoll?: ReturnType<typeof setInterval>;
     #overviewPromise?: Promise<void>;
@@ -84,11 +86,20 @@ export class WebStore {
     }
 
     async load(): Promise<void> {
-        if (this.#loadPromise !== undefined) {
+        if (this.#stopped) {
+            return;
+        }
+        const generation = this.#generation;
+        if (this.#loadPromise !== undefined && this.#loadGeneration === generation) {
             return await this.#loadPromise;
         }
-        this.#loadPromise = this.loadCurrent().finally(() => {
-            this.#loadPromise = undefined;
+        const request = this.loadCurrent(generation);
+        this.#loadGeneration = generation;
+        this.#loadPromise = request.finally(() => {
+            if (this.#loadGeneration === generation) {
+                this.#loadPromise = undefined;
+                this.#loadGeneration = undefined;
+            }
         });
         return await this.#loadPromise;
     }
@@ -172,6 +183,7 @@ export class WebStore {
             return;
         }
         this.#stopped = true;
+        this.#generation += 1;
         this.closeStreams();
         for (const timeout of this.#logRefreshes.values()) {
             clearTimeout(timeout);
@@ -188,7 +200,10 @@ export class WebStore {
         this.clients.close();
     }
 
-    private async loadCurrent(): Promise<void> {
+    private async loadCurrent(generation: number): Promise<void> {
+        if (!this.isCurrent(generation)) {
+            return;
+        }
         this.set({
             ...this.#state,
             connection: "connecting",
@@ -196,6 +211,9 @@ export class WebStore {
         });
         try {
             const hello = await this.clients.service.hello();
+            if (!this.isCurrent(generation)) {
+                return;
+            }
             if (hello.protocolVersion !== CONTROL_PROTOCOL_VERSION) {
                 throw new Error(
                     `Incompatible control protocol version: ${hello.protocolVersion}.`,
@@ -207,6 +225,9 @@ export class WebStore {
                 this.clients.mcp.status(),
                 this.clients.overview.get(),
             ]);
+            if (!this.isCurrent(generation)) {
+                return;
+            }
             const oauthApprovals =
                 mcpStatus.authMode === "oauth2" && mcpStatus.oauthReady === true
                     ? await this.clients.mcp.listApprovals()
@@ -232,6 +253,9 @@ export class WebStore {
                     }
                 }),
             );
+            if (!this.isCurrent(generation)) {
+                return;
+            }
             this.set({
                 ...this.#state,
                 connection: "online",
@@ -246,10 +270,13 @@ export class WebStore {
             this.startOverviewPolling();
             await Promise.all(
                 instances.map(({ name, snapshot }) =>
-                    this.beginSubscription(name, snapshot.lastSeq),
+                    this.beginSubscription(name, snapshot.lastSeq, generation),
                 ),
             );
         } catch (error) {
+            if (!this.isCurrent(generation)) {
+                return;
+            }
             this.stopOverviewPolling();
             this.set({
                 ...this.#state,
@@ -260,12 +287,19 @@ export class WebStore {
     }
 
     private async reconnectCurrent(): Promise<void> {
+        this.#generation += 1;
         this.closeStreams();
         this.stopOverviewPolling();
         try {
             await this.clients.reconnect();
+            if (this.#stopped) {
+                return;
+            }
             await this.load();
         } catch (error) {
+            if (this.#stopped) {
+                return;
+            }
             this.set({
                 ...this.#state,
                 connection: "offline",
@@ -277,20 +311,24 @@ export class WebStore {
     private async beginSubscription(
         name: string,
         fromSeq: number,
+        generation = this.#generation,
     ): Promise<void> {
-        if (this.#stopped) {
+        if (!this.isCurrent(generation)) {
             return;
         }
         this.#streams.get(name)?.close();
         try {
             const stream = await this.clients.runtime.subscribe(name, fromSeq);
-            if (this.#stopped) {
+            if (!this.isCurrent(generation)) {
                 stream.close();
                 return;
             }
             this.#streams.set(name, stream);
             void this.consume(name, stream);
         } catch (error) {
+            if (!this.isCurrent(generation)) {
+                return;
+            }
             this.set({
                 ...this.#state,
                 connection: "offline",
@@ -536,7 +574,14 @@ export class WebStore {
         return partialFailures;
     }
 
+    private isCurrent(generation: number): boolean {
+        return !this.#stopped && this.#generation === generation;
+    }
+
     private set(state: WebState): void {
+        if (this.#stopped) {
+            return;
+        }
         this.#state = state;
         for (const listener of this.#listeners) {
             listener();
