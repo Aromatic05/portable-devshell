@@ -80,11 +80,37 @@ test("operational overview prioritizes failures, approvals, activity, and todos 
         now: () => now,
         oauthApprovals: () => ({ list: async () => [{ id: "oauth-1" }] }),
         processId: () => 42,
+        systemCollector: {
+            async collect() {
+                return {
+                    alerts: [],
+                    system: {
+                        cpuCount: 8,
+                        cpuPercent: 12.5,
+                        load1m: 1.25,
+                        memoryAvailableBytes: 750,
+                        memoryPercent: 25,
+                        memoryTotalBytes: 1_000
+                    }
+                };
+            }
+        },
         uptimeSeconds: () => 90.8
     }).read();
 
     assert.equal(overview.health, "critical");
-    assert.deepEqual(overview.controller, { pid: 42, uptimeSeconds: 90 });
+    assert.deepEqual(overview.controller, {
+        pid: 42,
+        system: {
+            cpuCount: 8,
+            cpuPercent: 12.5,
+            load1m: 1.25,
+            memoryAvailableBytes: 750,
+            memoryPercent: 25,
+            memoryTotalBytes: 1_000
+        },
+        uptimeSeconds: 90
+    });
     assert.deepEqual(overview.counts, {
         activeTodos: 1,
         failedCalls24h: 1,
@@ -213,6 +239,42 @@ test("operational overview coalesces concurrent reads without caching later refr
     assert.deepEqual(await first, await second);
     await service.read();
     assert.equal(collectCount, 2);
+});
+
+test("controller resource alerts participate in overall health", async () => {
+    const service = new OperationalOverviewService({
+        instances: { list: () => [] },
+        now: () => now,
+        systemCollector: {
+            async collect() {
+                return {
+                    alerts: [{
+                        detail: "96% used",
+                        id: "controller.diskPressure",
+                        kind: "controller.diskPressure" as const,
+                        severity: "critical" as const,
+                        title: "Controller disk pressure"
+                    }],
+                    system: {
+                        cpuCount: 4,
+                        diskAvailableBytes: 40,
+                        diskPath: "/state",
+                        diskPercent: 96,
+                        diskTotalBytes: 1_000,
+                        memoryAvailableBytes: 500,
+                        memoryPercent: 50,
+                        memoryTotalBytes: 1_000
+                    }
+                };
+            }
+        }
+    });
+
+    const overview = await service.read();
+
+    assert.equal(overview.health, "critical");
+    assert.equal(overview.alerts[0]?.kind, "controller.diskPressure");
+    assert.equal(overview.controller.system?.diskPercent, 96);
 });
 
 test("operational overview isolates snapshot and todo collection failures per instance", async () => {

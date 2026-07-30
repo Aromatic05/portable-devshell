@@ -50,11 +50,23 @@ function buildHealthBox(
 ): BoxModel {
     const overview = state.operationalOverview!;
     const counts = overview.counts;
+    const system = overview.controller.system;
     return makeBox(state, "overview", undefined, {
         detailLines: [
             formatField("Generated", overview.generatedAt),
             formatField("Controller PID", String(overview.controller.pid)),
             formatField("Uptime", formatDuration(overview.controller.uptimeSeconds)),
+            ...(system === undefined ? [] : [
+                formatField("CPU", `${formatPercent(system.cpuPercent)} · ${system.cpuCount} cores`),
+                formatField("Load 1m", system.load1m === undefined ? "—" : String(system.load1m)),
+                formatField("Memory", `${formatPercent(system.memoryPercent)} · ${formatBytes(system.memoryAvailableBytes)} available`),
+                ...(system.diskPercent === undefined
+                    ? []
+                    : [formatField("Disk", `${formatPercent(system.diskPercent)} · ${formatBytes(system.diskAvailableBytes ?? 0)} available`)]),
+                ...(system.diskPath === undefined
+                    ? []
+                    : [formatField("Disk path", shortenPath(system.diskPath))])
+            ]),
             formatField("Instances", `${counts.instancesReady}/${counts.instancesTotal} ready`),
             formatField("Critical", String(counts.instancesCritical)),
             formatField("Attention", String(counts.instancesAttention)),
@@ -78,7 +90,9 @@ function buildHealthBox(
             compactSummary(
                 ["critical", String(counts.instancesCritical)],
                 ["failures24h", String(counts.failedCalls24h)],
-                ["todos", String(counts.activeTodos)]
+                ["cpu", formatPercent(system?.cpuPercent)],
+                ["mem", formatPercent(system?.memoryPercent)],
+                ["disk", formatPercent(system?.diskPercent)]
             )
         ],
         title: "Operational Health"
@@ -335,4 +349,21 @@ function formatDuration(seconds: number): string {
     if (hours > 0) return `${hours}h ${minutes}m`;
     if (minutes > 0) return `${minutes}m`;
     return `${seconds}s`;
+}
+
+function formatPercent(value: number | undefined): string {
+    return value === undefined ? "—" : `${value}%`;
+}
+
+function formatBytes(bytes: number): string {
+    if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
+    const units = ["B", "KiB", "MiB", "GiB", "TiB"];
+    let value = bytes;
+    let unit = 0;
+    while (value >= 1024 && unit < units.length - 1) {
+        value /= 1024;
+        unit += 1;
+    }
+    const digits = value >= 100 || unit === 0 ? 0 : value >= 10 ? 1 : 2;
+    return `${value.toFixed(digits)} ${units[unit]}`;
 }

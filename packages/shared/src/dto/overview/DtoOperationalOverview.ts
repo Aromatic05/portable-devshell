@@ -9,8 +9,22 @@ import type {
 export type OperationalHealth = "healthy" | "attention" | "critical";
 export type OperationalAlertSeverity = "attention" | "critical";
 
+export interface OperationalOverviewSystem {
+    cpuCount: number;
+    cpuPercent?: number;
+    diskAvailableBytes?: number;
+    diskPath?: string;
+    diskPercent?: number;
+    diskTotalBytes?: number;
+    load1m?: number;
+    memoryAvailableBytes: number;
+    memoryPercent: number;
+    memoryTotalBytes: number;
+}
+
 export interface OperationalOverviewController {
     pid: number;
+    system?: OperationalOverviewSystem;
     uptimeSeconds: number;
 }
 
@@ -56,6 +70,8 @@ export interface OperationalOverviewAlert {
         | "activity.failed"
         | "approval.oauthPending"
         | "approval.pending"
+        | "controller.diskPressure"
+        | "controller.memoryPressure"
         | "instance.attention"
         | "instance.failed"
         | "overview.partial"

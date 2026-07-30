@@ -9,6 +9,10 @@ import {
     type OperationalOverviewInstanceCollection
 } from "./OperationalOverviewInstanceCollector.js";
 import {
+    OperationalOverviewSystemCollector,
+    type OperationalOverviewSystemCollection
+} from "./OperationalOverviewSystemCollector.js";
+import {
     createCollectionFailure,
     isCriticalSnapshot,
     readOperationalHealth,
@@ -32,12 +36,17 @@ export interface OperationalOverviewInstanceCollectorPort {
     ): Promise<OperationalOverviewInstanceCollection>;
 }
 
+export interface OperationalOverviewSystemCollectorPort {
+    collect(): Promise<OperationalOverviewSystemCollection>;
+}
+
 export interface OperationalOverviewServiceOptions {
     instanceCollector?: OperationalOverviewInstanceCollectorPort;
     instances: OperationalOverviewRegistryPort;
     now?: () => Date;
     oauthApprovals?: () => OperationalOverviewApprovalPort | undefined;
     processId?: () => number;
+    systemCollector?: OperationalOverviewSystemCollectorPort;
     uptimeSeconds?: () => number;
 }
 
@@ -48,6 +57,7 @@ export class OperationalOverviewService {
     readonly #now: () => Date;
     readonly #oauthApprovals: () => OperationalOverviewApprovalPort | undefined;
     readonly #processId: () => number;
+    readonly #systemCollector: OperationalOverviewSystemCollectorPort;
     readonly #uptimeSeconds: () => number;
 
     constructor(options: OperationalOverviewServiceOptions) {
@@ -57,6 +67,7 @@ export class OperationalOverviewService {
         this.#now = options.now ?? (() => new Date());
         this.#oauthApprovals = options.oauthApprovals ?? (() => undefined);
         this.#processId = options.processId ?? (() => process.pid);
+        this.#systemCollector = options.systemCollector ?? new OperationalOverviewSystemCollector();
         this.#uptimeSeconds = options.uptimeSeconds ?? (() => process.uptime());
     }
 
@@ -77,12 +88,17 @@ export class OperationalOverviewService {
 
     async #collect(): Promise<OperationalOverview> {
         const now = this.#now();
-        const collections = await Promise.all(
-            this.#instances.list().map(async (descriptor) =>
-                await this.#instanceCollector.collect(descriptor, now)
-            )
-        );
+        const [collections, systemResult, oauthResult] = await Promise.all([
+            Promise.all(
+                this.#instances.list().map(async (descriptor) =>
+                    await this.#instanceCollector.collect(descriptor, now)
+                )
+            ),
+            this.#collectSystem(),
+            this.#collectOAuthApprovals()
+        ]);
         const alerts = collections.flatMap((collection) => collection.alerts);
+        alerts.push(...systemResult.alerts);
         const instances = collections
             .map((collection) => collection.instance)
             .sort((left, right) => left.name.localeCompare(right.name));
@@ -97,7 +113,6 @@ export class OperationalOverviewService {
             (total, instance) => total + instance.pendingApprovals,
             0
         );
-        const oauthResult = await this.#collectOAuthApprovals();
         pendingApprovals += oauthResult.count;
         alerts.push(...oauthResult.alerts);
         sortOperationalAlerts(alerts);
@@ -107,6 +122,7 @@ export class OperationalOverviewService {
             alerts,
             controller: {
                 pid: this.#processId(),
+                ...(systemResult.system === undefined ? {} : { system: systemResult.system }),
                 uptimeSeconds: Math.max(0, Math.floor(this.#uptimeSeconds()))
             },
             counts: {
@@ -130,6 +146,19 @@ export class OperationalOverviewService {
             instances,
             todos
         };
+    }
+
+    async #collectSystem(): Promise<{
+        alerts: OperationalOverviewAlert[];
+        system?: OperationalOverviewSystemCollection["system"];
+    }> {
+        try {
+            return await this.#systemCollector.collect();
+        } catch (error) {
+            return {
+                alerts: [createCollectionFailure(undefined, "controller resources", error)]
+            };
+        }
     }
 
     async #collectOAuthApprovals(): Promise<{

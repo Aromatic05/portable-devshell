@@ -33,6 +33,18 @@ const overview: OperationalOverview = {
     }],
     controller: {
         pid: 42,
+        system: {
+            cpuCount: 8,
+            cpuPercent: 12.5,
+            diskAvailableBytes: 600,
+            diskPath: "/home/aromatic",
+            diskPercent: 40,
+            diskTotalBytes: 1_000,
+            load1m: 1.25,
+            memoryAvailableBytes: 750,
+            memoryPercent: 25,
+            memoryTotalBytes: 1_000
+        },
         uptimeSeconds: 3_720
     },
     counts: {
@@ -92,6 +104,18 @@ test("overview page prioritizes health and alerts before read-only operational d
         ]
     );
     assert.equal(model.boxes[0]?.status, "failed");
+    assert.equal(
+        model.boxes[0]?.expandedLines.some((line) => line.text.includes("CPU") && line.text.includes("12.5%")),
+        true
+    );
+    assert.equal(
+        model.boxes[0]?.expandedLines.some((line) => line.text.includes("Memory") && line.text.includes("25%")),
+        true
+    );
+    assert.equal(
+        model.boxes[0]?.expandedLines.some((line) => line.text.includes("Disk") && line.text.includes("40%")),
+        true
+    );
     assert.equal(model.boxes[1]?.severity, "danger");
     assert.equal(selectMainScrollKey(store.getState()), "overview:-:main");
     assert.equal(
