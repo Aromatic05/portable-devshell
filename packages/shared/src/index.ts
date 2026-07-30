@@ -19,6 +19,7 @@ export * from "./dto/tool/DtoToolDefinition.js";
 export * from "./error/ErrorBodyControl.js";
 export * from "./error/ErrorCodeCatalog.js";
 export * from "./error/ErrorFactoryCreate.js";
+export * from "./hint/index.js";
 export * from "./schema/SchemaTool.js";
 export * from "./transport/Channel.js";
 export * from "./transport/Codec.js";
