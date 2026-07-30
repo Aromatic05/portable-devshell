@@ -1,4 +1,6 @@
-import type {
+import {
+    asInstanceName,
+    type InstanceSnapshot,
     OperationalOverviewActivity,
     OperationalOverviewAlert,
     OperationalOverviewInstance,
@@ -11,7 +13,7 @@ import {
     createRecentFailureAlert,
     createSnapshotAlerts,
     createTodoAlerts,
-    toOperationalActivity
+    selectOperationalActivity
 } from "./OperationalOverviewPolicy.js";
 
 export interface OperationalOverviewInstanceCollection {
@@ -33,17 +35,22 @@ export class OperationalOverviewInstanceCollector {
         descriptor: InstanceDescriptor,
         now: Date
     ): Promise<OperationalOverviewInstanceCollection> {
-        const snapshot = descriptor.worker.snapshot();
+        const snapshot = readSnapshot(descriptor);
         const alerts = createSnapshotAlerts(snapshot.name, snapshot);
-        const todos = descriptor.todo.summaries().map((todo) => ({
-            ...todo,
-            instance: snapshot.name
-        }));
+        let todos: OperationalOverviewTodo[] = [];
+        try {
+            todos = descriptor.todo.summaries().map((todo) => ({
+                ...todo,
+                instance: snapshot.name
+            }));
+        } catch (error) {
+            alerts.push(createCollectionFailure(snapshot.name, "todo summaries", error));
+        }
         alerts.push(...createTodoAlerts(snapshot.name, todos));
 
         const [approvalsResult, callsResult] = await Promise.allSettled([
             descriptor.worker.listApprovals(),
-            descriptor.worker.readToolCalls({ limit: this.#activityLimit })
+            descriptor.worker.readToolCalls()
         ]);
         const pendingApprovals = approvalsResult.status === "fulfilled"
             ? approvalsResult.value.length
@@ -80,7 +87,7 @@ export class OperationalOverviewInstanceCollector {
         }
 
         return {
-            activity: calls.map(toOperationalActivity),
+            activity: selectOperationalActivity(calls, this.#activityLimit),
             alerts,
             failedCalls24h: recentFailure.count,
             instance: {
@@ -92,6 +99,24 @@ export class OperationalOverviewInstanceCollector {
                 ...(descriptor.workspace === undefined ? {} : { workspace: descriptor.workspace })
             },
             todos
+        };
+    }
+}
+
+function readSnapshot(descriptor: InstanceDescriptor): InstanceSnapshot {
+    try {
+        return descriptor.worker.snapshot();
+    } catch (error) {
+        const name = asInstanceName(descriptor.name);
+        const failure = createCollectionFailure(name, "instance snapshot", error);
+        return {
+            connectionState: "failed",
+            daemonState: "failed",
+            lastErrorMessage: failure.detail,
+            lastSeq: 0,
+            name,
+            ready: false,
+            status: "failed"
         };
     }
 }

@@ -111,6 +111,151 @@ test("operational overview prioritizes failures, approvals, activity, and todos 
     assert.equal("output" in overview.activity[0]!, false);
 });
 
+test("operational overview counts the full 24 hour failure window while bounding activity", async () => {
+    const completedCalls: ToolCallRecord[] = Array.from({ length: 25 }, (_, index) => {
+        const timestamp = new Date(now.getTime() - index * 60_000).toISOString();
+        return {
+            callId: `completed-${index}`,
+            completedAt: timestamp,
+            inputSummary: "completed call",
+            instance: asInstanceName("busy-one"),
+            source: "mcp",
+            startedAt: timestamp,
+            status: "completed",
+            toolName: "bash_run"
+        };
+    });
+    const olderFailure: ToolCallRecord = {
+        callId: "older-failure",
+        completedAt: new Date(now.getTime() - 23 * 60 * 60 * 1_000).toISOString(),
+        error: "failed before the latest twenty calls",
+        inputSummary: "older failed call",
+        instance: asInstanceName("busy-one"),
+        source: "mcp",
+        startedAt: new Date(now.getTime() - 23 * 60 * 60 * 1_000 - 1_000).toISOString(),
+        status: "failed",
+        toolName: "bash_run"
+    };
+    const futureFailure: ToolCallRecord = {
+        ...olderFailure,
+        callId: "future-failure",
+        completedAt: new Date(now.getTime() + 60_000).toISOString(),
+        startedAt: new Date(now.getTime() + 59_000).toISOString()
+    };
+    const descriptor = createTestInstanceDescriptor({
+        listApprovals: async () => [],
+        readToolCalls: async () => [olderFailure, futureFailure, ...completedCalls],
+        snapshot: () => ({
+            connectionState: "connected",
+            daemonState: "running",
+            lastSeq: 1,
+            name: asInstanceName("busy-one"),
+            ready: true,
+            status: "ready"
+        })
+    } as never, { name: "busy-one" });
+
+    const overview = await new OperationalOverviewService({
+        instances: { list: () => [descriptor] },
+        now: () => now
+    }).read();
+
+    assert.equal(overview.counts.failedCalls24h, 1);
+    assert.equal(overview.activity.length, 20);
+    assert.equal(overview.activity.some((activity) => activity.callId === "older-failure"), false);
+    assert.equal(overview.activity[0]?.callId, "future-failure");
+});
+
+test("operational overview coalesces concurrent reads without caching later refreshes", async () => {
+    const descriptor = createTestInstanceDescriptor({} as never, { name: "coalesced-one" });
+    let collectCount = 0;
+    let releaseFirst!: () => void;
+    const firstGate = new Promise<void>((resolve) => {
+        releaseFirst = resolve;
+    });
+    const service = new OperationalOverviewService({
+        instanceCollector: {
+            async collect() {
+                collectCount += 1;
+                if (collectCount === 1) {
+                    await firstGate;
+                }
+                return {
+                    activity: [],
+                    alerts: [],
+                    failedCalls24h: 0,
+                    instance: {
+                        mcpEnabled: false,
+                        name: asInstanceName("coalesced-one"),
+                        pendingApprovals: 0,
+                        provider: "local",
+                        snapshot: {
+                            connectionState: "connected",
+                            daemonState: "running",
+                            lastSeq: 1,
+                            name: asInstanceName("coalesced-one"),
+                            ready: true,
+                            status: "ready"
+                        }
+                    },
+                    todos: []
+                };
+            }
+        },
+        instances: { list: () => [descriptor] },
+        now: () => now
+    });
+
+    const first = service.read();
+    const second = service.read();
+    assert.equal(collectCount, 1);
+    releaseFirst();
+    assert.deepEqual(await first, await second);
+    await service.read();
+    assert.equal(collectCount, 2);
+});
+
+test("operational overview isolates snapshot and todo collection failures per instance", async () => {
+    const snapshotBroken = createTestInstanceDescriptor({
+        listApprovals: async () => [],
+        readToolCalls: async () => [],
+        snapshot: () => {
+            throw new Error("snapshot unavailable");
+        }
+    } as never, { name: "snapshot-broken" });
+    const todoBroken = createTestInstanceDescriptor({
+        listApprovals: async () => [],
+        readToolCalls: async () => [],
+        snapshot: () => ({
+            connectionState: "connected",
+            daemonState: "running",
+            lastSeq: 1,
+            name: asInstanceName("todo-broken"),
+            ready: true,
+            status: "ready"
+        })
+    } as never, {
+        name: "todo-broken",
+        todo: {
+            ...createTestTodoPort(),
+            summaries: () => {
+                throw new Error("todo store unavailable");
+            }
+        }
+    });
+
+    const overview = await new OperationalOverviewService({
+        instances: { list: () => [snapshotBroken, todoBroken] },
+        now: () => now
+    }).read();
+
+    assert.equal(overview.health, "critical");
+    assert.equal(overview.instances.length, 2);
+    assert.equal(overview.instances.find((instance) => instance.name === "snapshot-broken")?.snapshot.status, "failed");
+    assert.ok(overview.alerts.some((alert) => alert.kind === "instance.failed" && alert.instance === "snapshot-broken"));
+    assert.ok(overview.alerts.some((alert) => alert.kind === "overview.partial" && alert.instance === "todo-broken"));
+});
+
 test("operational overview remains available when one collection source fails", async () => {
     const descriptor = createTestInstanceDescriptor({
         listApprovals: async () => {

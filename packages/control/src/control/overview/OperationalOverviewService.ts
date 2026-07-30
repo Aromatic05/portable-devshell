@@ -42,6 +42,7 @@ export interface OperationalOverviewServiceOptions {
 }
 
 export class OperationalOverviewService {
+    #inFlight?: Promise<OperationalOverview>;
     readonly #instanceCollector: OperationalOverviewInstanceCollectorPort;
     readonly #instances: OperationalOverviewRegistryPort;
     readonly #now: () => Date;
@@ -60,6 +61,21 @@ export class OperationalOverviewService {
     }
 
     async read(): Promise<OperationalOverview> {
+        if (this.#inFlight !== undefined) {
+            return await this.#inFlight;
+        }
+        const request = this.#collect();
+        this.#inFlight = request;
+        try {
+            return await request;
+        } finally {
+            if (this.#inFlight === request) {
+                this.#inFlight = undefined;
+            }
+        }
+    }
+
+    async #collect(): Promise<OperationalOverview> {
         const now = this.#now();
         const collections = await Promise.all(
             this.#instances.list().map(async (descriptor) =>

@@ -97,6 +97,16 @@ export function toOperationalActivity(
     };
 }
 
+export function selectOperationalActivity(
+    records: readonly ToolCallRecord[],
+    limit: number
+): OperationalOverviewActivity[] {
+    return [...records]
+        .sort((left, right) => right.startedAt.localeCompare(left.startedAt))
+        .slice(0, Math.max(0, limit))
+        .map(toOperationalActivity);
+}
+
 export function createCollectionFailure(
     instance: OperationalOverviewAlert["instance"],
     subject: string,
@@ -139,7 +149,8 @@ function isRecentFailure(record: ToolCallRecord, now: Date): boolean {
         return false;
     }
     const timestamp = Date.parse(record.completedAt ?? record.startedAt);
-    return Number.isFinite(timestamp) && now.getTime() - timestamp <= failureWindowMs;
+    const age = now.getTime() - timestamp;
+    return Number.isFinite(timestamp) && age >= 0 && age <= failureWindowMs;
 }
 
 function describeSnapshot(snapshot: InstanceSnapshot): string {
