@@ -7,7 +7,7 @@ import {
 export function createTuiClientTodo(connection: ClientConnection) {
     const todo = instanceClientModule(connection, "todo");
     return {
-        addComment: (instance: string, text: string): Promise<void> => todo.request(instance, "addComment", { text }),
+        addComment: (instance: string, ctxId: string, text: string): Promise<void> => todo.request(instance, "addComment", { ctxId, text }),
         deleteComment: (instance: string, id: string): Promise<void> => todo.request(instance, "deleteComment", { id }),
         get: (instance: string): Promise<TodoRpcEnvelope> => todo.request(instance, "get")
     };

@@ -87,8 +87,8 @@ export class TuiCommandDispatcherDetail {
 
             const button = actionId?.startsWith("button:") ? actionId.slice("button:".length) : undefined;
 
-            if (state.ui.selectedPage === "todo" && state.ui.selectedInstance !== undefined && button === "add-comment") {
-                return await this.#dispatch({ instance: state.ui.selectedInstance, toolName: "__todo_comment", type: "toolForm.open" });
+            if (state.ui.selectedPage === "todo" && state.ui.selectedInstance !== undefined && button?.startsWith("add-comment:")) {
+                return await this.#dispatch({ instance: state.ui.selectedInstance, toolName: `__todo_comment:${button.slice("add-comment:".length)}`, type: "toolForm.open" });
             }
             if (state.ui.selectedPage === "todo" && state.ui.selectedInstance !== undefined && button?.startsWith("delete-comment:")) {
                 await (this.#onTodoCommentDelete ?? missingTodoCommentHandler)(state.ui.selectedInstance, button.slice("delete-comment:".length));

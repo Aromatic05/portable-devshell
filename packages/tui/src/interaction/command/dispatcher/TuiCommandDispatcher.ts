@@ -49,7 +49,7 @@ export interface TuiCommandDispatcherOptions {
         toolName: string,
         input: string
     ): Promise<boolean>;
-    onTodoComment?(instance: string, text: string): Promise<void>;
+    onTodoComment?(instance: string, ctxId: string, text: string): Promise<void>;
     onTodoCommentDelete?(instance: string, id: string): Promise<void>;
     onApplyConfig?(): Promise<JsonValue>;
     onControlRestart?(): Promise<void>;
@@ -242,7 +242,7 @@ export class TuiCommandDispatcher {
                 this.#store.setToolForm(
                     intent.instance,
                     intent.toolName,
-                    intent.toolName === "__todo_comment" ? "" : '{"command":""}'
+                    intent.toolName.startsWith("__todo_comment:") ? "" : '{"command":""}'
                 );
                 return true;
             case "toolForm.append":
@@ -396,9 +396,9 @@ export class TuiCommandDispatcher {
         if (form === undefined) {
             return false;
         }
-        if (form.toolName === "__todo_comment") {
+        if (form.toolName.startsWith("__todo_comment:")) {
             if (form.input.trim().length === 0) return false;
-            await (this.#options.onTodoComment ?? unavailable)(form.instance, form.input.trim());
+            await (this.#options.onTodoComment ?? unavailable)(form.instance, form.toolName.slice("__todo_comment:".length), form.input.trim());
             this.#store.clearToolForm();
             this.#focusManager.restore();
             return true;
