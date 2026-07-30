@@ -22,6 +22,7 @@ import {
 } from "../tool/catalog/McpToolCatalogEnvironment.js";
 import { McpToolCatalogInstance } from "../tool/catalog/McpToolCatalogInstance.js";
 import { McpToolCatalogTodo } from "../tool/catalog/McpToolCatalogTodo.js";
+import { withMcpCommentOutputSchema } from "./McpEndpointFeedback.js";
 import {
     withMcpContextId,
     withMcpInstanceTarget
@@ -115,7 +116,7 @@ export class McpEndpointCatalog {
     adapt(tool: ToolDefinition): McpTool {
         const exposed = tool.name === mcpEnvironmentToolName
             ? tool
-            : withMcpContextId(tool);
+            : withMcpCommentOutputSchema(withMcpContextId(tool));
         return this.#schemaAdapter.toMcpTool(
             exposed,
             this.#descriptionEnhancer.enhance(exposed.description)

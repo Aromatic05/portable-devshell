@@ -131,6 +131,12 @@ test("tools/call delegates to WorkerInstance.callTool", async () => {
             toolName: "bash_run"
         });
         assert.equal(response.body.result?.isError, false);
+        assert.deepEqual(response.body.result?.structuredContent, {
+            comment: [],
+            exitCode: 0,
+            stderr: "",
+            stdout: "/workspace\n"
+        });
     } finally {
         await server.close();
         await binding.close();
@@ -164,8 +170,19 @@ test("tools/call delivers only comments bound to its ctxId", async () => {
             session.headers
         );
 
-        assert.deepEqual(target.body.result?.structuredContent?.comment, ["Use the project convention."]);
-        assert.deepEqual(other.body.result?.structuredContent?.comment, []);
+        assert.deepEqual(target.body.result?.structuredContent, {
+            comment: ["Use the project convention."],
+            exitCode: 0,
+            stderr: "",
+            stdout: "/workspace\n"
+        });
+        assert.deepEqual(other.body.result?.structuredContent, {
+            comment: [],
+            exitCode: 0,
+            stderr: "",
+            stdout: "/workspace\n"
+        });
+        assert.equal(target.body.result?.structuredContent?.result, undefined);
         assert.deepEqual(commentCtxIds, [targetCtxId, otherCtxId]);
     } finally {
         await server.close();
@@ -196,7 +213,48 @@ test("tools/call returns ctxId comments when the tool fails", async () => {
         );
 
         assert.equal(response.status, 200);
-        assert.deepEqual(response.body.error?.data?.comment, ["Check the generated files before retrying."]);
+        assert.deepEqual(response.body.error?.data?.comment, [
+            "Check the generated files before retrying.",
+            "Error hint [error.unknown]: The tool call failed for an unclassified reason. Inspect the original error and current state before taking further action; do not report completion or retry the same operation unchanged."
+        ]);
+    } finally {
+        await server.close();
+        await binding.close();
+    }
+});
+
+test("tools/call appends a worker result hint after user comments and keeps the flat shape", async () => {
+    const harness = createWorkerHarness({
+        result: { exitCode: 7, stderr: "boom", stdout: "", termination: "exited" }
+    });
+    const binding = createBinding(harness, {
+        async todoCommentsFor() {
+            return ["Do not change permissions globally."];
+        }
+    });
+    const server = await createBindingServer(binding);
+
+    try {
+        const session = await initialize(server.url);
+        const ctxId = await createContext(server.url, session.headers);
+        const response = await postJson(
+            server.url,
+            withToolContext(await readFixture("mcp-tools-call.json"), ctxId),
+            session.headers
+        );
+
+        assert.equal(response.status, 200);
+        const structured = response.body.result?.structuredContent;
+        assert.equal(structured?.exitCode, 7);
+        assert.equal(structured?.stderr, "boom");
+        assert.equal(structured?.result, undefined);
+        assert.deepEqual(structured?.comment, [
+            "Do not change permissions globally.",
+            "Error hint [bash.nonZeroExit]: The command ran but exited with code 7. Inspect the original stdout and stderr, then correct the command, dependencies, input, or environment before calling again. Do not report completion or retry the same command unchanged."
+        ]);
+        for (const entry of structured?.comment as string[]) {
+            assert.equal(entry.includes("boom"), false);
+        }
     } finally {
         await server.close();
         await binding.close();
@@ -496,6 +554,7 @@ test("instance_list returns object structured content through SDK transport", as
         assert.equal(response.status, 200);
         assert.equal(response.body.error, undefined);
         assert.deepEqual(response.body.result?.structuredContent, {
+            comment: [],
             instances: [{ name: "demo" }]
         });
     } finally {
@@ -566,6 +625,7 @@ test("artifact_viewImage returns native image content over SDK transport", async
         ]);
         assert.deepEqual(response.body.result?.structuredContent, {
             bytes: 68,
+            comment: [],
             mediaType: "image/png",
             name: "pixel.png",
             source: { instance: "demo", path: "./pixel.png", type: "file" }

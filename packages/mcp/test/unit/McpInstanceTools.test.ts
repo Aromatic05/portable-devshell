@@ -111,10 +111,10 @@ test("worker calls default to the endpoint instance and route explicit targets t
     });
     const endpoint = createManagedEndpoint(worker, gateway);
 
-    assert.deepEqual(await endpoint.callTool("bash_run", withContext({ command: "pwd" }), context), { local: true });
+    assert.deepEqual(await endpoint.callTool("bash_run", withContext({ command: "pwd" }), context), { comment: [], local: true });
     assert.deepEqual(
         await endpoint.callTool("bash_run", withContext({ command: "pwd", instance: "remote-server" }), context),
-        { remote: true }
+        { comment: [], remote: true }
     );
     assert.deepEqual(localCalls, [{ input: { command: "pwd" }, toolName: "bash_run" }]);
     assert.deepEqual(remoteCalls, [{ input: { command: "pwd" }, instance: "remote-server", toolName: "bash_run" }]);
@@ -212,7 +212,7 @@ test("instance management tools delegate to the gateway without requiring the lo
         "instance_start",
         "instance_stop"
     ]);
-    assert.deepEqual(await endpoint.callTool("instance_list", withContext({}), context), { instances: [] });
+    assert.deepEqual(await endpoint.callTool("instance_list", withContext({}), context), { comment: [], instances: [] });
     await endpoint.callTool("instance_status", withContext({ instance: "remote-server" }), context);
     await endpoint.callTool("instance_start", withContext({ instance: "remote-server" }), context);
     await endpoint.callTool("instance_stop", withContext({ instance: "remote-server" }), context);
@@ -368,6 +368,7 @@ test("todo tools are control-side, group-controlled, capability-free, and availa
 
     assert.deepEqual(endpoint.listTools().map((tool) => tool.name), ["environ_info", "todo_read", "todo_write"]);
     assert.deepEqual(await endpoint.callTool("todo_read", withContext({}), context), {
+        comment: [],
         items: [],
         revision: 0,
         summary: { completed: 0, total: 0 }

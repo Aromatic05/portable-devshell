@@ -4,7 +4,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { CallToolRequestSchema, ErrorCode, isInitializeRequest, ListToolsRequestSchema, McpError } from "@modelcontextprotocol/sdk/types.js";
-import { toControlErrorBody, type ControlErrorBody, type JsonValue } from "@portable-devshell/shared";
+import { mergeComments, resolveErrorHints, toControlErrorBody, type ControlErrorBody, type JsonValue } from "@portable-devshell/shared";
 
 import { McpToolSchemaUnavailableError } from "../tool/McpToolSchemaAdapter.js";
 import { McpEndpointWorker } from "./McpEndpointWorker.js";
@@ -143,7 +143,7 @@ export class McpEndpointBinding {
                     tools: this.#worker.listTools()
                 };
             } catch (error) {
-                throw toMcpError(error);
+                throw toMcpError(error, undefined);
             }
         });
 
@@ -170,7 +170,7 @@ export class McpEndpointBinding {
                     combined.cleanup();
                 }
             } catch (error) {
-                throw toMcpError(error);
+                throw toMcpError(error, request.params.name);
             }
         });
     }
@@ -288,13 +288,12 @@ function toCallToolResult(result: McpEndpointResult) {
     };
 }
 
-function toMcpError(error: unknown): McpError {
-    const comment = readComment(error);
+function toMcpError(error: unknown, toolName: string | undefined): McpError {
+    const body = toControlErrorBody(error);
+    const comment = mergeErrorComment(error, body, toolName);
     if (error instanceof McpToolSchemaUnavailableError) {
         return new McpError(-32002, error.message, { code: error.code, ...(comment === undefined ? {} : { comment }) });
     }
-
-    const body = toControlErrorBody(error);
 
     if (body?.code === "core.instanceNotReady") {
         const sanitized = sanitizeErrorBody(body);
@@ -326,6 +325,17 @@ function toMcpError(error: unknown): McpError {
         "Unknown MCP error.",
         comment === undefined ? undefined : { comment }
     );
+}
+
+function mergeErrorComment(
+    error: unknown,
+    body: ControlErrorBody | undefined,
+    toolName: string | undefined
+): string[] | undefined {
+    const userComments = readComment(error) ?? [];
+    const hints = body === undefined ? [] : resolveErrorHints(toolName ?? "", body);
+    const merged = mergeComments(userComments, hints);
+    return merged.length > 0 ? merged : undefined;
 }
 
 function readComment(error: unknown): string[] | undefined {

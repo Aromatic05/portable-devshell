@@ -1,6 +1,8 @@
 import {
     createError,
     errorCodes,
+    mergeComments,
+    resolveResultHints,
     type JsonValue,
     type ToolCallContext
 } from "@portable-devshell/shared";
@@ -11,6 +13,7 @@ import type { McpToolCatalogArtifactName } from "../tool/catalog/McpToolCatalogA
 import type { McpToolCatalogInstanceName } from "../tool/catalog/McpToolCatalogInstance.js";
 import type { McpToolCatalogTodoName } from "../tool/catalog/McpToolCatalogTodo.js";
 import { throwIfMcpEndpointAborted } from "./McpEndpointCancellation.js";
+import { attachMcpComments } from "./McpEndpointFeedback.js";
 import type { McpEndpointCatalog, McpEndpointCatalogWorker } from "./McpEndpointCatalog.js";
 import { readMcpContextInput } from "./McpEndpointInput.js";
 import type { McpEndpointCallContext, McpEndpointWorkerPort } from "./McpEndpointPort.js";
@@ -118,7 +121,7 @@ export class McpEndpointDispatch {
                 }
                 const owner = known.owner;
                 this.#catalog.assertAdaptable(selected.definition);
-                return await this.#withComments(await this.#auditControlTool(
+                return await this.#withComments(toolName, await this.#auditControlTool(
                     owner,
                     toolName,
                     input,
@@ -127,7 +130,7 @@ export class McpEndpointDispatch {
                 ), context);
             }
 
-            return await this.#withComments(await this.#workerHandler.call(
+            return await this.#withComments(toolName, await this.#workerHandler.call(
                 toolName,
                 input,
                 context,
@@ -141,17 +144,21 @@ export class McpEndpointDispatch {
         }
     }
 
-    async #withComments(result: McpEndpointResult, context: ToolCallContext): Promise<McpEndpointResult> {
-        if (context.ctxId === undefined || this.#gateway?.todoCommentsFor === undefined) return result;
-        const comment = await this.#gateway.todoCommentsFor(this.#instanceName, context.ctxId);
+    async #withComments(toolName: string, result: McpEndpointResult, context: ToolCallContext): Promise<McpEndpointResult> {
+        if (context.ctxId === undefined) return result;
+        const userComments = this.#gateway?.todoCommentsFor === undefined
+            ? []
+            : await this.#gateway.todoCommentsFor(this.#instanceName, context.ctxId);
         if (result instanceof McpNativeToolResult) {
+            const comments = mergeComments(userComments, resolveResultHints(toolName, result.structuredContent));
             return new McpNativeToolResult({
                 content: result.content,
                 isError: result.isError,
-                structuredContent: { comment, result: result.structuredContent }
+                structuredContent: attachMcpComments(result.structuredContent, comments)
             });
         }
-        return { comment, result };
+        const comments = mergeComments(userComments, resolveResultHints(toolName, result));
+        return attachMcpComments(result, comments);
     }
 
     async #attachComments(error: unknown, context: ToolCallContext): Promise<void> {
