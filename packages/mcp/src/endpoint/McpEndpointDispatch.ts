@@ -41,6 +41,7 @@ export class McpEndpointDispatch {
     readonly #catalog: McpEndpointCatalog;
     readonly #contextRegistry: McpContextRegistry;
     readonly #environment: McpEndpointHandlerEnvironment;
+    readonly #gateway?: McpInstanceGateway;
     readonly #instance: McpEndpointHandlerInstance;
     readonly #instanceName: string;
     readonly #todo: McpEndpointHandlerTodo;
@@ -50,6 +51,7 @@ export class McpEndpointDispatch {
     constructor(options: McpEndpointDispatchOptions) {
         this.#catalog = options.catalog;
         this.#contextRegistry = options.contextRegistry ?? new McpContextRegistry();
+        this.#gateway = options.gateway;
         this.#instanceName = options.instanceName;
         this.#worker = options.worker;
         const controlOptions = {
@@ -109,29 +111,55 @@ export class McpEndpointDispatch {
         );
         input = contextInput.input;
 
-        if (known?.owner === "todo" || known?.owner === "artifact" || known?.owner === "instance") {
-            if (selected === undefined) {
-                throw mcpEndpointToolNotExposed(toolName, this.#instanceName);
+        try {
+            if (known?.owner === "todo" || known?.owner === "artifact" || known?.owner === "instance") {
+                if (selected === undefined) {
+                    throw mcpEndpointToolNotExposed(toolName, this.#instanceName);
+                }
+                const owner = known.owner;
+                this.#catalog.assertAdaptable(selected.definition);
+                return await this.#withComments(await this.#auditControlTool(
+                    owner,
+                    toolName,
+                    input,
+                    context,
+                    signal
+                ), context);
             }
-            const owner = known.owner;
-            this.#catalog.assertAdaptable(selected.definition);
-            return await this.#auditControlTool(
-                owner,
+
+            return await this.#withComments(await this.#workerHandler.call(
                 toolName,
                 input,
                 context,
+                selected?.definition,
+                snapshot.instanceRoutingEnabled,
                 signal
-            );
+            ), context);
+        } catch (error) {
+            await this.#attachComments(error, context);
+            throw error;
         }
+    }
 
-        return await this.#workerHandler.call(
-            toolName,
-            input,
-            context,
-            selected?.definition,
-            snapshot.instanceRoutingEnabled,
-            signal
-        );
+    async #withComments(result: McpEndpointResult, context: ToolCallContext): Promise<McpEndpointResult> {
+        if (context.ctxId === undefined || this.#gateway?.todoCommentsFor === undefined) return result;
+        const comment = await this.#gateway.todoCommentsFor(this.#instanceName, context.ctxId);
+        if (result instanceof McpNativeToolResult) {
+            return new McpNativeToolResult({
+                content: result.content,
+                isError: result.isError,
+                structuredContent: { comment, result: result.structuredContent }
+            });
+        }
+        return { comment, result };
+    }
+
+    async #attachComments(error: unknown, context: ToolCallContext): Promise<void> {
+        if (context.ctxId === undefined || this.#gateway?.todoCommentsFor === undefined) return;
+        if (typeof error !== "object" || error === null) return;
+        Object.assign(error, {
+            comment: await this.#gateway.todoCommentsFor(this.#instanceName, context.ctxId)
+        });
     }
 
     async #createToolContext(

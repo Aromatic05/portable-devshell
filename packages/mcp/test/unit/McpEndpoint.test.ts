@@ -137,6 +137,72 @@ test("tools/call delegates to WorkerInstance.callTool", async () => {
     }
 });
 
+test("tools/call delivers only comments bound to its ctxId", async () => {
+    const harness = createWorkerHarness();
+    const commentCtxIds: string[] = [];
+    let targetCtxId: string | undefined;
+    const binding = createBinding(harness, {
+        async todoCommentsFor(_instance, ctxId) {
+            commentCtxIds.push(ctxId);
+            return ctxId === targetCtxId ? ["Use the project convention."] : [];
+        }
+    });
+    const server = await createBindingServer(binding);
+
+    try {
+        const session = await initialize(server.url);
+        targetCtxId = await createContext(server.url, session.headers);
+        const otherCtxId = await createContext(server.url, session.headers);
+        const target = await postJson(
+            server.url,
+            withToolContext(await readFixture("mcp-tools-call.json"), targetCtxId),
+            session.headers
+        );
+        const other = await postJson(
+            server.url,
+            withToolContext(await readFixture("mcp-tools-call.json"), otherCtxId),
+            session.headers
+        );
+
+        assert.deepEqual(target.body.result?.structuredContent?.comment, ["Use the project convention."]);
+        assert.deepEqual(other.body.result?.structuredContent?.comment, []);
+        assert.deepEqual(commentCtxIds, [targetCtxId, otherCtxId]);
+    } finally {
+        await server.close();
+        await binding.close();
+    }
+});
+
+test("tools/call returns ctxId comments when the tool fails", async () => {
+    const harness = createWorkerHarness({
+        async callHandler() {
+            throw new Error("command failed");
+        }
+    });
+    const binding = createBinding(harness, {
+        async todoCommentsFor() {
+            return ["Check the generated files before retrying."];
+        }
+    });
+    const server = await createBindingServer(binding);
+
+    try {
+        const session = await initialize(server.url);
+        const ctxId = await createContext(server.url, session.headers);
+        const response = await postJson(
+            server.url,
+            withToolContext(await readFixture("mcp-tools-call.json"), ctxId),
+            session.headers
+        );
+
+        assert.equal(response.status, 200);
+        assert.deepEqual(response.body.error?.data?.comment, ["Check the generated files before retrying."]);
+    } finally {
+        await server.close();
+        await binding.close();
+    }
+});
+
 test("environment and control-owned tools execute through the endpoint audit path", async () => {
     const harness = createWorkerHarness();
     const gateway: McpInstanceGateway = {
@@ -560,9 +626,10 @@ test("tools/call still maps not ready to mcp.instanceNotReady", async () => {
     }
 });
 
-function createBinding(harness = createWorkerHarness()): McpEndpointBinding {
+function createBinding(harness = createWorkerHarness(), gateway?: Pick<McpInstanceGateway, "todoCommentsFor">): McpEndpointBinding {
     return new McpEndpointBinding(
         new McpEndpointWorker({
+            gateway: gateway as McpInstanceGateway | undefined,
             policy: { capabilities: ["execute"], groups: ["bash"] },
             instanceName: "demo",
             worker: harness.worker

@@ -289,8 +289,9 @@ function toCallToolResult(result: McpEndpointResult) {
 }
 
 function toMcpError(error: unknown): McpError {
+    const comment = readComment(error);
     if (error instanceof McpToolSchemaUnavailableError) {
-        return new McpError(-32002, error.message, { code: error.code });
+        return new McpError(-32002, error.message, { code: error.code, ...(comment === undefined ? {} : { comment }) });
     }
 
     const body = toControlErrorBody(error);
@@ -300,19 +301,37 @@ function toMcpError(error: unknown): McpError {
 
         return new McpError(-32001, "Instance not ready.", {
             ...sanitized,
-            code: "mcp.instanceNotReady"
+            code: "mcp.instanceNotReady",
+            ...(comment === undefined ? {} : { comment })
         });
     }
 
     if (body !== undefined) {
-        return new McpError(ErrorCode.InternalError, body.message, sanitizeErrorBody(body));
+        return new McpError(ErrorCode.InternalError, body.message, {
+            ...sanitizeErrorBody(body),
+            ...(comment === undefined ? {} : { comment })
+        });
     }
 
     if (error instanceof Error) {
-        return new McpError(ErrorCode.ConnectionClosed, error.message);
+        return new McpError(
+            ErrorCode.ConnectionClosed,
+            error.message,
+            comment === undefined ? undefined : { comment }
+        );
     }
 
-    return new McpError(ErrorCode.ConnectionClosed, "Unknown MCP error.");
+    return new McpError(
+        ErrorCode.ConnectionClosed,
+        "Unknown MCP error.",
+        comment === undefined ? undefined : { comment }
+    );
+}
+
+function readComment(error: unknown): string[] | undefined {
+    if (typeof error !== "object" || error === null || !("comment" in error)) return undefined;
+    const { comment } = error;
+    return Array.isArray(comment) && comment.every((entry) => typeof entry === "string") ? comment : undefined;
 }
 
 function sanitizeErrorBody(body: ControlErrorBody): Record<string, JsonValue> {
