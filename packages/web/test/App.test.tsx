@@ -170,6 +170,59 @@ describe("authenticated application shell", () => {
         expect(session.logout).toHaveBeenCalledOnce();
     });
 
+    it("shows a failed logout without leaving the application", async () => {
+        const session = fakeSession({ check: true });
+        session.logout.mockRejectedValue(new Error("Session revocation failed"));
+        render(<App createClients={fakeClients} session={session} />);
+
+        fireEvent.click(await screen.findByRole("button", { name: "Log out" }));
+
+        expect(await screen.findByText("Session revocation failed")).toHaveAttribute("role", "alert");
+        expect(screen.getByRole("button", { name: "Log out" })).toBeInTheDocument();
+    });
+
+    it("shows a session verification error when reconnect checking fails", async () => {
+        const session = fakeSession({ check: true });
+        const clients = fakeClients();
+        clients.runtime.subscribe = async () => {
+            throw new Error("WebSocket closed");
+        };
+        render(<App createClients={() => clients} session={session} />);
+
+        await screen.findByRole("button", { name: "Reconnect" });
+        session.check.mockRejectedValue(new Error("Session unavailable"));
+        fireEvent.click(screen.getByRole("button", { name: "Reconnect" }));
+
+        expect(await screen.findByText("Unable to verify the session.")).toHaveAttribute("role", "alert");
+        session.check.mockResolvedValue(true);
+        fireEvent.click(screen.getByRole("button", { name: "Reconnect" }));
+
+        await waitFor(() => expect(screen.queryByText("Unable to verify the session.")).not.toBeInTheDocument());
+    });
+
+    it("clears the ready store before bootstrapping a replacement session", async () => {
+        let resolveCheck!: (available: boolean) => void;
+        const initialClients = fakeClients();
+        const close = vi.fn();
+        initialClients.close = close;
+        const initial = fakeSession({ check: true });
+        const replacement: WebSession = {
+            check: async () => await new Promise<boolean>((resolve) => { resolveCheck = resolve; }),
+            establish: async () => false,
+            logout: async () => undefined,
+        };
+        const createClients = vi.fn(() => initialClients);
+        const view = render(<App createClients={createClients} session={initial} />);
+
+        await screen.findByRole("button", { name: "Log out" });
+        view.rerender(<App createClients={createClients} session={replacement} />);
+
+        expect(screen.getByText("Checking session…")).toBeInTheDocument();
+        expect(close).toHaveBeenCalledOnce();
+        resolveCheck(false);
+        expect(await screen.findByRole("button", { name: "Sign in" })).toBeInTheDocument();
+    });
+
     it("supports mobile bottom and desktop navigation", async () => {
         render(
             <App

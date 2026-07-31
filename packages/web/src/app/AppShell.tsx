@@ -28,6 +28,7 @@ export function App({ createClients = createWebClients, createSession = createBr
     const activeSession = useMemo(() => session ?? createSession(), [createSession, session]);
     const [sessionState, setSessionState] = useState<SessionState>("checking");
     const [store, setStore] = useState<WebStore>();
+    const [storeContext, setStoreContext] = useState<{ clients: AppProps["createClients"]; session: WebSession }>();
     const storeRef = useRef<WebStore>();
     const lifecycle = useRef(0);
     const loginRequest = useRef<Promise<void>>();
@@ -38,6 +39,12 @@ export function App({ createClients = createWebClients, createSession = createBr
     useEffect(() => {
         let disposed = false;
         const generation = ++lifecycle.current;
+        discardStore();
+        setStore(undefined);
+        setStoreContext(undefined);
+        setError(undefined);
+        setBusy(undefined);
+        setSessionState("checking");
         void bootstrap();
         return () => { disposed = true; lifecycle.current += 1; discardStore(); };
         function current(): boolean { return !disposed && lifecycle.current === generation; }
@@ -60,6 +67,7 @@ export function App({ createClients = createWebClients, createSession = createBr
         const nextStore = new WebStore(createClients());
         storeRef.current = nextStore;
         setStore(nextStore);
+        setStoreContext({ clients: createClients, session: activeSession });
         setSessionState("ready");
         void nextStore.load();
     }
@@ -90,6 +98,7 @@ export function App({ createClients = createWebClients, createSession = createBr
         const generation = ++lifecycle.current;
         const request = (async () => {
             setBusy("logout");
+            setError(undefined);
             try {
                 await activeSession.logout();
                 if (lifecycle.current !== generation) return;
@@ -110,6 +119,7 @@ export function App({ createClients = createWebClients, createSession = createBr
         if (target === undefined) return;
         const request = (async () => {
             setBusy("reconnect");
+            setError(undefined);
             try {
                 const available = await activeSession.check();
                 if (lifecycle.current !== generation || storeRef.current !== target) return;
@@ -118,6 +128,7 @@ export function App({ createClients = createWebClients, createSession = createBr
                     return;
                 }
                 await target.reconnect();
+                if (lifecycle.current === generation && storeRef.current === target) setError(undefined);
             } catch {
                 if (lifecycle.current === generation && storeRef.current === target) setError("Unable to verify the session.");
             } finally {
@@ -127,9 +138,9 @@ export function App({ createClients = createWebClients, createSession = createBr
         reconnectRequest.current = request;
         try { await request; } finally { if (reconnectRequest.current === request) reconnectRequest.current = undefined; }
     }
-    if (sessionState === "checking") return <main className="session"><p aria-live="polite">Checking session…</p></main>;
+    if (sessionState === "checking" || (store !== undefined && (storeContext?.clients !== createClients || storeContext?.session !== activeSession))) return <main className="session"><p aria-live="polite">Checking session…</p></main>;
     if (sessionState === "login" || store === undefined) return <Login error={error} onLogin={login} />;
-    return <Application busy={busy} store={store} onLogout={logout} onReconnect={reconnect} />;
+    return <Application busy={busy} error={error} store={store} onLogout={logout} onReconnect={reconnect} />;
 }
 
 function Login({ error, onLogin }: { error?: string; onLogin(token: string): Promise<void> }) {
@@ -138,9 +149,9 @@ function Login({ error, onLogin }: { error?: string; onLogin(token: string): Pro
     return <main className="session"><form onSubmit={(event) => void submit(event)}><h1>portable-devshell</h1><label>Access token<input autoComplete="off" onChange={(event) => setToken(event.target.value)} type="password" value={token} /></label>{error !== undefined ? <p className="error" role="alert">{error}</p> : null}<button disabled={submitting || token.length === 0} type="submit">{submitting ? "Signing in…" : "Sign in"}</button></form></main>;
 }
 
-function Application({ busy, store, onLogout, onReconnect }: { busy?: "login" | "logout" | "reconnect"; store: WebStore; onLogout(): Promise<void>; onReconnect(): Promise<void> }) {
+function Application({ busy, error, store, onLogout, onReconnect }: { busy?: "login" | "logout" | "reconnect"; error?: string; store: WebStore; onLogout(): Promise<void>; onReconnect(): Promise<void> }) {
     const state = useSyncExternalStore(store.subscribe.bind(store), () => store.state, () => store.state);
     const [route, navigate] = useHashRoute();
     const counts = { approvals: pendingApprovals(state), instances: state.instances.length, todos: openTodos(state) };
-    return <div className="app"><aside><h1>portable-devshell</h1><Navigation active={route} counts={counts} navigate={navigate} /></aside><main><header className={`connection ${state.connection}`}><span>{state.connection === "online" ? "Online" : state.connection === "connecting" ? "Connecting…" : "Offline"}</span>{state.connection !== "online" ? <button disabled={busy !== undefined} onClick={() => void onReconnect()}>{busy === "reconnect" ? "Reconnecting…" : "Reconnect"}</button> : null}<button disabled={busy !== undefined} onClick={() => void onLogout()}>{busy === "logout" ? "Logging out…" : "Log out"}</button></header>{Object.keys(state.partialFailures).length > 0 ? <p className="partial" role="status">Some instance data could not be refreshed. Other data remains available.</p> : null}<div aria-live="polite">{state.notice !== undefined ? <p className="notice">{state.notice}</p> : null}{state.error !== undefined ? <p className="error" role="alert">{state.error}</p> : null}</div>{route === "overview" ? <Overview state={state} /> : null}{route === "instances" ? <Instances store={store} /> : null}{route === "approvals" ? <Approvals store={store} /> : null}{route === "activity" ? <Activity state={state} /> : null}{route === "todos" ? <Todos state={state} /> : null}</main><nav aria-label="Primary navigation" className="bottom"><Navigation active={route} counts={counts} navigate={navigate} /></nav></div>;
+    return <div className="app"><aside><h1>portable-devshell</h1><Navigation active={route} counts={counts} navigate={navigate} /></aside><main><header className={`connection ${state.connection}`}><span>{state.connection === "online" ? "Online" : state.connection === "connecting" ? "Connecting…" : "Offline"}</span>{state.connection !== "online" ? <button disabled={busy !== undefined} onClick={() => void onReconnect()}>{busy === "reconnect" ? "Reconnecting…" : "Reconnect"}</button> : null}<button disabled={busy !== undefined} onClick={() => void onLogout()}>{busy === "logout" ? "Logging out…" : "Log out"}</button></header>{Object.keys(state.partialFailures).length > 0 ? <p className="partial" role="status">Some instance data could not be refreshed. Other data remains available.</p> : null}<div aria-live="polite">{state.notice !== undefined ? <p className="notice">{state.notice}</p> : null}{state.error !== undefined ? <p className="error" role="alert">{state.error}</p> : null}{error !== undefined ? <p className="error" role="alert">{error}</p> : null}</div>{route === "overview" ? <Overview state={state} /> : null}{route === "instances" ? <Instances store={store} /> : null}{route === "approvals" ? <Approvals store={store} /> : null}{route === "activity" ? <Activity state={state} /> : null}{route === "todos" ? <Todos state={state} /> : null}</main><nav aria-label="Primary navigation" className="bottom"><Navigation active={route} counts={counts} navigate={navigate} /></nav></div>;
 }
