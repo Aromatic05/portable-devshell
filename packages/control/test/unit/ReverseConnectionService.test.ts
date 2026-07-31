@@ -329,6 +329,32 @@ test("ReverseConnectionService rejects queued activation after stop", async () =
     assert.equal(accepted, 1);
 });
 
+test("ReverseConnectionService closes the channel when credential activation fails", async () => {
+    const descriptor = reverseDescriptor(async () => reverseSnapshot());
+    const credentialStore = {
+        async withAuthenticatedToken() {
+            throw new Error("credential store unavailable");
+        }
+    } as unknown as ReverseCredentialStore;
+    const service = new ReverseConnectionService({
+        credentialStore,
+        instanceRegistry: { get: (name) => name === descriptor.name ? descriptor : undefined },
+        publicBaseUrl: "https://example.test"
+    });
+    const channel = new MemoryRpcChannel();
+
+    await assert.rejects(
+        service.activate({
+            credentialToken: "token",
+            descriptor,
+            generation: 1
+        }, "wss", channel),
+        /credential store unavailable/iu
+    );
+
+    assert.equal(channel.closed, true);
+});
+
 
 function reverseSnapshot(): InstanceSnapshot {
     return {

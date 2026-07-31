@@ -82,42 +82,45 @@ export class ReverseConnectionService {
         transport: "sse" | "wss",
         channel: WorkerRpcChannel
     ): Promise<void> {
-        await this.#exclusive(identity.descriptor.name, async () => {
-            this.#assertRunning(channel);
-            let active: ActiveReverseConnection | undefined;
-            const authenticated = await this.#credentialStore.withAuthenticatedToken(
-                identity.descriptor.name,
-                identity.credentialToken,
-                async () => {
-                    this.#assertRunning(channel);
-                    active = this.#prepareActivation(identity, transport, channel);
+        try {
+            await this.#exclusive(identity.descriptor.name, async () => {
+                this.#assertRunning(channel);
+                let active: ActiveReverseConnection | undefined;
+                const authenticated = await this.#credentialStore.withAuthenticatedToken(
+                    identity.descriptor.name,
+                    identity.credentialToken,
+                    async () => {
+                        this.#assertRunning(channel);
+                        active = this.#prepareActivation(identity, transport, channel);
+                    }
+                );
+                if (!authenticated || active === undefined) {
+                    throw invalidDeviceToken(identity.descriptor.name);
                 }
-            );
-            if (!authenticated || active === undefined) {
-                channel.close();
-                throw invalidDeviceToken(identity.descriptor.name);
-            }
 
-            try {
-                await identity.descriptor.worker.acceptReverseChannel(channel, {
-                    generation: identity.generation,
-                    transport
-                });
-                if (this.#active.get(identity.descriptor.name) !== active) {
-                    throw createError({
-                        code: errorCodes.reverseConnectionSuperseded,
-                        message: "Reverse connection was superseded during activation.",
-                        retryable: true
+                try {
+                    await identity.descriptor.worker.acceptReverseChannel(channel, {
+                        generation: identity.generation,
+                        transport
                     });
+                    if (this.#active.get(identity.descriptor.name) !== active) {
+                        throw createError({
+                            code: errorCodes.reverseConnectionSuperseded,
+                            message: "Reverse connection was superseded during activation.",
+                            retryable: true
+                        });
+                    }
+                } catch (error) {
+                    if (this.#active.get(identity.descriptor.name) === active) {
+                        this.#active.delete(identity.descriptor.name);
+                    }
+                    throw error;
                 }
-            } catch (error) {
-                if (this.#active.get(identity.descriptor.name) === active) {
-                    this.#active.delete(identity.descriptor.name);
-                }
-                channel.close();
-                throw error;
-            }
-        });
+            });
+        } catch (error) {
+            channel.close();
+            throw error;
+        }
     }
 
     #prepareActivation(
