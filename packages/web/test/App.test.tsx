@@ -245,10 +245,10 @@ describe("authenticated application shell", () => {
         window.location.hash = "#/overview";
         render(<App createClients={fakeClients} session={fakeSession({ check: true })} />);
 
-        const activity = await screen.findByRole("link", { name: "Recent activity" });
+        const activity = await screen.findByRole("link", { name: "Recent tool calls" });
         expect(activity).toHaveAttribute("href", "#/activity");
         fireEvent.click(activity);
-        expect(await screen.findByRole("heading", { name: "Activity" })).toBeInTheDocument();
+        expect(await screen.findByRole("heading", { name: "Tool Calls" })).toBeInTheDocument();
         expect(window.location.hash).toBe("#/activity");
     });
 });
@@ -298,6 +298,7 @@ function fakeClients(): WebClients {
             subscribe: async () => stream,
         },
         tool: {
+            listCalls: async () => [],
             listApprovals: async () => [],
             getApproval: async () => {
                 throw new Error("Not used.");
@@ -305,6 +306,16 @@ function fakeClients(): WebClients {
             decideApproval: async () => {
                 throw new Error("Not used.");
             },
+        },
+        contextMessage: {
+            list: async () => [],
+            queue: async (_instance, input) => ({
+                createdAt: "2026-07-31T00:00:00Z",
+                id: "message",
+                instance: "demo",
+                status: "pending",
+                ...input,
+            }),
         },
         todo: {
             get: async () => ({

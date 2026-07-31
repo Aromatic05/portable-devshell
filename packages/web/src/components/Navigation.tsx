@@ -4,7 +4,7 @@ const navigation: Array<{ route: Route; label: string; badge?: number }> = [
     { route: "overview", label: "Overview" },
     { route: "instances", label: "Instances" },
     { route: "approvals", label: "Approvals" },
-    { route: "activity", label: "Activity" },
+    { route: "activity", label: "Tool Calls" },
     { route: "todos", label: "Todos" },
 ];
 

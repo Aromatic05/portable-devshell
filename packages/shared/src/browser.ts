@@ -31,6 +31,16 @@ export type {
     ApprovalDecisionValue,
     ApprovalRequest
 } from "./dto/tool/DtoToolApproval.js";
+export type {
+    ToolCallQuery,
+    ToolCallRecord,
+    ToolCallSource,
+    ToolCallStatus
+} from "./dto/tool/DtoToolCallRecord.js";
+export type {
+    ContextMessageQueueInput,
+    ContextMessageRecord
+} from "./dto/context/DtoContextMessage.js";
 export type { InstanceEvent } from "./dto/instance/DtoInstanceEvent.js";
 export type {
     InstanceListEntry,

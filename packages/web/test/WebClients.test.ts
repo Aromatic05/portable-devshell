@@ -17,7 +17,10 @@ describe("typed web client routing", () => {
         await clients.instance.list();
         await clients.overview.get();
         await clients.runtime.readLogs("demo", { limit: 5 });
+        await clients.tool.listCalls("demo", { limit: 20 });
         await clients.tool.listApprovals("demo");
+        await clients.contextMessage.list("demo", "ctx-demo");
+        await clients.contextMessage.queue("demo", { ctxId: "ctx-demo", text: "hello" });
         await clients.mcp.status();
         await clients.mcp.listApprovals();
 
@@ -28,7 +31,10 @@ describe("typed web client routing", () => {
             "instance.list",
             "overview.get",
             "runtime.readLogs",
+            "tool.listCalls",
             "tool.listApprovals",
+            "contextMessage.list",
+            "contextMessage.queue",
             "mcp.status",
             "mcp.listApprovals",
         ]);

@@ -1,6 +1,5 @@
 import type {
     ApprovalRequest,
-    InstanceEvent,
     OperationalOverview,
     OperationalOverviewActivity,
     OperationalOverviewAlert,
@@ -64,7 +63,7 @@ export function overviewAlerts(
     return overview.alerts.slice(0, 8);
 }
 
-export function overviewActivity(
+export function overviewToolCalls(
     overview: OperationalOverview,
 ): OperationalOverviewActivity[] {
     return overview.activity.slice(0, 6);
@@ -76,13 +75,4 @@ export function overviewAlertRoute(kind: OperationalOverviewAlert["kind"]): stri
     if (kind.startsWith("activity.")) return "#/activity";
     if (kind.startsWith("instance.")) return "#/instances";
     return "#/overview";
-}
-
-export function recentActivity(state: WebState, query = "", type = "all"): InstanceEvent[] {
-    const needle = query.trim().toLowerCase();
-    return [...state.activity]
-        .reverse()
-        .filter((event) => type === "all" || event.type === type)
-        .filter((event) => needle.length === 0 || `${event.instanceName} ${event.type}`.toLowerCase().includes(needle))
-        .slice(0, 100);
 }

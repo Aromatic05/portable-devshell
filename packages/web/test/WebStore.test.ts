@@ -30,6 +30,44 @@ describe("WebStore", () => {
         expect(listApprovals).not.toHaveBeenCalled();
     });
 
+    it("loads tool calls and queues Context messages through the instance routes", async () => {
+        const clients = fakeClients();
+        const call = {
+            callId: "call-1",
+            ctxId: "ctx-demo",
+            inputSummary: "{}",
+            instance: asInstanceName("demo"),
+            source: "mcp" as const,
+            startedAt: "2026-07-31T00:00:00Z",
+            status: "running" as const,
+            toolName: "bash_run",
+        };
+        const queued = {
+            createdAt: "2026-07-31T00:00:01Z",
+            ctxId: "ctx-demo",
+            id: "message-1",
+            instance: "demo",
+            status: "pending" as const,
+            text: "Continue with the next check.",
+        };
+        clients.tool.listCalls = vi.fn(async () => [call]);
+        clients.contextMessage.list = vi.fn(async () => []);
+        clients.contextMessage.queue = vi.fn(async () => queued);
+        clients.overview.get = vi.fn(async () => operationalOverview());
+        const store = new WebStore(clients);
+
+        await store.load();
+        expect(store.state.toolCalls.demo).toEqual([call]);
+        expect(await store.queueContextMessage("demo", "ctx-demo", queued.text)).toBe(true);
+        expect(clients.contextMessage.queue).toHaveBeenCalledWith("demo", {
+            ctxId: "ctx-demo",
+            text: queued.text,
+        });
+        expect(store.state.contextMessages.demo).toEqual([queued]);
+        expect(clients.contextMessage.list).toHaveBeenCalledOnce();
+        expect(clients.overview.get).toHaveBeenCalledOnce();
+    });
+
     it("uses the server overview as the authoritative operational read model", async () => {
         const clients = fakeClients();
         const overview = { ...operationalOverview(), alerts: [{ detail: "The server classified this alert.", id: "server-alert", kind: "overview.partial" as const, severity: "attention" as const, title: "Server alert" }], health: "critical" as const };
@@ -448,6 +486,43 @@ describe("WebStore", () => {
         vi.useRealTimers();
     });
 
+    it("refreshes tool calls and Context messages after their runtime events", async () => {
+        vi.useFakeTimers();
+        const stream = controllableStream();
+        const clients = fakeClients({ subscribe: async () => stream });
+        const store = new WebStore(clients);
+        await store.load();
+        const call = {
+            callId: "event-call",
+            ctxId: "ctx-demo",
+            inputSummary: "{}",
+            instance: asInstanceName("demo"),
+            source: "mcp" as const,
+            startedAt: "2026-07-31T00:00:02Z",
+            status: "completed" as const,
+            toolName: "file_read",
+        };
+        const contextMessage = {
+            createdAt: "2026-07-31T00:00:03Z",
+            ctxId: "ctx-demo",
+            id: "event-message",
+            instance: "demo",
+            status: "delivered" as const,
+            text: "Message delivered.",
+        };
+        clients.tool.listCalls = vi.fn(async () => [call]);
+        clients.contextMessage.list = vi.fn(async () => [contextMessage]);
+
+        stream.push(instanceEvent("toolCall.completed"));
+        stream.push(instanceEvent("context.message.delivered"));
+        await vi.advanceTimersByTimeAsync(250);
+        await vi.waitFor(() => expect(store.state.toolCalls.demo).toEqual([call]));
+        expect(store.state.contextMessages.demo).toEqual([contextMessage]);
+
+        store.close();
+        vi.useRealTimers();
+    });
+
     it("polls overview only while online, visible, and observed", async () => {
         vi.useFakeTimers();
         let visible = true;
@@ -554,6 +629,7 @@ function fakeClients(
         },
         overview: { get: async () => operationalOverview() },
         tool: {
+            listCalls: async () => [],
             listApprovals: async () => [],
             getApproval: async () => {
                 throw new Error("Not used.");
@@ -561,6 +637,16 @@ function fakeClients(
             decideApproval: async () => {
                 throw new Error("Not used.");
             },
+        },
+        contextMessage: {
+            list: async () => [],
+            queue: async (_instance, input) => ({
+                createdAt: "2026-07-31T00:00:00Z",
+                id: "message",
+                instance: "demo",
+                status: "pending",
+                ...input,
+            }),
         },
         todo: {
             get: async () => ({

@@ -1,12 +1,14 @@
 import {
     CONTROL_PROTOCOL_VERSION,
     type ApprovalRequest,
+    type ContextMessageRecord,
     type InstanceEvent,
     type InstanceListEntry,
     type InstanceLogEntry,
     type OAuthApprovalRequest,
     type OperationalOverview,
     type TodoReadResult,
+    type ToolCallRecord,
 } from "@portable-devshell/shared/browser";
 
 import type { WebClients, WebRuntimeStream } from "../client/WebClients.js";
@@ -26,7 +28,8 @@ export interface WebState {
     approvals: Record<string, ApprovalRequest[]>;
     oauthApprovals: OAuthApprovalRequest[];
     logs: Record<string, InstanceLogEntry[]>;
-    activity: InstanceEvent[];
+    toolCalls: Record<string, ToolCallRecord[]>;
+    contextMessages: Record<string, ContextMessageRecord[]>;
     todos: Record<string, TodoReadResult>;
     partialFailures: Record<string, string>;
     operations: Record<string, "pending">;
@@ -40,7 +43,8 @@ const initial: WebState = {
     approvals: {},
     oauthApprovals: [],
     logs: {},
-    activity: [],
+    toolCalls: {},
+    contextMessages: {},
     todos: {},
     partialFailures: {},
     operations: {},
@@ -52,6 +56,8 @@ export class WebStore {
     #streams = new Map<string, WebRuntimeStream>();
     #logRefreshes = new Map<string, ReturnType<typeof setTimeout>>();
     #todoRefreshes = new Map<string, ReturnType<typeof setTimeout>>();
+    #toolCallRefreshes = new Map<string, ReturnType<typeof setTimeout>>();
+    #contextMessageRefreshes = new Map<string, ReturnType<typeof setTimeout>>();
     #stopped = false;
     #loadPromise?: Promise<void>;
     #loadGeneration?: number;
@@ -193,6 +199,36 @@ export class WebStore {
         });
     }
 
+    async queueContextMessage(instance: string, ctxId: string, text: string): Promise<boolean> {
+        await this.mutate(
+            `context-message:${instance}:${ctxId}`,
+            "Message queued.",
+            async (generation) => {
+                const queued = await this.clients.contextMessage.queue(instance, {
+                    ctxId,
+                    text,
+                });
+                if (!this.isCurrent(generation)) return;
+                const current = this.#state.contextMessages[instance] ?? [];
+                this.set({
+                    ...this.#state,
+                    contextMessages: {
+                        ...this.#state.contextMessages,
+                        [instance]: [
+                            ...current.filter((message) => message.id !== queued.id),
+                            queued,
+                        ],
+                    },
+                    partialFailures: this.withoutPartialFailure(
+                        `contextMessages:${instance}`,
+                    ),
+                });
+            },
+            false,
+        );
+        return this.#state.notice === "Message queued.";
+    }
+
     async start(instance: string): Promise<void> {
         await this.mutate(`start:${instance}`, `${instance} start requested.`, async (generation) => {
             await this.clients.runtime.start(instance);
@@ -258,13 +294,17 @@ export class WebStore {
                     ? await this.clients.mcp.listApprovals()
                     : [];
             const approvals: Record<string, ApprovalRequest[]> = {};
+            const toolCalls: Record<string, ToolCallRecord[]> = {};
+            const contextMessages: Record<string, ContextMessageRecord[]> = {};
             const todos: Record<string, TodoReadResult> = {};
             const partialFailures: Record<string, string> = {};
             await Promise.all(
                 instances.map(async ({ name }) => {
-                    const [approvalResult, todoResult] = await Promise.allSettled([
+                    const [approvalResult, todoResult, toolCallResult, contextMessageResult] = await Promise.allSettled([
                         this.clients.tool.listApprovals(name),
                         this.clients.todo.get(name),
+                        this.clients.tool.listCalls(name, { limit: 200 }),
+                        this.clients.contextMessage.list(name),
                     ]);
                     if (approvalResult.status === "fulfilled") {
                         approvals[name] = approvalResult.value;
@@ -275,6 +315,16 @@ export class WebStore {
                         todos[name] = todoResult.value.todo;
                     } else {
                         partialFailures[`todos:${name}`] = message(todoResult.reason);
+                    }
+                    if (toolCallResult.status === "fulfilled") {
+                        toolCalls[name] = toolCallResult.value;
+                    } else {
+                        partialFailures[`toolCalls:${name}`] = message(toolCallResult.reason);
+                    }
+                    if (contextMessageResult.status === "fulfilled") {
+                        contextMessages[name] = contextMessageResult.value;
+                    } else {
+                        partialFailures[`contextMessages:${name}`] = message(contextMessageResult.reason);
                     }
                 }),
             );
@@ -288,6 +338,8 @@ export class WebStore {
                 instances,
                 oauthApprovals,
                 approvals,
+                toolCalls,
+                contextMessages,
                 todos,
                 partialFailures,
                 overview,
@@ -404,12 +456,8 @@ export class WebStore {
     }
 
     private addEvent(name: string, event: InstanceEvent, generation: number): void {
-        const activity = [...this.#state.activity, event]
-            .sort((left, right) => left.at.localeCompare(right.at))
-            .slice(-200);
         this.set({
             ...this.#state,
-            activity,
             instances: this.#state.instances.map((entry) =>
                 entry.name === name
                     ? {
@@ -433,6 +481,12 @@ export class WebStore {
         }
         if (event.type.startsWith("todo.")) {
             this.scheduleTodoRefresh(name, generation);
+        }
+        if (event.type.startsWith("toolCall.")) {
+            this.scheduleToolCallRefresh(name, generation);
+        }
+        if (event.type.startsWith("context.message.")) {
+            this.scheduleContextMessageRefresh(name, generation);
         }
         if (event.type !== "log.appended") {
             this.scheduleOverviewRefresh(generation);
@@ -523,6 +577,56 @@ export class WebStore {
         }
     }
 
+    private scheduleToolCallRefresh(name: string, generation: number): void {
+        if (this.#toolCallRefreshes.has(name)) return;
+        const timeout = setTimeout(() => {
+            this.#toolCallRefreshes.delete(name);
+            void this.refreshToolCalls(name, generation);
+        }, 250);
+        this.#toolCallRefreshes.set(name, timeout);
+    }
+
+    private async refreshToolCalls(name: string, generation: number): Promise<void> {
+        const version = this.nextReadVersion(`toolCalls:${name}`);
+        try {
+            const calls = await this.clients.tool.listCalls(name, { limit: 200 });
+            if (!this.isCurrent(generation) || !this.isCurrentRead(`toolCalls:${name}`, version)) return;
+            this.set({
+                ...this.#state,
+                toolCalls: { ...this.#state.toolCalls, [name]: calls },
+                partialFailures: this.withoutPartialFailure(`toolCalls:${name}`),
+            });
+        } catch (error) {
+            if (!this.isCurrent(generation) || !this.isCurrentRead(`toolCalls:${name}`, version)) return;
+            this.setPartialFailure(`toolCalls:${name}`, error);
+        }
+    }
+
+    private scheduleContextMessageRefresh(name: string, generation: number): void {
+        if (this.#contextMessageRefreshes.has(name)) return;
+        const timeout = setTimeout(() => {
+            this.#contextMessageRefreshes.delete(name);
+            void this.refreshContextMessages(name, generation);
+        }, 250);
+        this.#contextMessageRefreshes.set(name, timeout);
+    }
+
+    private async refreshContextMessages(name: string, generation: number): Promise<void> {
+        const version = this.nextReadVersion(`contextMessages:${name}`);
+        try {
+            const messages = await this.clients.contextMessage.list(name);
+            if (!this.isCurrent(generation) || !this.isCurrentRead(`contextMessages:${name}`, version)) return;
+            this.set({
+                ...this.#state,
+                contextMessages: { ...this.#state.contextMessages, [name]: messages },
+                partialFailures: this.withoutPartialFailure(`contextMessages:${name}`),
+            });
+        } catch (error) {
+            if (!this.isCurrent(generation) || !this.isCurrentRead(`contextMessages:${name}`, version)) return;
+            this.setPartialFailure(`contextMessages:${name}`, error);
+        }
+    }
+
     private scheduleOverviewRefresh(generation: number): void {
         if (this.#overviewRefresh !== undefined) {
             return;
@@ -599,6 +703,7 @@ export class WebStore {
         operation: string,
         success: string,
         action: (generation: number) => Promise<void>,
+        refreshOverview = true,
     ): Promise<void> {
         const generation = this.#generation;
         if (!this.isCurrent(generation)) {
@@ -617,9 +722,9 @@ export class WebStore {
             if (!this.isCurrent(generation)) {
                 return;
             }
-            await this.refreshOverview(generation, true);
-            if (!this.isCurrent(generation)) {
-                return;
+            if (refreshOverview) {
+                await this.refreshOverview(generation, true);
+                if (!this.isCurrent(generation)) return;
             }
             const { [operation]: _completed, ...operations } = this.#state.operations;
             this.set({ ...this.#state, notice: success, operations });
@@ -648,6 +753,10 @@ export class WebStore {
             clearTimeout(timeout);
         }
         this.#todoRefreshes.clear();
+        for (const timeout of this.#toolCallRefreshes.values()) clearTimeout(timeout);
+        this.#toolCallRefreshes.clear();
+        for (const timeout of this.#contextMessageRefreshes.values()) clearTimeout(timeout);
+        this.#contextMessageRefreshes.clear();
         if (this.#overviewRefresh !== undefined) {
             clearTimeout(this.#overviewRefresh);
             this.#overviewRefresh = undefined;

@@ -1,0 +1,137 @@
+import { describe, expect, it } from "vitest";
+import {
+    asInstanceName,
+    type ToolCallRecord,
+} from "@portable-devshell/shared/browser";
+
+import {
+    formatToolValue,
+    resolveToolCallOutput,
+} from "../src/formatters/toolCalls.js";
+import { toolCallResult, filterToolCalls } from "../src/selectors/toolCalls.js";
+
+const calls: ToolCallRecord[] = [
+    {
+        callId: "call-old",
+        completedAt: "2026-07-31T08:30:01Z",
+        ctxId: "ctx-alpha",
+        inputSummary: '{"path":"README.md"}',
+        instance: asInstanceName("alpha"),
+        source: "mcp",
+        startedAt: "2026-07-31T08:30:00Z",
+        status: "completed",
+        toolName: "file_read",
+    },
+    {
+        callId: "call-failed",
+        completedAt: "2026-07-31T09:30:01Z",
+        ctxId: "ctx-alpha",
+        error: "command failed",
+        inputSummary: '{"command":"false"}',
+        instance: asInstanceName("alpha"),
+        source: "mcp",
+        startedAt: "2026-07-31T09:30:00Z",
+        status: "failed",
+        toolName: "bash_run",
+    },
+    {
+        callId: "call-pending",
+        inputSummary: "{}",
+        instance: asInstanceName("beta"),
+        source: "tui",
+        startedAt: "2026-07-31T09:45:00Z",
+        status: "pendingApproval",
+        toolName: "artifact_transfer",
+    },
+];
+
+describe("tool call activity read model", () => {
+    it("applies text, instance, context, result, tool, and time filters together", () => {
+        expect(
+            filterToolCalls(
+                calls,
+                {
+                    ctxId: "context:ctx-alpha",
+                    instance: "alpha",
+                    period: "1h",
+                    query: "command failed",
+                    result: "failure",
+                    tool: "bash_run",
+                },
+                Date.parse("2026-07-31T10:00:00Z"),
+            ),
+        ).toEqual([calls[1]]);
+        expect(
+            filterToolCalls(
+                calls,
+                {
+                    ctxId: "unscoped",
+                    instance: "all",
+                    period: "24h",
+                    query: "",
+                    result: "pending",
+                    tool: "all",
+                },
+                Date.parse("2026-07-31T10:00:00Z"),
+            ),
+        ).toEqual([calls[2]]);
+    });
+
+    it("keeps real all and unscoped ctxId values separate from filter sentinels", () => {
+        const scoped = {
+            ...calls[0]!,
+            callId: "call-real-unscoped",
+            ctxId: "unscoped",
+        };
+        expect(
+            filterToolCalls(
+                [calls[2]!, scoped],
+                {
+                    ctxId: "unscoped",
+                    instance: "all",
+                    period: "all",
+                    query: "",
+                    result: "all",
+                    tool: "all",
+                },
+            ),
+        ).toEqual([calls[2]]);
+        expect(
+            filterToolCalls(
+                [calls[2]!, scoped],
+                {
+                    ctxId: "context:unscoped",
+                    instance: "all",
+                    period: "all",
+                    query: "",
+                    result: "all",
+                    tool: "all",
+                },
+            ),
+        ).toEqual([scoped]);
+    });
+
+    it("formats complete structured input and restores output from linked logs", () => {
+        expect(
+            formatToolValue({ command: "printf ok", options: { timeoutMs: 1000 } }),
+        ).toBe("\n  command: printf ok\n  options:\n    timeoutMs: 1000");
+        expect(
+            resolveToolCallOutput(calls[0]!, [
+                {
+                    at: "2026-07-31T08:30:01Z",
+                    callId: "call-old",
+                    instanceName: "alpha",
+                    message: "hello",
+                    seq: 1,
+                    stream: "stdout",
+                },
+            ]),
+        ).toEqual({ stdout: "hello" });
+    });
+
+    it("classifies tool call statuses for the existing result filter", () => {
+        expect(toolCallResult(calls[0]!)).toBe("success");
+        expect(toolCallResult(calls[1]!)).toBe("failure");
+        expect(toolCallResult(calls[2]!)).toBe("pending");
+    });
+});

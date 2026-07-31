@@ -1,7 +1,6 @@
 import type { WebState } from "../state/WebStore.js";
-import type { InstanceEvent } from "@portable-devshell/shared/browser";
 import { SystemResources } from "../components/diagnostics/SystemResources.js";
-import { overviewActivity, overviewAlertRoute, overviewAlerts } from "../selectors/readModel.js";
+import { overviewAlertRoute, overviewAlerts, overviewToolCalls } from "../selectors/readModel.js";
 
 export function Overview({ state }: { state: WebState }) {
     if (state.overview === undefined) {
@@ -25,8 +24,8 @@ export function Overview({ state }: { state: WebState }) {
                     {currentAlerts.length === 0 ? <p className="empty">No current alerts.</p> : <ul className="alerts">{currentAlerts.map((alert) => <li className={alert.severity} key={alert.id}><a href={overviewAlertRoute(alert.kind)}><strong>{alert.title}</strong><br />{alert.detail}</a></li>)}</ul>}
                 </section>
                 <section>
-                    <h3><a href="#/activity">Recent activity</a></h3>
-                    {overviewActivity(overview).length === 0 ? <p className="empty">No recent activity.</p> : <ol className="feed">{overviewActivity(overview).map((activity) => <li key={activity.callId}><time>{activity.completedAt ?? activity.startedAt}</time><strong>{activity.instance}</strong> {activity.toolName} · {activity.status}</li>)}</ol>}
+                    <h3><a href="#/activity">Recent tool calls</a></h3>
+                    {overviewToolCalls(overview).length === 0 ? <p className="empty">No recent activity.</p> : <ol className="feed">{overviewToolCalls(overview).map((activity) => <li key={activity.callId}><time>{activity.completedAt ?? activity.startedAt}</time><strong>{activity.instance}</strong> {activity.toolName} · {activity.status}</li>)}</ol>}
                 </section>
             </div>
             <div className="overview-grid">
@@ -41,10 +40,6 @@ export function Overview({ state }: { state: WebState }) {
             </div>
         </section>
     );
-}
-
-export function ActivityList({ events, empty }: { events: InstanceEvent[]; empty: string }) {
-    return events.length === 0 ? <p className="empty">{empty}</p> : <ol className="feed">{events.map((event) => <li key={`${event.instanceName}-${event.seq}`}><time>{event.at}</time><strong>{event.instanceName}</strong> {event.type}</li>)}</ol>;
 }
 
 function Metric({ label, value }: { label: string; value: string }) {

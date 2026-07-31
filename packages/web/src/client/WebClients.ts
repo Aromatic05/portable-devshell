@@ -14,6 +14,8 @@ import {
     type ControlErrorBody,
     type ControlProtocolHelloRequest,
     type ControlProtocolHelloResponse,
+    type ContextMessageQueueInput,
+    type ContextMessageRecord,
     type InstanceEvent,
     type InstanceListEntry,
     type InstanceLogEntry,
@@ -24,6 +26,8 @@ import {
     type OAuthApprovalRequest,
     type OperationalOverview,
     type TodoRpcEnvelope,
+    type ToolCallQuery,
+    type ToolCallRecord,
 } from "@portable-devshell/shared/browser";
 
 import { BrowserWebSocketChannelProvider } from "../rpc/BrowserWebSocketChannelProvider.js";
@@ -49,6 +53,7 @@ export interface WebClients {
         subscribe(instance: string, fromSeq: number): Promise<WebRuntimeStream>;
     };
     tool: {
+        listCalls(instance: string, query?: ToolCallQuery): Promise<ToolCallRecord[]>;
         listApprovals(instance: string): Promise<ApprovalRequest[]>;
         getApproval(
             instance: string,
@@ -59,6 +64,10 @@ export interface WebClients {
             approvalId: string,
             decision: ApprovalDecisionValue,
         ): Promise<ApprovalRequest>;
+    };
+    contextMessage: {
+        list(instance: string, ctxId?: string): Promise<ContextMessageRecord[]>;
+        queue(instance: string, input: ContextMessageQueueInput): Promise<ContextMessageRecord>;
     };
     todo: {
         get(instance: string): Promise<TodoRpcEnvelope>;
@@ -133,6 +142,7 @@ export function createWebClients(
     const mcp = controlClientModule(connection, "mcp");
     const runtime = instanceClientModule(connection, "runtime");
     const tool = instanceClientModule(connection, "tool");
+    const contextMessage = instanceClientModule(connection, "contextMessage");
     const todo = instanceClientModule(connection, "todo");
 
     return {
@@ -178,11 +188,17 @@ export function createWebClients(
             },
         },
         tool: {
+            listCalls: (name, query) => tool.request(name, "listCalls", query),
             listApprovals: (name) => tool.request(name, "listApprovals"),
             getApproval: (name, approvalId) =>
                 tool.request(name, "getApproval", { approvalId }),
             decideApproval: (name, approvalId, decision) =>
                 tool.request(name, "decideApproval", { approvalId, decision }),
+        },
+        contextMessage: {
+            list: (name, ctxId) =>
+                contextMessage.request(name, "list", ctxId === undefined ? {} : { ctxId }),
+            queue: (name, input) => contextMessage.request(name, "queue", input),
         },
         todo: {
             get: (name) => todo.request(name, "get"),

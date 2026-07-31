@@ -15,7 +15,8 @@ const snapshot: InstanceSnapshot = {
 
 it("aggregates read-only todos without assigning operational health", () => {
     const state: WebState = {
-        activity: [{ at: "2026-07-31T00:00:00Z", instanceName: asInstanceName("failed-instance"), seq: 4, type: "toolCall.failed" }],
+        contextMessages: {},
+        toolCalls: {},
         approvals: { "failed-instance": [] }, connection: "online", instances: [{ mcpEnabled: true, name: "failed-instance", snapshot }], logs: {}, oauthApprovals: [], operations: {}, partialFailures: {}, todos: {
             "failed-instance": { items: [], revision: 7, summary: { completed: 1, total: 3 }, tasks: [{ completed: 1, revision: 7, status: "in_progress", taskId: "deploy", title: "Deploy service", total: 3, updatedAt: "2026-07-31T00:00:00Z" }] },
         },
