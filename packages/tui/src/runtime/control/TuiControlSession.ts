@@ -26,8 +26,10 @@ export class TuiControlSession {
     #oauthRefreshTimer?: ReturnType<typeof setInterval>;
     #overviewPollTimer?: ReturnType<typeof setInterval>;
     #overviewRefreshRequest?: Promise<void>;
+    #overviewRefreshGeneration?: number;
     #overviewRefreshTimer?: ReturnType<typeof setTimeout>;
     #started = false;
+    #generation = 0;
 
     constructor(options: TuiControlSessionOptions = {}) {
         this.#clients = options.clients ?? createControlClients();
@@ -35,6 +37,7 @@ export class TuiControlSession {
         this.#store = options.store ?? new TuiAppStore();
         this.#refresh = new TuiControlSessionRefresh({
             clients: this.#clients,
+            isCurrent: (generation) => this.#current(generation),
             store: this.#store
         });
         this.#subscriptions = new TuiControlSessionSubscriptions({
@@ -65,14 +68,16 @@ export class TuiControlSession {
             return;
         }
         this.#started = true;
-        await this.refresh();
-        if (this.#store.getState().connection.status === "connected") {
+        const generation = ++this.#generation;
+        await this.refresh(generation);
+        if (this.#current(generation) && this.#store.getState().connection.status === "connected") {
             this.#startOAuthRefresh();
             this.#startOverviewPolling();
         }
     }
 
     async stop(): Promise<void> {
+        this.#generation += 1;
         this.#started = false;
         this.#stopOAuthRefresh();
         this.#stopOverviewPolling();
@@ -86,70 +91,76 @@ export class TuiControlSession {
         if (!this.#started) {
             return;
         }
+        const generation = ++this.#generation;
         this.#stopOAuthRefresh();
         this.#stopOverviewPolling();
         try {
             await this.#clients.reconnect();
-            await this.refresh();
-            if (this.#store.getState().connection.status === "connected") {
+            if (!this.#current(generation)) return;
+            await this.refresh(generation);
+            if (this.#current(generation) && this.#store.getState().connection.status === "connected") {
                 this.#startOAuthRefresh();
                 this.#startOverviewPolling();
             }
         } catch (error) {
-            this.#applyConnectionFailure(error);
+            if (this.#current(generation)) this.#applyConnectionFailure(error);
         }
     }
 
-    async refreshConfig(): Promise<void> {
-        await this.#refresh.refreshConfig();
-        if (this.#store.getState().connection.status === "connected") {
+    async refreshConfig(generation = this.#generation): Promise<void> {
+        await this.#refresh.refreshConfig(generation);
+        if (this.#current(generation) && this.#store.getState().connection.status === "connected") {
             this.#stopOAuthRefresh();
             this.#startOAuthRefresh();
         }
     }
 
-    async refreshOverview(): Promise<void> {
-        await this.#requestOverviewRefresh();
+    async refreshOverview(generation = this.#generation): Promise<void> {
+        await this.#requestOverviewRefresh(generation);
     }
 
-    async refreshOAuth(): Promise<void> {
-        await this.#refresh.refreshOAuth();
+    async refreshOAuth(generation = this.#generation): Promise<void> {
+        await this.#refresh.refreshOAuth(generation);
     }
 
-    async refreshAudit(instance: string): Promise<void> {
-        await this.#refresh.refreshAudit(instance);
+    async refreshAudit(instance: string, generation = this.#generation): Promise<void> {
+        await this.#refresh.refreshAudit(instance, generation);
     }
 
-    async refreshLogsForInstance(instance: string): Promise<void> {
-        await this.#refresh.refreshLogsForInstance(instance);
+    async refreshLogsForInstance(instance: string, generation = this.#generation): Promise<void> {
+        await this.#refresh.refreshLogsForInstance(instance, generation);
     }
 
-    async refreshTodo(instance: string): Promise<void> {
-        await this.#refresh.refreshTodo(instance);
+    async refreshTodo(instance: string, generation = this.#generation): Promise<void> {
+        await this.#refresh.refreshTodo(instance, generation);
     }
 
-    async refreshArtifacts(): Promise<void> {
-        await this.#refresh.refreshArtifacts();
+    async refreshArtifacts(generation = this.#generation): Promise<void> {
+        await this.#refresh.refreshArtifacts(generation);
     }
 
-    async refreshLogs(): Promise<void> {
-        await this.#refresh.refreshLogs();
+    async refreshLogs(generation = this.#generation): Promise<void> {
+        await this.#refresh.refreshLogs(generation);
     }
 
-    async refreshInstance(instance: string): Promise<void> {
-        const fromSeq = await this.#refresh.refreshInstance(instance);
+    async refreshInstance(instance: string, generation = this.#generation): Promise<void> {
+        const fromSeq = await this.#refresh.refreshInstance(instance, generation);
+        if (!this.#current(generation)) return;
         this.#subscriptions.subscribeInstance(instance, fromSeq);
     }
 
-    async refresh(): Promise<void> {
+    async refresh(generation = this.#generation): Promise<void> {
+        if (!this.#current(generation)) return;
         this.#store.setConnectionState("connecting");
         try {
             await this.#clients.service.ping();
-            const subscriptions = await this.#refresh.refreshAll();
+            if (!this.#current(generation)) return;
+            const subscriptions = await this.#refresh.refreshAll(generation);
+            if (!this.#current(generation)) return;
             this.#subscriptions.replaceAll(subscriptions);
             this.#store.setConnectionState("connected");
         } catch (error) {
-            this.#applyConnectionFailure(error);
+            if (this.#current(generation)) this.#applyConnectionFailure(error);
         }
     }
 
@@ -170,6 +181,10 @@ export class TuiControlSession {
             { kind: "instance.event" }
         >
     ): void {
+        const generation = this.#generation;
+        if (!this.#current(generation)) {
+            return;
+        }
         const instance = message.event.destination;
         if (!isTuiPresentationEvent(message.event.name)) {
             return;
@@ -179,13 +194,13 @@ export class TuiControlSession {
             this.#store.getState().ui.selectedPage === "overview" &&
             isOverviewRefreshEvent(message.event.name)
         ) {
-            this.#scheduleOverviewRefresh();
+            this.#scheduleOverviewRefresh(generation);
         }
         if (message.event.name.startsWith("todo.")) {
-            this.#runBackgroundRefresh("todo", async () => await this.#refresh.refreshTodo(instance));
+            this.#runBackgroundRefresh("todo", generation, async () => await this.#refresh.refreshTodo(instance, generation));
         }
         if (isTerminalToolCallEvent(message.event.name)) {
-            this.#scheduleAuditRefresh(instance);
+            this.#scheduleAuditRefresh(instance, generation);
         }
         const state = this.#store.getState();
         if (
@@ -216,6 +231,7 @@ export class TuiControlSession {
     }
 
     #handleDisconnected(): void {
+        this.#generation += 1;
         this.#stopOAuthRefresh();
         this.#stopOverviewPolling();
         this.#stopOverviewRefresh();
@@ -225,8 +241,10 @@ export class TuiControlSession {
     }
 
     #applyConnectionFailure(error: unknown): void {
+        this.#generation += 1;
         const failure = toFailure(error);
         this.#store.setConnectionState(failure.status, failure.error);
+        this.#stopOAuthRefresh();
         this.#stopOverviewPolling();
         this.#stopOverviewRefresh();
         this.#stopAuditRefreshes();
@@ -238,7 +256,8 @@ export class TuiControlSession {
             return;
         }
         this.#oauthRefreshTimer = setInterval(() => {
-            this.#runBackgroundRefresh("oauth", async () => await this.#refresh.refreshOAuth());
+            const generation = this.#generation;
+            this.#runBackgroundRefresh("oauth", generation, async () => await this.#refresh.refreshOAuth(generation));
         }, 1_000);
     }
 
@@ -265,7 +284,8 @@ export class TuiControlSession {
             ) {
                 return;
             }
-            void this.#refreshVisibleOverview();
+            const generation = this.#generation;
+            void this.#refreshVisibleOverview(generation);
         }, this.#overviewRefreshIntervalMs);
     }
 
@@ -277,37 +297,42 @@ export class TuiControlSession {
         this.#overviewPollTimer = undefined;
     }
 
-    #scheduleOverviewRefresh(): void {
+    #scheduleOverviewRefresh(generation: number): void {
         this.#stopOverviewRefresh();
         this.#overviewRefreshTimer = setTimeout(() => {
             this.#overviewRefreshTimer = undefined;
             if (!this.#started || this.#store.getState().ui.selectedPage !== "overview") {
                 return;
             }
-            void this.#refreshVisibleOverview();
+            if (!this.#current(generation)) return;
+            void this.#refreshVisibleOverview(generation);
         }, 75);
     }
 
-    async #refreshVisibleOverview(): Promise<void> {
+    async #refreshVisibleOverview(generation = this.#generation): Promise<void> {
         try {
-            await this.#requestOverviewRefresh();
+            await this.#requestOverviewRefresh(generation);
+            if (!this.#current(generation)) return;
             this.#clearRefreshFailure("overview");
         } catch (error) {
+            if (!this.#current(generation)) return;
             this.#reportRefreshFailure("overview", error);
         }
     }
 
-    async #requestOverviewRefresh(): Promise<void> {
-        if (this.#overviewRefreshRequest !== undefined) {
+    async #requestOverviewRefresh(generation = this.#generation): Promise<void> {
+        if (this.#overviewRefreshRequest !== undefined && this.#overviewRefreshGeneration === generation) {
             return await this.#overviewRefreshRequest;
         }
-        const request = this.#refresh.refreshOverview();
+        const request = this.#refresh.refreshOverview(generation);
+        this.#overviewRefreshGeneration = generation;
         this.#overviewRefreshRequest = request;
         try {
             await request;
         } finally {
-            if (this.#overviewRefreshRequest === request) {
+            if (this.#overviewRefreshRequest === request && this.#overviewRefreshGeneration === generation) {
                 this.#overviewRefreshRequest = undefined;
+                this.#overviewRefreshGeneration = undefined;
             }
         }
     }
@@ -320,7 +345,7 @@ export class TuiControlSession {
         this.#overviewRefreshTimer = undefined;
     }
 
-    #scheduleAuditRefresh(instance: string): void {
+    #scheduleAuditRefresh(instance: string, generation: number): void {
         const state = this.#store.getState();
         if (state.ui.selectedPage !== "audit" || state.ui.selectedInstance !== instance) {
             return;
@@ -336,7 +361,7 @@ export class TuiControlSession {
             }
             const latest = this.#store.getState();
             if (latest.ui.selectedPage === "audit" && latest.ui.selectedInstance === instance) {
-                this.#runBackgroundRefresh("audit", async () => await this.#refresh.refreshAudit(instance));
+                this.#runBackgroundRefresh("audit", generation, async () => await this.#refresh.refreshAudit(instance, generation));
             }
         }, 50));
     }
@@ -350,11 +375,16 @@ export class TuiControlSession {
 
     #runBackgroundRefresh(
         page: "audit" | "oauth" | "todo",
+        generation: number,
         refresh: () => Promise<void>
     ): void {
         void refresh().then(
-            () => this.#clearRefreshFailure(page),
-            (error: unknown) => this.#reportRefreshFailure(page, error)
+            () => {
+                if (this.#current(generation)) this.#clearRefreshFailure(page);
+            },
+            (error: unknown) => {
+                if (this.#current(generation)) this.#reportRefreshFailure(page, error);
+            }
         );
     }
 
@@ -379,6 +409,10 @@ export class TuiControlSession {
             page,
             `${refreshPageLabel(page)} refresh failed: ${readErrorMessage(error)}`
         );
+    }
+
+    #current(generation: number): boolean {
+        return this.#started && this.#generation === generation;
     }
 }
 

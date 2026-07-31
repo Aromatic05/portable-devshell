@@ -22,66 +22,76 @@ export interface TuiControlSubscriptionRequest {
 
 export interface TuiControlSessionRefreshOptions {
     clients: TuiClients;
+    isCurrent?: (generation: number) => boolean;
     store: TuiAppStore;
 }
 
 export class TuiControlSessionRefresh {
     readonly #clients: TuiClients;
+    readonly #isCurrent: (generation: number) => boolean;
     readonly #store: TuiAppStore;
 
     constructor(options: TuiControlSessionRefreshOptions) {
         this.#clients = options.clients;
+        this.#isCurrent = options.isCurrent ?? (() => true);
         this.#store = options.store;
     }
 
-    async refreshAll(): Promise<TuiControlSubscriptionRequest[]> {
-        await this.refreshOverview();
+    async refreshAll(generation?: number): Promise<TuiControlSubscriptionRequest[]> {
+        await this.refreshOverview(generation);
+        if (!this.#current(generation)) return [];
         const configView = await this.#readConfigView();
         const runtimeInstances = await this.#clients.instance.list();
-        this.#store.setMcpStatus(await this.#clients.mcp.status());
+        const mcpStatus = await this.#clients.mcp.status();
+        if (!this.#current(generation)) return [];
+        this.#store.setMcpStatus(mcpStatus);
         this.#store.replaceInstances(
             mergeInstances(configView, runtimeInstances)
         );
         this.#store.setConfigView(configView);
-        await this.#reloadOAuthApprovals(configView);
-        await this.refreshArtifacts();
+        await this.#reloadOAuthApprovals(configView, generation);
+        await this.refreshArtifacts(generation);
+        if (!this.#current(generation)) return [];
 
         const subscriptions: TuiControlSubscriptionRequest[] = [];
         for (const instance of runtimeInstances) {
+            if (!this.#current(generation)) break;
             subscriptions.push({
-                fromSeq: await this.refreshRuntimeInstance(instance.name),
+                fromSeq: await this.refreshRuntimeInstance(instance.name, generation),
                 instance: instance.name
             });
         }
         return subscriptions;
     }
 
-    async refreshConfig(): Promise<void> {
+    async refreshConfig(generation?: number): Promise<void> {
         const configView = await this.#readConfigView();
         const runtimeInstances = await this.#clients.instance.list();
-        this.#store.setMcpStatus(await this.#clients.mcp.status());
+        const mcpStatus = await this.#clients.mcp.status();
+        if (!this.#current(generation)) return;
+        this.#store.setMcpStatus(mcpStatus);
         this.#store.replaceInstances(
             mergeInstances(configView, runtimeInstances)
         );
         this.#store.setConfigView(configView);
     }
 
-    async refreshOverview(): Promise<void> {
+    async refreshOverview(generation?: number): Promise<void> {
         try {
-            this.#store.replaceOperationalOverview(
-                await this.#clients.overview.get()
-            );
+            const overview = await this.#clients.overview.get();
+            if (this.#current(generation)) this.#store.replaceOperationalOverview(overview);
         } catch (error) {
             if (readErrorCode(error) !== "control.methodNotFound") {
                 throw error;
             }
-            this.#store.replaceOperationalOverview(undefined);
+            if (this.#current(generation)) this.#store.replaceOperationalOverview(undefined);
         }
     }
 
-    async refreshOAuth(): Promise<void> {
+    async refreshOAuth(generation?: number): Promise<void> {
         await this.#reloadOAuthApprovals(
-            this.#store.getState().configView
+            this.#store.getState().configView,
+            generation
         );
     }
 
@@ -89,90 +99,93 @@ export class TuiControlSessionRefresh {
         return !oauthApprovalsUnavailable(this.#store.getState().configView);
     }
 
-    async refreshAudit(instance: string): Promise<void> {
-        await this.#reloadToolCalls(instance);
-        await this.#reloadApprovals(instance);
+    async refreshAudit(instance: string, generation?: number): Promise<void> {
+        await this.#reloadToolCalls(instance, generation);
+        await this.#reloadApprovals(instance, generation);
     }
 
-    async refreshLogsForInstance(instance: string): Promise<void> {
-        await this.#reloadLogs(instance);
+    async refreshLogsForInstance(instance: string, generation?: number): Promise<void> {
+        await this.#reloadLogs(instance, generation);
     }
 
-    async refreshTodo(instance: string): Promise<void> {
-        await this.#reloadTodo(instance);
+    async refreshTodo(instance: string, generation?: number): Promise<void> {
+        await this.#reloadTodo(instance, generation);
     }
 
-    async refreshArtifacts(): Promise<void> {
+    async refreshArtifacts(generation?: number): Promise<void> {
         try {
             const [shares, transfers] = await Promise.all([
                 this.#clients.artifact.listShares(),
                 this.#clients.artifact.listTransfers()
             ]);
+            if (!this.#current(generation)) return;
             this.#store.replaceArtifactShares(shares);
             this.#store.replaceArtifactTransfers(transfers);
         } catch (error) {
             if (readErrorCode(error) !== "control.methodNotFound") {
                 throw error;
             }
+            if (!this.#current(generation)) return;
             this.#store.replaceArtifactShares([]);
             this.#store.replaceArtifactTransfers([]);
         }
     }
 
-    async refreshLogs(): Promise<void> {
+    async refreshLogs(generation?: number): Promise<void> {
         for (const instance of this.#runtimeInstanceNames()) {
-            await this.#reloadLogs(instance);
+            await this.#reloadLogs(instance, generation);
         }
     }
 
-    async refreshRuntimeInstance(instance: string): Promise<number> {
+    async refreshRuntimeInstance(instance: string, generation?: number): Promise<number> {
         const snapshotEnvelope = await this.#clients.runtime.snapshot(instance);
+        if (!this.#current(generation)) return nextSubscribeSeq(snapshotEnvelope);
         this.#store.replaceSnapshot(snapshotEnvelope.snapshot);
-        await this.#reloadTodo(instance);
-        await this.#reloadLogs(instance);
-        await this.#reloadToolCalls(instance);
-        await this.#reloadApprovals(instance);
+        await this.#reloadTodo(instance, generation);
+        await this.#reloadLogs(instance, generation);
+        await this.#reloadToolCalls(instance, generation);
+        await this.#reloadApprovals(instance, generation);
         return nextSubscribeSeq(snapshotEnvelope);
     }
 
-    async refreshInstance(instance: string): Promise<number> {
-        return await this.refreshRuntimeInstance(instance);
+    async refreshInstance(instance: string, generation?: number): Promise<number> {
+        return await this.refreshRuntimeInstance(instance, generation);
     }
 
-    async #reloadTodo(instance: string): Promise<void> {
+    async #reloadTodo(instance: string, generation?: number): Promise<void> {
         const envelope = await this.#clients.todo.get(instance);
-        this.#store.replaceTodo(instance, envelope.todo);
+        if (this.#current(generation)) this.#store.replaceTodo(instance, envelope.todo);
     }
 
-    async #reloadLogs(instance: string): Promise<void> {
+    async #reloadLogs(instance: string, generation?: number): Promise<void> {
         const logs = await this.#clients.runtime.readLogs(instance, {
             limit: LOG_READ_LIMIT
         });
-        this.#store.replaceLogs(instance, logs.map(mapLogEntry));
+        if (this.#current(generation)) this.#store.replaceLogs(instance, logs.map(mapLogEntry));
     }
 
-    async #reloadToolCalls(instance: string): Promise<void> {
+    async #reloadToolCalls(instance: string, generation?: number): Promise<void> {
         const records = await this.#clients.tool.listCalls(instance, {
             limit: TOOL_CALL_READ_LIMIT
         });
-        this.#store.replaceToolCalls(instance, records);
+        if (this.#current(generation)) this.#store.replaceToolCalls(instance, records);
     }
 
-    async #reloadApprovals(instance: string): Promise<void> {
+    async #reloadApprovals(instance: string, generation?: number): Promise<void> {
         const approvals = await this.#clients.tool.listApprovals(instance);
-        this.#store.replaceApprovals(instance, approvals);
+        if (this.#current(generation)) this.#store.replaceApprovals(instance, approvals);
     }
 
     async #reloadOAuthApprovals(
-        configView: Record<string, JsonValue> | undefined
+        configView: Record<string, JsonValue> | undefined,
+        generation?: number
     ): Promise<void> {
         if (oauthApprovalsUnavailable(configView)) {
-            this.#store.replaceOAuthApprovals([]);
+            if (this.#current(generation)) this.#store.replaceOAuthApprovals([]);
             return;
         }
-        this.#store.replaceOAuthApprovals(
-            await this.#clients.mcp.listApprovals()
-        );
+        const approvals = await this.#clients.mcp.listApprovals();
+        if (this.#current(generation)) this.#store.replaceOAuthApprovals(approvals);
     }
 
     #runtimeInstanceNames(): string[] {
@@ -195,6 +208,10 @@ export class TuiControlSessionRefresh {
             }
             throw error;
         }
+    }
+
+    #current(generation: number | undefined): boolean {
+        return generation === undefined || this.#isCurrent(generation);
     }
 }
 

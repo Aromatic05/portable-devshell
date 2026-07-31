@@ -153,6 +153,123 @@ test("TUI clears an OAuth polling failure after the background refresh recovers"
     }
 });
 
+test("TUI discards a Todo refresh that completes after reconnect", async () => {
+    let releaseTodo!: () => void;
+    const pendingTodo = new Promise<{ todo: { items: []; revision: number; summary: { completed: number; total: number } } }>((resolve) => {
+        releaseTodo = () => resolve({ todo: { items: [], revision: 2, summary: { completed: 0, total: 0 } } });
+    });
+    const session = new TuiControlSession({ clients: sessionClients({ todo: { get: async () => await pendingTodo } }) });
+
+    await session.start();
+    const staleRefresh = session.refreshTodo("alpha");
+    await Promise.resolve();
+    await session.reconnect();
+    releaseTodo();
+    await staleRefresh;
+
+    assert.equal(session.store.getState().todoByInstance.alpha, undefined);
+    await session.stop();
+});
+
+test("TUI does not subscribe after an obsolete instance refresh completes", async () => {
+    let releaseSnapshot!: () => void;
+    const pendingSnapshot = new Promise((resolve) => {
+        releaseSnapshot = () => resolve({
+            lastSeq: 2,
+            snapshot: {
+                connectionState: "connected", daemonState: "running", lastSeq: 2,
+                name: asInstanceName("alpha"), ready: true, status: "ready"
+            }
+        });
+    });
+    const subscribe = async () => {
+        throw new Error("stale refresh must not subscribe");
+    };
+    const session = new TuiControlSession({
+        clients: sessionClients({ runtime: {
+            readLogs: async () => [],
+            snapshot: async () => await pendingSnapshot,
+            subscribe
+        } })
+    });
+
+    await session.start();
+    const staleRefresh = session.refreshInstance("alpha");
+    await Promise.resolve();
+    await session.reconnect();
+    releaseSnapshot();
+    await staleRefresh;
+
+    await session.stop();
+});
+
+test("TUI stops OAuth polling after a connection refresh fails", async () => {
+    let approvalReads = 0;
+    let failPing = false;
+    const session = new TuiControlSession({
+        clients: sessionClients({
+            config: { async get() { return { mcp: { auth: { mode: "oauth2" } } }; } },
+            mcp: {
+                async listApprovals() { approvalReads += 1; return []; },
+                async status() { return {}; }
+            },
+            service: { async ping() {
+                if (failPing) throw new Error("control unavailable");
+                return { pong: true };
+            } }
+        })
+    });
+
+    try {
+        await session.start();
+        failPing = true;
+        await session.refresh();
+        const readsAfterFailure = approvalReads;
+        await new Promise((resolve) => setTimeout(resolve, 1_100));
+
+        assert.equal(session.store.getState().connection.status, "error");
+        assert.equal(approvalReads, readsAfterFailure);
+    } finally {
+        await session.stop();
+    }
+});
+
+test("TUI ignores an old visible Overview failure after reconnect", async () => {
+    let rejectOldOverview!: (error: Error) => void;
+    const oldOverview = new Promise<never>((_resolve, reject) => {
+        rejectOldOverview = reject;
+    });
+    let useOldOverview = false;
+    const session = new TuiControlSession({
+        clients: sessionClients({
+            overview: { async get() {
+                if (useOldOverview) return await oldOverview;
+                return {
+                    activity: [], alerts: [], controller: { pid: 1, uptimeSeconds: 1 },
+                    counts: { activeTodos: 0, failedCalls24h: 0, instancesAttention: 0, instancesCritical: 0, instancesReady: 0, instancesTotal: 0, pendingApprovals: 0 },
+                    generatedAt: "2026-07-31T00:00:00.000Z", health: "healthy" as const, instances: [], todos: []
+                };
+            } }
+        }),
+        overviewRefreshIntervalMs: 10
+    });
+
+    try {
+        await session.start();
+        session.store.setSelectedPage("overview");
+        useOldOverview = true;
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        useOldOverview = false;
+        await session.reconnect();
+        rejectOldOverview(new Error("stale overview failure"));
+        await new Promise((resolve) => setTimeout(resolve, 20));
+
+        assert.equal(session.store.getState().interaction.screenStatusByPage.overview, undefined);
+    } finally {
+        await session.stop();
+    }
+});
+
 test("artifact stream events upsert complete records without replacing shares from download audit events", () => {
     const store = new TuiAppStore();
     store.applyEvent({
@@ -274,4 +391,24 @@ async function waitFor(predicate: () => boolean): Promise<void> {
         }
         await new Promise((resolve) => setTimeout(resolve, 10));
     }
+}
+
+function sessionClients(overrides: Record<string, unknown> = {}) {
+    return {
+        artifact: { async listShares() { return []; }, async listTransfers() { return []; } },
+        close() {},
+        config: { async get() { return {}; } },
+        instance: { async list() { return []; } },
+        mcp: { async status() { return {}; } },
+        overview: { async get() {
+            return {
+                activity: [], alerts: [], controller: { pid: 1, uptimeSeconds: 1 },
+                counts: { activeTodos: 0, failedCalls24h: 0, instancesAttention: 0, instancesCritical: 0, instancesReady: 0, instancesTotal: 0, pendingApprovals: 0 },
+                generatedAt: "2026-07-31T00:00:00.000Z", health: "healthy" as const, instances: [], todos: []
+            };
+        } },
+        async reconnect() {},
+        service: { async ping() { return { pong: true }; } },
+        ...overrides
+    } as never;
 }
