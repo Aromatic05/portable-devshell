@@ -170,6 +170,26 @@ describe("authenticated application shell", () => {
         expect(session.logout).toHaveBeenCalledOnce();
     });
 
+    it("disables runtime actions while logout is pending", async () => {
+        let releaseLogout!: () => void;
+        const session = fakeSession({ check: true });
+        session.logout.mockImplementation(async () => await new Promise<void>((resolve) => {
+            releaseLogout = resolve;
+        }));
+        render(<App createClients={fakeClients} session={session} />);
+        const instances = await screen.findAllByRole("button", { name: /Instances/ });
+        fireEvent.click(instances[0]!);
+        fireEvent.click(await screen.findByText("demo"));
+        const stop = await screen.findByRole("button", { name: "Stop" });
+        expect(stop).toBeEnabled();
+
+        fireEvent.click(screen.getByRole("button", { name: "Log out" }));
+
+        expect(stop).toBeDisabled();
+        releaseLogout();
+        expect(await screen.findByRole("button", { name: "Sign in" })).toBeInTheDocument();
+    });
+
     it("shows a failed logout without leaving the application", async () => {
         const session = fakeSession({ check: true });
         session.logout.mockRejectedValue(new Error("Session revocation failed"));
@@ -224,6 +244,7 @@ describe("authenticated application shell", () => {
     });
 
     it("supports mobile bottom and desktop navigation", async () => {
+        window.location.hash = "#/overview";
         render(
             <App
                 createClients={fakeClients}
@@ -275,6 +296,7 @@ function fakeClients(): WebClients {
     } as unknown as WebRuntimeStream;
     return {
         close() {},
+        onTransportClose: () => () => undefined,
         reconnect: async () => undefined,
         service: {
             hello: async () => ({

@@ -154,3 +154,52 @@ it("does not render large Tool Call details until the row is expanded", () => {
     fireEvent(details, new Event("toggle"));
     expect(screen.getByText(new RegExp(token))).toBeInTheDocument();
 });
+
+it("normalizes a Context filter that disappears after refresh", () => {
+    const store = { queueContextMessage: vi.fn() } as unknown as WebStore;
+    const view = render(<ToolCalls state={state} store={store} />);
+    fireEvent.change(screen.getByLabelText("Instance"), { target: { value: "alpha" } });
+    fireEvent.change(screen.getByLabelText("Context"), {
+        target: { value: "context:ctx-alpha" },
+    });
+
+    view.rerender(<ToolCalls
+        state={{
+            ...state,
+            contextMessages: { alpha: [] },
+            toolCalls: {
+                ...state.toolCalls,
+                alpha: [{
+                    ...state.toolCalls.alpha![0]!,
+                    ctxId: "ctx-new",
+                }],
+            },
+        }}
+        store={store}
+    />);
+
+    expect(screen.getByLabelText("Context")).toHaveValue("all");
+    expect(screen.getByText("1 of 2 tool calls match active filters.")).toBeInTheDocument();
+});
+
+it("shows the display limit without claiming it is the match total", () => {
+    const manyState: WebState = {
+        ...state,
+        toolCalls: {
+            alpha: Array.from({ length: 150 }, (_, index) => ({
+                ...state.toolCalls.alpha![0]!,
+                callId: `call-${index}`,
+                startedAt: `2026-07-31T09:${String(index % 60).padStart(2, "0")}:00Z`,
+            })),
+        },
+    };
+
+    render(<ToolCalls
+        state={manyState}
+        store={{ queueContextMessage: vi.fn() } as unknown as WebStore}
+    />);
+
+    expect(
+        screen.getByText("Showing 100 of 150 matching tool calls."),
+    ).toBeInTheDocument();
+});

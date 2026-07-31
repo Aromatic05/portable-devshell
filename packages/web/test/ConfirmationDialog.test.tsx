@@ -29,3 +29,36 @@ describe("ConfirmationDialog", () => {
         expect(confirm).toHaveBeenCalledOnce();
     });
 });
+
+it("keeps focus inside the dialog while an operation is busy", () => {
+    const view = render(
+        <>
+            <ConfirmationDialog
+                actionLabel="Stop"
+                busy={false}
+                description="Stop demo?"
+                onCancel={vi.fn()}
+                onConfirm={vi.fn()}
+            />
+            <button>Background action</button>
+        </>,
+    );
+    view.rerender(
+        <>
+            <ConfirmationDialog
+                actionLabel="Stop"
+                busy
+                description="Stop demo?"
+                onCancel={vi.fn()}
+                onConfirm={vi.fn()}
+            />
+            <button>Background action</button>
+        </>,
+    );
+    const dialog = screen.getByRole("dialog", { name: "Confirm stop" });
+
+    expect(dialog).toHaveFocus();
+    fireEvent.keyDown(dialog, { key: "Tab" });
+    expect(dialog).toHaveFocus();
+    expect(screen.getByRole("button", { name: "Background action" })).not.toHaveFocus();
+});

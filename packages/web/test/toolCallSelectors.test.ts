@@ -8,7 +8,11 @@ import {
     formatToolValue,
     resolveToolCallOutput,
 } from "../src/formatters/toolCalls.js";
-import { toolCallResult, filterToolCalls } from "../src/selectors/toolCalls.js";
+import {
+    filterToolCalls,
+    selectToolCalls,
+    toolCallResult,
+} from "../src/selectors/toolCalls.js";
 
 const calls: ToolCallRecord[] = [
     {
@@ -165,4 +169,39 @@ describe("bounded Tool Call presentation", () => {
         expect(large.length).toBeLessThanOrEqual(210_000);
         expect(large).toContain("truncated");
     });
+});
+
+it("uses a global traversal budget for wide nested values", () => {
+    let reads = 0;
+    const inner = new Proxy(new Array(1_000).fill("value"), {
+        get(target, property, receiver) {
+            if (typeof property === "string" && /^\d+$/u.test(property)) reads += 1;
+            return Reflect.get(target, property, receiver);
+        },
+    });
+    const root = new Array(1_000).fill(inner);
+
+    const formatted = formatToolValue(root as never);
+
+    expect(formatted).toContain("truncated");
+    expect(reads).toBeLessThan(2_000);
+});
+
+it("reports the full match count separately from the display limit", () => {
+    const many = Array.from({ length: 150 }, (_, index) => ({
+        ...calls[0]!,
+        callId: `call-${index}`,
+        startedAt: `2026-07-31T09:${String(index % 60).padStart(2, "0")}:00Z`,
+    }));
+    const { items, total } = selectToolCalls(many, {
+        ctxId: "all",
+        instance: "all",
+        period: "all",
+        query: "",
+        result: "all",
+        tool: "all",
+    });
+
+    expect(items).toHaveLength(100);
+    expect(total).toBe(150);
 });

@@ -14,9 +14,15 @@ export interface ToolCallFilters {
     tool: string;
 }
 
+export interface ToolCallSelection {
+    items: ToolCallRecord[];
+    total: number;
+}
+
 export const allContextsFilter = "all";
 export const unscopedContextFilter = "unscoped";
 const scopedContextPrefix = "context:";
+const searchTextCache = new WeakMap<ToolCallRecord, string>();
 
 export const emptyToolCallFilters: ToolCallFilters = {
     ctxId: "all",
@@ -50,11 +56,12 @@ export function toolCallResult(
     return "failure";
 }
 
-export function filterToolCalls(
+export function selectToolCalls(
     calls: readonly ToolCallRecord[],
     filters: ToolCallFilters,
     now = Date.now(),
-): ToolCallRecord[] {
+    limit = 100,
+): ToolCallSelection {
     const query = filters.query.trim().toLowerCase();
     const minTime =
         filters.period === "1h"
@@ -62,33 +69,34 @@ export function filterToolCalls(
             : filters.period === "24h"
               ? now - 86_400_000
               : undefined;
-    return [...calls]
-        .sort((left, right) => right.startedAt.localeCompare(left.startedAt))
-        .filter(
-            (call) =>
-                filters.instance === "all" || call.instance === filters.instance,
-        )
-        .filter((call) => {
-            if (filters.ctxId === allContextsFilter) return true;
-            if (filters.ctxId === unscopedContextFilter) return call.ctxId === undefined;
-            return call.ctxId === selectedContextId(filters.ctxId);
-        })
-        .filter(
-            (call) => filters.tool === "all" || call.toolName === filters.tool,
-        )
-        .filter(
-            (call) =>
-                filters.result === "all" ||
-                toolCallResult(call) === filters.result,
-        )
-        .filter(
-            (call) =>
-                minTime === undefined || Date.parse(call.startedAt) >= minTime,
-        )
-        .filter(
-            (call) => query.length === 0 || callSearchText(call).includes(query),
-        )
-        .slice(0, 100);
+    const items: ToolCallRecord[] = [];
+    let total = 0;
+    for (const call of [...calls].sort((left, right) =>
+        right.startedAt.localeCompare(left.startedAt)
+    )) {
+        if (filters.instance !== "all" && call.instance !== filters.instance) continue;
+        if (filters.ctxId === unscopedContextFilter && call.ctxId !== undefined) continue;
+        if (
+            filters.ctxId !== allContextsFilter &&
+            filters.ctxId !== unscopedContextFilter &&
+            call.ctxId !== selectedContextId(filters.ctxId)
+        ) continue;
+        if (filters.tool !== "all" && call.toolName !== filters.tool) continue;
+        if (filters.result !== "all" && toolCallResult(call) !== filters.result) continue;
+        if (minTime !== undefined && Date.parse(call.startedAt) < minTime) continue;
+        if (query.length > 0 && !callSearchText(call).includes(query)) continue;
+        total += 1;
+        if (items.length < limit) items.push(call);
+    }
+    return { items, total };
+}
+
+export function filterToolCalls(
+    calls: readonly ToolCallRecord[],
+    filters: ToolCallFilters,
+    now = Date.now(),
+): ToolCallRecord[] {
+    return selectToolCalls(calls, filters, now).items;
 }
 
 export function hasActiveToolCallFilters(filters: ToolCallFilters): boolean {
@@ -96,7 +104,9 @@ export function hasActiveToolCallFilters(filters: ToolCallFilters): boolean {
 }
 
 function callSearchText(call: ToolCallRecord): string {
-    return [
+    const cached = searchTextCache.get(call);
+    if (cached !== undefined) return cached;
+    const text = [
         call.callId,
         call.ctxId,
         call.error,
@@ -112,6 +122,8 @@ function callSearchText(call: ToolCallRecord): string {
         .filter((value): value is string => typeof value === "string")
         .join(" ")
         .toLowerCase();
+    searchTextCache.set(call, text);
+    return text;
 }
 
 export function contextFilterValue(ctxId: string): string {

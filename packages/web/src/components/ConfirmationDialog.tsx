@@ -26,6 +26,10 @@ export function ConfirmationDialog({
         return () => previous?.focus();
     }, [destructive]);
 
+    useEffect(() => {
+        if (busy) dialogRef.current?.focus();
+    }, [busy]);
+
     function keyDown(event: React.KeyboardEvent<HTMLElement>): void {
         if (event.key === "Escape" && !busy) {
             event.preventDefault();
@@ -37,7 +41,11 @@ export function ConfirmationDialog({
             .filter((control): control is HTMLButtonElement =>
                 control !== null && !control.disabled
             );
-        if (controls.length === 0) return;
+        if (controls.length === 0) {
+            event.preventDefault();
+            dialogRef.current?.focus();
+            return;
+        }
         const first = controls[0]!;
         const last = controls[controls.length - 1]!;
         if (event.shiftKey && document.activeElement === first) {
@@ -56,6 +64,7 @@ export function ConfirmationDialog({
             role="presentation"
         >
             <section
+                aria-busy={busy}
                 aria-labelledby="confirmation-title"
                 aria-modal="true"
                 className="dialog"
@@ -63,6 +72,7 @@ export function ConfirmationDialog({
                 onMouseDown={(event) => event.stopPropagation()}
                 ref={dialogRef}
                 role="dialog"
+                tabIndex={-1}
             >
                 <h2 id="confirmation-title">Confirm {actionLabel.toLowerCase()}</h2>
                 <p>{description}</p>

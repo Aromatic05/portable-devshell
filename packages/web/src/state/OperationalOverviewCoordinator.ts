@@ -2,6 +2,7 @@ import type { OperationalOverview } from "@portable-devshell/shared/browser";
 
 import type { WebClients } from "../client/WebClients.js";
 import type { WebState } from "./WebState.js";
+import { withWebRequestTimeout } from "./WebRequestTimeout.js";
 
 export interface OperationalOverviewAccess {
     currentGeneration(): number;
@@ -24,6 +25,7 @@ export class OperationalOverviewCoordinator {
         private readonly clients: WebClients,
         private readonly access: OperationalOverviewAccess,
         private readonly refreshIntervalMs: number,
+        private readonly requestTimeoutMs = 10_000,
     ) {}
 
     setObserved(observed: boolean): void {
@@ -52,7 +54,11 @@ export class OperationalOverviewCoordinator {
         ) return await this.#request;
         this.#requestGeneration = generation;
         const version = ++this.#version;
-        const request = this.clients.overview.get()
+        const request = withWebRequestTimeout(
+            this.clients.overview.get(),
+            this.requestTimeoutMs,
+            "overview",
+        )
             .then((overview) => this.applyOverview(overview, generation, version))
             .catch((error: unknown) => this.applyFailure(error, generation, version))
             .finally(() => {

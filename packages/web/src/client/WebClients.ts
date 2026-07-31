@@ -31,9 +31,11 @@ import {
 } from "@portable-devshell/shared/browser";
 
 import { BrowserWebSocketChannelProvider } from "../rpc/BrowserWebSocketChannelProvider.js";
+import { ObservableChannelProvider } from "../rpc/ObservableChannelProvider.js";
 
 export interface WebClients {
     close(): void;
+    onTransportClose(listener: (error: Error) => void): () => void;
     reconnect(): Promise<void>;
     service: {
         hello(): Promise<ControlProtocolHelloResponse>;
@@ -49,7 +51,7 @@ export interface WebClients {
             query?: { fromSeq?: number; limit?: number },
         ): Promise<InstanceLogEntry[]>;
         stop(instance: string): Promise<InstanceSnapshot>;
-        start(instance: string): Promise<InstanceSnapshot>;
+        start(instance: string, signal?: AbortSignal): Promise<InstanceSnapshot>;
         subscribe(instance: string, fromSeq: number): Promise<WebRuntimeStream>;
     };
     tool: {
@@ -129,8 +131,9 @@ export class WebRuntimeStream {
 export function createWebClients(
     channelProvider: ChannelProvider = new BrowserWebSocketChannelProvider(),
 ): WebClients {
+    const observableProvider = new ObservableChannelProvider(channelProvider);
     const connection = new ClientConnection({
-        channelProvider,
+        channelProvider: observableProvider,
         mapError,
         mapRemoteError: (error) => createError(error),
         mode: "persistent",
@@ -147,6 +150,7 @@ export function createWebClients(
 
     return {
         close: () => connection.close(),
+        onTransportClose: (listener) => observableProvider.onClose(listener),
         reconnect: () => connection.reconnect(),
         service: {
             hello: () =>
@@ -163,17 +167,27 @@ export function createWebClients(
             refresh: (name) => runtime.request(name, "refresh"),
             readLogs: (name, query) => runtime.request(name, "readLogs", query),
             stop: (name) => runtime.request(name, "stop"),
-            start: async (name) => {
+            start: async (name, signal) => {
                 const opened = await runtime.openStream(name, "start");
-                while (true) {
-                    const event = await opened.stream.nextEvent();
-                    if (event.name === "stream.completed") {
-                        return readInstanceSnapshot(event.payload);
+                const aborted = () => opened.stream.close();
+                signal?.addEventListener("abort", aborted, { once: true });
+                try {
+                    if (signal?.aborted === true) {
+                        opened.stream.close();
+                        throw abortError(signal);
                     }
-                    if (event.name === "stream.cancelled") {
-                        connection.throwRemoteError(event.error);
-                        throw new Error("Start cancelled.");
+                    while (true) {
+                        const event = await opened.stream.nextEvent();
+                        if (event.name === "stream.completed") {
+                            return readInstanceSnapshot(event.payload);
+                        }
+                        if (event.name === "stream.cancelled") {
+                            connection.throwRemoteError(event.error);
+                            throw new Error("Start cancelled.");
+                        }
                     }
+                } finally {
+                    signal?.removeEventListener("abort", aborted);
                 }
             },
             subscribe: async (name, fromSeq) => {
@@ -316,4 +330,10 @@ function isOneOf<TValue extends string>(
     values: readonly TValue[],
 ): value is TValue {
     return typeof value === "string" && values.includes(value as TValue);
+}
+
+function abortError(signal: AbortSignal): Error {
+    return signal.reason instanceof Error
+        ? signal.reason
+        : new Error("Web operation was aborted.");
 }

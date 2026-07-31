@@ -44,6 +44,18 @@ describe("typed web client routing", () => {
             minProtocolVersion: 1,
         });
     });
+    it("reports an unexpected persistent transport close", async () => {
+        const channel = new ReplyChannel();
+        const clients = createWebClients({ connect: async () => channel });
+        const failures: string[] = [];
+        clients.onTransportClose((error) => failures.push(error.message));
+        await clients.service.hello();
+
+        channel.close(new Error("transport lost"));
+
+        expect(failures).toEqual(["transport lost"]);
+    });
+
 });
 
 class ReplyChannel implements FrameChannel {
@@ -96,8 +108,8 @@ class ReplyChannel implements FrameChannel {
         return () => this.closes.delete(listener);
     }
 
-    close(): void {
+    close(error?: Error): void {
         this.closed = true;
-        for (const listener of this.closes) listener();
+        for (const listener of this.closes) listener(error);
     }
 }

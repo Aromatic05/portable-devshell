@@ -2,6 +2,8 @@ import { render, screen } from "@testing-library/react";
 import { expect, it } from "vitest";
 
 import { WorkerDiagnostics } from "../src/components/diagnostics/WorkerDiagnostics.js";
+import { Overview } from "../src/views/Overview.js";
+import type { WebState } from "../src/state/WebStore.js";
 import { formatBytes, formatDuration, formatPercent } from "../src/formatters/resources.js";
 import { overviewAlertRoute } from "../src/selectors/readModel.js";
 import { presentWorker } from "../src/selectors/workerPresentation.js";
@@ -37,4 +39,25 @@ it("presents worker handshake metadata only when the server supplied it", () => 
     expect(screen.getByText("1.2.3")).toBeInTheDocument();
     rerender(<WorkerDiagnostics worker={undefined} />);
     expect(screen.getByText(/not connected \/ unavailable/)).toBeInTheDocument();
+});
+
+
+it("shows an Overview failure instead of an endless loading message", () => {
+    const state: WebState = {
+        approvals: {},
+        connection: "online",
+        contextMessages: {},
+        instances: [],
+        logs: {},
+        oauthApprovals: [],
+        operations: {},
+        partialFailures: { overview: "overview timed out" },
+        todos: {},
+        toolCalls: {},
+    };
+
+    render(<Overview state={state} />);
+
+    expect(screen.getByText("Overview could not be refreshed: overview timed out")).toHaveClass("error");
+    expect(screen.queryByText("Loading operational overview…")).not.toBeInTheDocument();
 });

@@ -198,7 +198,7 @@ describe("WebStore", () => {
         for (const type of ["log.appended", "todo.updated", "instance.statusChanged"] as const) {
             stream.push(instanceEvent(type));
         }
-        await vi.waitFor(() => expect(vi.getTimerCount()).toBe(3));
+        await vi.advanceTimersByTimeAsync(0);
         await store.reconnect();
         for (const type of ["log.appended", "todo.updated", "instance.statusChanged"] as const) {
             stream.push(instanceEvent(type));
@@ -611,14 +611,23 @@ function fakeClients(
     overrides: { subscribe?: WebClients["runtime"]["subscribe"] } = {},
 ): WebClients & {
     reconnect: ReturnType<typeof vi.fn>;
+    emitTransportClose(error: Error): void;
     runtime: WebClients["runtime"] & { refresh: ReturnType<typeof vi.fn> };
 } {
+    const transportListeners = new Set<(error: Error) => void>();
     const refresh = vi.fn(async () => ({
         lastSeq: 9,
         snapshot: { ...snapshot, lastSeq: 9 },
     }));
     return {
         close() {},
+        emitTransportClose(error) {
+            for (const listener of transportListeners) listener(error);
+        },
+        onTransportClose(listener) {
+            transportListeners.add(listener);
+            return () => transportListeners.delete(listener);
+        },
         reconnect: vi.fn(async () => undefined),
         service: {
             hello: async () => ({
@@ -1074,5 +1083,90 @@ describe("WebStore approval decision guards", () => {
         await store.decideOAuth("oauth-pending", "approve");
 
         expect(store.state.oauthApprovals).toEqual([]);
+    });
+});
+
+describe("WebStore operation and transport boundaries", () => {
+    it("completes a successful lifecycle operation without waiting for auxiliary reads", async () => {
+        const clients = fakeClients();
+        const store = new WebStore(clients, {
+            requestTimeoutMs: 0,
+            overviewRefreshIntervalMs: 0,
+        });
+        await store.load();
+        clients.runtime.start = vi.fn(async (): Promise<InstanceSnapshot> => ({
+            ...snapshot,
+            lastSeq: 10,
+            status: "running",
+        }));
+        clients.runtime.refresh = vi.fn(async () => await new Promise<never>(() => undefined));
+        clients.contextMessage.list = vi.fn(async () => await new Promise<never>(() => undefined));
+        clients.overview.get = vi.fn(async () => await new Promise<never>(() => undefined));
+
+        await store.start("demo");
+
+        expect(store.state.instances[0]?.snapshot.status).toBe("running");
+        expect(store.state.operations["start:demo"]).toBeUndefined();
+        expect(store.state.notice).toBe("demo start requested.");
+        store.close();
+    });
+
+    it("clears a primary operation when its RPC exceeds the operation timeout", async () => {
+        vi.useFakeTimers();
+        const clients = fakeClients();
+        const store = new WebStore(clients, {
+            operationTimeoutMs: 100,
+            overviewRefreshIntervalMs: 0,
+        });
+        await store.load();
+        let operationSignal: AbortSignal | undefined;
+        clients.runtime.start = vi.fn(async (_instance, signal) => {
+            operationSignal = signal;
+            return await new Promise<InstanceSnapshot>(() => undefined);
+        });
+
+        const request = store.start("demo");
+        await vi.advanceTimersByTimeAsync(100);
+        await request;
+
+        expect(store.state.operations["start:demo"]).toBeUndefined();
+        expect(operationSignal?.aborted).toBe(true);
+        expect(store.state.error).toContain("start:demo timed out after 100ms");
+        store.close();
+        vi.useRealTimers();
+    });
+
+    it("marks the control connection offline when the shared transport closes", async () => {
+        const clients = fakeClients();
+        const store = new WebStore(clients);
+        await store.load();
+
+        clients.emitTransportClose(new Error("WebSocket connection closed."));
+
+        expect(store.state.connection).toBe("offline");
+        expect(store.state.error).toBe("WebSocket connection closed.");
+        store.close();
+    });
+
+    it("does not replace an authoritative lifecycle snapshot with an equal-sequence refresh", async () => {
+        const clients = fakeClients();
+        clients.runtime.start = vi.fn(async (): Promise<InstanceSnapshot> => ({
+            ...snapshot,
+            lastSeq: 10,
+            status: "running",
+        }));
+        clients.runtime.refresh = vi.fn(async (): Promise<InstanceRuntimeEnvelope> => ({
+            lastSeq: 10,
+            snapshot: { ...snapshot, lastSeq: 10, pid: 4242, status: "ready" },
+        }));
+        const store = new WebStore(clients, { overviewRefreshIntervalMs: 0 });
+        await store.load();
+
+        await store.start("demo");
+        await vi.waitFor(() => expect(clients.runtime.refresh).toHaveBeenCalled());
+
+        expect(store.state.instances[0]?.snapshot.status).toBe("running");
+        expect(store.state.instances[0]?.snapshot.pid).toBe(4242);
+        store.close();
     });
 });

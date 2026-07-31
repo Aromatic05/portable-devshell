@@ -22,6 +22,6 @@ it("aggregates read-only todos without assigning operational health", () => {
         },
     };
 
-    expect(todoSummaries(state)).toEqual([{ completed: 1, instance: "failed-instance", revision: 7, status: "in_progress", title: "Deploy service", total: 3 }]);
+    expect(todoSummaries(state)).toEqual([{ completed: 1, instance: "failed-instance", revision: 7, status: "in_progress", taskId: "deploy", title: "Deploy service", total: 3 }]);
     expect(openTodos(state)).toBe(1);
 });

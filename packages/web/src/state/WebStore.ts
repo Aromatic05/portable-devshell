@@ -1,14 +1,13 @@
-import {
-    CONTROL_PROTOCOL_VERSION,
-    type InstanceEvent,
-    type OAuthApprovalRequest,
-} from "@portable-devshell/shared/browser";
+import type { InstanceEvent } from "@portable-devshell/shared/browser";
 
 import type { WebClients } from "../client/WebClients.js";
 import { ApprovalDecisionGuard } from "./ApprovalDecisionGuard.js";
+import { WebBootstrapLoader } from "./WebBootstrapLoader.js";
 import { InstanceReadModelCoordinator } from "./InstanceReadModelCoordinator.js";
 import { InstanceStreamSupervisor } from "./InstanceStreamSupervisor.js";
 import { OperationalOverviewCoordinator } from "./OperationalOverviewCoordinator.js";
+import { WebOperationCoordinator } from "./WebOperationCoordinator.js";
+import { withWebRequestTimeout } from "./WebRequestTimeout.js";
 import {
     createInitialWebState,
     type WebState,
@@ -18,47 +17,67 @@ export type { ConnectionState, WebState } from "./WebState.js";
 
 export interface WebStoreOptions {
     isPageVisible?: () => boolean;
+    operationTimeoutMs?: number;
     overviewRefreshIntervalMs?: number;
+    requestTimeoutMs?: number;
     streamRetryBaseMs?: number;
+    streamStableAfterMs?: number;
 }
 
 export class WebStore {
     #state = createInitialWebState();
     #listeners = new Set<() => void>();
     readonly #approvalGuard = new ApprovalDecisionGuard();
+    readonly #bootstrap: WebBootstrapLoader;
     readonly #instanceModels: InstanceReadModelCoordinator;
     readonly #streamSupervisor: InstanceStreamSupervisor;
     readonly #overview: OperationalOverviewCoordinator;
+    readonly #operations: WebOperationCoordinator;
+    readonly #requestTimeoutMs: number;
+    readonly #offTransportClose: () => void;
     #stopped = false;
     #loadPromise?: Promise<void>;
     #loadGeneration?: number;
     #reconnectPromise?: Promise<void>;
     #generation = 0;
     #oauthApprovalsVersion = 0;
+    #ignoreTransportClose = false;
 
     constructor(readonly clients: WebClients, options: WebStoreOptions = {}) {
         const isPageVisible = options.isPageVisible ?? (() =>
             typeof document === "undefined" || document.visibilityState !== "hidden"
         );
+        this.#requestTimeoutMs = options.requestTimeoutMs ?? 10_000;
+        const access = {
+            getState: () => this.#state,
+            isCurrent: (generation: number) => this.isCurrent(generation),
+            setState: (state: WebState) => this.set(state),
+        };
         this.#instanceModels = new InstanceReadModelCoordinator(
             clients,
-            {
-                getState: () => this.#state,
-                isCurrent: (generation) => this.isCurrent(generation),
-                setState: (state) => this.set(state),
-            },
+            access,
             this.#approvalGuard,
+            this.#requestTimeoutMs,
+        );
+        this.#bootstrap = new WebBootstrapLoader(
+            clients,
+            this.#instanceModels,
+            this.#approvalGuard,
+            this.#requestTimeoutMs,
         );
         this.#overview = new OperationalOverviewCoordinator(
             clients,
             {
                 currentGeneration: () => this.#generation,
-                getState: () => this.#state,
-                isCurrent: (generation) => this.isCurrent(generation),
+                ...access,
                 isVisible: isPageVisible,
-                setState: (state) => this.set(state),
             },
             options.overviewRefreshIntervalMs ?? 5_000,
+            this.#requestTimeoutMs,
+        );
+        this.#operations = new WebOperationCoordinator(
+            access,
+            options.operationTimeoutMs ?? 30_000,
         );
         this.#streamSupervisor = new InstanceStreamSupervisor(
             clients,
@@ -76,7 +95,13 @@ export class WebStore {
                 onRecovered: (name) =>
                     this.clearPartialFailure(`stream:${name}`),
             },
-            options.streamRetryBaseMs ?? 1_000,
+            {
+                retryBaseMs: options.streamRetryBaseMs,
+                stableAfterMs: options.streamStableAfterMs,
+            },
+        );
+        this.#offTransportClose = clients.onTransportClose((error) =>
+            this.transportClosed(error)
         );
     }
 
@@ -133,24 +158,21 @@ export class WebStore {
         approvalId: string,
         decision: "approve" | "deny",
     ): Promise<void> {
-        await this.mutate(
+        const generation = this.#generation;
+        await this.#operations.run(
             `approval:${approvalId}`,
             "Approval recorded.",
-            async (generation) => {
+            generation,
+            async (signal) => {
                 const decided = await this.clients.tool.decideApproval(
                     instance,
                     approvalId,
                     decision,
                 );
-                if (!this.isCurrent(generation)) return;
-                this.#instanceModels.recordToolDecision(
-                    instance,
-                    decided.approvalId,
-                );
-                await this.#instanceModels.refreshAfterToolDecision(
-                    instance,
-                    generation,
-                );
+                if (signal.aborted || !this.isCurrent(generation)) return;
+                this.#instanceModels.recordToolDecision(instance, decided.approvalId);
+                void this.#instanceModels.refreshAfterToolDecision(instance, generation);
+                void this.#overview.refresh(generation, true);
             },
         );
     }
@@ -159,15 +181,17 @@ export class WebStore {
         approvalId: string,
         decision: "approve" | "deny",
     ): Promise<void> {
-        await this.mutate(
+        const generation = this.#generation;
+        await this.#operations.run(
             `oauth:${approvalId}`,
             "Approval recorded.",
-            async (generation) => {
+            generation,
+            async (signal) => {
                 const decided = await this.clients.mcp.decideApproval(
                     approvalId,
                     decision,
                 );
-                if (!this.isCurrent(generation)) return;
+                if (signal.aborted || !this.isCurrent(generation)) return;
                 this.#approvalGuard.recordOAuth(decided.approvalId);
                 this.#oauthApprovalsVersion += 1;
                 this.set({
@@ -176,7 +200,8 @@ export class WebStore {
                         (approval) => approval.approvalId !== decided.approvalId,
                     ),
                 });
-                await this.refreshOAuthApprovals(generation);
+                void this.refreshOAuthApprovals(generation);
+                void this.#overview.refresh(generation, true);
             },
         );
     }
@@ -186,18 +211,19 @@ export class WebStore {
         ctxId: string,
         text: string,
     ): Promise<boolean> {
-        return await this.mutate(
+        const generation = this.#generation;
+        return await this.#operations.run(
             `context-message:${instance}:${ctxId}`,
             "Message queued.",
-            async (generation) => {
+            generation,
+            async (signal) => {
                 const queued = await this.clients.contextMessage.queue(instance, {
                     ctxId,
                     text,
                 });
-                if (!this.isCurrent(generation)) return;
+                if (signal.aborted || !this.isCurrent(generation)) return;
                 this.#instanceModels.mergeQueuedContextMessage(instance, queued);
             },
-            false,
         );
     }
 
@@ -213,8 +239,10 @@ export class WebStore {
         if (this.#stopped) return;
         this.#stopped = true;
         this.#generation += 1;
+        this.#offTransportClose();
+        this.#operations.cancelAll(new Error("Web store closed."));
         this.#streamSupervisor.closeAll();
-        this.clearScheduledRefreshes();
+        this.#instanceModels.reset();
         this.#overview.stop();
         this.clients.close();
     }
@@ -223,14 +251,19 @@ export class WebStore {
         instance: string,
         action: "start" | "stop",
     ): Promise<void> {
-        await this.mutate(
+        const generation = this.#generation;
+        await this.#operations.run(
             `${action}:${instance}`,
             `${instance} ${action} requested.`,
-            async (generation) => {
-                const snapshot = await this.clients.runtime[action](instance);
-                if (!this.isCurrent(generation)) return;
+            generation,
+            async (signal) => {
+                const snapshot = action === "start"
+                    ? await this.clients.runtime.start(instance, signal)
+                    : await this.clients.runtime.stop(instance);
+                if (signal.aborted || !this.isCurrent(generation)) return;
                 this.#instanceModels.applyAuthoritativeSnapshot(instance, snapshot);
-                await this.#instanceModels.refreshAll(instance, generation);
+                void this.#instanceModels.refreshAll(instance, generation);
+                void this.#overview.refresh(generation, true);
             },
         );
     }
@@ -243,62 +276,25 @@ export class WebStore {
             error: undefined,
         });
         try {
-            const hello = await this.clients.service.hello();
+            const loaded = await this.#bootstrap.load();
             if (!this.isCurrent(generation)) return;
-            if (hello.protocolVersion !== CONTROL_PROTOCOL_VERSION) {
-                throw new Error(
-                    `Incompatible control protocol version: ${hello.protocolVersion}.`,
-                );
-            }
-            const [service, instances] = await Promise.all([
-                this.clients.service.status(),
-                this.clients.instance.list(),
-            ]);
-            if (!this.isCurrent(generation)) return;
-
-            const partialFailures: Record<string, string> = {};
-            const [mcpStatusResult, overviewResult] = await Promise.allSettled([
-                this.clients.mcp.status(),
-                this.clients.overview.get(),
-            ]);
-            const overview = overviewResult.status === "fulfilled"
-                ? overviewResult.value
-                : undefined;
-            if (overviewResult.status === "rejected") {
-                partialFailures.overview = errorMessage(overviewResult.reason);
-            }
-
-            const oauthApprovals = await this.loadOAuthApprovals(
-                mcpStatusResult,
-                partialFailures,
-            );
-            const instanceModels = await this.#instanceModels.loadInitial(
-                instances.map(({ name }) => name),
-            );
-            Object.assign(partialFailures, instanceModels.failures);
-            if (!this.isCurrent(generation)) return;
-
             this.set({
                 ...this.#state,
-                approvals: instanceModels.approvals,
+                approvals: loaded.instanceModels.approvals,
                 connection: "online",
-                contextMessages: instanceModels.contextMessages,
-                instances,
-                logs: instanceModels.logs,
-                oauthApprovals,
-                overview,
-                partialFailures,
-                service,
-                todos: instanceModels.todos,
-                toolCalls: instanceModels.toolCalls,
+                contextMessages: loaded.instanceModels.contextMessages,
+                instances: loaded.instances,
+                logs: loaded.instanceModels.logs,
+                oauthApprovals: loaded.oauthApprovals,
+                overview: loaded.overview,
+                partialFailures: loaded.partialFailures,
+                service: loaded.service,
+                todos: loaded.instanceModels.todos,
+                toolCalls: loaded.instanceModels.toolCalls,
             });
-            await Promise.all(instances.map(({ name, snapshot }) =>
-                this.#streamSupervisor.start(
-                    name,
-                    snapshot.lastSeq,
-                    generation,
-                )
-            ));
+            for (const { name, snapshot } of loaded.instances) {
+                void this.#streamSupervisor.start(name, snapshot.lastSeq, generation);
+            }
         } catch (error) {
             if (!this.isCurrent(generation)) return;
             this.#overview.stop();
@@ -310,54 +306,36 @@ export class WebStore {
         }
     }
 
-    private async loadOAuthApprovals(
-        mcpStatus: PromiseSettledResult<{
-            authMode?: "none" | "oauth2" | "token";
-            oauthReady?: boolean;
-            running: boolean;
-        }>,
-        partialFailures: Record<string, string>,
-    ): Promise<OAuthApprovalRequest[]> {
-        if (mcpStatus.status === "rejected") {
-            partialFailures.mcp = errorMessage(mcpStatus.reason);
-            return [];
-        }
-        if (
-            mcpStatus.value.authMode !== "oauth2" ||
-            mcpStatus.value.oauthReady !== true
-        ) return [];
-        try {
-            return this.#approvalGuard.filterOAuth(
-                await this.clients.mcp.listApprovals(),
-            );
-        } catch (error) {
-            partialFailures.oauthApprovals = errorMessage(error);
-            return [];
-        }
-    }
-
     private async reconnectCurrent(): Promise<void> {
         this.#generation += 1;
-        this.clearScheduledRefreshes();
+        const generation = this.#generation;
+        this.#operations.cancelAll(new Error("Web connection is reconnecting."));
         this.#streamSupervisor.closeAll();
+        this.#instanceModels.reset();
         this.#overview.stop();
         this.set({
             ...this.#state,
+            connection: "connecting",
             error: undefined,
             notice: undefined,
             operations: {},
         });
+        this.#ignoreTransportClose = true;
         try {
-            await this.clients.reconnect();
-            if (!this.#stopped) await this.load();
+            await this.request(this.clients.reconnect(), "control.reconnect");
         } catch (error) {
-            if (this.#stopped) return;
-            this.set({
-                ...this.#state,
-                connection: "offline",
-                error: errorMessage(error),
-            });
+            if (this.isCurrent(generation)) {
+                this.set({
+                    ...this.#state,
+                    connection: "offline",
+                    error: errorMessage(error),
+                });
+            }
+            return;
+        } finally {
+            this.#ignoreTransportClose = false;
         }
+        if (this.isCurrent(generation)) await this.load();
     }
 
     private addEvent(
@@ -380,15 +358,16 @@ export class WebStore {
             ),
         });
         this.#instanceModels.handleEvent(name, event, generation);
-        if (event.type !== "log.appended") {
-            this.#overview.schedule(generation)
-        }
+        if (event.type !== "log.appended") this.#overview.schedule(generation);
     }
 
     private async refreshOAuthApprovals(generation: number): Promise<void> {
         const version = ++this.#oauthApprovalsVersion;
         try {
-            const approvals = await this.clients.mcp.listApprovals();
+            const approvals = await this.request(
+                this.clients.mcp.listApprovals(),
+                "mcp.listApprovals",
+            );
             if (
                 !this.isCurrent(generation) ||
                 version !== this.#oauthApprovalsVersion
@@ -406,49 +385,24 @@ export class WebStore {
         }
     }
 
-    private async mutate(
-        operation: string,
-        success: string,
-        action: (generation: number) => Promise<void>,
-        refreshOverview = true,
-    ): Promise<boolean> {
-        const generation = this.#generation;
-        if (
-            !this.isCurrent(generation) ||
-            this.#state.operations[operation] !== undefined
-        ) return false;
+    private transportClosed(error: Error): void {
+        if (this.#stopped || this.#ignoreTransportClose) return;
+        this.#generation += 1;
+        this.#operations.cancelAll(error);
+        this.#streamSupervisor.closeAll();
+        this.#instanceModels.reset();
+        this.#overview.stop();
         this.set({
             ...this.#state,
-            error: undefined,
+            connection: "offline",
+            error: error.message,
             notice: undefined,
-            operations: {
-                ...this.#state.operations,
-                [operation]: "pending",
-            },
+            operations: {},
         });
-        try {
-            await action(generation);
-            if (!this.isCurrent(generation)) return false;
-            if (refreshOverview) await this.#overview.refresh(generation, true);
-            if (!this.isCurrent(generation)) return false;
-            const { [operation]: _completed, ...operations } = this.#state.operations;
-            this.set({ ...this.#state, notice: success, operations });
-            return true;
-        } catch (error) {
-            if (!this.isCurrent(generation)) return false;
-            const { [operation]: _failed, ...operations } = this.#state.operations;
-            this.set({
-                ...this.#state,
-                error: errorMessage(error),
-                operations,
-            });
-            return false;
-        }
     }
 
-    private clearScheduledRefreshes(): void {
-        this.#instanceModels.clearScheduled();
-        this.#overview.clearScheduled();
+    private async request<T>(request: Promise<T>, label: string): Promise<T> {
+        return await withWebRequestTimeout(request, this.#requestTimeoutMs, label);
     }
 
     private setPartialFailure(key: string, error: unknown): void {

@@ -31,6 +31,7 @@ export function Application({
         () => store.state,
     );
     const [route, navigate] = useHashRoute();
+    const interactionDisabled = busy !== undefined;
     const counts = {
         approvals: pendingApprovals(state),
         instances: state.instances.length,
@@ -62,9 +63,9 @@ export function Application({
                 {error === undefined ? null : <p className="error" role="alert">{error}</p>}
             </div>
             {route === "overview" ? <Overview state={state} /> : null}
-            {route === "instances" ? <Instances store={store} /> : null}
-            {route === "approvals" ? <Approvals store={store} /> : null}
-            {route === "activity" ? <ToolCalls state={state} store={store} /> : null}
+            {route === "instances" ? <Instances disabled={interactionDisabled} store={store} /> : null}
+            {route === "approvals" ? <Approvals disabled={interactionDisabled} store={store} /> : null}
+            {route === "activity" ? <ToolCalls disabled={interactionDisabled} state={state} store={store} /> : null}
             {route === "todos" ? <Todos state={state} /> : null}
         </main>
         <nav aria-label="Primary navigation" className="bottom">

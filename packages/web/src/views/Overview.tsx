@@ -4,7 +4,13 @@ import { overviewAlertRoute, overviewAlerts, overviewToolCalls } from "../select
 
 export function Overview({ state }: { state: WebState }) {
     if (state.overview === undefined) {
-        return <section><h2>Overview</h2><p className="empty">{state.connection === "offline" ? "Overview is unavailable while offline." : "Loading operational overview…"}</p></section>;
+        const failure = state.partialFailures.overview;
+        const message = state.connection === "offline"
+            ? "Overview is unavailable while offline."
+            : failure === undefined
+              ? "Loading operational overview…"
+              : `Overview could not be refreshed: ${failure}`;
+        return <section><h2>Overview</h2><p className={failure === undefined ? "empty" : "error"}>{message}</p></section>;
     }
     const overview = state.overview;
     const currentAlerts = overviewAlerts(overview);

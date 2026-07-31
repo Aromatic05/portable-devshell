@@ -12,6 +12,7 @@ export interface TodoSummary {
     instance: string;
     revision: number;
     status: string;
+    taskId: string;
     title: string;
     total: number;
 }
@@ -45,6 +46,7 @@ export function todoSummaries(state: WebState): TodoSummary[] {
             instance,
             revision: task.revision,
             status: task.status,
+            taskId: task.taskId,
             title: task.title,
             total: task.total,
         }));
