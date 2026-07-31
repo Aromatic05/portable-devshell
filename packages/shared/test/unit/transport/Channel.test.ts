@@ -178,3 +178,36 @@ test("Channel serializes concurrent sends and rejects sends after close", async 
     client.close();
     await assert.rejects(client.send(Buffer.from("three")), /closed/i);
 });
+
+test("Channel isolates late close listener failures", async (t) => {
+    const listening = await listen();
+    const accepted = onceConnection(listening.server).then((socket) => Channel.accept(socket));
+    const client = await Channel.connect(listening.socketPath);
+    const service = await accepted;
+    t.after(async () => {
+        client.close();
+        service.close();
+        await closeListeningSocket(listening);
+    });
+    const warnings: unknown[] = [];
+    const originalEmitWarning = process.emitWarning;
+    process.emitWarning = ((warning: string | Error) => {
+        warnings.push(warning);
+    }) as typeof process.emitWarning;
+    try {
+        client.close();
+        let notified = 0;
+        client.onClose(() => {
+            throw new Error("late close listener failed");
+        });
+        client.onClose(() => {
+            notified += 1;
+        });
+        await new Promise((resolve) => setImmediate(resolve));
+
+        assert.equal(notified, 1);
+        assert.equal(warnings.length, 1);
+    } finally {
+        process.emitWarning = originalEmitWarning;
+    }
+});

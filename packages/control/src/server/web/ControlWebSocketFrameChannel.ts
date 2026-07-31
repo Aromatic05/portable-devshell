@@ -85,7 +85,7 @@ export class ControlWebSocketFrameChannel implements FrameChannel {
 
     onClose(listener: (error?: Error) => void): () => void {
         if (this.#closed) {
-            queueMicrotask(() => listener(this.#closeError));
+            queueMicrotask(() => this.#notifyCloseListener(listener));
             return () => undefined;
         }
         this.#closeListeners.add(listener);
@@ -180,11 +180,15 @@ export class ControlWebSocketFrameChannel implements FrameChannel {
         this.#closeListeners.clear();
         this.#frameListeners.clear();
         for (const listener of listeners) {
-            try {
-                listener(this.#closeError);
-            } catch (listenerError) {
-                console.warn(listenerError instanceof Error ? listenerError : new Error(String(listenerError)));
-            }
+            this.#notifyCloseListener(listener);
+        }
+    }
+
+    #notifyCloseListener(listener: (error?: Error) => void): void {
+        try {
+            listener(this.#closeError);
+        } catch (listenerError) {
+            console.warn(listenerError instanceof Error ? listenerError : new Error(String(listenerError)));
         }
     }
 }

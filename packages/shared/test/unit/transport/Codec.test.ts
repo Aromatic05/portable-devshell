@@ -219,3 +219,27 @@ test("Codec closes locally when the transport close operation throws", async () 
     assert.equal(codec.closed, true);
     assert.equal((await closed)?.message, "transport close failed");
 });
+
+test("Codec isolates late close listener failures", async () => {
+    const channel = new FailingFrameChannel();
+    const codec = new Codec(channel, { local: "tui", remote: "server" });
+    const warnings: unknown[] = [];
+    const originalWarn = console.warn;
+    console.warn = (warning) => warnings.push(warning);
+    try {
+        codec.close();
+        let notified = 0;
+        codec.onClose(() => {
+            throw new Error("late codec close listener failed");
+        });
+        codec.onClose(() => {
+            notified += 1;
+        });
+        await new Promise((resolve) => setImmediate(resolve));
+
+        assert.equal(notified, 1);
+        assert.equal(warnings.length, 1);
+    } finally {
+        console.warn = originalWarn;
+    }
+});

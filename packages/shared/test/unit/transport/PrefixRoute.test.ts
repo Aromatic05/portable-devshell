@@ -437,3 +437,27 @@ test("PrefixRoute reads the current snapshot for every routed request", async (t
     ]);
     assert.deepEqual((await request(value, instance, "todo", "get", undefined, "second")).event.payload, { version: 2 });
 });
+
+test("PrefixRoute isolates late close listener failures", async (t) => {
+    const value = await pair(() => PrefixRoute.snapshot([]));
+    t.after(() => closePair(value));
+    const warnings: unknown[] = [];
+    const originalWarn = console.warn;
+    console.warn = (warning) => warnings.push(warning);
+    try {
+        value.server.close();
+        let notified = 0;
+        value.server.onClose(() => {
+            throw new Error("late route close listener failed");
+        });
+        value.server.onClose(() => {
+            notified += 1;
+        });
+        await new Promise((resolve) => setImmediate(resolve));
+
+        assert.equal(notified, 1);
+        assert.equal(warnings.length, 1);
+    } finally {
+        console.warn = originalWarn;
+    }
+});

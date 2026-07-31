@@ -280,3 +280,27 @@ test("reverse RPC frame codec rejects invalid UTF-8 inside otherwise valid JSON"
         (error: unknown) => (error as { code?: string }).code === "protocol.invalidJson"
     );
 });
+
+test("control WebSocket isolates late close listener failures", async () => {
+    const socket = new FakeWebSocket();
+    const channel = new ControlWebSocketFrameChannel(socket as unknown as WebSocket);
+    const warnings: unknown[] = [];
+    const originalWarn = console.warn;
+    console.warn = (warning) => warnings.push(warning);
+    try {
+        channel.close();
+        let notified = 0;
+        channel.onClose(() => {
+            throw new Error("late WebSocket close listener failed");
+        });
+        channel.onClose(() => {
+            notified += 1;
+        });
+        await new Promise((resolve) => setImmediate(resolve));
+
+        assert.equal(notified, 1);
+        assert.equal(warnings.length, 1);
+    } finally {
+        console.warn = originalWarn;
+    }
+});

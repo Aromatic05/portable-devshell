@@ -52,7 +52,9 @@ export class BrowserWebSocketChannel implements FrameChannel {
     }
     onClose(listener: (error?: Error) => void): () => void {
         if (this.#closed) {
-            queueMicrotask(() => listener(new Error("WebSocket channel is closed.")));
+            queueMicrotask(() =>
+                this.notifyClose(listener, new Error("WebSocket channel is closed.")),
+            );
             return () => undefined;
         }
         this.#closes.add(listener);
@@ -113,11 +115,7 @@ export class BrowserWebSocketChannel implements FrameChannel {
         for (const pending of this.#queue.splice(0))
             pending.reject(error ?? new Error("WebSocket channel is closed."));
         for (const listener of this.#closes) {
-            try {
-                listener(error);
-            } catch {
-                // A consumer error must not block cleanup or other consumers.
-            }
+            this.notifyClose(listener, error);
         }
         this.#frames.clear();
         this.#closes.clear();
@@ -130,6 +128,16 @@ export class BrowserWebSocketChannel implements FrameChannel {
             // Preserve the send error after the channel has been closed locally.
         }
         return error;
+    }
+    private notifyClose(
+        listener: (error?: Error) => void,
+        error?: Error,
+    ): void {
+        try {
+            listener(error);
+        } catch {
+            // A consumer error must not block cleanup or other consumers.
+        }
     }
 }
 function asError(error: unknown): Error {

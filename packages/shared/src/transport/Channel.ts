@@ -129,7 +129,7 @@ export class Channel implements FrameChannel {
 
     onClose(listener: (error?: Error) => void): () => void {
         if (this.#closeNotified) {
-            queueMicrotask(() => listener(this.#closeError));
+            queueMicrotask(() => this.#notifyCloseListener(listener));
             return () => undefined;
         }
         this.#closeListeners.add(listener);
@@ -177,11 +177,15 @@ export class Channel implements FrameChannel {
         const listeners = [...this.#closeListeners];
         this.#closeListeners.clear();
         for (const listener of listeners) {
-            try {
-                listener(this.#closeError);
-            } catch (error) {
-                process.emitWarning(error instanceof Error ? error : new Error(String(error)));
-            }
+            this.#notifyCloseListener(listener);
+        }
+    }
+
+    #notifyCloseListener(listener: (error?: Error) => void): void {
+        try {
+            listener(this.#closeError);
+        } catch (error) {
+            process.emitWarning(error instanceof Error ? error : new Error(String(error)));
         }
     }
 }

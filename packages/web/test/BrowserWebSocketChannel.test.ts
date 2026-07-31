@@ -160,6 +160,23 @@ describe("BrowserWebSocketChannel", () => {
         await expect(connecting).rejects.toBe(reason);
         expect(socket.readyState).toBe(FakeSocket.CLOSED);
     });
+
+    it("isolates late close listener failures", async () => {
+        const socket = new FakeSocket();
+        const channel = new BrowserWebSocketChannel(socket as unknown as WebSocket);
+        channel.close();
+        let notified = 0;
+        channel.onClose(() => {
+            throw new Error("late close listener failed");
+        });
+        channel.onClose(() => {
+            notified += 1;
+        });
+
+        await new Promise((resolve) => setTimeout(resolve));
+
+        expect(notified).toBe(1);
+    });
 });
 
 class FakeSocket extends EventTarget {

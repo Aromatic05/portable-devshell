@@ -84,7 +84,7 @@ export class Codec {
 
     onClose(listener: (error?: Error) => void): () => void {
         if (this.#closed) {
-            queueMicrotask(() => listener(this.#closeError));
+            queueMicrotask(() => this.#notifyCloseListener(listener));
             return () => undefined;
         }
         this.#closeListeners.add(listener);
@@ -166,11 +166,15 @@ export class Codec {
         const listeners = [...this.#closeListeners];
         this.#closeListeners.clear();
         for (const listener of listeners) {
-            try {
-                listener(this.#closeError);
-            } catch (listenerError) {
-                console.warn(listenerError instanceof Error ? listenerError : new Error(String(listenerError)));
-            }
+            this.#notifyCloseListener(listener);
+        }
+    }
+
+    #notifyCloseListener(listener: (error?: Error) => void): void {
+        try {
+            listener(this.#closeError);
+        } catch (listenerError) {
+            console.warn(listenerError instanceof Error ? listenerError : new Error(String(listenerError)));
         }
     }
 }
