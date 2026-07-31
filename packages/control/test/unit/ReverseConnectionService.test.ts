@@ -182,6 +182,90 @@ test("ReverseConnectionService owns generation replacement and disconnect state"
     service.stop();
 });
 
+test("ReverseConnectionService rejects activation after an authenticated token is revoked", async () => {
+    const home = await mkdtemp(join(tmpdir(), "reverse-revoked-activation-"));
+    const credentialStore = new ReverseCredentialStore(home);
+    let accepted = 0;
+    const descriptor = reverseDescriptor(async () => {
+        accepted += 1;
+        return reverseSnapshot();
+    });
+    const service = new ReverseConnectionService({
+        credentialStore,
+        instanceRegistry: { get: (name) => name === descriptor.name ? descriptor : undefined },
+        publicBaseUrl: "https://example.test"
+    });
+    const code = await credentialStore.createDeviceCode(descriptor.name);
+    const enrollment = await service.enroll({
+        arch: "x86_64",
+        deviceCode: code.deviceCode,
+        os: "linux",
+        workerVersion: "test"
+    }) as Record<string, JsonValue>;
+    const identity = await service.authenticate(
+        descriptor.name,
+        1,
+        enrollment.deviceToken as string
+    );
+    await credentialStore.revoke(descriptor.name);
+    const channel = new MemoryRpcChannel();
+
+    await assert.rejects(
+        service.activate(identity, "wss", channel),
+        (error: unknown) => hasCode(error, "reverse.deviceTokenInvalid")
+    );
+
+    assert.equal(channel.closed, true);
+    assert.equal(accepted, 0);
+});
+
+test("ReverseConnectionService serializes activation with token rotation", async () => {
+    const home = await mkdtemp(join(tmpdir(), "reverse-activation-rotation-"));
+    const credentialStore = new ReverseCredentialStore(home);
+    let releaseActivation!: () => void;
+    let signalActivation!: () => void;
+    const activationStarted = new Promise<void>((resolve) => {
+        signalActivation = resolve;
+    });
+    const descriptor = reverseDescriptor(async () => {
+        signalActivation();
+        await new Promise<void>((resolve) => {
+            releaseActivation = resolve;
+        });
+        return reverseSnapshot();
+    });
+    const service = new ReverseConnectionService({
+        credentialStore,
+        instanceRegistry: { get: (name) => name === descriptor.name ? descriptor : undefined },
+        publicBaseUrl: "https://example.test"
+    });
+    const code = await credentialStore.createDeviceCode(descriptor.name);
+    const enrollment = await service.enroll({
+        arch: "x86_64",
+        deviceCode: code.deviceCode,
+        os: "linux",
+        workerVersion: "test"
+    }) as Record<string, JsonValue>;
+    const identity = await service.authenticate(
+        descriptor.name,
+        1,
+        enrollment.deviceToken as string
+    );
+    const activation = service.activate(identity, "wss", new MemoryRpcChannel());
+    await activationStarted;
+    let rotated = false;
+    const rotation = credentialStore.rotateToken(descriptor.name).then(() => {
+        rotated = true;
+    });
+
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(rotated, false);
+    releaseActivation();
+    await activation;
+    await rotation;
+    assert.equal(rotated, true);
+});
+
 
 function reverseSnapshot(): InstanceSnapshot {
     return {
@@ -191,6 +275,24 @@ function reverseSnapshot(): InstanceSnapshot {
         name: asInstanceName("remote-test"),
         ready: true,
         status: "ready"
+    };
+}
+
+function reverseDescriptor(
+    acceptReverseChannel: (
+        channel: WorkerRpcChannel,
+        options: { generation: number; transport: "sse" | "wss" }
+    ) => Promise<InstanceSnapshot>
+) {
+    return {
+        name: asInstanceName("remote-test"),
+        provider: "reverse" as const,
+        reverseConnector: {} as never,
+        worker: {
+            acceptReverseChannel,
+            setReverseEnrollmentState: async (): Promise<InstanceSnapshot> => reverseSnapshot(),
+            snapshot: () => ({}) as never
+        }
     };
 }
 

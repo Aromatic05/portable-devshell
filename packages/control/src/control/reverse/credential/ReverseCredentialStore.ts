@@ -111,14 +111,22 @@ export class ReverseCredentialStore {
 
     async authenticate(instance: string, deviceToken: string): Promise<boolean> {
         const record = await this.#readOptional(instance);
-        if (
-            record === undefined ||
-            record.revokedAt !== undefined ||
-            record.tokenHash === undefined
-        ) {
-            return false;
-        }
-        return safeHashEquals(record.tokenHash, hashSecret(deviceToken));
+        return credentialMatches(record, deviceToken);
+    }
+
+    async withAuthenticatedToken(
+        instance: string,
+        deviceToken: string,
+        operation: () => Promise<void>
+    ): Promise<boolean> {
+        return await this.#exclusive(async () => {
+            const record = await this.#readOptional(instance);
+            if (!credentialMatches(record, deviceToken)) {
+                return false;
+            }
+            await operation();
+            return true;
+        });
     }
 
     async rotateToken(instance: string): Promise<string> {
@@ -251,6 +259,16 @@ function safeHashEquals(left: string | undefined, right: string): boolean {
         return false;
     }
     return timingSafeEqual(Buffer.from(left, "hex"), Buffer.from(right, "hex"));
+}
+
+function credentialMatches(
+    record: ReverseCredentialRecord | undefined,
+    deviceToken: string
+): boolean {
+    return record !== undefined &&
+        record.revokedAt === undefined &&
+        record.tokenHash !== undefined &&
+        safeHashEquals(record.tokenHash, hashSecret(deviceToken));
 }
 
 function isMissingFile(error: unknown): error is NodeJS.ErrnoException {

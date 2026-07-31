@@ -21,6 +21,7 @@ interface ActiveReverseConnection {
 }
 
 export interface ReverseConnectionIdentity {
+    credentialToken: string;
     descriptor: ReverseInstancePort;
     generation: number;
 }
@@ -64,21 +65,33 @@ export class ReverseConnectionService {
     ): Promise<ReverseConnectionIdentity> {
         const authenticated = await this.#credentialStore.authenticate(instance, token);
         if (!authenticated) {
-            throw createError({
-                code: errorCodes.reverseDeviceTokenInvalid,
-                details: { instance },
-                message: "Device token is invalid or revoked.",
-                retryable: false
-            });
+            throw invalidDeviceToken(instance);
         }
 
         return {
+            credentialToken: token,
             descriptor: this.#requireReverseInstance(instance),
             generation
         };
     }
 
     async activate(
+        identity: ReverseConnectionIdentity,
+        transport: "sse" | "wss",
+        channel: WorkerRpcChannel
+    ): Promise<void> {
+        const authenticated = await this.#credentialStore.withAuthenticatedToken(
+            identity.descriptor.name,
+            identity.credentialToken,
+            async () => await this.#activateAuthenticated(identity, transport, channel)
+        );
+        if (!authenticated) {
+            channel.close();
+            throw invalidDeviceToken(identity.descriptor.name);
+        }
+    }
+
+    async #activateAuthenticated(
         identity: ReverseConnectionIdentity,
         transport: "sse" | "wss",
         channel: WorkerRpcChannel
@@ -228,4 +241,13 @@ export class ReverseConnectionService {
         this.#activationQueues.set(instance, tracked);
         return await next;
     }
+}
+
+function invalidDeviceToken(instance: string): Error {
+    return createError({
+        code: errorCodes.reverseDeviceTokenInvalid,
+        details: { instance },
+        message: "Device token is invalid or revoked.",
+        retryable: false
+    });
 }
