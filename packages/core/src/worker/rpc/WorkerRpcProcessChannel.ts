@@ -42,12 +42,22 @@ export class WorkerRpcProcessChannel extends WorkerRpcChannelBase {
         if (this.disconnected) {
             throw new Error("rpc process channel is disconnected");
         }
-        await this.#writer.write(message);
+        try {
+            await this.#writer.write(message);
+        } catch (error) {
+            this.#disconnect(error);
+            throw error instanceof Error ? error : new Error(String(error));
+        }
     }
 
     close(): void {
         if (!this.disconnected) {
-            this.#process.kill("SIGTERM");
+            try {
+                this.#process.kill("SIGTERM");
+            } catch (error) {
+                this.#disconnect(error);
+                return;
+            }
         }
         this.#disconnect(new Error("rpc process channel closed"));
     }
