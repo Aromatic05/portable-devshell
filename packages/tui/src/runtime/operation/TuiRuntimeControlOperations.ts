@@ -134,10 +134,10 @@ export class TuiRuntimeControlOperations {
                 if (instance !== undefined) await this.options.session.refreshTodo(instance);
                 return;
             case "config":
-            case "connector":
                 await this.options.session.refreshConfig();
                 return;
-            case "oauth":
+            case "connections":
+                await this.options.session.refreshConfig();
                 await this.options.session.refreshOAuth();
                 return;
             case "audit":

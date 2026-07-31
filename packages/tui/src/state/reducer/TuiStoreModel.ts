@@ -1,6 +1,7 @@
 import type { ApprovalRequest, ArtifactShareResult, ArtifactTransferRecord, ClientEvent, ControlError, InstanceSnapshot, JsonValue, OAuthApprovalRequest, OperationalOverview, TodoReadResult, ToolCallRecord } from "@portable-devshell/shared";
 
 import type { TuiEditorState, TuiInteractionState, TuiUiIntent } from "../TuiInteractionState.js";
+import type { TuiRoute } from "../route/TuiRoute.js";
 import type { TuiAuditPageState, TuiFocusScope, TuiPageId, TuiSidebarCursor, TuiSidebarFocus, TuiUiState } from "../TuiUiState.js";
 
 export type TuiConnectionStatus = "connecting" | "connected" | "disconnected" | "error";
@@ -133,6 +134,10 @@ export type TuiAppAction =
     | { page: TuiPageId; status?: string; type: "screen.setStatus" }
     | { instance?: string; type: "ui.selectInstance" }
     | { page: TuiPageId; type: "ui.selectPage" }
+    | { route: TuiRoute; type: "route.push" }
+    | { type: "route.pop" }
+    | { route: TuiRoute; type: "route.replace" }
+    | { type: "route.reset" }
     | { key: string; type: "ui.toggleExpanded" }
     | { key: string; offset: number; type: "ui.setScrollOffset" }
     | { follow: boolean; instance: string; type: "logs.setFollow" }

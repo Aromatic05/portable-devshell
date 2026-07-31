@@ -61,17 +61,8 @@ export class TuiCommandDispatcherViewport {
             this.#store.setFocusScope("mainBoxes");
             return true;
         }
-        if (scope === "mainBoxes") {
-            this.returnToSidebar();
-            return true;
-        }
-        if (scope === "sidebarInstances") {
-            this.#store.setSidebarCursor({
-                id: this.#store.getState().ui.selectedPage,
-                kind: "page"
-            });
-            this.#store.setFocusScope("sidebarPages");
-            return true;
+        if (scope === "mainBoxes" || scope === "sidebarInstances") {
+            return false;
         }
         return false;
     }
@@ -89,16 +80,20 @@ export class TuiCommandDispatcherViewport {
         if (boxId === undefined) {
             return false;
         }
-        const key = this.#focus.expandedKey(boxId);
+        const box = this.#projection.selectMainScreenModel(this.#store.getState()).boxes.find(
+            (candidate) => candidate.id === boxId
+        );
+        if (box?.expandable !== true) {
+            this.#store.setScreenStatus(this.#store.getState().ui.selectedPage, "This box has no expandable details.");
+            return false;
+        }
+        const key = box.expandedKey;
         const expanded = this.#store.getState().ui.expandedBoxes[key] === true;
         this.#store.toggleExpanded(key);
         if (expanded) {
             this.#store.setSelectedDetailLine(key, undefined);
         } else {
-            const box = this.#projection.selectMainScreenModel(this.#store.getState()).boxes.find(
-                (candidate) => candidate.id === boxId
-            );
-            this.#store.setSelectedDetailLine(key, box?.expandedLines[0]?.id);
+            this.#store.setSelectedDetailLine(key, box.expandedLines[0]?.id);
         }
         this.#focus.ensureMainFocusVisible();
         this.#store.setScreenStatus(

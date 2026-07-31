@@ -20,7 +20,7 @@ export function renderExpandableBoxLines(box: TuiBoxModel, requestedInnerWidth: 
         ? { bottomLeft: "╰", bottomRight: "╯", horizontal: "─", topLeft: "╭", topRight: "╮" }
         : { bottomLeft: "└", bottomRight: "┘", horizontal: "─", topLeft: "┌", topRight: "┐" };
     const borderColor = box.disabled ? "gray" : lineColor(box.severity) ?? statusColor(box.status);
-    const titleLine = renderTopBorder(`${box.title} [${statusMarker(box.status)} ${box.status}]`, innerWidth, frame);
+    const titleLine = renderTopBorder(`${interactionMarker(box)} ${box.title} [${statusMarker(box.status)} ${box.status}]`, innerWidth, frame);
     const bottomBorder = `${frame.bottomLeft}${frame.horizontal.repeat(innerWidth + 2)}${frame.bottomRight}`;
 
     return [
@@ -154,6 +154,13 @@ function lineColor(tone: TuiBoxLineTone | undefined): string | undefined {
         default:
             return undefined;
     }
+}
+
+function interactionMarker(box: TuiBoxModel): string {
+    if (box.disabled === true) return "−";
+    if (box.status === "failed" || box.severity === "danger") return "!";
+    if (box.enterable) return "▸";
+    return "·";
 }
 
 function statusColor(status: TuiExpandableBoxStatus): string {

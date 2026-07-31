@@ -257,7 +257,7 @@ export class TuiControlSession {
         }
         this.#oauthRefreshTimer = setInterval(() => {
             const generation = this.#generation;
-            this.#runBackgroundRefresh("oauth", generation, async () => await this.#refresh.refreshOAuth(generation));
+            this.#runBackgroundRefresh("connections", generation, async () => await this.#refresh.refreshOAuth(generation));
         }, 1_000);
     }
 
@@ -374,7 +374,7 @@ export class TuiControlSession {
     }
 
     #runBackgroundRefresh(
-        page: "audit" | "oauth" | "todo",
+        page: "audit" | "connections" | "todo",
         generation: number,
         refresh: () => Promise<void>
     ): void {
@@ -388,7 +388,7 @@ export class TuiControlSession {
         );
     }
 
-    #clearRefreshFailure(page: "audit" | "oauth" | "overview" | "todo"): void {
+    #clearRefreshFailure(page: "audit" | "connections" | "overview" | "todo"): void {
         if (!this.#started) {
             return;
         }
@@ -399,7 +399,7 @@ export class TuiControlSession {
     }
 
     #reportRefreshFailure(
-        page: "audit" | "oauth" | "overview" | "todo",
+        page: "audit" | "connections" | "overview" | "todo",
         error: unknown
     ): void {
         if (!this.#started) {
@@ -416,8 +416,8 @@ export class TuiControlSession {
     }
 }
 
-function refreshPageLabel(page: "audit" | "oauth" | "overview" | "todo"): string {
-    return page === "oauth" ? "OAuth" : page[0]!.toUpperCase() + page.slice(1);
+function refreshPageLabel(page: "audit" | "connections" | "overview" | "todo"): string {
+    return page[0]!.toUpperCase() + page.slice(1);
 }
 
 function isTuiPresentationEvent(name: string): boolean {

@@ -4,9 +4,9 @@ import type { BoxModel } from "../component/TuiComponentExpandableBox.js";
 import type { TuiAppState } from "../../state/reducer/TuiStoreModel.js";
 import { compactSummary, makeBox } from "./TuiPageBoxSupport.js";
 
-export function buildOAuthPageBoxes(state: TuiAppState): BoxModel[] {
+export function buildOAuthPageBoxes(state: TuiAppState, instanceName: string): BoxModel[] {
     const status = oauthRuntimeStatus(state);
-    const statusBox = makeBox(state, "oauth", undefined, {
+    const statusBox = makeBox(state, "connections", instanceName, {
         detailLines: [
             `Provider           ${status.provider}`,
             `Runtime            ${status.runtime}`,
@@ -23,7 +23,7 @@ export function buildOAuthPageBoxes(state: TuiAppState): BoxModel[] {
     if (state.oauthApprovals.length === 0) {
         return [
             statusBox,
-            makeBox(state, "oauth", undefined, {
+            makeBox(state, "connections", instanceName, {
                 detailLines: ["No OAuth registration or authorization requests are waiting for review."],
                 id: "oauth-empty",
                 summaryLines: ["pending=0"],
@@ -32,11 +32,11 @@ export function buildOAuthPageBoxes(state: TuiAppState): BoxModel[] {
         ];
     }
 
-    return [statusBox, ...state.oauthApprovals.map((approval) => oauthApprovalBox(state, approval))];
+    return [statusBox, ...state.oauthApprovals.map((approval) => oauthApprovalBox(state, instanceName, approval))];
 }
 
-function oauthApprovalBox(state: TuiAppState, approval: OAuthApprovalRequest): BoxModel {
-    return makeBox(state, "oauth", undefined, {
+function oauthApprovalBox(state: TuiAppState, instanceName: string, approval: OAuthApprovalRequest): BoxModel {
+    return makeBox(state, "connections", instanceName, {
         detailLines: [
             `kind ${approval.kind}`,
             `client ${approval.clientName}`,

@@ -237,6 +237,9 @@ export class TuiKeyDispatcher {
         if (press.key.return) {
             return [{ type: "focus.activate" }];
         }
+        if (press.key.backspace) {
+            return [{ type: "ui.cancel" }];
+        }
         if (press.input === " ") {
             return [{ type: "screen.toggle" }];
         }

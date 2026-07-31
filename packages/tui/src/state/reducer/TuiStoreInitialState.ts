@@ -36,6 +36,8 @@ export function createInitialTuiAppState(): TuiAppState {
             logsFollowByInstance: {},
             logsPausedAtSeqByInstance: {},
             mainFocusId: undefined,
+            routeStacks: {},
+            routeViewStates: {},
             scrollOffsets: {},
             searchQueries: {},
             selectedInstance: undefined,

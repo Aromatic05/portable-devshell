@@ -1,15 +1,16 @@
 import { measureExpandableBoxHeight } from "../component/TuiComponentExpandableBox.js";
 import type { TuiMode } from "../../state/TuiInteractionState.js";
-import type { TuiActivePage, TuiPageId } from "../../state/TuiUiState.js";
+import type { TuiActivePage } from "../../state/TuiUiState.js";
 import { buildBoxesForPage } from "../page/TuiPageBoxBuilder.js";
 import { buildHelpLines } from "../page/TuiPageHelp.js";
 import type { TuiAppState, TuiConnectionState } from "../../state/reducer/TuiStoreModel.js";
-import type { TuiBoxModel, TuiMainBoxFlowMetrics, TuiMainScreenModel, TuiSidebarModel } from "../../state/TuiViewModel.js";
+import type { TuiBoxModel, TuiMainBoxFlowMetrics, TuiMainScreenModel, TuiPageLoadState, TuiSidebarModel } from "../../state/TuiViewModel.js";
+import { currentTuiRouteScrollKey, selectBreadcrumbSegments } from "../../state/route/TuiRouteState.js";
 import { isTuiSearchablePage, tuiPageEntries } from "../../state/TuiPageCatalog.js";
 
 export function selectActivePage(state: TuiAppState): TuiActivePage {
     return {
-        instance: state.ui.selectedPage === "overview" || state.ui.selectedPage === "oauth" || state.ui.selectedPage === "help" ? undefined : state.ui.selectedInstance,
+        instance: state.ui.selectedPage === "overview" || state.ui.selectedPage === "help" ? undefined : state.ui.selectedInstance,
         page: state.ui.selectedPage
     };
 }
@@ -52,26 +53,31 @@ export function selectMainScreenModel(state: TuiAppState): TuiMainScreenModel {
     const panelError = state.panelErrors[`${activePage.page}:${activePage.instance ?? "-"}`];
     const errorLines = panelError === undefined ? undefined : [`${panelError.code}: ${panelError.message}`];
 
-    if (activePage.page !== "overview" && activePage.page !== "instances" && activePage.page !== "help" && activePage.page !== "oauth" && activePage.instance === undefined) {
+    if (requiresInstance(activePage.page) && activePage.instance === undefined) {
         return {
             activePage,
             boxes: [],
             emptyState: "No instance selected. Select one from the lower sidebar list.",
             errorLines,
-            pageTitle: pageTitle(activePage.page),
+            loadState: { kind: "empty" },
+            pageTitle: pageTitle(state),
             statusLine
         };
     }
 
     const boxes = buildBoxesForPage(state, activePage.page, activePage.instance);
     const query = state.ui.searchQueries[activePage.page] ?? "";
+    const emptyState = query.length > 0 && boxes.length === 0 && isTuiSearchablePage(activePage.page)
+        ? `No matches for "${query}".`
+        : undefined;
 
     return {
         activePage,
         boxes,
-        ...(query.length > 0 && boxes.length === 0 && isTuiSearchablePage(activePage.page) ? { emptyState: `No matches for "${query}".` } : {}),
+        ...(emptyState === undefined ? {} : { emptyState }),
         errorLines,
-        pageTitle: pageTitle(activePage.page),
+        loadState: pageLoadState(state, boxes, panelError?.message),
+        pageTitle: pageTitle(state),
         statusLine
     };
 }
@@ -88,22 +94,16 @@ export function selectMainBoxFlowMetrics(state: TuiAppState, boxInnerWidth = 80)
 export function measureMainBoxFlowMetrics(boxes: readonly TuiBoxModel[], scrollKey: string, boxInnerWidth = 80): TuiMainBoxFlowMetrics {
     let cursor = 0;
     const boxRanges: Record<string, { end: number; start: number }> = {};
-
     for (const box of boxes) {
         const start = cursor;
         cursor += measureExpandableBoxHeight(box, boxInnerWidth);
         boxRanges[box.id] = { end: cursor, start };
     }
-
-    return {
-        boxRanges,
-        scrollKey,
-        totalLines: cursor
-    };
+    return { boxRanges, scrollKey, totalLines: cursor };
 }
 
 export function selectMainScrollKey(state: TuiAppState): string {
-    return `${state.ui.selectedPage}:${state.ui.selectedPage === "instances" ? "collection" : state.ui.selectedInstance ?? "-"}:main`;
+    return currentTuiRouteScrollKey(state);
 }
 
 export function selectFooterModel(state: TuiAppState): { mode: TuiMode; text: string } {
@@ -114,27 +114,23 @@ export function selectFooterModel(state: TuiAppState): { mode: TuiMode; text: st
 }
 
 export function selectFooterText(state: TuiAppState): string {
-    const active = selectActivePage(state);
-    const scope = state.interaction.focusScope;
-    const instance = active.instance ?? "none";
-    return `${state.connection.status} ${active.page}:${instance} ${scope} | ${selectFooterShortcuts(state).join(" ")}`;
+    return selectBreadcrumbSegments(state).join(" / ");
 }
 
 export function selectFooterShortcuts(state: TuiAppState): string[] {
     switch (state.interaction.focusScope) {
         case "sidebarPages":
         case "sidebarInstances":
-            return ["→ main", "tab", "enter", "0-9", "shift+1-9", "r", "↑↓", "esc"];
+            return ["→ main", "tab", "enter", "0-8", "shift+1-9", "r", "↑↓"];
         case "mainBoxes":
-            return ["← sidebar", "tab", "enter", "space", "r", "↑↓", ...(isTuiSearchablePage(state.ui.selectedPage) ? ["/"] : []), "esc"];
+            return ["← sidebar", "enter detail", "space expand", "r", "↑↓", ...(isTuiSearchablePage(state.ui.selectedPage) ? ["/"] : []), "esc back"];
         case "boxDetail":
-            return ["← sidebar", "enter", "space", "r", "↑↓", ...(isTuiSearchablePage(state.ui.selectedPage) ? ["/"] : []), "esc"];
+            return ["enter", "space", "r", "↑↓", ...(isTuiSearchablePage(state.ui.selectedPage) ? ["/"] : []), "esc back"];
         case "search":
             return ["type", "bs", "enter", "esc"];
         case "toolForm":
             return ["type JSON", "bs", "enter", "esc"];
         case "form":
-            return ["tab", "enter", "ctrl+s", "ctrl+[", "ctrl+d"];
         case "wizard":
             return ["tab", "enter", "ctrl+s", "ctrl+[", "ctrl+d"];
         case "textDetail":
@@ -142,7 +138,6 @@ export function selectFooterShortcuts(state: TuiAppState): string[] {
         case "confirm":
             return ["tab", "←→", "enter", "esc"];
         case "approvalDetail":
-            return ["tab", "↑↓", "enter", "esc"];
         case "denyConfirm":
             return ["tab", "↑↓", "enter", "esc"];
         case "terminal":
@@ -154,11 +149,9 @@ export function selectErrorMessage(state: TuiAppState): string[] | undefined {
     if (state.connection.errorCode === "control.notRunning") {
         return ["control server is not running.", "No instance is auto-started.", "Run `devshell start` manually if needed."];
     }
-
     if (typeof state.connection.errorMessage === "string" && state.connection.errorMessage.length > 0) {
         return [state.connection.errorMessage];
     }
-
     return undefined;
 }
 
@@ -193,9 +186,24 @@ export function selectHelpLines(state: TuiAppState): string[] {
     return buildHelpLines(state);
 }
 
-function pageTitle(page: TuiPageId): string {
-    return tuiPageEntries.find((entry) => entry.id === page)?.label ?? page;
+function requiresInstance(page: TuiActivePage["page"]): boolean {
+    return page !== "overview" && page !== "instances" && page !== "help";
 }
+
+function pageLoadState(state: TuiAppState, boxes: readonly TuiBoxModel[], error: string | undefined): TuiPageLoadState {
+    if (error !== undefined) return boxes.length === 0 ? { error, kind: "failed" } : { kind: "stale", reason: error };
+    if (state.connection.status === "connecting" && boxes.length === 0) return { kind: "loading" };
+    if (boxes.length === 0) return { kind: "empty" };
+    return { kind: "ready" };
+}
+
+function pageTitle(state: TuiAppState): string {
+    const segments = selectBreadcrumbSegments(state);
+    return segments.length === 0
+        ? tuiPageEntries.find((entry) => entry.id === state.ui.selectedPage)?.label ?? state.ui.selectedPage
+        : segments.join(" / ");
+}
+
 export const tuiViewProjection = {
     selectMainBoxFlowMetrics,
     selectMainBoxIds,

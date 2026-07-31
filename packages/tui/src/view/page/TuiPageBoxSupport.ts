@@ -1,6 +1,8 @@
 import type { ApprovalRequest, JsonValue, ToolCallRecord } from "@portable-devshell/shared";
 
 import type { BoxLine, BoxModel } from "../component/TuiComponentExpandableBox.js";
+import type { TuiRoute } from "../../state/route/TuiRoute.js";
+import { currentTuiRoute, tuiRouteViewKey } from "../../state/route/TuiRouteState.js";
 import type { TuiExpandableBoxStatus, TuiPageId } from "../../state/TuiUiState.js";
 import type { TuiAppState, TuiLogEntry, TuiInstanceListEntry } from "../../state/reducer/TuiStoreModel.js";
 
@@ -34,8 +36,10 @@ export function makeBox(
     input: {
         detailLines: Array<string | { disabled?: boolean; id: string; text: string; tone?: BoxLine["tone"] }>;
         disabled?: boolean;
+        expandable?: boolean;
         expandedKey?: string;
         id: string;
+        primaryRoute?: TuiRoute;
         searchText?: string;
         severity?: BoxLine["tone"];
         status?: TuiExpandableBoxStatus;
@@ -43,7 +47,12 @@ export function makeBox(
         title: string;
     }
 ): BoxModel {
-    const expandedKey = input.expandedKey ?? `${page}:${instance}:${input.id}`;
+    const route = currentTuiRoute(state);
+    const routeScopedPrefix = route.view === "list" || route.view === "summary" || route.view === "overview" || route.view === "contexts" || route.view === "sources" || route.view === "index" || route.view === "session"
+        ? `${page}:${instance}`
+        : tuiRouteViewKey(page, instance, route);
+    const expandedKey = input.expandedKey ?? `${routeScopedPrefix}:${input.id}`;
+    const expandable = input.expandable ?? input.detailLines.length > 0;
     const summaryLines = normalizeCollapsedLines(input.summaryLines);
 
     const selectedDetailLineId = state.interaction.selectedDetailLineIds[expandedKey];
@@ -56,7 +65,9 @@ export function makeBox(
     return {
         collapsedLines: summaryLines,
         disabled: input.disabled,
-        expanded: state.ui.expandedBoxes[expandedKey] === true,
+        enterable: input.primaryRoute !== undefined && input.disabled !== true,
+        expandable,
+        expanded: expandable && state.ui.expandedBoxes[expandedKey] === true,
         expandedKey,
         expandedLines,
         focused:
@@ -66,6 +77,7 @@ export function makeBox(
                 state.interaction.focusScope === "form" ||
                 state.interaction.focusScope === "wizard"),
         id: input.id,
+        primaryAction: input.primaryRoute === undefined ? undefined : { kind: "navigate", route: input.primaryRoute },
         searchText: input.searchText,
         severity: input.severity,
         selectedDetailLineId: expandedLines.some((line) => line.id === selectedDetailLineId) ? selectedDetailLineId : expandedLines[0]?.id,

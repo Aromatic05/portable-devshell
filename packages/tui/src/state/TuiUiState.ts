@@ -1,4 +1,6 @@
-export type TuiPageId = "overview" | "instances" | "todo" | "config" | "connector" | "oauth" | "audit" | "logs" | "help" | "terminal";
+import type { TuiRoute, TuiRouteViewState } from "./route/TuiRoute.js";
+
+export type TuiPageId = "overview" | "instances" | "todo" | "config" | "connections" | "audit" | "logs" | "help" | "terminal";
 
 export type TuiSidebarFocus = "pages" | "instances";
 
@@ -37,6 +39,8 @@ export type TuiUiState = {
     sidebarFocus: TuiSidebarFocus;
     focusScope: TuiFocusScope;
     mainFocusId?: string;
+    routeStacks: Record<string, readonly TuiRoute[]>;
+    routeViewStates: Record<string, TuiRouteViewState>;
     expandedBoxes: Record<string, boolean>;
     scrollOffsets: Record<string, number>;
     searchQueries: Record<string, string>;

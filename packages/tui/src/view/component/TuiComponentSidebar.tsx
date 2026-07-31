@@ -29,7 +29,7 @@ export function TuiComponentSidebar(props: TuiComponentSidebarProps) {
 }
 
 function compactPageLabel(item: TuiSidebarModel["pages"][number]): string {
-    const label = item.id === "overview" ? "over" : item.id === "instances" ? "inst" : item.id === "connector" ? "conn" : item.label;
+    const label = item.id === "overview" ? "over" : item.id === "instances" ? "inst" : item.id === "connections" ? "conn" : item.label;
     const shortcut = tuiPageShortcut(item.id as TuiPageId) ?? "?";
     return `${item.selected ? "▶" : " "}${shortcut}:${label}`;
 }

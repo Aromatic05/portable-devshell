@@ -90,14 +90,14 @@ export function isRenderRelevantChange(previous: TuiAppState, next: TuiAppState)
             previous.artifactTransfers !== next.artifactTransfers ||
             previous.configView !== next.configView;
     }
-    if (page === "oauth") {
+    if (page === "connections") {
         return previous.oauthApprovals !== next.oauthApprovals ||
+            previous.configView !== next.configView ||
             previous.mcpStatus !== next.mcpStatus ||
-            previous.configView !== next.configView;
+            selectedValueChanged(previous.snapshotsByInstance, next.snapshotsByInstance, instance);
     }
-    if (page === "config" || page === "connector") {
+    if (page === "config") {
         return previous.configView !== next.configView ||
-            previous.mcpStatus !== next.mcpStatus ||
             selectedValueChanged(previous.snapshotsByInstance, next.snapshotsByInstance, instance);
     }
     if (page === "audit") {

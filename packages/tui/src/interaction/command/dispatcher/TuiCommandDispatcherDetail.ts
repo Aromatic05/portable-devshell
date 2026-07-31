@@ -49,7 +49,7 @@ export class TuiCommandDispatcherDetail {
                 return false;
             }
 
-            if (state.ui.selectedPage === "oauth" && actionId?.startsWith("oauth.approve:")) {
+            if (state.ui.selectedPage === "connections" && actionId?.startsWith("oauth.approve:")) {
                 const approvalId = actionId.slice("oauth.approve:".length);
                 return await this.#dispatch({
                     body: "Approve this OAuth request? The client may receive authorization immediately.",
@@ -60,9 +60,9 @@ export class TuiCommandDispatcherDetail {
                 });
             }
 
-            if (state.ui.selectedPage === "oauth" && actionId?.startsWith("oauth.deny:")) {
+            if (state.ui.selectedPage === "connections" && actionId?.startsWith("oauth.deny:")) {
                 await this.#onOAuthApprovalDecision(actionId.slice("oauth.deny:".length), "deny");
-                this.#store.setScreenStatus("oauth", "OAuth approval denied.");
+                this.#store.setScreenStatus("connections", "OAuth approval denied.");
                 return true;
             }
 
@@ -99,7 +99,7 @@ export class TuiCommandDispatcherDetail {
                 return true;
             }
 
-            if (state.ui.selectedPage === "connector" && button === "restart-control") {
+            if (state.ui.selectedPage === "connections" && button === "restart-control") {
                 return await this.#dispatch({
                     body: "Restart the control runtime now? TUI will reconnect automatically.",
                     confirmIntent: { type: "control.restart" },
@@ -108,15 +108,15 @@ export class TuiCommandDispatcherDetail {
                     type: "overlay.openConfirm"
                 });
             }
-            if (state.ui.selectedPage === "connector" && (button === "save" || button === "cancel")) {
+            if (state.ui.selectedPage === "connections" && (button === "save" || button === "cancel")) {
                 if (state.interaction.editor?.kind !== "connector") {
                     this.#store.setEditor({ editing: false, key: `connector:${state.ui.selectedInstance}`, kind: "connector" });
                 }
                 return button === "save" ? await this.#editor.save(false) : await this.#editor.discard();
             }
 
-            if ((state.ui.selectedPage === "config" || state.ui.selectedPage === "connector") && boxId !== undefined && actionId?.startsWith("field:")) {
-                return this.#editor.openPageEditor(state.ui.selectedPage, boxId);
+            if ((state.ui.selectedPage === "config" || state.ui.selectedPage === "connections") && boxId !== undefined && actionId?.startsWith("field:")) {
+                return this.#editor.openPageEditor(state.ui.selectedPage === "config" ? "config" : "connector", boxId);
             }
 
             if (state.ui.selectedPage === "audit" && state.ui.selectedInstance !== undefined && actionId?.startsWith("approval.open:")) {

@@ -23,6 +23,7 @@ export class TuiCommandDispatcherNavigation {
     readonly #onLogsReload: () => Promise<void>;
     readonly #onPageReload: TuiCommandDispatcherNavigationOptions["onPageReload"];
     readonly #onRedraw: () => void;
+    readonly #projection: TuiInteractionProjection;
     readonly #overlay: TuiCommandDispatcherOverlay;
     readonly #store: TuiAppStore;
     readonly #viewport: TuiCommandDispatcherViewport;
@@ -32,6 +33,7 @@ export class TuiCommandDispatcherNavigation {
         this.#onLogsReload = options.onLogsReload;
         this.#onPageReload = options.onPageReload;
         this.#onRedraw = options.onRedraw;
+        this.#projection = options.projection;
         this.#store = options.store;
         this.#overlay = new TuiCommandDispatcherOverlay({
             dispatch: options.dispatch,
@@ -102,7 +104,26 @@ export class TuiCommandDispatcherNavigation {
     }
 
     cancelPassiveScope(): boolean {
-        return this.#overlay.cancelPassiveScope() || this.#viewport.cancelPassiveScope();
+        if (this.#overlay.cancelPassiveScope()) {
+            return true;
+        }
+        if (this.#store.popRoute()) {
+            this.#focus.syncMainFocus();
+            return true;
+        }
+        return this.#viewport.cancelPassiveScope();
+    }
+
+    openFocusedRoute(): boolean {
+        const state = this.#store.getState();
+        const box = this.#projection.selectMainScreenModel(state).boxes.find((candidate) => candidate.id === state.ui.mainFocusId);
+        if (box?.primaryAction?.kind !== "navigate" || box.disabled === true) {
+            this.#store.setScreenStatus(state.ui.selectedPage, "This box has no detail page.");
+            return false;
+        }
+        this.#store.pushRoute(box.primaryAction.route);
+        this.#focus.syncMainFocus();
+        return true;
     }
 
     returnToSidebar(): void {

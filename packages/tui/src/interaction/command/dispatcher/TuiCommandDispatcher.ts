@@ -155,7 +155,7 @@ export class TuiCommandDispatcher {
                 await (this.#options.onControlRestart ?? unavailable)();
                 this.#store.setControlRestartRequired(false);
                 this.#store.setScreenStatus(
-                    "connector",
+                    "connections",
                     "Control runtime restarted and MCP configuration reloaded."
                 );
                 return true;
@@ -220,7 +220,7 @@ export class TuiCommandDispatcher {
                     intent.decision
                 );
                 this.#store.setScreenStatus(
-                    "oauth",
+                    "connections",
                     intent.decision === "approve"
                         ? "OAuth approval granted."
                         : "OAuth approval denied."
@@ -329,21 +329,7 @@ export class TuiCommandDispatcher {
             if (focused?.kind === "line") {
                 return await this.#detail.activate();
             }
-            const approvalId = focused?.kind === "box"
-                ? this.#focus.approvalIdFromBox(focused.id)
-                : undefined;
-            if (
-                state.ui.selectedPage === "audit" &&
-                state.ui.selectedInstance !== undefined &&
-                approvalId !== undefined
-            ) {
-                return await this.dispatch({
-                    approvalId,
-                    instance: state.ui.selectedInstance,
-                    type: "approval.open"
-                });
-            }
-            return await this.dispatch({ type: "screen.toggle" });
+            return this.#navigation.openFocusedRoute();
         }
         if (scope === "boxDetail") {
             return await this.#detail.activate();

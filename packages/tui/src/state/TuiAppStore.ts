@@ -13,6 +13,8 @@ import {
 } from "@portable-devshell/shared";
 
 import type { TuiEditorState, TuiUiIntent } from "./TuiInteractionState.js";
+import type { TuiRoute } from "./route/TuiRoute.js";
+import { currentTuiRouteStack } from "./route/TuiRouteState.js";
 import type {
     TuiAuditPageState,
     TuiFocusScope,
@@ -152,6 +154,26 @@ export class TuiAppStore {
             instance,
             type: "ui.selectInstance"
         });
+    }
+
+    pushRoute(route: TuiRoute): void {
+        this.dispatch({ route, type: "route.push" });
+    }
+
+    popRoute(): boolean {
+        if (currentTuiRouteStack(this.#state).length <= 1) {
+            return false;
+        }
+        this.dispatch({ type: "route.pop" });
+        return true;
+    }
+
+    replaceRoute(route: TuiRoute): void {
+        this.dispatch({ route, type: "route.replace" });
+    }
+
+    resetRoute(): void {
+        this.dispatch({ type: "route.reset" });
     }
 
     pushRestore(focusScope: TuiFocusScope, sidebarFocus: TuiSidebarFocus, mainFocusId?: string): void {

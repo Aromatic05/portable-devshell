@@ -19,7 +19,7 @@ export function buildConnectorPageBoxes(state: TuiAppState, instanceName: string
     const authMode = readPath(mcpDraft, "auth.mode");
 
     return [
-        makeBox(state, "connector", instanceName, {
+        makeBox(state, "connections", instanceName, {
             detailLines: [
                 fieldLine("instance.mcp.enabled", "mcp.enabled", readPath(instanceDraft, "mcp.enabled")),
                 fieldLine("instance.mcp.path", "mcp.path", readPath(instanceDraft, "mcp.path")),
@@ -33,7 +33,7 @@ export function buildConnectorPageBoxes(state: TuiAppState, instanceName: string
             summaryLines: [compactSummary(["enabled", String(readPath(instanceDraft, "mcp.enabled") ?? false)], ["path", String(readPath(instanceDraft, "mcp.path") ?? "-")])],
             title: `[Instance] MCP Endpoint${unsaved}`
         }),
-        makeBox(state, "connector", instanceName, {
+        makeBox(state, "connections", instanceName, {
             detailLines: [
                 fieldLine("listenHost", "listenHost", readPath(mcpDraft, "listenHost")),
                 fieldLine("listenPort", "listenPort", readPath(mcpDraft, "listenPort")),
@@ -44,7 +44,7 @@ export function buildConnectorPageBoxes(state: TuiAppState, instanceName: string
             summaryLines: [compactSummary(["host", String(readPath(mcpDraft, "listenHost") ?? "-")], ["baseUrl", String(readPath(mcpDraft, "publicBaseUrl") ?? "-")])],
             title: `[Global] Public Base URL${unsaved}`
         }),
-        makeBox(state, "connector", instanceName, {
+        makeBox(state, "connections", instanceName, {
             detailLines: [
                 fieldLine("auth.mode", "auth.mode", authMode),
                 ...(authMode === "token"
@@ -58,7 +58,7 @@ export function buildConnectorPageBoxes(state: TuiAppState, instanceName: string
             summaryLines: [compactSummary(["mode", String(readPath(mcpDraft, "auth.mode") ?? "-")], ["public", isPublic(mcpDraft) ? "yes" : "no"])],
             title: `[Global] Auth${unsaved}`
         }),
-        makeBox(state, "connector", instanceName, {
+        makeBox(state, "connections", instanceName, {
             detailLines: [
                 `Affected scopes    ${affectedScopes}`,
                 `Instance changes   ${instanceDirty ? "yes" : "no"}`,
@@ -72,14 +72,14 @@ export function buildConnectorPageBoxes(state: TuiAppState, instanceName: string
             summaryLines: [compactSummary(["scopes", affectedScopes], ["dirty", instanceDirty || globalDirty ? "yes" : "no"])],
             title: "Page Actions"
         }),
-        makeBox(state, "connector", instanceName, {
+        makeBox(state, "connections", instanceName, {
             detailLines: [endpoint.value, ...(endpoint.reason === undefined ? [] : [`reason=${endpoint.reason}`])],
             id: "endpoint-preview",
             status: endpoint.reason === undefined ? "normal" : "warning",
             summaryLines: [endpoint.value, ...(endpoint.reason === undefined ? [] : [`reason=${endpoint.reason}`])],
             title: "Configured Endpoint"
         }),
-        makeBox(state, "connector", instanceName, {
+        makeBox(state, "connections", instanceName, {
             detailLines: authNonePublic
                 ? ["validator error: auth.mode=none cannot expose a non-local endpoint"]
                 : ["validation=available before save"],
