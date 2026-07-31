@@ -95,14 +95,13 @@ export class WorkerRpcBridge {
                 removeAbortListener = () => signal.removeEventListener("abort", onAbort);
             }
             this.#pending.set(request.id, pending);
+            if (signal?.aborted === true) {
+                onAbort();
+            }
+            if (this.#pending.get(request.id) !== pending) {
+                return;
+            }
             void channel.send(request as unknown as JsonValue).catch((error: unknown) => {
-                if (!this.#preservePendingOnDisconnect) {
-                    const active = this.#pending.get(request.id);
-                    if (active === pending) {
-                        this.#pending.delete(request.id);
-                        pending.cleanup();
-                    }
-                }
                 this.#disconnectChannel(channel, this.#createDisconnectError(error));
             });
         });
@@ -200,8 +199,16 @@ export class WorkerRpcBridge {
         if (!this.#preservePendingOnDisconnect) {
             this.#rejectPending(error);
         }
-        for (const listener of this.#disconnectListeners) {
-            listener(error);
+        for (const listener of [...this.#disconnectListeners]) {
+            try {
+                listener(error);
+            } catch (listenerError) {
+                console.warn(
+                    listenerError instanceof Error
+                        ? listenerError
+                        : new Error(String(listenerError))
+                );
+            }
         }
     }
 

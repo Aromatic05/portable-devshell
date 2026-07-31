@@ -24,10 +24,14 @@ class DeferredConnector implements WorkerRpcConnector {
 class MemoryChannel implements WorkerRpcChannel {
     readonly sent: WorkerRpcRequestEnvelope[] = [];
     closed = false;
+    sendError?: Error;
     readonly #messages = new Set<(message: JsonValue) => void>();
     readonly #disconnects = new Set<(error: unknown) => void>();
 
     async send(message: JsonValue): Promise<void> {
+        if (this.sendError !== undefined) {
+            throw this.sendError;
+        }
         this.sent.push(message as unknown as WorkerRpcRequestEnvelope);
     }
 
@@ -109,6 +113,103 @@ test("closing an RPC bridge while connecting cannot resurrect the channel", asyn
     assert.equal(channel.closed, true);
     assert.equal(bridge.connected, false);
 });
+
+test("WorkerRpcBridge rejects a pending request when the initial send fails", async () => {
+    const connector = new DeferredConnector();
+    const channel = new MemoryChannel();
+    channel.sendError = new Error("send failed");
+    connector.channel = channel;
+    const bridge = new WorkerRpcBridge({
+        connector,
+        rpcOptions: { instanceName: "send-failure" }
+    });
+
+    const request = bridge.request({
+        id: "request-send-failure",
+        method: "worker.ping",
+        params: {},
+        type: "request"
+    });
+
+    await assert.rejects(withTimeout(request), /send failed|disconnected/iu);
+    assert.equal(bridge.connected, false);
+});
+
+test("WorkerRpcBridge observes aborts that race with listener registration", async () => {
+    const connector = new DeferredConnector();
+    const channel = new MemoryChannel();
+    connector.channel = channel;
+    const bridge = new WorkerRpcBridge({
+        connector,
+        rpcOptions: { instanceName: "abort-race" }
+    });
+    const signal = new RegistrationRaceAbortSignal();
+
+    const request = bridge.request({
+        id: "request-abort-race",
+        method: "bash_run",
+        params: {},
+        type: "request"
+    }, signal as unknown as AbortSignal);
+
+    await assert.rejects(withTimeout(request), /cancel/iu);
+    assert.equal(channel.sent.length, 0);
+});
+
+test("WorkerRpcBridge isolates disconnect listener failures", async () => {
+    const connector = new DeferredConnector();
+    const channel = new MemoryChannel();
+    connector.channel = channel;
+    const bridge = new WorkerRpcBridge({
+        connector,
+        rpcOptions: { instanceName: "disconnect-listeners" }
+    });
+    const warnings: unknown[] = [];
+    const originalWarn = console.warn;
+    console.warn = (warning) => warnings.push(warning);
+    try {
+        let healthyListenerCalled = false;
+        bridge.onDisconnect(() => {
+            throw new Error("broken disconnect listener");
+        });
+        bridge.onDisconnect(() => {
+            healthyListenerCalled = true;
+        });
+        await bridge.connect();
+
+        channel.disconnect();
+
+        assert.equal(healthyListenerCalled, true);
+        assert.equal(warnings.length, 1);
+    } finally {
+        console.warn = originalWarn;
+    }
+});
+
+class RegistrationRaceAbortSignal {
+    aborted = false;
+    readonly reason = new Error("abort raced with registration");
+
+    addEventListener(): void {
+        this.aborted = true;
+    }
+
+    removeEventListener(): void {}
+}
+
+async function withTimeout<T>(promise: Promise<T>): Promise<T> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+        return await Promise.race([
+            promise,
+            new Promise<never>((_resolve, reject) => {
+                timer = setTimeout(() => reject(new Error("request did not settle")), 250);
+            })
+        ]);
+    } finally {
+        if (timer !== undefined) clearTimeout(timer);
+    }
+}
 
 async function waitUntil(predicate: () => boolean): Promise<void> {
     for (let attempt = 0; attempt < 100; attempt += 1) {
