@@ -78,6 +78,98 @@ describe("authenticated application shell", () => {
         await waitFor(() => expect(session.logout).toHaveBeenCalledOnce());
     });
 
+    it("returns to login when reconnect finds an expired session", async () => {
+        const session = fakeSession({ check: true });
+        const clients = fakeClients();
+        const close = vi.fn();
+        clients.close = close;
+        clients.runtime.subscribe = async () => {
+            throw new Error("WebSocket closed");
+        };
+        const createClients = vi.fn(() => clients);
+
+        render(<App createClients={createClients} session={session} />);
+        await screen.findByRole("button", { name: "Reconnect" });
+        session.check.mockResolvedValue(false);
+        fireEvent.click(screen.getByRole("button", { name: "Reconnect" }));
+        await waitFor(() => expect(session.check.mock.calls.length).toBeGreaterThanOrEqual(2));
+
+        expect(await screen.findByRole("button", { name: "Sign in" })).toBeInTheDocument();
+        expect(close).toHaveBeenCalledOnce();
+        expect(session.check.mock.calls.length).toBeGreaterThanOrEqual(2);
+    });
+
+    it("makes reconnect single-flight while checking the session", async () => {
+        let releaseCheck!: (available: boolean) => void;
+        const session = fakeSession({ check: true });
+        const clients = fakeClients();
+        clients.runtime.subscribe = async () => {
+            throw new Error("WebSocket closed");
+        };
+        render(<App createClients={() => clients} session={session} />);
+
+        await screen.findByRole("button", { name: "Reconnect" });
+        session.check.mockImplementation(async () => await new Promise<boolean>((resolve) => { releaseCheck = resolve; }));
+        fireEvent.click(screen.getByRole("button", { name: "Reconnect" }));
+        expect(screen.getByRole("button", { name: "Reconnecting…" })).toBeDisabled();
+        fireEvent.click(screen.getByRole("button", { name: "Reconnecting…" }));
+        releaseCheck(true);
+
+        await waitFor(() => expect(session.check).toHaveBeenCalledTimes(2));
+    });
+
+    it("ignores a superseded bootstrap after the session changes", async () => {
+        let resolveFirstCheck!: (available: boolean) => void;
+        const first: WebSession = {
+            check: async () => await new Promise<boolean>((resolve) => { resolveFirstCheck = resolve; }),
+            establish: async () => false,
+            logout: async () => undefined,
+        };
+        const second = fakeSession({ check: false, establish: false });
+        const createClients = vi.fn(fakeClients);
+        const view = render(<App createClients={createClients} session={first} />);
+
+        view.rerender(<App createClients={createClients} session={second} />);
+        expect(await screen.findByRole("button", { name: "Sign in" })).toBeInTheDocument();
+        resolveFirstCheck(true);
+        await Promise.resolve();
+
+        expect(createClients).not.toHaveBeenCalled();
+    });
+
+    it("does not recreate clients after an unmounted bootstrap resolves", async () => {
+        let resolveCheck!: (available: boolean) => void;
+        const session: WebSession = {
+            check: async () => await new Promise<boolean>((resolve) => { resolveCheck = resolve; }),
+            establish: async () => false,
+            logout: async () => undefined,
+        };
+        const createClients = vi.fn(fakeClients);
+        const view = render(<App createClients={createClients} session={session} />);
+
+        view.unmount();
+        resolveCheck(true);
+        await Promise.resolve();
+
+        expect(createClients).not.toHaveBeenCalled();
+    });
+
+    it("makes logout single-flight while the session revocation is pending", async () => {
+        let releaseLogout!: () => void;
+        const session = fakeSession({ check: true });
+        session.logout.mockImplementation(async () => await new Promise<void>((resolve) => { releaseLogout = resolve; }));
+        render(<App createClients={fakeClients} session={session} />);
+
+        const logout = await screen.findByRole("button", { name: "Log out" });
+        fireEvent.click(logout);
+        expect(screen.getByRole("button", { name: "Logging out…" })).toBeDisabled();
+        fireEvent.click(screen.getByRole("button", { name: "Logging out…" }));
+        releaseLogout();
+
+        expect(await screen.findByRole("button", { name: "Sign in" })).toBeInTheDocument();
+        expect(session.logout).toHaveBeenCalledOnce();
+    });
+
     it("supports mobile bottom and desktop navigation", async () => {
         render(
             <App
