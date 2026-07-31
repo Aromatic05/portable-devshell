@@ -73,6 +73,46 @@ describe("BrowserWebSocketChannel", () => {
         expect(closes).toEqual(["closed"]);
     });
 
+    it("closes and notifies listeners when an OPEN send throws", async () => {
+        const socket = new FakeSocket();
+        const channel = new BrowserWebSocketChannel(socket as unknown as WebSocket);
+        socket.open();
+        socket.failOnSend(1);
+        socket.failOnClose();
+        const errors: Error[] = [];
+        channel.onClose((error) => {
+            if (error !== undefined) errors.push(error);
+        });
+
+        await expect(channel.send(new Uint8Array([1]))).rejects.toThrow("send failed");
+
+        expect(channel.closed).toBe(true);
+        expect(errors).toHaveLength(1);
+        await expect(channel.send(new Uint8Array([2]))).rejects.toThrow("closed");
+    });
+
+    it("rejects the remaining queue when a CONNECTING flush send throws", async () => {
+        const socket = new FakeSocket();
+        const channel = new BrowserWebSocketChannel(socket as unknown as WebSocket);
+        const closes: Error[] = [];
+        channel.onClose((error) => {
+            if (error !== undefined) closes.push(error);
+        });
+        const first = channel.send(new Uint8Array([1]));
+        const failed = channel.send(new Uint8Array([2]));
+        const pending = channel.send(new Uint8Array([3]));
+        socket.failOnSend(2);
+        socket.failOnClose();
+
+        socket.open();
+
+        await expect(first).resolves.toBeUndefined();
+        await expect(failed).rejects.toThrow("send failed");
+        await expect(pending).rejects.toThrow("send failed");
+        expect(channel.closed).toBe(true);
+        expect(closes).toHaveLength(1);
+    });
+
     it("derives RPC routes from the deployed WebUI path", () => {
         const location = {
             host: "controller.example",
@@ -94,12 +134,30 @@ class FakeSocket extends EventTarget {
     binaryType = "";
     readyState = FakeSocket.CONNECTING;
     sent: Uint8Array[] = [];
+    #failSendAt?: number;
+    #failClose = false;
+    #sendCount = 0;
 
     send(data: Uint8Array): void {
+        this.#sendCount += 1;
+        if (this.#sendCount === this.#failSendAt) {
+            throw new Error("send failed");
+        }
         this.sent.push(data);
     }
 
+    failOnSend(count: number): void {
+        this.#failSendAt = count;
+    }
+
+    failOnClose(): void {
+        this.#failClose = true;
+    }
+
     close(): void {
+        if (this.#failClose) {
+            throw new Error("close failed");
+        }
         this.serverClose();
     }
 

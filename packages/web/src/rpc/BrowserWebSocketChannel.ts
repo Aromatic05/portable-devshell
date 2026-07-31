@@ -32,8 +32,12 @@ export class BrowserWebSocketChannel implements FrameChannel {
             return Promise.reject(new Error("WebSocket channel is closed."));
         }
         if (this.socket.readyState === WebSocket.OPEN) {
-            this.socket.send(frame);
-            return Promise.resolve();
+            try {
+                this.socket.send(frame);
+                return Promise.resolve();
+            } catch (error) {
+                return Promise.reject(this.fail(asError(error)));
+            }
         }
         if (this.socket.readyState !== WebSocket.CONNECTING)
             return Promise.reject(new Error("WebSocket connection failed."));
@@ -62,12 +66,14 @@ export class BrowserWebSocketChannel implements FrameChannel {
     }
 
     private flush = () => {
-        for (const pending of this.#queue.splice(0)) {
+        while (this.#queue.length > 0) {
+            const pending = this.#queue.shift()!;
             try {
                 this.socket.send(pending.frame);
                 pending.resolve();
             } catch (error) {
-                pending.reject(asError(error));
+                pending.reject(this.fail(asError(error)));
+                return;
             }
         }
     };
@@ -115,6 +121,15 @@ export class BrowserWebSocketChannel implements FrameChannel {
         }
         this.#frames.clear();
         this.#closes.clear();
+    }
+    private fail(error: Error): Error {
+        this.finish(error);
+        try {
+            this.socket.close();
+        } catch {
+            // Preserve the send error after the channel has been closed locally.
+        }
+        return error;
     }
 }
 function asError(error: unknown): Error {
