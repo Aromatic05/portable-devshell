@@ -7,9 +7,16 @@ import {
 } from "@portable-devshell/shared";
 
 import {
+    selectMainBoxFlowMetrics,
+    selectMainBoxIds,
     selectMainScreenModel,
     selectMainScrollKey,
+    selectTuiOverviewPresentation,
     TuiAppStore,
+    TuiCommandDispatcherNavigation,
+    type TuiCommandDispatcherFocus,
+    type TuiFocusManager,
+    tuiViewProjection,
     TuiKeyDispatcher
 } from "../../src/testing.ts";
 
@@ -98,58 +105,73 @@ const overview: OperationalOverview = {
     }]
 };
 
-test("overview page prioritizes health and alerts before read-only operational detail", () => {
+test("overview projects system meters and an instance table without expandable boxes", () => {
     const store = new TuiAppStore();
     store.replaceOperationalOverview(overview);
     store.setSelectedPage("overview");
+    store.setMainFocusId("overview-instance:alpha");
 
-    const model = selectMainScreenModel(store.getState());
-    assert.equal(model.activePage.instance, undefined);
-    assert.deepEqual(
-        model.boxes.map((box) => box.title),
-        [
-            "Operational Health",
-            "Alert · Instance failed",
-            "Instance · alpha",
-            "Activity · bash_run",
-            "Todo · Recover remote worker"
-        ]
-    );
-    assert.equal(model.boxes[0]?.status, "failed");
-    assert.equal(
-        model.boxes[0]?.expandedLines.some((line) => line.text.includes("CPU") && line.text.includes("12.5%")),
-        true
-    );
-    assert.equal(
-        model.boxes[0]?.expandedLines.some((line) => line.text.includes("Memory") && line.text.includes("25%")),
-        true
-    );
-    assert.equal(
-        model.boxes[0]?.expandedLines.some((line) => line.text.includes("Disk") && line.text.includes("40%")),
-        true
-    );
-    assert.equal(model.boxes[1]?.severity, "danger");
-    assert.equal(
-        model.boxes[2]?.expandedLines.some((line) => line.text.includes("0.4.10") && line.text.includes("protocol 2")),
-        true
-    );
-    assert.equal(
-        model.boxes[2]?.expandedLines.some((line) => line.text.includes("linux/x64")),
-        true
-    );
-    assert.equal(
-        model.boxes[2]?.expandedLines.some((line) => line.text.includes("tools, streaming, cancel")),
-        true
-    );
-    assert.equal(selectMainScrollKey(store.getState()), "overview:-:main");
-    const actions = model.boxes.flatMap((box) =>
-        box.expandedLines.flatMap((line) => line.id?.includes(":button:") ? [line.id] : [])
-    );
-    assert.equal(actions.length > 0, true);
-    assert.equal(actions.every((id) => id.includes(":button:overview-open-")), true);
+    const screen = selectMainScreenModel(store.getState());
+    const presentation = selectTuiOverviewPresentation(store.getState());
+    assert.equal(screen.activePage.instance, undefined);
+    assert.deepEqual(screen.boxes, []);
+    assert.equal(screen.loadState.kind, "ready");
+    assert.equal(presentation.health, "critical");
+    assert.deepEqual(presentation.meters.map((meter) => [meter.label, meter.percent]), [
+        ["CPU", 12.5],
+        ["Memory", 25],
+        ["Disk", 40]
+    ]);
+    assert.deepEqual(presentation.instances.map((instance) => ({
+        approvals: instance.approvals,
+        focused: instance.focused,
+        id: instance.id,
+        runtime: instance.runtime,
+        todos: instance.todos,
+        tone: instance.tone
+    })), [{
+        approvals: 1,
+        focused: true,
+        id: "overview-instance:alpha",
+        runtime: "failed",
+        todos: 1,
+        tone: "danger"
+    }]);
+    assert.equal(presentation.alerts[0]?.title, "Instance failed");
+    assert.equal(presentation.activity[0]?.toolName, "bash_run");
+    assert.deepEqual(selectMainBoxIds(store.getState()), ["overview-instance:alpha"]);
+    const flow = selectMainBoxFlowMetrics(store.getState());
+    assert.deepEqual(flow.boxRanges, {
+        "overview-instance:alpha": { end: 1, start: 0 }
+    });
+    assert.equal(flow.scrollKey, selectMainScrollKey(store.getState()));
+    assert.match(flow.scrollKey, /^overview/u);
 });
 
-test("overview uses zero without changing the established one-to-nine page shortcuts", () => {
+test("overview Enter opens the selected instance row", () => {
+    const store = new TuiAppStore();
+    store.replaceInstances([{ enabled: true, mcpEnabled: true, name: "alpha", provider: "local" }]);
+    store.replaceOperationalOverview(overview);
+    store.setSelectedPage("overview");
+    store.setFocusScope("mainBoxes");
+    store.setMainFocusId("overview-instance:alpha");
+    const navigation = new TuiCommandDispatcherNavigation({
+        focus: { syncMainFocus() {} } as unknown as TuiCommandDispatcherFocus,
+        focusManager: {} as unknown as TuiFocusManager,
+        async onLogsReload() {},
+        async onPageReload() {},
+        onRedraw() {},
+        projection: tuiViewProjection,
+        store
+    });
+
+    assert.equal(navigation.openFocusedRoute(), true);
+    assert.equal(store.getState().ui.selectedPage, "instances");
+    assert.equal(store.getState().ui.selectedInstance, "alpha");
+    assert.equal(store.getState().ui.mainFocusId, "instance:alpha");
+});
+
+test("overview uses zero without changing the established one-to-eight page shortcuts", () => {
     const dispatcher = new TuiKeyDispatcher();
     assert.deepEqual(
         dispatcher.dispatch("sidebarPages", { input: "0", key: {} }),
@@ -160,7 +182,8 @@ test("overview uses zero without changing the established one-to-nine page short
         [{ page: "instances", type: "page.select" }]
     );
     assert.deepEqual(
-        dispatcher.dispatch("sidebarPages", { input: "9", key: {} }),
+        dispatcher.dispatch("sidebarPages", { input: "8", key: {} }),
         [{ page: "terminal", type: "page.select" }]
     );
+    assert.deepEqual(dispatcher.dispatch("sidebarPages", { input: "9", key: {} }), []);
 });

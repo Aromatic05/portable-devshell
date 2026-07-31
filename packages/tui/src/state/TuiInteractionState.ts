@@ -1,5 +1,6 @@
 import type { ArtifactViewImageResult, InstanceCreateSchema, InstanceCreateSummary } from "@portable-devshell/shared";
 
+import type { TuiOverlay } from "./overlay/TuiOverlay.js";
 import type { TuiAuditPageState, TuiFocusScope, TuiPageId, TuiSidebarCursor } from "./TuiUiState.js";
 
 export type TuiEditorKind = "config" | "connector" | "create";
@@ -50,6 +51,7 @@ export interface TuiInteractionState {
     confirmDialog: TuiConfirmDialogState;
     dirty: boolean;
     focusScope: TuiFocusScope;
+    overlays: readonly TuiOverlay[];
     redrawNonce: number;
     restoreStack: Array<{
         focusScope: TuiFocusScope;
@@ -128,6 +130,14 @@ export type TuiUiIntent =
     | { shareId: string; type: "artifact.revokeShare" }
     | { transferId: string; type: "artifact.cancelTransfer" }
     | { approvalId: string; instance: string; type: "approval.open" }
+    | { ctxId: string; instance: string; type: "messageComposer.open" }
+    | { type: "messageComposer.openCurrent" }
+    | { text: string; type: "messageComposer.append" }
+    | { type: "messageComposer.backspace" }
+    | { direction: "next" | "previous"; type: "messageComposer.focus" }
+    | { type: "messageComposer.submit" }
+    | { type: "messageComposer.forceSubmit" }
+    | { type: "messageComposer.cancel" }
     | { approvalId: string; decision: "approve" | "deny"; instance: string; type: "approval.decide" }
     | { approvalId: string; decision: "approve" | "deny"; type: "oauthApproval.decide" }
     | { type: "approval.back" }
@@ -148,6 +158,7 @@ export function createEmptyInteractionState(): TuiInteractionState {
         },
         dirty: false,
         focusScope: "sidebarPages",
+        overlays: [],
         redrawNonce: 0,
         restoreStack: [],
         screenStatusByPage: {},

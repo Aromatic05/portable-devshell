@@ -10,6 +10,7 @@ import {
 import { McpContextRegistry } from "../context/McpContextRegistry.js";
 import type { McpInstanceGateway } from "../instance/McpInstanceGateway.js";
 import type { McpToolCatalogArtifactName } from "../tool/catalog/McpToolCatalogArtifact.js";
+import type { McpToolCatalogContextMessageName } from "../tool/catalog/McpToolCatalogContextMessage.js";
 import type { McpToolCatalogInstanceName } from "../tool/catalog/McpToolCatalogInstance.js";
 import type { McpToolCatalogTodoName } from "../tool/catalog/McpToolCatalogTodo.js";
 import { throwIfMcpEndpointAborted } from "./McpEndpointCancellation.js";
@@ -19,6 +20,7 @@ import { readMcpContextInput } from "./McpEndpointInput.js";
 import type { McpEndpointCallContext, McpEndpointWorkerPort } from "./McpEndpointPort.js";
 import { McpNativeToolResult, type McpEndpointResult } from "./McpEndpointResult.js";
 import { McpEndpointHandlerArtifact } from "./handler/McpEndpointHandlerArtifact.js";
+import { McpEndpointHandlerContextMessage } from "./handler/McpEndpointHandlerContextMessage.js";
 import { McpEndpointHandlerEnvironment } from "./handler/McpEndpointHandlerEnvironment.js";
 import { McpEndpointHandlerInstance } from "./handler/McpEndpointHandlerInstance.js";
 import { McpEndpointHandlerTodo } from "./handler/McpEndpointHandlerTodo.js";
@@ -42,6 +44,7 @@ export interface McpEndpointDispatchOptions {
 export class McpEndpointDispatch {
     readonly #artifact: McpEndpointHandlerArtifact;
     readonly #catalog: McpEndpointCatalog;
+    readonly #contextMessage: McpEndpointHandlerContextMessage;
     readonly #contextRegistry: McpContextRegistry;
     readonly #environment: McpEndpointHandlerEnvironment;
     readonly #gateway?: McpInstanceGateway;
@@ -62,6 +65,7 @@ export class McpEndpointDispatch {
             instanceName: options.instanceName
         };
         this.#artifact = new McpEndpointHandlerArtifact(controlOptions);
+        this.#contextMessage = new McpEndpointHandlerContextMessage(controlOptions);
         this.#environment = new McpEndpointHandlerEnvironment({
             contextRegistry: this.#contextRegistry,
             instanceName: options.instanceName,
@@ -115,7 +119,7 @@ export class McpEndpointDispatch {
         input = contextInput.input;
 
         try {
-            if (known?.owner === "todo" || known?.owner === "artifact" || known?.owner === "instance") {
+            if (known?.owner === "todo" || known?.owner === "artifact" || known?.owner === "context" || known?.owner === "instance") {
                 if (selected === undefined) {
                     throw mcpEndpointToolNotExposed(toolName, this.#instanceName);
                 }
@@ -194,7 +198,7 @@ export class McpEndpointDispatch {
     }
 
     async #auditControlTool(
-        owner: "artifact" | "instance" | "todo",
+        owner: "artifact" | "context" | "instance" | "todo",
         toolName: string,
         input: JsonValue,
         context: ToolCallContext,
@@ -219,7 +223,7 @@ export class McpEndpointDispatch {
     }
 
     async #callControlTool(
-        owner: "artifact" | "instance" | "todo",
+        owner: "artifact" | "context" | "instance" | "todo",
         toolName: string,
         input: JsonValue,
         context: ToolCallContext,
@@ -228,6 +232,8 @@ export class McpEndpointDispatch {
         switch (owner) {
             case "artifact":
                 return await this.#artifact.call(toolName as McpToolCatalogArtifactName, input, signal);
+            case "context":
+                return await this.#contextMessage.call(toolName as McpToolCatalogContextMessageName, input, context, signal);
             case "instance":
                 return await this.#instance.call(toolName as McpToolCatalogInstanceName, input, signal);
             case "todo":

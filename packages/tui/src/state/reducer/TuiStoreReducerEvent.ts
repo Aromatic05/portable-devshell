@@ -1,4 +1,4 @@
-import { asInstanceName, artifactShareStates, artifactTransferStatuses, type ApprovalRequest, type ArtifactShareResult, type ArtifactTransferRecord, type JsonValue, type ToolCallRecord } from "@portable-devshell/shared";
+import { asInstanceName, artifactShareStates, artifactTransferStatuses, type ApprovalRequest, type ArtifactShareResult, type ArtifactTransferRecord, type ContextMessageRecord, type JsonValue, type ToolCallRecord } from "@portable-devshell/shared";
 
 import { asRecord, isApprovalEvent, isStatusEvent, isToolCallEvent, mergeLogEntry, upsertApproval, upsertToolCall } from "./TuiStoreReducerSupport.js";
 import type { TuiAppState, TuiRawEventRecord } from "./TuiStoreModel.js";
@@ -79,11 +79,52 @@ export function applyEventRecord(state: TuiAppState, rawEvent: TuiRawEventRecord
         };
     }
 
+    if (rawEvent.event.startsWith("context.message.")) {
+        state = applyContextMessageEvent(
+            state,
+            rawEvent.instance,
+            rawEvent.event,
+            typeof payload?.at === "string" ? payload.at : new Date(0).toISOString(),
+            data
+        );
+    }
+
     if (isApprovalEvent(rawEvent.event)) {
         state = applyApprovalEvent(state, rawEvent.instance, data);
     }
 
     return state;
+}
+
+function applyContextMessageEvent(
+    state: TuiAppState,
+    instance: string,
+    event: string,
+    at: string,
+    data: Record<string, JsonValue>
+): TuiAppState {
+    if (typeof data.id !== "string" || typeof data.ctxId !== "string" || typeof data.createdAt !== "string" || typeof data.text !== "string") return state;
+    const current = state.contextMessagesByInstance[instance] ?? [];
+    const existing = current.find((message) => message.id === data.id);
+    const status = event === "context.message.delivered" ? "delivered" : event === "context.message.failed" ? "failed" : "pending";
+    const record: ContextMessageRecord = {
+        createdAt: data.createdAt,
+        ctxId: data.ctxId,
+        ...(status === "delivered" ? { deliveredAt: at } : existing?.deliveredAt === undefined ? {} : { deliveredAt: existing.deliveredAt }),
+        ...(typeof data.error === "string" ? { error: data.error } : existing?.error === undefined ? {} : { error: existing.error }),
+        ...(status === "failed" ? { failedAt: at } : existing?.failedAt === undefined ? {} : { failedAt: existing.failedAt }),
+        id: data.id,
+        instance,
+        status,
+        text: data.text
+    };
+    return {
+        ...state,
+        contextMessagesByInstance: {
+            ...state.contextMessagesByInstance,
+            [instance]: [record, ...current.filter((message) => message.id !== record.id)].sort((left, right) => left.createdAt.localeCompare(right.createdAt))
+        }
+    };
 }
 
 function applySnapshotEvent(

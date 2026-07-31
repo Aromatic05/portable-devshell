@@ -15,6 +15,7 @@ import { TuiKeyDispatcher } from "../interaction/input/TuiKeyDispatcher.js";
 import { TuiRenderScheduler } from "../view/render/TuiRenderScheduler.js";
 import { buildFocusGraphForState } from "../view/screen/TuiScreenRouter.js";
 import { TuiAppStore } from "../state/TuiAppStore.js";
+import { topTuiOverlay } from "../state/overlay/TuiOverlay.js";
 import { selectMainScreenModel, tuiViewProjection } from "../view/model/TuiViewProjection.js";
 import type { TuiPageId } from "../state/TuiUiState.js";
 import { TuiApp } from "../view/TuiApp.js";
@@ -27,6 +28,8 @@ import {
     type TuiHitTarget
 } from "../view/TuiHitRegions.js";
 import { TuiRuntimeOperations } from "./TuiRuntimeOperations.js";
+import { TuiRouteDataLoader } from "./route/TuiRouteDataLoader.js";
+import { TuiRouteLifecycleController } from "./route/TuiRouteLifecycleController.js";
 import { TuiAttachShellCommandResolver } from "./attach/TuiAttachShellCommandResolver.js";
 import {
     detectTerminalGraphicsSupport,
@@ -61,6 +64,7 @@ export class TuiRuntime {
     readonly commandDispatcher: TuiCommandDispatcher;
     readonly focusManager: TuiFocusManager;
     readonly keyDispatcher: TuiKeyDispatcher;
+    readonly routeLifecycle: TuiRouteLifecycleController;
     readonly scheduler: TuiRenderScheduler;
     readonly session: TuiControlSession;
     readonly store: TuiAppStore;
@@ -136,6 +140,14 @@ export class TuiRuntime {
             session: this.session,
             store: this.store
         });
+        const routeDataLoader = new TuiRouteDataLoader({ session: this.session, store: this.store });
+        this.routeLifecycle = new TuiRouteLifecycleController({
+            onEnter: async (context) => await routeDataLoader.enter(context),
+            onError: ({ route }, error) => {
+                this.store.setScreenStatus(route.page, `Route load failed: ${readErrorMessage(error)}`);
+            },
+            store: this.store
+        });
         this.commandDispatcher = new TuiCommandDispatcher({
             focusManager: this.focusManager,
             mainViewportRows: () => Math.max(0, this.rows - 7),
@@ -155,6 +167,9 @@ export class TuiRuntime {
             },
             onArtifactViewImage: async (instance, input) =>
                 await clients.artifact.viewImage(instance, input),
+            onContextMessage: async (instance, ctxId, text) => {
+                await this.#operations.queueContextMessage(instance, ctxId, text);
+            },
             onTodoComment: async (instance, ctxId, text) => {
                 await this.#operations.addTodoComment(instance, ctxId, text);
             },
@@ -244,6 +259,7 @@ export class TuiRuntime {
         this.#startCursorBlink();
         this.#mountInk();
         await this.session.start();
+        this.routeLifecycle.start(true);
 
         while (!this.#stopped) {
             const ink = this.#ink;
@@ -352,6 +368,7 @@ export class TuiRuntime {
         this.renderTextDetailImage(false);
         this.renderTerminalGraphics(false);
         this.#storeUnsubscribe();
+        this.routeLifecycle.stop();
         this.terminal.dispose();
         await this.session.stop();
         this.scheduler.dispose();
@@ -370,8 +387,8 @@ export class TuiRuntime {
     }
 
     renderTextDetailImage(visible: boolean): void {
-        const detail = this.store.getState().interaction.textDetail;
-        if (!visible || detail.open !== true || detail.image === undefined) {
+        const detail = topTuiOverlay(this.store.getState().interaction.overlays);
+        if (!visible || detail?.kind !== "text-detail" || detail.image === undefined) {
             const clear = terminalImageClearSequence(this.#terminalImageSupport);
             if (clear.length > 0) {
                 this.#stdout.write(clear);

@@ -20,6 +20,7 @@ import { createOperationalOverviewRouteModule } from "../control/overview/Operat
 import { OperationalOverviewService } from "../control/overview/OperationalOverviewService.js";
 import type { ReverseCredentialService } from "../control/reverse/credential/ReverseCredentialService.js";
 import { createReverseRouteModule } from "../control/reverse/route/ReverseRouteModule.js";
+import { createContextMessageRouteModule } from "../instance/context/ContextMessageRouteModule.js";
 import { createRuntimeRouteModule } from "../instance/runtime/RuntimeRouteModule.js";
 import { RuntimeSubscriptionManager } from "../instance/runtime/RuntimeSubscriptionManager.js";
 import { createServiceRouteModule } from "../control/service/ServiceRouteModule.js";
@@ -114,6 +115,7 @@ export class ControlRouteComposition {
                         this.#options.instances,
                         this.#subscriptions
                     ),
+                    ...(descriptor.contextMessages === undefined ? [] : [createContextMessageRouteModule(descriptor.contextMessages)]),
                     createTodoRouteModule(descriptor, this.#subscriptions),
                     createToolRouteModule(descriptor)
                 ]

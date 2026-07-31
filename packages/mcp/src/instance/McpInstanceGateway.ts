@@ -30,6 +30,7 @@ export interface McpInstanceGateway {
     todoCommentsFor?(instance: string, ctxId: string): Promise<string[]>;
     createSshInstance(sourceInstance: string, input: McpSshInstanceCreateInput): Promise<JsonValue>;
     listInstances(): Promise<JsonValue>;
+    readContextMessages?(instance: string, ctxId: string): Promise<JsonValue>;
     readTodo(instance: string, title?: string): Promise<JsonValue>;
     listTools(instance: string): ToolDefinition[];
     startInstance(instance: string): Promise<JsonValue>;

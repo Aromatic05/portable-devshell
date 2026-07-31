@@ -1,4 +1,4 @@
-import type { ApprovalRequest, ToolCallRecord } from "@portable-devshell/shared";
+import type { ApprovalRequest, ContextMessageRecord, ToolCallRecord } from "@portable-devshell/shared";
 
 import type { BoxModel } from "../../component/TuiComponentExpandableBox.js";
 import type { TuiAppState } from "../../../state/reducer/TuiStoreModel.js";
@@ -12,7 +12,8 @@ export function buildAuditContextBoxes(state: TuiAppState, instance: string, ctx
 
     return [
         ...context.calls.map((call) => ({ at: call.startedAt, box: callBox(state, instance, ctxId, call) })),
-        ...context.approvals.map((approval) => ({ at: approval.createdAt, box: approvalBox(state, instance, approval) }))
+        ...context.approvals.map((approval) => ({ at: approval.createdAt, box: approvalBox(state, instance, approval) })),
+        ...context.messages.map((message) => ({ at: message.createdAt, box: messageBox(state, instance, message) }))
     ].sort((left, right) => left.at.localeCompare(right.at)).map((entry) => entry.box);
 }
 
@@ -36,6 +37,24 @@ function callBox(state: TuiAppState, instance: string, ctxId: string, call: Tool
         status: toolCallStatus(call),
         summaryLines: [compactSummary(["status", call.status], ["duration", duration(call)], ["operation", call.requestId ?? "-"])],
         title: `${call.toolName} · ${call.status}`
+    });
+}
+
+function messageBox(state: TuiAppState, instance: string, message: ContextMessageRecord): BoxModel {
+    return makeBox(state, "audit", instance, {
+        detailLines: [
+            formatField("Message", message.id),
+            formatField("Context", message.ctxId),
+            formatField("Created", message.createdAt),
+            formatField("Status", message.status),
+            ...(message.deliveredAt === undefined ? [] : [formatField("Delivered", message.deliveredAt)]),
+            ...(message.error === undefined ? [] : [formatField("Error", message.error)]),
+            formatField("Text", message.text)
+        ],
+        id: `context-message:${message.id}`,
+        status: message.status === "delivered" ? "ready" : message.status === "failed" ? "failed" : "pending",
+        summaryLines: [compactSummary(["message", message.status], ["created", message.createdAt]), message.text],
+        title: "Context Message"
     });
 }
 

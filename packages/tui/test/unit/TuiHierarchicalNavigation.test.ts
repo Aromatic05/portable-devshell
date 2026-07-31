@@ -4,8 +4,13 @@ import test from "node:test";
 import {
     currentTuiRoute,
     selectBreadcrumbSegments,
+    selectMainScreenModel,
     selectMainScrollKey,
     TuiAppStore,
+    TuiCommandDispatcherNavigation,
+    tuiViewProjection,
+    type TuiCommandDispatcherFocus,
+    type TuiFocusManager,
     tuiPageEntries
 } from "../../src/testing.ts";
 
@@ -41,7 +46,16 @@ test("route stacks are isolated by feature page and instance and restore route v
     store.setScrollOffset(selectMainScrollKey(store.getState()), 11);
 
     store.setSelectedPage("logs");
-    store.pushRoute({ page: "logs", sourceId: "control", view: "stream" });
+    store.replaceLogs("alpha", [{
+        at: "2026-07-31T00:00:01.000Z",
+        ctxId: "ctx-a",
+        instance: "alpha",
+        message: "done",
+        receivedAt: "2026-07-31T00:00:01.000Z",
+        seq: 18,
+        stream: "stdout"
+    }]);
+    store.pushRoute({ ctxId: "ctx-a", page: "logs", view: "context" });
     store.setMainFocusId("log-entry:18");
 
     store.setSelectedPage("audit");
@@ -108,10 +122,96 @@ test("footer breadcrumb follows the route stack and excludes overlay state", () 
 
     assert.deepEqual(selectBreadcrumbSegments(store.getState()), [
         "audit",
-        "alpha",
         "ctx-1234…ghij",
         "bash_run"
     ]);
+});
+
+test("Todo detail breadcrumb uses the task title instead of the selected instance", () => {
+    const store = createStore();
+    store.replaceTodo("alpha", {
+        items: [],
+        revision: 1,
+        summary: { completed: 0, total: 0 },
+        tasks: [{
+            completed: 0,
+            revision: 1,
+            status: "pending",
+            taskId: "task-1",
+            title: "Implement router",
+            total: 3,
+            updatedAt: "2026-07-31T00:00:00.000Z"
+        }]
+    });
+    store.setSelectedPage("todo");
+    store.pushRoute({ page: "todo", todoId: "task-1", view: "detail" });
+
+    assert.deepEqual(selectBreadcrumbSegments(store.getState()), ["todo", "Implement router"]);
+});
+
+test("Logs groups one instance by context and Enter opens only the focused context", () => {
+    const store = createStore();
+    store.replaceLogs("alpha", [
+        {
+            at: "2026-07-31T00:00:01.000Z",
+            ctxId: "ctx-a",
+            instance: "alpha",
+            message: "ctx-a message",
+            receivedAt: "2026-07-31T00:00:01.000Z",
+            seq: 1,
+            stream: "stdout"
+        },
+        {
+            at: "2026-07-31T00:00:02.000Z",
+            ctxId: "ctx-b",
+            instance: "alpha",
+            message: "ctx-b message",
+            receivedAt: "2026-07-31T00:00:02.000Z",
+            seq: 2,
+            stream: "stderr"
+        },
+        {
+            at: "2026-07-31T00:00:03.000Z",
+            instance: "alpha",
+            message: "control message",
+            receivedAt: "2026-07-31T00:00:03.000Z",
+            seq: 3,
+            stream: "stdout"
+        }
+    ]);
+    store.setSelectedPage("logs");
+
+    assert.deepEqual(
+        selectMainScreenModel(store.getState()).boxes.map((box) => box.id),
+        ["log-context:unscoped", "log-context:ctx-b", "log-context:ctx-a"]
+    );
+
+    store.setMainFocusId("log-context:ctx-a");
+    const navigation = new TuiCommandDispatcherNavigation({
+        focus: { syncMainFocus() {} } as unknown as TuiCommandDispatcherFocus,
+        focusManager: {} as unknown as TuiFocusManager,
+        async onLogsReload() {},
+        async onPageReload() {},
+        onRedraw() {},
+        projection: tuiViewProjection,
+        store
+    });
+
+    assert.equal(navigation.openFocusedRoute(), true);
+    assert.deepEqual(currentTuiRoute(store.getState()), { ctxId: "ctx-a", page: "logs", view: "context" });
+    const detail = selectMainScreenModel(store.getState()).boxes.find((box) => box.id === "logs");
+    assert.equal(detail?.expandedLines.some((line) => line.text.includes("ctx-a message")), true);
+    assert.equal(detail?.expandedLines.some((line) => line.text.includes("ctx-b message")), false);
+});
+
+test("page changes made from the sidebar preserve sidebar focus until the user enters the page", () => {
+    const store = createStore();
+    store.setFocusScope("sidebarPages");
+
+    store.setSelectedPage("terminal");
+
+    assert.equal(store.getState().interaction.focusScope, "sidebarPages");
+    assert.equal(store.getState().ui.focusScope, "sidebarPages");
 });
 
 test("connector and OAuth are represented by one Connections top-level page", () => {

@@ -8,13 +8,12 @@ import { buttonLine } from "../editor/TuiEditorView.js";
 import { buildHelpPageBoxes } from "./TuiPageHelp.js";
 import { buildInstancesPageBoxes } from "./TuiPageInstances.js";
 import { buildLogsPageBoxes } from "./TuiPageLogs.js";
-import { buildOverviewPageBoxes } from "./TuiPageOverview.js";
 import { buildTodoPageBoxes } from "./TuiPageTodo.js";
 import { makeBox } from "./TuiPageBoxSupport.js";
 
 export function buildBoxesForPage(state: TuiAppState, page: TuiPageId, instanceName: string | undefined): BoxModel[] {
     const boxes = buildUnfilteredBoxes(state, page, instanceName);
-    if (page !== "overview" && page !== "instances" && page !== "todo" && page !== "config" && page !== "audit") {
+    if (page !== "instances" && page !== "todo" && page !== "config" && page !== "audit") {
         return boxes;
     }
 
@@ -27,7 +26,7 @@ export function buildBoxesForPage(state: TuiAppState, page: TuiPageId, instanceN
 function buildUnfilteredBoxes(state: TuiAppState, page: TuiPageId, instanceName: string | undefined): BoxModel[] {
     switch (page) {
         case "overview":
-            return buildOverviewPageBoxes(state);
+            return [];
         case "help":
             return buildHelpPageBoxes(state);
         case "instances":
@@ -47,7 +46,7 @@ function buildUnfilteredBoxes(state: TuiAppState, page: TuiPageId, instanceName:
     }
 }
 
-function filterStatusBox(state: TuiAppState, page: "overview" | "instances" | "todo" | "config" | "audit", instanceName: string | undefined, query: string, visible: number, total: number): BoxModel {
+function filterStatusBox(state: TuiAppState, page: "instances" | "todo" | "config" | "audit", instanceName: string | undefined, query: string, visible: number, total: number): BoxModel {
     return makeBox(state, page, instanceName, {
         detailLines: [
             `Query              ${query}`,

@@ -1,5 +1,6 @@
 import { type TuiFocusItem, isSameTuiFocusItem } from "../../state/focus/TuiFocusItem.js";
 import type { TuiAppStore } from "../../state/TuiAppStore.js";
+import { topTuiOverlay } from "../../state/overlay/TuiOverlay.js";
 import type { TuiAppState } from "../../state/reducer/TuiStoreModel.js";
 import { TuiFocusGraph, type TuiFocusDirection } from "../../state/focus/TuiFocusGraph.js";
 import { type TuiMode } from "../../state/TuiInteractionState.js";
@@ -59,11 +60,12 @@ export class TuiFocusManager {
             return lineId === undefined ? undefined : { boxId, id: lineId, kind: "line" };
         }
         if (scope === "confirm") {
-            return { id: this.#store.getState().interaction.selectedConfirmButton, kind: "button" };
+            const overlay = topTuiOverlay(this.#store.getState().interaction.overlays);
+            return overlay?.kind === "confirmation" ? { id: overlay.selectedAction, kind: "button" } : undefined;
         }
         if (scope === "approvalDetail" || scope === "denyConfirm") {
-            const action = this.#store.getState().interaction.auditPage.selectedAction;
-            return action === undefined ? undefined : { id: action, kind: "approvalAction" };
+            const overlay = topTuiOverlay(this.#store.getState().interaction.overlays);
+            return overlay?.kind === "approval" ? { id: overlay.selectedAction, kind: "approvalAction" } : undefined;
         }
         if (scope === "textDetail") {
             return undefined;
@@ -73,6 +75,9 @@ export class TuiFocusManager {
         }
         if (scope === "toolForm") {
             return { id: "toolForm.input", kind: "field" };
+        }
+        if (scope === "messageComposer") {
+            return undefined;
         }
         if (scope === "form" || scope === "wizard") {
             const state = this.#store.getState();
@@ -150,7 +155,9 @@ export class TuiFocusManager {
         }
 
         this.#store.setFocusScope(restored.mode);
-        this.#store.setSelectedPage(restored.page);
+        if (this.currentPage() !== restored.page) {
+            this.#store.setSelectedPage(restored.page);
+        }
         this.syncPanel(restored.page, restored.mode);
 
         if (restored.focus !== undefined) {
@@ -189,11 +196,10 @@ export class TuiFocusManager {
                 return;
             }
             case "approvalAction": {
-                const state = this.#store.getState();
-                this.#store.setAuditPage({
-                    ...state.interaction.auditPage,
-                    selectedAction: item.id
-                });
+                const overlay = topTuiOverlay(this.#store.getState().interaction.overlays);
+                if (overlay?.kind === "approval") {
+                    this.#store.replaceTopOverlay({ ...overlay, selectedAction: item.id });
+                }
                 return;
             }
             case "button":
@@ -205,8 +211,11 @@ export class TuiFocusManager {
                     }
                     return;
                 }
-                this.#store.setFocusScope("confirm");
-                this.#store.setConfirmFocus(item.id === "confirm" ? "confirm" : "cancel");
+                const overlay = topTuiOverlay(this.#store.getState().interaction.overlays);
+                if (overlay?.kind === "confirmation") {
+                    this.#store.setFocusScope("confirm");
+                    this.#store.replaceTopOverlay({ ...overlay, selectedAction: item.id === "confirm" ? "confirm" : "cancel" });
+                }
                 return;
             case "field":
                 if (this.currentMode() === "form" || this.currentMode() === "wizard") {

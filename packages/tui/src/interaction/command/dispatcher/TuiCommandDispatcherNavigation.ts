@@ -6,11 +6,13 @@ import type { TuiFocusManager } from "../../focus/TuiFocusManager.js";
 import type { TuiCommandDispatcherFocus } from "./TuiCommandDispatcherFocus.js";
 import { TuiCommandDispatcherOverlay } from "./TuiCommandDispatcherOverlay.js";
 import { TuiCommandDispatcherViewport } from "./TuiCommandDispatcherViewport.js";
+import { selectTuiOverviewInstanceName } from "../../../view/page/TuiOverviewPresentation.js";
 
 export interface TuiCommandDispatcherNavigationOptions {
     dispatch?(intent: TuiUiIntent): Promise<boolean>;
     focus: TuiCommandDispatcherFocus;
     focusManager: TuiFocusManager;
+    onContextMessage?(instance: string, ctxId: string, text: string): Promise<void>;
     onLogsReload(): Promise<void>;
     onPageReload(page: TuiPageId, instance: string | undefined): Promise<void>;
     onRedraw(): void;
@@ -39,6 +41,7 @@ export class TuiCommandDispatcherNavigation {
             dispatch: options.dispatch,
             focus: options.focus,
             focusManager: options.focusManager,
+            onContextMessage: options.onContextMessage,
             store: options.store
         });
         this.#viewport = new TuiCommandDispatcherViewport({
@@ -69,9 +72,6 @@ export class TuiCommandDispatcherNavigation {
             case "mainFocus.set":
                 this.#store.setMainFocusId(intent.id);
                 return true;
-            case "confirm.focus":
-                this.#store.setConfirmFocus(intent.button);
-                return true;
             case "ui.toggleExpanded":
                 this.#store.toggleExpanded(intent.key);
                 return true;
@@ -99,7 +99,6 @@ export class TuiCommandDispatcherNavigation {
             return false;
         }
         this.#focus.syncMainFocus();
-        await this.#reloadSelectedPage();
         return true;
     }
 
@@ -116,6 +115,18 @@ export class TuiCommandDispatcherNavigation {
 
     openFocusedRoute(): boolean {
         const state = this.#store.getState();
+        if (state.ui.selectedPage === "overview") {
+            const instance = selectTuiOverviewInstanceName(state.ui.mainFocusId);
+            if (instance === undefined) {
+                this.#store.setScreenStatus("overview", "Select an instance row first.");
+                return false;
+            }
+            this.#store.setSelectedInstance(instance);
+            this.#store.setSelectedPage("instances");
+            this.#store.setMainFocusId(`instance:${instance}`);
+            this.#focus.syncMainFocus();
+            return true;
+        }
         const box = this.#projection.selectMainScreenModel(state).boxes.find((candidate) => candidate.id === state.ui.mainFocusId);
         if (box?.primaryAction?.kind !== "navigate" || box.disabled === true) {
             this.#store.setScreenStatus(state.ui.selectedPage, "This box has no detail page.");
@@ -134,7 +145,6 @@ export class TuiCommandDispatcherNavigation {
         this.#store.setSelectedPage(page);
         this.#store.setSidebarCursor({ id: page, kind: "page" });
         this.#focus.syncMainFocus();
-        await this.#reloadSelectedPage();
         return true;
     }
 
@@ -156,7 +166,11 @@ export class TuiCommandDispatcherNavigation {
     async #reloadPage(): Promise<boolean> {
         const state = this.#store.getState();
         try {
-            await this.#onPageReload(state.ui.selectedPage, state.ui.selectedInstance);
+            if (state.ui.selectedPage === "logs" && state.ui.selectedInstance !== undefined) {
+                await this.#onLogsReload();
+            } else {
+                await this.#onPageReload(state.ui.selectedPage, state.ui.selectedInstance);
+            }
             this.#store.setScreenStatus(state.ui.selectedPage, "Page reloaded.");
             this.#focus.syncMainFocus();
             return true;
@@ -166,23 +180,6 @@ export class TuiCommandDispatcherNavigation {
                 `Reload failed: ${readErrorMessage(error)}`
             );
             return false;
-        }
-    }
-
-    async #reloadSelectedPage(): Promise<void> {
-        const state = this.#store.getState();
-        if (state.ui.selectedPage === "overview") {
-            await this.#onPageReload("overview", undefined);
-            this.#store.setScreenStatus("overview", "Overview refreshed from control.");
-            return;
-        }
-        if (state.ui.selectedPage === "logs" && state.ui.selectedInstance !== undefined) {
-            await this.#onLogsReload();
-            this.#store.setScreenStatus("logs", "Logs reloaded from instance.readLogs.");
-            return;
-        }
-        if (state.ui.selectedPage === "audit" && state.ui.selectedInstance !== undefined) {
-            await this.#onPageReload("audit", state.ui.selectedInstance);
         }
     }
 }

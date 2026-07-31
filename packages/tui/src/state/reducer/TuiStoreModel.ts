@@ -1,6 +1,7 @@
-import type { ApprovalRequest, ArtifactShareResult, ArtifactTransferRecord, ClientEvent, ControlError, InstanceSnapshot, JsonValue, OAuthApprovalRequest, OperationalOverview, TodoReadResult, ToolCallRecord } from "@portable-devshell/shared";
+import type { ApprovalRequest, ArtifactShareResult, ArtifactTransferRecord, ClientEvent, ContextMessageRecord, ControlError, InstanceSnapshot, JsonValue, OAuthApprovalRequest, OperationalOverview, TodoReadResult, ToolCallRecord } from "@portable-devshell/shared";
 
 import type { TuiEditorState, TuiInteractionState, TuiUiIntent } from "../TuiInteractionState.js";
+import type { TuiOverlay } from "../overlay/TuiOverlay.js";
 import type { TuiRoute } from "../route/TuiRoute.js";
 import type { TuiAuditPageState, TuiFocusScope, TuiPageId, TuiSidebarCursor, TuiSidebarFocus, TuiUiState } from "../TuiUiState.js";
 
@@ -75,6 +76,7 @@ export interface TuiAppState {
     artifactTransfers: ArtifactTransferRecord[];
     approvalsByInstance: Record<string, ApprovalRequest[]>;
     commandRecords: TuiCommandRecord[];
+    contextMessagesByInstance: Record<string, ContextMessageRecord[]>;
     configView?: Record<string, JsonValue>;
     connection: TuiConnectionState;
     globalDerived: TuiGlobalDerivedState;
@@ -104,6 +106,7 @@ export type TuiAppAction =
     | { approvals: OAuthApprovalRequest[]; type: "oauthApproval.replace" }
     | { overview?: OperationalOverview; type: "overview.replace" }
     | { command: TuiCommandRecord; type: "command.upsert" }
+    | { instance: string; messages: ContextMessageRecord[]; type: "contextMessage.replace" }
     | { error?: ControlError; key: string; type: "panelError.set" }
     | { commandId: string; chunk: string; type: "relay.appendOutput" }
     | { commandId: string; provider?: string; requestId?: string; workspace?: string; type: "relay.setMetadata" }
@@ -134,6 +137,9 @@ export type TuiAppAction =
     | { page: TuiPageId; status?: string; type: "screen.setStatus" }
     | { instance?: string; type: "ui.selectInstance" }
     | { page: TuiPageId; type: "ui.selectPage" }
+    | { overlay: TuiOverlay; type: "overlay.push" }
+    | { overlay: TuiOverlay; type: "overlay.replaceTop" }
+    | { type: "overlay.pop" }
     | { route: TuiRoute; type: "route.push" }
     | { type: "route.pop" }
     | { route: TuiRoute; type: "route.replace" }

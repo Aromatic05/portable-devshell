@@ -44,6 +44,8 @@ export class TuiKeyDispatcher {
                 return this.#forSearch(press);
             case "toolForm":
                 return this.#forToolForm(press);
+            case "messageComposer":
+                return this.#forMessageComposer(press);
             case "form":
             case "wizard":
                 return this.#forEditor(press, mode);
@@ -138,6 +140,28 @@ export class TuiKeyDispatcher {
         }
         if (press.input.length === 1 && !press.key.ctrl) {
             return [{ text: press.input, type: "search.append" }];
+        }
+        return [];
+    }
+
+    #forMessageComposer(press: TuiKeyPress): TuiUiIntent[] {
+        if (press.key.tab && press.key.shift) {
+            return [{ direction: "previous", type: "messageComposer.focus" }];
+        }
+        if (press.key.tab) {
+            return [{ direction: "next", type: "messageComposer.focus" }];
+        }
+        if (press.key.backspace) {
+            return [{ type: "messageComposer.backspace" }];
+        }
+        if (press.key.return && press.key.ctrl) {
+            return [{ type: "messageComposer.forceSubmit" }];
+        }
+        if (press.key.return) {
+            return [{ type: "messageComposer.submit" }];
+        }
+        if (press.input.length === 1 && !press.key.ctrl) {
+            return [{ text: press.input, type: "messageComposer.append" }];
         }
         return [];
     }
@@ -242,6 +266,9 @@ export class TuiKeyDispatcher {
         }
         if (press.input === " ") {
             return [{ type: "screen.toggle" }];
+        }
+        if (press.input === "m" || press.input === "M") {
+            return [{ type: "messageComposer.openCurrent" }];
         }
         if (press.input === "/") {
             return [{ type: "search.open" }];

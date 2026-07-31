@@ -64,11 +64,11 @@ export class TuiControlSessionRefresh {
         return subscriptions;
     }
 
-    async refreshConfig(generation?: number): Promise<void> {
+    async refreshConfig(generation?: number, signal?: AbortSignal): Promise<void> {
         const configView = await this.#readConfigView();
         const runtimeInstances = await this.#clients.instance.list();
         const mcpStatus = await this.#clients.mcp.status();
-        if (!this.#current(generation)) return;
+        if (!this.#current(generation, signal)) return;
         this.#store.setMcpStatus(mcpStatus);
         this.#store.replaceInstances(
             mergeInstances(configView, runtimeInstances)
@@ -76,22 +76,23 @@ export class TuiControlSessionRefresh {
         this.#store.setConfigView(configView);
     }
 
-    async refreshOverview(generation?: number): Promise<void> {
+    async refreshOverview(generation?: number, signal?: AbortSignal): Promise<void> {
         try {
             const overview = await this.#clients.overview.get();
-            if (this.#current(generation)) this.#store.replaceOperationalOverview(overview);
+            if (this.#current(generation, signal)) this.#store.replaceOperationalOverview(overview);
         } catch (error) {
             if (readErrorCode(error) !== "control.methodNotFound") {
                 throw error;
             }
-            if (this.#current(generation)) this.#store.replaceOperationalOverview(undefined);
+            if (this.#current(generation, signal)) this.#store.replaceOperationalOverview(undefined);
         }
     }
 
-    async refreshOAuth(generation?: number): Promise<void> {
+    async refreshOAuth(generation?: number, signal?: AbortSignal): Promise<void> {
         await this.#reloadOAuthApprovals(
             this.#store.getState().configView,
-            generation
+            generation,
+            signal
         );
     }
 
@@ -99,17 +100,18 @@ export class TuiControlSessionRefresh {
         return !oauthApprovalsUnavailable(this.#store.getState().configView);
     }
 
-    async refreshAudit(instance: string, generation?: number): Promise<void> {
-        await this.#reloadToolCalls(instance, generation);
-        await this.#reloadApprovals(instance, generation);
+    async refreshAudit(instance: string, generation?: number, signal?: AbortSignal): Promise<void> {
+        await this.#reloadToolCalls(instance, generation, signal);
+        await this.#reloadApprovals(instance, generation, signal);
+        await this.#reloadContextMessages(instance, generation, signal);
     }
 
-    async refreshLogsForInstance(instance: string, generation?: number): Promise<void> {
-        await this.#reloadLogs(instance, generation);
+    async refreshLogsForInstance(instance: string, generation?: number, signal?: AbortSignal): Promise<void> {
+        await this.#reloadLogs(instance, generation, signal);
     }
 
-    async refreshTodo(instance: string, generation?: number): Promise<void> {
-        await this.#reloadTodo(instance, generation);
+    async refreshTodo(instance: string, generation?: number, signal?: AbortSignal): Promise<void> {
+        await this.#reloadTodo(instance, generation, signal);
     }
 
     async refreshArtifacts(generation?: number): Promise<void> {
@@ -145,6 +147,7 @@ export class TuiControlSessionRefresh {
         await this.#reloadLogs(instance, generation);
         await this.#reloadToolCalls(instance, generation);
         await this.#reloadApprovals(instance, generation);
+        await this.#reloadContextMessages(instance, generation);
         return nextSubscribeSeq(snapshotEnvelope);
     }
 
@@ -152,40 +155,56 @@ export class TuiControlSessionRefresh {
         return await this.refreshRuntimeInstance(instance, generation);
     }
 
-    async #reloadTodo(instance: string, generation?: number): Promise<void> {
-        const envelope = await this.#clients.todo.get(instance);
-        if (this.#current(generation)) this.#store.replaceTodo(instance, envelope.todo);
+    async #reloadContextMessages(instance: string, generation?: number, signal?: AbortSignal): Promise<void> {
+        const client = this.#clients.contextMessage;
+        if (client === undefined) {
+            if (this.#current(generation, signal)) this.#store.replaceContextMessages(instance, []);
+            return;
+        }
+        try {
+            const messages = await client.list(instance);
+            if (this.#current(generation, signal)) this.#store.replaceContextMessages(instance, messages);
+        } catch (error) {
+            if (readErrorCode(error) !== "control.methodNotFound") throw error;
+            if (this.#current(generation, signal)) this.#store.replaceContextMessages(instance, []);
+        }
     }
 
-    async #reloadLogs(instance: string, generation?: number): Promise<void> {
+    async #reloadTodo(instance: string, generation?: number, signal?: AbortSignal): Promise<void> {
+        const envelope = await this.#clients.todo.get(instance);
+        if (this.#current(generation, signal)) this.#store.replaceTodo(instance, envelope.todo);
+    }
+
+    async #reloadLogs(instance: string, generation?: number, signal?: AbortSignal): Promise<void> {
         const logs = await this.#clients.runtime.readLogs(instance, {
             limit: LOG_READ_LIMIT
         });
-        if (this.#current(generation)) this.#store.replaceLogs(instance, logs.map(mapLogEntry));
+        if (this.#current(generation, signal)) this.#store.replaceLogs(instance, logs.map(mapLogEntry));
     }
 
-    async #reloadToolCalls(instance: string, generation?: number): Promise<void> {
+    async #reloadToolCalls(instance: string, generation?: number, signal?: AbortSignal): Promise<void> {
         const records = await this.#clients.tool.listCalls(instance, {
             limit: TOOL_CALL_READ_LIMIT
         });
-        if (this.#current(generation)) this.#store.replaceToolCalls(instance, records);
+        if (this.#current(generation, signal)) this.#store.replaceToolCalls(instance, records);
     }
 
-    async #reloadApprovals(instance: string, generation?: number): Promise<void> {
+    async #reloadApprovals(instance: string, generation?: number, signal?: AbortSignal): Promise<void> {
         const approvals = await this.#clients.tool.listApprovals(instance);
-        if (this.#current(generation)) this.#store.replaceApprovals(instance, approvals);
+        if (this.#current(generation, signal)) this.#store.replaceApprovals(instance, approvals);
     }
 
     async #reloadOAuthApprovals(
         configView: Record<string, JsonValue> | undefined,
-        generation?: number
+        generation?: number,
+        signal?: AbortSignal
     ): Promise<void> {
         if (oauthApprovalsUnavailable(configView)) {
-            if (this.#current(generation)) this.#store.replaceOAuthApprovals([]);
+            if (this.#current(generation, signal)) this.#store.replaceOAuthApprovals([]);
             return;
         }
         const approvals = await this.#clients.mcp.listApprovals();
-        if (this.#current(generation)) this.#store.replaceOAuthApprovals(approvals);
+        if (this.#current(generation, signal)) this.#store.replaceOAuthApprovals(approvals);
     }
 
     #runtimeInstanceNames(): string[] {
@@ -210,8 +229,8 @@ export class TuiControlSessionRefresh {
         }
     }
 
-    #current(generation: number | undefined): boolean {
-        return generation === undefined || this.#isCurrent(generation);
+    #current(generation: number | undefined, signal?: AbortSignal): boolean {
+        return signal?.aborted !== true && (generation === undefined || this.#isCurrent(generation));
     }
 }
 

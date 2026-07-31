@@ -1,5 +1,6 @@
 import type { TuiAppStore } from "../../../state/TuiAppStore.js";
 import type { TuiInteractionProjection } from "../../TuiInteractionProjection.js";
+import { overviewInstanceViewportRows } from "../../../view/page/TuiOverviewPresentation.js";
 
 interface CommandFocusOptions {
     mainViewportRows(): number;
@@ -97,6 +98,9 @@ export class TuiCommandDispatcherFocus {
     }
 
     boxViewportRows(): number {
+        if (this.#store.getState().ui.selectedPage === "overview") {
+            return overviewInstanceViewportRows(this.#mainViewportRows());
+        }
         const model = this.#projection.selectMainScreenModel(this.#store.getState());
         return Math.max(0, this.#mainViewportRows() - 1 - (model.statusLine === undefined ? 0 : 1) - (model.emptyState === undefined ? 0 : 1));
     }

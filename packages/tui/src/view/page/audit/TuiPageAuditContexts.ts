@@ -29,7 +29,7 @@ export function buildAuditContextListBoxes(state: TuiAppState, instance: string)
         searchText: `${context.ctxId} ${context.latestCall?.toolName ?? ""}`,
         status: context.status,
         summaryLines: [
-            compactSummary(["calls", String(context.calls.length)], ["messages", "0"], ["latest", context.latestCall?.toolName ?? "-"]),
+            compactSummary(["calls", String(context.calls.length)], ["messages", String(context.messages.length)], ["latest", context.latestCall?.toolName ?? "-"]),
             context.latestActivityAt
         ],
         title: context.ctxId

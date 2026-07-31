@@ -7,6 +7,7 @@ export function createInitialTuiAppState(): TuiAppState {
         artifactTransfers: [],
         approvalsByInstance: {},
         commandRecords: [],
+        contextMessagesByInstance: {},
         connection: {
             status: "connecting"
         },

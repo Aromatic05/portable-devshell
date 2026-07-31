@@ -8,6 +8,7 @@ export function reduceTuiStoreReducerInstance(state: TuiAppState, action: TuiApp
             return withDerivedState(selectInstanceAfterListReplace({
                 ...state,
                 approvalsByInstance: pruneByInstances(state.approvalsByInstance, action.instances),
+                contextMessagesByInstance: pruneByInstances(state.contextMessagesByInstance, action.instances),
                 instances: [...action.instances],
                 lastSeqByInstance: pruneByInstanceNames(state.lastSeqByInstance, action.instances),
                 lastStatusChangeAtByInstance: pruneByInstanceNames(state.lastStatusChangeAtByInstance, action.instances),
@@ -16,6 +17,14 @@ export function reduceTuiStoreReducerInstance(state: TuiAppState, action: TuiApp
                 todoByInstance: pruneByInstances(state.todoByInstance, action.instances),
                 toolCallsByInstance: pruneByInstances(state.toolCallsByInstance, action.instances)
             }));
+        case "contextMessage.replace":
+            return {
+                ...state,
+                contextMessagesByInstance: {
+                    ...state.contextMessagesByInstance,
+                    [action.instance]: [...action.messages]
+                }
+            };
         case "log.append": {
             const current = state.logsByInstance[action.entry.instance] ?? [];
             return withDerivedState({

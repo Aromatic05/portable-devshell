@@ -1,5 +1,6 @@
-import { selectErrorMessage, selectMainBoxFlowMetrics, selectMainScreenModel, selectSearchModel, selectSidebarModel } from "./model/TuiViewProjection.js";
+import { topTuiOverlay } from "../state/overlay/TuiOverlay.js";
 import type { TuiAppState } from "../state/reducer/TuiStoreModel.js";
+import { selectErrorMessage, selectMainBoxFlowMetrics, selectMainScreenModel, selectSidebarModel } from "./model/TuiViewProjection.js";
 import { isTerminalSizeSupported, mainInnerWidth, tuiLayoutMetrics } from "./TuiRootLayout.js";
 import { tuiTextDetailImageRows } from "./TuiTextDetailLayout.js";
 
@@ -29,29 +30,27 @@ export function buildTuiTerminalViewportRegion(
     state: TuiAppState,
     viewport: { columns: number; rows: number }
 ): TuiTerminalViewportRegion | undefined {
-    if (state.ui.selectedPage !== "terminal" || !isTerminalSizeSupported(viewport.columns, viewport.rows)) {
+    if (
+        state.ui.selectedPage !== "terminal" ||
+        topTuiOverlay(state.interaction.overlays) !== undefined ||
+        !isTerminalSizeSupported(viewport.columns, viewport.rows)
+    ) {
         return undefined;
     }
 
     const layout = tuiLayoutMetrics(viewport.columns);
     const compact = layout.mode === "compact";
-    const search = selectSearchModel(state);
     const globalErrorHeight = blockHeight(selectErrorMessage(state));
-    const toolFormHeight = state.interaction.toolForm?.open === true ? 6 : 0;
     const viewportRows = Math.max(
         0,
-        viewport.rows
-            - (compact ? 10 : 7)
-            - globalErrorHeight
-            - (search.open ? 1 : 0)
-            - (state.connection.status === "connecting" ? 1 : 0)
+        viewport.rows - (compact ? 10 : 7) - globalErrorHeight - (state.connection.status === "connecting" ? 1 : 0)
     );
 
     return {
         height: Math.max(1, viewportRows - 1),
         width: Math.max(1, mainInnerWidth(viewport.columns)),
         x: compact ? 2 : layout.outerGap + layout.sidebarWidth + layout.panelGap + 2,
-        y: (compact ? 6 : 5) + globalErrorHeight + (search.open ? 1 : 0) + toolFormHeight + 1
+        y: (compact ? 6 : 5) + globalErrorHeight + 1
     };
 }
 
@@ -59,48 +58,42 @@ export function buildTuiTextDetailImageRegion(
     state: TuiAppState,
     viewport: { columns: number; rows: number }
 ): TuiTerminalViewportRegion | undefined {
+    const overlay = topTuiOverlay(state.interaction.overlays);
     if (
-        state.interaction.textDetail.open !== true
-        || state.interaction.textDetail.image === undefined
-        || !isTerminalSizeSupported(viewport.columns, viewport.rows)
+        overlay?.kind !== "text-detail" ||
+        overlay.image === undefined ||
+        !isTerminalSizeSupported(viewport.columns, viewport.rows)
     ) {
         return undefined;
     }
 
     const layout = tuiLayoutMetrics(viewport.columns);
     const compact = layout.mode === "compact";
-    const search = selectSearchModel(state);
     const globalErrorHeight = blockHeight(selectErrorMessage(state));
-    const toolFormHeight = state.interaction.toolForm?.open === true ? 6 : 0;
     const viewportRows = Math.max(
         0,
-        viewport.rows
-            - (compact ? 10 : 7)
-            - globalErrorHeight
-            - (search.open ? 1 : 0)
-            - (state.connection.status === "connecting" ? 1 : 0)
+        viewport.rows - (compact ? 10 : 7) - globalErrorHeight - (state.connection.status === "connecting" ? 1 : 0)
     );
 
     return {
         height: tuiTextDetailImageRows(viewportRows),
         width: Math.max(1, mainInnerWidth(viewport.columns)),
         x: compact ? 2 : layout.outerGap + layout.sidebarWidth + layout.panelGap + 2,
-        y: (compact ? 6 : 5) + globalErrorHeight + (search.open ? 1 : 0) + toolFormHeight + 2
+        y: (compact ? 6 : 5) + globalErrorHeight + 2
     };
 }
 
 export function buildTuiHitRegions(state: TuiAppState, viewport: { columns: number; rows: number }): TuiHitRegion[] {
+    if (!isTerminalSizeSupported(viewport.columns, viewport.rows) || topTuiOverlay(state.interaction.overlays) !== undefined) {
+        return [];
+    }
+
     const regions: TuiHitRegion[] = [];
     const layout = tuiLayoutMetrics(viewport.columns);
-    if (!isTerminalSizeSupported(viewport.columns, viewport.rows)) {
-        return regions;
-    }
     const sidebar = selectSidebarModel(state);
     const main = selectMainScreenModel(state);
     const metrics = selectMainBoxFlowMetrics(state, mainInnerWidth(viewport.columns));
-    const search = selectSearchModel(state);
     const globalErrorHeight = blockHeight(selectErrorMessage(state));
-    const toolFormHeight = state.interaction.toolForm?.open === true ? 6 : 0;
     const compact = layout.mode === "compact";
     const mainX = compact ? 2 : layout.outerGap + layout.sidebarWidth + layout.panelGap + 2;
     const mainWidth = compact ? Math.max(0, viewport.columns - 4) : Math.max(0, layout.mainPanelWidth - 2);
@@ -117,23 +110,17 @@ export function buildTuiHitRegions(state: TuiAppState, viewport: { columns: numb
         }
     }
 
-    let mainY = contentY + globalErrorHeight + (search.open ? 1 : 0) + toolFormHeight;
-    mainY += 1;
-    mainY += blockHeight(main.errorLines);
-    const viewportRows = Math.max(0, viewport.rows - (compact ? 10 : 7) - globalErrorHeight - (search.open ? 1 : 0) - (state.connection.status === "connecting" ? 1 : 0));
-    const boxViewportRows = Math.max(0, viewportRows - 1 - (main.statusLine === undefined ? 0 : 1) - (main.emptyState === undefined ? 0 : 1));
+    let mainY = contentY + globalErrorHeight + 1 + blockHeight(main.errorLines);
+    const viewportRows = Math.max(0, viewport.rows - (compact ? 10 : 7) - globalErrorHeight - (state.connection.status === "connecting" ? 1 : 0));
+    const stateRows = main.loadState.kind === "ready" ? 0 : 1;
+    const boxViewportRows = Math.max(0, viewportRows - 1 - stateRows - (main.statusLine === undefined ? 0 : 1) - (main.emptyState === undefined ? 0 : 1));
     const scrollOffset = state.ui.scrollOffsets[metrics.scrollKey] ?? 0;
     const visibleEnd = Math.min(metrics.totalLines, scrollOffset + boxViewportRows);
 
     regions.push({ height: boxViewportRows, target: { kind: "scrollViewport" }, width: mainWidth, x: mainX, y: mainY });
     for (const box of main.boxes) {
         const range = metrics.boxRanges[box.id];
-        if (range === undefined) {
-            continue;
-        }
-        if (range.start >= visibleEnd || range.end <= scrollOffset) {
-            continue;
-        }
+        if (range === undefined || range.start >= visibleEnd || range.end <= scrollOffset) continue;
         const startY = mainY + Math.max(0, range.start - scrollOffset);
         if (range.start >= scrollOffset) {
             regions.push({ height: 1, target: { boxId: box.id, kind: "boxTitle" }, width: mainWidth, x: mainX, y: startY });
@@ -149,7 +136,6 @@ export function buildTuiHitRegions(state: TuiAppState, viewport: { columns: numb
             });
         }
     }
-
 
     return regions;
 }

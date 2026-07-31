@@ -84,6 +84,18 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
         }) as unknown as JsonValue;
     }
 
+    async readContextMessages(instance: string, ctxId: string): Promise<JsonValue> {
+        const service = this.#requireDescriptor(instance).contextMessages;
+        if (service === undefined) {
+            throw createError({
+                code: errorCodes.envelopeInvalid,
+                message: "Context message service is unavailable for this instance.",
+                retryable: false
+            });
+        }
+        return (await service.readPending(ctxId)) as unknown as JsonValue;
+    }
+
     async readTodo(instance: string, title?: string): Promise<JsonValue> {
         return (await this.#requireDescriptor(instance).todo.read(title)) as unknown as JsonValue;
     }

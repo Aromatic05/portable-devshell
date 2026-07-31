@@ -107,7 +107,7 @@ test("page shortcuts include Todo, Help, and Terminal and reload works on every 
     ]);
 });
 
-test("Overview actions navigate to the matching instance, Todo, and Audit context", async () => {
+test("Overview instance rows open the matching instance page", async () => {
     const harness = createHarness();
     harness.store.replaceOperationalOverview({
         activity: [{
@@ -157,37 +157,14 @@ test("Overview actions navigate to the matching instance, Todo, and Audit contex
         }]
     });
 
-    async function activateOverviewButton(boxId: string, actionId: string): Promise<void> {
-        await harness.dispatch({ page: "overview", type: "page.select" });
-        harness.store.setFocusScope("mainBoxes");
-        harness.store.setMainFocusId(boxId);
-        let box = selectMainScreenModel(harness.store.getState()).boxes.find((candidate) => candidate.id === boxId);
-        assert.notEqual(box, undefined);
-        if (!box!.expanded) {
-            harness.store.toggleExpanded(box!.expandedKey);
-        }
-        box = selectMainScreenModel(harness.store.getState()).boxes.find((candidate) => candidate.id === boxId);
-        const line = box?.expandedLines.find((candidate) => candidate.id?.endsWith(`button:${actionId}`));
-        assert.notEqual(line?.id, undefined);
-        harness.store.setSelectedDetailLine(box!.expandedKey, line!.id);
-        harness.store.setFocusScope("boxDetail");
-        await harness.dispatch({ type: "focus.activate" });
-    }
+    await harness.dispatch({ page: "overview", type: "page.select" });
+    harness.store.setFocusScope("mainBoxes");
+    harness.store.setMainFocusId("overview-instance:alpha");
+    await harness.dispatch({ type: "focus.activate" });
 
-    await activateOverviewButton("overview-instance:alpha", "overview-open-instance:alpha");
     assert.equal(harness.store.getState().ui.selectedPage, "instances");
     assert.equal(harness.store.getState().ui.selectedInstance, "alpha");
     assert.equal(harness.store.getState().ui.mainFocusId, "instance:alpha");
-
-    await activateOverviewButton("overview-todo:alpha:task-1", "overview-open-todo:alpha");
-    assert.equal(harness.store.getState().ui.selectedPage, "todo");
-    assert.equal(harness.store.getState().ui.selectedInstance, "alpha");
-
-    await activateOverviewButton("overview-activity:call-1", "overview-open-audit:alpha:call-1");
-    assert.equal(harness.store.getState().ui.selectedPage, "audit");
-    assert.equal(harness.store.getState().ui.selectedInstance, "alpha");
-    assert.equal(harness.store.getState().ui.mainFocusId, "audit-call-1");
-    assert.deepEqual(harness.pageReloads().at(-1), { instance: "alpha", page: "audit" });
 });
 
 test("Help describes the implemented navigation and editing actions", () => {

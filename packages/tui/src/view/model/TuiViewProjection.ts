@@ -3,6 +3,7 @@ import type { TuiMode } from "../../state/TuiInteractionState.js";
 import type { TuiActivePage } from "../../state/TuiUiState.js";
 import { buildBoxesForPage } from "../page/TuiPageBoxBuilder.js";
 import { buildHelpLines } from "../page/TuiPageHelp.js";
+import { selectTuiOverviewFocusIds } from "../page/TuiOverviewPresentation.js";
 import type { TuiAppState, TuiConnectionState } from "../../state/reducer/TuiStoreModel.js";
 import type { TuiBoxModel, TuiMainBoxFlowMetrics, TuiMainScreenModel, TuiPageLoadState, TuiSidebarModel } from "../../state/TuiViewModel.js";
 import { currentTuiRouteScrollKey, selectBreadcrumbSegments } from "../../state/route/TuiRouteState.js";
@@ -53,6 +54,17 @@ export function selectMainScreenModel(state: TuiAppState): TuiMainScreenModel {
     const panelError = state.panelErrors[`${activePage.page}:${activePage.instance ?? "-"}`];
     const errorLines = panelError === undefined ? undefined : [`${panelError.code}: ${panelError.message}`];
 
+    if (activePage.page === "overview") {
+        return {
+            activePage,
+            boxes: [],
+            errorLines,
+            loadState: overviewLoadState(state, panelError?.message),
+            pageTitle: pageTitle(state),
+            statusLine
+        };
+    }
+
     if (requiresInstance(activePage.page) && activePage.instance === undefined) {
         return {
             activePage,
@@ -83,10 +95,22 @@ export function selectMainScreenModel(state: TuiAppState): TuiMainScreenModel {
 }
 
 export function selectMainBoxIds(state: TuiAppState): string[] {
+    if (state.ui.selectedPage === "overview") {
+        return selectTuiOverviewFocusIds(state);
+    }
     return selectMainScreenModel(state).boxes.map((box) => box.id);
 }
 
 export function selectMainBoxFlowMetrics(state: TuiAppState, boxInnerWidth = 80): TuiMainBoxFlowMetrics {
+    if (state.ui.selectedPage === "overview") {
+        const scrollKey = selectMainScrollKey(state);
+        const ids = selectTuiOverviewFocusIds(state);
+        return {
+            boxRanges: Object.fromEntries(ids.map((id, index) => [id, { end: index + 1, start: index }])),
+            scrollKey,
+            totalLines: ids.length
+        };
+    }
     const model = selectMainScreenModel(state);
     return measureMainBoxFlowMetrics(model.boxes, selectMainScrollKey(state), boxInnerWidth);
 }
@@ -123,6 +147,9 @@ export function selectFooterShortcuts(state: TuiAppState): string[] {
         case "sidebarInstances":
             return ["→ main", "tab", "enter", "0-8", "shift+1-9", "r", "↑↓"];
         case "mainBoxes":
+            if (state.ui.selectedPage === "overview") {
+                return ["← sidebar", "enter instance", "r", "↑↓", "/", "esc back"];
+            }
             return ["← sidebar", "enter detail", "space expand", "r", "↑↓", ...(isTuiSearchablePage(state.ui.selectedPage) ? ["/"] : []), "esc back"];
         case "boxDetail":
             return ["enter", "space", "r", "↑↓", ...(isTuiSearchablePage(state.ui.selectedPage) ? ["/"] : []), "esc back"];
@@ -130,6 +157,8 @@ export function selectFooterShortcuts(state: TuiAppState): string[] {
             return ["type", "bs", "enter", "esc"];
         case "toolForm":
             return ["type JSON", "bs", "enter", "esc"];
+        case "messageComposer":
+            return ["type", "enter newline", "tab", "ctrl+enter send", "esc"];
         case "form":
         case "wizard":
             return ["tab", "enter", "ctrl+s", "ctrl+[", "ctrl+d"];
@@ -195,6 +224,13 @@ function pageLoadState(state: TuiAppState, boxes: readonly TuiBoxModel[], error:
     if (state.connection.status === "connecting" && boxes.length === 0) return { kind: "loading" };
     if (boxes.length === 0) return { kind: "empty" };
     return { kind: "ready" };
+}
+
+function overviewLoadState(state: TuiAppState, error: string | undefined): TuiPageLoadState {
+    const available = state.operationalOverview !== undefined;
+    if (error !== undefined) return available ? { kind: "stale", reason: error } : { error, kind: "failed" };
+    if (state.connection.status === "connecting" && !available) return { kind: "loading" };
+    return available ? { kind: "ready" } : { kind: "empty" };
 }
 
 function pageTitle(state: TuiAppState): string {

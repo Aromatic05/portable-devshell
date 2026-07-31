@@ -3,8 +3,8 @@ import type { TuiAppState, TuiLogEntry } from "../../../state/reducer/TuiStoreMo
 import { buttonLine } from "../../editor/TuiEditorView.js";
 import { compactSummary, makeBox, renderLogLine } from "../TuiPageBoxSupport.js";
 
-export function buildLogStreamBoxes(state: TuiAppState, instance: string, sourceId: string): BoxModel[] {
-    const sourceEntries = entriesForSource(state.logsByInstance[instance] ?? [], sourceId);
+export function buildLogContextBoxes(state: TuiAppState, instance: string, ctxId: string): BoxModel[] {
+    const sourceEntries = entriesForContext(state.logsByInstance[instance] ?? [], ctxId);
     const query = state.ui.searchQueries.logs ?? "";
     const filtered = filterLogEntries(sourceEntries, query);
     const following = state.ui.logsFollowByInstance[instance] !== false;
@@ -15,7 +15,7 @@ export function buildLogStreamBoxes(state: TuiAppState, instance: string, source
     return [
         makeBox(state, "logs", instance, {
             detailLines: [
-                `Source             ${sourceId}`,
+                `Context            ${ctxId}`,
                 `Follow             ${following ? "on" : "paused"}`,
                 `Filter             ${query.length === 0 ? "none" : query}`,
                 `Total              ${sourceEntries.length}`,
@@ -29,7 +29,7 @@ export function buildLogStreamBoxes(state: TuiAppState, instance: string, source
             ],
             id: "logs-controls",
             status: stderr > 0 ? "warning" : following ? "running" : "warning",
-            summaryLines: [compactSummary(["source", sourceId], ["follow", following ? "on" : "paused"], ["visible", String(filtered.length)])],
+            summaryLines: [compactSummary(["context", ctxId], ["follow", following ? "on" : "paused"], ["visible", String(filtered.length)])],
             title: "Log Controls"
         }),
         makeBox(state, "logs", instance, {
@@ -42,8 +42,8 @@ export function buildLogStreamBoxes(state: TuiAppState, instance: string, source
                   })),
             id: "logs",
             status: stderr > 0 ? "warning" : "normal",
-            summaryLines: [compactSummary(["entries", String(filtered.length)], ["source", sourceId])],
-            title: query.length === 0 ? sourceId : `${sourceId} · filter: ${query}`
+            summaryLines: [compactSummary(["entries", String(filtered.length)], ["context", ctxId])],
+            title: query.length === 0 ? ctxId : `${ctxId} · filter: ${query}`
         })
     ];
 }
@@ -63,11 +63,10 @@ export function filterLogEntries(entries: TuiLogEntry[], query: string): TuiLogE
     });
 }
 
-function entriesForSource(entries: TuiLogEntry[], sourceId: string): TuiLogEntry[] {
-    if (sourceId === "audit-diagnostics") {
-        return entries.filter((entry) => entry.callId !== undefined || entry.ctxId !== undefined || entry.toolName !== undefined);
-    }
-    return entries;
+function entriesForContext(entries: TuiLogEntry[], ctxId: string): TuiLogEntry[] {
+    return ctxId === "unscoped"
+        ? entries.filter((entry) => entry.ctxId === undefined || entry.ctxId.length === 0)
+        : entries.filter((entry) => entry.ctxId === ctxId);
 }
 
 function parseLogQuery(query: string): { after?: string; before?: string; call?: string; source?: "cli" | "mcp" | "tui" | "web"; stream?: "stderr" | "stdout"; terms: string[]; tool?: string } {

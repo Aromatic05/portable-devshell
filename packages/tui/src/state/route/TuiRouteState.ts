@@ -42,12 +42,15 @@ export function transitionTuiRouteContext(
     page: TuiPageId,
     instance: string | undefined
 ): TuiAppState {
+    const sidebarScope = state.interaction.focusScope === "sidebarPages" || state.interaction.focusScope === "sidebarInstances"
+        ? state.interaction.focusScope
+        : undefined;
     const saved = persistCurrentTuiRouteView(state);
     const key = tuiRouteContextKey(page, instance);
     const routeStacks = saved.ui.routeStacks[key] === undefined
         ? { ...saved.ui.routeStacks, [key]: [rootTuiRoute(page)] }
         : saved.ui.routeStacks;
-    return restoreCurrentTuiRouteView({
+    const restored = restoreCurrentTuiRouteView({
         ...saved,
         ui: {
             ...saved.ui,
@@ -56,6 +59,12 @@ export function transitionTuiRouteContext(
             selectedPage: page
         }
     });
+    if (sidebarScope === undefined) return restored;
+    return {
+        ...restored,
+        interaction: { ...restored.interaction, focusScope: sidebarScope },
+        ui: { ...restored.ui, focusScope: sidebarScope }
+    };
 }
 
 export function pushTuiRoute(state: TuiAppState, route: TuiRoute): TuiAppState {
@@ -153,19 +162,16 @@ export function reconcileTuiRouteResources(state: TuiAppState): TuiAppState {
 export function selectBreadcrumbSegments(state: TuiAppState): string[] {
     const route = currentTuiRoute(state);
     const segments: string[] = [route.page];
-    if (route.page !== "overview" && route.page !== "help" && state.ui.selectedInstance !== undefined) {
-        segments.push(state.ui.selectedInstance);
-    }
     switch (route.page) {
         case "audit":
             if (route.view === "context" || route.view === "call") segments.push(truncateTuiBreadcrumbSegment(route.ctxId));
             if (route.view === "call") segments.push(truncateTuiBreadcrumbSegment(route.callId));
             break;
         case "todo":
-            if (route.view === "detail") segments.push(truncateTuiBreadcrumbSegment(route.todoId));
+            if (route.view === "detail") segments.push(resolveTodoBreadcrumbTitle(state, route.todoId));
             break;
         case "logs":
-            if (route.view === "stream") segments.push(truncateTuiBreadcrumbSegment(route.sourceId));
+            if (route.view === "context") segments.push(truncateTuiBreadcrumbSegment(route.ctxId));
             break;
         case "connections":
             if (route.view === "connector") segments.push("connector", truncateTuiBreadcrumbSegment(route.connectorId));
@@ -174,6 +180,15 @@ export function selectBreadcrumbSegments(state: TuiAppState): string[] {
             break;
     }
     return segments;
+}
+
+function resolveTodoBreadcrumbTitle(state: TuiAppState, todoId: string): string {
+    const instance = state.ui.selectedInstance;
+    const todo = instance === undefined ? undefined : state.todoByInstance[instance];
+    const title = todo?.taskId === todoId
+        ? todo.title
+        : todo?.tasks?.find((task) => task.taskId === todoId)?.title;
+    return truncateTuiBreadcrumbSegment(title ?? todoId);
 }
 
 export function truncateTuiBreadcrumbSegment(value: string): string {
@@ -230,8 +245,11 @@ function isTuiRouteResourceValid(state: TuiAppState, route: TuiRoute, instance: 
         if (instance === undefined) return false;
         const calls = state.toolCallsByInstance[instance] ?? [];
         const approvals = state.approvalsByInstance[instance] ?? [];
+        const messages = state.contextMessagesByInstance[instance] ?? [];
         if (route.view === "context") {
-            return calls.some((call) => call.ctxId === route.ctxId) || approvals.some((approval) => approval.ctxId === route.ctxId);
+            return calls.some((call) => call.ctxId === route.ctxId) ||
+                approvals.some((approval) => approval.ctxId === route.ctxId) ||
+                messages.some((message) => message.ctxId === route.ctxId);
         }
         return calls.some((call) => call.callId === route.callId && call.ctxId === route.ctxId);
     }
@@ -239,6 +257,13 @@ function isTuiRouteResourceValid(state: TuiAppState, route: TuiRoute, instance: 
         if (instance === undefined) return false;
         const todo = state.todoByInstance[instance];
         return todo?.taskId === route.todoId || todo?.tasks?.some((task) => task.taskId === route.todoId) === true;
+    }
+    if (route.page === "logs" && route.view === "context") {
+        if (instance === undefined) return false;
+        const logs = state.logsByInstance[instance] ?? [];
+        return route.ctxId === "unscoped"
+            ? logs.some((entry) => entry.ctxId === undefined || entry.ctxId.length === 0)
+            : logs.some((entry) => entry.ctxId === route.ctxId);
     }
     return true;
 }

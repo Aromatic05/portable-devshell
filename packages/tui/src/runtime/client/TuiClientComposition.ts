@@ -8,6 +8,7 @@ import {
 
 import { createTuiClientArtifact, type TuiClientArtifact } from "./artifact/TuiClientArtifact.js";
 import { createTuiClientConfig, type TuiClientConfig } from "./config/TuiClientConfig.js";
+import { createTuiClientContextMessage, type TuiClientContextMessage } from "./context/TuiClientContextMessage.js";
 import { createTuiClientInstance, type TuiClientInstance } from "./instance/TuiClientInstance.js";
 import { createTuiClientMcp, type TuiClientMcp } from "./mcp/TuiClientMcp.js";
 import { createTuiClientOverview, type TuiClientOverview } from "./overview/TuiClientOverview.js";
@@ -27,6 +28,7 @@ export interface TuiClients {
     artifact: TuiClientArtifact;
     close(): void;
     config: TuiClientConfig;
+    contextMessage?: TuiClientContextMessage;
     instance: TuiClientInstance;
     mcp: TuiClientMcp;
     overview: TuiClientOverview;
@@ -50,6 +52,7 @@ export function createTuiClients(options: TuiClientOptions = {}): TuiClients {
         artifact: createTuiClientArtifact(connection),
         close: () => connection.close(),
         config: createTuiClientConfig(connection),
+        contextMessage: createTuiClientContextMessage(connection),
         instance: createTuiClientInstance(connection),
         mcp: createTuiClientMcp(connection),
         overview: createTuiClientOverview(connection),

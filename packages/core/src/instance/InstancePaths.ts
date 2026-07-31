@@ -7,6 +7,7 @@ export class InstancePaths {
     readonly auditDatabaseFile: string;
     readonly instanceRootDir: string;
     readonly controlWorkerDir: string;
+    readonly contextMessagesFile: string;
     readonly legacyApprovalsFile: string;
     readonly legacyEventsFile: string;
     readonly legacyLogsFile: string;
@@ -19,6 +20,7 @@ export class InstancePaths {
     constructor(instanceName: InstanceName, homeDirectory = homedir()) {
         this.instanceRootDir = join(homeDirectory, ".devshell", instanceName);
         this.controlWorkerDir = join(this.instanceRootDir, "control-worker");
+        this.contextMessagesFile = join(this.controlWorkerDir, "context-messages.json");
         this.auditDatabaseFile = join(this.controlWorkerDir, "audit.sqlite3");
         this.legacyApprovalsFile = join(this.controlWorkerDir, "approvals.jsonl");
         this.legacyEventsFile = join(this.controlWorkerDir, "events.jsonl");

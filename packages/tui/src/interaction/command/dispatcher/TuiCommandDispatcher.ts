@@ -13,6 +13,7 @@ import type {
 import type { TuiFocusManager } from "../../focus/TuiFocusManager.js";
 import type { TuiUiIntent } from "../../../state/TuiInteractionState.js";
 import type { TuiAppStore } from "../../../state/TuiAppStore.js";
+import { topTuiOverlay } from "../../../state/overlay/TuiOverlay.js";
 import type { TuiPageId } from "../../../state/TuiUiState.js";
 import type { TuiInteractionProjection } from "../../TuiInteractionProjection.js";
 import { TuiCommandDispatcherAudit } from "./TuiCommandDispatcherAudit.js";
@@ -52,6 +53,7 @@ export interface TuiCommandDispatcherOptions {
     onTodoComment?(instance: string, ctxId: string, text: string): Promise<void>;
     onTodoCommentDelete?(instance: string, id: string): Promise<void>;
     onApplyConfig?(): Promise<JsonValue>;
+    onContextMessage?(instance: string, ctxId: string, text: string): Promise<void>;
     onControlRestart?(): Promise<void>;
     onCreateInstance?(draft: InstanceCreateDraft): Promise<string | undefined>;
     onGetInstanceCreateSchema?(): Promise<InstanceCreateSchema>;
@@ -95,8 +97,8 @@ export class TuiCommandDispatcher {
         });
         this.#audit = new TuiCommandDispatcherAudit({
             dispatch: (intent) => this.dispatch(intent),
+            focusManager: this.#focusManager,
             onArtifactViewImage: options.onArtifactViewImage,
-            projection: options.projection,
             store: this.#store
         });
         this.#editor = new TuiCommandDispatcherEditor({
@@ -132,6 +134,7 @@ export class TuiCommandDispatcher {
             dispatch: (intent) => this.dispatch(intent),
             focus: this.#focus,
             focusManager: this.#focusManager,
+            onContextMessage: options.onContextMessage,
             onLogsReload: options.onLogsReload,
             onPageReload: options.onPageReload,
             onRedraw: options.onRedraw,
@@ -206,7 +209,7 @@ export class TuiCommandDispatcher {
                 );
                 return true;
             case "approval.open":
-                this.#audit.openDetail(intent.approvalId);
+                this.#audit.openDetail(intent.instance, intent.approvalId);
                 return true;
             case "approval.decide":
                 return await this.#decideApproval(
@@ -232,18 +235,20 @@ export class TuiCommandDispatcher {
                     intent.approvalId,
                     "deny"
                 );
-                this.#audit.returnToList();
+                this.#audit.returnToPage();
                 return true;
             case "approval.back":
-                this.#audit.returnToList();
+                this.#audit.returnToPage();
                 return true;
             case "toolForm.open":
                 this.#focusManager.pushRestore("toolForm");
-                this.#store.setToolForm(
-                    intent.instance,
-                    intent.toolName,
-                    intent.toolName.startsWith("__todo_comment:") ? "" : '{"command":""}'
-                );
+                this.#store.pushOverlay({
+                    input: intent.toolName.startsWith("__todo_comment:") ? "" : '{"command":""}',
+                    instance: intent.instance,
+                    kind: "tool-form",
+                    toolName: intent.toolName
+                });
+                this.#store.setFocusScope("toolForm");
                 return true;
             case "toolForm.append":
                 return this.#updateToolForm((input) => {
@@ -254,7 +259,8 @@ export class TuiCommandDispatcher {
             case "toolForm.submit":
                 return await this.#submitToolForm();
             case "toolForm.cancel":
-                this.#store.clearToolForm();
+                if (topTuiOverlay(this.#store.getState().interaction.overlays)?.kind !== "tool-form") return false;
+                this.#store.popOverlay();
                 this.#focusManager.restore();
                 return true;
             case "editor.open":
@@ -308,7 +314,7 @@ export class TuiCommandDispatcher {
     #cancel(): boolean {
         const scope = this.#store.getState().interaction.focusScope;
         if (scope === "approvalDetail" || scope === "denyConfirm") {
-            this.#audit.returnToList();
+            this.#audit.returnToPage();
             return true;
         }
         if (scope === "form" || scope === "wizard") {
@@ -351,52 +357,34 @@ export class TuiCommandDispatcher {
         approvalId: string,
         decision: "approve" | "deny"
     ): Promise<boolean> {
-        if (decision === "deny") {
-            this.#audit.openDenyConfirm();
-            return true;
-        }
         await this.#options.onApprovalDecision(
             instance,
             approvalId,
             decision
         );
-        this.#audit.returnToList();
+        this.#audit.returnToPage();
         return true;
     }
 
     #updateToolForm(update: (value: string) => string): boolean {
-        const form = this.#store.getState().interaction.toolForm;
-        if (form === undefined) {
-            return false;
-        }
-        this.#store.setToolForm(
-            form.instance,
-            form.toolName,
-            update(form.input)
-        );
+        const form = topTuiOverlay(this.#store.getState().interaction.overlays);
+        if (form?.kind !== "tool-form") return false;
+        this.#store.replaceTopOverlay({ ...form, input: update(form.input) });
         return true;
     }
 
     async #submitToolForm(): Promise<boolean> {
-        const form = this.#store.getState().interaction.toolForm;
-        if (form === undefined) {
-            return false;
-        }
+        const form = topTuiOverlay(this.#store.getState().interaction.overlays);
+        if (form?.kind !== "tool-form") return false;
         if (form.toolName.startsWith("__todo_comment:")) {
             if (form.input.trim().length === 0) return false;
             await (this.#options.onTodoComment ?? unavailable)(form.instance, form.toolName.slice("__todo_comment:".length), form.input.trim());
-            this.#store.clearToolForm();
+            this.#store.popOverlay();
             this.#focusManager.restore();
             return true;
         }
-        if (
-            await this.#options.onToolCall(
-                form.instance,
-                form.toolName,
-                form.input
-            )
-        ) {
-            this.#store.clearToolForm();
+        if (await this.#options.onToolCall(form.instance, form.toolName, form.input)) {
+            this.#store.popOverlay();
             this.#focusManager.restore();
         }
         return true;

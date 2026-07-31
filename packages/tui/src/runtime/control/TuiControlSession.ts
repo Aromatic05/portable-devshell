@@ -9,6 +9,7 @@ import {
     TuiControlSessionRefresh
 } from "./TuiControlSessionRefresh.js";
 import { TuiControlSessionSubscriptions } from "./TuiControlSessionSubscriptions.js";
+import { selectMainScrollKey } from "../../view/model/TuiViewProjection.js";
 
 export interface TuiControlSessionOptions {
     clients?: TuiClients;
@@ -107,32 +108,32 @@ export class TuiControlSession {
         }
     }
 
-    async refreshConfig(generation = this.#generation): Promise<void> {
-        await this.#refresh.refreshConfig(generation);
+    async refreshConfig(generation = this.#generation, signal?: AbortSignal): Promise<void> {
+        await this.#refresh.refreshConfig(generation, signal);
         if (this.#current(generation) && this.#store.getState().connection.status === "connected") {
             this.#stopOAuthRefresh();
             this.#startOAuthRefresh();
         }
     }
 
-    async refreshOverview(generation = this.#generation): Promise<void> {
-        await this.#requestOverviewRefresh(generation);
+    async refreshOverview(generation = this.#generation, signal?: AbortSignal): Promise<void> {
+        if (signal?.aborted !== true) await this.#requestOverviewRefresh(generation);
     }
 
-    async refreshOAuth(generation = this.#generation): Promise<void> {
-        await this.#refresh.refreshOAuth(generation);
+    async refreshOAuth(generation = this.#generation, signal?: AbortSignal): Promise<void> {
+        await this.#refresh.refreshOAuth(generation, signal);
     }
 
-    async refreshAudit(instance: string, generation = this.#generation): Promise<void> {
-        await this.#refresh.refreshAudit(instance, generation);
+    async refreshAudit(instance: string, generation = this.#generation, signal?: AbortSignal): Promise<void> {
+        await this.#refresh.refreshAudit(instance, generation, signal);
     }
 
-    async refreshLogsForInstance(instance: string, generation = this.#generation): Promise<void> {
-        await this.#refresh.refreshLogsForInstance(instance, generation);
+    async refreshLogsForInstance(instance: string, generation = this.#generation, signal?: AbortSignal): Promise<void> {
+        await this.#refresh.refreshLogsForInstance(instance, generation, signal);
     }
 
-    async refreshTodo(instance: string, generation = this.#generation): Promise<void> {
-        await this.#refresh.refreshTodo(instance, generation);
+    async refreshTodo(instance: string, generation = this.#generation, signal?: AbortSignal): Promise<void> {
+        await this.#refresh.refreshTodo(instance, generation, signal);
     }
 
     async refreshArtifacts(generation = this.#generation): Promise<void> {
@@ -210,7 +211,7 @@ export class TuiControlSession {
             state.ui.logsFollowByInstance[instance] !== false
         ) {
             this.#store.setScrollOffset(
-                `logs:${instance}:main`,
+                selectMainScrollKey(state),
                 Number.MAX_SAFE_INTEGER
             );
         }
@@ -425,6 +426,7 @@ function isTuiPresentationEvent(name: string): boolean {
         name === "log.appended" ||
         name.startsWith("toolCall.") ||
         name.startsWith("approval.") ||
+        name.startsWith("context.message.") ||
         name.startsWith("todo.") ||
         name.startsWith("artifact.share") ||
         name.startsWith("artifact.transfer");
@@ -443,6 +445,7 @@ function isOverviewRefreshEvent(name: string): boolean {
     return isInstanceHealthEvent(name) ||
         name.startsWith("toolCall.") ||
         name.startsWith("approval.") ||
+        name.startsWith("context.message.") ||
         name.startsWith("todo.");
 }
 

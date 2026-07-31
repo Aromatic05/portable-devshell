@@ -26,6 +26,13 @@ export class TuiRuntimeControlOperations {
         await this.options.session.refreshArtifacts();
     }
 
+    async queueContextMessage(instance: string, ctxId: string, text: string): Promise<void> {
+        const client = this.options.clients.contextMessage;
+        if (client === undefined) throw new Error("Context message client is unavailable.");
+        await client.queue(instance, { ctxId, text });
+        await this.options.session.refreshAudit(instance);
+    }
+
     async addTodoComment(instance: string, ctxId: string, text: string): Promise<void> {
         await this.options.clients.todo.addComment(instance, ctxId, text);
         await this.options.session.refreshTodo(instance);

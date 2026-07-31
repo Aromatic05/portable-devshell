@@ -3,6 +3,7 @@ import {
     type ArtifactShareResult,
     type ArtifactTransferRecord,
     type ClientEvent,
+    type ContextMessageRecord,
     type ControlError,
     type InstanceSnapshot,
     type JsonValue,
@@ -13,6 +14,7 @@ import {
 } from "@portable-devshell/shared";
 
 import type { TuiEditorState, TuiUiIntent } from "./TuiInteractionState.js";
+import type { TuiOverlay } from "./overlay/TuiOverlay.js";
 import type { TuiRoute } from "./route/TuiRoute.js";
 import { currentTuiRouteStack } from "./route/TuiRouteState.js";
 import type {
@@ -154,6 +156,20 @@ export class TuiAppStore {
             instance,
             type: "ui.selectInstance"
         });
+    }
+
+    pushOverlay(overlay: TuiOverlay): void {
+        this.dispatch({ overlay, type: "overlay.push" });
+    }
+
+    replaceTopOverlay(overlay: TuiOverlay): void {
+        this.dispatch({ overlay, type: "overlay.replaceTop" });
+    }
+
+    popOverlay(): boolean {
+        if (this.#state.interaction.overlays.length === 0) return false;
+        this.dispatch({ type: "overlay.pop" });
+        return true;
     }
 
     pushRoute(route: TuiRoute): void {
@@ -347,6 +363,10 @@ export class TuiAppStore {
             instances,
             type: "instance.replaceList"
         });
+    }
+
+    replaceContextMessages(instance: string, messages: ContextMessageRecord[]): void {
+        this.dispatch({ instance, messages, type: "contextMessage.replace" });
     }
 
     replaceTodo(instance: string, todo: TodoReadResult): void {

@@ -48,7 +48,7 @@ export function makeBox(
     }
 ): BoxModel {
     const route = currentTuiRoute(state);
-    const routeScopedPrefix = route.view === "list" || route.view === "summary" || route.view === "overview" || route.view === "contexts" || route.view === "sources" || route.view === "index" || route.view === "session"
+    const routeScopedPrefix = route.view === "list" || route.view === "summary" || route.view === "overview" || route.view === "contexts" || route.view === "index" || route.view === "session"
         ? `${page}:${instance}`
         : tuiRouteViewKey(page, instance, route);
     const expandedKey = input.expandedKey ?? `${routeScopedPrefix}:${input.id}`;

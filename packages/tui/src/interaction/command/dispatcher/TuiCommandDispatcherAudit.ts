@@ -3,53 +3,51 @@ import type { ArtifactViewImageInput, ArtifactViewImageResult, JsonValue } from 
 import { auditInputText, auditOutputText, resolveAuditOutput } from "../../../state/audit/TuiAuditPresentation.js";
 import type { TuiAppStore } from "../../../state/TuiAppStore.js";
 import type { TuiUiIntent } from "../../../state/TuiInteractionState.js";
-import type { TuiInteractionProjection } from "../../TuiInteractionProjection.js";
+import { topTuiOverlay } from "../../../state/overlay/TuiOverlay.js";
+import type { TuiFocusManager } from "../../focus/TuiFocusManager.js";
 
 interface CommandAuditOptions {
     dispatch(intent: TuiUiIntent): Promise<boolean>;
+    focusManager: TuiFocusManager;
     onArtifactViewImage?(
         instance: string,
         input: ArtifactViewImageInput
     ): Promise<ArtifactViewImageResult>;
-    projection: TuiInteractionProjection;
     store: TuiAppStore;
 }
 
 export class TuiCommandDispatcherAudit {
     readonly #dispatch: CommandAuditOptions["dispatch"];
+    readonly #focusManager: TuiFocusManager;
     readonly #onArtifactViewImage?: CommandAuditOptions["onArtifactViewImage"];
-    readonly #projection: TuiInteractionProjection;
     readonly #store: TuiAppStore;
 
     constructor(options: CommandAuditOptions) {
         this.#dispatch = options.dispatch;
+        this.#focusManager = options.focusManager;
         this.#onArtifactViewImage = options.onArtifactViewImage;
-        this.#projection = options.projection;
         this.#store = options.store;
     }
 
-    openDetail(approvalId: string): void {
-        const state = this.#store.getState();
+    openDetail(instance: string, approvalId: string): void {
         this.#store.clearToolForm();
-        this.#store.setAuditPage({
+        this.#focusManager.pushRestore("approvalDetail");
+        this.#store.pushOverlay({
             approvalId,
-            listFocusId: state.ui.mainFocusId,
-            listScrollOffset: state.ui.scrollOffsets[this.#projection.selectMainScrollKey(state)] ?? 0,
-            mode: "approvalDetail",
+            instance,
+            kind: "approval",
             selectedAction: "back"
         });
         this.#store.setFocusScope("approvalDetail");
     }
 
     callIdFromBox(boxId: string): string | undefined {
-        return boxId.startsWith("audit-") ? boxId.slice("audit-".length) : undefined;
+        return boxId.startsWith("audit-call:") ? boxId.slice("audit-call:".length) : undefined;
     }
 
     async openInput(instance: string, callId: string): Promise<boolean> {
         const record = this.#store.getState().toolCallsByInstance[instance]?.find((candidate) => candidate.callId === callId);
-        if (record === undefined) {
-            return false;
-        }
+        if (record === undefined) return false;
         return await this.#dispatch({
             body: auditInputText(record.input, record.inputSummary),
             title: `${record.toolName} · input`,
@@ -59,13 +57,9 @@ export class TuiCommandDispatcherAudit {
 
     async openOutput(instance: string, callId: string): Promise<boolean> {
         const record = this.#store.getState().toolCallsByInstance[instance]?.find((candidate) => candidate.callId === callId);
-        if (record === undefined) {
-            return false;
-        }
+        if (record === undefined) return false;
         const output = resolveAuditOutput(record.output, this.#store.getState().logsByInstance[instance] ?? [], callId);
-        const imageInput = record.toolName === "artifact_viewImage"
-            ? readArtifactViewImageInput(record.input)
-            : undefined;
+        const imageInput = record.toolName === "artifact_viewImage" ? readArtifactViewImageInput(record.input) : undefined;
         if (imageInput !== undefined && this.#onArtifactViewImage !== undefined) {
             return await this.#openImageOutput(instance, record.toolName, imageInput, output);
         }
@@ -76,65 +70,49 @@ export class TuiCommandDispatcherAudit {
         });
     }
 
-    openDenyConfirm(): void {
-        const auditPage = this.#store.getState().interaction.auditPage;
-        if (auditPage.mode !== "approvalDetail") {
-            return;
-        }
-        this.#store.setAuditPage({ ...auditPage, mode: "denyConfirm", selectedAction: "back" });
-        this.#store.setFocusScope("denyConfirm");
-    }
-
-    returnToList(): void {
-        const auditPage = this.#store.getState().interaction.auditPage;
-        this.#store.setAuditPage({ mode: "list" });
-        this.#store.setFocusScope("mainBoxes");
-        this.#store.setMainFocusId(auditPage.listFocusId);
-        if (auditPage.listScrollOffset !== undefined) {
-            this.#store.setScrollOffset(this.#projection.selectMainScrollKey(this.#store.getState()), auditPage.listScrollOffset);
-        }
+    returnToPage(): boolean {
+        const overlay = topTuiOverlay(this.#store.getState().interaction.overlays);
+        if (overlay?.kind !== "approval") return false;
+        this.#store.popOverlay();
+        this.#focusManager.restore();
+        return true;
     }
 
     async activate(): Promise<boolean> {
         const state = this.#store.getState();
-        const { auditPage } = state.interaction;
-        const instance = state.ui.selectedInstance;
-        if (auditPage.approvalId === undefined || instance === undefined) {
-            return false;
-        }
-        if (auditPage.selectedAction === "back") {
-            return await this.#dispatch({ type: "approval.back" });
-        }
-        if (auditPage.selectedAction === "input" && auditPage.mode === "approvalDetail") {
-            const approval = state.approvalsByInstance[instance]?.find((candidate) => candidate.approvalId === auditPage.approvalId);
-            const toolCall = approval === undefined
-                ? undefined
-                : state.toolCallsByInstance[instance]?.find((candidate) => candidate.callId === approval.callId);
-            if (approval === undefined) {
-                return false;
+        const overlay = topTuiOverlay(state.interaction.overlays);
+        if (overlay?.kind !== "approval") return false;
+        const approval = state.approvalsByInstance[overlay.instance]?.find((candidate) => candidate.approvalId === overlay.approvalId);
+        if (approval === undefined) return this.returnToPage();
+
+        switch (overlay.selectedAction) {
+            case "back":
+                return this.returnToPage();
+            case "input": {
+                const toolCall = state.toolCallsByInstance[overlay.instance]?.find((candidate) => candidate.callId === approval.callId);
+                return await this.#dispatch({
+                    body: auditInputText(toolCall?.input, approval.inputSummary),
+                    title: `${approval.toolName} · approval input`,
+                    type: "textDetail.open"
+                });
             }
-            return await this.#dispatch({
-                body: auditInputText(toolCall?.input, approval.inputSummary),
-                title: `${approval.toolName} · approval input`,
-                type: "textDetail.open"
-            });
+            case "approve":
+                return await this.#dispatch({
+                    body: "Approve this tool call? The requested operation may execute immediately.",
+                    confirmIntent: { approvalId: overlay.approvalId, decision: "approve", instance: overlay.instance, type: "approval.decide" },
+                    confirmLabel: "Approve",
+                    title: "Confirm Approval",
+                    type: "overlay.openConfirm"
+                });
+            case "deny":
+                return await this.#dispatch({
+                    body: "Deny this tool call?",
+                    confirmIntent: { approvalId: overlay.approvalId, instance: overlay.instance, type: "approval.confirmDeny" },
+                    confirmLabel: "Deny",
+                    title: "Confirm Deny",
+                    type: "overlay.openConfirm"
+                });
         }
-        if (auditPage.selectedAction === "approve" && auditPage.mode === "approvalDetail") {
-            return await this.#dispatch({
-                body: "Approve this tool call? The requested operation may execute immediately.",
-                confirmIntent: { approvalId: auditPage.approvalId, decision: "approve", instance, type: "approval.decide" },
-                confirmLabel: "Approve",
-                title: "Confirm Approval",
-                type: "overlay.openConfirm"
-            });
-        }
-        if (auditPage.selectedAction === "deny") {
-            if (auditPage.mode === "approvalDetail") {
-                return await this.#dispatch({ approvalId: auditPage.approvalId, decision: "deny", instance, type: "approval.decide" });
-            }
-            return await this.#dispatch({ approvalId: auditPage.approvalId, instance, type: "approval.confirmDeny" });
-        }
-        return false;
     }
 
     async #openImageOutput(
@@ -151,23 +129,15 @@ export class TuiCommandDispatcherAudit {
         });
         try {
             const image = await this.#onArtifactViewImage!(instance, input);
-            const detail = this.#store.getState().interaction.textDetail;
-            if (!detail.open || detail.title !== title) {
-                return true;
-            }
-            this.#store.setTextDetail({
-                body: auditOutputText(output),
-                image,
-                open: true,
-                title
-            });
+            const overlay = topTuiOverlay(this.#store.getState().interaction.overlays);
+            if (overlay?.kind !== "text-detail" || overlay.title !== title) return true;
+            this.#store.replaceTopOverlay({ ...overlay, body: auditOutputText(output), image });
         } catch (error) {
-            const detail = this.#store.getState().interaction.textDetail;
-            if (detail.open && detail.title === title) {
-                this.#store.setTextDetail({
-                    body: `${auditOutputText(output)}\n\nImage preview unavailable: ${readErrorMessage(error)}`,
-                    open: true,
-                    title
+            const overlay = topTuiOverlay(this.#store.getState().interaction.overlays);
+            if (overlay?.kind === "text-detail" && overlay.title === title) {
+                this.#store.replaceTopOverlay({
+                    ...overlay,
+                    body: `${auditOutputText(output)}\n\nImage preview unavailable: ${readErrorMessage(error)}`
                 });
             }
         }
@@ -176,15 +146,11 @@ export class TuiCommandDispatcherAudit {
 }
 
 function readArtifactViewImageInput(value: JsonValue | undefined): ArtifactViewImageInput | undefined {
-    if (typeof value !== "object" || value === null || Array.isArray(value)) {
-        return undefined;
-    }
+    if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
     const handle = typeof value.handle === "string" && value.handle.length > 0 ? value.handle : undefined;
     const path = typeof value.path === "string" && value.path.length > 0 ? value.path : undefined;
     const instance = typeof value.instance === "string" && value.instance.length > 0 ? value.instance : undefined;
-    if ((handle === undefined) === (path === undefined)) {
-        return undefined;
-    }
+    if ((handle === undefined) === (path === undefined)) return undefined;
     return handle === undefined
         ? { ...(instance === undefined ? {} : { instance }), path: path! }
         : { handle, ...(instance === undefined ? {} : { instance }) };

@@ -2,6 +2,7 @@ import { InstancePaths, WorkerInstanceFactory, WorkerRpcInboundConnector, Worker
 import { asInstanceName, asWorkspacePath, type ControlInstanceConfig } from "@portable-devshell/shared";
 
 import type { InstanceDescriptor } from "./InstanceDescriptor.js";
+import { ContextMessageService } from "../../instance/context/ContextMessageService.js";
 import { TodoService } from "../../instance/todo/TodoService.js";
 
 export class InstanceFactory {
@@ -24,12 +25,20 @@ export class InstanceFactory {
             filePath: paths.todoFile,
             instanceName: instance.name
         });
+        const contextMessages = new ContextMessageService({
+            appendEvent: async (type, data) => {
+                await workerHolder.value?.appendControlEvent(type, data);
+            },
+            filePath: paths.contextMessagesFile,
+            instanceName: instance.name
+        });
         const worker = this.#workerInstanceFactory.create(this.#toWorkerConfig(instance, reverseConnector, homeDirectory), {
             toolCallAssociationProvider: (context) => todo.currentAssociation(context.ctxId)
         });
         workerHolder.value = worker;
 
         return {
+            contextMessages,
             mcpCapabilities: instance.mcp.tools.capabilities,
             mcpGroups: instance.mcp.tools.groups,
             enabled: instance.enabled,

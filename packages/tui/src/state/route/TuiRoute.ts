@@ -13,8 +13,8 @@ export type TuiRoute =
     | { callId: string; ctxId: string; page: "audit"; view: "call" }
     | { page: "todo"; view: "overview" }
     | { page: "todo"; todoId: string; view: "detail" }
-    | { page: "logs"; view: "sources" }
-    | { page: "logs"; sourceId: string; view: "stream" }
+    | { page: "logs"; view: "contexts" }
+    | { ctxId: string; page: "logs"; view: "context" }
     | { page: "help"; view: "index" }
     | { page: "terminal"; view: "session" };
 
@@ -38,7 +38,7 @@ export function rootTuiRoute(page: TuiRoute["page"]): TuiRoute {
         case "audit":
             return { page, view: "contexts" };
         case "logs":
-            return { page, view: "sources" };
+            return { page, view: "contexts" };
         case "help":
             return { page, view: "index" };
         case "terminal":
@@ -61,7 +61,7 @@ export function tuiRouteIdentity(route: TuiRoute): string {
         case "todo":
             return route.view === "overview" ? "todo/overview" : `todo/detail/${encodeURIComponent(route.todoId)}`;
         case "logs":
-            return route.view === "sources" ? "logs/sources" : `logs/stream/${encodeURIComponent(route.sourceId)}`;
+            return route.view === "contexts" ? "logs/contexts" : `logs/context/${encodeURIComponent(route.ctxId)}`;
         case "connections":
             if (route.view === "overview") return "connections/overview";
             if (route.view === "connector") return `connections/connector/${encodeURIComponent(route.connectorId)}`;

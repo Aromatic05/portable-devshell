@@ -1,4 +1,5 @@
 import type { WorkerInstance, WorkerRpcInboundConnector } from "@portable-devshell/core";
+import type { ContextMessageQueueInput, ContextMessageReadResult, ContextMessageRecord } from "@portable-devshell/shared";
 import type {
     ActiveTodoSummary,
     TodoReadResult,
@@ -6,6 +7,12 @@ import type {
     ToolCallAssociation,
     ToolCapability
 } from "@portable-devshell/shared";
+
+export interface InstanceContextMessagePort {
+    list(ctxId?: string): Promise<ContextMessageRecord[]>;
+    queue(input: ContextMessageQueueInput): Promise<ContextMessageRecord>;
+    readPending(ctxId: string): Promise<ContextMessageReadResult>;
+}
 
 export interface InstanceTodoPort {
     addComment(ctxId: string, text: string): Promise<void>;
@@ -18,6 +25,7 @@ export interface InstanceTodoPort {
 }
 
 export interface InstanceDescriptor {
+    contextMessages?: InstanceContextMessagePort;
     enabled: boolean;
     mcpCapabilities: readonly ToolCapability[];
     mcpEnabled: boolean;
