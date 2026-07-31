@@ -68,7 +68,13 @@ export class Codec {
             throw protocolError("protocol.invalidDirection", "Remote peer is not bound yet.");
         }
         const event = validateEvent({ ...input, from: this.#local, to: this.#remote });
-        await this.#channel.send(encoder.encode(JSON.stringify(event)));
+        try {
+            await this.#channel.send(encoder.encode(JSON.stringify(event)));
+        } catch (error) {
+            const normalized = error instanceof Error ? error : new Error(String(error));
+            this.close(normalized);
+            throw normalized;
+        }
     }
 
     onEvent(listener: (event: Event) => void): () => void {
@@ -89,8 +95,16 @@ export class Codec {
         if (error !== undefined && this.#closeError === undefined) {
             this.#closeError = error;
         }
-        this.#channel.close(error);
-        this.#finishClose(error);
+        try {
+            this.#channel.close(error);
+        } catch (closeError) {
+            if (this.#closeError === undefined) {
+                this.#closeError = closeError instanceof Error
+                    ? closeError
+                    : new Error(String(closeError));
+            }
+        }
+        this.#finishClose(this.#closeError);
     }
 
     #accept(frame: Uint8Array): void {
