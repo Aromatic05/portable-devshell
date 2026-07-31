@@ -326,7 +326,6 @@ export class TuiCommandDispatcher {
 
     async #activateCurrentScope(): Promise<boolean> {
         const scope = this.#store.getState().interaction.focusScope;
-        const state = this.#store.getState();
         if (scope === "sidebarPages" || scope === "sidebarInstances") {
             return await this.#navigation.activateSidebarSelection();
         }

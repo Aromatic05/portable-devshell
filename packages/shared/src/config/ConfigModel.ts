@@ -338,6 +338,15 @@ export interface ConfigNormalizeContext {
     defaultSecurityMode: ControlSecurityMode;
 }
 
+export const defaultMcpToolGroups = [
+    "file",
+    "bash",
+    "artifact",
+    "tmux",
+    "todo",
+    "context",
+] as const;
+
 export const defaultConfigNormalizeContext: ConfigNormalizeContext = {
     containerPresets: [
         { image: "archlinux:latest", preset: "arch" },
@@ -348,7 +357,7 @@ export const defaultConfigNormalizeContext: ConfigNormalizeContext = {
     defaultEnabled: true,
     defaultMcpCapabilities: ["read", "write", "execute"],
     defaultMcpEnabled: true,
-    defaultMcpGroups: ["file", "bash", "artifact", "tmux", "todo", "context"],
+    defaultMcpGroups: defaultMcpToolGroups,
     defaultSecurityMode: "disabled",
 };
 

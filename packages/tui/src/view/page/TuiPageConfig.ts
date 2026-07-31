@@ -1,4 +1,4 @@
-import type { JsonValue } from "@portable-devshell/shared";
+import { defaultMcpToolGroups, type JsonValue } from "@portable-devshell/shared";
 
 import type { BoxModel } from "../component/TuiComponentExpandableBox.js";
 import type { TuiAppState } from "../../state/reducer/TuiStoreModel.js";
@@ -225,7 +225,7 @@ function instanceDraft(state: TuiAppState, instanceName: string): Record<string,
 
     return record ?? {
         enabled: true,
-        mcp: { enabled: true, path: `/${instanceName}/mcp`, tools: { capabilities: ["read", "write", "execute"], groups: ["file", "bash", "artifact", "tmux", "todo"] } },
+        mcp: { enabled: true, path: `/${instanceName}/mcp`, tools: { capabilities: ["read", "write", "execute"], groups: [...defaultMcpToolGroups] } },
         name: instanceName,
         provider: "local",
         security: { mode: "disabled" },

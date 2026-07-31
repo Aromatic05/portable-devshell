@@ -296,6 +296,84 @@ test("audit structured filters and persistent filter controls work", async () =>
         ["audit-context:ctx-alpha"],
     );
 });
+test("context message composer requires the context MCP group", async () => {
+    const harness = createHarness();
+    enterAuditContext(harness, "ctx-alpha");
+    harness.store.setConfigView({
+        instances: [
+            {
+                enabled: true,
+                mcp: {
+                    enabled: true,
+                    path: "/alpha/mcp",
+                    tools: {
+                        capabilities: ["read", "write", "execute"],
+                        groups: ["file", "bash", "artifact", "tmux", "todo"],
+                    },
+                },
+                name: "alpha",
+                provider: "local",
+                workspace: "/workspace/alpha",
+            },
+        ],
+        mcp: {
+            auth: { mode: "none" },
+            enabled: true,
+            listenHost: "127.0.0.1",
+            listenPort: 3210,
+        },
+    });
+
+    assert.equal(
+        await dispatchResult(harness, { type: "messageComposer.openCurrent" }),
+        false,
+    );
+    assert.equal(
+        harness.store.getState().interaction.screenStatusByPage.audit,
+        "Enable MCP and the context tool group before sending messages to this Context.",
+    );
+    assert.equal(
+        topTuiOverlay(harness.store.getState().interaction.overlays),
+        undefined,
+    );
+
+    harness.store.setConfigView({
+        ...harness.store.getState().configView!,
+        instances: [
+            {
+                enabled: true,
+                mcp: {
+                    enabled: true,
+                    path: "/alpha/mcp",
+                    tools: {
+                        capabilities: ["read", "write", "execute"],
+                        groups: [
+                            "file",
+                            "bash",
+                            "artifact",
+                            "tmux",
+                            "todo",
+                            "context",
+                        ],
+                    },
+                },
+                name: "alpha",
+                provider: "local",
+                workspace: "/workspace/alpha",
+            },
+        ],
+    });
+
+    assert.equal(
+        await dispatchResult(harness, { type: "messageComposer.openCurrent" }),
+        true,
+    );
+    assert.equal(
+        topTuiOverlay(harness.store.getState().interaction.overlays)?.kind,
+        "message-composer",
+    );
+});
+
 test("Todo uses a dedicated instance-scoped page and does not appear in Instances boxes", async () => {
     const harness = createHarness();
     assert.equal(

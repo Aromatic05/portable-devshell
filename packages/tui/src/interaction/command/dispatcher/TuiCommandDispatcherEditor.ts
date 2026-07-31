@@ -1,3 +1,4 @@
+import { defaultMcpToolGroups } from "@portable-devshell/shared";
 import type {
     ConfigDraft,
     ConfigInstancePatch,
@@ -458,7 +459,7 @@ export class TuiCommandDispatcherEditor {
             ? entries.find((value) => asRecord(value)?.name === instanceName)
             : undefined;
         return toTuiInstanceEditorRecord(
-            cloneRecord(asRecord(entry) ?? { enabled: true, mcp: { enabled: true, path: `/${instanceName}/mcp`, tools: { capabilities: ["read", "write", "execute"], groups: ["file", "bash", "artifact", "tmux", "todo"] } }, name: instanceName, provider: "local", security: { mode: "disabled" }, workspace: "" })
+            cloneRecord(asRecord(entry) ?? { enabled: true, mcp: { enabled: true, path: `/${instanceName}/mcp`, tools: { capabilities: ["read", "write", "execute"], groups: [...defaultMcpToolGroups] } }, name: instanceName, provider: "local", security: { mode: "disabled" }, workspace: "" })
         );
     }
 

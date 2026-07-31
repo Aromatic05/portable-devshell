@@ -101,7 +101,7 @@ enabled = true
 path = "/demo-local/mcp"
 
 [mcp.tools]
-groups = ["file", "bash", "artifact", "tmux", "todo"]
+groups = ["file", "bash", "artifact", "tmux", "todo", "context"]
 capabilities = ["read", "write", "execute"]
 
 [security]
@@ -138,7 +138,7 @@ command = "ssh user@example-host"
 enabled = true
 
 [mcp.tools]
-groups = ["file", "bash", "artifact", "tmux", "todo"]
+groups = ["file", "bash", "artifact", "tmux", "todo", "context"]
 capabilities = ["read", "write", "execute"]
 ```
 

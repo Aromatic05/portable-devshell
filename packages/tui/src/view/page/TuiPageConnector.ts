@@ -1,4 +1,4 @@
-import type { JsonValue } from "@portable-devshell/shared";
+import { defaultMcpToolGroups, type JsonValue } from "@portable-devshell/shared";
 
 import type { BoxModel } from "../component/TuiComponentExpandableBox.js";
 import type { TuiAppState } from "../../state/reducer/TuiStoreModel.js";
@@ -95,7 +95,7 @@ function selectedInstanceDraft(state: TuiAppState, instanceName: string): Record
     const entry = Array.isArray(state.configView?.instances)
         ? state.configView.instances.find((value) => asRecord(value)?.name === instanceName)
         : undefined;
-    return asRecord(entry) ?? { mcp: { enabled: true, path: `/${instanceName}/mcp`, tools: { capabilities: ["read", "write", "execute"], groups: ["file", "bash", "artifact", "tmux", "todo"] } }, name: instanceName };
+    return asRecord(entry) ?? { mcp: { enabled: true, path: `/${instanceName}/mcp`, tools: { capabilities: ["read", "write", "execute"], groups: [...defaultMcpToolGroups] } }, name: instanceName };
 }
 
 function globalMcpDraft(state: TuiAppState): Record<string, JsonValue> {

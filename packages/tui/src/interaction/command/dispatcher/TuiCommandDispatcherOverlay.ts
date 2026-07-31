@@ -8,6 +8,7 @@ import {
 } from "../../../state/overlay/TuiOverlay.js";
 import { isTuiSearchablePage } from "../../../state/TuiPageCatalog.js";
 import { currentTuiRoute } from "../../../state/route/TuiRouteState.js";
+import { asRecord } from "../../../state/editor/TuiEditorDraft.js";
 import type { TuiFocusManager } from "../../focus/TuiFocusManager.js";
 import type { TuiCommandDispatcherFocus } from "./TuiCommandDispatcherFocus.js";
 
@@ -199,6 +200,23 @@ export class TuiCommandDispatcherOverlay {
             this.#store.setScreenStatus(
                 state.ui.selectedPage,
                 "Open an Audit Context before sending a message.",
+            );
+            return false;
+        }
+        const configured = (
+            Array.isArray(state.configView?.instances)
+                ? state.configView.instances
+                : []
+        )
+            .map((instance) => asRecord(instance))
+            .find((instance) => instance?.name === state.ui.selectedInstance);
+        const mcp = asRecord(configured?.mcp);
+        const tools = asRecord(mcp?.tools);
+        const groups = Array.isArray(tools?.groups) ? tools.groups : [];
+        if (mcp?.enabled !== true || !groups.includes("context")) {
+            this.#store.setScreenStatus(
+                state.ui.selectedPage,
+                "Enable MCP and the context tool group before sending messages to this Context.",
             );
             return false;
         }

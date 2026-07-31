@@ -31,7 +31,7 @@ workspace = "/absolute/path/to/workspace"
 enabled = true
 
 [mcp.tools]
-groups = ["file", "bash", "artifact", "tmux", "todo"]
+groups = ["file", "bash", "artifact", "tmux", "todo", "context"]
 capabilities = ["read", "write", "execute"]
 ```
 

@@ -79,6 +79,58 @@ test("valid global and instance documents are assembled into canonical config", 
     }
 });
 
+test("version 2 legacy default MCP groups gain context without widening custom allowlists", async () => {
+    const homeDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-control-home-"));
+
+    try {
+        const paths = new ControlPathHome(homeDirectory);
+        await writeFileWithParents(paths.configFile, await readFixture("config-valid.toml"));
+        await writeFileWithParents(
+            paths.instanceConfigFile("legacy-default"),
+            toml.encode({
+                enabled: true,
+                mcp: {
+                    enabled: true,
+                    tools: {
+                        capabilities: ["read", "write", "execute"],
+                        groups: ["file", "bash", "artifact", "tmux", "todo"]
+                    }
+                },
+                name: "legacy-default",
+                provider: "local",
+                version: 2,
+                workspace: "/tmp/legacy-default"
+            })
+        );
+        await writeFileWithParents(
+            paths.instanceConfigFile("custom-policy"),
+            toml.encode({
+                enabled: true,
+                mcp: {
+                    enabled: true,
+                    tools: { capabilities: ["read"], groups: ["file", "todo"] }
+                },
+                name: "custom-policy",
+                provider: "local",
+                version: 2,
+                workspace: "/tmp/custom-policy"
+            })
+        );
+
+        const config = await new ControlConfigStore().readOrCreate(homeDirectory);
+        assert.deepEqual(
+            config.instances.find((instance) => instance.name === "legacy-default")?.mcp.tools.groups,
+            ["file", "bash", "artifact", "tmux", "todo", "context"]
+        );
+        assert.deepEqual(
+            config.instances.find((instance) => instance.name === "custom-policy")?.mcp.tools.groups,
+            ["file", "todo"]
+        );
+    } finally {
+        await rm(homeDirectory, { force: true, recursive: true });
+    }
+});
+
 test("global TOML round-trips the independent WebUI enable switch", () => {
     const config = normalizeConfigGlobalDraft({
         mcp: { enabled: false },

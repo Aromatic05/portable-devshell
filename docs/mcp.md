@@ -56,7 +56,7 @@ workspace = "/absolute/path/to/workspace"
 enabled = true
 
 [mcp.tools]
-groups = ["file", "bash", "artifact", "tmux", "todo"]
+groups = ["file", "bash", "artifact", "tmux", "todo", "context"]
 capabilities = ["read", "write", "execute"]
 ```
 
@@ -73,9 +73,10 @@ capabilities = ["read", "write", "execute"]
 | `artifact` | `artifact_read`、`artifact_viewImage`、`artifact_share`、`artifact_transfer`             | `read`、`write`   |
 | `tmux`     | `tmux_run`、`tmux_input`、`tmux_read`、`tmux_inspect`、`tmux_list`、`tmux_create`、`tmux_close`    | `read`、`execute` |
 | `todo`     | `todo_read`、`todo_write`                                                                | 无硬性 capability |
+| `context`  | `context_message_read`                                                                  | 无硬性 capability |
 | `instance` | `instance_list`、`instance_status`、`instance_create`、`instance_start`、`instance_stop` | `manage`          |
 
-默认创建的实例不包含 `instance` group，也不授予 `manage`。
+默认创建的实例包含 `context` group，使 Agent 能读取用户从 TUI 定向发送给当前 Context 的消息；默认不包含 `instance` group，也不授予 `manage`。
 
 ## Skills 与项目记忆提示
 
@@ -99,7 +100,7 @@ Control 机器上的 Skill 目录固定为：
 
 ```toml
 [mcp.tools]
-groups = ["file", "bash", "artifact", "tmux", "todo", "instance"]
+groups = ["file", "bash", "artifact", "tmux", "todo", "context", "instance"]
 capabilities = ["read", "write", "execute", "manage"]
 ```
 

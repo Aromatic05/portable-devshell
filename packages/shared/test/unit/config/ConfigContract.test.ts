@@ -195,6 +195,26 @@ test("config normalization applies provider defaults and deduplicates MCP access
     });
 });
 
+test("legacy default MCP groups gain context while custom allowlists remain unchanged", () => {
+    const migrated = normalizeConfigInstanceDraft({
+        mcp: {
+            tools: { groups: ["file", "bash", "artifact", "tmux", "todo"] }
+        },
+        name: "legacy-default",
+        provider: "local",
+        workspace: "/workspace"
+    });
+    const custom = normalizeConfigInstanceDraft({
+        mcp: { tools: { groups: ["file", "bash", "todo"] } },
+        name: "custom-policy",
+        provider: "local",
+        workspace: "/workspace"
+    });
+
+    assert.deepEqual(migrated.mcp.tools.groups, ["file", "bash", "artifact", "tmux", "todo", "context"]);
+    assert.deepEqual(custom.mcp.tools.groups, ["file", "bash", "todo"]);
+});
+
 test("provider changes discard stale provider-specific fields before normalization", () => {
     const current = normalizeConfigInstanceDraft({
         name: "remote-one",

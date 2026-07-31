@@ -19,6 +19,8 @@ import type {
 } from "./ConfigModel.js";
 import { defaultConfigNormalizeContext } from "./ConfigModel.js";
 
+const legacyDefaultMcpToolGroups = ["file", "bash", "artifact", "tmux", "todo"] as const;
+
 export function createDefaultControlConfig(): ControlConfig {
     return normalizeConfigDraft({ instances: [] });
 }
@@ -85,7 +87,7 @@ export function normalizeConfigInstanceDraft(
             path: expectedMcpPath,
             tools: {
                 capabilities: deduplicate(draft.mcp?.tools?.capabilities ?? context.defaultMcpCapabilities),
-                groups: deduplicate(draft.mcp?.tools?.groups ?? context.defaultMcpGroups)
+                groups: normalizeMcpGroups(draft.mcp?.tools?.groups, context.defaultMcpGroups)
             }
         },
         name: draft.name,
@@ -462,6 +464,18 @@ function cloneOptionalRecord<T>(record: T | undefined): T | undefined {
 
 function cloneNonEmptyRecord(record: Record<string, string> | undefined): Record<string, string> | undefined {
     return record === undefined || Object.keys(record).length === 0 ? undefined : { ...record };
+}
+
+function normalizeMcpGroups(configured: readonly string[] | undefined, defaults: readonly string[]): string[] {
+    const normalized = deduplicate(configured ?? defaults);
+    if (
+        configured !== undefined &&
+        normalized.length === legacyDefaultMcpToolGroups.length &&
+        normalized.every((value, index) => value === legacyDefaultMcpToolGroups[index])
+    ) {
+        return [...normalized, "context"];
+    }
+    return normalized;
 }
 
 function deduplicate<T>(values: readonly T[]): T[] {
