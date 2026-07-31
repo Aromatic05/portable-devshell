@@ -249,7 +249,7 @@ test("WorkerRpcBridge replays pending work even when the previous channel close 
     assert.deepEqual((await pending).result, { pong: true });
 });
 
-test("WorkerRpcBridge does not replay a cancellation after it was sent successfully", async () => {
+test("WorkerRpcBridge replays cancellation until the worker acknowledges it", async () => {
     const connector = new DeferredConnector();
     const first = new MemoryChannel();
     connector.channel = first;
@@ -271,7 +271,42 @@ test("WorkerRpcBridge does not replay a cancellation after it was sent successfu
     controller.abort(new Error("user cancelled"));
     await assert.rejects(pending, /cancel/iu);
     await waitUntil(() => first.sent.length === 2);
-    await new Promise((resolve) => setImmediate(resolve));
+    const cancellationId = first.sent[1]!.id;
+    const second = new MemoryChannel();
+    await bridge.replaceChannel(second);
+
+    assert.equal(second.sent.length, 1);
+    assert.equal(second.sent[0]?.id, cancellationId);
+    second.respond(cancellationId, { cancelled: true });
+    const third = new MemoryChannel();
+    await bridge.replaceChannel(third);
+    assert.equal(third.sent.length, 0);
+});
+
+test("WorkerRpcBridge expires an unacknowledged cancellation", async () => {
+    const connector = new DeferredConnector();
+    const first = new MemoryChannel();
+    connector.channel = first;
+    const bridge = new WorkerRpcBridge({
+        cancellationRetentionMs: 10,
+        connector,
+        preservePendingOnDisconnect: true,
+        rpcOptions: { instanceName: "cancel-expiry" }
+    });
+    const controller = new AbortController();
+    const pending = bridge.request({
+        context: { ctxId: "ctx-cancel-expiry" },
+        id: "expired-cancelled-call",
+        method: "bash_run",
+        params: {},
+        type: "request"
+    }, controller.signal);
+    await waitUntil(() => first.sent.length === 1);
+
+    controller.abort(new Error("user cancelled"));
+    await assert.rejects(pending, /cancel/iu);
+    await waitUntil(() => first.sent.length === 2);
+    await new Promise((resolve) => setTimeout(resolve, 20));
     const second = new MemoryChannel();
     await bridge.replaceChannel(second);
 

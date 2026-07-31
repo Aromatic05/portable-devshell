@@ -13,6 +13,8 @@ import type {
 } from "./WorkerRpcEnvelope.js";
 import { WorkerRpcProcessConnector } from "./WorkerRpcProcessChannel.js";
 
+const DEFAULT_CANCELLATION_RETENTION_MS = 30_000;
+
 interface PendingResponse {
     cleanup(): void;
     reject: (error: unknown) => void;
@@ -28,6 +30,7 @@ interface ConnectingHandoff {
 type WorkerRpcResponseFrame = Record<string, JsonValue> & WorkerRpcResponseEnvelope;
 
 export interface WorkerRpcBridgeOptions {
+    cancellationRetentionMs?: number;
     connector?: WorkerRpcConnector;
     preservePendingOnDisconnect?: boolean;
     rpcOptions: WorkerRpcOptions;
@@ -35,6 +38,7 @@ export interface WorkerRpcBridgeOptions {
 }
 
 export class WorkerRpcBridge {
+    readonly #cancellationRetentionMs: number;
     readonly #connector: WorkerRpcConnector;
     readonly #rpcOptions: WorkerRpcOptions;
     readonly #preservePendingOnDisconnect: boolean;
@@ -53,6 +57,10 @@ export class WorkerRpcBridge {
             throw new TypeError("WorkerRpcBridge accepts connector or transport, not both.");
         }
 
+        this.#cancellationRetentionMs = options.cancellationRetentionMs ?? DEFAULT_CANCELLATION_RETENTION_MS;
+        if (!Number.isSafeInteger(this.#cancellationRetentionMs) || this.#cancellationRetentionMs < 1) {
+            throw new TypeError("WorkerRpcBridge cancellationRetentionMs must be a positive safe integer.");
+        }
         this.#rpcOptions = options.rpcOptions;
         this.#preservePendingOnDisconnect = options.preservePendingOnDisconnect === true;
         this.#connector =
@@ -302,33 +310,41 @@ export class WorkerRpcBridge {
                 source: request.context?.source
             }
         };
+        let expiryTimer: ReturnType<typeof setTimeout> | undefined;
         const pending: PendingResponse = {
-            cleanup: () => undefined,
+            cleanup: () => {
+                if (expiryTimer !== undefined) {
+                    clearTimeout(expiryTimer);
+                    expiryTimer = undefined;
+                }
+            },
             reject: () => undefined,
             request: cancellation,
             resolve: () => undefined
         };
         this.#pending.set(cancellation.id, pending);
+        expiryTimer = setTimeout(() => {
+            if (this.#pending.get(cancellation.id) === pending) {
+                this.#pending.delete(cancellation.id);
+                pending.cleanup();
+            }
+        }, this.#cancellationRetentionMs);
+        expiryTimer.unref?.();
         const channel = this.#channel;
         if (channel === undefined) {
             if (!this.#preservePendingOnDisconnect) {
                 this.#pending.delete(cancellation.id);
+                pending.cleanup();
             }
             return;
         }
-        void channel.send(cancellation as unknown as JsonValue).then(
-            () => {
-                if (this.#pending.get(cancellation.id) === pending) {
-                    this.#pending.delete(cancellation.id);
-                }
-            },
-            (error: unknown) => {
-                if (!this.#preservePendingOnDisconnect) {
-                    this.#pending.delete(cancellation.id);
-                }
-                this.#disconnectChannel(channel, this.#createDisconnectError(error));
+        void channel.send(cancellation as unknown as JsonValue).catch((error: unknown) => {
+            if (!this.#preservePendingOnDisconnect) {
+                this.#pending.delete(cancellation.id);
+                pending.cleanup();
             }
-        );
+            this.#disconnectChannel(channel, this.#createDisconnectError(error));
+        });
     }
 
     #cancellationDetails(request: WorkerRpcRequestEnvelope, reason: unknown): JsonValue {
