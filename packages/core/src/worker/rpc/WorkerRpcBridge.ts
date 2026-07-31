@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 
-import type { JsonValue } from "@portable-devshell/shared";
+import { isControlErrorBody, type JsonValue } from "@portable-devshell/shared";
 
 import { readWorkerAbortReason } from "../WorkerAbortReason.js";
 import type { WorkerCommandTransport } from "../command/WorkerCommandTransport.js";
@@ -211,15 +211,21 @@ export class WorkerRpcBridge {
             if (this.#channel !== channel) {
                 return;
             }
-            this.#handleMessage(message);
+            this.#handleMessage(channel, message);
         });
         channel.onDisconnect((cause) => {
             this.#disconnectChannel(channel, this.#createDisconnectError(cause));
         });
     }
 
-    #handleMessage(message: JsonValue): void {
+    #handleMessage(channel: WorkerRpcChannel, message: JsonValue): void {
         if (!isWorkerRpcResponseEnvelope(message)) {
+            this.#disconnectChannel(
+                channel,
+                this.#createDisconnectError(
+                    new Error("Worker RPC channel returned an invalid response payload.")
+                )
+            );
             return;
         }
         const pending = this.#pending.get(message.id);
@@ -373,5 +379,14 @@ function isWorkerRpcResponseEnvelope(value: JsonValue): value is WorkerRpcRespon
     }
 
     const candidate = value as Record<string, JsonValue>;
-    return candidate.type === "response" && typeof candidate.id === "string" && typeof candidate.ok === "boolean";
+    if (candidate.type !== "response" || typeof candidate.id !== "string") {
+        return false;
+    }
+    if (candidate.ok === true) {
+        return Object.prototype.hasOwnProperty.call(candidate, "result");
+    }
+    if (candidate.ok === false) {
+        return isControlErrorBody(candidate.error);
+    }
+    return false;
 }

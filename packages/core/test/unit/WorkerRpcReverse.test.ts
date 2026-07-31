@@ -64,6 +64,10 @@ class MemoryChannel implements WorkerRpcChannel {
             listener({ type: "response", id, ok: true, result });
         }
     }
+
+    publish(message: JsonValue): void {
+        for (const listener of this.#messages) listener(message);
+    }
 }
 
 test("reverse RPC bridge replays pending request with the original request id after channel replacement", async () => {
@@ -354,6 +358,59 @@ test("WorkerRpcBridge isolates disconnect listener failures", async () => {
     } finally {
         console.warn = originalWarn;
     }
+});
+
+test("WorkerRpcBridge rejects malformed success responses", async () => {
+    const connector = new DeferredConnector();
+    const channel = new MemoryChannel();
+    connector.channel = channel;
+    const bridge = new WorkerRpcBridge({
+        connector,
+        rpcOptions: { instanceName: "malformed-success" }
+    });
+    const pending = bridge.request({
+        id: "malformed-success-response",
+        method: "worker.ping",
+        params: {},
+        type: "request"
+    });
+    await waitUntil(() => channel.sent.length === 1);
+
+    channel.publish({
+        id: "malformed-success-response",
+        ok: true,
+        type: "response"
+    });
+
+    await assert.rejects(pending, /invalid response payload|disconnected/iu);
+    assert.equal(bridge.connected, false);
+});
+
+test("WorkerRpcBridge rejects malformed failure responses", async () => {
+    const connector = new DeferredConnector();
+    const channel = new MemoryChannel();
+    connector.channel = channel;
+    const bridge = new WorkerRpcBridge({
+        connector,
+        rpcOptions: { instanceName: "malformed-failure" }
+    });
+    const pending = bridge.request({
+        id: "malformed-failure-response",
+        method: "worker.ping",
+        params: {},
+        type: "request"
+    });
+    await waitUntil(() => channel.sent.length === 1);
+
+    channel.publish({
+        error: { code: "worker.failed", message: "failed" },
+        id: "malformed-failure-response",
+        ok: false,
+        type: "response"
+    });
+
+    await assert.rejects(pending, /invalid response payload|disconnected/iu);
+    assert.equal(bridge.connected, false);
 });
 
 class RegistrationRaceAbortSignal {
