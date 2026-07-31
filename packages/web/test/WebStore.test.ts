@@ -142,6 +142,75 @@ describe("WebStore", () => {
         vi.useRealTimers();
     });
 
+    it("replaces obsolete refresh timers when reconnecting", async () => {
+        vi.useFakeTimers();
+        const stream = controllableStream();
+        const clients = fakeClients({ subscribe: async () => stream });
+        const store = new WebStore(clients);
+        await store.load();
+        clients.runtime.readLogs = vi.fn(async () => []);
+        let revision = 2;
+        clients.todo.get = vi.fn(async () => ({ lastSeq: 4, todo: { items: [], revision: revision++, summary: { completed: 0, total: 0 } } }));
+        clients.overview.get = vi.fn(async () => operationalOverview());
+
+        for (const type of ["log.appended", "todo.updated", "instance.statusChanged"] as const) {
+            stream.push(instanceEvent(type));
+        }
+        await vi.waitFor(() => expect(vi.getTimerCount()).toBe(3));
+        await store.reconnect();
+        for (const type of ["log.appended", "todo.updated", "instance.statusChanged"] as const) {
+            stream.push(instanceEvent(type));
+        }
+        await vi.advanceTimersByTimeAsync(250);
+
+        expect(clients.runtime.readLogs).toHaveBeenCalledOnce();
+        expect(clients.todo.get).toHaveBeenCalledTimes(2);
+        expect(clients.overview.get).toHaveBeenCalledTimes(2);
+        expect(store.state.todos.demo?.revision).toBe(3);
+        store.close();
+        vi.useRealTimers();
+    });
+
+    it("stops overview polling when subscription setup fails", async () => {
+        vi.useFakeTimers();
+        const clients = fakeClients({ subscribe: async () => { throw new Error("subscribe failed"); } });
+        const store = new WebStore(clients, { overviewRefreshIntervalMs: 1_000 });
+        const unsubscribe = store.subscribe(() => undefined);
+
+        await store.load();
+
+        expect(store.state.connection).toBe("offline");
+        expect(vi.getTimerCount()).toBe(0);
+        unsubscribe();
+        store.close();
+        vi.useRealTimers();
+    });
+
+    it("does not let an old mutation clear a new connection operation", async () => {
+        const clients = fakeClients();
+        let releaseOld!: () => void;
+        let releaseNew!: () => void;
+        clients.runtime.stop = vi.fn()
+            .mockImplementationOnce(() => new Promise<void>((resolve) => { releaseOld = resolve; }))
+            .mockImplementationOnce(() => new Promise<void>((resolve) => { releaseNew = resolve; }));
+        const store = new WebStore(clients);
+        await store.load();
+
+        const oldOperation = store.stop("demo");
+        await store.reconnect();
+        const newOperation = store.stop("demo");
+        releaseOld();
+        await oldOperation;
+
+        expect(store.state.operations["stop:demo"]).toBe("pending");
+        expect(store.state.notice).toBeUndefined();
+        expect(store.state.error).toBeUndefined();
+        releaseNew();
+        await newOperation;
+        expect(store.state.operations["stop:demo"]).toBeUndefined();
+        store.close();
+    });
+
     it("refreshes and resubscribes after stream.gap", async () => {
         let count = 0;
         const subscriptions: number[] = [];

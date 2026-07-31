@@ -148,13 +148,13 @@ export class WebStore {
         approvalId: string,
         decision: "approve" | "deny",
     ): Promise<void> {
-        await this.mutate(`approval:${approvalId}`, "Approval recorded.", async () => {
+        await this.mutate(`approval:${approvalId}`, "Approval recorded.", async (generation) => {
             await this.clients.tool.decideApproval(
                 instance,
                 approvalId,
                 decision,
             );
-            await this.refreshInstance(instance);
+            await this.refreshInstance(instance, generation);
         });
     }
 
@@ -162,8 +162,11 @@ export class WebStore {
         approvalId: string,
         decision: "approve" | "deny",
     ): Promise<void> {
-        await this.mutate(`oauth:${approvalId}`, "Approval recorded.", async () => {
+        await this.mutate(`oauth:${approvalId}`, "Approval recorded.", async (generation) => {
             await this.clients.mcp.decideApproval(approvalId, decision);
+            if (!this.isCurrent(generation)) {
+                return;
+            }
             this.set({
                 ...this.#state,
                 oauthApprovals: await this.clients.mcp.listApprovals(),
@@ -172,16 +175,16 @@ export class WebStore {
     }
 
     async start(instance: string): Promise<void> {
-        await this.mutate(`start:${instance}`, `${instance} start requested.`, async () => {
+        await this.mutate(`start:${instance}`, `${instance} start requested.`, async (generation) => {
             await this.clients.runtime.start(instance);
-            await this.refreshInstance(instance);
+            await this.refreshInstance(instance, generation);
         });
     }
 
     async stop(instance: string): Promise<void> {
-        await this.mutate(`stop:${instance}`, `${instance} stop requested.`, async () => {
+        await this.mutate(`stop:${instance}`, `${instance} stop requested.`, async (generation) => {
             await this.clients.runtime.stop(instance);
-            await this.refreshInstance(instance);
+            await this.refreshInstance(instance, generation);
         });
     }
 
@@ -192,17 +195,7 @@ export class WebStore {
         this.#stopped = true;
         this.#generation += 1;
         this.closeStreams();
-        for (const timeout of this.#logRefreshes.values()) {
-            clearTimeout(timeout);
-        }
-        this.#logRefreshes.clear();
-        for (const timeout of this.#todoRefreshes.values()) {
-            clearTimeout(timeout);
-        }
-        this.#todoRefreshes.clear();
-        if (this.#overviewRefresh !== undefined) {
-            clearTimeout(this.#overviewRefresh);
-        }
+        this.clearScheduledRefreshes();
         this.stopOverviewPolling();
         this.clients.close();
     }
@@ -295,8 +288,10 @@ export class WebStore {
 
     private async reconnectCurrent(): Promise<void> {
         this.#generation += 1;
+        this.clearScheduledRefreshes();
         this.closeStreams();
         this.stopOverviewPolling();
+        this.set({ ...this.#state, error: undefined, notice: undefined, operations: {} });
         try {
             await this.clients.reconnect();
             if (this.#stopped) {
@@ -336,6 +331,7 @@ export class WebStore {
             if (!this.isCurrent(generation)) {
                 return;
             }
+            this.stopOverviewPolling();
             this.set({
                 ...this.#state,
                 connection: "offline",
@@ -573,8 +569,12 @@ export class WebStore {
     private async mutate(
         operation: string,
         success: string,
-        action: () => Promise<void>,
+        action: (generation: number) => Promise<void>,
     ): Promise<void> {
+        const generation = this.#generation;
+        if (!this.isCurrent(generation)) {
+            return;
+        }
         if (this.#state.operations[operation] !== undefined) {
             return;
         }
@@ -584,11 +584,20 @@ export class WebStore {
             operations: { ...this.#state.operations, [operation]: "pending" },
         });
         try {
-            await action();
-            await this.refreshOverview();
+            await action(generation);
+            if (!this.isCurrent(generation)) {
+                return;
+            }
+            await this.refreshOverview(generation);
+            if (!this.isCurrent(generation)) {
+                return;
+            }
             const { [operation]: _completed, ...operations } = this.#state.operations;
             this.set({ ...this.#state, notice: success, operations });
         } catch (error) {
+            if (!this.isCurrent(generation)) {
+                return;
+            }
             const { [operation]: _failed, ...operations } = this.#state.operations;
             this.set({ ...this.#state, error: message(error), operations });
         }
@@ -599,6 +608,21 @@ export class WebStore {
             stream.close();
         }
         this.#streams.clear();
+    }
+
+    private clearScheduledRefreshes(): void {
+        for (const timeout of this.#logRefreshes.values()) {
+            clearTimeout(timeout);
+        }
+        this.#logRefreshes.clear();
+        for (const timeout of this.#todoRefreshes.values()) {
+            clearTimeout(timeout);
+        }
+        this.#todoRefreshes.clear();
+        if (this.#overviewRefresh !== undefined) {
+            clearTimeout(this.#overviewRefresh);
+            this.#overviewRefresh = undefined;
+        }
     }
 
     private setError(error: unknown): void {
