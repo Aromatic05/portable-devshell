@@ -211,6 +211,31 @@ describe("WebStore", () => {
         store.close();
     });
 
+    it("does not apply an old OAuth approval list after reconnecting", async () => {
+        const clients = fakeClients();
+        let releaseOldList!: () => void;
+        const oldApproval = {
+            approvalId: "old", callId: "call", createdAt: "2026-07-31T00:00:00Z", expiresAt: "2026-07-31T01:00:00Z",
+            inputSummary: "old", reason: "old", riskLevel: "low" as const, source: "web" as const,
+            status: "pending" as const, toolName: "bash_run",
+        };
+        clients.mcp.listApprovals = vi.fn(() => new Promise((resolve) => {
+            releaseOldList = () => resolve([oldApproval]);
+        }));
+        clients.mcp.decideApproval = vi.fn(async () => undefined);
+        const store = new WebStore(clients);
+        await store.load();
+
+        const mutation = store.decideOAuth("oauth-1", "approve");
+        await vi.waitFor(() => expect(clients.mcp.listApprovals).toHaveBeenCalledOnce());
+        await store.reconnect();
+        releaseOldList();
+        await mutation;
+
+        expect(store.state.oauthApprovals).toEqual([]);
+        store.close();
+    });
+
     it("refreshes and resubscribes after stream.gap", async () => {
         let count = 0;
         const subscriptions: number[] = [];

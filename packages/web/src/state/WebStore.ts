@@ -164,12 +164,13 @@ export class WebStore {
     ): Promise<void> {
         await this.mutate(`oauth:${approvalId}`, "Approval recorded.", async (generation) => {
             await this.clients.mcp.decideApproval(approvalId, decision);
+            const oauthApprovals = await this.clients.mcp.listApprovals();
             if (!this.isCurrent(generation)) {
                 return;
             }
             this.set({
                 ...this.#state,
-                oauthApprovals: await this.clients.mcp.listApprovals(),
+                oauthApprovals,
             });
         });
     }
