@@ -9,6 +9,7 @@ export const CHANNEL_MAX_FRAME_SIZE = TRANSPORT_MAX_FRAME_SIZE;
 
 export interface ChannelOptions {
     maxFrameSize?: number;
+    signal?: AbortSignal;
     socketFactory?: (path: string) => Socket;
 }
 
@@ -24,19 +25,49 @@ export class Channel implements FrameChannel {
     #writeQueue: Promise<void> = Promise.resolve();
 
     static async connect(socketPath: string, options: ChannelOptions = {}): Promise<Channel> {
+        if (options.signal?.aborted === true) {
+            throw abortError(options.signal);
+        }
         const socket = options.socketFactory?.(socketPath) ?? createConnection(socketPath);
         return await new Promise<Channel>((resolve, reject) => {
-            const onConnect = () => {
+            let settled = false;
+            const cleanup = () => {
+                options.signal?.removeEventListener("abort", onAbort);
+                socket.off("connect", onConnect);
                 socket.off("error", onError);
-                resolve(new Channel(socket, options));
+            };
+            const onAbort = () => {
+                if (settled) return;
+                settled = true;
+                cleanup();
+                try {
+                    socket.destroy();
+                } catch {
+                    // The aborted connection attempt is already rejected.
+                }
+                reject(abortError(options.signal!));
+            };
+            const onConnect = () => {
+                if (settled) return;
+                settled = true;
+                cleanup();
+                resolve(new Channel(socket, { maxFrameSize: options.maxFrameSize }));
             };
             const onError = (error: Error) => {
-                socket.off("connect", onConnect);
-                socket.destroy();
+                if (settled) return;
+                settled = true;
+                cleanup();
+                try {
+                    socket.destroy();
+                } catch {
+                    // The connection error already owns the rejection.
+                }
                 reject(error);
             };
+            options.signal?.addEventListener("abort", onAbort, { once: true });
             socket.once("connect", onConnect);
             socket.once("error", onError);
+            if (options.signal?.aborted === true) onAbort();
         });
     }
 
@@ -157,4 +188,10 @@ export class Channel implements FrameChannel {
 
 function protocolError(code: string, message: string): Error {
     return createError({ code: code as ErrorCode, message, retryable: false });
+}
+
+function abortError(signal: AbortSignal): Error {
+    return signal.reason instanceof Error
+        ? signal.reason
+        : new Error("Channel connection was aborted.");
 }

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { createConnection, createServer, type Server, type Socket } from "node:net";
+import { createConnection, createServer, type Server, Socket } from "node:net";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -65,6 +65,21 @@ test("Channel connect/accept exchanges length-prefixed frames", async (t) => {
     const received = onceFrame(service);
     await client.send(Buffer.from("hello"));
     assert.equal(Buffer.from(await received).toString("utf8"), "hello");
+});
+
+test("Channel aborts and destroys a pending socket connection", async () => {
+    const socket = new Socket();
+    const controller = new AbortController();
+    const reason = new Error("connection cancelled");
+    const connecting = Channel.connect("unused", {
+        signal: controller.signal,
+        socketFactory: () => socket
+    });
+
+    controller.abort(reason);
+
+    await assert.rejects(connecting, reason);
+    assert.equal(socket.destroyed, true);
 });
 
 test("Channel assembles partial headers and payloads and splits sticky frames", async (t) => {

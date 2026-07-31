@@ -190,6 +190,7 @@ class SequencedChannelProvider implements ChannelProvider {
     readonly second = new TrackingFrameChannel();
     readonly firstStarted: Promise<void>;
     connectCount = 0;
+    firstSignal?: AbortSignal;
     #releaseFirst!: () => void;
     #signalFirstStarted!: () => void;
 
@@ -199,9 +200,10 @@ class SequencedChannelProvider implements ChannelProvider {
         });
     }
 
-    async connect(): Promise<FrameChannel> {
+    async connect(signal?: AbortSignal): Promise<FrameChannel> {
         this.connectCount += 1;
         if (this.connectCount === 1) {
+            this.firstSignal = signal;
             this.#signalFirstStarted();
             await new Promise<void>((resolve) => {
                 this.#releaseFirst = resolve;
@@ -457,6 +459,7 @@ test("ClientConnection close immediately cancels a stalled provider connect", as
     connection.close();
 
     await assert.rejects(withTimeout(pending), /closed/iu);
+    assert.equal(provider.firstSignal?.aborted, true);
     assert.equal(provider.first.closed, false);
     provider.releaseFirst();
     await waitUntil(() => provider.first.closed);
@@ -477,6 +480,7 @@ test("ClientConnection reconnect cancels a stalled connect and uses the new chan
     await connection.reconnect();
 
     await assert.rejects(withTimeout(pending), /reset|reconnect/iu);
+    assert.equal(provider.firstSignal?.aborted, true);
     assert.equal(provider.connectCount, 2);
     assert.equal(provider.second.closed, false);
     provider.releaseFirst();

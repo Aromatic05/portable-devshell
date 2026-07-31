@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import { BrowserWebSocketChannel } from "../src/rpc/BrowserWebSocketChannel.js";
-import { rpcUrl } from "../src/rpc/BrowserWebSocketChannelProvider.js";
+import {
+    BrowserWebSocketChannelProvider,
+    rpcUrl,
+} from "../src/rpc/BrowserWebSocketChannelProvider.js";
 import { webRoutePath } from "../src/routing/webRoute.js";
 
 describe("BrowserWebSocketChannel", () => {
@@ -123,6 +126,39 @@ describe("BrowserWebSocketChannel", () => {
         expect(webRoutePath(location.pathname, "/rpc")).toBe("/devshell/web/rpc");
         expect(rpcUrl(location)).toBe("wss://controller.example/devshell/web/rpc");
         expect(webRoutePath("/unexpected", "/rpc")).toBe("/web/rpc");
+    });
+
+    it("does not create a WebSocket for an already aborted connect", async () => {
+        const controller = new AbortController();
+        const reason = new Error("connect cancelled");
+        controller.abort(reason);
+        let factoryCalls = 0;
+        const provider = new BrowserWebSocketChannelProvider(
+            "ws://controller.test/web/rpc",
+            () => {
+                factoryCalls += 1;
+                return new FakeSocket() as unknown as WebSocket;
+            },
+        );
+
+        await expect(provider.connect(controller.signal)).rejects.toBe(reason);
+        expect(factoryCalls).toBe(0);
+    });
+
+    it("closes a pending WebSocket when connect is aborted", async () => {
+        const socket = new FakeSocket();
+        const provider = new BrowserWebSocketChannelProvider(
+            "ws://controller.test/web/rpc",
+            () => socket as unknown as WebSocket,
+        );
+        const controller = new AbortController();
+        const reason = new Error("connect cancelled");
+        const connecting = provider.connect(controller.signal);
+
+        controller.abort(reason);
+
+        await expect(connecting).rejects.toBe(reason);
+        expect(socket.readyState).toBe(FakeSocket.CLOSED);
     });
 });
 

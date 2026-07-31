@@ -20,7 +20,10 @@ export class SocketChannelProvider implements ChannelProvider {
         this.#socketPath = options.socketPath ?? resolveControlSocketPath(options.xdgRuntimeDir);
     }
 
-    async connect(): Promise<FrameChannel> {
-        return await Channel.connect(this.#socketPath, { socketFactory: this.#socketFactory });
+    async connect(signal?: AbortSignal): Promise<FrameChannel> {
+        return await Channel.connect(this.#socketPath, {
+            signal,
+            socketFactory: this.#socketFactory
+        });
     }
 }

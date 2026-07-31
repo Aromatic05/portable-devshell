@@ -303,15 +303,17 @@ export class ClientConnection {
     async #connect(onClose?: (session: ClientSession, error?: Error) => void): Promise<ClientSession> {
         const generation = this.#persistentGeneration;
         let cancellationError: Error | undefined;
+        const controller = new AbortController();
         let cancel!: (error: Error) => void;
         const cancellation = new Promise<never>((_resolve, reject) => {
             cancel = (error) => {
                 cancellationError = error;
+                controller.abort(error);
                 reject(error);
             };
         });
         this.#connectCancellers.add(cancel);
-        const connecting = this.#channelProvider.connect().then((channel) => {
+        const connecting = this.#channelProvider.connect(controller.signal).then((channel) => {
             if (
                 cancellationError !== undefined ||
                 generation !== this.#persistentGeneration ||
