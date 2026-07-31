@@ -118,7 +118,12 @@ export class WorkerRpcBridge {
         if (previous !== undefined && previous !== channel) {
             this.#closeChannel(previous);
         }
-        await this.#replayPending(channel);
+        try {
+            await this.#replayPending(channel);
+        } catch (error) {
+            this.#disconnectChannel(channel, this.#createDisconnectError(error));
+            throw error;
+        }
     }
 
     close(_signal: NodeJS.Signals | number = "SIGTERM"): void {
@@ -150,7 +155,12 @@ export class WorkerRpcBridge {
                         throw new Error("Worker RPC connection was reset while connecting.");
                     }
                     this.#attachChannel(channel);
-                    await this.#replayPending(channel);
+                    try {
+                        await this.#replayPending(channel);
+                    } catch (error) {
+                        this.#disconnectChannel(channel, this.#createDisconnectError(error));
+                        throw error;
+                    }
                     if (generation !== this.#connectionGeneration) {
                         if (this.#channel === channel) {
                             this.#channel = undefined;
@@ -275,12 +285,19 @@ export class WorkerRpcBridge {
             }
             return;
         }
-        void channel.send(cancellation as unknown as JsonValue).catch((error: unknown) => {
-            if (!this.#preservePendingOnDisconnect) {
-                this.#pending.delete(cancellation.id);
+        void channel.send(cancellation as unknown as JsonValue).then(
+            () => {
+                if (this.#pending.get(cancellation.id) === pending) {
+                    this.#pending.delete(cancellation.id);
+                }
+            },
+            (error: unknown) => {
+                if (!this.#preservePendingOnDisconnect) {
+                    this.#pending.delete(cancellation.id);
+                }
+                this.#disconnectChannel(channel, this.#createDisconnectError(error));
             }
-            this.#disconnectChannel(channel, this.#createDisconnectError(error));
-        });
+        );
     }
 
     #cancellationDetails(request: WorkerRpcRequestEnvelope, reason: unknown): JsonValue {

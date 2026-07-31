@@ -196,6 +196,66 @@ test("WorkerRpcBridge replays pending work even when the previous channel close 
     assert.deepEqual((await pending).result, { pong: true });
 });
 
+test("WorkerRpcBridge does not replay a cancellation after it was sent successfully", async () => {
+    const connector = new DeferredConnector();
+    const first = new MemoryChannel();
+    connector.channel = first;
+    const bridge = new WorkerRpcBridge({
+        connector,
+        preservePendingOnDisconnect: true,
+        rpcOptions: { instanceName: "cancel-replay" }
+    });
+    const controller = new AbortController();
+    const pending = bridge.request({
+        context: { ctxId: "ctx-cancel-replay" },
+        id: "cancelled-call",
+        method: "bash_run",
+        params: {},
+        type: "request"
+    }, controller.signal);
+    await waitUntil(() => first.sent.length === 1);
+
+    controller.abort(new Error("user cancelled"));
+    await assert.rejects(pending, /cancel/iu);
+    await waitUntil(() => first.sent.length === 2);
+    await new Promise((resolve) => setImmediate(resolve));
+    const second = new MemoryChannel();
+    await bridge.replaceChannel(second);
+
+    assert.equal(second.sent.length, 0);
+});
+
+test("WorkerRpcBridge disconnects a replacement channel when replay fails", async () => {
+    const connector = new DeferredConnector();
+    const first = new MemoryChannel();
+    connector.channel = first;
+    const bridge = new WorkerRpcBridge({
+        connector,
+        preservePendingOnDisconnect: true,
+        rpcOptions: { instanceName: "replay-failure" }
+    });
+    const pending = bridge.request({
+        id: "replay-failure-request",
+        method: "worker.ping",
+        params: {},
+        type: "request"
+    });
+    await waitUntil(() => first.sent.length === 1);
+    first.disconnect();
+    const failed = new MemoryChannel();
+    failed.sendError = new Error("replay send failed");
+
+    await assert.rejects(bridge.replaceChannel(failed), /replay send failed/iu);
+    assert.equal(bridge.connected, false);
+    assert.equal(failed.closed, true);
+
+    const recovered = new MemoryChannel();
+    await bridge.replaceChannel(recovered);
+    assert.equal(recovered.sent.length, 1);
+    recovered.respond("replay-failure-request", { pong: true });
+    assert.deepEqual((await pending).result, { pong: true });
+});
+
 test("WorkerRpcBridge observes aborts that race with listener registration", async () => {
     const connector = new DeferredConnector();
     const channel = new MemoryChannel();
