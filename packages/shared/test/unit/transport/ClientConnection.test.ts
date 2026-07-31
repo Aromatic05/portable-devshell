@@ -12,6 +12,7 @@ import {
     Codec,
     createError,
     type Event,
+    type FrameChannel,
     type JsonValue,
     SocketChannelProvider
 } from "@portable-devshell/shared";
@@ -157,6 +158,61 @@ class BlockingSocketChannelProvider implements ChannelProvider {
             }
         }
         return await this.#delegate.connect();
+    }
+}
+
+class TrackingFrameChannel implements FrameChannel {
+    readonly #closeListeners = new Set<(error?: Error) => void>();
+    readonly #frameListeners = new Set<(frame: Uint8Array) => void>();
+    closed = false;
+
+    async send(): Promise<void> {}
+
+    onFrame(listener: (frame: Uint8Array) => void): () => void {
+        this.#frameListeners.add(listener);
+        return () => this.#frameListeners.delete(listener);
+    }
+
+    onClose(listener: (error?: Error) => void): () => void {
+        this.#closeListeners.add(listener);
+        return () => this.#closeListeners.delete(listener);
+    }
+
+    close(error?: Error): void {
+        if (this.closed) return;
+        this.closed = true;
+        for (const listener of [...this.#closeListeners]) listener(error);
+    }
+}
+
+class SequencedChannelProvider implements ChannelProvider {
+    readonly first = new TrackingFrameChannel();
+    readonly second = new TrackingFrameChannel();
+    readonly firstStarted: Promise<void>;
+    connectCount = 0;
+    #releaseFirst!: () => void;
+    #signalFirstStarted!: () => void;
+
+    constructor() {
+        this.firstStarted = new Promise<void>((resolve) => {
+            this.#signalFirstStarted = resolve;
+        });
+    }
+
+    async connect(): Promise<FrameChannel> {
+        this.connectCount += 1;
+        if (this.connectCount === 1) {
+            this.#signalFirstStarted();
+            await new Promise<void>((resolve) => {
+                this.#releaseFirst = resolve;
+            });
+            return this.first;
+        }
+        return this.second;
+    }
+
+    releaseFirst(): void {
+        this.#releaseFirst();
     }
 }
 
@@ -386,6 +442,49 @@ test("persistent ClientConnection coalesces concurrent reconnect calls", async (
     assert.deepEqual((await recoveredRequest).payload, { ready: true });
 });
 
+test("ClientConnection close immediately cancels a stalled provider connect", async () => {
+    const provider = new SequencedChannelProvider();
+    const connection = new ClientConnection({
+        channelProvider: provider,
+        mapError: (error) => error instanceof Error ? error : new Error(String(error)),
+        mapRemoteError: (error) => createError(error),
+        mode: "persistent",
+        peer: "tui"
+    });
+    const pending = connection.requestEvent("@control", "service", "stalled");
+    await provider.firstStarted;
+
+    connection.close();
+
+    await assert.rejects(withTimeout(pending), /closed/iu);
+    assert.equal(provider.first.closed, false);
+    provider.releaseFirst();
+    await waitUntil(() => provider.first.closed);
+});
+
+test("ClientConnection reconnect cancels a stalled connect and uses the new channel", async () => {
+    const provider = new SequencedChannelProvider();
+    const connection = new ClientConnection({
+        channelProvider: provider,
+        mapError: (error) => error instanceof Error ? error : new Error(String(error)),
+        mapRemoteError: (error) => createError(error),
+        mode: "persistent",
+        peer: "tui"
+    });
+    const pending = connection.requestEvent("@control", "service", "stalled");
+    await provider.firstStarted;
+
+    await connection.reconnect();
+
+    await assert.rejects(withTimeout(pending), /reset|reconnect/iu);
+    assert.equal(provider.connectCount, 2);
+    assert.equal(provider.second.closed, false);
+    provider.releaseFirst();
+    await waitUntil(() => provider.first.closed);
+    connection.close();
+    assert.equal(provider.second.closed, true);
+});
+
 test("unexpected replyTo closes a persistent connection and rejects its pending requests", async (t) => {
     const peer = await ControlPeer.create();
     const connection = client(peer.socketPath);
@@ -409,3 +508,25 @@ test("unexpected replyTo closes a persistent connection and rejects its pending 
 
     await Promise.all([firstRejected, secondRejected]);
 });
+
+async function withTimeout<T>(promise: Promise<T>): Promise<T> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+        return await Promise.race([
+            promise,
+            new Promise<never>((_resolve, reject) => {
+                timer = setTimeout(() => reject(new Error("request did not settle")), 250);
+            })
+        ]);
+    } finally {
+        if (timer !== undefined) clearTimeout(timer);
+    }
+}
+
+async function waitUntil(predicate: () => boolean): Promise<void> {
+    const deadline = Date.now() + 2_000;
+    while (!predicate()) {
+        if (Date.now() >= deadline) throw new Error("Timed out waiting for condition.");
+        await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+}

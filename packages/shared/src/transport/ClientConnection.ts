@@ -107,6 +107,7 @@ export class ClientConnection {
     readonly #mode: ClientConnectionMode;
     readonly #peer: Exclude<Peer, "server">;
     readonly #channelProvider: ChannelProvider;
+    readonly #connectCancellers = new Set<(error: Error) => void>();
     #closed = false;
     #persistentFailure?: Error;
     #persistentGeneration = 0;
@@ -218,6 +219,7 @@ export class ClientConnection {
 
     async #reconnectPersistent(): Promise<void> {
         this.#persistentGeneration += 1;
+        this.#cancelConnects(new Error("Client connection was reset while reconnecting."));
         const session = this.#persistentSession;
         this.#persistentSession = undefined;
         this.#persistentSessionPromise = undefined;
@@ -232,6 +234,7 @@ export class ClientConnection {
         }
         this.#closed = true;
         this.#persistentGeneration += 1;
+        this.#cancelConnects(new Error("Client connection is closed."));
         const session = this.#persistentSession;
         this.#persistentSession = undefined;
         this.#persistentSessionPromise = undefined;
@@ -298,11 +301,49 @@ export class ClientConnection {
     }
 
     async #connect(onClose?: (session: ClientSession, error?: Error) => void): Promise<ClientSession> {
-        const channel = await this.#channelProvider.connect();
+        const generation = this.#persistentGeneration;
+        let cancellationError: Error | undefined;
+        let cancel!: (error: Error) => void;
+        const cancellation = new Promise<never>((_resolve, reject) => {
+            cancel = (error) => {
+                cancellationError = error;
+                reject(error);
+            };
+        });
+        this.#connectCancellers.add(cancel);
+        const connecting = this.#channelProvider.connect().then((channel) => {
+            if (
+                cancellationError !== undefined ||
+                generation !== this.#persistentGeneration ||
+                this.#closed
+            ) {
+                closeFrameChannel(channel);
+                throw cancellationError ?? new Error("Client connection was reset while connecting.");
+            }
+            return channel;
+        });
+        let channel;
+        try {
+            channel = await Promise.race([connecting, cancellation]);
+        } finally {
+            this.#connectCancellers.delete(cancel);
+        }
+        if (generation !== this.#persistentGeneration || this.#closed) {
+            closeFrameChannel(channel);
+            throw cancellationError ?? new Error("Client connection was reset while connecting.");
+        }
         const route = new PrefixRoute(new Codec(channel, { local: this.#peer, remote: "server" }), {
             eventIdPrefix: this.#peer
         });
         return new ClientSession(route, this.#peer, onClose);
+    }
+
+    #cancelConnects(error: Error): void {
+        const cancellers = [...this.#connectCancellers];
+        this.#connectCancellers.clear();
+        for (const cancel of cancellers) {
+            cancel(error);
+        }
     }
 
     #assertOpen(): void {
@@ -616,4 +657,12 @@ function isTerminalStreamEvent(event: ClientEvent): boolean {
 
 function isRecord(value: JsonValue | undefined): value is Record<string, JsonValue> {
     return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function closeFrameChannel(channel: import("./FrameChannel.js").FrameChannel): void {
+    try {
+        channel.close();
+    } catch {
+        // The connection attempt is already invalid; transport teardown is best effort.
+    }
 }
