@@ -67,7 +67,15 @@ export class ControlWebSocketFrameChannel implements FrameChannel {
             });
         });
         this.#sendTail = operation.catch(() => undefined);
-        await operation;
+        try {
+            await operation;
+        } catch (error) {
+            const normalized = error instanceof Error ? error : new Error(String(error));
+            if (!this.#closed) {
+                this.#fail(normalized);
+            }
+            throw normalized;
+        }
     }
 
     onFrame(listener: (frame: Uint8Array) => void): () => void {

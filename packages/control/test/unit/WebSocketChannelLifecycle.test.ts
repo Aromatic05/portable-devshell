@@ -14,8 +14,10 @@ import { ControlWebSocketFrameChannel } from "../../src/server/web/ControlWebSoc
 class FakeWebSocket extends EventEmitter {
     readyState: number = WebSocket.OPEN;
     closeError?: Error;
+    deferSend = false;
     pingError?: Error;
     sendError?: Error;
+    readonly sendCallbacks: Array<(error?: Error) => void> = [];
     terminated = false;
 
     close(code = 1000, reason = ""): void {
@@ -36,7 +38,17 @@ class FakeWebSocket extends EventEmitter {
         if (this.sendError !== undefined) {
             throw this.sendError;
         }
+        if (this.deferSend) {
+            this.sendCallbacks.push(callback);
+            return;
+        }
         callback();
+    }
+
+    completeSend(error?: Error): void {
+        const callback = this.sendCallbacks.shift();
+        assert.notEqual(callback, undefined);
+        callback!(error);
     }
 
     terminate(): void {
@@ -95,6 +107,24 @@ test("control WebSocket close remains terminal when socket.close throws", async 
     const error = await closed;
 
     assert.equal(error?.message, "close failed");
+    assert.equal(channel.closed, true);
+    assert.equal(socket.terminated, true);
+});
+
+test("control WebSocket send failure closes the channel and rejects queued sends", async () => {
+    const socket = new FakeWebSocket();
+    socket.deferSend = true;
+    const channel = new ControlWebSocketFrameChannel(socket as unknown as WebSocket);
+    const closed = new Promise<Error | undefined>((resolve) => channel.onClose(resolve));
+
+    const first = channel.send(new Uint8Array([1]));
+    const second = channel.send(new Uint8Array([2]));
+    await new Promise((resolve) => setImmediate(resolve));
+    socket.completeSend(new Error("send callback failed"));
+
+    await assert.rejects(first, /send callback failed/iu);
+    await assert.rejects(second, /send callback failed/iu);
+    assert.equal((await closed)?.message, "send callback failed");
     assert.equal(channel.closed, true);
     assert.equal(socket.terminated, true);
 });
