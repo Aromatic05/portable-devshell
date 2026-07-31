@@ -1,8 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 import {
     asInstanceName,
+    type ApprovalRequest,
     type InstanceEvent,
     type InstanceSnapshot,
+    type OAuthApprovalRequest,
 } from "@portable-devshell/shared/browser";
 
 import type { WebClients, WebRuntimeStream } from "../src/client/WebClients.js";
@@ -214,15 +216,11 @@ describe("WebStore", () => {
     it("does not apply an old OAuth approval list after reconnecting", async () => {
         const clients = fakeClients();
         let releaseOldList!: () => void;
-        const oldApproval = {
-            approvalId: "old", callId: "call", createdAt: "2026-07-31T00:00:00Z", expiresAt: "2026-07-31T01:00:00Z",
-            inputSummary: "old", reason: "old", riskLevel: "low" as const, source: "web" as const,
-            status: "pending" as const, toolName: "bash_run",
-        };
-        clients.mcp.listApprovals = vi.fn(() => new Promise((resolve) => {
+        const oldApproval = oauthApproval("old");
+        clients.mcp.listApprovals = vi.fn(() => new Promise<OAuthApprovalRequest[]>((resolve) => {
             releaseOldList = () => resolve([oldApproval]);
         }));
-        clients.mcp.decideApproval = vi.fn(async () => undefined);
+        clients.mcp.decideApproval = vi.fn(async () => oauthApproval("oauth-1", "approved"));
         const store = new WebStore(clients);
         await store.load();
 
@@ -322,7 +320,10 @@ describe("WebStore", () => {
     it("refreshes approval, todo, and overview models after a tool decision", async () => {
         const clients = fakeClients();
         let decided = false;
-        clients.tool.decideApproval = vi.fn(async () => { decided = true; });
+        clients.tool.decideApproval = vi.fn(async () => {
+            decided = true;
+            return decidedToolApproval("pending", "approve");
+        });
         clients.tool.listApprovals = vi.fn(async () => decided ? [] : [approval("pending")]);
         clients.todo.get = vi.fn(async () => ({ lastSeq: decided ? 4 : 3, todo: todo(decided ? 2 : 1) }));
         clients.overview.get = vi.fn(async () => ({ ...operationalOverview(), generatedAt: decided ? "2026-07-31T00:00:01Z" : "2026-07-31T00:00:00Z" }));
@@ -340,7 +341,10 @@ describe("WebStore", () => {
         const clients = fakeClients();
         let decided = false;
         clients.mcp.status = async () => ({ authMode: "oauth2", oauthReady: true, running: true });
-        clients.mcp.decideApproval = vi.fn(async () => { decided = true; });
+        clients.mcp.decideApproval = vi.fn(async () => {
+            decided = true;
+            return oauthApproval("oauth-pending", "approved");
+        });
         clients.mcp.listApprovals = vi.fn(async () => decided ? [] : [oauthApproval("oauth-pending")]);
         clients.overview.get = vi.fn(async () => ({ ...operationalOverview(), generatedAt: decided ? "2026-07-31T00:00:01Z" : "2026-07-31T00:00:00Z" }));
         const store = new WebStore(clients);
@@ -391,7 +395,7 @@ describe("WebStore", () => {
         clients.tool.listApprovals = vi.fn()
             .mockReturnValueOnce(eventApprovals)
             .mockResolvedValueOnce([]);
-        clients.tool.decideApproval = vi.fn(async () => undefined);
+        clients.tool.decideApproval = vi.fn(async () => decidedToolApproval("pending", "approve"));
 
         stream.push(instanceEvent("approval.requested"));
         await vi.waitFor(() => expect(clients.tool.listApprovals).toHaveBeenCalledOnce());
@@ -588,7 +592,7 @@ function operationalOverview() {
     };
 }
 
-function approval(approvalId: string) {
+function approval(approvalId: string): ApprovalRequest {
     return {
         approvalId,
         callId: "call",
@@ -604,17 +608,43 @@ function approval(approvalId: string) {
     };
 }
 
-function oauthApproval(approvalId: string) {
+function decidedToolApproval(
+    approvalId: string,
+    decision: "approve" | "deny",
+): ApprovalRequest {
+    return {
+        ...approval(approvalId),
+        decision: {
+            approvalId,
+            decidedAt: "2026-07-31T00:00:01Z",
+            decidedBy: "web",
+            decision,
+        },
+        status: decision === "approve" ? "approved" : "denied",
+    };
+}
+
+function oauthApproval(
+    approvalId: string,
+    status: OAuthApprovalRequest["status"] = "pending",
+): OAuthApprovalRequest {
     return {
         approvalId,
-        callId: "call",
+        clientId: "client-id",
+        clientName: "Web client",
         createdAt: "2026-07-31T00:00:00Z",
-        inputSummary: approvalId,
-        reason: approvalId,
-        riskLevel: "low" as const,
-        source: "web" as const,
-        status: "pending" as const,
-        toolName: "bash_run",
+        expiresAt: "2026-07-31T01:00:00Z",
+        kind: "authorization",
+        redirectUris: ["https://client.example/callback"],
+        requestedResources: ["portable-devshell"],
+        requestedScopes: ["mcp"],
+        status,
+        ...(status === "pending"
+            ? {}
+            : {
+                  decidedAt: "2026-07-31T00:00:01Z",
+                  decidedBy: "web" as const,
+              }),
     };
 }
 

@@ -7,7 +7,8 @@ import {
     WorkerRpcClient,
     type WorkerRpcChannel,
     type WorkerRpcConnector,
-    type WorkerRpcRequestEnvelope
+    type WorkerRpcRequestEnvelope,
+    type WorkerRpcResponseEnvelope
 } from "@portable-devshell/core/testing";
 
 class DeferredConnector implements WorkerRpcConnector {
@@ -169,7 +170,7 @@ test("reverse channel replacement takes over a stalled connector request", async
     await waitUntil(() => replacement.sent.length === 1);
     replacement.respond("handoff-request", { pong: true });
 
-    assert.deepEqual((await request).result, { pong: true });
+    assert.deepEqual(successResult(await request), { pong: true });
     assert.equal(bridge.connected, true);
     assert.equal(connectSignal?.aborted, true);
     releaseConnect();
@@ -219,7 +220,7 @@ test("WorkerRpcBridge rejects duplicate pending request ids without losing the f
     await assert.rejects(bridge.request(request), /Duplicate Worker RPC request id/iu);
     channel.respond(request.id, { pong: true });
 
-    assert.deepEqual((await first).result, { pong: true });
+    assert.deepEqual(successResult(await first), { pong: true });
 });
 
 test("WorkerRpcBridge replays pending work even when the previous channel close throws", async () => {
@@ -252,7 +253,7 @@ test("WorkerRpcBridge replays pending work even when the previous channel close 
     assert.equal(warnings.length, 1);
     assert.equal(second.sent.length, 1);
     second.respond("replay-after-close-failure", { pong: true });
-    assert.deepEqual((await pending).result, { pong: true });
+    assert.deepEqual(successResult(await pending), { pong: true });
 });
 
 test("WorkerRpcBridge replays cancellation until the worker acknowledges it", async () => {
@@ -347,7 +348,7 @@ test("WorkerRpcBridge disconnects a replacement channel when replay fails", asyn
     await bridge.replaceChannel(recovered);
     assert.equal(recovered.sent.length, 1);
     recovered.respond("replay-failure-request", { pong: true });
-    assert.deepEqual((await pending).result, { pong: true });
+    assert.deepEqual(successResult(await pending), { pong: true });
 });
 
 test("WorkerRpcBridge observes aborts that race with listener registration", async () => {
@@ -463,6 +464,13 @@ class RegistrationRaceAbortSignal {
     }
 
     removeEventListener(): void {}
+}
+
+function successResult(response: WorkerRpcResponseEnvelope): JsonValue {
+    if (!response.ok) {
+        throw new Error(response.error.message);
+    }
+    return response.result;
 }
 
 async function withTimeout<T>(promise: Promise<T>): Promise<T> {
