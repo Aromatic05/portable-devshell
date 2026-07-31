@@ -205,3 +205,18 @@ test("reverse SSE removes temporary drain listeners after backpressure clears", 
     assert.equal(response.listenerCount("error"), 1);
     channel.close();
 });
+
+test("reverse SSE rejects a backpressured send when the response closes", async () => {
+    const response = new FakeServerResponse();
+    response.writeResult = false;
+    const channel = new ReverseRpcSseChannel(response as unknown as ServerResponse);
+
+    const sent = channel.send({ type: "request" });
+    assert.equal(response.listenerCount("close"), 2);
+    response.emit("close");
+
+    await assert.rejects(sent, /closed before drain/iu);
+    assert.equal(response.listenerCount("drain"), 0);
+    assert.equal(response.listenerCount("error"), 1);
+    assert.equal(response.listenerCount("close"), 0);
+});

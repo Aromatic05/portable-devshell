@@ -98,8 +98,13 @@ export class ReverseRpcSseChannel extends WorkerRpcChannelBase {
     async #waitForDrain(): Promise<void> {
         await new Promise<void>((resolve, reject) => {
             const cleanup = () => {
+                this.#response.off("close", onClose);
                 this.#response.off("drain", onDrain);
                 this.#response.off("error", onError);
+            };
+            const onClose = () => {
+                cleanup();
+                reject(new Error("reverse SSE connection closed before drain"));
             };
             const onDrain = () => {
                 cleanup();
@@ -109,6 +114,7 @@ export class ReverseRpcSseChannel extends WorkerRpcChannelBase {
                 cleanup();
                 reject(error);
             };
+            this.#response.once("close", onClose);
             this.#response.once("drain", onDrain);
             this.#response.once("error", onError);
         });
