@@ -6,7 +6,7 @@ import { render, type Instance as InkInstance } from "ink";
 
 import {
     createTuiClients,
-    type TuiClients
+    type TuiClients,
 } from "./client/TuiClientComposition.js";
 import { TuiCommandDispatcher } from "../interaction/command/dispatcher/TuiCommandDispatcher.js";
 import { TuiControlSession } from "./control/TuiControlSession.js";
@@ -16,7 +16,10 @@ import { TuiRenderScheduler } from "../view/render/TuiRenderScheduler.js";
 import { buildFocusGraphForState } from "../view/screen/TuiScreenRouter.js";
 import { TuiAppStore } from "../state/TuiAppStore.js";
 import { topTuiOverlay } from "../state/overlay/TuiOverlay.js";
-import { selectMainScreenModel, tuiViewProjection } from "../view/model/TuiViewProjection.js";
+import {
+    selectMainScreenModel,
+    tuiViewProjection,
+} from "../view/model/TuiViewProjection.js";
 import type { TuiPageId } from "../state/TuiUiState.js";
 import { TuiApp } from "../view/TuiApp.js";
 import type { TuiAppKey } from "../view/TuiAppController.js";
@@ -25,7 +28,7 @@ import {
     buildTuiTextDetailImageRegion,
     buildTuiTerminalViewportRegion,
     hitTargetAt,
-    type TuiHitTarget
+    type TuiHitTarget,
 } from "../view/TuiHitRegions.js";
 import { TuiRuntimeOperations } from "./TuiRuntimeOperations.js";
 import { TuiRouteDataLoader } from "./route/TuiRouteDataLoader.js";
@@ -36,13 +39,13 @@ import {
     renderTerminalGraphicsFrame,
     terminalGraphicsClearSequence,
     type TuiTerminalGraphicsMode,
-    type TuiTerminalGraphicsSupport
+    type TuiTerminalGraphicsSupport,
 } from "./terminal/TuiTerminalGraphicsRenderer.js";
 import {
     detectTerminalImageSupport,
     renderTerminalImageFrame,
     terminalImageClearSequence,
-    type TuiTerminalImageSupport
+    type TuiTerminalImageSupport,
 } from "./terminal/TuiTerminalImageRenderer.js";
 import { TuiTerminalInputRouter } from "./terminal/TuiTerminalInputRouter.js";
 import { TuiTerminalSession } from "./terminal/TuiTerminalSession.js";
@@ -94,59 +97,80 @@ export class TuiRuntime {
 
     constructor(
         options: TuiRuntimeOptions = {},
-        dependencies: TuiRuntimeDependencies = {}
+        dependencies: TuiRuntimeDependencies = {},
     ) {
         this.#stdin = options.stdin ?? process.stdin;
         this.#stdout = options.stdout ?? process.stdout;
         this.#inkDebug = dependencies.inkDebug ?? false;
-        this.#terminalGraphicsSupport = detectTerminalGraphicsSupport(process.env, dependencies.graphicsMode);
-        this.#terminalImageSupport = detectTerminalImageSupport(process.env, dependencies.graphicsMode);
+        this.#terminalGraphicsSupport = detectTerminalGraphicsSupport(
+            process.env,
+            dependencies.graphicsMode,
+        );
+        this.#terminalImageSupport = detectTerminalImageSupport(
+            process.env,
+            dependencies.graphicsMode,
+        );
         this.#inkStdin = createInkStdin(this.#stdin);
         this.#alternateScreen = new AlternateScreen(this.#stdout);
         this.store = new TuiAppStore();
         this.scheduler = new TuiRenderScheduler(this.store);
         this.terminal = dependencies.terminal ?? new TuiTerminalSession();
-        this.#storeUnsubscribe = this.store.subscribe(() => this.#syncTerminalFocus());
+        this.#storeUnsubscribe = this.store.subscribe(() =>
+            this.#syncTerminalFocus(),
+        );
         this.focusManager = new TuiFocusManager(this.store, {
             currentPage: () => this.store.getState().ui.selectedPage,
-            graphFor: (page, mode) => buildFocusGraphForState({
-                ...this.store.getState(),
-                interaction: {
-                    ...this.store.getState().interaction,
-                    focusScope: mode
-                },
-                ui: {
-                    ...this.store.getState().ui,
-                    selectedPage: page
-                }
-            }),
-            mode: () => this.store.getState().interaction.focusScope
+            expandedKeyFor: (boxId) =>
+                selectMainScreenModel(this.store.getState()).boxes.find(
+                    (box) => box.id === boxId,
+                )?.expandedKey,
+            graphFor: (page, mode) =>
+                buildFocusGraphForState({
+                    ...this.store.getState(),
+                    interaction: {
+                        ...this.store.getState().interaction,
+                        focusScope: mode,
+                    },
+                    ui: {
+                        ...this.store.getState().ui,
+                        selectedPage: page,
+                    },
+                }),
+            mode: () => this.store.getState().interaction.focusScope,
         });
         this.keyDispatcher = new TuiKeyDispatcher();
 
-        const clients = dependencies.clients ?? createTuiClients({
-            xdgRuntimeDir: options.xdgRuntimeDir
-        });
+        const clients =
+            dependencies.clients ??
+            createTuiClients({
+                xdgRuntimeDir: options.xdgRuntimeDir,
+            });
         this.session = new TuiControlSession({
             clients,
-            store: this.store
+            store: this.store,
         });
         this.#operations = new TuiRuntimeOperations({
             attachHooks: {
                 resume: () => this.#resumeAfterAttach(),
-                suspend: () => this.#suspendForAttach()
+                suspend: () => this.#suspendForAttach(),
             },
             clients,
             session: this.session,
-            store: this.store
+            store: this.store,
         });
-        const routeDataLoader = new TuiRouteDataLoader({ session: this.session, store: this.store });
+        const routeDataLoader = new TuiRouteDataLoader({
+            session: this.session,
+            store: this.store,
+        });
         this.routeLifecycle = new TuiRouteLifecycleController({
             onEnter: async (context) => await routeDataLoader.enter(context),
             onError: ({ route }, error) => {
-                this.store.setScreenStatus(route.page, `Route load failed: ${readErrorMessage(error)}`);
+                this.store.setScreenStatus(
+                    route.page,
+                    `Route load failed: ${readErrorMessage(error)}`,
+                );
             },
-            store: this.store
+            store: this.store,
         });
         this.commandDispatcher = new TuiCommandDispatcher({
             focusManager: this.focusManager,
@@ -156,7 +180,7 @@ export class TuiRuntime {
                 await this.#operations.decideApproval(
                     instance,
                     approvalId,
-                    decision
+                    decision,
                 );
             },
             onArtifactCancelTransfer: async (transferId) => {
@@ -168,7 +192,11 @@ export class TuiRuntime {
             onArtifactViewImage: async (instance, input) =>
                 await clients.artifact.viewImage(instance, input),
             onContextMessage: async (instance, ctxId, text) => {
-                await this.#operations.queueContextMessage(instance, ctxId, text);
+                await this.#operations.queueContextMessage(
+                    instance,
+                    ctxId,
+                    text,
+                );
             },
             onTodoComment: async (instance, ctxId, text) => {
                 await this.#operations.addTodoComment(instance, ctxId, text);
@@ -194,7 +222,7 @@ export class TuiRuntime {
             onInstanceConfigUpdate: async (instanceName, patch) => {
                 await this.#operations.updateInstanceConfig(
                     instanceName,
-                    patch
+                    patch,
                 );
             },
             onInstanceDangerAction: async (_action, instance) => {
@@ -212,13 +240,17 @@ export class TuiRuntime {
             onOAuthApprovalDecision: async (approvalId, decision) => {
                 await this.#operations.decideOAuthApproval(
                     approvalId,
-                    decision
+                    decision,
                 );
             },
             onPageReload: async (page, instance) => {
                 if (page === "terminal") {
                     this.#terminalInstance = undefined;
-                    await this.openTerminal(instance, this.#terminalColumns, this.#terminalRows);
+                    await this.openTerminal(
+                        instance,
+                        this.#terminalColumns,
+                        this.#terminalRows,
+                    );
                     return;
                 }
                 await this.#operations.reloadPage(page, instance);
@@ -233,7 +265,7 @@ export class TuiRuntime {
                 return await this.#operations.callTool(
                     instance,
                     toolName,
-                    input
+                    input,
                 );
             },
             onValidateConfigDraft: async (draft) => {
@@ -242,14 +274,14 @@ export class TuiRuntime {
             projection: tuiViewProjection,
             onValidateInstanceCreateDraft: async (draft) => {
                 return await this.#operations.validateInstanceCreateDraft(
-                    draft
+                    draft,
                 );
             },
-            store: this.store
+            store: this.store,
         });
         this.focusManager.syncPanel(
             this.store.getState().ui.selectedPage,
-            this.store.getState().interaction.focusScope
+            this.store.getState().interaction.focusScope,
         );
     }
 
@@ -295,12 +327,16 @@ export class TuiRuntime {
     async handleInput(input: string, key: TuiAppKey): Promise<void> {
         const intents = this.keyDispatcher.dispatch(
             this.store.getState().interaction.focusScope,
-            { input, key }
+            { input, key },
         );
         await this.commandDispatcher.dispatchMany(intents);
     }
 
-    async openTerminal(instance: string | undefined, columns: number, rows: number): Promise<void> {
+    async openTerminal(
+        instance: string | undefined,
+        columns: number,
+        rows: number,
+    ): Promise<void> {
         this.#terminalColumns = Math.max(1, Math.floor(columns));
         this.#terminalRows = Math.max(1, Math.floor(rows));
 
@@ -309,27 +345,31 @@ export class TuiRuntime {
             this.terminal.setUnavailable(
                 "Select an instance from the lower sidebar list.",
                 this.#terminalColumns,
-                this.#terminalRows
+                this.#terminalRows,
             );
             return;
         }
 
         const current = this.terminal.getSnapshot();
         if (
-            this.#terminalInstance === instance
-            && (current.status === "starting" || current.status === "running" || current.status === "exited")
+            this.#terminalInstance === instance &&
+            (current.status === "starting" ||
+                current.status === "running" ||
+                current.status === "exited")
         ) {
             this.terminal.resize(this.#terminalColumns, this.#terminalRows);
             return;
         }
 
-        const entry = this.store.getState().instances.find((candidate) => candidate.name === instance);
+        const entry = this.store
+            .getState()
+            .instances.find((candidate) => candidate.name === instance);
         if (entry === undefined) {
             this.#terminalInstance = instance;
             this.terminal.setError(
                 "Selected instance is unavailable.",
                 this.#terminalColumns,
-                this.#terminalRows
+                this.#terminalRows,
             );
             return;
         }
@@ -339,7 +379,7 @@ export class TuiRuntime {
                 configView: this.store.getState().configView,
                 environment: process.env,
                 instance: entry,
-                snapshot: this.store.getState().snapshotsByInstance[instance]
+                snapshot: this.store.getState().snapshotsByInstance[instance],
             });
             this.#terminalInstance = instance;
             await this.terminal.start({
@@ -347,14 +387,14 @@ export class TuiRuntime {
                 command,
                 environment: process.env,
                 instance,
-                rows: this.#terminalRows
+                rows: this.#terminalRows,
             });
         } catch (error) {
             this.#terminalInstance = instance;
             this.terminal.setError(
                 readErrorMessage(error),
                 this.#terminalColumns,
-                this.#terminalRows
+                this.#terminalRows,
             );
         }
     }
@@ -387,9 +427,17 @@ export class TuiRuntime {
     }
 
     renderTextDetailImage(visible: boolean): void {
-        const detail = topTuiOverlay(this.store.getState().interaction.overlays);
-        if (!visible || detail?.kind !== "text-detail" || detail.image === undefined) {
-            const clear = terminalImageClearSequence(this.#terminalImageSupport);
+        const detail = topTuiOverlay(
+            this.store.getState().interaction.overlays,
+        );
+        if (
+            !visible ||
+            detail?.kind !== "text-detail" ||
+            detail.image === undefined
+        ) {
+            const clear = terminalImageClearSequence(
+                this.#terminalImageSupport,
+            );
             if (clear.length > 0) {
                 this.#stdout.write(clear);
             }
@@ -398,7 +446,7 @@ export class TuiRuntime {
 
         const region = buildTuiTextDetailImageRegion(this.store.getState(), {
             columns: this.columns,
-            rows: this.rows
+            rows: this.rows,
         });
         if (region === undefined) {
             return;
@@ -406,7 +454,7 @@ export class TuiRuntime {
         const frame = renderTerminalImageFrame({
             image: detail.image,
             region,
-            support: this.#terminalImageSupport
+            support: this.#terminalImageSupport,
         });
         if (frame.sequence.length > 0) {
             this.#stdout.write(frame.sequence);
@@ -415,7 +463,9 @@ export class TuiRuntime {
 
     renderTerminalGraphics(visible: boolean): void {
         if (!visible || this.store.getState().ui.selectedPage !== "terminal") {
-            const clear = terminalGraphicsClearSequence(this.#terminalGraphicsSupport);
+            const clear = terminalGraphicsClearSequence(
+                this.#terminalGraphicsSupport,
+            );
             if (clear.length > 0) {
                 this.#stdout.write(clear);
             }
@@ -424,19 +474,20 @@ export class TuiRuntime {
 
         const region = buildTuiTerminalViewportRegion(this.store.getState(), {
             columns: this.columns,
-            rows: this.rows
+            rows: this.rows,
         });
         if (region === undefined) {
             return;
         }
 
         const snapshot = this.terminal.getSnapshot();
-        const transient = this.terminal.takePendingGraphics()
+        const transient = this.terminal
+            .takePendingGraphics()
             .filter((graphic) => !graphic.persistent)
             .map((graphic) => ({
                 ...graphic,
                 x: graphic.column,
-                y: graphic.line - snapshot.scroll.viewportLine
+                y: graphic.line - snapshot.scroll.viewportLine,
             }));
         const persistent = this.terminal.getVisibleGraphics();
         const graphics = [...transient, ...persistent];
@@ -444,7 +495,7 @@ export class TuiRuntime {
             clear: true,
             graphics,
             region,
-            support: this.#terminalGraphicsSupport
+            support: this.#terminalGraphicsSupport,
         });
         if (frame.length > 0) {
             this.#stdout.write(frame);
@@ -468,15 +519,12 @@ export class TuiRuntime {
     }
 
     #mountInk(): void {
-        this.#ink = render(
-            React.createElement(TuiApp, { runtime: this }),
-            {
-                debug: this.#inkDebug,
-                exitOnCtrlC: false,
-                stdin: this.#inkStdin,
-                stdout: this.#stdout
-            }
-        );
+        this.#ink = render(React.createElement(TuiApp, { runtime: this }), {
+            debug: this.#inkDebug,
+            exitOnCtrlC: false,
+            stdin: this.#inkStdin,
+            stdout: this.#stdout,
+        });
     }
 
     #startInput(): void {
@@ -500,16 +548,23 @@ export class TuiRuntime {
             return;
         }
         if (
-            this.store.getState().ui.selectedPage === "terminal"
-            && this.store.getState().interaction.focusScope === "terminal"
+            this.store.getState().ui.selectedPage === "terminal" &&
+            this.store.getState().interaction.focusScope === "terminal"
         ) {
             this.#mouseBuffer = "";
             let focused = true;
-            for (const action of this.#terminalInputRouter.push(chunk.toString())) {
+            for (const action of this.#terminalInputRouter.push(
+                chunk.toString(),
+            )) {
                 if (action.type === "focus.leave") {
                     focused = false;
-                    const cursor = this.store.getState().interaction.sidebarCursor;
-                    this.store.setFocusScope(cursor?.kind === "instance" ? "sidebarInstances" : "sidebarPages");
+                    const cursor =
+                        this.store.getState().interaction.sidebarCursor;
+                    this.store.setFocusScope(
+                        cursor?.kind === "instance"
+                            ? "sidebarInstances"
+                            : "sidebarPages",
+                    );
                     continue;
                 }
                 if (action.type === "data") {
@@ -546,7 +601,7 @@ export class TuiRuntime {
         const input = this.#mouseBuffer + chunk.toString();
         const pattern = new RegExp(
             `${String.fromCharCode(27)}\\[<(\\d+);(\\d+);(\\d+)([Mm])`,
-            "g"
+            "g",
         );
         let cursor = 0;
 
@@ -558,7 +613,7 @@ export class TuiRuntime {
                 button: Number(match[1]),
                 kind: match[4] === "M" ? "press" : "release",
                 x: Number(match[2]),
-                y: Number(match[3])
+                y: Number(match[3]),
             });
         }
 
@@ -575,7 +630,9 @@ export class TuiRuntime {
 
     #syncTerminalFocus(): void {
         const state = this.store.getState();
-        const focused = state.ui.selectedPage === "terminal" && state.interaction.focusScope === "terminal";
+        const focused =
+            state.ui.selectedPage === "terminal" &&
+            state.interaction.focusScope === "terminal";
         if (focused === this.#terminalFocused) {
             return;
         }
@@ -613,21 +670,22 @@ export class TuiRuntime {
     }): Promise<void> {
         const region = buildTuiTerminalViewportRegion(this.store.getState(), {
             columns: this.columns,
-            rows: this.rows
+            rows: this.rows,
         });
         if (region === undefined) {
             await this.#handleMouse(event);
             return;
         }
 
-        const inside = event.x >= region.x
-            && event.x < region.x + region.width
-            && event.y >= region.y
-            && event.y < region.y + region.height;
+        const inside =
+            event.x >= region.x &&
+            event.x < region.x + region.width &&
+            event.y >= region.y &&
+            event.y < region.y + region.height;
         if (this.#terminalSelecting) {
             this.terminal.updateSelection(
                 Math.min(Math.max(1, event.x - region.x + 1), region.width),
-                Math.min(Math.max(1, event.y - region.y + 1), region.height)
+                Math.min(Math.max(1, event.y - region.y + 1), region.height),
             );
             if (event.kind === "release") {
                 this.#terminalSelecting = false;
@@ -644,18 +702,18 @@ export class TuiRuntime {
             button: event.button,
             kind: event.kind,
             x: event.x - region.x + 1,
-            y: event.y - region.y + 1
+            y: event.y - region.y + 1,
         } as const;
         const tracking = this.terminal.getSnapshot().modes.mouseTracking;
         const selectionModifier = (event.button & 4) !== 0;
         const leftButton = (event.button & 3) === 0;
         const motion = (event.button & 32) !== 0;
         if (
-            event.kind === "press"
-            && leftButton
-            && !motion
-            && (event.button & 64) === 0
-            && (tracking === "none" || selectionModifier)
+            event.kind === "press" &&
+            leftButton &&
+            !motion &&
+            (event.button & 64) === 0 &&
+            (tracking === "none" || selectionModifier)
         ) {
             this.#terminalSelecting = true;
             this.terminal.beginSelection(relative.x, relative.y);
@@ -666,9 +724,9 @@ export class TuiRuntime {
         }
 
         if (
-            event.kind === "press"
-            && (event.button & 64) !== 0
-            && tracking === "none"
+            event.kind === "press" &&
+            (event.button & 64) !== 0 &&
+            tracking === "none"
         ) {
             this.terminal.scrollLines((event.button & 1) === 0 ? -3 : 3);
         }
@@ -694,15 +752,16 @@ export class TuiRuntime {
         }
         const regions = buildTuiHitRegions(this.store.getState(), {
             columns: this.columns,
-            rows: this.rows
+            rows: this.rows,
         });
         if ((event.button & 64) !== 0) {
             const target = hitTargetAt(regions, event.x, event.y);
             if (target?.kind === "scrollViewport") {
                 await this.commandDispatcher.dispatch({
-                    type: (event.button & 1) === 0
-                        ? "screen.pageUp"
-                        : "screen.pageDown"
+                    type:
+                        (event.button & 1) === 0
+                            ? "screen.pageUp"
+                            : "screen.pageDown",
                 });
             }
             return;
@@ -720,17 +779,24 @@ export class TuiRuntime {
         if (target.kind === "page") {
             await this.commandDispatcher.dispatch({
                 page: target.id as TuiPageId,
-                type: "page.select"
+                type: "page.select",
             });
             this.focusManager.setFocus({
                 id: target.id as TuiPageId,
-                kind: "page"
+                kind: "page",
             });
             return;
         }
         if (target.kind === "instance") {
             this.store.setSelectedInstance(target.id);
             this.focusManager.setFocus({ id: target.id, kind: "instance" });
+            return;
+        }
+        if (target.kind === "overviewInstance") {
+            this.focusManager.setFocus({
+                id: `overview-instance:${target.instance}`,
+                kind: "box",
+            });
             return;
         }
         if (target.kind === "scrollViewport") {
@@ -827,7 +893,7 @@ class AlternateScreen {
         }
         this.#active = true;
         this.#stdout.write(
-            "\u001B[?1049h\u001B[?25l\u001B[?1000h\u001B[?1002h\u001B[?1006h\u001B[?2004h"
+            "\u001B[?1049h\u001B[?25l\u001B[?1000h\u001B[?1002h\u001B[?1006h\u001B[?2004h",
         );
     }
 
@@ -837,7 +903,7 @@ class AlternateScreen {
         }
         this.#active = false;
         this.#stdout.write(
-            "\u001B[?2004l\u001B[?1006l\u001B[?1002l\u001B[?1000l\u001B[?1l\u001B>\u001B[?25h\u001B[?1049l"
+            "\u001B[?2004l\u001B[?1006l\u001B[?1002l\u001B[?1000l\u001B[?1l\u001B>\u001B[?25h\u001B[?1049l",
         );
     }
 }

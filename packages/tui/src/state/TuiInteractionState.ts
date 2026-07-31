@@ -1,7 +1,15 @@
-import type { ArtifactViewImageResult, InstanceCreateSchema, InstanceCreateSummary } from "@portable-devshell/shared";
+import type {
+    ArtifactViewImageResult,
+    InstanceCreateSchema,
+    InstanceCreateSummary,
+} from "@portable-devshell/shared";
 
 import type { TuiOverlay } from "./overlay/TuiOverlay.js";
-import type { TuiAuditPageState, TuiFocusScope, TuiPageId, TuiSidebarCursor } from "./TuiUiState.js";
+import type {
+    TuiFocusScope,
+    TuiPageId,
+    TuiSidebarCursor,
+} from "./TuiUiState.js";
 
 export type TuiEditorKind = "config" | "connector" | "create";
 
@@ -18,53 +26,14 @@ export interface TuiEditorState {
 
 export type TuiMode = TuiFocusScope;
 
-export interface TuiConfirmDialogState {
-    body: string;
-    cancelLabel: string;
-    confirmIntent: TuiUiIntent;
-    confirmLabel: string;
-    open: boolean;
-    title: string;
-}
-
-export interface TuiSearchState {
-    open: boolean;
-}
-
-export interface TuiTextDetailState {
-    body: string;
-    image?: ArtifactViewImageResult;
-    open: boolean;
-    scrollOffset: number;
-    title: string;
-}
-
-export interface TuiToolFormState {
-    input: string;
-    instance: string;
-    open: boolean;
-    toolName: string;
-}
-
 export interface TuiInteractionState {
-    auditPage: TuiAuditPageState;
-    confirmDialog: TuiConfirmDialogState;
     dirty: boolean;
+    editor?: TuiEditorState;
     focusScope: TuiFocusScope;
     overlays: readonly TuiOverlay[];
     redrawNonce: number;
-    restoreStack: Array<{
-        focusScope: TuiFocusScope;
-        mainFocusId?: string;
-        sidebarFocus: "pages" | "instances";
-    }>;
     screenStatusByPage: Partial<Record<TuiPageId, string>>;
-    selectedConfirmButton: "cancel" | "confirm";
     selectedDetailLineIds: Record<string, string>;
-    search: TuiSearchState;
-    editor?: TuiEditorState;
-    toolForm?: TuiToolFormState;
-    textDetail: TuiTextDetailState;
     sidebarCursor?: TuiSidebarCursor;
 }
 
@@ -75,7 +44,10 @@ export type TuiUiIntent =
     | { type: "page.reload" }
     | { type: "control.restart" }
     | { index: number; type: "instance.selectIndex" }
-    | { direction: "next" | "previous" | "up" | "down" | "left" | "right"; type: "focus.move" }
+    | {
+          direction: "next" | "previous" | "up" | "down" | "left" | "right";
+          type: "focus.move";
+      }
     | { type: "focus.activate" }
     | { type: "ui.cancel" }
     | { type: "ui.help" }
@@ -89,7 +61,12 @@ export type TuiUiIntent =
     | { type: "toolForm.backspace" }
     | { type: "toolForm.submit" }
     | { type: "toolForm.cancel" }
-    | { kind: TuiEditorKind; key: string; schema?: InstanceCreateSchema; type: "editor.open" }
+    | {
+          kind: TuiEditorKind;
+          key: string;
+          schema?: InstanceCreateSchema;
+          type: "editor.open";
+      }
     | { type: "editor.close" }
     | { text: string; type: "editor.append" }
     | { type: "editor.backspace" }
@@ -108,12 +85,24 @@ export type TuiUiIntent =
     | { type: "screen.home" }
     | { type: "screen.end" }
     | { type: "screen.toggle" }
-    | { body: string; image?: ArtifactViewImageResult; title: string; type: "textDetail.open" }
+    | {
+          body: string;
+          image?: ArtifactViewImageResult;
+          title: string;
+          type: "textDetail.open";
+      }
     | { type: "textDetail.close" }
     | { delta: number; type: "textDetail.scroll" }
     | { type: "logs.toggleFollow" }
     | { type: "logs.clearBuffer" }
-    | { body: string; cancelLabel?: string; confirmIntent: TuiUiIntent; confirmLabel?: string; title: string; type: "overlay.openConfirm" }
+    | {
+          body: string;
+          cancelLabel?: string;
+          confirmIntent: TuiUiIntent;
+          confirmLabel?: string;
+          title: string;
+          type: "overlay.openConfirm";
+      }
     | { type: "overlay.closeConfirm" }
     | { key: string; type: "ui.toggleExpanded" }
     | { focusScope: TuiFocusScope; type: "focus.scope.set" }
@@ -138,36 +127,28 @@ export type TuiUiIntent =
     | { type: "messageComposer.submit" }
     | { type: "messageComposer.forceSubmit" }
     | { type: "messageComposer.cancel" }
-    | { approvalId: string; decision: "approve" | "deny"; instance: string; type: "approval.decide" }
-    | { approvalId: string; decision: "approve" | "deny"; type: "oauthApproval.decide" }
+    | {
+          approvalId: string;
+          decision: "approve" | "deny";
+          instance: string;
+          type: "approval.decide";
+      }
+    | {
+          approvalId: string;
+          decision: "approve" | "deny";
+          type: "oauthApproval.decide";
+      }
     | { type: "approval.back" }
     | { approvalId: string; instance: string; type: "approval.confirmDeny" };
 
 export function createEmptyInteractionState(): TuiInteractionState {
     return {
-        auditPage: {
-            mode: "list"
-        },
-        confirmDialog: {
-            body: "",
-            cancelLabel: "Cancel",
-            confirmIntent: { type: "ui.cancel" },
-            confirmLabel: "Confirm",
-            open: false,
-            title: ""
-        },
         dirty: false,
         focusScope: "sidebarPages",
         overlays: [],
         redrawNonce: 0,
-        restoreStack: [],
         screenStatusByPage: {},
-        selectedConfirmButton: "cancel",
         selectedDetailLineIds: {},
-        search: {
-            open: false
-        },
-        textDetail: { body: "", open: false, scrollOffset: 0, title: "" },
-        sidebarCursor: undefined
+        sidebarCursor: undefined,
     };
 }

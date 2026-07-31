@@ -27,19 +27,26 @@ export class TuiCommandDispatcherViewport {
     dispatch(intent: TuiUiIntent): boolean | undefined {
         switch (intent.type) {
             case "focus.move":
-                return intent.direction === "next" || intent.direction === "previous"
+                return intent.direction === "next" ||
+                    intent.direction === "previous"
                     ? this.#moveAcrossScopes(intent.direction)
                     : this.#moveWithinScope(intent.direction);
             case "screen.pageUp":
                 this.#focus.pauseLogFollow();
-                return this.#focus.scrollMainColumn(-Math.max(1, this.#focus.boxViewportRows() - 1));
+                return this.#focus.scrollMainColumn(
+                    -Math.max(1, this.#focus.boxViewportRows() - 1),
+                );
             case "screen.pageDown":
-                return this.#focus.scrollMainColumn(Math.max(1, this.#focus.boxViewportRows() - 1));
+                return this.#focus.scrollMainColumn(
+                    Math.max(1, this.#focus.boxViewportRows() - 1),
+                );
             case "screen.home":
                 this.#focus.pauseLogFollow();
                 return this.#focus.setMainColumnOffset(0);
             case "screen.end":
-                return this.#focus.setMainColumnOffset(this.#focus.maxMainScrollOffset());
+                return this.#focus.setMainColumnOffset(
+                    this.#focus.maxMainScrollOffset(),
+                );
             case "screen.toggle":
                 return this.#toggleCurrentBox();
             case "logs.toggleFollow":
@@ -69,7 +76,9 @@ export class TuiCommandDispatcherViewport {
 
     returnToSidebar(): void {
         const cursor = this.#store.getState().interaction.sidebarCursor;
-        this.#store.setFocusScope(cursor?.kind === "instance" ? "sidebarInstances" : "sidebarPages");
+        this.#store.setFocusScope(
+            cursor?.kind === "instance" ? "sidebarInstances" : "sidebarPages",
+        );
     }
 
     #toggleCurrentBox(): boolean {
@@ -80,11 +89,14 @@ export class TuiCommandDispatcherViewport {
         if (boxId === undefined) {
             return false;
         }
-        const box = this.#projection.selectMainScreenModel(this.#store.getState()).boxes.find(
-            (candidate) => candidate.id === boxId
-        );
+        const box = this.#projection
+            .selectMainScreenModel(this.#store.getState())
+            .boxes.find((candidate) => candidate.id === boxId);
         if (box?.expandable !== true) {
-            this.#store.setScreenStatus(this.#store.getState().ui.selectedPage, "This box has no expandable details.");
+            this.#store.setScreenStatus(
+                this.#store.getState().ui.selectedPage,
+                "This box has no expandable details.",
+            );
             return false;
         }
         const key = box.expandedKey;
@@ -93,12 +105,18 @@ export class TuiCommandDispatcherViewport {
         if (expanded) {
             this.#store.setSelectedDetailLine(key, undefined);
         } else {
-            this.#store.setSelectedDetailLine(key, box.expandedLines[0]?.id);
+            const expandedBox = this.#projection
+                .selectMainScreenModel(this.#store.getState())
+                .boxes.find((candidate) => candidate.id === boxId);
+            this.#store.setSelectedDetailLine(
+                key,
+                expandedBox?.expandedLines[0]?.id,
+            );
         }
         this.#focus.ensureMainFocusVisible();
         this.#store.setScreenStatus(
             this.#store.getState().ui.selectedPage,
-            expanded ? "Collapsed box." : "Expanded box."
+            expanded ? "Collapsed box." : "Expanded box.",
         );
         return true;
     }
@@ -115,9 +133,15 @@ export class TuiCommandDispatcherViewport {
             this.#store.setLogsPausedAtSeq(instance, undefined);
             this.#focus.setMainColumnOffset(this.#focus.maxMainScrollOffset());
         } else {
-            this.#store.setLogsPausedAtSeq(instance, state.logsByInstance[instance]?.at(-1)?.seq);
+            this.#store.setLogsPausedAtSeq(
+                instance,
+                state.logsByInstance[instance]?.at(-1)?.seq,
+            );
         }
-        this.#store.setScreenStatus("logs", follow ? "Following new log entries." : "Log follow paused.");
+        this.#store.setScreenStatus(
+            "logs",
+            follow ? "Following new log entries." : "Log follow paused.",
+        );
         return true;
     }
 
@@ -132,7 +156,9 @@ export class TuiCommandDispatcherViewport {
 
     #moveAcrossScopes(direction: "next" | "previous"): boolean {
         const scope = this.#store.getState().interaction.focusScope;
-        const hasBoxes = this.#projection.selectMainBoxIds(this.#store.getState()).length > 0;
+        const hasBoxes =
+            this.#projection.selectMainBoxIds(this.#store.getState()).length >
+            0;
         if (
             scope === "confirm" ||
             scope === "approvalDetail" ||
@@ -176,21 +202,34 @@ export class TuiCommandDispatcherViewport {
             return false;
         }
         if (scope === "approvalDetail" || scope === "denyConfirm") {
-            return (direction === "up" || direction === "down") && this.#focusManager.move(direction);
+            return (
+                (direction === "up" || direction === "down") &&
+                this.#focusManager.move(direction)
+            );
         }
         if (scope === "boxDetail" || scope === "form" || scope === "wizard") {
             if (direction === "left" && scope === "boxDetail") {
                 this.returnToSidebar();
                 return true;
             }
-            return (direction === "up" || direction === "down") && this.#focusManager.move(direction);
+            return (
+                (direction === "up" || direction === "down") &&
+                this.#focusManager.move(direction)
+            );
         }
-        if ((scope === "sidebarPages" || scope === "sidebarInstances") && direction === "right") {
+        if (
+            (scope === "sidebarPages" || scope === "sidebarInstances") &&
+            direction === "right"
+        ) {
             if (this.#store.getState().ui.selectedPage === "terminal") {
                 this.#store.setFocusScope("terminal");
                 return true;
             }
-            if (this.#projection.selectMainBoxIds(this.#store.getState()).length === 0) return false;
+            if (
+                this.#projection.selectMainBoxIds(this.#store.getState())
+                    .length === 0
+            )
+                return false;
             this.#store.setFocusScope("mainBoxes");
             this.#focus.syncMainFocus();
             return true;

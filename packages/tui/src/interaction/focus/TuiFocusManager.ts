@@ -1,13 +1,19 @@
-import { type TuiFocusItem, isSameTuiFocusItem } from "../../state/focus/TuiFocusItem.js";
+import {
+    type TuiFocusItem,
+    isSameTuiFocusItem,
+} from "../../state/focus/TuiFocusItem.js";
 import type { TuiAppStore } from "../../state/TuiAppStore.js";
 import { topTuiOverlay } from "../../state/overlay/TuiOverlay.js";
-import type { TuiAppState } from "../../state/reducer/TuiStoreModel.js";
-import { TuiFocusGraph, type TuiFocusDirection } from "../../state/focus/TuiFocusGraph.js";
+import {
+    TuiFocusGraph,
+    type TuiFocusDirection,
+} from "../../state/focus/TuiFocusGraph.js";
 import { type TuiMode } from "../../state/TuiInteractionState.js";
 import type { TuiPageId } from "../../state/TuiUiState.js";
 
 export interface TuiFocusManagerContext {
     currentPage(): TuiPageId;
+    expandedKeyFor(boxId: string): string | undefined;
     graphFor(page: TuiPageId, mode: TuiMode): TuiFocusGraph;
     mode(): TuiMode;
 }
@@ -15,7 +21,11 @@ export interface TuiFocusManagerContext {
 export class TuiFocusManager {
     readonly #context: TuiFocusManagerContext;
     readonly #pageMemory = new Map<TuiPageId, TuiFocusItem>();
-    readonly #restoreStack: Array<{ focus?: TuiFocusItem; mode: TuiMode; page: TuiPageId }> = [];
+    readonly #restoreStack: Array<{
+        focus?: TuiFocusItem;
+        mode: TuiMode;
+        page: TuiPageId;
+    }> = [];
     readonly #store: TuiAppStore;
 
     constructor(store: TuiAppStore, context: TuiFocusManagerContext) {
@@ -38,12 +48,21 @@ export class TuiFocusManager {
                 return cursor;
             }
             const instance = this.#store.getState().ui.selectedInstance;
-            return instance === undefined ? undefined : { id: instance, kind: "instance" };
+            return instance === undefined
+                ? undefined
+                : { id: instance, kind: "instance" };
         }
         if (scope === "mainBoxes") {
             const state = this.#store.getState();
             const boxId = state.ui.mainFocusId;
-            const lineId = boxId === undefined ? undefined : state.interaction.selectedDetailLineIds[detailKey(state, boxId)];
+            const expandedKey =
+                boxId === undefined
+                    ? undefined
+                    : this.#context.expandedKeyFor(boxId);
+            const lineId =
+                expandedKey === undefined
+                    ? undefined
+                    : state.interaction.selectedDetailLineIds[expandedKey];
             if (boxId !== undefined && lineId !== undefined) {
                 return { boxId, id: lineId, kind: "line" };
             }
@@ -55,17 +74,30 @@ export class TuiFocusManager {
             if (boxId === undefined) {
                 return undefined;
             }
-            const key = detailKey(state, boxId);
-            const lineId = state.interaction.selectedDetailLineIds[key];
-            return lineId === undefined ? undefined : { boxId, id: lineId, kind: "line" };
+            const key = this.#context.expandedKeyFor(boxId);
+            const lineId =
+                key === undefined
+                    ? undefined
+                    : state.interaction.selectedDetailLineIds[key];
+            return lineId === undefined
+                ? undefined
+                : { boxId, id: lineId, kind: "line" };
         }
         if (scope === "confirm") {
-            const overlay = topTuiOverlay(this.#store.getState().interaction.overlays);
-            return overlay?.kind === "confirmation" ? { id: overlay.selectedAction, kind: "button" } : undefined;
+            const overlay = topTuiOverlay(
+                this.#store.getState().interaction.overlays,
+            );
+            return overlay?.kind === "confirmation"
+                ? { id: overlay.selectedAction, kind: "button" }
+                : undefined;
         }
         if (scope === "approvalDetail" || scope === "denyConfirm") {
-            const overlay = topTuiOverlay(this.#store.getState().interaction.overlays);
-            return overlay?.kind === "approval" ? { id: overlay.selectedAction, kind: "approvalAction" } : undefined;
+            const overlay = topTuiOverlay(
+                this.#store.getState().interaction.overlays,
+            );
+            return overlay?.kind === "approval"
+                ? { id: overlay.selectedAction, kind: "approvalAction" }
+                : undefined;
         }
         if (scope === "textDetail") {
             return undefined;
@@ -85,8 +117,17 @@ export class TuiFocusManager {
             if (boxId === undefined) {
                 return undefined;
             }
-            const lineId = state.interaction.selectedDetailLineIds[detailKey(state, boxId)];
-            return lineId === undefined ? undefined : { id: lineId, kind: lineId.includes(":button:") ? "button" : "field" };
+            const expandedKey = this.#context.expandedKeyFor(boxId);
+            const lineId =
+                expandedKey === undefined
+                    ? undefined
+                    : state.interaction.selectedDetailLineIds[expandedKey];
+            return lineId === undefined
+                ? undefined
+                : {
+                      id: lineId,
+                      kind: lineId.includes(":button:") ? "button" : "field",
+                  };
         }
         return undefined;
     }
@@ -103,7 +144,11 @@ export class TuiFocusManager {
         const graph = this.#context.graphFor(page, mode);
         const remembered = this.#pageMemory.get(page);
         const current = this.currentFocus();
-        const nextFocus = graph.includes(current) ? current : graph.includes(remembered) ? remembered : graph.first();
+        const nextFocus = graph.includes(current)
+            ? current
+            : graph.includes(remembered)
+              ? remembered
+              : graph.first();
         this.#applyFocus(nextFocus);
 
         if (nextFocus !== undefined) {
@@ -116,7 +161,10 @@ export class TuiFocusManager {
         const graph = this.#context.graphFor(page, this.currentMode());
         const next = graph.move(this.currentFocus(), direction);
 
-        if (next === undefined || isSameTuiFocusItem(next, this.currentFocus())) {
+        if (
+            next === undefined ||
+            isSameTuiFocusItem(next, this.currentFocus())
+        ) {
             return false;
         }
 
@@ -127,7 +175,10 @@ export class TuiFocusManager {
 
     setFocus(item: TuiFocusItem): boolean {
         const page = this.currentPage();
-        const graph = this.#context.graphFor(page, focusModeFor(item, this.currentMode()));
+        const graph = this.#context.graphFor(
+            page,
+            focusModeFor(item, this.currentMode()),
+        );
 
         if (!graph.includes(item)) {
             return false;
@@ -142,7 +193,7 @@ export class TuiFocusManager {
         this.#restoreStack.push({
             focus: this.currentFocus(),
             mode: this.currentMode(),
-            page: this.currentPage()
+            page: this.currentPage(),
         });
         this.#store.setFocusScope(mode);
     }
@@ -183,69 +234,91 @@ export class TuiFocusManager {
                 this.#store.setSidebarFocus("instances");
                 this.#store.setSidebarCursor(item);
                 return;
-            case "box":
+            case "box": {
                 this.#store.setFocusScope("mainBoxes");
                 this.#store.setMainFocusId(item.id);
-                this.#store.setSelectedDetailLine(detailKey(this.#store.getState(), item.id), undefined);
+                const expandedKey = this.#context.expandedKeyFor(item.id);
+                if (expandedKey !== undefined) {
+                    this.#store.setSelectedDetailLine(expandedKey, undefined);
+                }
                 return;
+            }
             case "line": {
-                const state = this.#store.getState();
                 this.#store.setFocusScope("mainBoxes");
                 this.#store.setMainFocusId(item.boxId);
-                this.#store.setSelectedDetailLine(detailKey(state, item.boxId), item.id);
+                const expandedKey = this.#context.expandedKeyFor(item.boxId);
+                if (expandedKey !== undefined) {
+                    this.#store.setSelectedDetailLine(expandedKey, item.id);
+                }
                 return;
             }
             case "approvalAction": {
-                const overlay = topTuiOverlay(this.#store.getState().interaction.overlays);
+                const overlay = topTuiOverlay(
+                    this.#store.getState().interaction.overlays,
+                );
                 if (overlay?.kind === "approval") {
-                    this.#store.replaceTopOverlay({ ...overlay, selectedAction: item.id });
+                    this.#store.replaceTopOverlay({
+                        ...overlay,
+                        selectedAction: item.id,
+                    });
                 }
                 return;
             }
-            case "button":
-                if (this.currentMode() === "form" || this.currentMode() === "wizard") {
+            case "button": {
+                if (
+                    this.currentMode() === "form" ||
+                    this.currentMode() === "wizard"
+                ) {
                     const state = this.#store.getState();
                     const boxId = state.ui.mainFocusId;
                     if (boxId !== undefined) {
-                        this.#store.setSelectedDetailLine(detailKey(state, boxId), item.id);
+                        const expandedKey = this.#context.expandedKeyFor(boxId);
+                        if (expandedKey !== undefined) {
+                            this.#store.setSelectedDetailLine(
+                                expandedKey,
+                                item.id,
+                            );
+                        }
                     }
                     return;
                 }
-                const overlay = topTuiOverlay(this.#store.getState().interaction.overlays);
+                const overlay = topTuiOverlay(
+                    this.#store.getState().interaction.overlays,
+                );
                 if (overlay?.kind === "confirmation") {
                     this.#store.setFocusScope("confirm");
-                    this.#store.replaceTopOverlay({ ...overlay, selectedAction: item.id === "confirm" ? "confirm" : "cancel" });
+                    this.#store.replaceTopOverlay({
+                        ...overlay,
+                        selectedAction:
+                            item.id === "confirm" ? "confirm" : "cancel",
+                    });
                 }
                 return;
+            }
             case "field":
-                if (this.currentMode() === "form" || this.currentMode() === "wizard") {
+                if (
+                    this.currentMode() === "form" ||
+                    this.currentMode() === "wizard"
+                ) {
                     const state = this.#store.getState();
                     const boxId = state.ui.mainFocusId;
                     if (boxId !== undefined) {
-                        this.#store.setSelectedDetailLine(detailKey(state, boxId), item.id);
+                        const expandedKey = this.#context.expandedKeyFor(boxId);
+                        if (expandedKey !== undefined) {
+                            this.#store.setSelectedDetailLine(
+                                expandedKey,
+                                item.id,
+                            );
+                        }
                     }
                     return;
                 }
-                this.#store.setFocusScope(this.currentMode() === "toolForm" ? "toolForm" : "search");
+                this.#store.setFocusScope(
+                    this.currentMode() === "toolForm" ? "toolForm" : "search",
+                );
                 return;
         }
     }
-}
-
-function detailKey(state: TuiAppState, boxId: string): string {
-    if (state.ui.selectedPage === "instances" && boxId.startsWith("instance:")) {
-        return `instances:${boxId.slice("instance:".length)}:instance`;
-    }
-
-    if (state.ui.selectedPage === "instances" && boxId === "create-wizard") {
-        return "instances:all:create-wizard";
-    }
-
-    if (state.ui.selectedPage === "instances" && boxId === "create-instance") {
-        return "instances:undefined:create-instance";
-    }
-
-    return `${state.ui.selectedPage}:${state.ui.selectedInstance}:${boxId}`;
 }
 
 function focusModeFor(item: TuiFocusItem, current: TuiMode): TuiMode {

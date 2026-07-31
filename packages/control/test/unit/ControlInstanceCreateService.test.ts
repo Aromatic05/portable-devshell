@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { InstanceRegistry, createDefaultControlConfig } from "../../src/testing.ts";
+import {
+    InstanceRegistry,
+    createDefaultControlConfig,
+} from "../../src/testing.ts";
 import { InstanceCreateCoordinator } from "../../src/control/instance/create/InstanceCreateCoordinator.ts";
 import { normalizeConfigInstanceDraft } from "@portable-devshell/shared";
 
@@ -14,10 +17,20 @@ test("instance create schema exposes supported container modes without running c
         "dockerfile",
         "compose",
         "existingImage",
-        "existingStoppedContainer"
+        "existingStoppedContainer",
     ]);
-    assert.equal(schema.container.presets.some((entry) => entry.preset === "arch"), true);
-    assert.deepEqual(schema.defaultMcpGroups, ["file", "bash", "artifact", "tmux", "todo"]);
+    assert.equal(
+        schema.container.presets.some((entry) => entry.preset === "arch"),
+        true,
+    );
+    assert.deepEqual(schema.defaultMcpGroups, [
+        "file",
+        "bash",
+        "artifact",
+        "tmux",
+        "todo",
+        "context",
+    ]);
 });
 
 test("Windows instance create schema exposes only supported providers", () => {
@@ -31,11 +44,11 @@ test("instance create validates docker preset drafts into container config", () 
     const summary = service.validateDraft({
         container: {
             mode: "preset",
-            preset: "arch"
+            preset: "arch",
         },
         name: "demo-docker",
         provider: "docker",
-        workspace: "/workspace"
+        workspace: "/workspace",
     });
 
     assert.deepEqual(summary.container, {
@@ -46,7 +59,7 @@ test("instance create validates docker preset drafts into container config", () 
         mounts: undefined,
         network: undefined,
         preset: "arch",
-        user: undefined
+        user: undefined,
     });
     assert.equal(summary.provider, "docker");
 });
@@ -58,17 +71,17 @@ test("instance create validates existing stopped container drafts with adoptLife
         container: {
             adoptLifecycle: true,
             containerName: "my-stopped-container",
-            mode: "existingStoppedContainer"
+            mode: "existingStoppedContainer",
         },
         name: "demo-podman",
         provider: "podman",
-        workspace: "/workspace"
+        workspace: "/workspace",
     });
 
     assert.deepEqual(summary.container, {
         adoptLifecycle: true,
         containerName: "my-stopped-container",
-        mode: "existingStoppedContainer"
+        mode: "existingStoppedContainer",
     });
 });
 
@@ -79,7 +92,7 @@ function createService(platform?: NodeJS.Platform) {
         configStore: {
             async write(nextConfig) {
                 config = nextConfig;
-            }
+            },
         },
         getConfig: () => config,
         getMcpHost: () => undefined,
@@ -87,40 +100,42 @@ function createService(platform?: NodeJS.Platform) {
         platform,
         setConfig: (nextConfig) => {
             config = nextConfig;
-        }
+        },
     });
 }
 
 test("MCP instance_create creates only SSH and strips instance management from inherited policy", async () => {
     let config = createDefaultControlConfig();
     config.mcp.enabled = true;
-    config.instances.push(normalizeConfigInstanceDraft({
-        approvalPolicy: {
-            mode: "ask",
-            rules: [
-                {
-                    decision: "ask",
-                    match: "exact",
-                    source: "mcp",
-                    toolName: "bash_run"
-                }
-            ]
-        },
-        enabled: true,
-        mcp: {
+    config.instances.push(
+        normalizeConfigInstanceDraft({
+            approvalPolicy: {
+                mode: "ask",
+                rules: [
+                    {
+                        decision: "ask",
+                        match: "exact",
+                        source: "mcp",
+                        toolName: "bash_run",
+                    },
+                ],
+            },
             enabled: true,
-            tools: {
-                capabilities: ["read", "write", "execute", "manage"],
-                groups: ["file", "bash", "artifact", "instance"]
-            }
-        },
-        name: "main-pc",
-        provider: "local",
-        security: {
-            mode: "workspace"
-        },
-        workspace: "/home/dev/main"
-    }));
+            mcp: {
+                enabled: true,
+                tools: {
+                    capabilities: ["read", "write", "execute", "manage"],
+                    groups: ["file", "bash", "artifact", "instance"],
+                },
+            },
+            name: "main-pc",
+            provider: "local",
+            security: {
+                mode: "workspace",
+            },
+            workspace: "/home/dev/main",
+        }),
+    );
     const registry = new InstanceRegistry([]);
     const registered: Array<Record<string, unknown>> = [];
     const gateway = {} as never;
@@ -128,19 +143,20 @@ test("MCP instance_create creates only SSH and strips instance management from i
         configStore: {
             async write(nextConfig) {
                 config = nextConfig;
-            }
+            },
         },
         getConfig: () => config,
-        getMcpHost: () => ({
-            registerInstance(instance: Record<string, unknown>) {
-                registered.push(instance);
-            }
-        }) as never,
+        getMcpHost: () =>
+            ({
+                registerInstance(instance: Record<string, unknown>) {
+                    registered.push(instance);
+                },
+            }) as never,
         getMcpInstanceGateway: () => gateway,
         instanceRegistry: registry,
         setConfig: (nextConfig) => {
             config = nextConfig;
-        }
+        },
     });
 
     const result = await service.createSshInstanceFromMcp("main-pc", {
@@ -149,29 +165,38 @@ test("MCP instance_create creates only SSH and strips instance management from i
         name: "remote-server",
         port: 2222,
         user: "dev",
-        workspace: "/srv/project"
+        workspace: "/srv/project",
     });
 
     assert.equal(result.name, "remote-server");
-    const created = config.instances.find((instance) => instance.name === "remote-server");
+    const created = config.instances.find(
+        (instance) => instance.name === "remote-server",
+    );
     assert.ok(created !== undefined);
     assert.equal(created.provider, "ssh");
     assert.equal(created.mcp.enabled, true);
     assert.equal(created.mcp.path, "/remote-server/mcp");
     assert.deepEqual(created.mcp.tools.groups, ["file", "bash", "artifact"]);
-    assert.deepEqual(created.mcp.tools.capabilities, ["read", "write", "execute"]);
+    assert.deepEqual(created.mcp.tools.capabilities, [
+        "read",
+        "write",
+        "execute",
+    ]);
     assert.equal(created.security?.mode, "workspace");
-    assert.deepEqual(created.approvalPolicy, config.instances[0]?.approvalPolicy);
+    assert.deepEqual(
+        created.approvalPolicy,
+        config.instances[0]?.approvalPolicy,
+    );
     assert.equal(
         created.ssh?.command,
-        "'ssh' '-p' '2222' '-i' '/home/dev/.ssh/work key' 'dev@server.example.com'"
+        "'ssh' '-p' '2222' '-i' '/home/dev/.ssh/work key' 'dev@server.example.com'",
     );
     assert.ok(registry.get("remote-server") !== undefined);
     assert.equal(registered.length, 1);
     assert.equal(registered[0]?.gateway, gateway);
     assert.deepEqual(registered[0]?.policy, {
         capabilities: ["read", "write", "execute"],
-        groups: ["file", "bash", "artifact"]
+        groups: ["file", "bash", "artifact"],
     });
 });
 
@@ -182,9 +207,9 @@ test("MCP instance_create rejects SSH option injection through host and user", a
         service.createSshInstanceFromMcp("main-pc", {
             host: "-oProxyCommand=sh",
             name: "remote-server",
-            workspace: "/srv/project"
+            workspace: "/srv/project",
         }),
-        /host must not contain whitespace, control characters, or begin with '-'/u
+        /host must not contain whitespace, control characters, or begin with '-'/u,
     );
 
     await assert.rejects(
@@ -192,39 +217,41 @@ test("MCP instance_create rejects SSH option injection through host and user", a
             host: "server.example.com",
             name: "remote-server",
             user: "dev user",
-            workspace: "/srv/project"
+            workspace: "/srv/project",
         }),
-        /user must not contain whitespace, control characters, or begin with '-'/u
+        /user must not contain whitespace, control characters, or begin with '-'/u,
     );
 });
 
 function createMcpCreateService() {
     let config = createDefaultControlConfig();
-    config.instances.push(normalizeConfigInstanceDraft({
-        enabled: true,
-        mcp: {
+    config.instances.push(
+        normalizeConfigInstanceDraft({
             enabled: true,
-            tools: {
-                capabilities: ["manage"],
-                groups: ["instance"]
-            }
-        },
-        name: "main-pc",
-        provider: "local",
-        workspace: "/home/dev/main"
-    }));
+            mcp: {
+                enabled: true,
+                tools: {
+                    capabilities: ["manage"],
+                    groups: ["instance"],
+                },
+            },
+            name: "main-pc",
+            provider: "local",
+            workspace: "/home/dev/main",
+        }),
+    );
 
     return new InstanceCreateCoordinator({
         configStore: {
             async write(nextConfig) {
                 config = nextConfig;
-            }
+            },
         },
         getConfig: () => config,
         getMcpHost: () => undefined,
         instanceRegistry: new InstanceRegistry([]),
         setConfig: (nextConfig) => {
             config = nextConfig;
-        }
+        },
     });
 }

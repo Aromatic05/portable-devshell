@@ -14,22 +14,36 @@ test("context_message_read delivers messages only through the validated ctxId", 
     const calls: Array<{ ctxId: string; instance: string }> = [];
     const handler = new McpEndpointHandlerContextMessage({
         gateway: {
-            readContextMessages: async (instance, ctxId) => {
+            readContextMessages: async (instance: string, ctxId: string) => {
                 calls.push({ ctxId, instance });
-                return { messages: [{ createdAt: "2026-07-31T00:00:00.000Z", id: "message-1", text: "Review the failure" }] };
-            }
+                return {
+                    messages: [
+                        {
+                            createdAt: "2026-07-31T00:00:00.000Z",
+                            id: "message-1",
+                            text: "Review the failure",
+                        },
+                    ],
+                };
+            },
         } as never,
-        instanceName: "alpha"
+        instanceName: "alpha",
     });
 
     const result = await handler.call(
         "context_message_read",
         {},
-        { ctxId: "ctx-a", source: "mcp" }
+        { ctxId: "ctx-a", source: "mcp" },
     );
 
     assert.deepEqual(calls, [{ ctxId: "ctx-a", instance: "alpha" }]);
     assert.deepEqual(result, {
-        messages: [{ createdAt: "2026-07-31T00:00:00.000Z", id: "message-1", text: "Review the failure" }]
+        messages: [
+            {
+                createdAt: "2026-07-31T00:00:00.000Z",
+                id: "message-1",
+                text: "Review the failure",
+            },
+        ],
     });
 });

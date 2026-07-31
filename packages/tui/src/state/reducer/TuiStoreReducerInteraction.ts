@@ -1,45 +1,30 @@
 import type { TuiAppAction, TuiAppState } from "./TuiStoreModel.js";
 
-export function reduceTuiStoreReducerInteraction(state: TuiAppState, action: TuiAppAction): TuiAppState | undefined {
+export function reduceTuiStoreReducerInteraction(
+    state: TuiAppState,
+    action: TuiAppAction,
+): TuiAppState | undefined {
     switch (action.type) {
         case "focus.scope.set":
             return {
                 ...state,
                 interaction: {
                     ...state.interaction,
-                    focusScope: action.focusScope
+                    focusScope: action.focusScope,
                 },
-                ui: {
-                    ...state.ui,
-                    focusScope: action.focusScope
-                }
-            };
-        case "auditPage.set":
-            return {
-                ...state,
-                interaction: {
-                    ...state.interaction,
-                    auditPage: action.auditPage
-                }
             };
         case "mainFocus.set":
             return {
                 ...state,
                 ui: {
                     ...state.ui,
-                    mainFocusId: action.mainFocusId
-                }
-            };
-        case "confirm.focus":
-            return {
-                ...state,
-                interaction: {
-                    ...state.interaction,
-                    selectedConfirmButton: action.button
-                }
+                    mainFocusId: action.mainFocusId,
+                },
             };
         case "detailLine.select": {
-            const selectedDetailLineIds = { ...state.interaction.selectedDetailLineIds };
+            const selectedDetailLineIds = {
+                ...state.interaction.selectedDetailLineIds,
+            };
 
             if (action.lineId === undefined) {
                 delete selectedDetailLineIds[action.key];
@@ -51,8 +36,8 @@ export function reduceTuiStoreReducerInteraction(state: TuiAppState, action: Tui
                 ...state,
                 interaction: {
                     ...state.interaction,
-                    selectedDetailLineIds
-                }
+                    selectedDetailLineIds,
+                },
             };
         }
         case "sidebar.cursor.set":
@@ -60,43 +45,16 @@ export function reduceTuiStoreReducerInteraction(state: TuiAppState, action: Tui
                 ...state,
                 interaction: {
                     ...state.interaction,
-                    sidebarCursor: action.cursor
-                }
+                    sidebarCursor: action.cursor,
+                },
             };
         case "sidebar.focus.set":
             return {
                 ...state,
                 ui: {
                     ...state.ui,
-                    sidebarFocus: action.sidebarFocus
-                }
-            };
-        case "overlay.setConfirmDialog":
-            return {
-                ...state,
-                interaction: {
-                    ...state.interaction,
-                    confirmDialog: {
-                        body: action.body,
-                        cancelLabel: action.cancelLabel,
-                        confirmIntent: action.confirmIntent,
-                        confirmLabel: action.confirmLabel,
-                        open: action.open,
-                        title: action.title
-                    },
-                    selectedConfirmButton: "cancel"
-                }
-            };
-        case "search.setOpen":
-            return {
-                ...state,
-                interaction: {
-                    ...state.interaction,
-                    search: {
-                        ...state.interaction.search,
-                        open: action.value
-                    }
-                }
+                    sidebarFocus: action.sidebarFocus,
+                },
             };
         case "search.setQuery":
             return {
@@ -105,52 +63,17 @@ export function reduceTuiStoreReducerInteraction(state: TuiAppState, action: Tui
                     ...state.ui,
                     searchQueries: {
                         ...state.ui.searchQueries,
-                        [action.page]: action.query
-                    }
-                }
-            };
-        case "toolForm.set":
-            return {
-                ...state,
-                interaction: {
-                    ...state.interaction,
-                    toolForm: {
-                        input: action.input,
-                        instance: action.instance,
-                        open: true,
-                        toolName: action.toolName
-                    }
-                }
-            };
-        case "toolForm.clear":
-            return {
-                ...state,
-                interaction: {
-                    ...state.interaction,
-                    toolForm: undefined
-                }
-            };
-        case "textDetail.set":
-            return {
-                ...state,
-                interaction: {
-                    ...state.interaction,
-                    textDetail: {
-                        body: action.body,
-                        image: action.image,
-                        open: action.open,
-                        scrollOffset: action.scrollOffset,
-                        title: action.title
-                    }
-                }
+                        [action.page]: action.query,
+                    },
+                },
             };
         case "editor.set":
             return {
                 ...state,
                 interaction: {
                     ...state.interaction,
-                    editor: action.editor
-                }
+                    editor: action.editor,
+                },
             };
         case "formDraft.set":
             return {
@@ -159,24 +82,26 @@ export function reduceTuiStoreReducerInteraction(state: TuiAppState, action: Tui
                     ...state.ui,
                     dirtyForms: {
                         ...state.ui.dirtyForms,
-                        [action.key]: action.dirty
+                        [action.key]: action.dirty,
                     },
                     formDrafts: {
                         ...state.ui.formDrafts,
-                        [action.key]: action.value
-                    }
-                }
+                        [action.key]: action.value,
+                    },
+                },
             };
         case "formDraft.clear": {
-            const { [action.key]: _removedDraft, ...formDrafts } = state.ui.formDrafts;
-            const { [action.key]: _removedDirty, ...dirtyForms } = state.ui.dirtyForms;
+            const { [action.key]: _removedDraft, ...formDrafts } =
+                state.ui.formDrafts;
+            const { [action.key]: _removedDirty, ...dirtyForms } =
+                state.ui.dirtyForms;
             return {
                 ...state,
                 ui: {
                     ...state.ui,
                     dirtyForms,
-                    formDrafts
-                }
+                    formDrafts,
+                },
             };
         }
         case "screen.setStatus":
@@ -186,25 +111,25 @@ export function reduceTuiStoreReducerInteraction(state: TuiAppState, action: Tui
                     ...state.interaction,
                     screenStatusByPage: {
                         ...state.interaction.screenStatusByPage,
-                        [action.page]: action.status
-                    }
-                }
+                        [action.page]: action.status,
+                    },
+                },
             };
         case "ui.selectInstance":
             return {
                 ...state,
                 ui: {
                     ...state.ui,
-                    selectedInstance: action.instance
-                }
+                    selectedInstance: action.instance,
+                },
             };
         case "ui.selectPage":
             return {
                 ...state,
                 ui: {
                     ...state.ui,
-                    selectedPage: action.page
-                }
+                    selectedPage: action.page,
+                },
             };
         case "ui.toggleExpanded":
             return {
@@ -213,9 +138,10 @@ export function reduceTuiStoreReducerInteraction(state: TuiAppState, action: Tui
                     ...state.ui,
                     expandedBoxes: {
                         ...state.ui.expandedBoxes,
-                        [action.key]: state.ui.expandedBoxes[action.key] !== true
-                    }
-                }
+                        [action.key]:
+                            state.ui.expandedBoxes[action.key] !== true,
+                    },
+                },
             };
         case "ui.setScrollOffset":
             return {
@@ -224,9 +150,9 @@ export function reduceTuiStoreReducerInteraction(state: TuiAppState, action: Tui
                     ...state.ui,
                     scrollOffsets: {
                         ...state.ui.scrollOffsets,
-                        [action.key]: action.offset
-                    }
-                }
+                        [action.key]: action.offset,
+                    },
+                },
             };
         case "logs.setFollow":
             return {
@@ -235,9 +161,9 @@ export function reduceTuiStoreReducerInteraction(state: TuiAppState, action: Tui
                     ...state.ui,
                     logsFollowByInstance: {
                         ...state.ui.logsFollowByInstance,
-                        [action.instance]: action.follow
-                    }
-                }
+                        [action.instance]: action.follow,
+                    },
+                },
             };
         case "logs.setPausedAtSeq":
             return {
@@ -246,40 +172,17 @@ export function reduceTuiStoreReducerInteraction(state: TuiAppState, action: Tui
                     ...state.ui,
                     logsPausedAtSeqByInstance: {
                         ...state.ui.logsPausedAtSeqByInstance,
-                        [action.instance]: action.seq
-                    }
-                }
+                        [action.instance]: action.seq,
+                    },
+                },
             };
         case "ui.bumpRedrawNonce":
             return {
                 ...state,
                 interaction: {
                     ...state.interaction,
-                    redrawNonce: state.interaction.redrawNonce + 1
-                }
-            };
-        case "restore.push":
-            return {
-                ...state,
-                interaction: {
-                    ...state.interaction,
-                    restoreStack: [
-                        ...state.interaction.restoreStack,
-                        {
-                            focusScope: action.focusScope,
-                            mainFocusId: action.mainFocusId,
-                            sidebarFocus: action.sidebarFocus
-                        }
-                    ]
-                }
-            };
-        case "restore.pop":
-            return {
-                ...state,
-                interaction: {
-                    ...state.interaction,
-                    restoreStack: state.interaction.restoreStack.slice(0, -1)
-                }
+                    redrawNonce: state.interaction.redrawNonce + 1,
+                },
             };
     }
 }

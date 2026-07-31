@@ -1,72 +1,150 @@
-import type { ApprovalRequest, ContextMessageRecord, ToolCallRecord } from "@portable-devshell/shared";
+import type {
+    ApprovalRequest,
+    ContextMessageRecord,
+    ToolCallRecord,
+} from "@portable-devshell/shared";
 
 import type { TuiAppState } from "../../../state/reducer/TuiStoreModel.js";
 import type { TuiExpandableBoxStatus } from "../../../state/TuiUiState.js";
 
+export type TuiAuditContextKey =
+    | { readonly kind: "unscoped" }
+    | { readonly ctxId: string; readonly kind: "context" };
+
 export interface TuiAuditContextSummary {
     readonly approvals: readonly ApprovalRequest[];
     readonly calls: readonly ToolCallRecord[];
-    readonly ctxId: string;
+    readonly key: TuiAuditContextKey;
+    readonly label: string;
     readonly latestActivityAt: string;
     readonly latestCall?: ToolCallRecord;
     readonly messages: readonly ContextMessageRecord[];
     readonly status: TuiExpandableBoxStatus;
 }
 
-export function projectAuditContexts(state: TuiAppState, instance: string): TuiAuditContextSummary[] {
-    const contexts = new Map<string, { approvals: ApprovalRequest[]; calls: ToolCallRecord[]; messages: ContextMessageRecord[] }>();
+interface MutableAuditContext {
+    approvals: ApprovalRequest[];
+    calls: ToolCallRecord[];
+    key: TuiAuditContextKey;
+    label: string;
+    messages: ContextMessageRecord[];
+}
+
+export function projectAuditContexts(
+    state: TuiAppState,
+    instance: string,
+): TuiAuditContextSummary[] {
+    const contexts = new Map<string, MutableAuditContext>();
+    const resolve = (ctxId: string | undefined): MutableAuditContext => {
+        const key: TuiAuditContextKey =
+            ctxId === undefined || ctxId.length === 0
+                ? { kind: "unscoped" }
+                : { ctxId, kind: "context" };
+        const mapKey =
+            key.kind === "unscoped" ? "unscoped:" : `context:${key.ctxId}`;
+        const existing = contexts.get(mapKey);
+        if (existing !== undefined) return existing;
+        const created: MutableAuditContext = {
+            approvals: [],
+            calls: [],
+            key,
+            label: key.kind === "unscoped" ? "unscoped" : key.ctxId,
+            messages: [],
+        };
+        contexts.set(mapKey, created);
+        return created;
+    };
+
     for (const call of state.toolCallsByInstance[instance] ?? []) {
-        if (call.ctxId === undefined || call.ctxId.length === 0) continue;
-        const context = contexts.get(call.ctxId) ?? { approvals: [], calls: [], messages: [] };
-        context.calls.push(call);
-        contexts.set(call.ctxId, context);
+        resolve(call.ctxId).calls.push(call);
     }
     for (const approval of state.approvalsByInstance[instance] ?? []) {
-        if (approval.ctxId === undefined || approval.ctxId.length === 0) continue;
-        const context = contexts.get(approval.ctxId) ?? { approvals: [], calls: [], messages: [] };
-        context.approvals.push(approval);
-        contexts.set(approval.ctxId, context);
+        resolve(approval.ctxId).approvals.push(approval);
     }
-
     for (const message of state.contextMessagesByInstance[instance] ?? []) {
-        const context = contexts.get(message.ctxId) ?? { approvals: [], calls: [], messages: [] };
-        context.messages.push(message);
-        contexts.set(message.ctxId, context);
+        resolve(message.ctxId).messages.push(message);
     }
 
-    return [...contexts.entries()]
-        .map(([ctxId, context]) => toSummary(ctxId, context.calls, context.approvals, context.messages))
-        .sort((left, right) => right.latestActivityAt.localeCompare(left.latestActivityAt));
+    return [...contexts.values()]
+        .map(toSummary)
+        .sort((left, right) =>
+            right.latestActivityAt.localeCompare(left.latestActivityAt),
+        );
 }
 
-export function findAuditContext(state: TuiAppState, instance: string, ctxId: string): TuiAuditContextSummary | undefined {
-    return projectAuditContexts(state, instance).find((context) => context.ctxId === ctxId);
+export function findAuditContext(
+    state: TuiAppState,
+    instance: string,
+    key: TuiAuditContextKey,
+): TuiAuditContextSummary | undefined {
+    return projectAuditContexts(state, instance).find((context) =>
+        key.kind === "unscoped"
+            ? context.key.kind === "unscoped"
+            : context.key.kind === "context" && context.key.ctxId === key.ctxId,
+    );
 }
 
-function toSummary(ctxId: string, calls: ToolCallRecord[], approvals: ApprovalRequest[], messages: ContextMessageRecord[]): TuiAuditContextSummary {
-    const sortedCalls = [...calls].sort((left, right) => left.startedAt.localeCompare(right.startedAt));
+function toSummary(context: MutableAuditContext): TuiAuditContextSummary {
+    const sortedCalls = [...context.calls].sort((left, right) =>
+        left.startedAt.localeCompare(right.startedAt),
+    );
     const latestCall = sortedCalls.at(-1);
-    const latestActivityAt = [
-        ...sortedCalls.map((call) => call.completedAt ?? call.startedAt),
-        ...approvals.map((approval) => approval.createdAt),
-        ...messages.map((message) => message.deliveredAt ?? message.failedAt ?? message.createdAt)
-    ].sort().at(-1) ?? "-";
+    const latestActivityAt =
+        [
+            ...sortedCalls.map((call) => call.completedAt ?? call.startedAt),
+            ...context.approvals.map((approval) => approval.createdAt),
+            ...context.messages.map(
+                (message) =>
+                    message.deliveredAt ??
+                    message.failedAt ??
+                    message.createdAt,
+            ),
+        ]
+            .sort()
+            .at(-1) ?? "-";
 
     return {
-        approvals: [...approvals].sort((left, right) => left.createdAt.localeCompare(right.createdAt)),
+        approvals: [...context.approvals].sort((left, right) =>
+            left.createdAt.localeCompare(right.createdAt),
+        ),
         calls: sortedCalls,
-        ctxId,
+        key: context.key,
+        label: context.label,
         latestActivityAt,
         latestCall,
-        messages: [...messages].sort((left, right) => left.createdAt.localeCompare(right.createdAt)),
-        status: contextStatus(sortedCalls, approvals, messages)
+        messages: [...context.messages].sort((left, right) =>
+            left.createdAt.localeCompare(right.createdAt),
+        ),
+        status: contextStatus(sortedCalls, context.approvals, context.messages),
     };
 }
 
-function contextStatus(calls: readonly ToolCallRecord[], approvals: readonly ApprovalRequest[], messages: readonly ContextMessageRecord[]): TuiExpandableBoxStatus {
-    if (messages.some((message) => message.status === "failed")) return "failed";
-    if (calls.some((call) => call.status === "failed" || call.status === "denied" || call.status === "queueTimeout")) return "failed";
-    if (approvals.some((approval) => approval.status === "pending") || messages.some((message) => message.status === "pending")) return "pending";
-    if (calls.some((call) => call.status === "running" || call.status === "queued")) return "running";
+function contextStatus(
+    calls: readonly ToolCallRecord[],
+    approvals: readonly ApprovalRequest[],
+    messages: readonly ContextMessageRecord[],
+): TuiExpandableBoxStatus {
+    if (messages.some((message) => message.status === "failed"))
+        return "failed";
+    if (
+        calls.some(
+            (call) =>
+                call.status === "failed" ||
+                call.status === "denied" ||
+                call.status === "queueTimeout",
+        )
+    )
+        return "failed";
+    if (
+        approvals.some((approval) => approval.status === "pending") ||
+        messages.some((message) => message.status === "pending")
+    )
+        return "pending";
+    if (
+        calls.some(
+            (call) => call.status === "running" || call.status === "queued",
+        )
+    )
+        return "running";
     return calls.length === 0 ? "normal" : "ready";
 }

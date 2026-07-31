@@ -3,10 +3,12 @@ import test from "node:test";
 
 import {
     asInstanceName,
-    type OperationalOverview
+    type OperationalOverview,
 } from "@portable-devshell/shared";
 
 import {
+    buildTuiHitRegions,
+    hitTargetAt,
     selectMainBoxFlowMetrics,
     selectMainBoxIds,
     selectMainScreenModel,
@@ -17,27 +19,31 @@ import {
     type TuiCommandDispatcherFocus,
     type TuiFocusManager,
     tuiViewProjection,
-    TuiKeyDispatcher
+    TuiKeyDispatcher,
 } from "../../src/testing.ts";
 
 const overview: OperationalOverview = {
-    activity: [{
-        callId: "call-1",
-        errorSummary: "worker timed out",
-        instance: asInstanceName("alpha"),
-        source: "mcp",
-        startedAt: "2026-07-31T00:20:00.000Z",
-        status: "failed",
-        toolName: "bash_run"
-    }],
-    alerts: [{
-        detail: "reverse worker disconnected",
-        id: "instance.failed:alpha",
-        instance: asInstanceName("alpha"),
-        kind: "instance.failed",
-        severity: "critical",
-        title: "Instance failed"
-    }],
+    activity: [
+        {
+            callId: "call-1",
+            errorSummary: "worker timed out",
+            instance: asInstanceName("alpha"),
+            source: "mcp",
+            startedAt: "2026-07-31T00:20:00.000Z",
+            status: "failed",
+            toolName: "bash_run",
+        },
+    ],
+    alerts: [
+        {
+            detail: "reverse worker disconnected",
+            id: "instance.failed:alpha",
+            instance: asInstanceName("alpha"),
+            kind: "instance.failed",
+            severity: "critical",
+            title: "Instance failed",
+        },
+    ],
     controller: {
         pid: 42,
         system: {
@@ -50,9 +56,9 @@ const overview: OperationalOverview = {
             load1m: 1.25,
             memoryAvailableBytes: 750,
             memoryPercent: 25,
-            memoryTotalBytes: 1_000
+            memoryTotalBytes: 1_000,
         },
-        uptimeSeconds: 3_720
+        uptimeSeconds: 3_720,
     },
     counts: {
         activeTodos: 1,
@@ -61,48 +67,56 @@ const overview: OperationalOverview = {
         instancesCritical: 1,
         instancesReady: 0,
         instancesTotal: 1,
-        pendingApprovals: 1
+        pendingApprovals: 1,
     },
     generatedAt: "2026-07-31T00:30:00.000Z",
     health: "critical",
-    instances: [{
-        mcpEnabled: true,
-        name: asInstanceName("alpha"),
-        pendingApprovals: 1,
-        provider: "reverse",
-        snapshot: {
-            connectionState: "failed",
-            daemonState: "failed",
-            lastErrorMessage: "reverse worker disconnected",
-            lastSeq: 7,
+    instances: [
+        {
+            mcpEnabled: true,
             name: asInstanceName("alpha"),
-            ready: false,
-            status: "failed"
-        },
-        worker: {
-            capabilities: { cancel: true, streaming: true, tools: true },
-            platform: {
-                arch: "x64",
-                distribution: { id: "arch", name: "Arch Linux" },
-                os: "linux",
-                packageManager: "pacman",
-                shell: { executable: "/bin/bash", kind: "bash", version: "5.3" }
+            pendingApprovals: 1,
+            provider: "reverse",
+            snapshot: {
+                connectionState: "failed",
+                daemonState: "failed",
+                lastErrorMessage: "reverse worker disconnected",
+                lastSeq: 7,
+                name: asInstanceName("alpha"),
+                ready: false,
+                status: "failed",
             },
-            protocolVersion: 2,
-            version: "0.4.10"
+            worker: {
+                capabilities: { cancel: true, streaming: true, tools: true },
+                platform: {
+                    arch: "x64",
+                    distribution: { id: "arch", name: "Arch Linux" },
+                    os: "linux",
+                    packageManager: "pacman",
+                    shell: {
+                        executable: "/bin/bash",
+                        kind: "bash",
+                        version: "5.3",
+                    },
+                },
+                protocolVersion: 2,
+                version: "0.4.10",
+            },
+            workspace: "/workspace/alpha",
         },
-        workspace: "/workspace/alpha"
-    }],
-    todos: [{
-        completed: 1,
-        currentItem: "Restore worker connection",
-        instance: asInstanceName("alpha"),
-        revision: 2,
-        status: "blocked",
-        taskId: "task-1",
-        title: "Recover remote worker",
-        total: 3
-    }]
+    ],
+    todos: [
+        {
+            completed: 1,
+            currentItem: "Restore worker connection",
+            instance: asInstanceName("alpha"),
+            revision: 2,
+            status: "blocked",
+            taskId: "task-1",
+            title: "Recover remote worker",
+            total: 3,
+        },
+    ],
 };
 
 test("overview projects system meters and an instance table without expandable boxes", () => {
@@ -117,32 +131,42 @@ test("overview projects system meters and an instance table without expandable b
     assert.deepEqual(screen.boxes, []);
     assert.equal(screen.loadState.kind, "ready");
     assert.equal(presentation.health, "critical");
-    assert.deepEqual(presentation.meters.map((meter) => [meter.label, meter.percent]), [
-        ["CPU", 12.5],
-        ["Memory", 25],
-        ["Disk", 40]
-    ]);
-    assert.deepEqual(presentation.instances.map((instance) => ({
-        approvals: instance.approvals,
-        focused: instance.focused,
-        id: instance.id,
-        runtime: instance.runtime,
-        todos: instance.todos,
-        tone: instance.tone
-    })), [{
-        approvals: 1,
-        focused: true,
-        id: "overview-instance:alpha",
-        runtime: "failed",
-        todos: 1,
-        tone: "danger"
-    }]);
+    assert.deepEqual(
+        presentation.meters.map((meter) => [meter.label, meter.percent]),
+        [
+            ["CPU", 12.5],
+            ["Memory", 25],
+            ["Disk", 40],
+        ],
+    );
+    assert.deepEqual(
+        presentation.instances.map((instance) => ({
+            approvals: instance.approvals,
+            focused: instance.focused,
+            id: instance.id,
+            runtime: instance.runtime,
+            todos: instance.todos,
+            tone: instance.tone,
+        })),
+        [
+            {
+                approvals: 1,
+                focused: true,
+                id: "overview-instance:alpha",
+                runtime: "failed",
+                todos: 1,
+                tone: "danger",
+            },
+        ],
+    );
     assert.equal(presentation.alerts[0]?.title, "Instance failed");
     assert.equal(presentation.activity[0]?.toolName, "bash_run");
-    assert.deepEqual(selectMainBoxIds(store.getState()), ["overview-instance:alpha"]);
+    assert.deepEqual(selectMainBoxIds(store.getState()), [
+        "overview-instance:alpha",
+    ]);
     const flow = selectMainBoxFlowMetrics(store.getState());
     assert.deepEqual(flow.boxRanges, {
-        "overview-instance:alpha": { end: 1, start: 0 }
+        "overview-instance:alpha": { end: 1, start: 0 },
     });
     assert.equal(flow.scrollKey, selectMainScrollKey(store.getState()));
     assert.match(flow.scrollKey, /^overview/u);
@@ -150,7 +174,9 @@ test("overview projects system meters and an instance table without expandable b
 
 test("overview Enter opens the selected instance row", () => {
     const store = new TuiAppStore();
-    store.replaceInstances([{ enabled: true, mcpEnabled: true, name: "alpha", provider: "local" }]);
+    store.replaceInstances([
+        { enabled: true, mcpEnabled: true, name: "alpha", provider: "local" },
+    ]);
     store.replaceOperationalOverview(overview);
     store.setSelectedPage("overview");
     store.setFocusScope("mainBoxes");
@@ -162,7 +188,7 @@ test("overview Enter opens the selected instance row", () => {
         async onPageReload() {},
         onRedraw() {},
         projection: tuiViewProjection,
-        store
+        store,
     });
 
     assert.equal(navigation.openFocusedRoute(), true);
@@ -175,15 +201,35 @@ test("overview uses zero without changing the established one-to-eight page shor
     const dispatcher = new TuiKeyDispatcher();
     assert.deepEqual(
         dispatcher.dispatch("sidebarPages", { input: "0", key: {} }),
-        [{ page: "overview", type: "page.select" }]
+        [{ page: "overview", type: "page.select" }],
     );
     assert.deepEqual(
         dispatcher.dispatch("sidebarPages", { input: "1", key: {} }),
-        [{ page: "instances", type: "page.select" }]
+        [{ page: "instances", type: "page.select" }],
     );
     assert.deepEqual(
         dispatcher.dispatch("sidebarPages", { input: "8", key: {} }),
-        [{ page: "terminal", type: "page.select" }]
+        [{ page: "terminal", type: "page.select" }],
     );
-    assert.deepEqual(dispatcher.dispatch("sidebarPages", { input: "9", key: {} }), []);
+    assert.deepEqual(
+        dispatcher.dispatch("sidebarPages", { input: "9", key: {} }),
+        [],
+    );
+});
+
+test("overview exposes mouse hit regions for visible instance rows", () => {
+    const store = new TuiAppStore();
+    store.replaceOperationalOverview(overview);
+    store.setSelectedPage("overview");
+
+    const region = buildTuiHitRegions(store.getState(), {
+        columns: 120,
+        rows: 40,
+    }).find((candidate) => candidate.target.kind === "overviewInstance");
+    assert.ok(region !== undefined);
+    assert.deepEqual(region.target, {
+        instance: "alpha",
+        kind: "overviewInstance",
+    });
+    assert.deepEqual(hitTargetAt([region], region.x, region.y), region.target);
 });

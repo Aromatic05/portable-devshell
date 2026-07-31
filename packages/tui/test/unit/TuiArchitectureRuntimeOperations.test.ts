@@ -7,13 +7,15 @@ import { TuiAppStore, TuiRuntimeOperations } from "../../src/testing.ts";
 
 function createHarness(options: { failStart?: boolean } = {}) {
     const store = new TuiAppStore();
-    store.replaceInstances([{
-        defaultWorkspace: "/workspace/alpha",
-        enabled: true,
-        mcpEnabled: false,
-        name: "alpha",
-        provider: "local"
-    }]);
+    store.replaceInstances([
+        {
+            defaultWorkspace: "/workspace/alpha",
+            enabled: true,
+            mcpEnabled: false,
+            name: "alpha",
+            provider: "local",
+        },
+    ]);
     const calls: string[] = [];
     const refreshed: string[] = [];
     const clients = {
@@ -23,7 +25,7 @@ function createHarness(options: { failStart?: boolean } = {}) {
             },
             async revokeShare(shareId: string) {
                 calls.push(`artifact.revoke:${shareId}`);
-            }
+            },
         },
         config: {
             async apply() {
@@ -38,7 +40,7 @@ function createHarness(options: { failStart?: boolean } = {}) {
             },
             async validate() {
                 calls.push("config.validate");
-            }
+            },
         },
         instance: {
             async create(draft: InstanceCreateDraft) {
@@ -54,12 +56,12 @@ function createHarness(options: { failStart?: boolean } = {}) {
             async validateCreate() {
                 calls.push("instance.validate");
                 return {};
-            }
+            },
         },
         mcp: {
             async decideApproval(approvalId: string, decision: string) {
                 calls.push(`oauth.${decision}:${approvalId}`);
-            }
+            },
         },
         reverse: {
             async createCode(instance: string) {
@@ -67,9 +69,9 @@ function createHarness(options: { failStart?: boolean } = {}) {
                 return {
                     controllerUrl: "https://example.test",
                     deviceCode: "device-code",
-                    expiresAt: "2026-07-17T00:00:00.000Z"
+                    expiresAt: "2026-07-17T00:00:00.000Z",
                 };
-            }
+            },
         },
         runtime: {
             async refresh(instance: string) {
@@ -83,7 +85,7 @@ function createHarness(options: { failStart?: boolean } = {}) {
                         onOutput(chunk: string): void;
                         onRequestId(requestId: string): void;
                     };
-                }
+                },
             ) {
                 calls.push(`runtime.start:${instance}`);
                 input.relay?.onRequestId("request-start");
@@ -98,25 +100,31 @@ function createHarness(options: { failStart?: boolean } = {}) {
             async stop(instance: string) {
                 calls.push(`runtime.stop:${instance}`);
                 return { name: instance };
-            }
+            },
         },
         service: {
             async restart() {
                 calls.push("service.restart");
-            }
+            },
         },
         tool: {
             async call(instance: string, toolName: string, input: JsonValue) {
-                calls.push(`tool.call:${instance}:${toolName}:${JSON.stringify(input)}`);
+                calls.push(
+                    `tool.call:${instance}:${toolName}:${JSON.stringify(input)}`,
+                );
             },
-            async decideApproval(instance: string, approvalId: string, decision: string) {
+            async decideApproval(
+                instance: string,
+                approvalId: string,
+                decision: string,
+            ) {
                 calls.push(`approval.${decision}:${instance}:${approvalId}`);
             },
             async getApproval(instance: string, approvalId: string) {
                 calls.push(`approval.get:${instance}:${approvalId}`);
                 return {};
-            }
-        }
+            },
+        },
     } as never;
     const session = {
         async reconnect() {
@@ -145,13 +153,13 @@ function createHarness(options: { failStart?: boolean } = {}) {
         },
         async refreshTodo(instance: string) {
             refreshed.push(`todo:${instance}`);
-        }
+        },
     } as never;
     const operations = new TuiRuntimeOperations({
         clients,
         reconnectDelayMs: 0,
         session,
-        store
+        store,
     });
     return { calls, operations, refreshed, store };
 }
@@ -167,16 +175,17 @@ test("runtime operations own instance command lifecycle and relay diagnostics", 
     assert.equal(command?.title, "Start Worker: alpha");
     assert.equal(command?.status, "succeeded");
     assert.equal(command?.targetInstance, "alpha");
-    const relay = command === undefined
-        ? undefined
-        : harness.store.getState().relayByCommand[command.commandId];
+    const relay =
+        command === undefined
+            ? undefined
+            : harness.store.getState().relayByCommand[command.commandId];
     assert.deepEqual(relay?.output, ["starting alpha\n"]);
     assert.equal(relay?.provider, "local");
     assert.equal(relay?.workspace, "/workspace/alpha");
     assert.equal(relay?.requestId, "request-start");
     assert.match(
         harness.store.getState().interaction.screenStatusByPage.instances ?? "",
-        /completed/u
+        /completed/u,
     );
 });
 
@@ -190,7 +199,7 @@ test("runtime operations preserve failed command diagnostics without throwing in
     assert.equal(command?.error?.code, "core.startFailed");
     assert.equal(
         harness.store.getState().panelErrors["instances:alpha"]?.message,
-        "start failed"
+        "start failed",
     );
     assert.deepEqual(harness.refreshed, []);
 });
@@ -199,7 +208,7 @@ test("runtime operations expose control callbacks and route page refreshes", asy
     const harness = createHarness();
     const draft = {
         name: "remote-one",
-        provider: "reverse"
+        provider: "reverse",
     } as InstanceCreateDraft;
 
     const status = await harness.operations.createInstance(draft);
@@ -211,26 +220,27 @@ test("runtime operations expose control callbacks and route page refreshes", asy
         await harness.operations.callTool(
             "alpha",
             "bash_run",
-            '{"command":"pwd"}'
+            '{"command":"pwd"}',
         ),
-        true
+        true,
     );
     await harness.operations.reloadPage("config", "alpha");
     await harness.operations.reloadPage("audit", "alpha");
     await harness.operations.reloadPage("logs", "alpha");
     await harness.operations.reloadPage("todo", "alpha");
-    await harness.operations.reloadPage("oauth", "alpha");
+    await harness.operations.reloadPage("connections", "alpha");
 
     assert.equal(harness.calls.includes("instance.create:remote-one"), true);
     assert.equal(harness.calls.includes("reverse.code:remote-one"), true);
     assert.equal(harness.calls.includes("config.apply"), true);
     assert.equal(harness.calls.includes("service.restart"), true);
-    assert.equal(harness.calls.includes("approval.approve:alpha:approval-1"), true);
     assert.equal(
-        harness.calls.includes(
-            'tool.call:alpha:bash_run:{"command":"pwd"}'
-        ),
-        true
+        harness.calls.includes("approval.approve:alpha:approval-1"),
+        true,
+    );
+    assert.equal(
+        harness.calls.includes('tool.call:alpha:bash_run:{"command":"pwd"}'),
+        true,
     );
     assert.deepEqual(harness.refreshed, [
         "all",
@@ -242,6 +252,7 @@ test("runtime operations expose control callbacks and route page refreshes", asy
         "audit:alpha",
         "logs:alpha",
         "todo:alpha",
-        "oauth"
+        "config",
+        "oauth",
     ]);
 });

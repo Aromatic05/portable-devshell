@@ -1,11 +1,34 @@
-import type { ApprovalRequest, ArtifactShareResult, ArtifactTransferRecord, ClientEvent, ContextMessageRecord, ControlError, InstanceSnapshot, JsonValue, OAuthApprovalRequest, OperationalOverview, TodoReadResult, ToolCallRecord } from "@portable-devshell/shared";
+import type {
+    ApprovalRequest,
+    ArtifactShareResult,
+    ArtifactTransferRecord,
+    ClientEvent,
+    ContextMessageRecord,
+    ControlError,
+    InstanceSnapshot,
+    JsonValue,
+    OAuthApprovalRequest,
+    OperationalOverview,
+    TodoReadResult,
+    ToolCallRecord,
+} from "@portable-devshell/shared";
 
-import type { TuiEditorState, TuiInteractionState, TuiUiIntent } from "../TuiInteractionState.js";
+import type {
+    TuiEditorState,
+    TuiInteractionState,
+} from "../TuiInteractionState.js";
 import type { TuiOverlay } from "../overlay/TuiOverlay.js";
 import type { TuiRoute } from "../route/TuiRoute.js";
-import type { TuiAuditPageState, TuiFocusScope, TuiPageId, TuiSidebarCursor, TuiSidebarFocus, TuiUiState } from "../TuiUiState.js";
+import type {
+    TuiFocusScope,
+    TuiPageId,
+    TuiSidebarCursor,
+    TuiSidebarFocus,
+    TuiUiState,
+} from "../TuiUiState.js";
 
-export type TuiConnectionStatus = "connecting" | "connected" | "disconnected" | "error";
+export type TuiConnectionStatus =
+    "connecting" | "connected" | "disconnected" | "error";
 
 export interface TuiInstanceListEntry {
     defaultWorkspace?: string;
@@ -102,35 +125,47 @@ export type TuiAppAction =
     | { share: ArtifactShareResult; type: "artifact.share.upsert" }
     | { transfers: ArtifactTransferRecord[]; type: "artifact.transfer.replace" }
     | { transfer: ArtifactTransferRecord; type: "artifact.transfer.upsert" }
-    | { approvals: ApprovalRequest[]; instance: string; type: "approval.replace" }
+    | {
+          approvals: ApprovalRequest[];
+          instance: string;
+          type: "approval.replace";
+      }
     | { approvals: OAuthApprovalRequest[]; type: "oauthApproval.replace" }
     | { overview?: OperationalOverview; type: "overview.replace" }
     | { command: TuiCommandRecord; type: "command.upsert" }
-    | { instance: string; messages: ContextMessageRecord[]; type: "contextMessage.replace" }
+    | {
+          instance: string;
+          messages: ContextMessageRecord[];
+          type: "contextMessage.replace";
+      }
     | { error?: ControlError; key: string; type: "panelError.set" }
     | { commandId: string; chunk: string; type: "relay.appendOutput" }
-    | { commandId: string; provider?: string; requestId?: string; workspace?: string; type: "relay.setMetadata" }
+    | {
+          commandId: string;
+          provider?: string;
+          requestId?: string;
+          workspace?: string;
+          type: "relay.setMetadata";
+      }
     | { configView?: Record<string, JsonValue>; type: "control.setConfigView" }
     | { mcpStatus?: Record<string, JsonValue>; type: "control.setMcpStatus" }
-    | { errorCode?: string; errorMessage?: string; status: TuiConnectionStatus; type: "control.setConnectionState" }
+    | {
+          errorCode?: string;
+          errorMessage?: string;
+          status: TuiConnectionStatus;
+          type: "control.setConnectionState";
+      }
     | { focusScope: TuiFocusScope; type: "focus.scope.set" }
-    | { auditPage: TuiAuditPageState; type: "auditPage.set" }
     | { instance: string; seq: number; type: "instance.setLastSeq" }
     | { instances: TuiInstanceListEntry[]; type: "instance.replaceList" }
     | { entry: TuiLogEntry; type: "log.append" }
     | { instance: string; logs: TuiLogEntry[]; type: "log.replace" }
     | { type: "log.clearBuffer" }
     | { mainFocusId?: string; type: "mainFocus.set" }
-    | { button: "cancel" | "confirm"; type: "confirm.focus" }
     | { key: string; lineId?: string; type: "detailLine.select" }
     | { cursor?: TuiSidebarCursor; type: "sidebar.cursor.set" }
-    | { confirmIntent: TuiUiIntent; body: string; cancelLabel: string; confirmLabel: string; open: boolean; title: string; type: "overlay.setConfirmDialog" }
     | { sidebarFocus: TuiSidebarFocus; type: "sidebar.focus.set" }
-    | { type: "search.setOpen"; value: boolean }
     | { page: TuiPageId; query: string; type: "search.setQuery" }
-    | { input: string; instance: string; toolName: string; type: "toolForm.set" }
-    | { type: "toolForm.clear" }
-    | { body: string; image?: import("@portable-devshell/shared").ArtifactViewImageResult; open: boolean; scrollOffset: number; title: string; type: "textDetail.set" }
     | { editor?: TuiEditorState; type: "editor.set" }
     | { dirty: boolean; key: string; value: unknown; type: "formDraft.set" }
     | { key: string; type: "formDraft.clear" }
@@ -153,15 +188,13 @@ export type TuiAppAction =
     | { snapshot: InstanceSnapshot; type: "snapshot.replace" }
     | { instance: string; todo: TodoReadResult; type: "todo.replace" }
     | { instance: string; records: ToolCallRecord[]; type: "toolCall.replace" }
-    | { maxEvents?: number; rawEvent: TuiRawEventRecord; type: "event.append" }
-    | { type: "restore.pop" }
-    | { focusScope: TuiFocusScope; mainFocusId?: string; sidebarFocus: TuiSidebarFocus; type: "restore.push" };
+    | { maxEvents?: number; rawEvent: TuiRawEventRecord; type: "event.append" };
 
 export function toRawEventRecord(event: ClientEvent): TuiRawEventRecord {
     return {
         event: event.name,
         instance: event.destination,
         payload: event.payload,
-        seq: event.seq ?? 0
+        seq: event.seq ?? 0,
     };
 }

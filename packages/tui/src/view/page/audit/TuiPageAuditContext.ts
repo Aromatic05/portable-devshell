@@ -1,23 +1,64 @@
-import type { ApprovalRequest, ContextMessageRecord, ToolCallRecord } from "@portable-devshell/shared";
+import type {
+    ApprovalRequest,
+    ContextMessageRecord,
+    ToolCallRecord,
+} from "@portable-devshell/shared";
 
 import type { BoxModel } from "../../component/TuiComponentExpandableBox.js";
 import type { TuiAppState } from "../../../state/reducer/TuiStoreModel.js";
-import { auditInputSummary, auditOutputSummary } from "../../../state/audit/TuiAuditPresentation.js";
-import { compactSummary, formatField, makeBox, toolCallStatus } from "../TuiPageBoxSupport.js";
-import { findAuditContext } from "./TuiAuditContextProjection.js";
+import {
+    auditInputSummary,
+    auditOutputSummary,
+    resolveAuditOutput,
+} from "../../../state/audit/TuiAuditPresentation.js";
+import {
+    compactSummary,
+    formatField,
+    makeBox,
+    toolCallStatus,
+} from "../TuiPageBoxSupport.js";
+import {
+    findAuditContext,
+    type TuiAuditContextKey,
+} from "./TuiAuditContextProjection.js";
 
-export function buildAuditContextBoxes(state: TuiAppState, instance: string, ctxId: string): BoxModel[] {
-    const context = findAuditContext(state, instance, ctxId);
+export function buildAuditContextBoxes(
+    state: TuiAppState,
+    instance: string,
+    key: TuiAuditContextKey,
+): BoxModel[] {
+    const context = findAuditContext(state, instance, key);
     if (context === undefined) return [];
 
     return [
-        ...context.calls.map((call) => ({ at: call.startedAt, box: callBox(state, instance, ctxId, call) })),
-        ...context.approvals.map((approval) => ({ at: approval.createdAt, box: approvalBox(state, instance, approval) })),
-        ...context.messages.map((message) => ({ at: message.createdAt, box: messageBox(state, instance, message) }))
-    ].sort((left, right) => left.at.localeCompare(right.at)).map((entry) => entry.box);
+        ...context.calls.map((call) => ({
+            at: call.startedAt,
+            box: callBox(state, instance, key, call),
+        })),
+        ...context.approvals.map((approval) => ({
+            at: approval.createdAt,
+            box: approvalBox(state, instance, approval),
+        })),
+        ...context.messages.map((message) => ({
+            at: message.createdAt,
+            box: messageBox(state, instance, message),
+        })),
+    ]
+        .sort((left, right) => left.at.localeCompare(right.at))
+        .map((entry) => entry.box);
 }
 
-function callBox(state: TuiAppState, instance: string, ctxId: string, call: ToolCallRecord): BoxModel {
+function callBox(
+    state: TuiAppState,
+    instance: string,
+    key: TuiAuditContextKey,
+    call: ToolCallRecord,
+): BoxModel {
+    const output = resolveAuditOutput(
+        call.output,
+        state.logsByInstance[instance] ?? [],
+        call.callId,
+    );
     return makeBox(state, "audit", instance, {
         detailLines: [
             formatField("Call", call.callId),
@@ -27,56 +68,118 @@ function callBox(state: TuiAppState, instance: string, ctxId: string, call: Tool
             formatField("Completed", call.completedAt ?? "-"),
             formatField("Duration", duration(call)),
             formatField("Operation", call.requestId ?? "-"),
-            { id: "input", text: `input ${auditInputSummary(call.input, call.inputSummary)}` },
-            { id: "output", text: `result ${auditOutputSummary(call.output)}` },
-            ...(call.error === undefined ? [] : [formatField("Error", call.error)])
+            {
+                id: "input",
+                text: `input ${auditInputSummary(call.input, call.inputSummary)}`,
+            },
+            { id: "output", text: `result ${auditOutputSummary(output)}` },
+            ...(call.error === undefined
+                ? []
+                : [formatField("Error", call.error)]),
         ],
         id: `audit-call:${call.callId}`,
-        primaryRoute: { callId: call.callId, ctxId, page: "audit", view: "call" },
+        primaryRoute:
+            key.kind === "unscoped"
+                ? {
+                      callId: call.callId,
+                      page: "audit",
+                      scope: "unscoped",
+                      view: "call",
+                  }
+                : {
+                      callId: call.callId,
+                      ctxId: key.ctxId,
+                      page: "audit",
+                      scope: "context",
+                      view: "call",
+                  },
         searchText: `${call.toolName} ${call.status} ${call.callId}`,
         status: toolCallStatus(call),
-        summaryLines: [compactSummary(["status", call.status], ["duration", duration(call)], ["operation", call.requestId ?? "-"])],
-        title: `${call.toolName} · ${call.status}`
+        summaryLines: [
+            compactSummary(
+                ["status", call.status],
+                ["duration", duration(call)],
+                ["operation", call.requestId ?? "-"],
+            ),
+        ],
+        title: `${call.toolName} · ${call.status}`,
     });
 }
 
-function messageBox(state: TuiAppState, instance: string, message: ContextMessageRecord): BoxModel {
+function messageBox(
+    state: TuiAppState,
+    instance: string,
+    message: ContextMessageRecord,
+): BoxModel {
     return makeBox(state, "audit", instance, {
         detailLines: [
             formatField("Message", message.id),
             formatField("Context", message.ctxId),
             formatField("Created", message.createdAt),
             formatField("Status", message.status),
-            ...(message.deliveredAt === undefined ? [] : [formatField("Delivered", message.deliveredAt)]),
-            ...(message.error === undefined ? [] : [formatField("Error", message.error)]),
-            formatField("Text", message.text)
+            ...(message.deliveredAt === undefined
+                ? []
+                : [formatField("Delivered", message.deliveredAt)]),
+            ...(message.error === undefined
+                ? []
+                : [formatField("Error", message.error)]),
+            formatField("Text", message.text),
         ],
         id: `context-message:${message.id}`,
-        status: message.status === "delivered" ? "ready" : message.status === "failed" ? "failed" : "pending",
-        summaryLines: [compactSummary(["message", message.status], ["created", message.createdAt]), message.text],
-        title: "Context Message"
+        status:
+            message.status === "delivered"
+                ? "ready"
+                : message.status === "failed"
+                  ? "failed"
+                  : "pending",
+        summaryLines: [
+            compactSummary(
+                ["message", message.status],
+                ["created", message.createdAt],
+            ),
+            message.text,
+        ],
+        title: "Context Message",
     });
 }
 
-function approvalBox(state: TuiAppState, instance: string, approval: ApprovalRequest): BoxModel {
+function approvalBox(
+    state: TuiAppState,
+    instance: string,
+    approval: ApprovalRequest,
+): BoxModel {
     return makeBox(state, "audit", instance, {
         detailLines: [
             formatField("Approval", approval.approvalId),
             formatField("Tool", approval.toolName),
             formatField("Risk", approval.riskLevel),
             formatField("Reason", approval.reason),
-            { id: `approval.open:${approval.approvalId}`, text: "[ Review ]", tone: "accent" }
+            {
+                id: `approval.open:${approval.approvalId}`,
+                text: "[ Review ]",
+                tone: "accent",
+            },
         ],
         id: `approval-${approval.approvalId}`,
+        searchText: `status ${approval.status} risk ${approval.riskLevel} source ${approval.source} tool ${approval.toolName} ${approval.approvalId}`,
         severity: approval.riskLevel === "high" ? "danger" : "warning",
         status: approval.status === "pending" ? "pending" : "normal",
-        summaryLines: [compactSummary(["approval", approval.status], ["risk", approval.riskLevel], ["tool", approval.toolName])],
-        title: `Approval · ${approval.toolName}`
+        summaryLines: [
+            compactSummary(
+                ["approval", approval.status],
+                ["risk", approval.riskLevel],
+                ["tool", approval.toolName],
+            ),
+        ],
+        title: `Approval · ${approval.toolName}`,
     });
 }
 
 function duration(call: ToolCallRecord): string {
     if (call.completedAt === undefined) return "running";
-    const milliseconds = Date.parse(call.completedAt) - Date.parse(call.startedAt);
-    return Number.isFinite(milliseconds) && milliseconds >= 0 ? `${milliseconds}ms` : "-";
+    const milliseconds =
+        Date.parse(call.completedAt) - Date.parse(call.startedAt);
+    return Number.isFinite(milliseconds) && milliseconds >= 0
+        ? `${milliseconds}ms`
+        : "-";
 }

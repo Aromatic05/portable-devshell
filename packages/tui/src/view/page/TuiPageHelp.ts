@@ -12,7 +12,7 @@ export function buildHelpLines(state: TuiAppState): string[] {
         "Enter applies the focused sidebar item.",
         "Space expands and collapses the focused box.",
         "Esc returns from detail, search, menus, and main focus.",
-        "Ctrl+[ remains available as a terminal-safe escape fallback."
+        "Ctrl+[ remains available as a terminal-safe escape fallback.",
     ];
 }
 
@@ -25,38 +25,44 @@ export function buildHelpPageBoxes(state: TuiAppState): BoxModel[] {
                 "Up/Down moves sidebar focus without selecting.",
                 "Enter selects the focused item or activates its action.",
                 "Space expands or collapses the focused box.",
-                "0 opens Overview; 1-9 retain the existing page shortcuts; Shift+1-0 switch instances.",
+                "0 opens Overview; 1-8 open feature pages; Shift+1-9 switch instances.",
                 "Overview is read-only and prioritizes alerts, unhealthy instances, recent activity, and actionable todos.",
                 "Terminal uses the selected instance; Right/Tab enters it and Ctrl+] returns to the sidebar.",
                 "Terminal: drag selects and copies with OSC 52; hold Shift when the application owns mouse input.",
                 "Terminal: Shift+PgUp/PgDn and Shift+Home/End browse scrollback; bracketed paste is preserved.",
                 "Kitty and Sixel images are replayed when the host terminal advertises support; DEVSHELL_TUI_GRAPHICS overrides detection.",
                 "r reloads the current page and / opens search where available.",
-                "? opens this page; Ctrl+[ returns from detail, search, menus, and main focus."
+                "? opens this page; Ctrl+[ returns from detail, search, menus, and main focus.",
             ],
             id: "help-navigation",
             status: "normal",
             summaryLines: ["navigation shortcuts", "scope cycling"],
-            title: "Navigation"
+            title: "Navigation",
         }),
         makeBox(state, "help", undefined, {
             detailLines: [
                 "Expand an instance to create, attach, start, restart, stop, or delete.",
-                "Configuration and Connector fields can be edited and saved with Ctrl+S.",
+                "Configuration and Connections fields can be edited and saved with Ctrl+S.",
                 "Stop, delete, and other destructive actions open a confirmation dialog with Cancel focused.",
-                "Approval detail starts with Back focused; Enter never approves a list item."
+                "Approval detail starts with Back focused; Enter never approves a list item.",
             ],
             id: "help-readonly",
             status: "normal",
-            summaryLines: ["explicit actions and confirmations", "create and save are available"],
-            title: "Actions & Safety"
+            summaryLines: [
+                "explicit actions and confirmations",
+                "create and save are available",
+            ],
+            title: "Actions & Safety",
         }),
         makeBox(state, "help", undefined, {
             detailLines: buildHelpLines(state),
             id: "help-context",
             status: "normal",
-            summaryLines: [`current page ${state.ui.selectedPage}`, `selected instance ${state.ui.selectedInstance ?? "none"}`],
-            title: "Context"
-        })
+            summaryLines: [
+                `current page ${state.ui.selectedPage}`,
+                `selected instance ${state.ui.selectedInstance ?? "none"}`,
+            ],
+            title: "Context",
+        }),
     ];
 }

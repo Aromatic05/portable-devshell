@@ -9,7 +9,10 @@ export class TuiRenderScheduler {
     #scheduled = false;
     #timer?: NodeJS.Timeout;
 
-    constructor(readonly store: TuiAppStore, flushDelayMs = 16) {
+    constructor(
+        readonly store: TuiAppStore,
+        flushDelayMs = 16,
+    ) {
         this.#flushDelayMs = flushDelayMs;
         this.#lastObservedState = store.getState();
         this.#unsubscribeStore = store.subscribe(() => {
@@ -62,7 +65,10 @@ export class TuiRenderScheduler {
     }
 }
 
-export function isRenderRelevantChange(previous: TuiAppState, next: TuiAppState): boolean {
+export function isRenderRelevantChange(
+    previous: TuiAppState,
+    next: TuiAppState,
+): boolean {
     if (previous === next) {
         return false;
     }
@@ -74,49 +80,116 @@ export function isRenderRelevantChange(previous: TuiAppState, next: TuiAppState)
         previous.panelErrors !== next.panelErrors ||
         previous.commandRecords !== next.commandRecords ||
         previous.relayByCommand !== next.relayByCommand ||
-        previous.globalDerived.connectedInstanceCount !== next.globalDerived.connectedInstanceCount ||
-        previous.globalDerived.pendingApprovalCount !== next.globalDerived.pendingApprovalCount
+        previous.globalDerived.connectedInstanceCount !==
+            next.globalDerived.connectedInstanceCount ||
+        previous.globalDerived.pendingApprovalCount !==
+            next.globalDerived.pendingApprovalCount
     ) {
         return true;
     }
 
     const page = next.ui.selectedPage;
     const instance = next.ui.selectedInstance;
+    if (page === "overview") {
+        return previous.operationalOverview !== next.operationalOverview;
+    }
     if (page === "instances") {
-        return previous.snapshotsByInstance !== next.snapshotsByInstance ||
-            previous.lastStatusChangeAtByInstance !== next.lastStatusChangeAtByInstance ||
+        return (
+            previous.snapshotsByInstance !== next.snapshotsByInstance ||
+            previous.lastStatusChangeAtByInstance !==
+                next.lastStatusChangeAtByInstance ||
             previous.approvalsByInstance !== next.approvalsByInstance ||
             previous.artifactShares !== next.artifactShares ||
             previous.artifactTransfers !== next.artifactTransfers ||
-            previous.configView !== next.configView;
+            previous.configView !== next.configView
+        );
     }
     if (page === "connections") {
-        return previous.oauthApprovals !== next.oauthApprovals ||
+        return (
+            previous.oauthApprovals !== next.oauthApprovals ||
             previous.configView !== next.configView ||
             previous.mcpStatus !== next.mcpStatus ||
-            selectedValueChanged(previous.snapshotsByInstance, next.snapshotsByInstance, instance);
+            selectedValueChanged(
+                previous.snapshotsByInstance,
+                next.snapshotsByInstance,
+                instance,
+            )
+        );
     }
     if (page === "config") {
-        return previous.configView !== next.configView ||
-            selectedValueChanged(previous.snapshotsByInstance, next.snapshotsByInstance, instance);
+        return (
+            previous.configView !== next.configView ||
+            selectedValueChanged(
+                previous.snapshotsByInstance,
+                next.snapshotsByInstance,
+                instance,
+            )
+        );
     }
     if (page === "audit") {
-        return selectedValueChanged(previous.approvalsByInstance, next.approvalsByInstance, instance) ||
-            selectedValueChanged(previous.logsByInstance, next.logsByInstance, instance) ||
-            selectedValueChanged(previous.toolCallsByInstance, next.toolCallsByInstance, instance) ||
-            selectedValueChanged(previous.snapshotsByInstance, next.snapshotsByInstance, instance);
+        return (
+            selectedValueChanged(
+                previous.approvalsByInstance,
+                next.approvalsByInstance,
+                instance,
+            ) ||
+            selectedValueChanged(
+                previous.logsByInstance,
+                next.logsByInstance,
+                instance,
+            ) ||
+            selectedValueChanged(
+                previous.toolCallsByInstance,
+                next.toolCallsByInstance,
+                instance,
+            ) ||
+            selectedValueChanged(
+                previous.contextMessagesByInstance,
+                next.contextMessagesByInstance,
+                instance,
+            ) ||
+            selectedValueChanged(
+                previous.snapshotsByInstance,
+                next.snapshotsByInstance,
+                instance,
+            )
+        );
     }
     if (page === "logs") {
-        return selectedValueChanged(previous.logsByInstance, next.logsByInstance, instance) ||
-            selectedValueChanged(previous.snapshotsByInstance, next.snapshotsByInstance, instance);
+        return (
+            selectedValueChanged(
+                previous.logsByInstance,
+                next.logsByInstance,
+                instance,
+            ) ||
+            selectedValueChanged(
+                previous.snapshotsByInstance,
+                next.snapshotsByInstance,
+                instance,
+            )
+        );
     }
     if (page === "todo") {
-        return selectedValueChanged(previous.todoByInstance, next.todoByInstance, instance) ||
-            selectedValueChanged(previous.snapshotsByInstance, next.snapshotsByInstance, instance);
+        return (
+            selectedValueChanged(
+                previous.todoByInstance,
+                next.todoByInstance,
+                instance,
+            ) ||
+            selectedValueChanged(
+                previous.snapshotsByInstance,
+                next.snapshotsByInstance,
+                instance,
+            )
+        );
     }
     return false;
 }
 
-function selectedValueChanged<T>(previous: Record<string, T>, next: Record<string, T>, instance: string | undefined): boolean {
+function selectedValueChanged<T>(
+    previous: Record<string, T>,
+    next: Record<string, T>,
+    instance: string | undefined,
+): boolean {
     return instance !== undefined && previous[instance] !== next[instance];
 }

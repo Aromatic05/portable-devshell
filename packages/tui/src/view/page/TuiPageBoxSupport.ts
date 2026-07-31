@@ -1,31 +1,52 @@
-import type { ApprovalRequest, JsonValue, ToolCallRecord } from "@portable-devshell/shared";
+import type {
+    ApprovalRequest,
+    JsonValue,
+    ToolCallRecord,
+} from "@portable-devshell/shared";
 
-import type { BoxLine, BoxModel } from "../component/TuiComponentExpandableBox.js";
+import type {
+    BoxLine,
+    BoxModel,
+} from "../component/TuiComponentExpandableBox.js";
 import type { TuiRoute } from "../../state/route/TuiRoute.js";
-import { currentTuiRoute, tuiRouteViewKey } from "../../state/route/TuiRouteState.js";
-import type { TuiExpandableBoxStatus, TuiPageId } from "../../state/TuiUiState.js";
-import type { TuiAppState, TuiLogEntry, TuiInstanceListEntry } from "../../state/reducer/TuiStoreModel.js";
+import { currentTuiRouteItemKey } from "../../state/route/TuiRouteState.js";
+import type {
+    TuiExpandableBoxStatus,
+    TuiPageId,
+} from "../../state/TuiUiState.js";
+import type {
+    TuiAppState,
+    TuiLogEntry,
+    TuiInstanceListEntry,
+} from "../../state/reducer/TuiStoreModel.js";
 
 export interface SelectedInstancePageContext {
     approvals: ApprovalRequest[];
-    config: {
-        authMode?: string;
-        publicBaseUrl?: string;
-    } | undefined;
+    config:
+        | {
+              authMode?: string;
+              publicBaseUrl?: string;
+          }
+        | undefined;
     instance: TuiInstanceListEntry | undefined;
     logs: TuiLogEntry[];
     snapshot: TuiAppState["snapshotsByInstance"][string] | undefined;
     toolCalls: ToolCallRecord[];
 }
 
-export function buildSelectedInstancePageContext(state: TuiAppState, instanceName: string): SelectedInstancePageContext {
+export function buildSelectedInstancePageContext(
+    state: TuiAppState,
+    instanceName: string,
+): SelectedInstancePageContext {
     return {
-        approvals: (state.approvalsByInstance[instanceName] ?? []).filter((approval) => approval.status === "pending"),
+        approvals: (state.approvalsByInstance[instanceName] ?? []).filter(
+            (approval) => approval.status === "pending",
+        ),
         config: readConfigInstance(state, instanceName),
         instance: state.instances.find((entry) => entry.name === instanceName),
         logs: state.logsByInstance[instanceName] ?? [],
         snapshot: state.snapshotsByInstance[instanceName],
-        toolCalls: state.toolCallsByInstance[instanceName] ?? []
+        toolCalls: state.toolCallsByInstance[instanceName] ?? [],
     };
 }
 
@@ -34,7 +55,15 @@ export function makeBox(
     page: TuiPageId,
     instance: string | undefined,
     input: {
-        detailLines: Array<string | { disabled?: boolean; id: string; text: string; tone?: BoxLine["tone"] }>;
+        detailLines: Array<
+            | string
+            | {
+                  disabled?: boolean;
+                  id: string;
+                  text: string;
+                  tone?: BoxLine["tone"];
+              }
+        >;
         disabled?: boolean;
         expandable?: boolean;
         expandedKey?: string;
@@ -45,29 +74,38 @@ export function makeBox(
         status?: TuiExpandableBoxStatus;
         summaryLines: string[];
         title: string;
-    }
+    },
 ): BoxModel {
-    const route = currentTuiRoute(state);
-    const routeScopedPrefix = route.view === "list" || route.view === "summary" || route.view === "overview" || route.view === "contexts" || route.view === "index" || route.view === "session"
-        ? `${page}:${instance}`
-        : tuiRouteViewKey(page, instance, route);
-    const expandedKey = input.expandedKey ?? `${routeScopedPrefix}:${input.id}`;
+    const expandedKey =
+        input.expandedKey ?? currentTuiRouteItemKey(state, input.id);
     const expandable = input.expandable ?? input.detailLines.length > 0;
     const summaryLines = normalizeCollapsedLines(input.summaryLines);
 
-    const selectedDetailLineId = state.interaction.selectedDetailLineIds[expandedKey];
-    const expandedLines = normalizeExpandedLines(input.id, input.detailLines).map((line) =>
-        state.interaction.editor?.editing === true && line.id === selectedDetailLineId
-            ? { ...line, text: insertCursor(line.text, state.interaction.editor.cursor ?? 0, state.interaction.redrawNonce % 2 === 0) }
-            : line
-    );
+    const expanded = expandable && state.ui.expandedBoxes[expandedKey] === true;
+    const selectedDetailLineId =
+        state.interaction.selectedDetailLineIds[expandedKey];
+    const expandedLines = expanded
+        ? normalizeExpandedLines(input.id, input.detailLines).map((line) =>
+              state.interaction.editor?.editing === true &&
+              line.id === selectedDetailLineId
+                  ? {
+                        ...line,
+                        text: insertCursor(
+                            line.text,
+                            state.interaction.editor.cursor ?? 0,
+                            state.interaction.redrawNonce % 2 === 0,
+                        ),
+                    }
+                  : line,
+          )
+        : [];
 
     return {
         collapsedLines: summaryLines,
         disabled: input.disabled,
         enterable: input.primaryRoute !== undefined && input.disabled !== true,
         expandable,
-        expanded: expandable && state.ui.expandedBoxes[expandedKey] === true,
+        expanded,
         expandedKey,
         expandedLines,
         focused:
@@ -77,12 +115,19 @@ export function makeBox(
                 state.interaction.focusScope === "form" ||
                 state.interaction.focusScope === "wizard"),
         id: input.id,
-        primaryAction: input.primaryRoute === undefined ? undefined : { kind: "navigate", route: input.primaryRoute },
+        primaryAction:
+            input.primaryRoute === undefined
+                ? undefined
+                : { kind: "navigate", route: input.primaryRoute },
         searchText: input.searchText,
         severity: input.severity,
-        selectedDetailLineId: expandedLines.some((line) => line.id === selectedDetailLineId) ? selectedDetailLineId : expandedLines[0]?.id,
+        selectedDetailLineId: expandedLines.some(
+            (line) => line.id === selectedDetailLineId,
+        )
+            ? selectedDetailLineId
+            : expandedLines[0]?.id,
         status: input.status ?? "normal",
-        title: input.title
+        title: input.title,
     };
 }
 
@@ -102,10 +147,15 @@ export function compactSummary(...entries: Array<[string, string]>): string {
     return entries.map(([key, value]) => `${key}=${value}`).join("  ");
 }
 
-export function readConfigInstance(state: TuiAppState, instanceName: string): {
-    authMode?: string;
-    publicBaseUrl?: string;
-} | undefined {
+export function readConfigInstance(
+    state: TuiAppState,
+    instanceName: string,
+):
+    | {
+          authMode?: string;
+          publicBaseUrl?: string;
+      }
+    | undefined {
     const instances = state.configView?.instances;
     const mcp = asRecord(state.configView?.mcp);
     const auth = asRecord(mcp?.auth);
@@ -113,22 +163,34 @@ export function readConfigInstance(state: TuiAppState, instanceName: string): {
     if (!Array.isArray(instances)) {
         return {
             authMode: typeof auth?.mode === "string" ? auth.mode : undefined,
-            publicBaseUrl: typeof mcp?.publicBaseUrl === "string" ? mcp.publicBaseUrl : undefined
+            publicBaseUrl:
+                typeof mcp?.publicBaseUrl === "string"
+                    ? mcp.publicBaseUrl
+                    : undefined,
         };
     }
 
     const configEntry = instances.find(
-        (entry) => typeof entry === "object" && entry !== null && !Array.isArray(entry) && (entry as Record<string, JsonValue>).name === instanceName
+        (entry) =>
+            typeof entry === "object" &&
+            entry !== null &&
+            !Array.isArray(entry) &&
+            (entry as Record<string, JsonValue>).name === instanceName,
     ) as Record<string, JsonValue> | undefined;
 
     return {
         authMode: typeof auth?.mode === "string" ? auth.mode : undefined,
-        publicBaseUrl: typeof mcp?.publicBaseUrl === "string" ? mcp.publicBaseUrl : undefined,
-        ...(configEntry === undefined ? {} : {})
+        publicBaseUrl:
+            typeof mcp?.publicBaseUrl === "string"
+                ? mcp.publicBaseUrl
+                : undefined,
+        ...(configEntry === undefined ? {} : {}),
     };
 }
 
-export function runtimeStatus(snapshot: TuiAppState["snapshotsByInstance"][string] | undefined): TuiExpandableBoxStatus {
+export function runtimeStatus(
+    snapshot: TuiAppState["snapshotsByInstance"][string] | undefined,
+): TuiExpandableBoxStatus {
     if (snapshot?.status === "ready") {
         return "ready";
     }
@@ -167,17 +229,23 @@ export function renderLogLine(entry: TuiLogEntry): string {
     const context = [
         entry.toolName === undefined ? undefined : `tool=${entry.toolName}`,
         entry.callId === undefined ? undefined : `call=${entry.callId}`,
-        entry.requestId === undefined ? undefined : `request=${entry.requestId}`,
+        entry.requestId === undefined
+            ? undefined
+            : `request=${entry.requestId}`,
         entry.ctxId === undefined ? undefined : `session=${entry.ctxId}`,
-        entry.source === undefined ? undefined : `source=${entry.source}`
-    ].filter(Boolean).join(" ");
+        entry.source === undefined ? undefined : `source=${entry.source}`,
+    ]
+        .filter(Boolean)
+        .join(" ");
     return `${entry.at ?? entry.receivedAt} ${entry.stream} #${entry.seq}${context.length === 0 ? "" : ` ${context}`} ${entry.message ?? entry.tail ?? entry.preview ?? ""}`;
 }
 
-function normalizeCollapsedLines(lines: string[]): [BoxLine] | [BoxLine, BoxLine] {
+function normalizeCollapsedLines(
+    lines: string[],
+): [BoxLine] | [BoxLine, BoxLine] {
     const normalized = lines.slice(0, 2).map((line, index) => ({
         text: line,
-        tone: collapsedToneFor(line, index)
+        tone: collapsedToneFor(line, index),
     }));
 
     if (normalized.length <= 1) {
@@ -189,21 +257,37 @@ function normalizeCollapsedLines(lines: string[]): [BoxLine] | [BoxLine, BoxLine
 
 function normalizeExpandedLines(
     boxId: string,
-    lines: Array<string | { disabled?: boolean; id: string; text: string; tone?: BoxLine["tone"] }>
+    lines: Array<
+        | string
+        | {
+              disabled?: boolean;
+              id: string;
+              text: string;
+              tone?: BoxLine["tone"];
+          }
+    >,
 ): BoxLine[] {
     const occurrences = new Map<string, number>();
 
     return lines.map((line) => {
         const text = typeof line === "string" ? line : line.text;
-        const requestedId = typeof line === "string" ? stableDetailLineId(text) : line.id;
+        const requestedId =
+            typeof line === "string" ? stableDetailLineId(text) : line.id;
         const occurrence = occurrences.get(requestedId) ?? 0;
         occurrences.set(requestedId, occurrence + 1);
 
         return {
-            id: occurrence === 0 ? `${boxId}:${requestedId}` : `${boxId}:${requestedId}:${occurrence + 1}`,
+            id:
+                occurrence === 0
+                    ? `${boxId}:${requestedId}`
+                    : `${boxId}:${requestedId}:${occurrence + 1}`,
             text,
-            ...(typeof line === "string" || line.disabled !== true ? {} : { disabled: true }),
-            ...(typeof line === "string" || line.tone === undefined ? {} : { tone: line.tone })
+            ...(typeof line === "string" || line.disabled !== true
+                ? {}
+                : { disabled: true }),
+            ...(typeof line === "string" || line.tone === undefined
+                ? {}
+                : { tone: line.tone }),
         };
     });
 }
@@ -237,6 +321,10 @@ function collapsedToneFor(line: string, index: number): BoxLine["tone"] {
     return "muted";
 }
 
-function asRecord(value: JsonValue | undefined): Record<string, JsonValue> | undefined {
-    return typeof value === "object" && value !== null && !Array.isArray(value) ? value : undefined;
+function asRecord(
+    value: JsonValue | undefined,
+): Record<string, JsonValue> | undefined {
+    return typeof value === "object" && value !== null && !Array.isArray(value)
+        ? value
+        : undefined;
 }

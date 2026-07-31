@@ -1,9 +1,17 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { asInstanceName } from "@portable-devshell/shared";
+import {
+    asInstanceName,
+    type ContextMessageRecord,
+    type OperationalOverview,
+} from "@portable-devshell/shared";
 
-import { TuiRenderScheduler, TuiAppStore, selectMainScreenModel } from "../../src/testing.ts";
+import {
+    TuiRenderScheduler,
+    TuiAppStore,
+    selectMainScreenModel,
+} from "../../src/testing.ts";
 
 test("TuiAppStore keeps page, instance, and expanded boxes stable across events", () => {
     const store = new TuiAppStore({ maxRawEvents: 2 });
@@ -11,7 +19,7 @@ test("TuiAppStore keeps page, instance, and expanded boxes stable across events"
     store.setConnectionState("connected");
     store.replaceInstances([
         { enabled: true, mcpEnabled: false, name: "alpha" },
-        { enabled: true, mcpEnabled: true, name: "beta" }
+        { enabled: true, mcpEnabled: true, name: "beta" },
     ]);
     store.setSelectedPage("logs");
     store.setSelectedInstance("beta");
@@ -22,7 +30,7 @@ test("TuiAppStore keeps page, instance, and expanded boxes stable across events"
         lastSeq: 2,
         name: asInstanceName("beta"),
         ready: true,
-        status: "ready"
+        status: "ready",
     });
     store.applyEvent({
         destination: asInstanceName("beta"),
@@ -33,10 +41,10 @@ test("TuiAppStore keeps page, instance, and expanded boxes stable across events"
             data: {
                 bytes: 8,
                 stream: "stdout",
-                tail: "payload"
-            }
+                tail: "payload",
+            },
         },
-        seq: 3
+        seq: 3,
     });
 
     const state = store.getState();
@@ -72,9 +80,41 @@ test("TuiRenderScheduler batches multiple store updates into one render notifica
     assert.equal(scheduler.getSnapshot().ui.selectedPage, "help");
 });
 
+test("TuiRenderScheduler redraws visible Overview and Audit context message changes", async () => {
+    const store = new TuiAppStore();
+    store.replaceInstances([
+        { enabled: true, mcpEnabled: true, name: "alpha" },
+    ]);
+    store.setSelectedInstance("alpha");
+    const scheduler = new TuiRenderScheduler(store, 2);
+    let renders = 0;
+    const unsubscribe = scheduler.subscribe(() => {
+        renders += 1;
+    });
+
+    store.setSelectedPage("overview");
+    await delay(10);
+    renders = 0;
+    store.replaceOperationalOverview(emptyOverview());
+    await delay(10);
+    assert.equal(renders, 1);
+
+    store.setSelectedPage("audit");
+    await delay(10);
+    renders = 0;
+    store.replaceContextMessages("alpha", [contextMessage("message-1")]);
+    await delay(10);
+    assert.equal(renders, 1);
+
+    unsubscribe();
+    scheduler.dispose();
+});
+
 test("Audit page renders control-owned tool calls from live events", () => {
     const store = new TuiAppStore();
-    store.replaceInstances([{ enabled: true, mcpEnabled: true, name: "alpha" }]);
+    store.replaceInstances([
+        { enabled: true, mcpEnabled: true, name: "alpha" },
+    ]);
     store.setSelectedInstance("alpha");
     store.setSelectedPage("audit");
 
@@ -93,10 +133,10 @@ test("Audit page renders control-owned tool calls from live events", () => {
                 source: "mcp",
                 startedAt: "2026-07-15T00:00:00.000Z",
                 status: "running",
-                toolName: "todo_read"
-            }
+                toolName: "todo_read",
+            },
         },
-        seq: 1
+        seq: 1,
     });
     store.applyEvent({
         destination: asInstanceName("alpha"),
@@ -111,10 +151,10 @@ test("Audit page renders control-owned tool calls from live events", () => {
                 source: "mcp",
                 startedAt: "2026-07-15T00:00:00.000Z",
                 status: "completed",
-                toolName: "todo_read"
-            }
+                toolName: "todo_read",
+            },
         },
-        seq: 2
+        seq: 2,
     });
 
     const record = store.getState().toolCallsByInstance.alpha?.[0];
@@ -124,18 +164,36 @@ test("Audit page renders control-owned tool calls from live events", () => {
     assert.deepEqual(record?.output, { revision: 3 });
     assert.equal(record?.requestId, "request-control");
 
-    const collapsedAudit = selectMainScreenModel(store.getState());
-    store.toggleExpanded(collapsedAudit.boxes[0]!.expandedKey);
-    const audit = selectMainScreenModel(store.getState());
-    assert.equal(audit.boxes[0]?.id, "audit-control-call-1");
-    assert.equal(audit.boxes[0]?.title, "todo_read · completed");
-    assert.equal(audit.boxes[0]?.expandedLines.some((line) => line.text === "ctxId ctx-control"), true);
-    assert.equal(audit.boxes[0]?.expandedLines.some((line) => line.text.startsWith("output ")), true);
+    const contexts = selectMainScreenModel(store.getState());
+    assert.equal(contexts.boxes[0]?.id, "audit-context:ctx-control");
+    store.pushRoute({
+        ctxId: "ctx-control",
+        page: "audit",
+        scope: "context",
+        view: "context",
+    });
+    const calls = selectMainScreenModel(store.getState());
+    assert.equal(calls.boxes[0]?.id, "audit-call:control-call-1");
+    assert.equal(calls.boxes[0]?.title, "todo_read · completed");
+    store.toggleExpanded(calls.boxes[0]!.expandedKey);
+    const expanded = selectMainScreenModel(store.getState()).boxes[0];
+    assert.equal(
+        expanded?.expandedLines.some(
+            (line) => line.text === "Context ctx-control",
+        ),
+        false,
+    );
+    assert.equal(
+        expanded?.expandedLines.some((line) => line.text.startsWith("result ")),
+        true,
+    );
 });
 
 test("TuiAppStore bounds live logs and tool calls per instance", () => {
     const store = new TuiAppStore();
-    store.replaceInstances([{ enabled: true, mcpEnabled: true, name: "alpha" }]);
+    store.replaceInstances([
+        { enabled: true, mcpEnabled: true, name: "alpha" },
+    ]);
 
     for (let index = 1; index <= 150; index += 1) {
         store.applyEvent({
@@ -150,10 +208,10 @@ test("TuiAppStore bounds live logs and tool calls per instance", () => {
                     source: "mcp",
                     startedAt: new Date(index).toISOString(),
                     status: "running",
-                    toolName: "bash_run"
-                }
+                    toolName: "bash_run",
+                },
             },
-            seq: index
+            seq: index,
         });
     }
 
@@ -167,10 +225,10 @@ test("TuiAppStore bounds live logs and tool calls per instance", () => {
                 data: {
                     bytes: 1,
                     stream: "stdout",
-                    tail: String(index)
-                }
+                    tail: String(index),
+                },
             },
-            seq: index
+            seq: index,
         });
     }
 
@@ -196,7 +254,7 @@ test("TuiRenderScheduler ignores updates outside the visible page and instance",
     const store = new TuiAppStore();
     store.replaceInstances([
         { enabled: true, mcpEnabled: true, name: "alpha" },
-        { enabled: true, mcpEnabled: true, name: "beta" }
+        { enabled: true, mcpEnabled: true, name: "beta" },
     ]);
     store.setSelectedPage("help");
     store.setSelectedInstance("alpha");
@@ -228,15 +286,36 @@ test("TuiRenderScheduler ignores updates outside the visible page and instance",
 
 test("Audit page creates expensive input and output detail only for expanded records", () => {
     const store = new TuiAppStore();
-    store.replaceInstances([{ enabled: true, mcpEnabled: true, name: "alpha" }]);
+    store.replaceInstances([
+        { enabled: true, mcpEnabled: true, name: "alpha" },
+    ]);
     store.setSelectedInstance("alpha");
     store.setSelectedPage("audit");
-    store.replaceToolCalls("alpha", [{
-        ...toolCall("large-output"),
-        input: { command: "x".repeat(20_000) },
-        output: { stdout: "y".repeat(20_000) }
-    }]);
+    store.replaceToolCalls("alpha", [
+        {
+            ...toolCall("large-output"),
+            input: { command: "x".repeat(20_000) },
+            output: { stdout: "y".repeat(20_000) },
+        },
+    ]);
 
+    const contexts = selectMainScreenModel(store.getState()).boxes;
+    assert.equal(contexts[0]?.id, "audit-scope:unscoped");
+
+    store.replaceToolCalls("alpha", [
+        {
+            ...toolCall("large-output"),
+            ctxId: "ctx-large",
+            input: { command: "x".repeat(20_000) },
+            output: { stdout: "y".repeat(20_000) },
+        },
+    ]);
+    store.pushRoute({
+        ctxId: "ctx-large",
+        page: "audit",
+        scope: "context",
+        view: "context",
+    });
     const collapsed = selectMainScreenModel(store.getState()).boxes[0];
     assert.equal(collapsed?.expanded, false);
     assert.deepEqual(collapsed?.expandedLines, []);
@@ -244,8 +323,14 @@ test("Audit page creates expensive input and output detail only for expanded rec
     store.toggleExpanded(collapsed!.expandedKey);
     const expanded = selectMainScreenModel(store.getState()).boxes[0];
     assert.equal(expanded?.expanded, true);
-    assert.equal(expanded?.expandedLines.some((line) => line.text.startsWith("input ")), true);
-    assert.equal(expanded?.expandedLines.some((line) => line.text.startsWith("output ")), true);
+    assert.equal(
+        expanded?.expandedLines.some((line) => line.text.startsWith("input ")),
+        true,
+    );
+    assert.equal(
+        expanded?.expandedLines.some((line) => line.text.startsWith("result ")),
+        true,
+    );
 });
 
 function toolCall(callId: string) {
@@ -256,10 +341,42 @@ function toolCall(callId: string) {
         source: "mcp" as const,
         startedAt: "2026-07-28T00:00:00.000Z",
         status: "completed" as const,
-        toolName: "bash_run"
+        toolName: "bash_run",
     };
 }
 
 async function delay(milliseconds: number): Promise<void> {
     await new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+function emptyOverview(): OperationalOverview {
+    return {
+        activity: [],
+        alerts: [],
+        controller: { pid: 1, uptimeSeconds: 1 },
+        counts: {
+            activeTodos: 0,
+            failedCalls24h: 0,
+            instancesAttention: 0,
+            instancesCritical: 0,
+            instancesReady: 0,
+            instancesTotal: 0,
+            pendingApprovals: 0,
+        },
+        generatedAt: "2026-07-31T00:00:00.000Z",
+        health: "healthy",
+        instances: [],
+        todos: [],
+    };
+}
+
+function contextMessage(id: string): ContextMessageRecord {
+    return {
+        createdAt: "2026-07-31T00:00:00.000Z",
+        ctxId: "ctx-a",
+        id,
+        instance: "alpha",
+        status: "pending",
+        text: "Review this context",
+    };
 }

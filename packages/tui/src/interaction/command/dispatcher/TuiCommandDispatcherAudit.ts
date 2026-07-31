@@ -1,6 +1,14 @@
-import type { ArtifactViewImageInput, ArtifactViewImageResult, JsonValue } from "@portable-devshell/shared";
+import type {
+    ArtifactViewImageInput,
+    ArtifactViewImageResult,
+    JsonValue,
+} from "@portable-devshell/shared";
 
-import { auditInputText, auditOutputText, resolveAuditOutput } from "../../../state/audit/TuiAuditPresentation.js";
+import {
+    auditInputText,
+    auditOutputText,
+    resolveAuditOutput,
+} from "../../../state/audit/TuiAuditPresentation.js";
 import type { TuiAppStore } from "../../../state/TuiAppStore.js";
 import type { TuiUiIntent } from "../../../state/TuiInteractionState.js";
 import { topTuiOverlay } from "../../../state/overlay/TuiOverlay.js";
@@ -11,7 +19,7 @@ interface CommandAuditOptions {
     focusManager: TuiFocusManager;
     onArtifactViewImage?(
         instance: string,
-        input: ArtifactViewImageInput
+        input: ArtifactViewImageInput,
     ): Promise<ArtifactViewImageResult>;
     store: TuiAppStore;
 }
@@ -30,48 +38,74 @@ export class TuiCommandDispatcherAudit {
     }
 
     openDetail(instance: string, approvalId: string): void {
-        this.#store.clearToolForm();
         this.#focusManager.pushRestore("approvalDetail");
         this.#store.pushOverlay({
             approvalId,
             instance,
             kind: "approval",
-            selectedAction: "back"
+            selectedAction: "back",
         });
         this.#store.setFocusScope("approvalDetail");
     }
 
     callIdFromBox(boxId: string): string | undefined {
-        return boxId.startsWith("audit-call:") ? boxId.slice("audit-call:".length) : undefined;
+        return boxId.startsWith("audit-call:")
+            ? boxId.slice("audit-call:".length)
+            : undefined;
     }
 
     async openInput(instance: string, callId: string): Promise<boolean> {
-        const record = this.#store.getState().toolCallsByInstance[instance]?.find((candidate) => candidate.callId === callId);
+        const record = this.#store
+            .getState()
+            .toolCallsByInstance[instance]?.find(
+                (candidate) => candidate.callId === callId,
+            );
         if (record === undefined) return false;
         return await this.#dispatch({
             body: auditInputText(record.input, record.inputSummary),
             title: `${record.toolName} · input`,
-            type: "textDetail.open"
+            type: "textDetail.open",
         });
     }
 
     async openOutput(instance: string, callId: string): Promise<boolean> {
-        const record = this.#store.getState().toolCallsByInstance[instance]?.find((candidate) => candidate.callId === callId);
+        const record = this.#store
+            .getState()
+            .toolCallsByInstance[instance]?.find(
+                (candidate) => candidate.callId === callId,
+            );
         if (record === undefined) return false;
-        const output = resolveAuditOutput(record.output, this.#store.getState().logsByInstance[instance] ?? [], callId);
-        const imageInput = record.toolName === "artifact_viewImage" ? readArtifactViewImageInput(record.input) : undefined;
-        if (imageInput !== undefined && this.#onArtifactViewImage !== undefined) {
-            return await this.#openImageOutput(instance, record.toolName, imageInput, output);
+        const output = resolveAuditOutput(
+            record.output,
+            this.#store.getState().logsByInstance[instance] ?? [],
+            callId,
+        );
+        const imageInput =
+            record.toolName === "artifact_viewImage"
+                ? readArtifactViewImageInput(record.input)
+                : undefined;
+        if (
+            imageInput !== undefined &&
+            this.#onArtifactViewImage !== undefined
+        ) {
+            return await this.#openImageOutput(
+                instance,
+                record.toolName,
+                imageInput,
+                output,
+            );
         }
         return await this.#dispatch({
             body: auditOutputText(output),
             title: `${record.toolName} · output`,
-            type: "textDetail.open"
+            type: "textDetail.open",
         });
     }
 
     returnToPage(): boolean {
-        const overlay = topTuiOverlay(this.#store.getState().interaction.overlays);
+        const overlay = topTuiOverlay(
+            this.#store.getState().interaction.overlays,
+        );
         if (overlay?.kind !== "approval") return false;
         this.#store.popOverlay();
         this.#focusManager.restore();
@@ -82,35 +116,51 @@ export class TuiCommandDispatcherAudit {
         const state = this.#store.getState();
         const overlay = topTuiOverlay(state.interaction.overlays);
         if (overlay?.kind !== "approval") return false;
-        const approval = state.approvalsByInstance[overlay.instance]?.find((candidate) => candidate.approvalId === overlay.approvalId);
+        const approval = state.approvalsByInstance[overlay.instance]?.find(
+            (candidate) => candidate.approvalId === overlay.approvalId,
+        );
         if (approval === undefined) return this.returnToPage();
 
         switch (overlay.selectedAction) {
             case "back":
                 return this.returnToPage();
             case "input": {
-                const toolCall = state.toolCallsByInstance[overlay.instance]?.find((candidate) => candidate.callId === approval.callId);
+                const toolCall = state.toolCallsByInstance[
+                    overlay.instance
+                ]?.find((candidate) => candidate.callId === approval.callId);
                 return await this.#dispatch({
-                    body: auditInputText(toolCall?.input, approval.inputSummary),
+                    body: auditInputText(
+                        toolCall?.input,
+                        approval.inputSummary,
+                    ),
                     title: `${approval.toolName} · approval input`,
-                    type: "textDetail.open"
+                    type: "textDetail.open",
                 });
             }
             case "approve":
                 return await this.#dispatch({
                     body: "Approve this tool call? The requested operation may execute immediately.",
-                    confirmIntent: { approvalId: overlay.approvalId, decision: "approve", instance: overlay.instance, type: "approval.decide" },
+                    confirmIntent: {
+                        approvalId: overlay.approvalId,
+                        decision: "approve",
+                        instance: overlay.instance,
+                        type: "approval.decide",
+                    },
                     confirmLabel: "Approve",
                     title: "Confirm Approval",
-                    type: "overlay.openConfirm"
+                    type: "overlay.openConfirm",
                 });
             case "deny":
                 return await this.#dispatch({
                     body: "Deny this tool call?",
-                    confirmIntent: { approvalId: overlay.approvalId, instance: overlay.instance, type: "approval.confirmDeny" },
+                    confirmIntent: {
+                        approvalId: overlay.approvalId,
+                        instance: overlay.instance,
+                        type: "approval.confirmDeny",
+                    },
                     confirmLabel: "Deny",
                     title: "Confirm Deny",
-                    type: "overlay.openConfirm"
+                    type: "overlay.openConfirm",
                 });
         }
     }
@@ -119,25 +169,34 @@ export class TuiCommandDispatcherAudit {
         instance: string,
         toolName: string,
         input: ArtifactViewImageInput,
-        output: JsonValue | undefined
+        output: JsonValue | undefined,
     ): Promise<boolean> {
         const title = `${toolName} · output`;
         await this.#dispatch({
             body: `${auditOutputText(output)}\n\nLoading image preview...`,
             title,
-            type: "textDetail.open"
+            type: "textDetail.open",
         });
         try {
             const image = await this.#onArtifactViewImage!(instance, input);
-            const overlay = topTuiOverlay(this.#store.getState().interaction.overlays);
-            if (overlay?.kind !== "text-detail" || overlay.title !== title) return true;
-            this.#store.replaceTopOverlay({ ...overlay, body: auditOutputText(output), image });
+            const overlay = topTuiOverlay(
+                this.#store.getState().interaction.overlays,
+            );
+            if (overlay?.kind !== "text-detail" || overlay.title !== title)
+                return true;
+            this.#store.replaceTopOverlay({
+                ...overlay,
+                body: auditOutputText(output),
+                image,
+            });
         } catch (error) {
-            const overlay = topTuiOverlay(this.#store.getState().interaction.overlays);
+            const overlay = topTuiOverlay(
+                this.#store.getState().interaction.overlays,
+            );
             if (overlay?.kind === "text-detail" && overlay.title === title) {
                 this.#store.replaceTopOverlay({
                     ...overlay,
-                    body: `${auditOutputText(output)}\n\nImage preview unavailable: ${readErrorMessage(error)}`
+                    body: `${auditOutputText(output)}\n\nImage preview unavailable: ${readErrorMessage(error)}`,
                 });
             }
         }
@@ -145,11 +204,23 @@ export class TuiCommandDispatcherAudit {
     }
 }
 
-function readArtifactViewImageInput(value: JsonValue | undefined): ArtifactViewImageInput | undefined {
-    if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
-    const handle = typeof value.handle === "string" && value.handle.length > 0 ? value.handle : undefined;
-    const path = typeof value.path === "string" && value.path.length > 0 ? value.path : undefined;
-    const instance = typeof value.instance === "string" && value.instance.length > 0 ? value.instance : undefined;
+function readArtifactViewImageInput(
+    value: JsonValue | undefined,
+): ArtifactViewImageInput | undefined {
+    if (typeof value !== "object" || value === null || Array.isArray(value))
+        return undefined;
+    const handle =
+        typeof value.handle === "string" && value.handle.length > 0
+            ? value.handle
+            : undefined;
+    const path =
+        typeof value.path === "string" && value.path.length > 0
+            ? value.path
+            : undefined;
+    const instance =
+        typeof value.instance === "string" && value.instance.length > 0
+            ? value.instance
+            : undefined;
     if ((handle === undefined) === (path === undefined)) return undefined;
     return handle === undefined
         ? { ...(instance === undefined ? {} : { instance }), path: path! }

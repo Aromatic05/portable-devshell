@@ -1,6 +1,11 @@
 import type { TuiUiIntent } from "../../../state/TuiInteractionState.js";
 import type { TuiAppStore } from "../../../state/TuiAppStore.js";
-import { topTuiOverlay, type TuiConfirmationOverlay, type TuiMessageComposerOverlay, type TuiTextDetailOverlay } from "../../../state/overlay/TuiOverlay.js";
+import {
+    topTuiOverlay,
+    type TuiConfirmationOverlay,
+    type TuiMessageComposerOverlay,
+    type TuiTextDetailOverlay,
+} from "../../../state/overlay/TuiOverlay.js";
 import { isTuiSearchablePage } from "../../../state/TuiPageCatalog.js";
 import { currentTuiRoute } from "../../../state/route/TuiRouteState.js";
 import type { TuiFocusManager } from "../../focus/TuiFocusManager.js";
@@ -10,7 +15,11 @@ export interface TuiCommandDispatcherOverlayOptions {
     dispatch?(intent: TuiUiIntent): Promise<boolean>;
     focus: TuiCommandDispatcherFocus;
     focusManager: TuiFocusManager;
-    onContextMessage?(instance: string, ctxId: string, text: string): Promise<void>;
+    onContextMessage?(
+        instance: string,
+        ctxId: string,
+        text: string,
+    ): Promise<void>;
     store: TuiAppStore;
 }
 
@@ -34,7 +43,9 @@ export class TuiCommandDispatcherOverlay {
             case "search.open":
                 return this.#openSearch();
             case "search.append":
-                return this.#updateSearch((current) => `${current}${intent.text}`);
+                return this.#updateSearch(
+                    (current) => `${current}${intent.text}`,
+                );
             case "search.backspace":
                 return this.#updateSearch((current) => current.slice(0, -1));
             case "search.submit":
@@ -62,9 +73,17 @@ export class TuiCommandDispatcherOverlay {
             case "messageComposer.openCurrent":
                 return this.#openCurrentMessageComposer();
             case "messageComposer.append":
-                return this.#updateMessageComposer((overlay) => ({ ...overlay, draft: `${overlay.draft}${intent.text}`, error: undefined }));
+                return this.#updateMessageComposer((overlay) => ({
+                    ...overlay,
+                    draft: `${overlay.draft}${intent.text}`,
+                    error: undefined,
+                }));
             case "messageComposer.backspace":
-                return this.#updateMessageComposer((overlay) => ({ ...overlay, draft: overlay.draft.slice(0, -1), error: undefined }));
+                return this.#updateMessageComposer((overlay) => ({
+                    ...overlay,
+                    draft: overlay.draft.slice(0, -1),
+                    error: undefined,
+                }));
             case "messageComposer.focus":
                 return this.#moveMessageComposerFocus(intent.direction);
             case "messageComposer.cancel":
@@ -79,7 +98,9 @@ export class TuiCommandDispatcherOverlay {
     }
 
     cancelPassiveScope(): boolean {
-        const overlay = topTuiOverlay(this.#store.getState().interaction.overlays);
+        const overlay = topTuiOverlay(
+            this.#store.getState().interaction.overlays,
+        );
         if (overlay === undefined) return false;
         return this.#closeOverlay(overlay.kind);
     }
@@ -89,7 +110,6 @@ export class TuiCommandDispatcherOverlay {
         if (!isTuiSearchablePage(page)) return false;
         this.#focusManager.pushRestore("search");
         this.#store.pushOverlay({ kind: "search", page });
-        this.#store.setSearchOpen(true);
         this.#store.setFocusScope("search");
         return true;
     }
@@ -102,7 +122,9 @@ export class TuiCommandDispatcherOverlay {
         return true;
     }
 
-    #openConfirmation(intent: Extract<TuiUiIntent, { type: "overlay.openConfirm" }>): void {
+    #openConfirmation(
+        intent: Extract<TuiUiIntent, { type: "overlay.openConfirm" }>,
+    ): void {
         this.#focusManager.pushRestore("confirm");
         this.#store.pushOverlay({
             body: intent.body,
@@ -111,51 +133,73 @@ export class TuiCommandDispatcherOverlay {
             confirmLabel: intent.confirmLabel ?? "Confirm",
             kind: "confirmation",
             selectedAction: "cancel",
-            title: intent.title
+            title: intent.title,
         });
         this.#store.setFocusScope("confirm");
     }
 
     #focusConfirmation(button: "cancel" | "confirm"): boolean {
-        const overlay = topTuiOverlay(this.#store.getState().interaction.overlays);
+        const overlay = topTuiOverlay(
+            this.#store.getState().interaction.overlays,
+        );
         if (overlay?.kind !== "confirmation") return false;
         this.#store.replaceTopOverlay({ ...overlay, selectedAction: button });
         return true;
     }
 
     async #acceptConfirm(): Promise<boolean> {
-        const overlay = topTuiOverlay(this.#store.getState().interaction.overlays);
+        const overlay = topTuiOverlay(
+            this.#store.getState().interaction.overlays,
+        );
         if (overlay?.kind !== "confirmation") return false;
-        if (overlay.selectedAction === "cancel") return this.#closeOverlay("confirmation");
+        if (overlay.selectedAction === "cancel")
+            return this.#closeOverlay("confirmation");
         const confirmIntent = overlay.confirmIntent;
         this.#closeOverlay("confirmation");
-        return this.#dispatch === undefined ? false : await this.#dispatch(confirmIntent);
+        return this.#dispatch === undefined
+            ? false
+            : await this.#dispatch(confirmIntent);
     }
 
-    #openTextDetail(intent: Extract<TuiUiIntent, { type: "textDetail.open" }>): void {
+    #openTextDetail(
+        intent: Extract<TuiUiIntent, { type: "textDetail.open" }>,
+    ): void {
         this.#focusManager.pushRestore("textDetail");
         this.#store.pushOverlay({
             body: intent.body,
             image: intent.image,
             kind: "text-detail",
             scrollOffset: 0,
-            title: intent.title
+            title: intent.title,
         });
         this.#store.setFocusScope("textDetail");
     }
 
     #scrollTextDetail(delta: number): boolean {
-        const overlay = topTuiOverlay(this.#store.getState().interaction.overlays);
+        const overlay = topTuiOverlay(
+            this.#store.getState().interaction.overlays,
+        );
         if (overlay?.kind !== "text-detail") return false;
-        this.#store.replaceTopOverlay({ ...overlay, scrollOffset: Math.max(0, overlay.scrollOffset + delta) });
+        this.#store.replaceTopOverlay({
+            ...overlay,
+            scrollOffset: Math.max(0, overlay.scrollOffset + delta),
+        });
         return true;
     }
 
     #openCurrentMessageComposer(): boolean {
         const state = this.#store.getState();
         const route = currentTuiRoute(state);
-        if (state.ui.selectedInstance === undefined || route.page !== "audit" || route.view === "contexts") {
-            this.#store.setScreenStatus(state.ui.selectedPage, "Open an Audit Context before sending a message.");
+        if (
+            state.ui.selectedInstance === undefined ||
+            route.page !== "audit" ||
+            route.view === "contexts" ||
+            route.scope !== "context"
+        ) {
+            this.#store.setScreenStatus(
+                state.ui.selectedPage,
+                "Open an Audit Context before sending a message.",
+            );
             return false;
         }
         this.#openMessageComposer(state.ui.selectedInstance, route.ctxId);
@@ -170,62 +214,109 @@ export class TuiCommandDispatcherOverlay {
             instance,
             kind: "message-composer",
             selectedAction: "editor",
-            submitting: false
+            submitting: false,
         });
         this.#store.setFocusScope("messageComposer");
     }
 
-    #updateMessageComposer(update: (overlay: TuiMessageComposerOverlay) => TuiMessageComposerOverlay): boolean {
-        const overlay = topTuiOverlay(this.#store.getState().interaction.overlays);
-        if (overlay?.kind !== "message-composer" || overlay.submitting) return false;
+    #updateMessageComposer(
+        update: (
+            overlay: TuiMessageComposerOverlay,
+        ) => TuiMessageComposerOverlay,
+    ): boolean {
+        const overlay = topTuiOverlay(
+            this.#store.getState().interaction.overlays,
+        );
+        if (overlay?.kind !== "message-composer" || overlay.submitting)
+            return false;
         this.#store.replaceTopOverlay(update(overlay));
         return true;
     }
 
     #moveMessageComposerFocus(direction: "next" | "previous"): boolean {
-        const order: readonly TuiMessageComposerOverlay["selectedAction"][] = ["editor", "send", "cancel"];
+        const order: readonly TuiMessageComposerOverlay["selectedAction"][] = [
+            "editor",
+            "send",
+            "cancel",
+        ];
         return this.#updateMessageComposer((overlay) => {
             const current = order.indexOf(overlay.selectedAction);
             const delta = direction === "next" ? 1 : -1;
-            return { ...overlay, selectedAction: order[(current + delta + order.length) % order.length]! };
+            return {
+                ...overlay,
+                selectedAction:
+                    order[(current + delta + order.length) % order.length]!,
+            };
         });
     }
 
     async #submitMessageComposer(force: boolean): Promise<boolean> {
-        const overlay = topTuiOverlay(this.#store.getState().interaction.overlays);
-        if (overlay?.kind !== "message-composer" || overlay.submitting) return false;
-        if (overlay.selectedAction === "cancel") return this.#closeOverlay("message-composer");
+        const overlay = topTuiOverlay(
+            this.#store.getState().interaction.overlays,
+        );
+        if (overlay?.kind !== "message-composer" || overlay.submitting)
+            return false;
+        if (overlay.selectedAction === "cancel")
+            return this.#closeOverlay("message-composer");
         if (overlay.selectedAction === "editor" && !force) {
-            this.#store.replaceTopOverlay({ ...overlay, draft: `${overlay.draft}\n` });
+            this.#store.replaceTopOverlay({
+                ...overlay,
+                draft: `${overlay.draft}\n`,
+            });
             return true;
         }
         const text = overlay.draft.trim();
         if (text.length === 0) {
-            this.#store.replaceTopOverlay({ ...overlay, error: "Message cannot be empty." });
+            this.#store.replaceTopOverlay({
+                ...overlay,
+                error: "Message cannot be empty.",
+            });
             return false;
         }
         if (this.#onContextMessage === undefined) {
-            this.#store.replaceTopOverlay({ ...overlay, error: "Context message service is unavailable." });
+            this.#store.replaceTopOverlay({
+                ...overlay,
+                error: "Context message service is unavailable.",
+            });
             return false;
         }
-        this.#store.replaceTopOverlay({ ...overlay, error: undefined, submitting: true });
+        this.#store.replaceTopOverlay({
+            ...overlay,
+            error: undefined,
+            submitting: true,
+        });
         try {
             await this.#onContextMessage(overlay.instance, overlay.ctxId, text);
             return this.#closeOverlay("message-composer");
         } catch (error) {
-            const current = topTuiOverlay(this.#store.getState().interaction.overlays);
+            const current = topTuiOverlay(
+                this.#store.getState().interaction.overlays,
+            );
             if (current?.kind === "message-composer") {
-                this.#store.replaceTopOverlay({ ...current, error: readErrorMessage(error), submitting: false });
+                this.#store.replaceTopOverlay({
+                    ...current,
+                    error: readErrorMessage(error),
+                    submitting: false,
+                });
             }
             return false;
         }
     }
 
-    #closeOverlay(expectedKind: TuiConfirmationOverlay["kind"] | TuiTextDetailOverlay["kind"] | "search" | "tool-form" | "message-composer" | "approval"): boolean {
-        const overlay = topTuiOverlay(this.#store.getState().interaction.overlays);
+    #closeOverlay(
+        expectedKind:
+            | TuiConfirmationOverlay["kind"]
+            | TuiTextDetailOverlay["kind"]
+            | "search"
+            | "tool-form"
+            | "message-composer"
+            | "approval",
+    ): boolean {
+        const overlay = topTuiOverlay(
+            this.#store.getState().interaction.overlays,
+        );
         if (overlay?.kind !== expectedKind) return false;
         this.#store.popOverlay();
-        if (expectedKind === "search") this.#store.setSearchOpen(false);
         this.#focusManager.restore();
         return true;
     }

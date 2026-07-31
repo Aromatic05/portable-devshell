@@ -1,6 +1,15 @@
 import type { TuiRoute, TuiRouteViewState } from "./route/TuiRoute.js";
 
-export type TuiPageId = "overview" | "instances" | "todo" | "config" | "connections" | "audit" | "logs" | "help" | "terminal";
+export type TuiPageId =
+    | "overview"
+    | "instances"
+    | "todo"
+    | "config"
+    | "connections"
+    | "audit"
+    | "logs"
+    | "help"
+    | "terminal";
 
 export type TuiSidebarFocus = "pages" | "instances";
 
@@ -20,25 +29,22 @@ export type TuiFocusScope =
     | "textDetail"
     | "terminal";
 
-export type TuiAuditPageMode = "list" | "approvalDetail" | "denyConfirm";
+export type TuiSidebarCursor =
+    { id: TuiPageId; kind: "page" } | { id: string; kind: "instance" };
 
-export type TuiAuditPageState = {
-    approvalId?: string;
-    listFocusId?: string;
-    listScrollOffset?: number;
-    mode: TuiAuditPageMode;
-    selectedAction?: "approve" | "deny" | "back" | "input";
-};
-
-export type TuiSidebarCursor = { id: TuiPageId; kind: "page" } | { id: string; kind: "instance" };
-
-export type TuiExpandableBoxStatus = "normal" | "ready" | "running" | "warning" | "failed" | "disabled" | "pending";
+export type TuiExpandableBoxStatus =
+    | "normal"
+    | "ready"
+    | "running"
+    | "warning"
+    | "failed"
+    | "disabled"
+    | "pending";
 
 export type TuiUiState = {
     selectedPage: TuiPageId;
     selectedInstance?: string;
     sidebarFocus: TuiSidebarFocus;
-    focusScope: TuiFocusScope;
     mainFocusId?: string;
     routeStacks: Record<string, readonly TuiRoute[]>;
     routeViewStates: Record<string, TuiRouteViewState>;

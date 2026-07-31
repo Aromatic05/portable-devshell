@@ -10,19 +10,18 @@ import {
     type OAuthApprovalRequest,
     type OperationalOverview,
     type TodoReadResult,
-    type ToolCallRecord
+    type ToolCallRecord,
 } from "@portable-devshell/shared";
 
-import type { TuiEditorState, TuiUiIntent } from "./TuiInteractionState.js";
+import type { TuiEditorState } from "./TuiInteractionState.js";
 import type { TuiOverlay } from "./overlay/TuiOverlay.js";
 import type { TuiRoute } from "./route/TuiRoute.js";
 import { currentTuiRouteStack } from "./route/TuiRouteState.js";
 import type {
-    TuiAuditPageState,
     TuiFocusScope,
     TuiPageId,
     TuiSidebarCursor,
-    TuiSidebarFocus
+    TuiSidebarFocus,
 } from "./TuiUiState.js";
 import { createInitialTuiAppState } from "./reducer/TuiStoreInitialState.js";
 import { tuiAppReducer } from "./reducer/TuiStoreReducer.js";
@@ -64,7 +63,12 @@ export class TuiAppStore {
 
     dispatch(action: TuiAppAction): void {
         const nextState =
-            action.type === "event.append" ? tuiAppReducer(this.#state, { ...action, maxEvents: this.#maxRawEvents }) : tuiAppReducer(this.#state, action);
+            action.type === "event.append"
+                ? tuiAppReducer(this.#state, {
+                      ...action,
+                      maxEvents: this.#maxRawEvents,
+                  })
+                : tuiAppReducer(this.#state, action);
 
         if (nextState === this.#state) {
             return;
@@ -103,58 +107,54 @@ export class TuiAppStore {
     setConfigView(configView?: Record<string, JsonValue>): void {
         this.dispatch({
             configView,
-            type: "control.setConfigView"
+            type: "control.setConfigView",
         });
     }
 
-    setConnectionState(status: TuiConnectionStatus, error?: { code?: string; message?: string }): void {
+    setConnectionState(
+        status: TuiConnectionStatus,
+        error?: { code?: string; message?: string },
+    ): void {
         this.dispatch({
             errorCode: error?.code,
             errorMessage: error?.message,
             status,
-            type: "control.setConnectionState"
+            type: "control.setConnectionState",
         });
     }
 
     setFocusScope(focusScope: TuiFocusScope): void {
         this.dispatch({
             focusScope,
-            type: "focus.scope.set"
-        });
-    }
-
-    setAuditPage(auditPage: TuiAuditPageState): void {
-        this.dispatch({
-            auditPage,
-            type: "auditPage.set"
+            type: "focus.scope.set",
         });
     }
 
     setSidebarFocus(sidebarFocus: TuiSidebarFocus): void {
         this.dispatch({
             sidebarFocus,
-            type: "sidebar.focus.set"
+            type: "sidebar.focus.set",
         });
     }
 
     setMainFocusId(mainFocusId?: string): void {
         this.dispatch({
             mainFocusId,
-            type: "mainFocus.set"
+            type: "mainFocus.set",
         });
     }
 
     setSelectedPage(page: TuiPageId): void {
         this.dispatch({
             page,
-            type: "ui.selectPage"
+            type: "ui.selectPage",
         });
     }
 
     setSelectedInstance(instance?: string): void {
         this.dispatch({
             instance,
-            type: "ui.selectInstance"
+            type: "ui.selectInstance",
         });
     }
 
@@ -192,66 +192,18 @@ export class TuiAppStore {
         this.dispatch({ type: "route.reset" });
     }
 
-    pushRestore(focusScope: TuiFocusScope, sidebarFocus: TuiSidebarFocus, mainFocusId?: string): void {
-        this.dispatch({
-            focusScope,
-            mainFocusId,
-            sidebarFocus,
-            type: "restore.push"
-        });
-    }
-
-    popRestore(): void {
-        this.dispatch({
-            type: "restore.pop"
-        });
-    }
-
-    setConfirmDialog(input: {
-        body: string;
-        cancelLabel?: string;
-        confirmIntent: TuiUiIntent;
-        confirmLabel?: string;
-        open: boolean;
-        title: string;
-    }): void {
-        this.dispatch({
-            body: input.body,
-            cancelLabel: input.cancelLabel ?? "Cancel",
-            confirmIntent: input.confirmIntent,
-            confirmLabel: input.confirmLabel ?? "Confirm",
-            open: input.open,
-            title: input.title,
-            type: "overlay.setConfirmDialog"
-        });
-    }
-
-    setConfirmFocus(button: "cancel" | "confirm"): void {
-        this.dispatch({
-            button,
-            type: "confirm.focus"
-        });
-    }
-
     setSelectedDetailLine(key: string, lineId?: string): void {
         this.dispatch({
             key,
             lineId,
-            type: "detailLine.select"
+            type: "detailLine.select",
         });
     }
 
     setSidebarCursor(cursor?: TuiSidebarCursor): void {
         this.dispatch({
             cursor,
-            type: "sidebar.cursor.set"
-        });
-    }
-
-    setSearchOpen(value: boolean): void {
-        this.dispatch({
-            type: "search.setOpen",
-            value
+            type: "sidebar.cursor.set",
         });
     }
 
@@ -259,7 +211,7 @@ export class TuiAppStore {
         this.dispatch({
             page,
             query,
-            type: "search.setQuery"
+            type: "search.setQuery",
         });
     }
 
@@ -267,7 +219,7 @@ export class TuiAppStore {
         this.dispatch({
             page,
             status,
-            type: "screen.setStatus"
+            type: "screen.setStatus",
         });
     }
 
@@ -275,39 +227,7 @@ export class TuiAppStore {
         this.dispatch({
             error,
             key,
-            type: "panelError.set"
-        });
-    }
-
-    setToolForm(instance: string, toolName: string, input: string): void {
-        this.dispatch({
-            input,
-            instance,
-            toolName,
-            type: "toolForm.set"
-        });
-    }
-
-    setTextDetail(input: {
-        body: string;
-        image?: import("@portable-devshell/shared").ArtifactViewImageResult;
-        open: boolean;
-        scrollOffset?: number;
-        title: string;
-    }): void {
-        this.dispatch({
-            body: input.body,
-            image: input.image,
-            open: input.open,
-            scrollOffset: input.scrollOffset ?? 0,
-            title: input.title,
-            type: "textDetail.set"
-        });
-    }
-
-    clearToolForm(): void {
-        this.dispatch({
-            type: "toolForm.clear"
+            type: "panelError.set",
         });
     }
 
@@ -326,7 +246,7 @@ export class TuiAppStore {
     toggleExpanded(key: string): void {
         this.dispatch({
             key,
-            type: "ui.toggleExpanded"
+            type: "ui.toggleExpanded",
         });
     }
 
@@ -335,37 +255,44 @@ export class TuiAppStore {
     }
 
     setLogsPausedAtSeq(instance: string, seq: number | undefined): void {
-        this.dispatch({ instance, ...(seq === undefined ? {} : { seq }), type: "logs.setPausedAtSeq" });
+        this.dispatch({
+            instance,
+            ...(seq === undefined ? {} : { seq }),
+            type: "logs.setPausedAtSeq",
+        });
     }
 
     setScrollOffset(key: string, offset: number): void {
         this.dispatch({
             key,
             offset,
-            type: "ui.setScrollOffset"
+            type: "ui.setScrollOffset",
         });
     }
 
     clearLogsBuffer(): void {
         this.dispatch({
-            type: "log.clearBuffer"
+            type: "log.clearBuffer",
         });
     }
 
     bumpRedrawNonce(): void {
         this.dispatch({
-            type: "ui.bumpRedrawNonce"
+            type: "ui.bumpRedrawNonce",
         });
     }
 
     replaceInstances(instances: TuiInstanceListEntry[]): void {
         this.dispatch({
             instances,
-            type: "instance.replaceList"
+            type: "instance.replaceList",
         });
     }
 
-    replaceContextMessages(instance: string, messages: ContextMessageRecord[]): void {
+    replaceContextMessages(
+        instance: string,
+        messages: ContextMessageRecord[],
+    ): void {
         this.dispatch({ instance, messages, type: "contextMessage.replace" });
     }
 
@@ -376,7 +303,7 @@ export class TuiAppStore {
     replaceSnapshot(snapshot: InstanceSnapshot): void {
         this.dispatch({
             snapshot,
-            type: "snapshot.replace"
+            type: "snapshot.replace",
         });
     }
 
@@ -384,14 +311,14 @@ export class TuiAppStore {
         this.dispatch({
             instance,
             logs,
-            type: "log.replace"
+            type: "log.replace",
         });
     }
 
     appendLog(entry: TuiLogEntry): void {
         this.dispatch({
             entry,
-            type: "log.append"
+            type: "log.append",
         });
     }
 
@@ -399,7 +326,7 @@ export class TuiAppStore {
         this.dispatch({
             instance,
             records,
-            type: "toolCall.replace"
+            type: "toolCall.replace",
         });
     }
 
@@ -407,14 +334,14 @@ export class TuiAppStore {
         this.dispatch({
             approvals,
             instance,
-            type: "approval.replace"
+            type: "approval.replace",
         });
     }
 
     replaceOAuthApprovals(approvals: OAuthApprovalRequest[]): void {
         this.dispatch({
             approvals,
-            type: "oauthApproval.replace"
+            type: "oauthApproval.replace",
         });
     }
 
@@ -425,7 +352,7 @@ export class TuiAppStore {
     upsertCommand(command: TuiCommandRecord): void {
         this.dispatch({
             command,
-            type: "command.upsert"
+            type: "command.upsert",
         });
     }
 
@@ -433,15 +360,18 @@ export class TuiAppStore {
         this.dispatch({
             chunk,
             commandId,
-            type: "relay.appendOutput"
+            type: "relay.appendOutput",
         });
     }
 
-    setRelayMetadata(commandId: string, input: { provider?: string; requestId?: string; workspace?: string }): void {
+    setRelayMetadata(
+        commandId: string,
+        input: { provider?: string; requestId?: string; workspace?: string },
+    ): void {
         this.dispatch({
             commandId,
             ...input,
-            type: "relay.setMetadata"
+            type: "relay.setMetadata",
         });
     }
 
@@ -449,14 +379,14 @@ export class TuiAppStore {
         this.dispatch({
             instance,
             seq,
-            type: "instance.setLastSeq"
+            type: "instance.setLastSeq",
         });
     }
 
     appendRawEvent(event: ClientEvent): void {
         this.dispatch({
             rawEvent: toRawEventRecord(event),
-            type: "event.append"
+            type: "event.append",
         });
     }
 

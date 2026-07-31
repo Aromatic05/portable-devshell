@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { asInstanceName, type ArtifactShareResult, type ArtifactTransferRecord, type JsonValue } from "@portable-devshell/shared";
+import {
+    asInstanceName,
+    type ArtifactShareResult,
+    type ArtifactTransferRecord,
+    type JsonValue,
+} from "@portable-devshell/shared";
 import {
     buildFocusGraphForState,
     TuiCommandDispatcher,
@@ -9,7 +14,8 @@ import {
     TuiAppStore,
     TuiControlSession,
     TuiFocusManager,
-    tuiViewProjection
+    topTuiOverlay,
+    tuiViewProjection,
 } from "@portable-devshell/tui/testing";
 
 const share: ArtifactShareResult = {
@@ -21,7 +27,7 @@ const share: ArtifactShareResult = {
     shareId: "share-12345678",
     source: { instance: "instance-a", path: "./result.bin", type: "file" },
     state: "active",
-    url: "https://example.test/artifacts/share/token"
+    url: "https://example.test/artifacts/share/token",
 };
 
 const transfer: ArtifactTransferRecord = {
@@ -32,9 +38,8 @@ const transfer: ArtifactTransferRecord = {
     totalBytes: 10,
     transferId: "transfer-12345678",
     transferredBytes: 4,
-    updatedAt: "2026-07-13T00:00:01.000Z"
+    updatedAt: "2026-07-13T00:00:01.000Z",
 };
-
 
 function toJsonValue(value: unknown): JsonValue {
     return JSON.parse(JSON.stringify(value)) as JsonValue;
@@ -45,18 +50,28 @@ test("TUI startup pulls artifact shares and transfers from Control", async () =>
     const session = new TuiControlSession({
         clients: {
             artifact: {
-                async listShares() { return [share]; },
-                async listTransfers() { return [transfer]; }
+                async listShares() {
+                    return [share];
+                },
+                async listTransfers() {
+                    return [transfer];
+                },
             },
             close() {},
             config: {
-                async get() { return {}; }
+                async get() {
+                    return {};
+                },
             },
             instance: {
-                async list() { return []; }
+                async list() {
+                    return [];
+                },
             },
             mcp: {
-                async status() { return {}; }
+                async status() {
+                    return {};
+                },
             },
             overview: {
                 async get() {
@@ -71,21 +86,23 @@ test("TUI startup pulls artifact shares and transfers from Control", async () =>
                             instancesCritical: 0,
                             instancesReady: 0,
                             instancesTotal: 0,
-                            pendingApprovals: 0
+                            pendingApprovals: 0,
                         },
                         generatedAt: "2026-07-31T00:00:00.000Z",
                         health: "healthy",
                         instances: [],
-                        todos: []
+                        todos: [],
                     };
-                }
+                },
             },
             async reconnect() {},
             service: {
-                async ping() { return { pong: true }; }
-            }
+                async ping() {
+                    return { pong: true };
+                },
+            },
         } as never,
-        store
+        store,
     });
 
     await session.start();
@@ -100,53 +117,85 @@ test("TUI clears an OAuth polling failure after the background refresh recovers"
     const session = new TuiControlSession({
         clients: {
             artifact: {
-                async listShares() { return []; },
-                async listTransfers() { return []; }
+                async listShares() {
+                    return [];
+                },
+                async listTransfers() {
+                    return [];
+                },
             },
             close() {},
             config: {
-                async get() { return { mcp: { auth: { mode: "oauth2" } } }; }
+                async get() {
+                    return { mcp: { auth: { mode: "oauth2" } } };
+                },
             },
             instance: {
-                async list() { return []; }
+                async list() {
+                    return [];
+                },
             },
             mcp: {
                 async listApprovals() {
                     approvalReads += 1;
-                    if (approvalReads === 2) throw new Error("OAuth service unavailable");
+                    if (approvalReads === 2)
+                        throw new Error("OAuth service unavailable");
                     return [];
                 },
-                async status() { return {}; }
+                async status() {
+                    return {};
+                },
             },
             overview: {
                 async get() {
                     return {
-                        activity: [], alerts: [], controller: { pid: 1, uptimeSeconds: 10 },
-                        counts: { activeTodos: 0, failedCalls24h: 0, instancesAttention: 0, instancesCritical: 0, instancesReady: 0, instancesTotal: 0, pendingApprovals: 0 },
-                        generatedAt: "2026-07-31T00:00:00.000Z", health: "healthy" as const, instances: [], todos: []
+                        activity: [],
+                        alerts: [],
+                        controller: { pid: 1, uptimeSeconds: 10 },
+                        counts: {
+                            activeTodos: 0,
+                            failedCalls24h: 0,
+                            instancesAttention: 0,
+                            instancesCritical: 0,
+                            instancesReady: 0,
+                            instancesTotal: 0,
+                            pendingApprovals: 0,
+                        },
+                        generatedAt: "2026-07-31T00:00:00.000Z",
+                        health: "healthy" as const,
+                        instances: [],
+                        todos: [],
                     };
-                }
+                },
             },
             async reconnect() {},
             service: {
-                async ping() { return { pong: true }; }
-            }
+                async ping() {
+                    return { pong: true };
+                },
+            },
         } as never,
-        store
+        store,
     });
 
     try {
         await session.start();
-        await waitFor(() => store.getState().interaction.screenStatusByPage.oauth !== undefined);
+        await waitFor(
+            () =>
+                store.getState().interaction.screenStatusByPage.connections !==
+                undefined,
+        );
 
         assert.equal(
-            store.getState().interaction.screenStatusByPage.oauth,
-            "OAuth refresh failed: OAuth service unavailable"
+            store.getState().interaction.screenStatusByPage.connections,
+            "Connections refresh failed: OAuth service unavailable",
         );
         assert.equal(store.getState().connection.status, "connected");
         await waitFor(
-            () => approvalReads >= 3 &&
-                store.getState().interaction.screenStatusByPage.oauth === undefined
+            () =>
+                approvalReads >= 3 &&
+                store.getState().interaction.screenStatusByPage.connections ===
+                    undefined,
         );
     } finally {
         await session.stop();
@@ -155,10 +204,27 @@ test("TUI clears an OAuth polling failure after the background refresh recovers"
 
 test("TUI discards a Todo refresh that completes after reconnect", async () => {
     let releaseTodo!: () => void;
-    const pendingTodo = new Promise<{ todo: { items: []; revision: number; summary: { completed: number; total: number } } }>((resolve) => {
-        releaseTodo = () => resolve({ todo: { items: [], revision: 2, summary: { completed: 0, total: 0 } } });
+    const pendingTodo = new Promise<{
+        todo: {
+            items: [];
+            revision: number;
+            summary: { completed: number; total: number };
+        };
+    }>((resolve) => {
+        releaseTodo = () =>
+            resolve({
+                todo: {
+                    items: [],
+                    revision: 2,
+                    summary: { completed: 0, total: 0 },
+                },
+            });
     });
-    const session = new TuiControlSession({ clients: sessionClients({ todo: { get: async () => await pendingTodo } }) });
+    const session = new TuiControlSession({
+        clients: sessionClients({
+            todo: { get: async () => await pendingTodo },
+        }),
+    });
 
     await session.start();
     const staleRefresh = session.refreshTodo("alpha");
@@ -174,23 +240,30 @@ test("TUI discards a Todo refresh that completes after reconnect", async () => {
 test("TUI does not subscribe after an obsolete instance refresh completes", async () => {
     let releaseSnapshot!: () => void;
     const pendingSnapshot = new Promise((resolve) => {
-        releaseSnapshot = () => resolve({
-            lastSeq: 2,
-            snapshot: {
-                connectionState: "connected", daemonState: "running", lastSeq: 2,
-                name: asInstanceName("alpha"), ready: true, status: "ready"
-            }
-        });
+        releaseSnapshot = () =>
+            resolve({
+                lastSeq: 2,
+                snapshot: {
+                    connectionState: "connected",
+                    daemonState: "running",
+                    lastSeq: 2,
+                    name: asInstanceName("alpha"),
+                    ready: true,
+                    status: "ready",
+                },
+            });
     });
     const subscribe = async () => {
         throw new Error("stale refresh must not subscribe");
     };
     const session = new TuiControlSession({
-        clients: sessionClients({ runtime: {
-            readLogs: async () => [],
-            snapshot: async () => await pendingSnapshot,
-            subscribe
-        } })
+        clients: sessionClients({
+            runtime: {
+                readLogs: async () => [],
+                snapshot: async () => await pendingSnapshot,
+                subscribe,
+            },
+        }),
     });
 
     await session.start();
@@ -208,16 +281,27 @@ test("TUI stops OAuth polling after a connection refresh fails", async () => {
     let failPing = false;
     const session = new TuiControlSession({
         clients: sessionClients({
-            config: { async get() { return { mcp: { auth: { mode: "oauth2" } } }; } },
-            mcp: {
-                async listApprovals() { approvalReads += 1; return []; },
-                async status() { return {}; }
+            config: {
+                async get() {
+                    return { mcp: { auth: { mode: "oauth2" } } };
+                },
             },
-            service: { async ping() {
-                if (failPing) throw new Error("control unavailable");
-                return { pong: true };
-            } }
-        })
+            mcp: {
+                async listApprovals() {
+                    approvalReads += 1;
+                    return [];
+                },
+                async status() {
+                    return {};
+                },
+            },
+            service: {
+                async ping() {
+                    if (failPing) throw new Error("control unavailable");
+                    return { pong: true };
+                },
+            },
+        }),
     });
 
     try {
@@ -242,16 +326,31 @@ test("TUI ignores an old visible Overview failure after reconnect", async () => 
     let useOldOverview = false;
     const session = new TuiControlSession({
         clients: sessionClients({
-            overview: { async get() {
-                if (useOldOverview) return await oldOverview;
-                return {
-                    activity: [], alerts: [], controller: { pid: 1, uptimeSeconds: 1 },
-                    counts: { activeTodos: 0, failedCalls24h: 0, instancesAttention: 0, instancesCritical: 0, instancesReady: 0, instancesTotal: 0, pendingApprovals: 0 },
-                    generatedAt: "2026-07-31T00:00:00.000Z", health: "healthy" as const, instances: [], todos: []
-                };
-            } }
+            overview: {
+                async get() {
+                    if (useOldOverview) return await oldOverview;
+                    return {
+                        activity: [],
+                        alerts: [],
+                        controller: { pid: 1, uptimeSeconds: 1 },
+                        counts: {
+                            activeTodos: 0,
+                            failedCalls24h: 0,
+                            instancesAttention: 0,
+                            instancesCritical: 0,
+                            instancesReady: 0,
+                            instancesTotal: 0,
+                            pendingApprovals: 0,
+                        },
+                        generatedAt: "2026-07-31T00:00:00.000Z",
+                        health: "healthy" as const,
+                        instances: [],
+                        todos: [],
+                    };
+                },
+            },
         }),
-        overviewRefreshIntervalMs: 10
+        overviewRefreshIntervalMs: 10,
     });
 
     try {
@@ -264,7 +363,10 @@ test("TUI ignores an old visible Overview failure after reconnect", async () => 
         rejectOldOverview(new Error("stale overview failure"));
         await new Promise((resolve) => setTimeout(resolve, 20));
 
-        assert.equal(session.store.getState().interaction.screenStatusByPage.overview, undefined);
+        assert.equal(
+            session.store.getState().interaction.screenStatusByPage.overview,
+            undefined,
+        );
     } finally {
         await session.stop();
     }
@@ -277,21 +379,27 @@ test("artifact stream events upsert complete records without replacing shares fr
         id: "artifact-share-created",
         name: "artifact.shareCreated",
         payload: { at: "2026-07-13T00:00:00.000Z", data: toJsonValue(share) },
-        seq: 1
+        seq: 1,
     });
     store.applyEvent({
         destination: asInstanceName("instance-a"),
         id: "artifact-share-downloaded",
         name: "artifact.shareDownloaded",
-        payload: { at: "2026-07-13T00:00:01.000Z", data: { shareId: share.shareId } },
-        seq: 2
+        payload: {
+            at: "2026-07-13T00:00:01.000Z",
+            data: { shareId: share.shareId },
+        },
+        seq: 2,
     });
     store.applyEvent({
         destination: asInstanceName("instance-a"),
         id: "artifact-transfer-progress",
         name: "artifact.transferProgress",
-        payload: { at: "2026-07-13T00:00:02.000Z", data: toJsonValue(transfer) },
-        seq: 3
+        payload: {
+            at: "2026-07-13T00:00:02.000Z",
+            data: toJsonValue(transfer),
+        },
+        seq: 3,
     });
 
     assert.deepEqual(store.getState().artifactShares, [share]);
@@ -304,21 +412,32 @@ test("instance box shows artifact activity and confirms revoke or cancel before 
     const cancelled: string[] = [];
     const focusManager = new TuiFocusManager(store, {
         currentPage: () => store.getState().ui.selectedPage,
+        expandedKeyFor: (boxId) =>
+            selectMainScreenModel(store.getState()).boxes.find(
+                (box) => box.id === boxId,
+            )?.expandedKey,
         graphFor: (page, mode) =>
             buildFocusGraphForState({
                 ...store.getState(),
-                interaction: { ...store.getState().interaction, focusScope: mode },
-                ui: { ...store.getState().ui, selectedPage: page }
+                interaction: {
+                    ...store.getState().interaction,
+                    focusScope: mode,
+                },
+                ui: { ...store.getState().ui, selectedPage: page },
             }),
-        mode: () => store.getState().interaction.focusScope
+        mode: () => store.getState().interaction.focusScope,
     });
     const dispatcher = new TuiCommandDispatcher({
         focusManager,
         mainViewportRows: () => 20,
         projection: tuiViewProjection,
         onApprovalDecision: async () => undefined,
-        onArtifactCancelTransfer: async (transferId) => { cancelled.push(transferId); },
-        onArtifactRevokeShare: async (shareId) => { revoked.push(shareId); },
+        onArtifactCancelTransfer: async (transferId) => {
+            cancelled.push(transferId);
+        },
+        onArtifactRevokeShare: async (shareId) => {
+            revoked.push(shareId);
+        },
         onAttachShell: async () => undefined,
         onInstanceAction: async () => undefined,
         onLogsReload: async () => undefined,
@@ -326,31 +445,48 @@ test("instance box shows artifact activity and confirms revoke or cancel before 
         onQuit: async () => undefined,
         onRedraw: () => undefined,
         onToolCall: async () => true,
-        store
+        store,
     });
 
-    const box = selectMainScreenModel(store.getState()).boxes.find((candidate) => candidate.id === "instance:instance-a")!;
-    assert.match(box.collapsedLines[1]?.text ?? "", /artifacts shares=1 transfers=1 active=2/u);
-    const revokeLine = box.expandedLines.find((line) => line.id?.includes("button:artifact-revoke:"));
-    const cancelLine = box.expandedLines.find((line) => line.id?.includes("button:artifact-cancel:"));
+    const box = selectMainScreenModel(store.getState()).boxes.find(
+        (candidate) => candidate.id === "instance:instance-a",
+    )!;
+    assert.match(
+        box.collapsedLines[1]?.text ?? "",
+        /artifacts shares=1 transfers=1 active=2/u,
+    );
+    const revokeLine = box.expandedLines.find((line) =>
+        line.id?.includes("button:artifact-revoke:"),
+    );
+    const cancelLine = box.expandedLines.find((line) =>
+        line.id?.includes("button:artifact-cancel:"),
+    );
     assert.ok(revokeLine?.id);
     assert.ok(cancelLine?.id);
 
     store.setFocusScope("boxDetail");
     store.setSelectedDetailLine(box.expandedKey, revokeLine.id);
     await dispatcher.dispatch({ type: "focus.activate" });
-    assert.equal(store.getState().interaction.confirmDialog.open, true);
-    assert.equal(store.getState().interaction.selectedConfirmButton, "cancel");
+    let overlay = topTuiOverlay(store.getState().interaction.overlays);
+    assert.equal(overlay?.kind, "confirmation");
+    assert.equal(
+        overlay?.kind === "confirmation" ? overlay.selectedAction : undefined,
+        "cancel",
+    );
     assert.deepEqual(revoked, []);
-    store.setConfirmFocus("confirm");
+    await dispatcher.dispatch({ button: "confirm", type: "confirm.focus" });
     await dispatcher.dispatch({ type: "confirm.accept" });
     assert.deepEqual(revoked, [share.shareId]);
 
     store.setFocusScope("boxDetail");
     store.setSelectedDetailLine(box.expandedKey, cancelLine.id);
     await dispatcher.dispatch({ type: "focus.activate" });
-    assert.equal(store.getState().interaction.selectedConfirmButton, "cancel");
-    store.setConfirmFocus("confirm");
+    overlay = topTuiOverlay(store.getState().interaction.overlays);
+    assert.equal(
+        overlay?.kind === "confirmation" ? overlay.selectedAction : undefined,
+        "cancel",
+    );
+    await dispatcher.dispatch({ button: "confirm", type: "confirm.focus" });
     await dispatcher.dispatch({ type: "confirm.accept" });
     assert.deepEqual(cancelled, [transfer.transferId]);
 });
@@ -363,8 +499,8 @@ function seededStore(): TuiAppStore {
             enabled: true,
             mcpEnabled: true,
             name: "instance-a",
-            provider: "local"
-        }
+            provider: "local",
+        },
     ]);
     store.replaceSnapshot({
         connectionState: "connected",
@@ -372,7 +508,7 @@ function seededStore(): TuiAppStore {
         lastSeq: 0,
         name: asInstanceName("instance-a"),
         ready: true,
-        status: "ready"
+        status: "ready",
     });
     store.replaceArtifactShares([share]);
     store.replaceArtifactTransfers([transfer]);
@@ -395,20 +531,58 @@ async function waitFor(predicate: () => boolean): Promise<void> {
 
 function sessionClients(overrides: Record<string, unknown> = {}) {
     return {
-        artifact: { async listShares() { return []; }, async listTransfers() { return []; } },
+        artifact: {
+            async listShares() {
+                return [];
+            },
+            async listTransfers() {
+                return [];
+            },
+        },
         close() {},
-        config: { async get() { return {}; } },
-        instance: { async list() { return []; } },
-        mcp: { async status() { return {}; } },
-        overview: { async get() {
-            return {
-                activity: [], alerts: [], controller: { pid: 1, uptimeSeconds: 1 },
-                counts: { activeTodos: 0, failedCalls24h: 0, instancesAttention: 0, instancesCritical: 0, instancesReady: 0, instancesTotal: 0, pendingApprovals: 0 },
-                generatedAt: "2026-07-31T00:00:00.000Z", health: "healthy" as const, instances: [], todos: []
-            };
-        } },
+        config: {
+            async get() {
+                return {};
+            },
+        },
+        instance: {
+            async list() {
+                return [];
+            },
+        },
+        mcp: {
+            async status() {
+                return {};
+            },
+        },
+        overview: {
+            async get() {
+                return {
+                    activity: [],
+                    alerts: [],
+                    controller: { pid: 1, uptimeSeconds: 1 },
+                    counts: {
+                        activeTodos: 0,
+                        failedCalls24h: 0,
+                        instancesAttention: 0,
+                        instancesCritical: 0,
+                        instancesReady: 0,
+                        instancesTotal: 0,
+                        pendingApprovals: 0,
+                    },
+                    generatedAt: "2026-07-31T00:00:00.000Z",
+                    health: "healthy" as const,
+                    instances: [],
+                    todos: [],
+                };
+            },
+        },
         async reconnect() {},
-        service: { async ping() { return { pong: true }; } },
-        ...overrides
+        service: {
+            async ping() {
+                return { pong: true };
+            },
+        },
+        ...overrides,
     } as never;
 }

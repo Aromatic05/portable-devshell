@@ -10,21 +10,34 @@ import { asInstanceName } from "@portable-devshell/shared";
 
 import type { TuiClients } from "../../src/runtime/client/TuiClientComposition.ts";
 import { TuiRuntime } from "../../src/runtime/TuiRuntime.ts";
-import { topTuiOverlay, TuiTerminalSession, type TuiTerminalPty } from "../../src/testing.ts";
-import { buildTuiHitRegions, buildTuiTerminalViewportRegion, hitTargetAt } from "../../src/view/TuiHitRegions.ts";
-import { selectMainScreenModel, selectMainScrollKey } from "../../src/view/model/TuiViewProjection.ts";
+import {
+    topTuiOverlay,
+    TuiTerminalSession,
+    type TuiTerminalPty,
+} from "../../src/testing.ts";
+import {
+    buildTuiHitRegions,
+    buildTuiTerminalViewportRegion,
+    hitTargetAt,
+} from "../../src/view/TuiHitRegions.ts";
+import {
+    selectMainScreenModel,
+    selectMainScrollKey,
+} from "../../src/view/model/TuiViewProjection.ts";
 
 test("real Ink runtime handles keyboard navigation, search, redraw, and terminal cleanup", async () => {
     const terminal = createTerminal();
     const clients = createClients();
     const runtime = new TuiRuntime(
         { stdin: terminal.stdin, stdout: terminal.stdout },
-        { clients: clients.value, inkDebug: true }
+        { clients: clients.value, inkDebug: true },
     );
     const running = runtime.run();
 
     try {
-        await waitUntil(() => runtime.store.getState().connection.status === "connected");
+        await waitUntil(
+            () => runtime.store.getState().connection.status === "connected",
+        );
         await waitUntil(() => terminal.output.includes("Create Instance"));
 
         await waitUntil(() => terminal.rawModes.includes(true));
@@ -32,25 +45,41 @@ test("real Ink runtime handles keyboard navigation, search, redraw, and terminal
         assert.match(terminal.output, /Create Instance/u);
 
         terminal.write("7");
-        await waitUntil(() => runtime.store.getState().ui.selectedPage === "help");
+        await waitUntil(
+            () => runtime.store.getState().ui.selectedPage === "help",
+        );
         await waitUntil(() => terminal.output.includes("Navigation"));
 
         terminal.write("1");
-        await waitUntil(() => runtime.store.getState().ui.selectedPage === "instances");
+        await waitUntil(
+            () => runtime.store.getState().ui.selectedPage === "instances",
+        );
         terminal.write("/");
-        await waitUntil(() => runtime.store.getState().interaction.focusScope === "search");
+        await waitUntil(
+            () => runtime.store.getState().interaction.focusScope === "search",
+        );
         await writeCharacters(terminal, "alpha");
-        await waitUntil(() => runtime.store.getState().ui.searchQueries.instances === "alpha");
+        await waitUntil(
+            () =>
+                runtime.store.getState().ui.searchQueries.instances === "alpha",
+        );
         await waitUntil(() => terminal.output.includes("/ alpha"));
 
         terminal.write("\u0008");
-        await waitUntil(() => runtime.store.getState().ui.searchQueries.instances === "alph");
+        await waitUntil(
+            () =>
+                runtime.store.getState().ui.searchQueries.instances === "alph",
+        );
         terminal.write("\u001b");
-        await waitUntil(() => runtime.store.getState().interaction.focusScope !== "search");
+        await waitUntil(
+            () => runtime.store.getState().interaction.focusScope !== "search",
+        );
 
         const beforeRedraw = terminal.output.length;
         terminal.write("\u000c");
-        await waitUntil(() => terminal.output.slice(beforeRedraw).includes("\u001B[2J\u001B[H"));
+        await waitUntil(() =>
+            terminal.output.slice(beforeRedraw).includes("\u001B[2J\u001B[H"),
+        );
 
         terminal.write("\u0004");
         await running;
@@ -69,24 +98,36 @@ test("real Ink runtime buffers split mouse input and enters then discards the cr
     const clients = createClients();
     const runtime = new TuiRuntime(
         { stdin: terminal.stdin, stdout: terminal.stdout },
-        { clients: clients.value, inkDebug: true }
+        { clients: clients.value, inkDebug: true },
     );
     const running = runtime.run();
 
     try {
-        await waitUntil(() => runtime.store.getState().connection.status === "connected");
+        await waitUntil(
+            () => runtime.store.getState().connection.status === "connected",
+        );
 
         terminal.write("\t");
-        await waitUntil(() => runtime.store.getState().interaction.focusScope === "mainBoxes");
+        await waitUntil(
+            () =>
+                runtime.store.getState().interaction.focusScope === "mainBoxes",
+        );
         terminal.write(" ");
-        await waitUntil(() => runtime.store.getState().ui.expandedBoxes["instances:undefined:create-instance"] === true);
+        await waitUntil(
+            () =>
+                runtime.store.getState().ui.expandedBoxes[
+                    "instances:undefined:create-instance"
+                ] === true,
+        );
 
         const createRegion = buildTuiHitRegions(runtime.store.getState(), {
             columns: runtime.columns,
-            rows: runtime.rows
+            rows: runtime.rows,
         }).find((region) => {
-            return region.target.kind === "boxBody" &&
-                region.target.lineId?.endsWith(":button:create") === true;
+            return (
+                region.target.kind === "boxBody" &&
+                region.target.lineId?.endsWith(":button:create") === true
+            );
         });
         assert.ok(createRegion);
 
@@ -96,24 +137,48 @@ test("real Ink runtime buffers split mouse input and enters then discards the cr
         assert.equal(runtime.store.getState().interaction.editor, undefined);
         terminal.write(mouse.slice(5));
 
-        await waitUntil(() => runtime.store.getState().interaction.editor?.kind === "create");
-        await waitUntil(() => runtime.store.getState().interaction.focusScope === "wizard");
+        await waitUntil(
+            () =>
+                runtime.store.getState().interaction.editor?.kind === "create",
+        );
+        await waitUntil(
+            () => runtime.store.getState().interaction.focusScope === "wizard",
+        );
         await waitUntil(() => terminal.output.includes("Step 1/5 Basic"));
 
         terminal.write("\r");
-        await waitUntil(() => runtime.store.getState().interaction.editor?.editing === true);
+        await waitUntil(
+            () => runtime.store.getState().interaction.editor?.editing === true,
+        );
         await writeCharacters(terminal, "demo-instance");
         await waitUntil(() => {
             const draft = runtime.store.getState().ui.formDrafts.create;
-            return (draft as { name?: unknown } | undefined)?.name === "demo-instance";
+            return (
+                (draft as { name?: unknown } | undefined)?.name ===
+                "demo-instance"
+            );
         });
 
         terminal.write("\u0004");
-        await waitUntil(() => runtime.store.getState().interaction.focusScope === "confirm");
-        const discardOverlay = topTuiOverlay(runtime.store.getState().interaction.overlays);
+        await waitUntil(
+            () => runtime.store.getState().interaction.focusScope === "confirm",
+        );
+        const discardOverlay = topTuiOverlay(
+            runtime.store.getState().interaction.overlays,
+        );
         assert.equal(discardOverlay?.kind, "confirmation");
-        assert.equal(discardOverlay?.kind === "confirmation" ? discardOverlay.title : undefined, "Discard Unsaved Changes");
-        assert.equal(discardOverlay?.kind === "confirmation" ? discardOverlay.selectedAction : undefined, "cancel");
+        assert.equal(
+            discardOverlay?.kind === "confirmation"
+                ? discardOverlay.title
+                : undefined,
+            "Discard Unsaved Changes",
+        );
+        assert.equal(
+            discardOverlay?.kind === "confirmation"
+                ? discardOverlay.selectedAction
+                : undefined,
+            "cancel",
+        );
 
         let resolved = false;
         void running.then(() => {
@@ -124,11 +189,18 @@ test("real Ink runtime buffers split mouse input and enters then discards the cr
 
         terminal.write("\u001B[C");
         await waitUntil(() => {
-            const overlay = topTuiOverlay(runtime.store.getState().interaction.overlays);
-            return overlay?.kind === "confirmation" && overlay.selectedAction === "confirm";
+            const overlay = topTuiOverlay(
+                runtime.store.getState().interaction.overlays,
+            );
+            return (
+                overlay?.kind === "confirmation" &&
+                overlay.selectedAction === "confirm"
+            );
         });
         terminal.write("\r");
-        await waitUntil(() => runtime.store.getState().interaction.editor === undefined);
+        await waitUntil(
+            () => runtime.store.getState().interaction.editor === undefined,
+        );
         assert.equal(runtime.store.getState().ui.formDrafts.create, undefined);
 
         terminal.write("\u0004");
@@ -146,21 +218,27 @@ test("real Ink runtime renders connection failure and remains interactive until 
     const terminal = createTerminal();
     const clients = createClients({
         pingError: Object.assign(new Error("control server is not running."), {
-            code: "control.notRunning"
-        })
+            code: "control.notRunning",
+        }),
     });
     const runtime = new TuiRuntime(
         { stdin: terminal.stdin, stdout: terminal.stdout },
-        { clients: clients.value, inkDebug: true }
+        { clients: clients.value, inkDebug: true },
     );
     const running = runtime.run();
 
     try {
-        await waitUntil(() => runtime.store.getState().connection.status === "disconnected");
-        await waitUntil(() => terminal.output.includes("control server is not running."));
+        await waitUntil(
+            () => runtime.store.getState().connection.status === "disconnected",
+        );
+        await waitUntil(() =>
+            terminal.output.includes("control server is not running."),
+        );
 
         terminal.write("7");
-        await waitUntil(() => runtime.store.getState().ui.selectedPage === "help");
+        await waitUntil(
+            () => runtime.store.getState().ui.selectedPage === "help",
+        );
         terminal.write("\u0004");
         await running;
     } finally {
@@ -176,17 +254,22 @@ test("real Ink runtime handles sidebar mouse buttons and viewport wheel scrollin
     const clients = createClients();
     const runtime = new TuiRuntime(
         { stdin: terminal.stdin, stdout: terminal.stdout },
-        { clients: clients.value, inkDebug: true }
+        { clients: clients.value, inkDebug: true },
     );
     const running = runtime.run();
 
     try {
-        await waitUntil(() => runtime.store.getState().connection.status === "connected");
+        await waitUntil(
+            () => runtime.store.getState().connection.status === "connected",
+        );
 
         const helpRegion = buildTuiHitRegions(runtime.store.getState(), {
             columns: runtime.columns,
-            rows: runtime.rows
-        }).find((region) => region.target.kind === "page" && region.target.id === "help");
+            rows: runtime.rows,
+        }).find(
+            (region) =>
+                region.target.kind === "page" && region.target.id === "help",
+        );
         assert.ok(helpRegion);
 
         terminal.write(mouseSequence(0, helpRegion.x, helpRegion.y, "release"));
@@ -195,24 +278,37 @@ test("real Ink runtime handles sidebar mouse buttons and viewport wheel scrollin
         assert.equal(runtime.store.getState().ui.selectedPage, "instances");
 
         terminal.write(mouseSequence(0, helpRegion.x, helpRegion.y, "press"));
-        await waitUntil(() => runtime.store.getState().ui.selectedPage === "help");
+        await waitUntil(
+            () => runtime.store.getState().ui.selectedPage === "help",
+        );
 
         terminal.write("1");
-        await waitUntil(() => runtime.store.getState().ui.selectedPage === "instances");
+        await waitUntil(
+            () => runtime.store.getState().ui.selectedPage === "instances",
+        );
         const regions = buildTuiHitRegions(runtime.store.getState(), {
             columns: runtime.columns,
-            rows: runtime.rows
+            rows: runtime.rows,
         });
-        const viewport = regions.find((region) => region.target.kind === "scrollViewport");
+        const viewport = regions.find(
+            (region) => region.target.kind === "scrollViewport",
+        );
         assert.ok(viewport);
-        const bareViewportY = Array.from({ length: viewport.height }, (_, offset) => viewport.y + offset).find((y) => {
-            return hitTargetAt(regions, viewport.x, y)?.kind === "scrollViewport";
+        const bareViewportY = Array.from(
+            { length: viewport.height },
+            (_, offset) => viewport.y + offset,
+        ).find((y) => {
+            return (
+                hitTargetAt(regions, viewport.x, y)?.kind === "scrollViewport"
+            );
         });
         assert.notEqual(bareViewportY, undefined);
         const scrollKey = selectMainScrollKey(runtime.store.getState());
         runtime.store.setScrollOffset(scrollKey, 5);
         terminal.write(mouseSequence(64, viewport.x, bareViewportY!, "press"));
-        await waitUntil(() => runtime.store.getState().ui.scrollOffsets[scrollKey] === 0);
+        await waitUntil(
+            () => runtime.store.getState().ui.scrollOffsets[scrollKey] === 0,
+        );
 
         terminal.write("\u0004");
         await running;
@@ -224,19 +320,24 @@ test("real Ink runtime handles sidebar mouse buttons and viewport wheel scrollin
 test("real Ink runtime renders compact and unsupported terminal layouts", async () => {
     for (const terminalOptions of [
         { columns: 80, expected: "1:inst", rows: 20 },
-        { columns: 59, expected: "Terminal too small (need 60x14)", rows: 13 }
+        { columns: 59, expected: "Terminal too small (need 60x14)", rows: 13 },
     ]) {
         const terminal = createTerminal(terminalOptions);
         const clients = createClients();
         const runtime = new TuiRuntime(
             { stdin: terminal.stdin, stdout: terminal.stdout },
-            { clients: clients.value, inkDebug: true }
+            { clients: clients.value, inkDebug: true },
         );
         const running = runtime.run();
 
         try {
-            await waitUntil(() => runtime.store.getState().connection.status === "connected");
-            await waitUntil(() => terminal.output.includes(terminalOptions.expected));
+            await waitUntil(
+                () =>
+                    runtime.store.getState().connection.status === "connected",
+            );
+            await waitUntil(() =>
+                terminal.output.includes(terminalOptions.expected),
+            );
             assert.equal(runtime.columns, terminalOptions.columns);
             assert.equal(runtime.rows, terminalOptions.rows);
             terminal.write("\u0004");
@@ -252,20 +353,31 @@ test("real Ink runtime routes every page and drives approval and text detail scr
     const clients = createClients();
     const runtime = new TuiRuntime(
         { stdin: terminal.stdin, stdout: terminal.stdout },
-        { clients: clients.value, inkDebug: true }
+        { clients: clients.value, inkDebug: true },
     );
     const running = runtime.run();
 
     try {
-        await waitUntil(() => runtime.store.getState().connection.status === "connected");
-        const pages = ["instances", "config", "connections", "audit", "logs", "todo", "help", "terminal"] as const;
+        await waitUntil(
+            () => runtime.store.getState().connection.status === "connected",
+        );
+        const pages = [
+            "instances",
+            "config",
+            "connections",
+            "audit",
+            "logs",
+            "todo",
+            "help",
+            "terminal",
+        ] as const;
         for (let index = 0; index < pages.length; index += 1) {
             terminal.write(String(index + 1));
             await delay(20);
             assert.equal(
                 runtime.store.getState().ui.selectedPage,
                 pages[index],
-                `shortcut ${index + 1} did not select ${pages[index]}`
+                `shortcut ${index + 1} did not select ${pages[index]}`,
             );
         }
 
@@ -275,21 +387,21 @@ test("real Ink runtime routes every page and drives approval and text detail scr
                 enabled: true,
                 mcpEnabled: true,
                 name: "alpha",
-                provider: "local"
-            }
+                provider: "local",
+            },
         ]);
         runtime.store.setSelectedInstance("alpha");
         runtime.store.replaceToolCalls("alpha", [
             {
                 callId: "call-1",
                 input: { command: "pwd" },
-                inputSummary: "{\"command\":\"pwd\"}",
+                inputSummary: '{"command":"pwd"}',
                 instance: "alpha" as never,
                 source: "tui",
                 startedAt: "2026-07-17T00:00:00.000Z",
                 status: "running",
-                toolName: "bash_run"
-            }
+                toolName: "bash_run",
+            },
         ]);
         runtime.store.replaceApprovals("alpha", [
             {
@@ -297,62 +409,99 @@ test("real Ink runtime routes every page and drives approval and text detail scr
                 callId: "call-1",
                 createdAt: "2026-07-17T00:00:00.000Z",
                 expiresAt: "2099-07-17T00:10:00.000Z",
-                inputSummary: "{\"command\":\"pwd\"}",
+                inputSummary: '{"command":"pwd"}',
                 instance: "alpha" as never,
                 reason: "needs review",
                 riskLevel: "high",
                 source: "tui",
                 status: "pending",
-                toolName: "bash_run"
-            }
+                toolName: "bash_run",
+            },
         ]);
         runtime.store.setSelectedPage("audit");
         runtime.store.pushOverlay({
             approvalId: "approval-1",
             instance: "alpha",
             kind: "approval",
-            selectedAction: "back"
+            selectedAction: "back",
         });
         runtime.store.setFocusScope("approvalDetail");
 
         await waitUntil(() => terminal.output.includes("Approval"));
         terminal.write("\u001B[B");
         await waitUntil(() => {
-            const overlay = topTuiOverlay(runtime.store.getState().interaction.overlays);
-            return overlay?.kind === "approval" && overlay.selectedAction === "input";
+            const overlay = topTuiOverlay(
+                runtime.store.getState().interaction.overlays,
+            );
+            return (
+                overlay?.kind === "approval" &&
+                overlay.selectedAction === "input"
+            );
         });
         terminal.write("\r");
-        await waitUntil(() => topTuiOverlay(runtime.store.getState().interaction.overlays)?.kind === "text-detail");
-        await waitUntil(() => terminal.output.includes("bash_run · approval input"));
+        await waitUntil(
+            () =>
+                topTuiOverlay(runtime.store.getState().interaction.overlays)
+                    ?.kind === "text-detail",
+        );
+        await waitUntil(() =>
+            terminal.output.includes("bash_run · approval input"),
+        );
         terminal.write("\r");
-        await waitUntil(() => topTuiOverlay(runtime.store.getState().interaction.overlays)?.kind === "approval");
+        await waitUntil(
+            () =>
+                topTuiOverlay(runtime.store.getState().interaction.overlays)
+                    ?.kind === "approval",
+        );
 
         runtime.store.pushOverlay({
-            body: Array.from({ length: 80 }, (_, index) => `line-${index}`).join("\n"),
+            body: Array.from(
+                { length: 80 },
+                (_, index) => `line-${index}`,
+            ).join("\n"),
             kind: "text-detail",
             scrollOffset: 0,
-            title: "Long Detail"
+            title: "Long Detail",
         });
         runtime.store.setFocusScope("textDetail");
         await delay(20);
-        assert.equal(topTuiOverlay(runtime.store.getState().interaction.overlays)?.kind, "text-detail");
+        assert.equal(
+            topTuiOverlay(runtime.store.getState().interaction.overlays)?.kind,
+            "text-detail",
+        );
         terminal.write("\u001B[6~");
         await waitUntil(() => {
-            const overlay = topTuiOverlay(runtime.store.getState().interaction.overlays);
-            return overlay?.kind === "text-detail" && overlay.scrollOffset === 10;
+            const overlay = topTuiOverlay(
+                runtime.store.getState().interaction.overlays,
+            );
+            return (
+                overlay?.kind === "text-detail" && overlay.scrollOffset === 10
+            );
         });
         terminal.write("\u001B[5~");
         await waitUntil(() => {
-            const overlay = topTuiOverlay(runtime.store.getState().interaction.overlays);
-            return overlay?.kind === "text-detail" && overlay.scrollOffset === 0;
+            const overlay = topTuiOverlay(
+                runtime.store.getState().interaction.overlays,
+            );
+            return (
+                overlay?.kind === "text-detail" && overlay.scrollOffset === 0
+            );
         });
         terminal.write("\u001B[B");
         await waitUntil(() => {
-            const overlay = topTuiOverlay(runtime.store.getState().interaction.overlays);
-            return overlay?.kind === "text-detail" && overlay.scrollOffset === 1;
+            const overlay = topTuiOverlay(
+                runtime.store.getState().interaction.overlays,
+            );
+            return (
+                overlay?.kind === "text-detail" && overlay.scrollOffset === 1
+            );
         });
         terminal.write("\r");
-        await waitUntil(() => topTuiOverlay(runtime.store.getState().interaction.overlays)?.kind === "approval");
+        await waitUntil(
+            () =>
+                topTuiOverlay(runtime.store.getState().interaction.overlays)
+                    ?.kind === "approval",
+        );
 
         terminal.write("\u0004");
         await running;
@@ -365,7 +514,9 @@ test(
     "real Ink runtime suspends and remounts around an Attach Shell child process",
     { skip: process.platform === "win32" },
     async (context) => {
-        const shellDirectory = await mkdtemp(join(tmpdir(), "devshell-tui-shell-"));
+        const shellDirectory = await mkdtemp(
+            join(tmpdir(), "devshell-tui-shell-"),
+        );
         const shellPath = join(shellDirectory, "shell");
         await writeFile(shellPath, "#!/bin/sh\nexit 0\n", "utf8");
         await chmod(shellPath, 0o755);
@@ -383,20 +534,44 @@ test(
         const clients = createClients();
         const runtime = new TuiRuntime(
             { stdin: terminal.stdin, stdout: terminal.stdout },
-            { clients: clients.value, inkDebug: true }
+            { clients: clients.value, inkDebug: true },
         );
         let sessionRefreshes = 0;
-        (runtime.session as unknown as { refreshInstance(instance: string): Promise<void> }).refreshInstance = async (instance) => {
+        (
+            runtime.session as unknown as {
+                refreshInstance(instance: string): Promise<void>;
+            }
+        ).refreshInstance = async (instance) => {
             assert.equal(instance, "alpha");
             sessionRefreshes += 1;
         };
         const running = runtime.run();
 
         try {
-            await waitUntil(() => runtime.store.getState().connection.status === "connected");
+            await waitUntil(
+                () =>
+                    runtime.store.getState().connection.status === "connected",
+            );
             clients.setControlState(
-                [{ defaultWorkspace: process.cwd(), enabled: true, mcpEnabled: false, name: "alpha", provider: "local" }],
-                { instances: [{ enabled: true, name: "alpha", provider: "local", workspace: process.cwd() }] }
+                [
+                    {
+                        defaultWorkspace: process.cwd(),
+                        enabled: true,
+                        mcpEnabled: false,
+                        name: "alpha",
+                        provider: "local",
+                    },
+                ],
+                {
+                    instances: [
+                        {
+                            enabled: true,
+                            name: "alpha",
+                            provider: "local",
+                            workspace: process.cwd(),
+                        },
+                    ],
+                },
             );
             runtime.store.replaceInstances([
                 {
@@ -404,8 +579,8 @@ test(
                     enabled: true,
                     mcpEnabled: false,
                     name: "alpha",
-                    provider: "local"
-                }
+                    provider: "local",
+                },
             ]);
             runtime.store.replaceSnapshot({
                 connectionState: "connected",
@@ -413,48 +588,100 @@ test(
                 lastSeq: 1,
                 name: asInstanceName("alpha"),
                 ready: true,
-                status: "ready"
+                status: "ready",
             });
 
-            await waitUntil(() => selectMainScreenModel(runtime.store.getState()).boxes.some((box) => box.id === "instance:alpha"));
+            await waitUntil(() =>
+                selectMainScreenModel(runtime.store.getState()).boxes.some(
+                    (box) => box.id === "instance:alpha",
+                ),
+            );
             const titleRegion = buildTuiHitRegions(runtime.store.getState(), {
                 columns: runtime.columns,
-                rows: runtime.rows
-            }).find((region) => region.target.kind === "boxTitle" && region.target.boxId === "instance:alpha");
+                rows: runtime.rows,
+            }).find(
+                (region) =>
+                    region.target.kind === "boxTitle" &&
+                    region.target.boxId === "instance:alpha",
+            );
             assert.ok(titleRegion);
-            terminal.write(mouseSequence(0, titleRegion.x, titleRegion.y, "press"));
-            await waitUntil(() => runtime.store.getState().ui.expandedBoxes["instances:alpha:instance"] === true);
+            terminal.write(
+                mouseSequence(0, titleRegion.x, titleRegion.y, "press"),
+            );
+            await waitUntil(
+                () =>
+                    runtime.store.getState().ui.expandedBoxes[
+                        "instances:alpha:instance"
+                    ] === true,
+            );
 
-            const instanceBox = selectMainScreenModel(runtime.store.getState()).boxes.find((box) => box.id === "instance:alpha");
-            const attachLine = instanceBox?.expandedLines.find((line) => line.id?.endsWith(":button:attach-shell") === true);
+            const instanceBox = selectMainScreenModel(
+                runtime.store.getState(),
+            ).boxes.find((box) => box.id === "instance:alpha");
+            const attachLine = instanceBox?.expandedLines.find(
+                (line) => line.id?.endsWith(":button:attach-shell") === true,
+            );
             assert.ok(instanceBox?.expandedKey);
             assert.ok(attachLine?.id);
             runtime.store.setScreenStatus("instances", undefined);
             runtime.store.setMainFocusId(instanceBox.id);
-            runtime.store.setSelectedDetailLine(instanceBox.expandedKey, attachLine.id);
+            runtime.store.setSelectedDetailLine(
+                instanceBox.expandedKey,
+                attachLine.id,
+            );
             runtime.store.setFocusScope("boxDetail");
-            await runtime.commandDispatcher.dispatch({ type: "focus.activate" });
+            await runtime.commandDispatcher.dispatch({
+                type: "focus.activate",
+            });
 
-            await waitUntil(() => runtime.store.getState().interaction.focusScope === "confirm");
-            const shellConfirm = topTuiOverlay(runtime.store.getState().interaction.overlays);
+            await waitUntil(
+                () =>
+                    runtime.store.getState().interaction.focusScope ===
+                    "confirm",
+            );
+            const shellConfirm = topTuiOverlay(
+                runtime.store.getState().interaction.overlays,
+            );
             assert.equal(shellConfirm?.kind, "confirmation");
-            assert.equal(shellConfirm?.kind === "confirmation" ? shellConfirm.title : undefined, "UNMANAGED SHELL");
-            assert.equal(shellConfirm?.kind === "confirmation" ? shellConfirm.selectedAction : undefined, "cancel");
+            assert.equal(
+                shellConfirm?.kind === "confirmation"
+                    ? shellConfirm.title
+                    : undefined,
+                "UNMANAGED SHELL",
+            );
+            assert.equal(
+                shellConfirm?.kind === "confirmation"
+                    ? shellConfirm.selectedAction
+                    : undefined,
+                "cancel",
+            );
             terminal.write("\u001B[C");
             await waitUntil(() => {
-                const overlay = topTuiOverlay(runtime.store.getState().interaction.overlays);
-                return overlay?.kind === "confirmation" && overlay.selectedAction === "confirm";
+                const overlay = topTuiOverlay(
+                    runtime.store.getState().interaction.overlays,
+                );
+                return (
+                    overlay?.kind === "confirmation" &&
+                    overlay.selectedAction === "confirm"
+                );
             });
             terminal.write("\r");
 
             await waitUntil(() => sessionRefreshes === 1);
             assert.equal(
-                runtime.store.getState().interaction.screenStatusByPage.instances,
-                "Shell exited. Status refreshed from control."
+                runtime.store.getState().interaction.screenStatusByPage
+                    .instances,
+                "Shell exited. Status refreshed from control.",
             );
             assert.equal(clients.refreshCalls(), 1);
-            assert.equal(countOccurrences(terminal.output, "\u001B[?1049h") >= 2, true);
-            assert.equal(countOccurrences(terminal.output, "\u001B[?1049l") >= 1, true);
+            assert.equal(
+                countOccurrences(terminal.output, "\u001B[?1049h") >= 2,
+                true,
+            );
+            assert.equal(
+                countOccurrences(terminal.output, "\u001B[?1049l") >= 1,
+                true,
+            );
 
             terminal.write("\u0004");
             await running;
@@ -463,7 +690,7 @@ test(
         }
 
         assert.equal(terminal.rawModes.at(-1), false);
-    }
+    },
 );
 
 test("real Ink runtime routes terminal scrollback and mouse without trapping sidebar clicks", async () => {
@@ -483,20 +710,43 @@ test("real Ink runtime routes terminal scrollback and mouse without trapping sid
         resize() {},
         write(data) {
             writes.push(data);
-        }
+        },
     };
     const embedded = new TuiTerminalSession({ ptyFactory: () => pty });
     const runtime = new TuiRuntime(
         { stdin: host.stdin, stdout: host.stdout },
-        { clients: clients.value, graphicsMode: "kitty", inkDebug: true, terminal: embedded }
+        {
+            clients: clients.value,
+            graphicsMode: "kitty",
+            inkDebug: true,
+            terminal: embedded,
+        },
     );
     const running = runtime.run();
 
     try {
-        await waitUntil(() => runtime.store.getState().connection.status === "connected");
+        await waitUntil(
+            () => runtime.store.getState().connection.status === "connected",
+        );
         clients.setControlState(
-            [{ defaultWorkspace: process.cwd(), enabled: true, mcpEnabled: true, name: "alpha", provider: "ssh" }],
-            { instances: [{ name: "alpha", provider: "ssh", ssh: { command: "ssh example.test" } }] }
+            [
+                {
+                    defaultWorkspace: process.cwd(),
+                    enabled: true,
+                    mcpEnabled: true,
+                    name: "alpha",
+                    provider: "ssh",
+                },
+            ],
+            {
+                instances: [
+                    {
+                        name: "alpha",
+                        provider: "ssh",
+                        ssh: { command: "ssh example.test" },
+                    },
+                ],
+            },
         );
         runtime.store.replaceInstances([
             {
@@ -504,50 +754,87 @@ test("real Ink runtime routes terminal scrollback and mouse without trapping sid
                 enabled: true,
                 mcpEnabled: true,
                 name: "alpha",
-                provider: "ssh"
-            }
+                provider: "ssh",
+            },
         ]);
         runtime.store.setConfigView({
             instances: [
-                { name: "alpha", provider: "ssh", ssh: { command: "ssh example.test" } }
-            ]
+                {
+                    name: "alpha",
+                    provider: "ssh",
+                    ssh: { command: "ssh example.test" },
+                },
+            ],
         } as never);
         runtime.store.setSelectedInstance("alpha");
 
         host.write("8");
-        await waitUntil(() => runtime.store.getState().ui.selectedPage === "terminal");
+        await waitUntil(
+            () => runtime.store.getState().ui.selectedPage === "terminal",
+        );
         await waitUntil(() => embedded.getSnapshot().status === "running");
         host.write("\t");
-        await waitUntil(() => runtime.store.getState().interaction.focusScope === "terminal");
+        await waitUntil(
+            () =>
+                runtime.store.getState().interaction.focusScope === "terminal",
+        );
         await waitUntil(() => host.output.includes("\u001B[?1h\u001B="));
 
         host.write("\u001B[A");
         await waitUntil(() => writes.includes("\u001B[A"));
 
-        const terminalRegion = buildTuiTerminalViewportRegion(runtime.store.getState(), {
-            columns: runtime.columns,
-            rows: runtime.rows
-        });
+        const terminalRegion = buildTuiTerminalViewportRegion(
+            runtime.store.getState(),
+            {
+                columns: runtime.columns,
+                rows: runtime.rows,
+            },
+        );
         assert.ok(terminalRegion);
         dataListener?.("select me");
-        await waitUntil(() => embedded.getSnapshot().lines[0]?.segments.some((segment) => segment.text.includes("select")) === true);
-        host.write(mouseSequence(0, terminalRegion.x, terminalRegion.y, "press"));
-        host.write(mouseSequence(32, terminalRegion.x + 5, terminalRegion.y, "press"));
-        host.write(mouseSequence(0, terminalRegion.x + 5, terminalRegion.y, "release"));
-        await waitUntil(() => host.output.includes("\u001B]52;c;c2VsZWN0\u0007"));
+        await waitUntil(
+            () =>
+                embedded
+                    .getSnapshot()
+                    .lines[0]?.segments.some((segment) =>
+                        segment.text.includes("select"),
+                    ) === true,
+        );
+        host.write(
+            mouseSequence(0, terminalRegion.x, terminalRegion.y, "press"),
+        );
+        host.write(
+            mouseSequence(32, terminalRegion.x + 5, terminalRegion.y, "press"),
+        );
+        host.write(
+            mouseSequence(0, terminalRegion.x + 5, terminalRegion.y, "release"),
+        );
+        await waitUntil(() =>
+            host.output.includes("\u001B]52;c;c2VsZWN0\u0007"),
+        );
 
         dataListener?.("\u001B[?2004h");
-        await waitUntil(() => embedded.getSnapshot().modes.bracketedPaste === true);
+        await waitUntil(
+            () => embedded.getSnapshot().modes.bracketedPaste === true,
+        );
         host.write("\u001B[200~pasted");
         host.write(" text\u001B[201~");
-        await waitUntil(() => writes.includes("\u001B[200~pasted text\u001B[201~"));
+        await waitUntil(() =>
+            writes.includes("\u001B[200~pasted text\u001B[201~"),
+        );
 
         dataListener?.("\u001B_Ga=T,f=100;AAAA\u001B\\");
         await waitUntil(() => embedded.getSnapshot().graphics.count === 1);
-        await waitUntil(() => host.output.includes("\u001B_Ga=T,f=100;AAAA\u001B\\"));
+        await waitUntil(() =>
+            host.output.includes("\u001B_Ga=T,f=100;AAAA\u001B\\"),
+        );
         assert.equal(host.output.includes("\u001B_Ga=d,d=A;\u001B\\"), true);
 
-        dataListener?.(Array.from({ length: 80 }, (_, index) => String(index)).join("\r\n"));
+        dataListener?.(
+            Array.from({ length: 80 }, (_, index) => String(index)).join(
+                "\r\n",
+            ),
+        );
         await waitUntil(() => embedded.getSnapshot().scroll.historyLines > 0);
         host.write("\u001B[5;");
         await delay(10);
@@ -557,23 +844,41 @@ test("real Ink runtime routes terminal scrollback and mouse without trapping sid
         assert.equal(
             embedded.getSnapshot().scroll.atBottom,
             false,
-            JSON.stringify({ scroll: embedded.getSnapshot().scroll, writes })
+            JSON.stringify({ scroll: embedded.getSnapshot().scroll, writes }),
         );
 
         dataListener?.("\u001B[?1000;1006h");
-        await waitUntil(() => embedded.getSnapshot().modes.mouseTracking === "vt200");
-        host.write(mouseSequence(0, terminalRegion.x + 4, terminalRegion.y + 2, "press"));
+        await waitUntil(
+            () => embedded.getSnapshot().modes.mouseTracking === "vt200",
+        );
+        host.write(
+            mouseSequence(
+                0,
+                terminalRegion.x + 4,
+                terminalRegion.y + 2,
+                "press",
+            ),
+        );
         await waitUntil(() => writes.includes("\u001B[<0;5;3M"));
 
         const helpRegion = buildTuiHitRegions(runtime.store.getState(), {
             columns: runtime.columns,
-            rows: runtime.rows
-        }).find((region) => region.target.kind === "page" && region.target.id === "help");
+            rows: runtime.rows,
+        }).find(
+            (region) =>
+                region.target.kind === "page" && region.target.id === "help",
+        );
         assert.ok(helpRegion);
         const beforePageChange = host.output.length;
         host.write(mouseSequence(0, helpRegion.x, helpRegion.y, "press"));
-        await waitUntil(() => runtime.store.getState().ui.selectedPage === "help");
-        await waitUntil(() => host.output.slice(beforePageChange).includes("\u001B_Ga=d,d=A;\u001B\\"));
+        await waitUntil(
+            () => runtime.store.getState().ui.selectedPage === "help",
+        );
+        await waitUntil(() =>
+            host.output
+                .slice(beforePageChange)
+                .includes("\u001B_Ga=d,d=A;\u001B\\"),
+        );
 
         host.write("\u0004");
         await running;
@@ -590,65 +895,105 @@ test("real Ink runtime renders artifact_viewImage audit output in the detail pan
     const clients = createClients({
         image: {
             bytes: 68,
-            content: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+            content:
+                "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
             encoding: "base64",
             mediaType: "image/png",
             name: "preview.png",
-            source: { instance: "alpha", path: "./preview.png", type: "file" }
-        }
+            source: { instance: "alpha", path: "./preview.png", type: "file" },
+        },
     });
     const runtime = new TuiRuntime(
         { stdin: host.stdin, stdout: host.stdout },
-        { clients: clients.value, graphicsMode: "kitty", inkDebug: true }
+        { clients: clients.value, graphicsMode: "kitty", inkDebug: true },
     );
     const running = runtime.run();
 
     try {
-        await waitUntil(() => runtime.store.getState().connection.status === "connected");
-        clients.setControlState(
-            [{ enabled: true, mcpEnabled: true, name: "alpha", provider: "local" }],
-            { instances: [{ name: "alpha", provider: "local" }] }
+        await waitUntil(
+            () => runtime.store.getState().connection.status === "connected",
         );
-        runtime.store.replaceInstances([{ enabled: true, mcpEnabled: true, name: "alpha", provider: "local" }]);
-        runtime.store.setSelectedInstance("alpha");
-        runtime.store.replaceToolCalls("alpha", [{
-            callId: "image-call",
-            ctxId: "ctx-image",
-            completedAt: "2026-07-18T00:00:01.000Z",
-            input: { path: "./preview.png" },
-            inputSummary: "{\"path\":\"./preview.png\"}",
-            instance: "alpha" as never,
-            output: {
-                bytes: 68,
-                mediaType: "image/png",
-                name: "preview.png",
-                source: { instance: "alpha", path: "./preview.png", type: "file" }
+        clients.setControlState(
+            [
+                {
+                    enabled: true,
+                    mcpEnabled: true,
+                    name: "alpha",
+                    provider: "local",
+                },
+            ],
+            { instances: [{ name: "alpha", provider: "local" }] },
+        );
+        runtime.store.replaceInstances([
+            {
+                enabled: true,
+                mcpEnabled: true,
+                name: "alpha",
+                provider: "local",
             },
-            source: "mcp",
-            startedAt: "2026-07-18T00:00:00.000Z",
-            status: "completed",
-            toolName: "artifact_viewImage"
-        }]);
+        ]);
+        runtime.store.setSelectedInstance("alpha");
+        runtime.store.replaceToolCalls("alpha", [
+            {
+                callId: "image-call",
+                ctxId: "ctx-image",
+                completedAt: "2026-07-18T00:00:01.000Z",
+                input: { path: "./preview.png" },
+                inputSummary: '{"path":"./preview.png"}',
+                instance: "alpha" as never,
+                output: {
+                    bytes: 68,
+                    mediaType: "image/png",
+                    name: "preview.png",
+                    source: {
+                        instance: "alpha",
+                        path: "./preview.png",
+                        type: "file",
+                    },
+                },
+                source: "mcp",
+                startedAt: "2026-07-18T00:00:00.000Z",
+                status: "completed",
+                toolName: "artifact_viewImage",
+            },
+        ]);
         runtime.store.setSelectedPage("audit");
-        runtime.store.pushRoute({ ctxId: "ctx-image", page: "audit", view: "context" });
+        runtime.store.pushRoute({
+            ctxId: "ctx-image",
+            page: "audit",
+            scope: "context",
+            view: "context",
+        });
 
-        const box = selectMainScreenModel(runtime.store.getState()).boxes.find((candidate) => candidate.id === "audit-call:image-call")!;
+        const box = selectMainScreenModel(runtime.store.getState()).boxes.find(
+            (candidate) => candidate.id === "audit-call:image-call",
+        )!;
         runtime.store.toggleExpanded(box.expandedKey);
         runtime.store.setFocusScope("boxDetail");
         runtime.store.setMainFocusId(box.id);
-        runtime.store.setSelectedDetailLine(box.expandedKey, "audit-call:image-call:output");
+        runtime.store.setSelectedDetailLine(
+            box.expandedKey,
+            "audit-call:image-call:output",
+        );
         await runtime.commandDispatcher.dispatch({ type: "focus.activate" });
 
         await waitUntil(() => {
-            const overlay = topTuiOverlay(runtime.store.getState().interaction.overlays);
-            return overlay?.kind === "text-detail" && overlay.image?.name === "preview.png";
+            const overlay = topTuiOverlay(
+                runtime.store.getState().interaction.overlays,
+            );
+            return (
+                overlay?.kind === "text-detail" &&
+                overlay.image?.name === "preview.png"
+            );
         });
         await waitUntil(() => host.output.includes("a=T,f=100"));
         assert.equal(host.output.includes("c="), true);
 
         const beforeClose = host.output.length;
         await runtime.commandDispatcher.dispatch({ type: "textDetail.close" });
-        await waitUntil(() => host.output.slice(beforeClose).includes("a=d,d=A"));
+        await waitUntil(() =>
+            host.output.slice(beforeClose).includes("a=d,d=A"),
+        );
 
         host.write("\u0004");
         await running;
@@ -656,22 +1001,37 @@ test("real Ink runtime renders artifact_viewImage audit output in the detail pan
         await runtime.stop();
     }
 
-    assert.deepEqual(clients.imageReads(), [{ input: { path: "./preview.png" }, instance: "alpha" }]);
+    assert.deepEqual(clients.imageReads(), [
+        { input: { path: "./preview.png" }, instance: "alpha" },
+    ]);
 });
 
-function createClients(options: {
-    configView?: Record<string, unknown>;
-    instanceList?: Array<{ defaultWorkspace?: string; enabled: boolean; mcpEnabled: boolean; name: string; provider?: string }>;
-    image?: {
-        bytes: number;
-        content: string;
-        encoding: "base64";
-        mediaType: "image/gif" | "image/jpeg" | "image/png" | "image/webp";
-        name: string;
-        source: { handle?: string; instance: string; path?: string; type?: "artifact" | "directory" | "file" };
-    };
-    pingError?: Error;
-} = {}) {
+function createClients(
+    options: {
+        configView?: Record<string, unknown>;
+        instanceList?: Array<{
+            defaultWorkspace?: string;
+            enabled: boolean;
+            mcpEnabled: boolean;
+            name: string;
+            provider?: string;
+        }>;
+        image?: {
+            bytes: number;
+            content: string;
+            encoding: "base64";
+            mediaType: "image/gif" | "image/jpeg" | "image/png" | "image/webp";
+            name: string;
+            source: {
+                handle?: string;
+                instance: string;
+                path?: string;
+                type?: "artifact" | "directory" | "file";
+            };
+        };
+        pingError?: Error;
+    } = {},
+) {
     let closeCount = 0;
     let configView = options.configView ?? { instances: [] };
     let instanceList = options.instanceList ?? [];
@@ -692,7 +1052,7 @@ function createClients(options: {
             },
             async listTransfers() {
                 return [];
-            }
+            },
         },
         close() {
             closeCount += 1;
@@ -700,7 +1060,7 @@ function createClients(options: {
         config: {
             async get() {
                 return configView;
-            }
+            },
         },
         instance: {
             async createSchema() {
@@ -708,8 +1068,14 @@ function createClients(options: {
                 return {
                     container: {
                         defaultMode: "preset",
-                        modes: ["preset", "dockerfile", "compose", "existingImage", "existingStoppedContainer"],
-                        presets: []
+                        modes: [
+                            "preset",
+                            "dockerfile",
+                            "compose",
+                            "existingImage",
+                            "existingStoppedContainer",
+                        ],
+                        presets: [],
                     },
                     defaultEnabled: true,
                     defaultMcpCapabilities: ["read", "write", "execute"],
@@ -717,17 +1083,17 @@ function createClients(options: {
                     defaultMcpGroups: ["file", "bash", "artifact"],
                     defaultProvider: "local",
                     defaultSecurityMode: "disabled",
-                    providers: ["local", "ssh", "docker", "podman"]
+                    providers: ["local", "ssh", "docker", "podman"],
                 };
             },
             async list() {
                 return instanceList;
-            }
+            },
         },
         mcp: {
             async status() {
                 return {};
-            }
+            },
         },
         overview: {
             async get() {
@@ -742,14 +1108,14 @@ function createClients(options: {
                         instancesCritical: 0,
                         instancesReady: 0,
                         instancesTotal: 0,
-                        pendingApprovals: 0
+                        pendingApprovals: 0,
                     },
                     generatedAt: "2026-07-31T00:00:00.000Z",
                     health: "healthy",
                     instances: [],
-                    todos: []
+                    todos: [],
                 };
-            }
+            },
         },
         async reconnect() {},
         reverse: {},
@@ -763,10 +1129,10 @@ function createClients(options: {
                         lastSeq: 2,
                         name: instance,
                         ready: true,
-                        status: "ready"
-                    }
+                        status: "ready",
+                    },
                 };
-            }
+            },
         },
         service: {
             async ping() {
@@ -774,10 +1140,10 @@ function createClients(options: {
                     throw options.pingError;
                 }
                 return { pong: true };
-            }
+            },
         },
         todo: {},
-        tool: {}
+        tool: {},
     } as unknown as TuiClients;
 
     return {
@@ -785,11 +1151,14 @@ function createClients(options: {
         createSchemaCalls: () => schemaCalls,
         imageReads: () => imageReads,
         refreshCalls: () => refreshCount,
-        setControlState(nextInstances: typeof instanceList, nextConfigView: Record<string, unknown>) {
+        setControlState(
+            nextInstances: typeof instanceList,
+            nextConfigView: Record<string, unknown>,
+        ) {
             instanceList = nextInstances;
             configView = nextConfigView;
         },
-        value
+        value,
     };
 }
 
@@ -840,11 +1209,14 @@ function createTerminal(options: { columns?: number; rows?: number } = {}): {
         stdout: output as unknown as WriteStream,
         write(value: string) {
             input.write(value);
-        }
+        },
     };
 }
 
-async function waitUntil(predicate: () => boolean, timeoutMs = 10_000): Promise<void> {
+async function waitUntil(
+    predicate: () => boolean,
+    timeoutMs = 10_000,
+): Promise<void> {
     const deadline = Date.now() + timeoutMs;
     while (!predicate()) {
         if (Date.now() >= deadline) {
@@ -860,7 +1232,7 @@ async function delay(milliseconds: number): Promise<void> {
 
 async function writeCharacters(
     terminal: Pick<ReturnType<typeof createTerminal>, "write">,
-    value: string
+    value: string,
 ): Promise<void> {
     for (const character of value) {
         terminal.write(character);
@@ -872,7 +1244,7 @@ function mouseSequence(
     button: number,
     x: number,
     y: number,
-    kind: "press" | "release"
+    kind: "press" | "release",
 ): string {
     return `\u001B[<${button};${x};${y}${kind === "press" ? "M" : "m"}`;
 }

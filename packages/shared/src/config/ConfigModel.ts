@@ -3,12 +3,13 @@ import type { ToolCapability } from "../dto/tool/DtoToolDefinition.js";
 import type {
     InstanceContainerConfig,
     InstanceContainerMode,
-    InstanceContainerMountConfig
+    InstanceContainerMountConfig,
 } from "../dto/instance/DtoInstanceCreate.js";
 
 export type RawConfig = unknown;
 
-export type ControlProviderKind = "docker" | "local" | "podman" | "reverse" | "ssh";
+export type ControlProviderKind =
+    "docker" | "local" | "podman" | "reverse" | "ssh";
 export type ControlMcpAuthMode = "none" | "oauth2" | "token";
 export type ControlSecurityMode = "disabled" | "workspace";
 
@@ -342,13 +343,13 @@ export const defaultConfigNormalizeContext: ConfigNormalizeContext = {
         { image: "archlinux:latest", preset: "arch" },
         { image: "ubuntu:24.04", preset: "ubuntu" },
         { image: "debian:stable", preset: "debian" },
-        { image: "alpine:latest", preset: "alpine" }
+        { image: "alpine:latest", preset: "alpine" },
     ],
     defaultEnabled: true,
     defaultMcpCapabilities: ["read", "write", "execute"],
     defaultMcpEnabled: true,
-    defaultMcpGroups: ["file", "bash", "artifact", "tmux", "todo"],
-    defaultSecurityMode: "disabled"
+    defaultMcpGroups: ["file", "bash", "artifact", "tmux", "todo", "context"],
+    defaultSecurityMode: "disabled",
 };
 
 export const minimumAuditStorageBytes = 1024 * 1024;

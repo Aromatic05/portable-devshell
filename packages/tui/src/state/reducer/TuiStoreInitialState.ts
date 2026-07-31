@@ -9,12 +9,12 @@ export function createInitialTuiAppState(): TuiAppState {
         commandRecords: [],
         contextMessagesByInstance: {},
         connection: {
-            status: "connecting"
+            status: "connecting",
         },
         globalDerived: {
             connectedInstanceCount: 0,
             pendingApprovalCount: 0,
-            totalEventCount: 0
+            totalEventCount: 0,
         },
         interaction: createEmptyInteractionState(),
         instances: [],
@@ -32,7 +32,6 @@ export function createInitialTuiAppState(): TuiAppState {
             controlRestartRequired: false,
             dirtyForms: {},
             expandedBoxes: {},
-            focusScope: "sidebarPages",
             formDrafts: {},
             logsFollowByInstance: {},
             logsPausedAtSeqByInstance: {},
@@ -43,7 +42,7 @@ export function createInitialTuiAppState(): TuiAppState {
             searchQueries: {},
             selectedInstance: undefined,
             selectedPage: "instances",
-            sidebarFocus: "pages"
-        }
+            sidebarFocus: "pages",
+        },
     };
 }

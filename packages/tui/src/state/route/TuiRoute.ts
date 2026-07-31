@@ -9,12 +9,21 @@ export type TuiRoute =
     | { page: "connections"; providerId: string; view: "oauth" }
     | { instanceId: string; page: "connections"; view: "reverse" }
     | { page: "audit"; view: "contexts" }
-    | { ctxId: string; page: "audit"; view: "context" }
-    | { callId: string; ctxId: string; page: "audit"; view: "call" }
+    | { page: "audit"; scope: "unscoped"; view: "context" }
+    | { ctxId: string; page: "audit"; scope: "context"; view: "context" }
+    | { callId: string; page: "audit"; scope: "unscoped"; view: "call" }
+    | {
+          callId: string;
+          ctxId: string;
+          page: "audit";
+          scope: "context";
+          view: "call";
+      }
     | { page: "todo"; view: "overview" }
     | { page: "todo"; todoId: string; view: "detail" }
     | { page: "logs"; view: "contexts" }
-    | { ctxId: string; page: "logs"; view: "context" }
+    | { page: "logs"; scope: "unscoped"; view: "context" }
+    | { ctxId: string; page: "logs"; scope: "context"; view: "context" }
     | { page: "help"; view: "index" }
     | { page: "terminal"; view: "session" };
 
@@ -36,7 +45,6 @@ export function rootTuiRoute(page: TuiRoute["page"]): TuiRoute {
         case "todo":
             return { page, view: "overview" };
         case "audit":
-            return { page, view: "contexts" };
         case "logs":
             return { page, view: "contexts" };
         case "help":
@@ -56,16 +64,31 @@ export function tuiRouteIdentity(route: TuiRoute): string {
             return `${route.page}/${route.view}`;
         case "audit":
             if (route.view === "contexts") return "audit/contexts";
-            if (route.view === "context") return `audit/context/${encodeURIComponent(route.ctxId)}`;
-            return `audit/context/${encodeURIComponent(route.ctxId)}/call/${encodeURIComponent(route.callId)}`;
+            if (route.scope === "unscoped") {
+                return route.view === "context"
+                    ? "audit/context/unscoped"
+                    : `audit/context/unscoped/call/${encodeURIComponent(route.callId)}`;
+            }
+            return route.view === "context"
+                ? `audit/context/${encodeURIComponent(route.ctxId)}`
+                : `audit/context/${encodeURIComponent(route.ctxId)}/call/${encodeURIComponent(route.callId)}`;
         case "todo":
-            return route.view === "overview" ? "todo/overview" : `todo/detail/${encodeURIComponent(route.todoId)}`;
+            return route.view === "overview"
+                ? "todo/overview"
+                : `todo/detail/${encodeURIComponent(route.todoId)}`;
         case "logs":
-            return route.view === "contexts" ? "logs/contexts" : `logs/context/${encodeURIComponent(route.ctxId)}`;
+            if (route.view === "contexts") return "logs/contexts";
+            return route.scope === "unscoped"
+                ? "logs/context/unscoped"
+                : `logs/context/${encodeURIComponent(route.ctxId)}`;
         case "connections":
             if (route.view === "overview") return "connections/overview";
-            if (route.view === "connector") return `connections/connector/${encodeURIComponent(route.connectorId)}`;
-            if (route.view === "oauth") return `connections/oauth/${encodeURIComponent(route.providerId)}`;
+            if (route.view === "connector") {
+                return `connections/connector/${encodeURIComponent(route.connectorId)}`;
+            }
+            if (route.view === "oauth") {
+                return `connections/oauth/${encodeURIComponent(route.providerId)}`;
+            }
             return `connections/reverse/${encodeURIComponent(route.instanceId)}`;
     }
 }
@@ -74,6 +97,6 @@ export function defaultTuiRouteViewState(): TuiRouteViewState {
     return {
         expandedItemIds: [],
         focusRegion: "mainBoxes",
-        scrollOffset: 0
+        scrollOffset: 0,
     };
 }
