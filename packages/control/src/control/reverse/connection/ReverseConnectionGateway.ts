@@ -111,14 +111,7 @@ export class ReverseConnectionGateway {
                         identity,
                         "wss",
                         channel
-                    ).catch((error) => {
-                        webSocket.close(
-                            1008,
-                            error instanceof Error
-                                ? error.message.slice(0, 120)
-                                : "activation failed"
-                        );
-                    });
+                    ).catch(() => channel.close());
                 }
             );
         } catch (error) {
@@ -148,7 +141,11 @@ export class ReverseConnectionGateway {
             if (!response.headersSent) {
                 sendGatewayError(response, error);
             } else if (!response.writableEnded) {
-                response.end();
+                try {
+                    response.end();
+                } catch {
+                    // The SSE channel may already own a closed response.
+                }
             }
         }
     }
