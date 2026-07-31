@@ -110,8 +110,11 @@ export class ControlWebSocketFrameChannel implements FrameChannel {
     readonly #handleMessage = (data: RawData, isBinary: boolean): void => {
         this.#lastSeenAt = this.#now();
         if (!isBinary) {
-            this.#socket.close(1003, "binary RPC frame required");
-            this.#finish(new Error("Control WebSocket requires binary RPC frames."));
+            this.#closeInvalid(
+                1003,
+                "binary RPC frame required",
+                new Error("Control WebSocket requires binary RPC frames.")
+            );
             return;
         }
         const frame = Buffer.isBuffer(data)
@@ -153,6 +156,15 @@ export class ControlWebSocketFrameChannel implements FrameChannel {
         } catch {
             // The channel is already closed locally; transport teardown is best effort.
         }
+    }
+
+    #closeInvalid(code: number, reason: string, error: Error): void {
+        try {
+            this.#socket.close(code, reason);
+        } catch {
+            // The protocol error below owns the channel lifecycle.
+        }
+        this.#finish(error);
     }
 
     #finish(error?: Error): void {

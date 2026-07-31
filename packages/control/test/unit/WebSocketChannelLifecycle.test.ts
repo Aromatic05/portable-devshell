@@ -51,6 +51,10 @@ class FakeWebSocket extends EventEmitter {
         callback!(error);
     }
 
+    message(data: unknown, isBinary: boolean): void {
+        this.emit("message", data, isBinary);
+    }
+
     terminate(): void {
         this.terminated = true;
         this.readyState = WebSocket.CLOSED;
@@ -127,6 +131,18 @@ test("control WebSocket send failure closes the channel and rejects queued sends
     assert.equal((await closed)?.message, "send callback failed");
     assert.equal(channel.closed, true);
     assert.equal(socket.terminated, true);
+});
+
+test("control WebSocket rejects text frames even when the close frame fails", async () => {
+    const socket = new FakeWebSocket();
+    socket.closeError = new Error("close frame failed");
+    const channel = new ControlWebSocketFrameChannel(socket as unknown as WebSocket);
+    const closed = new Promise<Error | undefined>((resolve) => channel.onClose(resolve));
+
+    socket.message("not binary", false);
+
+    assert.match((await closed)?.message ?? "", /requires binary RPC frames/iu);
+    assert.equal(channel.closed, true);
 });
 
 test("reverse WebSocket heartbeat times out with a pending RPC request", async () => {
