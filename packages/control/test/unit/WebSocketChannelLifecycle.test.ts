@@ -12,7 +12,7 @@ import { ReverseRpcWebSocketChannel } from "../../src/control/reverse/rpc/Revers
 import { ControlWebSocketFrameChannel } from "../../src/server/web/ControlWebSocketFrameChannel.ts";
 
 class FakeWebSocket extends EventEmitter {
-    readyState = WebSocket.OPEN;
+    readyState: number = WebSocket.OPEN;
     closeError?: Error;
     pingError?: Error;
     sendError?: Error;
