@@ -61,6 +61,9 @@ export class WebStore {
     #overviewPoll?: ReturnType<typeof setInterval>;
     #overviewPromise?: Promise<void>;
     #overviewGeneration?: number;
+    #overviewVersion = 0;
+    #oauthApprovalsVersion = 0;
+    #readVersions = new Map<string, number>();
     readonly #isPageVisible: () => boolean;
     readonly #overviewRefreshIntervalMs: number;
 
@@ -116,6 +119,9 @@ export class WebStore {
     }
 
     async refreshInstance(name: string, generation = this.#generation): Promise<void> {
+        const instanceVersion = this.nextReadVersion(`instance:${name}`);
+        const logVersion = this.nextReadVersion(`logs:${name}`);
+        const approvalVersion = this.nextReadVersion(`approvals:${name}`);
         try {
             const [envelope, logs, approvals] = await Promise.all([
                 this.clients.runtime.refresh(name),
@@ -125,18 +131,26 @@ export class WebStore {
             if (!this.isCurrent(generation)) {
                 return;
             }
-            this.set({
-                ...this.#state,
-                instances: this.#state.instances.map((entry) =>
-                    entry.name === name
-                        ? { ...entry, snapshot: envelope.snapshot }
-                        : entry,
-                ),
-                logs: { ...this.#state.logs, [name]: logs.slice(-100) },
-                approvals: { ...this.#state.approvals, [name]: approvals },
-            });
+            let next = this.#state;
+            if (this.isCurrentRead(`instance:${name}`, instanceVersion)) {
+                next = {
+                    ...next,
+                    instances: next.instances.map((entry) =>
+                        entry.name === name
+                            ? { ...entry, snapshot: envelope.snapshot }
+                            : entry,
+                    ),
+                };
+            }
+            if (this.isCurrentRead(`logs:${name}`, logVersion)) {
+                next = { ...next, logs: { ...next.logs, [name]: logs.slice(-100) } };
+            }
+            if (this.isCurrentRead(`approvals:${name}`, approvalVersion)) {
+                next = { ...next, approvals: { ...next.approvals, [name]: approvals } };
+            }
+            if (next !== this.#state) this.set(next);
         } catch (error) {
-            if (!this.isCurrent(generation)) {
+            if (!this.isCurrent(generation) || (!this.isCurrentRead(`instance:${name}`, instanceVersion) && !this.isCurrentRead(`logs:${name}`, logVersion) && !this.isCurrentRead(`approvals:${name}`, approvalVersion))) {
                 return;
             }
             this.setError(error);
@@ -154,7 +168,10 @@ export class WebStore {
                 approvalId,
                 decision,
             );
-            await this.refreshInstance(instance, generation);
+            await Promise.all([
+                this.refreshInstance(instance, generation),
+                this.refreshTodo(instance, generation),
+            ]);
         });
     }
 
@@ -164,8 +181,9 @@ export class WebStore {
     ): Promise<void> {
         await this.mutate(`oauth:${approvalId}`, "Approval recorded.", async (generation) => {
             await this.clients.mcp.decideApproval(approvalId, decision);
+            const version = ++this.#oauthApprovalsVersion;
             const oauthApprovals = await this.clients.mcp.listApprovals();
-            if (!this.isCurrent(generation)) {
+            if (!this.isCurrent(generation) || this.#oauthApprovalsVersion !== version) {
                 return;
             }
             this.set({
@@ -178,14 +196,20 @@ export class WebStore {
     async start(instance: string): Promise<void> {
         await this.mutate(`start:${instance}`, `${instance} start requested.`, async (generation) => {
             await this.clients.runtime.start(instance);
-            await this.refreshInstance(instance, generation);
+            await Promise.all([
+                this.refreshInstance(instance, generation),
+                this.refreshTodo(instance, generation),
+            ]);
         });
     }
 
     async stop(instance: string): Promise<void> {
         await this.mutate(`stop:${instance}`, `${instance} stop requested.`, async (generation) => {
             await this.clients.runtime.stop(instance);
-            await this.refreshInstance(instance, generation);
+            await Promise.all([
+                this.refreshInstance(instance, generation),
+                this.refreshTodo(instance, generation),
+            ]);
         });
     }
 
@@ -427,11 +451,12 @@ export class WebStore {
     }
 
     private async readLogs(name: string, generation: number): Promise<void> {
+        const version = this.nextReadVersion(`logs:${name}`);
         try {
             const logs = await this.clients.runtime.readLogs(name, {
                 limit: 50,
             });
-            if (!this.isCurrent(generation)) {
+            if (!this.isCurrent(generation) || !this.isCurrentRead(`logs:${name}`, version)) {
                 return;
             }
             this.set({
@@ -440,7 +465,7 @@ export class WebStore {
                 partialFailures: this.withoutPartialFailure(`logs:${name}`),
             });
         } catch (error) {
-            if (!this.isCurrent(generation)) {
+            if (!this.isCurrent(generation) || !this.isCurrentRead(`logs:${name}`, version)) {
                 return;
             }
             this.setPartialFailure(`logs:${name}`, error);
@@ -459,9 +484,10 @@ export class WebStore {
     }
 
     private async refreshTodo(name: string, generation: number): Promise<void> {
+        const version = this.nextReadVersion(`todos:${name}`);
         try {
             const { todo } = await this.clients.todo.get(name);
-            if (!this.isCurrent(generation)) {
+            if (!this.isCurrent(generation) || !this.isCurrentRead(`todos:${name}`, version)) {
                 return;
             }
             this.set({
@@ -470,7 +496,7 @@ export class WebStore {
                 partialFailures: this.withoutPartialFailure(`todos:${name}`),
             });
         } catch (error) {
-            if (!this.isCurrent(generation)) {
+            if (!this.isCurrent(generation) || !this.isCurrentRead(`todos:${name}`, version)) {
                 return;
             }
             this.setPartialFailure(`todos:${name}`, error);
@@ -478,9 +504,10 @@ export class WebStore {
     }
 
     private async refreshApprovals(name: string, generation: number): Promise<void> {
+        const version = this.nextReadVersion(`approvals:${name}`);
         try {
             const approvals = await this.clients.tool.listApprovals(name);
-            if (!this.isCurrent(generation)) {
+            if (!this.isCurrent(generation) || !this.isCurrentRead(`approvals:${name}`, version)) {
                 return;
             }
             this.set({
@@ -489,7 +516,7 @@ export class WebStore {
                 partialFailures: this.withoutPartialFailure(`approvals:${name}`),
             });
         } catch (error) {
-            if (!this.isCurrent(generation)) {
+            if (!this.isCurrent(generation) || !this.isCurrentRead(`approvals:${name}`, version)) {
                 return;
             }
             this.setPartialFailure(`approvals:${name}`, error);
@@ -535,14 +562,15 @@ export class WebStore {
         this.#overviewPoll = undefined;
     }
 
-    private async refreshOverview(generation = this.#generation): Promise<void> {
-        if (this.#overviewPromise !== undefined && this.#overviewGeneration === generation) {
+    private async refreshOverview(generation = this.#generation, force = false): Promise<void> {
+        if (!force && this.#overviewPromise !== undefined && this.#overviewGeneration === generation) {
             return await this.#overviewPromise;
         }
         this.#overviewGeneration = generation;
+        const version = ++this.#overviewVersion;
         const request = this.clients.overview.get()
             .then((overview) => {
-                if (!this.isCurrent(generation)) {
+                if (!this.isCurrent(generation) || this.#overviewVersion !== version) {
                     return;
                 }
                 this.set({
@@ -552,13 +580,13 @@ export class WebStore {
                 });
             })
             .catch((error: unknown) => {
-                if (!this.isCurrent(generation)) {
+                if (!this.isCurrent(generation) || this.#overviewVersion !== version) {
                     return;
                 }
                 this.setPartialFailure("overview", error);
             })
             .finally(() => {
-                if (this.#overviewGeneration === generation) {
+                if (this.#overviewPromise === request) {
                     this.#overviewPromise = undefined;
                     this.#overviewGeneration = undefined;
                 }
@@ -589,7 +617,7 @@ export class WebStore {
             if (!this.isCurrent(generation)) {
                 return;
             }
-            await this.refreshOverview(generation);
+            await this.refreshOverview(generation, true);
             if (!this.isCurrent(generation)) {
                 return;
             }
@@ -643,6 +671,16 @@ export class WebStore {
     private withoutPartialFailure(key: string): Record<string, string> {
         const { [key]: _recovered, ...partialFailures } = this.#state.partialFailures;
         return partialFailures;
+    }
+
+    private nextReadVersion(key: string): number {
+        const version = (this.#readVersions.get(key) ?? 0) + 1;
+        this.#readVersions.set(key, version);
+        return version;
+    }
+
+    private isCurrentRead(key: string, version: number): boolean {
+        return this.#readVersions.get(key) === version;
     }
 
     private isCurrent(generation: number): boolean {

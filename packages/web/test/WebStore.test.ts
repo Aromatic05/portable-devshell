@@ -286,6 +286,123 @@ describe("WebStore", () => {
         expect(store.state.operations["stop:demo"]).toBeUndefined();
     });
 
+    it("refreshes instance, approval, todo, and overview models after start and stop", async () => {
+        const clients = fakeClients();
+        let lifecycle = 0;
+        clients.runtime.start = vi.fn(async () => {
+            lifecycle = 1;
+            return { ...snapshot, lastSeq: 4 };
+        });
+        clients.runtime.stop = vi.fn(async () => {
+            lifecycle = 2;
+            return { ...snapshot, lastSeq: 5 };
+        });
+        clients.runtime.refresh = vi.fn(async () => ({ lastSeq: lifecycle + 3, snapshot: { ...snapshot, lastSeq: lifecycle + 3 } }));
+        clients.tool.listApprovals = vi.fn(async () => lifecycle === 1 ? [approval("after-start")] : []);
+        clients.todo.get = vi.fn(async () => ({ lastSeq: lifecycle + 3, todo: todo(lifecycle + 1) }));
+        clients.overview.get = vi.fn(async () => ({ ...operationalOverview(), generatedAt: `2026-07-31T00:00:0${lifecycle}Z` }));
+        const store = new WebStore(clients);
+        await store.load();
+
+        await store.start("demo");
+
+        expect(store.state.instances[0]?.snapshot.lastSeq).toBe(4);
+        expect(store.state.approvals.demo?.[0]?.approvalId).toBe("after-start");
+        expect(store.state.todos.demo?.revision).toBe(2);
+        expect(store.state.overview?.generatedAt).toBe("2026-07-31T00:00:01Z");
+
+        await store.stop("demo");
+
+        expect(store.state.instances[0]?.snapshot.lastSeq).toBe(5);
+        expect(store.state.approvals.demo).toEqual([]);
+        expect(store.state.todos.demo?.revision).toBe(3);
+        expect(store.state.overview?.generatedAt).toBe("2026-07-31T00:00:02Z");
+    });
+
+    it("refreshes approval, todo, and overview models after a tool decision", async () => {
+        const clients = fakeClients();
+        let decided = false;
+        clients.tool.decideApproval = vi.fn(async () => { decided = true; });
+        clients.tool.listApprovals = vi.fn(async () => decided ? [] : [approval("pending")]);
+        clients.todo.get = vi.fn(async () => ({ lastSeq: decided ? 4 : 3, todo: todo(decided ? 2 : 1) }));
+        clients.overview.get = vi.fn(async () => ({ ...operationalOverview(), generatedAt: decided ? "2026-07-31T00:00:01Z" : "2026-07-31T00:00:00Z" }));
+        const store = new WebStore(clients);
+        await store.load();
+
+        await store.decideTool("demo", "pending", "approve");
+
+        expect(store.state.approvals.demo).toEqual([]);
+        expect(store.state.todos.demo?.revision).toBe(2);
+        expect(store.state.overview?.generatedAt).toBe("2026-07-31T00:00:01Z");
+    });
+
+    it("refreshes OAuth approvals and overview after an OAuth decision", async () => {
+        const clients = fakeClients();
+        let decided = false;
+        clients.mcp.status = async () => ({ authMode: "oauth2", oauthReady: true, running: true });
+        clients.mcp.decideApproval = vi.fn(async () => { decided = true; });
+        clients.mcp.listApprovals = vi.fn(async () => decided ? [] : [oauthApproval("oauth-pending")]);
+        clients.overview.get = vi.fn(async () => ({ ...operationalOverview(), generatedAt: decided ? "2026-07-31T00:00:01Z" : "2026-07-31T00:00:00Z" }));
+        const store = new WebStore(clients);
+        await store.load();
+
+        await store.decideOAuth("oauth-pending", "approve");
+
+        expect(store.state.oauthApprovals).toEqual([]);
+        expect(store.state.overview?.generatedAt).toBe("2026-07-31T00:00:01Z");
+    });
+
+    it("does not let an event refresh overwrite the overview fetched after a mutation", async () => {
+        vi.useFakeTimers();
+        const stream = controllableStream();
+        const clients = fakeClients({ subscribe: async () => stream });
+        let releaseOldOverview!: () => void;
+        const oldOverview = new Promise<ReturnType<typeof operationalOverview>>((resolve) => {
+            releaseOldOverview = () => resolve({ ...operationalOverview(), generatedAt: "2026-07-31T00:00:01Z" });
+        });
+        clients.overview.get = vi.fn()
+            .mockResolvedValueOnce(operationalOverview())
+            .mockReturnValueOnce(oldOverview)
+            .mockResolvedValueOnce({ ...operationalOverview(), generatedAt: "2026-07-31T00:00:02Z" });
+        const store = new WebStore(clients);
+        await store.load();
+
+        stream.push(instanceEvent("instance.statusChanged"));
+        await vi.advanceTimersByTimeAsync(250);
+        await vi.waitFor(() => expect(clients.overview.get).toHaveBeenCalledTimes(2));
+        await store.start("demo");
+        releaseOldOverview();
+        await vi.runAllTimersAsync();
+
+        expect(store.state.overview?.generatedAt).toBe("2026-07-31T00:00:02Z");
+        store.close();
+        vi.useRealTimers();
+    });
+
+    it("does not let an event approval refresh overwrite a tool decision", async () => {
+        const stream = controllableStream();
+        const clients = fakeClients({ subscribe: async () => stream });
+        const store = new WebStore(clients);
+        await store.load();
+        let releaseEventApprovals!: () => void;
+        const eventApprovals = new Promise<ReturnType<typeof approval>[]>((resolve) => {
+            releaseEventApprovals = () => resolve([approval("pending")]);
+        });
+        clients.tool.listApprovals = vi.fn()
+            .mockReturnValueOnce(eventApprovals)
+            .mockResolvedValueOnce([]);
+        clients.tool.decideApproval = vi.fn(async () => undefined);
+
+        stream.push(instanceEvent("approval.requested"));
+        await vi.waitFor(() => expect(clients.tool.listApprovals).toHaveBeenCalledOnce());
+        await store.decideTool("demo", "pending", "approve");
+        releaseEventApprovals();
+        await Promise.resolve();
+
+        expect(store.state.approvals.demo).toEqual([]);
+        store.close();
+    });
+
     it("debounces an overview refresh after a runtime event", async () => {
         vi.useFakeTimers();
         const clients = fakeClients({ subscribe: async () => eventStream() });
@@ -469,6 +586,40 @@ function operationalOverview() {
     return {
         activity: [], alerts: [], controller: { pid: 1, uptimeSeconds: 1 }, counts: { activeTodos: 0, failedCalls24h: 0, instancesAttention: 0, instancesCritical: 0, instancesReady: 1, instancesTotal: 1, pendingApprovals: 0 }, generatedAt: "2026-07-31T00:00:00Z", health: "healthy" as const, instances: [], todos: [],
     };
+}
+
+function approval(approvalId: string) {
+    return {
+        approvalId,
+        callId: "call",
+        createdAt: "2026-07-31T00:00:00Z",
+        expiresAt: "2026-07-31T01:00:00Z",
+        inputSummary: approvalId,
+        instance: asInstanceName("demo"),
+        reason: approvalId,
+        riskLevel: "low" as const,
+        source: "web" as const,
+        status: "pending" as const,
+        toolName: "bash_run",
+    };
+}
+
+function oauthApproval(approvalId: string) {
+    return {
+        approvalId,
+        callId: "call",
+        createdAt: "2026-07-31T00:00:00Z",
+        inputSummary: approvalId,
+        reason: approvalId,
+        riskLevel: "low" as const,
+        source: "web" as const,
+        status: "pending" as const,
+        toolName: "bash_run",
+    };
+}
+
+function todo(revision: number) {
+    return { items: [], revision, summary: { completed: 0, total: 0 } };
 }
 
 function pendingStream(): WebRuntimeStream {
