@@ -271,6 +271,64 @@ test("ReverseConnectionService lets token rotation disconnect a pending activati
     );
 });
 
+test("ReverseConnectionService rejects queued activation after stop", async () => {
+    const home = await mkdtemp(join(tmpdir(), "reverse-stop-activation-"));
+    const credentialStore = new ReverseCredentialStore(home);
+    let accepted = 0;
+    let releaseFirst!: () => void;
+    let signalFirst!: () => void;
+    const firstStarted = new Promise<void>((resolve) => {
+        signalFirst = resolve;
+    });
+    const descriptor = reverseDescriptor(async (_channel, options) => {
+        accepted += 1;
+        if (options.generation === 1) {
+            signalFirst();
+            await new Promise<void>((resolve) => {
+                releaseFirst = resolve;
+            });
+        }
+        return reverseSnapshot();
+    });
+    const service = new ReverseConnectionService({
+        credentialStore,
+        instanceRegistry: { get: (name) => name === descriptor.name ? descriptor : undefined },
+        publicBaseUrl: "https://example.test"
+    });
+    const code = await credentialStore.createDeviceCode(descriptor.name);
+    const enrollment = await service.enroll({
+        arch: "x86_64",
+        deviceCode: code.deviceCode,
+        os: "linux",
+        workerVersion: "test"
+    }) as Record<string, JsonValue>;
+    const token = enrollment.deviceToken as string;
+    const firstIdentity = await service.authenticate(descriptor.name, 1, token);
+    const secondIdentity = await service.authenticate(descriptor.name, 2, token);
+    const firstChannel = new MemoryRpcChannel();
+    const secondChannel = new MemoryRpcChannel();
+    const first = service.activate(firstIdentity, "wss", firstChannel);
+    void first.catch(() => undefined);
+    await firstStarted;
+    const second = service.activate(secondIdentity, "wss", secondChannel);
+    void second.catch(() => undefined);
+
+    service.stop();
+    releaseFirst();
+
+    await assert.rejects(
+        first,
+        (error: unknown) => hasCode(error, "reverse.connectionSuperseded")
+    );
+    await assert.rejects(
+        second,
+        (error: unknown) => hasCode(error, "reverse.transportUnavailable")
+    );
+    assert.equal(firstChannel.closed, true);
+    assert.equal(secondChannel.closed, true);
+    assert.equal(accepted, 1);
+});
+
 
 function reverseSnapshot(): InstanceSnapshot {
     return {

@@ -38,6 +38,7 @@ export class ReverseConnectionService {
     readonly #publicBaseUrl: string;
     readonly #active = new Map<string, ActiveReverseConnection>();
     readonly #activationQueues = new Map<string, Promise<unknown>>();
+    #stopped = false;
 
     constructor(options: ReverseConnectionServiceOptions) {
         this.#credentialStore = options.credentialStore;
@@ -63,6 +64,7 @@ export class ReverseConnectionService {
         generation: number,
         token: string
     ): Promise<ReverseConnectionIdentity> {
+        this.#assertRunning();
         const authenticated = await this.#credentialStore.authenticate(instance, token);
         if (!authenticated) {
             throw invalidDeviceToken(instance);
@@ -81,11 +83,13 @@ export class ReverseConnectionService {
         channel: WorkerRpcChannel
     ): Promise<void> {
         await this.#exclusive(identity.descriptor.name, async () => {
+            this.#assertRunning(channel);
             let active: ActiveReverseConnection | undefined;
             const authenticated = await this.#credentialStore.withAuthenticatedToken(
                 identity.descriptor.name,
                 identity.credentialToken,
                 async () => {
+                    this.#assertRunning(channel);
                     active = this.#prepareActivation(identity, transport, channel);
                 }
             );
@@ -205,10 +209,23 @@ export class ReverseConnectionService {
     }
 
     stop(): void {
+        this.#stopped = true;
         for (const active of this.#active.values()) {
             active.channel.close();
         }
         this.#active.clear();
+    }
+
+    #assertRunning(channel?: WorkerRpcChannel): void {
+        if (!this.#stopped) {
+            return;
+        }
+        channel?.close();
+        throw createError({
+            code: errorCodes.reverseTransportUnavailable,
+            message: "Reverse connection service is stopping.",
+            retryable: true
+        });
     }
 
     #requireReverseInstance(instance: string): ReverseInstancePort {
