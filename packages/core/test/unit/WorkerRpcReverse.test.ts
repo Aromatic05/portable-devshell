@@ -95,11 +95,16 @@ test("reverse RPC bridge replays pending request with the original request id af
 test("closing an RPC bridge while connecting cannot resurrect the channel", async () => {
     const channel = new MemoryChannel();
     let releaseConnect!: () => void;
+    let signalConnectStarted!: () => void;
     const connectGate = new Promise<void>((resolve) => {
         releaseConnect = resolve;
     });
+    const connectStarted = new Promise<void>((resolve) => {
+        signalConnectStarted = resolve;
+    });
     const connector: WorkerRpcConnector = {
         async connect() {
+            signalConnectStarted();
             await connectGate;
             return channel;
         }
@@ -110,12 +115,56 @@ test("closing an RPC bridge while connecting cannot resurrect the channel", asyn
     });
 
     const connecting = bridge.connect();
+    await connectStarted;
     bridge.close();
-    releaseConnect();
 
-    await assert.rejects(connecting, /closed|reset/u);
+    await assert.rejects(withTimeout(connecting), /closed|reset|disconnected/u);
+    assert.equal(channel.closed, false);
+    releaseConnect();
+    await waitUntil(() => channel.closed);
     assert.equal(channel.closed, true);
     assert.equal(bridge.connected, false);
+});
+
+test("reverse channel replacement takes over a stalled connector request", async () => {
+    const stale = new MemoryChannel();
+    let releaseConnect!: () => void;
+    let signalConnectStarted!: () => void;
+    const connectGate = new Promise<void>((resolve) => {
+        releaseConnect = resolve;
+    });
+    const connectStarted = new Promise<void>((resolve) => {
+        signalConnectStarted = resolve;
+    });
+    const connector: WorkerRpcConnector = {
+        async connect() {
+            signalConnectStarted();
+            await connectGate;
+            return stale;
+        }
+    };
+    const bridge = new WorkerRpcBridge({
+        connector,
+        rpcOptions: { instanceName: "connecting-handoff" }
+    });
+
+    const request = bridge.request({
+        id: "handoff-request",
+        method: "worker.ping",
+        params: {},
+        type: "request"
+    });
+    await connectStarted;
+    const replacement = new MemoryChannel();
+    await bridge.replaceChannel(replacement);
+    await waitUntil(() => replacement.sent.length === 1);
+    replacement.respond("handoff-request", { pong: true });
+
+    assert.deepEqual((await request).result, { pong: true });
+    assert.equal(bridge.connected, true);
+    releaseConnect();
+    await waitUntil(() => stale.closed);
+    assert.equal(bridge.connected, true);
 });
 
 test("WorkerRpcBridge rejects a pending request when the initial send fails", async () => {

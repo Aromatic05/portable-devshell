@@ -20,6 +20,11 @@ interface PendingResponse {
     resolve: (response: WorkerRpcResponseEnvelope) => void;
 }
 
+interface ConnectingHandoff {
+    reject(error: Error): void;
+    resolve(channel: WorkerRpcChannel): void;
+}
+
 type WorkerRpcResponseFrame = Record<string, JsonValue> & WorkerRpcResponseEnvelope;
 
 export interface WorkerRpcBridgeOptions {
@@ -37,6 +42,7 @@ export class WorkerRpcBridge {
     readonly #pending = new Map<string, PendingResponse>();
     #channel?: WorkerRpcChannel;
     #connectionGeneration = 0;
+    #connectingHandoff?: ConnectingHandoff;
     #connectPromise?: Promise<WorkerRpcChannel>;
 
     constructor(options: WorkerRpcBridgeOptions) {
@@ -112,6 +118,7 @@ export class WorkerRpcBridge {
 
     async replaceChannel(channel: WorkerRpcChannel): Promise<void> {
         this.#connectionGeneration += 1;
+        const handoff = this.#takeConnectingHandoff();
         this.#connectPromise = undefined;
         const previous = this.#channel;
         this.#attachChannel(channel);
@@ -122,8 +129,10 @@ export class WorkerRpcBridge {
             await this.#replayPending(channel);
         } catch (error) {
             this.#disconnectChannel(channel, this.#createDisconnectError(error));
+            handoff?.reject(error instanceof Error ? error : new Error(String(error)));
             throw error;
         }
+        handoff?.resolve(channel);
     }
 
     close(_signal: NodeJS.Signals | number = "SIGTERM"): void {
@@ -132,6 +141,7 @@ export class WorkerRpcBridge {
             instanceName: this.#rpcOptions.instanceName,
             reason: "bridge_closed"
         });
+        this.#takeConnectingHandoff()?.reject(error);
         const channel = this.#channel;
         this.#channel = undefined;
         this.#connectPromise = undefined;
@@ -147,7 +157,18 @@ export class WorkerRpcBridge {
         }
         if (this.#connectPromise === undefined) {
             const generation = this.#connectionGeneration;
-            const promise = this.#connector
+            let rejectHandoff!: (error: Error) => void;
+            let resolveHandoff!: (channel: WorkerRpcChannel) => void;
+            const handoff = new Promise<WorkerRpcChannel>((resolve, reject) => {
+                resolveHandoff = resolve;
+                rejectHandoff = reject;
+            });
+            const connectingHandoff: ConnectingHandoff = {
+                reject: rejectHandoff,
+                resolve: resolveHandoff
+            };
+            this.#connectingHandoff = connectingHandoff;
+            const connection = this.#connector
                 .connect()
                 .then(async (channel) => {
                     if (generation !== this.#connectionGeneration) {
@@ -169,10 +190,14 @@ export class WorkerRpcBridge {
                         throw new Error("Worker RPC connection was reset while connecting.");
                     }
                     return channel;
-                })
+                });
+            const promise = Promise.race([connection, handoff])
                 .finally(() => {
                     if (this.#connectPromise === promise) {
                         this.#connectPromise = undefined;
+                    }
+                    if (this.#connectingHandoff === connectingHandoff) {
+                        this.#connectingHandoff = undefined;
                     }
                 });
             this.#connectPromise = promise;
@@ -333,6 +358,12 @@ export class WorkerRpcBridge {
         } catch (error) {
             console.warn(error instanceof Error ? error : new Error(String(error)));
         }
+    }
+
+    #takeConnectingHandoff(): ConnectingHandoff | undefined {
+        const handoff = this.#connectingHandoff;
+        this.#connectingHandoff = undefined;
+        return handoff;
     }
 }
 
