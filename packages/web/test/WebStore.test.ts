@@ -2,7 +2,9 @@ import { describe, expect, it, vi } from "vitest";
 import {
     asInstanceName,
     type ApprovalRequest,
+    type ContextMessageRecord,
     type InstanceEvent,
+    type InstanceRuntimeEnvelope,
     type InstanceSnapshot,
     type OAuthApprovalRequest,
 } from "@portable-devshell/shared/browser";
@@ -203,7 +205,7 @@ describe("WebStore", () => {
         }
         await vi.advanceTimersByTimeAsync(250);
 
-        expect(clients.runtime.readLogs).toHaveBeenCalledOnce();
+        expect(clients.runtime.readLogs).toHaveBeenCalledTimes(2);
         expect(clients.todo.get).toHaveBeenCalledTimes(2);
         expect(clients.overview.get).toHaveBeenCalledTimes(2);
         expect(store.state.todos.demo?.revision).toBe(3);
@@ -211,7 +213,7 @@ describe("WebStore", () => {
         vi.useRealTimers();
     });
 
-    it("stops overview polling when subscription setup fails", async () => {
+    it("keeps overview polling while retrying a failed subscription", async () => {
         vi.useFakeTimers();
         const clients = fakeClients({ subscribe: async () => { throw new Error("subscribe failed"); } });
         const store = new WebStore(clients, { overviewRefreshIntervalMs: 1_000 });
@@ -219,8 +221,9 @@ describe("WebStore", () => {
 
         await store.load();
 
-        expect(store.state.connection).toBe("offline");
-        expect(vi.getTimerCount()).toBe(0);
+        expect(store.state.connection).toBe("online");
+        expect(store.state.partialFailures["stream:demo"]).toBe("subscribe failed");
+        expect(vi.getTimerCount()).toBeGreaterThan(0);
         unsubscribe();
         store.close();
         vi.useRealTimers();
@@ -590,7 +593,7 @@ describe("WebStore", () => {
         vi.useRealTimers();
     });
 
-    it("enters offline state when initial overview loading fails", async () => {
+    it("keeps core data online when initial overview loading fails", async () => {
         const clients = fakeClients();
         clients.overview.get = vi.fn(async () => {
             throw new Error("overview unavailable");
@@ -599,8 +602,8 @@ describe("WebStore", () => {
         const store = new WebStore(clients);
         await store.load();
 
-        expect(store.state.connection).toBe("offline");
-        expect(store.state.error).toBe("overview unavailable");
+        expect(store.state.connection).toBe("online");
+        expect(store.state.partialFailures.overview).toBe("overview unavailable");
     });
 });
 
@@ -807,3 +810,269 @@ function controllableStream(): WebRuntimeStream & { push(event: InstanceEvent): 
 function instanceEvent(type: InstanceEvent["type"]): InstanceEvent {
     return { at: "2026-07-31T00:00:00Z", instanceName: asInstanceName("demo"), seq: 4, type };
 }
+
+describe("WebStore recovery and consistency", () => {
+    it("keeps core data online when Overview is unavailable", async () => {
+        const clients = fakeClients();
+        clients.overview.get = vi.fn(async () => { throw new Error("overview unavailable"); });
+        const store = new WebStore(clients);
+
+        await store.load();
+
+        expect(store.state.connection).toBe("online");
+        expect(store.state.instances).toHaveLength(1);
+        expect(store.state.partialFailures.overview).toBe("overview unavailable");
+    });
+
+    it("keeps other instances online and retries a failed subscription", async () => {
+        vi.useFakeTimers();
+        let attempts = 0;
+        const clients = fakeClients({
+            subscribe: async () => {
+                attempts += 1;
+                if (attempts === 1) throw new Error("stream unavailable");
+                return pendingStream();
+            },
+        });
+        const store = new WebStore(clients);
+
+        await store.load();
+        expect(store.state.connection).toBe("online");
+        expect(store.state.partialFailures["stream:demo"]).toBe("stream unavailable");
+
+        await vi.advanceTimersByTimeAsync(1_000);
+        await vi.waitFor(() => expect(attempts).toBe(2));
+        expect(store.state.partialFailures["stream:demo"]).toBeUndefined();
+        store.close();
+        vi.useRealTimers();
+    });
+
+    it("applies successful instance refresh results independently", async () => {
+        const clients = fakeClients();
+        clients.runtime.refresh = vi.fn(async () => ({
+            lastSeq: 9,
+            snapshot: { ...snapshot, lastSeq: 9 },
+        }));
+        clients.runtime.readLogs = vi.fn(async () => { throw new Error("logs unavailable"); });
+        clients.tool.listApprovals = vi.fn(async () => [approval("fresh")]);
+        const store = new WebStore(clients);
+        await store.load();
+
+        await store.refreshInstance("demo");
+
+        expect(store.state.instances[0]?.snapshot.lastSeq).toBe(9);
+        expect(store.state.approvals.demo?.[0]?.approvalId).toBe("fresh");
+        expect(store.state.partialFailures["logs:demo"]).toBe("logs unavailable");
+    });
+
+    it("fully resynchronizes every instance read model after stream.gap", async () => {
+        let subscription = 0;
+        const clients = fakeClients({
+            subscribe: async () => (++subscription === 1 ? gapStream() : pendingStream()),
+        });
+        const reads = {
+            contexts: 0,
+            logs: 0,
+            toolCalls: 0,
+            todos: 0,
+        };
+        clients.contextMessage.list = vi.fn(async () => {
+            reads.contexts += 1;
+            return [];
+        });
+        clients.runtime.readLogs = vi.fn(async () => {
+            reads.logs += 1;
+            return [];
+        });
+        clients.tool.listCalls = vi.fn(async () => {
+            reads.toolCalls += 1;
+            return [];
+        });
+        clients.todo.get = vi.fn(async () => {
+            reads.todos += 1;
+            return { lastSeq: 9, todo: todo(reads.todos) };
+        });
+        const store = new WebStore(clients);
+
+        await store.load();
+        await vi.waitFor(() => expect(subscription).toBe(2));
+
+        expect(reads).toEqual({ contexts: 2, logs: 2, toolCalls: 2, todos: 2 });
+    });
+
+    it("returns the result of each Context message operation independently", async () => {
+        const clients = fakeClients();
+        clients.contextMessage.queue = vi.fn(async (_instance, input) => {
+            if (input.ctxId === "ctx-b") throw new Error("queue b failed");
+            return {
+                createdAt: "2026-07-31T00:00:00Z",
+                ctxId: input.ctxId,
+                id: input.ctxId,
+                instance: "demo",
+                status: "pending" as const,
+                text: input.text,
+            };
+        });
+        const store = new WebStore(clients);
+        await store.load();
+
+        const result = await Promise.all([
+            store.queueContextMessage("demo", "ctx-a", "A"),
+            store.queueContextMessage("demo", "ctx-b", "B"),
+        ]);
+
+        expect(result).toEqual([true, false]);
+        expect(store.state.error).toBe("queue b failed");
+    });
+
+    it("does not downgrade a delivered Context message with an older queue response", async () => {
+        const clients = fakeClients();
+        let release!: () => void;
+        clients.contextMessage.queue = vi.fn(() => new Promise<ContextMessageRecord>((resolve) => {
+            release = () => resolve({
+                createdAt: "2026-07-31T00:00:00Z",
+                ctxId: "ctx-demo",
+                id: "message-1",
+                instance: "demo",
+                status: "pending" as const,
+                text: "Continue.",
+            });
+        }));
+        const store = new WebStore(clients);
+        await store.load();
+
+        const queue = store.queueContextMessage("demo", "ctx-demo", "Continue.");
+        store.state.contextMessages.demo = [{
+            createdAt: "2026-07-31T00:00:00Z",
+            ctxId: "ctx-demo",
+            deliveredAt: "2026-07-31T00:00:01Z",
+            id: "message-1",
+            instance: "demo",
+            status: "delivered",
+            text: "Continue.",
+        }];
+        release();
+        await queue;
+
+        expect(store.state.contextMessages.demo?.[0]?.status).toBe("delivered");
+    });
+
+    it("uses the authoritative lifecycle response even when follow-up reads fail", async () => {
+        const clients = fakeClients();
+        clients.runtime.start = vi.fn(async (): Promise<InstanceSnapshot> => ({
+            ...snapshot,
+            connectionState: "connected",
+            daemonState: "running",
+            lastSeq: 10,
+            ready: true,
+            status: "running",
+        }));
+        clients.runtime.refresh = vi.fn(async () => { throw new Error("refresh unavailable"); });
+        const store = new WebStore(clients);
+        await store.load();
+
+        await store.start("demo");
+
+        expect(store.state.instances[0]?.snapshot.status).toBe("running");
+        expect(store.state.instances[0]?.snapshot.lastSeq).toBe(10);
+        expect(store.state.notice).toBe("demo start requested.");
+        expect(store.state.partialFailures["instance:demo"]).toBe("refresh unavailable");
+    });
+
+    it("loads logs with Tool Calls so legacy output is available immediately", async () => {
+        const clients = fakeClients();
+        clients.runtime.readLogs = vi.fn(async () => [{
+            at: "2026-07-31T00:00:01Z",
+            callId: "call-1",
+            instanceName: asInstanceName("demo"),
+            message: "output",
+            seq: 4,
+            stream: "stdout" as const,
+        }]);
+        const store = new WebStore(clients);
+
+        await store.load();
+
+        expect(store.state.logs.demo?.[0]?.callId).toBe("call-1");
+    });
+});
+
+describe("WebStore stream and lifecycle guards", () => {
+    it("retries a stream that closes after it was established", async () => {
+        vi.useFakeTimers();
+        let subscriptions = 0;
+        const clients = fakeClients({
+            subscribe: async () => {
+                subscriptions += 1;
+                return subscriptions === 1
+                    ? ({ close() {}, next: async () => ({ kind: "closed" }) } as unknown as WebRuntimeStream)
+                    : pendingStream();
+            },
+        });
+        const store = new WebStore(clients);
+
+        await store.load();
+        await vi.advanceTimersByTimeAsync(1_000);
+        await vi.waitFor(() => expect(subscriptions).toBe(2));
+
+        expect(store.state.connection).toBe("online");
+        expect(store.state.partialFailures["stream:demo"]).toBeUndefined();
+        store.close();
+        vi.useRealTimers();
+    });
+
+    it("does not replace a lifecycle response with an older refresh snapshot", async () => {
+        const clients = fakeClients();
+        clients.runtime.start = vi.fn(async (): Promise<InstanceSnapshot> => ({
+            ...snapshot,
+            lastSeq: 10,
+            status: "running",
+        }));
+        clients.runtime.refresh = vi.fn(async (): Promise<InstanceRuntimeEnvelope> => ({
+            lastSeq: 9,
+            snapshot: { ...snapshot, lastSeq: 9, status: "ready" },
+        }));
+        const store = new WebStore(clients);
+        await store.load();
+
+        await store.start("demo");
+
+        expect(store.state.instances[0]?.snapshot.lastSeq).toBe(10);
+        expect(store.state.instances[0]?.snapshot.status).toBe("running");
+    });
+});
+
+describe("WebStore approval decision guards", () => {
+    it("does not reintroduce a decided tool approval from a stale list response", async () => {
+        const clients = fakeClients();
+        clients.tool.listApprovals = vi.fn(async () => [approval("pending")]);
+        clients.tool.decideApproval = vi.fn(async () =>
+            decidedToolApproval("pending", "approve")
+        );
+        const store = new WebStore(clients);
+        await store.load();
+
+        await store.decideTool("demo", "pending", "approve");
+
+        expect(store.state.approvals.demo).toEqual([]);
+    });
+
+    it("does not reintroduce a decided OAuth approval from a stale list response", async () => {
+        const clients = fakeClients();
+        clients.mcp.status = async () => ({
+            authMode: "oauth2",
+            oauthReady: true,
+            running: true,
+        });
+        clients.mcp.listApprovals = vi.fn(async () => [oauthApproval("oauth-pending")]);
+        clients.mcp.decideApproval = vi.fn(async () =>
+            oauthApproval("oauth-pending", "approved")
+        );
+        const store = new WebStore(clients);
+        await store.load();
+
+        await store.decideOAuth("oauth-pending", "approve");
+
+        expect(store.state.oauthApprovals).toEqual([]);
+    });
+});

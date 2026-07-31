@@ -4,14 +4,28 @@ import { describe, expect, it, vi } from "vitest";
 import { ConfirmationDialog } from "../src/components/ConfirmationDialog.js";
 
 describe("ConfirmationDialog", () => {
-    it("requires an explicit accessible confirmation and disables duplicate submission", () => {
+    it("defaults destructive actions to Cancel and closes with Escape", () => {
         const cancel = vi.fn();
-        const confirm = vi.fn();
-        render(<ConfirmationDialog actionLabel="Stop" busy={false} description="Stop demo?" onCancel={cancel} onConfirm={confirm} />);
+        render(<ConfirmationDialog actionLabel="Stop" busy={false} description="Stop demo?" onCancel={cancel} onConfirm={vi.fn()} />);
 
-        expect(screen.getByRole("dialog", { name: "Confirm stop" })).toBeInTheDocument();
-        fireEvent.click(screen.getByRole("button", { name: "Stop" }));
+        expect(screen.getByRole("button", { name: "Cancel" })).toHaveFocus();
+        fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
+        expect(cancel).toHaveBeenCalledOnce();
+    });
+
+    it("traps keyboard focus and allows an explicit confirmation", () => {
+        const confirm = vi.fn();
+        render(<ConfirmationDialog actionLabel="Deny" busy={false} description="Deny demo?" onCancel={vi.fn()} onConfirm={confirm} />);
+        const dialog = screen.getByRole("dialog", { name: "Confirm deny" });
+        const cancel = screen.getByRole("button", { name: "Cancel" });
+        const deny = screen.getByRole("button", { name: "Deny" });
+
+        cancel.focus();
+        fireEvent.keyDown(dialog, { key: "Tab", shiftKey: true });
+        expect(deny).toHaveFocus();
+        fireEvent.keyDown(dialog, { key: "Tab" });
+        expect(cancel).toHaveFocus();
+        fireEvent.click(deny);
         expect(confirm).toHaveBeenCalledOnce();
-        expect(cancel).not.toHaveBeenCalled();
     });
 });

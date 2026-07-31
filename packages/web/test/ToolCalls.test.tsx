@@ -117,3 +117,40 @@ it("filters structured tool calls by ctxId and queues a message for the selected
         ),
     );
 });
+
+it("clears Context synchronously when the selected instance changes", async () => {
+    const queueContextMessage = vi.fn(async () => true);
+    const store = { queueContextMessage } as unknown as WebStore;
+    render(<ToolCalls state={state} store={store} />);
+
+    fireEvent.change(screen.getByLabelText("Instance"), { target: { value: "alpha" } });
+    fireEvent.change(screen.getByLabelText("Context"), { target: { value: "context:ctx-alpha" } });
+    fireEvent.change(screen.getByLabelText("Message"), { target: { value: "Do not misroute" } });
+    fireEvent.change(screen.getByLabelText("Instance"), { target: { value: "beta" } });
+
+    expect(screen.getByLabelText("Context")).toHaveValue("all");
+    expect(screen.queryByRole("button", { name: "Send message" })).not.toBeInTheDocument();
+    expect(queueContextMessage).not.toHaveBeenCalled();
+});
+
+it("does not render large Tool Call details until the row is expanded", () => {
+    const token = "large-output-token";
+    const output = `${token}${"x".repeat(200_000)}`;
+    const largeState: WebState = {
+        ...state,
+        toolCalls: {
+            alpha: [{
+                ...state.toolCalls.alpha![0]!,
+                callId: "large-call",
+                output,
+            }],
+        },
+    };
+    render(<ToolCalls state={largeState} store={{ queueContextMessage: vi.fn() } as unknown as WebStore} />);
+
+    expect(screen.queryByText(new RegExp(token))).not.toBeInTheDocument();
+    const details = document.querySelector("details")!;
+    details.open = true;
+    fireEvent(details, new Event("toggle"));
+    expect(screen.getByText(new RegExp(token))).toBeInTheDocument();
+});

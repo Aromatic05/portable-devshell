@@ -1,5 +1,7 @@
 import type { ToolCallRecord } from "@portable-devshell/shared/browser";
 
+import { formatToolSearchValue } from "../formatters/toolCalls.js";
+
 export type ToolCallResult = "all" | "failure" | "pending" | "success";
 export type ToolCallPeriod = "all" | "1h" | "24h";
 
@@ -99,6 +101,8 @@ function callSearchText(call: ToolCallRecord): string {
         call.ctxId,
         call.error,
         call.inputSummary,
+        call.input === undefined ? undefined : formatToolSearchValue(call.input),
+        call.output === undefined ? undefined : formatToolSearchValue(call.output),
         call.instance,
         call.requestId,
         call.source,

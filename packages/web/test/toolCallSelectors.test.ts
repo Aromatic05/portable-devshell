@@ -135,3 +135,34 @@ describe("tool call activity read model", () => {
         expect(toolCallResult(calls[2]!)).toBe("pending");
     });
 });
+
+describe("bounded Tool Call presentation", () => {
+    it("searches actual structured input and output", () => {
+        const call = {
+            ...calls[0]!,
+            callId: "structured-search",
+            input: { command: "unique-input-token" },
+            output: { stdout: "unique-output-token" },
+        };
+        const base = {
+            ctxId: "all",
+            instance: "all",
+            period: "all" as const,
+            result: "all" as const,
+            tool: "all",
+        };
+        expect(filterToolCalls([call], { ...base, query: "unique-input-token" })).toEqual([call]);
+        expect(filterToolCalls([call], { ...base, query: "unique-output-token" })).toEqual([call]);
+    });
+
+    it("bounds deeply nested and oversized values", () => {
+        let nested: unknown = "leaf";
+        for (let index = 0; index < 15_000; index += 1) nested = { nested };
+        const deep = formatToolValue(nested as never);
+        const large = formatToolValue("x".repeat(2_000_000));
+
+        expect(deep).toContain("truncated");
+        expect(large.length).toBeLessThanOrEqual(210_000);
+        expect(large).toContain("truncated");
+    });
+});

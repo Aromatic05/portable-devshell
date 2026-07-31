@@ -15,7 +15,7 @@ h1, h2, h3, h4 { margin-top: 0; }
 .connection { display: flex; flex-wrap: wrap; gap: .5rem; justify-content: flex-end; align-items: center; border-radius: 9px; padding: .6rem .8rem; margin-bottom: 1rem; background: #6b5014; }
 .connection span { margin-right: auto; }
 .connection.online { background: #175f46; }.connection.offline { background: #7f2837; }
-.error { color: #ffb4bd; }.notice { color: #a8e6c5; }.partial { border-left: 4px solid #dba63d; padding-left: .75rem; color: #f3ce82; }.hint, .empty { color: #b9c5d8; }
+.error { color: #ffb4bd; }.notice { color: #a8e6c5; }.partial { border-left: 4px solid #dba63d; padding: .5rem 0 .5rem .75rem; margin-bottom: 1rem; color: #f3ce82; }.partial summary { cursor: pointer; }.partial ul { margin-bottom: 0; }.hint, .empty { color: #b9c5d8; }
 .metrics, .instances, .approval-list, .todo-list, .overview-grid { display: grid; gap: .8rem; }
 .metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .resource-metrics { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .8rem; margin: .8rem 0; }.resource-card small { display: block; margin-top: .35rem; color: #b9c5d8; overflow-wrap: anywhere; }

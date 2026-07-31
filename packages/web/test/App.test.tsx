@@ -83,9 +83,9 @@ describe("authenticated application shell", () => {
         const clients = fakeClients();
         const close = vi.fn();
         clients.close = close;
-        clients.runtime.subscribe = async () => {
-            throw new Error("WebSocket closed");
-        };
+        clients.service.hello = vi.fn()
+            .mockRejectedValueOnce(new Error("Control offline"))
+            .mockResolvedValue({ capabilities: ["request", "stream", "streamResume"], protocolVersion: 1 });
         const createClients = vi.fn(() => clients);
 
         render(<App createClients={createClients} session={session} />);
@@ -103,9 +103,9 @@ describe("authenticated application shell", () => {
         let releaseCheck!: (available: boolean) => void;
         const session = fakeSession({ check: true });
         const clients = fakeClients();
-        clients.runtime.subscribe = async () => {
-            throw new Error("WebSocket closed");
-        };
+        clients.service.hello = vi.fn()
+            .mockRejectedValueOnce(new Error("Control offline"))
+            .mockResolvedValue({ capabilities: ["request", "stream", "streamResume"], protocolVersion: 1 });
         render(<App createClients={() => clients} session={session} />);
 
         await screen.findByRole("button", { name: "Reconnect" });
@@ -184,9 +184,9 @@ describe("authenticated application shell", () => {
     it("shows a session verification error when reconnect checking fails", async () => {
         const session = fakeSession({ check: true });
         const clients = fakeClients();
-        clients.runtime.subscribe = async () => {
-            throw new Error("WebSocket closed");
-        };
+        clients.service.hello = vi.fn()
+            .mockRejectedValueOnce(new Error("Control offline"))
+            .mockResolvedValue({ capabilities: ["request", "stream", "streamResume"], protocolVersion: 1 });
         render(<App createClients={() => clients} session={session} />);
 
         await screen.findByRole("button", { name: "Reconnect" });
