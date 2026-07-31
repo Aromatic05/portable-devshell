@@ -94,7 +94,7 @@ test("TUI startup pulls artifact shares and transfers from Control", async () =>
     await session.stop();
 });
 
-test("TUI reports OAuth polling failures while the session remains active", async () => {
+test("TUI clears an OAuth polling failure after the background refresh recovers", async () => {
     const store = new TuiAppStore();
     let approvalReads = 0;
     const session = new TuiControlSession({
@@ -113,7 +113,7 @@ test("TUI reports OAuth polling failures while the session remains active", asyn
             mcp: {
                 async listApprovals() {
                     approvalReads += 1;
-                    if (approvalReads > 1) throw new Error("OAuth service unavailable");
+                    if (approvalReads === 2) throw new Error("OAuth service unavailable");
                     return [];
                 },
                 async status() { return {}; }
@@ -144,6 +144,10 @@ test("TUI reports OAuth polling failures while the session remains active", asyn
             "OAuth refresh failed: OAuth service unavailable"
         );
         assert.equal(store.getState().connection.status, "connected");
+        await waitFor(
+            () => approvalReads >= 3 &&
+                store.getState().interaction.screenStatusByPage.oauth === undefined
+        );
     } finally {
         await session.stop();
     }

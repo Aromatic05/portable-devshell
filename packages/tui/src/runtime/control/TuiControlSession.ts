@@ -182,9 +182,7 @@ export class TuiControlSession {
             this.#scheduleOverviewRefresh();
         }
         if (message.event.name.startsWith("todo.")) {
-            void this.#refresh.refreshTodo(instance).catch((error: unknown) => {
-                this.#reportRefreshFailure("todo", error);
-            });
+            this.#runBackgroundRefresh("todo", async () => await this.#refresh.refreshTodo(instance));
         }
         if (isTerminalToolCallEvent(message.event.name)) {
             this.#scheduleAuditRefresh(instance);
@@ -240,9 +238,7 @@ export class TuiControlSession {
             return;
         }
         this.#oauthRefreshTimer = setInterval(() => {
-            void this.#refresh.refreshOAuth().catch((error: unknown) => {
-                this.#reportRefreshFailure("oauth", error);
-            });
+            this.#runBackgroundRefresh("oauth", async () => await this.#refresh.refreshOAuth());
         }, 1_000);
     }
 
@@ -295,11 +291,9 @@ export class TuiControlSession {
     async #refreshVisibleOverview(): Promise<void> {
         try {
             await this.#requestOverviewRefresh();
+            this.#clearRefreshFailure("overview");
         } catch (error) {
-            this.#store.setScreenStatus(
-                "overview",
-                `Overview refresh failed: ${readErrorMessage(error)}`
-            );
+            this.#reportRefreshFailure("overview", error);
         }
     }
 
@@ -342,9 +336,7 @@ export class TuiControlSession {
             }
             const latest = this.#store.getState();
             if (latest.ui.selectedPage === "audit" && latest.ui.selectedInstance === instance) {
-                void this.#refresh.refreshAudit(instance).catch((error: unknown) => {
-                    this.#reportRefreshFailure("audit", error);
-                });
+                this.#runBackgroundRefresh("audit", async () => await this.#refresh.refreshAudit(instance));
             }
         }, 50));
     }
@@ -356,15 +348,42 @@ export class TuiControlSession {
         this.#auditRefreshTimers.clear();
     }
 
-    #reportRefreshFailure(page: "audit" | "oauth" | "todo", error: unknown): void {
+    #runBackgroundRefresh(
+        page: "audit" | "oauth" | "todo",
+        refresh: () => Promise<void>
+    ): void {
+        void refresh().then(
+            () => this.#clearRefreshFailure(page),
+            (error: unknown) => this.#reportRefreshFailure(page, error)
+        );
+    }
+
+    #clearRefreshFailure(page: "audit" | "oauth" | "overview" | "todo"): void {
+        if (!this.#started) {
+            return;
+        }
+        const status = this.#store.getState().interaction.screenStatusByPage[page];
+        if (status?.startsWith(`${refreshPageLabel(page)} refresh failed:`) === true) {
+            this.#store.setScreenStatus(page, undefined);
+        }
+    }
+
+    #reportRefreshFailure(
+        page: "audit" | "oauth" | "overview" | "todo",
+        error: unknown
+    ): void {
         if (!this.#started) {
             return;
         }
         this.#store.setScreenStatus(
             page,
-            `${page === "oauth" ? "OAuth" : page[0]!.toUpperCase() + page.slice(1)} refresh failed: ${readErrorMessage(error)}`
+            `${refreshPageLabel(page)} refresh failed: ${readErrorMessage(error)}`
         );
     }
+}
+
+function refreshPageLabel(page: "audit" | "oauth" | "overview" | "todo"): string {
+    return page === "oauth" ? "OAuth" : page[0]!.toUpperCase() + page.slice(1);
 }
 
 function isTuiPresentationEvent(name: string): boolean {
