@@ -4,6 +4,7 @@ import type { ServerResponse } from "node:http";
 import test from "node:test";
 
 import type { JsonValue } from "@portable-devshell/shared";
+import { encodeFrame } from "@portable-devshell/shared/transport/frame";
 import WebSocket from "ws";
 
 import { ReverseRpcFrameCodec } from "../../src/control/reverse/rpc/ReverseRpcFrameCodec.ts";
@@ -265,4 +266,17 @@ test("reverse SSE rejects a backpressured send when the response closes", async 
     assert.equal(response.listenerCount("drain"), 0);
     assert.equal(response.listenerCount("error"), 1);
     assert.equal(response.listenerCount("close"), 0);
+});
+
+test("reverse RPC frame codec rejects invalid UTF-8 inside otherwise valid JSON", () => {
+    const payload = Buffer.concat([
+        Buffer.from('{"value":"', "utf8"),
+        Buffer.from([0xff]),
+        Buffer.from('"}', "utf8")
+    ]);
+
+    assert.throws(
+        () => ReverseRpcFrameCodec.decode(encodeFrame(payload)),
+        (error: unknown) => (error as { code?: string }).code === "protocol.invalidJson"
+    );
 });

@@ -7,6 +7,8 @@ import {
 } from "@portable-devshell/shared";
 import { encodeFrame, FrameBuffer } from "@portable-devshell/shared/transport/frame";
 
+const decoder = new TextDecoder("utf-8", { fatal: true });
+
 export class WorkerRpcFrameReader {
     readonly #frames = new FrameBuffer();
 
@@ -39,7 +41,7 @@ function decodeJson(payload: Uint8Array): JsonValue {
         throw protocolError("protocol.invalidJson", "Frame payload must not be empty.");
     }
     try {
-        return JSON.parse(Buffer.from(payload).toString("utf8")) as JsonValue;
+        return JSON.parse(decoder.decode(payload)) as JsonValue;
     } catch (error) {
         throw protocolError(
             "protocol.invalidJson",

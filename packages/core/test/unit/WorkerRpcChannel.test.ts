@@ -4,6 +4,8 @@ import test from "node:test";
 
 import { WorkerRpcChannelBase } from "@portable-devshell/core";
 import type { JsonValue } from "@portable-devshell/shared";
+import { encodeFrame } from "@portable-devshell/shared/transport/frame";
+import { WorkerRpcFrameReader } from "../../src/worker/rpc/WorkerRpcFrame.ts";
 import { WorkerRpcProcessChannel } from "../../src/worker/rpc/WorkerRpcProcessChannel.ts";
 
 class TestWorkerRpcChannel extends WorkerRpcChannelBase {
@@ -108,4 +110,18 @@ test("WorkerRpcProcessChannel reports kill failures as disconnects", async () =>
     channel.close();
 
     assert.match(String(await disconnected), /kill failed/iu);
+});
+
+test("WorkerRpcFrameReader rejects invalid UTF-8 inside otherwise valid JSON", () => {
+    const reader = new WorkerRpcFrameReader();
+    const payload = Buffer.concat([
+        Buffer.from('{"value":"', "utf8"),
+        Buffer.from([0xff]),
+        Buffer.from('"}', "utf8")
+    ]);
+
+    assert.throws(
+        () => reader.push(encodeFrame(payload)),
+        (error: unknown) => (error as { code?: string }).code === "protocol.invalidJson"
+    );
 });
