@@ -46,6 +46,7 @@ export class WorkerRpcBridge {
     readonly #pending = new Map<string, PendingResponse>();
     #channel?: WorkerRpcChannel;
     #connectionGeneration = 0;
+    #connectAbortController?: AbortController;
     #connectingHandoff?: ConnectingHandoff;
     #connectPromise?: Promise<WorkerRpcChannel>;
 
@@ -127,6 +128,7 @@ export class WorkerRpcBridge {
     async replaceChannel(channel: WorkerRpcChannel): Promise<void> {
         this.#connectionGeneration += 1;
         const handoff = this.#takeConnectingHandoff();
+        const connectAbortController = this.#takeConnectAbortController();
         this.#connectPromise = undefined;
         const previous = this.#channel;
         this.#attachChannel(channel);
@@ -137,10 +139,13 @@ export class WorkerRpcBridge {
             await this.#replayPending(channel);
         } catch (error) {
             this.#disconnectChannel(channel, this.#createDisconnectError(error));
-            handoff?.reject(error instanceof Error ? error : new Error(String(error)));
+            const normalized = error instanceof Error ? error : new Error(String(error));
+            handoff?.reject(normalized);
+            connectAbortController?.abort(normalized);
             throw error;
         }
         handoff?.resolve(channel);
+        connectAbortController?.abort(new Error("Worker RPC connector was replaced by an attached channel."));
     }
 
     close(_signal: NodeJS.Signals | number = "SIGTERM"): void {
@@ -150,6 +155,7 @@ export class WorkerRpcBridge {
             reason: "bridge_closed"
         });
         this.#takeConnectingHandoff()?.reject(error);
+        this.#takeConnectAbortController()?.abort(error);
         const channel = this.#channel;
         this.#channel = undefined;
         this.#connectPromise = undefined;
@@ -175,9 +181,11 @@ export class WorkerRpcBridge {
                 reject: rejectHandoff,
                 resolve: resolveHandoff
             };
+            const connectAbortController = new AbortController();
+            this.#connectAbortController = connectAbortController;
             this.#connectingHandoff = connectingHandoff;
             const connection = this.#connector
-                .connect()
+                .connect(connectAbortController.signal)
                 .then(async (channel) => {
                     if (generation !== this.#connectionGeneration) {
                         this.#closeChannel(channel);
@@ -206,6 +214,9 @@ export class WorkerRpcBridge {
                     }
                     if (this.#connectingHandoff === connectingHandoff) {
                         this.#connectingHandoff = undefined;
+                    }
+                    if (this.#connectAbortController === connectAbortController) {
+                        this.#connectAbortController = undefined;
                     }
                 });
             this.#connectPromise = promise;
@@ -386,6 +397,12 @@ export class WorkerRpcBridge {
         const handoff = this.#connectingHandoff;
         this.#connectingHandoff = undefined;
         return handoff;
+    }
+
+    #takeConnectAbortController(): AbortController | undefined {
+        const controller = this.#connectAbortController;
+        this.#connectAbortController = undefined;
+        return controller;
     }
 }
 

@@ -15,8 +15,10 @@ export class WorkerRpcProcessConnector implements WorkerRpcConnector {
         this.#options = options;
     }
 
-    async connect(): Promise<WorkerRpcChannel> {
-        return new WorkerRpcProcessChannel(await WorkerRpcProcessAdapter.spawn(this.#transport, this.#options));
+    async connect(signal?: AbortSignal): Promise<WorkerRpcChannel> {
+        return new WorkerRpcProcessChannel(
+            await WorkerRpcProcessAdapter.spawn(this.#transport, this.#options, signal)
+        );
     }
 }
 

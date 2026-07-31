@@ -21,10 +21,51 @@ export class WorkerRpcProcessAdapter {
         this.#process = process;
     }
 
-    static async spawn(transport: WorkerCommandTransport, options: WorkerRpcOptions): Promise<WorkerRpcProcessAdapter> {
+    static async spawn(
+        transport: WorkerCommandTransport,
+        options: WorkerRpcOptions,
+        signal?: AbortSignal
+    ): Promise<WorkerRpcProcessAdapter> {
+        if (signal?.aborted === true) {
+            throw abortError(signal);
+        }
+        const spawning = WorkerRpcProcessAdapter.#spawnProcess(transport, options, signal);
+        if (signal === undefined) {
+            return await spawning;
+        }
+        let onAbort!: () => void;
+        const aborted = new Promise<never>((_resolve, reject) => {
+            onAbort = () => reject(abortError(signal));
+            signal.addEventListener("abort", onAbort, { once: true });
+        });
+        if (signal.aborted) onAbort();
         try {
-            return new WorkerRpcProcessAdapter(await transport.spawnWorkerRpc(options));
+            return await Promise.race([spawning, aborted]);
+        } finally {
+            signal.removeEventListener("abort", onAbort);
+        }
+    }
+
+    static async #spawnProcess(
+        transport: WorkerCommandTransport,
+        options: WorkerRpcOptions,
+        signal?: AbortSignal
+    ): Promise<WorkerRpcProcessAdapter> {
+        try {
+            const process = await transport.spawnWorkerRpc(options);
+            if (signal?.aborted === true) {
+                try {
+                    process.kill("SIGTERM");
+                } catch {
+                    // The cancelled spawn is already rejected; late process cleanup is best effort.
+                }
+                throw abortError(signal);
+            }
+            return new WorkerRpcProcessAdapter(process);
         } catch (error) {
+            if (signal?.aborted === true) {
+                throw abortError(signal);
+            }
             if (typeof error === "object" && error !== null && "code" in error && error.code === errorCodes.coreWorkerRpcSpawnFailed) {
                 throw error;
             }
@@ -58,4 +99,10 @@ export class WorkerRpcProcessAdapter {
     kill(signal?: NodeJS.Signals | number): boolean {
         return this.#process.kill(signal);
     }
+}
+
+function abortError(signal: AbortSignal): Error {
+    return signal.reason instanceof Error
+        ? signal.reason
+        : new Error("Worker RPC process connection was aborted.");
 }

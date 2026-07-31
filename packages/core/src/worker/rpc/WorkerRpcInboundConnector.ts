@@ -19,7 +19,12 @@ export class WorkerRpcInboundConnector implements WorkerRpcConnector {
         return this.#channel !== undefined;
     }
 
-    async connect(): Promise<WorkerRpcChannel> {
+    async connect(signal?: AbortSignal): Promise<WorkerRpcChannel> {
+        if (signal?.aborted === true) {
+            throw signal.reason instanceof Error
+                ? signal.reason
+                : new Error("Reverse worker connection was aborted.");
+        }
         if (this.#channel !== undefined) {
             return this.#channel;
         }

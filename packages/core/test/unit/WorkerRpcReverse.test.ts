@@ -98,6 +98,7 @@ test("reverse RPC bridge replays pending request with the original request id af
 
 test("closing an RPC bridge while connecting cannot resurrect the channel", async () => {
     const channel = new MemoryChannel();
+    let connectSignal: AbortSignal | undefined;
     let releaseConnect!: () => void;
     let signalConnectStarted!: () => void;
     const connectGate = new Promise<void>((resolve) => {
@@ -107,7 +108,8 @@ test("closing an RPC bridge while connecting cannot resurrect the channel", asyn
         signalConnectStarted = resolve;
     });
     const connector: WorkerRpcConnector = {
-        async connect() {
+        async connect(signal) {
+            connectSignal = signal;
             signalConnectStarted();
             await connectGate;
             return channel;
@@ -123,6 +125,7 @@ test("closing an RPC bridge while connecting cannot resurrect the channel", asyn
     bridge.close();
 
     await assert.rejects(withTimeout(connecting), /closed|reset|disconnected/u);
+    assert.equal(connectSignal?.aborted, true);
     assert.equal(channel.closed, false);
     releaseConnect();
     await waitUntil(() => channel.closed);
@@ -132,6 +135,7 @@ test("closing an RPC bridge while connecting cannot resurrect the channel", asyn
 
 test("reverse channel replacement takes over a stalled connector request", async () => {
     const stale = new MemoryChannel();
+    let connectSignal: AbortSignal | undefined;
     let releaseConnect!: () => void;
     let signalConnectStarted!: () => void;
     const connectGate = new Promise<void>((resolve) => {
@@ -141,7 +145,8 @@ test("reverse channel replacement takes over a stalled connector request", async
         signalConnectStarted = resolve;
     });
     const connector: WorkerRpcConnector = {
-        async connect() {
+        async connect(signal) {
+            connectSignal = signal;
             signalConnectStarted();
             await connectGate;
             return stale;
@@ -166,6 +171,7 @@ test("reverse channel replacement takes over a stalled connector request", async
 
     assert.deepEqual((await request).result, { pong: true });
     assert.equal(bridge.connected, true);
+    assert.equal(connectSignal?.aborted, true);
     releaseConnect();
     await waitUntil(() => stale.closed);
     assert.equal(bridge.connected, true);

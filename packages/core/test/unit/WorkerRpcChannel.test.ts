@@ -6,7 +6,10 @@ import { WorkerRpcChannelBase } from "@portable-devshell/core";
 import type { JsonValue } from "@portable-devshell/shared";
 import { encodeFrame } from "@portable-devshell/shared/transport/frame";
 import { WorkerRpcFrameReader } from "../../src/worker/rpc/WorkerRpcFrame.ts";
-import { WorkerRpcProcessChannel } from "../../src/worker/rpc/WorkerRpcProcessChannel.ts";
+import {
+    WorkerRpcProcessChannel,
+    WorkerRpcProcessConnector
+} from "../../src/worker/rpc/WorkerRpcProcessChannel.ts";
 
 class TestWorkerRpcChannel extends WorkerRpcChannelBase {
     async send(): Promise<void> {}
@@ -112,6 +115,46 @@ test("WorkerRpcProcessChannel reports kill failures as disconnects", async () =>
     assert.match(String(await disconnected), /kill failed/iu);
 });
 
+test("WorkerRpcProcessConnector aborts immediately and kills a late process", async () => {
+    let releaseSpawn!: () => void;
+    let signalSpawnStarted!: () => void;
+    let killCount = 0;
+    const spawnGate = new Promise<void>((resolve) => {
+        releaseSpawn = resolve;
+    });
+    const spawnStarted = new Promise<void>((resolve) => {
+        signalSpawnStarted = resolve;
+    });
+    const process = {
+        exit: new Promise(() => undefined),
+        stdin: new PassThrough(),
+        stdout: new PassThrough(),
+        stderr: new PassThrough(),
+        kill() {
+            killCount += 1;
+            return true;
+        }
+    };
+    const connector = new WorkerRpcProcessConnector({
+        async spawnWorkerRpc() {
+            signalSpawnStarted();
+            await spawnGate;
+            return process;
+        }
+    } as never, { instanceName: "late-process" });
+    const controller = new AbortController();
+    const reason = new Error("spawn cancelled");
+    const connecting = connector.connect(controller.signal);
+    await spawnStarted;
+
+    controller.abort(reason);
+
+    await assert.rejects(withTimeout(connecting), reason);
+    assert.equal(killCount, 0);
+    releaseSpawn();
+    await waitUntil(() => killCount === 1);
+});
+
 test("WorkerRpcFrameReader rejects invalid UTF-8 inside otherwise valid JSON", () => {
     const reader = new WorkerRpcFrameReader();
     const payload = Buffer.concat([
@@ -125,3 +168,25 @@ test("WorkerRpcFrameReader rejects invalid UTF-8 inside otherwise valid JSON", (
         (error: unknown) => (error as { code?: string }).code === "protocol.invalidJson"
     );
 });
+
+async function withTimeout<T>(promise: Promise<T>): Promise<T> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+        return await Promise.race([
+            promise,
+            new Promise<never>((_resolve, reject) => {
+                timer = setTimeout(() => reject(new Error("operation did not settle")), 250);
+            })
+        ]);
+    } finally {
+        if (timer !== undefined) clearTimeout(timer);
+    }
+}
+
+async function waitUntil(predicate: () => boolean): Promise<void> {
+    const deadline = Date.now() + 2_000;
+    while (!predicate()) {
+        if (Date.now() >= deadline) throw new Error("Timed out waiting for condition.");
+        await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+}

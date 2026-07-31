@@ -80,6 +80,6 @@ export abstract class WorkerRpcChannelBase implements WorkerRpcChannel {
 
 export interface WorkerRpcConnector {
     attach?(channel: WorkerRpcChannel): void;
-    connect(): Promise<WorkerRpcChannel>;
+    connect(signal?: AbortSignal): Promise<WorkerRpcChannel>;
     detach?(channel?: WorkerRpcChannel): void;
 }
