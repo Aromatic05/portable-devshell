@@ -72,6 +72,9 @@ export class WorkerRpcBridge {
         this.#throwIfCancelled(request, signal);
         const channel = await this.#ensureChannel();
         this.#throwIfCancelled(request, signal);
+        if (this.#pending.has(request.id)) {
+            throw new Error(`Duplicate Worker RPC request id: ${request.id}`);
+        }
 
         return await new Promise<WorkerRpcResponseEnvelope>((resolve, reject) => {
             let removeAbortListener: () => void = () => {};
@@ -113,7 +116,7 @@ export class WorkerRpcBridge {
         const previous = this.#channel;
         this.#attachChannel(channel);
         if (previous !== undefined && previous !== channel) {
-            previous.close();
+            this.#closeChannel(previous);
         }
         await this.#replayPending(channel);
     }
@@ -127,7 +130,9 @@ export class WorkerRpcBridge {
         const channel = this.#channel;
         this.#channel = undefined;
         this.#connectPromise = undefined;
-        channel?.close();
+        if (channel !== undefined) {
+            this.#closeChannel(channel);
+        }
         this.#rejectPending(error);
     }
 
@@ -141,7 +146,7 @@ export class WorkerRpcBridge {
                 .connect()
                 .then(async (channel) => {
                     if (generation !== this.#connectionGeneration) {
-                        channel.close();
+                        this.#closeChannel(channel);
                         throw new Error("Worker RPC connection was reset while connecting.");
                     }
                     this.#attachChannel(channel);
@@ -150,7 +155,7 @@ export class WorkerRpcBridge {
                         if (this.#channel === channel) {
                             this.#channel = undefined;
                         }
-                        channel.close();
+                        this.#closeChannel(channel);
                         throw new Error("Worker RPC connection was reset while connecting.");
                     }
                     return channel;
@@ -196,6 +201,7 @@ export class WorkerRpcBridge {
             return;
         }
         this.#channel = undefined;
+        this.#closeChannel(channel);
         if (!this.#preservePendingOnDisconnect) {
             this.#rejectPending(error);
         }
@@ -302,6 +308,14 @@ export class WorkerRpcBridge {
             } as JsonValue,
             cause
         );
+    }
+
+    #closeChannel(channel: WorkerRpcChannel): void {
+        try {
+            channel.close();
+        } catch (error) {
+            console.warn(error instanceof Error ? error : new Error(String(error)));
+        }
     }
 }
 

@@ -24,6 +24,7 @@ class DeferredConnector implements WorkerRpcConnector {
 class MemoryChannel implements WorkerRpcChannel {
     readonly sent: WorkerRpcRequestEnvelope[] = [];
     closed = false;
+    closeError?: Error;
     sendError?: Error;
     readonly #messages = new Set<(message: JsonValue) => void>();
     readonly #disconnects = new Set<(error: unknown) => void>();
@@ -46,6 +47,9 @@ class MemoryChannel implements WorkerRpcChannel {
     }
 
     close(): void {
+        if (this.closeError !== undefined) {
+            throw this.closeError;
+        }
         this.closed = true;
     }
 
@@ -133,6 +137,63 @@ test("WorkerRpcBridge rejects a pending request when the initial send fails", as
 
     await assert.rejects(withTimeout(request), /send failed|disconnected/iu);
     assert.equal(bridge.connected, false);
+    assert.equal(channel.closed, true);
+});
+
+test("WorkerRpcBridge rejects duplicate pending request ids without losing the first request", async () => {
+    const connector = new DeferredConnector();
+    const channel = new MemoryChannel();
+    connector.channel = channel;
+    const bridge = new WorkerRpcBridge({
+        connector,
+        rpcOptions: { instanceName: "duplicate-request" }
+    });
+    const request = {
+        id: "duplicate-id",
+        method: "worker.ping",
+        params: {},
+        type: "request" as const
+    };
+
+    const first = bridge.request(request);
+    await waitUntil(() => channel.sent.length === 1);
+    await assert.rejects(bridge.request(request), /Duplicate Worker RPC request id/iu);
+    channel.respond(request.id, { pong: true });
+
+    assert.deepEqual((await first).result, { pong: true });
+});
+
+test("WorkerRpcBridge replays pending work even when the previous channel close throws", async () => {
+    const connector = new DeferredConnector();
+    const first = new MemoryChannel();
+    connector.channel = first;
+    const bridge = new WorkerRpcBridge({
+        connector,
+        preservePendingOnDisconnect: true,
+        rpcOptions: { instanceName: "close-failure-replay" }
+    });
+    const pending = bridge.request({
+        id: "replay-after-close-failure",
+        method: "worker.ping",
+        params: {},
+        type: "request"
+    });
+    await waitUntil(() => first.sent.length === 1);
+    first.closeError = new Error("close failed");
+    const second = new MemoryChannel();
+    const warnings: unknown[] = [];
+    const originalWarn = console.warn;
+    console.warn = (warning) => warnings.push(warning);
+    try {
+        await bridge.replaceChannel(second);
+    } finally {
+        console.warn = originalWarn;
+    }
+
+    assert.equal(warnings.length, 1);
+    assert.equal(second.sent.length, 1);
+    second.respond("replay-after-close-failure", { pong: true });
+    assert.deepEqual((await pending).result, { pong: true });
 });
 
 test("WorkerRpcBridge observes aborts that race with listener registration", async () => {
