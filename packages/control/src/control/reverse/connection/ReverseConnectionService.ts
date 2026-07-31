@@ -80,63 +80,32 @@ export class ReverseConnectionService {
         transport: "sse" | "wss",
         channel: WorkerRpcChannel
     ): Promise<void> {
-        const authenticated = await this.#credentialStore.withAuthenticatedToken(
-            identity.descriptor.name,
-            identity.credentialToken,
-            async () => await this.#activateAuthenticated(identity, transport, channel)
-        );
-        if (!authenticated) {
-            channel.close();
-            throw invalidDeviceToken(identity.descriptor.name);
-        }
-    }
-
-    async #activateAuthenticated(
-        identity: ReverseConnectionIdentity,
-        transport: "sse" | "wss",
-        channel: WorkerRpcChannel
-    ): Promise<void> {
         await this.#exclusive(identity.descriptor.name, async () => {
-            const previous = this.#active.get(identity.descriptor.name);
-            const previousGeneration = Math.max(
-                previous?.generation ?? 0,
-                identity.descriptor.worker.snapshot().reverse?.generation ?? 0
-            );
-
-            if (
-                !Number.isSafeInteger(identity.generation) ||
-                identity.generation <= previousGeneration
-            ) {
-                channel.close();
-                throw createError({
-                    code: errorCodes.reverseGenerationInvalid,
-                    details: {
-                        generation: identity.generation,
-                        instance: identity.descriptor.name,
-                        previousGeneration
-                    },
-                    message: `Connection generation must be greater than ${previousGeneration}.`,
-                    retryable: true
-                });
-            }
-
-            const active: ActiveReverseConnection = {
-                channel,
-                generation: identity.generation,
-                transport
-            };
-            this.#active.set(identity.descriptor.name, active);
-            channel.onDisconnect(() => {
-                if (this.#active.get(identity.descriptor.name) === active) {
-                    this.#active.delete(identity.descriptor.name);
+            let active: ActiveReverseConnection | undefined;
+            const authenticated = await this.#credentialStore.withAuthenticatedToken(
+                identity.descriptor.name,
+                identity.credentialToken,
+                async () => {
+                    active = this.#prepareActivation(identity, transport, channel);
                 }
-            });
+            );
+            if (!authenticated || active === undefined) {
+                channel.close();
+                throw invalidDeviceToken(identity.descriptor.name);
+            }
 
             try {
                 await identity.descriptor.worker.acceptReverseChannel(channel, {
                     generation: identity.generation,
                     transport
                 });
+                if (this.#active.get(identity.descriptor.name) !== active) {
+                    throw createError({
+                        code: errorCodes.reverseConnectionSuperseded,
+                        message: "Reverse connection was superseded during activation.",
+                        retryable: true
+                    });
+                }
             } catch (error) {
                 if (this.#active.get(identity.descriptor.name) === active) {
                     this.#active.delete(identity.descriptor.name);
@@ -145,6 +114,48 @@ export class ReverseConnectionService {
                 throw error;
             }
         });
+    }
+
+    #prepareActivation(
+        identity: ReverseConnectionIdentity,
+        transport: "sse" | "wss",
+        channel: WorkerRpcChannel
+    ): ActiveReverseConnection {
+        const previous = this.#active.get(identity.descriptor.name);
+        const previousGeneration = Math.max(
+            previous?.generation ?? 0,
+            identity.descriptor.worker.snapshot().reverse?.generation ?? 0
+        );
+
+        if (
+            !Number.isSafeInteger(identity.generation) ||
+            identity.generation <= previousGeneration
+        ) {
+            channel.close();
+            throw createError({
+                code: errorCodes.reverseGenerationInvalid,
+                details: {
+                    generation: identity.generation,
+                    instance: identity.descriptor.name,
+                    previousGeneration
+                },
+                message: `Connection generation must be greater than ${previousGeneration}.`,
+                retryable: true
+            });
+        }
+
+        const active: ActiveReverseConnection = {
+            channel,
+            generation: identity.generation,
+            transport
+        };
+        this.#active.set(identity.descriptor.name, active);
+        channel.onDisconnect(() => {
+            if (this.#active.get(identity.descriptor.name) === active) {
+                this.#active.delete(identity.descriptor.name);
+            }
+        });
+        return active;
     }
 
     acceptUpstream(

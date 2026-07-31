@@ -8,6 +8,7 @@ import type { WorkerRpcChannel } from "@portable-devshell/core/testing";
 import { asInstanceName, type InstanceSnapshot, type JsonValue } from "@portable-devshell/shared";
 
 import { ReverseConnectionService } from "../../src/control/reverse/connection/ReverseConnectionService.ts";
+import { ReverseCredentialService } from "../../src/control/reverse/credential/ReverseCredentialService.ts";
 import { ReverseCredentialStore } from "../../src/control/reverse/credential/ReverseCredentialStore.ts";
 
 class MemoryRpcChannel implements WorkerRpcChannel {
@@ -219,7 +220,7 @@ test("ReverseConnectionService rejects activation after an authenticated token i
     assert.equal(accepted, 0);
 });
 
-test("ReverseConnectionService serializes activation with token rotation", async () => {
+test("ReverseConnectionService lets token rotation disconnect a pending activation", async () => {
     const home = await mkdtemp(join(tmpdir(), "reverse-activation-rotation-"));
     const credentialStore = new ReverseCredentialStore(home);
     let releaseActivation!: () => void;
@@ -239,6 +240,12 @@ test("ReverseConnectionService serializes activation with token rotation", async
         instanceRegistry: { get: (name) => name === descriptor.name ? descriptor : undefined },
         publicBaseUrl: "https://example.test"
     });
+    const credentialService = new ReverseCredentialService({
+        credentialStore,
+        instanceRegistry: { get: (name) => name === descriptor.name ? descriptor : undefined },
+        publicBaseUrl: "https://example.test"
+    });
+    credentialService.setDisconnectHandler((instance) => service.disconnect(instance));
     const code = await credentialStore.createDeviceCode(descriptor.name);
     const enrollment = await service.enroll({
         arch: "x86_64",
@@ -251,19 +258,17 @@ test("ReverseConnectionService serializes activation with token rotation", async
         1,
         enrollment.deviceToken as string
     );
-    const activation = service.activate(identity, "wss", new MemoryRpcChannel());
+    const channel = new MemoryRpcChannel();
+    const activation = service.activate(identity, "wss", channel);
     await activationStarted;
-    let rotated = false;
-    const rotation = credentialStore.rotateToken(descriptor.name).then(() => {
-        rotated = true;
-    });
+    await credentialService.rotateDeviceToken(descriptor.name);
 
-    await new Promise((resolve) => setImmediate(resolve));
-    assert.equal(rotated, false);
+    assert.equal(channel.closed, true);
     releaseActivation();
-    await activation;
-    await rotation;
-    assert.equal(rotated, true);
+    await assert.rejects(
+        activation,
+        (error: unknown) => hasCode(error, "reverse.connectionSuperseded")
+    );
 });
 
 
