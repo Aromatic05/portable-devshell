@@ -176,6 +176,64 @@ test("global TOML round-trips the independent WebUI enable switch", () => {
     assert.equal(globalDocument.decode(toml.decode(encoded)).web?.enabled, true);
 });
 
+test("global TOML round-trips web token auth without leaking other modes", () => {
+    const token = "a".repeat(48);
+    const config = normalizeConfigGlobalDraft({
+        web: { auth: "token", enabled: true, token }
+    });
+
+    const encoded = toml.encode(globalDocument.encode(config));
+    assert.match(encoded, /auth = "token"/u);
+    assert.match(encoded, new RegExp(`token = "${token}"`, "u"));
+    assert.doesNotMatch(encoded, /\[web\.oauth2\]/u);
+
+    const decoded = normalizeConfigGlobalDraft(globalDocument.decode(toml.decode(encoded)));
+    assert.deepEqual(decoded.web.auth, { mode: "token", token });
+});
+
+test("global TOML round-trips web oauth2 auth with a flat web.oauth2 table", () => {
+    const config = normalizeConfigGlobalDraft({
+        web: {
+            auth: "oauth2",
+            enabled: true,
+            oauth2: {
+                documentationUrl: "https://docs.example.com/web",
+                requiredScopes: ["web", "admin"],
+                resourceName: "aromatic-web"
+            }
+        }
+    });
+
+    const encoded = toml.encode(globalDocument.encode(config));
+    assert.match(encoded, /auth = "oauth2"/u);
+    assert.match(encoded, /\[web\.oauth2\]/u);
+    assert.match(encoded, /resourceName = "aromatic-web"/u);
+    assert.doesNotMatch(encoded, /token = /u);
+
+    const decoded = normalizeConfigGlobalDraft(globalDocument.decode(toml.decode(encoded)));
+    assert.deepEqual(decoded.web.auth, {
+        mode: "oauth2",
+        oauth2: {
+            documentationUrl: "https://docs.example.com/web",
+            requiredScopes: ["web", "admin"],
+            resourceName: "aromatic-web"
+        }
+    });
+});
+
+test("global TOML decode rejects web token residual alongside auth=none", () => {
+    assert.throws(
+        () =>
+            globalDocument.decode(toml.decode([
+                "version = 2",
+                "[web]",
+                'auth = "none"',
+                `token = "${"a".repeat(48)}"`
+            ].join("\n"))),
+        /must not configure oauth2 or token when auth=none/u
+    );
+});
+
 test("invalid TOML field type is reported with file and structural path", async () => {
     const homeDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-control-home-"));
 

@@ -49,11 +49,13 @@ export class ControlGlobalTomlDocument {
                 publicBaseUrl: config.mcp.publicBaseUrl
             },
             web: {
-                auth: config.web.auth,
+                auth: config.web.auth.mode,
                 enabled: config.web.enabled,
                 listenHost: config.web.listenHost,
                 listenPort: config.web.listenPort,
-                publicBaseUrl: config.web.publicBaseUrl
+                oauth2: config.web.auth.mode === "oauth2" ? compact(config.web.auth.oauth2) : undefined,
+                publicBaseUrl: config.web.publicBaseUrl,
+                token: config.web.auth.mode === "token" ? config.web.auth.token : undefined
             }
         });
     }
