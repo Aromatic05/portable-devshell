@@ -5,6 +5,7 @@ import {
     type ConfigDraft,
     type ConfigInstancePatch,
     type ConfigMcpPatch,
+    type ConfigWebPatch,
     type InstanceCreateDraft,
     type InstanceCreateSchema,
     type InstanceCreateSummary,
@@ -172,8 +173,12 @@ export class TuiRuntimeControlOperations {
         });
     }
 
-    async updateMcpConfig(mcp: ConfigMcpPatch): Promise<void> {
-        await this.#request(this.options.clients.config.updateMcp({ patch: mcp }), "config.mcp.update");
+    async updateMcpEndpoint(mcp: ConfigMcpPatch): Promise<void> {
+        await this.#request(this.options.clients.config.updateMcpEndpoint({ patch: mcp }), "config.mcp.endpoint.update");
+    }
+
+    async updateWeb(web: ConfigWebPatch): Promise<void> {
+        await this.#request(this.options.clients.config.updateWeb({ patch: web }), "config.web.update");
     }
 
     async decideOAuthApproval(approvalId: string, decision: "approve" | "deny"): Promise<void> {

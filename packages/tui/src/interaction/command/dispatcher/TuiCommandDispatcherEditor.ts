@@ -3,6 +3,7 @@ import type {
     ConfigDraft,
     ConfigInstancePatch,
     ConfigMcpPatch,
+    ConfigWebPatch,
     InstanceCreateDraft,
     InstanceCreateSchema,
     InstanceCreateSummary,
@@ -13,7 +14,7 @@ import { createDefaultInstanceDraft } from "../../../state/editor/TuiEditorInsta
 import { editableProviderChoices } from "../../../state/editor/TuiEditorProviderChoices.js";
 import type { TuiAppStore } from "../../../state/TuiAppStore.js";
 import { asRecord, cloneRecord, editorDraft, readPath, setPath } from "../../../state/editor/TuiEditorDraft.js";
-import { coerceTuiEditorRecord, parseTuiConfigDraft, parseTuiInstanceDraft, parseTuiInstancePatch, parseTuiMcpPatch, toTuiInstanceEditorRecord } from "../../../state/editor/TuiEditorConfigAdapter.js";
+import { coerceTuiEditorRecord, parseTuiConfigDraft, parseTuiInstanceDraft, parseTuiInstancePatch, parseTuiMcpPatch, parseTuiWebPatch, toTuiInstanceEditorRecord } from "../../../state/editor/TuiEditorConfigAdapter.js";
 import type { TuiInteractionProjection } from "../../TuiInteractionProjection.js";
 import type { TuiEditorState, TuiUiIntent } from "../../../state/TuiInteractionState.js";
 
@@ -25,6 +26,7 @@ interface CommandEditorOptions {
     onInstanceAction(action: "refresh" | "restart" | "start" | "stop", instance: string): Promise<void>;
     onInstanceConfigUpdate(instanceName: string, patch: ConfigInstancePatch): Promise<void>;
     onMcpConfigUpdate(mcp: ConfigMcpPatch): Promise<void>;
+    onWebConfigUpdate(web: ConfigWebPatch): Promise<void>;
     onValidateConfigDraft(draft: ConfigDraft): Promise<void>;
     onValidateInstanceCreateDraft(draft: InstanceCreateDraft): Promise<InstanceCreateSummary>;
     projection: TuiInteractionProjection;
@@ -86,6 +88,9 @@ export class TuiCommandDispatcherEditor {
         if (state.ui.formDrafts[key] === undefined) {
             const source = kind === "config" ? this.#instanceDraft(instance) : this.#mcpDraft();
             this.#store.setFormDraft(key, source, false);
+        }
+        if (kind === "connector" && state.ui.formDrafts[`web:${instance}`] === undefined) {
+            this.#store.setFormDraft(`web:${instance}`, this.#webDraft(), false);
         }
         const box = this.#projection.selectMainScreenModel(this.#store.getState()).boxes.find((candidate) => candidate.id === boxId);
         if (box !== undefined && !box.expanded) {
@@ -293,17 +298,23 @@ export class TuiCommandDispatcherEditor {
             }
             const instanceKey = `config:${instance}`;
             const globalKey = `connector:${instance}`;
+            const webKey = `web:${instance}`;
             const instanceDraft = coerceTuiEditorRecord(this.#editorDraft(instanceKey, this.#instanceDraft(instance)));
             const globalDraft = coerceTuiEditorRecord(this.#editorDraft(globalKey, this.#mcpDraft()));
+            const webDraft = coerceTuiEditorRecord(this.#editorDraft(webKey, this.#webDraft()));
             const instanceDirty = state.ui.dirtyForms[instanceKey] === true;
             const globalDirty = editor.kind === "connector" && state.ui.dirtyForms[globalKey] === true;
+            const webDirty = editor.kind === "connector" && state.ui.dirtyForms[webKey] === true;
             if (instanceDirty) {
                 await this.#options.onInstanceConfigUpdate(instance, parseTuiInstancePatch(instanceDraft));
             }
             if (globalDirty) {
                 await this.#options.onMcpConfigUpdate(parseTuiMcpPatch(globalDraft));
             }
-            const applyResult = instanceDirty || globalDirty ? await this.#options.onApplyConfig() : {};
+            if (webDirty) {
+                await this.#options.onWebConfigUpdate(parseTuiWebPatch(webDraft));
+            }
+            const applyResult = instanceDirty || globalDirty || webDirty ? await this.#options.onApplyConfig() : {};
             if (asRecord(applyResult)?.restartControlRequired === true) {
                 this.#store.setControlRestartRequired(true);
             }
@@ -313,6 +324,7 @@ export class TuiCommandDispatcherEditor {
             this.#store.setFormDraft(`config:${instance}`, instanceDraft, false);
             if (editor.kind === "connector") {
                 this.#store.setFormDraft(globalKey, globalDraft, false);
+                this.#store.setFormDraft(webKey, webDraft, false);
             }
             this.#store.setEditor({ ...editor, editing: false, error: undefined });
             this.#store.setScreenStatus(
@@ -432,6 +444,9 @@ export class TuiCommandDispatcherEditor {
             const name = instance!;
             return { fallback: this.#instanceDraft(name), key: `config:${name}`, path: field.slice("instance.".length) };
         }
+        if (editor.kind === "connector" && field.startsWith("web.")) {
+            return { fallback: this.#webDraft(), key: `web:${instance!}`, path: field.slice("web.".length) };
+        }
         return {
             fallback: editor.kind === "connector" ? this.#mcpDraft() : this.#instanceDraft(instance!),
             key: editor.key,
@@ -449,7 +464,7 @@ export class TuiCommandDispatcherEditor {
         }
 
         const instance = this.#store.getState().ui.selectedInstance;
-        return instance === undefined ? [editor.key] : [editor.key, `config:${instance}`];
+        return instance === undefined ? [editor.key] : [editor.key, `config:${instance}`, `web:${instance}`];
     }
 
     #instanceDraft(instanceName: string): Record<string, JsonValue> {
@@ -459,12 +474,18 @@ export class TuiCommandDispatcherEditor {
             ? entries.find((value) => asRecord(value)?.name === instanceName)
             : undefined;
         return toTuiInstanceEditorRecord(
-            cloneRecord(asRecord(entry) ?? { enabled: true, mcp: { enabled: true, path: `/${instanceName}/mcp`, tools: { capabilities: ["read", "write", "execute"], groups: [...defaultMcpToolGroups] } }, name: instanceName, provider: "local", security: { mode: "disabled" }, workspace: "" })
+            cloneRecord(asRecord(entry) ?? { enabled: true, mcp: { auth: "none", enabled: true, path: `/${instanceName}/mcp`, tools: { capabilities: ["read", "write", "execute"], groups: [...defaultMcpToolGroups] } }, name: instanceName, provider: "local", security: { mode: "disabled" }, workspace: "" })
         );
     }
 
     #mcpDraft(): Record<string, JsonValue> {
-        return cloneRecord(asRecord(this.#store.getState().configView?.mcp) ?? { auth: { mode: "none" }, enabled: false, listenHost: "127.0.0.1", listenPort: 0 });
+        return cloneRecord(asRecord(this.#store.getState().configView?.mcp) ?? { enabled: false, listenHost: "127.0.0.1", listenPort: 0 });
+    }
+
+    #webDraft(): Record<string, JsonValue> {
+        return cloneRecord(asRecord(this.#store.getState().configView?.web) ?? {
+            auth: "none", enabled: false, listenHost: "127.0.0.1", listenPort: 0
+        });
     }
 
     #fullConfigDraft(includeMcp: boolean): ConfigDraft {

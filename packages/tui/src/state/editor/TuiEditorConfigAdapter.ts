@@ -3,10 +3,12 @@ import {
     parseConfigInstanceDraft,
     parseConfigInstancePatch,
     parseConfigMcpPatch,
+    parseConfigWebPatch,
     type ConfigDraft,
     type ConfigInstanceDraft,
     type ConfigInstancePatch,
     type ConfigMcpPatch,
+    type ConfigWebPatch,
     type JsonValue
 } from "@portable-devshell/shared";
 
@@ -31,6 +33,10 @@ export function parseTuiInstancePatch(value: Record<string, JsonValue>): ConfigI
 
 export function parseTuiMcpPatch(value: Record<string, JsonValue>): ConfigMcpPatch {
     return parseConfigMcpPatch(coerceTuiEditorRecord(value));
+}
+
+export function parseTuiWebPatch(value: Record<string, JsonValue>): ConfigWebPatch {
+    return parseConfigWebPatch(coerceTuiEditorRecord(value));
 }
 
 export function toTuiInstanceEditorRecord(value: Record<string, JsonValue>): Record<string, JsonValue> {

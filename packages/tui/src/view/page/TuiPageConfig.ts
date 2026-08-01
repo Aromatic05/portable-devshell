@@ -225,7 +225,7 @@ function instanceDraft(state: TuiAppState, instanceName: string): Record<string,
 
     return record ?? {
         enabled: true,
-        mcp: { enabled: true, path: `/${instanceName}/mcp`, tools: { capabilities: ["read", "write", "execute"], groups: [...defaultMcpToolGroups] } },
+        mcp: { auth: "none", enabled: true, path: `/${instanceName}/mcp`, tools: { capabilities: ["read", "write", "execute"], groups: [...defaultMcpToolGroups] } },
         name: instanceName,
         provider: "local",
         security: { mode: "disabled" },

@@ -9,14 +9,15 @@ import { buttonLine, editorErrorLine, fieldLine, secretFieldLine } from "../edit
 export function buildConnectorPageBoxes(state: TuiAppState, instanceName: string): BoxModel[] {
     const instanceDraft = editorDraft(state, `config:${instanceName}`, selectedInstanceDraft(state, instanceName));
     const mcpDraft = editorDraft(state, `connector:${instanceName}`, globalMcpDraft(state));
-    const unsaved = state.ui.dirtyForms[`connector:${instanceName}`] === true || state.ui.dirtyForms[`config:${instanceName}`] === true ? " [UNSAVED]" : "";
+    const webDraft = editorDraft(state, `web:${instanceName}`, globalWebDraft(state));
+    const unsaved = state.ui.dirtyForms[`connector:${instanceName}`] === true || state.ui.dirtyForms[`config:${instanceName}`] === true || state.ui.dirtyForms[`web:${instanceName}`] === true ? " [UNSAVED]" : "";
     const instanceDirty = state.ui.dirtyForms[`config:${instanceName}`] === true;
     const globalDirty = state.ui.dirtyForms[`connector:${instanceName}`] === true;
-    const affectedScopes = [instanceDirty ? "instance" : undefined, globalDirty ? "global" : undefined].filter(Boolean).join(" + ") || "none";
+    const webDirty = state.ui.dirtyForms[`web:${instanceName}`] === true;
+    const affectedScopes = [instanceDirty ? "instance" : undefined, globalDirty ? "mcp" : undefined, webDirty ? "web" : undefined].filter(Boolean).join(" + ") || "none";
     const endpoint = endpointPreview(mcpDraft, readPath(instanceDraft, "mcp.path"), instanceName);
     const runtime = runtimeStatus(state, instanceDraft, mcpDraft, endpoint);
-    const authNonePublic = isPublic(mcpDraft) && readPath(mcpDraft, "auth.mode") === "none";
-    const authMode = readPath(mcpDraft, "auth.mode");
+    const authMode = readPath(instanceDraft, "mcp.auth");
 
     return [
         makeBox(state, "connections", instanceName, {
@@ -46,25 +47,44 @@ export function buildConnectorPageBoxes(state: TuiAppState, instanceName: string
         }),
         makeBox(state, "connections", instanceName, {
             detailLines: [
-                fieldLine("auth.mode", "auth.mode", authMode),
+                fieldLine("web.enabled", "enabled", readPath(webDraft, "enabled")),
+                fieldLine("web.auth", "auth", readPath(webDraft, "auth")),
+                fieldLine("web.listenHost", "listenHost", readPath(webDraft, "listenHost")),
+                fieldLine("web.listenPort", "listenPort", readPath(webDraft, "listenPort")),
+                fieldLine("web.publicBaseUrl", "publicBaseUrl", readPath(webDraft, "publicBaseUrl")),
+                ...editorErrorLine(state, "connector", "web", ["web"])
+            ],
+            id: "web",
+            summaryLines: [compactSummary(["enabled", String(readPath(webDraft, "enabled") ?? false)], ["listener", `${String(readPath(webDraft, "listenHost") ?? "-")}:${String(readPath(webDraft, "listenPort") ?? "-")}`])],
+            title: `[Global] Web UI${unsaved}`
+        }),
+        makeBox(state, "connections", instanceName, {
+            detailLines: [
+                fieldLine("mcp.auth", "mcp.auth", authMode),
                 ...(authMode === "token"
-                    ? [secretFieldLine("auth.token", "auth.token", readPath(mcpDraft, "auth.token"))]
+                    ? [secretFieldLine("mcp.token", "mcp.token", readPath(instanceDraft, "mcp.token"))]
                     : []),
-                ...(authNonePublic ? [{ id: "auth-warning", text: "auth.mode=none is not valid for a public endpoint", tone: "danger" as const }] : []),
-                ...editorErrorLine(state, "connector", "auth", ["auth"])
+                ...(authMode === "oauth2"
+                    ? [
+                        fieldLine("mcp.oauth2.resourceName", "resource", readPath(instanceDraft, "mcp.oauth2.resourceName")),
+                        fieldLine("mcp.oauth2.requiredScopes", "scopes", readPath(instanceDraft, "mcp.oauth2.requiredScopes"))
+                    ]
+                    : []),
+                ...editorErrorLine(state, "connector", "auth", ["mcp", "auth", "oauth2", "token"])
             ],
             id: "auth",
-            status: authNonePublic ? "failed" : "normal",
-            summaryLines: [compactSummary(["mode", String(readPath(mcpDraft, "auth.mode") ?? "-")], ["public", isPublic(mcpDraft) ? "yes" : "no"])],
-            title: `[Global] Auth${unsaved}`
+            status: "normal",
+            summaryLines: [compactSummary(["mode", String(authMode ?? "-")], ["namespace", instanceName])],
+            title: `[Instance] Auth${unsaved}`
         }),
         makeBox(state, "connections", instanceName, {
             detailLines: [
                 `Affected scopes    ${affectedScopes}`,
                 `Instance changes   ${instanceDirty ? "yes" : "no"}`,
-                `Global changes     ${globalDirty ? "yes" : "no"}`,
-                buttonLine("save", "Save", !instanceDirty && !globalDirty),
-                buttonLine("cancel", "Cancel", !instanceDirty && !globalDirty),
+                `MCP changes        ${globalDirty ? "yes" : "no"}`,
+                `Web changes        ${webDirty ? "yes" : "no"}`,
+                buttonLine("save", "Save", !instanceDirty && !globalDirty && !webDirty),
+                buttonLine("cancel", "Cancel", !instanceDirty && !globalDirty && !webDirty),
                 buttonLine("restart-control", "Restart Control", !state.ui.controlRestartRequired)
             ],
             id: "connector-actions",
@@ -80,12 +100,10 @@ export function buildConnectorPageBoxes(state: TuiAppState, instanceName: string
             title: "Configured Endpoint"
         }),
         makeBox(state, "connections", instanceName, {
-            detailLines: authNonePublic
-                ? ["validator error: auth.mode=none cannot expose a non-local endpoint"]
-                : ["validation=available before save"],
+            detailLines: ["validation=available before save"],
             id: "validation",
-            status: authNonePublic ? "failed" : "normal",
-            summaryLines: [compactSummary(["publicAuth", authNonePublic ? "invalid" : "valid"])],
+            status: "normal",
+            summaryLines: [compactSummary(["namespaceAuth", "valid"])],
             title: "Configuration Validation"
         })
     ];
@@ -95,11 +113,17 @@ function selectedInstanceDraft(state: TuiAppState, instanceName: string): Record
     const entry = Array.isArray(state.configView?.instances)
         ? state.configView.instances.find((value) => asRecord(value)?.name === instanceName)
         : undefined;
-    return asRecord(entry) ?? { mcp: { enabled: true, path: `/${instanceName}/mcp`, tools: { capabilities: ["read", "write", "execute"], groups: [...defaultMcpToolGroups] } }, name: instanceName };
+    return asRecord(entry) ?? { mcp: { auth: "none", enabled: true, path: `/${instanceName}/mcp`, tools: { capabilities: ["read", "write", "execute"], groups: [...defaultMcpToolGroups] } }, name: instanceName };
 }
 
 function globalMcpDraft(state: TuiAppState): Record<string, JsonValue> {
-    return asRecord(state.configView?.mcp) ?? { auth: { mode: "none" }, enabled: false, listenHost: "127.0.0.1", listenPort: 0 };
+    return asRecord(state.configView?.mcp) ?? { enabled: false, listenHost: "127.0.0.1", listenPort: 0 };
+}
+
+function globalWebDraft(state: TuiAppState): Record<string, JsonValue> {
+    return asRecord(state.configView?.web) ?? {
+        auth: "none", enabled: false, listenHost: "127.0.0.1", listenPort: 0
+    };
 }
 
 function endpointPreview(mcp: Record<string, JsonValue>, configuredPath: JsonValue | undefined, instanceName: string): { reason?: string; value: string } {

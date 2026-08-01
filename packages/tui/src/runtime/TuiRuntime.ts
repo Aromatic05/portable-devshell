@@ -235,7 +235,10 @@ export class TuiRuntime {
                 await this.#operations.reloadLogs();
             },
             onMcpConfigUpdate: async (mcp) => {
-                await this.#operations.updateMcpConfig(mcp);
+                await this.#operations.updateMcpEndpoint(mcp);
+            },
+            onWebConfigUpdate: async (web) => {
+                await this.#operations.updateWeb(web);
             },
             onOAuthApprovalDecision: async (approvalId, decision) => {
                 await this.#operations.decideOAuthApproval(

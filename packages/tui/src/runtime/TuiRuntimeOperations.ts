@@ -2,6 +2,7 @@ import type {
     ConfigDraft,
     ConfigInstancePatch,
     ConfigMcpPatch,
+    ConfigWebPatch,
     InstanceCreateDraft,
     InstanceCreateSchema,
     InstanceCreateSummary,
@@ -96,8 +97,12 @@ export class TuiRuntimeOperations {
         await this.#control.setInstanceEnabled(instance, enabled);
     }
 
-    async updateMcpConfig(mcp: ConfigMcpPatch): Promise<void> {
-        await this.#control.updateMcpConfig(mcp);
+    async updateMcpEndpoint(mcp: ConfigMcpPatch): Promise<void> {
+        await this.#control.updateMcpEndpoint(mcp);
+    }
+
+    async updateWeb(web: ConfigWebPatch): Promise<void> {
+        await this.#control.updateWeb(web);
     }
 
     async decideOAuthApproval(approvalId: string, decision: "approve" | "deny"): Promise<void> {

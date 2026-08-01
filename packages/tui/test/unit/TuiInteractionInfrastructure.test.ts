@@ -317,7 +317,6 @@ test("context message composer requires the context MCP group", async () => {
             },
         ],
         mcp: {
-            auth: { mode: "none" },
             enabled: true,
             listenHost: "127.0.0.1",
             listenPort: 3210,
@@ -1260,7 +1259,6 @@ test("connector discard confirms and clears its per-instance MCP draft", async (
     harness.store.setFormDraft(
         "connector:alpha",
         {
-            auth: { mode: "none" },
             enabled: true,
             listenHost: "0.0.0.0",
             listenPort: 3210,
@@ -1395,7 +1393,8 @@ test("connector editor presents unavailable endpoints and control runtime limits
         [
             "[Instance] MCP Endpoint",
             "[Global] Public Base URL",
-            "[Global] Auth",
+            "[Global] Web UI",
+            "[Instance] Auth",
             "Page Actions",
             "Configured Endpoint",
             "Configuration Validation",
@@ -1418,13 +1417,12 @@ test("connector editor presents unavailable endpoints and control runtime limits
     harness.store.setConfigView({
         instances: [
             {
-                mcp: { enabled: true, path: "/alpha/custom-mcp" },
+                mcp: { auth: "none", enabled: true, path: "/alpha/custom-mcp" },
                 name: "alpha",
                 provider: "local",
             },
         ],
         mcp: {
-            auth: { mode: "none" },
             enabled: true,
             listenHost: "127.0.0.1",
             listenPort: 3210,
@@ -1441,6 +1439,7 @@ test("connector editor presents unavailable endpoints and control runtime limits
 test("connector page actions expose and save only affected scopes", async () => {
     const instanceUpdates: unknown[] = [];
     const mcpUpdates: unknown[] = [];
+    const webUpdates: unknown[] = [];
     const harness = createHarness({
         onInstanceConfigUpdate: async (instanceName, patch) => {
             instanceUpdates.push({ instanceName, patch });
@@ -1448,18 +1447,23 @@ test("connector page actions expose and save only affected scopes", async () => 
         onMcpConfigUpdate: async (value) => {
             mcpUpdates.push(value);
         },
+        onWebConfigUpdate: async (value) => {
+            webUpdates.push(value);
+        },
     });
     enterConnectionsRoute(harness, "connector");
     harness.store.setFormDraft(
         "connector:alpha",
         {
-            auth: { mode: "none" },
             enabled: true,
             listenHost: "127.0.0.1",
             listenPort: 3210,
         },
         true,
     );
+    harness.store.setFormDraft("web:alpha", {
+        auth: "none", enabled: true, listenHost: "127.0.0.1", listenPort: 3211, publicBaseUrl: "127.0.0.1"
+    }, true);
     harness.store.setEditor({
         editing: false,
         key: "connector:alpha",
@@ -1468,7 +1472,7 @@ test("connector page actions expose and save only affected scopes", async () => 
     const actions = expandBox(harness, "connector-actions");
     assert.equal(
         actions.expandedLines.some(
-            (line) => line.text === "Affected scopes    global",
+            (line) => line.text === "Affected scopes    mcp + web",
         ),
         true,
     );
@@ -1481,6 +1485,7 @@ test("connector page actions expose and save only affected scopes", async () => 
     await harness.dispatch({ type: "focus.activate" });
     assert.equal(instanceUpdates.length, 0);
     assert.equal(mcpUpdates.length, 1);
+    assert.equal(webUpdates.length, 1);
 });
 test("long detail lines open a wrapped full-text viewer", async () => {
     const harness = createHarness();
@@ -2010,7 +2015,6 @@ function openEditorForBox(
         harness.store.setFormDraft(
             key,
             {
-                auth: { mode: "none" },
                 enabled: true,
                 listenHost: "127.0.0.1",
                 listenPort: 3210,
@@ -2119,6 +2123,7 @@ function createHarness(
             patch: Record<string, unknown>,
         ) => Promise<void>;
         onMcpConfigUpdate?: (value: Record<string, unknown>) => Promise<void>;
+        onWebConfigUpdate?: (value: Record<string, unknown>) => Promise<void>;
         onContextMessage?: (
             instance: string,
             ctxId: string,
@@ -2204,6 +2209,7 @@ function createHarness(
             }),
         onInstanceConfigUpdate: options.onInstanceConfigUpdate as never,
         onMcpConfigUpdate: options.onMcpConfigUpdate as never,
+        onWebConfigUpdate: options.onWebConfigUpdate as never,
         onApplyConfig: async () => ({}),
         onContextMessage: options.onContextMessage,
         onQuit: async () => undefined,
@@ -2321,7 +2327,6 @@ function seedPrompt3State(store: TuiAppStore) {
             },
         ],
         mcp: {
-            auth: { mode: "none" },
             enabled: true,
             listenHost: "127.0.0.1",
             listenPort: 3210,

@@ -5,6 +5,7 @@ import type {
     ConfigDraft,
     ConfigInstancePatch,
     ConfigMcpPatch,
+    ConfigWebPatch,
     ArtifactViewImageInput,
     ArtifactViewImageResult,
     JsonValue
@@ -64,6 +65,7 @@ export interface TuiCommandDispatcherOptions {
     onInstanceDangerAction?(action: "delete", instance: string): Promise<void>;
     onInstanceEnabledChange?(instance: string, enabled: boolean): Promise<void>;
     onMcpConfigUpdate?(mcp: ConfigMcpPatch): Promise<void>;
+    onWebConfigUpdate?(web: ConfigWebPatch): Promise<void>;
     onOAuthApprovalDecision?(
         approvalId: string,
         decision: "approve" | "deny"
@@ -111,6 +113,7 @@ export class TuiCommandDispatcher {
             onInstanceConfigUpdate:
                 options.onInstanceConfigUpdate ?? unavailable,
             onMcpConfigUpdate: options.onMcpConfigUpdate ?? unavailable,
+            onWebConfigUpdate: options.onWebConfigUpdate ?? unavailable,
             onValidateConfigDraft:
                 options.onValidateConfigDraft ?? unavailable,
             onValidateInstanceCreateDraft:
