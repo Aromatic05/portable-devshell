@@ -15,9 +15,11 @@ import type {
     ConfigInstanceTargetRequest,
     ConfigMcpAuthDraft,
     ConfigMcpPatch,
+    ConfigWebPatch,
     ConfigPatch,
     ConfigUpdateInstanceRequest,
     ConfigUpdateMcpRequest,
+    ConfigUpdateWebRequest,
     ControlInstanceLogsConfig,
     ControlInstanceToolsConfig,
     ControlProviderKind,
@@ -108,11 +110,12 @@ export function parseConfigInstanceDraft(
 
 export function parseConfigPatch(value: unknown): ConfigPatch {
     const record = readRecord(value, []);
-    assertKnownKeys(record, ["control", "mcp"], []);
+    assertKnownKeys(record, ["control", "mcp", "web"], []);
 
     return {
         control: record.control === undefined ? undefined : parseControlDraft(record.control, ["control"]),
-        mcp: record.mcp === undefined ? undefined : parseConfigMcpPatch(record.mcp, ["mcp"])
+        mcp: record.mcp === undefined ? undefined : parseConfigMcpPatch(record.mcp, ["mcp"]),
+        web: record.web === undefined ? undefined : parseConfigWebPatch(record.web, ["web"])
     };
 }
 
@@ -164,10 +167,9 @@ export function parseConfigMcpPatch(
     path: readonly ConfigPathSegment[] = []
 ): ConfigMcpPatch {
     const record = readRecord(value, path);
-    assertKnownKeys(record, ["auth", "enabled", "listenHost", "listenPort", "publicBaseUrl"], path);
+    assertKnownKeys(record, ["enabled", "listenHost", "listenPort", "publicBaseUrl"], path);
 
     return {
-        auth: record.auth === undefined ? undefined : parseMcpAuthDraft(record.auth, [...path, "auth"]),
         enabled: readOptionalBoolean(record.enabled, [...path, "enabled"]),
         listenHost: readOptionalTrimmedString(record.listenHost, [...path, "listenHost"]),
         listenPort: readOptionalInteger(record.listenPort, [...path, "listenPort"]),
@@ -175,6 +177,13 @@ export function parseConfigMcpPatch(
             readRequiredTrimmedString(entry, [...path, "publicBaseUrl"])
         )
     };
+}
+
+export function parseConfigWebPatch(
+    value: unknown,
+    path: readonly ConfigPathSegment[] = []
+): ConfigWebPatch {
+    return parseGlobalWebDraft(value, path);
 }
 
 export function parseConfigUpdateInstanceRequest(value: unknown): ConfigUpdateInstanceRequest {
@@ -192,6 +201,12 @@ export function parseConfigUpdateMcpRequest(value: unknown): ConfigUpdateMcpRequ
     return {
         patch: parseConfigMcpPatch(record.patch, ["patch"])
     };
+}
+
+export function parseConfigUpdateWebRequest(value: unknown): ConfigUpdateWebRequest {
+    const record = readRecord(value, []);
+    assertKnownKeys(record, ["patch"], []);
+    return { patch: parseConfigWebPatch(record.patch, ["patch"]) };
 }
 
 export function parseConfigInstanceTargetRequest(value: unknown): ConfigInstanceTargetRequest {
@@ -215,18 +230,9 @@ function parseGlobalWebDraft(
     path: readonly ConfigPathSegment[]
 ): NonNullable<ConfigGlobalDraft["web"]> {
     const record = readRecord(value, path);
-    assertKnownKeys(record, ["enabled"], path);
-    return {
-        enabled: readOptionalBoolean(record.enabled, [...path, "enabled"])
-    };
-}
-
-function parseGlobalMcpDraft(value: unknown, path: readonly ConfigPathSegment[]): NonNullable<ConfigGlobalDraft["mcp"]> {
-    const record = readRecord(value, path);
     assertKnownKeys(record, ["auth", "enabled", "listenHost", "listenPort", "publicBaseUrl"], path);
-
     return {
-        auth: record.auth === undefined ? undefined : parseMcpAuthDraft(record.auth, [...path, "auth"]),
+        auth: record.auth === undefined ? undefined : readEnum<"none">(record.auth, [...path, "auth"], ["none"]),
         enabled: readOptionalBoolean(record.enabled, [...path, "enabled"]),
         listenHost: readOptionalTrimmedString(record.listenHost, [...path, "listenHost"]),
         listenPort: readOptionalInteger(record.listenPort, [...path, "listenPort"]),
@@ -236,7 +242,21 @@ function parseGlobalMcpDraft(value: unknown, path: readonly ConfigPathSegment[])
     };
 }
 
-function parseMcpAuthDraft(value: unknown, path: readonly ConfigPathSegment[]): ConfigMcpAuthDraft {
+function parseGlobalMcpDraft(value: unknown, path: readonly ConfigPathSegment[]): NonNullable<ConfigGlobalDraft["mcp"]> {
+    const record = readRecord(value, path);
+    assertKnownKeys(record, ["enabled", "listenHost", "listenPort", "publicBaseUrl"], path);
+
+    return {
+        enabled: readOptionalBoolean(record.enabled, [...path, "enabled"]),
+        listenHost: readOptionalTrimmedString(record.listenHost, [...path, "listenHost"]),
+        listenPort: readOptionalInteger(record.listenPort, [...path, "listenPort"]),
+        publicBaseUrl: readNullable(record.publicBaseUrl, (entry) =>
+            readRequiredTrimmedString(entry, [...path, "publicBaseUrl"])
+        )
+    };
+}
+
+export function parseMcpAuthDraft(value: unknown, path: readonly ConfigPathSegment[] = []): ConfigMcpAuthDraft {
     const record = readRecord(value, path);
     assertKnownKeys(record, ["mode", "oauth2", "token"], path);
     const mode = readEnum(record.mode, [...path, "mode"], ["none", "oauth2", "token"]);
@@ -272,29 +292,32 @@ function parseMcpAuthDraft(value: unknown, path: readonly ConfigPathSegment[]): 
         throw configInputError("parse", [...path, "oauth2"], "config.auth.oauth2Required", "is required when mode=oauth2");
     }
 
-    const oauth2 = readRecord(record.oauth2, [...path, "oauth2"]);
+    const oauth2 = parseMcpOAuth2Draft(record.oauth2, [...path, "oauth2"]);
+
+    return { mode, oauth2 };
+}
+
+function parseMcpOAuth2Draft(value: unknown, path: readonly ConfigPathSegment[]) {
+    const oauth2 = readRecord(value, path);
     assertKnownKeys(
         oauth2,
         ["documentationUrl", "requiredScopes", "resourceName"],
-        [...path, "oauth2"]
+        path
     );
 
     return {
-        mode,
-        oauth2: {
-            documentationUrl: readOptionalTrimmedString(oauth2.documentationUrl, [...path, "oauth2", "documentationUrl"]),
+            documentationUrl: readOptionalTrimmedString(oauth2.documentationUrl, [...path, "documentationUrl"]),
             requiredScopes:
                 oauth2.requiredScopes === undefined
                     ? undefined
-                    : readStringArray(oauth2.requiredScopes, [...path, "oauth2", "requiredScopes"]),
-            resourceName: readRequiredTrimmedString(oauth2.resourceName, [...path, "oauth2", "resourceName"])
-        }
+                    : readStringArray(oauth2.requiredScopes, [...path, "requiredScopes"]),
+            resourceName: readRequiredTrimmedString(oauth2.resourceName, [...path, "resourceName"])
     };
 }
 
 function parseInstanceMcpDraft(value: unknown, path: readonly ConfigPathSegment[]): NonNullable<ConfigInstanceDraft["mcp"]> {
     const record = readRecord(value, path);
-    assertKnownKeys(record, ["enabled", "path", "tools"], path);
+    assertKnownKeys(record, ["auth", "enabled", "oauth2", "path", "token", "tools"], path);
 
     const tools = record.tools === undefined ? undefined : readRecord(record.tools, [...path, "tools"]);
     if (tools !== undefined) {
@@ -302,6 +325,7 @@ function parseInstanceMcpDraft(value: unknown, path: readonly ConfigPathSegment[
     }
 
     return {
+        ...parseMcpNamespaceAuth(record, path),
         enabled: readOptionalBoolean(record.enabled, [...path, "enabled"]),
         path: readOptionalTrimmedString(record.path, [...path, "path"]),
         tools:
@@ -322,13 +346,14 @@ function parseInstanceMcpDraft(value: unknown, path: readonly ConfigPathSegment[
 
 function parseInstanceMcpPatch(value: unknown, path: readonly ConfigPathSegment[]): NonNullable<ConfigInstancePatch["mcp"]> {
     const record = readRecord(value, path);
-    assertKnownKeys(record, ["enabled", "path", "tools"], path);
+    assertKnownKeys(record, ["auth", "enabled", "oauth2", "path", "token", "tools"], path);
     const tools = record.tools === undefined ? undefined : readRecord(record.tools, [...path, "tools"]);
     if (tools !== undefined) {
         assertKnownKeys(tools, ["capabilities", "groups"], [...path, "tools"]);
     }
 
     return {
+        ...parseMcpNamespaceAuth(record, path),
         enabled: readOptionalBoolean(record.enabled, [...path, "enabled"]),
         path: readNullable(record.path, (entry) => readRequiredTrimmedString(entry, [...path, "path"])),
         tools:
@@ -345,6 +370,43 @@ function parseInstanceMcpPatch(value: unknown, path: readonly ConfigPathSegment[
                               : readStringArray(tools.groups, [...path, "tools", "groups"])
                   }
     };
+}
+
+function parseMcpNamespaceAuth(
+    record: Record<string, unknown>,
+    path: readonly ConfigPathSegment[]
+): Pick<NonNullable<ConfigInstanceDraft["mcp"]>, "auth" | "oauth2" | "token"> {
+    const auth = record.auth === undefined
+        ? undefined
+        : readEnum(record.auth, [...path, "auth"], ["none", "oauth2", "token"]);
+    if (auth === "none") {
+        if (record.oauth2 !== undefined || record.token !== undefined) {
+            throw configInputError("parse", [...path, "auth"], "config.auth.unexpectedParameters", "must not configure oauth2 or token when auth=none");
+        }
+        return { auth };
+    }
+    if (auth === "token") {
+        if (record.oauth2 !== undefined) {
+            throw configInputError("parse", [...path, "oauth2"], "config.auth.unexpectedOauth2", "must be omitted when auth=token");
+        }
+        if (record.token === undefined) {
+            throw configInputError("parse", [...path, "token"], "config.auth.tokenRequired", "is required when auth=token");
+        }
+        return { auth, token: readRequiredTrimmedString(record.token, [...path, "token"]) };
+    }
+    if (auth === "oauth2") {
+        if (record.token !== undefined) {
+            throw configInputError("parse", [...path, "token"], "config.auth.unexpectedToken", "must be omitted when auth=oauth2");
+        }
+        if (record.oauth2 === undefined) {
+            throw configInputError("parse", [...path, "oauth2"], "config.auth.oauth2Required", "is required when auth=oauth2");
+        }
+        return { auth, oauth2: parseMcpOAuth2Draft(record.oauth2, [...path, "oauth2"]) };
+    }
+    if (record.oauth2 !== undefined || record.token !== undefined) {
+        throw configInputError("parse", [...path, "auth"], "config.auth.authRequired", "is required when configuring oauth2 or token");
+    }
+    return {};
 }
 
 function parseContainerDraft(value: unknown, path: readonly ConfigPathSegment[]): ConfigContainerDraft {

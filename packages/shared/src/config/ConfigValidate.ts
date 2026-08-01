@@ -42,6 +42,7 @@ export function validateConfigSemantics(config: ControlConfig): ControlConfig {
     }
 
     validateGlobalMcp(config);
+    validateWeb(config);
     return config;
 }
 
@@ -65,6 +66,7 @@ function validateInstance(instance: ControlInstanceConfig, index: number): void 
     validateScheduler(instance.tools?.scheduler, base);
     validateApprovalPolicy(instance, base);
     validateContainer(instance, base);
+    validateMcpAuth(instance, base);
 }
 
 function validateGlobalMcp(config: ControlConfig): void {
@@ -77,31 +79,34 @@ function validateGlobalMcp(config: ControlConfig): void {
         );
     }
 
-    if (config.mcp.publicBaseUrl !== undefined) {
-        parseUrl(config.mcp.publicBaseUrl, ["mcp", "publicBaseUrl"]);
-    }
+    parseUrl(config.mcp.publicBaseUrl, ["mcp", "publicBaseUrl"]);
+}
 
-    if (config.mcp.auth.mode === "oauth2") {
-        const oauth2 = config.mcp.auth.oauth2;
-        if (oauth2.documentationUrl !== undefined) parseUrl(oauth2.documentationUrl, ["mcp", "auth", "oauth2", "documentationUrl"]);
-    }
-    if (config.mcp.auth.mode === "token" && Buffer.byteLength(config.mcp.auth.token, "utf8") < 32) {
+function validateWeb(config: ControlConfig): void {
+    if (!Number.isSafeInteger(config.web.listenPort) || config.web.listenPort < 0 || config.web.listenPort > 65535) {
         throw configInputError(
             "semantic",
-            ["mcp", "auth", "token"],
-            "config.auth.tokenWeak",
-            "must contain at least 32 UTF-8 bytes"
+            ["web", "listenPort"],
+            "config.web.listenPort",
+            "must be an integer between 0 and 65535"
         );
     }
+    parseUrl(config.web.publicBaseUrl, ["web", "publicBaseUrl"]);
+}
 
-    const publicHost = config.mcp.listenHost === "0.0.0.0" || config.mcp.listenHost === "::";
-    const publicBaseUrl = config.mcp.publicBaseUrl !== undefined && !isLoopbackUrl(config.mcp.publicBaseUrl);
-    if (config.mcp.auth.mode === "none" && (publicHost || publicBaseUrl)) {
+function validateMcpAuth(instance: ControlInstanceConfig, base: readonly (string | number)[]): void {
+    if (instance.mcp.auth.mode === "oauth2") {
+        const oauth2 = instance.mcp.auth.oauth2;
+        if (oauth2.documentationUrl !== undefined) {
+            parseUrl(oauth2.documentationUrl, [...base, "mcp", "auth", "oauth2", "documentationUrl"]);
+        }
+    }
+    if (instance.mcp.auth.mode === "token" && Buffer.byteLength(instance.mcp.auth.token, "utf8") < 32) {
         throw configInputError(
             "semantic",
-            ["mcp", "auth", "mode"],
-            "config.mcp.publicAuthRequired",
-            "must not be none when the control HTTP host is publicly exposed"
+            [...base, "mcp", "auth", "token"],
+            "config.auth.tokenWeak",
+            "must contain at least 32 UTF-8 bytes"
         );
     }
 }
@@ -193,9 +198,4 @@ function parseUrl(value: string, path: readonly (string | number)[]): URL {
     } catch {
         throw configInputError("semantic", path, "config.url.invalid", "must be a valid URL");
     }
-}
-
-function isLoopbackUrl(value: string): boolean {
-    const hostname = parseUrl(value, ["mcp", "publicBaseUrl"]).hostname.toLowerCase();
-    return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1" || hostname === "[::1]";
 }

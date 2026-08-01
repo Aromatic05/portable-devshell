@@ -11,6 +11,7 @@ import {
     formatConfigPath,
     normalizeConfigGlobalDraft,
     normalizeConfigInstanceDraft,
+    type ConfigMcpAuthDraft,
     type ControlConfig,
     type ControlGlobalConfig,
     type ControlInstanceConfig
@@ -43,11 +44,13 @@ export class ControlConfigStore {
     async readOrCreate(homeDirectory?: string): Promise<ControlConfig> {
         const paths = new ControlPathHome(homeDirectory);
         let globalConfig: ControlGlobalConfig | undefined;
+        let legacyMcpAuth: ConfigMcpAuthDraft | undefined;
 
         try {
             const source = await readFile(paths.configFile, "utf8");
             await secureFile(paths.configFile);
             const draft = this.#globalDocument.decode(this.#tomlCodec.decode(source));
+            legacyMcpAuth = (draft as ConfigGlobalDraftWithLegacyAuth).legacyMcpAuth;
             globalConfig = normalizeConfigGlobalDraft(draft);
         } catch (error) {
             if (!isFileMissingError(error)) throw attachConfigFile(error, paths.configFile);
@@ -59,10 +62,12 @@ export class ControlConfigStore {
             return config;
         }
 
-        return this.#validator.validate({
+        const config = this.#validator.validate({
             ...globalConfig,
-            instances: await this.#readInstances(paths)
+            instances: await this.#readInstances(paths, legacyMcpAuth)
         });
+        if (legacyMcpAuth !== undefined) await this.write(config, homeDirectory);
+        return config;
     }
 
     async write(config: ControlConfig, homeDirectory?: string): Promise<void> {
@@ -81,7 +86,7 @@ export class ControlConfigStore {
         await this.#removeStaleInstances(paths, new Set(instanceSources.map((entry) => entry.filePath)));
     }
 
-    async #readInstances(paths: ControlPathHome): Promise<ControlInstanceConfig[]> {
+    async #readInstances(paths: ControlPathHome, legacyMcpAuth?: ConfigMcpAuthDraft): Promise<ControlInstanceConfig[]> {
         let entries: Array<{ isFile(): boolean; name: string }>;
         try {
             entries = await readdir(paths.instancesDir, { encoding: "utf8", withFileTypes: true });
@@ -109,7 +114,12 @@ export class ControlConfigStore {
                 const source = await readFile(filePath, "utf8");
                 await secureFile(filePath);
                 const draft = this.#instanceDocument.decode(this.#tomlCodec.decode(source));
-                instances.push(normalizeConfigInstanceDraft(draft));
+                instances.push(normalizeConfigInstanceDraft({
+                    ...draft,
+                    mcp: draft.mcp?.enabled === false || legacyMcpAuth === undefined
+                        ? draft.mcp
+                        : { ...draft.mcp, ...toLegacyInstanceAuth(legacyMcpAuth) }
+                }));
             } catch (error) {
                 throw attachConfigFile(error, filePath);
             }
@@ -124,6 +134,16 @@ export class ControlConfigStore {
             if (!activeFiles.has(filePath)) await rm(filePath, { force: true });
         }
     }
+}
+
+interface ConfigGlobalDraftWithLegacyAuth {
+    legacyMcpAuth?: ConfigMcpAuthDraft;
+}
+
+function toLegacyInstanceAuth(auth: ConfigMcpAuthDraft) {
+    if (auth.mode === "none") return { auth: "none" as const };
+    if (auth.mode === "token") return { auth: "token" as const, token: auth.token };
+    return { auth: "oauth2" as const, oauth2: auth.oauth2 };
 }
 
 async function atomicWriteFile(filePath: string, source: string): Promise<void> {

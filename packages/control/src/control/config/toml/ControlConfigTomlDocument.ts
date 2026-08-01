@@ -1,5 +1,6 @@
 import {
     configInputError,
+    parseMcpAuthDraft,
     parseConfigGlobalDraft,
     parseConfigInstanceDraft,
     type ConfigGlobalDraft,
@@ -13,7 +14,10 @@ import type { ConfigTomlDocument } from "./ControlConfigTomlCodec.js";
 export class ControlGlobalTomlDocument {
     decode(document: ConfigTomlDocument): ConfigGlobalDraft {
         const record = asRecord(document);
-        assertDocumentVersion(record.version, 1, ["version"]);
+        const version = readDocumentVersion(record.version);
+        if (version !== 1 && version !== 2) {
+            throw configInputError("parse", ["version"], "config.document.versionUnsupported", "must be 1 or 2");
+        }
         if (record.instances !== undefined) {
             throw configInputError(
                 "parse",
@@ -23,12 +27,18 @@ export class ControlGlobalTomlDocument {
             );
         }
         const { version: _version, ...config } = record;
+        if (version === 1) {
+            const mcp = asRecord(config.mcp);
+            const legacyAuth = mcp.auth === undefined ? undefined : parseMcpAuthDraft(mcp.auth, ["mcp", "auth"]);
+            const { auth: _auth, ...mcpWithoutAuth } = mcp;
+            return Object.assign(parseConfigGlobalDraft({ ...config, mcp: mcpWithoutAuth }), { legacyMcpAuth: legacyAuth });
+        }
         return parseConfigGlobalDraft(config);
     }
 
     encode(config: ControlGlobalConfig): ConfigTomlDocument {
         return compact({
-            version: 1,
+            version: 2,
             control: {
                 logLevel: config.control.logLevel
             },
@@ -36,19 +46,14 @@ export class ControlGlobalTomlDocument {
                 enabled: config.mcp.enabled,
                 listenHost: config.mcp.listenHost,
                 listenPort: config.mcp.listenPort,
-                publicBaseUrl: config.mcp.publicBaseUrl,
-                auth:
-                    config.mcp.auth.mode === "oauth2"
-                        ? {
-                              mode: "oauth2",
-                              oauth2: compact(config.mcp.auth.oauth2)
-                          }
-                        : config.mcp.auth.mode === "token"
-                            ? { mode: "token", token: config.mcp.auth.token }
-                            : { mode: "none" }
+                publicBaseUrl: config.mcp.publicBaseUrl
             },
             web: {
-                enabled: config.web.enabled
+                auth: config.web.auth,
+                enabled: config.web.enabled,
+                listenHost: config.web.listenHost,
+                listenPort: config.web.listenPort,
+                publicBaseUrl: config.web.publicBaseUrl
             }
         });
     }
@@ -79,8 +84,11 @@ export class ControlInstanceTomlDocument {
             podmanBinary: instance.podmanBinary,
             env: instance.env,
             mcp: {
+                auth: instance.mcp.auth.mode,
                 enabled: instance.mcp.enabled,
+                oauth2: instance.mcp.auth.mode === "oauth2" ? compact(instance.mcp.auth.oauth2) : undefined,
                 path: instance.mcp.path,
+                token: instance.mcp.auth.mode === "token" ? instance.mcp.auth.token : undefined,
                 tools: {
                     capabilities: [...instance.mcp.tools.capabilities],
                     groups: [...instance.mcp.tools.groups]
@@ -101,6 +109,13 @@ function assertDocumentVersion(value: unknown, expected: number, path: readonly 
     if (value !== expected) {
         throw configInputError("parse", path, "config.document.versionUnsupported", `must be ${expected}`);
     }
+}
+
+function readDocumentVersion(value: unknown): number {
+    if (typeof value !== "number" || !Number.isSafeInteger(value)) {
+        throw configInputError("parse", ["version"], "config.document.versionType", "must be an integer");
+    }
+    return value;
 }
 
 function rejectLegacyField(record: Record<string, unknown>, key: string, message: string): void {

@@ -48,7 +48,7 @@ test("default config is generated at the fixed control config path", async () =>
         await access(paths.configFile);
         const generated = await readFile(paths.configFile, "utf8");
         assert.match(generated, /\[mcp\]/u);
-        assert.match(generated, /\[web\]\nenabled = false/u);
+        assert.match(generated, /\[web\]\nauth = "none"\nenabled = false/u);
         if (process.platform !== "win32") {
             assert.equal((await stat(paths.configFile)).mode & 0o777, 0o600);
             assert.equal((await stat(paths.controlHomeDir)).mode & 0o777, 0o700);
@@ -74,6 +74,40 @@ test("valid global and instance documents are assembled into canonical config", 
         assert.equal(instance?.logs?.maxBytes, 33_554_432);
         assert.equal(instance?.approvalPolicy?.rules?.[0]?.source, "mcp");
         assert.equal(instance?.security.mode, "workspace");
+    } finally {
+        await rm(homeDirectory, { force: true, recursive: true });
+    }
+});
+
+test("version 1 global MCP auth migrates to each enabled namespace and writes version 2", async () => {
+    const homeDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-control-home-"));
+    const token = "0123456789abcdef0123456789abcdef";
+
+    try {
+        const paths = new ControlPathHome(homeDirectory);
+        await writeFileWithParents(paths.configFile, [
+            "version = 1",
+            "[control]",
+            'logLevel = "info"',
+            "[mcp]",
+            "enabled = true",
+            'listenHost = "127.0.0.1"',
+            "listenPort = 17890",
+            "[mcp.auth]",
+            'mode = "token"',
+            `token = "${token}"`,
+            "[web]",
+            "enabled = true"
+        ].join("\n"));
+        await writeFileWithParents(paths.instanceConfigFile("demo-local"), encodeInstance(createInstanceConfig("/tmp/demo")));
+
+        const config = await new ControlConfigStore().readOrCreate(homeDirectory);
+        assert.deepEqual(config.instances[0]?.mcp.auth, { mode: "token", token });
+        const global = await readFile(paths.configFile, "utf8");
+        const instance = await readFile(paths.instanceConfigFile("demo-local"), "utf8");
+        assert.match(global, /^version = 2$/mu);
+        assert.doesNotMatch(global, /\[mcp\.auth\]/u);
+        assert.match(instance, /auth = "token"/u);
     } finally {
         await rm(homeDirectory, { force: true, recursive: true });
     }
@@ -138,7 +172,7 @@ test("global TOML round-trips the independent WebUI enable switch", () => {
     });
 
     const encoded = toml.encode(globalDocument.encode(config));
-    assert.match(encoded, /\[web\]\nenabled = true/u);
+    assert.match(encoded, /\[web\]\nauth = "none"\nenabled = true/u);
     assert.equal(globalDocument.decode(toml.decode(encoded)).web?.enabled, true);
 });
 
@@ -161,16 +195,13 @@ test("invalid TOML field type is reported with file and structural path", async 
     }
 });
 
-test("public MCP without auth is rejected by semantic validation", async () => {
+test("explicitly exposed MCP without auth remains a valid user choice", async () => {
     const homeDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-control-home-"));
 
     try {
         const paths = new ControlPathHome(homeDirectory);
         await writeFileWithParents(paths.configFile, await readFixture("config-public-no-auth.toml"));
-        await assert.rejects(
-            new ControlConfigStore().readOrCreate(homeDirectory),
-            /mcp\.auth\.mode must not be none when the control HTTP host is publicly exposed/u
-        );
+        await assert.doesNotReject(new ControlConfigStore().readOrCreate(homeDirectory));
     } finally {
         await rm(homeDirectory, { force: true, recursive: true });
     }

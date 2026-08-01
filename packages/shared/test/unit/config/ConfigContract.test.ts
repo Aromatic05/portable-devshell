@@ -14,40 +14,46 @@ import {
 test("config parser trims values and preserves explicit patch removals", () => {
     const parsed = parseConfigDraft({
         control: { logLevel: " debug " },
-        instances: [
-            {
-                name: " local-one ",
-                provider: " local ",
-                workspace: " /workspace "
-            }
-        ],
         mcp: {
-            auth: {
-                mode: " oauth2 ",
-                oauth2: {
-                    requiredScopes: [" mcp ", " artifacts "],
-                    resourceName: " aromatic "
-                }
-            }
+            enabled: true
         },
         web: {
-            enabled: true
-        }
+            auth: "none",
+            enabled: true,
+            listenHost: " 192.168.1.5 ",
+            listenPort: 17891,
+            publicBaseUrl: " 192.168.1.5 "
+        },
+        instances: [
+            {
+                mcp: {
+                    auth: " oauth2 ",
+                    oauth2: {
+                        requiredScopes: [" mcp ", " artifacts "],
+                        resourceName: " aromatic "
+                    }
+                },
+                name: "local-one",
+                provider: "local",
+                workspace: "/workspace"
+            }
+        ]
     });
 
     assert.equal(parsed.control?.logLevel, "debug");
     assert.equal(parsed.instances?.[0]?.name, "local-one");
     assert.equal(parsed.instances?.[0]?.provider, "local");
     assert.equal(parsed.instances?.[0]?.workspace, "/workspace");
-    assert.deepEqual(parsed.mcp?.auth, {
-        mode: "oauth2",
-        oauth2: {
+    assert.equal(parsed.mcp?.enabled, true);
+    assert.equal(parsed.instances?.[0]?.mcp?.auth, "oauth2");
+    assert.deepEqual(parsed.instances?.[0]?.mcp?.oauth2, {
             documentationUrl: undefined,
             requiredScopes: ["mcp", "artifacts"],
             resourceName: "aromatic"
-        }
     });
     assert.equal(parsed.web?.enabled, true);
+    assert.equal(parsed.web?.listenHost, "192.168.1.5");
+    assert.equal(parsed.web?.publicBaseUrl, "192.168.1.5");
 
     const patch = parseConfigInstancePatch({
         container: null,
@@ -72,7 +78,7 @@ test("config parser trims values and preserves explicit patch removals", () => {
     });
 });
 
-test("config parser rejects unknown fields and invalid OAuth2 structure with exact paths", () => {
+test("top-level MCP rejects auth while instance MCP validates OAuth2 structure", () => {
     assertConfigIssue(
         () =>
             parseConfigDraft({
@@ -92,63 +98,65 @@ test("config parser rejects unknown fields and invalid OAuth2 structure with exa
     assertConfigIssue(
         () => parseConfigDraft({ mcp: { auth: { mode: "oauth2" } } }),
         "parse",
-        ["mcp", "auth", "oauth2"],
-        "config.auth.oauth2Required"
+        ["mcp", "auth"],
+        "config.field.unknown"
     );
     assertConfigIssue(
         () =>
             parseConfigDraft({
-                mcp: {
-                    auth: {
-                        mode: "token",
-                        oauth2: { resourceName: "unexpected" }
-                    }
-                }
+                instances: [{
+                    mcp: { auth: "token", oauth2: { resourceName: "unexpected" } },
+                    name: "local-one",
+                    provider: "local",
+                    workspace: "/workspace"
+                }]
             }),
         "parse",
-        ["mcp", "auth", "oauth2"],
+        ["instances", 0, "mcp", "oauth2"],
         "config.auth.unexpectedOauth2"
     );
     assertConfigIssue(
-        () => parseConfigDraft({ mcp: { auth: { mode: "token" } } }),
+        () => parseConfigDraft({ instances: [{ mcp: { auth: "token" }, name: "local-one", provider: "local", workspace: "/workspace" }] }),
         "parse",
-        ["mcp", "auth", "token"],
+        ["instances", 0, "mcp", "token"],
         "config.auth.tokenRequired"
     );
     assertConfigIssue(
         () =>
             parseConfigDraft({
-                mcp: {
-                    auth: {
-                        mode: "oauth2",
+                instances: [{
+                    mcp: {
+                        auth: "oauth2",
                         oauth2: {
                             issuer: "https://issuer.example",
                             resourceName: "aromatic"
                         }
-                    }
-                }
+                    },
+                    name: "local-one",
+                    provider: "local",
+                    workspace: "/workspace"
+                }]
             }),
         "parse",
-        ["mcp", "auth", "oauth2", "issuer"],
+        ["instances", 0, "mcp", "oauth2", "issuer"],
         "config.field.unknown"
     );
 });
 
-test("token auth requires a non-trivial configured secret", () => {
+test("instance token auth requires a non-trivial configured secret", () => {
     const token = "0123456789abcdef0123456789abcdef";
     assert.deepEqual(
-        normalizeConfigDraft({ instances: [], mcp: { auth: { mode: "token", token } } }).mcp.auth,
+        normalizeConfigDraft({ instances: [{ mcp: { auth: "token", token }, name: "local-one", provider: "local", workspace: "/workspace" }] }).instances[0]!.mcp.auth,
         { mode: "token", token }
     );
 
     const weak = normalizeConfigDraft({
-        instances: [],
-        mcp: { auth: { mode: "token", token: "too-short" } }
+        instances: [{ mcp: { auth: "token", token: "too-short" }, name: "local-one", provider: "local", workspace: "/workspace" }]
     });
     assertConfigIssue(
         () => validateConfigSemantics(weak),
         "semantic",
-        ["mcp", "auth", "token"],
+        ["instances", 0, "mcp", "auth", "token"],
         "config.auth.tokenWeak"
     );
 });
@@ -263,22 +271,16 @@ test("semantic validation rejects duplicate names and mismatched instance MCP pa
     );
 });
 
-test("semantic validation requires authenticated public MCP and a public reverse endpoint", () => {
+test("semantic validation permits explicitly exposed unauthenticated endpoints and validates reverse endpoints", () => {
     const publicWithoutAuth = normalizeConfigDraft({
         instances: [],
         mcp: {
-            auth: { mode: "none" },
             enabled: true,
             listenHost: "0.0.0.0",
             publicBaseUrl: "https://devshell.example"
         }
     });
-    assertConfigIssue(
-        () => validateConfigSemantics(publicWithoutAuth),
-        "semantic",
-        ["mcp", "auth", "mode"],
-        "config.mcp.publicAuthRequired"
-    );
+    assert.doesNotThrow(() => validateConfigSemantics(publicWithoutAuth));
 
     const reverseWithoutMcp = normalizeConfigDraft({
         instances: [{ name: "reverse-one", provider: "reverse", workspace: "/workspace" }],
@@ -291,20 +293,6 @@ test("semantic validation requires authenticated public MCP and a public reverse
         "config.reverse.mcpRequired"
     );
 
-    const reverseWithoutPublicBaseUrl = normalizeConfigDraft({
-        instances: [{ name: "reverse-one", provider: "reverse", workspace: "/workspace" }],
-        mcp: {
-            auth: { mode: "token", token: "0123456789abcdef0123456789abcdef" },
-            enabled: true,
-            publicBaseUrl: null
-        }
-    });
-    assertConfigIssue(
-        () => validateConfigSemantics(reverseWithoutPublicBaseUrl),
-        "semantic",
-        ["mcp", "publicBaseUrl"],
-        "config.reverse.publicBaseUrlRequired"
-    );
 });
 
 function assertConfigIssue(

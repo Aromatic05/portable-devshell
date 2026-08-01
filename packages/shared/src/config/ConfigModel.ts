@@ -11,6 +11,7 @@ export type RawConfig = unknown;
 export type ControlProviderKind =
     "docker" | "local" | "podman" | "reverse" | "ssh";
 export type ControlMcpAuthMode = "none" | "oauth2" | "token";
+export type ControlWebAuthMode = "none";
 export type ControlSecurityMode = "disabled" | "workspace";
 
 export interface ControlInstanceLogsConfig {
@@ -38,6 +39,7 @@ export interface ControlInstanceToolsConfig {
 }
 
 export interface ControlInstanceMcpConfig {
+    auth: ControlMcpAuthConfig;
     enabled: boolean;
     path: string;
     tools: {
@@ -129,14 +131,17 @@ export interface ControlGlobalConfig {
         logLevel: string;
     };
     mcp: {
-        auth: ControlMcpAuthConfig;
         enabled: boolean;
         listenHost: string;
         listenPort: number;
-        publicBaseUrl?: string;
+        publicBaseUrl: string;
     };
     web: {
+        auth: ControlWebAuthMode;
         enabled: boolean;
+        listenHost: string;
+        listenPort: number;
+        publicBaseUrl: string;
     };
 }
 
@@ -189,8 +194,11 @@ export type ConfigContainerDraft =
       };
 
 export interface ConfigInstanceMcpDraft {
+    auth?: ControlMcpAuthMode;
     enabled?: boolean;
+    oauth2?: ConfigMcpOAuth2Draft;
     path?: string;
+    token?: string;
     tools?: {
         capabilities?: ToolCapability[];
         groups?: string[];
@@ -234,14 +242,17 @@ export interface ConfigGlobalDraft {
         logLevel?: string;
     };
     mcp?: {
-        auth?: ConfigMcpAuthDraft;
         enabled?: boolean;
         listenHost?: string;
         listenPort?: number;
         publicBaseUrl?: string | null;
     };
     web?: {
+        auth?: ControlWebAuthMode;
         enabled?: boolean;
+        listenHost?: string;
+        listenPort?: number;
+        publicBaseUrl?: string | null;
     };
 }
 
@@ -259,8 +270,11 @@ export interface ConfigInstancePatch {
     env?: ConfigNullable<Record<string, string>>;
     logs?: ConfigNullable<ControlInstanceLogsConfig>;
     mcp?: {
+        auth?: ControlMcpAuthMode;
         enabled?: boolean;
+        oauth2?: ConfigMcpOAuth2Draft;
         path?: ConfigNullable<string>;
+        token?: string;
         tools?: {
             capabilities?: ToolCapability[];
             groups?: string[];
@@ -279,7 +293,14 @@ export interface ConfigInstancePatch {
 }
 
 export interface ConfigMcpPatch {
-    auth?: ConfigMcpAuthDraft;
+    enabled?: boolean;
+    listenHost?: string;
+    listenPort?: number;
+    publicBaseUrl?: ConfigNullable<string>;
+}
+
+export interface ConfigWebPatch {
+    auth?: ControlWebAuthMode;
     enabled?: boolean;
     listenHost?: string;
     listenPort?: number;
@@ -291,6 +312,7 @@ export interface ConfigPatch {
         logLevel?: string;
     };
     mcp?: ConfigMcpPatch;
+    web?: ConfigWebPatch;
 }
 
 export interface ConfigUpdateInstanceRequest {
@@ -300,6 +322,10 @@ export interface ConfigUpdateInstanceRequest {
 
 export interface ConfigUpdateMcpRequest {
     patch: ConfigMcpPatch;
+}
+
+export interface ConfigUpdateWebRequest {
+    patch: ConfigWebPatch;
 }
 
 export interface ConfigInstanceTargetRequest {

@@ -6,9 +6,11 @@ import type {
     ConfigDraft,
     ConfigGlobalDraft,
     ConfigInstanceDraft,
+    ConfigInstanceMcpDraft,
     ConfigInstancePatch,
     ConfigMcpAuthDraft,
     ConfigMcpPatch,
+    ConfigWebPatch,
     ConfigNormalizeContext,
     ConfigView,
     ControlConfig,
@@ -37,23 +39,26 @@ export function normalizeConfigDraft(
 }
 
 export function normalizeConfigGlobalDraft(draft: ConfigGlobalDraft): ControlGlobalConfig {
-    const auth = normalizeMcpAuth(draft.mcp?.auth);
+    const mcpListenHost = draft.mcp?.listenHost ?? "127.0.0.1";
+    const mcpListenPort = draft.mcp?.listenPort ?? 17890;
+    const webListenHost = draft.web?.listenHost ?? mcpListenHost;
+    const webListenPort = draft.web?.listenPort ?? mcpListenPort;
     return {
         control: {
             logLevel: draft.control?.logLevel ?? "info"
         },
         mcp: {
-            auth,
             enabled: draft.mcp?.enabled ?? false,
-            listenHost: draft.mcp?.listenHost ?? "127.0.0.1",
-            listenPort: draft.mcp?.listenPort ?? 17890,
-            publicBaseUrl:
-                draft.mcp?.publicBaseUrl === null
-                    ? undefined
-                    : draft.mcp?.publicBaseUrl ?? "http://127.0.0.1:17890"
+            listenHost: mcpListenHost,
+            listenPort: mcpListenPort,
+            publicBaseUrl: normalizePublicBaseUrl(draft.mcp?.publicBaseUrl, mcpListenHost, mcpListenPort)
         },
         web: {
-            enabled: draft.web?.enabled ?? false
+            auth: draft.web?.auth ?? "none",
+            enabled: draft.web?.enabled ?? false,
+            listenHost: webListenHost,
+            listenPort: webListenPort,
+            publicBaseUrl: normalizePublicBaseUrl(draft.web?.publicBaseUrl, webListenHost, webListenPort)
         }
     };
 }
@@ -83,6 +88,7 @@ export function normalizeConfigInstanceDraft(
         env: cloneNonEmptyRecord(draft.env),
         logs: cloneOptionalRecord(draft.logs),
         mcp: {
+            auth: normalizeInstanceMcpAuth(draft.mcp),
             enabled: draft.mcp?.enabled ?? context.defaultMcpEnabled,
             path: expectedMcpPath,
             tools: {
@@ -175,6 +181,15 @@ export function applyConfigInstancePatch(
             patch.mcp === undefined
                 ? base.mcp
                 : {
+                      ...toInstanceMcpAuthDraft(
+                          patch.mcp.auth === undefined
+                              ? normalizeInstanceMcpAuth(base.mcp)
+                              : normalizeInstanceMcpAuth({
+                                    auth: patch.mcp.auth,
+                                    oauth2: patch.mcp.oauth2,
+                                    token: patch.mcp.token
+                                })
+                      ),
                       enabled: patch.mcp.enabled ?? base.mcp?.enabled,
                       path: applyNullable(patch.mcp.path, base.mcp?.path),
                       tools:
@@ -207,7 +222,19 @@ export function applyConfigMcpPatch(
     patch: ConfigMcpPatch
 ): ConfigGlobalDraft["mcp"] {
     return {
-        auth: patch.auth ?? toMcpAuthDraft(current.auth),
+        enabled: patch.enabled ?? current.enabled,
+        listenHost: patch.listenHost ?? current.listenHost,
+        listenPort: patch.listenPort ?? current.listenPort,
+        publicBaseUrl: patch.publicBaseUrl === undefined ? current.publicBaseUrl : patch.publicBaseUrl
+    };
+}
+
+export function applyConfigWebPatch(
+    current: ControlGlobalConfig["web"],
+    patch: ConfigWebPatch
+): ConfigGlobalDraft["web"] {
+    return {
+        auth: patch.auth ?? current.auth,
         enabled: patch.enabled ?? current.enabled,
         listenHost: patch.listenHost ?? current.listenHost,
         listenPort: patch.listenPort ?? current.listenPort,
@@ -219,16 +246,13 @@ export function toConfigView(config: ControlConfig): ConfigView {
     return {
         control: { ...config.control },
         instances: config.instances.map((instance) => ({
-            ...cloneInstance(instance),
+            ...toConfigInstanceDraft(instance),
             security: {
                 effectiveMode: instance.security.mode,
                 mode: instance.security.mode
             }
-        })),
-        mcp: {
-            ...config.mcp,
-            auth: cloneMcpAuth(config.mcp.auth)
-        },
+        })) as unknown as ConfigView["instances"],
+        mcp: { ...config.mcp },
         web: {
             ...config.web
         }
@@ -244,6 +268,7 @@ export function toConfigInstanceDraft(instance: ControlInstanceConfig): ConfigIn
         env: cloneOptionalRecord(instance.env),
         logs: cloneOptionalRecord(instance.logs),
         mcp: {
+            ...toInstanceMcpAuthDraft(instance.mcp.auth),
             enabled: instance.mcp.enabled,
             path: instance.mcp.path,
             tools: {
@@ -272,6 +297,50 @@ function normalizeMcpAuth(draft: ConfigMcpAuthDraft | undefined): ControlMcpAuth
             resourceName: draft.oauth2.resourceName
         }
     };
+}
+
+function normalizeInstanceMcpAuth(
+    draft: Pick<ConfigInstanceMcpDraft, "auth" | "oauth2" | "token"> | undefined
+): ControlMcpAuthConfig {
+    if (draft?.auth === undefined || draft.auth === "none") return { mode: "none" };
+    if (draft.auth === "token") return { mode: "token", token: draft.token! };
+    return {
+        mode: "oauth2",
+        oauth2: {
+            documentationUrl: draft.oauth2!.documentationUrl,
+            requiredScopes: deduplicate(draft.oauth2!.requiredScopes ?? []),
+            resourceName: draft.oauth2!.resourceName
+        }
+    };
+}
+
+function toInstanceMcpAuthDraft(
+    auth: ControlMcpAuthConfig
+): Partial<Pick<ConfigInstanceMcpDraft, "auth" | "oauth2" | "token">> {
+    if (auth.mode === "none") return { auth: "none" };
+    if (auth.mode === "token") return { auth: "token", token: auth.token };
+    return {
+        auth: "oauth2",
+        oauth2: {
+            ...auth.oauth2,
+            requiredScopes: [...auth.oauth2.requiredScopes]
+        }
+    };
+}
+
+export function normalizePublicBaseUrl(
+    value: string | null | undefined,
+    listenHost: string,
+    listenPort: number
+): string {
+    const source = value === null ? undefined : value;
+    if (source === undefined) return `http://${formatUrlHost(listenHost)}:${listenPort}`;
+    if (/^https?:\/\//iu.test(source)) return source;
+    return `http://${formatUrlHost(source)}:${listenPort}`;
+}
+
+function formatUrlHost(value: string): string {
+    return value.includes(":") && !value.startsWith("[") ? `[${value}]` : value;
 }
 
 function normalizeContainer(
@@ -373,6 +442,7 @@ function cloneInstance(instance: ControlInstanceConfig): ControlInstanceConfig {
         logs: cloneOptionalRecord(instance.logs),
         mcp: {
             ...instance.mcp,
+            auth: cloneMcpAuth(instance.mcp.auth),
             tools: {
                 capabilities: [...instance.mcp.tools.capabilities],
                 groups: [...instance.mcp.tools.groups]
