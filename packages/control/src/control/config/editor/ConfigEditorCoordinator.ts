@@ -3,6 +3,7 @@ import {
     ConfigInputError,
     applyConfigInstancePatch,
     applyConfigMcpPatch,
+    applyConfigWebPatch,
     createError,
     errorCodes,
     formatConfigPath,
@@ -13,6 +14,7 @@ import {
     parseConfigInstanceTargetRequest,
     parseConfigUpdateInstanceRequest,
     parseConfigUpdateMcpRequest,
+    parseConfigUpdateWebRequest,
     toConfigView,
     type ControlConfig,
     type JsonValue
@@ -22,6 +24,7 @@ import { InstanceFactory } from "../../instance/InstanceFactory.js";
 import type { InstanceRegistry } from "../../instance/registry/InstanceRegistry.js";
 import { McpEndpointFactory } from "../../../composition/McpEndpointFactory.js";
 import { ControlConfigValidator } from "../ControlConfigValidator.js";
+import { HttpEndpointPreflight } from "../../../server/http/HttpEndpointPreflight.js";
 import {
     buildApplyResult,
     emptyApplyResult,
@@ -44,7 +47,9 @@ interface ConfigEditorCoordinatorOptions {
     instanceConfigMapper?: InstanceFactory;
     instanceRegistry: InstanceRegistry;
     mcpEndpointConfigMapper?: McpEndpointFactory;
+    runtimeApply?: { apply(previous: ControlConfig, next: ControlConfig): Promise<void> };
     setConfig: (config: ControlConfig) => void;
+    runtimePreflight?: { assertAvailable(previous: ControlConfig, next: ControlConfig): Promise<void> };
     validator?: ControlConfigValidator;
 }
 
@@ -58,6 +63,8 @@ export class ConfigEditorCoordinator {
     readonly #instanceRegistry: InstanceRegistry;
     readonly #mcpEndpointConfigMapper: McpEndpointFactory;
     readonly #setConfig: (config: ControlConfig) => void;
+    readonly #runtimePreflight: { assertAvailable(previous: ControlConfig, next: ControlConfig): Promise<void> };
+    readonly #runtimeApply?: { apply(previous: ControlConfig, next: ControlConfig): Promise<void> };
     readonly #validator: ControlConfigValidator;
     #lastApplyResult: ConfigApplyResult = emptyApplyResult();
 
@@ -71,6 +78,8 @@ export class ConfigEditorCoordinator {
         this.#instanceRegistry = options.instanceRegistry;
         this.#mcpEndpointConfigMapper = options.mcpEndpointConfigMapper ?? new McpEndpointFactory();
         this.#setConfig = options.setConfig;
+        this.#runtimePreflight = options.runtimePreflight ?? new HttpEndpointPreflight();
+        this.#runtimeApply = options.runtimeApply;
         this.#validator = options.validator ?? new ControlConfigValidator();
     }
 
@@ -98,6 +107,7 @@ export class ConfigEditorCoordinator {
         });
         const descriptor = this.#instanceRegistry.get(request.instanceName);
         const rebuildRequired = descriptor !== undefined && requiresWorkerRebuild(existing, instance);
+        const authChanged = JSON.stringify(existing.mcp.auth) !== JSON.stringify(instance.mcp.auth);
         if (rebuildRequired) this.#assertInstanceStopped(request.instanceName, "update");
 
         await this.#persistConfig(nextConfig);
@@ -114,7 +124,11 @@ export class ConfigEditorCoordinator {
             descriptor.mcpPath = instance.mcp.path;
             descriptor.worker.reconfigure(toWorkerReconfigureInput(instance));
         }
-        this.#syncMcpEndpoint(request.instanceName);
+        if (authChanged && this.#runtimeApply !== undefined) {
+            await this.#applyRuntimeOrRestore(currentConfig, nextConfig);
+        } else {
+            this.#syncMcpEndpoint(request.instanceName);
+        }
         this.#rememberApplyResult(
             buildApplyResult(currentConfig, nextConfig, [{ kind: "instance.updated", target: request.instanceName }])
         );
@@ -132,8 +146,28 @@ export class ConfigEditorCoordinator {
         );
         const nextConfig = this.#validateConfig({ ...currentConfig, mcp: global.mcp });
 
+        await this.#runtimePreflight.assertAvailable(currentConfig, nextConfig);
         await this.#persistConfig(nextConfig);
-        this.#rememberApplyResult(buildApplyResult(currentConfig, nextConfig, [{ kind: "mcp.updated", target: "mcp" }]));
+        await this.#applyRuntimeOrRestore(currentConfig, nextConfig);
+        this.#rememberApplyResult(buildApplyResult(currentConfig, nextConfig, [{ kind: "mcp.endpoint.updated", target: "mcp" }]));
+        return this.getConfigView();
+    }
+
+    async updateWebConfig(params: JsonValue | undefined): Promise<JsonValue> {
+        const request = this.#readConfigInput(() => parseConfigUpdateWebRequest(params));
+        const currentConfig = this.#getConfig();
+        const global = this.#readConfigInput(() =>
+            normalizeConfigGlobalDraft({
+                control: currentConfig.control,
+                mcp: currentConfig.mcp,
+                web: applyConfigWebPatch(currentConfig.web, request.patch)
+            })
+        );
+        const nextConfig = this.#validateConfig({ ...currentConfig, web: global.web });
+        await this.#runtimePreflight.assertAvailable(currentConfig, nextConfig);
+        await this.#persistConfig(nextConfig);
+        await this.#applyRuntimeOrRestore(currentConfig, nextConfig);
+        this.#rememberApplyResult(buildApplyResult(currentConfig, nextConfig, [{ kind: "web.updated", target: "web" }]));
         return this.getConfigView();
     }
 
@@ -219,7 +253,7 @@ export class ConfigEditorCoordinator {
             host.unregisterInstance(instanceName);
             return;
         }
-        host.registerInstance(this.#mcpEndpointConfigMapper.map(descriptor, this.#getMcpInstanceGateway()));
+        host.registerInstance(this.#mcpEndpointConfigMapper.map(descriptor, this.#getMcpInstanceGateway(), instance.mcp.auth));
     }
 
     #assertInstanceStopped(instanceName: string, operation: "delete" | "disable" | "update"): void {
@@ -238,6 +272,16 @@ export class ConfigEditorCoordinator {
     async #persistConfig(config: ControlConfig): Promise<void> {
         await this.#configStore.write(config, this.#homeDirectory);
         this.#setConfig(config);
+    }
+
+    async #applyRuntimeOrRestore(previous: ControlConfig, next: ControlConfig): Promise<void> {
+        if (this.#runtimeApply === undefined) return;
+        try {
+            await this.#runtimeApply.apply(previous, next);
+        } catch (error) {
+            await this.#persistConfig(previous);
+            throw error;
+        }
     }
 
     #validateConfig(config: ControlConfig): ControlConfig {

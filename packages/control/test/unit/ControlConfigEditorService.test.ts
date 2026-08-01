@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createServer } from "node:net";
 import test from "node:test";
 
 import {
@@ -31,11 +32,12 @@ test("config editor validates drafts and accumulates patch apply summaries", asy
     assert.equal(view.instances[0]?.security.mode, "disabled");
     assert.equal(view.instances[0]?.security.effectiveMode, "disabled");
 
+    const configView = service.getConfigView() as { instances: Array<Record<string, unknown>> } & Record<string, unknown>;
     const validated = service.validateConfigDraft({
-        ...config,
+        ...configView,
         instances: [
             {
-                ...config.instances[0],
+                ...configView.instances[0],
                 approvalPolicy: { mode: "ask" },
                 security: { mode: "workspace" }
             }
@@ -57,16 +59,23 @@ test("config editor validates drafts and accumulates patch apply summaries", asy
 
     await service.updateMcpConfig({
         patch: {
-            auth: { mode: "token", token: "0123456789abcdef0123456789abcdef" },
             enabled: true,
             listenHost: "127.0.0.1",
             listenPort: 17891,
             publicBaseUrl: "http://127.0.0.1:17891"
         }
     });
+    await service.updateWebConfig({
+        patch: { enabled: true, listenHost: "127.0.0.1", listenPort: 17892, publicBaseUrl: "127.0.0.1" }
+    });
+    await service.updateInstanceConfig({
+        instanceName: "demo-local",
+        patch: { mcp: { auth: "token", token: "0123456789abcdef0123456789abcdef" } }
+    });
 
     const applied = service.applyConfig() as {
         affectedInstances: string[];
+        affectedListeners: string[];
         affectedMcpEndpoints: string[];
         appliedChanges: Array<{ kind: string; target: string }>;
         reloadRequired: boolean;
@@ -74,13 +83,145 @@ test("config editor validates drafts and accumulates patch apply summaries", asy
     };
     assert.deepEqual(applied.appliedChanges, [
         { kind: "instance.updated", target: "demo-local" },
-        { kind: "mcp.updated", target: "mcp" }
+        { kind: "mcp.endpoint.updated", target: "mcp" },
+        { kind: "web.updated", target: "web" },
+        { kind: "instance.updated", target: "demo-local" }
     ]);
     assert.deepEqual(applied.affectedInstances, ["demo-local"]);
-    assert.deepEqual(applied.affectedMcpEndpoints, ["mcp"]);
+    assert.deepEqual(applied.affectedListeners, ["127.0.0.1:17890", "127.0.0.1:17891", "127.0.0.1:17892"]);
+    assert.deepEqual(applied.affectedMcpEndpoints, ["/demo-local/mcp", "mcp"]);
     assert.equal(applied.reloadRequired, true);
     assert.equal(applied.restartControlRequired, true);
-    assert.deepEqual(service.applyConfig(), emptyApplyResult());
+    assert.deepEqual(service.applyConfig(), { ...emptyApplyResult(), affectedListeners: [] });
+});
+
+test("listener preflight rejects an occupied Web bind without persisting configuration", async () => {
+    let config = createConfig();
+    const writes: ControlConfig[] = [];
+    const occupied = createServer();
+    await new Promise<void>((resolve) => occupied.listen(0, "127.0.0.1", resolve));
+    const address = occupied.address();
+    assert.ok(typeof address === "object" && address !== null);
+    const service = new ConfigEditorCoordinator({
+        configStore: {
+            async write(nextConfig: ControlConfig) {
+                writes.push(nextConfig);
+                config = nextConfig;
+            }
+        },
+        getConfig: () => config,
+        instanceRegistry: new InstanceRegistryFactory().build(config),
+        setConfig: (nextConfig) => {
+            config = nextConfig;
+        }
+    });
+
+    try {
+        await assert.rejects(
+            service.updateWebConfig({
+                patch: { enabled: true, listenHost: "127.0.0.1", listenPort: address.port }
+            }),
+            /Cannot bind HTTP listener 127\.0\.0\.1:/u
+        );
+        assert.equal(writes.length, 0);
+        assert.equal(config.web.listenPort, 17890);
+    } finally {
+        await new Promise<void>((resolve, reject) => occupied.close((error) => error === undefined ? resolve() : reject(error)));
+    }
+});
+
+test("listener preflight does not treat a disabled MCP endpoint as active", async () => {
+    let config = createConfig();
+    config.mcp.enabled = false;
+    const occupied = createServer();
+    await new Promise<void>((resolve) => occupied.listen(0, "127.0.0.1", resolve));
+    const address = occupied.address();
+    assert.ok(typeof address === "object" && address !== null);
+    config.mcp.listenPort = address.port;
+    config.web.listenPort = address.port;
+    const service = new ConfigEditorCoordinator({
+        configStore: { async write() {} },
+        getConfig: () => config,
+        instanceRegistry: new InstanceRegistryFactory().build(config),
+        setConfig: (nextConfig) => {
+            config = nextConfig;
+        }
+    });
+
+    try {
+        await assert.rejects(
+            service.updateWebConfig({ patch: { enabled: true } }),
+            /Cannot bind HTTP listener 127\.0\.0\.1:/u
+        );
+        assert.equal(config.web.enabled, false);
+    } finally {
+        await new Promise<void>((resolve, reject) => occupied.close((error) => error === undefined ? resolve() : reject(error)));
+    }
+});
+
+test("endpoint runtime failure restores the prior persisted configuration", async () => {
+    let config = createConfig();
+    const writes: ControlConfig[] = [];
+    const service = new ConfigEditorCoordinator({
+        configStore: {
+            async write(nextConfig: ControlConfig) {
+                writes.push(nextConfig);
+                config = nextConfig;
+            }
+        },
+        getConfig: () => config,
+        instanceRegistry: new InstanceRegistryFactory().build(config),
+        runtimeApply: {
+            async apply() {
+                throw new Error("new listener did not become healthy");
+            }
+        },
+        setConfig: (nextConfig) => {
+            config = nextConfig;
+        }
+    });
+
+    await assert.rejects(
+        service.updateWebConfig({ patch: { enabled: true, listenPort: 17891 } }),
+        /new listener did not become healthy/u
+    );
+    assert.equal(writes.length, 2);
+    assert.equal(writes[0]?.web.listenPort, 17891);
+    assert.equal(writes[1]?.web.listenPort, 17890);
+    assert.equal(config.web.listenPort, 17890);
+});
+
+test("namespace auth updates restart the HTTP runtime before exposing OAuth", async () => {
+    let config = createConfig();
+    let applyCalls = 0;
+    const service = new ConfigEditorCoordinator({
+        configStore: {
+            async write(nextConfig: ControlConfig) {
+                config = nextConfig;
+            }
+        },
+        getConfig: () => config,
+        instanceRegistry: new InstanceRegistryFactory().build(config),
+        runtimeApply: {
+            async apply() {
+                applyCalls += 1;
+            }
+        },
+        setConfig: (nextConfig) => {
+            config = nextConfig;
+        }
+    });
+
+    await service.updateInstanceConfig({
+        instanceName: "demo-local",
+        patch: {
+            mcp: {
+                auth: "oauth2",
+                oauth2: { requiredScopes: ["mcp"], resourceName: "demo-local" }
+            }
+        }
+    });
+    assert.equal(applyCalls, 1);
 });
 
 test("config editor reconfigures and disables a running instance without replacing it", async () => {
@@ -199,10 +340,25 @@ test("config editor reconciles instance MCP bindings from patches without restar
         capabilities: ["read", "write", "execute", "manage"],
         groups: ["file", "bash", "artifact", "instance"]
     });
+    assert.deepEqual(registered[0]?.auth, { enabled: false, provider: "none" });
+
+    await service.updateInstanceConfig({
+        instanceName: "demo-local",
+        patch: { mcp: { auth: "token", token: "0123456789abcdef0123456789abcdef" } }
+    });
+    assert.deepEqual(registered[1]?.auth, {
+        enabled: true,
+        provider: "token",
+        token: "0123456789abcdef0123456789abcdef"
+    });
     assert.deepEqual(service.applyConfig(), {
         affectedInstances: ["demo-local"],
+        affectedListeners: [],
         affectedMcpEndpoints: ["/demo-local/mcp"],
-        appliedChanges: [{ kind: "instance.updated", target: "demo-local" }],
+        appliedChanges: [
+            { kind: "instance.updated", target: "demo-local" },
+            { kind: "instance.updated", target: "demo-local" }
+        ],
         reloadRequired: true,
         restartControlRequired: false
     });
@@ -210,7 +366,7 @@ test("config editor reconciles instance MCP bindings from patches without restar
     await service.disableInstance({ instanceName: "demo-local" });
     assert.deepEqual(unregistered, ["demo-local"]);
     await service.enableInstance({ instanceName: "demo-local" });
-    assert.equal(registered.length, 2);
+    assert.equal(registered.length, 3);
     await service.deleteInstance({ instanceName: "demo-local" });
     assert.deepEqual(unregistered, ["demo-local", "demo-local"]);
     assert.equal(registry.get("demo-local"), undefined);

@@ -10,6 +10,7 @@ export interface ConfigEditorPort {
     getConfigView(): JsonValue;
     updateInstanceConfig(params?: JsonValue): Promise<JsonValue>;
     updateMcpConfig(params?: JsonValue): Promise<JsonValue>;
+    updateWebConfig(params?: JsonValue): Promise<JsonValue>;
     validateConfigDraft(params?: JsonValue): JsonValue;
 }
 
@@ -19,7 +20,8 @@ export function createConfigRouteModule(service?: ConfigEditorPort): PrefixRoute
         get: () => config().getConfigView(),
         validate: (request) => config().validateConfigDraft(request.payload),
         updateInstance: async (request) => await config().updateInstanceConfig(request.payload),
-        updateMcp: async (request) => await config().updateMcpConfig(request.payload),
+        updateMcpEndpoint: async (request) => await config().updateMcpConfig(request.payload),
+        updateWeb: async (request) => await config().updateWebConfig(request.payload),
         apply: async () => await config().applyConfig()
     });
 }

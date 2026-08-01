@@ -63,6 +63,9 @@ export class ControlServer {
         await this.#state.load();
         await this.#socketFile.ensureRuntimeDir();
         const runtime = await this.#runtimeFactory.create({
+            applyRuntimeConfig: async (previous) => {
+                await this.#applyRuntimeConfig(previous);
+            },
             restart: async () => {
                 await this.restart();
             },
@@ -89,6 +92,26 @@ export class ControlServer {
         } finally {
             this.#state.reset();
         }
+    }
+
+    async #applyRuntimeConfig(previous: ControlConfig): Promise<void> {
+        await this.#runExclusive(async () => {
+            await this.#stop();
+            try {
+                await this.#start();
+            } catch (error) {
+                try {
+                    await this.#state.configStore.write(previous, this.#state.homeDirectory);
+                    await this.#start();
+                } catch (restoreError) {
+                    throw new AggregateError(
+                        [error, restoreError],
+                        "Control runtime could not apply the new configuration or restore the previous runtime."
+                    );
+                }
+                throw error;
+            }
+        });
     }
 
     async #runExclusive<T>(factory: () => Promise<T>): Promise<T> {

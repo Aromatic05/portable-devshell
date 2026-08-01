@@ -1,4 +1,5 @@
 export * from "./server/ControlDaemon.js";
+export * from "./server/http/HttpEndpointPreflight.js";
 export * from "./control/artifact/ArtifactService.js";
 export * from "./control/artifact/route/ArtifactHttpRoute.js";
 export * from "./control/artifact/host/ArtifactHostBridge.js";

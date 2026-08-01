@@ -164,7 +164,7 @@ export class InstanceCreateCoordinator {
         this.#instanceRegistry.add(descriptor);
         if (nextConfig.mcp.enabled && normalized.mcp.enabled) {
             this.#getMcpHost()?.registerInstance(
-                this.#mcpEndpointConfigMapper.map(descriptor, this.#getMcpInstanceGateway())
+                this.#mcpEndpointConfigMapper.map(descriptor, this.#getMcpInstanceGateway(), normalized.mcp.auth)
             );
         }
 

@@ -6,13 +6,14 @@ import {
 } from "@portable-devshell/shared";
 
 export interface ConfigApplyChange {
-    kind: "instance.deleted" | "instance.disabled" | "instance.enabled" | "instance.updated" | "mcp.updated";
+    kind: "instance.deleted" | "instance.disabled" | "instance.enabled" | "instance.updated" | "mcp.endpoint.updated" | "web.updated";
     target: string;
 }
 
 export interface ConfigApplyResult {
     affectedInstances: string[];
     affectedMcpEndpoints: string[];
+    affectedListeners: string[];
     appliedChanges: ConfigApplyChange[];
     reloadRequired: boolean;
     restartControlRequired: boolean;
@@ -21,6 +22,7 @@ export interface ConfigApplyResult {
 export const emptyApplyResult = (): ConfigApplyResult => ({
     affectedInstances: [],
     affectedMcpEndpoints: [],
+    affectedListeners: [],
     appliedChanges: [],
     reloadRequired: false,
     restartControlRequired: false
@@ -29,6 +31,7 @@ export const emptyApplyResult = (): ConfigApplyResult => ({
 export function buildApplyResult(previous: ControlConfig, next: ControlConfig, appliedChanges: ConfigApplyChange[]): ConfigApplyResult {
     const affectedInstances = new Set<string>();
     const affectedMcpEndpoints = new Set<string>();
+    const affectedListeners = new Set<string>();
     let restartControlRequired = false;
 
     const previousInstances = new Map(previous.instances.map((instance) => [instance.name, instance] as const));
@@ -52,11 +55,19 @@ export function buildApplyResult(previous: ControlConfig, next: ControlConfig, a
     if (stableStringify(previous.mcp) !== stableStringify(next.mcp)) {
         restartControlRequired = true;
         affectedMcpEndpoints.add("mcp");
+        affectedListeners.add(listenerId(previous.mcp.listenHost, previous.mcp.listenPort));
+        affectedListeners.add(listenerId(next.mcp.listenHost, next.mcp.listenPort));
+    }
+    if (stableStringify(previous.web) !== stableStringify(next.web)) {
+        restartControlRequired = true;
+        affectedListeners.add(listenerId(previous.web.listenHost, previous.web.listenPort));
+        affectedListeners.add(listenerId(next.web.listenHost, next.web.listenPort));
     }
 
     return {
         affectedInstances: [...affectedInstances].sort((left, right) => left.localeCompare(right)),
         affectedMcpEndpoints: [...affectedMcpEndpoints].sort((left, right) => left.localeCompare(right)),
+        affectedListeners: [...affectedListeners].sort((left, right) => left.localeCompare(right)),
         appliedChanges,
         reloadRequired: affectedInstances.size > 0,
         restartControlRequired
@@ -71,10 +82,17 @@ export function mergeApplyResults(previous: ConfigApplyResult, next: ConfigApply
         affectedMcpEndpoints: [...new Set([...previous.affectedMcpEndpoints, ...next.affectedMcpEndpoints])].sort((left, right) =>
             left.localeCompare(right)
         ),
+        affectedListeners: [...new Set([...previous.affectedListeners, ...next.affectedListeners])].sort((left, right) =>
+            left.localeCompare(right)
+        ),
         appliedChanges: [...previous.appliedChanges, ...next.appliedChanges],
         reloadRequired: previous.reloadRequired || next.reloadRequired,
         restartControlRequired: previous.restartControlRequired || next.restartControlRequired
     };
+}
+
+function listenerId(host: string, port: number): string {
+    return `${host}:${port}`;
 }
 
 export function toWorkerReconfigureInput(instance: ControlInstanceConfig): {
