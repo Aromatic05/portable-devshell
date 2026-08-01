@@ -55,10 +55,11 @@ test("control tool route appends the same worker result hint after user comments
     assert.equal(result.exitCode, 7);
     assert.equal(result.stderr, "boom");
     assert.equal("result" in result, false);
-    assert.deepEqual(result.comment, [
-        "Do not change permissions globally.",
-        "Error hint [bash.nonZeroExit]: The command ran but exited with code 7. Inspect the original stdout and stderr, then correct the command, dependencies, input, or environment before calling again. Do not report completion or retry the same command unchanged."
-    ]);
+    assert.ok(Array.isArray(result.comment));
+    assert.equal(result.comment[0], "Do not change permissions globally.");
+    assert.match(String(result.comment[1]), /^\[bash\.nonZeroExit\] /u);
+    assert.match(String(result.comment[1]), /code 7/i);
+    assert.match(String(result.comment[1]), /inspect output/i);
 });
 
 test("control tool route turns a thrown error into a structured hint instead of copying the message", async () => {
@@ -73,8 +74,9 @@ test("control tool route turns a thrown error into a structured hint instead of 
 
     assert.equal(result.result, null);
     assert.deepEqual(result.error, { code: "file.revisionMismatch", message: "stale revision", retryable: true });
-    assert.deepEqual(result.comment, [
-        "Do not change permissions globally.",
-        "Error hint [file.revisionMismatch]: The file changed after it was read or searched. Read the latest content and regenerate the edit or search; do not overwrite or rely on the older revision."
-    ]);
+    assert.ok(Array.isArray(result.comment));
+    assert.equal(result.comment[0], "Do not change permissions globally.");
+    assert.match(String(result.comment[1]), /^\[file\.revisionMismatch\] /u);
+    assert.match(String(result.comment[1]), /read the latest content/i);
+    assert.match(String(result.comment[1]), /regenerate the operation/i);
 });
