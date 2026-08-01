@@ -374,6 +374,48 @@ test("context message composer requires the context MCP group", async () => {
     );
 });
 
+test("context message composer stays open while submission is pending", async () => {
+    let release!: () => void;
+    const pending = new Promise<void>((resolve) => {
+        release = resolve;
+    });
+    const harness = createHarness({
+        onContextMessage: async () => await pending,
+    });
+    enterAuditContext(harness, "ctx-alpha");
+    assert.equal(
+        await dispatchResult(harness, {
+            type: "messageComposer.open",
+            instance: "alpha",
+            ctxId: "ctx-alpha",
+        }),
+        true,
+    );
+    await harness.press("pasted guidance");
+    const submission = harness.press("", { ctrl: true, return: true });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    assert.equal(
+        topTuiOverlay(harness.store.getState().interaction.overlays)?.kind,
+        "message-composer",
+    );
+    assert.equal(
+        await dispatchResult(harness, { type: "ui.cancel" }),
+        false,
+    );
+    assert.equal(
+        topTuiOverlay(harness.store.getState().interaction.overlays)?.kind,
+        "message-composer",
+    );
+
+    release();
+    await submission;
+    assert.equal(
+        topTuiOverlay(harness.store.getState().interaction.overlays),
+        undefined,
+    );
+});
+
 test("Todo uses a dedicated instance-scoped page and does not appear in Instances boxes", async () => {
     const harness = createHarness();
     assert.equal(
@@ -2077,6 +2119,11 @@ function createHarness(
             patch: Record<string, unknown>,
         ) => Promise<void>;
         onMcpConfigUpdate?: (value: Record<string, unknown>) => Promise<void>;
+        onContextMessage?: (
+            instance: string,
+            ctxId: string,
+            text: string,
+        ) => Promise<void>;
         onToolCall?: (
             instance: string,
             toolName: string,
@@ -2158,6 +2205,7 @@ function createHarness(
         onInstanceConfigUpdate: options.onInstanceConfigUpdate as never,
         onMcpConfigUpdate: options.onMcpConfigUpdate as never,
         onApplyConfig: async () => ({}),
+        onContextMessage: options.onContextMessage,
         onQuit: async () => undefined,
         onRedraw: () => undefined,
         onToolCall: options.onToolCall ?? (async () => true),

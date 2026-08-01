@@ -7,6 +7,7 @@ import type { TuiCommandDispatcherFocus } from "./TuiCommandDispatcherFocus.js";
 import { TuiCommandDispatcherOverlay } from "./TuiCommandDispatcherOverlay.js";
 import { TuiCommandDispatcherViewport } from "./TuiCommandDispatcherViewport.js";
 import { selectTuiOverviewInstanceName } from "../../../view/page/TuiOverviewPresentation.js";
+import { topTuiOverlay } from "../../../state/overlay/TuiOverlay.js";
 
 export interface TuiCommandDispatcherNavigationOptions {
     dispatch?(intent: TuiUiIntent): Promise<boolean>;
@@ -103,8 +104,8 @@ export class TuiCommandDispatcherNavigation {
     }
 
     cancelPassiveScope(): boolean {
-        if (this.#overlay.cancelPassiveScope()) {
-            return true;
+        if (topTuiOverlay(this.#store.getState().interaction.overlays) !== undefined) {
+            return this.#overlay.cancelPassiveScope();
         }
         if (this.#store.popRoute()) {
             this.#focus.syncMainFocus();

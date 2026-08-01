@@ -1,8 +1,11 @@
-import type {
-    InstanceListEntry,
-    InstanceLogEntry,
-    InstanceRuntimeEnvelope,
-    JsonValue
+import {
+    createError,
+    errorCodes,
+    type InstanceListEntry,
+    type InstanceLogEntry,
+    type InstanceRuntimeEnvelope,
+    type InstanceSnapshot,
+    type JsonValue
 } from "@portable-devshell/shared";
 
 import type { TuiClients } from "../client/TuiClientComposition.js";
@@ -11,6 +14,7 @@ import type {
     TuiInstanceListEntry,
     TuiLogEntry
 } from "../../state/reducer/TuiStoreModel.js";
+import { withTuiRequestTimeout } from "./TuiRequestTimeout.js";
 
 const LOG_READ_LIMIT = 100;
 const TOOL_CALL_READ_LIMIT = 100;
@@ -23,77 +27,107 @@ export interface TuiControlSubscriptionRequest {
 export interface TuiControlSessionRefreshOptions {
     clients: TuiClients;
     isCurrent?: (generation: number) => boolean;
+    readTimeoutMs?: number;
     store: TuiAppStore;
 }
 
 export class TuiControlSessionRefresh {
+    readonly #authoritativeSnapshots = new Map<string, InstanceSnapshot>();
     readonly #clients: TuiClients;
     readonly #isCurrent: (generation: number) => boolean;
+    readonly #readTimeoutMs: number;
+    readonly #requestVersions = new Map<string, number>();
     readonly #store: TuiAppStore;
 
     constructor(options: TuiControlSessionRefreshOptions) {
         this.#clients = options.clients;
         this.#isCurrent = options.isCurrent ?? (() => true);
+        this.#readTimeoutMs = options.readTimeoutMs ?? 10_000;
         this.#store = options.store;
     }
 
+    applyAuthoritativeSnapshot(snapshot: InstanceSnapshot): void {
+        this.#beginRequest(`snapshot:${snapshot.name}`);
+        this.#authoritativeSnapshots.set(snapshot.name, snapshot);
+        this.#store.replaceSnapshot(snapshot);
+    }
+
     async refreshAll(generation?: number): Promise<TuiControlSubscriptionRequest[]> {
-        await this.refreshOverview(generation);
-        if (!this.#current(generation)) return [];
-        const configView = await this.#readConfigView();
-        const runtimeInstances = await this.#clients.instance.list();
-        const mcpStatus = await this.#clients.mcp.status();
+        const [configView, runtimeInstances, mcpStatus] = await Promise.all([
+            this.#request(this.#readConfigView(), "config.get"),
+            this.#request(this.#clients.instance.list(), "instance.list"),
+            this.#request(this.#clients.mcp.status(), "mcp.status")
+        ]);
         if (!this.#current(generation)) return [];
         this.#store.setMcpStatus(mcpStatus);
-        this.#store.replaceInstances(
-            mergeInstances(configView, runtimeInstances)
-        );
+        this.#store.replaceInstances(mergeInstances(configView, runtimeInstances));
         this.#store.setConfigView(configView);
-        await this.#reloadOAuthApprovals(configView, generation);
-        await this.refreshArtifacts(generation);
+
+        await Promise.all([
+            this.refreshOverview(generation),
+            this.refreshOAuth(generation),
+            this.refreshArtifacts(generation)
+        ]);
         if (!this.#current(generation)) return [];
 
         const subscriptions: TuiControlSubscriptionRequest[] = [];
         for (const instance of runtimeInstances) {
             if (!this.#current(generation)) break;
-            subscriptions.push({
-                fromSeq: await this.refreshRuntimeInstance(instance.name, generation),
-                instance: instance.name
-            });
+            const fromSeq = await this.refreshRuntimeInstance(instance.name, generation);
+            if (fromSeq !== undefined) subscriptions.push({ fromSeq, instance: instance.name });
         }
         return subscriptions;
     }
 
     async refreshConfig(generation?: number, signal?: AbortSignal): Promise<void> {
-        const configView = await this.#readConfigView();
-        const runtimeInstances = await this.#clients.instance.list();
-        const mcpStatus = await this.#clients.mcp.status();
+        const [configView, runtimeInstances, mcpStatus] = await Promise.all([
+            this.#request(this.#readConfigView(), "config.get"),
+            this.#request(this.#clients.instance.list(), "instance.list"),
+            this.#request(this.#clients.mcp.status(), "mcp.status")
+        ]);
         if (!this.#current(generation, signal)) return;
         this.#store.setMcpStatus(mcpStatus);
-        this.#store.replaceInstances(
-            mergeInstances(configView, runtimeInstances)
-        );
+        this.#store.replaceInstances(mergeInstances(configView, runtimeInstances));
         this.#store.setConfigView(configView);
     }
 
     async refreshOverview(generation?: number, signal?: AbortSignal): Promise<void> {
+        const key = "overview";
+        const version = this.#beginRequest(key);
         try {
-            const overview = await this.#clients.overview.get();
-            if (this.#current(generation, signal)) this.#store.replaceOperationalOverview(overview);
+            const overview = await this.#request(this.#clients.overview.get(), "overview.get");
+            if (!this.#current(generation, signal) || !this.#latestRequest(key, version)) return;
+            this.#store.replaceOperationalOverview(overview);
+            this.#store.setPanelError("overview:-:overview", undefined);
         } catch (error) {
-            if (readErrorCode(error) !== "control.methodNotFound") {
-                throw error;
+            if (!this.#current(generation, signal) || !this.#latestRequest(key, version)) return;
+            if (readErrorCode(error) === "control.methodNotFound") {
+                this.#store.replaceOperationalOverview(undefined);
+                this.#store.setPanelError("overview:-:overview", undefined);
+                return;
             }
-            if (this.#current(generation, signal)) this.#store.replaceOperationalOverview(undefined);
+            this.#store.setPanelError("overview:-:overview", toPanelError(error));
         }
     }
 
     async refreshOAuth(generation?: number, signal?: AbortSignal): Promise<void> {
-        await this.#reloadOAuthApprovals(
-            this.#store.getState().configView,
-            generation,
-            signal
-        );
+        const key = "oauth";
+        const version = this.#beginRequest(key);
+        if (oauthApprovalsUnavailable(this.#store.getState().configView)) {
+            if (this.#current(generation, signal) && this.#latestRequest(key, version)) {
+                this.#store.replaceOAuthApprovals([]);
+                this.#setPageError("connections", undefined);
+            }
+            return;
+        }
+        try {
+            const approvals = await this.#request(this.#clients.mcp.listApprovals(), "mcp.approvals.list");
+            if (!this.#current(generation, signal) || !this.#latestRequest(key, version)) return;
+            this.#store.replaceOAuthApprovals(approvals);
+            this.#setPageError("connections", undefined);
+        } catch (error) {
+            if (this.#current(generation, signal) && this.#latestRequest(key, version)) this.#setPageError("connections", error);
+        }
     }
 
     oauthApprovalsAvailable(): boolean {
@@ -101,137 +135,233 @@ export class TuiControlSessionRefresh {
     }
 
     async refreshAudit(instance: string, generation?: number, signal?: AbortSignal): Promise<void> {
-        await this.#reloadToolCalls(instance, generation, signal);
-        await this.#reloadApprovals(instance, generation, signal);
-        await this.#reloadContextMessages(instance, generation, signal);
+        await this.#refreshGroup(`audit:${instance}:readModels`, generation, signal, [
+            ["tool calls", () => this.#reloadToolCalls(instance, generation, signal)],
+            ["approvals", () => this.#reloadApprovals(instance, generation, signal)],
+            ["context messages", () => this.#reloadContextMessages(instance, generation, signal)]
+        ]);
     }
 
     async refreshLogsForInstance(instance: string, generation?: number, signal?: AbortSignal): Promise<void> {
-        await this.#reloadLogs(instance, generation, signal);
+        await this.#refreshGroup(`logs:${instance}:logs`, generation, signal, [
+            ["logs", () => this.#reloadLogs(instance, generation, signal)]
+        ]);
     }
 
     async refreshTodo(instance: string, generation?: number, signal?: AbortSignal): Promise<void> {
-        await this.#reloadTodo(instance, generation, signal);
+        await this.#refreshGroup(`todo:${instance}:todo`, generation, signal, [
+            ["todo", () => this.#reloadTodo(instance, generation, signal)]
+        ]);
     }
 
     async refreshArtifacts(generation?: number): Promise<void> {
+        const key = "artifacts";
+        const version = this.#beginRequest(key);
         try {
             const [shares, transfers] = await Promise.all([
-                this.#clients.artifact.listShares(),
-                this.#clients.artifact.listTransfers()
+                this.#request(this.#clients.artifact.listShares(), "artifact.shares.list"),
+                this.#request(this.#clients.artifact.listTransfers(), "artifact.transfers.list")
             ]);
-            if (!this.#current(generation)) return;
+            if (!this.#current(generation) || !this.#latestRequest(key, version)) return;
             this.#store.replaceArtifactShares(shares);
             this.#store.replaceArtifactTransfers(transfers);
+            this.#setPageError("instances", undefined);
         } catch (error) {
-            if (readErrorCode(error) !== "control.methodNotFound") {
-                throw error;
+            if (!this.#current(generation) || !this.#latestRequest(key, version)) return;
+            if (readErrorCode(error) === "control.methodNotFound") {
+                this.#store.replaceArtifactShares([]);
+                this.#store.replaceArtifactTransfers([]);
+                this.#setPageError("instances", undefined);
+                return;
             }
-            if (!this.#current(generation)) return;
-            this.#store.replaceArtifactShares([]);
-            this.#store.replaceArtifactTransfers([]);
+            this.#setPageError("instances", error);
         }
     }
 
     async refreshLogs(generation?: number): Promise<void> {
-        for (const instance of this.#runtimeInstanceNames()) {
-            await this.#reloadLogs(instance, generation);
+        await Promise.all(this.#runtimeInstanceNames().map(async (instance) => {
+            await this.refreshLogsForInstance(instance, generation);
+        }));
+    }
+
+    async refreshRuntimeInstance(instance: string, generation?: number): Promise<number | undefined> {
+        const key = `snapshot:${instance}`;
+        const version = this.#beginRequest(key);
+        let snapshotEnvelope: InstanceRuntimeEnvelope;
+        try {
+            snapshotEnvelope = await this.#request(
+                this.#clients.runtime.snapshot(instance),
+                `runtime.snapshot:${instance}`
+            );
+        } catch (error) {
+            if (this.#current(generation) && this.#latestRequest(key, version)) this.#store.setPanelError(`instances:${instance}:snapshot`, toPanelError(error));
+            return undefined;
         }
+        if (!this.#current(generation) || !this.#latestRequest(key, version)) return undefined;
+        const authoritativeSeq = this.#applySnapshotRead(snapshotEnvelope.snapshot);
+        this.#store.setPanelError(`instances:${instance}:snapshot`, undefined);
+        await Promise.all([
+            this.refreshTodo(instance, generation),
+            this.refreshLogsForInstance(instance, generation),
+            this.refreshAudit(instance, generation)
+        ]);
+        return Math.max(nextSubscribeSeq(snapshotEnvelope), authoritativeSeq);
     }
 
-    async refreshRuntimeInstance(instance: string, generation?: number): Promise<number> {
-        const snapshotEnvelope = await this.#clients.runtime.snapshot(instance);
-        if (!this.#current(generation)) return nextSubscribeSeq(snapshotEnvelope);
-        this.#store.replaceSnapshot(snapshotEnvelope.snapshot);
-        await this.#reloadTodo(instance, generation);
-        await this.#reloadLogs(instance, generation);
-        await this.#reloadToolCalls(instance, generation);
-        await this.#reloadApprovals(instance, generation);
-        await this.#reloadContextMessages(instance, generation);
-        return nextSubscribeSeq(snapshotEnvelope);
-    }
-
-    async refreshInstance(instance: string, generation?: number): Promise<number> {
+    async refreshInstance(instance: string, generation?: number): Promise<number | undefined> {
         return await this.refreshRuntimeInstance(instance, generation);
     }
 
     async #reloadContextMessages(instance: string, generation?: number, signal?: AbortSignal): Promise<void> {
+        const key = `contextMessages:${instance}`;
+        const version = this.#beginRequest(key);
         const client = this.#clients.contextMessage;
         if (client === undefined) {
-            if (this.#current(generation, signal)) this.#store.replaceContextMessages(instance, []);
+            if (this.#current(generation, signal) && this.#latestRequest(key, version)) this.#store.replaceContextMessages(instance, []);
             return;
         }
         try {
-            const messages = await client.list(instance);
-            if (this.#current(generation, signal)) this.#store.replaceContextMessages(instance, messages);
+            const messages = await this.#request(client.list(instance), `contextMessage.list:${instance}`);
+            if (this.#current(generation, signal) && this.#latestRequest(key, version)) this.#store.replaceContextMessages(instance, messages);
         } catch (error) {
             if (readErrorCode(error) !== "control.methodNotFound") throw error;
-            if (this.#current(generation, signal)) this.#store.replaceContextMessages(instance, []);
+            if (this.#current(generation, signal) && this.#latestRequest(key, version)) this.#store.replaceContextMessages(instance, []);
         }
     }
 
     async #reloadTodo(instance: string, generation?: number, signal?: AbortSignal): Promise<void> {
-        const envelope = await this.#clients.todo.get(instance);
-        if (this.#current(generation, signal)) this.#store.replaceTodo(instance, envelope.todo);
+        const key = `todo:${instance}`;
+        const version = this.#beginRequest(key);
+        const envelope = await this.#request(this.#clients.todo.get(instance), `todo.get:${instance}`);
+        if (this.#current(generation, signal) && this.#latestRequest(key, version)) this.#store.replaceTodo(instance, envelope.todo);
     }
 
     async #reloadLogs(instance: string, generation?: number, signal?: AbortSignal): Promise<void> {
-        const logs = await this.#clients.runtime.readLogs(instance, {
-            limit: LOG_READ_LIMIT
-        });
-        if (this.#current(generation, signal)) this.#store.replaceLogs(instance, logs.map(mapLogEntry));
+        const key = `logs:${instance}`;
+        const version = this.#beginRequest(key);
+        const logs = await this.#request(
+            this.#clients.runtime.readLogs(instance, { limit: LOG_READ_LIMIT }),
+            `runtime.logs:${instance}`
+        );
+        if (this.#current(generation, signal) && this.#latestRequest(key, version)) this.#store.replaceLogs(instance, logs.map(mapLogEntry));
     }
 
     async #reloadToolCalls(instance: string, generation?: number, signal?: AbortSignal): Promise<void> {
-        const records = await this.#clients.tool.listCalls(instance, {
-            limit: TOOL_CALL_READ_LIMIT
-        });
-        if (this.#current(generation, signal)) this.#store.replaceToolCalls(instance, records);
+        const key = `toolCalls:${instance}`;
+        const version = this.#beginRequest(key);
+        const records = await this.#request(
+            this.#clients.tool.listCalls(instance, { limit: TOOL_CALL_READ_LIMIT }),
+            `tool.calls:${instance}`
+        );
+        if (this.#current(generation, signal) && this.#latestRequest(key, version)) this.#store.replaceToolCalls(instance, records);
     }
 
     async #reloadApprovals(instance: string, generation?: number, signal?: AbortSignal): Promise<void> {
-        const approvals = await this.#clients.tool.listApprovals(instance);
-        if (this.#current(generation, signal)) this.#store.replaceApprovals(instance, approvals);
+        const key = `approvals:${instance}`;
+        const version = this.#beginRequest(key);
+        const approvals = await this.#request(
+            this.#clients.tool.listApprovals(instance),
+            `tool.approvals:${instance}`
+        );
+        if (this.#current(generation, signal) && this.#latestRequest(key, version)) this.#store.replaceApprovals(instance, approvals);
     }
 
-    async #reloadOAuthApprovals(
-        configView: Record<string, JsonValue> | undefined,
-        generation?: number,
-        signal?: AbortSignal
+    async #refreshGroup(
+        panelKey: string,
+        generation: number | undefined,
+        signal: AbortSignal | undefined,
+        requests: ReadonlyArray<readonly [string, () => Promise<void>]>
     ): Promise<void> {
-        if (oauthApprovalsUnavailable(configView)) {
-            if (this.#current(generation, signal)) this.#store.replaceOAuthApprovals([]);
+        const version = this.#beginRequest(`group:${panelKey}`);
+        const results = await Promise.allSettled(requests.map(([, request]) => request()));
+        if (!this.#current(generation, signal) || !this.#latestRequest(`group:${panelKey}`, version)) return;
+        const failures = results.flatMap((result, index) =>
+            result.status === "rejected"
+                ? [`${requests[index]?.[0] ?? "read"}: ${readErrorMessage(result.reason)}`]
+                : []
+        );
+        this.#store.setPanelError(
+            panelKey,
+            failures.length === 0 ? undefined : toPanelError(new Error(failures.join("; ")))
+        );
+    }
+
+    #setPageError(page: "connections" | "instances", error: unknown | undefined): void {
+        const instances = this.#store.getState().instances;
+        if (instances.length === 0) {
+            this.#store.setPanelError(`${page}:-:${page === "instances" ? "artifacts" : "oauth"}`, error === undefined ? undefined : toPanelError(error));
             return;
         }
-        const approvals = await this.#clients.mcp.listApprovals();
-        if (this.#current(generation, signal)) this.#store.replaceOAuthApprovals(approvals);
+        for (const instance of instances) {
+            this.#store.setPanelError(
+                `${page}:${instance.name}:${page === "instances" ? "artifacts" : "oauth"}`,
+                error === undefined ? undefined : toPanelError(error)
+            );
+        }
     }
 
     #runtimeInstanceNames(): string[] {
         const state = this.#store.getState();
         return state.instances
-            .filter((instance) => {
-                return state.snapshotsByInstance[instance.name] !== undefined;
-            })
+            .filter((instance) => state.snapshotsByInstance[instance.name] !== undefined)
             .map((instance) => instance.name);
     }
 
-    async #readConfigView(): Promise<
-        Record<string, JsonValue> | undefined
-    > {
+    async #readConfigView(): Promise<Record<string, JsonValue> | undefined> {
         try {
             return await this.#clients.config.get();
         } catch (error) {
-            if (readErrorCode(error) === "control.methodNotFound") {
-                return undefined;
-            }
+            if (readErrorCode(error) === "control.methodNotFound") return undefined;
             throw error;
         }
+    }
+
+    async #request<T>(request: Promise<T>, label: string): Promise<T> {
+        return await withTuiRequestTimeout(request, this.#readTimeoutMs, label);
+    }
+
+    #applySnapshotRead(snapshot: InstanceSnapshot): number {
+        const fence = this.#authoritativeSnapshots.get(snapshot.name);
+        if (fence === undefined) {
+            this.#store.replaceSnapshot(snapshot);
+            return snapshot.lastSeq;
+        }
+        if (snapshot.lastSeq < fence.lastSeq) return fence.lastSeq;
+        if (snapshot.lastSeq === fence.lastSeq) {
+            this.#store.replaceSnapshot(fence);
+            return fence.lastSeq;
+        }
+        this.#authoritativeSnapshots.delete(snapshot.name);
+        this.#store.replaceSnapshot(snapshot);
+        return snapshot.lastSeq;
+    }
+
+    #beginRequest(key: string): number {
+        const version = (this.#requestVersions.get(key) ?? 0) + 1;
+        this.#requestVersions.set(key, version);
+        return version;
+    }
+
+    #latestRequest(key: string, version: number): boolean {
+        return this.#requestVersions.get(key) === version;
     }
 
     #current(generation: number | undefined, signal?: AbortSignal): boolean {
         return signal?.aborted !== true && (generation === undefined || this.#isCurrent(generation));
     }
+}
+
+function toPanelError(error: unknown) {
+    const candidate = error as { code?: unknown; message?: unknown; retryable?: unknown } | undefined;
+    return createError({
+        code: typeof candidate?.code === "string" ? candidate.code : errorCodes.targetInvalid,
+        message: typeof candidate?.message === "string" ? candidate.message : String(error),
+        retryable: candidate?.retryable === true
+    });
+}
+
+function readErrorMessage(error: unknown): string {
+    return error instanceof Error ? error.message : String(error);
 }
 
 function oauthApprovalsUnavailable(

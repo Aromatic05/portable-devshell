@@ -103,6 +103,7 @@ export class TuiCommandDispatcherOverlay {
             this.#store.getState().interaction.overlays,
         );
         if (overlay === undefined) return false;
+        if (overlay.kind === "message-composer" && overlay.submitting) return false;
         return this.#closeOverlay(overlay.kind);
     }
 
@@ -305,7 +306,11 @@ export class TuiCommandDispatcherOverlay {
         });
         try {
             await this.#onContextMessage(overlay.instance, overlay.ctxId, text);
-            return this.#closeOverlay("message-composer");
+            const current = topTuiOverlay(this.#store.getState().interaction.overlays);
+            if (current?.kind !== "message-composer") return true;
+            this.#store.popOverlay();
+            this.#focusManager.restore();
+            return true;
         } catch (error) {
             const current = topTuiOverlay(
                 this.#store.getState().interaction.overlays,
@@ -334,6 +339,7 @@ export class TuiCommandDispatcherOverlay {
             this.#store.getState().interaction.overlays,
         );
         if (overlay?.kind !== expectedKind) return false;
+        if (overlay.kind === "message-composer" && overlay.submitting) return false;
         this.#store.popOverlay();
         this.#focusManager.restore();
         return true;

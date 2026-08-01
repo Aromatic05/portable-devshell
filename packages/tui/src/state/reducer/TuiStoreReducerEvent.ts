@@ -2,6 +2,7 @@ import { asInstanceName, artifactShareStates, artifactTransferStatuses, type App
 
 import { asRecord, isApprovalEvent, isStatusEvent, isToolCallEvent, mergeLogEntry, upsertApproval, upsertToolCall } from "./TuiStoreReducerSupport.js";
 import type { TuiAppState, TuiRawEventRecord } from "./TuiStoreModel.js";
+import { mergeTuiContextMessage } from "../context/TuiContextMessageState.js";
 
 export function applyEventRecord(state: TuiAppState, rawEvent: TuiRawEventRecord): TuiAppState {
     const payload = asRecord(rawEvent.payload);
@@ -122,7 +123,7 @@ function applyContextMessageEvent(
         ...state,
         contextMessagesByInstance: {
             ...state.contextMessagesByInstance,
-            [instance]: [record, ...current.filter((message) => message.id !== record.id)].sort((left, right) => left.createdAt.localeCompare(right.createdAt))
+            [instance]: mergeTuiContextMessage(current, record)
         }
     };
 }

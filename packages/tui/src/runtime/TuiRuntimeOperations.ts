@@ -22,6 +22,7 @@ export interface TuiRuntimeOperationsOptions {
         suspend(): void;
     };
     clients: TuiClients;
+    operationTimeoutMs?: number;
     reconnectDelayMs?: number;
     session: TuiControlSession;
     store: TuiAppStore;
@@ -36,11 +37,15 @@ export class TuiRuntimeOperations {
         this.#attach = new TuiRuntimeAttachOperations(options);
         this.#control = new TuiRuntimeControlOperations({
             clients: options.clients,
+            operationTimeoutMs: options.operationTimeoutMs ?? 30_000,
             reconnectDelayMs: options.reconnectDelayMs ?? 100,
             session: options.session,
             store: options.store
         });
-        this.#execution = new TuiRuntimeExecutionOperations(options);
+        this.#execution = new TuiRuntimeExecutionOperations({
+            ...options,
+            operationTimeoutMs: options.operationTimeoutMs ?? 30_000
+        });
     }
 
     async revokeArtifactShare(shareId: string): Promise<void> {

@@ -9,12 +9,14 @@ import type { TuiClients } from "../client/TuiClientComposition.js";
 import type { TuiControlSession } from "../control/TuiControlSession.js";
 import type { TuiAppStore } from "../../state/TuiAppStore.js";
 import type { TuiCommandRecord } from "../../state/reducer/TuiStoreModel.js";
+import { withTuiRequestTimeout } from "../control/TuiRequestTimeout.js";
 
 export class TuiRuntimeExecutionOperations {
     #commandCounter = 0;
 
     constructor(private readonly options: {
         clients: TuiClients;
+        operationTimeoutMs: number;
         session: TuiControlSession;
         store: TuiAppStore;
     }) {}
@@ -23,9 +25,9 @@ export class TuiRuntimeExecutionOperations {
         switch (action) {
             case "refresh":
                 await this.#runCommand(`Refresh Status: ${instance}`, instance, async () => {
-                    const result = await this.options.clients.runtime.refresh(instance);
-                    this.options.store.replaceSnapshot(result.snapshot);
-                    await this.options.session.refreshInstance(instance);
+                    const result = await this.#request(this.options.clients.runtime.refresh(instance), `runtime.refresh:${instance}`);
+                    this.options.session.applyAuthoritativeSnapshot(result.snapshot);
+                    await this.#refreshInstanceBestEffort(instance);
                 });
                 return;
             case "start":
@@ -33,15 +35,15 @@ export class TuiRuntimeExecutionOperations {
                 return;
             case "restart":
                 await this.#runCommand(`Restart Worker: ${instance}`, instance, async (commandId) => {
-                    await this.options.clients.runtime.stop(instance);
+                    await this.#request(this.options.clients.runtime.stop(instance), `runtime.stop:${instance}`);
                     await this.#startInstanceWithinCommand(instance, commandId);
                 });
                 return;
             case "stop":
                 await this.#runCommand(`Stop Worker: ${instance}`, instance, async () => {
-                    const snapshot = await this.options.clients.runtime.stop(instance);
-                    this.options.store.replaceSnapshot(snapshot);
-                    await this.options.session.refreshInstance(instance);
+                    const snapshot = await this.#request(this.options.clients.runtime.stop(instance), `runtime.stop:${instance}`);
+                    this.options.session.applyAuthoritativeSnapshot(snapshot);
+                    await this.#refreshInstanceBestEffort(instance);
                 });
         }
     }
@@ -51,9 +53,12 @@ export class TuiRuntimeExecutionOperations {
             `${decision === "approve" ? "Approve" : "Deny"} Approval: ${approvalId}`,
             instance,
             async () => {
-                await this.options.clients.tool.getApproval(instance, approvalId);
-                await this.options.clients.tool.decideApproval(instance, approvalId, decision);
-                await this.options.session.refreshInstance(instance);
+                await this.#request(this.options.clients.tool.getApproval(instance, approvalId), `approval.get:${approvalId}`);
+                await this.#request(
+                    this.options.clients.tool.decideApproval(instance, approvalId, decision),
+                    `approval.${decision}:${approvalId}`
+                );
+                await this.#refreshInstanceBestEffort(instance);
             }
         );
     }
@@ -61,7 +66,10 @@ export class TuiRuntimeExecutionOperations {
     async callTool(instance: string, toolName: string, input: string): Promise<boolean> {
         return await this.#runCommand(`Call Tool: ${toolName}`, instance, async () => {
             const parsed = JSON.parse(input) as JsonValue;
-            const feedback = await this.options.clients.tool.call(instance, toolName, parsed) as {
+            const feedback = await this.#request(
+                this.options.clients.tool.call(instance, toolName, parsed),
+                `tool.call:${toolName}`
+            ) as {
                 comment?: string[];
                 error?: { code: string; message: string; retryable: boolean };
             };
@@ -71,7 +79,7 @@ export class TuiRuntimeExecutionOperations {
             if ((feedback?.comment?.length ?? 0) > 0) {
                 this.options.store.setScreenStatus("todo", feedback.comment!.join(" "));
             }
-            await this.options.session.refreshInstance(instance);
+            await this.#refreshInstanceBestEffort(instance);
         });
     }
 
@@ -87,15 +95,33 @@ export class TuiRuntimeExecutionOperations {
             provider: entry?.provider,
             workspace: entry?.defaultWorkspace
         });
-        const snapshot = await this.options.clients.runtime.start(instance, {
+        const snapshot = await this.#request(this.options.clients.runtime.start(instance, {
             relay: {
                 onOutput: (chunk) => this.options.store.appendRelayOutput(commandId, chunk),
                 onRequestId: (requestId) => this.options.store.setRelayMetadata(commandId, { requestId })
             },
             workspacePath: entry?.defaultWorkspace
-        });
-        this.options.store.replaceSnapshot(snapshot);
-        await this.options.session.refreshInstance(instance);
+        }), `runtime.start:${instance}`);
+        this.options.session.applyAuthoritativeSnapshot(snapshot);
+        await this.#refreshInstanceBestEffort(instance);
+    }
+
+    async #refreshInstanceBestEffort(instance: string): Promise<void> {
+        const key = `${this.options.store.getState().ui.selectedPage}:${instance}:operationRefresh`;
+        try {
+            await this.options.session.refreshInstance(instance);
+            this.options.store.setPanelError(key, undefined);
+        } catch (error) {
+            this.options.store.setPanelError(key, toControlError(error));
+        }
+    }
+
+    async #request<T>(request: Promise<T>, label: string): Promise<T> {
+        return await withTuiRequestTimeout(
+            request,
+            this.options.operationTimeoutMs,
+            label
+        );
     }
 
     async #runCommand(

@@ -79,12 +79,14 @@ export function selectSidebarModel(state: TuiAppState): TuiSidebarModel {
 export function selectMainScreenModel(state: TuiAppState): TuiMainScreenModel {
     const activePage = selectActivePage(state);
     const statusLine = state.interaction.screenStatusByPage[activePage.page];
-    const panelError =
-        state.panelErrors[`${activePage.page}:${activePage.instance ?? "-"}`];
-    const errorLines =
-        panelError === undefined
-            ? undefined
-            : [`${panelError.code}: ${panelError.message}`];
+    const panelKey = `${activePage.page}:${activePage.instance ?? "-"}`;
+    const panelErrors = Object.entries(state.panelErrors)
+        .filter(([key]) => key === panelKey || key.startsWith(`${panelKey}:`))
+        .map(([, error]) => error);
+    const panelError = panelErrors[0];
+    const errorLines = panelErrors.length === 0
+        ? undefined
+        : panelErrors.map((error) => `${error.code}: ${error.message}`);
 
     if (activePage.page === "overview") {
         return {

@@ -5,7 +5,7 @@ import type { InstanceCreateDraft, JsonValue } from "@portable-devshell/shared";
 
 import { TuiAppStore, TuiRuntimeOperations } from "../../src/testing.ts";
 
-function createHarness(options: { failStart?: boolean } = {}) {
+function createHarness(options: { failReverseCode?: boolean; failStart?: boolean } = {}) {
     const store = new TuiAppStore();
     store.replaceInstances([
         {
@@ -66,6 +66,7 @@ function createHarness(options: { failStart?: boolean } = {}) {
         reverse: {
             async createCode(instance: string) {
                 calls.push(`reverse.code:${instance}`);
+                if (options.failReverseCode) throw new Error("device code unavailable");
                 return {
                     controllerUrl: "https://example.test",
                     deviceCode: "device-code",
@@ -127,6 +128,9 @@ function createHarness(options: { failStart?: boolean } = {}) {
         },
     } as never;
     const session = {
+        applyAuthoritativeSnapshot(snapshot: { name: string }) {
+            store.replaceSnapshot(snapshot as never);
+        },
         async reconnect() {
             refreshed.push("reconnect");
         },
@@ -202,6 +206,23 @@ test("runtime operations preserve failed command diagnostics without throwing in
         "start failed",
     );
     assert.deepEqual(harness.refreshed, []);
+});
+
+
+test("reverse instance creation reports committed creation when device code generation fails", async () => {
+    const harness = createHarness({ failReverseCode: true });
+    const status = await harness.operations.createInstance({
+        name: "reverse-one",
+        provider: "reverse",
+    } as InstanceCreateDraft);
+
+    assert.match(status ?? "", /was created/u);
+    assert.match(status ?? "", /devshell instance device-code reverse-one/u);
+    assert.equal(
+        harness.store.getState().panelErrors["instances:reverse-one:enrollment"]?.message,
+        "device code unavailable",
+    );
+    assert.deepEqual(harness.refreshed, ["all"]);
 });
 
 test("runtime operations expose control callbacks and route page refreshes", async () => {

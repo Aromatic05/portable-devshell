@@ -39,18 +39,17 @@ export function reduceTuiStoreReducerControl(state: TuiAppState, action: TuiAppA
             };
         }
         case "panelError.set": {
-            const panelErrors = { ...state.panelErrors };
-
-            if (action.error === undefined) {
-                delete panelErrors[action.key];
-            } else {
-                panelErrors[action.key] = action.error;
+            const current = state.panelErrors[action.key];
+            if (
+                (action.error === undefined && current === undefined) ||
+                (action.error !== undefined && isDeepStrictEqual(current, action.error))
+            ) {
+                return state;
             }
-
-            return {
-                ...state,
-                panelErrors
-            };
+            const panelErrors = { ...state.panelErrors };
+            if (action.error === undefined) delete panelErrors[action.key];
+            else panelErrors[action.key] = action.error;
+            return { ...state, panelErrors };
         }
         case "relay.appendOutput": {
             const current = state.relayByCommand[action.commandId] ?? { commandId: action.commandId, output: [] };

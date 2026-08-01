@@ -138,7 +138,7 @@ export class TuiKeyDispatcher {
         if (press.key.return) {
             return [{ type: "search.submit" }];
         }
-        if (press.input.length === 1 && !press.key.ctrl) {
+        if (press.input.length > 0 && !press.key.ctrl) {
             return [{ text: press.input, type: "search.append" }];
         }
         return [];
@@ -160,7 +160,7 @@ export class TuiKeyDispatcher {
         if (press.key.return) {
             return [{ type: "messageComposer.submit" }];
         }
-        if (press.input.length === 1 && !press.key.ctrl) {
+        if (press.input.length > 0 && !press.key.ctrl) {
             return [{ text: press.input, type: "messageComposer.append" }];
         }
         return [];
@@ -173,7 +173,7 @@ export class TuiKeyDispatcher {
         if (press.key.return) {
             return [{ type: "toolForm.submit" }];
         }
-        if (press.input.length === 1 && !press.key.ctrl) {
+        if (press.input.length > 0 && !press.key.ctrl) {
             return [{ text: press.input, type: "toolForm.append" }];
         }
         return [];
@@ -210,7 +210,7 @@ export class TuiKeyDispatcher {
         if (press.key.backspace || press.key.delete) {
             return [{ type: "editor.backspace" }];
         }
-        if (press.input.length === 1 && !press.key.ctrl) {
+        if (press.input.length > 0 && !press.key.ctrl) {
             return [{ text: press.input, type: "editor.append" }];
         }
         return [];

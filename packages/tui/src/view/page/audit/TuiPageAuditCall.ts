@@ -4,6 +4,7 @@ import type { TuiAuditContextKey } from "./TuiAuditContextProjection.js";
 import {
     auditInputSummary,
     auditOutputSummary,
+    resolveAuditOutput,
 } from "../../../state/audit/TuiAuditPresentation.js";
 import { formatField, makeBox, toolCallStatus } from "../TuiPageBoxSupport.js";
 
@@ -21,6 +22,11 @@ export function buildAuditCallBoxes(
                 : candidate.ctxId === key.ctxId),
     );
     if (call === undefined) return [];
+    const output = resolveAuditOutput(
+        call.output,
+        state.logsByInstance[instance] ?? [],
+        call.callId
+    );
     return [
         makeBox(state, "audit", instance, {
             detailLines: [
@@ -36,7 +42,7 @@ export function buildAuditCallBoxes(
                 formatField("Task", call.taskId ?? "-"),
                 formatField("Todo item", call.todoItemId ?? "-"),
                 `input ${auditInputSummary(call.input, call.inputSummary)}`,
-                `result ${auditOutputSummary(call.output)}`,
+                `result ${auditOutputSummary(output)}`,
                 ...(call.error === undefined
                     ? []
                     : [formatField("Error", call.error)]),

@@ -181,21 +181,18 @@ test("TUI clears an OAuth polling failure after the background refresh recovers"
     try {
         await session.start();
         await waitFor(
-            () =>
-                store.getState().interaction.screenStatusByPage.connections !==
-                undefined,
+            () => store.getState().panelErrors["connections:-:oauth"] !== undefined,
         );
 
         assert.equal(
-            store.getState().interaction.screenStatusByPage.connections,
-            "Connections refresh failed: OAuth service unavailable",
+            store.getState().panelErrors["connections:-:oauth"]?.message,
+            "OAuth service unavailable",
         );
         assert.equal(store.getState().connection.status, "connected");
         await waitFor(
             () =>
                 approvalReads >= 3 &&
-                store.getState().interaction.screenStatusByPage.connections ===
-                    undefined,
+                store.getState().panelErrors["connections:-:oauth"] === undefined,
         );
     } finally {
         await session.stop();
