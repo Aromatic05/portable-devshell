@@ -35,6 +35,7 @@ export class HttpHost {
     readonly #listenHost: string;
     readonly #listenPort: number;
     readonly #oauth?: McpOAuthProtectedResource;
+    readonly #installedOAuth = new Set<McpOAuthProtectedResource>();
     #oauthInstalled = false;
     readonly #publicBaseUrl?: string;
     readonly #registeredPaths = new Set<string>();
@@ -64,7 +65,7 @@ export class HttpHost {
         }
 
         if (this.#oauth !== undefined && !this.#oauthInstalled) {
-            this.#oauth.install(this.#app);
+            this.installOAuth(this.#oauth);
             this.#oauthInstalled = true;
         }
 
@@ -111,6 +112,14 @@ export class HttpHost {
 
     get address() {
         return this.#server?.address();
+    }
+
+    installOAuth(oauth: McpOAuthProtectedResource): void {
+        if (this.#installedOAuth.has(oauth)) {
+            return;
+        }
+        oauth.install(this.#app);
+        this.#installedOAuth.add(oauth);
     }
 
     registerRawRoute(

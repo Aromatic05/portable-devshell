@@ -46,8 +46,19 @@ export class McpOAuthProtectedResource {
         return this.#approvals;
     }
 
+    get issuerUrl(): URL {
+        return this.#runtime.issuerUrl;
+    }
+
     registerResource(resourceServerUrl: URL, config: McpOAuth2Config): void {
         this.#runtime.registerResource(resourceServerUrl, config);
+    }
+
+    async verifyAccessToken(
+        resourceServerUrl: URL,
+        token: string
+    ): Promise<{ clientId: string; scopes: string[] }> {
+        return await this.#runtime.verifyAccessToken(resourceServerUrl, token);
     }
 
     async warmup(): Promise<void> {
@@ -85,13 +96,12 @@ export class McpOAuthProtectedResource {
     }
 
     #installProvider(app: Express): void {
-        const callback = this.#runtime.provider.callback();
         app.use((request, response, next) => {
             if (!this.#shouldHandleRequest(request.url)) {
                 next();
                 return;
             }
-            callback(request, response);
+            this.#runtime.provider.callback()(request, response);
         });
     }
 

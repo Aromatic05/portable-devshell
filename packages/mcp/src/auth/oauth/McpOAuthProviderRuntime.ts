@@ -258,6 +258,20 @@ export class McpOAuthProviderRuntime {
             )
         });
     }
+
+    async verifyAccessToken(
+        resourceServerUrl: URL,
+        token: string
+    ): Promise<{ clientId: string; scopes: string[] }> {
+        const verified = await new McpOAuthResourceVerifier(
+            this.provider,
+            resourceServerUrl
+        ).verifyAccessToken(token);
+        return {
+            clientId: verified.clientId,
+            scopes: [...verified.scopes]
+        };
+    }
 }
 
 class McpOAuthResourceVerifier implements OAuthTokenVerifier {

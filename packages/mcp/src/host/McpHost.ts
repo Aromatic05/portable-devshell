@@ -157,6 +157,10 @@ export class McpHost {
         return this.#oauth?.approvals;
     }
 
+    get oauthProtectedResource(): McpOAuthProtectedResource | undefined {
+        return this.#oauth;
+    }
+
     status(): {
         authMode: "none" | "oauth2" | "token";
         listenAddress?: string;
