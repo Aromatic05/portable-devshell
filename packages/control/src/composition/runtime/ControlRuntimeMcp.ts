@@ -1,5 +1,5 @@
 import { HttpHost, type McpHost, type McpOAuthApprovalService } from "@portable-devshell/mcp";
-import type { ControlConfig, JsonValue } from "@portable-devshell/shared";
+import type { ControlConfig, ControlWebAuthConfig, JsonValue } from "@portable-devshell/shared";
 
 import { ConfigEditorCoordinator } from "../../control/config/editor/ConfigEditorCoordinator.js";
 import { McpInstanceGatewayControl } from "../McpInstanceGatewayControl.js";
@@ -25,6 +25,7 @@ export class ControlRuntimeMcp {
     readonly publicBaseUrl?: string;
     #webHost?: HttpHost;
     #webPublicBaseUrl?: string;
+    #webAuth: ControlWebAuthConfig;
     #webEnabled: boolean;
     #host?: McpHost;
     readonly #mcpEnabled: boolean;
@@ -46,6 +47,7 @@ export class ControlRuntimeMcp {
         this.#applyRuntimeConfig = options.applyRuntimeConfig;
         this.#mcpEnabled = config.mcp.enabled;
         this.publicBaseUrl = config.mcp.publicBaseUrl;
+        this.#webAuth = config.web.auth;
         this.#webEnabled = config.web.enabled;
         const gatewayHolder: { value?: McpInstanceGatewayControl } = {};
         this.instanceCreate = new InstanceCreateCoordinator({
@@ -137,6 +139,10 @@ export class ControlRuntimeMcp {
         }
     }
 
+    get webAuth(): ControlWebAuthConfig {
+        return this.#webAuth;
+    }
+
     get webEnabled(): boolean {
         return this.#webEnabled;
     }
@@ -172,6 +178,7 @@ export class ControlRuntimeMcp {
                 throw error;
             }
         }
+        this.#webAuth = config.web.auth;
         this.#webEnabled = config.web.enabled;
         this.#webPublicBaseUrl = config.web.enabled ? config.web.publicBaseUrl : undefined;
         this.#webHost = next;
@@ -186,6 +193,7 @@ export class ControlRuntimeMcp {
 
     async restoreWebHost(host: HttpHost | undefined, config: ControlConfig): Promise<void> {
         const current = this.#webHost;
+        this.#webAuth = config.web.auth;
         this.#webEnabled = config.web.enabled;
         this.#webPublicBaseUrl = config.web.enabled ? config.web.publicBaseUrl : undefined;
         this.#webHost = host;

@@ -1,14 +1,15 @@
-import { randomBytes } from "node:crypto";
+import { randomBytes, timingSafeEqual } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
 
 import type { HttpHost } from "@portable-devshell/mcp";
-import { CONTROL_WEB_BASE_PATH } from "@portable-devshell/shared";
+import { CONTROL_WEB_BASE_PATH, type ControlWebAuthConfig } from "@portable-devshell/shared";
 
 const DEFAULT_SESSION_TTL_MS = 12 * 60 * 60 * 1_000;
 const DEFAULT_MAX_SESSIONS = 16;
 const SESSION_COOKIE_NAME = "devshell_web_session";
 
 export interface ControlWebSessionServiceOptions {
+    auth?: ControlWebAuthConfig;
     basePath?: string;
     maxSessions?: number;
     now?: () => number;
@@ -18,6 +19,7 @@ export interface ControlWebSessionServiceOptions {
 }
 
 export class ControlWebSessionService {
+    readonly #auth: ControlWebAuthConfig;
     readonly #basePath: string;
     readonly #expiryTimers = new Map<string, ReturnType<typeof setTimeout>>();
     readonly #maxSessions: number;
@@ -30,6 +32,7 @@ export class ControlWebSessionService {
     #installed = false;
 
     constructor(options: ControlWebSessionServiceOptions = {}) {
+        this.#auth = options.auth ?? { mode: "none" };
         this.#basePath = normalizeBasePath(options.basePath ?? CONTROL_WEB_BASE_PATH);
         this.#maxSessions = options.maxSessions ?? DEFAULT_MAX_SESSIONS;
         if (!Number.isSafeInteger(this.#maxSessions) || this.#maxSessions < 1) {
@@ -44,13 +47,21 @@ export class ControlWebSessionService {
         this.#tokenFactory = options.tokenFactory ?? (() => randomBytes(32).toString("base64url"));
     }
 
+    get auth(): ControlWebAuthConfig {
+        return this.#auth;
+    }
+
     install(http: HttpHost): () => void {
         if (this.#installed) {
             return () => undefined;
         }
         this.#installed = true;
         const sessionPath = `${this.#basePath}/session`;
-        const removeCreate = http.registerAuthenticatedRawRoute("post", sessionPath, (_request, response) => {
+        const removeCreate = http.registerRawRoute("post", sessionPath, (request, response) => {
+            if (!this.#authorizeBearer(request)) {
+                writeJsonError(response, 401, "Unauthorized");
+                return;
+            }
             this.#create(response);
         });
         const removeRead = http.registerRawRoute("get", sessionPath, (request, response) => {
@@ -75,6 +86,29 @@ export class ControlWebSessionService {
 
     authorize(request: IncomingMessage): boolean {
         return this.authorizeToken(request) !== undefined;
+    }
+
+    setSessionCookie(response: ServerResponse): void {
+        const token = this.#registerSession();
+        response.setHeader("Set-Cookie", this.#cookie(token, Math.max(1, Math.floor(this.#sessionTtlMs / 1_000))));
+    }
+
+    #authorizeBearer(request: IncomingMessage): boolean {
+        if (this.#auth.mode === "none") {
+            return true;
+        }
+        if (this.#auth.mode === "oauth2") {
+            return false;
+        }
+        const header = request.headers.authorization;
+        if (typeof header !== "string") {
+            return false;
+        }
+        const match = /^Bearer\s+(.+)$/iu.exec(header.trim());
+        if (match === null) {
+            return false;
+        }
+        return constantTimeEquals(match[1]!, this.#auth.token);
     }
 
     authorizeToken(request: IncomingMessage): string | undefined {
@@ -103,6 +137,11 @@ export class ControlWebSessionService {
     }
 
     #create(response: ServerResponse): void {
+        this.setSessionCookie(response);
+        writeNoContent(response);
+    }
+
+    #registerSession(): string {
         this.#prune();
         while (this.#sessions.size >= this.#maxSessions) {
             const oldest = this.#sessions.keys().next().value as string | undefined;
@@ -120,11 +159,7 @@ export class ControlWebSessionService {
         }, this.#sessionTtlMs);
         expiryTimer.unref?.();
         this.#expiryTimers.set(token, expiryTimer);
-        response.setHeader(
-            "Set-Cookie",
-            this.#cookie(token, Math.max(1, Math.floor(this.#sessionTtlMs / 1_000)))
-        );
-        writeNoContent(response);
+        return token;
     }
 
     #revoke(request: IncomingMessage): void {
@@ -178,6 +213,15 @@ function normalizeBasePath(value: string): string {
         throw new Error("Control web basePath must be an absolute non-root path.");
     }
     return value.replace(/\/+$/u, "");
+}
+
+function constantTimeEquals(left: string, right: string): boolean {
+    const leftBuffer = Buffer.from(left, "utf8");
+    const rightBuffer = Buffer.from(right, "utf8");
+    if (leftBuffer.length !== rightBuffer.length) {
+        return false;
+    }
+    return timingSafeEqual(leftBuffer, rightBuffer);
 }
 
 function readCookie(header: string | undefined, name: string): string | undefined {

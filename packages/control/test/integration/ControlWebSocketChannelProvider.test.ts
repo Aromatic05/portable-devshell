@@ -161,6 +161,87 @@ test("Web none auth stays independent when its shared MCP listener requires OAut
     }).request<JsonValue>("@control", "service", "ping"), { pong: true });
 });
 
+test("web token auth exchanges the configured web bearer token for a session cookie", async (t) => {
+    const webToken = "a".repeat(48);
+    const http = new HttpHost({
+        auth: { enabled: false, provider: "none" },
+        listenHost: "127.0.0.1",
+        listenPort: 0
+    });
+    const sessions = new ControlWebSessionService({ auth: { mode: "token", token: webToken } });
+    const channels = new ControlChannelServer({
+        providers: [new ControlWebSocketChannelProvider({ http, sessions })],
+        routes: { connectionClosed() {}, snapshot: createRouteSnapshot }
+    });
+    await channels.start();
+    await http.start();
+    t.after(async () => {
+        await channels.close().catch(() => undefined);
+        await http.stop().catch(() => undefined);
+    });
+
+    const origin = httpOrigin(http);
+    assert.equal((await fetch(`${origin}/web/session`, { method: "POST" })).status, 401);
+    assert.equal((await fetch(`${origin}/web/session`, {
+        headers: { authorization: "Bearer wrong-token" },
+        method: "POST"
+    })).status, 401);
+
+    const login = await fetch(`${origin}/web/session`, {
+        headers: { authorization: `Bearer ${webToken}` },
+        method: "POST"
+    });
+    assert.equal(login.status, 204);
+    const cookie = login.headers.get("set-cookie")?.split(";", 1)[0];
+    assert.notEqual(cookie, undefined);
+    assert.match(login.headers.get("set-cookie")!, /HttpOnly/iu);
+
+    assert.equal((await fetch(`${origin}/web/session`, { headers: { cookie: cookie! } })).status, 204);
+    const webSocket = await NodeWebSocketFrameChannel.connect(`${origin.replace("http", "ws")}/web/rpc`, cookie!);
+    t.after(() => webSocket.close());
+    assert.deepEqual(await new ClientConnection({
+        channelProvider: { connect: async () => webSocket },
+        mapError: normalizeError,
+        mapRemoteError: (error) => createError(error),
+        mode: "persistent",
+        peer: "web"
+    }).request<JsonValue>("@control", "service", "ping"), { pong: true });
+});
+
+test("web token auth never accepts an MCP namespace bearer token", async (t) => {
+    const mcpToken = "m".repeat(48);
+    const webToken = "w".repeat(48);
+    const http = new HttpHost({
+        auth: { enabled: true, provider: "token", token: mcpToken },
+        listenHost: "127.0.0.1",
+        listenPort: 0
+    });
+    const sessions = new ControlWebSessionService({ auth: { mode: "token", token: webToken } });
+    const channels = new ControlChannelServer({
+        providers: [new ControlWebSocketChannelProvider({ http, sessions })],
+        routes: { connectionClosed() {}, snapshot: createRouteSnapshot }
+    });
+    await channels.start();
+    await http.start();
+    t.after(async () => {
+        await channels.close().catch(() => undefined);
+        await http.stop().catch(() => undefined);
+    });
+
+    const origin = httpOrigin(http);
+    const withMcpToken = await fetch(`${origin}/web/session`, {
+        headers: { authorization: `Bearer ${mcpToken}` },
+        method: "POST"
+    });
+    assert.equal(withMcpToken.status, 401);
+
+    const withWebToken = await fetch(`${origin}/web/session`, {
+        headers: { authorization: `Bearer ${webToken}` },
+        method: "POST"
+    });
+    assert.equal(withWebToken.status, 204);
+});
+
 
 test("web routes and cookies follow the public base URL path prefix", async (t) => {
     const basePath = controlWebBasePath("https://controller.example/devshell");

@@ -113,6 +113,7 @@ export class ControlRuntime {
             basePath,
             http,
             sessions: new ControlWebSessionService({
+                auth: this.#mcp.webAuth,
                 basePath,
                 secureCookie: this.#mcp.webPublicBaseUrl?.startsWith("https://") ?? false
             })
