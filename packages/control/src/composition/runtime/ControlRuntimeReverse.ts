@@ -36,11 +36,15 @@ export class ControlRuntimeReverse {
             instanceRegistry: options.state.instances,
             publicBaseUrl: config.mcp.publicBaseUrl
         });
-        this.#gateway.install(options.mcp.host.server);
+        this.install(options.mcp.host.server);
         this.service.setDisconnectHandler((instance) => this.#gateway?.disconnect(instance));
     }
 
     stop(): void {
         this.#gateway?.stop();
+    }
+
+    install(server: Parameters<ReverseConnectionGateway["install"]>[0]): void {
+        this.#gateway?.install(server);
     }
 }

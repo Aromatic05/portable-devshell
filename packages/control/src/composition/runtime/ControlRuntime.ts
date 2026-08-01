@@ -30,6 +30,7 @@ export class ControlRuntime {
     readonly #reverse: ControlRuntimeReverse;
     readonly #routes: ControlRouteComposition;
     readonly #socketProvider: ControlSocketChannelProvider;
+    #webProvider?: ControlWebSocketChannelProvider;
 
     constructor(options: ControlRuntimeOptions) {
         this.#artifact = options.artifact;
@@ -53,20 +54,17 @@ export class ControlRuntime {
         });
         this.#socketProvider = new ControlSocketChannelProvider({ socketPath: options.socketPath });
         const providers: ControlChannelProvider[] = [this.#socketProvider];
-        const http = options.mcp.webHost;
-        if (http !== undefined && options.mcp.webEnabled) {
-            const basePath = controlWebBasePath(options.mcp.webPublicBaseUrl);
-            providers.push(new ControlWebSocketChannelProvider({
-                assetDirectory: resolveControlWebAssetsDirectory(),
-                basePath,
-                http,
-                sessions: new ControlWebSessionService({
-                    basePath,
-                    secureCookie: options.mcp.webPublicBaseUrl?.startsWith("https://") ?? false
-                })
-            }));
-        }
+        const webProvider = this.#createWebProvider();
+        if (webProvider !== undefined) providers.push(webProvider);
+        this.#webProvider = webProvider;
         this.#channels = new ControlChannelServer({ providers, routes: this.#routes });
+        this.#mcp.setWebConfigApplier?.(async (previous, next) => await this.#replaceWebProvider(previous, next));
+        this.#mcp.setMcpConfigApplier?.(async (_previous, next) => {
+            const retired = await this.#mcp.replaceMcpHost(next);
+            const host = this.#mcp.host;
+            if (host !== undefined) this.#reverse.install(host.server);
+            await retired?.stop();
+        });
     }
 
     async start(): Promise<void> {
@@ -99,5 +97,40 @@ export class ControlRuntime {
         if (failures.length > 0) {
             throw new AggregateError(failures, "Control runtime failed to stop cleanly.");
         }
+    }
+
+    #createWebProvider(): ControlWebSocketChannelProvider | undefined {
+        const http = this.#mcp.webHost;
+        if (http === undefined || !this.#mcp.webEnabled) return undefined;
+        const basePath = controlWebBasePath(this.#mcp.webPublicBaseUrl);
+        return new ControlWebSocketChannelProvider({
+            assetDirectory: resolveControlWebAssetsDirectory(),
+            basePath,
+            http,
+            sessions: new ControlWebSessionService({
+                basePath,
+                secureCookie: this.#mcp.webPublicBaseUrl?.startsWith("https://") ?? false
+            })
+        });
+    }
+
+    async #replaceWebProvider(
+        previousConfig: import("@portable-devshell/shared").ControlConfig,
+        nextConfig: import("@portable-devshell/shared").ControlConfig
+    ): Promise<void> {
+        const previousHost = await this.#mcp.replaceWebHost(nextConfig);
+        const previousProvider = this.#webProvider;
+        const nextProvider = this.#createWebProvider();
+        if (previousProvider === undefined || nextProvider === undefined) {
+            throw new Error("Web listener hot replacement requires Web to remain enabled.");
+        }
+        try {
+            await this.#channels.replaceProvider(previousProvider, nextProvider);
+            this.#webProvider = nextProvider;
+        } catch (error) {
+            await this.#mcp.restoreWebHost(previousHost, previousConfig);
+            throw error;
+        }
+        await this.#mcp.stopRetiredWebHost(previousHost);
     }
 }

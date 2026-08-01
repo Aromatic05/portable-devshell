@@ -21,7 +21,7 @@ export interface ControlChannelServerOptions {
 }
 
 export class ControlChannelServer {
-    readonly #providers: readonly ControlChannelProvider[];
+    #providers: ControlChannelProvider[];
     readonly #routes: ControlChannelRouteProvider;
     readonly #connections = new Map<string, PrefixRoute>();
     readonly #startedProviders: ControlChannelProvider[] = [];
@@ -81,6 +81,27 @@ export class ControlChannelServer {
                 this.#closePromise = undefined;
             }
         }
+    }
+
+    async replaceProvider(previous: ControlChannelProvider, next: ControlChannelProvider): Promise<void> {
+        if (!this.#started) {
+            throw new Error("Control channel server is not started.");
+        }
+        const index = this.#providers.indexOf(previous);
+        if (index < 0 || !this.#startedProviders.includes(previous)) {
+            throw new Error("Control channel provider is not active.");
+        }
+
+        await next.start((channel) => this.#accept(channel));
+        try {
+            await previous.close();
+        } catch (error) {
+            await next.close().catch(() => undefined);
+            throw error;
+        }
+        this.#providers[index] = next;
+        const startedIndex = this.#startedProviders.indexOf(previous);
+        this.#startedProviders[startedIndex] = next;
     }
 
     async #startInternal(): Promise<void> {

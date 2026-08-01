@@ -384,6 +384,24 @@ test("ControlChannelServer coalesces restarts while failed cleanup is retried", 
     await server.close();
 });
 
+test("ControlChannelServer replaces one started provider without closing others", async () => {
+    const socket = new MemoryControlChannelProvider();
+    const web = new MemoryControlChannelProvider();
+    const replacement = new MemoryControlChannelProvider();
+    const server = new ControlChannelServer({
+        providers: [socket, web],
+        routes: { connectionClosed() {}, snapshot: createRouteSnapshot }
+    });
+
+    await server.start();
+    await server.replaceProvider(web, replacement);
+
+    assert.equal(socket.closed, false);
+    assert.equal(web.closed, true);
+    assert.equal(replacement.started, true);
+    await server.close();
+});
+
 
 function createClient(
     provider: MemoryControlChannelProvider,

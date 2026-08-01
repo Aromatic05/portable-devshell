@@ -29,6 +29,7 @@ export class ControlWebSocketChannelProvider implements ControlChannelProvider {
     readonly #path: string;
     readonly #sessions: ControlWebSessionService;
     #accept?: (channel: ControlWebSocketFrameChannel) => void;
+    #removeRoutes?: () => void;
     #routesInstalled = false;
     #started = false;
     #webSocketServer?: WebSocketServer;
@@ -48,13 +49,16 @@ export class ControlWebSocketChannelProvider implements ControlChannelProvider {
         }
         this.#accept = accept;
         if (!this.#routesInstalled) {
-            this.#sessions.install(this.#http);
+            const removeRoutes = [this.#sessions.install(this.#http)];
             if (this.#assetDirectory !== undefined) {
-                this.#http.registerStaticDirectory(this.#basePath, this.#assetDirectory);
+                removeRoutes.push(this.#http.registerStaticDirectory(this.#basePath, this.#assetDirectory));
             }
-            this.#http.registerUpgradeHandler(this.#path, async (request, socket, head) => {
+            removeRoutes.push(this.#http.registerUpgradeHandler(this.#path, async (request, socket, head) => {
                 await this.#handleUpgrade(request, socket, head);
-            });
+            }));
+            this.#removeRoutes = () => {
+                for (const remove of removeRoutes.reverse()) remove();
+            };
             this.#routesInstalled = true;
         }
         this.#webSocketServer = new WebSocketServer({
@@ -73,6 +77,9 @@ export class ControlWebSocketChannelProvider implements ControlChannelProvider {
         this.#accept = undefined;
         this.#sessions.clear();
         this.#channelsBySession.clear();
+        this.#removeRoutes?.();
+        this.#removeRoutes = undefined;
+        this.#routesInstalled = false;
         const server = this.#webSocketServer;
         this.#webSocketServer = undefined;
         if (server === undefined) {

@@ -44,6 +44,52 @@ test("separate Web listener can stop without interrupting MCP", async (t) => {
     assert.equal(mcpResponse.status, 404);
 });
 
+test("replacing an independent Web listener keeps the MCP listener running", async (t) => {
+    const homeDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-runtime-listener-replace-"));
+    const config = createConfig(await reservePort(), await reservePort());
+    const runtime = await createRuntime(config, homeDirectory);
+    t.after(async () => {
+        await runtime.stop().catch(() => undefined);
+        await rm(homeDirectory, { force: true, recursive: true });
+    });
+    await runtime.start();
+    const mcpAddress = runtime.host?.server.address;
+    assert.ok(typeof mcpAddress === "object" && mcpAddress !== null);
+    const previousWeb = runtime.webHost;
+    const next = structuredClone(config);
+    next.web.listenPort = await reservePort();
+
+    const retired = await runtime.replaceWebHost(next);
+    await runtime.stopRetiredWebHost(retired);
+
+    assert.equal((runtime.host?.server.address as { port: number }).port, mcpAddress.port);
+    assert.notEqual(runtime.webHost, previousWeb);
+    const mcpResponse = await fetch(`http://127.0.0.1:${mcpAddress.port}/missing/mcp`, { method: "POST" });
+    assert.equal(mcpResponse.status, 404);
+});
+
+test("replacing an independent MCP listener keeps the Web listener running", async (t) => {
+    const homeDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-runtime-mcp-replace-"));
+    const config = createConfig(await reservePort(), await reservePort());
+    const runtime = await createRuntime(config, homeDirectory);
+    t.after(async () => {
+        await runtime.stop().catch(() => undefined);
+        await rm(homeDirectory, { force: true, recursive: true });
+    });
+    await runtime.start();
+    const web = runtime.webHost;
+    const next = structuredClone(config);
+    next.mcp.listenPort = await reservePort();
+
+    const retired = await runtime.replaceMcpHost(next);
+    await retired?.stop();
+
+    assert.equal(runtime.webHost, web);
+    const address = runtime.webHost?.address;
+    assert.ok(typeof address === "object" && address !== null);
+    await fetch(`http://127.0.0.1:${address.port}/web/session`, { method: "POST" });
+});
+
 async function createRuntime(config: ControlConfig, homeDirectory: string): Promise<ControlRuntimeMcp> {
     const state = new ControlRuntimeState({
         configStore: {

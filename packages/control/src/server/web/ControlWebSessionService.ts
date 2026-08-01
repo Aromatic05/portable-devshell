@@ -44,27 +44,33 @@ export class ControlWebSessionService {
         this.#tokenFactory = options.tokenFactory ?? (() => randomBytes(32).toString("base64url"));
     }
 
-    install(http: HttpHost): void {
+    install(http: HttpHost): () => void {
         if (this.#installed) {
-            return;
+            return () => undefined;
         }
         this.#installed = true;
         const sessionPath = `${this.#basePath}/session`;
-        http.registerAuthenticatedRawRoute("post", sessionPath, (_request, response) => {
+        const removeCreate = http.registerAuthenticatedRawRoute("post", sessionPath, (_request, response) => {
             this.#create(response);
         });
-        http.registerRawRoute("get", sessionPath, (request, response) => {
+        const removeRead = http.registerRawRoute("get", sessionPath, (request, response) => {
             if (!this.authorize(request)) {
                 writeJsonError(response, 401, "Unauthorized");
                 return;
             }
             writeNoContent(response);
         });
-        http.registerRawRoute("delete", sessionPath, (request, response) => {
+        const removeDelete = http.registerRawRoute("delete", sessionPath, (request, response) => {
             this.#revoke(request);
             response.setHeader("Set-Cookie", this.#cookie("", 0));
             writeNoContent(response);
         });
+        return () => {
+            removeCreate();
+            removeRead();
+            removeDelete();
+            this.#installed = false;
+        };
     }
 
     authorize(request: IncomingMessage): boolean {
