@@ -1,7 +1,7 @@
 import { once } from "node:events";
 import type { IncomingMessage, ServerResponse } from "node:http";
 
-import type { McpHostHttpServer } from "@portable-devshell/mcp";
+import type { HttpHost } from "@portable-devshell/mcp";
 import { errorCodes, toControlErrorBody } from "@portable-devshell/shared";
 
 import type { ArtifactService } from "../ArtifactService.js";
@@ -29,7 +29,7 @@ export class ArtifactHttpRoute {
         this.#routeBase = artifactShareRoute(options?.publicBaseUrl);
     }
 
-    install(server: McpHostHttpServer): void {
+    install(server: HttpHost): void {
         const path = `${this.#routeBase}/:token`;
         server.registerRawRoute("head", path, async (request, response) => {
             await this.#handle(request, response, true);

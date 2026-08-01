@@ -1,7 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { Duplex } from "node:stream";
 
-import type { McpHostHttpServer } from "@portable-devshell/mcp";
+import type { HttpHost } from "@portable-devshell/mcp";
 import {
     createError,
     errorCodes,
@@ -45,7 +45,7 @@ export class ReverseConnectionGateway {
         this.#connectionService = new ReverseConnectionService(options);
     }
 
-    install(server: McpHostHttpServer): void {
+    install(server: HttpHost): void {
         const enrollPath = reverseRoute(this.#publicBaseUrl, ENROLL_SUFFIX);
         const ssePath = reverseRoute(this.#publicBaseUrl, SSE_SUFFIX);
         const upstreamPath = reverseRoute(this.#publicBaseUrl, UPSTREAM_SUFFIX);

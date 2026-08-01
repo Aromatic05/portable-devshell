@@ -1,11 +1,13 @@
 import assert from "node:assert/strict";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { createServer } from "node:net";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { McpHostHttpServer } from "@portable-devshell/mcp";
+import { HttpHost } from "@portable-devshell/mcp";
+import { McpHost } from "@portable-devshell/mcp/testing";
 import {
     ClientConnection,
     PrefixRoute,
@@ -24,7 +26,7 @@ import { ControlWebSocketChannelProvider } from "../../src/server/web/ControlWeb
 const WEB_TOKEN = "portable-devshell-web-token-value";
 
 test("web session cookie authenticates the shared control RPC over WebSocket", async (t) => {
-    const http = new McpHostHttpServer({
+    const http = new HttpHost({
         auth: { enabled: true, provider: "token", token: WEB_TOKEN },
         listenHost: "127.0.0.1",
         listenPort: 0
@@ -109,13 +111,63 @@ test("web session cookie authenticates the shared control RPC over WebSocket", a
     assert.match(rejectedAfterLogout, /401/iu);
 });
 
+test("Web none auth stays independent when its shared MCP listener requires OAuth2", async (t) => {
+    const storage = await mkdtemp(join(tmpdir(), "portable-devshell-web-mcp-oauth-"));
+    const port = await reservePort();
+    const host = new McpHost({
+        instances: [{
+            auth: {
+                enabled: true,
+                oauth2: { requiredScopes: ["mcp"], resourceName: "demo" },
+                provider: "oauth2"
+            },
+            name: "demo",
+            policy: { capabilities: ["execute"], groups: ["bash"] },
+            worker: createMcpWorker()
+        }],
+        listenHost: "127.0.0.1",
+        listenPort: port,
+        publicBaseUrl: `http://127.0.0.1:${port}`,
+        storageDir: storage
+    });
+    const sessions = new ControlWebSessionService();
+    const channels = new ControlChannelServer({
+        providers: [new ControlWebSocketChannelProvider({ http: host.server, sessions })],
+        routes: { connectionClosed() {}, snapshot: createRouteSnapshot }
+    });
+    await channels.start();
+    await host.start();
+    t.after(async () => {
+        await channels.close().catch(() => undefined);
+        await host.stop().catch(() => undefined);
+        await rm(storage, { force: true, recursive: true });
+    });
+
+    const origin = `http://127.0.0.1:${port}`;
+    const mcp = await fetch(`${origin}/demo/mcp`, { method: "POST" });
+    assert.equal(mcp.status, 401);
+    const session = await fetch(`${origin}/web/session`, { method: "POST" });
+    assert.equal(session.status, 204);
+    const cookie = session.headers.get("set-cookie")?.split(";", 1)[0];
+    assert.notEqual(cookie, undefined);
+    const webSocket = await NodeWebSocketFrameChannel.connect(`${origin.replace("http", "ws")}/web/rpc`, cookie!);
+    t.after(() => webSocket.close());
+    assert.deepEqual(await new ClientConnection({
+        channelProvider: { connect: async () => webSocket },
+        mapError: normalizeError,
+        mapRemoteError: (error) => createError(error),
+        mode: "persistent",
+        peer: "web"
+    }).request<JsonValue>("@control", "service", "ping"), { pong: true });
+});
+
 
 test("web routes and cookies follow the public base URL path prefix", async (t) => {
     const basePath = controlWebBasePath("https://controller.example/devshell");
     const assetDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-web-prefix-"));
     await writeFile(join(assetDirectory, "index.html"), '<script src="./assets/app.js"></script>', "utf8");
     t.after(async () => await rm(assetDirectory, { force: true, recursive: true }));
-    const http = new McpHostHttpServer({
+    const http = new HttpHost({
         auth: { enabled: false, provider: "none" },
         listenHost: "127.0.0.1",
         listenPort: 0,
@@ -175,7 +227,7 @@ test("web routes and cookies follow the public base URL path prefix", async (t) 
 
 
 test("web session expiry closes its active channel", async (t) => {
-    const http = new McpHostHttpServer({
+    const http = new HttpHost({
         auth: { enabled: false, provider: "none" },
         listenHost: "127.0.0.1",
         listenPort: 0
@@ -215,7 +267,7 @@ test("web session expiry closes its active channel", async (t) => {
 });
 
 test("web RPC requires the canonical subprotocol", async (t) => {
-    const http = new McpHostHttpServer({
+    const http = new HttpHost({
         auth: { enabled: false, provider: "none" },
         listenHost: "127.0.0.1",
         listenPort: 0
@@ -251,7 +303,7 @@ test("web RPC requires the canonical subprotocol", async (t) => {
 });
 
 test("web session capacity evicts the oldest browser session and closes its channel", async (t) => {
-    const http = new McpHostHttpServer({
+    const http = new HttpHost({
         auth: { enabled: false, provider: "none" },
         listenHost: "127.0.0.1",
         listenPort: 0
@@ -405,12 +457,32 @@ function createRouteSnapshot(): PrefixRouteSnapshot {
     ]);
 }
 
-function httpOrigin(server: McpHostHttpServer): string {
+function httpOrigin(server: HttpHost): string {
     const address = server.address as AddressInfo | null | undefined;
     if (address === null || address === undefined || typeof address === "string") {
         throw new Error("HTTP server did not expose a TCP address.");
     }
     return `http://127.0.0.1:${address.port}`;
+}
+
+function createMcpWorker() {
+    return {
+        async appendMcpSessionClosed() {},
+        async appendMcpSessionOpened() {},
+        async appendMcpToolCalled() {},
+        async callTool() { return { exitCode: 0, stderr: "", stdout: "" }; },
+        listTools() { return []; },
+        snapshot() { return { ready: true }; }
+    } as never;
+}
+
+async function reservePort(): Promise<number> {
+    const server = createServer();
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address();
+    if (typeof address !== "object" || address === null) throw new Error("Port reservation failed.");
+    await new Promise<void>((resolve, reject) => server.close((error) => error === undefined ? resolve() : reject(error)));
+    return address.port;
 }
 
 async function openRejected(

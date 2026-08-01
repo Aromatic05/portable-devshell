@@ -5,7 +5,7 @@ import { join } from "node:path";
 import test from "node:test";
 
 import { WorkerInstanceFactory, WorkerRpcInboundConnector } from "@portable-devshell/core/testing";
-import { McpHostHttpServer } from "@portable-devshell/mcp/testing";
+import { HttpHost } from "@portable-devshell/mcp/testing";
 import { asInstanceName, asWorkspacePath, type JsonValue } from "@portable-devshell/shared";
 import WebSocket from "ws";
 
@@ -50,7 +50,7 @@ test("WSS reverse connection authenticates, handshakes, and a higher generation 
         }
     ]);
     const credentialStore = new ReverseCredentialStore(home);
-    const server = new McpHostHttpServer({
+    const server = new HttpHost({
         listenHost: "127.0.0.1",
         listenPort: 0,
         publicBaseUrl: "http://127.0.0.1/base"
@@ -158,7 +158,7 @@ test("SSE plus POST fallback completes RPC handshake and deduplicates repeated u
         }
     ]);
     const credentialStore = new ReverseCredentialStore(home);
-    const server = new McpHostHttpServer({
+    const server = new HttpHost({
         listenHost: "127.0.0.1",
         listenPort: 0,
         publicBaseUrl: "http://127.0.0.1/base"

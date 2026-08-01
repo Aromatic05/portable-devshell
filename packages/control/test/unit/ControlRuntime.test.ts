@@ -164,10 +164,10 @@ test("runtime mounts web session and RPC routes on the MCP HTTP host", async (t)
         } as never,
         mcp: {
             configEditor: undefined,
-            host: { server: http },
             instanceCreate: undefined,
             oauthApprovals: undefined,
-            publicBaseUrl: "https://devshell.example",
+            webHost: http,
+            webPublicBaseUrl: "https://devshell.example",
             webEnabled: true,
             async start() {},
             status: () => ({ running: true }),

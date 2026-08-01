@@ -1,5 +1,5 @@
-import type { McpHost, McpOAuthApprovalService } from "@portable-devshell/mcp";
-import type { JsonValue } from "@portable-devshell/shared";
+import { HttpHost, type McpHost, type McpOAuthApprovalService } from "@portable-devshell/mcp";
+import type { ControlConfig, JsonValue } from "@portable-devshell/shared";
 
 import { ConfigEditorCoordinator } from "../../control/config/editor/ConfigEditorCoordinator.js";
 import { McpInstanceGatewayControl } from "../McpInstanceGatewayControl.js";
@@ -12,6 +12,7 @@ import type { ControlRuntimeState } from "./ControlRuntimeState.js";
 
 export interface ControlRuntimeMcpOptions {
     artifact: ControlRuntimeArtifact;
+    applyRuntimeConfig?: (previous: ControlConfig, next: ControlConfig) => Promise<void>;
     controlPaths: ControlPathHome;
     factory?: McpRuntimeFactory;
     state: ControlRuntimeState;
@@ -22,6 +23,8 @@ export class ControlRuntimeMcp {
     readonly instanceCreate: InstanceCreateCoordinator;
     readonly instanceGateway: McpInstanceGatewayControl;
     readonly publicBaseUrl?: string;
+    readonly webHost?: HttpHost;
+    readonly webPublicBaseUrl?: string;
     readonly webEnabled: boolean;
     readonly #host?: McpHost;
     readonly #mcpEnabled: boolean;
@@ -53,6 +56,12 @@ export class ControlRuntimeMcp {
             gateway: decorateMcpInstanceGatewayArtifact(this.instanceGateway, options.artifact.service),
             storageDir: options.controlPaths.oauthDir
         });
+        if (config.web.enabled) {
+            this.webPublicBaseUrl = config.web.publicBaseUrl;
+            this.webHost = this.#host !== undefined && sameEndpoint(config.mcp, config.web)
+                ? this.#host.server
+                : new HttpHost({ listenHost: config.web.listenHost, listenPort: config.web.listenPort });
+        }
         if (this.#host !== undefined) options.artifact.installHttpRoute(this.#host.server);
         this.configEditor = new ConfigEditorCoordinator({
             configStore: options.state.configStore,
@@ -61,6 +70,7 @@ export class ControlRuntimeMcp {
             getMcpInstanceGateway: () => this.instanceGateway,
             homeDirectory: options.state.homeDirectory,
             instanceRegistry: options.state.instances,
+            runtimeApply: options.applyRuntimeConfig === undefined ? undefined : { apply: options.applyRuntimeConfig },
             setConfig: (config) => options.state.setConfig(config)
         });
     }
@@ -88,9 +98,22 @@ export class ControlRuntimeMcp {
 
     async start(): Promise<void> {
         await this.#host?.start();
+        if (this.webHost !== undefined && this.webHost !== this.#host?.server) {
+            await this.webHost.start();
+        }
     }
 
     async stop(): Promise<void> {
+        if (this.webHost !== undefined && this.webHost !== this.#host?.server) {
+            await this.webHost.stop();
+        }
         await this.#host?.stop();
     }
+}
+
+function sameEndpoint(
+    left: { listenHost: string; listenPort: number },
+    right: { listenHost: string; listenPort: number }
+): boolean {
+    return left.listenHost === right.listenHost && left.listenPort === right.listenPort;
 }

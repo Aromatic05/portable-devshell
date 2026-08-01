@@ -55,7 +55,6 @@ test("real Rust reverse worker connects to the TS gateway and executes a tool ca
         encodeGlobalConfig({
             control: { logLevel: "info" },
             mcp: {
-                auth: { mode: "none" },
                 enabled: true,
                 listenHost: "127.0.0.1",
                 listenPort: port,

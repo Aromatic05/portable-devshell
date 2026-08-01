@@ -505,9 +505,6 @@ async function createHarness(): Promise<{
                     logLevel: "info"
                 },
                 mcp: {
-                    auth: {
-                        mode: "none"
-                    },
                     enabled: false,
                     listenHost: "127.0.0.1",
                     listenPort

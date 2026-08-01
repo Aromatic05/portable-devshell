@@ -1,7 +1,7 @@
 import type { IncomingMessage } from "node:http";
 import type { Duplex } from "node:stream";
 
-import type { McpHostHttpServer } from "@portable-devshell/mcp";
+import type { HttpHost } from "@portable-devshell/mcp";
 import {
     CONTROL_WEB_BASE_PATH,
     CONTROL_WEB_RPC_SUBPROTOCOL
@@ -16,7 +16,7 @@ import { ControlWebSocketFrameChannel } from "./ControlWebSocketFrameChannel.js"
 export interface ControlWebSocketChannelProviderOptions {
     assetDirectory?: string;
     basePath?: string;
-    http: McpHostHttpServer;
+    http: HttpHost;
     path?: string;
     sessions: ControlWebSessionService;
 }
@@ -25,7 +25,7 @@ export class ControlWebSocketChannelProvider implements ControlChannelProvider {
     readonly #assetDirectory?: string;
     readonly #basePath: string;
     readonly #channelsBySession = new Map<string, Set<ControlWebSocketFrameChannel>>();
-    readonly #http: McpHostHttpServer;
+    readonly #http: HttpHost;
     readonly #path: string;
     readonly #sessions: ControlWebSessionService;
     #accept?: (channel: ControlWebSocketFrameChannel) => void;

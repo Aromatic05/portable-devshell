@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test, { type TestContext } from "node:test";
 
-import { McpHostHttpServer } from "@portable-devshell/mcp/testing";
+import { HttpHost } from "@portable-devshell/mcp/testing";
 import { requireTcpPort } from "../../../../test/TestHttpSupport.ts";
 import type { ArtifactPayloadDescriptor, JsonValue } from "@portable-devshell/shared";
 import {
@@ -85,7 +85,7 @@ async function fixture(
 ) {
     const storageDir = await mkdtemp(join(tmpdir(), "artifact-http-"));
     const endpoint = new MemoryShareEndpoint(Buffer.from("0123456789abcdef"));
-    const server = new McpHostHttpServer({
+    const server = new HttpHost({
         auth: { enabled: false, provider: "none" },
         listenHost: "127.0.0.1",
         listenPort: 0

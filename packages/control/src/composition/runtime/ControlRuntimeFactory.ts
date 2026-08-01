@@ -20,6 +20,7 @@ export class ControlRuntimeFactory {
     }
 
     async create(options: {
+        applyRuntimeConfig?: (previous: import("@portable-devshell/shared").ControlConfig, next: import("@portable-devshell/shared").ControlConfig) => Promise<void>;
         restart: () => Promise<void>;
         shutdown: () => Promise<void>;
         socketPath: string;
@@ -36,6 +37,7 @@ export class ControlRuntimeFactory {
         try {
             const mcp = new ControlRuntimeMcp({
                 artifact,
+                applyRuntimeConfig: options.applyRuntimeConfig,
                 controlPaths,
                 factory: this.#mcpFactory,
                 state: options.state

@@ -53,16 +53,16 @@ export class ControlRuntime {
         });
         this.#socketProvider = new ControlSocketChannelProvider({ socketPath: options.socketPath });
         const providers: ControlChannelProvider[] = [this.#socketProvider];
-        const http = options.mcp.host?.server;
+        const http = options.mcp.webHost;
         if (http !== undefined && options.mcp.webEnabled) {
-            const basePath = controlWebBasePath(options.mcp.publicBaseUrl);
+            const basePath = controlWebBasePath(options.mcp.webPublicBaseUrl);
             providers.push(new ControlWebSocketChannelProvider({
                 assetDirectory: resolveControlWebAssetsDirectory(),
                 basePath,
                 http,
                 sessions: new ControlWebSessionService({
                     basePath,
-                    secureCookie: options.mcp.publicBaseUrl?.startsWith("https://") ?? false
+                    secureCookie: options.mcp.webPublicBaseUrl?.startsWith("https://") ?? false
                 })
             }));
         }

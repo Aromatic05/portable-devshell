@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
 
-import type { McpHostHttpServer } from "@portable-devshell/mcp";
+import type { HttpHost } from "@portable-devshell/mcp";
 import { CONTROL_WEB_BASE_PATH } from "@portable-devshell/shared";
 
 const DEFAULT_SESSION_TTL_MS = 12 * 60 * 60 * 1_000;
@@ -44,7 +44,7 @@ export class ControlWebSessionService {
         this.#tokenFactory = options.tokenFactory ?? (() => randomBytes(32).toString("base64url"));
     }
 
-    install(http: McpHostHttpServer): void {
+    install(http: HttpHost): void {
         if (this.#installed) {
             return;
         }
