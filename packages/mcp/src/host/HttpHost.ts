@@ -11,7 +11,7 @@ import { McpEndpointBinding } from "../endpoint/McpEndpointBinding.js";
 
 type JsonValue = boolean | number | null | string | JsonValue[] | { [key: string]: JsonValue };
 
-interface McpHostHttpServerOptions {
+export interface HttpHostOptions {
     auth?: McpAuthConfig;
     listenHost: string;
     listenPort: number;
@@ -28,10 +28,10 @@ function isRecord(value: unknown): value is Record<string, JsonValue> {
     return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-export class McpHostHttpServer {
+export class HttpHost {
     readonly #app = express();
     readonly #auth?: McpAuthConfig;
-    readonly #bindings = new Map<string, McpEndpointBinding>();
+    readonly #bindings = new Map<string, { auth?: McpAuthConfig; binding: McpEndpointBinding }>();
     readonly #listenHost: string;
     readonly #listenPort: number;
     readonly #oauth?: McpOAuthProtectedResource;
@@ -45,7 +45,7 @@ export class McpHostHttpServer {
     >();
     #server?: Server;
 
-    constructor(options: McpHostHttpServerOptions) {
+    constructor(options: HttpHostOptions) {
         this.#auth = options.auth;
         this.#listenHost = options.listenHost;
         this.#listenPort = options.listenPort;
@@ -117,8 +117,13 @@ export class McpHostHttpServer {
         method: "delete" | "get" | "head" | "post",
         path: string,
         handler: (request: IncomingMessage, response: ServerResponse) => void | Promise<void>
-    ): void {
-        this.#app[method](path, (request: Request, response: Response) => {
+    ): () => void {
+        let active = true;
+        this.#app[method](path, (request: Request, response: Response, next: NextFunction) => {
+            if (!active) {
+                next();
+                return;
+            }
             void Promise.resolve(handler(request as IncomingMessage, response as unknown as ServerResponse)).catch(
                 (error: unknown) => {
                     if (!response.headersSent) {
@@ -131,6 +136,9 @@ export class McpHostHttpServer {
                 }
             );
         });
+        return () => {
+            active = false;
+        };
     }
 
     registerAuthenticatedRawRoute(
@@ -141,8 +149,13 @@ export class McpHostHttpServer {
             response: ServerResponse,
             auth: AuthInfo
         ) => void | Promise<void>
-    ): void {
-        this.#app[method](path, ...this.#createAuthHandlers(path), (request: Request, response: Response) => {
+    ): () => void {
+        let active = true;
+        this.#app[method](path, ...this.#createAuthHandlers(path), (request: Request, response: Response, next: NextFunction) => {
+            if (!active) {
+                next();
+                return;
+            }
             const auth = readRequestAuth(request);
             if (auth === undefined) {
                 response.status(401).json({ error: "Unauthorized" });
@@ -160,10 +173,14 @@ export class McpHostHttpServer {
                 response.end();
             });
         });
+        return () => {
+            active = false;
+        };
     }
 
-    registerStaticDirectory(path: string, directory: string): void {
-        this.#app.use(path, express.static(directory, {
+    registerStaticDirectory(path: string, directory: string): () => void {
+        let active = true;
+        const staticDirectory = express.static(directory, {
             fallthrough: false,
             index: "index.html",
             redirect: true,
@@ -186,35 +203,62 @@ export class McpHostHttpServer {
                 }
                 response.setHeader("Cache-Control", "no-cache");
             }
-        }));
+        });
+        this.#app.use(path, (request: Request, response: Response, next: NextFunction) => {
+            if (!active) {
+                next();
+                return;
+            }
+            staticDirectory(request, response, next);
+        });
+        return () => {
+            active = false;
+        };
     }
 
     registerUpgradeHandler(
         path: string,
         handler: (request: IncomingMessage, socket: Duplex, head: Buffer) => void | Promise<void>
-    ): void {
+    ): () => void {
         this.#upgradeHandlers.set(path, handler);
+        return () => {
+            if (this.#upgradeHandlers.get(path) === handler) {
+                this.#upgradeHandlers.delete(path);
+            }
+        };
     }
 
-    registerBinding(path: string, binding: McpEndpointBinding): void {
-        this.#bindings.set(path, binding);
+    registerBinding(path: string, binding: McpEndpointBinding, auth?: McpAuthConfig): void {
+        this.#bindings.set(path, { auth, binding });
+        const resourceServerUrl = this.#toPublicResourceUrl(path);
+        if (auth?.provider === "oauth2" && this.#oauth !== undefined && resourceServerUrl !== undefined) {
+            this.#oauth.registerResource(resourceServerUrl);
+        }
         if (this.#registeredPaths.has(path)) {
             return;
         }
 
         this.#registeredPaths.add(path);
+        if (resourceServerUrl !== undefined && this.#oauth !== undefined) {
+            this.#app.get(this.#oauthProtectedResourceMetadataPath(resourceServerUrl), (request: Request, response: Response) => {
+                const current = this.#bindings.get(path);
+                if (current?.auth?.provider !== "oauth2") {
+                    response.status(404).json({ error: "OAuth protected resource not found" });
+                    return;
+                }
+                response.json(this.#oauth!.protectedResourceMetadata(resourceServerUrl, current.auth.oauth2));
+            });
+        }
 
-        const routeHandlers = this.#createAuthHandlers(path);
-
-        this.#app.all(path, ...routeHandlers, async (request: Request, response: Response) => {
+        this.#app.all(path, this.#bindingAuthHandler(path), async (request: Request, response: Response) => {
             try {
-                const currentBinding = this.#bindings.get(path);
-                if (currentBinding === undefined) {
+                const current = this.#bindings.get(path);
+                if (current === undefined) {
                     response.status(404).json({ error: "Instance endpoint not found" });
                     return;
                 }
                 const body = await this.#readJsonBody(request as IncomingMessage);
-                await currentBinding.handleRequest(request, response, body);
+                await current.binding.handleRequest(request, response, body);
             } catch (error) {
                 if (response.headersSent) {
                     response.end();
@@ -236,22 +280,23 @@ export class McpHostHttpServer {
     #createAuthHandlers(path: string): RequestHandler[] {
         const routeHandlers: RequestHandler[] = [];
         const resourceServerUrl = this.#toPublicResourceUrl(path);
+        const auth = this.#bindings.get(path)?.auth ?? this.#auth;
 
-        if (this.#auth?.provider === "oauth2" && this.#oauth !== undefined && resourceServerUrl !== undefined) {
+        if (auth?.provider === "oauth2" && this.#oauth !== undefined && resourceServerUrl !== undefined) {
             this.#oauth.registerResource(resourceServerUrl);
-            routeHandlers.push(this.#oauth.requestAuthHandler(resourceServerUrl));
+            routeHandlers.push(this.#oauth.requestAuthHandler(resourceServerUrl, auth.oauth2));
             this.#app.use(
                 this.#oauthProtectedResourceMetadataPath(resourceServerUrl),
-                this.#oauth.protectedResourceMetadataHandler(resourceServerUrl)
+                this.#oauth.protectedResourceMetadataHandler(resourceServerUrl, auth.oauth2)
             );
-        } else if (this.#auth?.provider === "token") {
+        } else if (auth?.provider === "token") {
             routeHandlers.push((request: Request, response: Response, next: NextFunction) => {
-                const auth = this.#tokenProvider?.authenticate(request.headers.authorization);
-                if (auth === undefined) {
+                const requestAuth = new McpAuthProviderToken(auth.token).authenticate(request.headers.authorization);
+                if (requestAuth === undefined) {
                     response.status(401).json({ error: "Unauthorized" });
                     return;
                 }
-                setRequestAuth(request, auth);
+                setRequestAuth(request, requestAuth);
                 next();
             });
         } else {
@@ -261,6 +306,30 @@ export class McpHostHttpServer {
             });
         }
         return routeHandlers;
+    }
+
+    #bindingAuthHandler(path: string): RequestHandler {
+        return (request: Request, response: Response, next: NextFunction) => {
+            const current = this.#bindings.get(path);
+            const auth = current?.auth ?? { enabled: false as const, provider: "none" as const };
+            const resourceServerUrl = this.#toPublicResourceUrl(path);
+            if (auth.provider === "oauth2" && this.#oauth !== undefined && resourceServerUrl !== undefined) {
+                void this.#oauth.requestAuthHandler(resourceServerUrl, auth.oauth2)(request, response, next);
+                return;
+            }
+            if (auth.provider === "token") {
+                const requestAuth = new McpAuthProviderToken(auth.token).authenticate(request.headers.authorization);
+                if (requestAuth === undefined) {
+                    response.status(401).json({ error: "Unauthorized" });
+                    return;
+                }
+                setRequestAuth(request, requestAuth);
+                next();
+                return;
+            }
+            setRequestAuth(request, { clientId: "local", scopes: [], token: "local" });
+            next();
+        };
     }
 
     async #readJsonBody(request: IncomingMessage): Promise<JsonValue> {

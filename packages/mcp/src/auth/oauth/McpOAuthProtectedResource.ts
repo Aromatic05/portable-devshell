@@ -61,23 +61,27 @@ export class McpOAuthProtectedResource {
     }
 
     protectedResourceMetadataHandler(
-        resourceServerUrl: URL
+        resourceServerUrl: URL,
+        config?: McpOAuth2Config
     ): RequestHandler {
         return this.#runtime.protectedResourceMetadataHandler(
-            resourceServerUrl
+            resourceServerUrl,
+            config
         );
     }
 
     protectedResourceMetadata(
-        resourceServerUrl: URL
+        resourceServerUrl: URL,
+        config?: McpOAuth2Config
     ): OAuthProtectedResourceMetadata {
         return this.#runtime.protectedResourceMetadata(
-            resourceServerUrl
+            resourceServerUrl,
+            config
         );
     }
 
-    requestAuthHandler(resourceServerUrl: URL): RequestHandler {
-        return this.#runtime.requestAuthHandler(resourceServerUrl);
+    requestAuthHandler(resourceServerUrl: URL, config?: McpOAuth2Config): RequestHandler {
+        return this.#runtime.requestAuthHandler(resourceServerUrl, config);
     }
 
     #installProvider(app: Express): void {

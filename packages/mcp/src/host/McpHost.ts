@@ -4,10 +4,9 @@ import { McpContextRegistry } from "../context/McpContextRegistry.js";
 import type { McpInstanceGateway } from "../instance/McpInstanceGateway.js";
 import { McpOAuthProtectedResource } from "../auth/oauth/McpOAuthProtectedResource.js";
 import type { McpOAuthApprovalService } from "../auth/oauth/McpOAuthApprovalService.js";
-import { McpAuthPublicExposureGuard, type McpExposureConfig } from "../auth/public/McpAuthPublicExposureGuard.js";
 import { McpEndpointBinding } from "../endpoint/McpEndpointBinding.js";
 import { McpEndpointWorker } from "../endpoint/McpEndpointWorker.js";
-import { McpHostHttpServer } from "./McpHostHttpServer.js";
+import { HttpHost } from "./HttpHost.js";
 import { McpHostRouteRegistry } from "./route/McpHostRouteRegistry.js";
 
 interface WorkerInstanceLike {
@@ -33,6 +32,7 @@ interface WorkerInstanceLike {
 }
 
 export interface McpHostInstanceConfig {
+    auth?: McpAuthConfig;
     gateway?: McpInstanceGateway;
     policy: ToolPolicy;
     name: string;
@@ -40,20 +40,19 @@ export interface McpHostInstanceConfig {
     worker: WorkerInstanceLike;
 }
 
-export interface McpHostConfig extends McpExposureConfig {
-    auth?: McpAuthConfig;
+export interface McpHostConfig {
     contextFile?: string;
     instances: readonly McpHostInstanceConfig[];
+    listenHost: string;
     listenPort: number;
+    publicBaseUrl?: string;
     storageDir?: string;
 }
 
 export class McpHost {
-    readonly #auth?: McpAuthConfig;
     readonly #config: McpHostConfig;
     readonly #contextRegistry: McpContextRegistry;
-    readonly #guard = new McpAuthPublicExposureGuard();
-    readonly #httpServer: McpHostHttpServer;
+    readonly #httpServer: HttpHost;
     readonly #oauth?: McpOAuthProtectedResource;
     readonly #registry = new McpHostRouteRegistry();
     readonly #retiredBindingClosures = new Set<Promise<void>>();
@@ -61,11 +60,10 @@ export class McpHost {
 
     constructor(config: McpHostConfig) {
         this.#config = config;
-        this.#auth = config.auth;
         this.#contextRegistry = new McpContextRegistry({ filePath: config.contextFile });
         this.#oauth =
-            config.auth?.provider === "oauth2" && config.publicBaseUrl !== undefined && config.storageDir !== undefined
-                ? new McpOAuthProtectedResource(config.auth.oauth2, config.publicBaseUrl, config.storageDir, {
+            oauthConfig(config.instances) !== undefined && config.publicBaseUrl !== undefined && config.storageDir !== undefined
+                ? new McpOAuthProtectedResource(oauthConfig(config.instances)!, config.publicBaseUrl, config.storageDir, {
                       trustProxy: isLoopbackHost(config.listenHost)
                   })
                 : undefined;
@@ -74,8 +72,7 @@ export class McpHost {
             this.registerInstance(instance);
         }
 
-        this.#httpServer = new McpHostHttpServer({
-            auth: config.auth,
+        this.#httpServer = new HttpHost({
             listenHost: config.listenHost,
             listenPort: config.listenPort,
             oauth: this.#oauth,
@@ -84,14 +81,13 @@ export class McpHost {
     }
 
     async start(): Promise<void> {
-        this.#guard.assertSafe(this.#config);
-        if (this.#auth?.provider === "oauth2" && this.#oauth === undefined) {
-            throw new Error("mcp.publicBaseUrl and storageDir are required when mcp.auth.mode=oauth2");
+        if (oauthConfig(this.#config.instances) !== undefined && this.#oauth === undefined) {
+            throw new Error("mcp.publicBaseUrl and storageDir are required when an instance uses oauth2 auth");
         }
         await this.#contextRegistry.initialize();
         await this.#oauth?.warmup();
         for (const binding of this.#registry.list()) {
-            this.#httpServer.registerBinding(binding.path, binding.binding);
+            this.#httpServer.registerBinding(binding.path, binding.binding, binding.auth);
         }
         await this.#httpServer.start();
         this.#started = true;
@@ -119,6 +115,7 @@ export class McpHost {
         const path = instance.path ?? `/${instance.name}/mcp`;
 
         const previous = this.#registry.register({
+            auth: instance.auth ?? { enabled: false, provider: "none" },
             binding,
             path
         });
@@ -127,7 +124,7 @@ export class McpHost {
             if (previous !== undefined && previous.path !== path) {
                 this.#httpServer.unregisterBinding(previous.path);
             }
-            this.#httpServer.registerBinding(path, binding);
+            this.#httpServer.registerBinding(path, binding, instance.auth);
         }
         if (previous !== undefined) {
             this.#retireBinding(previous.binding);
@@ -152,7 +149,7 @@ export class McpHost {
         this.#retiredBindingClosures.add(closure);
     }
 
-    get server(): McpHostHttpServer {
+    get server(): HttpHost {
         return this.#httpServer;
     }
 
@@ -173,15 +170,30 @@ export class McpHost {
         const running = this.#started && address !== undefined && address !== null;
         const listenAddress = typeof address === "object" && address !== null ? `${address.address}:${address.port}` : undefined;
         return {
-            authMode: this.#auth?.provider ?? "none",
+            authMode: "none",
             ...(listenAddress === undefined ? {} : { listenAddress }),
-            oauthReady: this.#auth?.provider !== "oauth2" || this.#oauth !== undefined,
+            oauthReady: oauthConfig(this.#config.instances) === undefined || this.#oauth !== undefined,
             protocolReadiness: "notChecked",
             ...(this.#config.publicBaseUrl === undefined ? {} : { publicBaseUrl: this.#config.publicBaseUrl }),
             publicReachability: "notChecked",
             running
         };
     }
+}
+
+function oauthConfig(instances: readonly McpHostInstanceConfig[]) {
+    const oauth = instances
+        .map((instance) => instance.auth)
+        .filter((auth): auth is McpAuthConfig => auth !== undefined)
+        .filter((auth) => auth.provider === "oauth2")
+        .map((auth) => auth.oauth2);
+    if (oauth.length === 0) return undefined;
+    const [first] = oauth;
+    return {
+        documentationUrl: first!.documentationUrl,
+        requiredScopes: [...new Set(oauth.flatMap((entry) => entry.requiredScopes))],
+        resourceName: first!.resourceName
+    };
 }
 
 function isLoopbackHost(host: string): boolean {

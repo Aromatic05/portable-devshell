@@ -1,4 +1,4 @@
-import { McpHost, type McpAuthConfig, type McpInstanceGateway } from "@portable-devshell/mcp";
+import { McpHost, type McpInstanceGateway } from "@portable-devshell/mcp";
 import type { ControlConfig } from "@portable-devshell/shared";
 
 import type { InstanceRegistry } from "../control/instance/registry/InstanceRegistry.js";
@@ -16,7 +16,7 @@ export class McpRuntimeFactory {
         registry: InstanceRegistry,
         options?: { contextFile?: string; gateway?: McpInstanceGateway; storageDir?: string }
     ): McpHost | undefined {
-        if (!config.mcp.enabled && !config.web.enabled) {
+        if (!config.mcp.enabled) {
             return undefined;
         }
 
@@ -24,11 +24,14 @@ export class McpRuntimeFactory {
             ? registry
                   .list()
                   .filter((descriptor) => descriptor.mcpEnabled)
-                  .map((descriptor) => this.#mapper.map(descriptor, options?.gateway))
+                  .map((descriptor) => {
+                      const instance = config.instances.find((entry) => entry.name === descriptor.name);
+                      if (instance === undefined) throw new Error(`Missing config for MCP instance ${descriptor.name}.`);
+                      return this.#mapper.map(descriptor, options?.gateway, instance.mcp.auth);
+                  })
             : [];
 
         return new McpHost({
-            auth: toMcpHostAuth(config),
             ...(options?.contextFile === undefined ? {} : { contextFile: options.contextFile }),
             instances: endpoints,
             listenHost: config.mcp.listenHost,
@@ -37,37 +40,4 @@ export class McpRuntimeFactory {
             storageDir: options?.storageDir
         });
     }
-}
-
-function toMcpHostAuth(config: ControlConfig): McpAuthConfig | undefined {
-    const mode = config.mcp.auth.mode;
-
-    if (mode === "none") {
-        return {
-            enabled: false as const,
-            provider: "none"
-        };
-    }
-
-    if (mode === "oauth2") {
-        if (config.mcp.auth.oauth2 === undefined) {
-            throw new Error("mcp.auth.oauth2 is required when mcp.auth.mode=oauth2");
-        }
-
-        return {
-            enabled: true as const,
-            oauth2: {
-                documentationUrl: config.mcp.auth.oauth2.documentationUrl,
-                requiredScopes: [...config.mcp.auth.oauth2.requiredScopes],
-                resourceName: config.mcp.auth.oauth2.resourceName
-            },
-            provider: "oauth2"
-        };
-    }
-
-    return {
-        enabled: true as const,
-        provider: "token",
-        token: config.mcp.auth.token
-    };
 }

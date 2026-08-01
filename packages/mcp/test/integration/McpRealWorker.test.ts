@@ -36,12 +36,9 @@ test("MCP initialize tools/list and tools/call succeed against the frozen worker
         })
     });
     const host = new McpHost({
-        auth: {
-            enabled: false,
-            provider: "none"
-        },
         instances: [
             {
+                auth: { enabled: false, provider: "none" },
                 policy: { capabilities: ["execute"], groups: ["bash", "tmux"] },
                 name: instanceName,
                 worker: instance
@@ -166,12 +163,9 @@ test("MCP tools/call waits for approval before invoking the worker tool", realWo
         })
     });
     const host = new McpHost({
-        auth: {
-            enabled: false,
-            provider: "none"
-        },
         instances: [
             {
+                auth: { enabled: false, provider: "none" },
                 policy: { capabilities: ["execute"], groups: ["bash"] },
                 name: instanceName,
                 worker: instance

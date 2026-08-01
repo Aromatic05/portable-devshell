@@ -50,6 +50,7 @@ test("mcp endpoint path is generated and wiring only builds host configuration",
     assert.ok(descriptor !== undefined);
     assert.equal(descriptor.mcpPath, "/demo-local/mcp");
     assert.deepEqual(new McpEndpointFactory().map(descriptor), {
+        auth: { enabled: false, provider: "none" },
         policy: {
             capabilities: ["read", "write", "execute"],
             groups: ["file", "bash", "artifact"]
@@ -66,7 +67,7 @@ test("mcp endpoint path is generated and wiring only builds host configuration",
     assert.equal(descriptor.worker.snapshot().ready, false);
 });
 
-test("WebUI can create the HTTP host while global MCP remains disabled", () => {
+test("MCP runtime is absent while global MCP remains disabled", () => {
     const config = createDefaultControlConfig();
     config.mcp.enabled = false;
     config.web.enabled = true;
@@ -90,7 +91,7 @@ test("WebUI can create the HTTP host while global MCP remains disabled", () => {
 
     const host = factory.wire(config, registry);
 
-    assert.ok(host !== undefined);
+    assert.equal(host, undefined);
     assert.deepEqual(mapped, []);
 });
 

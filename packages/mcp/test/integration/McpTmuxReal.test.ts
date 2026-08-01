@@ -171,8 +171,8 @@ async function withTmuxHarness(instanceName: string, body: (harness: TmuxHarness
         })
     });
     const host = new McpHost({
-        auth: { enabled: false, provider: "none" },
         instances: [{
+            auth: { enabled: false, provider: "none" },
             name: instanceName,
             policy: { capabilities: ["execute", "read"], groups: ["tmux"] },
             worker: instance

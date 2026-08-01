@@ -219,30 +219,32 @@ export class McpOAuthProviderRuntime {
     }
 
     protectedResourceMetadata(
-        resourceServerUrl: URL
+        resourceServerUrl: URL,
+        config: McpOAuth2Config = this.#config
     ): OAuthProtectedResourceMetadata {
         return {
             authorization_servers: [stripTrailingSlash(this.#issuerUrl.href)],
             resource: resourceUrlFromServerUrl(resourceServerUrl).href,
-            resource_documentation: this.#config.documentationUrl,
-            resource_name: this.#config.resourceName,
-            scopes_supported: this.#config.requiredScopes.length === 0
+            resource_documentation: config.documentationUrl,
+            resource_name: config.resourceName,
+            scopes_supported: config.requiredScopes.length === 0
                 ? undefined
-                : [...this.#config.requiredScopes]
+                : [...config.requiredScopes]
         };
     }
 
     protectedResourceMetadataHandler(
-        resourceServerUrl: URL
+        resourceServerUrl: URL,
+        config: McpOAuth2Config = this.#config
     ): RequestHandler {
         return async (_request: Request, response: Response) => {
-            response.json(this.protectedResourceMetadata(resourceServerUrl));
+            response.json(this.protectedResourceMetadata(resourceServerUrl, config));
         };
     }
 
-    requestAuthHandler(resourceServerUrl: URL): RequestHandler {
+    requestAuthHandler(resourceServerUrl: URL, config: McpOAuth2Config = this.#config): RequestHandler {
         return requireBearerAuth({
-            requiredScopes: this.#config.requiredScopes,
+            requiredScopes: config.requiredScopes,
             resourceMetadataUrl: getOAuthProtectedResourceMetadataUrl(
                 resourceServerUrl
             ),

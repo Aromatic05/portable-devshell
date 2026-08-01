@@ -5,10 +5,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { McpHostHttpServer } from "@portable-devshell/mcp/testing";
+import { HttpHost } from "@portable-devshell/mcp/testing";
 
 test("MCP HTTP server rejects oversized request bodies before dispatch", async () => {
-    const server = new McpHostHttpServer({
+    const server = new HttpHost({
         listenHost: "127.0.0.1",
         listenPort: 0
     });
@@ -45,7 +45,7 @@ test("HTTP server serves WebUI assets with browser security and cache headers", 
     await mkdir(join(directory, "assets"));
     await writeFile(join(directory, "index.html"), "<!doctype html><title>devshell</title>", "utf8");
     await writeFile(join(directory, "assets", "app-abc123.js"), "export {};", "utf8");
-    const server = new McpHostHttpServer({
+    const server = new HttpHost({
         listenHost: "127.0.0.1",
         listenPort: 0
     });
@@ -69,6 +69,53 @@ test("HTTP server serves WebUI assets with browser security and cache headers", 
     } finally {
         await server.stop();
         await rm(directory, { force: true, recursive: true });
+    }
+});
+
+test("MCP binding auth is read from the current namespace registration", async () => {
+    const server = new HttpHost({ listenHost: "127.0.0.1", listenPort: 0 });
+    const binding = {
+        async handleRequest(_request: unknown, response: { statusCode: number; end(): void }) {
+            response.statusCode = 204;
+            response.end();
+        }
+    };
+    server.registerBinding("/demo/mcp", binding as never, {
+        enabled: true,
+        provider: "token",
+        token: "first-token"
+    });
+
+    try {
+        await server.start();
+        const address = server.address;
+        assert.ok(typeof address === "object" && address !== null);
+        const initial = await requestHttp(address.port, "/demo/mcp", {
+            body: "{}",
+            headers: { authorization: "Bearer first-token", "content-type": "application/json" },
+            method: "POST"
+        });
+        assert.equal(initial.status, 204);
+
+        server.registerBinding("/demo/mcp", binding as never, {
+            enabled: true,
+            provider: "token",
+            token: "second-token"
+        });
+        const stale = await requestHttp(address.port, "/demo/mcp", {
+            body: "{}",
+            headers: { authorization: "Bearer first-token", "content-type": "application/json" },
+            method: "POST"
+        });
+        const current = await requestHttp(address.port, "/demo/mcp", {
+            body: "{}",
+            headers: { authorization: "Bearer second-token", "content-type": "application/json" },
+            method: "POST"
+        });
+        assert.equal(stale.status, 401);
+        assert.equal(current.status, 204);
+    } finally {
+        await server.stop();
     }
 });
 

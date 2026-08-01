@@ -1,6 +1,8 @@
 import type { McpEndpointBinding } from "../../endpoint/McpEndpointBinding.js";
+import type { McpAuthConfig } from "../../auth/McpAuthConfig.js";
 
 export interface McpHostRouteEntry {
+    auth?: McpAuthConfig;
     binding: McpEndpointBinding;
     path: string;
 }

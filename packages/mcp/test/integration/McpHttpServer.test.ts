@@ -10,6 +10,7 @@ import { fileURLToPath } from "node:url";
 import { requireTcpPort } from "../../../../test/TestHttpSupport.ts";
 
 import { McpHost } from "@portable-devshell/mcp/testing";
+import type { McpAuthConfig, McpHostInstanceConfig } from "@portable-devshell/mcp";
 
 const fixturesDirectory = resolve(dirname(fileURLToPath(import.meta.url)), "../fixtures");
 type JsonValue = boolean | number | null | string | JsonValue[] | { [key: string]: JsonValue };
@@ -61,6 +62,27 @@ test("initialize succeeds over HTTP", async () => {
     }
 });
 
+test("a namespace with no auth remains runnable behind a public MCP URL", async () => {
+    const host = createHost({ publicBaseUrl: "https://dev.aromatic05.top" });
+    await host.start();
+
+    try {
+        const port = requireTcpPort(host.server.address);
+        const response = await fetch(`http://127.0.0.1:${port}/demo/mcp`, {
+            method: "POST",
+            headers: {
+                accept: "application/json, text/event-stream",
+                "content-type": "application/json"
+            },
+            body: JSON.stringify(await readFixture("mcp-initialize.json"))
+        });
+
+        assert.equal(response.status, 200);
+    } finally {
+        await host.stop();
+    }
+});
+
 test("oauth2 exposes protected resource metadata and accepts a valid bearer token", async () => {
     const port = await reservePort();
     const storageDir = await mkdtemp(join(tmpdir(), "portable-devshell-mcp-oidc-"));
@@ -78,6 +100,16 @@ test("oauth2 exposes protected resource metadata and accepts a valid bearer toke
         publicBaseUrl: `http://127.0.0.1:${port}`,
         storageDir
     });
+    host.registerInstance(createInstance("other", {
+        enabled: true,
+        oauth2: {
+            documentationUrl: "https://docs.example.com/other",
+            requiredScopes: ["mcp-other"],
+            resourceName: "other"
+        },
+        provider: "oauth2"
+    }));
+    host.registerInstance(createInstance("open", { enabled: false, provider: "none" }));
 
     await host.start();
 
@@ -106,6 +138,26 @@ test("oauth2 exposes protected resource metadata and accepts a valid bearer toke
             resource_name: "aromatic",
             scopes_supported: ["mcp"]
         });
+
+        const otherMetadata = await fetch(`http://127.0.0.1:${port}/.well-known/oauth-protected-resource/other/mcp`);
+        assert.equal(otherMetadata.status, 200);
+        assert.deepEqual(await otherMetadata.json(), {
+            authorization_servers: [`http://127.0.0.1:${port}`],
+            resource: `http://127.0.0.1:${port}/other/mcp`,
+            resource_documentation: "https://docs.example.com/other",
+            resource_name: "other",
+            scopes_supported: ["mcp-other"]
+        });
+
+        const open = await fetch(`http://127.0.0.1:${port}/open/mcp`, {
+            method: "POST",
+            headers: {
+                accept: "application/json, text/event-stream",
+                "content-type": "application/json"
+            },
+            body: JSON.stringify(await readFixture("mcp-initialize.json"))
+        });
+        assert.equal(open.status, 200);
 
         const authorizationServerMetadata = await fetch(`http://127.0.0.1:${port}/.well-known/openid-configuration`);
         assert.equal(authorizationServerMetadata.status, 200);
@@ -178,6 +230,17 @@ test("oauth2 exposes protected resource metadata and accepts a valid bearer toke
         assert.equal(typeof tokens.access_token, "string");
         assert.equal(tokens.expires_in, 24 * 60 * 60);
 
+        const rejectedByOtherNamespace = await fetch(`http://127.0.0.1:${port}/other/mcp`, {
+            method: "POST",
+            headers: {
+                accept: "application/json, text/event-stream",
+                authorization: `Bearer ${tokens.access_token}`,
+                "content-type": "application/json"
+            },
+            body: JSON.stringify(await readFixture("mcp-initialize.json"))
+        });
+        assert.equal(rejectedByOtherNamespace.status, 401);
+
         const response = await fetch(endpoint, {
             method: "POST",
             headers: {
@@ -243,7 +306,7 @@ async function readFixture(name: string): Promise<JsonValue> {
 }
 
 function createHost(overrides?: {
-    auth?: ConstructorParameters<typeof McpHost>[0]["auth"];
+    auth?: McpAuthConfig;
     listenPort?: number;
     publicBaseUrl?: string;
     storageDir?: string;
@@ -253,10 +316,16 @@ function createHost(overrides?: {
         listenPort: overrides?.listenPort ?? 0,
         publicBaseUrl: overrides?.publicBaseUrl,
         storageDir: overrides?.storageDir,
-        auth: overrides?.auth ?? { enabled: false, provider: "none" },
         instances: [
-            {
-                name: "demo",
+            createInstance("demo", overrides?.auth ?? { enabled: false, provider: "none" })
+        ]
+    });
+}
+
+function createInstance(name: string, auth: McpAuthConfig): McpHostInstanceConfig {
+    return {
+                auth,
+                name,
                 policy: { capabilities: ["execute"], groups: ["bash"] },
                 worker: {
                     async appendMcpSessionClosed(_sessionId: string) {},
@@ -272,9 +341,7 @@ function createHost(overrides?: {
                         return { exitCode: 0, stderr: "", stdout: "ok\n" };
                     }
                 } as never
-            }
-        ]
-    });
+            };
 }
 
 async function reservePort(): Promise<number> {

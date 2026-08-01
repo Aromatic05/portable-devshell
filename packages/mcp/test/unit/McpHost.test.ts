@@ -36,6 +36,6 @@ test("route registry resolves per-instance binding", () => {
         })
     );
 
-    registry.register({ binding, path: "/demo/mcp" });
+    registry.register({ auth: { enabled: false, provider: "none" }, binding, path: "/demo/mcp" });
     assert.equal(registry.resolve("demo"), binding);
 });
