@@ -27,7 +27,6 @@ export interface McpInstanceGateway {
         signal?: AbortSignal
     ): Promise<JsonValue>;
     closeToolSession?(sessionId: string): Promise<void>;
-    todoCommentsFor?(instance: string, ctxId: string): Promise<string[]>;
     createSshInstance(sourceInstance: string, input: McpSshInstanceCreateInput): Promise<JsonValue>;
     listInstances(): Promise<JsonValue>;
     readContextMessages?(instance: string, ctxId: string): Promise<JsonValue>;

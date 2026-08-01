@@ -108,7 +108,7 @@ export class TuiFocusManager {
         if (scope === "toolForm") {
             return { id: "toolForm.input", kind: "field" };
         }
-        if (scope === "messageComposer") {
+        if (scope === "contextConversation") {
             return undefined;
         }
         if (scope === "form" || scope === "wizard") {

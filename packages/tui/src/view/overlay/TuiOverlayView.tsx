@@ -68,55 +68,6 @@ export function TuiOverlayView(props: TuiOverlayViewProps) {
                 />
             );
         }
-        case "message-composer":
-            return (
-                <Box
-                    borderColor="cyan"
-                    borderStyle="round"
-                    flexDirection="column"
-                    paddingX={1}
-                >
-                    <Text bold>{`Message Context ${overlay.ctxId}`}</Text>
-                    <Text dimColor>{`instance ${overlay.instance}`}</Text>
-                    <Text
-                        backgroundColor={
-                            overlay.selectedAction === "editor"
-                                ? "cyan"
-                                : undefined
-                        }
-                        color={
-                            overlay.selectedAction === "editor"
-                                ? "black"
-                                : undefined
-                        }
-                    >
-                        {overlay.draft.length === 0 ? " " : overlay.draft}
-                    </Text>
-                    {overlay.error === undefined ? undefined : (
-                        <Text color="red">{overlay.error}</Text>
-                    )}
-                    <Box marginTop={1}>
-                        <Text
-                            backgroundColor={
-                                overlay.selectedAction === "send"
-                                    ? "cyan"
-                                    : undefined
-                            }
-                        >{` ${overlay.submitting ? "Sending..." : "Send"} `}</Text>
-                        <Text> </Text>
-                        <Text
-                            backgroundColor={
-                                overlay.selectedAction === "cancel"
-                                    ? "cyan"
-                                    : undefined
-                            }
-                        >
-                            {" "}
-                            Cancel{" "}
-                        </Text>
-                    </Box>
-                </Box>
-            );
         case "search":
             return (
                 <Box borderColor="cyan" borderStyle="round" paddingX={1}>

@@ -248,7 +248,7 @@ test("TodoStore persists and reloads normalized state independently", async () =
 
 
 test("TodoStore discards obsolete comments while loading legacy documents", async () => {
-    const { writeFile } = await import("node:fs/promises");
+    const { readFile, writeFile } = await import("node:fs/promises");
     const root = await mkdtemp(join(tmpdir(), "portable-devshell-todo-migration-"));
     const state = new TodoState("aromatic-pc");
     const storedState = {
@@ -271,7 +271,7 @@ test("TodoStore discards obsolete comments while loading legacy documents", asyn
         version: 1
     }));
     const version1 = new TodoStore({ filePath: version1Path, instanceName: "aromatic-pc", state }).read();
-    assert.equal(version1.version, 3);
+    assert.equal(version1.version, 4);
     assert.deepEqual(version1.active, [{ ...version1State, title: "task-legacy" }]);
     assert.equal("comments" in version1, false);
     assert.equal("comments" in state.emptyDocument(), false);
@@ -288,7 +288,7 @@ test("TodoStore discards obsolete comments while loading legacy documents", asyn
         version: 2
     }));
     const version2 = new TodoStore({ filePath: version2Path, instanceName: "aromatic-pc", state }).read();
-    assert.equal(version2.version, 3);
+    assert.equal(version2.version, 4);
     assert.deepEqual(version2.active, [storedState]);
     assert.equal("comments" in version2, false);
     assert.equal("comments" in state.readResult(version2, "Legacy task"), false);
@@ -305,7 +305,31 @@ test("TodoStore discards obsolete comments while loading legacy documents", asyn
         }],
         version: 3
     }));
-    const version3 = new TodoStore({ filePath: version3Path, instanceName: "aromatic-pc", state }).read();
+    const version3Store = new TodoStore({ filePath: version3Path, instanceName: "aromatic-pc", state });
+    const version3 = version3Store.read();
+    assert.equal(version3.version, 4);
     assert.deepEqual(version3.active, [storedState]);
     assert.equal("comments" in version3, false);
+
+    await version3Store.write(version3);
+    const persisted = JSON.parse(await readFile(version3Path, "utf8")) as Record<string, unknown>;
+    assert.equal(persisted.version, 4);
+    assert.equal("comments" in persisted, false);
+
+    const version4Path = join(root, "todo-v4.json");
+    await writeFile(version4Path, JSON.stringify({
+        active: [storedState],
+        archived: [],
+        version: 4
+    }));
+    const version4 = new TodoStore({ filePath: version4Path, instanceName: "aromatic-pc", state }).read();
+    assert.equal(version4.version, 4);
+    assert.deepEqual(version4.active, [storedState]);
+
+    assert.throws(() => state.normalizeDocument({
+        active: [storedState],
+        archived: [],
+        comments: [],
+        version: 4
+    }), /must not contain comments/u);
 });

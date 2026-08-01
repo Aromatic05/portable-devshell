@@ -51,8 +51,6 @@ export interface TuiCommandDispatcherOptions {
         toolName: string,
         input: string
     ): Promise<boolean>;
-    onTodoComment?(instance: string, ctxId: string, text: string): Promise<void>;
-    onTodoCommentDelete?(instance: string, id: string): Promise<void>;
     onApplyConfig?(): Promise<JsonValue>;
     onContextMessage?(instance: string, ctxId: string, text: string): Promise<void>;
     onControlRestart?(): Promise<void>;
@@ -129,7 +127,6 @@ export class TuiCommandDispatcher {
             focus: this.#focus,
             onOAuthApprovalDecision:
                 options.onOAuthApprovalDecision ?? unavailable,
-            onTodoCommentDelete: options.onTodoCommentDelete,
             projection: options.projection,
             store: this.#store
         });
@@ -246,7 +243,7 @@ export class TuiCommandDispatcher {
             case "toolForm.open":
                 this.#focusManager.pushRestore("toolForm");
                 this.#store.pushOverlay({
-                    input: intent.toolName.startsWith("__todo_comment:") ? "" : '{"command":""}',
+                    input: '{"command":""}',
                     instance: intent.instance,
                     kind: "tool-form",
                     toolName: intent.toolName
@@ -378,13 +375,6 @@ export class TuiCommandDispatcher {
     async #submitToolForm(): Promise<boolean> {
         const form = topTuiOverlay(this.#store.getState().interaction.overlays);
         if (form?.kind !== "tool-form") return false;
-        if (form.toolName.startsWith("__todo_comment:")) {
-            if (form.input.trim().length === 0) return false;
-            await (this.#options.onTodoComment ?? unavailable)(form.instance, form.toolName.slice("__todo_comment:".length), form.input.trim());
-            this.#store.popOverlay();
-            this.#focusManager.restore();
-            return true;
-        }
         if (await this.#options.onToolCall(form.instance, form.toolName, form.input)) {
             this.#store.popOverlay();
             this.#focusManager.restore();

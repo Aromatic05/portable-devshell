@@ -7,6 +7,7 @@ import {
     type ContextMessageRecord,
     type InstanceCreateDraft,
     type InstanceCreateSummary,
+    type JsonValue,
 } from "@portable-devshell/shared";
 
 import {
@@ -1943,23 +1944,33 @@ async function openPrimaryRoute(
 
 function enableContextMessageMcp(harness: ReturnType<typeof createHarness>): void {
     const view = harness.store.getState().configView!;
+    const instances = Array.isArray(view.instances) ? view.instances : [];
     harness.store.setConfigView({
         ...view,
-        instances: view.instances.map((instance) =>
-            instance.name === "alpha"
-                ? {
-                      ...instance,
-                      mcp: {
-                          ...instance.mcp,
-                          enabled: true,
-                          tools: {
-                              capabilities: ["read", "write", "execute"],
-                              groups: ["context"],
-                          },
-                      },
-                  }
-                : instance,
-        ),
+        instances: instances.map((value): JsonValue => {
+            if (typeof value !== "object" || value === null || Array.isArray(value)) {
+                return value;
+            }
+            const instance = value as Record<string, JsonValue>;
+            if (instance.name !== "alpha") return instance;
+            const currentMcp =
+                typeof instance.mcp === "object" &&
+                instance.mcp !== null &&
+                !Array.isArray(instance.mcp)
+                    ? instance.mcp as Record<string, JsonValue>
+                    : {};
+            return {
+                ...instance,
+                mcp: {
+                    ...currentMcp,
+                    enabled: true,
+                    tools: {
+                        capabilities: ["read", "write", "execute"],
+                        groups: ["context"],
+                    },
+                },
+            };
+        }),
     });
 }
 
@@ -1967,8 +1978,8 @@ function conversationScreenText(harness: ReturnType<typeof createHarness>): stri
     return selectMainScreenModel(harness.store.getState()).boxes
         .flatMap((box) => [
             box.title,
-            ...(box.summaryLines ?? []),
-            ...(box.expandedLines ?? []).map((line) => line.text),
+            ...box.collapsedLines.map((line) => line.text),
+            ...box.expandedLines.map((line) => line.text),
         ])
         .join("\n");
 }

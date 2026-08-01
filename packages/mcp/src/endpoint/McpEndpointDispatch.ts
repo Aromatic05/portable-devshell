@@ -118,59 +118,43 @@ export class McpEndpointDispatch {
         );
         input = contextInput.input;
 
-        try {
-            if (known?.owner === "todo" || known?.owner === "artifact" || known?.owner === "context" || known?.owner === "instance") {
-                if (selected === undefined) {
-                    throw mcpEndpointToolNotExposed(toolName, this.#instanceName);
-                }
-                const owner = known.owner;
-                this.#catalog.assertAdaptable(selected.definition);
-                return await this.#withComments(toolName, await this.#auditControlTool(
-                    owner,
-                    toolName,
-                    input,
-                    context,
-                    signal
-                ), context);
+        if (known?.owner === "todo" || known?.owner === "artifact" || known?.owner === "context" || known?.owner === "instance") {
+            if (selected === undefined) {
+                throw mcpEndpointToolNotExposed(toolName, this.#instanceName);
             }
-
-            return await this.#withComments(toolName, await this.#workerHandler.call(
+            const owner = known.owner;
+            this.#catalog.assertAdaptable(selected.definition);
+            return await this.#withComments(toolName, await this.#auditControlTool(
+                owner,
                 toolName,
                 input,
                 context,
-                selected?.definition,
-                snapshot.instanceRoutingEnabled,
                 signal
             ), context);
-        } catch (error) {
-            await this.#attachComments(error, context);
-            throw error;
         }
+
+        return await this.#withComments(toolName, await this.#workerHandler.call(
+            toolName,
+            input,
+            context,
+            selected?.definition,
+            snapshot.instanceRoutingEnabled,
+            signal
+        ), context);
     }
 
     async #withComments(toolName: string, result: McpEndpointResult, context: ToolCallContext): Promise<McpEndpointResult> {
         if (context.ctxId === undefined) return result;
-        const userComments = this.#gateway?.todoCommentsFor === undefined
-            ? []
-            : await this.#gateway.todoCommentsFor(this.#instanceName, context.ctxId);
         if (result instanceof McpNativeToolResult) {
-            const comments = mergeComments(userComments, resolveResultHints(toolName, result.structuredContent));
+            const comments = mergeComments([], resolveResultHints(toolName, result.structuredContent));
             return new McpNativeToolResult({
                 content: result.content,
                 isError: result.isError,
                 structuredContent: attachMcpComments(result.structuredContent, comments)
             });
         }
-        const comments = mergeComments(userComments, resolveResultHints(toolName, result));
+        const comments = mergeComments([], resolveResultHints(toolName, result));
         return attachMcpComments(result, comments);
-    }
-
-    async #attachComments(error: unknown, context: ToolCallContext): Promise<void> {
-        if (context.ctxId === undefined || this.#gateway?.todoCommentsFor === undefined) return;
-        if (typeof error !== "object" || error === null) return;
-        const comments = await this.#gateway.todoCommentsFor(this.#instanceName, context.ctxId);
-        if (comments.length === 0) return;
-        Object.assign(error, { comment: comments });
     }
 
     async #createToolContext(

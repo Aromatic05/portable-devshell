@@ -13,12 +13,9 @@ export function createTestTodoPort(): InstanceTodoPort {
         summary: { completed: 0, total: 0 }
     };
     return {
-        async addComment() {},
-        commentsFor() { return []; },
         currentAssociation() {
             return undefined;
         },
-        async deleteComment() {},
         async read() {
             return empty;
         },

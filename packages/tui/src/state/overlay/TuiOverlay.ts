@@ -5,7 +5,6 @@ import type { TuiUiIntent } from "../TuiInteractionState.js";
 export type TuiOverlay =
     | TuiConfirmationOverlay
     | TuiApprovalOverlay
-    | TuiMessageComposerOverlay
     | TuiTextDetailOverlay
     | TuiSearchOverlay
     | TuiToolFormOverlay;
@@ -27,15 +26,6 @@ export interface TuiApprovalOverlay {
     readonly selectedAction: "back" | "input" | "deny" | "approve";
 }
 
-export interface TuiMessageComposerOverlay {
-    readonly ctxId: string;
-    readonly draft: string;
-    readonly error?: string;
-    readonly instance: string;
-    readonly kind: "message-composer";
-    readonly selectedAction: "editor" | "send" | "cancel";
-    readonly submitting: boolean;
-}
 
 export interface TuiTextDetailOverlay {
     readonly body: string;

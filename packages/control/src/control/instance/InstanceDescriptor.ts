@@ -15,10 +15,7 @@ export interface InstanceContextMessagePort {
 }
 
 export interface InstanceTodoPort {
-    addComment(ctxId: string, text: string): Promise<void>;
-    commentsFor(ctxId: string): string[];
     currentAssociation(): ToolCallAssociation | undefined;
-    deleteComment(id: string): Promise<void>;
     read(title?: string): Promise<TodoReadResult>;
     summaries(): ActiveTodoSummary[];
     write(input: TodoWriteInput, ctxId: string): Promise<TodoReadResult>;

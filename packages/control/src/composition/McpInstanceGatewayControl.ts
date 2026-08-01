@@ -62,10 +62,6 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
         );
     }
 
-    async todoCommentsFor(instance: string, ctxId: string): Promise<string[]> {
-        return this.#requireDescriptor(instance).todo.commentsFor(ctxId);
-    }
-
     async createSshInstance(sourceInstance: string, input: McpSshInstanceCreateInput): Promise<JsonValue> {
         return (await this.#createService.createSshInstanceFromMcp(sourceInstance, input)) as unknown as JsonValue;
     }

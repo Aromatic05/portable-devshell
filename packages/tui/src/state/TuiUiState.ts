@@ -22,7 +22,7 @@ export type TuiFocusScope =
     | "wizard"
     | "search"
     | "toolForm"
-    | "messageComposer"
+    | "contextConversation"
     | "confirm"
     | "approvalDetail"
     | "denyConfirm"

@@ -143,63 +143,13 @@ test("tools/call delegates to WorkerInstance.callTool", async () => {
     }
 });
 
-test("tools/call delivers only comments bound to its ctxId", async () => {
-    const harness = createWorkerHarness();
-    const commentCtxIds: string[] = [];
-    let targetCtxId: string | undefined;
-    const binding = createBinding(harness, {
-        async todoCommentsFor(_instance, ctxId) {
-            commentCtxIds.push(ctxId);
-            return ctxId === targetCtxId ? ["Use the project convention."] : [];
-        }
-    });
-    const server = await createBindingServer(binding);
-
-    try {
-        const session = await initialize(server.url);
-        targetCtxId = await createContext(server.url, session.headers);
-        const otherCtxId = await createContext(server.url, session.headers);
-        const target = await postJson(
-            server.url,
-            withToolContext(await readFixture("mcp-tools-call.json"), targetCtxId),
-            session.headers
-        );
-        const other = await postJson(
-            server.url,
-            withToolContext(await readFixture("mcp-tools-call.json"), otherCtxId),
-            session.headers
-        );
-
-        assert.deepEqual(target.body.result?.structuredContent, {
-            comment: ["Use the project convention."],
-            exitCode: 0,
-            stderr: "",
-            stdout: "/workspace\n"
-        });
-        assert.deepEqual(other.body.result?.structuredContent, {
-            exitCode: 0,
-            stderr: "",
-            stdout: "/workspace\n"
-        });
-        assert.equal(target.body.result?.structuredContent?.result, undefined);
-        assert.deepEqual(commentCtxIds, [targetCtxId, otherCtxId]);
-    } finally {
-        await server.close();
-        await binding.close();
-    }
-});
-
-test("tools/call returns ctxId comments when the tool fails", async () => {
+test("tools/call returns a structured hint when the tool fails", async () => {
     const harness = createWorkerHarness({
         async callHandler() {
             throw new Error("command failed");
         }
     });
-    const binding = createBinding(harness, {
-        async todoCommentsFor() {
-            return ["Check the generated files before retrying."];
-        }
-    });
+    const binding = createBinding(harness);
     const server = await createBindingServer(binding);
 
     try {
@@ -213,23 +163,18 @@ test("tools/call returns ctxId comments when the tool fails", async () => {
 
         assert.equal(response.status, 200);
         const comments = response.body.error?.data?.comment as string[];
-        assert.equal(comments[0], "Check the generated files before retrying.");
-        assert.match(comments[1] ?? "", /^\[error\.unknown\] /);
+        assert.match(comments[0] ?? "", /^\[error\.unknown\] /);
     } finally {
         await server.close();
         await binding.close();
     }
 });
 
-test("tools/call appends a worker result hint after user comments and keeps the flat shape", async () => {
+test("tools/call appends a worker result hint and keeps the flat shape", async () => {
     const harness = createWorkerHarness({
         result: { exitCode: 7, stderr: "boom", stdout: "", termination: "exited" }
     });
-    const binding = createBinding(harness, {
-        async todoCommentsFor() {
-            return ["Do not change permissions globally."];
-        }
-    });
+    const binding = createBinding(harness);
     const server = await createBindingServer(binding);
 
     try {
@@ -246,8 +191,7 @@ test("tools/call appends a worker result hint after user comments and keeps the 
         assert.equal(structured?.exitCode, 7);
         assert.equal(structured?.stderr, "boom");
         assert.equal(structured?.result, undefined);
-        assert.equal(structured?.comment?.[0], "Do not change permissions globally.");
-        assert.match(structured?.comment?.[1] ?? "", /^\[bash\.nonZeroExit\] /);
+        assert.match(structured?.comment?.[0] ?? "", /^\[bash\.nonZeroExit\] /);
         for (const entry of structured?.comment as string[]) {
             assert.equal(entry.includes("boom"), false);
         }
@@ -679,10 +623,9 @@ test("tools/call still maps not ready to mcp.instanceNotReady", async () => {
     }
 });
 
-function createBinding(harness = createWorkerHarness(), gateway?: Pick<McpInstanceGateway, "todoCommentsFor">): McpEndpointBinding {
+function createBinding(harness = createWorkerHarness()): McpEndpointBinding {
     return new McpEndpointBinding(
         new McpEndpointWorker({
-            gateway: gateway as McpInstanceGateway | undefined,
             policy: { capabilities: ["execute"], groups: ["bash"] },
             instanceName: "demo",
             worker: harness.worker

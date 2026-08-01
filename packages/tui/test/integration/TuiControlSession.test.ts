@@ -336,12 +336,9 @@ function createServer(socketPath: string, worker: FakeWorker, getConfigVersion: 
             name: "alpha",
             provider: "local",
             todo: {
-                async addComment() {},
-                commentsFor() { return []; },
                 currentAssociation() {
                     return undefined;
                 },
-                async deleteComment() {},
                 async read() {
                     return { items: [], revision: 0, summary: { completed: 0, total: 0 } };
                 },

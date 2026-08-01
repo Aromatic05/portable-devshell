@@ -119,14 +119,10 @@ export type TuiUiIntent =
     | { shareId: string; type: "artifact.revokeShare" }
     | { transferId: string; type: "artifact.cancelTransfer" }
     | { approvalId: string; instance: string; type: "approval.open" }
-    | { ctxId: string; instance: string; type: "messageComposer.open" }
-    | { type: "messageComposer.openCurrent" }
-    | { text: string; type: "messageComposer.append" }
-    | { type: "messageComposer.backspace" }
-    | { direction: "next" | "previous"; type: "messageComposer.focus" }
-    | { type: "messageComposer.submit" }
-    | { type: "messageComposer.forceSubmit" }
-    | { type: "messageComposer.cancel" }
+    | { type: "contextConversation.openCurrent" }
+    | { text: string; type: "contextConversation.append" }
+    | { type: "contextConversation.backspace" }
+    | { type: "contextConversation.submit" }
     | {
           approvalId: string;
           decision: "approve" | "deny";

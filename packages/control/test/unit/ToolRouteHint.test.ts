@@ -15,7 +15,6 @@ function routeContext(connectionId: string): PrefixRouteContext {
 
 function callHandler(callTool: (toolName: string, input: JsonValue) => Promise<JsonValue>) {
     const module = createToolRouteModule({
-        todo: { commentsFor: () => ["Do not change permissions globally."] },
         worker: {
             async callTool(toolName: string, input: JsonValue) {
                 return callTool(toolName, input);
@@ -39,7 +38,7 @@ function callHandler(callTool: (toolName: string, input: JsonValue) => Promise<J
     return operation.handle;
 }
 
-test("control tool route appends the same worker result hint after user comments", async () => {
+test("control tool route appends the worker result hint", async () => {
     const handle = callHandler(async () => ({
         exitCode: 7,
         stderr: "boom",
@@ -56,10 +55,9 @@ test("control tool route appends the same worker result hint after user comments
     assert.equal(result.stderr, "boom");
     assert.equal("result" in result, false);
     assert.ok(Array.isArray(result.comment));
-    assert.equal(result.comment[0], "Do not change permissions globally.");
-    assert.match(String(result.comment[1]), /^\[bash\.nonZeroExit\] /u);
-    assert.match(String(result.comment[1]), /code 7/i);
-    assert.match(String(result.comment[1]), /inspect output/i);
+    assert.match(String(result.comment[0]), /^\[bash\.nonZeroExit\] /u);
+    assert.match(String(result.comment[0]), /code 7/i);
+    assert.match(String(result.comment[0]), /inspect output/i);
 });
 
 test("control tool route turns a thrown error into a structured hint instead of copying the message", async () => {
@@ -75,8 +73,7 @@ test("control tool route turns a thrown error into a structured hint instead of 
     assert.equal(result.result, null);
     assert.deepEqual(result.error, { code: "file.revisionMismatch", message: "stale revision", retryable: true });
     assert.ok(Array.isArray(result.comment));
-    assert.equal(result.comment[0], "Do not change permissions globally.");
-    assert.match(String(result.comment[1]), /^\[file\.revisionMismatch\] /u);
-    assert.match(String(result.comment[1]), /read the latest content/i);
-    assert.match(String(result.comment[1]), /regenerate the operation/i);
+    assert.match(String(result.comment[0]), /^\[file\.revisionMismatch\] /u);
+    assert.match(String(result.comment[0]), /read the latest content/i);
+    assert.match(String(result.comment[0]), /regenerate the operation/i);
 });

@@ -8,6 +8,7 @@ import { TuiCommandDispatcherOverlay } from "./TuiCommandDispatcherOverlay.js";
 import { TuiCommandDispatcherViewport } from "./TuiCommandDispatcherViewport.js";
 import { selectTuiOverviewInstanceName } from "../../../view/page/TuiOverviewPresentation.js";
 import { topTuiOverlay } from "../../../state/overlay/TuiOverlay.js";
+import { currentTuiRoute } from "../../../state/route/TuiRouteState.js";
 
 export interface TuiCommandDispatcherNavigationOptions {
     dispatch?(intent: TuiUiIntent): Promise<boolean>;
@@ -23,6 +24,7 @@ export interface TuiCommandDispatcherNavigationOptions {
 
 export class TuiCommandDispatcherNavigation {
     readonly #focus: TuiCommandDispatcherFocus;
+    readonly #onContextMessage?: TuiCommandDispatcherNavigationOptions["onContextMessage"];
     readonly #onLogsReload: () => Promise<void>;
     readonly #onPageReload: TuiCommandDispatcherNavigationOptions["onPageReload"];
     readonly #onRedraw: () => void;
@@ -33,6 +35,7 @@ export class TuiCommandDispatcherNavigation {
 
     constructor(options: TuiCommandDispatcherNavigationOptions) {
         this.#focus = options.focus;
+        this.#onContextMessage = options.onContextMessage;
         this.#onLogsReload = options.onLogsReload;
         this.#onPageReload = options.onPageReload;
         this.#onRedraw = options.onRedraw;
@@ -42,7 +45,6 @@ export class TuiCommandDispatcherNavigation {
             dispatch: options.dispatch,
             focus: options.focus,
             focusManager: options.focusManager,
-            onContextMessage: options.onContextMessage,
             store: options.store
         });
         this.#viewport = new TuiCommandDispatcherViewport({
@@ -82,6 +84,14 @@ export class TuiCommandDispatcherNavigation {
             case "screen.clearStatus":
                 this.#store.setScreenStatus(this.#store.getState().ui.selectedPage, undefined);
                 return true;
+            case "contextConversation.openCurrent":
+                return this.#openContextConversation();
+            case "contextConversation.append":
+                return this.#updateContextConversationDraft((draft) => `${draft}${intent.text}`);
+            case "contextConversation.backspace":
+                return this.#updateContextConversationDraft((draft) => draft.slice(0, -1));
+            case "contextConversation.submit":
+                return await this.#submitContextConversation();
             default:
                 break;
         }
@@ -164,6 +174,88 @@ export class TuiCommandDispatcherNavigation {
         return true;
     }
 
+    #openContextConversation(): boolean {
+        const state = this.#store.getState();
+        const route = currentTuiRoute(state);
+        const instance = state.ui.selectedInstance;
+        if (
+            instance === undefined ||
+            route.page !== "audit" ||
+            route.view !== "context" ||
+            route.scope !== "context"
+        ) {
+            return false;
+        }
+        this.#store.pushRoute({
+            ctxId: route.ctxId,
+            page: "audit",
+            scope: "context",
+            view: "conversation",
+        });
+        const key = contextConversationDraftKey(instance, route.ctxId);
+        if (typeof this.#store.getState().ui.formDrafts[key] !== "string") {
+            this.#store.setFormDraft(key, "", false);
+        }
+        this.#store.setFocusScope("contextConversation");
+        return true;
+    }
+
+    #updateContextConversationDraft(update: (draft: string) => string): boolean {
+        const target = this.#contextConversationTarget();
+        if (target === undefined) return false;
+        const draft = readContextConversationDraft(this.#store.getState(), target.instance, target.ctxId);
+        this.#store.setFormDraft(
+            contextConversationDraftKey(target.instance, target.ctxId),
+            update(draft),
+            true,
+        );
+        this.#store.setScreenStatus("audit", undefined);
+        return true;
+    }
+
+    async #submitContextConversation(): Promise<boolean> {
+        const target = this.#contextConversationTarget();
+        if (target === undefined) return false;
+        const text = readContextConversationDraft(
+            this.#store.getState(),
+            target.instance,
+            target.ctxId,
+        ).trim();
+        if (text.length === 0) {
+            this.#store.setScreenStatus("audit", "Comment cannot be empty.");
+            return false;
+        }
+        if (this.#onContextMessage === undefined) {
+            this.#store.setScreenStatus("audit", "Context Comment service is unavailable.");
+            return false;
+        }
+        try {
+            await this.#onContextMessage(target.instance, target.ctxId, text);
+            this.#store.setFormDraft(
+                contextConversationDraftKey(target.instance, target.ctxId),
+                "",
+                false,
+            );
+            this.#store.setScreenStatus("audit", "Comment queued.");
+            this.#store.setFocusScope("contextConversation");
+            return true;
+        } catch (error) {
+            this.#store.setScreenStatus("audit", `Comment failed: ${readErrorMessage(error)}`);
+            return false;
+        }
+    }
+
+    #contextConversationTarget(): { ctxId: string; instance: string } | undefined {
+        const state = this.#store.getState();
+        const route = currentTuiRoute(state);
+        return state.ui.selectedInstance !== undefined &&
+            route.page === "audit" &&
+            route.view === "conversation" &&
+            route.scope === "context"
+            ? { ctxId: route.ctxId, instance: state.ui.selectedInstance }
+            : undefined;
+    }
+
     async #reloadPage(): Promise<boolean> {
         const state = this.#store.getState();
         try {
@@ -187,4 +279,18 @@ export class TuiCommandDispatcherNavigation {
 
 function readErrorMessage(error: unknown): string {
     return error instanceof Error ? error.message : String(error);
+}
+
+
+export function contextConversationDraftKey(instance: string, ctxId: string): string {
+    return `contextConversation:${instance}:${ctxId}`;
+}
+
+export function readContextConversationDraft(
+    state: import("../../../state/reducer/TuiStoreModel.js").TuiAppState,
+    instance: string,
+    ctxId: string,
+): string {
+    const value = state.ui.formDrafts[contextConversationDraftKey(instance, ctxId)];
+    return typeof value === "string" ? value : "";
 }

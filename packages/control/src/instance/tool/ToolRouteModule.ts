@@ -18,10 +18,8 @@ import {
     readToolCall,
     readToolCallQuery
 } from "./ToolRouteInput.js";
-import type { TodoService } from "../todo/TodoService.js";
 
 export interface ToolRouteInstancePort {
-    todo: Pick<TodoService, "commentsFor">;
     worker: Pick<
         WorkerInstance,
         "callTool" | "decideApproval" | "getApproval" | "listApprovals" | "readToolCalls"
@@ -32,14 +30,13 @@ export function createToolRouteModule(instance: ToolRouteInstancePort): PrefixRo
     return routeModule("tool", {
         call: async (request, context) => {
             const { input, toolName } = readToolCall(request.payload);
-            const userComments = instance.todo.commentsFor(context.connectionId);
             try {
                 const result = await instance.worker.callTool(toolName, input, {
                     requestId: context.requestId,
                     ctxId: context.connectionId,
                     source: context.peer
                 });
-                return attachComments(result, mergeComments(userComments, resolveResultHints(toolName, result)));
+                return attachComments(result, mergeComments([], resolveResultHints(toolName, result)));
             } catch (error) {
                 const failure = error instanceof ControlError ? error : createError({
                     code: errorCodes.targetInvalid,
@@ -49,7 +46,7 @@ export function createToolRouteModule(instance: ToolRouteInstancePort): PrefixRo
                 const body = toControlErrorBody(error);
                 const hints = body === undefined ? [] : resolveErrorHints(toolName, body);
                 return {
-                    comment: mergeComments(userComments, hints),
+                    comment: mergeComments([], hints),
                     error: { code: failure.code, message: failure.message, retryable: failure.retryable },
                     result: null
                 } as unknown as JsonValue;

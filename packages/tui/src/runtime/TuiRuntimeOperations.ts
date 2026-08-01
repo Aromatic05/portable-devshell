@@ -67,14 +67,6 @@ export class TuiRuntimeOperations {
         await this.#control.queueContextMessage(instance, ctxId, text);
     }
 
-    async addTodoComment(instance: string, ctxId: string, text: string): Promise<void> {
-        await this.#control.addTodoComment(instance, ctxId, text);
-    }
-
-    async deleteTodoComment(instance: string, id: string): Promise<void> {
-        await this.#control.deleteTodoComment(instance, id);
-    }
-
     async applyConfig(): Promise<JsonValue> {
         return await this.#control.applyConfig();
     }

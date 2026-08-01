@@ -47,26 +47,6 @@ export class TuiRuntimeControlOperations {
         });
     }
 
-    async addTodoComment(instance: string, ctxId: string, text: string): Promise<void> {
-        await this.#request(
-            this.options.clients.todo.addComment(instance, ctxId, text),
-            `todo.comment.add:${instance}`
-        );
-        await this.#refreshBestEffort(`todo:${instance}`, async () => {
-            await this.options.session.refreshTodo(instance);
-        });
-    }
-
-    async deleteTodoComment(instance: string, id: string): Promise<void> {
-        await this.#request(
-            this.options.clients.todo.deleteComment(instance, id),
-            `todo.comment.delete:${id}`
-        );
-        await this.#refreshBestEffort(`todo:${instance}`, async () => {
-            await this.options.session.refreshTodo(instance);
-        });
-    }
-
     async cancelArtifactTransfer(transferId: string): Promise<void> {
         await this.#request(
             this.options.clients.artifact.cancelTransfer(transferId),

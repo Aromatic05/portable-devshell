@@ -44,8 +44,8 @@ export class TuiKeyDispatcher {
                 return this.#forSearch(press);
             case "toolForm":
                 return this.#forToolForm(press);
-            case "messageComposer":
-                return this.#forMessageComposer(press);
+            case "contextConversation":
+                return this.#forContextConversation(press);
             case "form":
             case "wizard":
                 return this.#forEditor(press, mode);
@@ -144,24 +144,22 @@ export class TuiKeyDispatcher {
         return [];
     }
 
-    #forMessageComposer(press: TuiKeyPress): TuiUiIntent[] {
-        if (press.key.tab && press.key.shift) {
-            return [{ direction: "previous", type: "messageComposer.focus" }];
-        }
-        if (press.key.tab) {
-            return [{ direction: "next", type: "messageComposer.focus" }];
-        }
+    #forContextConversation(press: TuiKeyPress): TuiUiIntent[] {
         if (press.key.backspace) {
-            return [{ type: "messageComposer.backspace" }];
+            return [{ type: "contextConversation.backspace" }];
         }
         if (press.key.return && press.key.ctrl) {
-            return [{ type: "messageComposer.forceSubmit" }];
+            return [{ type: "contextConversation.submit" }];
         }
         if (press.key.return) {
-            return [{ type: "messageComposer.submit" }];
+            return [{ text: "\n", type: "contextConversation.append" }];
         }
+        if (press.key.pageUp) return [{ type: "screen.pageUp" }];
+        if (press.key.pageDown) return [{ type: "screen.pageDown" }];
+        if (press.key.home) return [{ type: "screen.home" }];
+        if (press.key.end) return [{ type: "screen.end" }];
         if (press.input.length > 0 && !press.key.ctrl) {
-            return [{ text: press.input, type: "messageComposer.append" }];
+            return [{ text: press.input, type: "contextConversation.append" }];
         }
         return [];
     }
@@ -268,7 +266,7 @@ export class TuiKeyDispatcher {
             return [{ type: "screen.toggle" }];
         }
         if (press.input === "m" || press.input === "M") {
-            return [{ type: "messageComposer.openCurrent" }];
+            return [{ type: "contextConversation.openCurrent" }];
         }
         if (press.input === "/") {
             return [{ type: "search.open" }];

@@ -7,7 +7,6 @@ import {
     type InstanceEventType,
     type JsonValue,
     type TodoItem,
-    type TodoComment,
     type TodoReadResult,
     type TodoState as SharedTodoState,
     type TodoStatus,
@@ -20,8 +19,7 @@ import {
 export interface TodoDocument {
     active: SharedTodoState[];
     archived: SharedTodoState[];
-    comments: TodoComment[];
-    version: 3;
+    version: 4;
 }
 
 export interface TodoTransition {
@@ -47,7 +45,7 @@ export class TodoState {
     }
 
     emptyDocument(): TodoDocument {
-        return { active: [], archived: [], comments: [], version: 3 };
+        return { active: [], archived: [], version: 4 };
     }
 
     normalizeDocument(value: unknown): TodoDocument {
@@ -57,22 +55,16 @@ export class TodoState {
 
         const version = value.version;
         let activeValues: unknown[];
-        let commentValues: unknown[];
         if (version === 1) {
             activeValues = value.active === undefined ? [] : [value.active];
-            commentValues = [];
-        } else if (version === 2 || version === 3) {
+        } else if (version === 2 || version === 3 || version === 4) {
             if (!Array.isArray(value.active)) {
                 throw new Error(`todo document version ${version} must contain an active array`);
             }
-            activeValues = value.active;
-            if (value.comments === undefined && version === 2) {
-                commentValues = [];
-            } else if (Array.isArray(value.comments)) {
-                commentValues = value.comments;
-            } else {
-                throw new Error(`todo document version ${version} must contain a comments array`);
+            if (version === 4 && Object.hasOwn(value, "comments")) {
+                throw new Error("todo document version 4 must not contain comments");
             }
+            activeValues = value.active;
         } else {
             throw new Error("todo document version is unsupported");
         }
@@ -80,16 +72,10 @@ export class TodoState {
         const active = activeValues.map((entry) => this.#normalizeStoredState(entry, version === 1));
         const titles = new Set(active.map((entry) => entry.title));
         if (titles.size !== active.length) throw new Error("active todo titles must be unique");
-        const activeCtxIds = [...new Set(active.flatMap((entry) => entry.activeCtxId === undefined ? [] : [entry.activeCtxId]))];
-        const legacyCommentCtxId = activeCtxIds.length === 1 ? activeCtxIds[0] : undefined;
         return {
             active,
             archived: value.archived.map((entry) => this.#normalizeStoredState(entry, version === 1)),
-            comments: commentValues.map((entry) => normalizeComment(entry, {
-                fallbackCtxId: legacyCommentCtxId,
-                requireCtxId: version === 3
-            })),
-            version: 3
+            version: 4
         };
     }
 
@@ -130,17 +116,17 @@ export class TodoState {
             archived.push(archivedState);
             events.push(todoEvent("todo.archived", archivedState));
         }
-        return { document: { active, archived, comments: document.comments, version: 3 }, events };
+        return { document: { active, archived, version: 4 }, events };
     }
 
     readResult(document: TodoDocument, title?: string): TodoReadResult {
         const tasks = this.#taskSummaries(document);
         if (title === undefined) {
-            return { items: [], revision: 0, summary: { completed: 0, total: 0 }, tasks, comments: document.comments };
+            return { items: [], revision: 0, summary: { completed: 0, total: 0 }, tasks };
         }
         const state = document.active.find((entry) => entry.title === title);
         if (state === undefined) {
-            return { items: [], revision: 0, summary: { completed: 0, total: 0 }, tasks, comments: document.comments };
+            return { items: [], revision: 0, summary: { completed: 0, total: 0 }, tasks };
         }
         return {
             items: state.items.map((item) => ({ ...item })),
@@ -148,8 +134,7 @@ export class TodoState {
             summary: summarize(state.items),
             taskId: state.taskId,
             title: state.title,
-            tasks,
-            comments: document.comments
+            tasks
         };
     }
 
@@ -256,25 +241,6 @@ function normalizeInput(input: TodoWriteInput): TodoWriteInput {
         revision: requiredRevision(input.revision),
         title: normalizeText(input.title, "title"),
         todos: normalizeItems(input.todos)
-    };
-}
-
-function normalizeComment(
-    value: unknown,
-    options: { fallbackCtxId?: string; requireCtxId: boolean }
-): TodoComment {
-    if (!isRecord(value)) throw new Error("todo comment must be an object");
-    const id = requiredString(value.id, "comment.id");
-    const storedCtxId = optionalString(value.ctxId);
-    const ctxId = storedCtxId ?? options.fallbackCtxId ?? `legacy-unscoped:${id}`;
-    if (options.requireCtxId && storedCtxId === undefined) {
-        throw new Error("comment.ctxId must be a non-empty string");
-    }
-    return {
-        createdAt: requiredString(value.createdAt, "comment.createdAt"),
-        ctxId,
-        id,
-        text: normalizeText(value.text, "comment.text")
     };
 }
 

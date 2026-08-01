@@ -103,6 +103,7 @@ function clamp(value: number, min: number, max: number): number {
 export function buildFocusGraphForState(state: TuiAppState): TuiFocusGraph {
     switch (state.interaction.focusScope) {
         case "terminal":
+        case "contextConversation":
         case "textDetail":
             return new TuiFocusGraph([]);
         case "confirm":
@@ -126,8 +127,6 @@ export function buildFocusGraphForState(state: TuiAppState): TuiFocusGraph {
             return new TuiFocusGraph([{ item: { id: "search.query", kind: "field" } }]);
         case "toolForm":
             return new TuiFocusGraph([{ item: { id: "toolForm.input", kind: "field" } }]);
-        case "messageComposer":
-            return new TuiFocusGraph([]);
         case "form":
         case "wizard": {
             const box = selectMainScreenModel(state).boxes.find((candidate) => candidate.id === state.ui.mainFocusId);

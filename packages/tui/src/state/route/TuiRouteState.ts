@@ -249,12 +249,15 @@ export function selectBreadcrumbSegments(state: TuiAppState): string[] {
     const segments: string[] = [route.page];
     switch (route.page) {
         case "audit":
-            if (route.view === "context" || route.view === "call") {
+            if (route.view === "context" || route.view === "conversation" || route.view === "call") {
                 segments.push(
                     route.scope === "unscoped"
                         ? "unscoped"
                         : truncateTuiBreadcrumbSegment(route.ctxId),
                 );
+            }
+            if (route.view === "conversation") {
+                segments.push("conversation");
             }
             if (route.view === "call") {
                 segments.push(truncateTuiBreadcrumbSegment(route.callId));
@@ -408,7 +411,7 @@ function isTuiRouteResourceValid(
                           (call.ctxId === undefined || call.ctxId.length === 0),
                   );
         }
-        if (route.view === "context") {
+        if (route.view === "context" || route.view === "conversation") {
             return (
                 calls.some((call) => call.ctxId === route.ctxId) ||
                 approvals.some((approval) => approval.ctxId === route.ctxId) ||

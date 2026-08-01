@@ -290,8 +290,8 @@ test("text input scopes preserve multi-character paste payloads", () => {
     assert.deepEqual(dispatcher.dispatch("search", { input: paste, key: {} }), [
         { text: paste, type: "search.append" },
     ]);
-    assert.deepEqual(dispatcher.dispatch("messageComposer", { input: paste, key: {} }), [
-        { text: paste, type: "messageComposer.append" },
+    assert.deepEqual(dispatcher.dispatch("contextConversation", { input: paste, key: {} }), [
+        { text: paste, type: "contextConversation.append" },
     ]);
     assert.deepEqual(dispatcher.dispatch("toolForm", { input: paste, key: {} }), [
         { text: paste, type: "toolForm.append" },

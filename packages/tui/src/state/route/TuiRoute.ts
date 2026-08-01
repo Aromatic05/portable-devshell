@@ -13,6 +13,7 @@ export type TuiRoute =
     | { page: "audit"; view: "contexts" }
     | { page: "audit"; scope: "unscoped"; view: "context" }
     | { ctxId: string; page: "audit"; scope: "context"; view: "context" }
+    | { ctxId: string; page: "audit"; scope: "context"; view: "conversation" }
     | { callId: string; page: "audit"; scope: "unscoped"; view: "call" }
     | {
           callId: string;
@@ -74,9 +75,13 @@ export function tuiRouteIdentity(route: TuiRoute): string {
                     ? "audit/context/unscoped"
                     : `audit/context/unscoped/call/${encodeURIComponent(route.callId)}`;
             }
-            return route.view === "context"
-                ? `audit/context/${encodeURIComponent(route.ctxId)}`
-                : `audit/context/${encodeURIComponent(route.ctxId)}/call/${encodeURIComponent(route.callId)}`;
+            if (route.view === "context") {
+                return `audit/context/${encodeURIComponent(route.ctxId)}`;
+            }
+            if (route.view === "conversation") {
+                return `audit/context/${encodeURIComponent(route.ctxId)}/conversation`;
+            }
+            return `audit/context/${encodeURIComponent(route.ctxId)}/call/${encodeURIComponent(route.callId)}`;
         case "todo":
             return route.view === "overview"
                 ? "todo/overview"

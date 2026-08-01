@@ -4,6 +4,7 @@ import { currentTuiRoute } from "../../state/route/TuiRouteState.js";
 import { buildAuditCallBoxes } from "./audit/TuiPageAuditCall.js";
 import { buildAuditContextBoxes } from "./audit/TuiPageAuditContext.js";
 import { buildAuditContextListBoxes } from "./audit/TuiPageAuditContexts.js";
+import { buildAuditConversationBoxes } from "./audit/TuiPageAuditConversation.js";
 
 export function buildAuditPageBoxes(
     state: TuiAppState,
@@ -19,6 +20,9 @@ export function buildAuditPageBoxes(
             : { ctxId: route.ctxId, kind: "context" as const };
     if (route.view === "context") {
         return buildAuditContextBoxes(state, instanceName, key);
+    }
+    if (route.view === "conversation") {
+        return buildAuditConversationBoxes(state, instanceName, route.ctxId);
     }
     return buildAuditCallBoxes(state, instanceName, key, route.callId);
 }

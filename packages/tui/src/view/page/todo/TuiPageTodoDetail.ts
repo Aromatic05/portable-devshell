@@ -36,33 +36,19 @@ export function buildTodoDetailBoxes(state: TuiAppState, instance: string, todoI
     }
 
     return [
-        summaryBox(state, instance, todo, summary.ctxId),
-        ...todo.items.map((item) => itemBox(state, instance, item)),
-        ...(todo.comments ?? []).map((comment) => makeBox(state, "todo", instance, {
-            detailLines: [
-                formatField("Comment", comment.text),
-                formatField("Context", comment.ctxId),
-                formatField("Created", comment.createdAt),
-                formatField("ID", comment.id),
-                { id: `button:delete-comment:${comment.id}`, text: "[ Delete Comment ]", tone: "danger" }
-            ],
-            id: `todo-comment:${comment.id}`,
-            status: "warning",
-            summaryLines: [comment.text],
-            title: "Context Comment"
-        }))
+        summaryBox(state, instance, todo),
+        ...todo.items.map((item) => itemBox(state, instance, item))
     ];
 }
 
-function summaryBox(state: TuiAppState, instance: string, todo: TodoReadResult, ctxId: string | undefined): BoxModel {
+function summaryBox(state: TuiAppState, instance: string, todo: TodoReadResult): BoxModel {
     const current = todo.summary.currentItemId === undefined ? undefined : todo.items.find((item) => item.id === todo.summary.currentItemId);
     return makeBox(state, "todo", instance, {
         detailLines: [
             formatField("Task", todo.taskId ?? "-"),
             formatField("Revision", String(todo.revision)),
             formatField("Progress", `${todo.summary.completed}/${todo.summary.total}`),
-            formatField("Current", current?.content ?? "none"),
-            ...(ctxId === undefined ? [] : [{ id: `button:add-comment:${ctxId}`, text: "[ Add Context Comment ]", tone: "accent" as const }])
+            formatField("Current", current?.content ?? "none")
         ],
         id: `todo-summary:${todo.taskId}`,
         status: summaryStatus(todo),

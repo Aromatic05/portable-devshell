@@ -1,0 +1,112 @@
+import type { ContextMessageRecord, JsonValue } from "@portable-devshell/shared";
+
+import type { BoxModel } from "../../component/TuiComponentExpandableBox.js";
+import type { TuiAppState } from "../../../state/reducer/TuiStoreModel.js";
+import { readContextConversationDraft } from "../../../interaction/command/dispatcher/TuiCommandDispatcherNavigation.js";
+import { compactSummary, formatField, makeBox } from "../TuiPageBoxSupport.js";
+
+export function buildAuditConversationBoxes(
+    state: TuiAppState,
+    instance: string,
+    ctxId: string,
+): BoxModel[] {
+    const messages = (state.contextMessagesByInstance[instance] ?? [])
+        .filter((message) => message.ctxId === ctxId)
+        .sort((left, right) => left.createdAt.localeCompare(right.createdAt));
+    return [
+        ...messages.map((message) => messageBox(state, instance, message)),
+        composerBox(state, instance, ctxId),
+    ];
+}
+
+function messageBox(
+    state: TuiAppState,
+    instance: string,
+    message: ContextMessageRecord,
+): BoxModel {
+    return makeBox(state, "audit", instance, {
+        detailLines: [
+            formatField("Message", message.id),
+            formatField("Context", message.ctxId),
+            formatField("Created", message.createdAt),
+            formatField("Status", message.status),
+            ...(message.deliveredAt === undefined
+                ? []
+                : [formatField("Delivered", message.deliveredAt)]),
+            ...(message.failedAt === undefined
+                ? []
+                : [formatField("Failed", message.failedAt)]),
+            ...(message.error === undefined
+                ? []
+                : [formatField("Error", message.error)]),
+            formatField("Text", message.text),
+        ],
+        id: `conversation-message:${message.id}`,
+        searchText: `${message.status} ${message.createdAt} ${message.text} ${message.error ?? ""}`,
+        status:
+            message.status === "delivered"
+                ? "ready"
+                : message.status === "failed"
+                  ? "failed"
+                  : "pending",
+        summaryLines: [
+            compactSummary(["status", message.status], ["created", message.createdAt]),
+            message.error === undefined
+                ? message.text
+                : `${message.text}  error=${message.error}`,
+        ],
+        title: `Comment · ${message.status}`,
+    });
+}
+
+function composerBox(
+    state: TuiAppState,
+    instance: string,
+    ctxId: string,
+): BoxModel {
+    const draft = readContextConversationDraft(state, instance, ctxId);
+    const agentCanRead = contextToolEnabled(state, instance);
+    return makeBox(state, "audit", instance, {
+        detailLines: [
+            formatField("Context", ctxId),
+            formatField("Agent read", agentCanRead ? "enabled" : "disabled"),
+            ...(agentCanRead
+                ? []
+                : ["The Comment can be queued, but the Agent cannot read it until the context MCP group is enabled."]),
+            formatField("Draft", draft.length === 0 ? "<empty>" : draft),
+            "Enter inserts a newline. Ctrl+Enter queues the Comment.",
+            "Esc or Ctrl+[ returns to the Audit Context.",
+        ],
+        expandedKey: `audit-conversation:${instance}:${ctxId}:composer`,
+        id: "conversation-composer",
+        status: agentCanRead ? (draft.length === 0 ? "normal" : "running") : "warning",
+        summaryLines: [
+            draft.length === 0 ? "draft=<empty>" : `draft=${draft}`,
+            `${agentCanRead ? "agent-read=enabled" : "agent-read=disabled"} · Ctrl+Enter send · Esc back`,
+        ],
+        title: "Write Comment",
+    });
+}
+
+
+function contextToolEnabled(state: TuiAppState, instanceName: string): boolean {
+    const instances = state.configView?.instances;
+    if (!Array.isArray(instances)) return false;
+    const instance = instances.find((value) =>
+        typeof value === "object" &&
+        value !== null &&
+        !Array.isArray(value) &&
+        (value as Record<string, JsonValue>).name === instanceName
+    ) as Record<string, JsonValue> | undefined;
+    const mcp = asRecord(instance?.mcp);
+    const tools = asRecord(mcp?.tools);
+    return mcp?.enabled === true &&
+        Array.isArray(tools?.groups) &&
+        tools.groups.includes("context");
+}
+
+function asRecord(value: JsonValue | undefined): Record<string, JsonValue> | undefined {
+    return typeof value === "object" && value !== null && !Array.isArray(value)
+        ? value as Record<string, JsonValue>
+        : undefined;
+}

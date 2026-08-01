@@ -209,12 +209,6 @@ export class TuiRuntime {
                     text,
                 );
             },
-            onTodoComment: async (instance, ctxId, text) => {
-                await this.#operations.addTodoComment(instance, ctxId, text);
-            },
-            onTodoCommentDelete: async (instance, id) => {
-                await this.#operations.deleteTodoComment(instance, id);
-            },
             onAttachShell: async (instance) => {
                 await this.#operations.attachShell(instance);
             },
