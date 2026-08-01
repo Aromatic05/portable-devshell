@@ -1,16 +1,43 @@
 import { webRoutePath } from "../routing/webRoute.js";
 
+export type WebAuthMode = "none" | "oauth2" | "token";
+
 export interface WebSession {
+    authMode(): Promise<WebAuthMode>;
     check(): Promise<boolean>;
     establish(token?: string): Promise<boolean>;
     logout(): Promise<void>;
+    startOAuth(): void;
 }
 
 export class BrowserWebSession implements WebSession {
     constructor(
         private readonly request: typeof fetch = fetch,
         private readonly path = sessionPath(),
+        private readonly oauthPath = oauthStartPath(),
+        private readonly navigate: (url: string) => void = (url) => {
+            window.location.href = url;
+        },
     ) {}
+
+    async authMode(): Promise<WebAuthMode> {
+        const response = await this.request(this.path, {
+            credentials: "same-origin",
+            method: "GET",
+        });
+        if (response.status === 204) {
+            return "none";
+        }
+        try {
+            const body = (await response.json()) as { auth?: unknown };
+            if (body.auth === "oauth2" || body.auth === "none" || body.auth === "token") {
+                return body.auth;
+            }
+        } catch {
+            // Fall through to the default interactive mode.
+        }
+        return "token";
+    }
 
     async check(): Promise<boolean> {
         return await this.send("GET");
@@ -28,6 +55,10 @@ export class BrowserWebSession implements WebSession {
         if (response.status !== 204) {
             throw new Error("Unable to log out.");
         }
+    }
+
+    startOAuth(): void {
+        this.navigate(this.oauthPath);
     }
 
     private async send(
@@ -54,4 +85,8 @@ export class BrowserWebSession implements WebSession {
 
 export function sessionPath(location: Location = window.location): string {
     return webRoutePath(location.pathname, "/session");
+}
+
+export function oauthStartPath(location: Location = window.location): string {
+    return webRoutePath(location.pathname, "/oauth/start");
 }

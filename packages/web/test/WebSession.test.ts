@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { BrowserWebSession, sessionPath } from "../src/session/WebSession.js";
+import { BrowserWebSession, oauthStartPath, sessionPath } from "../src/session/WebSession.js";
 
 describe("BrowserWebSession", () => {
     it("uses same-origin cookies and only adds Authorization for token exchange", async () => {
@@ -63,5 +63,37 @@ describe("BrowserWebSession", () => {
             credentials: "same-origin",
             method: "DELETE",
         });
+    });
+
+    it("reads the configured auth mode from the unauthorized session body", async () => {
+        const request = vi
+            .fn<typeof fetch>()
+            .mockResolvedValueOnce(
+                new Response(JSON.stringify({ auth: "oauth2", error: "Unauthorized" }), { status: 401 }),
+            )
+            .mockResolvedValueOnce(
+                new Response(JSON.stringify({ auth: "token", error: "Unauthorized" }), { status: 401 }),
+            )
+            .mockResolvedValueOnce(new Response(null, { status: 204 }));
+        const session = new BrowserWebSession(request);
+
+        expect(await session.authMode()).toBe("oauth2");
+        expect(await session.authMode()).toBe("token");
+        expect(await session.authMode()).toBe("none");
+    });
+
+    it("navigates to the deployed OAuth start path", () => {
+        const navigate = vi.fn();
+        const location = { pathname: "/devshell/web/" } as Location;
+        const session = new BrowserWebSession(
+            vi.fn<typeof fetch>(),
+            sessionPath(location),
+            oauthStartPath(location),
+            navigate,
+        );
+
+        session.startOAuth();
+
+        expect(navigate).toHaveBeenCalledWith("/devshell/web/oauth/start");
     });
 });

@@ -66,7 +66,7 @@ export class ControlWebSessionService {
         });
         const removeRead = http.registerRawRoute("get", sessionPath, (request, response) => {
             if (!this.authorize(request)) {
-                writeJsonError(response, 401, "Unauthorized");
+                writeJsonError(response, 401, "Unauthorized", { auth: this.#auth.mode });
                 return;
             }
             writeNoContent(response);
@@ -252,8 +252,13 @@ function writeNoContent(response: ServerResponse): void {
     response.end();
 }
 
-function writeJsonError(response: ServerResponse, statusCode: number, message: string): void {
-    const body = JSON.stringify({ error: message });
+function writeJsonError(
+    response: ServerResponse,
+    statusCode: number,
+    message: string,
+    extra: Record<string, string> = {}
+): void {
+    const body = JSON.stringify({ error: message, ...extra });
     response.statusCode = statusCode;
     response.setHeader("Cache-Control", "no-store");
     response.setHeader("Content-Type", "application/json; charset=utf-8");

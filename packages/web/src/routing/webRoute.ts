@@ -2,7 +2,7 @@ import { CONTROL_WEB_BASE_PATH } from "@portable-devshell/shared/browser";
 
 const webSegment = CONTROL_WEB_BASE_PATH.slice(1);
 
-export function webRoutePath(pathname: string, suffix: "/rpc" | "/session"): string {
+export function webRoutePath(pathname: string, suffix: "/oauth/start" | "/rpc" | "/session"): string {
     const segments = pathname.split("/");
     const webIndex = segments.lastIndexOf(webSegment);
     if (webIndex < 0) {

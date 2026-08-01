@@ -49,6 +49,15 @@ describe("authenticated application shell", () => {
         expect(createClients).toHaveBeenCalledOnce();
     });
 
+    it("redirects to the OAuth start endpoint when auth=oauth2", async () => {
+        const session = fakeSession({ authMode: "oauth2", check: false, establish: false });
+        render(<App createClients={fakeClients} session={session} />);
+
+        await waitFor(() => expect(session.startOAuth).toHaveBeenCalledOnce());
+        expect(session.establish).not.toHaveBeenCalled();
+        expect(screen.queryByLabelText("Access token")).not.toBeInTheDocument();
+    });
+
     it("keeps a submitted token in component state only and logs out", async () => {
         const session = fakeSession({ check: false, establish: false });
         render(<App createClients={fakeClients} session={session} />);
@@ -121,9 +130,11 @@ describe("authenticated application shell", () => {
     it("ignores a superseded bootstrap after the session changes", async () => {
         let resolveFirstCheck!: (available: boolean) => void;
         const first: WebSession = {
+            authMode: async () => "token",
             check: async () => await new Promise<boolean>((resolve) => { resolveFirstCheck = resolve; }),
             establish: async () => false,
             logout: async () => undefined,
+            startOAuth: () => undefined,
         };
         const second = fakeSession({ check: false, establish: false });
         const createClients = vi.fn(fakeClients);
@@ -140,9 +151,11 @@ describe("authenticated application shell", () => {
     it("does not recreate clients after an unmounted bootstrap resolves", async () => {
         let resolveCheck!: (available: boolean) => void;
         const session: WebSession = {
+            authMode: async () => "token",
             check: async () => await new Promise<boolean>((resolve) => { resolveCheck = resolve; }),
             establish: async () => false,
             logout: async () => undefined,
+            startOAuth: () => undefined,
         };
         const createClients = vi.fn(fakeClients);
         const view = render(<App createClients={createClients} session={session} />);
@@ -227,9 +240,11 @@ describe("authenticated application shell", () => {
         initialClients.close = close;
         const initial = fakeSession({ check: true });
         const replacement: WebSession = {
+            authMode: async () => "token",
             check: async () => await new Promise<boolean>((resolve) => { resolveCheck = resolve; }),
             establish: async () => false,
             logout: async () => undefined,
+            startOAuth: () => undefined,
         };
         const createClients = vi.fn(() => initialClients);
         const view = render(<App createClients={createClients} session={initial} />);
@@ -275,17 +290,22 @@ describe("authenticated application shell", () => {
 });
 
 function fakeSession(result: {
+    authMode?: "none" | "oauth2" | "token";
     check: boolean;
     establish?: boolean;
 }): WebSession & {
+    authMode: ReturnType<typeof vi.fn>;
     check: ReturnType<typeof vi.fn>;
     establish: ReturnType<typeof vi.fn>;
     logout: ReturnType<typeof vi.fn>;
+    startOAuth: ReturnType<typeof vi.fn>;
 } {
     return {
+        authMode: vi.fn(async () => result.authMode ?? "token"),
         check: vi.fn(async () => result.check),
         establish: vi.fn(async () => result.establish ?? false),
         logout: vi.fn(async () => undefined),
+        startOAuth: vi.fn(() => undefined),
     };
 }
 

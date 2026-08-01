@@ -57,15 +57,21 @@ export function useWebApplicationSession(
 
         async function bootstrap(): Promise<void> {
             try {
-                const available =
-                    (await activeSession.check()) ||
-                    (await activeSession.establish());
-                if (!current()) return;
-                if (!available) {
-                    setSessionState("login");
+                if (await activeSession.check()) {
+                    if (current()) activateStore(generation);
                     return;
                 }
-                activateStore(generation);
+                const mode = await activeSession.authMode();
+                if (!current()) return;
+                if (mode === "oauth2") {
+                    activeSession.startOAuth();
+                    return;
+                }
+                if (await activeSession.establish()) {
+                    if (current()) activateStore(generation);
+                    return;
+                }
+                if (current()) setSessionState("login");
             } catch {
                 if (current()) {
                     setError("Unable to establish a session.");
