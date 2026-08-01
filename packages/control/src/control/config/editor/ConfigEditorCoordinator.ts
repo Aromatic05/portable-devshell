@@ -1,6 +1,7 @@
 import type { McpHost, McpInstanceGateway } from "@portable-devshell/mcp";
 import {
     ConfigInputError,
+    MASKED_CONFIG_TOKEN,
     applyConfigInstancePatch,
     applyConfigMcpPatch,
     applyConfigWebPatch,
@@ -16,6 +17,7 @@ import {
     parseConfigUpdateMcpRequest,
     parseConfigUpdateWebRequest,
     toConfigView,
+    type ConfigDraft,
     type ControlConfig,
     type JsonValue
 } from "@portable-devshell/shared";
@@ -88,7 +90,8 @@ export class ConfigEditorCoordinator {
     }
 
     validateConfigDraft(params: JsonValue | undefined): JsonValue {
-        const config = this.#readConfigInput(() => normalizeConfigDraft(parseConfigDraft(params)));
+        const draft = this.#readConfigInput(() => parseConfigDraft(params));
+        const config = this.#readConfigInput(() => normalizeConfigDraft(this.#resolveMaskedWebToken(draft)));
         return toConfigView(this.#validateConfig(config)) as unknown as JsonValue;
     }
 
@@ -289,6 +292,12 @@ export class ConfigEditorCoordinator {
 
     #validateConfig(config: ControlConfig): ControlConfig {
         return this.#validator.validate(config);
+    }
+
+    #resolveMaskedWebToken(draft: ConfigDraft): ConfigDraft {
+        const auth = this.#getConfig().web.auth;
+        if (draft.web?.token !== MASKED_CONFIG_TOKEN || auth.mode !== "token") return draft;
+        return { ...draft, web: { ...draft.web, token: auth.token } };
     }
 
     #readConfigInput<T>(read: () => T): T {

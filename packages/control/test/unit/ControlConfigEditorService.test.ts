@@ -8,7 +8,7 @@ import {
     InstanceRegistryFactory,
     createDefaultControlConfig
 } from "../../src/testing.ts";
-import { normalizeConfigInstanceDraft, type ControlConfig, type JsonValue } from "@portable-devshell/shared";
+import { MASKED_CONFIG_TOKEN, normalizeConfigInstanceDraft, type ControlConfig, type JsonValue } from "@portable-devshell/shared";
 
 test("config editor validates drafts and accumulates patch apply summaries", async () => {
     let config = createConfig();
@@ -93,6 +93,49 @@ test("config editor validates drafts and accumulates patch apply summaries", asy
     assert.equal(applied.reloadRequired, true);
     assert.equal(applied.restartControlRequired, true);
     assert.deepEqual(service.applyConfig(), { ...emptyApplyResult(), affectedListeners: [] });
+});
+
+test("config view and validation mask the web token while updateWeb preserves the masked secret", async () => {
+    const strongToken = "a".repeat(48);
+    let config = createConfig();
+    config.web.auth = { mode: "token", token: strongToken };
+    const service = new ConfigEditorCoordinator({
+        configStore: {
+            async write(nextConfig: ControlConfig) {
+                config = nextConfig;
+            }
+        },
+        getConfig: () => config,
+        instanceRegistry: new InstanceRegistryFactory().build(config),
+        setConfig: (nextConfig) => {
+            config = nextConfig;
+        }
+    });
+
+    const view = service.getConfigView() as {
+        instances: Array<Record<string, unknown>>;
+        web: { auth: string; token?: string };
+    };
+    assert.equal(view.web.auth, "token");
+    assert.equal(view.web.token, MASKED_CONFIG_TOKEN);
+    assert.ok(!JSON.stringify(view).includes(strongToken));
+
+    const draft = {
+        ...view,
+        instances: view.instances.map((instance) => ({
+            ...instance,
+            security: { mode: (instance.security as { mode: string }).mode }
+        }))
+    };
+    const validated = service.validateConfigDraft(draft as unknown as JsonValue) as { web: { token?: string } };
+    assert.equal(validated.web.token, MASKED_CONFIG_TOKEN);
+    assert.ok(!JSON.stringify(validated).includes(strongToken));
+
+    await service.updateWebConfig({ patch: { auth: "token", token: MASKED_CONFIG_TOKEN } });
+    assert.deepEqual(config.web.auth, { mode: "token", token: strongToken });
+
+    await service.updateWebConfig({ patch: { auth: "token", token: "b".repeat(48) } });
+    assert.deepEqual(config.web.auth, { mode: "token", token: "b".repeat(48) });
 });
 
 test("listener preflight rejects an occupied Web bind without persisting configuration", async () => {

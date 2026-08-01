@@ -144,16 +144,17 @@ test("web auth patch switches mode and drops stale residual fields", () => {
     assert.equal(toNone?.oauth2, undefined);
 });
 
-test("config view exposes a flat web auth draft that round-trips the parser", () => {
+test("config view exposes a flat web auth draft that masks the token", () => {
     const config = createDefaultControlConfig();
     config.web.auth = { mode: "token", token: strongToken };
 
     const view = toConfigView(config);
     assert.equal(view.web.auth, "token");
-    assert.equal(view.web.token, strongToken);
+    assert.equal(view.web.token, MASKED_CONFIG_TOKEN);
+    assert.ok(!JSON.stringify(view).includes(strongToken));
 
     const reparsed = normalizeConfigGlobalDraft(parseConfigGlobalDraft({ web: view.web }));
-    assert.deepEqual(reparsed.web.auth, { mode: "token", token: strongToken });
+    assert.deepEqual(reparsed.web.auth, { mode: "token", token: MASKED_CONFIG_TOKEN });
 });
 
 test("web auth patch preserves the current token when the masked placeholder is submitted", () => {

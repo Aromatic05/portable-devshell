@@ -289,7 +289,7 @@ function toWebView(web: ControlGlobalConfig["web"]): ConfigWebView {
                 ? { ...auth.oauth2, requiredScopes: [...auth.oauth2.requiredScopes] }
                 : undefined,
         publicBaseUrl: web.publicBaseUrl,
-        token: auth.mode === "token" ? auth.token : undefined
+        token: auth.mode === "token" ? MASKED_CONFIG_TOKEN : undefined
     };
 }
 
