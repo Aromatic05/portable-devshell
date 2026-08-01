@@ -71,7 +71,8 @@ try {
             arguments: { command: "pwd", ctxId }
         }
     }, headers);
-    const output = String(toolCall.body.result?.content?.[0]?.text ?? "");
+    assert.deepEqual(toolCall.body.result?.content, []);
+    const output = String(toolCall.body.result?.structuredContent?.stdout ?? "");
     assert.equal(output.includes(fixture.workspace), true);
 
     process.stdout.write(JSON.stringify({
