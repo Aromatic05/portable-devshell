@@ -163,6 +163,36 @@ fn tmux_pane_sizes(env: &TestEnv, instance: &str) -> Vec<(usize, usize)> {
         .collect()
 }
 
+fn tmux_pane_id_by_name(env: &TestEnv, instance: &str, name: &str) -> String {
+    let socket = env.tmux_socket_file(instance);
+    let output = Command::new("tmux")
+        .args([
+            "-S",
+            socket.to_string_lossy().as_ref(),
+            "list-panes",
+            "-s",
+            "-t",
+            "devshell",
+            "-F",
+            "#{@devshell_worker_pane_name}|#{pane_id}",
+        ])
+        .output()
+        .expect("tmux list-panes should run");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8(output.stdout)
+        .expect("tmux pane list should be UTF-8")
+        .lines()
+        .find_map(|line| {
+            let (candidate, pane_id) = line.split_once('|')?;
+            (candidate == name).then(|| pane_id.to_string())
+        })
+        .unwrap_or_else(|| panic!("managed pane not found: {name}"))
+}
+
 fn tmux_capture_range(
     env: &TestEnv,
     instance: &str,
@@ -349,6 +379,10 @@ fn tmux_zero_time_ms_returns_immediate_observations() {
         "input-zero-time",
     );
     assert_eq!(input["ok"], true, "{input}");
+    assert!(input["result"].get("pane").is_none());
+    assert!(input["result"].get("kind").is_none());
+    assert!(input["result"].get("observationEpoch").is_none());
+    assert!(input["result"].get("observationReset").is_none());
     let read = call(
         &env,
         instance,
@@ -359,6 +393,10 @@ fn tmux_zero_time_ms_returns_immediate_observations() {
         "read-zero-time",
     );
     assert_eq!(read["ok"], true, "{read}");
+    assert!(read["result"].get("pane").is_none());
+    assert!(read["result"].get("kind").is_none());
+    assert!(read["result"].get("observationEpoch").is_none());
+    assert!(read["result"].get("observationReset").is_none());
     let finished = wait_for_terminal(&env, instance, task, "ctx-a");
     assert_ne!(finished["result"]["task"]["status"], "running");
     stop(&env, instance);
@@ -391,6 +429,14 @@ fn tmux_run_returns_a_task_and_preserves_clean_first_output() {
     );
     assert_eq!(run["ok"], true, "{run}");
     assert_eq!(run["result"]["task"]["status"], "0", "{run}");
+    assert!(run["result"]["task"].get("paneId").is_none());
+    assert!(run["result"]["task"].get("startedAt").is_none());
+    assert!(run["result"]["task"].get("finishedAt").is_none());
+    assert!(run["result"]["pane"]["id"].is_string());
+    assert_eq!(run["result"]["pane"]["name"], "main");
+    assert!(run["result"]["pane"].get("tmuxPaneId").is_none());
+    assert!(run["result"].get("kind").is_none());
+    assert!(run["result"].get("warnings").is_none());
     assert!(
         run["result"]["output"]
             .as_array()
@@ -589,7 +635,7 @@ fn pane_incarnation_change_invalidates_stale_task_control() {
     );
     assert_eq!(run["ok"], true, "{run}");
     let task = run["result"]["task"]["id"].as_str().unwrap();
-    let tmux_pane_id = run["result"]["pane"]["tmuxPaneId"].as_str().unwrap();
+    let tmux_pane_id = tmux_pane_id_by_name(&env, instance, "server");
 
     let changed = Command::new("tmux")
         .arg("-S")
@@ -599,7 +645,7 @@ fn pane_incarnation_change_invalidates_stale_task_control() {
             "-p",
             "-q",
             "-t",
-            tmux_pane_id,
+            &tmux_pane_id,
             "@devshell_worker_pane_incarnation_id",
             "replacement-incarnation",
         ])
@@ -679,8 +725,8 @@ fn tmux_inspect_honors_nonzero_end_offsets() {
         "fill-history",
     );
     assert_eq!(run["ok"], true, "{run}");
-    let pane_id = run["result"]["pane"]["tmuxPaneId"].as_str().unwrap();
-    let expected = tmux_capture_range(&env, instance, pane_id, -100, -90);
+    let pane_id = tmux_pane_id_by_name(&env, instance, "main");
+    let expected = tmux_capture_range(&env, instance, &pane_id, -100, -90);
     assert_eq!(expected.len(), 10, "{expected:?}");
 
     let inspect = call(
@@ -851,22 +897,27 @@ fn managed_panes_use_independent_single_pane_windows() {
     );
     assert_eq!(listed["ok"], true, "{listed}");
     let panes = listed["result"]["panes"].as_array().unwrap();
-    assert!(panes.iter().all(|pane| pane["active"] == true), "{listed}");
-    assert_eq!(
-        panes
-            .iter()
-            .filter(|pane| pane["windowActive"] == true)
-            .count(),
-        1,
-        "{listed}"
-    );
+    assert_eq!(panes.len(), 3, "{listed}");
     assert!(panes.iter().all(|pane| {
-        pane["tmuxWindowId"]
-            .as_str()
-            .is_some_and(|id| !id.is_empty())
-            && pane["columns"].as_u64().is_some_and(|value| value >= 240)
-            && pane["rows"].as_u64().is_some_and(|value| value >= 60)
+        pane["id"].is_string()
+            && pane["name"].is_string()
+            && pane["status"].is_string()
+            && pane.get("tmuxPaneId").is_none()
+            && pane.get("tmuxWindowId").is_none()
+            && pane.get("active").is_none()
+            && pane.get("windowActive").is_none()
+            && pane.get("columns").is_none()
+            && pane.get("rows").is_none()
+            && pane.get("cwd").is_none()
+            && pane.get("command").is_none()
+            && pane.get("createdAt").is_none()
+            && pane.get("locked").is_none()
     }));
+    assert!(listed["result"].get("kind").is_none());
+    assert!(listed["result"].get("capacity").is_none());
+    assert!(listed["result"].get("observationEpoch").is_none());
+    assert!(listed["result"].get("observationReset").is_none());
+    assert!(listed["result"].get("warnings").is_none());
 
     stop(&env, instance);
 }
@@ -892,12 +943,12 @@ fn existing_split_layout_is_migrated_without_restarting_tasks() {
         "create-server",
     );
     assert_eq!(created["ok"], true, "{created}");
-    let server_pane = created["result"]["pane"]["tmuxPaneId"].as_str().unwrap();
+    let server_pane = tmux_pane_id_by_name(&env, instance, "server");
     let socket = env.tmux_socket_file(instance);
     let main_pane = tmux_window_layout(&env, instance)
         .into_iter()
         .map(|(_, _, pane_id)| pane_id)
-        .find(|pane_id| pane_id != server_pane)
+        .find(|pane_id| *pane_id != server_pane)
         .unwrap();
     let joined = Command::new("tmux")
         .args([
@@ -907,7 +958,7 @@ fn existing_split_layout_is_migrated_without_restarting_tasks() {
             "-d",
             "-h",
             "-s",
-            server_pane,
+            &server_pane,
             "-t",
             &main_pane,
         ])
@@ -1291,7 +1342,15 @@ fn worker_restart_adopts_existing_panes() {
         .find(|pane| pane["name"] == "persistent")
         .unwrap();
     assert_eq!(persistent["id"], pane_id);
-    assert_eq!(listed["result"]["observationReset"], true);
+    assert!(listed["result"].get("observationReset").is_none());
+    assert!(
+        listed["result"]["warnings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|warning| warning["code"] == "tmux.observationReset"),
+        "{listed}"
+    );
     stop(&env, instance);
 }
 

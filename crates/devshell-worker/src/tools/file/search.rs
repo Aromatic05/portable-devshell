@@ -138,7 +138,6 @@ impl ToolHandler for FileSearchTool {
                     output: FileSearchFile {
                         path: entry.display,
                         content: body,
-                        match_count: matches.len(),
                     },
                     resolved: entry.resolved,
                     metadata,

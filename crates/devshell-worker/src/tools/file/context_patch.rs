@@ -21,7 +21,6 @@ pub struct PatchApplication {
     pub normalized: String,
     pub required_lines: BTreeSet<usize>,
     pub resulting_known_lines: BTreeSet<usize>,
-    pub first_changed_line: Option<usize>,
     pub added_lines: usize,
     pub removed_lines: usize,
     line_edits: Vec<(usize, usize, usize)>,
@@ -99,7 +98,6 @@ pub fn apply(base: &str, patch: &str) -> Result<PatchApplication, ToolError> {
     let mut line_edits = Vec::new();
     let mut added_lines = 0usize;
     let mut removed_lines = 0usize;
-    let mut first_changed_line = None;
     for (position, hunk) in &located {
         let changed = changed_span(hunk);
         for offset in 0..hunk.old_lines.len() {
@@ -119,11 +117,6 @@ pub fn apply(base: &str, patch: &str) -> Result<PatchApplication, ToolError> {
         }
         added_lines += changed.1;
         removed_lines += changed.0;
-        if changed != (0, 0) {
-            first_changed_line = Some(
-                first_changed_line.map_or(position + 1, |current: usize| current.min(position + 1)),
-            );
-        }
     }
 
     let mut result = lines;
@@ -141,7 +134,6 @@ pub fn apply(base: &str, patch: &str) -> Result<PatchApplication, ToolError> {
         normalized,
         required_lines,
         resulting_known_lines,
-        first_changed_line,
         added_lines,
         removed_lines,
         line_edits,

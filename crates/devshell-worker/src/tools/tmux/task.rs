@@ -6,7 +6,9 @@ use crate::platform::unix_time_millis;
 use crate::tools::ToolError;
 use crate::tools::tmux::backend::BackendPane;
 use crate::tools::tmux::output::{OutputWindow, refresh_window};
-use crate::tools::tmux::types::{TmuxPaneView, TmuxTaskView, TmuxWarning};
+use crate::tools::tmux::types::{
+    TmuxPaneDetail, TmuxPaneRef, TmuxPaneSummary, TmuxTaskView, TmuxTerminalSize, TmuxWarning,
+};
 
 const MAX_COMPLETED_TASKS: usize = 64;
 const TASK_RETENTION_MS: u128 = 30 * 60 * 1_000;
@@ -42,7 +44,6 @@ pub struct TaskRecord {
     pub state: TaskState,
     pub window: OutputWindow,
     pub start_status_seq: Option<u64>,
-    pub started_at_ms: u128,
     pub finished_at_ms: Option<u128>,
     pub last_pane: BackendPane,
     pub warnings: Vec<TmuxWarning>,
@@ -150,44 +151,60 @@ pub fn refresh_task_record(task: &mut TaskRecord, pane: &BackendPane) {
     }
 }
 
-pub fn pane_view(
-    pane: &BackendPane,
-    task: Option<&TaskRecord>,
-    lines: Option<Vec<String>>,
-) -> TmuxPaneView {
-    let unmanaged_running = task.is_none() && pane.status.as_deref() == Some("running");
-    let locked = task.is_some_and(|task| task.state.is_active()) || unmanaged_running;
-    let status = task
-        .filter(|task| task.state.is_active())
-        .map(|task| task.state.text())
-        .or_else(|| pane.status.clone())
-        .unwrap_or_else(|| "unknown".to_string());
-    TmuxPaneView {
+pub fn pane_ref(pane: &BackendPane) -> TmuxPaneRef {
+    TmuxPaneRef {
         id: pane.id.clone(),
         name: pane.name.clone(),
-        tmux_pane_id: pane.tmux_pane_id.clone(),
-        tmux_window_id: pane.tmux_window_id.clone(),
-        active: pane.active,
-        window_active: pane.window_active,
-        columns: pane.columns,
-        rows: pane.rows,
-        status,
-        cwd: pane.cwd.clone(),
-        command: pane.command.clone(),
-        created_at: pane.created_at_ms,
-        locked,
-        task: task.filter(|task| task.state.is_active()).map(task_view),
-        lines,
     }
+}
+
+pub fn pane_summary(pane: &BackendPane, task: Option<&TaskRecord>) -> TmuxPaneSummary {
+    TmuxPaneSummary {
+        id: pane.id.clone(),
+        name: pane.name.clone(),
+        status: pane_status(pane, task),
+        task: active_task(task),
+    }
+}
+
+pub fn pane_detail(
+    pane: &BackendPane,
+    task: Option<&TaskRecord>,
+    lines: Vec<String>,
+) -> TmuxPaneDetail {
+    let unmanaged_running = task.is_none() && pane.status.as_deref() == Some("running");
+    let locked = task.is_some_and(|task| task.state.is_active()) || unmanaged_running;
+    TmuxPaneDetail {
+        id: pane.id.clone(),
+        name: pane.name.clone(),
+        status: pane_status(pane, task),
+        cwd: (!pane.cwd.is_empty()).then(|| pane.cwd.clone()),
+        command: (!pane.command.is_empty()).then(|| pane.command.clone()),
+        size: Some(TmuxTerminalSize {
+            columns: pane.columns,
+            rows: pane.rows,
+        }),
+        locked: locked.then_some(true),
+        task: active_task(task),
+        lines: (!lines.is_empty()).then_some(lines),
+    }
+}
+
+fn pane_status(pane: &BackendPane, task: Option<&TaskRecord>) -> String {
+    task.filter(|task| task.state.is_active())
+        .map(|task| task.state.text())
+        .or_else(|| pane.status.clone())
+        .unwrap_or_else(|| "unknown".to_string())
+}
+
+fn active_task(task: Option<&TaskRecord>) -> Option<TmuxTaskView> {
+    task.filter(|task| task.state.is_active()).map(task_view)
 }
 
 pub fn task_view(task: &TaskRecord) -> TmuxTaskView {
     TmuxTaskView {
         id: task.id.clone(),
-        pane_id: task.pane_id.clone(),
         status: task.state.text(),
-        started_at: task.started_at_ms,
-        finished_at: task.finished_at_ms,
     }
 }
 
@@ -229,12 +246,10 @@ mod tests {
             tmux_pane_id: "%0".to_string(),
             tmux_window_id: "@0".to_string(),
             window_panes: 1,
-            window_active: true,
             columns: 240,
             rows: 60,
             pane_incarnation_id: "incarnation".to_string(),
             created_at_ms: 1,
-            active: true,
             cwd: "/tmp".to_string(),
             command: "bash".to_string(),
             lines: Vec::new(),
@@ -252,7 +267,6 @@ mod tests {
             state,
             window: OutputWindow::default(),
             start_status_seq: Some(1),
-            started_at_ms: 1,
             finished_at_ms,
             last_pane: pane(),
             warnings: Vec::new(),

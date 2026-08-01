@@ -3,7 +3,7 @@ import type { JsonValue, ToolDefinition } from "@portable-devshell/shared";
 import { McpToolSchemaUnavailableError } from "../tool/McpToolSchemaAdapter.js";
 
 const commentSchema: JsonValue = {
-    description: "User comments for this session context.",
+    description: "Actionable notes.",
     items: { minLength: 1, type: "string" },
     type: "array"
 };
@@ -15,10 +15,6 @@ export function withMcpCommentOutputSchema(tool: ToolDefinition): ToolDefinition
     const properties = isRecord(tool.outputSchema.properties)
         ? tool.outputSchema.properties
         : {};
-    const required = Array.isArray(tool.outputSchema.required)
-        ? tool.outputSchema.required.filter((entry): entry is string => typeof entry === "string")
-        : [];
-
     return {
         ...tool,
         outputSchema: {
@@ -26,8 +22,7 @@ export function withMcpCommentOutputSchema(tool: ToolDefinition): ToolDefinition
             properties: {
                 ...properties,
                 comment: commentSchema
-            },
-            required: required.includes("comment") ? required : [...required, "comment"]
+            }
         }
     };
 }
@@ -36,6 +31,7 @@ export function attachMcpComments(result: JsonValue, comments: readonly string[]
     if (!isRecord(result)) {
         throw new Error("MCP tool results must be objects when context comments are enabled.");
     }
+    if (comments.length === 0) return result;
     return {
         ...result,
         comment: [...comments]

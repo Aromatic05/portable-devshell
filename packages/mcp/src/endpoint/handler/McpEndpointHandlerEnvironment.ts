@@ -53,10 +53,7 @@ export class McpEndpointHandlerEnvironment {
             async () => ({
                 ctxId: record.ctxId,
                 expiresAt: record.expiresAt,
-                comment: [
-                    `Skills are available in ${environment.skillsDirectory}. Read the relevant SKILL.md before using a skill.`,
-                    "Every project may contain AGENT.md. Read and follow the applicable AGENT.md before working in that project, and maintain it when project-specific knowledge changes."
-                ],
+                comment: ["Read applicable AGENT.md."],
                 instance: this.#instanceName,
                 platform: {
                     arch: environment.platform.arch,

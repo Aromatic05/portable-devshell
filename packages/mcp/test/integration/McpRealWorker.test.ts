@@ -127,7 +127,7 @@ test("MCP initialize tools/list and tools/call succeed against the frozen worker
         assert.equal(call.error, undefined);
         assert.equal(call.result?.isError, false);
         assert.match(
-            String(call.result?.content?.[0]?.text ?? ""),
+            String((call.result?.structuredContent as { stdout?: JsonValue } | undefined)?.stdout ?? ""),
             new RegExp(workspaceMarker, "u")
         );
 

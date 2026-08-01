@@ -34,12 +34,10 @@ pub struct BackendPane {
     pub tmux_pane_id: String,
     pub tmux_window_id: String,
     pub window_panes: usize,
-    pub window_active: bool,
     pub columns: usize,
     pub rows: usize,
     pub pane_incarnation_id: String,
     pub created_at_ms: u128,
-    pub active: bool,
     pub cwd: String,
     pub command: String,
     pub lines: Vec<String>,
@@ -93,7 +91,6 @@ pub struct TmuxBackend {
     shell_dir: PathBuf,
     status_dir: PathBuf,
     session_file: PathBuf,
-    observation_epoch: String,
     observation_reset: bool,
     session_prepared: AtomicBool,
 }
@@ -127,14 +124,9 @@ impl TmuxBackend {
             shell_dir,
             status_dir,
             session_file: root.join("session.json"),
-            observation_epoch: Uuid::new_v4().to_string(),
             observation_reset,
             session_prepared: AtomicBool::new(false),
         })
-    }
-
-    pub fn observation_epoch(&self) -> &str {
-        &self.observation_epoch
     }
 
     pub fn observation_reset(&self) -> bool {
@@ -212,8 +204,6 @@ impl TmuxBackend {
             "#{@devshell_worker_pane_name}",
             "#{@devshell_worker_pane_incarnation_id}",
             "#{@devshell_worker_created_at}",
-            "#{pane_active}",
-            "#{window_active}",
             "#{window_id}",
             "#{window_panes}",
             "#{pane_width}",
@@ -260,27 +250,25 @@ impl TmuxBackend {
             panes.push(BackendPane {
                 id: id.to_string(),
                 name: name.to_string(),
-                automatic: fields.get(13).copied() == Some("1"),
+                automatic: fields.get(11).copied() == Some("1"),
                 tmux_pane_id: tmux_pane_id.to_string(),
-                tmux_window_id: fields.get(7).copied().unwrap_or_default().to_string(),
+                tmux_window_id: fields.get(5).copied().unwrap_or_default().to_string(),
                 window_panes: fields
-                    .get(8)
+                    .get(6)
                     .and_then(|value| value.parse::<usize>().ok())
                     .unwrap_or(1),
-                window_active: fields.get(6).copied() == Some("1"),
                 columns: fields
-                    .get(9)
+                    .get(7)
                     .and_then(|value| value.parse::<usize>().ok())
                     .unwrap_or_default(),
                 rows: fields
-                    .get(10)
+                    .get(8)
                     .and_then(|value| value.parse::<usize>().ok())
                     .unwrap_or_default(),
                 pane_incarnation_id: pane_incarnation_id.to_string(),
                 created_at_ms,
-                active: fields.get(5).copied() == Some("1"),
-                cwd: decode_tmux_argument(fields.get(11).copied().unwrap_or_default())?,
-                command: decode_tmux_argument(fields.get(12).copied().unwrap_or_default())?,
+                cwd: decode_tmux_argument(fields.get(9).copied().unwrap_or_default())?,
+                command: decode_tmux_argument(fields.get(10).copied().unwrap_or_default())?,
                 lines,
                 status: status.as_ref().map(status_text),
                 status_seq: status.as_ref().map(|record| record.seq),

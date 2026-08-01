@@ -137,7 +137,7 @@ test("McpEndpointCatalog independently owns merge, filtering, adaptation, and ro
         additionalProperties: false,
         properties: {
             comment: {
-                description: "User comments for this session context.",
+                description: "Actionable notes.",
                 items: { minLength: 1, type: "string" },
                 type: "array"
             },
@@ -145,7 +145,7 @@ test("McpEndpointCatalog independently owns merge, filtering, adaptation, and ro
             stderr: { type: "string" },
             stdout: { type: "string" }
         },
-        required: ["exitCode", "stderr", "stdout", "comment"],
+        required: ["exitCode", "stderr", "stdout"],
         type: "object"
     });
     assert.equal(catalog.getExposed("bash_run")?.owner, "worker");
@@ -239,14 +239,14 @@ test("McpEndpointDispatch executes environment, control, and worker domains with
         { ctxId: environment.ctxId },
         { principal: "tester", requestId: "request-list" }
     );
-    assert.deepEqual(listed, { comment: [], instances: [{ name: "demo-local" }] });
+    assert.deepEqual(listed, { instances: [{ name: "demo-local" }] });
 
     const workerResult = await dispatch.callTool(
         "bash_run",
         { command: "pwd", ctxId: environment.ctxId },
         { principal: "tester", requestId: "request-worker" }
     );
-    assert.deepEqual(workerResult, { comment: [], ok: true, toolName: "bash_run" });
+    assert.deepEqual(workerResult, { ok: true, toolName: "bash_run" });
     assert.deepEqual(harness.calls[0]?.input, { command: "pwd" });
     assert.deepEqual(harness.audited, ["environ_info", "instance_list"]);
 });

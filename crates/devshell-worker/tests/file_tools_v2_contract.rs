@@ -116,7 +116,12 @@ fn file_read_auto_returns_content_for_small_files_without_snapshot_tokens() {
     );
 
     assert_eq!(response["ok"], true, "{response}");
-    assert_eq!(response["result"]["view"], "content");
+    assert!(response["result"].get("view").is_none());
+    assert!(response["result"].get("path").is_none());
+    assert!(response["result"].get("returnedRanges").is_none());
+    assert!(response["result"].get("totalLines").is_none());
+    assert!(response["result"].get("totalBytes").is_none());
+    assert!(response["result"].get("truncated").is_none());
     assert!(
         response["result"]["content"]
             .as_str()
@@ -158,7 +163,7 @@ fn file_read_outline_reports_symbol_ranges_and_hierarchy() {
     assert!(content.contains("1-1 struct Demo"), "{content}");
     assert!(content.contains("3-6 impl Demo"), "{content}");
     assert!(content.contains("  4-4 fn first"), "{content}");
-    assert_eq!(response["result"]["parseStatus"], "complete");
+    assert!(response["result"].get("parseStatus").is_none());
     assert!(response["result"].get("nextSelector").is_none());
 
     env.json_command(&["stop", "--instance", instance]);
@@ -393,7 +398,7 @@ fn file_edit_keeps_applied_operations_and_stops_after_runtime_failure() {
     );
 
     assert_eq!(response["ok"], true, "{response}");
-    assert_eq!(response["result"]["complete"], false);
+    assert!(response["result"].get("complete").is_none());
     assert_eq!(response["result"]["operations"][0]["status"], "applied");
     assert_eq!(response["result"]["operations"][1]["status"], "failed");
     assert_eq!(response["result"]["operations"][2]["status"], "notExecuted");
@@ -458,7 +463,7 @@ fn file_edit_applies_all_five_operations_in_order() {
     );
 
     assert_eq!(edited["ok"], true, "{edited}");
-    assert_eq!(edited["result"]["complete"], true);
+    assert!(edited["result"].get("complete").is_none());
     assert_eq!(edited["result"]["operations"].as_array().unwrap().len(), 5);
     assert!(
         edited["result"]["operations"]
@@ -466,6 +471,13 @@ fn file_edit_applies_all_five_operations_in_order() {
             .unwrap()
             .iter()
             .all(|operation| operation["status"] == "applied")
+    );
+    assert!(
+        edited["result"]["operations"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|operation| operation.get("diff").is_none())
     );
     assert_eq!(
         fs::read_to_string(env.workspace().join("new.txt")).unwrap(),
@@ -521,7 +533,7 @@ fn file_edit_rejects_patch_context_outside_read_coverage() {
         }),
     );
     assert_eq!(edited["ok"], true, "{edited}");
-    assert_eq!(edited["result"]["complete"], false);
+    assert_eq!(edited["result"]["operations"][0]["status"], "failed");
     assert_eq!(
         edited["result"]["operations"][0]["error"]["code"],
         "file.unreadRange"
@@ -567,8 +579,8 @@ fn file_edit_three_way_merges_non_conflicting_external_changes() {
         }),
     );
     assert_eq!(edited["ok"], true, "{edited}");
-    assert_eq!(edited["result"]["complete"], true);
-    assert_eq!(edited["result"]["operations"][0]["merged"], true);
+    assert_eq!(edited["result"]["operations"][0]["status"], "applied");
+    assert!(edited["result"]["operations"][0].get("merged").is_none());
     assert_eq!(
         fs::read_to_string(env.workspace().join("document.txt")).unwrap(),
         "external\none\nsecond\nthree\n"
@@ -655,12 +667,89 @@ fn file_edit_keeps_a_call_local_snapshot_chain_for_dependent_operations() {
     );
 
     assert_eq!(edited["ok"], true, "{edited}");
-    assert_eq!(edited["result"]["complete"], true, "{edited}");
+    assert!(edited["result"].get("complete").is_none(), "{edited}");
     assert!(!env.workspace().join("first.txt").exists());
     assert_eq!(
         fs::read_to_string(env.workspace().join("second.txt")).unwrap(),
         "three\n"
     );
+
+    env.json_command(&["stop", "--instance", instance]);
+}
+
+#[test]
+fn file_edit_returns_diff_only_when_requested() {
+    let env = TestEnv::new();
+    let instance = "aromatic-file-edit-detail";
+    start(&env, instance);
+
+    let summary = call(
+        &env,
+        instance,
+        "1",
+        "ctx-a",
+        "file_edit",
+        json!({
+            "changes": "*** Begin Edit\n*** Write File: ./summary.txt\nsummary\n*** End Edit"
+        }),
+    );
+    assert_eq!(summary["ok"], true, "{summary}");
+    assert!(summary["result"]["operations"][0].get("diff").is_none());
+    assert!(summary["result"]["operations"][0].get("truncated").is_none());
+
+    let detailed = call(
+        &env,
+        instance,
+        "2",
+        "ctx-a",
+        "file_edit",
+        json!({
+            "changes": "*** Begin Edit\n*** Write File: ./detailed.txt\ndetailed\n*** End Edit",
+            "resultDetail": "diff"
+        }),
+    );
+    assert_eq!(detailed["ok"], true, "{detailed}");
+    assert!(detailed["result"]["operations"][0]["diff"].is_string());
+    assert!(detailed["result"]["operations"][0].get("truncated").is_none());
+
+    env.json_command(&["stop", "--instance", instance]);
+}
+
+#[test]
+fn file_info_returns_details_only_when_requested() {
+    let env = TestEnv::new();
+    let instance = "aromatic-file-info-detail";
+    fs::write(env.workspace().join("document.txt"), "data\n").unwrap();
+    start(&env, instance);
+
+    let summary = call(
+        &env,
+        instance,
+        "1",
+        "ctx-a",
+        "file_info",
+        json!({ "paths": ["./document.txt"] }),
+    );
+    assert_eq!(summary["ok"], true, "{summary}");
+    let entry = &summary["result"]["entries"][0];
+    assert_eq!(entry["type"], "file");
+    assert!(entry.get("exists").is_none());
+    assert!(entry.get("sizeBytes").is_none());
+    assert!(entry.get("modifiedAtMs").is_none());
+    assert!(entry.get("mode").is_none());
+
+    let detailed = call(
+        &env,
+        instance,
+        "2",
+        "ctx-a",
+        "file_info",
+        json!({ "paths": ["./document.txt"], "details": true }),
+    );
+    assert_eq!(detailed["ok"], true, "{detailed}");
+    let entry = &detailed["result"]["entries"][0];
+    assert_eq!(entry["sizeBytes"], 5);
+    assert!(entry["modifiedAtMs"].is_number());
 
     env.json_command(&["stop", "--instance", instance]);
 }
@@ -704,6 +793,7 @@ fn file_tools_omit_absent_pagination_fields() {
     );
     assert_eq!(read["ok"], true, "{read}");
     assert!(read["result"].get("nextSelector").is_none());
+    assert!(read["result"].get("truncated").is_none());
 
     let found = call(
         &env,
@@ -715,6 +805,7 @@ fn file_tools_omit_absent_pagination_fields() {
     );
     assert_eq!(found["ok"], true, "{found}");
     assert!(found["result"].get("nextCursor").is_none());
+    assert!(found["result"].get("content").is_none());
 
     let searched = call(
         &env,
@@ -726,6 +817,7 @@ fn file_tools_omit_absent_pagination_fields() {
     );
     assert_eq!(searched["ok"], true, "{searched}");
     assert!(searched["result"].get("nextCursor").is_none());
+    assert!(searched["result"]["files"][0].get("matchCount").is_none());
 
     env.json_command(&["stop", "--instance", instance]);
 }
@@ -801,7 +893,7 @@ fn file_info_reports_missing_entries_and_dangling_symlinks_in_one_batch() {
     assert_eq!(response["result"]["entries"][0]["exists"], false);
     assert!(response["result"]["entries"][0].get("type").is_none());
     assert_eq!(response["result"]["entries"][1]["path"], "./dangling-link");
-    assert_eq!(response["result"]["entries"][1]["exists"], true);
+    assert!(response["result"]["entries"][1].get("exists").is_none());
     assert_eq!(response["result"]["entries"][1]["type"], "symlink");
     assert!(response["result"]["entries"][1].get("targetType").is_none());
 
@@ -881,7 +973,7 @@ fn file_edit_preserves_the_detected_line_ending_style() {
     );
 
     assert_eq!(edited["ok"], true, "{edited}");
-    assert_eq!(edited["result"]["complete"], true, "{edited}");
+    assert!(edited["result"].get("complete").is_none(), "{edited}");
     assert_eq!(
         fs::read(env.workspace().join("document.txt")).unwrap(),
         b"updated\r\nsecond\r\n"
@@ -924,7 +1016,7 @@ fn file_edit_rejects_conflicting_external_changes_without_overwriting_them() {
     );
 
     assert_eq!(edited["ok"], true, "{edited}");
-    assert_eq!(edited["result"]["complete"], false, "{edited}");
+    assert_eq!(edited["result"]["operations"][0]["status"], "failed", "{edited}");
     assert_eq!(
         edited["result"]["operations"][0]["error"]["code"],
         "file.revisionMismatch"

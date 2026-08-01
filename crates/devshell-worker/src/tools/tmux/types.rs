@@ -113,29 +113,47 @@ pub struct TmuxCloseParams {
 #[serde(rename_all = "camelCase")]
 pub struct TmuxTaskView {
     pub id: String,
-    pub pane_id: String,
     pub status: String,
-    pub started_at: u128,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub finished_at: Option<u128>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct TmuxPaneView {
+pub struct TmuxPaneRef {
     pub id: String,
     pub name: String,
-    pub tmux_pane_id: String,
-    pub tmux_window_id: String,
-    pub active: bool,
-    pub window_active: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct TmuxPaneSummary {
+    pub id: String,
+    pub name: String,
+    pub status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub task: Option<TmuxTaskView>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct TmuxTerminalSize {
     pub columns: usize,
     pub rows: usize,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct TmuxPaneDetail {
+    pub id: String,
+    pub name: String,
     pub status: String,
-    pub cwd: String,
-    pub command: String,
-    pub created_at: u128,
-    pub locked: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cwd: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub command: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub size: Option<TmuxTerminalSize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub locked: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub task: Option<TmuxTaskView>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -144,14 +162,8 @@ pub struct TmuxPaneView {
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct TmuxCapacity {
-    pub used: usize,
-    pub max: usize,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
 pub struct TmuxWarning {
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub pane: Option<String>,
     pub code: String,
     pub message: String,
@@ -160,54 +172,43 @@ pub struct TmuxWarning {
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct TmuxTaskOperationOutput {
-    pub kind: String,
     pub task: TmuxTaskView,
-    pub pane: TmuxPaneView,
-    pub output: Vec<String>,
-    pub warnings: Vec<TmuxWarning>,
-    pub observation_epoch: String,
-    pub observation_reset: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pane: Option<TmuxPaneRef>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub output: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub warnings: Option<Vec<TmuxWarning>>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct TmuxPaneOperationOutput {
-    pub kind: String,
-    pub panes: Vec<TmuxPaneView>,
-    pub warnings: Vec<TmuxWarning>,
-    pub observation_epoch: String,
-    pub observation_reset: bool,
+    pub panes: Vec<TmuxPaneDetail>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub warnings: Option<Vec<TmuxWarning>>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct TmuxListOutput {
-    pub kind: String,
-    pub panes: Vec<TmuxPaneView>,
-    pub capacity: TmuxCapacity,
-    pub warnings: Vec<TmuxWarning>,
-    pub observation_epoch: String,
-    pub observation_reset: bool,
+    pub panes: Vec<TmuxPaneSummary>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub warnings: Option<Vec<TmuxWarning>>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct TmuxCreateOutput {
-    pub kind: String,
-    pub pane: TmuxPaneView,
-    pub capacity: TmuxCapacity,
-    pub warnings: Vec<TmuxWarning>,
-    pub observation_epoch: String,
-    pub observation_reset: bool,
+    pub pane: TmuxPaneRef,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub warnings: Option<Vec<TmuxWarning>>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct TmuxCloseOutput {
-    pub kind: String,
     pub closed_pane_id: String,
-    pub capacity: TmuxCapacity,
-    pub warnings: Vec<TmuxWarning>,
-    pub observation_epoch: String,
-    pub observation_reset: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub warnings: Option<Vec<TmuxWarning>>,
 }

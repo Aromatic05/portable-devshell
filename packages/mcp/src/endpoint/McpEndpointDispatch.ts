@@ -168,9 +168,9 @@ export class McpEndpointDispatch {
     async #attachComments(error: unknown, context: ToolCallContext): Promise<void> {
         if (context.ctxId === undefined || this.#gateway?.todoCommentsFor === undefined) return;
         if (typeof error !== "object" || error === null) return;
-        Object.assign(error, {
-            comment: await this.#gateway.todoCommentsFor(this.#instanceName, context.ctxId)
-        });
+        const comments = await this.#gateway.todoCommentsFor(this.#instanceName, context.ctxId);
+        if (comments.length === 0) return;
+        Object.assign(error, { comment: comments });
     }
 
     async #createToolContext(

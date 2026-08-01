@@ -36,6 +36,7 @@ impl ToolHandler for FileInfoTool {
                 "paths cannot be empty",
             ));
         }
+        let details = input.details.unwrap_or(false);
         let mut entries = Vec::with_capacity(input.paths.len());
         for raw_path in input.paths {
             call.check_cancelled()?;
@@ -47,7 +48,7 @@ impl ToolHandler for FileInfoTool {
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                     entries.push(FileInfoEntry {
                         path: raw_path,
-                        exists: false,
+                        exists: Some(false),
                         entry_type: None,
                         size_bytes: None,
                         modified_at_ms: None,
@@ -95,11 +96,11 @@ impl ToolHandler for FileInfoTool {
                 .map(|value| value.as_millis());
             entries.push(FileInfoEntry {
                 path: requested.raw,
-                exists: true,
+                exists: None,
                 entry_type: Some(entry_type.to_string()),
-                size_bytes: Some(metadata.len()),
-                modified_at_ms,
-                mode,
+                size_bytes: details.then_some(metadata.len()),
+                modified_at_ms: details.then_some(modified_at_ms).flatten(),
+                mode: details.then_some(mode).flatten(),
                 target_type,
             });
         }

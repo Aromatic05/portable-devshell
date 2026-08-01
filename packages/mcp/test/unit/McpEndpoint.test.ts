@@ -131,8 +131,8 @@ test("tools/call delegates to WorkerInstance.callTool", async () => {
             toolName: "bash_run"
         });
         assert.equal(response.body.result?.isError, false);
+        assert.deepEqual(response.body.result?.content, []);
         assert.deepEqual(response.body.result?.structuredContent, {
-            comment: [],
             exitCode: 0,
             stderr: "",
             stdout: "/workspace\n"
@@ -177,7 +177,6 @@ test("tools/call delivers only comments bound to its ctxId", async () => {
             stdout: "/workspace\n"
         });
         assert.deepEqual(other.body.result?.structuredContent, {
-            comment: [],
             exitCode: 0,
             stderr: "",
             stdout: "/workspace\n"
@@ -213,10 +212,9 @@ test("tools/call returns ctxId comments when the tool fails", async () => {
         );
 
         assert.equal(response.status, 200);
-        assert.deepEqual(response.body.error?.data?.comment, [
-            "Check the generated files before retrying.",
-            "Error hint [error.unknown]: The tool call failed for an unclassified reason. Inspect the original error and current state before taking further action; do not report completion or retry the same operation unchanged."
-        ]);
+        const comments = response.body.error?.data?.comment as string[];
+        assert.equal(comments[0], "Check the generated files before retrying.");
+        assert.match(comments[1] ?? "", /^\[error\.unknown\] /);
     } finally {
         await server.close();
         await binding.close();
@@ -248,10 +246,8 @@ test("tools/call appends a worker result hint after user comments and keeps the 
         assert.equal(structured?.exitCode, 7);
         assert.equal(structured?.stderr, "boom");
         assert.equal(structured?.result, undefined);
-        assert.deepEqual(structured?.comment, [
-            "Do not change permissions globally.",
-            "Error hint [bash.nonZeroExit]: The command ran but exited with code 7. Inspect the original stdout and stderr, then correct the command, dependencies, input, or environment before calling again. Do not report completion or retry the same command unchanged."
-        ]);
+        assert.equal(structured?.comment?.[0], "Do not change permissions globally.");
+        assert.match(structured?.comment?.[1] ?? "", /^\[bash\.nonZeroExit\] /);
         for (const entry of structured?.comment as string[]) {
             assert.equal(entry.includes("boom"), false);
         }
@@ -554,7 +550,6 @@ test("instance_list returns object structured content through SDK transport", as
         assert.equal(response.status, 200);
         assert.equal(response.body.error, undefined);
         assert.deepEqual(response.body.result?.structuredContent, {
-            comment: [],
             instances: [{ name: "demo" }]
         });
     } finally {
@@ -620,12 +615,10 @@ test("artifact_viewImage returns native image content over SDK transport", async
         assert.equal(response.status, 200);
         assert.equal(response.body.error, undefined);
         assert.deepEqual(response.body.result?.content, [
-            { data: pngData, mimeType: "image/png", type: "image" },
-            { text: "pixel.png (image/png, 68 bytes)", type: "text" }
+            { data: pngData, mimeType: "image/png", type: "image" }
         ]);
         assert.deepEqual(response.body.result?.structuredContent, {
             bytes: 68,
-            comment: [],
             mediaType: "image/png",
             name: "pixel.png",
             source: { instance: "demo", path: "./pixel.png", type: "file" }

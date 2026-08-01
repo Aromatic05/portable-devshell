@@ -1,4 +1,3 @@
-use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use serde_json::json;
@@ -87,85 +86,9 @@ impl ToolHandler for FileFindTool {
             .skip(offset)
             .take(PAGE_SIZE)
             .collect::<Vec<_>>();
-        let content = render_tree(&entries);
         crate::tools::contract::serialize(FileFindOutput {
             entries,
-            content,
             next_cursor,
         })
-    }
-}
-#[derive(Default)]
-struct TreeNode {
-    children: BTreeMap<String, TreeNode>,
-    entry_type: Option<String>,
-}
-
-fn render_tree(entries: &[FileFindEntry]) -> String {
-    let mut roots = BTreeMap::<String, TreeNode>::new();
-    for entry in entries {
-        let (root, segments) = split_display_path(&entry.path);
-        let mut node = roots.entry(root).or_default();
-        for segment in segments {
-            node = node.children.entry(segment).or_default();
-        }
-        node.entry_type = Some(entry.entry_type.clone());
-    }
-
-    let mut lines = Vec::new();
-    for (root, node) in roots {
-        lines.push(root);
-        render_children(&node, "", &mut lines);
-    }
-    lines.join("\n")
-}
-
-fn split_display_path(path: &str) -> (String, Vec<String>) {
-    if path == "./" {
-        return ("./".to_string(), Vec::new());
-    }
-    if let Some(relative) = path.strip_prefix("./") {
-        return (
-            "./".to_string(),
-            relative
-                .split('/')
-                .filter(|segment| !segment.is_empty())
-                .map(ToString::to_string)
-                .collect(),
-        );
-    }
-    if path == "/" {
-        return ("/".to_string(), Vec::new());
-    }
-    if let Some(relative) = path.strip_prefix('/') {
-        return (
-            "/".to_string(),
-            relative
-                .split('/')
-                .filter(|segment| !segment.is_empty())
-                .map(ToString::to_string)
-                .collect(),
-        );
-    }
-    (path.to_string(), Vec::new())
-}
-
-fn render_children(node: &TreeNode, prefix: &str, lines: &mut Vec<String>) {
-    let count = node.children.len();
-    for (index, (name, child)) in node.children.iter().enumerate() {
-        let last = index + 1 == count;
-        let connector = if last { "└── " } else { "├── " };
-        let suffix = if child.entry_type.as_deref() == Some("directory")
-            || (!child.children.is_empty() && child.entry_type.is_none())
-        {
-            "/"
-        } else if child.entry_type.as_deref() == Some("symlink") {
-            "@"
-        } else {
-            ""
-        };
-        lines.push(format!("{prefix}{connector}{name}{suffix}"));
-        let child_prefix = format!("{prefix}{}", if last { "    " } else { "│   " });
-        render_children(child, &child_prefix, lines);
     }
 }

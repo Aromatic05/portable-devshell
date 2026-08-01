@@ -40,17 +40,11 @@ export class McpEndpointHandlerArtifact {
                     source: image.source
                 } as unknown as JsonValue;
                 return new McpNativeToolResult({
-                    content: [
-                        {
-                            data: image.content,
-                            mimeType: image.mediaType,
-                            type: "image"
-                        },
-                        {
-                            text: `${image.name} (${image.mediaType}, ${image.bytes} bytes)`,
-                            type: "text"
-                        }
-                    ],
+                    content: [{
+                        data: image.content,
+                        mimeType: image.mediaType,
+                        type: "image"
+                    }],
                     structuredContent
                 });
             }

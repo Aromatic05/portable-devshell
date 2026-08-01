@@ -10,7 +10,7 @@ pub enum FileReadView {
     Outline,
 }
 
-#[derive(Clone, Copy, Debug, JsonSchema, Serialize)]
+#[derive(Clone, Copy, Debug, JsonSchema, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum FileParseStatus {
     Complete,
@@ -31,13 +31,11 @@ pub struct FileReadInput {
 #[derive(Debug, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct FileReadOutput {
-    pub path: String,
-    pub view: FileReadView,
     pub content: String,
-    pub returned_ranges: Vec<ReturnedRange>,
-    pub total_lines: usize,
-    pub total_bytes: usize,
-    pub truncated: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub view: Option<FileReadView>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub truncated: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub next_selector: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -46,18 +44,21 @@ pub struct FileReadOutput {
     pub parse_status: Option<FileParseStatus>,
 }
 
-#[derive(Clone, Debug, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct ReturnedRange {
-    pub start_line: usize,
-    pub end_line: usize,
-}
-
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct FileChangeSetInput {
     /// Ordered edit document using the *** Begin Edit / *** End Edit format described by this tool.
     pub changes: String,
+    /// Result detail. Defaults to summary.
+    pub result_detail: Option<FileChangeResultDetail>,
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum FileChangeResultDetail {
+    #[default]
+    Summary,
+    Diff,
 }
 
 #[derive(Clone, Copy, Debug, JsonSchema, Serialize)]
@@ -83,7 +84,8 @@ pub enum FileChangeStatus {
 pub struct FileChangeError {
     pub code: String,
     pub message: String,
-    pub retryable: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub retryable: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub details: Option<serde_json::Value>,
 }
@@ -91,39 +93,26 @@ pub struct FileChangeError {
 #[derive(Debug, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct FileChangeOperationOutput {
-    pub index: usize,
     pub action: FileChangeAction,
     pub path: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub moved_from: Option<String>,
     pub status: FileChangeStatus,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub merged: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub added_lines: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub removed_lines: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub first_changed_line: Option<usize>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub total_lines: Option<usize>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub total_bytes: Option<usize>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub diff: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub preview: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub preview_range: Option<ReturnedRange>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<FileChangeError>,
-    pub truncated: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub truncated: Option<bool>,
 }
 
 #[derive(Debug, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct FileChangeSetOutput {
-    pub complete: bool,
     pub operations: Vec<FileChangeOperationOutput>,
 }
 
@@ -149,7 +138,6 @@ pub enum FindType {
 #[serde(rename_all = "camelCase")]
 pub struct FileFindOutput {
     pub entries: Vec<FileFindEntry>,
-    pub content: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub next_cursor: Option<String>,
 }
@@ -198,7 +186,6 @@ pub struct FileSearchOutput {
 pub struct FileSearchFile {
     pub path: String,
     pub content: String,
-    pub match_count: usize,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -206,6 +193,8 @@ pub struct FileSearchFile {
 pub struct FileInfoInput {
     #[schemars(length(min = 1))]
     pub paths: Vec<String>,
+    /// Include size, modification time, and mode. Defaults to false.
+    pub details: Option<bool>,
 }
 #[derive(Debug, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
@@ -216,7 +205,8 @@ pub struct FileInfoOutput {
 #[serde(rename_all = "camelCase")]
 pub struct FileInfoEntry {
     pub path: String,
-    pub exists: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub exists: Option<bool>,
     #[serde(rename = "type", skip_serializing_if = "Option::is_none")]
     pub entry_type: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]

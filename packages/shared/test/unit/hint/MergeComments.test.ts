@@ -21,8 +21,8 @@ test("user comments precede hints and keep their order", () => {
         [
             "alpha",
             "beta",
-            "Error hint [bash.nonZeroExit]: x",
-            "Diagnostic hint [tmux.taskRunning]: y"
+            "[bash.nonZeroExit] x",
+            "[tmux.taskRunning] y"
         ]
     );
 });
@@ -48,7 +48,7 @@ test("hints with the same stable code are deduplicated", () => {
     ];
     assert.deepEqual(
         mergeComments([], hints),
-        ["Error hint [bash.nonZeroExit]: first"]
+        ["[bash.nonZeroExit] first"]
     );
 });
 
@@ -61,7 +61,7 @@ test("hints with different codes are both kept even when text overlaps", () => {
 });
 
 test("a hint colliding with a user comment by exact string is not duplicated", () => {
-    const collision = "Error hint [bash.nonZeroExit]: x";
+    const collision = "[bash.nonZeroExit] x";
     assert.deepEqual(
         mergeComments([collision], [errorHint("bash.nonZeroExit", "x")]),
         [collision]

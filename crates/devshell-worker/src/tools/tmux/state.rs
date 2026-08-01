@@ -14,13 +14,13 @@ use crate::tools::tmux::backend::{BackendPane, BackendWorkspace, MAX_PANES, Tmux
 use crate::tools::tmux::output::{OutputWindow, take_output};
 use crate::tools::tmux::replay::ReplayCache;
 use crate::tools::tmux::task::{
-    TaskRecord, TaskRegistry, TaskState, current_task, new_task_id, pane_view, refresh_task_record,
-    require_task, task_expired, task_view,
+    TaskRecord, TaskRegistry, TaskState, current_task, new_task_id, pane_detail, pane_ref,
+    pane_summary, refresh_task_record, require_task, task_expired, task_view,
 };
 use crate::tools::tmux::types::{
-    TmuxCapacity, TmuxCloseOutput, TmuxCloseParams, TmuxCreateOutput, TmuxCreateParams,
-    TmuxInputParams, TmuxInspectParams, TmuxListOutput, TmuxPaneOperationOutput, TmuxPaneView,
-    TmuxReadParams, TmuxRunParams, TmuxTaskOperationOutput, TmuxWaitMode, TmuxWarning,
+    TmuxCloseOutput, TmuxCloseParams, TmuxCreateOutput, TmuxCreateParams, TmuxInputParams,
+    TmuxInspectParams, TmuxListOutput, TmuxPaneDetail, TmuxPaneOperationOutput, TmuxReadParams,
+    TmuxRunParams, TmuxTaskOperationOutput, TmuxWaitMode, TmuxWarning,
 };
 use crate::tools::{ToolCall, ToolError};
 
@@ -55,13 +55,20 @@ pub struct TmuxState {
 
 impl TmuxState {
     pub fn new(backend: TmuxBackend) -> Self {
+        let pending_warnings = backend.observation_reset().then(|| {
+            warning(
+                None,
+                "tmux.observationReset",
+                "worker observation restarted; output history may be incomplete",
+            )
+        });
         Self {
             backend,
             structure: Mutex::new(()),
             pane_locks: Mutex::new(HashMap::new()),
             tasks: Mutex::new(TaskRegistry::default()),
             idle_since: Mutex::new(HashMap::new()),
-            pending_warnings: Mutex::new(Vec::new()),
+            pending_warnings: Mutex::new(pending_warnings.into_iter().collect()),
             replays: ReplayCache::default(),
         }
     }
@@ -168,7 +175,6 @@ impl TmuxState {
                     unread: Vec::new(),
                 },
                 start_status_seq: current.status_seq,
-                started_at_ms: unix_time_millis(),
                 finished_at_ms: None,
                 last_pane: current.clone(),
                 warnings: self.output_warnings(&workspace)?,
@@ -256,7 +262,7 @@ impl TmuxState {
         }
 
         call.check_cancelled()?;
-        self.task_output("run", &task_id, line)
+        self.task_output(&task_id, line, true)
     }
 
     pub fn input(
@@ -332,7 +338,7 @@ impl TmuxState {
             thread::sleep(Duration::from_millis(50));
         }
         call.check_cancelled()?;
-        self.task_output("input", &params.task, line)
+        self.task_output(&params.task, line, false)
     }
 
     pub fn read(
@@ -359,7 +365,7 @@ impl TmuxState {
             thread::sleep(Duration::from_millis(50));
         }
         call.check_cancelled()?;
-        self.task_output("read", &params.task, line)
+        self.task_output(&params.task, line, false)
     }
 
     pub fn inspect(
@@ -402,13 +408,13 @@ impl TmuxState {
         let mut panes = Vec::with_capacity(selected.len());
         for pane in selected {
             let lines = self.backend.capture_lines(&pane.tmux_pane_id, start, end)?;
-            panes.push(pane_view(
+            panes.push(pane_detail(
                 &pane,
                 current_task(&tasks, &pane.id),
-                Some(lines),
+                lines,
             ));
         }
-        Ok(self.pane_output("inspect", panes, self.output_warnings(&workspace)?))
+        Ok(self.pane_output(panes, self.output_warnings(&workspace)?))
     }
 
     pub fn list(&self, call: &ToolCall) -> Result<TmuxListOutput, ToolError> {
@@ -422,15 +428,11 @@ impl TmuxState {
         let panes = workspace
             .panes
             .iter()
-            .map(|pane| pane_view(pane, current_task(&tasks, &pane.id), None))
+            .map(|pane| pane_summary(pane, current_task(&tasks, &pane.id)))
             .collect();
         Ok(TmuxListOutput {
-            kind: "list".to_string(),
             panes,
-            capacity: capacity(&workspace),
-            warnings: self.output_warnings(&workspace)?,
-            observation_epoch: self.backend.observation_epoch().to_string(),
-            observation_reset: self.backend.observation_reset(),
+            warnings: non_empty(self.output_warnings(&workspace)?),
         })
     }
 
@@ -480,12 +482,8 @@ impl TmuxState {
         let pane = self.backend.create_pane(&params.name, &cwd, false)?;
         let after = self.backend.capture_workspace()?;
         Ok(TmuxCreateOutput {
-            kind: "create".to_string(),
-            pane: pane_view(&pane, None, None),
-            capacity: capacity(&after),
-            warnings: self.output_warnings(&after)?,
-            observation_epoch: self.backend.observation_epoch().to_string(),
-            observation_reset: self.backend.observation_reset(),
+            pane: pane_ref(&pane),
+            warnings: non_empty(self.output_warnings(&after)?),
         })
     }
 
@@ -556,12 +554,8 @@ impl TmuxState {
         self.clear_idle_since(&pane.id)?;
         let after = self.backend.capture_workspace()?;
         Ok(TmuxCloseOutput {
-            kind: "close".to_string(),
             closed_pane_id: pane.id,
-            capacity: capacity(&after),
-            warnings: self.output_warnings(&after)?,
-            observation_epoch: self.backend.observation_epoch().to_string(),
-            observation_reset: self.backend.observation_reset(),
+            warnings: non_empty(self.output_warnings(&after)?),
         })
     }
 
@@ -719,8 +713,7 @@ impl TmuxState {
                         unread: Vec::new(),
                     },
                     start_status_seq: pane.status_seq,
-                    started_at_ms: unix_time_millis(),
-                    finished_at_ms: None,
+                        finished_at_ms: None,
                     last_pane: pane.clone(),
                     warnings: Vec::new(),
                 })
@@ -747,9 +740,9 @@ impl TmuxState {
 
     fn task_output(
         &self,
-        kind: &str,
         task_id: &str,
         line: i64,
+        include_pane: bool,
     ) -> Result<TmuxTaskOperationOutput, ToolError> {
         let mut tasks = self.tasks.lock().map_err(|_| lock_error("tmux tasks"))?;
         tasks.prune();
@@ -761,18 +754,15 @@ impl TmuxState {
         let pane_id = task.pane_id.clone();
         let mut warnings = std::mem::take(&mut task.warnings);
         let view = task_view(task);
-        let pane = pane_view(&task.last_pane, Some(task), None);
+        let pane = include_pane.then(|| pane_ref(&task.last_pane));
         drop(tasks);
         self.touch_pane(&pane_id)?;
         warnings.append(&mut self.take_pending_warnings()?);
         Ok(TmuxTaskOperationOutput {
-            kind: kind.to_string(),
             task: view,
             pane,
-            output,
-            warnings,
-            observation_epoch: self.backend.observation_epoch().to_string(),
-            observation_reset: self.backend.observation_reset(),
+            output: non_empty(output),
+            warnings: non_empty(warnings),
         })
     }
 
@@ -983,16 +973,12 @@ impl TmuxState {
 
     fn pane_output(
         &self,
-        kind: &str,
-        panes: Vec<TmuxPaneView>,
+        panes: Vec<TmuxPaneDetail>,
         warnings: Vec<TmuxWarning>,
     ) -> TmuxPaneOperationOutput {
         TmuxPaneOperationOutput {
-            kind: kind.to_string(),
             panes,
-            warnings,
-            observation_epoch: self.backend.observation_epoch().to_string(),
-            observation_reset: self.backend.observation_reset(),
+            warnings: non_empty(warnings),
         }
     }
 }
@@ -1021,12 +1007,6 @@ fn pane_gc_eligible(
     }
 }
 
-fn capacity(workspace: &BackendWorkspace) -> TmuxCapacity {
-    TmuxCapacity {
-        used: workspace.total_panes,
-        max: MAX_PANES,
-    }
-}
 
 fn next_auto_name(workspace: &BackendWorkspace) -> String {
     for index in 1..=MAX_PANES {
@@ -1089,19 +1069,30 @@ fn resolve_cwd(call: &ToolCall, requested: Option<&str>) -> Result<PathBuf, Tool
     Ok(resolved)
 }
 
+fn non_empty<T>(values: Vec<T>) -> Option<Vec<T>> {
+    (!values.is_empty()).then_some(values)
+}
+
 fn workspace_warnings(workspace: &BackendWorkspace) -> Vec<TmuxWarning> {
-    if workspace.foreign_panes == 0 {
-        Vec::new()
-    } else {
-        vec![warning(
+    let mut warnings = Vec::new();
+    if workspace.foreign_panes > 0 {
+        warnings.push(warning(
             None,
             "tmux.foreignPanes",
             &format!(
                 "{} pane(s) without devshell ownership metadata are hidden",
                 workspace.foreign_panes
             ),
-        )]
+        ));
     }
+    if workspace.total_panes >= MAX_PANES {
+        warnings.push(warning(
+            None,
+            "tmux.capacityFull",
+            "managed pane capacity is full",
+        ));
+    }
+    warnings
 }
 fn lock_error(name: &str) -> ToolError {
     ToolError::new("tmux.internalError", format!("{name} lock poisoned"))
@@ -1175,12 +1166,10 @@ mod tests {
             tmux_pane_id: "%1".to_string(),
             tmux_window_id: "@0".to_string(),
             window_panes: 1,
-            window_active: true,
             columns: 240,
             rows: 60,
             pane_incarnation_id: name.to_string(),
             created_at_ms: 1,
-            active: false,
             cwd: "/tmp".to_string(),
             command: "bash".to_string(),
             lines: vec![],

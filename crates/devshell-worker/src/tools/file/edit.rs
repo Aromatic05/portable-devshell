@@ -12,8 +12,8 @@ use crate::tools::file::state::{
     ContextFileSnapshot, FULL_SNAPSHOT_LIMIT, SnapshotContent, TextFile,
 };
 use crate::tools::file::types::{
-    FileChangeAction, FileChangeError, FileChangeOperationOutput, FileChangeSetInput,
-    FileChangeSetOutput, FileChangeStatus, ReturnedRange,
+    FileChangeAction, FileChangeError, FileChangeOperationOutput, FileChangeResultDetail,
+    FileChangeSetInput, FileChangeSetOutput, FileChangeStatus,
 };
 use crate::tools::file::{FileToolState, authorize, resolve_create};
 use crate::tools::{ToolCall, ToolCapability, ToolCatalogEntry, ToolError, ToolHandler, ToolName};
@@ -21,7 +21,6 @@ use crate::tools::{ToolCall, ToolCapability, ToolCatalogEntry, ToolError, ToolHa
 const MAX_CHANGE_OPERATIONS: usize = 256;
 const MAX_RENDERED_DETAIL_BYTES: usize = 64 * 1024;
 const MAX_SERIALIZED_OUTPUT_BYTES: usize = 1024 * 1024;
-const PREVIEW_CONTEXT_LINES: usize = 3;
 
 pub struct FileEditTool {
     name: ToolName,
@@ -53,10 +52,17 @@ impl ToolHandler for FileEditTool {
     fn call(&self, call: ToolCall) -> Result<serde_json::Value, ToolError> {
         call.check_cancelled()?;
         let input: FileChangeSetInput = call.parse_params()?;
+        let detail = input.result_detail.unwrap_or_default();
         let parsed = parse_change_set(&input.changes)?;
         call.check_cancelled()?;
         let prepared = self.preflight(&call, parsed)?;
         let mut output = self.execute(&call, prepared);
+        if detail == FileChangeResultDetail::Summary {
+            for operation in &mut output.operations {
+                operation.diff = None;
+                operation.truncated = None;
+            }
+        }
         enforce_output_budget(&mut output)?;
         crate::tools::contract::serialize(output)
     }
@@ -323,10 +329,7 @@ impl FileEditTool {
             }
         }
 
-        FileChangeSetOutput {
-            complete: !failed,
-            operations: outputs,
-        }
+        FileChangeSetOutput { operations: outputs }
     }
 
     fn execute_one(
@@ -513,11 +516,8 @@ impl FileEditTool {
             &updated.normalized(),
             &updated,
         );
-        if !merged {
-            output.first_changed_line = application.first_changed_line;
-        }
-        output.added_lines = Some(application.added_lines);
-        output.removed_lines = Some(application.removed_lines);
+        output.added_lines = (application.added_lines > 0).then_some(application.added_lines);
+        output.removed_lines = (application.removed_lines > 0).then_some(application.removed_lines);
         Ok(output)
     }
 
@@ -547,11 +547,9 @@ impl FileEditTool {
         let before = current.normalized();
         let diff = limit_detail(diff::render(&before, ""));
         Ok(FileChangeOperationOutput {
-            added_lines: Some(0),
-            removed_lines: Some(current.lines.len()),
-            first_changed_line: (!current.lines.is_empty()).then_some(1),
+            removed_lines: (!current.lines.is_empty()).then_some(current.lines.len()),
             diff: Some(diff.0),
-            truncated: diff.1,
+            truncated: diff.1.then_some(true),
             ..base_output(
                 index,
                 FileChangeAction::Delete,
@@ -609,10 +607,6 @@ impl FileEditTool {
         local_snapshots.remove(&source);
         local_snapshots.insert(target.clone(), moved_snapshot);
         Ok(FileChangeOperationOutput {
-            added_lines: Some(0),
-            removed_lines: Some(0),
-            total_lines: Some(current.lines.len()),
-            total_bytes: Some(current.total_bytes),
             ..base_output(
                 index,
                 FileChangeAction::Move,
@@ -1141,25 +1135,18 @@ fn applied_text_output(
     index: usize,
     action: FileChangeAction,
     path: String,
-    merged: bool,
+    _merged: bool,
     before: &str,
     after: &str,
-    text: &TextFile,
+    _text: &TextFile,
 ) -> FileChangeOperationOutput {
-    let (added_lines, removed_lines, first_changed_line) = line_delta(before, after);
+    let (added_lines, removed_lines) = line_delta(before, after);
     let diff = limit_detail(diff::render(before, after));
-    let preview = preview(after, first_changed_line);
     FileChangeOperationOutput {
-        merged: Some(merged),
-        added_lines: Some(added_lines),
-        removed_lines: Some(removed_lines),
-        first_changed_line,
-        total_lines: Some(text.lines.len()),
-        total_bytes: Some(text.total_bytes),
+        added_lines: (added_lines > 0).then_some(added_lines),
+        removed_lines: (removed_lines > 0).then_some(removed_lines),
         diff: Some(diff.0),
-        preview: preview.as_ref().map(|value| value.0.clone()),
-        preview_range: preview.map(|value| value.1),
-        truncated: diff.1,
+        truncated: diff.1.then_some(true),
         ..base_output(index, action, path, None, FileChangeStatus::Applied)
     }
 }
@@ -1171,27 +1158,21 @@ fn base_output(
     moved_from: Option<String>,
     status: FileChangeStatus,
 ) -> FileChangeOperationOutput {
+    let _ = index;
     FileChangeOperationOutput {
-        index,
         action,
         path,
         moved_from,
         status,
-        merged: None,
         added_lines: None,
         removed_lines: None,
-        first_changed_line: None,
-        total_lines: None,
-        total_bytes: None,
         diff: None,
-        preview: None,
-        preview_range: None,
         error: None,
-        truncated: false,
+        truncated: None,
     }
 }
 
-fn line_delta(before: &str, after: &str) -> (usize, usize, Option<usize>) {
+fn line_delta(before: &str, after: &str) -> (usize, usize) {
     let before_lines = normalized_lines(before);
     let after_lines = normalized_lines(after);
     let prefix = before_lines
@@ -1200,7 +1181,7 @@ fn line_delta(before: &str, after: &str) -> (usize, usize, Option<usize>) {
         .take_while(|(left, right)| left == right)
         .count();
     if before_lines == after_lines {
-        return (0, 0, None);
+        return (0, 0);
     }
     let suffix = before_lines
         .iter()
@@ -1213,7 +1194,6 @@ fn line_delta(before: &str, after: &str) -> (usize, usize, Option<usize>) {
     (
         after_lines.len().saturating_sub(prefix + suffix),
         before_lines.len().saturating_sub(prefix + suffix),
-        Some(prefix + 1),
     )
 }
 
@@ -1224,28 +1204,6 @@ fn normalized_lines(value: &str) -> Vec<&str> {
     } else {
         body.split('\n').collect()
     }
-}
-
-fn preview(value: &str, first_changed_line: Option<usize>) -> Option<(String, ReturnedRange)> {
-    let lines = normalized_lines(value);
-    if lines.is_empty() {
-        return None;
-    }
-    let first = first_changed_line.unwrap_or(1);
-    let start = first.saturating_sub(PREVIEW_CONTEXT_LINES).max(1);
-    let end = (first + PREVIEW_CONTEXT_LINES).min(lines.len());
-    let content = (start..=end)
-        .map(|line| format!("{line}:{}", lines[line - 1]))
-        .collect::<Vec<_>>()
-        .join("\n");
-    let detail = limit_detail(content);
-    Some((
-        detail.0,
-        ReturnedRange {
-            start_line: start,
-            end_line: end,
-        },
-    ))
 }
 
 fn limit_detail(mut value: String) -> (String, bool) {
@@ -1273,18 +1231,8 @@ fn enforce_output_budget(output: &mut FileChangeSetOutput) -> Result<(), ToolErr
     for index in (0..output.operations.len()).rev() {
         {
             let operation = &mut output.operations[index];
-            if operation.preview.take().is_some() {
-                operation.preview_range = None;
-                operation.truncated = true;
-            }
-        }
-        if serialized_len(output)? <= MAX_SERIALIZED_OUTPUT_BYTES {
-            return Ok(());
-        }
-        {
-            let operation = &mut output.operations[index];
             if operation.diff.take().is_some() {
-                operation.truncated = true;
+                operation.truncated = Some(true);
             }
         }
         if serialized_len(output)? <= MAX_SERIALIZED_OUTPUT_BYTES {
@@ -1304,7 +1252,7 @@ fn failed_output(
         error: Some(FileChangeError {
             code: error.code,
             message: error.message,
-            retryable: error.retryable,
+            retryable: error.retryable.then_some(true),
             details: error.details,
         }),
         ..base_output(index, action, path, moved_from, FileChangeStatus::Failed)

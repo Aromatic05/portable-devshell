@@ -74,7 +74,7 @@ export function resolveErrorHints(toolName: string, body: ControlErrorBody): Too
     if (hints.length === 0) {
         hints.push(errorHint(
             "error.unknown",
-            "The tool call failed for an unclassified reason. Inspect the original error and current state before taking further action; do not report completion or retry the same operation unchanged."
+            "Inspect the error before retrying."
         ));
     }
     return hints;

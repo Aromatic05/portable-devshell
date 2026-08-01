@@ -78,7 +78,6 @@ test("artifact endpoint exposes worker read plus control share and transfer whil
         assert.equal(schema.properties?.instance, undefined, tool.name);
     }
     assert.deepEqual(await endpoint.callTool("artifact_share", withContext({ path: "./dist" }), context), {
-        comment: [],
         shareId: "share-1"
     });
     const image = await endpoint.callTool(
@@ -90,12 +89,10 @@ test("artifact endpoint exposes worker read plus control share and transfer whil
         structuredContent: JsonValue;
     };
     assert.deepEqual(image.content, [
-        { data: png.toString("base64"), mimeType: "image/png", type: "image" },
-        { text: "pixel.png (image/png, 68 bytes)", type: "text" }
+        { data: png.toString("base64"), mimeType: "image/png", type: "image" }
     ]);
     assert.deepEqual(image.structuredContent, {
         bytes: png.length,
-        comment: [],
         mediaType: "image/png",
         name: "pixel.png",
         source: {
@@ -115,7 +112,7 @@ test("artifact endpoint exposes worker read plus control share and transfer whil
             }),
             context
         ),
-        { comment: [], transferId: "transfer-1" }
+        { transferId: "transfer-1" }
     );
     assert.deepEqual(calls, [
         { defaultInstance: "main-pc", input: { path: "./dist" }, kind: "share" },

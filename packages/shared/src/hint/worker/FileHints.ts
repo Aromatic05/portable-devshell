@@ -9,17 +9,17 @@ export function fileReadResultHints(result: JsonValue): ToolDiagnosticHint[] {
     if (record === undefined) return [];
     const hints: ToolDiagnosticHint[] = [];
 
-    if (asBoolean(record.truncated) === true) {
+    if (asString(record.nextSelector) !== undefined || asBoolean(record.truncated) === true) {
         hints.push(diagnosticHint(
             "file.partialRead",
-            "Only part of the file was returned. Continue with the returned nextSelector or narrower ranges; do not draw whole-file conclusions from this fragment."
+            "Continue with nextSelector."
         ));
     }
 
     if (asString(record.parseStatus) === "partial") {
         hints.push(diagnosticHint(
             "file.partialParse",
-            "The outline or structural parse is incomplete. Verify with a content view, file_search, or explicit ranges; do not rely on an incomplete outline for a whole-file refactor."
+            "Verify with content view or file_search."
         ));
     }
 
@@ -32,7 +32,7 @@ export function fileFindResultHints(result: JsonValue): ToolDiagnosticHint[] {
     if (asString(record.nextCursor) === undefined) return [];
     return [diagnosticHint(
         "file.partialResults",
-        "More matching entries remain. Continue with the same query and the returned nextCursor; do not claim the results are complete until paging finishes."
+        "Continue with nextCursor."
     )];
 }
 
@@ -42,7 +42,7 @@ export function fileSearchResultHints(result: JsonValue): ToolDiagnosticHint[] {
     if (asString(record.nextCursor) === undefined) return [];
     return [diagnosticHint(
         "file.partialResults",
-        "More search results remain. Continue with the same paths, pattern, context, and the returned nextCursor; do not claim the search is exhausted until paging finishes."
+        "Continue with nextCursor."
     )];
 }
 
@@ -52,7 +52,7 @@ export function fileEditResultHints(result: JsonValue): ToolDiagnosticHint[] {
     const operations = asArray(record.operations);
     if (operations === undefined) return [];
 
-    if (asBoolean(record.complete) === false) {
+    if (operations.some((entry) => asString(asRecord(entry)?.status) === "failed")) {
         return [partialEditHint(operations)];
     }
 
@@ -62,11 +62,15 @@ export function fileEditResultHints(result: JsonValue): ToolDiagnosticHint[] {
         if (op === undefined) continue;
         if (asString(op.status) !== "applied") continue;
         const action = asString(op.action);
-        if ((action === "patch" || action === "rewrite") &&
-            asNumber(op.addedLines) === 0 && asNumber(op.removedLines) === 0) {
+        const addedLines = asNumber(op.addedLines);
+        const removedLines = asNumber(op.removedLines);
+        const noContentChange =
+            (addedLines === undefined && removedLines === undefined) ||
+            (addedLines === 0 && removedLines === 0);
+        if ((action === "patch" || action === "rewrite") && noContentChange) {
             hints.push(diagnosticHint(
                 "file.noContentChange",
-                "An applied edit produced no content difference. Do not report a substantive modification; verify the target if a change was expected."
+                "No content changed."
             ));
             break;
         }
@@ -77,7 +81,7 @@ export function fileEditResultHints(result: JsonValue): ToolDiagnosticHint[] {
         if (asString(op.status) === "applied" && asBoolean(op.truncated) === true) {
             hints.push(diagnosticHint(
                 "file.diffTruncated",
-                "The write succeeded but the returned diff or preview is incomplete. Do not claim to have reviewed the full diff; re-read the affected region to verify."
+                "Re-read the affected region."
             ));
             break;
         }
@@ -87,26 +91,25 @@ export function fileEditResultHints(result: JsonValue): ToolDiagnosticHint[] {
 
 function partialEditHint(operations: JsonValue[]): ToolDiagnosticHint {
     let firstFailed: Record<string, JsonValue> | undefined;
+    let firstFailedIndex: number | undefined;
     let appliedCount = 0;
-    for (const entry of operations) {
+    for (const [index, entry] of operations.entries()) {
         const op = asRecord(entry);
         if (op === undefined) continue;
         const status = asString(op.status);
         if (status === "applied") appliedCount += 1;
-        if (status === "failed" && firstFailed === undefined) firstFailed = op;
+        if (status === "failed" && firstFailed === undefined) {
+            firstFailed = op;
+            firstFailedIndex = asNumber(op.index) ?? index + 1;
+        }
     }
 
-    const appliedText = appliedCount > 0
-        ? `${appliedCount} earlier operation(s) were applied and are already in effect, and operations after the failure were not executed.`
-        : "No operation was applied, and operations after the failure were not executed.";
-    const failureText = firstFailed === undefined
-        ? "The change set did not complete."
-        : `The first failure was operation #${asString(firstFailed.index) ?? asNumber(firstFailed.index) ?? "?"} ` +
-          `(${asString(firstFailed.action) ?? "unknown"}, code ${failedCode(firstFailed)}).`;
-
+    const failure = firstFailed === undefined
+        ? "unknown failure"
+        : `operation #${firstFailedIndex ?? "?"} (${asString(firstFailed.action) ?? "unknown"}, ${failedCode(firstFailed)})`;
     return errorHint(
         "file.partialEdit",
-        `The change set partially failed. ${failureText} ${appliedText} Inspect each operation status, re-read the modified files, and rebuild only the failed and not-executed operations; do not replay the entire original change set unchanged.`
+        `${failure}; ${appliedCount} earlier operation(s) applied. Retry only failed and skipped operations.`
     );
 }
 
@@ -120,158 +123,158 @@ export function fileErrorHints(toolName: string, body: ControlErrorBody): ToolDi
         case "file.invalidPath":
             return [errorHint(
                 "file.invalidPath",
-                "Use a valid workspace-relative or absolute path. Do not use '..', symlinks, or repeated separators to bypass path rules, and do not guess the target file."
+                "Use a valid canonical path."
             )];
         case "file.pathEscapesWorkspace":
         case "security.denied":
             return [errorHint(
                 body.code,
-                "The path is outside the allowed security boundary. Choose a path inside the workspace, or have the user explicitly change the security policy; do not bypass the restriction via symlinks, absolute paths, shell commands, or other tools."
+                "Use a path allowed by the security policy."
             )];
         case "file.notFound":
             return [errorHint(
                 "file.notFound",
-                "Confirm the real path with file_info or file_find first. Do not create an empty file to mask a lookup error; only write the file if the user explicitly asked to create it."
+                "Confirm the path with file_info or file_find."
             )];
         case "file.notText":
             return [errorHint(
                 "file.notText",
-                "The file is not valid UTF-8 text, so text tools cannot process it. Do not rewrite it with a text editor or treat this as empty/no-match; use a byte-level path such as artifact base64 if explicitly authorized."
+                "Use a byte-level tool for this file."
             )];
         case "file.notFile":
             return [errorHint(
                 "file.notFile",
-                "The target is not a regular file. Use file_find for directories; do not read a directory as a file."
+                "Use file_find for directories."
             )];
         case "file.notDirectory":
             return [errorHint(
                 "file.notDirectory",
-                "The glob root must be a directory. Confirm it with file_info first."
+                "Confirm the directory with file_info."
             )];
         case "file.invalidPattern":
             return [errorHint(
                 "file.invalidPattern",
-                "The glob pattern is invalid. Fix the pattern; do not rely on shell pre-expansion."
+                "Fix the glob pattern."
             )];
         case "file.invalidRegex":
             return [errorHint(
                 "file.invalidRegex",
-                "The search pattern failed to compile. Fix the regex or use a literal pattern; do not resubmit the same expression."
+                "Fix the regex or use literal syntax."
             )];
         case "file.invalidCursor":
             return [errorHint(
                 "file.invalidCursor",
-                "The cursor is expired or does not match the query. Re-run the same query from the first page; do not reuse a cursor across different queries."
+                "Restart the same query without a cursor."
             )];
         case "file.invalidRange":
             return [errorHint(
                 "file.invalidRange",
-                "The requested range is invalid. Provide a valid one-based line range; do not guess at the returned content."
+                "Use a valid one-based line range."
             )];
         case "file.lineTooLarge":
             return [errorHint(
                 "file.lineTooLarge",
-                "A single line exceeds the output budget. Use a narrower segment or a byte-level read; do not pretend the line was read completely."
+                "Use a narrower or byte-level read."
             )];
         case "file.outlineTooLarge":
             return [errorHint(
                 "file.outlineTooLarge",
-                "The outline is too large. Use content ranges or file_search instead."
+                "Use content ranges or file_search."
             )];
         case "file.outlineUnavailable":
         case "file.parseFailed":
             return [errorHint(
                 body.code,
-                "The outline is unavailable for this file. Do not request the same outline again; use a content view or file_search."
+                "Use content view or file_search."
             )];
         case "file.outputTooLarge":
             return [errorHint(
                 "file.outputTooLarge",
-                "The search output is too large. Narrow the paths, pattern, or context and split the search; do not raise the protocol output limit."
+                "Narrow the search."
             )];
         case "file.revisionMismatch":
             return [errorHint(
                 "file.revisionMismatch",
-                "The file changed after it was read or searched. Read the latest content and regenerate the edit or search; do not overwrite or rely on the older revision."
+                "Read the latest content and regenerate the operation."
             )];
         case "file.snapshotRequired":
             return [errorHint(
                 "file.snapshotRequired",
-                "Read or search the exact target within this ctxId before editing it. Do not bypass the snapshot requirement via Rewrite, shell, or other tools."
+                "Read or search the target before editing."
             )];
         case "file.invalidEdit":
         case "file.invalidPatch":
             return [errorHint(
                 body.code,
-                "The edit input is malformed and nothing was applied. Fix the edit document and retry; do not claim any operation completed."
+                "Fix the edit document."
             )];
         case "file.emptyOperation":
             return [errorHint(
                 "file.emptyOperation",
-                "The change set contains an empty operation and nothing was applied. Provide a non-empty operation."
+                "Provide a non-empty operation."
             )];
         case "file.tooManyOperations":
             return [errorHint(
                 "file.tooManyOperations",
-                "The change set has too many operations and nothing was applied. Split it into smaller change sets."
+                "Split the change set."
             )];
         case "file.alreadyExists":
             return [errorHint(
                 "file.alreadyExists",
-                "The target already exists. Use Patch or Rewrite to modify it, or choose a genuinely new path to create; do not overwrite automatically."
+                "Use Patch, Rewrite, or a new path."
             )];
         case "file.pathConflict":
             return [errorHint(
                 "file.pathConflict",
-                "Operations in the change set conflict on a path and nothing was applied. Resolve the conflict and regenerate the change set."
+                "Resolve conflicting path operations."
             )];
         case "file.parentNotFound":
             return [errorHint(
                 "file.parentNotFound",
-                "The parent directory does not exist and nothing was applied. Verify the target path; create parent directories only if the user explicitly intends to."
+                "Verify or create the parent directory."
             )];
         case "file.patchOverlap":
             return [errorHint(
                 "file.patchOverlap",
-                "The patch hunks overlap and nothing was applied. Regenerate non-overlapping hunks against the same original snapshot; do not rely on application order to cover overlapping regions."
+                "Regenerate non-overlapping hunks."
             )];
         case "file.patchNotFound":
             return [errorHint(
                 "file.patchNotFound",
-                "The patch context no longer matches the current snapshot. Re-read the target region and regenerate the hunk; do not repeat the same patch."
+                "Re-read the region and regenerate the hunk."
             )];
         case "file.patchAmbiguous":
             return [errorHint(
                 "file.patchAmbiguous",
-                "The patch context matches multiple locations. Add unique surrounding context; do not arbitrarily pick the first match."
+                "Add unique patch context."
             )];
         case "file.unreadRange":
             return [errorHint(
                 "file.unreadRange",
-                "The edit references lines that were never read. Read the specific missing line ranges, then retry only the failed and not-executed operations; do not expand into an unbounded whole-file overwrite."
+                "Read the missing ranges, then retry failed operations."
             )];
         case "file.crossDeviceMoveUnsupported":
         case "file.atomicMoveUnsupported":
             return [errorHint(
                 body.code,
-                "Atomic move semantics cannot be guaranteed here. Do not silently downgrade to copy+delete; redesign the move only if the user explicitly accepts the semantic change."
+                "Choose a target supporting atomic move."
             )];
         case "file.readFailed":
             return [errorHint(
                 "file.readFailed",
-                "Reading the file failed. Check the path and I/O state and retry; do not assume content."
+                "Check the path and I/O state."
             )];
         case "file.writeFailed":
             return [errorHint(
                 "file.writeFailed",
-                "Writing failed. Check the original I/O error, capacity, permissions, and filesystem state; do not run global chmod/chown or claim the write succeeded."
+                "Inspect the write error and filesystem state."
             )];
         case "tool.cancelled":
             return [errorHint(
                 "tool.cancelled",
                 toolName === "file_edit"
-                    ? "The file_edit call was cancelled mid-operation, so earlier operations may already be applied. Treat this as a partial change: inspect operation status and re-read affected files; do not assume cancellation means zero side effects."
-                    : "The file call was cancelled before completing. It has no side effects; retry if the result is still needed."
+                    ? "Partial change possible; re-read affected files."
+                    : "Retry if the result is still needed."
             )];
         default:
             return workerCommonErrorHints(body);

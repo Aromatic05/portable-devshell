@@ -140,10 +140,7 @@ test("McpEndpointWorker exposes environ_info and requires ctxId on every other t
     assert.equal(environmentRecord.instance, "demo-local");
     assert.equal(environmentRecord.skillsDirectory, "/home/demo/.devshell/skill");
     assert.equal(environmentRecord.workspace, "/workspace");
-    assert.deepEqual(environmentRecord.comment, [
-        "Skills are available in /home/demo/.devshell/skill. Read the relevant SKILL.md before using a skill.",
-        "Every project may contain AGENT.md. Read and follow the applicable AGENT.md before working in that project, and maintain it when project-specific knowledge changes."
-    ]);
+    assert.deepEqual(environmentRecord.comment, ["Read applicable AGENT.md."]);
     assert.deepEqual(environmentRecord.platform, {
         arch: "x86_64",
         distribution: { id: "arch", name: "Arch Linux", version: "rolling" },
@@ -250,10 +247,8 @@ test("only environ_info omits ctxId across the complete 25-tool endpoint catalog
     const tools = endpoint.listTools();
     assert.equal(tools.length, 25);
     assert.equal(tools[0]?.name, "environ_info");
-    assert.equal(
-        tools[0]?.description,
-        "Initialize the session context and return the target environment. Call once at the start of each session and include the returned ctxId in every later tool call. Reuse it until a tool explicitly reports that it has expired, then call environ_info again. If it is lost or rejected as invalid, stop and ask the user for instructions."
-    );
+    assert.match(tools[0]?.description ?? "", /Call once/u);
+    assert.match(tools[0]?.description ?? "", /ctxId/u);
     for (const tool of tools) {
         assert.doesNotMatch(tool.description, /Pass the ctxId returned by environ_info|Exposed by portable-devshell MCP|Set instance to route/u);
         const schema = tool.inputSchema as { properties?: Record<string, unknown>; required?: string[] };

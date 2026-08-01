@@ -277,12 +277,7 @@ function toCallToolResult(result: McpEndpointResult) {
         };
     }
     return {
-        content: [
-            {
-                type: "text" as const,
-                text: JSON.stringify(result)
-            }
-        ],
+        content: [],
         isError: false,
         structuredContent: result
     };

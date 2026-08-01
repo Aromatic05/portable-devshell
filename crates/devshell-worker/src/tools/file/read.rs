@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use crate::tools::file::state::{FULL_SNAPSHOT_LIMIT, TextFile, TextMetadata};
 use crate::tools::file::structure;
-use crate::tools::file::types::{FileReadInput, FileReadOutput, FileReadView, ReturnedRange};
+use crate::tools::file::types::{FileParseStatus, FileReadInput, FileReadOutput, FileReadView};
 use crate::tools::file::{FileToolState, resolve_existing};
 use crate::tools::{ToolCall, ToolCapability, ToolCatalogEntry, ToolError, ToolHandler, ToolName};
 
@@ -46,7 +46,7 @@ impl ToolHandler for FileReadTool {
         }
 
         let ordinal = self.state.next_snapshot_ordinal();
-        let (requested, resolved) = resolve_existing(&call, &input.path, false)?;
+        let (_, resolved) = resolve_existing(&call, &input.path, false)?;
         let path = resolved.access_path();
         if !path.is_file() {
             return Err(ToolError::new("file.notFile", "path is not a file"));
@@ -57,7 +57,6 @@ impl ToolHandler for FileReadTool {
         let output = match resolved_view {
             FileReadView::Outline => self.read_outline(
                 &call,
-                requested.raw,
                 path,
                 &resolved.canonical,
                 &metadata,
@@ -65,7 +64,6 @@ impl ToolHandler for FileReadTool {
             )?,
             FileReadView::Content | FileReadView::Auto => self.read_content(
                 &call,
-                requested.raw,
                 path,
                 &resolved.canonical,
                 &metadata,
@@ -81,7 +79,6 @@ impl FileReadTool {
     fn read_outline(
         &self,
         call: &ToolCall,
-        requested: String,
         access_path: &std::path::Path,
         canonical_path: &std::path::Path,
         metadata: &TextMetadata,
@@ -117,23 +114,19 @@ impl FileReadTool {
             ordinal,
         );
         Ok(FileReadOutput {
-            path: requested,
-            view: FileReadView::Outline,
             content: outline.content,
-            returned_ranges: to_returned_ranges(&outline.seen_lines),
-            total_lines: metadata.total_lines,
-            total_bytes: metadata.total_bytes,
-            truncated: outline.truncated,
+            view: Some(FileReadView::Outline),
+            truncated: outline.truncated.then_some(true),
             next_selector: None,
             language: Some(outline.language),
-            parse_status: Some(outline.parse_status),
+            parse_status: (outline.parse_status == FileParseStatus::Partial)
+                .then_some(FileParseStatus::Partial),
         })
     }
 
     fn read_content(
         &self,
         call: &ToolCall,
-        requested: String,
         access_path: &std::path::Path,
         canonical_path: &std::path::Path,
         metadata: &TextMetadata,
@@ -219,13 +212,9 @@ impl FileReadTool {
         }
 
         Ok(FileReadOutput {
-            path: requested,
-            view: FileReadView::Content,
             content,
-            returned_ranges: to_returned_ranges(&seen),
-            total_lines: metadata.total_lines,
-            total_bytes: metadata.total_bytes,
-            truncated: selector.truncated,
+            view: None,
+            truncated: None,
             next_selector: selector.next_selector,
             language: None,
             parse_status: None,
@@ -284,15 +273,6 @@ fn resolve_view(
     }
 }
 
-fn to_returned_ranges(lines: &[usize]) -> Vec<ReturnedRange> {
-    coalesce_lines(lines)
-        .into_iter()
-        .map(|(start_line, end_line)| ReturnedRange {
-            start_line,
-            end_line,
-        })
-        .collect()
-}
 
 struct ParsedSelector {
     ranges: Vec<(usize, usize)>,
@@ -482,17 +462,6 @@ fn parse_positive(value: &str) -> Result<usize, ToolError> {
         ));
     }
     Ok(value)
-}
-
-fn coalesce_lines(lines: &[usize]) -> Vec<(usize, usize)> {
-    let mut ranges = Vec::new();
-    for line in lines {
-        match ranges.last_mut() {
-            Some((_, end)) if *line == *end + 1 => *end = *line,
-            _ => ranges.push((*line, *line)),
-        }
-    }
-    ranges
 }
 
 #[cfg(test)]
