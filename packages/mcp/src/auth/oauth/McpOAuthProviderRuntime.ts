@@ -23,6 +23,8 @@ import type {
 import { exportJWK, generateKeyPair } from "jose";
 import Provider from "oidc-provider";
 
+const NEVER_EXPIRES_SECONDS = 100 * 365 * 24 * 60 * 60;
+
 import type { McpOAuth2Config } from "../McpAuthConfig.js";
 import {
     McpOAuthApprovalService,
@@ -184,11 +186,11 @@ export class McpOAuthProviderRuntime {
                 ...this.#config.requiredScopes
             ],
             ttl: {
-                AccessToken: () => 24 * 60 * 60,
-                Grant: () => 30 * 24 * 60 * 60,
-                IdToken: () => 60 * 60,
-                Interaction: () => 10 * 60,
-                Session: () => 30 * 24 * 60 * 60
+                AccessToken: () => NEVER_EXPIRES_SECONDS,
+                Grant: () => NEVER_EXPIRES_SECONDS,
+                IdToken: () => NEVER_EXPIRES_SECONDS,
+                Interaction: () => NEVER_EXPIRES_SECONDS,
+                Session: () => NEVER_EXPIRES_SECONDS
             }
         });
         provider.proxy = this.#trustProxy;

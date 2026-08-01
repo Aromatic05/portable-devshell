@@ -228,7 +228,7 @@ test("oauth2 exposes protected resource metadata and accepts a valid bearer toke
         assert.equal(tokenResponse.status, 200);
         const tokens = await tokenResponse.json() as { access_token: string; expires_in: number };
         assert.equal(typeof tokens.access_token, "string");
-        assert.equal(tokens.expires_in, 24 * 60 * 60);
+        assert.equal(tokens.expires_in, 100 * 365 * 24 * 60 * 60);
 
         const rejectedByOtherNamespace = await fetch(`http://127.0.0.1:${port}/other/mcp`, {
             method: "POST",
