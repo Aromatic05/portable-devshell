@@ -61,9 +61,14 @@ export class ControlRuntime {
         this.#mcp.setWebConfigApplier?.(async (previous, next) => await this.#replaceWebProvider(previous, next));
         this.#mcp.setMcpConfigApplier?.(async (_previous, next) => {
             const retired = await this.#mcp.replaceMcpHost(next);
-            const host = this.#mcp.host;
-            if (host !== undefined) this.#reverse.install(host.server);
-            await retired?.stop();
+            try {
+                const host = this.#mcp.host;
+                if (host !== undefined) this.#reverse.install(host.server);
+                await retired?.stop();
+            } catch (error) {
+                await this.#mcp.restoreMcpHost(retired);
+                throw error;
+            }
         });
     }
 
@@ -127,10 +132,10 @@ export class ControlRuntime {
         try {
             await this.#channels.replaceProvider(previousProvider, nextProvider);
             this.#webProvider = nextProvider;
+            await this.#mcp.stopRetiredWebHost(previousHost);
         } catch (error) {
             await this.#mcp.restoreWebHost(previousHost, previousConfig);
             throw error;
         }
-        await this.#mcp.stopRetiredWebHost(previousHost);
     }
 }

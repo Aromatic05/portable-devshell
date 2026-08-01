@@ -169,8 +169,12 @@ export class McpHost {
         const address = this.#httpServer.address;
         const running = this.#started && address !== undefined && address !== null;
         const listenAddress = typeof address === "object" && address !== null ? `${address.address}:${address.port}` : undefined;
+        const authProviders = this.#config.instances
+            .map((instance) => instance.auth?.provider)
+            .filter((provider): provider is "oauth2" | "token" => provider === "oauth2" || provider === "token");
+        const authMode = authProviders.includes("oauth2") ? "oauth2" : authProviders.includes("token") ? "token" : "none";
         return {
-            authMode: "none",
+            authMode,
             ...(listenAddress === undefined ? {} : { listenAddress }),
             oauthReady: oauthConfig(this.#config.instances) === undefined || this.#oauth !== undefined,
             protocolReadiness: "notChecked",

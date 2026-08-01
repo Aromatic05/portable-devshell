@@ -98,7 +98,8 @@ test("runtime configuration apply restores the previous config after a new runti
     });
 
     await server.start();
-    await assert.rejects(applyRuntimeConfig!(previous, next), /new listener failed/u);
+    await applyRuntimeConfig!(previous, next);
+    await waitFor(() => runtimeNumber >= 3);
     assert.deepEqual(persisted, previous);
     assert.equal(runtimeNumber, 3);
     await server.stop();

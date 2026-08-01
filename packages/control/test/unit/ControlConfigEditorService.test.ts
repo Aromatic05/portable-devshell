@@ -205,6 +205,7 @@ test("namespace auth updates restart the HTTP runtime before exposing OAuth", as
         runtimeApply: {
             async apply() {
                 applyCalls += 1;
+                return true;
             }
         },
         setConfig: (nextConfig) => {

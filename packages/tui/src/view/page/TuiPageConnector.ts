@@ -8,12 +8,12 @@ import { buttonLine, editorErrorLine, fieldLine, secretFieldLine } from "../edit
 
 export function buildConnectorPageBoxes(state: TuiAppState, instanceName: string): BoxModel[] {
     const instanceDraft = editorDraft(state, `config:${instanceName}`, selectedInstanceDraft(state, instanceName));
-    const mcpDraft = editorDraft(state, `connector:${instanceName}`, globalMcpDraft(state));
-    const webDraft = editorDraft(state, `web:${instanceName}`, globalWebDraft(state));
-    const unsaved = state.ui.dirtyForms[`connector:${instanceName}`] === true || state.ui.dirtyForms[`config:${instanceName}`] === true || state.ui.dirtyForms[`web:${instanceName}`] === true ? " [UNSAVED]" : "";
+    const mcpDraft = editorDraft(state, "connector", globalMcpDraft(state));
+    const webDraft = editorDraft(state, "web", globalWebDraft(state));
+    const unsaved = state.ui.dirtyForms["connector"] === true || state.ui.dirtyForms[`config:${instanceName}`] === true || state.ui.dirtyForms["web"] === true ? " [UNSAVED]" : "";
     const instanceDirty = state.ui.dirtyForms[`config:${instanceName}`] === true;
-    const globalDirty = state.ui.dirtyForms[`connector:${instanceName}`] === true;
-    const webDirty = state.ui.dirtyForms[`web:${instanceName}`] === true;
+    const globalDirty = state.ui.dirtyForms["connector"] === true;
+    const webDirty = state.ui.dirtyForms["web"] === true;
     const affectedScopes = [instanceDirty ? "instance" : undefined, globalDirty ? "mcp" : undefined, webDirty ? "web" : undefined].filter(Boolean).join(" + ") || "none";
     const endpoint = endpointPreview(mcpDraft, readPath(instanceDraft, "mcp.path"), instanceName);
     const runtime = runtimeStatus(state, instanceDraft, mcpDraft, endpoint);
@@ -88,8 +88,8 @@ export function buildConnectorPageBoxes(state: TuiAppState, instanceName: string
                 buttonLine("restart-control", "Restart Control", !state.ui.controlRestartRequired)
             ],
             id: "connector-actions",
-            status: instanceDirty || globalDirty ? "warning" : "normal",
-            summaryLines: [compactSummary(["scopes", affectedScopes], ["dirty", instanceDirty || globalDirty ? "yes" : "no"])],
+            status: instanceDirty || globalDirty || webDirty ? "warning" : "normal",
+            summaryLines: [compactSummary(["scopes", affectedScopes], ["dirty", instanceDirty || globalDirty || webDirty ? "yes" : "no"])],
             title: "Page Actions"
         }),
         makeBox(state, "connections", instanceName, {

@@ -95,22 +95,20 @@ export class ControlServer {
     }
 
     async #applyRuntimeConfig(previous: ControlConfig): Promise<void> {
-        await this.#runExclusive(async () => {
-            await this.#stop();
-            try {
-                await this.#start();
-            } catch (error) {
+        setImmediate(() => {
+            void this.#runExclusive(async () => {
+                await this.#stop();
                 try {
-                    await this.#state.configStore.write(previous, this.#state.homeDirectory);
                     await this.#start();
-                } catch (restoreError) {
-                    throw new AggregateError(
-                        [error, restoreError],
-                        "Control runtime could not apply the new configuration or restore the previous runtime."
-                    );
+                } catch {
+                    try {
+                        await this.#state.configStore.write(previous, this.#state.homeDirectory);
+                        await this.#start();
+                    } catch {
+                        // Control cannot recover; remains down.
+                    }
                 }
-                throw error;
-            }
+            });
         });
     }
 

@@ -93,15 +93,12 @@ export class ControlChannelServer {
         }
 
         await next.start((channel) => this.#accept(channel));
-        try {
-            await previous.close();
-        } catch (error) {
-            await next.close().catch(() => undefined);
-            throw error;
-        }
         this.#providers[index] = next;
         const startedIndex = this.#startedProviders.indexOf(previous);
         this.#startedProviders[startedIndex] = next;
+        setImmediate(() => {
+            void previous.close().catch(() => undefined);
+        });
     }
 
     async #startInternal(): Promise<void> {

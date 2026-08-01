@@ -46,8 +46,8 @@ export class McpOAuthProtectedResource {
         return this.#approvals;
     }
 
-    registerResource(resourceServerUrl: URL): void {
-        this.#runtime.registerResource(resourceServerUrl);
+    registerResource(resourceServerUrl: URL, config: McpOAuth2Config): void {
+        this.#runtime.registerResource(resourceServerUrl, config);
     }
 
     async warmup(): Promise<void> {

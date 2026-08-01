@@ -47,7 +47,7 @@ interface ConfigEditorCoordinatorOptions {
     instanceConfigMapper?: InstanceFactory;
     instanceRegistry: InstanceRegistry;
     mcpEndpointConfigMapper?: McpEndpointFactory;
-    runtimeApply?: { apply(previous: ControlConfig, next: ControlConfig): Promise<void> };
+    runtimeApply?: { apply(previous: ControlConfig, next: ControlConfig): Promise<boolean> };
     setConfig: (config: ControlConfig) => void;
     runtimePreflight?: { assertAvailable(previous: ControlConfig, next: ControlConfig): Promise<void> };
     validator?: ControlConfigValidator;
@@ -64,7 +64,7 @@ export class ConfigEditorCoordinator {
     readonly #mcpEndpointConfigMapper: McpEndpointFactory;
     readonly #setConfig: (config: ControlConfig) => void;
     readonly #runtimePreflight: { assertAvailable(previous: ControlConfig, next: ControlConfig): Promise<void> };
-    readonly #runtimeApply?: { apply(previous: ControlConfig, next: ControlConfig): Promise<void> };
+    readonly #runtimeApply?: { apply(previous: ControlConfig, next: ControlConfig): Promise<boolean> };
     readonly #validator: ControlConfigValidator;
     #lastApplyResult: ConfigApplyResult = emptyApplyResult();
 
@@ -125,13 +125,16 @@ export class ConfigEditorCoordinator {
             descriptor.worker.reconfigure(toWorkerReconfigureInput(instance));
         }
         if (authChanged && this.#runtimeApply !== undefined) {
-            await this.#applyRuntimeOrRestore(currentConfig, nextConfig);
+            const hotApplied = await this.#applyRuntimeOrRestore(currentConfig, nextConfig);
+            this.#rememberApplyResult(
+                buildApplyResult(currentConfig, nextConfig, [{ kind: "instance.updated", target: request.instanceName }], hotApplied)
+            );
         } else {
             this.#syncMcpEndpoint(request.instanceName);
+            this.#rememberApplyResult(
+                buildApplyResult(currentConfig, nextConfig, [{ kind: "instance.updated", target: request.instanceName }])
+            );
         }
-        this.#rememberApplyResult(
-            buildApplyResult(currentConfig, nextConfig, [{ kind: "instance.updated", target: request.instanceName }])
-        );
         return this.getConfigView();
     }
 
@@ -148,8 +151,8 @@ export class ConfigEditorCoordinator {
 
         await this.#runtimePreflight.assertAvailable(currentConfig, nextConfig);
         await this.#persistConfig(nextConfig);
-        await this.#applyRuntimeOrRestore(currentConfig, nextConfig);
-        this.#rememberApplyResult(buildApplyResult(currentConfig, nextConfig, [{ kind: "mcp.endpoint.updated", target: "mcp" }]));
+        const hotApplied = await this.#applyRuntimeOrRestore(currentConfig, nextConfig);
+        this.#rememberApplyResult(buildApplyResult(currentConfig, nextConfig, [{ kind: "mcp.endpoint.updated", target: "mcp" }], hotApplied));
         return this.getConfigView();
     }
 
@@ -166,8 +169,8 @@ export class ConfigEditorCoordinator {
         const nextConfig = this.#validateConfig({ ...currentConfig, web: global.web });
         await this.#runtimePreflight.assertAvailable(currentConfig, nextConfig);
         await this.#persistConfig(nextConfig);
-        await this.#applyRuntimeOrRestore(currentConfig, nextConfig);
-        this.#rememberApplyResult(buildApplyResult(currentConfig, nextConfig, [{ kind: "web.updated", target: "web" }]));
+        const webHotApplied = await this.#applyRuntimeOrRestore(currentConfig, nextConfig);
+        this.#rememberApplyResult(buildApplyResult(currentConfig, nextConfig, [{ kind: "web.updated", target: "web" }], webHotApplied));
         return this.getConfigView();
     }
 
@@ -274,10 +277,10 @@ export class ConfigEditorCoordinator {
         this.#setConfig(config);
     }
 
-    async #applyRuntimeOrRestore(previous: ControlConfig, next: ControlConfig): Promise<void> {
-        if (this.#runtimeApply === undefined) return;
+    async #applyRuntimeOrRestore(previous: ControlConfig, next: ControlConfig): Promise<boolean> {
+        if (this.#runtimeApply === undefined) return false;
         try {
-            await this.#runtimeApply.apply(previous, next);
+            return await this.#runtimeApply.apply(previous, next);
         } catch (error) {
             await this.#persistConfig(previous);
             throw error;

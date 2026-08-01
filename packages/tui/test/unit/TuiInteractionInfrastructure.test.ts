@@ -1453,7 +1453,7 @@ test("connector page actions expose and save only affected scopes", async () => 
     });
     enterConnectionsRoute(harness, "connector");
     harness.store.setFormDraft(
-        "connector:alpha",
+        "connector",
         {
             enabled: true,
             listenHost: "127.0.0.1",
@@ -1461,12 +1461,12 @@ test("connector page actions expose and save only affected scopes", async () => 
         },
         true,
     );
-    harness.store.setFormDraft("web:alpha", {
+    harness.store.setFormDraft("web", {
         auth: "none", enabled: true, listenHost: "127.0.0.1", listenPort: 3211, publicBaseUrl: "127.0.0.1"
     }, true);
     harness.store.setEditor({
         editing: false,
-        key: "connector:alpha",
+        key: "connector",
         kind: "connector",
     });
     const actions = expandBox(harness, "connector-actions");

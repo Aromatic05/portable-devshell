@@ -84,13 +84,13 @@ export class TuiCommandDispatcherEditor {
         if (instance === undefined) {
             return false;
         }
-        const key = kind === "config" ? `config:${instance}` : `connector:${instance}`;
+        const key = kind === "config" ? `config:${instance}` : "connector";
         if (state.ui.formDrafts[key] === undefined) {
             const source = kind === "config" ? this.#instanceDraft(instance) : this.#mcpDraft();
             this.#store.setFormDraft(key, source, false);
         }
-        if (kind === "connector" && state.ui.formDrafts[`web:${instance}`] === undefined) {
-            this.#store.setFormDraft(`web:${instance}`, this.#webDraft(), false);
+        if (kind === "connector" && state.ui.formDrafts["web"] === undefined) {
+            this.#store.setFormDraft("web", this.#webDraft(), false);
         }
         const box = this.#projection.selectMainScreenModel(this.#store.getState()).boxes.find((candidate) => candidate.id === boxId);
         if (box !== undefined && !box.expanded) {
@@ -297,8 +297,8 @@ export class TuiCommandDispatcherEditor {
                 await this.#options.onInstanceAction("stop", instance);
             }
             const instanceKey = `config:${instance}`;
-            const globalKey = `connector:${instance}`;
-            const webKey = `web:${instance}`;
+            const globalKey = "connector";
+            const webKey = "web";
             const instanceDraft = coerceTuiEditorRecord(this.#editorDraft(instanceKey, this.#instanceDraft(instance)));
             const globalDraft = coerceTuiEditorRecord(this.#editorDraft(globalKey, this.#mcpDraft()));
             const webDraft = coerceTuiEditorRecord(this.#editorDraft(webKey, this.#webDraft()));
@@ -445,7 +445,7 @@ export class TuiCommandDispatcherEditor {
             return { fallback: this.#instanceDraft(name), key: `config:${name}`, path: field.slice("instance.".length) };
         }
         if (editor.kind === "connector" && field.startsWith("web.")) {
-            return { fallback: this.#webDraft(), key: `web:${instance!}`, path: field.slice("web.".length) };
+            return { fallback: this.#webDraft(), key: "web", path: field.slice("web.".length) };
         }
         return {
             fallback: editor.kind === "connector" ? this.#mcpDraft() : this.#instanceDraft(instance!),
@@ -464,7 +464,7 @@ export class TuiCommandDispatcherEditor {
         }
 
         const instance = this.#store.getState().ui.selectedInstance;
-        return instance === undefined ? [editor.key] : [editor.key, `config:${instance}`, `web:${instance}`];
+        return instance === undefined ? [editor.key] : [editor.key, `config:${instance}`, "web"];
     }
 
     #instanceDraft(instanceName: string): Record<string, JsonValue> {
@@ -488,7 +488,7 @@ export class TuiCommandDispatcherEditor {
         });
     }
 
-    #fullConfigDraft(includeMcp: boolean): ConfigDraft {
+    #fullConfigDraft(includeGlobal: boolean): ConfigDraft {
         const state = this.#store.getState();
         const instance = state.ui.selectedInstance!;
         const config = cloneRecord(state.configView ?? { control: {}, instances: [], mcp: this.#mcpDraft() });
@@ -504,8 +504,9 @@ export class TuiCommandDispatcherEditor {
               })
             : [];
         config.instances = instances;
-        if (includeMcp) {
-            config.mcp = coerceTuiEditorRecord(this.#editorDraft(`connector:${instance}`, this.#mcpDraft()));
+        if (includeGlobal) {
+            config.mcp = coerceTuiEditorRecord(this.#editorDraft("connector", this.#mcpDraft()));
+            config.web = coerceTuiEditorRecord(this.#editorDraft("web", this.#webDraft()));
         }
         return parseTuiConfigDraft(config);
     }

@@ -47,7 +47,7 @@ export class McpOAuthProviderRuntime {
     readonly #basePath: string;
     readonly #config: McpOAuth2Config;
     readonly #issuerUrl: URL;
-    readonly #registeredResources = new Set<string>();
+    readonly #registeredResources = new Map<string, McpOAuth2Config>();
     readonly #storageDir: string;
     readonly #trustProxy: boolean;
     #provider?: Provider;
@@ -84,12 +84,13 @@ export class McpOAuthProviderRuntime {
     }
 
     get registeredResources(): string[] {
-        return [...this.#registeredResources];
+        return [...this.#registeredResources.keys()];
     }
 
-    registerResource(resourceServerUrl: URL): void {
-        this.#registeredResources.add(
-            resourceUrlFromServerUrl(resourceServerUrl).href
+    registerResource(resourceServerUrl: URL, config: McpOAuth2Config): void {
+        this.#registeredResources.set(
+            resourceUrlFromServerUrl(resourceServerUrl).href,
+            config
         );
     }
 
@@ -131,7 +132,7 @@ export class McpOAuthProviderRuntime {
                             return oneOf[0];
                         }
                         if (this.#registeredResources.size === 1) {
-                            return [...this.#registeredResources][0];
+                            return [...this.#registeredResources.keys()][0];
                         }
                         throw new Error(
                             "Unable to determine a default resource indicator."
@@ -139,7 +140,8 @@ export class McpOAuthProviderRuntime {
                     },
                     enabled: true,
                     getResourceServerInfo: async (_ctx, resourceIndicator) => {
-                        if (!this.#registeredResources.has(resourceIndicator)) {
+                        const resourceConfig = this.#registeredResources.get(resourceIndicator);
+                        if (resourceConfig === undefined) {
                             throw new Error(
                                 `Unknown resource indicator: ${resourceIndicator}`
                             );
@@ -147,7 +149,7 @@ export class McpOAuthProviderRuntime {
                         return {
                             accessTokenFormat: "opaque" as const,
                             audience: resourceIndicator,
-                            scope: this.#config.requiredScopes.join(" ")
+                            scope: resourceConfig.requiredScopes.join(" ")
                         };
                     },
                     useGrantedResource: async () => true

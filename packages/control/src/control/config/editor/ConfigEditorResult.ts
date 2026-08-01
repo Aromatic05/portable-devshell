@@ -28,11 +28,10 @@ export const emptyApplyResult = (): ConfigApplyResult => ({
     restartControlRequired: false
 });
 
-export function buildApplyResult(previous: ControlConfig, next: ControlConfig, appliedChanges: ConfigApplyChange[]): ConfigApplyResult {
+export function buildApplyResult(previous: ControlConfig, next: ControlConfig, appliedChanges: ConfigApplyChange[], hotApplied = false): ConfigApplyResult {
     const affectedInstances = new Set<string>();
     const affectedMcpEndpoints = new Set<string>();
     const affectedListeners = new Set<string>();
-    let restartControlRequired = false;
 
     const previousInstances = new Map(previous.instances.map((instance) => [instance.name, instance] as const));
     const nextInstances = new Map(next.instances.map((instance) => [instance.name, instance] as const));
@@ -53,13 +52,11 @@ export function buildApplyResult(previous: ControlConfig, next: ControlConfig, a
     }
 
     if (stableStringify(previous.mcp) !== stableStringify(next.mcp)) {
-        restartControlRequired = true;
         affectedMcpEndpoints.add("mcp");
         affectedListeners.add(listenerId(previous.mcp.listenHost, previous.mcp.listenPort));
         affectedListeners.add(listenerId(next.mcp.listenHost, next.mcp.listenPort));
     }
     if (stableStringify(previous.web) !== stableStringify(next.web)) {
-        restartControlRequired = true;
         affectedListeners.add(listenerId(previous.web.listenHost, previous.web.listenPort));
         affectedListeners.add(listenerId(next.web.listenHost, next.web.listenPort));
     }
@@ -70,7 +67,10 @@ export function buildApplyResult(previous: ControlConfig, next: ControlConfig, a
         affectedListeners: [...affectedListeners].sort((left, right) => left.localeCompare(right)),
         appliedChanges,
         reloadRequired: affectedInstances.size > 0,
-        restartControlRequired
+        restartControlRequired: !hotApplied && (
+            stableStringify(previous.mcp) !== stableStringify(next.mcp) ||
+            stableStringify(previous.web) !== stableStringify(next.web)
+        )
     };
 }
 

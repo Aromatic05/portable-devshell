@@ -395,6 +395,7 @@ test("ControlChannelServer replaces one started provider without closing others"
 
     await server.start();
     await server.replaceProvider(web, replacement);
+    await new Promise((resolve) => setImmediate(resolve));
 
     assert.equal(socket.closed, false);
     assert.equal(web.closed, true);

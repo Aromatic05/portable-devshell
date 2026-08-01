@@ -232,7 +232,7 @@ export class HttpHost {
         this.#bindings.set(path, { auth, binding });
         const resourceServerUrl = this.#toPublicResourceUrl(path);
         if (auth?.provider === "oauth2" && this.#oauth !== undefined && resourceServerUrl !== undefined) {
-            this.#oauth.registerResource(resourceServerUrl);
+            this.#oauth.registerResource(resourceServerUrl, auth.oauth2);
         }
         if (this.#registeredPaths.has(path)) {
             return;
@@ -283,7 +283,7 @@ export class HttpHost {
         const auth = this.#bindings.get(path)?.auth ?? this.#auth;
 
         if (auth?.provider === "oauth2" && this.#oauth !== undefined && resourceServerUrl !== undefined) {
-            this.#oauth.registerResource(resourceServerUrl);
+            this.#oauth.registerResource(resourceServerUrl, auth.oauth2);
             routeHandlers.push(this.#oauth.requestAuthHandler(resourceServerUrl, auth.oauth2));
             this.#app.use(
                 this.#oauthProtectedResourceMetadataPath(resourceServerUrl),

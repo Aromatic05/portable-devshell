@@ -28,7 +28,7 @@ test("McpOAuthProviderRuntime owns provider lifecycle, resources, metadata, and 
     });
 
     try {
-        runtime.registerResource(new URL("https://mcp.example.test/devshell/demo/mcp"));
+        runtime.registerResource(new URL("https://mcp.example.test/devshell/demo/mcp"), config);
         await runtime.warmup();
 
         assert.equal(runtime.basePath, "/devshell");
@@ -61,7 +61,7 @@ test("McpOAuthProviderRuntime owns provider lifecycle, resources, metadata, and 
             storageDir,
             trustProxy: false
         });
-        reloaded.registerResource(new URL("https://mcp.example.test/devshell/demo/mcp"));
+        reloaded.registerResource(new URL("https://mcp.example.test/devshell/demo/mcp"), config);
         await reloaded.warmup();
         const secondJwks = await readFile(join(storageDir, "jwks.json"), "utf8");
         assert.equal(secondJwks, firstJwks);

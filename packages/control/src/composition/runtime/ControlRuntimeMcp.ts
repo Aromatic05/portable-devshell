@@ -107,11 +107,34 @@ export class ControlRuntimeMcp {
             gateway: decorateMcpInstanceGatewayArtifact(this.instanceGateway, this.#artifact.service),
             storageDir: this.#controlPaths.oauthDir
         });
-        this.#artifact.installHttpRoute(next!.server);
-        await next?.start();
         const previous = this.#host;
+        const same = previous !== undefined && sameEndpoint(this.#state.requireConfig().mcp, config.mcp);
+        if (same) {
+            await previous.stop();
+        }
+        try {
+            this.#artifact.installHttpRoute(next!.server);
+            await next?.start();
+        } catch (error) {
+            if (same) {
+                await previous?.start().catch(() => undefined);
+            }
+            throw error;
+        }
         this.#host = next;
         return previous;
+    }
+
+    async restoreMcpHost(host: McpHost | undefined): Promise<void> {
+        const current = this.#host;
+        this.#host = host;
+        if (current !== undefined && current !== host) {
+            await current.stop().catch(() => undefined);
+        }
+        if (host !== undefined) {
+            this.#artifact.installHttpRoute(host.server);
+            await host.start().catch(() => undefined);
+        }
     }
 
     get webEnabled(): boolean {
@@ -133,8 +156,21 @@ export class ControlRuntimeMcp {
                 ? this.#host.server
                 : new HttpHost({ listenHost: config.web.listenHost, listenPort: config.web.listenPort })
             : undefined;
+        const same = previous !== undefined && next !== undefined && next !== previous
+            && next !== this.#host?.server && previous !== this.#host?.server
+            && sameEndpoint(this.#state.requireConfig().web, config.web);
+        if (same && previous !== undefined) {
+            await previous.stop();
+        }
         if (next !== undefined && next !== previous && next !== this.#host?.server) {
-            await next.start();
+            try {
+                await next.start();
+            } catch (error) {
+                if (same && previous !== undefined) {
+                    await previous.start().catch(() => undefined);
+                }
+                throw error;
+            }
         }
         this.#webEnabled = config.web.enabled;
         this.#webPublicBaseUrl = config.web.enabled ? config.web.publicBaseUrl : undefined;
@@ -158,7 +194,7 @@ export class ControlRuntimeMcp {
         }
     }
 
-    async #applyConfig(previous: ControlConfig, next: ControlConfig): Promise<void> {
+    async #applyConfig(previous: ControlConfig, next: ControlConfig): Promise<boolean> {
         if (
             previous.web.enabled &&
             next.web.enabled &&
@@ -166,7 +202,7 @@ export class ControlRuntimeMcp {
             this.#applyWebConfig !== undefined
         ) {
             await this.#applyWebConfig(previous, next);
-            return;
+            return true;
         }
         if (
             previous.mcp.enabled &&
@@ -177,9 +213,10 @@ export class ControlRuntimeMcp {
             this.#applyMcpConfig !== undefined
         ) {
             await this.#applyMcpConfig(previous, next);
-            return;
+            return true;
         }
         await this.#applyRuntimeConfig?.(previous, next);
+        return false;
     }
 
     get oauthApprovals(): McpOAuthApprovalService | undefined {
