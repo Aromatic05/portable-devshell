@@ -8,6 +8,8 @@ import type { WorkerCommandInteractiveSession, WorkerInstance } from "@portable-
 import {
     asInstanceName,
     ClientConnection,
+    MASKED_CONFIG_TOKEN,
+    createDefaultControlConfig,
     createError,
     SocketChannelProvider,
     type ClientEvent,
@@ -18,8 +20,11 @@ import {
 } from "@portable-devshell/shared";
 
 import { ControlRouteComposition } from "../../src/composition/ControlRouteComposition.ts";
-import { ControlSocketServer } from "../../src/server/socket/ControlSocketServer.ts";
+import { ConfigEditorCoordinator } from "../../src/control/config/editor/ConfigEditorCoordinator.ts";
+import { ControlConfigStore } from "../../src/control/config/ControlConfigStore.ts";
 import { InstanceRegistry } from "../../src/control/instance/registry/InstanceRegistry.ts";
+import { InstanceRegistryFactory } from "../../src/control/instance/registry/InstanceRegistryFactory.ts";
+import { ControlSocketServer } from "../../src/server/socket/ControlSocketServer.ts";
 import { createTestIpcPath } from "../../../../test/TestPlatformSupport.ts";
 import { createTestInstanceDescriptor } from "../ControlTestFixtures.ts";
 
@@ -116,6 +121,73 @@ test("ControlSocketServer routes canonical control and instance operations over 
         "runtime.missing"
     );
     assert.equal(missingOperation.error?.code, "control.methodNotFound");
+});
+
+test("config RPC masks the Web token across get, validate, and update responses", async (t) => {
+    const directory = await mkdtemp(join(tmpdir(), "portable-devshell-config-rpc-secret-"));
+    const homeDirectory = join(directory, "home");
+    const socketPath = createTestIpcPath("control-config-rpc", directory);
+    const strongToken = "a".repeat(48);
+    const configStore = new ControlConfigStore();
+    let config = createDefaultControlConfig();
+    config.web.auth = { mode: "token", token: strongToken };
+    await configStore.write(config, homeDirectory);
+
+    const registry = new InstanceRegistryFactory().build(config);
+    const editor = new ConfigEditorCoordinator({
+        configStore,
+        getConfig: () => config,
+        homeDirectory,
+        instanceRegistry: registry,
+        runtimePreflight: { async assertAvailable() {} },
+        setConfig: (next) => {
+            config = next;
+        }
+    });
+    const routes = new ControlRouteComposition({
+        config: editor,
+        instances: registry,
+        shutdown() {}
+    });
+    const server = new ControlSocketServer({ routes, socketPath });
+    await server.start();
+    t.after(async () => {
+        await server.stop().catch(() => undefined);
+        routes.dispose();
+        await rm(directory, { force: true, recursive: true });
+    });
+
+    const getReply = await request(socketPath, "@control", "config.get");
+    assert.equal(getReply.error, undefined);
+    const getPayload = getReply.payload as Record<string, JsonValue>;
+    assert.equal((getPayload.web as Record<string, JsonValue>).token, MASKED_CONFIG_TOKEN);
+    assert.equal(JSON.stringify(getPayload).includes(strongToken), false);
+
+    const instances = (getPayload.instances as Array<Record<string, JsonValue>>).map((instance) => {
+        const security = instance.security as Record<string, JsonValue>;
+        return { ...instance, security: { mode: security.mode } };
+    });
+    const validateReply = await request(socketPath, "@control", "config.validate", {
+        ...getPayload,
+        instances
+    });
+    assert.equal(validateReply.error, undefined);
+    assert.equal(
+        ((validateReply.payload as Record<string, JsonValue>).web as Record<string, JsonValue>).token,
+        MASKED_CONFIG_TOKEN
+    );
+    assert.equal(JSON.stringify(validateReply.payload).includes(strongToken), false);
+
+    const updateReply = await request(socketPath, "@control", "config.updateWeb", {
+        patch: { auth: "token", token: MASKED_CONFIG_TOKEN }
+    });
+    assert.equal(updateReply.error, undefined);
+    assert.equal(JSON.stringify(updateReply.payload).includes(strongToken), false);
+    assert.deepEqual(config.web.auth, { mode: "token", token: strongToken });
+    assert.deepEqual((await configStore.readOrCreate(homeDirectory)).web.auth, {
+        mode: "token",
+        token: strongToken
+    });
 });
 
 test("ControlSocketServer rebuilds the immutable route snapshot after registry changes", async (t) => {
