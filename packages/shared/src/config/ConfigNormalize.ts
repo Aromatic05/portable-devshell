@@ -10,6 +10,7 @@ import type {
     ConfigInstancePatch,
     ConfigMcpAuthDraft,
     ConfigMcpPatch,
+    ConfigWebOAuth2Draft,
     ConfigWebPatch,
     ConfigNormalizeContext,
     ConfigView,
@@ -17,7 +18,9 @@ import type {
     ControlGlobalConfig,
     ControlInstanceConfig,
     ControlInstanceToolsConfig,
-    ControlMcpAuthConfig
+    ControlMcpAuthConfig,
+    ControlWebAuthConfig,
+    ControlWebAuthMode
 } from "./ConfigModel.js";
 import { defaultConfigNormalizeContext } from "./ConfigModel.js";
 
@@ -54,7 +57,7 @@ export function normalizeConfigGlobalDraft(draft: ConfigGlobalDraft): ControlGlo
             publicBaseUrl: normalizePublicBaseUrl(draft.mcp?.publicBaseUrl, mcpListenHost, mcpListenPort)
         },
         web: {
-            auth: draft.web?.auth ?? "none",
+            auth: normalizeWebAuth(draft.web),
             enabled: draft.web?.enabled ?? false,
             listenHost: webListenHost,
             listenPort: webListenPort,
@@ -233,8 +236,18 @@ export function applyConfigWebPatch(
     current: ControlGlobalConfig["web"],
     patch: ConfigWebPatch
 ): ConfigGlobalDraft["web"] {
+    const authDraft =
+        patch.auth === undefined
+            ? toWebAuthDraft(current.auth)
+            : toWebAuthDraft(
+                  normalizeWebAuth({
+                      auth: patch.auth,
+                      oauth2: patch.oauth2,
+                      token: patch.token
+                  })
+              );
     return {
-        auth: patch.auth ?? current.auth,
+        ...authDraft,
         enabled: patch.enabled ?? current.enabled,
         listenHost: patch.listenHost ?? current.listenHost,
         listenPort: patch.listenPort ?? current.listenPort,
@@ -317,6 +330,37 @@ function normalizeInstanceMcpAuth(
 function toInstanceMcpAuthDraft(
     auth: ControlMcpAuthConfig
 ): Partial<Pick<ConfigInstanceMcpDraft, "auth" | "oauth2" | "token">> {
+    if (auth.mode === "none") return { auth: "none" };
+    if (auth.mode === "token") return { auth: "token", token: auth.token };
+    return {
+        auth: "oauth2",
+        oauth2: {
+            ...auth.oauth2,
+            requiredScopes: [...auth.oauth2.requiredScopes]
+        }
+    };
+}
+
+function normalizeWebAuth(
+    draft: { auth?: ControlWebAuthMode; oauth2?: ConfigWebOAuth2Draft; token?: string } | undefined
+): ControlWebAuthConfig {
+    if (draft?.auth === undefined || draft.auth === "none") return { mode: "none" };
+    if (draft.auth === "token") return { mode: "token", token: draft.token! };
+    return {
+        mode: "oauth2",
+        oauth2: {
+            documentationUrl: draft.oauth2!.documentationUrl,
+            requiredScopes: deduplicate(draft.oauth2!.requiredScopes ?? []),
+            resourceName: draft.oauth2!.resourceName
+        }
+    };
+}
+
+function toWebAuthDraft(auth: ControlWebAuthConfig): {
+    auth: ControlWebAuthMode;
+    oauth2?: ConfigWebOAuth2Draft;
+    token?: string;
+} {
     if (auth.mode === "none") return { auth: "none" };
     if (auth.mode === "token") return { auth: "token", token: auth.token };
     return {

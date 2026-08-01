@@ -92,6 +92,19 @@ function validateWeb(config: ControlConfig): void {
         );
     }
     parseUrl(config.web.publicBaseUrl, ["web", "publicBaseUrl"]);
+
+    const auth = config.web.auth;
+    if (auth.mode === "token" && Buffer.byteLength(auth.token, "utf8") < 32) {
+        throw configInputError(
+            "semantic",
+            ["web", "auth", "token"],
+            "config.auth.tokenWeak",
+            "must contain at least 32 UTF-8 bytes"
+        );
+    }
+    if (auth.mode === "oauth2" && auth.oauth2.documentationUrl !== undefined) {
+        parseUrl(auth.oauth2.documentationUrl, ["web", "auth", "oauth2", "documentationUrl"]);
+    }
 }
 
 function validateMcpAuth(instance: ControlInstanceConfig, base: readonly (string | number)[]): void {

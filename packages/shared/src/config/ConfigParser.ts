@@ -15,6 +15,7 @@ import type {
     ConfigInstanceTargetRequest,
     ConfigMcpAuthDraft,
     ConfigMcpPatch,
+    ConfigWebOAuth2Draft,
     ConfigWebPatch,
     ConfigPatch,
     ConfigUpdateInstanceRequest,
@@ -230,15 +231,80 @@ function parseGlobalWebDraft(
     path: readonly ConfigPathSegment[]
 ): NonNullable<ConfigGlobalDraft["web"]> {
     const record = readRecord(value, path);
-    assertKnownKeys(record, ["auth", "enabled", "listenHost", "listenPort", "publicBaseUrl"], path);
+    assertKnownKeys(
+        record,
+        ["auth", "enabled", "listenHost", "listenPort", "oauth2", "publicBaseUrl", "token"],
+        path
+    );
     return {
-        auth: record.auth === undefined ? undefined : readEnum<"none">(record.auth, [...path, "auth"], ["none"]),
+        ...parseWebAuth(record, path),
         enabled: readOptionalBoolean(record.enabled, [...path, "enabled"]),
         listenHost: readOptionalTrimmedString(record.listenHost, [...path, "listenHost"]),
         listenPort: readOptionalInteger(record.listenPort, [...path, "listenPort"]),
         publicBaseUrl: readNullable(record.publicBaseUrl, (entry) =>
             readRequiredTrimmedString(entry, [...path, "publicBaseUrl"])
         )
+    };
+}
+
+function parseWebAuth(
+    record: Record<string, unknown>,
+    path: readonly ConfigPathSegment[]
+): Pick<NonNullable<ConfigGlobalDraft["web"]>, "auth" | "oauth2" | "token"> {
+    const auth =
+        record.auth === undefined
+            ? undefined
+            : readEnum(record.auth, [...path, "auth"], ["none", "oauth2", "token"]);
+    if (auth === "none") {
+        if (record.oauth2 !== undefined || record.token !== undefined) {
+            throw configInputError(
+                "parse",
+                [...path, "auth"],
+                "config.auth.unexpectedParameters",
+                "must not configure oauth2 or token when auth=none"
+            );
+        }
+        return { auth };
+    }
+    if (auth === "token") {
+        if (record.oauth2 !== undefined) {
+            throw configInputError("parse", [...path, "oauth2"], "config.auth.unexpectedOauth2", "must be omitted when auth=token");
+        }
+        if (record.token === undefined) {
+            throw configInputError("parse", [...path, "token"], "config.auth.tokenRequired", "is required when auth=token");
+        }
+        return { auth, token: readRequiredTrimmedString(record.token, [...path, "token"]) };
+    }
+    if (auth === "oauth2") {
+        if (record.token !== undefined) {
+            throw configInputError("parse", [...path, "token"], "config.auth.unexpectedToken", "must be omitted when auth=oauth2");
+        }
+        if (record.oauth2 === undefined) {
+            throw configInputError("parse", [...path, "oauth2"], "config.auth.oauth2Required", "is required when auth=oauth2");
+        }
+        return { auth, oauth2: parseWebOAuth2Draft(record.oauth2, [...path, "oauth2"]) };
+    }
+    if (record.oauth2 !== undefined || record.token !== undefined) {
+        throw configInputError(
+            "parse",
+            [...path, "auth"],
+            "config.auth.authRequired",
+            "is required when configuring oauth2 or token"
+        );
+    }
+    return {};
+}
+
+function parseWebOAuth2Draft(value: unknown, path: readonly ConfigPathSegment[]): ConfigWebOAuth2Draft {
+    const oauth2 = readRecord(value, path);
+    assertKnownKeys(oauth2, ["documentationUrl", "requiredScopes", "resourceName"], path);
+    return {
+        documentationUrl: readOptionalTrimmedString(oauth2.documentationUrl, [...path, "documentationUrl"]),
+        requiredScopes:
+            oauth2.requiredScopes === undefined
+                ? undefined
+                : readStringArray(oauth2.requiredScopes, [...path, "requiredScopes"]),
+        resourceName: readRequiredTrimmedString(oauth2.resourceName, [...path, "resourceName"])
     };
 }
 

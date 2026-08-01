@@ -11,7 +11,7 @@ export type RawConfig = unknown;
 export type ControlProviderKind =
     "docker" | "local" | "podman" | "reverse" | "ssh";
 export type ControlMcpAuthMode = "none" | "oauth2" | "token";
-export type ControlWebAuthMode = "none";
+export type ControlWebAuthMode = "none" | "oauth2" | "token";
 export type ControlSecurityMode = "disabled" | "workspace";
 
 export interface ControlInstanceLogsConfig {
@@ -126,6 +126,17 @@ export type ControlMcpAuthConfig =
     | { mode: "token"; oauth2?: undefined; token: string }
     | { mode: "oauth2"; oauth2: ControlMcpOAuth2Config };
 
+export interface ControlWebOAuth2Config {
+    documentationUrl?: string;
+    requiredScopes: string[];
+    resourceName: string;
+}
+
+export type ControlWebAuthConfig =
+    | { mode: "none"; oauth2?: undefined; token?: undefined }
+    | { mode: "token"; oauth2?: undefined; token: string }
+    | { mode: "oauth2"; oauth2: ControlWebOAuth2Config; token?: undefined };
+
 export interface ControlGlobalConfig {
     control: {
         logLevel: string;
@@ -137,7 +148,7 @@ export interface ControlGlobalConfig {
         publicBaseUrl: string;
     };
     web: {
-        auth: ControlWebAuthMode;
+        auth: ControlWebAuthConfig;
         enabled: boolean;
         listenHost: string;
         listenPort: number;
@@ -232,6 +243,12 @@ export interface ConfigMcpOAuth2Draft {
     resourceName: string;
 }
 
+export interface ConfigWebOAuth2Draft {
+    documentationUrl?: string;
+    requiredScopes?: string[];
+    resourceName: string;
+}
+
 export type ConfigMcpAuthDraft =
     | { mode: "none" }
     | { mode: "token"; token: string }
@@ -252,7 +269,9 @@ export interface ConfigGlobalDraft {
         enabled?: boolean;
         listenHost?: string;
         listenPort?: number;
+        oauth2?: ConfigWebOAuth2Draft;
         publicBaseUrl?: string | null;
+        token?: string;
     };
 }
 
@@ -304,7 +323,9 @@ export interface ConfigWebPatch {
     enabled?: boolean;
     listenHost?: string;
     listenPort?: number;
+    oauth2?: ConfigWebOAuth2Draft;
     publicBaseUrl?: ConfigNullable<string>;
+    token?: string;
 }
 
 export interface ConfigPatch {
