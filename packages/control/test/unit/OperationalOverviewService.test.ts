@@ -14,6 +14,19 @@ import {
 } from "../ControlTestFixtures.ts";
 
 const now = new Date("2026-07-31T00:00:00.000Z");
+const healthySystemCollector = {
+    async collect() {
+        return {
+            alerts: [],
+            system: {
+                cpuCount: 1,
+                memoryAvailableBytes: 1,
+                memoryPercent: 0,
+                memoryTotalBytes: 1
+            }
+        };
+    }
+};
 
 test("operational overview prioritizes failures, approvals, activity, and todos without raw payloads", async () => {
     const blockedTodo: ActiveTodoSummary = {
@@ -213,7 +226,8 @@ test("operational overview counts the full 24 hour failure window while bounding
 
     const overview = await new OperationalOverviewService({
         instances: { list: () => [descriptor] },
-        now: () => now
+        now: () => now,
+        systemCollector: healthySystemCollector
     }).read();
 
     assert.equal(overview.counts.failedCalls24h, 1);
@@ -259,7 +273,8 @@ test("operational overview coalesces concurrent reads without caching later refr
             }
         },
         instances: { list: () => [descriptor] },
-        now: () => now
+        now: () => now,
+        systemCollector: healthySystemCollector
     });
 
     const first = service.read();
@@ -338,7 +353,8 @@ test("operational overview isolates snapshot and todo collection failures per in
 
     const overview = await new OperationalOverviewService({
         instances: { list: () => [snapshotBroken, todoBroken] },
-        now: () => now
+        now: () => now,
+        systemCollector: healthySystemCollector
     }).read();
 
     assert.equal(overview.health, "critical");
@@ -368,7 +384,8 @@ test("operational overview remains available when one collection source fails", 
 
     const overview = await new OperationalOverviewService({
         instances: { list: () => [descriptor] },
-        now: () => now
+        now: () => now,
+        systemCollector: healthySystemCollector
     }).read();
 
     assert.equal(overview.health, "attention");

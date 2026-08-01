@@ -60,16 +60,28 @@ describe("BrowserWebSocketChannel", () => {
         channel.onFrame(() => {
             throw new Error("broken frame listener");
         });
-        channel.onFrame((frame) => frames.push(new TextDecoder().decode(frame)));
+        let resolveFrames!: () => void;
+        const framesReceived = new Promise<void>((resolve) => {
+            resolveFrames = resolve;
+        });
+        channel.onFrame((frame) => {
+            frames.push(new TextDecoder().decode(frame));
+            if (frames.length === 2) resolveFrames();
+        });
         const closes: string[] = [];
         channel.onClose(() => {
             throw new Error("broken close listener");
         });
         channel.onClose(() => closes.push("closed"));
 
-        socket.message(new DelayedBlob("first", 20));
-        socket.message(new DelayedBlob("second", 0));
-        await new Promise((resolve) => setTimeout(resolve, 30));
+        const first = new DeferredBlob("first");
+        const second = new DeferredBlob("second");
+        socket.message(first);
+        socket.message(second);
+        await first.started;
+        second.release();
+        first.release();
+        await framesReceived;
         socket.serverClose();
 
         expect(frames).toEqual(["first", "second"]);
@@ -229,16 +241,29 @@ class FakeSocket extends EventTarget {
     }
 }
 
-class DelayedBlob extends Blob {
-    constructor(
-        private readonly value: string,
-        private readonly delayMs: number,
-    ) {
+class DeferredBlob extends Blob {
+    readonly started: Promise<void>;
+    readonly #ready: Promise<void>;
+    #markStarted!: () => void;
+    #release!: () => void;
+
+    constructor(value: string) {
         super([value]);
+        this.started = new Promise((resolve) => {
+            this.#markStarted = resolve;
+        });
+        this.#ready = new Promise((resolve) => {
+            this.#release = resolve;
+        });
+    }
+
+    release(): void {
+        this.#release();
     }
 
     override async arrayBuffer(): Promise<ArrayBuffer> {
-        await new Promise((resolve) => setTimeout(resolve, this.delayMs));
+        this.#markStarted();
+        await this.#ready;
         return await super.arrayBuffer();
     }
 }
