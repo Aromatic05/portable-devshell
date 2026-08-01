@@ -4,6 +4,7 @@ import test from "node:test";
 import {
     asInstanceName,
     createError,
+    type ContextMessageRecord,
     type InstanceCreateDraft,
     type InstanceCreateSummary,
 } from "@portable-devshell/shared";
@@ -296,123 +297,146 @@ test("audit structured filters and persistent filter controls work", async () =>
         ["audit-context:ctx-alpha"],
     );
 });
-test("context message composer requires the context MCP group", async () => {
-    const harness = createHarness();
-    enterAuditContext(harness, "ctx-alpha");
-    harness.store.setConfigView({
-        instances: [
-            {
-                enabled: true,
-                mcp: {
-                    enabled: true,
-                    path: "/alpha/mcp",
-                    tools: {
-                        capabilities: ["read", "write", "execute"],
-                        groups: ["file", "bash", "artifact", "tmux", "todo"],
-                    },
-                },
-                name: "alpha",
-                provider: "local",
-                workspace: "/workspace/alpha",
-            },
-        ],
-        mcp: {
-            enabled: true,
-            listenHost: "127.0.0.1",
-            listenPort: 3210,
-        },
+test("Audit opens Comment conversation only from a concrete context route", async () => {
+    const root = createHarness();
+    root.store.setSelectedPage("audit");
+    await root.press("m");
+    assert.deepEqual(currentTuiRoute(root.store.getState()), {
+        page: "audit",
+        view: "contexts",
     });
+    assert.equal(topTuiOverlay(root.store.getState().interaction.overlays), undefined);
 
-    assert.equal(
-        await dispatchResult(harness, { type: "messageComposer.openCurrent" }),
-        false,
-    );
-    assert.equal(
-        harness.store.getState().interaction.screenStatusByPage.audit,
-        "Enable MCP and the context tool group before sending messages to this Context.",
-    );
-    assert.equal(
-        topTuiOverlay(harness.store.getState().interaction.overlays),
-        undefined,
-    );
-
-    harness.store.setConfigView({
-        ...harness.store.getState().configView!,
-        instances: [
-            {
-                enabled: true,
-                mcp: {
-                    enabled: true,
-                    path: "/alpha/mcp",
-                    tools: {
-                        capabilities: ["read", "write", "execute"],
-                        groups: [
-                            "file",
-                            "bash",
-                            "artifact",
-                            "tmux",
-                            "todo",
-                            "context",
-                        ],
-                    },
-                },
-                name: "alpha",
-                provider: "local",
-                workspace: "/workspace/alpha",
-            },
-        ],
+    const unscoped = createHarness();
+    enableContextMessageMcp(unscoped);
+    unscoped.store.setSelectedPage("audit");
+    unscoped.store.replaceRoute({
+        page: "audit",
+        scope: "unscoped",
+        view: "context",
     });
+    await unscoped.press("m");
+    assert.deepEqual(currentTuiRoute(unscoped.store.getState()), {
+        page: "audit",
+        scope: "unscoped",
+        view: "context",
+    });
+    assert.equal(topTuiOverlay(unscoped.store.getState().interaction.overlays), undefined);
 
-    assert.equal(
-        await dispatchResult(harness, { type: "messageComposer.openCurrent" }),
-        true,
-    );
-    assert.equal(
-        topTuiOverlay(harness.store.getState().interaction.overlays)?.kind,
-        "message-composer",
-    );
+    const call = createHarness();
+    enableContextMessageMcp(call);
+    enterAuditContext(call, "ctx-alpha");
+    call.store.pushRoute({
+        callId: "call-1",
+        ctxId: "ctx-alpha",
+        page: "audit",
+        scope: "context",
+        view: "call",
+    });
+    await call.press("m");
+    assert.deepEqual(currentTuiRoute(call.store.getState()), {
+        callId: "call-1",
+        ctxId: "ctx-alpha",
+        page: "audit",
+        scope: "context",
+        view: "call",
+    });
+    assert.equal(topTuiOverlay(call.store.getState().interaction.overlays), undefined);
+
+    const context = createHarness();
+    enableContextMessageMcp(context);
+    enterAuditContext(context, "ctx-alpha");
+    await context.press("m");
+    assert.deepEqual(currentTuiRoute(context.store.getState()), {
+        ctxId: "ctx-alpha",
+        page: "audit",
+        scope: "context",
+        view: "conversation",
+    } as never);
+    assert.equal(topTuiOverlay(context.store.getState().interaction.overlays), undefined);
+    await context.dispatch({ type: "ui.cancel" });
+    assert.deepEqual(currentTuiRoute(context.store.getState()), {
+        ctxId: "ctx-alpha",
+        page: "audit",
+        scope: "context",
+        view: "context",
+    });
 });
 
-test("context message composer stays open while submission is pending", async () => {
-    let release!: () => void;
-    const pending = new Promise<void>((resolve) => {
-        release = resolve;
+test("Comment conversation shows exact history and keeps the route open after send", async () => {
+    let harness!: ReturnType<typeof createHarness>;
+    const sent: string[] = [];
+    harness = createHarness({
+        onContextMessage: async (instance, ctxId, text) => {
+            sent.push(text);
+            const pending: ContextMessageRecord = {
+                createdAt: "2026-08-02T00:03:00.000Z",
+                ctxId,
+                id: "message-new",
+                instance,
+                status: "pending",
+                text,
+            };
+            harness.store.replaceContextMessages(instance, [pending]);
+        },
     });
-    const harness = createHarness({
-        onContextMessage: async () => await pending,
-    });
-    enterAuditContext(harness, "ctx-alpha");
-    assert.equal(
-        await dispatchResult(harness, {
-            type: "messageComposer.open",
-            instance: "alpha",
+    enableContextMessageMcp(harness);
+    harness.store.replaceContextMessages("alpha", [
+        {
+            createdAt: "2026-08-02T00:02:00.000Z",
             ctxId: "ctx-alpha",
-        }),
-        true,
-    );
-    await harness.press("pasted guidance");
-    const submission = harness.press("", { ctrl: true, return: true });
-    await new Promise((resolve) => setTimeout(resolve, 0));
+            error: "delivery failed",
+            failedAt: "2026-08-02T00:02:30.000Z",
+            id: "message-failed",
+            instance: "alpha",
+            status: "failed",
+            text: "second comment",
+        },
+        {
+            createdAt: "2026-08-02T00:01:00.000Z",
+            ctxId: "ctx-alpha",
+            deliveredAt: "2026-08-02T00:01:30.000Z",
+            id: "message-delivered",
+            instance: "alpha",
+            status: "delivered",
+            text: "first comment",
+        },
+        {
+            createdAt: "2026-08-02T00:00:00.000Z",
+            ctxId: "ctx-other",
+            id: "message-other",
+            instance: "alpha",
+            status: "pending",
+            text: "other context comment",
+        },
+    ]);
+    enterAuditContext(harness, "ctx-alpha");
+    await harness.press("m");
 
-    assert.equal(
-        topTuiOverlay(harness.store.getState().interaction.overlays)?.kind,
-        "message-composer",
-    );
-    assert.equal(
-        await dispatchResult(harness, { type: "ui.cancel" }),
-        false,
-    );
-    assert.equal(
-        topTuiOverlay(harness.store.getState().interaction.overlays)?.kind,
-        "message-composer",
-    );
+    let text = conversationScreenText(harness);
+    assert.equal(text.includes("other context comment"), false);
+    assert.ok(text.indexOf("first comment") < text.indexOf("second comment"));
+    assert.match(text, /delivered/i);
+    assert.match(text, /failed/i);
+    assert.match(text, /delivery failed/i);
+    assert.match(text, /2026-08-02T00:01:00.000Z/);
 
-    release();
-    await submission;
-    assert.equal(
-        topTuiOverlay(harness.store.getState().interaction.overlays),
-        undefined,
-    );
+    harness.store.setFocusScope("contextConversation" as never);
+    await harness.press("new guidance");
+    await harness.press("", { ctrl: true, return: true });
+    assert.deepEqual(sent, ["new guidance"]);
+    assert.deepEqual(currentTuiRoute(harness.store.getState()), {
+        ctxId: "ctx-alpha",
+        page: "audit",
+        scope: "context",
+        view: "conversation",
+    } as never);
+    text = conversationScreenText(harness);
+    assert.match(text, /new guidance/);
+    assert.match(text, /pending/i);
+
+    await harness.press("", { ctrl: true, return: true });
+    assert.deepEqual(sent, ["new guidance"], "successful send must clear the draft");
 });
 
 test("Todo uses a dedicated instance-scoped page and does not appear in Instances boxes", async () => {
@@ -1915,6 +1939,38 @@ async function openPrimaryRoute(
     harness.store.setFocusScope("mainBoxes");
     harness.store.setMainFocusId(boxId);
     await harness.dispatch({ type: "focus.activate" });
+}
+
+function enableContextMessageMcp(harness: ReturnType<typeof createHarness>): void {
+    const view = harness.store.getState().configView!;
+    harness.store.setConfigView({
+        ...view,
+        instances: view.instances.map((instance) =>
+            instance.name === "alpha"
+                ? {
+                      ...instance,
+                      mcp: {
+                          ...instance.mcp,
+                          enabled: true,
+                          tools: {
+                              capabilities: ["read", "write", "execute"],
+                              groups: ["context"],
+                          },
+                      },
+                  }
+                : instance,
+        ),
+    });
+}
+
+function conversationScreenText(harness: ReturnType<typeof createHarness>): string {
+    return selectMainScreenModel(harness.store.getState()).boxes
+        .flatMap((box) => [
+            box.title,
+            ...(box.summaryLines ?? []),
+            ...(box.expandedLines ?? []).map((line) => line.text),
+        ])
+        .join("\n");
 }
 
 function enterAuditContext(
