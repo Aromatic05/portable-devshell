@@ -21,7 +21,7 @@ use crate::tools::tmux::codec::{TmuxInputChunk, parse_tmux_input, sanitize_termi
 use crate::tools::tmux::shell::prepare_shell_launch;
 
 pub const TMUX_SESSION: &str = "devshell";
-pub const MAX_PANES: usize = 8;
+pub const MAX_PANES: usize = 16;
 const PANE_HISTORY_LINES: i64 = 400;
 const TERMINAL_COLUMNS: usize = 240;
 const TERMINAL_ROWS: usize = 60;
