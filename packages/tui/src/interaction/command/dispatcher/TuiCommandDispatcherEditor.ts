@@ -1,4 +1,4 @@
-import { defaultMcpToolGroups } from "@portable-devshell/shared";
+import { defaultMcpToolGroups, MASKED_CONFIG_TOKEN } from "@portable-devshell/shared";
 import type {
     ConfigDraft,
     ConfigInstancePatch,
@@ -483,9 +483,15 @@ export class TuiCommandDispatcherEditor {
     }
 
     #webDraft(): Record<string, JsonValue> {
-        return cloneRecord(asRecord(this.#store.getState().configView?.web) ?? {
-            auth: "none", enabled: false, listenHost: "127.0.0.1", listenPort: 0
-        });
+        const web = asRecord(this.#store.getState().configView?.web);
+        if (web === undefined) {
+            return { auth: "none", enabled: false, listenHost: "127.0.0.1", listenPort: 0 };
+        }
+        const draft = cloneRecord(web);
+        if (draft.auth === "token" && typeof draft.token === "string") {
+            draft.token = MASKED_CONFIG_TOKEN;
+        }
+        return draft;
     }
 
     #fullConfigDraft(includeGlobal: boolean): ConfigDraft {

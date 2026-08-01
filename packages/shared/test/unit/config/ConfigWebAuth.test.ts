@@ -4,8 +4,10 @@ import test from "node:test";
 import {
     applyConfigWebPatch,
     createDefaultControlConfig,
+    MASKED_CONFIG_TOKEN,
     normalizeConfigGlobalDraft,
     parseConfigGlobalDraft,
+    toConfigView,
     validateConfigSemantics
 } from "@portable-devshell/shared";
 
@@ -140,4 +142,31 @@ test("web auth patch switches mode and drops stale residual fields", () => {
     assert.equal(toNone?.auth, "none");
     assert.equal(toNone?.token, undefined);
     assert.equal(toNone?.oauth2, undefined);
+});
+
+test("config view exposes a flat web auth draft that round-trips the parser", () => {
+    const config = createDefaultControlConfig();
+    config.web.auth = { mode: "token", token: strongToken };
+
+    const view = toConfigView(config);
+    assert.equal(view.web.auth, "token");
+    assert.equal(view.web.token, strongToken);
+
+    const reparsed = normalizeConfigGlobalDraft(parseConfigGlobalDraft({ web: view.web }));
+    assert.deepEqual(reparsed.web.auth, { mode: "token", token: strongToken });
+});
+
+test("web auth patch preserves the current token when the masked placeholder is submitted", () => {
+    const config = createDefaultControlConfig();
+    config.web.auth = { mode: "token", token: strongToken };
+
+    const unchanged = applyConfigWebPatch(config.web, { auth: "token", token: MASKED_CONFIG_TOKEN });
+    const normalized = normalizeConfigGlobalDraft({ web: unchanged });
+    assert.deepEqual(normalized.web.auth, { mode: "token", token: strongToken });
+
+    const rotated = applyConfigWebPatch(config.web, { auth: "token", token: "b".repeat(48) });
+    assert.deepEqual(normalizeConfigGlobalDraft({ web: rotated }).web.auth, {
+        mode: "token",
+        token: "b".repeat(48)
+    });
 });

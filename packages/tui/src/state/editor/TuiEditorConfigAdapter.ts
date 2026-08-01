@@ -98,7 +98,7 @@ const numericFields = new Set([
     "retentionDays"
 ]);
 
-const listFields = new Set(["capabilities", "groups"]);
+const listFields = new Set(["capabilities", "groups", "requiredScopes"]);
 
 function containerModeValue(value: string): string | undefined {
     switch (value.trim().toLowerCase()) {

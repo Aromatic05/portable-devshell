@@ -14,6 +14,7 @@ import type {
     ConfigWebPatch,
     ConfigNormalizeContext,
     ConfigView,
+    ConfigWebView,
     ControlConfig,
     ControlGlobalConfig,
     ControlInstanceConfig,
@@ -22,7 +23,7 @@ import type {
     ControlWebAuthConfig,
     ControlWebAuthMode
 } from "./ConfigModel.js";
-import { defaultConfigNormalizeContext } from "./ConfigModel.js";
+import { defaultConfigNormalizeContext, MASKED_CONFIG_TOKEN } from "./ConfigModel.js";
 
 const legacyDefaultMcpToolGroups = ["file", "bash", "artifact", "tmux", "todo"] as const;
 
@@ -236,6 +237,12 @@ export function applyConfigWebPatch(
     current: ControlGlobalConfig["web"],
     patch: ConfigWebPatch
 ): ConfigGlobalDraft["web"] {
+    const resolvedToken =
+        patch.token === MASKED_CONFIG_TOKEN
+            ? current.auth.mode === "token"
+                ? current.auth.token
+                : undefined
+            : patch.token;
     const authDraft =
         patch.auth === undefined
             ? toWebAuthDraft(current.auth)
@@ -243,7 +250,7 @@ export function applyConfigWebPatch(
                   normalizeWebAuth({
                       auth: patch.auth,
                       oauth2: patch.oauth2,
-                      token: patch.token
+                      token: resolvedToken
                   })
               );
     return {
@@ -266,9 +273,23 @@ export function toConfigView(config: ControlConfig): ConfigView {
             }
         })) as unknown as ConfigView["instances"],
         mcp: { ...config.mcp },
-        web: {
-            ...config.web
-        }
+        web: toWebView(config.web)
+    };
+}
+
+function toWebView(web: ControlGlobalConfig["web"]): ConfigWebView {
+    const auth = web.auth;
+    return {
+        auth: auth.mode,
+        enabled: web.enabled,
+        listenHost: web.listenHost,
+        listenPort: web.listenPort,
+        oauth2:
+            auth.mode === "oauth2"
+                ? { ...auth.oauth2, requiredScopes: [...auth.oauth2.requiredScopes] }
+                : undefined,
+        publicBaseUrl: web.publicBaseUrl,
+        token: auth.mode === "token" ? auth.token : undefined
     };
 }
 

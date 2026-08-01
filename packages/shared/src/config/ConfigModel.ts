@@ -368,7 +368,17 @@ export interface ConfigView {
     control: ControlGlobalConfig["control"];
     instances: ConfigInstanceView[];
     mcp: ControlGlobalConfig["mcp"];
-    web: ControlGlobalConfig["web"];
+    web: ConfigWebView;
+}
+
+export interface ConfigWebView {
+    auth: ControlWebAuthMode;
+    enabled: boolean;
+    listenHost: string;
+    listenPort: number;
+    oauth2?: ControlWebOAuth2Config;
+    publicBaseUrl: string;
+    token?: string;
 }
 
 export interface ConfigPresetDefinition {
@@ -409,5 +419,7 @@ export const defaultConfigNormalizeContext: ConfigNormalizeContext = {
 };
 
 export const minimumAuditStorageBytes = 1024 * 1024;
+
+export const MASKED_CONFIG_TOKEN = "********";
 
 export type ConfigContainerMode = InstanceContainerMode;
