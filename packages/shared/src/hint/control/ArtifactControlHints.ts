@@ -49,14 +49,14 @@ export function artifactTransferResultHints(result: JsonValue): ToolDiagnosticHi
     if (status === "interrupted") {
         return [errorHint(
             "artifact.transferInterrupted",
-            "Inspect source and target, then start a new transfer."
+            "Inspect state before deciding whether to restart."
         )];
     }
 
     if (status === "cancelled") {
         return [errorHint(
             "artifact.transferCancelled",
-            "Check target state before restarting."
+            "Inspect target state; do not restart automatically."
         )];
     }
 
@@ -93,7 +93,7 @@ function transferFailureHint(transfer: Record<string, JsonValue>): ToolDiagnosti
         case "artifact.targetExists":
             return errorHint(
                 "artifact.targetExists",
-                "Verify the target before enabling overwrite."
+                "Overwrite requires explicit user approval."
             );
         case "artifact.payloadInvalid":
             return errorHint(
@@ -103,12 +103,12 @@ function transferFailureHint(transfer: Record<string, JsonValue>): ToolDiagnosti
         case "artifact.receiveOffsetMismatch":
             return errorHint(
                 "artifact.receiveOffsetMismatch",
-                "Start a new transfer."
+                "Start a new transfer only if still requested."
             );
         case "artifact.directoryChanged":
             return errorHint(
                 "artifact.directoryChanged",
-                "Stabilize the source and restart the transfer."
+                "Stabilize the source; restart only if requested."
             );
         case "artifact.directoryUnsafe":
             return errorHint(
@@ -181,7 +181,7 @@ export function artifactControlErrorHints(body: ControlErrorBody): ToolDiagnosti
         case "artifact.transferInterrupted":
             return [errorHint(
                 "artifact.transferInterrupted",
-                "Inspect state, then create a new transfer."
+                "Inspect state before deciding whether to restart."
             )];
         case "artifact.transferStateConflict":
             return [errorHint(

@@ -60,7 +60,8 @@ try {
         const written = await rpc.request("file_edit", {
             changes: "*** Begin Edit\n*** Write File: ./portable-devshell-smoke.txt\nportable-devshell-file-smoke\n*** End Edit"
         });
-        if (written.complete !== true || written.operations?.[0]?.status !== "applied") {
+        if (!Array.isArray(written.operations) || written.operations.length === 0 ||
+            written.operations.some((operation) => operation?.status !== "applied")) {
             throw new Error(`file_edit smoke failed: ${JSON.stringify(written)}`);
         }
         stage("file_read");

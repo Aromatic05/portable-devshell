@@ -7,7 +7,7 @@ export function instanceErrorHints(body: ControlErrorBody): ToolDiagnosticHint[]
         case "control.instanceAlreadyExists":
             return [errorHint(
                 "control.instanceAlreadyExists",
-                "Reuse the instance or choose another name."
+                "Reuse it or choose another name explicitly."
             )];
         case "control.instanceNotFound":
             return [errorHint(

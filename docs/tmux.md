@@ -20,14 +20,11 @@ tmux_close
 
 pane 是持久终端，task 是一次由 `tmux_run` 启动的前台命令。
 
-每个 task 都绑定：
+每个 task 在 worker 内部绑定 pane id 和 pane incarnation id；公开 task 结果只返回：
 
 ```text
-task id
-pane id
-pane incarnation id
-startedAt / finishedAt
-running / numeric exit code / unknown
+id
+status: running / numeric exit code / unknown
 ```
 
 task 不绑定创建它的 `ctxId`：
@@ -79,7 +76,6 @@ nonblock  shell 确认 task 已启动后返回
 {
     "task": {
         "id": "task-...",
-        "paneId": "pane-...",
         "status": "running"
     }
 }
@@ -167,19 +163,16 @@ unknown
 
 数字字符串就是 task 或最近前台命令的退出码。
 
-每个 pane 包含：
+`tmux_list` 返回紧凑 pane summary：
 
 ```text
 id                       稳定逻辑 ID
 name                     instance 内唯一名称
-tmuxPaneId               底层 tmux 坐标，仅用于诊断
-tmuxWindowId             底层 tmux window 坐标，仅用于诊断
-active                   pane 是否为所在 window 的活动 pane
-windowActive             所在 window 是否为 session 当前选中的 window
-columns / rows           terminal 的实际字符尺寸
-locked                   是否被运行中 task 或外部前台命令占用
-task                     当前运行中的 task
+status                   idle / running / unknown / numeric exit code
+task                     当前运行中的 task，可选
 ```
+
+`tmux_inspect` 才返回 detail；`cwd`、`command`、`size`、`locked`、`task` 和 `lines` 均仅在有值时出现。底层 tmux pane/window ID 不属于公开结果。
 
 ## 创建与关闭 pane
 
@@ -235,7 +228,7 @@ worker 只自动回收由 `tmux_run` 创建且在 metadata 中标记为 automati
 
 ## 生命周期与存储
 
-worker 正常停止时不会销毁 tmux server 和 pane。重新启动同一个 instance 后，worker 通过 tmux metadata 自动接管原有 pane 和仍在运行的 task，并返回新的 `observationEpoch` 和 `observationReset = true`。
+worker 正常停止时不会销毁 tmux server 和 pane。重新启动同一个 instance 后，worker 通过 tmux metadata 自动接管原有 pane 和仍在运行的 task；首次后续 tmux 结果会携带一次性的 `tmux.observationReset` warning，提示历史输出可能不完整。
 
 运行时 socket：
 

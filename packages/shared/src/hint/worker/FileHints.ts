@@ -221,7 +221,7 @@ export function fileErrorHints(toolName: string, body: ControlErrorBody): ToolDi
         case "file.alreadyExists":
             return [errorHint(
                 "file.alreadyExists",
-                "Use Patch, Rewrite, or a new path."
+                "Do not overwrite; use an explicitly requested action."
             )];
         case "file.pathConflict":
             return [errorHint(
@@ -231,7 +231,7 @@ export function fileErrorHints(toolName: string, body: ControlErrorBody): ToolDi
         case "file.parentNotFound":
             return [errorHint(
                 "file.parentNotFound",
-                "Verify or create the parent directory."
+                "Create the parent only if explicitly requested."
             )];
         case "file.patchOverlap":
             return [errorHint(

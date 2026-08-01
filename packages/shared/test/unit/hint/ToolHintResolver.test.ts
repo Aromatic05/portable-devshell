@@ -186,6 +186,15 @@ test("file_edit snapshotRequired and revisionMismatch errors are actionable", ()
     assert.match(cancelled[0].text, /re-read affected files/i);
 });
 
+test("file mutation errors preserve explicit authorization boundaries", () => {
+    const exists = resolveErrorHints("file_edit", body("file.alreadyExists"));
+    assert.match(exists[0].text, /do not overwrite/i);
+    assert.match(exists[0].text, /explicitly requested/i);
+
+    const parent = resolveErrorHints("file_edit", body("file.parentNotFound"));
+    assert.match(parent[0].text, /only if explicitly requested/i);
+});
+
 test("tmux_run block timeout keeps the task running and is not a failure", () => {
     const hints = resolveResultHints("tmux_run", {
         observationReset: false,
@@ -256,12 +265,21 @@ test("artifact_transfer non-terminal, terminal, and failure states are distingui
         transfer: { failure: { code: "artifact.targetExists", message: "exists", retryable: false }, status: "failed", transferId: "x1" }
     });
     assert.deepEqual(codes(failed), ["artifact.targetExists"]);
-    assert.match(failed[0].text, /verify the target/i);
-    assert.match(failed[0].text, /enabling overwrite/i);
+    assert.match(failed[0].text, /overwrite/i);
+    assert.match(failed[0].text, /explicit user approval/i);
 
-    assert.deepEqual(codes(resolveResultHints("artifact_transfer", {
+    const interrupted = resolveResultHints("artifact_transfer", {
         operation: "status", transfer: { status: "interrupted", transferId: "x1" }
-    })), ["artifact.transferInterrupted"]);
+    });
+    assert.deepEqual(codes(interrupted), ["artifact.transferInterrupted"]);
+    assert.match(interrupted[0].text, /before deciding/i);
+    assert.match(interrupted[0].text, /restart/i);
+
+    const cancelled = resolveResultHints("artifact_transfer", {
+        operation: "status", transfer: { status: "cancelled", transferId: "x1" }
+    });
+    assert.deepEqual(codes(cancelled), ["artifact.transferCancelled"]);
+    assert.match(cancelled[0].text, /do not restart automatically/i);
 
     const cancelCompleted = resolveResultHints("artifact_transfer", {
         operation: "cancel", transfer: { status: "completed", transferId: "x1" }
@@ -270,7 +288,9 @@ test("artifact_transfer non-terminal, terminal, and failure states are distingui
 });
 
 test("instance already-exists and config-invalid use real catalog codes and safe fields", () => {
-    assert.deepEqual(codes(resolveErrorHints("instance_create", body("control.instanceAlreadyExists"))), ["control.instanceAlreadyExists"]);
+    const exists = resolveErrorHints("instance_create", body("control.instanceAlreadyExists"));
+    assert.deepEqual(codes(exists), ["control.instanceAlreadyExists"]);
+    assert.match(exists[0].text, /explicitly/i);
     const config = resolveErrorHints("instance_create", body("control.configInvalid", {
         details: { fieldPath: "ssh.port", issueCode: "outOfRange" }
     }));

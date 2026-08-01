@@ -102,11 +102,10 @@ MCP `tools/list` 中对应的 `outputSchema` 也会保留原字段，并追加�
 诊断 hint 使用统一格式，文本为英文：
 
 ```text
-Error hint [<stable-code>]: <actionable instruction>
-Diagnostic hint [<stable-code>]: <authoritative instruction>
+[<stable-code>] <actionable instruction>
 ```
 
-`Error hint` 对应抛出的错误或返回的语义失败；`Diagnostic hint` 对应非错误但影响结论的部分结果或非终态。稳定 code 用于测试、去重和审计。
+error/diagnostic 类型在内部保留；对外 comment 统一使用上述短格式。稳定 code 用于测试、去重和审计。
 
 hint 不替代原有的 `error.code`、`error.message`、`error.details`、`stdout`、`stderr`、`warnings` 或 `operation.error`，这些字段继续保留。hint 的职责是说明：调用是否真正执行、是否可能已有副作用、输出是否完整、下一步该检查或调用什么、哪些动作被禁止、是否允许重试以及重试前必须改变什么。
 
@@ -114,7 +113,7 @@ hint 不包含敏感数据：完整 command、cwd、绝对路径、stdout/stderr
 
 正常返回的 JSON 也可能表示失败、部分结果或非终态，调用方必须结合 `comment` 判断：
 
-- `file_edit` 返回 `complete=false` 时表示部分失败：前面的 `applied` operation 已经生效，`failed` operation 未成功，后面的 `notExecuted` 未执行。必须逐项检查状态、重新读取已修改文件、只重建失败和未执行的操作，不得原样重放整个 change set。
+- `file_edit` 必须逐项检查 `operations[].status`：`applied` 已生效，`failed` 未成功，`notExecuted` 未执行。出现失败时必须重新读取已修改文件，只重建失败和未执行的操作，不得原样重放整个 change set。
 - `tmux.blockTimeout` 只表示本次调用等待结束，task 仍在运行，command 没有被终止；应继续 read/inspect/input，不得重启相同 command 或报告失败/完成。
 - `artifact_transfer` 返回 `queued` 等非终态只表示 transfer 已接受，不代表文件已送达；必须用同一 `transferId` 继续轮询，不得报告完成或启动重复 transfer。
 - 输出截断、分页 `nextCursor`/`nextOffsetBytes`、`lossy` 解码以及 tmux output window 的 skip/drop/resync 都会影响结论完整性；到达 EOF 或遍历完 cursor 之前不得声称已读取完整内容。
@@ -122,7 +121,7 @@ hint 不包含敏感数据：完整 command、cwd、绝对路径、stdout/stderr
 未分类错误只会得到保守的保底 hint：
 
 ```text
-Error hint [error.unknown]: The tool call failed for an unclassified reason. Inspect the original error and current state before taking further action; do not report completion or retry the same operation unchanged.
+[error.unknown] Inspect the error before retrying.
 ```
 
 遇到未知错误时禁止报告完成或原样重试。
