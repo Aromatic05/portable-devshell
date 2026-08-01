@@ -89,8 +89,12 @@ export class ControlWebSessionService {
     }
 
     setSessionCookie(response: ServerResponse): void {
+        response.setHeader("Set-Cookie", this.createSessionCookie());
+    }
+
+    createSessionCookie(): string {
         const token = this.#registerSession();
-        response.setHeader("Set-Cookie", this.#cookie(token, Math.max(1, Math.floor(this.#sessionTtlMs / 1_000))));
+        return this.#cookie(token, Math.max(1, Math.floor(this.#sessionTtlMs / 1_000)));
     }
 
     #authorizeBearer(request: IncomingMessage): boolean {

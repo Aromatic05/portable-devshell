@@ -1,3 +1,5 @@
+import { join } from "node:path";
+
 import { HttpHost, type McpHost, type McpOAuthApprovalService } from "@portable-devshell/mcp";
 import type { ControlConfig, ControlWebAuthConfig, JsonValue } from "@portable-devshell/shared";
 
@@ -153,6 +155,10 @@ export class ControlRuntimeMcp {
 
     get webPublicBaseUrl(): string | undefined {
         return this.#webPublicBaseUrl;
+    }
+
+    get webOauthDir(): string {
+        return join(this.#controlPaths.oauthDir, "web");
     }
 
     async replaceWebHost(config: ControlConfig): Promise<HttpHost | undefined> {

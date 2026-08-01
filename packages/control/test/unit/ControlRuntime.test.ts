@@ -166,6 +166,7 @@ test("runtime mounts web session and RPC routes on the MCP HTTP host", async (t)
             configEditor: undefined,
             instanceCreate: undefined,
             oauthApprovals: undefined,
+            webAuth: { mode: "none" },
             webHost: http,
             webPublicBaseUrl: "https://devshell.example",
             webEnabled: true,
@@ -188,10 +189,9 @@ test("runtime mounts web session and RPC routes on the MCP HTTP host", async (t)
 
     await runtime.start();
 
-    assert.deepEqual(authenticatedRoutes, [
-        { method: "post", path: CONTROL_WEB_SESSION_PATH }
-    ]);
+    assert.deepEqual(authenticatedRoutes, []);
     assert.deepEqual(rawRoutes, [
+        { method: "post", path: CONTROL_WEB_SESSION_PATH },
         { method: "get", path: CONTROL_WEB_SESSION_PATH },
         { method: "delete", path: CONTROL_WEB_SESSION_PATH }
     ]);

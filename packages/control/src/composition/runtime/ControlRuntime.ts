@@ -1,10 +1,12 @@
 import { controlWebBasePath } from "@portable-devshell/shared";
 
+import { McpOAuthProtectedResource } from "@portable-devshell/mcp";
 import type { InstanceRegistry } from "../../control/instance/registry/InstanceRegistry.js";
 import { OperationalOverviewService } from "../../control/overview/OperationalOverviewService.js";
 import { ControlChannelServer, type ControlChannelProvider } from "../../server/channel/ControlChannelServer.js";
 import { ControlSocketChannelProvider } from "../../server/socket/ControlSocketChannelProvider.js";
 import { resolveControlWebAssetsDirectory } from "../../server/web/ControlWebAssets.js";
+import { ControlWebOAuthFlow } from "../../server/web/ControlWebOAuthFlow.js";
 import { ControlWebSessionService } from "../../server/web/ControlWebSessionService.js";
 import { ControlWebSocketChannelProvider } from "../../server/web/ControlWebSocketChannelProvider.js";
 import { ControlRouteComposition } from "../ControlRouteComposition.js";
@@ -31,6 +33,8 @@ export class ControlRuntime {
     readonly #routes: ControlRouteComposition;
     readonly #socketProvider: ControlSocketChannelProvider;
     #webProvider?: ControlWebSocketChannelProvider;
+    #webFlow?: ControlWebOAuthFlow;
+    #webFlowUninstall?: () => void;
 
     constructor(options: ControlRuntimeOptions) {
         this.#artifact = options.artifact;
@@ -74,6 +78,7 @@ export class ControlRuntime {
 
     async start(): Promise<void> {
         try {
+            await this.#webFlow?.warmup();
             await this.#mcp.start();
             await this.#channels.start();
         } catch (error) {
@@ -85,6 +90,9 @@ export class ControlRuntime {
     async stop(): Promise<void> {
         const failures: unknown[] = [];
         await this.#channels.close().catch((error) => failures.push(error));
+        this.#webFlowUninstall?.();
+        this.#webFlow = undefined;
+        this.#webFlowUninstall = undefined;
         try {
             this.#reverse.stop();
         } catch (error) {
@@ -108,16 +116,65 @@ export class ControlRuntime {
         const http = this.#mcp.webHost;
         if (http === undefined || !this.#mcp.webEnabled) return undefined;
         const basePath = controlWebBasePath(this.#mcp.webPublicBaseUrl);
+        const secureCookie = this.#mcp.webPublicBaseUrl?.startsWith("https://") ?? false;
+        const sessions = new ControlWebSessionService({
+            auth: this.#mcp.webAuth,
+            basePath,
+            secureCookie
+        });
+        this.#installWebOAuthFlow(http, basePath, secureCookie, sessions);
         return new ControlWebSocketChannelProvider({
             assetDirectory: resolveControlWebAssetsDirectory(),
             basePath,
             http,
-            sessions: new ControlWebSessionService({
-                auth: this.#mcp.webAuth,
-                basePath,
-                secureCookie: this.#mcp.webPublicBaseUrl?.startsWith("https://") ?? false
-            })
+            sessions
         });
+    }
+
+    #installWebOAuthFlow(
+        http: import("@portable-devshell/mcp").HttpHost,
+        basePath: string,
+        secureCookie: boolean,
+        sessions: ControlWebSessionService
+    ): void {
+        this.#webFlowUninstall?.();
+        this.#webFlow = undefined;
+        this.#webFlowUninstall = undefined;
+
+        const auth = this.#mcp.webAuth;
+        const publicBaseUrl = this.#mcp.webPublicBaseUrl;
+        if (auth.mode !== "oauth2" || publicBaseUrl === undefined) return;
+
+        const mcpHost = this.#mcp.host;
+        const reused = http === mcpHost?.server && publicBaseUrl === this.#mcp.publicBaseUrl
+            ? mcpHost?.oauthProtectedResource
+            : undefined;
+        const providerConfig = {
+            documentationUrl: auth.oauth2.documentationUrl,
+            requiredScopes: [...auth.oauth2.requiredScopes],
+            resourceName: auth.oauth2.resourceName
+        };
+        const protectedResource = reused ?? new McpOAuthProtectedResource(
+            providerConfig,
+            publicBaseUrl,
+            this.#mcp.webOauthDir,
+            { trustProxy: isLoopbackPublicBaseUrl(publicBaseUrl) }
+        );
+
+        const flow = new ControlWebOAuthFlow({
+            basePath,
+            config: providerConfig,
+            ownsProvider: reused === undefined,
+            protectedResource,
+            publicBaseUrl,
+            secureCookie,
+            sessions
+        });
+        this.#webFlow = flow;
+        this.#webFlowUninstall = flow.install(http);
+        if (reused === undefined) {
+            http.installOAuth(protectedResource);
+        }
     }
 
     async #replaceWebProvider(
@@ -131,6 +188,7 @@ export class ControlRuntime {
             throw new Error("Web listener hot replacement requires Web to remain enabled.");
         }
         try {
+            await this.#webFlow?.warmup();
             await this.#channels.replaceProvider(previousProvider, nextProvider);
             this.#webProvider = nextProvider;
             await this.#mcp.stopRetiredWebHost(previousHost);
@@ -138,5 +196,14 @@ export class ControlRuntime {
             await this.#mcp.restoreWebHost(previousHost, previousConfig);
             throw error;
         }
+    }
+}
+
+function isLoopbackPublicBaseUrl(publicBaseUrl: string): boolean {
+    try {
+        const host = new URL(publicBaseUrl).hostname;
+        return host === "127.0.0.1" || host === "::1" || host === "localhost";
+    } catch {
+        return false;
     }
 }
