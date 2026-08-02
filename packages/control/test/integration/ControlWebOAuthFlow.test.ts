@@ -85,7 +85,7 @@ test("web oauth2 completes browser PKCE and authenticates the real control WebSo
     const authenticated = await fetch(`${publicBaseUrl}/web/session`, {
         headers: { cookie: sessionCookie! }
     });
-    assert.equal(authenticated.status, 204);
+    assert.equal(authenticated.status, 200);
 
     const connection = new ClientConnection({
         channelProvider: {
@@ -257,7 +257,7 @@ test("web oauth2 shares one provider with MCP on a shared listener without route
 
     const sessionCookie = await walkBrowserFlow(publicBaseUrl, protectedResource!.approvals);
     assert.notEqual(sessionCookie, undefined);
-    assert.equal((await fetch(`${publicBaseUrl}/web/session`, { headers: { cookie: sessionCookie! } })).status, 204);
+    assert.equal((await fetch(`${publicBaseUrl}/web/session`, { headers: { cookie: sessionCookie! } })).status, 200);
 
     assert.equal((await fetch(`${publicBaseUrl}/demo/mcp`, { method: "POST" })).status, 401);
 });
@@ -309,7 +309,7 @@ test("web oauth2 preserves a public URL path prefix across discovery, PKCE, and 
     const authenticated = await fetch(`${origin}${basePath}/session`, {
         headers: { cookie: sessionCookie! }
     });
-    assert.equal(authenticated.status, 204);
+    assert.equal(authenticated.status, 200);
 });
 
 function createMcpWorker() {

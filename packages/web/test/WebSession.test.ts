@@ -6,8 +6,8 @@ describe("BrowserWebSession", () => {
     it("uses same-origin cookies and only adds Authorization for token exchange", async () => {
         const request = vi
             .fn<typeof fetch>()
-            .mockResolvedValueOnce(new Response(null, { status: 401 }))
-            .mockResolvedValueOnce(new Response(null, { status: 204 }))
+            .mockResolvedValueOnce(new Response(JSON.stringify({ auth: "none", authenticated: false }), { status: 200 }))
+            .mockResolvedValueOnce(new Response(JSON.stringify({ authenticated: true }), { status: 200 }))
             .mockResolvedValueOnce(new Response(null, { status: 204 }));
         const session = new BrowserWebSession(request);
 
@@ -69,10 +69,10 @@ describe("BrowserWebSession", () => {
         const request = vi
             .fn<typeof fetch>()
             .mockResolvedValueOnce(
-                new Response(JSON.stringify({ auth: "oauth2", error: "Unauthorized" }), { status: 401 }),
+                new Response(JSON.stringify({ auth: "oauth2", authenticated: false }), { status: 200 }),
             )
             .mockResolvedValueOnce(
-                new Response(JSON.stringify({ auth: "token", error: "Unauthorized" }), { status: 401 }),
+                new Response(JSON.stringify({ auth: "token", authenticated: false }), { status: 200 }),
             )
             .mockResolvedValueOnce(new Response(null, { status: 204 }));
         const session = new BrowserWebSession(request);

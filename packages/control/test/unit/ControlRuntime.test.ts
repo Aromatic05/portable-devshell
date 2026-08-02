@@ -324,7 +324,7 @@ test("failed OAuth Web hot replacement restores the previous listener and OAuth 
     if (persisted.web.auth.mode !== "oauth2") throw new Error("restored Web auth mode is not oauth2");
     assert.equal(persisted.web.auth.oauth2.resourceName, "web-before");
     const restoredSession = await requestHttp(origin, "/web/session");
-    assert.equal(restoredSession.status, 401);
+    assert.equal(restoredSession.status, 200);
     const restoredMetadata = await requestHttp(origin, "/.well-known/oauth-protected-resource/web");
     assert.equal(restoredMetadata.status, 200);
     assert.equal((JSON.parse(restoredMetadata.body) as { resource_name: string }).resource_name, "web-before");

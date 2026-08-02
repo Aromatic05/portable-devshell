@@ -12,7 +12,7 @@ export interface WebSession {
 
 export class BrowserWebSession implements WebSession {
     constructor(
-        private readonly request: typeof fetch = fetch,
+        private readonly request: typeof fetch = (input, init) => globalThis.fetch(input, init),
         private readonly path = sessionPath(),
         private readonly oauthPath = oauthStartPath(),
         private readonly navigate: (url: string) => void = (url) => {
@@ -40,11 +40,25 @@ export class BrowserWebSession implements WebSession {
     }
 
     async check(): Promise<boolean> {
-        return await this.send("GET");
+        const response = await this.request(this.path, {
+            credentials: "same-origin",
+            method: "GET",
+        });
+        if (response.status === 204) {
+            return true;
+        }
+        if (response.status === 200) {
+            const body = (await response.json()) as { authenticated?: unknown };
+            return body.authenticated === true;
+        }
+        if (response.status === 401) {
+            return false;
+        }
+        throw new Error("Unable to establish a session.");
     }
 
     async establish(token?: string): Promise<boolean> {
-        return await this.send("POST", token);
+        return await this.send(token);
     }
 
     async logout(): Promise<void> {
@@ -61,19 +75,19 @@ export class BrowserWebSession implements WebSession {
         this.navigate(this.oauthPath);
     }
 
-    private async send(
-        method: "GET" | "POST",
-        token?: string,
-    ): Promise<boolean> {
+    private async send(token?: string): Promise<boolean> {
         const response = await this.request(this.path, {
             credentials: "same-origin",
             headers:
                 token === undefined
                     ? undefined
                     : { Authorization: `Bearer ${token}` },
-            method,
+            method: "POST",
         });
         if (response.status === 204) {
+            return true;
+        }
+        if (response.status === 200) {
             return true;
         }
         if (response.status === 401) {

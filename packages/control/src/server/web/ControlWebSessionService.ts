@@ -66,10 +66,16 @@ export class ControlWebSessionService {
         });
         const removeRead = http.registerRawRoute("get", sessionPath, (request, response) => {
             if (!this.authorize(request)) {
-                writeJsonError(response, 401, "Unauthorized", { auth: this.#auth.mode });
+                writeJson(response, 200, {
+                    auth: this.#auth.mode,
+                    authenticated: false,
+                });
                 return;
             }
-            writeNoContent(response);
+            writeJson(response, 200, {
+                auth: this.#auth.mode,
+                authenticated: true,
+            });
         });
         const removeDelete = http.registerRawRoute("delete", sessionPath, (request, response) => {
             this.#revoke(request);
@@ -142,7 +148,7 @@ export class ControlWebSessionService {
 
     #create(response: ServerResponse): void {
         this.setSessionCookie(response);
-        writeNoContent(response);
+        writeJson(response, 200, { authenticated: true });
     }
 
     #registerSession(): string {
@@ -258,7 +264,15 @@ function writeJsonError(
     message: string,
     extra: Record<string, string> = {}
 ): void {
-    const body = JSON.stringify({ error: message, ...extra });
+    writeJson(response, statusCode, { error: message, ...extra });
+}
+
+function writeJson(
+    response: ServerResponse,
+    statusCode: number,
+    value: Record<string, boolean | string>,
+): void {
+    const body = JSON.stringify(value);
     response.statusCode = statusCode;
     response.setHeader("Cache-Control", "no-store");
     response.setHeader("Content-Type", "application/json; charset=utf-8");

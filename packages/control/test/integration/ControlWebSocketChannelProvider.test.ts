@@ -59,7 +59,7 @@ test("web session cookie authenticates the shared control RPC over WebSocket", a
         headers: { authorization: `Bearer ${WEB_TOKEN}` },
         method: "POST"
     });
-    assert.equal(login.status, 204);
+    assert.equal(login.status, 200);
     const cookie = login.headers.get("set-cookie");
     assert.notEqual(cookie, null);
     const crossOrigin = await openRejected(`${origin.replace("http", "ws")}/web/rpc`, {
@@ -91,7 +91,7 @@ test("web session cookie authenticates the shared control RPC over WebSocket", a
     const session = await fetch(`${origin}/web/session`, {
         headers: { cookie: cookie!.split(";", 1)[0]! }
     });
-    assert.equal(session.status, 204);
+    assert.equal(session.status, 200);
 
     const logout = await fetch(`${origin}/web/session`, {
         headers: { cookie: cookie!.split(";", 1)[0]! },
@@ -147,7 +147,7 @@ test("Web none auth stays independent when its shared MCP listener requires OAut
     const mcp = await fetch(`${origin}/demo/mcp`, { method: "POST" });
     assert.equal(mcp.status, 401);
     const session = await fetch(`${origin}/web/session`, { method: "POST" });
-    assert.equal(session.status, 204);
+    assert.equal(session.status, 200);
     const cookie = session.headers.get("set-cookie")?.split(";", 1)[0];
     assert.notEqual(cookie, undefined);
     const webSocket = await NodeWebSocketFrameChannel.connect(`${origin.replace("http", "ws")}/web/rpc`, cookie!);
@@ -191,12 +191,12 @@ test("web token auth exchanges the configured web bearer token for a session coo
         headers: { authorization: `Bearer ${webToken}` },
         method: "POST"
     });
-    assert.equal(login.status, 204);
+    assert.equal(login.status, 200);
     const cookie = login.headers.get("set-cookie")?.split(";", 1)[0];
     assert.notEqual(cookie, undefined);
     assert.match(login.headers.get("set-cookie")!, /HttpOnly/iu);
 
-    assert.equal((await fetch(`${origin}/web/session`, { headers: { cookie: cookie! } })).status, 204);
+    assert.equal((await fetch(`${origin}/web/session`, { headers: { cookie: cookie! } })).status, 200);
     const webSocket = await NodeWebSocketFrameChannel.connect(`${origin.replace("http", "ws")}/web/rpc`, cookie!);
     t.after(() => webSocket.close());
     assert.deepEqual(await new ClientConnection({
@@ -239,7 +239,7 @@ test("web token auth never accepts an MCP namespace bearer token", async (t) => 
         headers: { authorization: `Bearer ${webToken}` },
         method: "POST"
     });
-    assert.equal(withWebToken.status, 204);
+    assert.equal(withWebToken.status, 200);
 });
 
 
@@ -275,7 +275,7 @@ test("web routes and cookies follow the public base URL path prefix", async (t) 
     assert.equal(await index.text(), '<script src="./assets/app.js"></script>');
     assert.equal((await fetch(`${origin}/web/session`, { method: "POST" })).status, 404);
     const login = await fetch(`${origin}${basePath}/session`, { method: "POST" });
-    assert.equal(login.status, 204);
+    assert.equal(login.status, 200);
     const setCookie = login.headers.get("set-cookie");
     assert.notEqual(setCookie, null);
     assert.match(setCookie!, /Path=\/devshell\/web(?:;|$)/u);
@@ -333,7 +333,7 @@ test("web session expiry closes its active channel", async (t) => {
     const origin = httpOrigin(http);
     const login = await fetch(`${origin}/web/session`, { method: "POST" });
     const cookie = login.headers.get("set-cookie")?.split(";", 1)[0];
-    assert.equal(login.status, 204);
+    assert.equal(login.status, 200);
     assert.notEqual(cookie, undefined);
     const channel = await NodeWebSocketFrameChannel.connect(
         `${origin.replace("http", "ws")}/web/rpc`,
@@ -342,9 +342,11 @@ test("web session expiry closes its active channel", async (t) => {
     t.after(() => channel.close());
 
     await waitUntil(() => channel.closed);
-    assert.equal((await fetch(`${origin}/web/session`, {
+    const expiredSession = await fetch(`${origin}/web/session`, {
         headers: { cookie: cookie! }
-    })).status, 401);
+    });
+    assert.equal(expiredSession.status, 200);
+    assert.deepEqual(await expiredSession.json(), { auth: "none", authenticated: false });
 });
 
 test("web RPC requires the canonical subprotocol", async (t) => {
@@ -373,7 +375,7 @@ test("web RPC requires the canonical subprotocol", async (t) => {
     const origin = httpOrigin(http);
     const login = await fetch(`${origin}/web/session`, { method: "POST" });
     const cookie = login.headers.get("set-cookie")?.split(";", 1)[0];
-    assert.equal(login.status, 204);
+    assert.equal(login.status, 200);
     assert.notEqual(cookie, undefined);
 
     const rejected = await openRejected(`${origin.replace("http", "ws")}/web/rpc`, {
@@ -415,7 +417,7 @@ test("web session capacity evicts the oldest browser session and closes its chan
     const origin = httpOrigin(http);
     const first = await fetch(`${origin}/web/session`, { method: "POST" });
     const firstCookie = first.headers.get("set-cookie")?.split(";", 1)[0];
-    assert.equal(first.status, 204);
+    assert.equal(first.status, 200);
     assert.notEqual(firstCookie, undefined);
     const firstChannel = await NodeWebSocketFrameChannel.connect(
         `${origin.replace("http", "ws")}/web/rpc`,
@@ -425,16 +427,18 @@ test("web session capacity evicts the oldest browser session and closes its chan
 
     const second = await fetch(`${origin}/web/session`, { method: "POST" });
     const secondCookie = second.headers.get("set-cookie")?.split(";", 1)[0];
-    assert.equal(second.status, 204);
+    assert.equal(second.status, 200);
     assert.notEqual(secondCookie, undefined);
     await waitUntil(() => firstChannel.closed);
 
-    assert.equal((await fetch(`${origin}/web/session`, {
+    const evictedSession = await fetch(`${origin}/web/session`, {
         headers: { cookie: firstCookie! }
-    })).status, 401);
+    });
+    assert.equal(evictedSession.status, 200);
+    assert.deepEqual(await evictedSession.json(), { auth: "none", authenticated: false });
     assert.equal((await fetch(`${origin}/web/session`, {
         headers: { cookie: secondCookie! }
-    })).status, 204);
+    })).status, 200);
 });
 
 function createRouteSnapshot(): PrefixRouteSnapshot {
