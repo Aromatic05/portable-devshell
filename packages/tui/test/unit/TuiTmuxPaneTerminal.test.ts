@@ -12,8 +12,17 @@ import {
     scrollTmuxInspectView,
     tuiTerminalTabLabel,
     tuiTerminalTabs,
+    type TuiTerminalLine,
     type TuiTmuxListPane,
 } from "../../src/testing.ts";
+
+function plainLines(values: readonly string[]): TuiTerminalLine[] {
+    return values.map((text) => ({ segments: [{ text }] }));
+}
+
+function visibleText(view: { visibleLines: TuiTerminalLine[] }): string[] {
+    return view.visibleLines.map((line) => line.segments.map((segment) => segment.text).join(""));
+}
 
 test("terminal page exposes a second-level selector with Instances and Tmux Panes", () => {
     assert.deepEqual([...tuiTerminalTabs], ["instances", "tmuxPanes"]);
@@ -40,20 +49,20 @@ test("only panes whose task.status is exactly running support Attach; other task
 });
 
 test("View renders tmux_inspect lines with clamped, scrollable offsets", () => {
-    const lines = ["one", "two", "three", "four", "five"];
+    const lines = plainLines(["one", "two", "three", "four", "five"]);
 
     const top = renderTmuxInspectView(lines, 3, 0);
-    assert.deepEqual(top.visibleLines, ["one", "two", "three"]);
+    assert.deepEqual(visibleText(top), ["one", "two", "three"]);
     assert.equal(top.offset, 0);
     assert.equal(top.atBottom, false);
     assert.equal(top.totalLines, 5);
 
     const middle = renderTmuxInspectView(lines, 3, 1);
-    assert.deepEqual(middle.visibleLines, ["two", "three", "four"]);
+    assert.deepEqual(visibleText(middle), ["two", "three", "four"]);
     assert.equal(middle.atBottom, false);
 
     const clamped = renderTmuxInspectView(lines, 3, 99);
-    assert.deepEqual(clamped.visibleLines, ["three", "four", "five"]);
+    assert.deepEqual(visibleText(clamped), ["three", "four", "five"]);
     assert.equal(clamped.offset, 2);
     assert.equal(clamped.atBottom, true);
 
@@ -61,14 +70,14 @@ test("View renders tmux_inspect lines with clamped, scrollable offsets", () => {
     assert.equal(negative.offset, 0);
 
     const scrolled = scrollTmuxInspectView(lines, 3, 0, 1);
-    assert.deepEqual(scrolled.visibleLines, ["two", "three", "four"]);
+    assert.deepEqual(visibleText(scrolled), ["two", "three", "four"]);
     const scrolledBack = scrollTmuxInspectView(lines, 3, 1, -1);
-    assert.deepEqual(scrolledBack.visibleLines, ["one", "two", "three"]);
+    assert.deepEqual(visibleText(scrolledBack), ["one", "two", "three"]);
 });
 
 test("View stays scrollable when content is shorter than the viewport", () => {
-    const view = renderTmuxInspectView(["only"], 10, 0);
-    assert.deepEqual(view.visibleLines, ["only"]);
+    const view = renderTmuxInspectView(plainLines(["only"]), 10, 0);
+    assert.deepEqual(visibleText(view), ["only"]);
     assert.equal(view.offset, 0);
     assert.equal(view.atBottom, true);
 });

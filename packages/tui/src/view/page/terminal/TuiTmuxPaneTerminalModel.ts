@@ -1,4 +1,5 @@
 import type { TuiTerminalTab } from "../../../state/route/TuiRoute.js";
+import type { TuiTerminalLine } from "../../../runtime/terminal/TuiTerminalModel.js";
 
 export const tuiTerminalTabs: readonly TuiTerminalTab[] = ["instances", "tmuxPanes"];
 export const TUI_TMUX_INSPECT_MAX_LINES = 200;
@@ -45,11 +46,11 @@ export interface TuiTmuxScrollView {
     atBottom: boolean;
     offset: number;
     totalLines: number;
-    visibleLines: string[];
+    visibleLines: TuiTerminalLine[];
 }
 
 export function renderTmuxInspectView(
-    lines: readonly string[],
+    lines: readonly TuiTerminalLine[],
     viewportRows: number,
     offset: number
 ): TuiTmuxScrollView {
@@ -66,7 +67,7 @@ export function renderTmuxInspectView(
 }
 
 export function scrollTmuxInspectView(
-    lines: readonly string[],
+    lines: readonly TuiTerminalLine[],
     viewportRows: number,
     offset: number,
     delta: number

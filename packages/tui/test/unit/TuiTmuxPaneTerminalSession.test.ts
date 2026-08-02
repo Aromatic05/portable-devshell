@@ -7,7 +7,7 @@ import {
     type TuiTmuxPaneTerminalOperations,
     type TuiTmuxPaneTerminalScheduler,
 } from "../../src/runtime/terminal/TuiTmuxPaneTerminalSession.ts";
-import { TUI_TMUX_MULTI_WRITER_WARNING, type TuiTmuxListPane } from "../../src/testing.ts";
+import { TUI_TMUX_MULTI_WRITER_WARNING, parseTmuxInspectLines, type TuiTerminalLine, type TuiTmuxListPane } from "../../src/testing.ts";
 
 interface RecordedOperation {
     args: readonly unknown[];
@@ -72,6 +72,18 @@ async function flush(): Promise<void> {
     await new Promise((resolve) => setImmediate(resolve));
 }
 
+function viewLines(session: TuiTmuxPaneTerminalSession): string[] {
+    return (session.getSnapshot().active?.scroll.visibleLines ?? []).map(
+        (line) => line.segments.map((segment) => segment.text).join("").trimEnd(),
+    );
+}
+
+function activeLines(session: TuiTmuxPaneTerminalSession): string[] {
+    return (session.getSnapshot().active?.lines ?? []).map(
+        (line) => line.segments.map((segment) => segment.text).join("").trimEnd(),
+    );
+}
+
 const runningPane: TuiTmuxListPane = { id: "%1", name: "server", status: "running", task: { id: "task-9", status: "running" } };
 const idlePane: TuiTmuxListPane = { id: "%0", name: "main", status: "idle" };
 
@@ -124,7 +136,7 @@ test("activating a view-only pane opens an unattached panel without a warning", 
     assert.equal(active?.attached, false);
     assert.equal(active?.warning, undefined);
     assert.equal(active?.name, "main");
-    assert.deepEqual(active?.lines, ["one", "two"]);
+    assert.deepEqual(activeLines(session), ["one", "two"]);
     assert.equal(harness.calls.some((call) => call.method === "inspectPane" && call.args[1] === "%0"), true);
 });
 
@@ -159,7 +171,7 @@ test("attached input is encoded and forwarded to the selected running task id", 
         { args: ["alpha", "task-9", "hello^M"], method: "sendInput" },
     );
     const active = session.getSnapshot().active;
-    assert.deepEqual(active?.lines, ["hello"]);
+    assert.deepEqual(activeLines(session), ["hello"]);
     assert.equal(active?.attached, true);
 });
 
@@ -200,20 +212,20 @@ test("View opens anchored to the latest output and scrolling up pauses follow", 
     await session.bind("alpha");
     await session.activate();
 
-    assert.deepEqual(session.getSnapshot().active?.scroll.visibleLines, ["d", "e"]);
+    assert.deepEqual(viewLines(session), ["d", "e"]);
     assert.equal(session.getSnapshot().active?.scroll.atBottom, true);
 
     session.scroll(-1);
-    assert.deepEqual(session.getSnapshot().active?.scroll.visibleLines, ["c", "d"]);
+    assert.deepEqual(viewLines(session), ["c", "d"]);
     assert.equal(session.getSnapshot().active?.scroll.atBottom, false);
 
     session.scroll(-10);
     assert.equal(session.getSnapshot().active?.scroll.offset, 0);
-    assert.deepEqual(session.getSnapshot().active?.scroll.visibleLines, ["a", "b"]);
+    assert.deepEqual(viewLines(session), ["a", "b"]);
 
     session.scroll(1_000_000);
     assert.equal(session.getSnapshot().active?.scroll.atBottom, true);
-    assert.deepEqual(session.getSnapshot().active?.scroll.visibleLines, ["d", "e"]);
+    assert.deepEqual(viewLines(session), ["d", "e"]);
 });
 
 test("refresh keeps following the bottom when anchored and holds position after scrolling up", async () => {
@@ -228,7 +240,7 @@ test("refresh keeps following the bottom when anchored and holds position after 
     harness.inspectByPane.set("%0", { id: "%0", lines: ["a", "b", "c", "d", "e"], name: "main", status: "idle" });
     await session.refresh();
     assert.equal(session.getSnapshot().active?.scroll.atBottom, true);
-    assert.deepEqual(session.getSnapshot().active?.scroll.visibleLines, ["d", "e"]);
+    assert.deepEqual(viewLines(session), ["d", "e"]);
 
     session.scroll(-2);
     assert.equal(session.getSnapshot().active?.scroll.atBottom, false);
@@ -357,11 +369,11 @@ test("handleRawInput in view mode scrolls up from the bottom and closes with Esc
     const session = new TuiTmuxPaneTerminalSession({ operations: harness.operations, viewportRows: 2 });
     await session.bind("alpha");
     await session.handleRawInput("\r");
-    assert.deepEqual(session.getSnapshot().active?.scroll.visibleLines, ["b", "c"]);
+    assert.deepEqual(viewLines(session), ["b", "c"]);
     assert.equal(session.getSnapshot().active?.scroll.atBottom, true);
 
     await session.handleRawInput("\u001b[A");
-    assert.deepEqual(session.getSnapshot().active?.scroll.visibleLines, ["a", "b"]);
+    assert.deepEqual(viewLines(session), ["a", "b"]);
     assert.equal(session.getSnapshot().active?.scroll.atBottom, false);
 
     await session.handleRawInput("\u001b");
@@ -477,6 +489,7 @@ test("Attach serializes input batches submitted by the same TUI client", async (
     assert.deepEqual(calls, ["first^M"]);
 
     resolvers.shift()?.({ output: ["first"], status: "running", task: "task-9" });
+    await first;
     await flush();
     assert.deepEqual(calls, ["first^M", "second^M"]);
 
@@ -622,7 +635,7 @@ test("a stale polling inspect cannot overwrite output returned by tmux_input", a
     const refresh = session.refresh();
     await flush();
     await session.handleInput("echo fresh\r");
-    assert.deepEqual(session.getSnapshot().active?.lines, ["fresh output"]);
+    assert.deepEqual(activeLines(session), ["fresh output"]);
 
     resolveStaleInspect?.({
         id: "%1",
@@ -634,7 +647,7 @@ test("a stale polling inspect cannot overwrite output returned by tmux_input", a
     });
     await refresh;
 
-    assert.deepEqual(session.getSnapshot().active?.lines, ["fresh output"]);
+    assert.deepEqual(activeLines(session), ["fresh output"]);
 });
 
 test("refresh detaches instead of silently switching an Attach session to a replacement task", async () => {
@@ -669,4 +682,49 @@ test("refresh detaches instead of silently switching an Attach session to a repl
     assert.equal(session.getSnapshot().active?.attached, false);
     assert.equal(session.getSnapshot().active?.taskId, undefined);
     assert.equal(session.getSnapshot().active?.warning, undefined);
+});
+
+function parsedText(lines: TuiTerminalLine[]): string {
+    return lines.map((line) => line.segments.map((segment) => segment.text).join("")).join("\n");
+}
+
+function flatSegments(lines: TuiTerminalLine[]): Array<{ backgroundColor?: string; bold?: boolean; color?: string; text: string }> {
+    return lines.flatMap((line) => line.segments);
+}
+
+test("parseTmuxInspectLines keeps SGR red, green, and bold as styled segments", async () => {
+    const lines = await parseTmuxInspectLines(["\u001B[31mred\u001B[0m \u001B[32mgreen\u001B[0m \u001B[1mbold\u001B[0m"]);
+
+    const segments = flatSegments(lines);
+    const red = segments.find((segment) => segment.text === "red");
+    const green = segments.find((segment) => segment.text === "green");
+    const bold = segments.find((segment) => segment.text === "bold");
+    assert.equal(red?.color, "#cd0000");
+    assert.equal(green?.color, "#00cd00");
+    assert.equal(bold?.bold, true);
+    assert.equal(parsedText(lines).includes("\u001B"), false);
+});
+
+test("parseTmuxInspectLines keeps background color segments", async () => {
+    const lines = await parseTmuxInspectLines(["\u001B[41malert\u001B[0m"]);
+
+    const alert = flatSegments(lines).find((segment) => segment.text === "alert");
+    assert.equal(alert?.backgroundColor, "#cd0000");
+});
+
+test("parseTmuxInspectLines honors carriage return and erase-line terminal semantics", async () => {
+    const overwritten = await parseTmuxInspectLines(["hello\rX"]);
+    assert.equal(parsedText(overwritten).trimEnd(), "Xello");
+
+    const erased = await parseTmuxInspectLines(["xxxx\r\u001B[Kyy"]);
+    assert.equal(parsedText(erased).trimEnd(), "yy");
+});
+
+test("parseTmuxInspectLines consumes dangerous OSC without rendering or executing it", async () => {
+    const lines = await parseTmuxInspectLines(["\u001B]52;c;U0VDUkVU\u0007visible"]);
+
+    const text = parsedText(lines);
+    assert.equal(text.includes("U0VDUkVU"), false);
+    assert.equal(text.includes("\u001B"), false);
+    assert.equal(text.trimEnd(), "visible");
 });

@@ -1077,6 +1077,7 @@ test("real Ink runtime switches terminal sources and drives tmux View and Attach
         await waitUntil(
             () => runtime.store.getState().interaction.focusScope === "terminal",
         );
+        await waitUntil(() => embedded.getSnapshot().status === "running");
         assert.ok(buildTuiTerminalViewportRegion(runtime.store.getState(), {
             columns: runtime.columns,
             rows: runtime.rows,

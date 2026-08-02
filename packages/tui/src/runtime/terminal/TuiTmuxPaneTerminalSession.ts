@@ -1,4 +1,6 @@
 import type { TuiTmuxInspectPane, TuiTmuxInputResult } from "../operation/TuiRuntimeTmuxOperations.js";
+import { TuiTerminalBuffer } from "./TuiTerminalBuffer.js";
+import type { TuiTerminalLine } from "./TuiTerminalModel.js";
 import {
     projectTmuxPanes,
     renderTmuxInspectView,
@@ -25,7 +27,7 @@ export interface TuiTmuxPaneTerminalActive {
     command?: string;
     cwd?: string;
     historyLimit: number;
-    lines: string[];
+    lines: TuiTerminalLine[];
     name: string;
     paneId: string;
     scroll: TuiTmuxScrollView;
@@ -197,7 +199,10 @@ export class TuiTmuxPaneTerminalSession {
             if (generation !== this.#refreshGeneration) {
                 return;
             }
-            active = this.#applyInspect(active, detail);
+            active = await this.#applyInspect(active, detail);
+            if (generation !== this.#refreshGeneration) {
+                return;
+            }
         }
         this.#replace({ active, error: undefined, instance, panes, selectedIndex, status: "ready" });
     }
@@ -240,7 +245,10 @@ export class TuiTmuxPaneTerminalSession {
         const taskId = detail?.taskId !== undefined && detail.taskStatus === "running"
             ? detail.taskId
             : undefined;
-        const lines = detail?.lines ?? [];
+        const lines = await parseTmuxInspectLines(detail?.lines ?? []);
+        if (generation !== this.#refreshGeneration) {
+            return;
+        }
         this.#replace({
             ...this.#snapshot,
             active: {
@@ -329,7 +337,7 @@ export class TuiTmuxPaneTerminalSession {
             if (current === undefined || current.taskId !== taskId) {
                 return;
             }
-            const lines = [...current.lines, ...result.output];
+            const lines = [...current.lines, ...(await parseTmuxInspectLines(result.output))];
             const offset = current.scroll.atBottom ? lines.length : current.scroll.offset;
             const exited = result.status !== "running";
             this.#replace({
@@ -406,8 +414,8 @@ export class TuiTmuxPaneTerminalSession {
         this.#stopPolling = undefined;
     }
 
-    #applyInspect(active: TuiTmuxPaneTerminalActive, detail: TuiTmuxInspectPane | undefined): TuiTmuxPaneTerminalActive {
-        const lines = detail?.lines ?? [];
+    async #applyInspect(active: TuiTmuxPaneTerminalActive, detail: TuiTmuxInspectPane | undefined): Promise<TuiTmuxPaneTerminalActive> {
+        const lines = await parseTmuxInspectLines(detail?.lines ?? []);
         const offset = active.scroll.atBottom ? lines.length : active.scroll.offset;
         const taskId =
             active.taskId !== undefined &&
@@ -457,4 +465,26 @@ function clampIndex(index: number, length: number): number {
 
 function readErrorMessage(error: unknown): string {
     return error instanceof Error ? error.message : String(error);
+}
+
+const TMUX_INSPECT_PARSE_MIN_COLUMNS = 80;
+// eslint-disable-next-line no-control-regex
+const ANSI_ESCAPE_PATTERN = /\u001B\[[0-?]*[ -/]*[@-~]|\u001B\][^\u0007\u001B]*(?:\u0007|\u001B\\)?|\u001B[@-Z\\-_]/g;
+
+export async function parseTmuxInspectLines(rawLines: readonly string[]): Promise<TuiTerminalLine[]> {
+    if (rawLines.length === 0) {
+        return [];
+    }
+    const columns = Math.max(TMUX_INSPECT_PARSE_MIN_COLUMNS, ...rawLines.map(visibleWidth));
+    const buffer = new TuiTerminalBuffer({ columns, rows: rawLines.length });
+    try {
+        await buffer.write(rawLines.join("\r\n"));
+        return buffer.getSnapshot().lines;
+    } finally {
+        buffer.dispose();
+    }
+}
+
+function visibleWidth(line: string): number {
+    return line.replace(ANSI_ESCAPE_PATTERN, "").length;
 }

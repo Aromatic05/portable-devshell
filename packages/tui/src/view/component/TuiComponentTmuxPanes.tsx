@@ -64,7 +64,23 @@ export function TuiComponentTmuxPanes(props: TuiComponentTmuxPanesProps) {
                             {active.warning !== undefined ? <Text color="yellow" wrap="wrap">{active.warning}</Text> : undefined}
                             {active.scroll.visibleLines.slice(0, bodyRows).map((line, row) => (
                                 <Box height={1} key={row} overflow="hidden" width={panelWidth}>
-                                    <Text wrap="truncate-end">{line === "" ? " " : line}</Text>
+                                    <Text wrap="truncate-end">
+                                        {line.segments.map((segment, index) => (
+                                            <Text
+                                                backgroundColor={segment.backgroundColor}
+                                                bold={segment.bold}
+                                                color={segment.color}
+                                                dimColor={segment.dimColor}
+                                                inverse={segment.inverse}
+                                                italic={segment.italic}
+                                                key={`${row}:${index}`}
+                                                strikethrough={segment.strikethrough}
+                                                underline={segment.underline}
+                                            >
+                                                {segment.text}
+                                            </Text>
+                                        ))}
+                                    </Text>
                                 </Box>
                             ))}
                             <Text dimColor wrap="truncate-end">
