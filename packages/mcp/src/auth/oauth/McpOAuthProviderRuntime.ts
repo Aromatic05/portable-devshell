@@ -158,6 +158,7 @@ export class McpOAuthProviderRuntime {
                     useGrantedResource: async () => true
                 },
                 revocation: {
+                    allowedPolicy: async (_ctx, client, token) => token.clientId === client.clientId,
                     enabled: true
                 }
             },

@@ -128,7 +128,7 @@ test("a running host can add an OAuth namespace without exposing it as local aut
     }
 });
 
-test("oauth2 exposes protected resource metadata and accepts a valid bearer token", async () => {
+test("oauth2 enforces resource isolation, refresh rotation, replay detection, and revocation", async () => {
     const port = await reservePort();
     const storageDir = await mkdtemp(join(tmpdir(), "portable-devshell-mcp-oidc-"));
     const host = createHost({
@@ -211,6 +211,7 @@ test("oauth2 exposes protected resource metadata and accepts a valid bearer toke
             code_challenge_methods_supported?: string[];
             issuer: string;
             registration_endpoint: string;
+            revocation_endpoint: string;
             scopes_supported?: string[];
             token_endpoint: string;
             token_endpoint_auth_methods_supported?: string[];
@@ -239,32 +240,67 @@ test("oauth2 exposes protected resource metadata and accepts a valid bearer toke
         const client = await clientRegistration.json() as { client_id: string; redirect_uris: string[] };
         assert.equal(typeof client.client_id, "string");
 
-        const verifier = base64Url(randomBytes(32));
-        const challenge = base64Url(createHash("sha256").update(verifier).digest());
         const redirectUri = client.redirect_uris[0]!;
-        const authorizationUrl = new URL(metadata.authorization_endpoint);
-        authorizationUrl.searchParams.set("client_id", client.client_id);
-        authorizationUrl.searchParams.set("redirect_uri", redirectUri);
-        authorizationUrl.searchParams.set("response_type", "code");
-        authorizationUrl.searchParams.set("scope", "openid offline_access mcp");
-        authorizationUrl.searchParams.set("code_challenge", challenge);
-        authorizationUrl.searchParams.set("code_challenge_method", "S256");
-        authorizationUrl.searchParams.set("resource", endpoint);
-
-        let approvalKind: "authorization" | "registration" = "registration";
         const approvedIds = new Set<string>();
-        const code = await authorizeViaInteractions(authorizationUrl, redirectUri, async () => {
-            const approval = await waitForPendingApproval(host, approvalKind);
-            approvedIds.add(approval.approvalId);
-            await host.oauthApprovals?.decide(approval.approvalId, "approve", "tui");
+        const issueTokens = async () => {
+            const verifier = base64Url(randomBytes(32));
+            const challenge = base64Url(createHash("sha256").update(verifier).digest());
+            const authorizationUrl = new URL(metadata.authorization_endpoint);
+            authorizationUrl.searchParams.set("client_id", client.client_id);
+            authorizationUrl.searchParams.set("redirect_uri", redirectUri);
+            authorizationUrl.searchParams.set("response_type", "code");
+            authorizationUrl.searchParams.set("scope", "openid offline_access mcp");
+            authorizationUrl.searchParams.set("code_challenge", challenge);
+            authorizationUrl.searchParams.set("code_challenge_method", "S256");
+            authorizationUrl.searchParams.set("resource", endpoint);
 
-            if (approvalKind === "registration") {
-                approvalKind = "authorization";
-                return "reload";
-            }
+            const code = await authorizeViaInteractions(authorizationUrl, redirectUri, async () => {
+                const approval = await waitForAnyPendingApproval(host);
+                approvedIds.add(approval.approvalId);
+                await host.oauthApprovals?.decide(approval.approvalId, "approve", "tui");
+                return approval.kind === "registration" ? "reload" : "submit";
+            });
 
-            return "submit";
+            const tokenResponse = await fetch(metadata.token_endpoint, {
+                method: "POST",
+                headers: {
+                    "content-type": "application/x-www-form-urlencoded"
+                },
+                body: new URLSearchParams({
+                    client_id: client.client_id,
+                    code,
+                    code_verifier: verifier,
+                    grant_type: "authorization_code",
+                    redirect_uri: redirectUri,
+                    resource: endpoint
+                })
+            });
+            assert.equal(tokenResponse.status, 200);
+            const tokens = await tokenResponse.json() as {
+                access_token?: string;
+                expires_in?: number;
+                refresh_token?: string;
+            };
+            assert.equal(typeof tokens.access_token, "string");
+            assert.equal(typeof tokens.refresh_token, "string");
+            assert.equal(tokens.expires_in, 60 * 60);
+            return {
+                accessToken: tokens.access_token!,
+                refreshToken: tokens.refresh_token!
+            };
+        };
+        const refreshTokens = async (refreshToken: string) => await fetch(metadata.token_endpoint, {
+            method: "POST",
+            headers: { "content-type": "application/x-www-form-urlencoded" },
+            body: new URLSearchParams({
+                client_id: client.client_id,
+                grant_type: "refresh_token",
+                refresh_token: refreshToken,
+                resource: endpoint
+            })
         });
+
+        const rotationGrant = await issueTokens();
 
         assert.equal(approvedIds.size, 2);
         assert.deepEqual(
@@ -272,69 +308,98 @@ test("oauth2 exposes protected resource metadata and accepts a valid bearer toke
             ["authorization", "registration"]
         );
 
-        const tokenResponse = await fetch(metadata.token_endpoint, {
-            method: "POST",
-            headers: {
-                "content-type": "application/x-www-form-urlencoded"
-            },
-            body: new URLSearchParams({
-                client_id: client.client_id,
-                code,
-                code_verifier: verifier,
-                grant_type: "authorization_code",
-                redirect_uri: redirectUri,
-                resource: endpoint
-            })
-        });
-        assert.equal(tokenResponse.status, 200);
-        const tokens = await tokenResponse.json() as {
-            access_token: string;
-            expires_in: number;
+        const refreshResponse = await refreshTokens(rotationGrant.refreshToken);
+        assert.equal(refreshResponse.status, 200);
+        const refreshedTokens = await refreshResponse.json() as {
+            access_token?: string;
             refresh_token?: string;
         };
-        assert.equal(typeof tokens.access_token, "string");
-        assert.equal(typeof tokens.refresh_token, "string");
-        assert.equal(tokens.expires_in, 60 * 60);
-
-        const refreshResponse = await fetch(metadata.token_endpoint, {
-            method: "POST",
-            headers: { "content-type": "application/x-www-form-urlencoded" },
-            body: new URLSearchParams({
-                client_id: client.client_id,
-                grant_type: "refresh_token",
-                refresh_token: tokens.refresh_token!,
-                resource: endpoint
-            })
-        });
-        assert.equal(refreshResponse.status, 200);
-        const refreshedTokens = await refreshResponse.json() as { access_token?: string };
         assert.equal(typeof refreshedTokens.access_token, "string");
+        assert.equal(typeof refreshedTokens.refresh_token, "string");
+        assert.notEqual(refreshedTokens.refresh_token, rotationGrant.refreshToken);
 
         const rejectedByOtherNamespace = await fetch(`http://127.0.0.1:${port}/other/mcp`, {
             method: "POST",
             headers: {
                 accept: "application/json, text/event-stream",
-                authorization: `Bearer ${tokens.access_token}`,
+                authorization: `Bearer ${rotationGrant.accessToken}`,
                 "content-type": "application/json"
             },
             body: JSON.stringify(await readFixture("mcp-initialize.json"))
         });
         assert.equal(rejectedByOtherNamespace.status, 401);
 
-        const response = await fetch(endpoint, {
-            method: "POST",
-            headers: {
-                accept: "application/json, text/event-stream",
-                authorization: `Bearer ${refreshedTokens.access_token}`,
-                "content-type": "application/json"
-            },
-            body: JSON.stringify(await readFixture("mcp-initialize.json"))
-        });
+        const response = await initializeWithBearer(endpoint, refreshedTokens.access_token!);
         const payload = await response.json() as { result?: { protocolVersion?: string } };
 
         assert.equal(response.status, 200);
         assert.equal(typeof payload.result?.protocolVersion, "string");
         assert.equal(typeof response.headers.get("mcp-session-id"), "string");
+
+        const revocationGrant = await issueTokens();
+
+        const replayedRefresh = await refreshTokens(rotationGrant.refreshToken);
+        assert.equal(replayedRefresh.status, 400);
+        assert.equal((await replayedRefresh.json() as { error?: string }).error, "invalid_grant");
+
+        const revokedRotatedRefresh = await refreshTokens(refreshedTokens.refresh_token!);
+        assert.equal(revokedRotatedRefresh.status, 400);
+        assert.equal((await revokedRotatedRefresh.json() as { error?: string }).error, "invalid_grant");
+        assert.equal((await initializeWithBearer(endpoint, refreshedTokens.access_token!)).status, 401);
+        assert.equal((await initializeWithBearer(endpoint, revocationGrant.accessToken)).status, 200);
+
+        const otherClientRegistration = await fetch(metadata.registration_endpoint, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+                application_type: "native",
+                client_name: "Other public client",
+                grant_types: ["authorization_code", "refresh_token"],
+                redirect_uris: ["https://client.example.com/oauth/callback"],
+                response_types: ["code"],
+                token_endpoint_auth_method: "none"
+            })
+        });
+        assert.equal(otherClientRegistration.status, 201);
+        const otherClient = await otherClientRegistration.json() as { client_id?: string };
+        assert.equal(typeof otherClient.client_id, "string");
+
+        const crossClientRevocation = await fetch(metadata.revocation_endpoint, {
+            method: "POST",
+            headers: { "content-type": "application/x-www-form-urlencoded" },
+            body: new URLSearchParams({
+                client_id: otherClient.client_id!,
+                token: revocationGrant.refreshToken,
+                token_type_hint: "refresh_token"
+            })
+        });
+        assert.equal(crossClientRevocation.status, 200);
+
+        const preservedRefresh = await refreshTokens(revocationGrant.refreshToken);
+        assert.equal(preservedRefresh.status, 200);
+        const preservedTokens = await preservedRefresh.json() as {
+            access_token?: string;
+            refresh_token?: string;
+        };
+        assert.equal(typeof preservedTokens.access_token, "string");
+        assert.equal(typeof preservedTokens.refresh_token, "string");
+
+        const revocationResponse = await fetch(metadata.revocation_endpoint, {
+            method: "POST",
+            headers: { "content-type": "application/x-www-form-urlencoded" },
+            body: new URLSearchParams({
+                client_id: client.client_id,
+                token: preservedTokens.refresh_token!,
+                token_type_hint: "refresh_token"
+            })
+        });
+        assert.equal(revocationResponse.status, 200);
+
+        const revokedRefresh = await refreshTokens(preservedTokens.refresh_token!);
+        assert.equal(revokedRefresh.status, 400);
+        assert.equal((await revokedRefresh.json() as { error?: string }).error, "invalid_grant");
+        assert.equal((await initializeWithBearer(endpoint, revocationGrant.accessToken)).status, 401);
+        assert.equal((await initializeWithBearer(endpoint, preservedTokens.access_token!)).status, 401);
     } finally {
         await host.stop();
         await rm(storageDir, { force: true, recursive: true });
@@ -428,6 +493,18 @@ test("oauth2 keeps a public path prefix on resources while using the origin as i
 
 async function readFixture(name: string): Promise<JsonValue> {
     return JSON.parse(await readFile(resolve(fixturesDirectory, name), "utf8")) as JsonValue;
+}
+
+async function initializeWithBearer(endpoint: string, accessToken: string): Promise<Response> {
+    return await fetch(endpoint, {
+        method: "POST",
+        headers: {
+            accept: "application/json, text/event-stream",
+            authorization: `Bearer ${accessToken}`,
+            "content-type": "application/json"
+        },
+        body: JSON.stringify(await readFixture("mcp-initialize.json"))
+    });
 }
 
 function createHost(overrides?: {
@@ -566,6 +643,12 @@ async function authorizeViaInteractions(
 async function waitForPendingApproval(host: McpHost, kind: "authorization" | "registration") {
     const approval = (await host.oauthApprovals?.list())?.find((candidate) => candidate.kind === kind && candidate.status === "pending");
     assert.notEqual(approval, undefined, `pending ${kind} approval was not created`);
+    return approval!;
+}
+
+async function waitForAnyPendingApproval(host: McpHost) {
+    const approval = (await host.oauthApprovals?.list())?.find((candidate) => candidate.status === "pending");
+    assert.notEqual(approval, undefined, "pending OAuth approval was not created");
     return approval!;
 }
 
