@@ -8,6 +8,7 @@ import test from "node:test";
 
 import { HttpHost, McpOAuthProtectedResource, type McpOAuthApprovalService } from "@portable-devshell/mcp";
 import { McpHost } from "@portable-devshell/mcp/testing";
+import { controlWebBasePath } from "@portable-devshell/shared";
 
 import { ControlWebOAuthFlow } from "../../src/server/web/ControlWebOAuthFlow.ts";
 import { ControlWebSessionService } from "../../src/server/web/ControlWebSessionService.ts";
@@ -166,6 +167,56 @@ test("web oauth2 shares one provider with MCP on a shared listener without route
     assert.equal((await fetch(`${publicBaseUrl}/demo/mcp`, { method: "POST" })).status, 401);
 });
 
+test("web oauth2 preserves a public URL path prefix across discovery, PKCE, and redirect", async (t) => {
+    const port = await reservePort();
+    const origin = `http://127.0.0.1:${port}`;
+    const publicBaseUrl = `${origin}/devshell`;
+    const basePath = controlWebBasePath(publicBaseUrl);
+    const storage = await mkdtemp(join(tmpdir(), "portable-devshell-web-oauth-prefix-"));
+    const protectedResource = new McpOAuthProtectedResource(
+        { requiredScopes: WEB_SCOPES, resourceName: WEB_RESOURCE_NAME },
+        origin,
+        storage,
+        { trustProxy: true }
+    );
+    const http = new HttpHost({ listenHost: "127.0.0.1", listenPort: port });
+    const sessions = new ControlWebSessionService({
+        auth: { mode: "oauth2", oauth2: { requiredScopes: WEB_SCOPES, resourceName: WEB_RESOURCE_NAME } },
+        basePath
+    });
+    const flow = new ControlWebOAuthFlow({
+        basePath,
+        config: { requiredScopes: WEB_SCOPES, resourceName: WEB_RESOURCE_NAME },
+        ownsProvider: true,
+        protectedResource,
+        publicBaseUrl,
+        sessions
+    });
+    await flow.warmup();
+    const uninstall = flow.install(http);
+    const uninstallSession = sessions.install(http);
+    await http.start();
+    t.after(async () => {
+        uninstall();
+        uninstallSession();
+        await http.stop().catch(() => undefined);
+        await rm(storage, { force: true, recursive: true });
+    });
+
+    const metadata = await fetch(`${origin}/.well-known/oauth-protected-resource${basePath}`);
+    assert.equal(metadata.status, 200);
+    const metadataBody = await metadata.json() as { authorization_servers: string[]; resource: string };
+    assert.equal(metadataBody.resource, `${origin}${basePath}`);
+    assert.deepEqual(metadataBody.authorization_servers, [origin]);
+
+    const sessionCookie = await walkBrowserFlow(origin, protectedResource.approvals, basePath);
+    assert.notEqual(sessionCookie, undefined);
+    const authenticated = await fetch(`${origin}${basePath}/session`, {
+        headers: { cookie: sessionCookie! }
+    });
+    assert.equal(authenticated.status, 204);
+});
+
 function createMcpWorker() {
     return {
         async appendMcpSessionClosed() {},
@@ -179,10 +230,11 @@ function createMcpWorker() {
 
 async function walkBrowserFlow(
     origin: string,
-    approvals: McpOAuthApprovalService
+    approvals: McpOAuthApprovalService,
+    basePath = "/web"
 ): Promise<string | undefined> {
     let cookieHeader = "";
-    const start = await fetch(`${origin}/web/oauth/start`, { redirect: "manual" });
+    const start = await fetch(`${origin}${basePath}/oauth/start`, { redirect: "manual" });
     assert.equal(start.status, 302);
     cookieHeader = mergeCookieHeader(cookieHeader, start);
     assert.match(start.headers.get("set-cookie") ?? "", /devshell_web_oauth_state=/u);
@@ -219,14 +271,14 @@ async function walkBrowserFlow(
         const location = response.headers.get("location");
         assert.notEqual(location, null);
         const nextUrl = new URL(location!, currentUrl);
-        if (nextUrl.pathname === "/web/oauth/callback") {
+        if (nextUrl.pathname === `${basePath}/oauth/callback`) {
             const callback = await fetch(nextUrl.href, {
                 headers: { cookie: cookieHeader },
                 redirect: "manual"
             });
             cookieHeader = mergeCookieHeader(cookieHeader, callback);
             assert.equal(callback.status, 302);
-            assert.equal(new URL(callback.headers.get("location")!, origin).pathname, "/web/");
+            assert.equal(new URL(callback.headers.get("location")!, origin).pathname, `${basePath}/`);
             return extractCookie(cookieHeader, "devshell_web_session");
         }
         currentUrl = nextUrl.href;

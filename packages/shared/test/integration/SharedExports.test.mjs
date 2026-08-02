@@ -54,7 +54,7 @@ test("config patch has explicit null clearing and strict unknown-field parsing",
     const global = normalizeConfigGlobalDraft({
         mcp: applyConfigMcpPatch(createDefaultControlConfig().mcp, { publicBaseUrl: null })
     });
-    assert.equal(global.mcp.publicBaseUrl, undefined);
+    assert.equal(global.mcp.publicBaseUrl, "http://127.0.0.1:17890");
 });
 
 test("semantic validation accepts normalized canonical config", () => {

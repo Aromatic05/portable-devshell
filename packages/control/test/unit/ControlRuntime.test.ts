@@ -1,15 +1,21 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rename, rm, writeFile } from "node:fs/promises";
+import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
 import {
+    ControlPathHome,
     CONTROL_WEB_RPC_PATH,
-    CONTROL_WEB_SESSION_PATH
+    CONTROL_WEB_SESSION_PATH,
+    createDefaultControlConfig,
+    type ControlConfig
 } from "@portable-devshell/shared";
 
 import { ControlRuntime } from "../../src/testing.ts";
+import { ControlRuntimeMcp } from "../../src/composition/runtime/ControlRuntimeMcp.ts";
+import { ControlRuntimeState } from "../../src/composition/runtime/ControlRuntimeState.ts";
 import { createTestIpcPath, ipcEndpointAcceptsConnections } from "../../../../test/TestPlatformSupport.ts";
 
 test("runtime stop does not settle until owned cleanup completes", async (t) => {
@@ -240,3 +246,95 @@ test("runtime does not mount WebUI routes when web.enabled is false", async (t) 
 
     await runtime.start();
 });
+
+test("failed OAuth Web hot replacement restores the previous listener and OAuth routes", async (t) => {
+    const homeDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-runtime-web-rollback-"));
+    const socketPath = createTestIpcPath("control-runtime", homeDirectory);
+    const port = await reservePort();
+    const origin = `http://127.0.0.1:${port}`;
+    let persisted = createDefaultControlConfig();
+    persisted.web = {
+        auth: {
+            mode: "oauth2",
+            oauth2: { requiredScopes: ["web"], resourceName: "web-before" }
+        },
+        enabled: true,
+        listenHost: "127.0.0.1",
+        listenPort: port,
+        publicBaseUrl: origin
+    };
+    const state = new ControlRuntimeState({
+        configStore: {
+            async readOrCreate() {
+                return persisted;
+            },
+            async write(config: ControlConfig) {
+                persisted = config;
+            }
+        } as never,
+        homeDirectory
+    });
+    await state.load();
+    const controlPaths = new ControlPathHome(homeDirectory);
+    const artifact = {
+        installHttpRoute() {},
+        service: undefined,
+        async stop() {}
+    } as never;
+    const mcp = new ControlRuntimeMcp({
+        applyRuntimeConfig: async () => undefined,
+        artifact,
+        controlPaths,
+        state
+    });
+    const runtime = new ControlRuntime({
+        artifact,
+        instances: state.instances,
+        mcp,
+        restart: async () => undefined,
+        reverse: { service: undefined, stop() {} } as never,
+        shutdown: async () => undefined,
+        socketPath
+    });
+    t.after(async () => {
+        await runtime.stop().catch(() => undefined);
+        await rm(homeDirectory, { force: true, recursive: true });
+    });
+
+    await runtime.start();
+    assert.equal((await fetch(`${origin}/.well-known/oauth-protected-resource/web`)).status, 200);
+
+    const oauthStorage = mcp.webOauthDir;
+    const oauthBackup = `${oauthStorage}.backup`;
+    await rename(oauthStorage, oauthBackup);
+    await writeFile(oauthStorage, "block replacement warmup", "utf8");
+
+    await assert.rejects(
+        mcp.configEditor.updateWebConfig({
+            patch: {
+                auth: "oauth2",
+                oauth2: { requiredScopes: ["web"], resourceName: "web-after" }
+            }
+        }),
+        /EEXIST|ENOTDIR|not a directory/iu
+    );
+
+    assert.equal(persisted.web.auth.mode, "oauth2");
+    if (persisted.web.auth.mode !== "oauth2") throw new Error("restored Web auth mode is not oauth2");
+    assert.equal(persisted.web.auth.oauth2.resourceName, "web-before");
+    assert.equal((await fetch(`${origin}/web/session`)).status, 401);
+    const restoredMetadata = await fetch(`${origin}/.well-known/oauth-protected-resource/web`);
+    assert.equal(restoredMetadata.status, 200);
+    assert.equal((await restoredMetadata.json() as { resource_name: string }).resource_name, "web-before");
+});
+
+async function reservePort(): Promise<number> {
+    const server = createServer();
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address();
+    assert.ok(typeof address === "object" && address !== null);
+    await new Promise<void>((resolve, reject) => {
+        server.close((error) => error === undefined ? resolve() : reject(error));
+    });
+    return address.port;
+}

@@ -1,6 +1,6 @@
 import { controlWebBasePath } from "@portable-devshell/shared";
 
-import { McpOAuthProtectedResource } from "@portable-devshell/mcp";
+import { McpOAuthProtectedResource, type HttpHost } from "@portable-devshell/mcp";
 import type { InstanceRegistry } from "../../control/instance/registry/InstanceRegistry.js";
 import { OperationalOverviewService } from "../../control/overview/OperationalOverviewService.js";
 import { ControlChannelServer, type ControlChannelProvider } from "../../server/channel/ControlChannelServer.js";
@@ -22,6 +22,12 @@ export interface ControlRuntimeOptions {
     reverse: ControlRuntimeReverse;
     shutdown: () => Promise<void>;
     socketPath: string;
+}
+
+interface ControlWebRuntime {
+    flow?: ControlWebOAuthFlow;
+    host: HttpHost;
+    provider: ControlWebSocketChannelProvider;
 }
 
 export class ControlRuntime {
@@ -58,9 +64,10 @@ export class ControlRuntime {
         });
         this.#socketProvider = new ControlSocketChannelProvider({ socketPath: options.socketPath });
         const providers: ControlChannelProvider[] = [this.#socketProvider];
-        const webProvider = this.#createWebProvider();
-        if (webProvider !== undefined) providers.push(webProvider);
-        this.#webProvider = webProvider;
+        const webRuntime = this.#createWebRuntime();
+        if (webRuntime !== undefined) providers.push(webRuntime.provider);
+        this.#webProvider = webRuntime?.provider;
+        this.#webFlow = webRuntime?.flow;
         this.#channels = new ControlChannelServer({ providers, routes: this.#routes });
         this.#mcp.setWebConfigApplier?.(async (previous, next) => await this.#replaceWebProvider(previous, next));
         this.#mcp.setMcpConfigApplier?.(async (_previous, next) => {
@@ -79,6 +86,10 @@ export class ControlRuntime {
     async start(): Promise<void> {
         try {
             await this.#webFlow?.warmup();
+            const webHost = this.#mcp.webHost;
+            if (this.#webFlow !== undefined && webHost !== undefined) {
+                this.#webFlowUninstall = this.#webFlow.install(webHost);
+            }
             await this.#mcp.start();
             await this.#channels.start();
         } catch (error) {
@@ -112,7 +123,7 @@ export class ControlRuntime {
         }
     }
 
-    #createWebProvider(): ControlWebSocketChannelProvider | undefined {
+    #createWebRuntime(): ControlWebRuntime | undefined {
         const http = this.#mcp.webHost;
         if (http === undefined || !this.#mcp.webEnabled) return undefined;
         const basePath = controlWebBasePath(this.#mcp.webPublicBaseUrl);
@@ -122,31 +133,31 @@ export class ControlRuntime {
             basePath,
             secureCookie
         });
-        this.#installWebOAuthFlow(http, basePath, secureCookie, sessions);
-        return new ControlWebSocketChannelProvider({
-            assetDirectory: resolveControlWebAssetsDirectory(),
-            basePath,
-            http,
-            sessions
-        });
+        const flow = this.#createWebOAuthFlow(http, basePath, secureCookie, sessions);
+        return {
+            ...(flow === undefined ? {} : { flow }),
+            host: http,
+            provider: new ControlWebSocketChannelProvider({
+                assetDirectory: resolveControlWebAssetsDirectory(),
+                basePath,
+                http,
+                sessions
+            })
+        };
     }
 
-    #installWebOAuthFlow(
-        http: import("@portable-devshell/mcp").HttpHost,
+    #createWebOAuthFlow(
+        http: HttpHost,
         basePath: string,
         secureCookie: boolean,
         sessions: ControlWebSessionService
-    ): void {
-        this.#webFlowUninstall?.();
-        this.#webFlow = undefined;
-        this.#webFlowUninstall = undefined;
-
+    ): ControlWebOAuthFlow | undefined {
         const auth = this.#mcp.webAuth;
         const publicBaseUrl = this.#mcp.webPublicBaseUrl;
-        if (auth.mode !== "oauth2" || publicBaseUrl === undefined) return;
+        if (auth.mode !== "oauth2" || publicBaseUrl === undefined) return undefined;
 
         const mcpHost = this.#mcp.host;
-        const reused = http === mcpHost?.server && publicBaseUrl === this.#mcp.publicBaseUrl
+        const reused = sameOrigin(publicBaseUrl, this.#mcp.publicBaseUrl)
             ? mcpHost?.oauthProtectedResource
             : undefined;
         const providerConfig = {
@@ -156,44 +167,62 @@ export class ControlRuntime {
         };
         const protectedResource = reused ?? new McpOAuthProtectedResource(
             providerConfig,
-            publicBaseUrl,
+            new URL(publicBaseUrl).origin,
             this.#mcp.webOauthDir,
             { trustProxy: isLoopbackPublicBaseUrl(publicBaseUrl) }
         );
 
-        const flow = new ControlWebOAuthFlow({
+        return new ControlWebOAuthFlow({
             basePath,
             config: providerConfig,
+            installProvider: reused === undefined || http !== mcpHost?.server,
             ownsProvider: reused === undefined,
             protectedResource,
             publicBaseUrl,
             secureCookie,
             sessions
         });
-        this.#webFlow = flow;
-        this.#webFlowUninstall = flow.install(http);
-        if (reused === undefined) {
-            http.installOAuth(protectedResource);
-        }
     }
 
     async #replaceWebProvider(
         previousConfig: import("@portable-devshell/shared").ControlConfig,
         nextConfig: import("@portable-devshell/shared").ControlConfig
     ): Promise<void> {
-        const previousHost = await this.#mcp.replaceWebHost(nextConfig);
+        const previousHost = await this.#mcp.replaceWebHost(previousConfig, nextConfig);
         const previousProvider = this.#webProvider;
-        const nextProvider = this.#createWebProvider();
-        if (previousProvider === undefined || nextProvider === undefined) {
-            throw new Error("Web listener hot replacement requires Web to remain enabled.");
-        }
+        const previousFlow = this.#webFlow;
+        const previousFlowUninstall = this.#webFlowUninstall;
+        let previousFlowRemoved = false;
+        let nextRuntime: ControlWebRuntime | undefined;
+        let nextFlowUninstall: (() => void) | undefined;
         try {
-            await this.#webFlow?.warmup();
-            await this.#channels.replaceProvider(previousProvider, nextProvider);
-            this.#webProvider = nextProvider;
-            await this.#mcp.stopRetiredWebHost(previousHost);
+            nextRuntime = this.#createWebRuntime();
+            if (previousProvider === undefined || nextRuntime === undefined) {
+                throw new Error("Web listener hot replacement requires Web to remain enabled.");
+            }
+            await nextRuntime.flow?.warmup();
+            if (previousFlowUninstall !== undefined) {
+                previousFlowUninstall();
+                previousFlowRemoved = true;
+            }
+            nextFlowUninstall = nextRuntime.flow?.install(nextRuntime.host);
+            await this.#channels.replaceProvider(previousProvider, nextRuntime.provider);
+            this.#webProvider = nextRuntime.provider;
+            this.#webFlow = nextRuntime.flow;
+            this.#webFlowUninstall = nextFlowUninstall;
+            await this.#mcp.stopRetiredWebHost(previousHost).catch(reportRetiredWebHostFailure);
         } catch (error) {
+            nextFlowUninstall?.();
+            await nextRuntime?.provider.close().catch(() => undefined);
             await this.#mcp.restoreWebHost(previousHost, previousConfig);
+            this.#webProvider = previousProvider;
+            this.#webFlow = previousFlow;
+            if (previousFlowRemoved && previousFlow !== undefined && this.#mcp.webHost !== undefined) {
+                await previousFlow.warmup();
+                this.#webFlowUninstall = previousFlow.install(this.#mcp.webHost);
+            } else {
+                this.#webFlowUninstall = previousFlowUninstall;
+            }
             throw error;
         }
     }
@@ -206,4 +235,17 @@ function isLoopbackPublicBaseUrl(publicBaseUrl: string): boolean {
     } catch {
         return false;
     }
+}
+
+function sameOrigin(left: string | undefined, right: string | undefined): boolean {
+    if (left === undefined || right === undefined) return false;
+    try {
+        return new URL(left).origin === new URL(right).origin;
+    } catch {
+        return false;
+    }
+}
+
+function reportRetiredWebHostFailure(error: unknown): void {
+    console.warn(error instanceof Error ? error : new Error(String(error)));
 }

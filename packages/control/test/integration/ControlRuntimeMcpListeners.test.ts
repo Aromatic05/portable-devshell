@@ -59,7 +59,7 @@ test("replacing an independent Web listener keeps the MCP listener running", asy
     const next = structuredClone(config);
     next.web.listenPort = await reservePort();
 
-    const retired = await runtime.replaceWebHost(next);
+    const retired = await runtime.replaceWebHost(config, next);
     await runtime.stopRetiredWebHost(retired);
 
     assert.equal((runtime.host?.server.address as { port: number }).port, mcpAddress.port);
@@ -88,6 +88,51 @@ test("replacing an independent MCP listener keeps the Web listener running", asy
     const address = runtime.webHost?.address;
     assert.ok(typeof address === "object" && address !== null);
     await fetch(`http://127.0.0.1:${address.port}/web/session`, { method: "POST" });
+});
+
+test("shared listener Web auth changes use a full runtime rebuild instead of hot replacement", async (t) => {
+    const homeDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-runtime-listener-shared-apply-"));
+    const port = await reservePort();
+    let config = createConfig(port, port);
+    let fullApplyCalls = 0;
+    let webHotApplyCalls = 0;
+    const state = new ControlRuntimeState({
+        configStore: {
+            async readOrCreate() {
+                return config;
+            },
+            async write(next: ControlConfig) {
+                config = next;
+            }
+        } as never,
+        homeDirectory
+    });
+    await state.load();
+    const runtime = new ControlRuntimeMcp({
+        applyRuntimeConfig: async () => {
+            fullApplyCalls += 1;
+        },
+        artifact: {
+            service: {},
+            installHttpRoute() {}
+        } as never,
+        controlPaths: new ControlPathHome(homeDirectory),
+        state
+    });
+    runtime.setWebConfigApplier(async () => {
+        webHotApplyCalls += 1;
+    });
+    t.after(async () => {
+        await runtime.stop().catch(() => undefined);
+        await rm(homeDirectory, { force: true, recursive: true });
+    });
+
+    await runtime.configEditor.updateWebConfig({
+        patch: { auth: "token", token: "a".repeat(48) }
+    });
+
+    assert.equal(fullApplyCalls, 1);
+    assert.equal(webHotApplyCalls, 0);
 });
 
 async function createRuntime(config: ControlConfig, homeDirectory: string): Promise<ControlRuntimeMcp> {

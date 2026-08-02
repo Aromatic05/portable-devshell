@@ -63,7 +63,7 @@ export class McpHost {
         this.#contextRegistry = new McpContextRegistry({ filePath: config.contextFile });
         this.#oauth =
             oauthConfig(config.instances) !== undefined && config.publicBaseUrl !== undefined && config.storageDir !== undefined
-                ? new McpOAuthProtectedResource(oauthConfig(config.instances)!, config.publicBaseUrl, config.storageDir, {
+                ? new McpOAuthProtectedResource(oauthConfig(config.instances)!, new URL(config.publicBaseUrl).origin, config.storageDir, {
                       trustProxy: isLoopbackHost(config.listenHost)
                   })
                 : undefined;

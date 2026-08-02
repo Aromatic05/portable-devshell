@@ -161,7 +161,7 @@ export class ControlRuntimeMcp {
         return join(this.#controlPaths.oauthDir, "web");
     }
 
-    async replaceWebHost(config: ControlConfig): Promise<HttpHost | undefined> {
+    async replaceWebHost(previousConfig: ControlConfig, config: ControlConfig): Promise<HttpHost | undefined> {
         const previous = this.#webHost;
         const next = config.web.enabled
             ? this.#host !== undefined && sameEndpoint(config.mcp, config.web)
@@ -170,7 +170,7 @@ export class ControlRuntimeMcp {
             : undefined;
         const same = previous !== undefined && next !== undefined && next !== previous
             && next !== this.#host?.server && previous !== this.#host?.server
-            && sameEndpoint(this.#state.requireConfig().web, config.web);
+            && sameEndpoint(previousConfig.web, config.web);
         if (same && previous !== undefined) {
             await previous.stop();
         }
@@ -206,6 +206,9 @@ export class ControlRuntimeMcp {
         if (current !== undefined && current !== host && current !== this.#host?.server) {
             await current.stop();
         }
+        if (host !== undefined && host !== this.#host?.server) {
+            await host.start();
+        }
     }
 
     async #applyConfig(previous: ControlConfig, next: ControlConfig): Promise<boolean> {
@@ -213,6 +216,8 @@ export class ControlRuntimeMcp {
             previous.web.enabled &&
             next.web.enabled &&
             JSON.stringify(previous.mcp) === JSON.stringify(next.mcp) &&
+            !sameEndpoint(previous.mcp, previous.web) &&
+            !sameEndpoint(next.mcp, next.web) &&
             this.#applyWebConfig !== undefined
         ) {
             await this.#applyWebConfig(previous, next);

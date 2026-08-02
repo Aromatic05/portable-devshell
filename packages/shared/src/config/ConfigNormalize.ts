@@ -8,7 +8,6 @@ import type {
     ConfigInstanceDraft,
     ConfigInstanceMcpDraft,
     ConfigInstancePatch,
-    ConfigMcpAuthDraft,
     ConfigMcpPatch,
     ConfigWebOAuth2Draft,
     ConfigWebPatch,
@@ -320,19 +319,6 @@ export function toConfigInstanceDraft(instance: ControlInstanceConfig): ConfigIn
     };
 }
 
-function normalizeMcpAuth(draft: ConfigMcpAuthDraft | undefined): ControlMcpAuthConfig {
-    if (draft === undefined || draft.mode === "none") return { mode: "none" };
-    if (draft.mode === "token") return { mode: "token", token: draft.token };
-    return {
-        mode: "oauth2",
-        oauth2: {
-            documentationUrl: draft.oauth2.documentationUrl,
-            requiredScopes: deduplicate(draft.oauth2.requiredScopes ?? []),
-            resourceName: draft.oauth2.resourceName
-        }
-    };
-}
-
 function normalizeInstanceMcpAuth(
     draft: Pick<ConfigInstanceMcpDraft, "auth" | "oauth2" | "token"> | undefined
 ): ControlMcpAuthConfig {
@@ -473,73 +459,6 @@ function normalizeManagedContainer(
         network: draft.network,
         user: draft.user
     };
-}
-
-function toMcpAuthDraft(auth: ControlMcpAuthConfig): ConfigMcpAuthDraft {
-    if (auth.mode === "none") return { mode: "none" };
-    if (auth.mode === "token") return { mode: "token", token: auth.token };
-    return {
-        mode: "oauth2",
-        oauth2: {
-            ...auth.oauth2,
-            requiredScopes: [...auth.oauth2.requiredScopes]
-        }
-    };
-}
-
-function cloneMcpAuth(auth: ControlMcpAuthConfig): ControlMcpAuthConfig {
-    if (auth.mode === "none") return { mode: "none" };
-    if (auth.mode === "token") return { mode: "token", token: auth.token };
-    return {
-        mode: "oauth2",
-        oauth2: {
-            ...auth.oauth2,
-            requiredScopes: [...auth.oauth2.requiredScopes]
-        }
-    };
-}
-
-function cloneInstance(instance: ControlInstanceConfig): ControlInstanceConfig {
-    const common = {
-        approvalPolicy: cloneApprovalPolicy(instance.approvalPolicy),
-        enabled: instance.enabled,
-        env: cloneOptionalRecord(instance.env),
-        logs: cloneOptionalRecord(instance.logs),
-        mcp: {
-            ...instance.mcp,
-            auth: cloneMcpAuth(instance.mcp.auth),
-            tools: {
-                capabilities: [...instance.mcp.tools.capabilities],
-                groups: [...instance.mcp.tools.groups]
-            }
-        },
-        name: instance.name,
-        security: { ...instance.security },
-        tools: cloneTools(instance.tools),
-        workspace: instance.workspace
-    };
-    switch (instance.provider) {
-        case "local":
-            return { ...common, provider: "local" };
-        case "reverse":
-            return { ...common, provider: "reverse" };
-        case "ssh":
-            return { ...common, provider: "ssh", ssh: { ...instance.ssh } };
-        case "docker":
-            return {
-                ...common,
-                container: cloneContainer(instance.container),
-                dockerBinary: instance.dockerBinary,
-                provider: "docker"
-            };
-        case "podman":
-            return {
-                ...common,
-                container: cloneContainer(instance.container),
-                podmanBinary: instance.podmanBinary,
-                provider: "podman"
-            };
-    }
 }
 
 function cloneContainer<T extends InstanceContainerConfig>(container: T): T {

@@ -39,7 +39,6 @@ export class HttpHost {
     #oauthInstalled = false;
     readonly #publicBaseUrl?: string;
     readonly #registeredPaths = new Set<string>();
-    readonly #tokenProvider?: McpAuthProviderToken;
     readonly #upgradeHandlers = new Map<
         string,
         (request: IncomingMessage, socket: Duplex, head: Buffer) => void | Promise<void>
@@ -52,10 +51,6 @@ export class HttpHost {
         this.#listenPort = options.listenPort;
         this.#oauth = options.oauth;
         this.#publicBaseUrl = options.publicBaseUrl;
-        this.#tokenProvider = options.auth?.provider === "token"
-            ? new McpAuthProviderToken(options.auth.token)
-            : undefined;
-
         this.#app.disable("x-powered-by");
     }
 

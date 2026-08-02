@@ -301,6 +301,51 @@ test("oauth2 emits HTTPS endpoints behind a loopback reverse proxy", async () =>
     }
 });
 
+test("oauth2 keeps a public path prefix on resources while using the origin as issuer", async () => {
+    const port = await reservePort();
+    const origin = `http://127.0.0.1:${port}`;
+    const storageDir = await mkdtemp(join(tmpdir(), "portable-devshell-mcp-prefix-"));
+    const host = createHost({
+        auth: {
+            enabled: true,
+            oauth2: {
+                requiredScopes: ["mcp"],
+                resourceName: "aromatic"
+            },
+            provider: "oauth2"
+        },
+        listenPort: port,
+        publicBaseUrl: `${origin}/devshell`,
+        storageDir
+    });
+    await host.start();
+
+    try {
+        const protectedMetadata = await fetch(
+            `${origin}/.well-known/oauth-protected-resource/devshell/demo/mcp`
+        );
+        assert.equal(protectedMetadata.status, 200);
+        const resource = await protectedMetadata.json() as {
+            authorization_servers: string[];
+            resource: string;
+        };
+        assert.deepEqual(resource.authorization_servers, [origin]);
+        assert.equal(resource.resource, `${origin}/devshell/demo/mcp`);
+
+        const authorizationMetadata = await fetch(`${origin}/.well-known/openid-configuration`);
+        assert.equal(authorizationMetadata.status, 200);
+        const issuer = await authorizationMetadata.json() as {
+            authorization_endpoint: string;
+            issuer: string;
+        };
+        assert.equal(issuer.issuer, origin);
+        assert.equal(issuer.authorization_endpoint, `${origin}/authorize`);
+    } finally {
+        await host.stop();
+        await rm(storageDir, { force: true, recursive: true });
+    }
+});
+
 async function readFixture(name: string): Promise<JsonValue> {
     return JSON.parse(await readFile(resolve(fixturesDirectory, name), "utf8")) as JsonValue;
 }
