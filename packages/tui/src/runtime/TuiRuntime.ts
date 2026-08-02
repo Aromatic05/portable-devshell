@@ -186,7 +186,6 @@ export class TuiRuntime {
         this.commandDispatcher = new TuiCommandDispatcher({
             focusManager: this.focusManager,
             mainViewportRows: () => Math.max(0, this.rows - 7),
-            onApplyConfig: async () => await this.#operations.applyConfig(),
             onApprovalDecision: async (instance, approvalId, decision) => {
                 await this.#operations.decideApproval(
                     instance,
@@ -224,11 +223,8 @@ export class TuiRuntime {
             onInstanceAction: async (action, instance) => {
                 await this.#operations.runInstanceAction(action, instance);
             },
-            onInstanceConfigUpdate: async (instanceName, patch) => {
-                await this.#operations.updateInstanceConfig(
-                    instanceName,
-                    patch,
-                );
+            onConfigUpdate: async (request) => {
+                return await this.#operations.updateConfig(request);
             },
             onInstanceDangerAction: async (_action, instance) => {
                 await this.#operations.deleteInstance(instance);
@@ -238,12 +234,6 @@ export class TuiRuntime {
             },
             onLogsReload: async () => {
                 await this.#operations.reloadLogs();
-            },
-            onMcpConfigUpdate: async (mcp) => {
-                await this.#operations.updateMcpEndpoint(mcp);
-            },
-            onWebConfigUpdate: async (web) => {
-                await this.#operations.updateWeb(web);
             },
             onOAuthApprovalDecision: async (approvalId, decision) => {
                 await this.#operations.decideOAuthApproval(

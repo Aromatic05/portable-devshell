@@ -2,6 +2,7 @@ import {
     ControlError,
     createError,
     errorCodes,
+    type ConfigBatchUpdateRequest,
     type ConfigDraft,
     type ConfigInstancePatch,
     type ConfigMcpPatch,
@@ -119,6 +120,14 @@ export class TuiRuntimeControlOperations {
 
     async getInstanceCreateSchema(): Promise<InstanceCreateSchema> {
         return await this.#request(this.options.clients.instance.createSchema(), "instance.createSchema");
+    }
+
+    async updateConfig(request: ConfigBatchUpdateRequest): Promise<JsonValue> {
+        const result = await this.#request(this.options.clients.config.update(request), "config.update");
+        await this.#refreshBestEffort(this.#panelKey("config"), async () => {
+            await this.options.session.refreshConfig();
+        });
+        return result;
     }
 
     async updateInstanceConfig(instanceName: string, patch: ConfigInstancePatch): Promise<void> {

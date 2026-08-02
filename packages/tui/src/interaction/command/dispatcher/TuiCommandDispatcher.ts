@@ -2,10 +2,8 @@ import type {
     InstanceCreateDraft,
     InstanceCreateSchema,
     InstanceCreateSummary,
+    ConfigBatchUpdateRequest,
     ConfigDraft,
-    ConfigInstancePatch,
-    ConfigMcpPatch,
-    ConfigWebPatch,
     ArtifactViewImageInput,
     ArtifactViewImageResult,
     JsonValue
@@ -51,19 +49,13 @@ export interface TuiCommandDispatcherOptions {
         toolName: string,
         input: string
     ): Promise<boolean>;
-    onApplyConfig?(): Promise<JsonValue>;
     onContextMessage?(instance: string, ctxId: string, text: string): Promise<void>;
     onControlRestart?(): Promise<void>;
     onCreateInstance?(draft: InstanceCreateDraft): Promise<string | undefined>;
     onGetInstanceCreateSchema?(): Promise<InstanceCreateSchema>;
-    onInstanceConfigUpdate?(
-        instanceName: string,
-        patch: ConfigInstancePatch
-    ): Promise<void>;
+    onConfigUpdate?(request: ConfigBatchUpdateRequest): Promise<JsonValue>;
     onInstanceDangerAction?(action: "delete", instance: string): Promise<void>;
     onInstanceEnabledChange?(instance: string, enabled: boolean): Promise<void>;
-    onMcpConfigUpdate?(mcp: ConfigMcpPatch): Promise<void>;
-    onWebConfigUpdate?(web: ConfigWebPatch): Promise<void>;
     onOAuthApprovalDecision?(
         approvalId: string,
         decision: "approve" | "deny"
@@ -103,15 +95,11 @@ export class TuiCommandDispatcher {
         });
         this.#editor = new TuiCommandDispatcherEditor({
             dispatch: (intent) => this.dispatch(intent),
-            onApplyConfig: options.onApplyConfig ?? unavailable,
             onCreateInstance: options.onCreateInstance ?? unavailable,
             onGetInstanceCreateSchema:
                 options.onGetInstanceCreateSchema ?? unavailable,
             onInstanceAction: options.onInstanceAction,
-            onInstanceConfigUpdate:
-                options.onInstanceConfigUpdate ?? unavailable,
-            onMcpConfigUpdate: options.onMcpConfigUpdate ?? unavailable,
-            onWebConfigUpdate: options.onWebConfigUpdate ?? unavailable,
+            onConfigUpdate: options.onConfigUpdate ?? unavailable,
             onValidateConfigDraft:
                 options.onValidateConfigDraft ?? unavailable,
             onValidateInstanceCreateDraft:

@@ -11,6 +11,7 @@ import {
     normalizeConfigDraft,
     normalizeConfigGlobalDraft,
     normalizeConfigInstanceDraft,
+    parseConfigBatchUpdateRequest,
     parseConfigDraft,
     parseConfigInstanceTargetRequest,
     parseConfigUpdateInstanceRequest,
@@ -95,6 +96,77 @@ export class ConfigEditorCoordinator {
         return toConfigView(this.#validateConfig(config)) as unknown as JsonValue;
     }
 
+    async updateConfig(params: JsonValue | undefined): Promise<JsonValue> {
+        const request = this.#readConfigInput(() => parseConfigBatchUpdateRequest(params));
+        const currentConfig = this.#getConfig();
+        const instanceRequest = request.instance;
+        const existing = instanceRequest === undefined
+            ? undefined
+            : currentConfig.instances.find((entry) => entry.name === instanceRequest.instanceName);
+        if (instanceRequest !== undefined && existing === undefined) {
+            throw missingInstance(instanceRequest.instanceName);
+        }
+
+        const instance = existing === undefined || instanceRequest === undefined
+            ? undefined
+            : this.#readConfigInput(() =>
+                  normalizeConfigInstanceDraft(applyConfigInstancePatch(existing, instanceRequest.patch))
+              );
+        const descriptor = instanceRequest === undefined ? undefined : this.#instanceRegistry.get(instanceRequest.instanceName);
+        const rebuildRequired = existing !== undefined && instance !== undefined && descriptor !== undefined
+            && requiresWorkerRebuild(existing, instance);
+        const authChanged = existing !== undefined && instance !== undefined
+            && JSON.stringify(existing.mcp.auth) !== JSON.stringify(instance.mcp.auth);
+        if (rebuildRequired && instanceRequest !== undefined) {
+            this.#assertInstanceStopped(instanceRequest.instanceName, "update");
+        }
+
+        const global = this.#readConfigInput(() =>
+            normalizeConfigGlobalDraft({
+                control: currentConfig.control,
+                mcp: applyConfigMcpPatch(currentConfig.mcp, request.mcp ?? {}),
+                web: applyConfigWebPatch(currentConfig.web, request.web ?? {})
+            })
+        );
+        const nextConfig = this.#validateConfig({
+            ...currentConfig,
+            instances: instanceRequest === undefined || instance === undefined
+                ? currentConfig.instances
+                : currentConfig.instances.map((entry) =>
+                      entry.name === instanceRequest.instanceName ? instance : entry
+                  ),
+            mcp: global.mcp,
+            web: global.web
+        });
+
+        if (request.mcp !== undefined || request.web !== undefined) {
+            await this.#runtimePreflight.assertAvailable(currentConfig, nextConfig);
+        }
+        await this.#persistConfig(nextConfig);
+
+        const runtimeChanged = request.mcp !== undefined || request.web !== undefined || authChanged;
+        const hotApplied = runtimeChanged
+            ? await this.#applyRuntimeOrRestore(currentConfig, nextConfig)
+            : false;
+        if (existing !== undefined && instance !== undefined) {
+            this.#applyInstanceConfig(instance, descriptor, rebuildRequired);
+            this.#syncMcpEndpoint(instance.name);
+        }
+
+        const changes = [
+            ...(instanceRequest === undefined
+                ? []
+                : [{ kind: "instance.updated" as const, target: instanceRequest.instanceName }]),
+            ...(request.mcp === undefined
+                ? []
+                : [{ kind: "mcp.endpoint.updated" as const, target: "mcp" }]),
+            ...(request.web === undefined
+                ? []
+                : [{ kind: "web.updated" as const, target: "web" }])
+        ];
+        return buildApplyResult(currentConfig, nextConfig, changes, hotApplied) as unknown as JsonValue;
+    }
+
     async updateInstanceConfig(params: JsonValue | undefined): Promise<JsonValue> {
         const request = this.#readConfigInput(() => parseConfigUpdateInstanceRequest(params));
         const currentConfig = this.#getConfig();
@@ -115,29 +187,14 @@ export class ConfigEditorCoordinator {
 
         await this.#persistConfig(nextConfig);
 
-        if (descriptor === undefined) {
-            if (instance.enabled) this.#instanceRegistry.add(this.#instanceConfigMapper.map(instance));
-        } else if (rebuildRequired) {
-            this.#instanceRegistry.add(this.#instanceConfigMapper.map(instance));
-        } else {
-            descriptor.mcpCapabilities = [...instance.mcp.tools.capabilities];
-            descriptor.mcpGroups = [...instance.mcp.tools.groups];
-            descriptor.enabled = instance.enabled;
-            descriptor.mcpEnabled = instance.mcp.enabled;
-            descriptor.mcpPath = instance.mcp.path;
-            descriptor.worker.reconfigure(toWorkerReconfigureInput(instance));
-        }
-        if (authChanged && this.#runtimeApply !== undefined) {
-            const hotApplied = await this.#applyRuntimeOrRestore(currentConfig, nextConfig);
-            this.#rememberApplyResult(
-                buildApplyResult(currentConfig, nextConfig, [{ kind: "instance.updated", target: request.instanceName }], hotApplied)
-            );
-        } else {
-            this.#syncMcpEndpoint(request.instanceName);
-            this.#rememberApplyResult(
-                buildApplyResult(currentConfig, nextConfig, [{ kind: "instance.updated", target: request.instanceName }])
-            );
-        }
+        const hotApplied = authChanged && this.#runtimeApply !== undefined
+            ? await this.#applyRuntimeOrRestore(currentConfig, nextConfig)
+            : false;
+        this.#applyInstanceConfig(instance, descriptor, rebuildRequired);
+        this.#syncMcpEndpoint(request.instanceName);
+        this.#rememberApplyResult(
+            buildApplyResult(currentConfig, nextConfig, [{ kind: "instance.updated", target: request.instanceName }], hotApplied)
+        );
         return this.getConfigView();
     }
 
@@ -241,6 +298,27 @@ export class ConfigEditorCoordinator {
             ])
         );
         return this.getConfigView();
+    }
+
+    #applyInstanceConfig(
+        instance: ControlConfig["instances"][number],
+        descriptor: ReturnType<InstanceRegistry["get"]>,
+        rebuildRequired: boolean
+    ): void {
+        if (descriptor === undefined) {
+            if (instance.enabled) this.#instanceRegistry.add(this.#instanceConfigMapper.map(instance));
+            return;
+        }
+        if (rebuildRequired) {
+            this.#instanceRegistry.add(this.#instanceConfigMapper.map(instance));
+            return;
+        }
+        descriptor.worker.reconfigure(toWorkerReconfigureInput(instance));
+        descriptor.mcpCapabilities = [...instance.mcp.tools.capabilities];
+        descriptor.mcpGroups = [...instance.mcp.tools.groups];
+        descriptor.enabled = instance.enabled;
+        descriptor.mcpEnabled = instance.mcp.enabled;
+        descriptor.mcpPath = instance.mcp.path;
     }
 
     #syncMcpEndpoint(instanceName: string): void {

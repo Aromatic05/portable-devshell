@@ -988,6 +988,37 @@ test("config exposes reload, save-only, and save-and-restart semantics", () => {
         true,
     );
 });
+test("failed Save & Restart restores a previously running instance", async () => {
+    const harness = createHarness({
+        onConfigUpdate: async () => {
+            throw new Error("configuration transaction failed");
+        },
+    });
+    harness.store.setSelectedPage("config");
+    openEditorForBox(harness, "config", "configuration");
+    harness.store.setFormDraft("config:alpha", {
+        ...(harness.store.getState().ui.formDrafts["config:alpha"] as Record<string, JsonValue>),
+        provider: "ssh",
+        ssh: { command: "ssh alpha" },
+    });
+
+    const actions = expandBox(harness, "configuration-actions");
+    harness.store.setMainFocusId(actions.id);
+    harness.store.setFocusScope("form");
+    harness.store.setSelectedDetailLine(
+        actions.expandedKey,
+        "configuration-actions:button:save-restart",
+    );
+    await harness.dispatch({ type: "focus.activate" });
+
+    assert.deepEqual(harness.instanceActions(), [
+        { action: "stop", instance: "alpha" },
+        { action: "start", instance: "alpha" },
+    ]);
+    assert.match(harness.store.getState().interaction.editor?.error ?? "", /configuration transaction failed/u);
+    assert.equal(harness.store.getState().ui.dirtyForms["config:alpha"], true);
+});
+
 test("config separates MCP tool access and requires restart when it changes", () => {
     const harness = createHarness();
     harness.store.setSelectedPage("config");
@@ -1460,19 +1491,12 @@ test("connector editor presents unavailable endpoints and control runtime limits
         ["endpoint=https://example.test/tunnel/alpha/custom-mcp"],
     );
 });
-test("connector page actions expose and save only affected scopes", async () => {
-    const instanceUpdates: unknown[] = [];
-    const mcpUpdates: unknown[] = [];
-    const webUpdates: unknown[] = [];
+test("connector page actions send all affected scopes in one configuration transaction", async () => {
+    const updates: Array<Record<string, unknown>> = [];
     const harness = createHarness({
-        onInstanceConfigUpdate: async (instanceName, patch) => {
-            instanceUpdates.push({ instanceName, patch });
-        },
-        onMcpConfigUpdate: async (value) => {
-            mcpUpdates.push(value);
-        },
-        onWebConfigUpdate: async (value) => {
-            webUpdates.push(value);
+        onConfigUpdate: async (value) => {
+            updates.push(value);
+            return {};
         },
     });
     enterConnectionsRoute(harness, "connector");
@@ -1507,9 +1531,21 @@ test("connector page actions expose and save only affected scopes", async () => 
         "connector-actions:button:save",
     );
     await harness.dispatch({ type: "focus.activate" });
-    assert.equal(instanceUpdates.length, 0);
-    assert.equal(mcpUpdates.length, 1);
-    assert.equal(webUpdates.length, 1);
+    assert.equal(updates.length, 1);
+    assert.equal(updates[0]?.instance, undefined);
+    assert.deepEqual(updates[0]?.mcp, {
+        enabled: true,
+        listenHost: "127.0.0.1",
+        listenPort: 3210,
+        publicBaseUrl: undefined,
+    });
+    assert.deepEqual(updates[0]?.web, {
+        auth: "none",
+        enabled: true,
+        listenHost: "127.0.0.1",
+        listenPort: 3211,
+        publicBaseUrl: "127.0.0.1",
+    });
 });
 test("long detail lines open a wrapped full-text viewer", async () => {
     const harness = createHarness();
@@ -2184,12 +2220,7 @@ function createHarness(
             approvalId: string,
             decision: "approve" | "deny",
         ) => Promise<void>;
-        onInstanceConfigUpdate?: (
-            instanceName: string,
-            patch: Record<string, unknown>,
-        ) => Promise<void>;
-        onMcpConfigUpdate?: (value: Record<string, unknown>) => Promise<void>;
-        onWebConfigUpdate?: (value: Record<string, unknown>) => Promise<void>;
+        onConfigUpdate?: (value: Record<string, unknown>) => Promise<JsonValue>;
         onContextMessage?: (
             instance: string,
             ctxId: string,
@@ -2273,10 +2304,7 @@ function createHarness(
             (async (approvalId, decision) => {
                 oauthApprovalDecisions.push({ approvalId, decision });
             }),
-        onInstanceConfigUpdate: options.onInstanceConfigUpdate as never,
-        onMcpConfigUpdate: options.onMcpConfigUpdate as never,
-        onWebConfigUpdate: options.onWebConfigUpdate as never,
-        onApplyConfig: async () => ({}),
+        onConfigUpdate: (options.onConfigUpdate ?? (async () => ({}))) as never,
         onContextMessage: options.onContextMessage,
         onQuit: async () => undefined,
         onRedraw: () => undefined,

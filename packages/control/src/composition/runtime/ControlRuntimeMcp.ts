@@ -14,7 +14,6 @@ import type { ControlRuntimeState } from "./ControlRuntimeState.js";
 
 export interface ControlRuntimeMcpOptions {
     artifact: ControlRuntimeArtifact;
-    applyRuntimeConfig?: (previous: ControlConfig, next: ControlConfig) => Promise<void>;
     controlPaths: ControlPathHome;
     factory?: McpRuntimeFactory;
     state: ControlRuntimeState;
@@ -35,7 +34,6 @@ export class ControlRuntimeMcp {
     readonly #state: ControlRuntimeState;
     readonly #artifact: ControlRuntimeArtifact;
     readonly #controlPaths: ControlPathHome;
-    readonly #applyRuntimeConfig?: (previous: ControlConfig, next: ControlConfig) => Promise<void>;
     #applyWebConfig?: (previous: ControlConfig, next: ControlConfig) => Promise<void>;
     #applyMcpConfig?: (previous: ControlConfig, next: ControlConfig) => Promise<void>;
 
@@ -46,7 +44,6 @@ export class ControlRuntimeMcp {
         this.#artifact = options.artifact;
         this.#controlPaths = options.controlPaths;
         const config = options.state.requireConfig();
-        this.#applyRuntimeConfig = options.applyRuntimeConfig;
         this.#mcpEnabled = config.mcp.enabled;
         this.publicBaseUrl = config.mcp.publicBaseUrl;
         this.#webAuth = config.web.auth;
@@ -86,7 +83,7 @@ export class ControlRuntimeMcp {
             getMcpInstanceGateway: () => this.instanceGateway,
             homeDirectory: options.state.homeDirectory,
             instanceRegistry: options.state.instances,
-            runtimeApply: options.applyRuntimeConfig === undefined ? undefined : {
+            runtimeApply: {
                 apply: async (previous, next) => await this.#applyConfig(previous, next)
             },
             setConfig: (config) => options.state.setConfig(config)
@@ -234,7 +231,6 @@ export class ControlRuntimeMcp {
             await this.#applyMcpConfig(previous, next);
             return true;
         }
-        await this.#applyRuntimeConfig?.(previous, next);
         return false;
     }
 

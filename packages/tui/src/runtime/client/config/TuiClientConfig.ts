@@ -1,6 +1,7 @@
 import {
     controlClientModule,
     type ClientConnection,
+    type ConfigBatchUpdateRequest,
     type ConfigDraft,
     type ConfigUpdateInstanceRequest,
     type ConfigUpdateMcpRequest,
@@ -13,6 +14,7 @@ export function createTuiClientConfig(connection: ClientConnection) {
     return {
         get: (): Promise<Record<string, JsonValue>> => config.request("get"),
         validate: (draft: ConfigDraft): Promise<Record<string, JsonValue>> => config.request("validate", draft),
+        update: (request: ConfigBatchUpdateRequest): Promise<JsonValue> => config.request("update", request),
         updateInstance: (request: ConfigUpdateInstanceRequest): Promise<Record<string, JsonValue>> =>
             config.request("updateInstance", request),
         updateMcpEndpoint: (request: ConfigUpdateMcpRequest): Promise<Record<string, JsonValue>> =>

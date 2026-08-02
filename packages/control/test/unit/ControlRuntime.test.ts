@@ -282,7 +282,6 @@ test("failed OAuth Web hot replacement restores the previous listener and OAuth 
         async stop() {}
     } as never;
     const mcp = new ControlRuntimeMcp({
-        applyRuntimeConfig: async () => undefined,
         artifact,
         controlPaths,
         state

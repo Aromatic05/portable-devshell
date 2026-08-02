@@ -1,4 +1,5 @@
 import type {
+    ConfigBatchUpdateRequest,
     ConfigDraft,
     ConfigInstancePatch,
     ConfigMcpPatch,
@@ -81,6 +82,10 @@ export class TuiRuntimeOperations {
 
     async getInstanceCreateSchema(): Promise<InstanceCreateSchema> {
         return await this.#control.getInstanceCreateSchema();
+    }
+
+    async updateConfig(request: ConfigBatchUpdateRequest): Promise<JsonValue> {
+        return await this.#control.updateConfig(request);
     }
 
     async updateInstanceConfig(instanceName: string, patch: ConfigInstancePatch): Promise<void> {

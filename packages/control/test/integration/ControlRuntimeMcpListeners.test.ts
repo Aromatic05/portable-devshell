@@ -90,11 +90,10 @@ test("replacing an independent MCP listener keeps the Web listener running", asy
     await fetch(`http://127.0.0.1:${address.port}/web/session`, { method: "POST" });
 });
 
-test("shared listener Web auth changes use a full runtime rebuild instead of hot replacement", async (t) => {
+test("shared listener Web auth changes require an explicit control restart without stopping the current runtime", async (t) => {
     const homeDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-runtime-listener-shared-apply-"));
     const port = await reservePort();
     let config = createConfig(port, port);
-    let fullApplyCalls = 0;
     let webHotApplyCalls = 0;
     const state = new ControlRuntimeState({
         configStore: {
@@ -109,9 +108,6 @@ test("shared listener Web auth changes use a full runtime rebuild instead of hot
     });
     await state.load();
     const runtime = new ControlRuntimeMcp({
-        applyRuntimeConfig: async () => {
-            fullApplyCalls += 1;
-        },
         artifact: {
             service: {},
             installHttpRoute() {}
@@ -130,9 +126,13 @@ test("shared listener Web auth changes use a full runtime rebuild instead of hot
     await runtime.configEditor.updateWebConfig({
         patch: { auth: "token", token: "a".repeat(48) }
     });
+    const result = runtime.configEditor.applyConfig() as {
+        restartControlRequired: boolean;
+    };
 
-    assert.equal(fullApplyCalls, 1);
     assert.equal(webHotApplyCalls, 0);
+    assert.equal(result.restartControlRequired, true);
+    assert.equal(runtime.webHost, runtime.host?.server);
 });
 
 async function createRuntime(config: ControlConfig, homeDirectory: string): Promise<ControlRuntimeMcp> {

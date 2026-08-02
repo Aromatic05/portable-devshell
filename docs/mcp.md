@@ -186,8 +186,9 @@ worker handshake 返回 `cancel = true`。本地 RPC、WSS 和 SSE + HTTPS POST 
 
 ## 本地与公网
 
-- `127.0.0.1` + localhost `publicBaseUrl`：可使用 `mode = "none"`；
-- `0.0.0.0` 或非 localhost `publicBaseUrl`：必须启用认证；
-- 给 ChatGPT Connector 使用时，必须通过公网 HTTPS 地址访问。
+- `mode = "none"`、`token` 和 `oauth2` 均可用于本机、内网或公网监听；
+- control 不根据 `listenHost` 或 `publicBaseUrl` 猜测防火墙、反向代理和网络信任边界；
+- 无认证 endpoint 的访问控制与暴露范围由部署者负责；
+- 给 ChatGPT Connector 使用时，必须通过公网 HTTPS 地址访问，并按客户端要求配置认证。
 
 公网配置见 [oauth.md](oauth.md)。

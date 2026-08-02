@@ -7,6 +7,7 @@ import type {
 import type { ToolCapability } from "../dto/tool/DtoToolDefinition.js";
 import { configInputError, type ConfigPathSegment } from "./ConfigIssue.js";
 import type {
+    ConfigBatchUpdateRequest,
     ConfigContainerDraft,
     ConfigDraft,
     ConfigGlobalDraft,
@@ -208,6 +209,16 @@ export function parseConfigUpdateWebRequest(value: unknown): ConfigUpdateWebRequ
     const record = readRecord(value, []);
     assertKnownKeys(record, ["patch"], []);
     return { patch: parseConfigWebPatch(record.patch, ["patch"]) };
+}
+
+export function parseConfigBatchUpdateRequest(value: unknown): ConfigBatchUpdateRequest {
+    const record = readRecord(value, []);
+    assertKnownKeys(record, ["instance", "mcp", "web"], []);
+    return {
+        instance: record.instance === undefined ? undefined : parseConfigUpdateInstanceRequest(record.instance),
+        mcp: record.mcp === undefined ? undefined : parseConfigMcpPatch(record.mcp, ["mcp"]),
+        web: record.web === undefined ? undefined : parseConfigWebPatch(record.web, ["web"])
+    };
 }
 
 export function parseConfigInstanceTargetRequest(value: unknown): ConfigInstanceTargetRequest {

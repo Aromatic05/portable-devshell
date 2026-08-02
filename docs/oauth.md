@@ -127,4 +127,5 @@ OAuth 客户端、授权状态、token 数据和签名密钥保存在：
 - 默认工具策略不包含 `instance + manage`；
 - 不要在公网 endpoint 无条件开放实例管理；
 - 高风险工具可使用 `approvalPolicy.mode = "ask"`；
-- 公网配置为 `mode = "none"` 时，control 会拒绝启动。
+- `mode = "none"` 在公网、内网和本机部署中均允许；control 不推断防火墙、反向代理或网络边界。
+- 选择无认证部署时，访问控制与暴露范围由部署者负责。

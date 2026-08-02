@@ -178,8 +178,8 @@ test("config RPC masks the Web token across get, validate, and update responses"
     );
     assert.equal(JSON.stringify(validateReply.payload).includes(strongToken), false);
 
-    const updateReply = await request(socketPath, "@control", "config.updateWeb", {
-        patch: { auth: "token", token: MASKED_CONFIG_TOKEN }
+    const updateReply = await request(socketPath, "@control", "config.update", {
+        web: { auth: "token", token: MASKED_CONFIG_TOKEN }
     });
     assert.equal(updateReply.error, undefined);
     assert.equal(JSON.stringify(updateReply.payload).includes(strongToken), false);

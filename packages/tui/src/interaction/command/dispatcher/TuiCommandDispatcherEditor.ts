@@ -1,9 +1,7 @@
 import { defaultMcpToolGroups, MASKED_CONFIG_TOKEN } from "@portable-devshell/shared";
 import type {
+    ConfigBatchUpdateRequest,
     ConfigDraft,
-    ConfigInstancePatch,
-    ConfigMcpPatch,
-    ConfigWebPatch,
     InstanceCreateDraft,
     InstanceCreateSchema,
     InstanceCreateSummary,
@@ -13,20 +11,17 @@ import type {
 import { createDefaultInstanceDraft } from "../../../state/editor/TuiEditorInstanceCreateDraft.js";
 import { editableProviderChoices } from "../../../state/editor/TuiEditorProviderChoices.js";
 import type { TuiAppStore } from "../../../state/TuiAppStore.js";
-import { asRecord, cloneRecord, editorDraft, readPath, setPath } from "../../../state/editor/TuiEditorDraft.js";
+import { asRecord, cloneRecord, deletePath, editorDraft, readPath, setPath } from "../../../state/editor/TuiEditorDraft.js";
 import { coerceTuiEditorRecord, parseTuiConfigDraft, parseTuiInstanceDraft, parseTuiInstancePatch, parseTuiMcpPatch, parseTuiWebPatch, toTuiInstanceEditorRecord } from "../../../state/editor/TuiEditorConfigAdapter.js";
 import type { TuiInteractionProjection } from "../../TuiInteractionProjection.js";
 import type { TuiEditorState, TuiUiIntent } from "../../../state/TuiInteractionState.js";
 
 interface CommandEditorOptions {
     dispatch(intent: TuiUiIntent): Promise<boolean>;
-    onApplyConfig(): Promise<JsonValue>;
     onCreateInstance(draft: InstanceCreateDraft): Promise<string | undefined>;
     onGetInstanceCreateSchema(): Promise<InstanceCreateSchema>;
     onInstanceAction(action: "refresh" | "restart" | "start" | "stop", instance: string): Promise<void>;
-    onInstanceConfigUpdate(instanceName: string, patch: ConfigInstancePatch): Promise<void>;
-    onMcpConfigUpdate(mcp: ConfigMcpPatch): Promise<void>;
-    onWebConfigUpdate(web: ConfigWebPatch): Promise<void>;
+    onConfigUpdate(request: ConfigBatchUpdateRequest): Promise<JsonValue>;
     onValidateConfigDraft(draft: ConfigDraft): Promise<void>;
     onValidateInstanceCreateDraft(draft: InstanceCreateDraft): Promise<InstanceCreateSummary>;
     projection: TuiInteractionProjection;
@@ -209,7 +204,11 @@ export class TuiCommandDispatcherEditor {
             const nextIndex = direction === "left"
                 ? (currentIndex - 1 + choices.length) % choices.length
                 : (currentIndex + 1) % choices.length;
-            this.#store.setFormDraft(target.key, setPath(draft, target.path, choices[currentIndex === -1 ? 0 : nextIndex]!));
+            const choice = choices[currentIndex === -1 ? 0 : nextIndex]!;
+            const nextDraft = editor.kind === "connector" && (field === "web.auth" || field === "mcp.auth")
+                ? applyAuthModeChoice(draft, target.path, choice)
+                : setPath(draft, target.path, choice);
+            this.#store.setFormDraft(target.key, nextDraft);
             this.#store.setEditor({ ...editor, editing: false, error: undefined });
             return true;
         }
@@ -229,6 +228,12 @@ export class TuiCommandDispatcherEditor {
             }
             if (field === "container.mode") {
                 return editor.schema?.container.modes;
+            }
+            return undefined;
+        }
+        if (editor.kind === "connector") {
+            if (field === "web.auth" || field === "mcp.auth") {
+                return ["none", "token", "oauth2"];
             }
             return undefined;
         }
@@ -290,11 +295,13 @@ export class TuiCommandDispatcherEditor {
         if (!(await this.validate())) {
             return false;
         }
+        const state = this.#store.getState();
+        const wasRunning = state.snapshotsByInstance[instance]?.daemonState === "running" || state.snapshotsByInstance[instance]?.ready === true;
+        let stoppedForRestart = false;
         try {
-            const state = this.#store.getState();
-            const wasRunning = state.snapshotsByInstance[instance]?.daemonState === "running" || state.snapshotsByInstance[instance]?.ready === true;
             if (restartInstance && wasRunning) {
                 await this.#options.onInstanceAction("stop", instance);
+                stoppedForRestart = true;
             }
             const instanceKey = `config:${instance}`;
             const globalKey = "connector";
@@ -305,21 +312,22 @@ export class TuiCommandDispatcherEditor {
             const instanceDirty = state.ui.dirtyForms[instanceKey] === true;
             const globalDirty = editor.kind === "connector" && state.ui.dirtyForms[globalKey] === true;
             const webDirty = editor.kind === "connector" && state.ui.dirtyForms[webKey] === true;
-            if (instanceDirty) {
-                await this.#options.onInstanceConfigUpdate(instance, parseTuiInstancePatch(instanceDraft));
-            }
-            if (globalDirty) {
-                await this.#options.onMcpConfigUpdate(parseTuiMcpPatch(globalDraft));
-            }
-            if (webDirty) {
-                await this.#options.onWebConfigUpdate(parseTuiWebPatch(webDraft));
-            }
-            const applyResult = instanceDirty || globalDirty || webDirty ? await this.#options.onApplyConfig() : {};
+            const request: ConfigBatchUpdateRequest = {
+                ...(instanceDirty
+                    ? { instance: { instanceName: instance, patch: parseTuiInstancePatch(instanceDraft) } }
+                    : {}),
+                ...(globalDirty ? { mcp: parseTuiMcpPatch(globalDraft) } : {}),
+                ...(webDirty ? { web: parseTuiWebPatch(webDraft) } : {})
+            };
+            const applyResult = instanceDirty || globalDirty || webDirty
+                ? await this.#options.onConfigUpdate(request)
+                : {};
             if (asRecord(applyResult)?.restartControlRequired === true) {
                 this.#store.setControlRestartRequired(true);
             }
-            if (restartInstance && wasRunning) {
+            if (stoppedForRestart) {
                 await this.#options.onInstanceAction("start", instance);
+                stoppedForRestart = false;
             }
             this.#store.setFormDraft(`config:${instance}`, instanceDraft, false);
             if (editor.kind === "connector") {
@@ -333,7 +341,15 @@ export class TuiCommandDispatcherEditor {
             );
             return true;
         } catch (error) {
-            this.#store.setEditor({ ...editor, editing: false, error: readErrorMessage(error) });
+            let reported = error;
+            if (stoppedForRestart) {
+                try {
+                    await this.#options.onInstanceAction("start", instance);
+                } catch (restoreError) {
+                    reported = new AggregateError([error, restoreError], "Save failed and the previous instance state could not be restored.");
+                }
+            }
+            this.#store.setEditor({ ...editor, editing: false, error: readErrorMessage(reported) });
             return false;
         }
     }
@@ -541,4 +557,27 @@ function describeApplyResult(result: JsonValue, restarted: boolean): string {
         return "Saved. Control restart is required for MCP changes.";
     }
     return record?.reloadRequired === true ? "Saved and hot-applied to future instance operations." : "Saved.";
+}
+
+function applyAuthModeChoice(
+    draft: Record<string, JsonValue>,
+    authPath: string,
+    choice: JsonValue
+): Record<string, JsonValue> {
+    if (choice !== "none" && choice !== "token" && choice !== "oauth2") {
+        return setPath(draft, authPath, choice);
+    }
+
+    const prefix = authPath === "auth" ? "" : authPath.slice(0, -".auth".length);
+    const sibling = (name: string) => prefix.length === 0 ? name : `${prefix}.${name}`;
+    let next = setPath(draft, authPath, choice);
+    next = deletePath(next, sibling("token"));
+    next = deletePath(next, sibling("oauth2"));
+    if (choice === "token") {
+        return setPath(next, sibling("token"), "");
+    }
+    if (choice === "oauth2") {
+        return setPath(next, sibling("oauth2"), { requiredScopes: [], resourceName: "" });
+    }
+    return next;
 }

@@ -95,6 +95,102 @@ test("config editor validates drafts and accumulates patch apply summaries", asy
     assert.deepEqual(service.applyConfig(), { ...emptyApplyResult(), affectedListeners: [] });
 });
 
+test("config batch update persists instance, MCP, and Web changes as one transaction", async () => {
+    let config = createConfig();
+    const writes: ControlConfig[] = [];
+    let runtimeApplyCalls = 0;
+    const registry = new InstanceRegistryFactory().build(config);
+    const service = new ConfigEditorCoordinator({
+        configStore: {
+            async write(nextConfig: ControlConfig) {
+                writes.push(nextConfig);
+                config = nextConfig;
+            }
+        },
+        getConfig: () => config,
+        instanceRegistry: registry,
+        runtimeApply: {
+            async apply() {
+                runtimeApplyCalls += 1;
+                return false;
+            }
+        },
+        setConfig: (nextConfig) => {
+            config = nextConfig;
+        }
+    });
+
+    const result = await service.updateConfig({
+        instance: {
+            instanceName: "demo-local",
+            patch: { approvalPolicy: { mode: "ask" }, security: { mode: "workspace" } }
+        },
+        mcp: { listenPort: 17891, publicBaseUrl: "http://127.0.0.1:17891" },
+        web: { auth: "token", enabled: true, listenPort: 17892, token: "a".repeat(48) }
+    }) as {
+        appliedChanges: Array<{ kind: string; target: string }>;
+        restartControlRequired: boolean;
+    };
+
+    assert.equal(writes.length, 1);
+    assert.equal(runtimeApplyCalls, 1);
+    assert.equal(config.instances[0]?.security.mode, "workspace");
+    assert.equal(config.instances[0]?.approvalPolicy?.mode, "ask");
+    assert.equal(config.mcp.listenPort, 17891);
+    assert.equal(config.web.listenPort, 17892);
+    assert.deepEqual(config.web.auth, { mode: "token", token: "a".repeat(48) });
+    assert.equal(registry.get("demo-local")?.worker.snapshot().effectiveSecurityMode, "workspace");
+    assert.deepEqual(result.appliedChanges, [
+        { kind: "instance.updated", target: "demo-local" },
+        { kind: "mcp.endpoint.updated", target: "mcp" },
+        { kind: "web.updated", target: "web" }
+    ]);
+    assert.equal(result.restartControlRequired, true);
+});
+
+test("config batch preflight failure leaves every requested scope unchanged", async () => {
+    let config = createConfig();
+    const writes: ControlConfig[] = [];
+    const registry = new InstanceRegistryFactory().build(config);
+    const occupied = createServer();
+    await new Promise<void>((resolve) => occupied.listen(0, "127.0.0.1", resolve));
+    const address = occupied.address();
+    assert.ok(typeof address === "object" && address !== null);
+    const service = new ConfigEditorCoordinator({
+        configStore: {
+            async write(nextConfig: ControlConfig) {
+                writes.push(nextConfig);
+                config = nextConfig;
+            }
+        },
+        getConfig: () => config,
+        instanceRegistry: registry,
+        setConfig: (nextConfig) => {
+            config = nextConfig;
+        }
+    });
+
+    try {
+        await assert.rejects(
+            service.updateConfig({
+                instance: {
+                    instanceName: "demo-local",
+                    patch: { approvalPolicy: { mode: "ask" }, security: { mode: "workspace" } }
+                },
+                web: { enabled: true, listenHost: "127.0.0.1", listenPort: address.port }
+            }),
+            /Cannot bind HTTP listener 127\.0\.0\.1:/u
+        );
+        assert.equal(writes.length, 0);
+        assert.equal(config.instances[0]?.security.mode, "disabled");
+        assert.equal(config.instances[0]?.approvalPolicy, undefined);
+        assert.equal(config.web.enabled, false);
+        assert.equal(registry.get("demo-local")?.worker.snapshot().effectiveSecurityMode, "disabled");
+    } finally {
+        await new Promise<void>((resolve, reject) => occupied.close((error) => error === undefined ? resolve() : reject(error)));
+    }
+});
+
 test("config view and validation mask the web token while updateWeb preserves the masked secret", async () => {
     const strongToken = "a".repeat(48);
     let config = createConfig();

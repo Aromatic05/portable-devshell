@@ -349,6 +349,12 @@ export interface ConfigUpdateWebRequest {
     patch: ConfigWebPatch;
 }
 
+export interface ConfigBatchUpdateRequest {
+    instance?: ConfigUpdateInstanceRequest;
+    mcp?: ConfigMcpPatch;
+    web?: ConfigWebPatch;
+}
+
 export interface ConfigInstanceTargetRequest {
     instanceName: string;
 }

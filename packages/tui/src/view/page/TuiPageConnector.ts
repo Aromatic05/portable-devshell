@@ -18,6 +18,7 @@ export function buildConnectorPageBoxes(state: TuiAppState, instanceName: string
     const endpoint = endpointPreview(mcpDraft, readPath(instanceDraft, "mcp.path"), instanceName);
     const runtime = runtimeStatus(state, instanceDraft, mcpDraft, endpoint);
     const authMode = readPath(instanceDraft, "mcp.auth");
+    const webAuthMode = readPath(webDraft, "auth");
 
     return [
         makeBox(state, "connections", instanceName, {
@@ -48,11 +49,21 @@ export function buildConnectorPageBoxes(state: TuiAppState, instanceName: string
         makeBox(state, "connections", instanceName, {
             detailLines: [
                 fieldLine("web.enabled", "enabled", readPath(webDraft, "enabled")),
-                fieldLine("web.auth", "auth", readPath(webDraft, "auth")),
+                fieldLine("web.auth", "auth", webAuthMode),
+                ...(webAuthMode === "token"
+                    ? [secretFieldLine("web.token", "token", readPath(webDraft, "token"))]
+                    : []),
+                ...(webAuthMode === "oauth2"
+                    ? [
+                        fieldLine("web.oauth2.resourceName", "resource", readPath(webDraft, "oauth2.resourceName")),
+                        fieldLine("web.oauth2.requiredScopes", "scopes", readPath(webDraft, "oauth2.requiredScopes")),
+                        fieldLine("web.oauth2.documentationUrl", "documentationUrl", readPath(webDraft, "oauth2.documentationUrl"))
+                    ]
+                    : []),
                 fieldLine("web.listenHost", "listenHost", readPath(webDraft, "listenHost")),
                 fieldLine("web.listenPort", "listenPort", readPath(webDraft, "listenPort")),
                 fieldLine("web.publicBaseUrl", "publicBaseUrl", readPath(webDraft, "publicBaseUrl")),
-                ...editorErrorLine(state, "connector", "web", ["web"])
+                ...editorErrorLine(state, "connector", "web", ["web", "auth", "oauth2", "token"])
             ],
             id: "web",
             summaryLines: [compactSummary(["enabled", String(readPath(webDraft, "enabled") ?? false)], ["listener", `${String(readPath(webDraft, "listenHost") ?? "-")}:${String(readPath(webDraft, "listenPort") ?? "-")}`])],

@@ -39,3 +39,19 @@ export function setPath(record: Record<string, JsonValue>, path: string, value: 
     current[segments[segments.length - 1]!] = value;
     return copy;
 }
+
+export function deletePath(record: Record<string, JsonValue>, path: string): Record<string, JsonValue> {
+    const copy = cloneRecord(record);
+    const segments = path.split(".");
+    let current: Record<string, JsonValue> | undefined = copy;
+
+    for (const segment of segments.slice(0, -1)) {
+        current = current === undefined ? undefined : asRecord(current[segment]);
+        if (current === undefined) {
+            return copy;
+        }
+    }
+
+    delete current[segments[segments.length - 1]!];
+    return copy;
+}
