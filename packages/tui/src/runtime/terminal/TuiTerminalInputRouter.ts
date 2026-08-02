@@ -1,12 +1,14 @@
 export type TuiTerminalInputAction =
     | { data: string; type: "data" }
     | { type: "focus.leave" }
+    | { type: "source.toggle" }
     | { data: string; type: "paste" }
     | { direction: "pageUp" | "pageDown" | "top" | "bottom"; type: "scroll" }
     | { button: number; kind: "press" | "release"; type: "mouse"; x: number; y: number };
 
 const ESCAPE = "\u001B";
 const FOCUS_LEAVE = "\u001D";
+const SOURCE_TOGGLE = "\u0014";
 const MOUSE_PREFIX = `${ESCAPE}[<`;
 const PASTE_BEGIN = `${ESCAPE}[200~`;
 const PASTE_END = `${ESCAPE}[201~`;
@@ -44,6 +46,12 @@ export class TuiTerminalInputRouter {
             if (this.#buffer.startsWith(FOCUS_LEAVE)) {
                 actions.push({ type: "focus.leave" });
                 this.#buffer = this.#buffer.slice(FOCUS_LEAVE.length);
+                continue;
+            }
+
+            if (this.#buffer.startsWith(SOURCE_TOGGLE)) {
+                actions.push({ type: "source.toggle" });
+                this.#buffer = this.#buffer.slice(SOURCE_TOGGLE.length);
                 continue;
             }
 
@@ -92,6 +100,18 @@ export class TuiTerminalInputRouter {
         return actions;
     }
 
+    flushPendingEscape(): TuiTerminalInputAction[] {
+        if (this.#pasteBuffer === undefined && this.#buffer === ESCAPE) {
+            this.#buffer = "";
+            return [{ data: ESCAPE, type: "data" }];
+        }
+        return [];
+    }
+
+    hasPendingEscape(): boolean {
+        return this.#pasteBuffer === undefined && this.#buffer === ESCAPE;
+    }
+
     reset(): void {
         this.#buffer = "";
         this.#pasteBuffer = undefined;
@@ -101,9 +121,9 @@ export class TuiTerminalInputRouter {
 function firstControlIndex(value: string): number {
     const escape = value.indexOf(ESCAPE);
     const focusLeave = value.indexOf(FOCUS_LEAVE);
-    if (escape === -1) return focusLeave;
-    if (focusLeave === -1) return escape;
-    return Math.min(escape, focusLeave);
+    const sourceToggle = value.indexOf(SOURCE_TOGGLE);
+    const indexes = [escape, focusLeave, sourceToggle].filter((index) => index >= 0);
+    return indexes.length === 0 ? -1 : Math.min(...indexes);
 }
 
 function isRecognizedPartial(value: string): boolean {

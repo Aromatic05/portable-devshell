@@ -1,5 +1,7 @@
 import type { TuiFocusScope } from "../TuiUiState.js";
 
+export type TuiTerminalTab = "instances" | "tmuxPanes";
+
 export type TuiRoute =
     | { page: "overview"; view: "summary" }
     | { page: "instances"; view: "list" }
@@ -25,7 +27,7 @@ export type TuiRoute =
     | { page: "logs"; scope: "unscoped"; view: "context" }
     | { ctxId: string; page: "logs"; scope: "context"; view: "context" }
     | { page: "help"; view: "index" }
-    | { page: "terminal"; view: "session" };
+    | { page: "terminal"; pane?: string; tab: TuiTerminalTab; view: "session" };
 
 export interface TuiRouteViewState {
     readonly expandedItemIds: readonly string[];
@@ -50,7 +52,7 @@ export function rootTuiRoute(page: TuiRoute["page"]): TuiRoute {
         case "help":
             return { page, view: "index" };
         case "terminal":
-            return { page, view: "session" };
+            return { page, tab: "instances", view: "session" };
     }
 }
 
@@ -60,8 +62,11 @@ export function tuiRouteIdentity(route: TuiRoute): string {
         case "instances":
         case "config":
         case "help":
-        case "terminal":
             return `${route.page}/${route.view}`;
+        case "terminal":
+            return route.pane === undefined
+                ? `terminal/${route.tab}`
+                : `terminal/${route.tab}/${encodeURIComponent(route.pane)}`;
         case "audit":
             if (route.view === "contexts") return "audit/contexts";
             if (route.scope === "unscoped") {

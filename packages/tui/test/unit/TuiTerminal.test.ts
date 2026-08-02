@@ -4,6 +4,7 @@ import test from "node:test";
 import {
     detectTerminalGraphicsSupport,
     detectTerminalImageSupport,
+    buildTuiTerminalViewportRegion,
     pageFromShortcut,
     renderTerminalGraphicsFrame,
     renderTerminalImageFrame,
@@ -31,6 +32,18 @@ test("terminal is an additional ninth page without changing existing shortcuts",
     const pages = selectSidebarModel(new TuiAppStore().getState()).pages;
     assert.equal(pages.at(-1)?.id, "terminal");
     assert.equal(pages.at(-1)?.label, "terminal");
+});
+
+test("terminal viewport region exists only for the Instances terminal tab", () => {
+    const store = new TuiAppStore();
+    store.setSelectedPage("terminal");
+    assert.ok(buildTuiTerminalViewportRegion(store.getState(), { columns: 120, rows: 40 }));
+
+    store.replaceRoute({ page: "terminal", tab: "tmuxPanes", view: "session" });
+    assert.equal(
+        buildTuiTerminalViewportRegion(store.getState(), { columns: 120, rows: 40 }),
+        undefined,
+    );
 });
 
 test("headless terminal buffer applies cursor movement and SGR colors", async () => {
@@ -185,6 +198,24 @@ test("terminal input router preserves order across split shortcuts and mouse rep
             { data: "rest", type: "data" },
         ],
     );
+});
+
+test("terminal input router emits source toggle and flushes a standalone Ctrl+[ without breaking split CSI", () => {
+    const router = new TuiTerminalInputRouter();
+
+    assert.deepEqual(router.push("before\u0014after"), [
+        { data: "before", type: "data" },
+        { type: "source.toggle" },
+        { data: "after", type: "data" },
+    ]);
+    assert.deepEqual(router.push("\u001B"), []);
+    assert.equal(router.hasPendingEscape(), true);
+    assert.deepEqual(router.push("[B"), [{ data: "\u001B[B", type: "data" }]);
+    assert.equal(router.hasPendingEscape(), false);
+
+    assert.deepEqual(router.push("\u001B"), []);
+    assert.deepEqual(router.flushPendingEscape(), [{ data: "\u001B", type: "data" }]);
+    assert.deepEqual(router.flushPendingEscape(), []);
 });
 
 test("terminal input router reconstructs split bracketed paste", () => {

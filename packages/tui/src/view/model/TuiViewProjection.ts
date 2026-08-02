@@ -16,9 +16,11 @@ import type {
     TuiSidebarModel,
 } from "../../state/TuiViewModel.js";
 import {
+    currentTuiRoute,
     currentTuiRouteScrollKey,
     selectBreadcrumbSegments,
 } from "../../state/route/TuiRouteState.js";
+import type { TuiTerminalTab } from "../../state/route/TuiRoute.js";
 import {
     isTuiSearchablePage,
     tuiPageEntries,
@@ -34,6 +36,11 @@ export function selectActivePage(state: TuiAppState): TuiActivePage {
                 : state.ui.selectedInstance,
         page: state.ui.selectedPage,
     };
+}
+
+export function selectTerminalTab(state: TuiAppState): TuiTerminalTab {
+    const route = currentTuiRoute(state);
+    return route.page === "terminal" ? route.tab : "instances";
 }
 
 export function selectConnectionState(state: TuiAppState): TuiConnectionState {
@@ -261,6 +268,7 @@ export function selectFooterShortcuts(state: TuiAppState): string[] {
                 "raw input",
                 "drag copy",
                 "shift+drag app mouse",
+                "ctrl+t source",
                 "shift+pgup/pgdn",
                 "ctrl+] sidebar",
             ];

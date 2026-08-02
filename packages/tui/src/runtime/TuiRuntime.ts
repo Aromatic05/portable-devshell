@@ -18,9 +18,12 @@ import { TuiAppStore } from "../state/TuiAppStore.js";
 import { topTuiOverlay } from "../state/overlay/TuiOverlay.js";
 import {
     selectMainScreenModel,
+    selectTerminalTab,
     tuiViewProjection,
 } from "../view/model/TuiViewProjection.js";
+import { nextTuiTerminalTab } from "../view/page/terminal/TuiTmuxPaneTerminalModel.js";
 import type { TuiPageId } from "../state/TuiUiState.js";
+import type { TuiTerminalTab } from "../state/route/TuiRoute.js";
 import { TuiApp } from "../view/TuiApp.js";
 import type { TuiAppKey } from "../view/TuiAppController.js";
 import {
@@ -49,6 +52,9 @@ import {
 } from "./terminal/TuiTerminalImageRenderer.js";
 import { TuiTerminalInputRouter } from "./terminal/TuiTerminalInputRouter.js";
 import { TuiTerminalSession } from "./terminal/TuiTerminalSession.js";
+import { TuiTmuxPaneTerminalSession } from "./terminal/TuiTmuxPaneTerminalSession.js";
+
+const TERMINAL_ESCAPE_TIMEOUT_MS = 100;
 
 export interface TuiRuntimeOptions {
     stdin?: ReadStream;
@@ -72,6 +78,7 @@ export class TuiRuntime {
     readonly session: TuiControlSession;
     readonly store: TuiAppStore;
     readonly terminal: TuiTerminalSession;
+    readonly tmuxPanes: TuiTmuxPaneTerminalSession;
     readonly #alternateScreen: AlternateScreen;
     readonly #inkDebug: boolean;
     readonly #inkStdin: ReadStream;
@@ -90,10 +97,13 @@ export class TuiRuntime {
     #mouseBuffer = "";
     #stopped = false;
     #terminalColumns = 1;
+    #terminalEscapeTimer?: ReturnType<typeof setTimeout>;
     #terminalFocused = false;
     #terminalInstance?: string;
     #terminalRows = 1;
     #terminalSelecting = false;
+    #tmuxPanesActive = false;
+    #tmuxPanesInstance?: string;
 
     constructor(
         options: TuiRuntimeOptions = {},
@@ -115,9 +125,6 @@ export class TuiRuntime {
         this.store = new TuiAppStore();
         this.scheduler = new TuiRenderScheduler(this.store);
         this.terminal = dependencies.terminal ?? new TuiTerminalSession();
-        this.#storeUnsubscribe = this.store.subscribe(() =>
-            this.#syncTerminalFocus(),
-        );
         this.focusManager = new TuiFocusManager(this.store, {
             currentPage: () => this.store.getState().ui.selectedPage,
             expandedKeyFor: (boxId) =>
@@ -157,6 +164,10 @@ export class TuiRuntime {
             clients,
             session: this.session,
             store: this.store,
+        });
+        this.tmuxPanes = new TuiTmuxPaneTerminalSession({
+            operations: this.#operations.tmuxOperations,
+            viewportRows: Math.max(1, this.rows - 8),
         });
         const routeDataLoader = new TuiRouteDataLoader({
             session: this.session,
@@ -282,6 +293,10 @@ export class TuiRuntime {
             },
             store: this.store,
         });
+        this.#storeUnsubscribe = this.store.subscribe(() => {
+            this.#syncTerminalFocus();
+            this.#syncTmuxPanes();
+        });
         this.focusManager.syncPanel(
             this.store.getState().ui.selectedPage,
             this.store.getState().interaction.focusScope,
@@ -402,17 +417,34 @@ export class TuiRuntime {
         }
     }
 
+    selectTerminalTab(tab: TuiTerminalTab): void {
+        const state = this.store.getState();
+        if (state.ui.selectedPage !== "terminal" || selectTerminalTab(state) === tab) {
+            return;
+        }
+        const keepTerminalFocus = state.interaction.focusScope === "terminal";
+        if (tab === "instances") {
+            this.tmuxPanes.exitAttach();
+        }
+        this.store.replaceRoute({ page: "terminal", tab, view: "session" });
+        if (keepTerminalFocus) {
+            this.store.setFocusScope("terminal");
+        }
+    }
+
     async stop(): Promise<void> {
         if (this.#stopped) {
             return;
         }
         this.#stopped = true;
+        this.#clearTerminalEscapeTimer();
         this.#stopCursorBlink();
         this.renderTextDetailImage(false);
         this.renderTerminalGraphics(false);
         this.#storeUnsubscribe();
         this.routeLifecycle.stop();
         this.terminal.dispose();
+        this.tmuxPanes.dispose();
         await this.session.stop();
         this.scheduler.dispose();
         this.#ink?.unmount();
@@ -555,51 +587,21 @@ export class TuiRuntime {
             this.store.getState().interaction.focusScope === "terminal"
         ) {
             this.#mouseBuffer = "";
-            let focused = true;
-            for (const action of this.#terminalInputRouter.push(
-                chunk.toString(),
-            )) {
-                if (action.type === "focus.leave") {
-                    focused = false;
-                    const cursor =
-                        this.store.getState().interaction.sidebarCursor;
-                    this.store.setFocusScope(
-                        cursor?.kind === "instance"
-                            ? "sidebarInstances"
-                            : "sidebarPages",
+            this.#clearTerminalEscapeTimer();
+            this.#dispatchTerminalInputActions(
+                this.#terminalInputRouter.push(chunk.toString()),
+            );
+            if (this.#terminalInputRouter.hasPendingEscape()) {
+                this.#terminalEscapeTimer = setTimeout(() => {
+                    this.#terminalEscapeTimer = undefined;
+                    this.#dispatchTerminalInputActions(
+                        this.#terminalInputRouter.flushPendingEscape(),
                     );
-                    continue;
-                }
-                if (action.type === "data") {
-                    if (focused) {
-                        this.terminal.writeInput(action.data);
-                    } else {
-                        this.#inkStdin.write(action.data);
-                    }
-                    continue;
-                }
-                if (action.type === "paste") {
-                    if (focused) {
-                        this.terminal.paste(action.data);
-                    } else {
-                        this.#inkStdin.write(action.data);
-                    }
-                    continue;
-                }
-                if (action.type === "scroll") {
-                    if (focused) {
-                        this.#scrollTerminal(action.direction);
-                    }
-                    continue;
-                }
-                if (focused) {
-                    void this.#handleTerminalMouse(action);
-                } else {
-                    void this.#handleMouse(action);
-                }
+                }, TERMINAL_ESCAPE_TIMEOUT_MS);
             }
             return;
         }
+        this.#clearTerminalEscapeTimer();
         this.#terminalInputRouter.reset();
         const input = this.#mouseBuffer + chunk.toString();
         const pattern = new RegExp(
@@ -631,11 +633,87 @@ export class TuiRuntime {
         this.#inkStdin.write(remainder);
     };
 
+    #dispatchTerminalInputActions(
+        actions: ReturnType<TuiTerminalInputRouter["push"]>,
+    ): void {
+        let tab = selectTerminalTab(this.store.getState());
+        let focused = true;
+        for (const action of actions) {
+            if (action.type === "source.toggle") {
+                tab = nextTuiTerminalTab(tab);
+                this.selectTerminalTab(tab);
+                continue;
+            }
+            if (action.type === "focus.leave") {
+                focused = false;
+                const cursor = this.store.getState().interaction.sidebarCursor;
+                this.store.setFocusScope(
+                    cursor?.kind === "instance"
+                        ? "sidebarInstances"
+                        : "sidebarPages",
+                );
+                continue;
+            }
+            if (!focused) {
+                if (action.type === "data" || action.type === "paste") {
+                    this.#inkStdin.write(action.data);
+                } else if (action.type === "mouse") {
+                    void this.#handleMouse(action);
+                }
+                continue;
+            }
+            if (tab === "tmuxPanes") {
+                this.#dispatchTmuxPaneInputAction(action);
+                continue;
+            }
+            if (action.type === "data") {
+                this.terminal.writeInput(action.data);
+            } else if (action.type === "paste") {
+                this.terminal.paste(action.data);
+            } else if (action.type === "scroll") {
+                this.#scrollTerminal(action.direction);
+            } else if (action.type === "mouse") {
+                void this.#handleTerminalMouse(action);
+            }
+        }
+    }
+
+    #dispatchTmuxPaneInputAction(
+        action: Exclude<ReturnType<TuiTerminalInputRouter["push"]>[number], { type: "focus.leave" } | { type: "source.toggle" }>,
+    ): void {
+        if (action.type === "data" || action.type === "paste") {
+            void this.tmuxPanes.handleRawInput(action.data);
+            return;
+        }
+        if (action.type === "scroll") {
+            const rows = Math.max(1, this.rows - 8);
+            const delta =
+                action.direction === "pageUp"
+                    ? -rows
+                    : action.direction === "pageDown"
+                      ? rows
+                      : action.direction === "top"
+                        ? -1_000_000
+                        : 1_000_000;
+            this.tmuxPanes.scroll(delta);
+            return;
+        }
+        void this.#handleMouse(action);
+    }
+
+    #clearTerminalEscapeTimer(): void {
+        if (this.#terminalEscapeTimer !== undefined) {
+            clearTimeout(this.#terminalEscapeTimer);
+            this.#terminalEscapeTimer = undefined;
+        }
+    }
+
     #syncTerminalFocus(): void {
         const state = this.store.getState();
         const focused =
             state.ui.selectedPage === "terminal" &&
-            state.interaction.focusScope === "terminal";
+            state.interaction.focusScope === "terminal" &&
+            selectTerminalTab(state) === "instances";
         if (focused === this.#terminalFocused) {
             return;
         }
@@ -644,7 +722,41 @@ export class TuiRuntime {
         this.#stdout.write(focused ? "\u001B[?1h\u001B=" : "\u001B[?1l\u001B>");
         if (!focused) {
             this.#terminalSelecting = false;
+            this.#clearTerminalEscapeTimer();
             this.#terminalInputRouter.reset();
+        }
+    }
+
+    #syncTmuxPanes(): void {
+        const state = this.store.getState();
+        const active =
+            state.ui.selectedPage === "terminal" &&
+            selectTerminalTab(state) === "tmuxPanes";
+        if (!active) {
+            if (this.#tmuxPanesActive) {
+                this.#tmuxPanesActive = false;
+                this.#tmuxPanesInstance = undefined;
+                this.tmuxPanes.stopPolling();
+            }
+            return;
+        }
+        const instance = state.ui.selectedInstance;
+        this.tmuxPanes.setViewportRows(Math.max(1, this.rows - 8));
+        if (!this.#tmuxPanesActive || this.#tmuxPanesInstance !== instance) {
+            this.#tmuxPanesActive = true;
+            this.#tmuxPanesInstance = instance;
+            void this.tmuxPanes.bind(instance).then(() => {
+                if (this.#tmuxPanesActive && this.#tmuxPanesInstance === instance) {
+                    this.tmuxPanes.startPolling(2000);
+                }
+            }).catch((error: unknown) => {
+                if (this.#tmuxPanesActive && this.#tmuxPanesInstance === instance) {
+                    this.store.setScreenStatus(
+                        "terminal",
+                        `Tmux pane load failed: ${readErrorMessage(error)}`,
+                    );
+                }
+            });
         }
     }
 

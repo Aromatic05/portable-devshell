@@ -16,6 +16,7 @@ import type { TuiPageId } from "../state/TuiUiState.js";
 import { TuiRuntimeAttachOperations } from "./operation/TuiRuntimeAttachOperations.js";
 import { TuiRuntimeControlOperations } from "./operation/TuiRuntimeControlOperations.js";
 import { TuiRuntimeExecutionOperations } from "./operation/TuiRuntimeExecutionOperations.js";
+import { TuiRuntimeTmuxOperations } from "./operation/TuiRuntimeTmuxOperations.js";
 
 export interface TuiRuntimeOperationsOptions {
     attachHooks?: {
@@ -33,6 +34,7 @@ export class TuiRuntimeOperations {
     readonly #attach: TuiRuntimeAttachOperations;
     readonly #control: TuiRuntimeControlOperations;
     readonly #execution: TuiRuntimeExecutionOperations;
+    readonly #tmux: TuiRuntimeTmuxOperations;
 
     constructor(options: TuiRuntimeOperationsOptions) {
         this.#attach = new TuiRuntimeAttachOperations(options);
@@ -45,6 +47,10 @@ export class TuiRuntimeOperations {
         });
         this.#execution = new TuiRuntimeExecutionOperations({
             ...options,
+            operationTimeoutMs: options.operationTimeoutMs ?? 30_000
+        });
+        this.#tmux = new TuiRuntimeTmuxOperations({
+            clients: options.clients,
             operationTimeoutMs: options.operationTimeoutMs ?? 30_000
         });
     }
@@ -147,4 +153,9 @@ export class TuiRuntimeOperations {
     async callTool(instance: string, toolName: string, input: string): Promise<boolean> {
         return await this.#execution.callTool(instance, toolName, input);
     }
+
+    get tmuxOperations(): TuiRuntimeTmuxOperations {
+        return this.#tmux;
+    }
+
 }

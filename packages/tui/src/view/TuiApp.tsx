@@ -8,6 +8,8 @@ import { TuiComponentFooter } from "./component/TuiComponentFooter.js";
 import { TuiComponentHeader } from "./component/TuiComponentHeader.js";
 import { TuiComponentSidebar } from "./component/TuiComponentSidebar.js";
 import { TuiComponentTerminal } from "./component/TuiComponentTerminal.js";
+import { TuiComponentTerminalTabs } from "./component/TuiComponentTerminalTabs.js";
+import { TuiComponentTmuxPanes } from "./component/TuiComponentTmuxPanes.js";
 import { TuiOverlayView } from "./overlay/TuiOverlayView.js";
 import { TuiScreenRouter } from "./screen/TuiScreenRouter.js";
 import {
@@ -16,7 +18,8 @@ import {
     selectFooterModel,
     selectHeaderSummary,
     selectHeaderTitle,
-    selectSidebarModel
+    selectSidebarModel,
+    selectTerminalTab
 } from "./model/TuiViewProjection.js";
 import type { TuiAppController } from "./TuiAppController.js";
 import { mainInnerWidth, tuiLayoutMetrics, TuiRootLayout } from "./TuiRootLayout.js";
@@ -76,15 +79,28 @@ export function TuiApp(props: TuiAppProps) {
                             width={boxInnerWidth}
                         />
                     ) : state.ui.selectedPage === "terminal" ? (
-                        <TuiComponentTerminal
-                            columns={Math.max(1, boxInnerWidth)}
-                            focused={state.interaction.focusScope === "terminal"}
-                            instance={state.ui.selectedInstance}
-                            onGraphicsVisibility={renderTerminalGraphics}
-                            onOpen={openTerminal}
-                            rows={terminalRows}
-                            source={props.runtime.terminal}
-                        />
+                        <Box flexDirection="column" flexGrow={1}>
+                            <TuiComponentTerminalTabs activeTab={selectTerminalTab(state)} focused={state.interaction.focusScope === "terminal"} />
+                            {selectTerminalTab(state) === "tmuxPanes" ? (
+                                <TuiComponentTmuxPanes
+                                    columns={Math.max(1, boxInnerWidth)}
+                                    focused={state.interaction.focusScope === "terminal"}
+                                    instance={state.ui.selectedInstance}
+                                    rows={Math.max(1, terminalRows - 1)}
+                                    source={props.runtime.tmuxPanes}
+                                />
+                            ) : (
+                                <TuiComponentTerminal
+                                    columns={Math.max(1, boxInnerWidth)}
+                                    focused={state.interaction.focusScope === "terminal"}
+                                    instance={state.ui.selectedInstance}
+                                    onGraphicsVisibility={renderTerminalGraphics}
+                                    onOpen={openTerminal}
+                                    rows={Math.max(1, terminalRows - 1)}
+                                    source={props.runtime.terminal}
+                                />
+                            )}
+                        </Box>
                     ) : (
                         <TuiScreenRouter
                             boxInnerWidth={boxInnerWidth}

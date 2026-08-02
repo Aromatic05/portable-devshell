@@ -1751,3 +1751,142 @@ fn repeated_tmux_list_skips_session_reinitialization() {
     );
     stop(&env, instance);
 }
+
+#[test]
+#[ignore = "requires tmux on PATH"]
+fn concurrent_tmux_input_from_distinct_contexts_serializes_on_the_pane() {
+    assert!(
+        tmux_available(),
+        "tmux is required to run this ignored contract test"
+    );
+    if !Command::new("bash")
+        .arg("--version")
+        .output()
+        .is_ok_and(|output| output.status.success())
+    {
+        return;
+    }
+    let env = TestEnv::new();
+    let instance = "aromatic-tmux-concurrent-input";
+    env.command_with_env("SHELL", "/bin/bash")
+        .current_dir(env.workspace())
+        .args(["start", "--instance", instance])
+        .assert()
+        .success();
+
+    let run = call(
+        &env,
+        instance,
+        "1",
+        "tmux_run",
+        json!({
+            "pane": "main",
+            "command": "read first; read second; printf 'CONTRACT:%s:%s\\n' \"$first\" \"$second\"",
+            "wait": "nonblock"
+        }),
+        "ctx-a",
+        "run-reader",
+    );
+    assert_eq!(run["ok"], true, "{run}");
+    let task = run["result"]["task"]["id"].as_str().unwrap().to_string();
+    assert_eq!(run["result"]["task"]["status"], "running", "{run}");
+
+    let listed = call(
+        &env,
+        instance,
+        "2",
+        "tmux_list",
+        json!({}),
+        "ctx-list",
+        "list-running-task",
+    );
+    assert_eq!(listed["ok"], true, "{listed}");
+    let listed_task = listed["result"]["panes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|pane| pane["name"] == "main")
+        .and_then(|pane| pane["task"]["id"].as_str())
+        .map(ToOwned::to_owned);
+    assert_eq!(listed_task.as_deref(), Some(task.as_str()), "{listed}");
+
+    let task_a = task.clone();
+    let task_b = task.clone();
+    let (first, second) = thread::scope(|scope| {
+        let first = scope.spawn(|| {
+            call(
+                &env,
+                instance,
+                "3a",
+                "tmux_input",
+                json!({ "task": task_a, "input": "AAAA^M", "timeMs": 0 }),
+                "ctx-writer-a",
+                "input-writer-a",
+            )
+        });
+        let second = scope.spawn(|| {
+            call(
+                &env,
+                instance,
+                "3b",
+                "tmux_input",
+                json!({ "task": task_b, "input": "BBBB^M", "timeMs": 0 }),
+                "ctx-writer-b",
+                "input-writer-b",
+            )
+        });
+        (first.join().unwrap(), second.join().unwrap())
+    });
+
+    assert_eq!(first["ok"], true, "{first}");
+    assert_eq!(second["ok"], true, "{second}");
+
+    let mut output: Vec<String> = Vec::new();
+    for response in [&first, &second] {
+        if let Some(lines) = response["result"]["output"].as_array() {
+            output.extend(lines.iter().map(|line| line.as_str().unwrap().to_string()));
+        }
+    }
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let mut attempt = 0;
+    let final_status = loop {
+        attempt += 1;
+        let read = call(
+            &env,
+            instance,
+            &format!("collect-{attempt}"),
+            "tmux_read",
+            json!({ "task": task, "line": 400, "timeMs": 200 }),
+            "ctx-collect",
+            &format!("collect-output-{attempt}"),
+        );
+        assert_eq!(read["ok"], true, "{read}");
+        if let Some(lines) = read["result"]["output"].as_array() {
+            output.extend(lines.iter().map(|line| line.as_str().unwrap().to_string()));
+        }
+        let status = read["result"]["task"]["status"]
+            .as_str()
+            .unwrap_or("unknown");
+        if status != "running" {
+            break status.to_string();
+        }
+        assert!(
+            Instant::now() < deadline,
+            "reader task did not finish; observed output: {output:?}"
+        );
+    };
+    assert_eq!(
+        final_status, "0",
+        "reader task exit status; observed output: {output:?}"
+    );
+
+    let serialized = output
+        .iter()
+        .any(|line| line == "CONTRACT:AAAA:BBBB" || line == "CONTRACT:BBBB:AAAA");
+    assert!(
+        serialized,
+        "concurrent tmux_input writes did not serialize into one intact line per writer (expected CONTRACT:AAAA:BBBB or CONTRACT:BBBB:AAAA); observed output: {output:?}"
+    );
+
+    stop(&env, instance);
+}

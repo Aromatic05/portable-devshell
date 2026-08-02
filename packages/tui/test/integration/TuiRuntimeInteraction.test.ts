@@ -11,6 +11,7 @@ import { asInstanceName } from "@portable-devshell/shared";
 import type { TuiClients } from "../../src/runtime/client/TuiClientComposition.ts";
 import { TuiRuntime } from "../../src/runtime/TuiRuntime.ts";
 import {
+    currentTuiRoute,
     topTuiOverlay,
     TuiTerminalSession,
     type TuiTerminalPty,
@@ -890,6 +891,163 @@ test("real Ink runtime routes terminal scrollback and mouse without trapping sid
     assert.equal(host.rawModes.at(-1), false);
 });
 
+test("real Ink runtime switches terminal sources and drives tmux View and Attach", async () => {
+    const host = createTerminal();
+    const ptyWrites: string[] = [];
+    const embedded = new TuiTerminalSession({
+        ptyFactory: () => ({
+            kill() {},
+            onData() {
+                return { dispose() {} };
+            },
+            onExit() {
+                return { dispose() {} };
+            },
+            resize() {},
+            write(data) {
+                ptyWrites.push(data);
+            },
+        }),
+    });
+    const clients = createClients({
+        configView: {
+            instances: [
+                {
+                    enabled: true,
+                    mcp: { enabled: true, tools: { capabilities: [], groups: [] } },
+                    name: "alpha",
+                    provider: "local",
+                    security: { mode: "disabled" },
+                },
+            ],
+        },
+        instanceList: [
+            {
+                defaultWorkspace: process.cwd(),
+                enabled: true,
+                mcpEnabled: true,
+                name: "alpha",
+                provider: "local",
+            },
+        ],
+        toolCall(_instance, toolName, input) {
+            if (toolName === "tmux_list") {
+                return {
+                    panes: [
+                        {
+                            id: "%1",
+                            name: "agent",
+                            status: "running",
+                            task: { id: "task-agent", status: "running" },
+                        },
+                    ],
+                };
+            }
+            if (toolName === "tmux_inspect") {
+                return {
+                    panes: [
+                        {
+                            command: "read first; read second",
+                            cwd: process.cwd(),
+                            id: "%1",
+                            lines: ["ready"],
+                            name: "agent",
+                            status: "running",
+                            task: { id: "task-agent", status: "running" },
+                        },
+                    ],
+                };
+            }
+            if (toolName === "tmux_input") {
+                assert.deepEqual(input, {
+                    input: "echo hello^M",
+                    task: "task-agent",
+                    timeMs: 0,
+                });
+                return {
+                    output: ["echo hello", "hello"],
+                    task: { id: "task-agent", status: "running" },
+                };
+            }
+            throw new Error(`Unexpected tool ${toolName}`);
+        },
+    });
+    const runtime = new TuiRuntime(
+        { stdin: host.stdin, stdout: host.stdout },
+        { clients: clients.value, inkDebug: true, terminal: embedded },
+    );
+    const running = runtime.run();
+
+    try {
+        await waitUntil(
+            () => runtime.store.getState().connection.status === "connected",
+        );
+        await waitUntil(() => runtime.store.getState().instances.length === 1);
+        runtime.store.setSelectedInstance("alpha");
+
+        host.write("8");
+        await waitUntil(
+            () => runtime.store.getState().ui.selectedPage === "terminal",
+        );
+        host.write("\t");
+        await waitUntil(
+            () => runtime.store.getState().interaction.focusScope === "terminal",
+        );
+        assert.equal(currentTuiRoute(runtime.store.getState()).page, "terminal");
+
+        host.write("\u0014");
+        await waitUntil(() => {
+            const route = currentTuiRoute(runtime.store.getState());
+            return route.page === "terminal" && route.tab === "tmuxPanes";
+        });
+        await waitUntil(() => runtime.tmuxPanes.getSnapshot().panes.length === 1);
+        assert.equal(buildTuiTerminalViewportRegion(runtime.store.getState(), {
+            columns: runtime.columns,
+            rows: runtime.rows,
+        }), undefined);
+
+        host.write("\r");
+        await waitUntil(
+            () => runtime.tmuxPanes.getSnapshot().active?.attached === true,
+        );
+        host.write("echo hello\r");
+        await waitUntil(() =>
+            clients.toolCalls().some((call) => call.toolName === "tmux_input"),
+        );
+        await waitUntil(() => host.output.includes("hello"));
+
+        host.write("\u001B");
+        await waitUntil(
+            () => runtime.tmuxPanes.getSnapshot().active?.attached === false,
+        );
+        host.write("\u0014");
+        await waitUntil(() => {
+            const route = currentTuiRoute(runtime.store.getState());
+            return route.page === "terminal" && route.tab === "instances";
+        });
+        assert.ok(buildTuiTerminalViewportRegion(runtime.store.getState(), {
+            columns: runtime.columns,
+            rows: runtime.rows,
+        }));
+
+        host.write("\t");
+        await waitUntil(() => ptyWrites.includes("\t"));
+        assert.equal(
+            clients.toolCalls().filter((call) => call.toolName === "tmux_input").length,
+            1,
+        );
+
+        host.write("\u001D");
+        await waitUntil(
+            () => runtime.store.getState().interaction.focusScope !== "terminal",
+        );
+        host.write("\u0004");
+        await running;
+    } finally {
+        await runtime.stop();
+    }
+});
+
 test("real Ink runtime renders artifact_viewImage audit output in the detail panel", async () => {
     const host = createTerminal();
     const clients = createClients({
@@ -1030,6 +1188,7 @@ function createClients(
             };
         };
         pingError?: Error;
+        toolCall?: (instance: string, toolName: string, input: unknown) => unknown;
     } = {},
 ) {
     let closeCount = 0;
@@ -1038,6 +1197,7 @@ function createClients(
     const imageReads: Array<{ input: unknown; instance: string }> = [];
     let refreshCount = 0;
     let schemaCalls = 0;
+    const toolCalls: Array<{ input: unknown; instance: string; toolName: string }> = [];
     const value = {
         artifact: {
             async viewImage(instance: string, input: unknown) {
@@ -1143,7 +1303,12 @@ function createClients(
             },
         },
         todo: {},
-        tool: {},
+        tool: {
+            async call(instance: string, toolName: string, input: unknown) {
+                toolCalls.push({ input, instance, toolName });
+                return options.toolCall?.(instance, toolName, input) ?? {};
+            },
+        },
     } as unknown as TuiClients;
 
     return {
@@ -1151,6 +1316,7 @@ function createClients(
         createSchemaCalls: () => schemaCalls,
         imageReads: () => imageReads,
         refreshCalls: () => refreshCount,
+        toolCalls: () => toolCalls,
         setControlState(
             nextInstances: typeof instanceList,
             nextConfigView: Record<string, unknown>,

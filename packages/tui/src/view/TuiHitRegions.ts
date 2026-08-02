@@ -1,5 +1,6 @@
 import { topTuiOverlay } from "../state/overlay/TuiOverlay.js";
 import type { TuiAppState } from "../state/reducer/TuiStoreModel.js";
+import { currentTuiRoute } from "../state/route/TuiRouteState.js";
 import {
     selectErrorMessage,
     selectMainBoxFlowMetrics,
@@ -44,8 +45,11 @@ export function buildTuiTerminalViewportRegion(
     state: TuiAppState,
     viewport: { columns: number; rows: number },
 ): TuiTerminalViewportRegion | undefined {
+    const route = currentTuiRoute(state);
     if (
         state.ui.selectedPage !== "terminal" ||
+        route.page !== "terminal" ||
+        route.tab !== "instances" ||
         topTuiOverlay(state.interaction.overlays) !== undefined ||
         !isTerminalSizeSupported(viewport.columns, viewport.rows)
     ) {
@@ -64,12 +68,12 @@ export function buildTuiTerminalViewportRegion(
     );
 
     return {
-        height: Math.max(1, viewportRows - 1),
+        height: Math.max(1, viewportRows - 2),
         width: Math.max(1, mainInnerWidth(viewport.columns)),
         x: compact
             ? 2
             : layout.outerGap + layout.sidebarWidth + layout.panelGap + 2,
-        y: (compact ? 6 : 5) + globalErrorHeight + 1,
+        y: (compact ? 6 : 5) + globalErrorHeight + 2,
     };
 }
 
