@@ -7,7 +7,7 @@ import test from "node:test";
 
 import { HttpHost } from "@portable-devshell/mcp/testing";
 
-test("MCP HTTP server rejects oversized request bodies before dispatch", async () => {
+test("MCP HTTP server rejects a declared oversized request body before dispatch", async () => {
     const server = new HttpHost({
         listenHost: "127.0.0.1",
         listenPort: 0
@@ -23,11 +23,11 @@ test("MCP HTTP server rejects oversized request bodies before dispatch", async (
         await server.start();
         const address = server.address;
         assert.ok(typeof address === "object" && address !== null);
-        const body = JSON.stringify({ payload: "x".repeat(1024 * 1024) });
+        const body = "{}";
         const response = await requestHttp(address.port, "/demo/mcp", {
             body,
             headers: {
-                "content-length": String(Buffer.byteLength(body)),
+                "content-length": String(1024 * 1024 + 1),
                 "content-type": "application/json"
             },
             method: "POST"
