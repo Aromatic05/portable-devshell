@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -66,6 +66,52 @@ test("McpOAuthProviderRuntime owns provider lifecycle, resources, metadata, and 
         const secondJwks = await readFile(join(storageDir, "jwks.json"), "utf8");
         assert.equal(secondJwks, firstJwks);
         assert.equal(reloaded.provider.proxy, false);
+    } finally {
+        await rm(storageDir, { force: true, recursive: true });
+    }
+});
+
+test("McpOAuthProviderRuntime upgrades persisted dynamic clients for OIDC refresh-token scopes", async () => {
+    const storageDir = await mkdtemp(join(tmpdir(), "mcp-oauth-client-scope-upgrade-"));
+    const adapterDir = join(storageDir, "adapter");
+    const clientFile = join(adapterDir, "Client.json");
+    await mkdir(adapterDir, { recursive: true });
+    await writeFile(clientFile, JSON.stringify({
+        "claude-code": {
+            payload: {
+                application_type: "native",
+                client_id: "claude-code",
+                client_name: "Claude Code",
+                grant_types: ["authorization_code", "refresh_token"],
+                redirect_uris: ["http://localhost/callback"],
+                response_types: ["code"],
+                scope: "mcp",
+                token_endpoint_auth_method: "none"
+            }
+        }
+    }), "utf8");
+    const runtime = new McpOAuthProviderRuntime({
+        approvals: new McpOAuthApprovalService(storageDir),
+        config,
+        publicBaseUrl: "https://mcp.example.test/",
+        storageDir
+    });
+
+    try {
+        await runtime.warmup();
+        const client = await runtime.provider.Client.find("claude-code");
+        assert.notEqual(client, undefined);
+        assert.deepEqual(
+            new Set(client!.scope?.split(" ")),
+            new Set(["mcp", "openid", "offline_access"])
+        );
+        const persisted = JSON.parse(await readFile(clientFile, "utf8")) as {
+            "claude-code": { payload: { scope?: string } };
+        };
+        assert.deepEqual(
+            new Set(persisted["claude-code"].payload.scope?.split(" ")),
+            new Set(["mcp", "openid", "offline_access"])
+        );
     } finally {
         await rm(storageDir, { force: true, recursive: true });
     }

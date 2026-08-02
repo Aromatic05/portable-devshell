@@ -21,12 +21,17 @@ import type {
     Response
 } from "express";
 import { exportJWK, generateKeyPair } from "jose";
-import Provider from "oidc-provider";
+import Provider, {
+    type Adapter,
+    type AdapterFactory,
+    type AdapterPayload
+} from "oidc-provider";
 
 const ACCESS_TOKEN_TTL_SECONDS = 60 * 60;
 const ID_TOKEN_TTL_SECONDS = 60 * 60;
 const INTERACTION_TTL_SECONDS = 10 * 60;
 const LONG_LIVED_TTL_SECONDS = 90 * 24 * 60 * 60;
+const DYNAMIC_CLIENT_REQUIRED_SCOPES = ["openid", "offline_access"] as const;
 
 import type { McpOAuth2Config } from "../McpAuthConfig.js";
 import {
@@ -109,8 +114,10 @@ export class McpOAuthProviderRuntime {
         await this.#approvals.warmup();
         const jwks = await readOrCreateJwks(this.#storageDir);
         const provider = new Provider(stripTrailingSlash(this.#issuerUrl.href), {
-            adapter: createMcpOAuthOidcFileAdapterFactory(
-                join(this.#storageDir, "adapter")
+            adapter: createDynamicClientScopeAdapterFactory(
+                createMcpOAuthOidcFileAdapterFactory(
+                    join(this.#storageDir, "adapter")
+                )
             ),
             clientDefaults: {
                 grant_types: ["authorization_code", "refresh_token"],
@@ -201,7 +208,12 @@ export class McpOAuthProviderRuntime {
             }
         });
         provider.proxy = this.#trustProxy;
-        provider.on("registration_create.success", (_context, client) => {
+        provider.on("registration_create.success", (context, client) => {
+            const scope = extendDynamicClientScope(client.scope);
+            (client as unknown as { scope: string }).scope = scope;
+            if (isRecord(context.body)) {
+                context.body.scope = scope;
+            }
             void this.#approvals.registerClient(
                 toRegistrationApprovalInput(client)
             );
@@ -277,6 +289,88 @@ export class McpOAuthProviderRuntime {
             scopes: [...verified.scopes]
         };
     }
+}
+
+function createDynamicClientScopeAdapterFactory(
+    delegate: AdapterFactory
+): AdapterFactory {
+    return (name) => {
+        const adapter = delegate(name);
+        return name === "Client"
+            ? new DynamicClientScopeAdapter(adapter)
+            : adapter;
+    };
+}
+
+class DynamicClientScopeAdapter implements Adapter {
+    constructor(private readonly delegate: Adapter) {}
+
+    async consume(id: string): Promise<void> {
+        await this.delegate.consume(id);
+    }
+
+    async destroy(id: string): Promise<void> {
+        await this.delegate.destroy(id);
+    }
+
+    async find(id: string): Promise<AdapterPayload | undefined> {
+        const payload = await this.delegate.find(id);
+        if (payload === undefined) {
+            return undefined;
+        }
+        const extended = extendDynamicClientPayload(payload);
+        if (extended !== payload) {
+            await this.delegate.upsert(id, extended, 0);
+        }
+        return extended;
+    }
+
+    async findByUid(uid: string): Promise<AdapterPayload | undefined> {
+        return await this.delegate.findByUid(uid) ?? undefined;
+    }
+
+    async findByUserCode(userCode: string): Promise<AdapterPayload | undefined> {
+        return await this.delegate.findByUserCode(userCode) ?? undefined;
+    }
+
+    async revokeByGrantId(grantId: string): Promise<void> {
+        await this.delegate.revokeByGrantId(grantId);
+    }
+
+    async upsert(
+        id: string,
+        payload: AdapterPayload,
+        expiresIn: number
+    ): Promise<void> {
+        await this.delegate.upsert(
+            id,
+            extendDynamicClientPayload(payload),
+            expiresIn
+        );
+    }
+}
+
+function extendDynamicClientPayload(payload: AdapterPayload): AdapterPayload {
+    const scope = extendDynamicClientScope(payload.scope);
+    return scope === payload.scope
+        ? payload
+        : { ...payload, scope };
+}
+
+function extendDynamicClientScope(value: unknown): string {
+    const scopes = typeof value === "string"
+        ? value.split(/\s+/u).filter((scope) => scope.length > 0)
+        : [];
+    for (const scope of DYNAMIC_CLIENT_REQUIRED_SCOPES) {
+        if (!scopes.includes(scope)) {
+            scopes.push(scope);
+        }
+    }
+    return scopes.join(" ");
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 class McpOAuthResourceVerifier implements OAuthTokenVerifier {

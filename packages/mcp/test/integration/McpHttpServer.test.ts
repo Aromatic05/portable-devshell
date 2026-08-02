@@ -229,16 +229,26 @@ test("oauth2 enforces resource isolation, refresh rotation, replay detection, an
             },
             body: JSON.stringify({
                 application_type: "native",
-                client_name: "ChatGPT",
+                client_name: "Claude Code",
                 grant_types: ["authorization_code", "refresh_token"],
                 redirect_uris: ["https://chatgpt.com/connector/oauth/test-callback"],
                 response_types: ["code"],
+                scope: "mcp",
                 token_endpoint_auth_method: "none"
             })
         });
         assert.equal(clientRegistration.status, 201);
-        const client = await clientRegistration.json() as { client_id: string; redirect_uris: string[] };
+        const client = await clientRegistration.json() as {
+            client_id: string;
+            redirect_uris: string[];
+            scope?: string;
+        };
+        await waitForAnyPendingApproval(host);
         assert.equal(typeof client.client_id, "string");
+        assert.deepEqual(
+            new Set(client.scope?.split(" ")),
+            new Set(["mcp", "openid", "offline_access"])
+        );
 
         const redirectUri = client.redirect_uris[0]!;
         const approvedIds = new Set<string>();
@@ -249,7 +259,7 @@ test("oauth2 enforces resource isolation, refresh rotation, replay detection, an
             authorizationUrl.searchParams.set("client_id", client.client_id);
             authorizationUrl.searchParams.set("redirect_uri", redirectUri);
             authorizationUrl.searchParams.set("response_type", "code");
-            authorizationUrl.searchParams.set("scope", "openid offline_access mcp");
+            authorizationUrl.searchParams.set("scope", "mcp offline_access");
             authorizationUrl.searchParams.set("code_challenge", challenge);
             authorizationUrl.searchParams.set("code_challenge_method", "S256");
             authorizationUrl.searchParams.set("resource", endpoint);
