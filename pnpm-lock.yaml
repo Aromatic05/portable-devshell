@@ -12,6 +12,9 @@ importers:
       '@eslint/js':
         specifier: ^9.31.0
         version: 9.39.4
+      '@modelcontextprotocol/sdk':
+        specifier: 1.29.0
+        version: 1.29.0(zod@3.25.76)
       '@types/node':
         specifier: ^24.0.0
         version: 24.13.2
@@ -41,7 +44,7 @@ importers:
     dependencies:
       '@portable-devshell/control':
         specifier: workspace:*
-        version: file:packages/control
+        version: link:../control
       '@portable-devshell/shared':
         specifier: workspace:*
         version: link:../shared
@@ -531,21 +534,6 @@ packages:
 
   '@oxc-project/types@0.142.0':
     resolution: {integrity: sha512-7W+2q5AKQVU36fkaryontrHn3YDt1RyUYXatw9i5H8ocYe2sPKSFB6eS8WNPeRKiN1qAWWZUPm7gwFzJGrccqQ==}
-
-  '@portable-devshell/control@file:packages/control':
-    resolution: {directory: packages/control, type: directory}
-
-  '@portable-devshell/core@file:packages/core':
-    resolution: {directory: packages/core, type: directory}
-
-  '@portable-devshell/mcp@file:packages/mcp':
-    resolution: {directory: packages/mcp, type: directory}
-
-  '@portable-devshell/shared@file:packages/shared':
-    resolution: {directory: packages/shared, type: directory}
-
-  '@portable-devshell/web@file:packages/web':
-    resolution: {directory: packages/web, type: directory}
 
   '@rolldown/binding-android-arm64@1.2.1':
     resolution: {integrity: sha512-02hOeOSryYxVrOIphmLAsqnCJWxwlzFk+pEt/N/i6OgT3lShHO7xGCU5cpgchRDHboAEbSjzgGh+O/u1GswQmA==}
@@ -2561,54 +2549,6 @@ snapshots:
     optional: true
 
   '@oxc-project/types@0.142.0': {}
-
-  '@portable-devshell/control@file:packages/control':
-    dependencies:
-      '@portable-devshell/core': file:packages/core
-      '@portable-devshell/mcp': file:packages/mcp(zod@3.25.76)
-      '@portable-devshell/shared': file:packages/shared
-      '@portable-devshell/web': file:packages/web
-      hash-wasm: 4.12.0
-      smol-toml: 1.7.0
-      tar-stream: 3.2.0
-      ws: 8.21.0
-    transitivePeerDependencies:
-      - '@cfworker/json-schema'
-      - bare-abort-controller
-      - bare-buffer
-      - bufferutil
-      - react-native-b4a
-      - supports-color
-      - utf-8-validate
-      - zod
-
-  '@portable-devshell/core@file:packages/core':
-    dependencies:
-      '@portable-devshell/shared': file:packages/shared
-      ajv: 8.20.0
-      string-argv: 0.3.2
-      tar-stream: 3.2.0
-    transitivePeerDependencies:
-      - bare-abort-controller
-      - bare-buffer
-      - react-native-b4a
-
-  '@portable-devshell/mcp@file:packages/mcp(zod@3.25.76)':
-    dependencies:
-      '@modelcontextprotocol/sdk': 1.29.0(zod@3.25.76)
-      '@portable-devshell/shared': file:packages/shared
-      '@types/oidc-provider': 9.5.0
-      express: 5.2.1
-      jose: 6.2.3
-      oidc-provider: 9.9.1
-    transitivePeerDependencies:
-      - '@cfworker/json-schema'
-      - supports-color
-      - zod
-
-  '@portable-devshell/shared@file:packages/shared': {}
-
-  '@portable-devshell/web@file:packages/web': {}
 
   '@rolldown/binding-android-arm64@1.2.1':
     optional: true

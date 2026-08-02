@@ -38,6 +38,7 @@
         "test:worker:tmux": "cargo test --locked -p devshell-worker --test tmux_tools_contract -- --ignored"
     },
     "devDependencies": {
+        "@modelcontextprotocol/sdk": "1.29.0",
         "@types/react": "^18.3.11",
         "@types/node": "^24.0.0",
         "@eslint/js": "^9.31.0",
