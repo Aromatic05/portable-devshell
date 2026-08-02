@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { rm } from "node:fs/promises";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import type { ReadStream, WriteStream } from "node:tty";
 import test from "node:test";
+
+import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
 
 import {
     asInstanceName,
@@ -96,11 +97,15 @@ test("real Ink keeps Space, Enter, route hierarchy, logical focus and rendered h
     await waitUntil(() => currentTuiRoute(harness.runtime.store.getState()).view === "context");
     const callBox = () => box(harness.runtime, "audit-call:call-1");
     await focusBox(harness, "audit-call:call-1");
+    await waitUntil(() => callBox()?.focused === true);
+    await delay(50);
     assert.equal(callBox()?.enterable, false);
     assert.equal(callBox()?.primaryAction, undefined);
+    assert.equal(callBox()?.expandable, true);
+    assert.equal(callBox()?.expanded, false);
     assert.equal(currentTuiRoute(harness.runtime.store.getState()).view, "context");
 
-    harness.terminal.write("\r");
+    await harness.runtime.handleInput("", { return: true });
     await waitUntil(() => callBox()?.expanded === true);
     assert.equal(currentTuiRoute(harness.runtime.store.getState()).view, "context");
     await delay(100);
@@ -136,7 +141,7 @@ interface Harness {
 }
 
 async function createHarness(toolCalls: readonly ToolCallRecord[] = []): Promise<Harness> {
-    const root = await createTestDirectory("tui-context-rpc");
+    const root = await createTestTempDirectory("tui-context-rpc");
     const socketPath = process.platform === "win32"
         ? `\\\\.\\pipe\\portable-devshell-tui-${process.pid}-${Date.now()}`
         : join(root, "control.sock");
@@ -421,12 +426,6 @@ function createTerminal(): {
         stdout: output as unknown as WriteStream,
         write(value: string) { input.write(value); },
     };
-}
-
-async function createTestDirectory(label: string): Promise<string> {
-    const namespace = join(tmpdir(), "devshell-test");
-    await mkdir(namespace, { recursive: true });
-    return await mkdtemp(join(namespace, `${label}-`));
 }
 
 async function waitUntil(predicate: () => boolean | Promise<boolean>, timeoutMs = 10_000): Promise<void> {

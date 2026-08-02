@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
 import { spawn as nodeSpawn } from "node:child_process";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
 
 import { requireTcpPort } from "../../../../test/TestHttpSupport.ts";
+import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
 import { realWorkerTestOptions, resolveTestWorkerBinary } from "../../../../test/TestPlatformSupport.ts";
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -110,9 +110,9 @@ test("a real MCP SDK client authenticates to a token-auth frozen worker with a b
 test("a real MCP SDK OAuth consumer completes registration, PKCE authorization, approval, token exchange, refresh, revocation and tools/call against a frozen worker", realWorkerTestOptions(workerBinaryPath), async () => {
     const port = await reservePort();
     const origin = `http://127.0.0.1:${port}`;
-    const storageDir = await mkdtemp(join(tmpdir(), "portable-devshell-mcp-oauth-real-client-"));
-    const workspacePath = await mkdtemp(join(tmpdir(), "portable-devshell-mcp-oauth-real-workspace-"));
-    const homeDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-mcp-oauth-real-home-"));
+    const storageDir = await createTestTempDirectory("mcp-oauth-real-client");
+    const workspacePath = await createTestTempDirectory("mcp-oauth-real-workspace");
+    const homeDirectory = await createTestTempDirectory("mcp-oauth-real-home");
     const markerName = "oauth-real-marker.txt";
     const markerValue = "oauth-real-frozen-worker";
     await writeFile(join(workspacePath, markerName), markerValue, "utf8");
@@ -481,8 +481,8 @@ function createFrozenWorker(name: string, homeDirectory: string, workspacePath: 
 }
 
 async function startFrozenWorkerHost(name: string, auth: McpAuthConfig) {
-    const homeDirectory = await mkdtemp(join(tmpdir(), `portable-devshell-mcp-real-${name}-home-`));
-    const workspacePath = await mkdtemp(join(tmpdir(), `portable-devshell-mcp-real-${name}-workspace-`));
+    const homeDirectory = await createTestTempDirectory(`mcp-real-${name}-home`);
+    const workspacePath = await createTestTempDirectory(`mcp-real-${name}-workspace`);
     const markerName = `real-${name}-marker.txt`;
     const markerValue = `real-${name}-frozen-worker`;
     await writeFile(join(workspacePath, markerName), markerValue, "utf8");

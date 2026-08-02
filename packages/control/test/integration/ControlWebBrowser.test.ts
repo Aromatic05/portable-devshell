@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
-import { access, mkdir, mkdtemp, rm } from "node:fs/promises";
+import { access, rm } from "node:fs/promises";
 import { createServer } from "node:net";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import test from "node:test";
 
 import { chromium, type Browser, type Page } from "playwright";
+
+import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
 
 import { HttpHost, McpOAuthProtectedResource, type McpOAuthApprovalService } from "@portable-devshell/mcp";
 import {
@@ -102,7 +102,7 @@ async function startBrowserRuntime(options: {
     const origin = `http://127.0.0.1:${port}`;
     const publicBaseUrl = `${origin}${options.prefix}`;
     const basePath = controlWebBasePath(publicBaseUrl);
-    const storage = await createTestDirectory("web-browser");
+    const storage = await createTestTempDirectory("web-browser");
     const http = new HttpHost({ listenHost: "127.0.0.1", listenPort: port });
     const sessions = new ControlWebSessionService({
         auth: options.auth === "none"
@@ -348,12 +348,6 @@ async function approveBrowserFlow(
         await page.waitForTimeout(100);
     }
     throw new Error(`Web OAuth browser flow did not return to ${expectedReturnUrl}; current URL is ${page.url()}`);
-}
-
-async function createTestDirectory(label: string): Promise<string> {
-    const namespace = join(tmpdir(), "devshell-test");
-    await mkdir(namespace, { recursive: true });
-    return await mkdtemp(join(namespace, `${label}-`));
 }
 
 async function reservePort(): Promise<number> {

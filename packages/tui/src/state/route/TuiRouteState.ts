@@ -418,10 +418,7 @@ function isTuiRouteResourceValid(
                 messages.some((message) => message.ctxId === route.ctxId)
             );
         }
-        return calls.some(
-            (call) =>
-                call.callId === route.callId && call.ctxId === route.ctxId,
-        );
+        return false;
     }
     if (route.page === "todo" && route.view === "detail") {
         if (instance === undefined) return false;

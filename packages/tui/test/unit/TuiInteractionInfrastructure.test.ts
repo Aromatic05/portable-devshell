@@ -326,20 +326,18 @@ test("Audit opens Comment conversation only from a concrete context route", asyn
 
     const call = createHarness();
     enableContextMessageMcp(call);
-    enterAuditContext(call, "ctx-alpha");
-    call.store.pushRoute({
+    call.store.setSelectedPage("audit");
+    call.store.replaceRoute({
         callId: "call-1",
-        ctxId: "ctx-alpha",
         page: "audit",
-        scope: "context",
+        scope: "unscoped",
         view: "call",
     });
     await call.press("m");
     assert.deepEqual(currentTuiRoute(call.store.getState()), {
         callId: "call-1",
-        ctxId: "ctx-alpha",
         page: "audit",
-        scope: "context",
+        scope: "unscoped",
         view: "call",
     });
     assert.equal(topTuiOverlay(call.store.getState().interaction.overlays), undefined);

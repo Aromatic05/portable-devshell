@@ -15,13 +15,6 @@ export type TuiRoute =
     | { ctxId: string; page: "audit"; scope: "context"; view: "context" }
     | { ctxId: string; page: "audit"; scope: "context"; view: "conversation" }
     | { callId: string; page: "audit"; scope: "unscoped"; view: "call" }
-    | {
-          callId: string;
-          ctxId: string;
-          page: "audit";
-          scope: "context";
-          view: "call";
-      }
     | { page: "todo"; view: "overview" }
     | { page: "todo"; todoId: string; view: "detail" }
     | { page: "logs"; view: "contexts" }
@@ -81,7 +74,7 @@ export function tuiRouteIdentity(route: TuiRoute): string {
             if (route.view === "conversation") {
                 return `audit/context/${encodeURIComponent(route.ctxId)}/conversation`;
             }
-            return `audit/context/${encodeURIComponent(route.ctxId)}/call/${encodeURIComponent(route.callId)}`;
+            throw new Error("Unsupported audit route.");
         case "todo":
             return route.view === "overview"
                 ? "todo/overview"

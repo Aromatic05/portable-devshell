@@ -86,13 +86,7 @@ function callBox(
                       scope: "unscoped",
                       view: "call",
                   }
-                : {
-                      callId: call.callId,
-                      ctxId: key.ctxId,
-                      page: "audit",
-                      scope: "context",
-                      view: "call",
-                  },
+                : undefined,
         searchText: `${call.toolName} ${call.status} ${call.callId}`,
         status: toolCallStatus(call),
         summaryLines: [

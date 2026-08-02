@@ -322,7 +322,18 @@ export class TuiCommandDispatcher {
             if (focused?.kind === "line") {
                 return await this.#detail.activate();
             }
-            return this.#navigation.openFocusedRoute();
+            if (this.#store.getState().ui.selectedPage === "overview") {
+                return this.#navigation.openFocusedRoute();
+            }
+            const box = this.#options.projection
+                .selectMainScreenModel(this.#store.getState())
+                .boxes.find(
+                    (candidate) => candidate.id === this.#store.getState().ui.mainFocusId,
+                );
+            if (box?.primaryAction?.kind === "navigate" && box.disabled !== true) {
+                return this.#navigation.openFocusedRoute();
+            }
+            return await this.dispatch({ type: "screen.toggle" });
         }
         if (scope === "boxDetail") {
             return await this.#detail.activate();

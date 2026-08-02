@@ -139,13 +139,6 @@ test("resource refresh removes invalid trailing routes instead of retaining a bl
         scope: "context",
         view: "context",
     });
-    store.pushRoute({
-        callId: "call-1",
-        ctxId: "ctx-a",
-        page: "audit",
-        scope: "context",
-        view: "call",
-    });
 
     store.replaceToolCalls("alpha", []);
 
@@ -161,7 +154,6 @@ test("footer breadcrumb follows the route stack and excludes overlay state", () 
     store.replaceToolCalls("alpha", [
         {
             callId: "bash_run",
-            ctxId: "ctx-1234567890-abcdefghij",
             inputSummary: "{}",
             instance: "alpha" as never,
             source: "mcp",
@@ -171,16 +163,14 @@ test("footer breadcrumb follows the route stack and excludes overlay state", () 
         },
     ]);
     store.pushRoute({
-        ctxId: "ctx-1234567890-abcdefghij",
         page: "audit",
-        scope: "context",
+        scope: "unscoped",
         view: "context",
     });
     store.pushRoute({
         callId: "bash_run",
-        ctxId: "ctx-1234567890-abcdefghij",
         page: "audit",
-        scope: "context",
+        scope: "unscoped",
         view: "call",
     });
     store.pushOverlay({
@@ -195,7 +185,7 @@ test("footer breadcrumb follows the route stack and excludes overlay state", () 
 
     assert.deepEqual(selectBreadcrumbSegments(store.getState()), [
         "audit",
-        "ctx-1234…ghij",
+        "unscoped",
         "bash_run",
     ]);
 });
