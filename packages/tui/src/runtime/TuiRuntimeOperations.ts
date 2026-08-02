@@ -68,10 +68,6 @@ export class TuiRuntimeOperations {
         await this.#control.queueContextMessage(instance, ctxId, text);
     }
 
-    async applyConfig(): Promise<JsonValue> {
-        return await this.#control.applyConfig();
-    }
-
     async restartControl(): Promise<void> {
         await this.#control.restartControl();
     }

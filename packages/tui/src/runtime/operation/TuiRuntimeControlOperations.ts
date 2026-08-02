@@ -58,14 +58,6 @@ export class TuiRuntimeControlOperations {
         });
     }
 
-    async applyConfig(): Promise<JsonValue> {
-        const result = await this.#request(this.options.clients.config.apply(), "config.apply");
-        await this.#refreshBestEffort(this.#panelKey("config"), async () => {
-            await this.options.session.refresh();
-        });
-        return result;
-    }
-
     async restartControl(): Promise<void> {
         await this.#request(this.options.clients.service.restart(), "service.restart");
         if (this.options.reconnectDelayMs > 0) {
@@ -156,7 +148,6 @@ export class TuiRuntimeControlOperations {
             }),
             `config.instance.enabled:${instance}`
         );
-        await this.#request(this.options.clients.config.apply(), "config.apply");
         await this.#refreshBestEffort(`instances:${instance}`, async () => {
             await this.options.session.refresh();
         });

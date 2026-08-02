@@ -123,10 +123,9 @@ test("shared listener Web auth changes require an explicit control restart witho
         await rm(homeDirectory, { force: true, recursive: true });
     });
 
-    await runtime.configEditor.updateWebConfig({
+    const result = await runtime.configEditor.updateWebConfig({
         patch: { auth: "token", token: "a".repeat(48) }
-    });
-    const result = runtime.configEditor.applyConfig() as {
+    }) as {
         restartControlRequired: boolean;
     };
 

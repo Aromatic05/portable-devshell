@@ -10,7 +10,7 @@ import {
 } from "../../src/testing.ts";
 import { MASKED_CONFIG_TOKEN, normalizeConfigInstanceDraft, type ControlConfig, type JsonValue } from "@portable-devshell/shared";
 
-test("config editor validates drafts and accumulates patch apply summaries", async () => {
+test("config editor returns each patch apply summary to the initiating request", async () => {
     let config = createConfig();
     const registry = new InstanceRegistryFactory().build(config);
     const writes: unknown[] = [];
@@ -46,53 +46,40 @@ test("config editor validates drafts and accumulates patch apply summaries", asy
     assert.equal(validated.instances[0]?.security.mode, "workspace");
     assert.equal(config.instances[0]?.security.mode, "disabled");
 
-    await service.updateInstanceConfig({
+    const instanceResult = await service.updateInstanceConfig({
         instanceName: "demo-local",
         patch: {
             approvalPolicy: { mode: "ask" },
             security: { mode: "workspace" }
         }
-    });
+    }) as { appliedChanges: Array<{ kind: string; target: string }> };
     assert.equal(writes.length, 1);
     assert.equal(config.instances[0]?.security.mode, "workspace");
     assert.equal(registry.get("demo-local")?.worker.snapshot().effectiveSecurityMode, "workspace");
 
-    await service.updateMcpConfig({
+    const mcpResult = await service.updateMcpConfig({
         patch: {
             enabled: true,
             listenHost: "127.0.0.1",
             listenPort: 17891,
             publicBaseUrl: "http://127.0.0.1:17891"
         }
-    });
-    await service.updateWebConfig({
+    }) as { appliedChanges: Array<{ kind: string; target: string }>; restartControlRequired: boolean };
+    const webResult = await service.updateWebConfig({
         patch: { enabled: true, listenHost: "127.0.0.1", listenPort: 17892, publicBaseUrl: "127.0.0.1" }
-    });
-    await service.updateInstanceConfig({
+    }) as { appliedChanges: Array<{ kind: string; target: string }>; restartControlRequired: boolean };
+    const authResult = await service.updateInstanceConfig({
         instanceName: "demo-local",
         patch: { mcp: { auth: "token", token: "0123456789abcdef0123456789abcdef" } }
-    });
+    }) as { appliedChanges: Array<{ kind: string; target: string }>; affectedMcpEndpoints: string[] };
 
-    const applied = service.applyConfig() as {
-        affectedInstances: string[];
-        affectedListeners: string[];
-        affectedMcpEndpoints: string[];
-        appliedChanges: Array<{ kind: string; target: string }>;
-        reloadRequired: boolean;
-        restartControlRequired: boolean;
-    };
-    assert.deepEqual(applied.appliedChanges, [
-        { kind: "instance.updated", target: "demo-local" },
-        { kind: "mcp.endpoint.updated", target: "mcp" },
-        { kind: "web.updated", target: "web" },
-        { kind: "instance.updated", target: "demo-local" }
-    ]);
-    assert.deepEqual(applied.affectedInstances, ["demo-local"]);
-    assert.deepEqual(applied.affectedListeners, ["127.0.0.1:17890", "127.0.0.1:17891", "127.0.0.1:17892"]);
-    assert.deepEqual(applied.affectedMcpEndpoints, ["/demo-local/mcp", "mcp"]);
-    assert.equal(applied.reloadRequired, true);
-    assert.equal(applied.restartControlRequired, true);
-    assert.deepEqual(service.applyConfig(), { ...emptyApplyResult(), affectedListeners: [] });
+    assert.deepEqual(instanceResult.appliedChanges, [{ kind: "instance.updated", target: "demo-local" }]);
+    assert.deepEqual(mcpResult.appliedChanges, [{ kind: "mcp.endpoint.updated", target: "mcp" }]);
+    assert.equal(mcpResult.restartControlRequired, true);
+    assert.deepEqual(webResult.appliedChanges, [{ kind: "web.updated", target: "web" }]);
+    assert.equal(webResult.restartControlRequired, true);
+    assert.deepEqual(authResult.appliedChanges, [{ kind: "instance.updated", target: "demo-local" }]);
+    assert.deepEqual(authResult.affectedMcpEndpoints, ["/demo-local/mcp"]);
 });
 
 test("config batch update persists instance, MCP, and Web changes as one transaction", async () => {
@@ -482,26 +469,18 @@ test("config editor reconciles instance MCP bindings from patches without restar
     });
     assert.deepEqual(registered[0]?.auth, { enabled: false, provider: "none" });
 
-    await service.updateInstanceConfig({
+    const authUpdate = await service.updateInstanceConfig({
         instanceName: "demo-local",
         patch: { mcp: { auth: "token", token: "0123456789abcdef0123456789abcdef" } }
-    });
+    }) as { appliedChanges: Array<{ kind: string; target: string }> };
     assert.deepEqual(registered[1]?.auth, {
         enabled: true,
         provider: "token",
         token: "0123456789abcdef0123456789abcdef"
     });
-    assert.deepEqual(service.applyConfig(), {
-        affectedInstances: ["demo-local"],
-        affectedListeners: [],
-        affectedMcpEndpoints: ["/demo-local/mcp"],
-        appliedChanges: [
-            { kind: "instance.updated", target: "demo-local" },
-            { kind: "instance.updated", target: "demo-local" }
-        ],
-        reloadRequired: true,
-        restartControlRequired: false
-    });
+    assert.deepEqual(authUpdate.appliedChanges, [
+        { kind: "instance.updated", target: "demo-local" }
+    ]);
 
     await service.disableInstance({ instanceName: "demo-local" });
     assert.deepEqual(unregistered, ["demo-local"]);

@@ -19,8 +19,7 @@ export function createTuiClientConfig(connection: ClientConnection) {
             config.request("updateInstance", request),
         updateMcpEndpoint: (request: ConfigUpdateMcpRequest): Promise<Record<string, JsonValue>> =>
             config.request("updateMcpEndpoint", request),
-        updateWeb: (request: ConfigUpdateWebRequest): Promise<Record<string, JsonValue>> => config.request("updateWeb", request),
-        apply: (): Promise<JsonValue> => config.request("apply")
+        updateWeb: (request: ConfigUpdateWebRequest): Promise<Record<string, JsonValue>> => config.request("updateWeb", request)
     };
 }
 

@@ -28,10 +28,6 @@ function createHarness(options: { failReverseCode?: boolean; failStart?: boolean
             },
         },
         config: {
-            async apply() {
-                calls.push("config.apply");
-                return { applied: true };
-            },
             async updateInstance(input: { instanceName: string }) {
                 calls.push(`config.instance:${input.instanceName}`);
             },
@@ -234,7 +230,6 @@ test("runtime operations expose control callbacks and route page refreshes", asy
 
     const status = await harness.operations.createInstance(draft);
     assert.match(status ?? "", /devshell-worker enroll/u);
-    await harness.operations.applyConfig();
     await harness.operations.restartControl();
     await harness.operations.decideApproval("alpha", "approval-1", "approve");
     assert.equal(
@@ -253,7 +248,6 @@ test("runtime operations expose control callbacks and route page refreshes", asy
 
     assert.equal(harness.calls.includes("instance.create:remote-one"), true);
     assert.equal(harness.calls.includes("reverse.code:remote-one"), true);
-    assert.equal(harness.calls.includes("config.apply"), true);
     assert.equal(harness.calls.includes("service.restart"), true);
     assert.equal(
         harness.calls.includes("approval.approve:alpha:approval-1"),
@@ -264,7 +258,6 @@ test("runtime operations expose control callbacks and route page refreshes", asy
         true,
     );
     assert.deepEqual(harness.refreshed, [
-        "all",
         "all",
         "reconnect",
         "instance:alpha",

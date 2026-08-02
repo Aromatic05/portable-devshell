@@ -31,11 +31,8 @@ import { ControlConfigMutationLock, type ControlConfigMutationRunner } from "../
 import { HttpEndpointPreflight } from "../../../server/http/HttpEndpointPreflight.js";
 import {
     buildApplyResult,
-    emptyApplyResult,
-    mergeApplyResults,
     requiresWorkerRebuild,
-    toWorkerReconfigureInput,
-    type ConfigApplyResult
+    toWorkerReconfigureInput
 } from "./ConfigEditorResult.js";
 
 interface ControlConfigWriter {
@@ -72,7 +69,6 @@ export class ConfigEditorCoordinator {
     readonly #runtimePreflight: { assertAvailable(previous: ControlConfig, next: ControlConfig): Promise<void> };
     readonly #runtimeApply?: { apply(previous: ControlConfig, next: ControlConfig): Promise<boolean> };
     readonly #validator: ControlConfigValidator;
-    #lastApplyResult: ConfigApplyResult = emptyApplyResult();
 
     constructor(options: ConfigEditorCoordinatorOptions) {
         this.#configStore = options.configStore;
@@ -204,10 +200,12 @@ export class ConfigEditorCoordinator {
             : false;
         this.#applyInstanceConfig(instance, descriptor, rebuildRequired);
         this.#syncMcpEndpoint(request.instanceName);
-        this.#rememberApplyResult(
-            buildApplyResult(currentConfig, nextConfig, [{ kind: "instance.updated", target: request.instanceName }], hotApplied)
-        );
-        return this.getConfigView();
+        return buildApplyResult(
+            currentConfig,
+            nextConfig,
+            [{ kind: "instance.updated", target: request.instanceName }],
+            hotApplied
+        ) as unknown as JsonValue;
     }
 
     async updateMcpConfig(params: JsonValue | undefined): Promise<JsonValue> {
@@ -228,8 +226,12 @@ export class ConfigEditorCoordinator {
         await this.#runtimePreflight.assertAvailable(currentConfig, nextConfig);
         await this.#persistConfig(nextConfig);
         const hotApplied = await this.#applyRuntimeOrRestore(currentConfig, nextConfig);
-        this.#rememberApplyResult(buildApplyResult(currentConfig, nextConfig, [{ kind: "mcp.endpoint.updated", target: "mcp" }], hotApplied));
-        return this.getConfigView();
+        return buildApplyResult(
+            currentConfig,
+            nextConfig,
+            [{ kind: "mcp.endpoint.updated", target: "mcp" }],
+            hotApplied
+        ) as unknown as JsonValue;
     }
 
     async updateWebConfig(params: JsonValue | undefined): Promise<JsonValue> {
@@ -250,8 +252,12 @@ export class ConfigEditorCoordinator {
         await this.#runtimePreflight.assertAvailable(currentConfig, nextConfig);
         await this.#persistConfig(nextConfig);
         const webHotApplied = await this.#applyRuntimeOrRestore(currentConfig, nextConfig);
-        this.#rememberApplyResult(buildApplyResult(currentConfig, nextConfig, [{ kind: "web.updated", target: "web" }], webHotApplied));
-        return this.getConfigView();
+        return buildApplyResult(
+            currentConfig,
+            nextConfig,
+            [{ kind: "web.updated", target: "web" }],
+            webHotApplied
+        ) as unknown as JsonValue;
     }
 
     async deleteInstance(params: JsonValue | undefined): Promise<JsonValue> {
@@ -273,10 +279,11 @@ export class ConfigEditorCoordinator {
         await this.#persistConfig(nextConfig);
         this.#getMcpHost()?.unregisterInstance(instanceName);
         this.#instanceRegistry.delete(instanceName);
-        this.#rememberApplyResult(
-            buildApplyResult(currentConfig, nextConfig, [{ kind: "instance.deleted", target: instanceName }])
-        );
-        return this.getConfigView();
+        return buildApplyResult(
+            currentConfig,
+            nextConfig,
+            [{ kind: "instance.deleted", target: instanceName }]
+        ) as unknown as JsonValue;
     }
 
     async enableInstance(params: JsonValue | undefined): Promise<JsonValue> {
@@ -291,12 +298,6 @@ export class ConfigEditorCoordinator {
             const { instanceName } = this.#readConfigInput(() => parseConfigInstanceTargetRequest(params));
             return await this.#setInstanceEnabled(instanceName, false);
         });
-    }
-
-    applyConfig(): JsonValue {
-        const result = this.#lastApplyResult;
-        this.#lastApplyResult = emptyApplyResult();
-        return result as unknown as JsonValue;
     }
 
     async #setInstanceEnabled(instanceName: string, enabled: boolean): Promise<JsonValue> {
@@ -320,12 +321,11 @@ export class ConfigEditorCoordinator {
         }
 
         this.#syncMcpEndpoint(instanceName);
-        this.#rememberApplyResult(
-            buildApplyResult(currentConfig, nextConfig, [
-                { kind: enabled ? "instance.enabled" : "instance.disabled", target: instanceName }
-            ])
-        );
-        return this.getConfigView();
+        return buildApplyResult(
+            currentConfig,
+            nextConfig,
+            [{ kind: enabled ? "instance.enabled" : "instance.disabled", target: instanceName }]
+        ) as unknown as JsonValue;
     }
 
     #applyInstanceConfig(
@@ -425,9 +425,7 @@ export class ConfigEditorCoordinator {
         }
     }
 
-    #rememberApplyResult(result: ConfigApplyResult): void {
-        this.#lastApplyResult = mergeApplyResults(this.#lastApplyResult, result);
-    }
+
 }
 
 function missingInstance(instanceName: string): Error {

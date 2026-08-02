@@ -19,15 +19,6 @@ export interface ConfigApplyResult {
     restartControlRequired: boolean;
 }
 
-export const emptyApplyResult = (): ConfigApplyResult => ({
-    affectedInstances: [],
-    affectedMcpEndpoints: [],
-    affectedListeners: [],
-    appliedChanges: [],
-    reloadRequired: false,
-    restartControlRequired: false
-});
-
 export function buildApplyResult(previous: ControlConfig, next: ControlConfig, appliedChanges: ConfigApplyChange[], hotApplied = false): ConfigApplyResult {
     const affectedInstances = new Set<string>();
     const affectedMcpEndpoints = new Set<string>();
@@ -71,23 +62,6 @@ export function buildApplyResult(previous: ControlConfig, next: ControlConfig, a
             stableStringify(previous.mcp) !== stableStringify(next.mcp) ||
             stableStringify(previous.web) !== stableStringify(next.web)
         )
-    };
-}
-
-export function mergeApplyResults(previous: ConfigApplyResult, next: ConfigApplyResult): ConfigApplyResult {
-    return {
-        affectedInstances: [...new Set([...previous.affectedInstances, ...next.affectedInstances])].sort((left, right) =>
-            left.localeCompare(right)
-        ),
-        affectedMcpEndpoints: [...new Set([...previous.affectedMcpEndpoints, ...next.affectedMcpEndpoints])].sort((left, right) =>
-            left.localeCompare(right)
-        ),
-        affectedListeners: [...new Set([...previous.affectedListeners, ...next.affectedListeners])].sort((left, right) =>
-            left.localeCompare(right)
-        ),
-        appliedChanges: [...previous.appliedChanges, ...next.appliedChanges],
-        reloadRequired: previous.reloadRequired || next.reloadRequired,
-        restartControlRequired: previous.restartControlRequired || next.restartControlRequired
     };
 }
 

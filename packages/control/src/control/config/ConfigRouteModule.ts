@@ -3,7 +3,6 @@ import type { JsonValue, PrefixRouteModuleDefinition } from "@portable-devshell/
 import { requirePort, routeModule } from "../../route/ControlRouteFactory.js";
 
 export interface ConfigEditorPort {
-    applyConfig(): JsonValue | Promise<JsonValue>;
     deleteInstance(params?: JsonValue): Promise<JsonValue>;
     disableInstance(params?: JsonValue): Promise<JsonValue>;
     enableInstance(params?: JsonValue): Promise<JsonValue>;
@@ -23,7 +22,6 @@ export function createConfigRouteModule(service?: ConfigEditorPort): PrefixRoute
         update: async (request) => await config().updateConfig(request.payload),
         updateInstance: async (request) => await config().updateInstanceConfig(request.payload),
         updateMcpEndpoint: async (request) => await config().updateMcpConfig(request.payload),
-        updateWeb: async (request) => await config().updateWebConfig(request.payload),
-        apply: async () => await config().applyConfig()
+        updateWeb: async (request) => await config().updateWebConfig(request.payload)
     });
 }
