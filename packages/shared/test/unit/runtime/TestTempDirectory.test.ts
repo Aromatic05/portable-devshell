@@ -4,6 +4,7 @@ import { dirname, relative } from "node:path";
 import test from "node:test";
 
 import {
+    cleanupTestTempDirectories,
     createTestTempDirectory,
     resolveTestTempNamespace
 } from "../../../../../test/TestTempDirectory.ts";
@@ -52,4 +53,16 @@ test("cleaning one test temp directory leaves siblings intact", async (t) => {
 
     await assert.rejects(stat(`${first}/marker.txt`));
     assert.equal((await stat(`${second}/marker.txt`)).isFile(), true);
+});
+
+test("process cleanup removes every directory registered by the helper", async () => {
+    const first = await createTestTempDirectory("process-cleanup-first");
+    const second = await createTestTempDirectory("process-cleanup-second");
+    await writeFile(`${first}/marker.txt`, "first", "utf8");
+    await writeFile(`${second}/marker.txt`, "second", "utf8");
+
+    cleanupTestTempDirectories();
+
+    await assert.rejects(stat(first));
+    await assert.rejects(stat(second));
 });

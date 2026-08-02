@@ -1,8 +1,13 @@
+import { rmdirSync, rmSync } from "node:fs";
 import { mkdir, mkdtemp, realpath } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 export const TEST_TEMP_NAMESPACE = "devshell-test";
+
+const activeDirectories = new Set<string>();
+
+process.once("exit", cleanupTestTempDirectories);
 
 export async function resolveTestTempNamespace(): Promise<string> {
     await mkdir(join(tmpdir(), TEST_TEMP_NAMESPACE), { recursive: true });
@@ -12,5 +17,22 @@ export async function resolveTestTempNamespace(): Promise<string> {
 export async function createTestTempDirectory(label = "test"): Promise<string> {
     const sanitized = label.replaceAll(/[^A-Za-z0-9._-]/gu, "-") || "test";
     const namespace = await resolveTestTempNamespace();
-    return await realpath(await mkdtemp(join(namespace, `${sanitized}-`)));
+    const directory = await realpath(await mkdtemp(join(namespace, `${sanitized}-`)));
+    activeDirectories.add(directory);
+    return directory;
+}
+
+export function cleanupTestTempDirectories(): void {
+    for (const directory of activeDirectories) {
+        try {
+            rmSync(directory, { force: true, recursive: true });
+        } finally {
+            activeDirectories.delete(directory);
+        }
+    }
+    try {
+        rmdirSync(join(tmpdir(), TEST_TEMP_NAMESPACE));
+    } catch {
+        // Another test process may still own directories in the shared namespace.
+    }
 }
