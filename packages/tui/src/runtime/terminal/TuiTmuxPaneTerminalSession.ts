@@ -251,7 +251,7 @@ export class TuiTmuxPaneTerminalSession {
                 lines,
                 name: pane.name,
                 paneId: pane.id,
-                scroll: renderTmuxInspectView(lines, this.#viewportRows, 0),
+                scroll: renderTmuxInspectView(lines, this.#viewportRows, lines.length),
                 status: detail?.status ?? pane.status,
                 taskId,
                 warning: taskId !== undefined ? TUI_TMUX_MULTI_WRITER_WARNING : undefined,

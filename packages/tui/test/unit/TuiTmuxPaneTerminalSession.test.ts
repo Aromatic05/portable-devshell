@@ -192,7 +192,7 @@ test("raw input is ignored while viewing a pane that has no running task", async
     assert.equal(harness.calls.some((call) => call.method === "sendInput"), false);
 });
 
-test("View scrolling moves the inspect window and clamps at both ends", async () => {
+test("View opens anchored to the latest output and scrolling up pauses follow", async () => {
     const harness = createOperationsHarness();
     harness.setPanes([idlePane]);
     harness.inspectByPane.set("%0", { id: "%0", lines: ["a", "b", "c", "d", "e"], name: "main", status: "idle" });
@@ -200,13 +200,44 @@ test("View scrolling moves the inspect window and clamps at both ends", async ()
     await session.bind("alpha");
     await session.activate();
 
+    assert.deepEqual(session.getSnapshot().active?.scroll.visibleLines, ["d", "e"]);
+    assert.equal(session.getSnapshot().active?.scroll.atBottom, true);
+
+    session.scroll(-1);
+    assert.deepEqual(session.getSnapshot().active?.scroll.visibleLines, ["c", "d"]);
+    assert.equal(session.getSnapshot().active?.scroll.atBottom, false);
+
     session.scroll(-10);
     assert.equal(session.getSnapshot().active?.scroll.offset, 0);
-    session.scroll(1);
-    assert.deepEqual(session.getSnapshot().active?.scroll.visibleLines, ["b", "c"]);
-    session.scroll(99);
+    assert.deepEqual(session.getSnapshot().active?.scroll.visibleLines, ["a", "b"]);
+
+    session.scroll(1_000_000);
     assert.equal(session.getSnapshot().active?.scroll.atBottom, true);
     assert.deepEqual(session.getSnapshot().active?.scroll.visibleLines, ["d", "e"]);
+});
+
+test("refresh keeps following the bottom when anchored and holds position after scrolling up", async () => {
+    const harness = createOperationsHarness();
+    harness.setPanes([idlePane]);
+    harness.inspectByPane.set("%0", { id: "%0", lines: ["a", "b", "c"], name: "main", status: "idle" });
+    const session = new TuiTmuxPaneTerminalSession({ operations: harness.operations, viewportRows: 2 });
+    await session.bind("alpha");
+    await session.activate();
+    assert.equal(session.getSnapshot().active?.scroll.atBottom, true);
+
+    harness.inspectByPane.set("%0", { id: "%0", lines: ["a", "b", "c", "d", "e"], name: "main", status: "idle" });
+    await session.refresh();
+    assert.equal(session.getSnapshot().active?.scroll.atBottom, true);
+    assert.deepEqual(session.getSnapshot().active?.scroll.visibleLines, ["d", "e"]);
+
+    session.scroll(-2);
+    assert.equal(session.getSnapshot().active?.scroll.atBottom, false);
+    const pausedOffset = session.getSnapshot().active?.scroll.offset;
+
+    harness.inspectByPane.set("%0", { id: "%0", lines: ["a", "b", "c", "d", "e", "f", "g"], name: "main", status: "idle" });
+    await session.refresh();
+    assert.equal(session.getSnapshot().active?.scroll.atBottom, false);
+    assert.equal(session.getSnapshot().active?.scroll.offset, pausedOffset);
 });
 
 test("a task that exits in response to input detaches and clears the warning", async () => {
@@ -319,17 +350,19 @@ test("handleRawInput in list mode selects with arrows and activates with Enter",
     assert.equal(active?.attached, true);
 });
 
-test("handleRawInput in view mode scrolls with arrows and closes with Esc", async () => {
+test("handleRawInput in view mode scrolls up from the bottom and closes with Esc", async () => {
     const harness = createOperationsHarness();
     harness.setPanes([idlePane]);
     harness.inspectByPane.set("%0", { id: "%0", lines: ["a", "b", "c"], name: "main", status: "idle" });
     const session = new TuiTmuxPaneTerminalSession({ operations: harness.operations, viewportRows: 2 });
     await session.bind("alpha");
     await session.handleRawInput("\r");
-    assert.notEqual(session.getSnapshot().active, undefined);
-
-    await session.handleRawInput("\u001b[B");
     assert.deepEqual(session.getSnapshot().active?.scroll.visibleLines, ["b", "c"]);
+    assert.equal(session.getSnapshot().active?.scroll.atBottom, true);
+
+    await session.handleRawInput("\u001b[A");
+    assert.deepEqual(session.getSnapshot().active?.scroll.visibleLines, ["a", "b"]);
+    assert.equal(session.getSnapshot().active?.scroll.atBottom, false);
 
     await session.handleRawInput("\u001b");
     assert.equal(session.getSnapshot().active, undefined);

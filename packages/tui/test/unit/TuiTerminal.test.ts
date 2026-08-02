@@ -85,6 +85,33 @@ test("terminal buffer exposes and controls scrollback without sending keys to th
     terminal.dispose();
 });
 
+test("terminal buffer follows new output at the bottom but holds position after scrolling up", async () => {
+    const terminal = new TuiTerminalBuffer({ columns: 8, rows: 3 });
+
+    await terminal.write("one\r\ntwo\r\nthree\r\nfour");
+    assert.equal(terminal.getSnapshot().scroll.atBottom, true);
+    const bottomLastLine = lineText(terminal.getSnapshot().lines[2]!);
+
+    await terminal.write("\r\nfive");
+    assert.equal(terminal.getSnapshot().scroll.atBottom, true);
+    assert.equal(lineText(terminal.getSnapshot().lines[2]!).slice(0, 4), "five");
+    assert.notEqual(lineText(terminal.getSnapshot().lines[2]!), bottomLastLine);
+
+    terminal.scrollPages(-1);
+    assert.equal(terminal.getSnapshot().scroll.atBottom, false);
+    const pausedOffset = terminal.getSnapshot().scroll.offsetFromBottom;
+
+    await terminal.write("\r\nsix\r\nseven");
+    const afterOutput = terminal.getSnapshot();
+    assert.equal(afterOutput.scroll.atBottom, false);
+    assert.equal(afterOutput.scroll.offsetFromBottom > pausedOffset, true);
+
+    terminal.scrollToBottom();
+    assert.equal(terminal.getSnapshot().scroll.atBottom, true);
+    assert.equal(lineText(terminal.getSnapshot().lines[2]!).slice(0, 5), "seven");
+    terminal.dispose();
+});
+
 test("terminal buffer adapts application cursor keys and focus reporting", async () => {
     const terminal = new TuiTerminalBuffer({ columns: 8, rows: 3 });
     const writes: string[] = [];
