@@ -45,6 +45,7 @@ function summaryBox(state: TuiAppState, instance: string, todo: TodoReadResult):
     const current = todo.summary.currentItemId === undefined ? undefined : todo.items.find((item) => item.id === todo.summary.currentItemId);
     return makeBox(state, "todo", instance, {
         detailLines: [
+            formatField("Level", "0 · root"),
             formatField("Task", todo.taskId ?? "-"),
             formatField("Revision", String(todo.revision)),
             formatField("Progress", `${todo.summary.completed}/${todo.summary.total}`),
@@ -60,6 +61,7 @@ function summaryBox(state: TuiAppState, instance: string, todo: TodoReadResult):
 function itemBox(state: TuiAppState, instance: string, item: TodoItem): BoxModel {
     return makeBox(state, "todo", instance, {
         detailLines: [
+            formatField("Level", "1 · subtask"),
             formatField("ID", item.id),
             formatField("Status", item.status),
             formatField("Content", item.content),

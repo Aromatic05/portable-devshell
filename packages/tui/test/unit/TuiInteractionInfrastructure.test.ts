@@ -451,8 +451,16 @@ test("Todo uses a dedicated instance-scoped page and does not appear in Instance
         selectMainScreenModel(harness.store.getState()).boxes.map(
             (box) => box.id,
         ),
-        ["todo-task:task-1"],
+        [
+            "todo-task:task-1",
+            "todo-item:inspect",
+            "todo-item:implement",
+            "todo-item:verify",
+        ],
     );
+    for (const box of selectMainScreenModel(harness.store.getState()).boxes) {
+        assert.notEqual(box.primaryAction, undefined);
+    }
     await openPrimaryRoute(harness, "todo-task:task-1");
     assert.deepEqual(currentTuiRoute(harness.store.getState()), {
         page: "todo",

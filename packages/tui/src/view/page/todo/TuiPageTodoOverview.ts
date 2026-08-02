@@ -1,12 +1,23 @@
-import type { TodoTaskSummary } from "@portable-devshell/shared";
+import type { TodoItem, TodoTaskSummary } from "@portable-devshell/shared";
 
 import type { BoxModel } from "../../component/TuiComponentExpandableBox.js";
 import type { TuiAppState } from "../../../state/reducer/TuiStoreModel.js";
+import type { TuiExpandableBoxStatus } from "../../../state/TuiUiState.js";
 import { compactSummary, formatField, makeBox } from "../TuiPageBoxSupport.js";
 import { projectTodoSummaries } from "./TuiTodoProjection.js";
 
+const symbols: Record<TodoItem["status"], string> = {
+    blocked: "!",
+    cancelled: "-",
+    completed: "✓",
+    failed: "×",
+    in_progress: "●",
+    pending: "○",
+};
+
 export function buildTodoOverviewBoxes(state: TuiAppState, instance: string): BoxModel[] {
-    const summaries = projectTodoSummaries(state.todoByInstance[instance]);
+    const todo = state.todoByInstance[instance];
+    const summaries = projectTodoSummaries(todo);
     if (summaries.length === 0) {
         return [makeBox(state, "todo", instance, {
             detailLines: ["No active todo for this instance."],
@@ -17,7 +28,13 @@ export function buildTodoOverviewBoxes(state: TuiAppState, instance: string): Bo
             title: "Todo"
         })];
     }
-    return summaries.map((task) => taskBox(state, instance, task));
+    const activeTaskId = todo?.taskId;
+    return [
+        ...summaries.map((task) => taskBox(state, instance, task)),
+        ...(activeTaskId === undefined || todo === undefined
+            ? []
+            : todo.items.map((item) => subTaskBox(state, instance, activeTaskId, item)))
+    ];
 }
 
 function taskBox(state: TuiAppState, instance: string, task: TodoTaskSummary): BoxModel {
@@ -40,4 +57,31 @@ function taskBox(state: TuiAppState, instance: string, task: TodoTaskSummary): B
         ],
         title: task.title
     });
+}
+
+function subTaskBox(state: TuiAppState, instance: string, taskId: string, item: TodoItem): BoxModel {
+    return makeBox(state, "todo", instance, {
+        detailLines: [
+            formatField("ID", item.id),
+            formatField("Status", item.status),
+            formatField("Content", item.content),
+            ...(item.detail === undefined ? [] : [formatField("Detail", item.detail)])
+        ],
+        id: `todo-item:${item.id}`,
+        primaryRoute: { page: "todo", todoId: taskId, view: "detail" },
+        status: itemStatus(item.status),
+        summaryLines: [`${symbols[item.status]} ${item.content}`],
+        title: item.content
+    });
+}
+
+function itemStatus(status: TodoItem["status"]): TuiExpandableBoxStatus {
+    switch (status) {
+        case "in_progress": return "running";
+        case "completed": return "ready";
+        case "blocked": return "warning";
+        case "failed": return "failed";
+        case "cancelled": return "disabled";
+        case "pending": return "normal";
+    }
 }
