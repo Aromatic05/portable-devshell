@@ -17,8 +17,9 @@ export class ControlRuntimeReverse {
 
     constructor(options: ControlRuntimeReverseOptions) {
         const config = options.state.requireConfig();
-        if (!config.instances.some((instance) => instance.provider === "reverse")) return;
+        const hasReverseInstance = config.instances.some((instance) => instance.provider === "reverse");
         if (options.mcp.host === undefined || config.mcp.publicBaseUrl === undefined) {
+            if (!hasReverseInstance) return;
             throw createError({
                 code: errorCodes.controlConfigValidationFailed,
                 message: "Reverse instances require enabled MCP HTTP host and mcp.publicBaseUrl.",

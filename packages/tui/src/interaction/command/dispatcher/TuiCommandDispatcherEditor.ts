@@ -209,9 +209,11 @@ export class TuiCommandDispatcherEditor {
             const choice = choices[currentIndex === -1 ? 0 : nextIndex]!;
             const nextDraft = editor.kind === "create"
                 ? applyCreateChoice(draft, field, choice, editor.schema)
-                : editor.kind === "connector" && (field === "web.auth" || field === "mcp.auth")
-                    ? applyAuthModeChoice(draft, target.path, choice)
-                    : setPath(draft, target.path, choice);
+                : editor.kind === "config" && (field === "provider" || field === "container.mode")
+                    ? applyCreateChoice(draft, field, choice, undefined)
+                    : editor.kind === "connector" && (field === "web.auth" || field === "mcp.auth")
+                        ? applyAuthModeChoice(draft, target.path, choice)
+                        : setPath(draft, target.path, choice);
             this.#store.setFormDraft(target.key, nextDraft);
             this.#store.setEditor({ ...editor, editing: false, error: undefined });
             return true;
@@ -557,7 +559,9 @@ export class TuiCommandDispatcherEditor {
 
 function inputText(value: JsonValue | undefined): string {
     if (Array.isArray(value)) {
-        return value.join(", ");
+        return value.every((entry) => typeof entry !== "object" || entry === null)
+            ? value.join(", ")
+            : JSON.stringify(value);
     }
     if (typeof value === "object" && value !== null) {
         return JSON.stringify(value);
@@ -601,12 +605,18 @@ function applyCreateChoice(
         }
         if (choice === "docker" || choice === "podman") {
             const preset = schema?.container.presets[0];
-            next = setPath(next, "container", {
-                containerName: defaultContainerName(draft),
-                image: preset?.image ?? "",
-                mode: schema?.container.defaultMode ?? "preset",
-                preset: preset?.preset ?? ""
-            });
+            next = setPath(next, "container", schema === undefined
+                ? {
+                      containerName: defaultContainerName(draft),
+                      image: "",
+                      mode: "existingImage"
+                  }
+                : {
+                      containerName: defaultContainerName(draft),
+                      image: preset?.image ?? "",
+                      mode: schema.container.defaultMode,
+                      preset: preset?.preset ?? ""
+                  });
         }
         return next;
     }

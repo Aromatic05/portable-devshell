@@ -73,13 +73,13 @@ export class ControlRuntime {
         this.#channels = new ControlChannelServer({ providers, routes: this.#routes });
         this.#mcp.setWebConfigApplier?.(async (previous, next) => await this.#replaceWebProvider(previous, next));
         this.#mcp.setMcpConfigApplier?.(async (_previous, next) => {
-            const retired = await this.#mcp.replaceMcpHost(next);
+            const retired = await this.#mcp.replaceMcpHost(_previous, next);
             try {
                 const host = this.#mcp.host;
                 if (host !== undefined) this.#reverse.install(host.server, next.mcp.publicBaseUrl);
                 await retired?.stop();
             } catch (error) {
-                await this.#mcp.restoreMcpHost(retired);
+                await this.#mcp.restoreMcpHost(retired, _previous);
                 const host = this.#mcp.host;
                 if (host !== undefined) this.#reverse.install(host.server, _previous.mcp.publicBaseUrl);
                 throw error;

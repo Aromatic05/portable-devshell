@@ -5,7 +5,7 @@ import type { InstanceCreateDraft, JsonValue } from "@portable-devshell/shared";
 
 import { TuiAppStore, TuiRuntimeOperations } from "../../src/testing.ts";
 
-function createHarness(options: { failReverseCode?: boolean; failStart?: boolean } = {}) {
+function createHarness(options: { failConfigUpdate?: boolean; failReverseCode?: boolean; failStart?: boolean } = {}) {
     const store = new TuiAppStore();
     store.replaceInstances([
         {
@@ -30,6 +30,7 @@ function createHarness(options: { failReverseCode?: boolean; failStart?: boolean
         config: {
             async updateInstance(input: { instanceName: string }) {
                 calls.push(`config.instance:${input.instanceName}`);
+                if (options.failConfigUpdate) throw new Error("config update failed");
             },
             async updateMcp() {
                 calls.push("config.mcp");
@@ -219,6 +220,29 @@ test("reverse instance creation reports committed creation when device code gene
         "device code unavailable",
     );
     assert.deepEqual(harness.refreshed, ["all"]);
+});
+
+test("failed disable restores a worker that was running before the config update", async () => {
+    const harness = createHarness({ failConfigUpdate: true });
+    harness.store.replaceSnapshot({
+        connectionState: "connected",
+        daemonState: "running",
+        lastSeq: 1,
+        name: "alpha",
+        ready: true,
+        status: "ready"
+    } as never);
+
+    await assert.rejects(
+        harness.operations.setInstanceEnabled("alpha", false),
+        /config update failed/u
+    );
+
+    assert.deepEqual(harness.calls, [
+        "runtime.stop:alpha",
+        "config.instance:alpha",
+        "runtime.start:alpha"
+    ]);
 });
 
 test("runtime operations expose control callbacks and route page refreshes", async () => {

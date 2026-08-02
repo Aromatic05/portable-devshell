@@ -6,7 +6,7 @@ import {
     createDefaultControlConfig,
 } from "../../src/testing.ts";
 import { InstanceCreateCoordinator } from "../../src/control/instance/create/InstanceCreateCoordinator.ts";
-import { normalizeConfigInstanceDraft } from "@portable-devshell/shared";
+import { normalizeConfigInstanceDraft, type ControlConfig } from "@portable-devshell/shared";
 
 test("instance create schema exposes supported container modes without running container attach", () => {
     const service = createService("linux");
@@ -135,6 +135,87 @@ function createService(platform?: NodeJS.Platform) {
         },
     });
 }
+
+test("instance create prepares the runtime descriptor before persisting configuration", async () => {
+    let config = createDefaultControlConfig();
+    let writes = 0;
+    const service = new InstanceCreateCoordinator({
+        configStore: {
+            async write(nextConfig) {
+                writes += 1;
+                config = nextConfig;
+            }
+        },
+        getConfig: () => config,
+        getMcpHost: () => undefined,
+        instanceConfigMapper: {
+            map() {
+                throw new Error("runtime descriptor failed");
+            }
+        } as never,
+        instanceRegistry: new InstanceRegistry([]),
+        setConfig: (nextConfig) => { config = nextConfig; }
+    });
+
+    await assert.rejects(
+        service.createInstance({
+            name: "demo-local",
+            provider: "local",
+            workspace: "/workspace/demo"
+        }),
+        /runtime descriptor failed/u
+    );
+    assert.equal(writes, 0);
+    assert.deepEqual(config.instances, []);
+});
+
+test("instance create restores configuration and registry when MCP registration fails", async () => {
+    let config = createDefaultControlConfig();
+    config.mcp.enabled = true;
+    const writes: ControlConfig[] = [];
+    const registry = new InstanceRegistry([]);
+    const descriptor = {
+        enabled: true,
+        mcpCapabilities: ["read"],
+        mcpEnabled: true,
+        mcpGroups: ["file"],
+        mcpPath: "/demo-local/mcp",
+        name: "demo-local",
+        provider: "local",
+        todo: {},
+        worker: { snapshot: () => ({ status: "stopped" }) },
+        workspace: "/workspace/demo"
+    } as never;
+    const service = new InstanceCreateCoordinator({
+        configStore: {
+            async write(nextConfig) {
+                writes.push(structuredClone(nextConfig));
+                config = nextConfig;
+            }
+        },
+        getConfig: () => config,
+        getMcpHost: () => ({
+            registerInstance() { throw new Error("MCP registration failed"); },
+            unregisterInstance() {}
+        }) as never,
+        instanceConfigMapper: { map: () => descriptor } as never,
+        instanceRegistry: registry,
+        setConfig: (nextConfig) => { config = nextConfig; }
+    });
+
+    await assert.rejects(
+        service.createInstance({
+            mcp: { enabled: true },
+            name: "demo-local",
+            provider: "local",
+            workspace: "/workspace/demo"
+        }),
+        /MCP registration failed/u
+    );
+    assert.equal(writes.length, 2);
+    assert.deepEqual(config.instances, []);
+    assert.equal(registry.get("demo-local"), undefined);
+});
 
 test("MCP instance_create creates only SSH and strips instance management from inherited policy", async () => {
     let config = createDefaultControlConfig();

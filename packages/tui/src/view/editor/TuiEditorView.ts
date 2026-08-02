@@ -52,7 +52,9 @@ export function editorErrorLine(
 
 export function displayValue(value: JsonValue | undefined): string {
     if (Array.isArray(value)) {
-        return value.join(", ");
+        return value.every((entry) => typeof entry !== "object" || entry === null)
+            ? value.join(", ")
+            : JSON.stringify(value);
     }
     if (value === undefined) {
         return "";

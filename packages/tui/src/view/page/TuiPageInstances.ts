@@ -133,7 +133,7 @@ function buildCreateWizard(state: TuiAppState): BoxModel {
     const draft = editorDraft(state, editor.key, createDefaultInstanceDraft());
     const step = editor.step ?? 1;
     const error = editor.error;
-    const summary = editor.summary === undefined ? undefined : JSON.stringify(redactCreateSecrets(editor.summary));
+    const summary = editor.summary === undefined ? undefined : JSON.stringify(redactCreateSecrets(editor.summary as unknown as JsonValue));
     const detailLines = [
         `Step ${step}/6 ${stepName(step)}`,
         "",

@@ -162,32 +162,56 @@ export class InstanceCreateCoordinator {
     }
 
     async #createNormalized(normalized: ControlInstanceConfig): Promise<InstanceCreateResult> {
+        const previousConfig = this.#getConfig();
         const nextConfig = this.#validateMergedConfig(normalized);
-        await this.#configStore.write(nextConfig, this.#homeDirectory);
-        this.#setConfig(nextConfig);
+        const descriptor = normalized.enabled ? this.#instanceConfigMapper.map(normalized) : undefined;
+        let persisted = false;
 
-        if (!normalized.enabled) {
+        try {
+            await this.#configStore.write(nextConfig, this.#homeDirectory);
+            this.#setConfig(nextConfig);
+            persisted = true;
+
+            if (!normalized.enabled || descriptor === undefined) {
+                return {
+                    enabled: false,
+                    mcpPath: normalized.mcp.enabled ? normalized.mcp.path : undefined,
+                    name: normalized.name
+                };
+            }
+
+            this.#instanceRegistry.add(descriptor);
+            if (nextConfig.mcp.enabled && normalized.mcp.enabled) {
+                this.#getMcpHost()?.registerInstance(
+                    this.#mcpEndpointConfigMapper.map(descriptor, this.#getMcpInstanceGateway(), normalized.mcp.auth)
+                );
+            }
+
             return {
-                enabled: false,
+                enabled: true,
                 mcpPath: normalized.mcp.enabled ? normalized.mcp.path : undefined,
-                name: normalized.name
+                name: normalized.name,
+                snapshot: descriptor.worker.snapshot()
             };
+        } catch (error) {
+            const failures: unknown[] = [error];
+            this.#getMcpHost()?.unregisterInstance(normalized.name);
+            this.#instanceRegistry.delete(normalized.name);
+            if (descriptor !== undefined) {
+                const close = (descriptor.worker as { close?: () => Promise<void> }).close;
+                if (close !== undefined) await close.call(descriptor.worker).catch((closeError) => failures.push(closeError));
+            }
+            if (persisted) {
+                try {
+                    await this.#configStore.write(previousConfig, this.#homeDirectory);
+                    this.#setConfig(previousConfig);
+                } catch (rollbackError) {
+                    failures.push(rollbackError);
+                }
+            }
+            if (failures.length === 1) throw error;
+            throw new AggregateError(failures, `Instance ${normalized.name} creation failed and rollback was incomplete.`);
         }
-
-        const descriptor = this.#instanceConfigMapper.map(normalized);
-        this.#instanceRegistry.add(descriptor);
-        if (nextConfig.mcp.enabled && normalized.mcp.enabled) {
-            this.#getMcpHost()?.registerInstance(
-                this.#mcpEndpointConfigMapper.map(descriptor, this.#getMcpInstanceGateway(), normalized.mcp.auth)
-            );
-        }
-
-        return {
-            enabled: true,
-            mcpPath: normalized.mcp.enabled ? normalized.mcp.path : undefined,
-            name: normalized.name,
-            snapshot: descriptor.worker.snapshot()
-        };
     }
 
     #validateMergedConfig(instance: ControlInstanceConfig): ControlConfig {

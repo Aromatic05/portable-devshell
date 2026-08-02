@@ -18,6 +18,7 @@ export class ControlRuntimeState {
     readonly #instanceRegistryFactory: InstanceRegistryFactory;
     #config?: ControlConfig;
     #instances = new InstanceRegistry([]);
+    #restartControlRequired = false;
 
     constructor(options: ControlRuntimeStateOptions = {}) {
         this.configStore = options.configStore ?? new ControlConfigStore();
@@ -33,10 +34,15 @@ export class ControlRuntimeState {
         return this.#instances;
     }
 
+    get restartControlRequired(): boolean {
+        return this.#restartControlRequired;
+    }
+
     async load(): Promise<void> {
         const config = await this.configStore.readOrCreate(this.homeDirectory);
         this.#config = config;
         this.#instances = this.#instanceRegistryFactory.build(config);
+        this.#restartControlRequired = false;
     }
 
     requireConfig(): ControlConfig {
@@ -52,8 +58,13 @@ export class ControlRuntimeState {
         this.#config = config;
     }
 
+    markRestartControlRequired(): void {
+        this.#restartControlRequired = true;
+    }
+
     reset(): void {
         this.#config = undefined;
         this.#instances = new InstanceRegistry([]);
+        this.#restartControlRequired = false;
     }
 }

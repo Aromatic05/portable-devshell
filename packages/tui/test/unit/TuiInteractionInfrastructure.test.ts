@@ -935,16 +935,22 @@ test("config validation errors render in the active field box", async () => {
     assert.equal(configuration?.status, "failed");
 });
 
-test("config choices use angle selectors and switch with arrow keys", async () => {
+test("config choices use angle selectors and replace incompatible provider fields", async () => {
     const harness = createHarness();
     harness.store.setSelectedPage("config");
     openEditorForBox(harness, "config", "configuration");
     harness.store.setFormDraft("config:alpha", {
         approvalPolicy: { mode: "ask" },
+        container: {
+            containerName: "devshell-alpha",
+            image: "archlinux:latest",
+            mode: "existingImage",
+        },
+        dockerBinary: "/usr/bin/docker",
         enabled: true,
         mcp: { enabled: true, path: "/alpha/mcp" },
         name: "alpha",
-        provider: "local",
+        provider: "docker",
         security: { mode: "disabled" },
         workspace: "/workspace/alpha",
     });
@@ -952,7 +958,7 @@ test("config choices use angle selectors and switch with arrow keys", async () =
     const general = expandBox(harness, "configuration");
     const security = expandBox(harness, "security");
     assert.equal(
-        general.expandedLines.some((line) => line.text.endsWith("<local>")),
+        general.expandedLines.some((line) => line.text.endsWith("<docker>")),
         true,
     );
     assert.equal(
@@ -965,30 +971,23 @@ test("config choices use angle selectors and switch with arrow keys", async () =
     );
 
     const provider = general.expandedLines.find((line) =>
-        line.text.endsWith("<local>"),
+        line.text.endsWith("<docker>"),
     );
     assert.ok(provider?.id);
     harness.store.setMainFocusId(general.id);
     harness.store.setFocusScope("form");
     harness.store.setSelectedDetailLine(general.expandedKey, provider.id);
-    await harness.press("", { rightArrow: true });
-    assert.equal(
-        (
-            harness.store.getState().ui.formDrafts["config:alpha"] as {
-                provider?: unknown;
-            }
-        ).provider,
-        "ssh",
-    );
     await harness.press("", { leftArrow: true });
-    assert.equal(
-        (
-            harness.store.getState().ui.formDrafts["config:alpha"] as {
-                provider?: unknown;
-            }
-        ).provider,
-        "local",
-    );
+    const switched = harness.store.getState().ui.formDrafts["config:alpha"] as {
+        container?: unknown;
+        dockerBinary?: unknown;
+        provider?: unknown;
+        ssh?: { command?: unknown };
+    };
+    assert.equal(switched.provider, "ssh");
+    assert.equal(switched.container, undefined);
+    assert.equal(switched.dockerBinary, undefined);
+    assert.deepEqual(switched.ssh, { command: "" });
 });
 test("config exposes reload, save-only, and save-and-restart semantics", () => {
     const harness = createHarness();
@@ -1107,9 +1106,11 @@ test("config exposes container and tool scheduler settings", () => {
                 context: "/workspace/alpha",
                 dockerfile: "Dockerfile.dev",
             },
+            env: { API_TOKEN: "secret" },
             mode: "dockerfile",
-            preset: "ubuntu",
+            mounts: [{ source: "/host", target: "/container" }],
         },
+        dockerBinary: "/usr/bin/docker",
         enabled: true,
         logs: { eventBufferSize: 100, maxBytes: 67_108_864, retentionDays: 7 },
         mcp: {
@@ -1139,6 +1140,35 @@ test("config exposes container and tool scheduler settings", () => {
         provider.expandedLines.some((line) =>
             line.text.includes("/workspace/alpha"),
         ),
+        true,
+    );
+    assert.equal(
+        provider.expandedLines.some((line) => line.text.endsWith("<dockerfile>")),
+        true,
+    );
+    assert.equal(
+        provider.expandedLines.some((line) => line.text.includes("/usr/bin/docker")),
+        true,
+    );
+    assert.equal(
+        provider.expandedLines.some((line) => line.text.includes("podmanBinary")),
+        false,
+    );
+    assert.equal(
+        provider.expandedLines.some((line) => line.text.includes('[{"source":"/host","target":"/container"}]')),
+        true,
+    );
+    assert.equal(
+        provider.expandedLines.some((line) => line.text.includes("API_TOKEN=secret")),
+        false,
+    );
+    const mcpTools = expandBox(harness, "mcp-tools");
+    assert.equal(
+        mcpTools.expandedLines.some((line) => line.id?.includes(":field:mcp.path")),
+        false,
+    );
+    assert.equal(
+        mcpTools.expandedLines.some((line) => line.text.includes("/alpha/mcp")),
         true,
     );
     assert.equal(
@@ -2222,6 +2252,16 @@ function instanceCreateSummary(
             : { workspace: draft.workspace }),
         enabled: draft.enabled ?? true,
         mcp: {
+            auth: draft.mcp?.auth === "oauth2"
+                ? {
+                      mode: "oauth2",
+                      oauth2: {
+                          documentationUrl: draft.mcp.oauth2?.documentationUrl,
+                          requiredScopes: [...(draft.mcp.oauth2?.requiredScopes ?? [])],
+                          resourceName: draft.mcp.oauth2?.resourceName ?? draft.name,
+                      },
+                  }
+                : { mode: draft.mcp?.auth ?? "none" },
             enabled: draft.mcp?.enabled ?? true,
             path: `/${draft.name}/mcp`,
             tools: {

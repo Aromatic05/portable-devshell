@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { HttpHost, type McpHost, type McpOAuthApprovalService } from "@portable-devshell/mcp";
 import type { ControlConfig, ControlWebAuthConfig, JsonValue } from "@portable-devshell/shared";
 
-import { ConfigEditorCoordinator } from "../../control/config/editor/ConfigEditorCoordinator.js";
+import { ConfigEditorCoordinator, type ConfigRuntimeChangeSet } from "../../control/config/editor/ConfigEditorCoordinator.js";
 import { McpInstanceGatewayControl } from "../McpInstanceGatewayControl.js";
 import { decorateMcpInstanceGatewayArtifact } from "../McpInstanceGatewayArtifactDecorator.js";
 import { InstanceCreateCoordinator } from "../../control/instance/create/InstanceCreateCoordinator.js";
@@ -23,7 +23,7 @@ export class ControlRuntimeMcp {
     readonly configEditor: ConfigEditorCoordinator;
     readonly instanceCreate: InstanceCreateCoordinator;
     readonly instanceGateway: McpInstanceGatewayControl;
-    readonly publicBaseUrl?: string;
+    #publicBaseUrl?: string;
     #webHost?: HttpHost;
     #webPublicBaseUrl?: string;
     #webAuth: ControlWebAuthConfig;
@@ -45,7 +45,7 @@ export class ControlRuntimeMcp {
         this.#controlPaths = options.controlPaths;
         const config = options.state.requireConfig();
         this.#mcpEnabled = config.mcp.enabled;
-        this.publicBaseUrl = config.mcp.publicBaseUrl;
+        this.#publicBaseUrl = config.mcp.publicBaseUrl;
         this.#webAuth = config.web.auth;
         this.#webEnabled = config.web.enabled;
         const gatewayHolder: { value?: McpInstanceGatewayControl } = {};
@@ -82,11 +82,13 @@ export class ControlRuntimeMcp {
             getConfig: () => options.state.requireConfig(),
             getMcpHost: () => this.#host,
             getMcpInstanceGateway: () => this.instanceGateway,
+            getRestartControlRequired: () => options.state.restartControlRequired,
             homeDirectory: options.state.homeDirectory,
             instanceRegistry: options.state.instances,
+            markRestartControlRequired: () => options.state.markRestartControlRequired(),
             mutationRunner: options.state.configMutations,
             runtimeApply: {
-                apply: async (previous, next) => await this.#applyConfig(previous, next)
+                apply: async (previous, next, changes) => await this.#applyConfig(previous, next, changes)
             },
             setConfig: (config) => options.state.setConfig(config)
         });
@@ -94,6 +96,10 @@ export class ControlRuntimeMcp {
 
     get host(): McpHost | undefined {
         return this.#host;
+    }
+
+    get publicBaseUrl(): string | undefined {
+        return this.#publicBaseUrl;
     }
 
     setWebConfigApplier(apply: (previous: ControlConfig, next: ControlConfig) => Promise<void>): void {
@@ -104,33 +110,33 @@ export class ControlRuntimeMcp {
         this.#applyMcpConfig = apply;
     }
 
-    async replaceMcpHost(config: ControlConfig): Promise<McpHost | undefined> {
+    async replaceMcpHost(previousConfig: ControlConfig, config: ControlConfig): Promise<McpHost | undefined> {
         const next = this.#factory.wire(config, this.#state.instances, {
             contextFile: this.#controlPaths.contextsFile,
             gateway: decorateMcpInstanceGatewayArtifact(this.instanceGateway, this.#artifact.service),
             storageDir: this.#controlPaths.oauthDir
         });
         const previous = this.#host;
-        const same = previous !== undefined && sameEndpoint(this.#state.requireConfig().mcp, config.mcp);
-        if (same) {
-            await previous.stop();
-        }
+        const sameEndpointAsPrevious = previous !== undefined && sameEndpoint(previousConfig.mcp, config.mcp);
+        if (sameEndpointAsPrevious) await previous.stop();
         try {
-            this.#artifact.installHttpRoute(next!.server);
-            await next?.start();
-        } catch (error) {
-            if (same) {
-                await previous?.start().catch(() => undefined);
+            if (next !== undefined) {
+                this.#artifact.installHttpRoute(next.server);
+                await next.start();
             }
+        } catch (error) {
+            if (sameEndpointAsPrevious) await previous?.start().catch(() => undefined);
             throw error;
         }
         this.#host = next;
+        this.#publicBaseUrl = config.mcp.enabled ? config.mcp.publicBaseUrl : undefined;
         return previous;
     }
 
-    async restoreMcpHost(host: McpHost | undefined): Promise<void> {
+    async restoreMcpHost(host: McpHost | undefined, config: ControlConfig): Promise<void> {
         const current = this.#host;
         this.#host = host;
+        this.#publicBaseUrl = config.mcp.enabled ? config.mcp.publicBaseUrl : undefined;
         if (current !== undefined && current !== host) {
             await current.stop().catch(() => undefined);
         }
@@ -210,24 +216,32 @@ export class ControlRuntimeMcp {
         }
     }
 
-    async #applyConfig(previous: ControlConfig, next: ControlConfig): Promise<boolean> {
+    async #applyConfig(
+        previous: ControlConfig,
+        next: ControlConfig,
+        changes: ConfigRuntimeChangeSet
+    ): Promise<boolean> {
+        if (changes.instanceAuth && !changes.mcp && !changes.web) return true;
+
         if (
+            changes.web &&
+            !changes.mcp &&
             previous.web.enabled &&
             next.web.enabled &&
-            JSON.stringify(previous.mcp) === JSON.stringify(next.mcp) &&
-            !sameEndpoint(previous.mcp, previous.web) &&
-            !sameEndpoint(next.mcp, next.web) &&
+            endpointIsIndependent(previous.web, previous.mcp, previous.mcp.enabled) &&
+            endpointIsIndependent(next.web, next.mcp, next.mcp.enabled) &&
             this.#applyWebConfig !== undefined
         ) {
             await this.#applyWebConfig(previous, next);
             return true;
         }
         if (
+            changes.mcp &&
+            !changes.web &&
             previous.mcp.enabled &&
             next.mcp.enabled &&
-            JSON.stringify(previous.web) === JSON.stringify(next.web) &&
-            previous.web.enabled &&
-            !sameEndpoint(previous.mcp, previous.web) &&
+            endpointIsIndependent(previous.mcp, previous.web, previous.web.enabled) &&
+            endpointIsIndependent(next.mcp, next.web, next.web.enabled) &&
             this.#applyMcpConfig !== undefined
         ) {
             await this.#applyMcpConfig(previous, next);
@@ -266,6 +280,14 @@ export class ControlRuntimeMcp {
         }
         await this.#host?.stop();
     }
+}
+
+function endpointIsIndependent(
+    endpoint: { listenHost: string; listenPort: number },
+    other: { listenHost: string; listenPort: number },
+    otherEnabled: boolean
+): boolean {
+    return !otherEnabled || !sameEndpoint(endpoint, other);
 }
 
 function sameEndpoint(

@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { ControlPathHome, createDefaultControlConfig, type ControlConfig } from "@portable-devshell/shared";
+import { ControlPathHome, createDefaultControlConfig, normalizeConfigInstanceDraft, type ControlConfig } from "@portable-devshell/shared";
 
 import { ControlRuntimeMcp } from "../../src/composition/runtime/ControlRuntimeMcp.ts";
 import { ControlRuntimeState } from "../../src/composition/runtime/ControlRuntimeState.ts";
@@ -81,13 +81,98 @@ test("replacing an independent MCP listener keeps the Web listener running", asy
     const next = structuredClone(config);
     next.mcp.listenPort = await reservePort();
 
-    const retired = await runtime.replaceMcpHost(next);
+    const retired = await runtime.replaceMcpHost(config, next);
     await retired?.stop();
 
     assert.equal(runtime.webHost, web);
     const address = runtime.webHost?.address;
     assert.ok(typeof address === "object" && address !== null);
     await fetch(`http://127.0.0.1:${address.port}/web/session`, { method: "POST" });
+});
+
+test("instance MCP auth updates do not replace an unrelated Web listener", async (t) => {
+    const homeDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-runtime-instance-auth-"));
+    let config = createConfig(await reservePort(), await reservePort());
+    config.instances = [normalizeConfigInstanceDraft({
+        name: "demo-local",
+        provider: "local",
+        workspace: "/workspace/demo"
+    })];
+    let webApplyCalls = 0;
+    let mcpApplyCalls = 0;
+    const state = new ControlRuntimeState({
+        configStore: {
+            async readOrCreate() { return config; },
+            async write(next: ControlConfig) { config = next; }
+        } as never,
+        homeDirectory
+    });
+    await state.load();
+    const runtime = new ControlRuntimeMcp({
+        artifact: { service: {}, installHttpRoute() {} } as never,
+        controlPaths: new ControlPathHome(homeDirectory),
+        state
+    });
+    runtime.setWebConfigApplier(async () => { webApplyCalls += 1; });
+    runtime.setMcpConfigApplier(async () => { mcpApplyCalls += 1; });
+    t.after(async () => {
+        await runtime.stop().catch(() => undefined);
+        await rm(homeDirectory, { force: true, recursive: true });
+    });
+
+    const result = await runtime.configEditor.updateInstanceConfig({
+        instanceName: "demo-local",
+        patch: { mcp: { auth: "token", token: "a".repeat(48) } }
+    }) as { restartControlRequired: boolean };
+
+    assert.equal(webApplyCalls, 0);
+    assert.equal(mcpApplyCalls, 0);
+    assert.equal(result.restartControlRequired, false);
+});
+
+test("MCP migration starts a different listener before retiring the previous listener", async (t) => {
+    const homeDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-runtime-mcp-order-"));
+    const previous = createConfig(17890, 17891);
+    previous.web.enabled = false;
+    const next = structuredClone(previous);
+    next.mcp.listenPort = 17892;
+    next.mcp.publicBaseUrl = "https://new.example";
+    const events: string[] = [];
+    const oldHost = {
+        server: {},
+        async start() { events.push("old.start"); },
+        async stop() { events.push("old.stop"); }
+    };
+    const newHost = {
+        server: {},
+        async start() { events.push("new.start"); },
+        async stop() { events.push("new.stop"); }
+    };
+    let wireCalls = 0;
+    const state = new ControlRuntimeState({
+        configStore: { async readOrCreate() { return previous; } } as never,
+        homeDirectory
+    });
+    await state.load();
+    const runtime = new ControlRuntimeMcp({
+        artifact: { service: {}, installHttpRoute() {} } as never,
+        controlPaths: new ControlPathHome(homeDirectory),
+        factory: {
+            wire() {
+                wireCalls += 1;
+                return wireCalls === 1 ? oldHost : newHost;
+            }
+        } as never,
+        state
+    });
+    t.after(async () => await rm(homeDirectory, { force: true, recursive: true }));
+
+    state.setConfig(next);
+    const retired = await runtime.replaceMcpHost(previous, next);
+    assert.deepEqual(events, ["new.start"]);
+    assert.equal(runtime.publicBaseUrl, "https://new.example");
+    await retired?.stop();
+    assert.deepEqual(events, ["new.start", "old.stop"]);
 });
 
 test("shared listener Web auth changes require an explicit control restart without stopping the current runtime", async (t) => {
@@ -132,6 +217,8 @@ test("shared listener Web auth changes require an explicit control restart witho
     assert.equal(webHotApplyCalls, 0);
     assert.equal(result.restartControlRequired, true);
     assert.equal(runtime.webHost, runtime.host?.server);
+    const view = runtime.configEditor.getConfigView() as { restartControlRequired?: boolean };
+    assert.equal(view.restartControlRequired, true);
 });
 
 async function createRuntime(config: ControlConfig, homeDirectory: string): Promise<ControlRuntimeMcp> {

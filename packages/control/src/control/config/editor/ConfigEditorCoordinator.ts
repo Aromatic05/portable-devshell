@@ -39,17 +39,25 @@ interface ControlConfigWriter {
     write(config: ControlConfig, homeDirectory?: string): Promise<void>;
 }
 
+export interface ConfigRuntimeChangeSet {
+    instanceAuth: boolean;
+    mcp: boolean;
+    web: boolean;
+}
+
 interface ConfigEditorCoordinatorOptions {
     configStore: ControlConfigWriter;
     getConfig: () => ControlConfig;
     getMcpHost?: () => McpHost | undefined;
     getMcpInstanceGateway?: () => McpInstanceGateway | undefined;
+    getRestartControlRequired?: () => boolean;
     homeDirectory?: string;
     instanceConfigMapper?: InstanceFactory;
     instanceRegistry: InstanceRegistry;
     mcpEndpointConfigMapper?: McpEndpointFactory;
+    markRestartControlRequired?: () => void;
     mutationRunner?: ControlConfigMutationRunner;
-    runtimeApply?: { apply(previous: ControlConfig, next: ControlConfig): Promise<boolean> };
+    runtimeApply?: { apply(previous: ControlConfig, next: ControlConfig, changes: ConfigRuntimeChangeSet): Promise<boolean> };
     setConfig: (config: ControlConfig) => void;
     runtimePreflight?: { assertAvailable(previous: ControlConfig, next: ControlConfig): Promise<void> };
     validator?: ControlConfigValidator;
@@ -60,14 +68,16 @@ export class ConfigEditorCoordinator {
     readonly #getConfig: () => ControlConfig;
     readonly #getMcpHost: () => McpHost | undefined;
     readonly #getMcpInstanceGateway: () => McpInstanceGateway | undefined;
+    readonly #getRestartControlRequired: () => boolean;
     readonly #homeDirectory?: string;
     readonly #instanceConfigMapper: InstanceFactory;
     readonly #instanceRegistry: InstanceRegistry;
+    readonly #markRestartControlRequired: () => void;
     readonly #mcpEndpointConfigMapper: McpEndpointFactory;
     readonly #mutationRunner: ControlConfigMutationRunner;
     readonly #setConfig: (config: ControlConfig) => void;
     readonly #runtimePreflight: { assertAvailable(previous: ControlConfig, next: ControlConfig): Promise<void> };
-    readonly #runtimeApply?: { apply(previous: ControlConfig, next: ControlConfig): Promise<boolean> };
+    readonly #runtimeApply?: { apply(previous: ControlConfig, next: ControlConfig, changes: ConfigRuntimeChangeSet): Promise<boolean> };
     readonly #validator: ControlConfigValidator;
 
     constructor(options: ConfigEditorCoordinatorOptions) {
@@ -75,9 +85,11 @@ export class ConfigEditorCoordinator {
         this.#getConfig = options.getConfig;
         this.#getMcpHost = options.getMcpHost ?? (() => undefined);
         this.#getMcpInstanceGateway = options.getMcpInstanceGateway ?? (() => undefined);
+        this.#getRestartControlRequired = options.getRestartControlRequired ?? (() => false);
         this.#homeDirectory = options.homeDirectory;
         this.#instanceConfigMapper = options.instanceConfigMapper ?? new InstanceFactory();
         this.#instanceRegistry = options.instanceRegistry;
+        this.#markRestartControlRequired = options.markRestartControlRequired ?? (() => undefined);
         this.#mcpEndpointConfigMapper = options.mcpEndpointConfigMapper ?? new McpEndpointFactory();
         this.#mutationRunner = options.mutationRunner ?? new ControlConfigMutationLock();
         this.#setConfig = options.setConfig;
@@ -87,13 +99,13 @@ export class ConfigEditorCoordinator {
     }
 
     getConfigView(): JsonValue {
-        return toConfigView(this.#getConfig()) as unknown as JsonValue;
+        return toConfigView(this.#getConfig(), this.#getRestartControlRequired()) as unknown as JsonValue;
     }
 
     validateConfigDraft(params: JsonValue | undefined): JsonValue {
-        const draft = this.#readConfigInput(() => parseConfigDraft(params));
+        const draft = this.#readConfigInput(() => parseConfigDraft(stripConfigViewMetadata(params)));
         const config = this.#readConfigInput(() => normalizeConfigDraft(this.#resolveMaskedTokens(draft)));
-        return toConfigView(this.#validateConfig(config)) as unknown as JsonValue;
+        return toConfigView(this.#validateConfig(config), this.#getRestartControlRequired()) as unknown as JsonValue;
     }
 
     async updateConfig(params: JsonValue | undefined): Promise<JsonValue> {
@@ -119,6 +131,9 @@ export class ConfigEditorCoordinator {
         const descriptor = instanceRequest === undefined ? undefined : this.#instanceRegistry.get(instanceRequest.instanceName);
         const rebuildRequired = existing !== undefined && instance !== undefined && descriptor !== undefined
             && requiresWorkerRebuild(existing, instance);
+        const preparedDescriptor = instance === undefined
+            ? undefined
+            : this.#prepareInstanceDescriptor(instance, descriptor, rebuildRequired);
         const authChanged = existing !== undefined && instance !== undefined
             && JSON.stringify(existing.mcp.auth) !== JSON.stringify(instance.mcp.auth);
         if (rebuildRequired && instanceRequest !== undefined) {
@@ -148,14 +163,21 @@ export class ConfigEditorCoordinator {
         }
         await this.#persistConfig(nextConfig);
 
-        const runtimeChanged = request.mcp !== undefined || request.web !== undefined || authChanged;
-        const hotApplied = runtimeChanged
-            ? await this.#applyRuntimeOrRestore(currentConfig, nextConfig)
-            : false;
-        if (existing !== undefined && instance !== undefined) {
-            this.#applyInstanceConfig(instance, descriptor, rebuildRequired);
-            this.#syncMcpEndpoint(instance.name);
-        }
+        const runtimeChanges: ConfigRuntimeChangeSet = {
+            instanceAuth: authChanged,
+            mcp: request.mcp !== undefined,
+            web: request.web !== undefined
+        };
+        const hotApplied = await this.#applyPersistedChanges({
+            currentConfig,
+            descriptor,
+            existing,
+            instance,
+            nextConfig,
+            preparedDescriptor,
+            rebuildRequired,
+            runtimeChanges
+        });
 
         const changes = [
             ...(instanceRequest === undefined
@@ -168,7 +190,7 @@ export class ConfigEditorCoordinator {
                 ? []
                 : [{ kind: "web.updated" as const, target: "web" }])
         ];
-        return buildApplyResult(currentConfig, nextConfig, changes, hotApplied) as unknown as JsonValue;
+        return this.#finalizeApplyResult(currentConfig, nextConfig, changes, hotApplied);
     }
 
     async updateInstanceConfig(params: JsonValue | undefined): Promise<JsonValue> {
@@ -190,22 +212,32 @@ export class ConfigEditorCoordinator {
         });
         const descriptor = this.#instanceRegistry.get(request.instanceName);
         const rebuildRequired = descriptor !== undefined && requiresWorkerRebuild(existing, instance);
+        const preparedDescriptor = this.#prepareInstanceDescriptor(instance, descriptor, rebuildRequired);
         const authChanged = JSON.stringify(existing.mcp.auth) !== JSON.stringify(instance.mcp.auth);
         if (rebuildRequired) this.#assertInstanceStopped(request.instanceName, "update");
 
         await this.#persistConfig(nextConfig);
 
-        const hotApplied = authChanged && this.#runtimeApply !== undefined
-            ? await this.#applyRuntimeOrRestore(currentConfig, nextConfig)
-            : false;
-        this.#applyInstanceConfig(instance, descriptor, rebuildRequired);
-        this.#syncMcpEndpoint(request.instanceName);
-        return buildApplyResult(
+        const hotApplied = await this.#applyPersistedChanges({
+            currentConfig,
+            descriptor,
+            existing,
+            instance,
+            nextConfig,
+            preparedDescriptor,
+            rebuildRequired,
+            runtimeChanges: {
+                instanceAuth: authChanged,
+                mcp: false,
+                web: false
+            }
+        });
+        return this.#finalizeApplyResult(
             currentConfig,
             nextConfig,
             [{ kind: "instance.updated", target: request.instanceName }],
             hotApplied
-        ) as unknown as JsonValue;
+        );
     }
 
     async updateMcpConfig(params: JsonValue | undefined): Promise<JsonValue> {
@@ -225,13 +257,17 @@ export class ConfigEditorCoordinator {
 
         await this.#runtimePreflight.assertAvailable(currentConfig, nextConfig);
         await this.#persistConfig(nextConfig);
-        const hotApplied = await this.#applyRuntimeOrRestore(currentConfig, nextConfig);
-        return buildApplyResult(
+        const hotApplied = await this.#applyRuntimeOrRestore(currentConfig, nextConfig, {
+            instanceAuth: false,
+            mcp: true,
+            web: false
+        });
+        return this.#finalizeApplyResult(
             currentConfig,
             nextConfig,
             [{ kind: "mcp.endpoint.updated", target: "mcp" }],
             hotApplied
-        ) as unknown as JsonValue;
+        );
     }
 
     async updateWebConfig(params: JsonValue | undefined): Promise<JsonValue> {
@@ -251,13 +287,17 @@ export class ConfigEditorCoordinator {
         const nextConfig = this.#validateConfig({ ...currentConfig, web: global.web });
         await this.#runtimePreflight.assertAvailable(currentConfig, nextConfig);
         await this.#persistConfig(nextConfig);
-        const webHotApplied = await this.#applyRuntimeOrRestore(currentConfig, nextConfig);
-        return buildApplyResult(
+        const webHotApplied = await this.#applyRuntimeOrRestore(currentConfig, nextConfig, {
+            instanceAuth: false,
+            mcp: false,
+            web: true
+        });
+        return this.#finalizeApplyResult(
             currentConfig,
             nextConfig,
             [{ kind: "web.updated", target: "web" }],
             webHotApplied
-        ) as unknown as JsonValue;
+        );
     }
 
     async deleteInstance(params: JsonValue | undefined): Promise<JsonValue> {
@@ -279,11 +319,11 @@ export class ConfigEditorCoordinator {
         await this.#persistConfig(nextConfig);
         this.#getMcpHost()?.unregisterInstance(instanceName);
         this.#instanceRegistry.delete(instanceName);
-        return buildApplyResult(
+        return this.#finalizeApplyResult(
             currentConfig,
             nextConfig,
             [{ kind: "instance.deleted", target: instanceName }]
-        ) as unknown as JsonValue;
+        );
     }
 
     async enableInstance(params: JsonValue | undefined): Promise<JsonValue> {
@@ -321,24 +361,118 @@ export class ConfigEditorCoordinator {
         }
 
         this.#syncMcpEndpoint(instanceName);
-        return buildApplyResult(
+        return this.#finalizeApplyResult(
             currentConfig,
             nextConfig,
             [{ kind: enabled ? "instance.enabled" : "instance.disabled", target: instanceName }]
-        ) as unknown as JsonValue;
+        );
+    }
+
+    async #applyPersistedChanges(input: {
+        currentConfig: ControlConfig;
+        descriptor: ReturnType<InstanceRegistry["get"]>;
+        existing?: ControlConfig["instances"][number];
+        instance?: ControlConfig["instances"][number];
+        nextConfig: ControlConfig;
+        preparedDescriptor?: ReturnType<InstanceFactory["map"]>;
+        rebuildRequired: boolean;
+        runtimeChanges: ConfigRuntimeChangeSet;
+    }): Promise<boolean> {
+        let hotApplied = false;
+        try {
+            const runtimeChanged = input.runtimeChanges.instanceAuth || input.runtimeChanges.mcp || input.runtimeChanges.web;
+            hotApplied = runtimeChanged
+                ? await this.#applyRuntimeOrRestore(input.currentConfig, input.nextConfig, input.runtimeChanges)
+                : false;
+            if (input.existing !== undefined && input.instance !== undefined) {
+                this.#applyInstanceConfig(
+                    input.instance,
+                    input.descriptor,
+                    input.rebuildRequired,
+                    input.preparedDescriptor
+                );
+                this.#syncMcpEndpoint(input.instance.name);
+            }
+            return hotApplied;
+        } catch (error) {
+            const failures: unknown[] = [error];
+            if (hotApplied && this.#runtimeApply !== undefined) {
+                await this.#runtimeApply.apply(input.nextConfig, input.currentConfig, input.runtimeChanges)
+                    .catch((rollbackError) => failures.push(rollbackError));
+            }
+            if (this.#getConfig() !== input.currentConfig) {
+                await this.#persistConfig(input.currentConfig).catch((rollbackError) => failures.push(rollbackError));
+            }
+            if (input.existing !== undefined && input.instance !== undefined) {
+                await this.#restoreInstanceRuntime(
+                    input.existing,
+                    input.descriptor,
+                    input.preparedDescriptor
+                ).catch((rollbackError) => failures.push(rollbackError));
+                try {
+                    this.#syncMcpEndpoint(input.existing.name);
+                } catch (rollbackError) {
+                    failures.push(rollbackError);
+                }
+            } else if (input.preparedDescriptor !== undefined) {
+                await closeWorkerBestEffort(input.preparedDescriptor).catch((rollbackError) => failures.push(rollbackError));
+            }
+            if (failures.length === 1) throw error;
+            throw new AggregateError(failures, "Configuration update failed and runtime rollback was incomplete.");
+        }
+    }
+
+    async #restoreInstanceRuntime(
+        existing: ControlConfig["instances"][number],
+        descriptor: ReturnType<InstanceRegistry["get"]>,
+        preparedDescriptor: ReturnType<InstanceFactory["map"]> | undefined
+    ): Promise<void> {
+        const failures: unknown[] = [];
+        if (descriptor === undefined) {
+            this.#instanceRegistry.delete(existing.name);
+        } else {
+            this.#instanceRegistry.add(descriptor);
+            try {
+                descriptor.worker.reconfigure(toWorkerReconfigureInput(existing));
+                descriptor.mcpCapabilities = [...existing.mcp.tools.capabilities];
+                descriptor.mcpGroups = [...existing.mcp.tools.groups];
+                descriptor.enabled = existing.enabled;
+                descriptor.mcpEnabled = existing.mcp.enabled;
+                descriptor.mcpPath = existing.mcp.path;
+                descriptor.workspace = existing.workspace;
+            } catch (error) {
+                failures.push(error);
+            }
+        }
+        if (preparedDescriptor !== undefined && preparedDescriptor !== descriptor) {
+            await closeWorkerBestEffort(preparedDescriptor).catch((error) => failures.push(error));
+        }
+        if (failures.length > 0) throw new AggregateError(failures, `Failed to restore instance ${existing.name}.`);
+    }
+
+    #prepareInstanceDescriptor(
+        instance: ControlConfig["instances"][number],
+        descriptor: ReturnType<InstanceRegistry["get"]>,
+        rebuildRequired: boolean
+    ): ReturnType<InstanceFactory["map"]> | undefined {
+        if (!instance.enabled) return undefined;
+        if (descriptor === undefined || rebuildRequired) return this.#instanceConfigMapper.map(instance);
+        return undefined;
     }
 
     #applyInstanceConfig(
         instance: ControlConfig["instances"][number],
         descriptor: ReturnType<InstanceRegistry["get"]>,
-        rebuildRequired: boolean
+        rebuildRequired: boolean,
+        preparedDescriptor: ReturnType<InstanceFactory["map"]> | undefined
     ): void {
         if (descriptor === undefined) {
-            if (instance.enabled) this.#instanceRegistry.add(this.#instanceConfigMapper.map(instance));
+            if (instance.enabled && preparedDescriptor !== undefined) this.#instanceRegistry.add(preparedDescriptor);
             return;
         }
         if (rebuildRequired) {
-            this.#instanceRegistry.add(this.#instanceConfigMapper.map(instance));
+            if (preparedDescriptor === undefined) throw new Error(`Missing prepared descriptor for ${instance.name}.`);
+            this.#instanceRegistry.add(preparedDescriptor);
             return;
         }
         descriptor.worker.reconfigure(toWorkerReconfigureInput(instance));
@@ -347,6 +481,7 @@ export class ConfigEditorCoordinator {
         descriptor.enabled = instance.enabled;
         descriptor.mcpEnabled = instance.mcp.enabled;
         descriptor.mcpPath = instance.mcp.path;
+        descriptor.workspace = instance.workspace;
     }
 
     #syncMcpEndpoint(instanceName: string): void {
@@ -386,14 +521,29 @@ export class ConfigEditorCoordinator {
         this.#setConfig(config);
     }
 
-    async #applyRuntimeOrRestore(previous: ControlConfig, next: ControlConfig): Promise<boolean> {
+    async #applyRuntimeOrRestore(
+        previous: ControlConfig,
+        next: ControlConfig,
+        changes: ConfigRuntimeChangeSet
+    ): Promise<boolean> {
         if (this.#runtimeApply === undefined) return false;
         try {
-            return await this.#runtimeApply.apply(previous, next);
+            return await this.#runtimeApply.apply(previous, next, changes);
         } catch (error) {
             await this.#persistConfig(previous);
             throw error;
         }
+    }
+
+    #finalizeApplyResult(
+        previous: ControlConfig,
+        next: ControlConfig,
+        changes: Parameters<typeof buildApplyResult>[2],
+        hotApplied = false
+    ): JsonValue {
+        const result = buildApplyResult(previous, next, changes, hotApplied);
+        if (result.restartControlRequired) this.#markRestartControlRequired();
+        return result as unknown as JsonValue;
     }
 
     #validateConfig(config: ControlConfig): ControlConfig {
@@ -435,6 +585,17 @@ export class ConfigEditorCoordinator {
     }
 
 
+}
+
+async function closeWorkerBestEffort(descriptor: ReturnType<InstanceFactory["map"]>): Promise<void> {
+    const close = (descriptor.worker as { close?: () => Promise<void> }).close;
+    if (close !== undefined) await close.call(descriptor.worker);
+}
+
+function stripConfigViewMetadata(value: JsonValue | undefined): JsonValue | undefined {
+    if (typeof value !== "object" || value === null || Array.isArray(value)) return value;
+    const { restartControlRequired: _restartControlRequired, ...config } = value;
+    return config;
 }
 
 function missingInstance(instanceName: string): Error {

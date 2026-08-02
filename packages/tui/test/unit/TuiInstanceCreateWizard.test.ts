@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import type { InstanceCreateSchema, JsonValue } from "@portable-devshell/shared";
+import type { InstanceCreateSchema, InstanceCreateSummary, JsonValue } from "@portable-devshell/shared";
 
 import { TuiAppStore } from "../../src/state/TuiAppStore.ts";
 import { createDefaultInstanceDraft } from "../../src/state/editor/TuiEditorInstanceCreateDraft.ts";
@@ -32,13 +32,15 @@ function wizard(step: number, patch: Record<string, JsonValue> = {}) {
     store.toggleExpanded(box.expandedKey);
     const expanded = buildInstancesPageBoxes(store.getState())[0];
     assert.ok(expanded?.expanded);
-    return expanded.expandedLines.map((line) => line.id);
+    return expanded.expandedLines
+        .map((line) => line.id)
+        .filter((id): id is string => id !== undefined);
 }
 
 function wizardText(
     step: number,
     patch: Record<string, JsonValue>,
-    summary?: Record<string, JsonValue>
+    summary?: InstanceCreateSummary
 ): string {
     const store = new TuiAppStore();
     store.setSelectedPage("instances");
@@ -97,6 +99,30 @@ test("create wizard exposes complete MCP authentication, approval, logs, environ
     }
 });
 
+test("create wizard renders object arrays as editable JSON", () => {
+    const provider = wizardText(2, {
+        container: {
+            containerName: "devshell-demo-docker",
+            image: "archlinux:latest",
+            mode: "existingImage",
+            mounts: [{ source: "/host", target: "/container" }]
+        },
+        name: "demo-docker",
+        provider: "docker"
+    });
+    const approval = wizardText(4, {
+        approvalPolicy: {
+            mode: "ask",
+            rules: [{ decision: "ask", match: "exact", source: "mcp", toolName: "bash_run" }]
+        }
+    });
+
+    assert.equal(provider.includes('[{"source":"/host","target":"/container"}]'), true);
+    assert.equal(approval.includes('[{"decision":"ask","match":"exact","source":"mcp","toolName":"bash_run"}]'), true);
+    assert.equal(provider.includes("[object Object]"), false);
+    assert.equal(approval.includes("[object Object]"), false);
+});
+
 test("create wizard review and validation output redact every secret value", () => {
     const text = wizardText(
         6,
@@ -118,8 +144,17 @@ test("create wizard review and validation output redact every secret value", () 
             provider: "docker"
         },
         {
+            enabled: true,
             env: { API_TOKEN: "summary-secret" },
-            name: "demo-docker"
+            mcp: {
+                auth: { mode: "none" },
+                enabled: true,
+                path: "/demo-docker/mcp",
+                tools: { capabilities: ["read"], groups: ["file"] }
+            },
+            name: "demo-docker",
+            provider: "docker",
+            security: { mode: "disabled" }
         }
     );
 

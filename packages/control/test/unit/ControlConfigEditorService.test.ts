@@ -401,6 +401,55 @@ test("config editor reconfigures and disables a running instance without replaci
     assert.equal(registry.get("demo-local")?.enabled, false);
 });
 
+test("instance reconfigure failure restores persisted and runtime configuration", async () => {
+    let config = createConfig();
+    const writes: ControlConfig[] = [];
+    let runtimeWorkspace = "/tmp/demo";
+    let failNext = true;
+    const worker = {
+        reconfigure(input: { defaultWorkspace?: string }) {
+            runtimeWorkspace = input.defaultWorkspace ?? "";
+            if (failNext) {
+                failNext = false;
+                throw new Error("worker reconfigure failed");
+            }
+        },
+        snapshot: () => ({
+            connectionState: "disconnected",
+            daemonState: "stopped",
+            lastSeq: 0,
+            name: "demo-local",
+            ready: false,
+            status: "stopped"
+        })
+    };
+    const registry = new InstanceRegistry([descriptor(worker)]);
+    const service = new ConfigEditorCoordinator({
+        configStore: {
+            async write(nextConfig: ControlConfig) {
+                writes.push(structuredClone(nextConfig));
+                config = nextConfig;
+            }
+        },
+        getConfig: () => config,
+        instanceRegistry: registry,
+        setConfig: (nextConfig) => { config = nextConfig; }
+    });
+
+    await assert.rejects(
+        service.updateInstanceConfig({
+            instanceName: "demo-local",
+            patch: { workspace: "/tmp/next" }
+        }),
+        /worker reconfigure failed/u
+    );
+
+    assert.equal(writes.length, 2);
+    assert.equal(config.instances[0]?.workspace, "/tmp/demo");
+    assert.equal(runtimeWorkspace, "/tmp/demo");
+    assert.equal(registry.get("demo-local")?.workspace, "/tmp/demo");
+});
+
 test("config editor rejects delete and rebuild patches while an instance is running before persistence", async () => {
     let config = createConfig();
     const writes: unknown[] = [];

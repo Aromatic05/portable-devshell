@@ -374,6 +374,7 @@ export interface ConfigView {
     control: ControlGlobalConfig["control"];
     instances: ConfigInstanceView[];
     mcp: ControlGlobalConfig["mcp"];
+    restartControlRequired: boolean;
     web: ConfigWebView;
 }
 

@@ -62,6 +62,7 @@ export class TuiControlSessionRefresh {
         this.#store.setMcpStatus(mcpStatus);
         this.#store.replaceInstances(mergeInstances(configView, runtimeInstances));
         this.#store.setConfigView(configView);
+        this.#store.setControlRestartRequired(configView?.restartControlRequired === true);
 
         await Promise.all([
             this.refreshOverview(generation),
@@ -89,6 +90,7 @@ export class TuiControlSessionRefresh {
         this.#store.setMcpStatus(mcpStatus);
         this.#store.replaceInstances(mergeInstances(configView, runtimeInstances));
         this.#store.setConfigView(configView);
+        this.#store.setControlRestartRequired(configView?.restartControlRequired === true);
     }
 
     async refreshOverview(generation?: number, signal?: AbortSignal): Promise<void> {

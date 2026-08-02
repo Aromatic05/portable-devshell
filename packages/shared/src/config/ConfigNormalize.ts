@@ -270,7 +270,7 @@ export function applyConfigWebPatch(
     };
 }
 
-export function toConfigView(config: ControlConfig): ConfigView {
+export function toConfigView(config: ControlConfig, restartControlRequired = false): ConfigView {
     return {
         control: { ...config.control },
         instances: config.instances.map((instance) => {
@@ -285,6 +285,7 @@ export function toConfigView(config: ControlConfig): ConfigView {
             };
         }) as unknown as ConfigView["instances"],
         mcp: { ...config.mcp },
+        restartControlRequired,
         web: toWebView(config.web)
     };
 }

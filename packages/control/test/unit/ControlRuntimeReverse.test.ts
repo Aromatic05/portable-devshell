@@ -32,6 +32,30 @@ class RecordingHttpHost {
     }
 }
 
+test("reverse runtime is ready before the first reverse instance is created", async (t) => {
+    const homeDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-reverse-runtime-empty-"));
+    t.after(async () => await rm(homeDirectory, { force: true, recursive: true }));
+    const config = createDefaultControlConfig();
+    config.mcp.enabled = true;
+    config.mcp.publicBaseUrl = "https://controller.example.test";
+    const instances = new InstanceRegistryFactory().build(config);
+    const host = new RecordingHttpHost();
+    const state = {
+        homeDirectory,
+        instances,
+        requireConfig: () => config
+    } as unknown as ControlRuntimeState;
+    const mcp = {
+        host: { server: host as unknown as HttpHost }
+    } as unknown as ControlRuntimeMcp;
+
+    const reverse = new ControlRuntimeReverse({ mcp, state });
+
+    assert.notEqual(reverse.service, undefined);
+    assert.equal(host.rawPaths.includes("/reverse/v1/enroll"), true);
+    assert.equal(host.upgradePaths.includes("/reverse/v1/connect"), true);
+});
+
 test("reverse runtime adopts a changed MCP public URL on the replacement host", async (t) => {
     const homeDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-reverse-runtime-"));
     t.after(async () => await rm(homeDirectory, { force: true, recursive: true }));

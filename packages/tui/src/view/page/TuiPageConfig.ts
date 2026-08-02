@@ -4,7 +4,7 @@ import type { BoxModel } from "../component/TuiComponentExpandableBox.js";
 import type { TuiAppState } from "../../state/reducer/TuiStoreModel.js";
 import { buildSelectedInstancePageContext, compactSummary, makeBox, shortenPath } from "./TuiPageBoxSupport.js";
 import { asRecord, editorDraft, readPath } from "../../state/editor/TuiEditorDraft.js";
-import { buttonLine, choiceLine, editorErrorLine, fieldLine } from "../editor/TuiEditorView.js";
+import { buttonLine, choiceLine, editorErrorLine, fieldLine, secretRecordFieldLine } from "../editor/TuiEditorView.js";
 
 export function buildConfigPageBoxes(state: TuiAppState, instanceName: string): BoxModel[] {
     const { instance, snapshot } = buildSelectedInstancePageContext(state, instanceName);
@@ -47,7 +47,7 @@ export function buildConfigPageBoxes(state: TuiAppState, instanceName: string): 
         makeBox(state, "config", instanceName, {
             detailLines: [
                 fieldLine("mcp.enabled", "mcp.enabled", readPath(draft, "mcp.enabled")),
-                fieldLine("mcp.path", "mcp.path", readPath(draft, "mcp.path")),
+                { id: "mcp-path", text: `mcp.path           ${stringValue(readPath(draft, "mcp.path"), `/${instanceName}/mcp`)} (fixed)` },
                 fieldLine("mcp.tools.groups", "groups", readPath(draft, "mcp.tools.groups")),
                 fieldLine("mcp.tools.capabilities", "capabilities", readPath(draft, "mcp.tools.capabilities")),
                 ...editorErrorLine(state, "config", "mcp-tools", ["mcp", "groups", "capabilities"])
@@ -199,21 +199,64 @@ function providerLines(draft: Record<string, JsonValue>): Array<{ id: string; te
     if (provider === "ssh") {
         return [fieldLine("ssh.command", "ssh.command", readPath(draft, "ssh.command"))];
     }
-    if (provider === "docker" || provider === "podman") {
-        return [
-            fieldLine("container.mode", "container.mode", readPath(draft, "container.mode")),
-            fieldLine("container.preset", "container.preset", readPath(draft, "container.preset")),
-            fieldLine("container.image", "container.image", readPath(draft, "container.image")),
-            fieldLine("container.containerName", "container.name", readPath(draft, "container.containerName")),
-            fieldLine("container.build.context", "build.context", readPath(draft, "container.build.context")),
-            fieldLine("container.build.dockerfile", "build.dockerfile", readPath(draft, "container.build.dockerfile")),
-            fieldLine("container.compose.file", "compose.file", readPath(draft, "container.compose.file")),
-            fieldLine("container.compose.service", "compose.service", readPath(draft, "container.compose.service")),
-            fieldLine("dockerBinary", "dockerBinary", readPath(draft, "dockerBinary")),
-            fieldLine("podmanBinary", "podmanBinary", readPath(draft, "podmanBinary"))
-        ];
+    if (provider !== "docker" && provider !== "podman") {
+        return ["No provider-specific settings."].map((text, index) => ({ id: `provider-info:${index}`, text }));
     }
-    return ["No provider-specific settings."].map((text, index) => ({ id: `provider-info:${index}`, text }));
+
+    const mode = readPath(draft, "container.mode");
+    const common = [
+        choiceLine("container.mode", "container.mode", mode),
+        ...(provider === "docker"
+            ? [fieldLine("dockerBinary", "dockerBinary", readPath(draft, "dockerBinary"))]
+            : [fieldLine("podmanBinary", "podmanBinary", readPath(draft, "podmanBinary"))])
+    ];
+    switch (mode) {
+        case "preset":
+            return [
+                ...common,
+                fieldLine("container.preset", "container.preset", readPath(draft, "container.preset")),
+                fieldLine("container.image", "container.image", readPath(draft, "container.image")),
+                ...managedContainerLines(draft)
+            ];
+        case "dockerfile":
+            return [
+                ...common,
+                fieldLine("container.build.context", "build.context", readPath(draft, "container.build.context")),
+                fieldLine("container.build.dockerfile", "build.dockerfile", readPath(draft, "container.build.dockerfile")),
+                fieldLine("container.build.tag", "build.tag", readPath(draft, "container.build.tag")),
+                ...managedContainerLines(draft)
+            ];
+        case "compose":
+            return [
+                ...common,
+                fieldLine("container.compose.file", "compose.file", readPath(draft, "container.compose.file")),
+                fieldLine("container.compose.service", "compose.service", readPath(draft, "container.compose.service")),
+                fieldLine("container.compose.projectName", "compose.project", readPath(draft, "container.compose.projectName"))
+            ];
+        case "existingStoppedContainer":
+            return [
+                ...common,
+                fieldLine("container.containerName", "container.name", readPath(draft, "container.containerName")),
+                fieldLine("container.adoptLifecycle", "adoptLifecycle", readPath(draft, "container.adoptLifecycle"))
+            ];
+        case "existingImage":
+        default:
+            return [
+                ...common,
+                fieldLine("container.image", "container.image", readPath(draft, "container.image")),
+                ...managedContainerLines(draft)
+            ];
+    }
+}
+
+function managedContainerLines(draft: Record<string, JsonValue>): Array<{ id: string; text: string }> {
+    return [
+        fieldLine("container.containerName", "container.name", readPath(draft, "container.containerName")),
+        fieldLine("container.user", "container.user", readPath(draft, "container.user")),
+        fieldLine("container.network", "container.network", readPath(draft, "container.network")),
+        fieldLine("container.mounts", "mounts JSON", readPath(draft, "container.mounts")),
+        secretRecordFieldLine("container.env", "container env", readPath(draft, "container.env"))
+    ];
 }
 
 function instanceDraft(state: TuiAppState, instanceName: string): Record<string, JsonValue> {
