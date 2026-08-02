@@ -80,7 +80,7 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
         }) as unknown as JsonValue;
     }
 
-    async readContextMessages(instance: string, ctxId: string): Promise<JsonValue> {
+    async consumeContextMessages(instance: string, ctxId: string) {
         const service = this.#requireDescriptor(instance).contextMessages;
         if (service === undefined) {
             throw createError({
@@ -89,7 +89,7 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
                 retryable: false
             });
         }
-        return (await service.readPending(ctxId)) as unknown as JsonValue;
+        return await service.readPending(ctxId);
     }
 
     async readTodo(instance: string, title?: string): Promise<JsonValue> {

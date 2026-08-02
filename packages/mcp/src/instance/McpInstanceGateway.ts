@@ -6,7 +6,12 @@ import type {
     ArtifactViewImageInput,
     ArtifactViewImageResult
 } from "@portable-devshell/shared";
-import type { JsonValue, ToolCallContext, ToolDefinition } from "@portable-devshell/shared";
+import type {
+    ContextMessageReadResult,
+    JsonValue,
+    ToolCallContext,
+    ToolDefinition
+} from "@portable-devshell/shared";
 
 export interface McpSshInstanceCreateInput {
     host: string;
@@ -29,7 +34,7 @@ export interface McpInstanceGateway {
     closeToolSession?(sessionId: string): Promise<void>;
     createSshInstance(sourceInstance: string, input: McpSshInstanceCreateInput): Promise<JsonValue>;
     listInstances(): Promise<JsonValue>;
-    readContextMessages?(instance: string, ctxId: string): Promise<JsonValue>;
+    consumeContextMessages?(instance: string, ctxId: string): Promise<ContextMessageReadResult>;
     readTodo(instance: string, title?: string): Promise<JsonValue>;
     listTools(instance: string): ToolDefinition[];
     startInstance(instance: string): Promise<JsonValue>;

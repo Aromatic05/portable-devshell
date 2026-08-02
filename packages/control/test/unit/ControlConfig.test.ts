@@ -114,7 +114,7 @@ test("version 1 global MCP auth migrates to each enabled namespace and writes ve
     }
 });
 
-test("version 2 legacy default MCP groups gain context without widening custom allowlists", async () => {
+test("version 2 removes the obsolete context MCP group from persisted allowlists", async () => {
     const homeDirectory = await createTestTempDirectory("control-home");
 
     try {
@@ -143,7 +143,7 @@ test("version 2 legacy default MCP groups gain context without widening custom a
                 enabled: true,
                 mcp: {
                     enabled: true,
-                    tools: { capabilities: ["read"], groups: ["file", "todo"] }
+                    tools: { capabilities: ["read"], groups: ["file", "context", "todo"] }
                 },
                 name: "custom-policy",
                 provider: "local",
@@ -155,7 +155,7 @@ test("version 2 legacy default MCP groups gain context without widening custom a
         const config = await new ControlConfigStore().readOrCreate(homeDirectory);
         assert.deepEqual(
             config.instances.find((instance) => instance.name === "legacy-default")?.mcp.tools.groups,
-            ["file", "bash", "artifact", "tmux", "todo", "context"]
+            ["file", "bash", "artifact", "tmux", "todo"]
         );
         assert.deepEqual(
             config.instances.find((instance) => instance.name === "custom-policy")?.mcp.tools.groups,

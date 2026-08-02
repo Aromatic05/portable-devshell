@@ -24,8 +24,6 @@ import type {
 } from "./ConfigModel.js";
 import { defaultConfigNormalizeContext, MASKED_CONFIG_TOKEN } from "./ConfigModel.js";
 
-const legacyDefaultMcpToolGroups = ["file", "bash", "artifact", "tmux", "todo"] as const;
-
 export function createDefaultControlConfig(): ControlConfig {
     return normalizeConfigDraft({ instances: [] });
 }
@@ -535,15 +533,7 @@ function cloneNonEmptyRecord(record: Record<string, string> | undefined): Record
 }
 
 function normalizeMcpGroups(configured: readonly string[] | undefined, defaults: readonly string[]): string[] {
-    const normalized = deduplicate(configured ?? defaults);
-    if (
-        configured !== undefined &&
-        normalized.length === legacyDefaultMcpToolGroups.length &&
-        normalized.every((value, index) => value === legacyDefaultMcpToolGroups[index])
-    ) {
-        return [...normalized, "context"];
-    }
-    return normalized;
+    return deduplicate(configured ?? defaults).filter((group) => group !== "context");
 }
 
 function deduplicate<T>(values: readonly T[]): T[] {

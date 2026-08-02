@@ -20,7 +20,6 @@ import {
     McpToolCatalogEnvironment,
     mcpEnvironmentToolName
 } from "../tool/catalog/McpToolCatalogEnvironment.js";
-import { McpToolCatalogContextMessage } from "../tool/catalog/McpToolCatalogContextMessage.js";
 import { McpToolCatalogInstance } from "../tool/catalog/McpToolCatalogInstance.js";
 import { McpToolCatalogTodo } from "../tool/catalog/McpToolCatalogTodo.js";
 import { withMcpCommentOutputSchema } from "./McpEndpointFeedback.js";
@@ -52,7 +51,6 @@ export interface McpEndpointCatalogSnapshot {
 export class McpEndpointCatalog {
     readonly #artifactTools = new McpToolCatalogArtifact();
     readonly #catalog: McpToolCatalogEndpoint;
-    readonly #contextMessageTools = new McpToolCatalogContextMessage();
     readonly #descriptionEnhancer = new McpToolDescriptionEnhancer();
     readonly #environmentTools = new McpToolCatalogEnvironment();
     readonly #gateway?: McpInstanceGateway;
@@ -155,10 +153,6 @@ export class McpEndpointCatalog {
                 });
             }
             sources.push(
-                {
-                    owner: "context",
-                    tools: this.#contextMessageTools.list()
-                },
                 {
                     owner: "todo",
                     tools: this.#todoTools.list()

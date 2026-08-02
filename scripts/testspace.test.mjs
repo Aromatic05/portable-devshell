@@ -45,7 +45,6 @@ test("testspace config enables a complete isolated local instance", () => {
         "artifact",
         "tmux",
         "todo",
-        "context",
         "instance",
     ]);
     assert.deepEqual(instance.mcp.tools.capabilities, ["read", "write", "execute", "manage"]);

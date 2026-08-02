@@ -26,7 +26,7 @@ import type {
 import { asInstanceName, asWorkspacePath } from "@portable-devshell/shared";
 import { WorkerBinary, WorkerInstanceFactory, WorkerTransportDriverLocal } from "@portable-devshell/core/testing";
 import { McpHost } from "@portable-devshell/mcp/testing";
-import type { McpAuthConfig } from "@portable-devshell/mcp";
+import type { McpAuthConfig, McpInstanceGateway } from "@portable-devshell/mcp";
 
 const workerBinaryPath = resolveTestWorkerBinary();
 const clientInfo = { name: "portable-devshell-real-client", version: "0.0.0" };
@@ -60,6 +60,71 @@ test("a real MCP SDK client drives a none-auth frozen worker through initialize,
             (await instance.readToolCalls()).some((record) => record.source === "mcp" && record.status === "completed"),
             true
         );
+        await client.close();
+    } finally {
+        await teardownFrozenWorker(host, instance, cleanupDirs);
+    }
+});
+
+test("a real MCP SDK client receives a queued Comment in the next ordinary tool result", realWorkerTestOptions(workerBinaryPath), async () => {
+    const pending = new Map<string, string[]>();
+    const consumed: Array<{ ctxId: string; instance: string }> = [];
+    const gateway = {
+        async consumeContextMessages(instance: string, ctxId: string) {
+            consumed.push({ ctxId, instance });
+            const comments = pending.get(ctxId) ?? [];
+            pending.delete(ctxId);
+            return {
+                messages: comments.map((text, index) => ({
+                    createdAt: "2026-08-03T00:00:00.000Z",
+                    id: `message-${index}`,
+                    text,
+                })),
+            };
+        },
+    } as unknown as McpInstanceGateway;
+    const { cleanupDirs, host, instance, workspaceMarker } = await startFrozenWorkerHost(
+        "real-comment",
+        { enabled: false, provider: "none" },
+        gateway,
+    );
+
+    try {
+        const client = new Client(clientInfo);
+        await client.connect(
+            new StreamableHTTPClientTransport(
+                new URL(endpointFor(host, "real-comment")),
+            ),
+        );
+        const tools = await client.listTools();
+        assert.equal(
+            tools.tools.some((tool) => tool.name === "context_message_read"),
+            false,
+        );
+
+        const ctxId = await readContextId(client);
+        pending.set(ctxId, ["Inspect this result before continuing"]);
+        const first = await client.callTool({
+            arguments: { command: `cat -- './${workspaceMarker.name}'`, ctxId },
+            name: "bash_run",
+        });
+        assert.deepEqual(
+            (first.structuredContent as { comment?: string[] } | undefined)?.comment,
+            ["Inspect this result before continuing"],
+        );
+
+        const second = await client.callTool({
+            arguments: { command: "pwd", ctxId },
+            name: "bash_run",
+        });
+        assert.equal(
+            (second.structuredContent as { comment?: string[] } | undefined)?.comment,
+            undefined,
+        );
+        assert.deepEqual(consumed, [
+            { ctxId, instance: "real-comment" },
+            { ctxId, instance: "real-comment" },
+        ]);
         await client.close();
     } finally {
         await teardownFrozenWorker(host, instance, cleanupDirs);
@@ -480,7 +545,11 @@ function createFrozenWorker(name: string, homeDirectory: string, workspacePath: 
     });
 }
 
-async function startFrozenWorkerHost(name: string, auth: McpAuthConfig) {
+async function startFrozenWorkerHost(
+    name: string,
+    auth: McpAuthConfig,
+    gateway?: McpInstanceGateway,
+) {
     const homeDirectory = await createTestTempDirectory(`mcp-real-${name}-home`);
     const workspacePath = await createTestTempDirectory(`mcp-real-${name}-workspace`);
     const markerName = `real-${name}-marker.txt`;
@@ -492,6 +561,7 @@ async function startFrozenWorkerHost(name: string, auth: McpAuthConfig) {
         instances: [
             {
                 auth,
+                gateway,
                 name,
                 policy: { capabilities: ["execute"], groups: ["bash"] },
                 worker: instance

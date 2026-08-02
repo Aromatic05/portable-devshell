@@ -45,7 +45,7 @@ export function buildTestspaceInstanceConfig({ workspace }) {
         `path = "/${TESTSPACE_INSTANCE}/mcp"`,
         "",
         "[mcp.tools]",
-        'groups = ["file", "bash", "artifact", "tmux", "todo", "context", "instance"]',
+        'groups = ["file", "bash", "artifact", "tmux", "todo", "instance"]',
         'capabilities = ["read", "write", "execute", "manage"]',
         "",
         "[approvalPolicy]",
