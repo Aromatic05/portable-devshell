@@ -1,12 +1,19 @@
 import { createInterface } from "node:readline/promises";
 
 import type {
+    ApprovalPolicy,
+    ApprovalPolicyMode,
+    ConfigInstanceMcpDraft,
+    ControlInstanceLogsConfig,
+    ControlInstanceToolsConfig,
+    ControlMcpAuthMode,
     InstanceContainerConfig,
     InstanceContainerMountConfig,
     InstanceContainerPresetSchema,
     InstanceCreateDraft,
     InstanceCreateSchema,
-    InstanceCreateSummary
+    InstanceCreateSummary,
+    JsonValue
 } from "@portable-devshell/shared";
 
 export interface CliWizardInstanceCreateOptions {
@@ -60,11 +67,18 @@ export class CliWizardInstanceCreate {
 
         this.#output.write("MCP\n");
         const mcpEnabled = await this.#confirm(lines, "MCP enabled", schema.defaultMcpEnabled);
+        const mcpAuth = mcpEnabled ? await this.#mcpAuth(lines) : { auth: "none" as const };
         const mcpGroups = await this.#stringList(lines, "MCP tool groups", schema.defaultMcpGroups);
         const mcpCapabilities = await this.#stringList(lines, "MCP capabilities", schema.defaultMcpCapabilities);
 
         this.#output.write("Security\n");
         const securityMode = await this.#securityMode(lines, schema);
+        const approvalPolicy = await this.#approvalPolicy(lines);
+
+        this.#output.write("Runtime\n");
+        const env = await this.#instanceEnv(lines);
+        const logs = await this.#logs(lines);
+        const tools = await this.#tools(lines);
 
         return {
             ...(workspace.length === 0 ? {} : { workspace }),
@@ -72,8 +86,13 @@ export class CliWizardInstanceCreate {
             ...(providerFields.dockerBinary === undefined ? {} : { dockerBinary: providerFields.dockerBinary }),
             ...(providerFields.podmanBinary === undefined ? {} : { podmanBinary: providerFields.podmanBinary }),
             ...(providerFields.ssh === undefined ? {} : { ssh: providerFields.ssh }),
+            ...(approvalPolicy.mode === "disabled" && approvalPolicy.rules === undefined ? {} : { approvalPolicy }),
+            ...(env === undefined ? {} : { env }),
+            ...(logs === undefined ? {} : { logs }),
+            ...(tools === undefined ? {} : { tools }),
             enabled,
             mcp: {
+                ...mcpAuth,
                 enabled: mcpEnabled,
                 tools: {
                     capabilities: mcpCapabilities as InstanceCreateDraft["mcp"] extends { tools?: { capabilities?: infer T } } ? T : never,
@@ -98,6 +117,109 @@ export class CliWizardInstanceCreate {
 
             this.#output.write(`provider must be one of ${schema.providers.join(", ")}.\n`);
     }
+    }
+
+    async #mcpAuth(lines: AsyncIterator<string>): Promise<ConfigInstanceMcpDraft> {
+        const auth = await this.#choice<ControlMcpAuthMode>(
+            lines,
+            "MCP auth",
+            ["none", "token", "oauth2"],
+            "none"
+        );
+        switch (auth) {
+            case "none":
+                return { auth };
+            case "token":
+                return {
+                    auth,
+                    token: await this.#secretRequired(lines, "MCP token")
+                };
+            case "oauth2": {
+                const resourceName = await this.#required(lines, "OAuth resource name");
+                const requiredScopes = await this.#stringList(lines, "OAuth required scopes", ["mcp"]);
+                const documentationUrl = await this.#blankAsUndefined(lines, "OAuth documentation URL");
+                return {
+                    auth,
+                    oauth2: {
+                        ...(documentationUrl === undefined ? {} : { documentationUrl }),
+                        requiredScopes,
+                        resourceName
+                    }
+                };
+            }
+        }
+    }
+
+    async #approvalPolicy(lines: AsyncIterator<string>): Promise<ApprovalPolicy> {
+        const mode = await this.#choice<ApprovalPolicyMode>(
+            lines,
+            "approval mode",
+            ["disabled", "allow", "ask", "deny"],
+            "disabled"
+        );
+        if (mode === "disabled") {
+            return { mode };
+        }
+        const rules = await this.#jsonOptional<ApprovalPolicy["rules"]>(
+            lines,
+            "approval rules JSON",
+            (value) => Array.isArray(value),
+            "approval rules must be a JSON array."
+        );
+        return {
+            mode,
+            ...(rules === undefined ? {} : { rules })
+        };
+    }
+
+    async #instanceEnv(lines: AsyncIterator<string>): Promise<Record<string, string> | undefined> {
+        const env: Record<string, string> = {};
+        while (await this.#confirm(lines, "add instance env", false)) {
+            const key = await this.#required(lines, "instance env key");
+            env[key] = await this.#secretRequired(lines, "instance env value");
+        }
+        return Object.keys(env).length === 0 ? undefined : env;
+    }
+
+    async #logs(lines: AsyncIterator<string>): Promise<ControlInstanceLogsConfig | undefined> {
+        if (!(await this.#confirm(lines, "configure log limits", false))) {
+            return undefined;
+        }
+        const retentionDays = await this.#positiveIntegerOptional(lines, "log retention days");
+        const maxBytes = await this.#positiveIntegerOptional(lines, "log max bytes");
+        const eventBufferSize = await this.#positiveIntegerOptional(lines, "log event buffer size");
+        const result = {
+            ...(eventBufferSize === undefined ? {} : { eventBufferSize }),
+            ...(maxBytes === undefined ? {} : { maxBytes }),
+            ...(retentionDays === undefined ? {} : { retentionDays })
+        };
+        return Object.keys(result).length === 0 ? undefined : result;
+    }
+
+    async #tools(lines: AsyncIterator<string>): Promise<ControlInstanceToolsConfig | undefined> {
+        if (!(await this.#confirm(lines, "configure tool scheduler", false))) {
+            return undefined;
+        }
+        const maxRunning = await this.#positiveIntegerOptional(lines, "scheduler max running");
+        const maxRunningPerSession = await this.#positiveIntegerOptional(lines, "scheduler max running per session");
+        const queueDepth = await this.#positiveIntegerOptional(lines, "scheduler queue depth");
+        const queueDepthPerSession = await this.#positiveIntegerOptional(lines, "scheduler queue depth per session");
+        const queueTimeoutMs = await this.#positiveIntegerOptional(lines, "scheduler queue timeout ms");
+        const byTool = await this.#jsonOptional<NonNullable<NonNullable<ControlInstanceToolsConfig["scheduler"]>["byTool"]>>(
+            lines,
+            "scheduler by-tool JSON",
+            isJsonObject,
+            "scheduler by-tool limits must be a JSON object."
+        );
+        const scheduler = {
+            ...(byTool === undefined ? {} : { byTool }),
+            ...(maxRunning === undefined ? {} : { maxRunning }),
+            ...(maxRunningPerSession === undefined ? {} : { maxRunningPerSession }),
+            ...(queueDepth === undefined ? {} : { queueDepth }),
+            ...(queueDepthPerSession === undefined ? {} : { queueDepthPerSession }),
+            ...(queueTimeoutMs === undefined ? {} : { queueTimeoutMs })
+        };
+        return Object.keys(scheduler).length === 0 ? undefined : { scheduler };
     }
 
     async #securityMode(
@@ -306,7 +428,7 @@ export class CliWizardInstanceCreate {
 
         while (await this.#confirm(lines, "add container env", false)) {
             const key = await this.#required(lines, "env key");
-            const value = await this.#required(lines, "env value");
+            const value = await this.#secretRequired(lines, "env value");
             env[key] = value;
         }
 
@@ -321,6 +443,58 @@ export class CliWizardInstanceCreate {
         }
 
         return [...new Set(raw.split(/[,\s]+/u).map((entry) => entry.trim()).filter((entry) => entry.length > 0))];
+    }
+
+    async #choice<T extends string>(
+        lines: AsyncIterator<string>,
+        label: string,
+        values: readonly T[],
+        defaultValue: T
+    ): Promise<T> {
+        while (true) {
+            const answer = await this.#optional(lines, `${label} (${values.join(" | ")})`, defaultValue);
+            if (values.includes(answer as T)) {
+                return answer as T;
+            }
+            this.#output.write(`${label} must be one of ${values.join(", ")}.\n`);
+        }
+    }
+
+    async #positiveIntegerOptional(lines: AsyncIterator<string>, label: string): Promise<number | undefined> {
+        while (true) {
+            const value = await this.#blankAsUndefined(lines, label);
+            if (value === undefined) {
+                return undefined;
+            }
+            const parsed = Number(value);
+            if (Number.isSafeInteger(parsed) && parsed > 0) {
+                return parsed;
+            }
+            this.#output.write(`${label} must be a positive integer.\n`);
+        }
+    }
+
+    async #jsonOptional<T>(
+        lines: AsyncIterator<string>,
+        label: string,
+        validate: (value: JsonValue) => boolean,
+        invalidMessage: string
+    ): Promise<T | undefined> {
+        while (true) {
+            const raw = await this.#blankAsUndefined(lines, label);
+            if (raw === undefined) {
+                return undefined;
+            }
+            try {
+                const value = JSON.parse(raw) as JsonValue;
+                if (validate(value)) {
+                    return value as T;
+                }
+            } catch {
+                // Report one stable validation message below.
+            }
+            this.#output.write(`${invalidMessage}\n`);
+        }
     }
 
     async #confirm(lines: AsyncIterator<string>, label: string, defaultValue: boolean): Promise<boolean> {
@@ -353,6 +527,16 @@ export class CliWizardInstanceCreate {
                 return value;
             }
 
+            this.#output.write(`${label} is required.\n`);
+        }
+    }
+
+    async #secretRequired(lines: AsyncIterator<string>, label: string): Promise<string> {
+        while (true) {
+            const value = (await this.#askSecret(lines, `${label}: `)).trim();
+            if (value.length > 0) {
+                return value;
+            }
             this.#output.write(`${label} is required.\n`);
         }
     }
@@ -392,10 +576,31 @@ export class CliWizardInstanceCreate {
         }
 
         this.#output.write(`mcp enabled: ${summary.mcp.enabled}\n`);
+        this.#output.write(`mcp auth: ${summary.mcp.auth.mode}\n`);
+        if (summary.mcp.auth.oauth2 !== undefined) {
+            this.#output.write(`oauth resource: ${summary.mcp.auth.oauth2.resourceName}\n`);
+            this.#output.write(`oauth scopes: ${summary.mcp.auth.oauth2.requiredScopes.join(",")}\n`);
+            if (summary.mcp.auth.oauth2.documentationUrl !== undefined) {
+                this.#output.write(`oauth documentation: ${summary.mcp.auth.oauth2.documentationUrl}\n`);
+            }
+        }
         this.#output.write(`mcp path: ${summary.mcp.path}\n`);
         this.#output.write(`MCP groups: ${summary.mcp.tools.groups.join(",")}\n`);
         this.#output.write(`MCP capabilities: ${summary.mcp.tools.capabilities.join(",")}\n`);
         this.#output.write(`security mode: ${summary.security.mode}\n`);
+        this.#output.write(`approval mode: ${summary.approvalPolicy?.mode ?? "disabled"}\n`);
+        if ((summary.approvalPolicy?.rules?.length ?? 0) > 0) {
+            this.#output.write(`approval rules: ${summary.approvalPolicy!.rules!.length}\n`);
+        }
+        if (summary.env !== undefined) {
+            this.#output.write(`instance env keys: ${Object.keys(summary.env).sort().join(",")}\n`);
+        }
+        if (summary.logs !== undefined) {
+            this.#output.write(`logs: ${JSON.stringify(summary.logs)}\n`);
+        }
+        if (summary.tools?.scheduler !== undefined) {
+            this.#output.write(`tool scheduler: ${JSON.stringify(summary.tools.scheduler)}\n`);
+        }
     }
 
     #renderContainerSummary(container: InstanceContainerConfig): void {
@@ -454,7 +659,29 @@ export class CliWizardInstanceCreate {
         }
 
         if (container.env !== undefined && Object.keys(container.env).length > 0) {
-            this.#output.write(`container env: ${Object.entries(container.env).map(([key, value]) => `${key}=${value}`).join(", ")}\n`);
+            this.#output.write(`container env keys: ${Object.keys(container.env).sort().join(", ")}\n`);
+        }
+    }
+
+    async #askSecret(lines: AsyncIterator<string>, prompt: string): Promise<string> {
+        const input = this.#input as NodeJS.ReadableStream & {
+            isTTY?: boolean;
+            setRawMode?(mode: boolean): void;
+        };
+        const hideInput = input.isTTY === true && typeof input.setRawMode === "function";
+        if (hideInput) {
+            input.setRawMode!(true);
+        }
+        try {
+            const value = await this.#ask(lines, prompt);
+            if (hideInput) {
+                this.#output.write("\n");
+            }
+            return value;
+        } finally {
+            if (hideInput) {
+                input.setRawMode!(false);
+            }
         }
     }
 
@@ -468,4 +695,8 @@ export class CliWizardInstanceCreate {
 
         return next.value;
     }
+}
+
+function isJsonObject(value: JsonValue): boolean {
+    return typeof value === "object" && value !== null && !Array.isArray(value);
 }

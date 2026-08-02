@@ -1,8 +1,13 @@
 import type {
     ConfigInstanceDraft,
+    ControlInstanceLogsConfig,
+    ControlInstanceToolsConfig,
+    ControlMcpAuthMode,
+    ControlMcpOAuth2Config,
     ControlProviderKind,
     ControlSecurityMode
 } from "../../config/ConfigModel.js";
+import type { ApprovalPolicy } from "../tool/DtoToolApproval.js";
 import type { ToolCapability } from "../tool/DtoToolDefinition.js";
 import type { InstanceSnapshot } from "./DtoInstanceSnapshot.js";
 
@@ -111,10 +116,17 @@ export interface InstanceCreateSchema {
 export type InstanceCreateDraft = ConfigInstanceDraft;
 
 export interface InstanceCreateSummary {
+    approvalPolicy?: ApprovalPolicy;
     container?: InstanceContainerConfig;
     dockerBinary?: string;
     enabled: boolean;
+    env?: Record<string, string>;
+    logs?: ControlInstanceLogsConfig;
     mcp: {
+        auth: {
+            mode: ControlMcpAuthMode;
+            oauth2?: ControlMcpOAuth2Config;
+        };
         enabled: boolean;
         path: string;
         tools: {
@@ -131,6 +143,7 @@ export interface InstanceCreateSummary {
     ssh?: {
         command?: string;
     };
+    tools?: ControlInstanceToolsConfig;
     workspace?: string;
 }
 

@@ -48,10 +48,15 @@ test("instance wizard retries invalid basic answers, deduplicates lists, and sup
             "",
             "",
             "",
+            "",
             "file,file bash",
             "read execute read",
             "unsafe",
             "workspace",
+            "",
+            "",
+            "",
+            "",
             "n"
         ],
         output
@@ -91,6 +96,10 @@ test("instance wizard collects SSH configuration and accepts validated creation"
             "",
             "",
             "",
+            "",
+            "",
+            "",
+            "",
             "y"
         ],
         output
@@ -102,6 +111,7 @@ test("instance wizard collects SSH configuration and accepts validated creation"
     assert.deepEqual(result?.draft, {
         enabled: true,
         mcp: {
+            auth: "none",
             enabled: false,
             tools: {
                 capabilities: ["read", "write", "execute"],
@@ -120,6 +130,88 @@ test("instance wizard collects SSH configuration and accepts validated creation"
     assert.match(text, /Summary/u);
     assert.match(text, /ssh command: ssh devbox/u);
     assert.match(text, /mcp enabled: false/u);
+});
+
+test("instance wizard collects complete OAuth, approval, environment, log, and scheduler configuration", async () => {
+    const output = createBuffer();
+    const wizard = createWizard(
+        [
+            "complete-local",
+            "",
+            "local",
+            "/workspace/complete",
+            "",
+            "oauth2",
+            "complete-resource",
+            "mcp profile",
+            "https://docs.example.test/mcp",
+            "file bash",
+            "read write execute",
+            "workspace",
+            "ask",
+            '[{"decision":"allow","match":"exact","source":"cli","toolName":"file_read"}]',
+            "y",
+            "API_TOKEN",
+            "instance-secret",
+            "n",
+            "y",
+            "14",
+            "1048576",
+            "512",
+            "y",
+            "4",
+            "2",
+            "32",
+            "8",
+            "30000",
+            '{"bash_run":{"maxRunning":1,"queueDepth":4}}',
+            "y"
+        ],
+        output
+    );
+
+    const result = await wizard.run(schema, async (draft) => summaryFor(draft));
+
+    assert.notEqual(result, undefined);
+    assert.deepEqual(result?.draft.mcp, {
+        auth: "oauth2",
+        enabled: true,
+        oauth2: {
+            documentationUrl: "https://docs.example.test/mcp",
+            requiredScopes: ["mcp", "profile"],
+            resourceName: "complete-resource"
+        },
+        tools: {
+            capabilities: ["read", "write", "execute"],
+            groups: ["file", "bash"]
+        }
+    });
+    assert.deepEqual(result?.draft.approvalPolicy, {
+        mode: "ask",
+        rules: [{ decision: "allow", match: "exact", source: "cli", toolName: "file_read" }]
+    });
+    assert.deepEqual(result?.draft.env, { API_TOKEN: "instance-secret" });
+    assert.deepEqual(result?.draft.logs, {
+        eventBufferSize: 512,
+        maxBytes: 1048576,
+        retentionDays: 14
+    });
+    assert.deepEqual(result?.draft.tools, {
+        scheduler: {
+            byTool: { bash_run: { maxRunning: 1, queueDepth: 4 } },
+            maxRunning: 4,
+            maxRunningPerSession: 2,
+            queueDepth: 32,
+            queueDepthPerSession: 8,
+            queueTimeoutMs: 30000
+        }
+    });
+
+    const text = output.flush();
+    assert.match(text, /mcp auth: oauth2/u);
+    assert.match(text, /approval mode: ask/u);
+    assert.match(text, /instance env keys: API_TOKEN/u);
+    assert.doesNotMatch(text, /instance-secret/u);
 });
 
 test("instance wizard validates and collects a managed Docker preset", async () => {
@@ -149,6 +241,11 @@ test("instance wizard validates and collects a managed Docker preset", async () 
             "n",
             "",
             "/usr/bin/docker",
+            "",
+            "",
+            "",
+            "",
+            "",
             "",
             "",
             "",
@@ -197,12 +294,22 @@ function createWizard(lines: string[], output: ReturnType<typeof createBuffer>):
 function summaryFor(draft: InstanceCreateDraft): InstanceCreateSummary {
     const instance = normalizeConfigInstanceDraft(draft);
     return {
+        ...(instance.approvalPolicy === undefined ? {} : { approvalPolicy: structuredClone(instance.approvalPolicy) }),
         ...(instance.container === undefined ? {} : { container: instance.container }),
         ...(instance.dockerBinary === undefined ? {} : { dockerBinary: instance.dockerBinary }),
+        ...(instance.env === undefined ? {} : { env: { ...instance.env } }),
+        ...(instance.logs === undefined ? {} : { logs: { ...instance.logs } }),
         ...(instance.podmanBinary === undefined ? {} : { podmanBinary: instance.podmanBinary }),
         ...(instance.ssh === undefined ? {} : { ssh: instance.ssh }),
+        ...(instance.tools === undefined ? {} : { tools: structuredClone(instance.tools) }),
         enabled: instance.enabled,
         mcp: {
+            auth: {
+                mode: instance.mcp.auth.mode,
+                ...(instance.mcp.auth.mode === "oauth2"
+                    ? { oauth2: structuredClone(instance.mcp.auth.oauth2) }
+                    : {})
+            },
             enabled: instance.mcp.enabled,
             path: instance.mcp.path,
             tools: {

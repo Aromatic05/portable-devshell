@@ -305,11 +305,20 @@ function isStructuredError(error: unknown): error is { details?: JsonValue; mess
 
 function toSummary(instance: ControlInstanceConfig): InstanceCreateSummary {
     return {
+        ...(instance.approvalPolicy === undefined ? {} : { approvalPolicy: structuredClone(instance.approvalPolicy) }),
         ...(instance.container === undefined ? {} : { container: instance.container }),
         ...(instance.dockerBinary === undefined ? {} : { dockerBinary: instance.dockerBinary }),
+        ...(instance.env === undefined ? {} : { env: { ...instance.env } }),
+        ...(instance.logs === undefined ? {} : { logs: { ...instance.logs } }),
         ...(instance.podmanBinary === undefined ? {} : { podmanBinary: instance.podmanBinary }),
         enabled: instance.enabled,
         mcp: {
+            auth: {
+                mode: instance.mcp.auth.mode,
+                ...(instance.mcp.auth.mode === "oauth2"
+                    ? { oauth2: structuredClone(instance.mcp.auth.oauth2) }
+                    : {})
+            },
             enabled: instance.mcp.enabled,
             path: instance.mcp.path,
             tools: {
@@ -323,6 +332,7 @@ function toSummary(instance: ControlInstanceConfig): InstanceCreateSummary {
             mode: instance.security.mode
         },
         ...(instance.ssh === undefined ? {} : { ssh: { ...instance.ssh } }),
+        ...(instance.tools === undefined ? {} : { tools: structuredClone(instance.tools) }),
         workspace: instance.workspace
     };
 }
