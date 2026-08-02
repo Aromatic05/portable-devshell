@@ -46,7 +46,7 @@ export class ContextMessageState {
             ctxId,
             id: `message-${randomUUID()}`,
             instance,
-            status: "pending",
+            status: "sent",
             text,
         };
         return {
@@ -65,7 +65,7 @@ export class ContextMessageState {
     ): { delivered: ContextMessageRecord[]; document: ContextMessageDocument } {
         const delivered: ContextMessageRecord[] = [];
         const messages = document.messages.map((message) => {
-            if (message.ctxId !== ctxId || message.status !== "pending")
+            if (message.ctxId !== ctxId || message.status !== "sent")
                 return message;
             const next = {
                 ...message,
@@ -104,18 +104,22 @@ export class ContextMessageState {
         document: ContextMessageDocument,
         maxTerminalMessages = MAX_TERMINAL_MESSAGES,
     ): ContextMessageDocument {
-        const pending = document.messages.filter(
-            (message) => message.status === "pending",
+        const active = document.messages.filter(
+            (message) =>
+                message.status === "pending" || message.status === "sent",
         );
         const terminal = document.messages
-            .filter((message) => message.status !== "pending")
+            .filter(
+                (message) =>
+                    message.status !== "pending" && message.status !== "sent",
+            )
             .sort((left, right) =>
                 right.createdAt.localeCompare(left.createdAt),
             )
             .slice(0, Math.max(0, maxTerminalMessages));
         return {
             ...document,
-            messages: [...pending, ...terminal].sort((left, right) =>
+            messages: [...active, ...terminal].sort((left, right) =>
                 left.createdAt.localeCompare(right.createdAt),
             ),
         };
@@ -125,7 +129,12 @@ export class ContextMessageState {
 function normalizeRecord(value: unknown): ContextMessageRecord {
     if (!isRecord(value)) throw new Error("context message must be an object");
     const status = value.status;
-    if (status !== "pending" && status !== "delivered" && status !== "failed")
+    if (
+        status !== "pending" &&
+        status !== "sent" &&
+        status !== "delivered" &&
+        status !== "failed"
+    )
         throw new Error("invalid context message status");
     return {
         createdAt: requireStoredText(value.createdAt, "createdAt"),

@@ -8,6 +8,7 @@ import {
     TuiFocusGraph,
     type TuiFocusDirection,
 } from "../../state/focus/TuiFocusGraph.js";
+import { resolveSelectedDetailLineId } from "../../state/focus/TuiDetailLineSelection.js";
 import { type TuiMode } from "../../state/TuiInteractionState.js";
 import type { TuiPageId } from "../../state/TuiUiState.js";
 
@@ -53,32 +54,21 @@ export class TuiFocusManager {
                 : { id: instance, kind: "instance" };
         }
         if (scope === "mainBoxes") {
-            const state = this.#store.getState();
-            const boxId = state.ui.mainFocusId;
-            const expandedKey =
-                boxId === undefined
-                    ? undefined
-                    : this.#context.expandedKeyFor(boxId);
-            const lineId =
-                expandedKey === undefined
-                    ? undefined
-                    : state.interaction.selectedDetailLineIds[expandedKey];
-            if (boxId !== undefined && lineId !== undefined) {
-                return { boxId, id: lineId, kind: "line" };
-            }
-            return boxId === undefined ? undefined : { id: boxId, kind: "box" };
-        }
-        if (scope === "boxDetail") {
-            const state = this.#store.getState();
-            const boxId = state.ui.mainFocusId;
+            const boxId = this.#store.getState().ui.mainFocusId;
             if (boxId === undefined) {
                 return undefined;
             }
-            const key = this.#context.expandedKeyFor(boxId);
-            const lineId =
-                key === undefined
-                    ? undefined
-                    : state.interaction.selectedDetailLineIds[key];
+            const lineId = this.#resolveBoxLineId(boxId, "mainBoxes");
+            return lineId === undefined
+                ? { id: boxId, kind: "box" }
+                : { boxId, id: lineId, kind: "line" };
+        }
+        if (scope === "boxDetail") {
+            const boxId = this.#store.getState().ui.mainFocusId;
+            if (boxId === undefined) {
+                return undefined;
+            }
+            const lineId = this.#resolveBoxLineId(boxId, "boxDetail");
             return lineId === undefined
                 ? undefined
                 : { boxId, id: lineId, kind: "line" };
@@ -230,6 +220,21 @@ export class TuiFocusManager {
         return true;
     }
 
+    #resolveBoxLineId(boxId: string, mode: TuiMode): string | undefined {
+        const expandedKey = this.#context.expandedKeyFor(boxId);
+        const storedId =
+            expandedKey === undefined
+                ? undefined
+                : this.#store.getState().interaction.selectedDetailLineIds[
+                      expandedKey
+                  ];
+        const graph = this.#context.graphFor(this.currentPage(), mode);
+        return resolveSelectedDetailLineId(
+            graph.lineIdsInBox(boxId),
+            storedId,
+        );
+    }
+
     #applyFocus(item: TuiFocusItem | undefined): void {
         if (item === undefined) {
             return;
@@ -249,10 +254,6 @@ export class TuiFocusManager {
             case "box": {
                 this.#store.setFocusScope("mainBoxes");
                 this.#store.setMainFocusId(item.id);
-                const expandedKey = this.#context.expandedKeyFor(item.id);
-                if (expandedKey !== undefined) {
-                    this.#store.setSelectedDetailLine(expandedKey, undefined);
-                }
                 return;
             }
             case "line": {

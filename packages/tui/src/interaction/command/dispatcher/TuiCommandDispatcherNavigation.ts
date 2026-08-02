@@ -196,7 +196,8 @@ export class TuiCommandDispatcherNavigation {
         if (typeof this.#store.getState().ui.formDrafts[key] !== "string") {
             this.#store.setFormDraft(key, "", false);
         }
-        this.#store.setFocusScope("contextConversation");
+        this.#store.setMainFocusId("conversation-composer");
+        this.#store.setFocusScope("mainBoxes");
         return true;
     }
 

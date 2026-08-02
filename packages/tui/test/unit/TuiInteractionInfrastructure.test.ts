@@ -32,6 +32,7 @@ import {
     tuiViewProjection,
     wrapTerminalText,
 } from "../../src/testing.ts";
+import { fieldLine } from "../../src/view/editor/TuiEditorView.ts";
 
 test("Prompt 3 urgent fix uses page + instance coordinates with a two-stage Tab cycle", async () => {
     const harness = createHarness();
@@ -646,6 +647,36 @@ test("box rendering wraps Unicode text by terminal display width", () => {
     assert.equal(lines.length, 4);
     assert.equal(lines[1]?.text, "│ 012345678901234567890123 │");
     assert.equal(lines[2]?.text, "│ 45                       │");
+});
+
+test("only real editable fields render with the shared underline affordance", () => {
+    const editable = fieldLine("workspace", "Workspace", "/workspace");
+    const lines = renderExpandableBoxLines(
+        {
+            collapsedLines: [{ text: "summary" }],
+            enterable: false,
+            expandable: true,
+            expanded: true,
+            expandedKey: "editor",
+            expandedLines: [
+                editable,
+                { id: "runtime", text: "Runtime            running" },
+            ],
+            focused: true,
+            id: "editor",
+            selectedDetailLineId: "field:workspace",
+            status: "normal",
+            title: "Configuration",
+        },
+        80,
+    );
+
+    const editableLine = lines.find((line) =>
+        line.key.includes("field:workspace"),
+    );
+    const readOnlyLine = lines.find((line) => line.key.includes("runtime"));
+    assert.equal(editableLine?.underline, true);
+    assert.equal(readOnlyLine?.underline, false);
 });
 
 test("box borders encode result status and retain severity while focused", () => {

@@ -107,7 +107,7 @@ function applyContextMessageEvent(
     if (typeof data.id !== "string" || typeof data.ctxId !== "string" || typeof data.createdAt !== "string" || typeof data.text !== "string") return state;
     const current = state.contextMessagesByInstance[instance] ?? [];
     const existing = current.find((message) => message.id === data.id);
-    const status = event === "context.message.delivered" ? "delivered" : event === "context.message.failed" ? "failed" : "pending";
+    const status = event === "context.message.queued" ? "sent" : event === "context.message.delivered" ? "delivered" : event === "context.message.failed" ? "failed" : "pending";
     const record: ContextMessageRecord = {
         createdAt: data.createdAt,
         ctxId: data.ctxId,

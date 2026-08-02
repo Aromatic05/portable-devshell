@@ -1,4 +1,4 @@
-export type ContextMessageStatus = "pending" | "delivered" | "failed";
+export type ContextMessageStatus = "pending" | "sent" | "delivered" | "failed";
 
 export interface ContextMessageRecord {
     createdAt: string;

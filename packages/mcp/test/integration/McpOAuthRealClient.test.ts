@@ -27,6 +27,7 @@ import { asInstanceName, asWorkspacePath } from "@portable-devshell/shared";
 import { WorkerBinary, WorkerInstanceFactory, WorkerTransportDriverLocal } from "@portable-devshell/core/testing";
 import { McpHost } from "@portable-devshell/mcp/testing";
 import type { McpAuthConfig, McpInstanceGateway } from "@portable-devshell/mcp";
+import { ContextMessageService } from "../../../control/src/instance/context/ContextMessageService.ts";
 
 const workerBinaryPath = resolveTestWorkerBinary();
 const clientInfo = { name: "portable-devshell-real-client", version: "0.0.0" };
@@ -67,20 +68,16 @@ test("a real MCP SDK client drives a none-auth frozen worker through initialize,
 });
 
 test("a real MCP SDK client receives a queued Comment in the next ordinary tool result", realWorkerTestOptions(workerBinaryPath), async () => {
-    const pending = new Map<string, string[]>();
-    const consumed: Array<{ ctxId: string; instance: string }> = [];
+    const contextRoot = await createTestTempDirectory("real-comment-state");
+    const messages = new ContextMessageService({
+        appendEvent: async () => undefined,
+        filePath: join(contextRoot, "context-messages.json"),
+        instanceName: "real-comment",
+    });
     const gateway = {
         async consumeContextMessages(instance: string, ctxId: string) {
-            consumed.push({ ctxId, instance });
-            const comments = pending.get(ctxId) ?? [];
-            pending.delete(ctxId);
-            return {
-                messages: comments.map((text, index) => ({
-                    createdAt: "2026-08-03T00:00:00.000Z",
-                    id: `message-${index}`,
-                    text,
-                })),
-            };
+            assert.equal(instance, "real-comment");
+            return await messages.readPending(ctxId);
         },
     } as unknown as McpInstanceGateway;
     const { cleanupDirs, host, instance, workspaceMarker } = await startFrozenWorkerHost(
@@ -88,6 +85,7 @@ test("a real MCP SDK client receives a queued Comment in the next ordinary tool 
         { enabled: false, provider: "none" },
         gateway,
     );
+    cleanupDirs.push(contextRoot);
 
     try {
         const client = new Client(clientInfo);
@@ -103,7 +101,15 @@ test("a real MCP SDK client receives a queued Comment in the next ordinary tool 
         );
 
         const ctxId = await readContextId(client);
-        pending.set(ctxId, ["Inspect this result before continuing"]);
+        const queued = await messages.queue({
+            ctxId,
+            text: "Inspect this result before continuing",
+        });
+        const other = await messages.queue({
+            ctxId: "ctx-other",
+            text: "This belongs to another context",
+        });
+        assert.equal(queued.status, "sent");
         const first = await client.callTool({
             arguments: { command: `cat -- './${workspaceMarker.name}'`, ctxId },
             name: "bash_run",
@@ -111,6 +117,13 @@ test("a real MCP SDK client receives a queued Comment in the next ordinary tool 
         assert.deepEqual(
             (first.structuredContent as { comment?: string[] } | undefined)?.comment,
             ["Inspect this result before continuing"],
+        );
+        assert.equal((await messages.list(ctxId))[0]?.status, "delivered");
+        assert.equal(
+            (await messages.list("ctx-other")).find(
+                (message) => message.id === other.id,
+            )?.status,
+            "sent",
         );
 
         const second = await client.callTool({
@@ -121,10 +134,6 @@ test("a real MCP SDK client receives a queued Comment in the next ordinary tool 
             (second.structuredContent as { comment?: string[] } | undefined)?.comment,
             undefined,
         );
-        assert.deepEqual(consumed, [
-            { ctxId, instance: "real-comment" },
-            { ctxId, instance: "real-comment" },
-        ]);
         await client.close();
     } finally {
         await teardownFrozenWorker(host, instance, cleanupDirs);

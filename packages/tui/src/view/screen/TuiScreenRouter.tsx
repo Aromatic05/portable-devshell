@@ -49,7 +49,7 @@ export function TuiScreenRouter(props: TuiScreenRouterProps) {
             {model.emptyState !== undefined ? <Text color="yellow">{model.emptyState}</Text> : undefined}
             {model.emptyState === undefined
                 ? visibleLines.map((line) => (
-                      <Text backgroundColor={line.backgroundColor} color={line.color} dimColor={line.dimColor} key={line.key}>
+                      <Text backgroundColor={line.backgroundColor} color={line.color} dimColor={line.dimColor} key={line.key} underline={line.underline}>
                           {line.text}
                       </Text>
                   ))
@@ -103,7 +103,6 @@ function clamp(value: number, min: number, max: number): number {
 export function buildFocusGraphForState(state: TuiAppState): TuiFocusGraph {
     switch (state.interaction.focusScope) {
         case "terminal":
-        case "contextConversation":
         case "textDetail":
             return new TuiFocusGraph([]);
         case "confirm":
@@ -144,6 +143,7 @@ export function buildFocusGraphForState(state: TuiAppState): TuiFocusGraph {
                 ...state.instances.map((instance) => ({ id: instance.name, kind: "instance" as const }))
             ]);
         case "mainBoxes":
+        case "contextConversation":
             if (state.ui.selectedPage === "overview") {
                 return buildLinearGraph(selectMainBoxIds(state).map((id) => ({ id, kind: "box" as const })));
             }

@@ -34,6 +34,15 @@ export class TuiFocusGraph {
         );
     }
 
+    lineIdsInBox(boxId: string): string[] {
+        return this.#order
+            .filter(
+                (item): item is Extract<TuiFocusItem, { kind: "line" }> =>
+                    item.kind === "line" && item.boxId === boxId,
+            )
+            .map((item) => item.id);
+    }
+
     last(): TuiFocusItem | undefined {
         return this.#order.at(-1);
     }

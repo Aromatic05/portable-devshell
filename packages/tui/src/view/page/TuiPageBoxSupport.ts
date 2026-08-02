@@ -10,6 +10,7 @@ import type {
 } from "../component/TuiComponentExpandableBox.js";
 import type { TuiRoute } from "../../state/route/TuiRoute.js";
 import { currentTuiRouteItemKey } from "../../state/route/TuiRouteState.js";
+import { resolveSelectedDetailLineId } from "../../state/focus/TuiDetailLineSelection.js";
 import type {
     TuiExpandableBoxStatus,
     TuiPageId,
@@ -59,12 +60,14 @@ export function makeBox(
             | string
             | {
                   disabled?: boolean;
+                  editable?: boolean;
                   id: string;
                   text: string;
                   tone?: BoxLine["tone"];
               }
         >;
         disabled?: boolean;
+        editable?: boolean;
         expandable?: boolean;
         expandedKey?: string;
         id: string;
@@ -103,6 +106,7 @@ export function makeBox(
     return {
         collapsedLines: summaryLines,
         disabled: input.disabled,
+        editable: input.editable,
         enterable: input.primaryRoute !== undefined && input.disabled !== true,
         expandable,
         expanded,
@@ -113,7 +117,8 @@ export function makeBox(
             (state.interaction.focusScope === "mainBoxes" ||
                 state.interaction.focusScope === "boxDetail" ||
                 state.interaction.focusScope === "form" ||
-                state.interaction.focusScope === "wizard"),
+                state.interaction.focusScope === "wizard" ||
+                state.interaction.focusScope === "contextConversation"),
         id: input.id,
         primaryAction:
             input.primaryRoute === undefined
@@ -121,11 +126,10 @@ export function makeBox(
                 : { kind: "navigate", route: input.primaryRoute },
         searchText: input.searchText,
         severity: input.severity,
-        selectedDetailLineId: expandedLines.some(
-            (line) => line.id === selectedDetailLineId,
-        )
-            ? selectedDetailLineId
-            : undefined,
+        selectedDetailLineId: resolveSelectedDetailLineId(
+            expandedLines.map((line) => line.id),
+            selectedDetailLineId,
+        ),
         status: input.status ?? "normal",
         title: input.title,
     };
@@ -261,6 +265,7 @@ function normalizeExpandedLines(
         | string
         | {
               disabled?: boolean;
+              editable?: boolean;
               id: string;
               text: string;
               tone?: BoxLine["tone"];
@@ -285,6 +290,9 @@ function normalizeExpandedLines(
             ...(typeof line === "string" || line.disabled !== true
                 ? {}
                 : { disabled: true }),
+            ...(typeof line === "string" || line.editable !== true
+                ? {}
+                : { editable: true }),
             ...(typeof line === "string" || line.tone === undefined
                 ? {}
                 : { tone: line.tone }),

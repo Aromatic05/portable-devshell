@@ -33,6 +33,35 @@ test("RuntimeSubscriptionManager returns snapshot lastSeq and pushes sequenced e
     manager.unsubscribeConnection("conn-1");
 });
 
+test("RuntimeSubscriptionManager preserves dotted context message operations", async () => {
+    const manager = new RuntimeSubscriptionManager(5);
+    const worker = new FakeWorker("alpha");
+    await worker.start("/tmp/ws");
+    const harness = createStreamContext("conn-context", "subscribe-context");
+
+    await manager.subscribe(
+        harness.context,
+        "alpha",
+        worker as unknown as WorkerInstance,
+        1,
+    );
+    worker.emit("context.message.delivered", {
+        ctxId: "ctx-a",
+        id: "message-a",
+        status: "delivered",
+    });
+    await waitFor(() => harness.events.length === 1);
+
+    assert.equal(harness.events[0]?.module, "context");
+    assert.equal(harness.events[0]?.name, "message.delivered");
+    assert.equal(
+        (harness.events[0]?.payload as { data?: { ctxId?: string } }).data
+            ?.ctxId,
+        "ctx-a",
+    );
+    manager.unsubscribeConnection("conn-context");
+});
+
 test("RuntimeSubscriptionManager returns stream.gap when fromSeq is unavailable", async () => {
     const manager = new RuntimeSubscriptionManager(5);
     const worker = new FakeWorker("alpha");

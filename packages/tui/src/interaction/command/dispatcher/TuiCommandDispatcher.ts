@@ -301,6 +301,10 @@ export class TuiCommandDispatcher {
 
     #cancel(): boolean {
         const scope = this.#store.getState().interaction.focusScope;
+        if (scope === "contextConversation") {
+            this.#store.setFocusScope("mainBoxes");
+            return true;
+        }
         if (scope === "approvalDetail" || scope === "denyConfirm") {
             this.#audit.returnToPage();
             return true;
@@ -332,6 +336,10 @@ export class TuiCommandDispatcher {
                 );
             if (box?.primaryAction?.kind === "navigate" && box.disabled !== true) {
                 return this.#navigation.openFocusedRoute();
+            }
+            if (box?.editable === true && box.disabled !== true) {
+                this.#store.setFocusScope("contextConversation");
+                return true;
             }
             return await this.dispatch({ type: "screen.toggle" });
         }

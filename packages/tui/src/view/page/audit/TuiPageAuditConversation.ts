@@ -1,4 +1,4 @@
-import type { ContextMessageRecord, JsonValue } from "@portable-devshell/shared";
+import type { ContextMessageRecord } from "@portable-devshell/shared";
 
 import type { BoxModel } from "../../component/TuiComponentExpandableBox.js";
 import type { TuiAppState } from "../../../state/reducer/TuiStoreModel.js";
@@ -48,7 +48,9 @@ function messageBox(
                 ? "ready"
                 : message.status === "failed"
                   ? "failed"
-                  : "pending",
+                  : message.status === "sent"
+                    ? "running"
+                    : "pending",
         summaryLines: [
             compactSummary(["status", message.status], ["created", message.createdAt]),
             message.error === undefined
@@ -65,48 +67,25 @@ function composerBox(
     ctxId: string,
 ): BoxModel {
     const draft = readContextConversationDraft(state, instance, ctxId);
-    const agentCanRead = contextToolEnabled(state, instance);
     return makeBox(state, "audit", instance, {
         detailLines: [
             formatField("Context", ctxId),
-            formatField("Agent read", agentCanRead ? "enabled" : "disabled"),
-            ...(agentCanRead
-                ? []
-                : ["The Comment can be queued, but the Agent cannot read it until the context MCP group is enabled."]),
-            formatField("Draft", draft.length === 0 ? "<empty>" : draft),
+            {
+                editable: true,
+                id: "draft",
+                text: formatField("Draft", draft.length === 0 ? "<empty>" : draft),
+            },
             "Enter queues the Comment.",
             "Esc or Ctrl+[ returns to the Audit Context.",
         ],
         expandedKey: `audit-conversation:${instance}:${ctxId}:composer`,
+        editable: true,
         id: "conversation-composer",
-        status: agentCanRead ? (draft.length === 0 ? "normal" : "running") : "warning",
+        status: draft.length === 0 ? "normal" : "running",
         summaryLines: [
             draft.length === 0 ? "draft=<empty>" : `draft=${draft}`,
-            `${agentCanRead ? "agent-read=enabled" : "agent-read=disabled"} · Enter send · Esc back`,
+            "Enter edit · Space expand · Esc back",
         ],
         title: "Write Comment",
     });
-}
-
-
-function contextToolEnabled(state: TuiAppState, instanceName: string): boolean {
-    const instances = state.configView?.instances;
-    if (!Array.isArray(instances)) return false;
-    const instance = instances.find((value) =>
-        typeof value === "object" &&
-        value !== null &&
-        !Array.isArray(value) &&
-        (value as Record<string, JsonValue>).name === instanceName
-    ) as Record<string, JsonValue> | undefined;
-    const mcp = asRecord(instance?.mcp);
-    const tools = asRecord(mcp?.tools);
-    return mcp?.enabled === true &&
-        Array.isArray(tools?.groups) &&
-        tools.groups.includes("context");
-}
-
-function asRecord(value: JsonValue | undefined): Record<string, JsonValue> | undefined {
-    return typeof value === "object" && value !== null && !Array.isArray(value)
-        ? value as Record<string, JsonValue>
-        : undefined;
 }

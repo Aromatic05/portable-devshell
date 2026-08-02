@@ -32,16 +32,70 @@ test("real Ink and control socket edit and deliver Comments only to the matching
 
     await harness.messages.queue({ ctxId: "ctx-beta", text: "beta seed comment" });
     await delay(5);
-    await harness.messages.queue({ ctxId: "ctx-alpha", text: "alpha seed comment" });
+    const alphaSeed = await harness.messages.queue({
+        ctxId: "ctx-alpha",
+        text: "alpha seed comment",
+    });
     await harness.start();
     await enterAuditContext(harness, "ctx-alpha");
 
     harness.terminal.write("m");
     await waitUntil(() => currentTuiRoute(harness.runtime.store.getState()).view === "conversation");
+    await waitUntil(() => harness.runtime.store.getState().ui.mainFocusId === "conversation-composer");
     const conversation = conversationText(harness.runtime);
     assert.match(conversation, /alpha seed comment/u);
     assert.equal(conversation.includes("beta seed comment"), false);
 
+    harness.terminal.write("\u001b[A");
+    await waitUntil(
+        () =>
+            harness.runtime.store.getState().ui.mainFocusId ===
+            `conversation-message:${alphaSeed.id}`,
+    );
+    harness.terminal.write(" ");
+    await waitUntil(
+        () =>
+            box(
+                harness.runtime,
+                `conversation-message:${alphaSeed.id}`,
+            )?.expanded === true,
+    );
+    harness.terminal.write(" ");
+    await waitUntil(
+        () =>
+            box(
+                harness.runtime,
+                `conversation-message:${alphaSeed.id}`,
+            )?.expanded === false,
+    );
+    harness.terminal.write("\u001b[B");
+    await waitUntil(
+        () =>
+            harness.runtime.store.getState().ui.mainFocusId ===
+            "conversation-composer",
+    );
+
+    harness.terminal.write(" ");
+    await waitUntil(
+        () => box(harness.runtime, "conversation-composer")?.expanded === true,
+    );
+    assert.equal(
+        renderExpandableBoxLines(
+            box(harness.runtime, "conversation-composer")!,
+            80,
+        ).some((line) => line.underline === true),
+        true,
+        "the real Comment draft field must carry the editable underline",
+    );
+    harness.terminal.write("\u001b[B");
+    await waitUntil(
+        () =>
+            box(harness.runtime, "conversation-composer")
+                ?.selectedDetailLineId === "conversation-composer:draft",
+    );
+
+    harness.terminal.write("\r");
+    await waitUntil(() => harness.runtime.store.getState().interaction.focusScope === "contextConversation");
     harness.terminal.write("abcd");
     await waitUntil(() => draft(harness.runtime, "ctx-alpha") === "abcd");
     harness.terminal.write("\u007f");
@@ -52,6 +106,12 @@ test("real Ink and control socket edit and deliver Comments only to the matching
     harness.terminal.write("c\r");
     await waitUntil(async () =>
         (await harness.messages.list("ctx-alpha")).some((message) => message.text === "abc"),
+    );
+    assert.equal(
+        (await harness.messages.list("ctx-alpha")).find(
+            (message) => message.text === "abc",
+        )?.status,
+        "sent",
     );
     assert.equal(draft(harness.runtime, "ctx-alpha"), "");
     assert.equal(
@@ -64,6 +124,7 @@ test("real Ink and control socket edit and deliver Comments only to the matching
         (await harness.messages.list("ctx-alpha")).some((message) => message.text === "linefeed"),
     );
     assert.equal(harness.routeCalls.contextQueue >= 2, true, "Comment sends must cross the real control RPC route");
+
 });
 
 test("real Ink keeps Space, Enter, route hierarchy, logical focus and rendered highlight consistent", async (t) => {
@@ -115,6 +176,24 @@ test("real Ink keeps Space, Enter, route hierarchy, logical focus and rendered h
     assert.equal(callBox()?.focused, true);
     assert.equal(harness.runtime.store.getState().ui.mainFocusId, callBox()?.id);
 
+    const firstDetailLine = callBox()?.selectedDetailLineId;
+    harness.terminal.write("\u001b[B");
+    await waitUntil(
+        () =>
+            callBox()?.selectedDetailLineId !== undefined &&
+            callBox()?.selectedDetailLineId !== firstDetailLine,
+    );
+    const rememberedDetailLine = callBox()?.selectedDetailLineId;
+
+    harness.terminal.write(" ");
+    await waitUntil(() => callBox()?.expanded === false);
+    harness.terminal.write(" ");
+    await waitUntil(() => callBox()?.expanded === true);
+    assert.equal(
+        callBox()?.selectedDetailLineId,
+        rememberedDetailLine,
+        "Space collapse and re-expand must preserve the selected detail line",
+    );
     harness.terminal.write(" ");
     await waitUntil(() => callBox()?.expanded === false);
     harness.terminal.write("\u001b[B");

@@ -137,7 +137,10 @@ function contextStatus(
         return "failed";
     if (
         approvals.some((approval) => approval.status === "pending") ||
-        messages.some((message) => message.status === "pending")
+        messages.some(
+            (message) =>
+                message.status === "pending" || message.status === "sent",
+        )
     )
         return "pending";
     if (

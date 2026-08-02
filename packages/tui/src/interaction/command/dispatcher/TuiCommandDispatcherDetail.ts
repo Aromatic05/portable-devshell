@@ -46,6 +46,11 @@ export class TuiCommandDispatcherDetail {
                 return false;
             }
 
+            if (box?.editable === true && selectedLine?.editable === true) {
+                this.#store.setFocusScope("contextConversation");
+                return true;
+            }
+
             if (state.ui.selectedPage === "connections" && actionId?.startsWith("oauth.approve:")) {
                 const approvalId = actionId.slice("oauth.approve:".length);
                 return await this.#dispatch({

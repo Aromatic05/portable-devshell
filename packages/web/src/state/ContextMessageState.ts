@@ -2,8 +2,9 @@ import type { ContextMessageRecord } from "@portable-devshell/shared/browser";
 
 const statusRank: Record<ContextMessageRecord["status"], number> = {
     pending: 0,
-    failed: 1,
-    delivered: 2,
+    sent: 1,
+    failed: 2,
+    delivered: 3,
 };
 
 export function mergeContextMessage(

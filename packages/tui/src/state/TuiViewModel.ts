@@ -5,6 +5,7 @@ export type TuiBoxLineTone = "normal" | "muted" | "accent" | "success" | "warnin
 
 export interface TuiBoxLine {
     disabled?: boolean;
+    editable?: boolean;
     id?: string;
     text: string;
     tone?: TuiBoxLineTone;
@@ -18,6 +19,7 @@ export type TuiBoxPrimaryAction = {
 export interface TuiBoxModel {
     collapsedLines: readonly [TuiBoxLine] | readonly [TuiBoxLine, TuiBoxLine];
     disabled?: boolean;
+    editable?: boolean;
     enterable: boolean;
     expandable: boolean;
     expanded: boolean;

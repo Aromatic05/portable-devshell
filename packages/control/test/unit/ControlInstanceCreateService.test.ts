@@ -29,7 +29,6 @@ test("instance create schema exposes supported container modes without running c
         "artifact",
         "tmux",
         "todo",
-        "context",
     ]);
 });
 

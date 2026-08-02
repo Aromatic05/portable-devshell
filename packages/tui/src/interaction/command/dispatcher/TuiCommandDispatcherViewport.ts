@@ -102,17 +102,6 @@ export class TuiCommandDispatcherViewport {
         const key = box.expandedKey;
         const expanded = this.#store.getState().ui.expandedBoxes[key] === true;
         this.#store.toggleExpanded(key);
-        if (expanded) {
-            this.#store.setSelectedDetailLine(key, undefined);
-        } else {
-            const expandedBox = this.#projection
-                .selectMainScreenModel(this.#store.getState())
-                .boxes.find((candidate) => candidate.id === boxId);
-            this.#store.setSelectedDetailLine(
-                key,
-                expandedBox?.expandedLines[0]?.id,
-            );
-        }
         this.#focus.ensureMainFocusVisible();
         this.#store.setScreenStatus(
             this.#store.getState().ui.selectedPage,

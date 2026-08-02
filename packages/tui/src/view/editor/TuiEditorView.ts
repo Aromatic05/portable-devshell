@@ -2,28 +2,29 @@ import type { JsonValue } from "@portable-devshell/shared";
 
 import type { TuiAppState } from "../../state/reducer/TuiStoreModel.js";
 
-export function fieldLine(id: string, label: string, value: JsonValue | undefined): { id: string; text: string } {
-    return { id: `field:${id}`, text: `${label.padEnd(18, " ")} [ ${displayValue(value)} ]  (${valueType(value)})` };
+export function fieldLine(id: string, label: string, value: JsonValue | undefined): { editable: true; id: string; text: string } {
+    return { editable: true, id: `field:${id}`, text: `${label.padEnd(18, " ")} [ ${displayValue(value)} ]  (${valueType(value)})` };
 }
 
-export function secretFieldLine(id: string, label: string, value: JsonValue | undefined): { id: string; text: string } {
+export function secretFieldLine(id: string, label: string, value: JsonValue | undefined): { editable: true; id: string; text: string } {
     const configured = typeof value === "string" && value.length > 0;
     return {
+        editable: true,
         id: `field:${id}`,
         text: `${label.padEnd(18, " ")} [ ${configured ? "********" : ""} ]  (secret)`
     };
 }
 
-export function secretRecordFieldLine(id: string, label: string, value: JsonValue | undefined): { id: string; text: string } {
+export function secretRecordFieldLine(id: string, label: string, value: JsonValue | undefined): { editable: true; id: string; text: string } {
     const keys = typeof value === "object" && value !== null && !Array.isArray(value)
         ? Object.keys(value).sort((left, right) => left.localeCompare(right))
         : [];
     const display = keys.map((key) => `${key}=********`).join(", ");
-    return { id: `field:${id}`, text: `${label.padEnd(18, " ")} [ ${display} ]  (secret JSON)` };
+    return { editable: true, id: `field:${id}`, text: `${label.padEnd(18, " ")} [ ${display} ]  (secret JSON)` };
 }
 
-export function choiceLine(id: string, label: string, value: JsonValue | undefined): { id: string; text: string } {
-    return { id: `field:${id}`, text: `${label.padEnd(18, " ")} <${displayValue(value)}>` };
+export function choiceLine(id: string, label: string, value: JsonValue | undefined): { editable: true; id: string; text: string } {
+    return { editable: true, id: `field:${id}`, text: `${label.padEnd(18, " ")} <${displayValue(value)}>` };
 }
 
 export function buttonLine(id: string, label: string, disabled = false): { disabled?: boolean; id: string; text: string; tone: "accent" | "muted" } {
