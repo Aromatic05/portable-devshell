@@ -5,7 +5,10 @@ import { asInstanceName, type JsonValue } from "@portable-devshell/shared";
 
 import { TuiAppStore, TuiControlSessionRefresh, TuiControlSessionSubscriptions } from "../../src/testing.ts";
 
-function createRefreshHarness() {
+function createRefreshHarness(options: {
+    mcpStatus?: Record<string, JsonValue>;
+    oauthApprovals?: JsonValue[];
+} = {}) {
     const store = new TuiAppStore();
     let oauthReads = 0;
     const clients = {
@@ -37,7 +40,6 @@ function createRefreshHarness() {
                         }
                     ],
                     mcp: {
-                        auth: { mode: "none" },
                         enabled: false
                     }
                 };
@@ -54,10 +56,10 @@ function createRefreshHarness() {
         mcp: {
             async listApprovals() {
                 oauthReads += 1;
-                return [];
+                return options.oauthApprovals ?? [];
             },
             async status() {
-                return { running: false };
+                return options.mcpStatus ?? { running: false };
             }
         },
         overview: {
@@ -168,6 +170,35 @@ test("session refresh routes page-specific reloads without rebuilding unrelated 
     assert.equal(harness.store.getState().approvalsByInstance.alpha?.length, 0);
     assert.equal(harness.store.getState().todoByInstance.alpha?.revision, 0);
     assert.equal(harness.oauthReads(), 0);
+});
+
+test("session refresh reads OAuth approvals from MCP runtime status without legacy global auth config", async () => {
+    const harness = createRefreshHarness({
+        mcpStatus: {
+            authMode: "oauth2",
+            oauthReady: true,
+            running: true
+        },
+        oauthApprovals: [
+            {
+                approvalId: "oauth-1",
+                clientId: "client-1",
+                clientName: "ChatGPT",
+                createdAt: "2026-08-02T00:00:00.000Z",
+                expiresAt: "2026-08-02T00:05:00.000Z",
+                kind: "registration",
+                redirectUris: ["https://chatgpt.com/connector/callback"],
+                requestedResources: ["https://devshell.example/alpha/mcp"],
+                requestedScopes: ["mcp"],
+                status: "pending"
+            }
+        ]
+    });
+
+    await harness.refresh.refreshAll();
+
+    assert.equal(harness.oauthReads(), 1);
+    assert.equal(harness.store.getState().oauthApprovals[0]?.approvalId, "oauth-1");
 });
 
 test("subscription manager applies events, reports gaps, and closes replaced streams", async () => {

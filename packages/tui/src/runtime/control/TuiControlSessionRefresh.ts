@@ -115,7 +115,7 @@ export class TuiControlSessionRefresh {
     async refreshOAuth(generation?: number, signal?: AbortSignal): Promise<void> {
         const key = "oauth";
         const version = this.#beginRequest(key);
-        if (oauthApprovalsUnavailable(this.#store.getState().configView)) {
+        if (oauthApprovalsUnavailable(this.#store.getState().mcpStatus)) {
             if (this.#current(generation, signal) && this.#latestRequest(key, version)) {
                 this.#store.replaceOAuthApprovals([]);
                 this.#setPageError("connections", undefined);
@@ -133,7 +133,7 @@ export class TuiControlSessionRefresh {
     }
 
     oauthApprovalsAvailable(): boolean {
-        return !oauthApprovalsUnavailable(this.#store.getState().configView);
+        return !oauthApprovalsUnavailable(this.#store.getState().mcpStatus);
     }
 
     async refreshAudit(instance: string, generation?: number, signal?: AbortSignal): Promise<void> {
@@ -367,17 +367,11 @@ function readErrorMessage(error: unknown): string {
 }
 
 function oauthApprovalsUnavailable(
-    configView: Record<string, JsonValue> | undefined
+    status: Record<string, JsonValue> | undefined
 ): boolean {
-    const mcp = configView?.mcp;
-    if (typeof mcp !== "object" || mcp === null || Array.isArray(mcp)) {
-        return true;
-    }
-    const auth = mcp.auth;
-    return typeof auth !== "object" ||
-        auth === null ||
-        Array.isArray(auth) ||
-        auth.mode !== "oauth2";
+    return status?.authMode !== "oauth2" ||
+        status.oauthReady !== true ||
+        status.running !== true;
 }
 
 function nextSubscribeSeq(snapshotEnvelope: InstanceRuntimeEnvelope): number {

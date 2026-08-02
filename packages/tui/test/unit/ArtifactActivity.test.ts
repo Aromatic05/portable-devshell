@@ -127,7 +127,7 @@ test("TUI clears an OAuth polling failure after the background refresh recovers"
             close() {},
             config: {
                 async get() {
-                    return { mcp: { auth: { mode: "oauth2" } } };
+                    return { mcp: { enabled: true } };
                 },
             },
             instance: {
@@ -143,7 +143,7 @@ test("TUI clears an OAuth polling failure after the background refresh recovers"
                     return [];
                 },
                 async status() {
-                    return {};
+                    return { authMode: "oauth2", oauthReady: true, running: true };
                 },
             },
             overview: {
@@ -280,7 +280,7 @@ test("TUI stops OAuth polling after a connection refresh fails", async () => {
         clients: sessionClients({
             config: {
                 async get() {
-                    return { mcp: { auth: { mode: "oauth2" } } };
+                    return { mcp: { enabled: true } };
                 },
             },
             mcp: {
@@ -289,7 +289,7 @@ test("TUI stops OAuth polling after a connection refresh fails", async () => {
                     return [];
                 },
                 async status() {
-                    return {};
+                    return { authMode: "oauth2", oauthReady: true, running: true };
                 },
             },
             service: {

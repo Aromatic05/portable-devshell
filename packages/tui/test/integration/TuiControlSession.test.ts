@@ -5,7 +5,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { asInstanceName, type ApprovalRequest, type JsonValue, type ToolCallRecord } from "@portable-devshell/shared";
+import {
+    asInstanceName,
+    type ApprovalRequest,
+    type JsonValue,
+    type OAuthApprovalRequest,
+    type ToolCallRecord
+} from "@portable-devshell/shared";
 import type { WorkerInstance } from "@portable-devshell/core/testing";
 
 import {
@@ -315,11 +321,65 @@ test("module TUI clients send explicit instance operations and preserve start re
     assert.equal(worker.callToolCount, 1);
 });
 
+test("module TUI client sends an OAuth approval payload accepted by the control route", async (t) => {
+    const runtimeDir = await mkdtemp(join(tmpdir(), "portable-devshell-tui-oauth-decision-"));
+    const socketPath = createTestIpcPath("tui-oauth-decision", runtimeDir);
+    const pending = oauthApproval("oauth-1");
+    const decisions: Array<{ approvalId: string; decidedBy: string; decision: string }> = [];
+    const routes = new ControlRouteComposition({
+        instances: new InstanceRegistry([]),
+        mcpStatus: () => ({ authMode: "oauth2", oauthReady: true, running: true }),
+        oauthApprovals: () => ({
+            async decide(approvalId: string, decision: "approve" | "deny", decidedBy: string) {
+                decisions.push({ approvalId, decidedBy, decision });
+                return { ...pending, decidedBy: "tui", status: decision === "approve" ? "approved" : "denied" };
+            },
+            async list() {
+                return [pending];
+            }
+        } as never),
+        shutdown() {}
+    });
+    const server = new ControlSocketServer({ routes, socketPath });
+    const clients = createTuiClients({ socketPath });
+
+    await server.start();
+    t.after(async () => {
+        clients.close();
+        await server.stop().catch(() => undefined);
+        routes.dispose();
+        await rm(runtimeDir, { force: true, recursive: true });
+    });
+
+    assert.equal((await clients.mcp.listApprovals())[0]?.approvalId, "oauth-1");
+    const decided = await clients.mcp.decideApproval("oauth-1", "approve");
+
+    assert.equal(decided.status, "approved");
+    assert.deepEqual(decisions, [
+        { approvalId: "oauth-1", decidedBy: "tui", decision: "approve" }
+    ]);
+});
+
 
 function jsonRecord(value: JsonValue): Record<string, JsonValue> | undefined {
     return typeof value === "object" && value !== null && !Array.isArray(value)
         ? value
         : undefined;
+}
+
+function oauthApproval(approvalId: string): OAuthApprovalRequest {
+    return {
+        approvalId,
+        clientId: "chatgpt-client",
+        clientName: "ChatGPT",
+        createdAt: "2026-08-02T00:00:00.000Z",
+        expiresAt: "2026-08-02T00:05:00.000Z",
+        kind: "registration",
+        redirectUris: ["https://chatgpt.com/connector/callback"],
+        requestedResources: ["https://devshell.example/alpha/mcp"],
+        requestedScopes: ["mcp"],
+        status: "pending"
+    };
 }
 
 function createServer(socketPath: string, worker: FakeWorker, getConfigVersion: () => number): {
@@ -369,7 +429,7 @@ function createServer(socketPath: string, worker: FakeWorker, getConfigVersion: 
                             workspace: "/workspace/alpha"
                         }
                     ],
-                    mcp: { auth: { mode: "none" }, enabled: false, listenHost: "127.0.0.1", listenPort: 3210 },
+                    mcp: { enabled: false, listenHost: "127.0.0.1", listenPort: 3210 },
                     version: getConfigVersion()
                 };
             }
