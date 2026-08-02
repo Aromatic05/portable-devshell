@@ -245,8 +245,10 @@ test("oauth2 exposes protected resource metadata and accepts a valid bearer toke
         authorizationUrl.searchParams.set("resource", endpoint);
 
         let approvalKind: "authorization" | "registration" = "registration";
+        const approvedIds = new Set<string>();
         const code = await authorizeViaInteractions(authorizationUrl, redirectUri, async () => {
             const approval = await waitForPendingApproval(host, approvalKind);
+            approvedIds.add(approval.approvalId);
             await host.oauthApprovals?.decide(approval.approvalId, "approve", "tui");
 
             if (approvalKind === "registration") {
@@ -256,6 +258,12 @@ test("oauth2 exposes protected resource metadata and accepts a valid bearer toke
 
             return "submit";
         });
+
+        assert.equal(approvedIds.size, 2);
+        assert.deepEqual(
+            (await host.oauthApprovals!.list()).map((approval) => approval.kind).sort(),
+            ["authorization", "registration"]
+        );
 
         const tokenResponse = await fetch(metadata.token_endpoint, {
             method: "POST",
@@ -486,6 +494,12 @@ async function authorizeViaInteractions(
                 assert.equal(await approve(), "reload");
                 assert.match(html, /window\.location\.reload\(\)/u);
                 method = "GET";
+                continue;
+            }
+
+            if (html.includes("Administrator approved this request.")) {
+                assert.match(html, /form\.submit\(\)/u);
+                method = "POST";
                 continue;
             }
 

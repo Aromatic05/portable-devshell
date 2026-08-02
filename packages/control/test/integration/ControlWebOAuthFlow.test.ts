@@ -62,6 +62,10 @@ test("web oauth2 runs a browser authorization-code PKCE flow into a session cook
 
     const sessionCookie = await walkBrowserFlow(publicBaseUrl, protectedResource.approvals);
     assert.notEqual(sessionCookie, undefined);
+    assert.deepEqual(
+        (await protectedResource.approvals.list()).map((approval) => approval.kind).sort(),
+        ["authorization", "registration"]
+    );
     assert.match(sessionCookie!, /devshell_web_session=/u);
 
     const authenticated = await fetch(`${publicBaseUrl}/web/session`, {
@@ -263,7 +267,9 @@ async function walkBrowserFlow(
                 method = "GET";
                 continue;
             }
-            await approvePending(approvals, approvalKind);
+            if (!html.includes("Administrator approved this request.")) {
+                await approvePending(approvals, approvalKind);
+            }
             method = "POST";
             continue;
         }

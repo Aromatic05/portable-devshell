@@ -162,6 +162,7 @@ export class McpOAuthInteraction {
 
         const approval = await this.#approvals.requestAuthorization(
             String(details.uid),
+            authorizationTransactionId(details),
             toAuthorizationApprovalInput(details)
         );
         if (approval.status === "denied" || approval.status === "expired") {
@@ -298,6 +299,26 @@ export class McpOAuthInteraction {
             { mergeWithLastSubmission: false }
         );
     }
+}
+
+
+function authorizationTransactionId(
+    details: Awaited<ReturnType<Provider["interactionDetails"]>>
+): string {
+    const clientId = typeof details.params.client_id === "string"
+        ? details.params.client_id
+        : "unknown-client";
+    const codeChallenge = typeof details.params.code_challenge === "string"
+        ? details.params.code_challenge
+        : undefined;
+    const state = typeof details.params.state === "string"
+        ? details.params.state
+        : undefined;
+    const transactionNonce = codeChallenge ?? state;
+    if (transactionNonce === undefined) {
+        return String(details.uid);
+    }
+    return JSON.stringify({ clientId, transactionNonce });
 }
 
 function toAuthorizationApprovalInput(

@@ -21,7 +21,7 @@ test("OAuth approvals persist registration and authorization decisions", async (
         assert.equal(registration.status, "pending");
 
         await service.decide(registration.approvalId, "approve", "tui");
-        const authorization = await service.requestAuthorization("interaction-1", {
+        const authorization = await service.requestAuthorization("interaction-1", "transaction-1", {
             clientId: "chatgpt",
             clientName: "ChatGPT",
             redirectUris: ["https://chatgpt.com/callback"],
@@ -39,6 +39,44 @@ test("OAuth approvals persist registration and authorization decisions", async (
             (await reloaded.list()).map((request) => [request.kind, request.status]),
             [["authorization", "denied"], ["registration", "approved"]]
         );
+    } finally {
+        await rm(storageDir, { force: true, recursive: true });
+    }
+});
+
+test("one OAuth authorization transaction shares approval across login and consent interactions", async () => {
+    const storageDir = await mkdtemp(join(tmpdir(), "portable-devshell-oauth-shared-authorization-"));
+    const service = new McpOAuthApprovalService(storageDir);
+
+    try {
+        await service.warmup();
+        const registration = await service.registerClient({
+            clientId: "chatgpt",
+            clientName: "ChatGPT",
+            redirectUris: ["https://chatgpt.com/callback"]
+        });
+        await service.decide(registration.approvalId, "approve", "tui");
+
+        const login = await service.requestAuthorization("login-interaction", "pkce-flow-1", {
+            clientId: "chatgpt",
+            clientName: "ChatGPT",
+            redirectUris: ["https://chatgpt.com/callback"],
+            requestedResources: ["https://example.test/demo/mcp"],
+            requestedScopes: ["openid", "mcp"]
+        });
+        await service.decide(login.approvalId, "approve", "tui");
+        const consent = await service.requestAuthorization("consent-interaction", "pkce-flow-1", {
+            clientId: "chatgpt",
+            clientName: "ChatGPT",
+            redirectUris: ["https://chatgpt.com/callback"],
+            requestedResources: ["https://example.test/demo/mcp"],
+            requestedScopes: ["openid", "mcp"]
+        });
+
+        assert.equal(consent.approvalId, login.approvalId);
+        assert.equal(consent.status, "approved");
+        assert.equal((await service.getAuthorization("consent-interaction"))?.approvalId, login.approvalId);
+        assert.equal((await service.list()).filter((request) => request.kind === "authorization").length, 1);
     } finally {
         await rm(storageDir, { force: true, recursive: true });
     }

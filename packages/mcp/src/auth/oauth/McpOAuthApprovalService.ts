@@ -32,6 +32,7 @@ export class McpOAuthApprovalService {
     readonly #timeoutMs: number;
     readonly #requests = new Map<string, OAuthApprovalRequest>();
     readonly #authorizationByInteraction = new Map<string, string>();
+    readonly #authorizationByTransaction = new Map<string, string>();
 
     constructor(storageDir: string, options: McpOAuthApprovalServiceOptions = {}) {
         this.#filePath = join(storageDir, "approvals.jsonl");
@@ -48,6 +49,8 @@ export class McpOAuthApprovalService {
     async warmup(): Promise<void> {
         await this.#mutex.runExclusive(async () => {
             this.#requests.clear();
+            this.#authorizationByInteraction.clear();
+            this.#authorizationByTransaction.clear();
             for (const request of await this.#readAll()) {
                 this.#requests.set(request.approvalId, request);
             }
@@ -81,7 +84,11 @@ export class McpOAuthApprovalService {
         });
     }
 
-    async requestAuthorization(interactionId: string, input: OAuthApprovalInput): Promise<OAuthApprovalRequest> {
+    async requestAuthorization(
+        interactionId: string,
+        transactionId: string,
+        input: OAuthApprovalInput
+    ): Promise<OAuthApprovalRequest> {
         return await this.#mutex.runExclusive(async () => {
             const expired = this.#expirePendingLocked();
             let registration = this.#findRegistration(input.clientId);
@@ -104,10 +111,22 @@ export class McpOAuthApprovalService {
                 return registration;
             }
 
-            const existingId = this.#authorizationByInteraction.get(interactionId);
-            if (existingId !== undefined) {
-                const existing = this.#requests.get(existingId);
+            const interactionApproval = this.#authorizationByInteraction.get(interactionId);
+            if (interactionApproval !== undefined) {
+                const existing = this.#requests.get(interactionApproval);
                 if (existing !== undefined) {
+                    if (expired) {
+                        await this.#persistLocked();
+                    }
+                    return existing;
+                }
+            }
+
+            const transactionApproval = this.#authorizationByTransaction.get(transactionId);
+            if (transactionApproval !== undefined) {
+                const existing = this.#requests.get(transactionApproval);
+                if (existing !== undefined) {
+                    this.#authorizationByInteraction.set(interactionId, existing.approvalId);
                     if (expired) {
                         await this.#persistLocked();
                     }
@@ -117,6 +136,7 @@ export class McpOAuthApprovalService {
 
             const request = this.#createLocked("authorization", input);
             this.#authorizationByInteraction.set(interactionId, request.approvalId);
+            this.#authorizationByTransaction.set(transactionId, request.approvalId);
             await this.#persistLocked();
             return request;
         });
