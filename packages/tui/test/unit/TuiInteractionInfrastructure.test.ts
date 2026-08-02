@@ -365,9 +365,8 @@ test("Audit opens Comment conversation only from a concrete context route", asyn
 });
 
 test("Comment conversation shows exact history and keeps the route open after send", async () => {
-    let harness!: ReturnType<typeof createHarness>;
     const sent: string[] = [];
-    harness = createHarness({
+    const harness = createHarness({
         onContextMessage: async (instance, ctxId, text) => {
             sent.push(text);
             const pending: ContextMessageRecord = {
@@ -424,7 +423,7 @@ test("Comment conversation shows exact history and keeps the route open after se
 
     harness.store.setFocusScope("contextConversation" as never);
     await harness.press("new guidance");
-    await harness.press("", { ctrl: true, return: true });
+    await harness.press("", { return: true });
     assert.deepEqual(sent, ["new guidance"]);
     assert.deepEqual(currentTuiRoute(harness.store.getState()), {
         ctxId: "ctx-alpha",
@@ -436,7 +435,7 @@ test("Comment conversation shows exact history and keeps the route open after se
     assert.match(text, /new guidance/);
     assert.match(text, /pending/i);
 
-    await harness.press("", { ctrl: true, return: true });
+    await harness.press("", { return: true });
     assert.deepEqual(sent, ["new guidance"], "successful send must clear the draft");
 });
 

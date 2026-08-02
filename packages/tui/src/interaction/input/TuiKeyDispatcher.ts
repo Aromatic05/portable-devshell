@@ -148,11 +148,8 @@ export class TuiKeyDispatcher {
         if (press.key.backspace) {
             return [{ type: "contextConversation.backspace" }];
         }
-        if (press.key.return && press.key.ctrl) {
-            return [{ type: "contextConversation.submit" }];
-        }
         if (press.key.return) {
-            return [{ text: "\n", type: "contextConversation.append" }];
+            return [{ type: "contextConversation.submit" }];
         }
         if (press.key.pageUp) return [{ type: "screen.pageUp" }];
         if (press.key.pageDown) return [{ type: "screen.pageDown" }];

@@ -31,7 +31,7 @@ export function buildHelpPageBoxes(state: TuiAppState): BoxModel[] {
                 "Terminal: drag selects and copies with OSC 52; hold Shift when the application owns mouse input.",
                 "Terminal: Shift+PgUp/PgDn and Shift+Home/End browse scrollback; bracketed paste is preserved. Tmux Attach uses Ctrl+[ to return to View.",
                 "Kitty and Sixel images are replayed when the host terminal advertises support; DEVSHELL_TUI_GRAPHICS overrides detection.",
-                "On an Audit Context, M opens the full Comment conversation page; Ctrl+Enter sends.",
+                "On an Audit Context, M opens the full Comment conversation page; Enter sends.",
                 "r reloads the current page and / opens search where available.",
                 "? opens this page; Ctrl+[ returns from detail, search, menus, and main focus.",
             ],

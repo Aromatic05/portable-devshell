@@ -252,7 +252,7 @@ export function selectFooterShortcuts(state: TuiAppState): string[] {
         case "toolForm":
             return ["type JSON", "bs", "enter", "esc"];
         case "contextConversation":
-            return ["type", "enter newline", "ctrl+enter send", "pgup/pgdn", "esc"];
+            return ["type", "enter send", "pgup/pgdn", "esc"];
         case "form":
         case "wizard":
             return ["tab", "enter", "ctrl+s", "ctrl+[", "ctrl+d"];

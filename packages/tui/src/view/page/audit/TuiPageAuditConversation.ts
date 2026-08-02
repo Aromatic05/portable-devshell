@@ -74,7 +74,7 @@ function composerBox(
                 ? []
                 : ["The Comment can be queued, but the Agent cannot read it until the context MCP group is enabled."]),
             formatField("Draft", draft.length === 0 ? "<empty>" : draft),
-            "Enter inserts a newline. Ctrl+Enter queues the Comment.",
+            "Enter queues the Comment.",
             "Esc or Ctrl+[ returns to the Audit Context.",
         ],
         expandedKey: `audit-conversation:${instance}:${ctxId}:composer`,
@@ -82,7 +82,7 @@ function composerBox(
         status: agentCanRead ? (draft.length === 0 ? "normal" : "running") : "warning",
         summaryLines: [
             draft.length === 0 ? "draft=<empty>" : `draft=${draft}`,
-            `${agentCanRead ? "agent-read=enabled" : "agent-read=disabled"} · Ctrl+Enter send · Esc back`,
+            `${agentCanRead ? "agent-read=enabled" : "agent-read=disabled"} · Enter send · Esc back`,
         ],
         title: "Write Comment",
     });

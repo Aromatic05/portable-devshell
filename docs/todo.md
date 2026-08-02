@@ -1,6 +1,6 @@
 # Todo 进度
 
-Todo 用于记录 Agent 的任务计划和执行进度。状态由 TypeScript control 管理，不属于 worker，也不会出现在 worker 的 `tools.list` 中。
+Todo 用于记录 Agent 的任务计划、执行进度和面向当前 `ctxId` 的用户评论。状态由 TypeScript control 管理，不属于 worker，也不会出现在 worker 的 `tools.list` 中。
 
 ## MCP 工具
 
@@ -13,7 +13,7 @@ todo_write  group=todo  requiredCapabilities=[]
 
 `todo_read` 接受可选的 `title`：
 
-- 不传 `title` 时，列出全部 live task 摘要；
+- 不传 `title` 时，列出全部 live task 摘要和 context comments；
 - 传入 `title` 时，返回该任务的完整 Todo 列表、revision、taskId 和摘要。
 
 `todo_write` 以 `title` 作为 live task 的稳定命名空间，并使用完整列表替换该任务状态：
@@ -64,16 +64,40 @@ cancelled
 - 进度为 `completed / 非 cancelled 项目数`，由 control 计算。
 - taskId、revision 和时间字段由 control 生成。
 
+## Context comments
+
+TUI 可以向某个 live task 当前绑定的 `ctxId` 添加评论。评论是持久的 context guidance，不是一次性消息：在用户删除前，该 `ctxId` 的后续工具调用都会收到它。
+
+成功的工具结果保持原有字段层级，并在顶层追加 `comment`：
+
+```json
+{
+    "exitCode": 0,
+    "stdout": "...",
+    "stderr": "",
+    "durationMs": 12,
+    "comment": ["先修复真实链路，再补测试"]
+}
+```
+
+MCP `tools/list` 中对应的 `outputSchema` 也会保留原字段，并追加必需的 `comment: string[]`。失败结果通过错误数据中的 `comment` 返回评论。
+
+评论按 `ctxId` 隔离。旧 v2 中没有 `ctxId` 的评论只有在能唯一确定 active context 时才会自动绑定；无法唯一确定的旧评论会保留为不可投递的 legacy comment，等待用户检查或删除。
+
 ## 权威诊断 hint
 
-`comment: string[]` 只承载工具调用产生的权威诊断 hint，不是用户消息存储或会话通道。
+`comment: string[]` 是统一的权威指令通道。它同时承载两类内容，并处于同一权威层级：
 
-调用方必须遵守 `comment` 中的每一条。生成与合并规则固定：
+- 用户通过 Todo/TUI 添加的 context comment；
+- 工具调用产生的诊断 hint。
 
-- 本次调用产生的 hint 按确定性顺序输出；
+调用方必须遵守 `comment` 中的每一条，不存在“用户 comment 是要求、错误 hint 只是建议”的降级关系。合并规则固定：
+
+- 用户 comment 保持原始顺序并位于最前；
+- 本次调用产生的 hint 按确定性顺序追加在后；
 - 空字符串被丢弃；
 - 仅按精确字符串或稳定 code 去重，不做语义去重；
-- clean success 不产生系统 hint，因此可以没有 `comment` 字段。
+- clean success 不产生任何系统 hint，`comment` 只含用户 comment（可能为空）。
 
 诊断 hint 使用统一格式，文本为英文：
 
@@ -112,11 +136,11 @@ hint 不包含敏感数据：完整 command、cwd、绝对路径、stdout/stderr
 
 control 使用临时文件、fsync 和原子 rename 写入。CLI 和 TUI 只能通过 control RPC 读取，不能直接读取该文件。
 
-当前内存格式为 version 4。control 可读取 version 1、version 2 和 version 3：
+当前内存格式为 version 3。control 可读取 version 1 和 version 2：
 
 - v1 的单个 active task 会转换成数组；缺失 title 时使用 taskId；
-- v2/v3 中遗留的 `comments` 字段会被丢弃；新的用户 Comment 由独立的 Context Message 存储承担；
-- 下一次状态写入时统一保存为 version 4；version 4 不允许出现 `comments`。
+- v2 会补齐 comments，并迁移旧的无作用域评论；
+- 下一次状态写入时统一保存为 version 3。
 
 事件使用现有 instance stream：
 
@@ -140,7 +164,7 @@ devshell instance todo <instance> --follow
 
 ## TUI
 
-Todo 是独立的 instance-scoped 一级页面。页面只列出 live task 和每个 Todo item。用户 Comment 位于 Audit 的具体 Context Conversation 页面，不属于 Todo。
+Todo 是独立的 instance-scoped 一级页面。页面列出所有 live task、每个 Todo item，以及持久的 Context comment。评论可以从对应任务添加，并由用户显式删除。
 
 ## 工具调用关联
 
