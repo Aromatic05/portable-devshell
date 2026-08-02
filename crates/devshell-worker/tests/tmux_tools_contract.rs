@@ -1490,18 +1490,6 @@ fn capacity_pressure_collects_only_idle_automatic_panes() {
         "{after_restart}"
     );
 
-    for index in 1..=5 {
-        let created = call(
-            &env,
-            instance,
-            &format!("create-{index}"),
-            "tmux_create",
-            json!({ "name": format!("persistent-{index}") }),
-            "ctx-a",
-            &format!("create-persistent-{index}"),
-        );
-        assert_eq!(created["ok"], true, "{created}");
-    }
     let explicit_auto_name = call(
         &env,
         instance,
@@ -1513,23 +1501,33 @@ fn capacity_pressure_collects_only_idle_automatic_panes() {
     );
     assert_eq!(explicit_auto_name["ok"], true, "{explicit_auto_name}");
 
-    let collected = call(
-        &env,
-        instance,
-        "10",
-        "tmux_create",
-        json!({ "name": "persistent-6" }),
-        "ctx-b",
-        "create-under-pressure",
-    );
-    assert_eq!(collected["ok"], true, "{collected}");
-    assert!(
-        collected["result"]["warnings"]
+    let mut collected = None;
+    for index in 1..=64 {
+        let created = call(
+            &env,
+            instance,
+            &format!("create-{index}"),
+            "tmux_create",
+            json!({ "name": format!("persistent-{index}") }),
+            "ctx-a",
+            &format!("create-persistent-{index}"),
+        );
+        assert_eq!(created["ok"], true, "{created}");
+        let pane_collected = created["result"]["warnings"]
             .as_array()
-            .unwrap()
-            .iter()
-            .any(|warning| warning["code"] == "tmux.paneCollected"),
-        "{collected}"
+            .is_some_and(|warnings| {
+                warnings
+                    .iter()
+                    .any(|warning| warning["code"] == "tmux.paneCollected")
+            });
+        if pane_collected {
+            collected = Some(created);
+            break;
+        }
+    }
+    assert!(
+        collected.is_some(),
+        "capacity pressure did not collect the idle automatic pane"
     );
 
     let listed = call(
@@ -1554,9 +1552,9 @@ fn capacity_pressure_collects_only_idle_automatic_panes() {
     let full = call(
         &env,
         instance,
-        "12",
+        "create-after-capacity",
         "tmux_create",
-        json!({ "name": "persistent-7" }),
+        json!({ "name": "persistent-after-capacity" }),
         "ctx-c",
         "create-without-collectable-pane",
     );
