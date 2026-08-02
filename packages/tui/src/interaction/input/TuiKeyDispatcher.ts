@@ -27,6 +27,12 @@ export class TuiKeyDispatcher {
         if (mode === "terminal") {
             return [];
         }
+        return normalizeKeyPresses(press).flatMap((normalized) =>
+            this.#dispatchNormalized(mode, normalized),
+        );
+    }
+
+    #dispatchNormalized(mode: Exclude<TuiMode, "terminal">, press: TuiKeyPress): TuiUiIntent[] {
         const globalIntent = this.#global(mode, press);
         if (globalIntent !== undefined) {
             return [globalIntent];
@@ -145,7 +151,7 @@ export class TuiKeyDispatcher {
     }
 
     #forContextConversation(press: TuiKeyPress): TuiUiIntent[] {
-        if (press.key.backspace) {
+        if (press.key.backspace || press.key.delete) {
             return [{ type: "contextConversation.backspace" }];
         }
         if (press.key.return) {
@@ -280,6 +286,24 @@ export class TuiKeyDispatcher {
 
 function isShortcutDigit(input: string): input is "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" {
     return input === "1" || input === "2" || input === "3" || input === "4" || input === "5" || input === "6" || input === "7" || input === "8" || input === "9";
+}
+
+function normalizeKeyPresses(press: TuiKeyPress): TuiKeyPress[] {
+    const normalizedKey = press.key.delete && !press.key.backspace
+        ? { ...press.key, backspace: true, delete: false }
+        : press.key;
+    if (normalizedKey.return) {
+        return [{ ...press, input: press.input.replace(/[\r\n]+$/u, ""), key: normalizedKey }];
+    }
+    const trailingNewline = /[\r\n]+$/u.exec(press.input);
+    if (trailingNewline === null) {
+        return [{ ...press, key: normalizedKey }];
+    }
+    const text = press.input.slice(0, trailingNewline.index);
+    return [
+        ...(text.length === 0 ? [] : [{ ...press, input: text, key: normalizedKey }]),
+        { ...press, input: "", key: { ...normalizedKey, return: true } },
+    ];
 }
 
 function shiftedInstanceIndex(press: TuiKeyPress): number | undefined {

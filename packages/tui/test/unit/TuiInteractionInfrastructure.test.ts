@@ -1504,6 +1504,10 @@ test("Prompt 3 detail line selection clamps to a valid line after data replaceme
             stream: "stdout",
         },
     ]);
+    harness.focusManager.syncPanel(
+        harness.store.getState().ui.selectedPage,
+        harness.store.getState().interaction.focusScope,
+    );
     logs = selectMainScreenModel(harness.store.getState()).boxes.find(
         (box) => box.id === "logs",
     )!;

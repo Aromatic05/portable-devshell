@@ -144,12 +144,24 @@ export class TuiFocusManager {
         const graph = this.#context.graphFor(page, mode);
         const remembered = this.#pageMemory.get(page);
         const current = this.currentFocus();
+        const currentBoxId = current?.kind === "line"
+            ? current.boxId
+            : current?.kind === "box"
+              ? current.id
+              : undefined;
+        const sameBoxLine = currentBoxId === undefined
+            ? undefined
+            : graph.firstLineInBox(currentBoxId);
         const nextFocus = graph.includes(current)
             ? current
+            : sameBoxLine !== undefined
+              ? sameBoxLine
             : graph.includes(remembered)
               ? remembered
               : graph.first();
-        this.#applyFocus(nextFocus);
+        if (!isSameTuiFocusItem(nextFocus, current)) {
+            this.#applyFocus(nextFocus);
+        }
 
         if (nextFocus !== undefined) {
             this.#pageMemory.set(page, nextFocus);

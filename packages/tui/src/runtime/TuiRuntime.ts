@@ -104,6 +104,7 @@ export class TuiRuntime {
     #terminalSelecting = false;
     #tmuxPanesActive = false;
     #tmuxPanesInstance?: string;
+    #reconcilingFocus = false;
 
     constructor(
         options: TuiRuntimeOptions = {},
@@ -278,6 +279,23 @@ export class TuiRuntime {
             store: this.store,
         });
         this.#storeUnsubscribe = this.store.subscribe(() => {
+            const scope = this.store.getState().interaction.focusScope;
+            const reconcile =
+                scope === "mainBoxes" ||
+                scope === "boxDetail" ||
+                scope === "form" ||
+                scope === "wizard";
+            if (reconcile && !this.#reconcilingFocus) {
+                this.#reconcilingFocus = true;
+                try {
+                    this.focusManager.syncPanel(
+                        this.store.getState().ui.selectedPage,
+                        this.store.getState().interaction.focusScope,
+                    );
+                } finally {
+                    this.#reconcilingFocus = false;
+                }
+            }
             this.#syncTerminalFocus();
             this.#syncTmuxPanes();
         });

@@ -125,7 +125,7 @@ export function makeBox(
             (line) => line.id === selectedDetailLineId,
         )
             ? selectedDetailLineId
-            : expandedLines[0]?.id,
+            : undefined,
         status: input.status ?? "normal",
         title: input.title,
     };

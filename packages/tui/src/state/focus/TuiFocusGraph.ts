@@ -27,6 +27,13 @@ export class TuiFocusGraph {
         return this.#order[0];
     }
 
+    firstLineInBox(boxId: string): TuiFocusItem | undefined {
+        return this.#order.find(
+            (item): item is Extract<TuiFocusItem, { kind: "line" }> =>
+                item.kind === "line" && item.boxId === boxId,
+        );
+    }
+
     last(): TuiFocusItem | undefined {
         return this.#order.at(-1);
     }
