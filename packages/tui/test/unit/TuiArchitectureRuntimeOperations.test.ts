@@ -5,7 +5,14 @@ import type { InstanceCreateDraft, JsonValue } from "@portable-devshell/shared";
 
 import { TuiAppStore, TuiRuntimeOperations } from "../../src/testing.ts";
 
-function createHarness(options: { failConfigUpdate?: boolean; failReverseCode?: boolean; failStart?: boolean } = {}) {
+function createHarness(options: {
+    failConfigUpdate?: boolean;
+    failReverseCode?: boolean;
+    failStart?: boolean;
+    operationTimeoutMs?: number;
+    reconnectDelayMs?: number;
+    restartReconnectFailures?: number;
+} = {}) {
     const store = new TuiAppStore();
     store.replaceInstances([
         {
@@ -18,6 +25,7 @@ function createHarness(options: { failConfigUpdate?: boolean; failReverseCode?: 
     ]);
     const calls: string[] = [];
     const refreshed: string[] = [];
+    let reconnectAttempts = 0;
     const clients = {
         artifact: {
             async cancelTransfer(transferId: string) {
@@ -129,7 +137,11 @@ function createHarness(options: { failConfigUpdate?: boolean; failReverseCode?: 
             store.replaceSnapshot(snapshot as never);
         },
         async reconnect() {
+            reconnectAttempts += 1;
             refreshed.push("reconnect");
+            if (reconnectAttempts <= (options.restartReconnectFailures ?? 0)) {
+                throw new Error("control server is not running.");
+            }
         },
         async refresh() {
             refreshed.push("all");
@@ -158,11 +170,12 @@ function createHarness(options: { failConfigUpdate?: boolean; failReverseCode?: 
     } as never;
     const operations = new TuiRuntimeOperations({
         clients,
-        reconnectDelayMs: 0,
+        operationTimeoutMs: options.operationTimeoutMs,
+        reconnectDelayMs: options.reconnectDelayMs ?? 0,
         session,
         store,
     });
-    return { calls, operations, refreshed, store };
+    return { calls, operations, reconnectAttempts: () => reconnectAttempts, refreshed, store };
 }
 
 test("runtime operations own instance command lifecycle and relay diagnostics", async () => {
@@ -243,6 +256,34 @@ test("failed disable restores a worker that was running before the config update
         "config.instance:alpha",
         "runtime.start:alpha"
     ]);
+});
+
+test("control restart retries until the replacement runtime is reachable", async () => {
+    const harness = createHarness({
+        operationTimeoutMs: 100,
+        reconnectDelayMs: 1,
+        restartReconnectFailures: 2
+    });
+
+    await harness.operations.restartControl();
+
+    assert.equal(harness.reconnectAttempts(), 3);
+    assert.deepEqual(harness.calls, ["service.restart"]);
+    assert.deepEqual(harness.refreshed, ["reconnect", "reconnect", "reconnect"]);
+});
+
+test("control restart reports failure when the replacement runtime never becomes reachable", async () => {
+    const harness = createHarness({
+        operationTimeoutMs: 20,
+        reconnectDelayMs: 1,
+        restartReconnectFailures: Number.MAX_SAFE_INTEGER
+    });
+
+    await assert.rejects(
+        harness.operations.restartControl(),
+        /did not become ready/u
+    );
+    assert.equal(harness.reconnectAttempts() > 1, true);
 });
 
 test("runtime operations expose control callbacks and route page refreshes", async () => {

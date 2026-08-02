@@ -19,7 +19,11 @@ import {
     ControlSocketServer,
     InstanceRegistry
 } from "@portable-devshell/control/testing";
-import { createTuiClients, TuiControlSession } from "../../src/testing.ts";
+import {
+    createTuiClients,
+    TuiControlSession,
+    TuiRuntimeOperations
+} from "../../src/testing.ts";
 import { createTestIpcPath } from "../../../../test/TestPlatformSupport.ts";
 
 test("TuiControlSession pulls instances, snapshots, subscribes, and recovers from stream.gap", async (t) => {
@@ -321,6 +325,36 @@ test("module TUI clients send explicit instance operations and preserve start re
     assert.equal(worker.callToolCount, 1);
 });
 
+test("TUI control restart reconnects after the socket runtime is replaced", async (t) => {
+    const runtimeDir = await mkdtemp(join(tmpdir(), "portable-devshell-tui-control-restart-"));
+    const socketPath = createTestIpcPath("tui-control-restart", runtimeDir);
+    const worker = new FakeWorker("alpha");
+    const server = createServer(socketPath, worker, () => 7, { restartable: true });
+    const clients = createTuiClients({ socketPath });
+    const session = new TuiControlSession({ clients, readTimeoutMs: 500 });
+    const operations = new TuiRuntimeOperations({
+        clients,
+        operationTimeoutMs: 2_000,
+        reconnectDelayMs: 10,
+        session,
+        store: session.store
+    });
+
+    await server.start();
+    t.after(async () => {
+        await session.stop();
+        await server.stop().catch(() => undefined);
+        await rm(runtimeDir, { force: true, recursive: true });
+    });
+    await session.start();
+
+    await operations.restartControl();
+
+    assert.equal(server.restartCount(), 1);
+    assert.equal(session.store.getState().connection.status, "connected");
+    assert.deepEqual(await clients.service.ping(), { pong: true });
+});
+
 test("module TUI client sends an OAuth approval payload accepted by the control route", async (t) => {
     const runtimeDir = await mkdtemp(join(tmpdir(), "portable-devshell-tui-oauth-decision-"));
     const socketPath = createTestIpcPath("tui-oauth-decision", runtimeDir);
@@ -382,7 +416,13 @@ function oauthApproval(approvalId: string): OAuthApprovalRequest {
     };
 }
 
-function createServer(socketPath: string, worker: FakeWorker, getConfigVersion: () => number): {
+function createServer(
+    socketPath: string,
+    worker: FakeWorker,
+    getConfigVersion: () => number,
+    options: { restartable?: boolean } = {}
+): {
+    restartCount(): number;
     start(): Promise<void>;
     stop(): Promise<void>;
 } {
@@ -412,6 +452,8 @@ function createServer(socketPath: string, worker: FakeWorker, getConfigVersion: 
             worker: worker as unknown as WorkerInstance
         }
     ]);
+    let server!: ControlSocketServer;
+    let restartCount = 0;
     const routes = new ControlRouteComposition({
         artifact: {
             listShares() { return []; },
@@ -436,10 +478,21 @@ function createServer(socketPath: string, worker: FakeWorker, getConfigVersion: 
         } as never,
         instances,
         mcpStatus: () => ({ running: false, reason: "MCP runtime is disabled." }),
+        ...(options.restartable
+            ? {
+                restart: async () => {
+                    restartCount += 1;
+                    await server.stop();
+                    server = new ControlSocketServer({ routes, socketPath });
+                    await server.start();
+                }
+            }
+            : {}),
         shutdown() {}
     });
-    const server = new ControlSocketServer({ routes, socketPath });
+    server = new ControlSocketServer({ routes, socketPath });
     return {
+        restartCount: () => restartCount,
         start: async () => await server.start(),
         async stop() {
             await server.stop();

@@ -17,6 +17,7 @@ export const errorCodes = {
     controlConfigLoadFailed: "control.configLoadFailed",
     controlConfigParseFailed: "control.configParseFailed",
     controlConfigValidationFailed: "control.configValidationFailed",
+    controlRestartFailed: "control.restartFailed",
     coreApprovalAlreadyDecided: "core.approvalAlreadyDecided",
     coreApprovalDenied: "core.approvalDenied",
     coreApprovalExpired: "core.approvalExpired",

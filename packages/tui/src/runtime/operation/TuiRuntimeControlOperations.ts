@@ -60,12 +60,35 @@ export class TuiRuntimeControlOperations {
 
     async restartControl(): Promise<void> {
         await this.#request(this.options.clients.service.restart(), "service.restart");
-        if (this.options.reconnectDelayMs > 0) {
-            await new Promise((resolve) => setTimeout(resolve, this.options.reconnectDelayMs));
+        const errorKey = `${this.#panelKey("connections")}:operationRefresh`;
+        const deadline = Date.now() + this.options.operationTimeoutMs;
+        let lastError: unknown;
+
+        while (Date.now() < deadline) {
+            if (this.options.reconnectDelayMs > 0) {
+                await new Promise((resolve) => setTimeout(resolve, this.options.reconnectDelayMs));
+            }
+            try {
+                const remainingMs = Math.max(1, deadline - Date.now());
+                await withTuiRequestTimeout(
+                    this.options.session.reconnect(),
+                    remainingMs,
+                    "control.reconnect"
+                );
+                this.options.store.setPanelError(errorKey, undefined);
+                return;
+            } catch (error) {
+                lastError = error;
+            }
         }
-        await this.#refreshBestEffort(this.#panelKey("connections"), async () => {
-            await this.#request(this.options.session.reconnect(), "control.reconnect");
+
+        const failure = createError({
+            code: errorCodes.controlRestartFailed,
+            message: `Control restart was accepted, but the replacement runtime did not become ready: ${readErrorMessage(lastError)}`,
+            retryable: true
         });
+        this.options.store.setPanelError(errorKey, failure);
+        throw failure;
     }
 
     async createInstance(draft: InstanceCreateDraft): Promise<string | undefined> {
@@ -260,4 +283,8 @@ function toControlError(error: unknown): ControlError {
         message: typeof candidate?.message === "string" ? candidate.message : String(error),
         retryable: candidate?.retryable === true
     });
+}
+
+function readErrorMessage(error: unknown): string {
+    return error instanceof Error ? error.message : String(error);
 }

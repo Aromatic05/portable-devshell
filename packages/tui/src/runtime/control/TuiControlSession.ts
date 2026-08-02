@@ -121,14 +121,17 @@ export class TuiControlSession {
         this.#stopOverviewPolling();
         try {
             await withTuiRequestTimeout(this.#clients.reconnect(), this.#readTimeoutMs, "control.reconnect");
-            if (!this.#current(generation)) return;
-            await this.refresh(generation);
-            if (this.#current(generation) && this.#store.getState().connection.status === "connected") {
-                this.#startOAuthRefresh();
-                this.#startOverviewPolling();
+            this.#assertCurrent(generation, "Control connection changed while reconnecting.");
+            await this.#refreshConnected(generation);
+            this.#assertCurrent(generation, "Control connection changed while refreshing after reconnect.");
+            if (this.#store.getState().connection.status !== "connected") {
+                throw new Error("Control reconnect completed without a connected session.");
             }
+            this.#startOAuthRefresh();
+            this.#startOverviewPolling();
         } catch (error) {
             if (this.#current(generation)) this.#applyConnectionFailure(error);
+            throw error;
         }
     }
 
@@ -178,20 +181,31 @@ export class TuiControlSession {
     async refresh(generation?: number): Promise<void> {
         const activeGeneration = generation ?? ++this.#generation;
         if (!this.#current(activeGeneration)) return;
-        this.#store.setConnectionState("connecting");
         try {
-            await withTuiRequestTimeout(
-                this.#clients.service.ping(),
-                this.#readTimeoutMs,
-                "service.ping"
-            );
-            if (!this.#current(activeGeneration)) return;
-            const subscriptions = await this.#refresh.refreshAll(activeGeneration);
-            if (!this.#current(activeGeneration)) return;
-            this.#subscriptions.replaceAll(subscriptions);
-            this.#store.setConnectionState("connected");
+            await this.#refreshConnected(activeGeneration);
         } catch (error) {
             if (this.#current(activeGeneration)) this.#applyConnectionFailure(error);
+        }
+    }
+
+    async #refreshConnected(activeGeneration: number): Promise<void> {
+        this.#assertCurrent(activeGeneration, "Control connection changed before refresh.");
+        this.#store.setConnectionState("connecting");
+        await withTuiRequestTimeout(
+            this.#clients.service.ping(),
+            this.#readTimeoutMs,
+            "service.ping"
+        );
+        this.#assertCurrent(activeGeneration, "Control connection changed during ping.");
+        const subscriptions = await this.#refresh.refreshAll(activeGeneration);
+        this.#assertCurrent(activeGeneration, "Control connection changed during refresh.");
+        this.#subscriptions.replaceAll(subscriptions);
+        this.#store.setConnectionState("connected");
+    }
+
+    #assertCurrent(generation: number, message: string): void {
+        if (!this.#current(generation)) {
+            throw new Error(message);
         }
     }
 
