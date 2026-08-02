@@ -21,6 +21,7 @@ import {
     selectSidebarModel,
     selectTerminalTab
 } from "./model/TuiViewProjection.js";
+import { tuiTerminalFullScreen } from "./TuiHitRegions.js";
 import type { TuiAppController } from "./TuiAppController.js";
 import { mainInnerWidth, tuiLayoutMetrics, TuiRootLayout } from "./TuiRootLayout.js";
 
@@ -39,7 +40,8 @@ export function TuiApp(props: TuiAppProps) {
     const overlay = topTuiOverlay(state.interaction.overlays);
     const footer = selectFooterModel(state);
     const layout = tuiLayoutMetrics(props.runtime.columns);
-    const boxInnerWidth = mainInnerWidth(props.runtime.columns);
+    const fullWidth = tuiTerminalFullScreen(state);
+    const boxInnerWidth = mainInnerWidth(props.runtime.columns, fullWidth);
     const viewportRows = Math.max(
         0,
         props.runtime.rows - (layout.mode === "compact" ? 10 : 7) - (errorLines?.length ?? 0) - (connection.status === "connecting" ? 1 : 0)
@@ -112,7 +114,11 @@ export function TuiApp(props: TuiAppProps) {
                 </Box>
             }
             rows={props.runtime.rows}
-            sidebar={<TuiComponentSidebar compact={layout.mode === "compact"} model={selectSidebarModel(state)} />}
+            sidebar={
+                fullWidth
+                    ? undefined
+                    : <TuiComponentSidebar compact={layout.mode === "compact"} model={selectSidebarModel(state)} />
+            }
         />
     );
 }

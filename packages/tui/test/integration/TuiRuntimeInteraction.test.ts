@@ -1006,6 +1006,55 @@ test("real Ink runtime switches terminal sources and drives tmux View and Attach
             rows: runtime.rows,
         }), undefined);
 
+        const fullScreenRegions = buildTuiHitRegions(runtime.store.getState(), {
+            columns: runtime.columns,
+            rows: runtime.rows,
+        });
+        const tabTargets = fullScreenRegions.filter(
+            (region) => region.target.kind === "terminalTab",
+        );
+        assert.equal(tabTargets.length, 2);
+        assert.equal(
+            fullScreenRegions.some(
+                (region) =>
+                    region.target.kind === "page" ||
+                    region.target.kind === "instance",
+            ),
+            false,
+            "tmuxPanes tab must not reserve sidebar hit regions",
+        );
+
+        const instancesTabRegion = tabTargets.find(
+            (region) =>
+                region.target.kind === "terminalTab" &&
+                region.target.tab === "instances",
+        )!;
+        host.write(mouseSequence(0, instancesTabRegion.x, instancesTabRegion.y, "press"));
+        await waitUntil(() => {
+            const route = currentTuiRoute(runtime.store.getState());
+            return route.page === "terminal" && route.tab === "instances";
+        });
+        assert.ok(buildTuiTerminalViewportRegion(runtime.store.getState(), {
+            columns: runtime.columns,
+            rows: runtime.rows,
+        }));
+
+        const instancesLayoutRegions = buildTuiHitRegions(runtime.store.getState(), {
+            columns: runtime.columns,
+            rows: runtime.rows,
+        });
+        const tmuxTabRegion = instancesLayoutRegions.find(
+            (region) =>
+                region.target.kind === "terminalTab" &&
+                region.target.tab === "tmuxPanes",
+        )!;
+        host.write(mouseSequence(0, tmuxTabRegion.x, tmuxTabRegion.y, "press"));
+        await waitUntil(() => {
+            const route = currentTuiRoute(runtime.store.getState());
+            return route.page === "terminal" && route.tab === "tmuxPanes";
+        });
+        await waitUntil(() => runtime.tmuxPanes.getSnapshot().panes.length === 1);
+
         host.write("\r");
         await waitUntil(
             () => runtime.tmuxPanes.getSnapshot().active?.attached === true,
@@ -1025,6 +1074,9 @@ test("real Ink runtime switches terminal sources and drives tmux View and Attach
             const route = currentTuiRoute(runtime.store.getState());
             return route.page === "terminal" && route.tab === "instances";
         });
+        await waitUntil(
+            () => runtime.store.getState().interaction.focusScope === "terminal",
+        );
         assert.ok(buildTuiTerminalViewportRegion(runtime.store.getState(), {
             columns: runtime.columns,
             rows: runtime.rows,

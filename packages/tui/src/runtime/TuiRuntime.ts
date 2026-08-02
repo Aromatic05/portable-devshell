@@ -916,6 +916,10 @@ export class TuiRuntime {
             });
             return;
         }
+        if (target.kind === "terminalTab") {
+            this.selectTerminalTab(target.tab);
+            return;
+        }
         if (target.kind === "scrollViewport") {
             return;
         }

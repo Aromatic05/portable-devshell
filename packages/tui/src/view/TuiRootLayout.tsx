@@ -14,10 +14,13 @@ export interface TuiRootLayoutProps {
     header: React.ReactNode;
     main: React.ReactNode;
     rows: number;
-    sidebar: React.ReactNode;
+    sidebar?: React.ReactNode;
 }
 
-export function mainInnerWidth(columns: number): number {
+export function mainInnerWidth(columns: number, fullWidth = false): number {
+    if (fullWidth) {
+        return Math.max(0, columns - 4);
+    }
     const layout = tuiLayoutMetrics(columns);
     return layout.mode === "compact" ? Math.max(0, columns - 4) : Math.max(0, layout.mainPanelWidth - GAP * 8);
 }
@@ -29,6 +32,20 @@ export function TuiRootLayout(props: TuiRootLayoutProps) {
         return (
             <Box alignItems="center" height={props.rows} justifyContent="center" width={props.columns}>
                 <Text color="yellow">{`Terminal too small (need ${MINIMUM_TERMINAL_COLUMNS}x${MINIMUM_TERMINAL_ROWS})`}</Text>
+            </Box>
+        );
+    }
+
+    if (props.sidebar === undefined) {
+        return (
+            <Box flexDirection="column" height={props.rows} width={props.columns}>
+                {props.header}
+                <Box flexGrow={1} height={Math.max(0, props.rows - 6)}>
+                    <Box borderStyle="single" flexDirection="column" paddingX={1} width={props.columns}>
+                        {props.main}
+                    </Box>
+                </Box>
+                {props.footer}
             </Box>
         );
     }

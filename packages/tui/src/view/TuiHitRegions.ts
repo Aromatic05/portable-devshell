@@ -1,6 +1,8 @@
 import { topTuiOverlay } from "../state/overlay/TuiOverlay.js";
 import type { TuiAppState } from "../state/reducer/TuiStoreModel.js";
 import { currentTuiRoute } from "../state/route/TuiRouteState.js";
+import type { TuiTerminalTab } from "../state/route/TuiRoute.js";
+import { tuiTerminalTabLabel, tuiTerminalTabs } from "./page/terminal/TuiTmuxPaneTerminalModel.js";
 import {
     selectErrorMessage,
     selectMainBoxFlowMetrics,
@@ -24,7 +26,16 @@ export type TuiHitTarget =
     | { id: string; kind: "instance" }
     | { instance: string; kind: "overviewInstance" }
     | { id: string; kind: "page" }
-    | { kind: "scrollViewport" };
+    | { kind: "scrollViewport" }
+    | { kind: "terminalTab"; tab: TuiTerminalTab };
+
+export function tuiTerminalFullScreen(state: TuiAppState): boolean {
+    if (state.ui.selectedPage !== "terminal") {
+        return false;
+    }
+    const route = currentTuiRoute(state);
+    return route.page === "terminal" && route.tab === "tmuxPanes";
+}
 
 export interface TuiHitRegion {
     height: number;
@@ -123,6 +134,12 @@ export function buildTuiHitRegions(
     }
 
     const regions: TuiHitRegion[] = [];
+    const globalErrorHeight = blockHeight(selectErrorMessage(state));
+    if (tuiTerminalFullScreen(state)) {
+        pushTerminalTabRegions(regions, 2, 5 + globalErrorHeight + 1);
+        return regions;
+    }
+
     const layout = tuiLayoutMetrics(viewport.columns);
     const sidebar = selectSidebarModel(state);
     const main = selectMainScreenModel(state);
@@ -130,7 +147,6 @@ export function buildTuiHitRegions(
         state,
         mainInnerWidth(viewport.columns),
     );
-    const globalErrorHeight = blockHeight(selectErrorMessage(state));
     const compact = layout.mode === "compact";
     const mainX = compact
         ? 2
@@ -266,6 +282,10 @@ export function buildTuiHitRegions(
         }
     }
 
+    if (state.ui.selectedPage === "terminal") {
+        pushTerminalTabRegions(regions, mainX, contentY + globalErrorHeight + 1);
+    }
+
     return regions;
 }
 
@@ -290,4 +310,23 @@ export function hitTargetAt(
 
 function blockHeight(lines: readonly string[] | undefined): number {
     return lines === undefined ? 0 : lines.length + 2;
+}
+
+function pushTerminalTabRegions(
+    regions: TuiHitRegion[],
+    startX: number,
+    y: number,
+): void {
+    let tabX = startX;
+    for (const tab of tuiTerminalTabs) {
+        const width = tuiTerminalTabLabel(tab).length + 2;
+        regions.push({
+            height: 1,
+            target: { kind: "terminalTab", tab },
+            width,
+            x: tabX,
+            y,
+        });
+        tabX += width + 1;
+    }
 }
