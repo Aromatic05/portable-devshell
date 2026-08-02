@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { mkdtemp, rename, rm, writeFile } from "node:fs/promises";
+import { request } from "node:http";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -301,11 +302,8 @@ test("failed OAuth Web hot replacement restores the previous listener and OAuth 
     });
 
     await runtime.start();
-    const initialMetadata = await fetch(`${origin}/.well-known/oauth-protected-resource/web`, {
-        headers: { connection: "close" }
-    });
+    const initialMetadata = await requestHttp(origin, "/.well-known/oauth-protected-resource/web");
     assert.equal(initialMetadata.status, 200);
-    await initialMetadata.arrayBuffer();
 
     const oauthStorage = mcp.webOauthDir;
     const oauthBackup = `${oauthStorage}.backup`;
@@ -325,17 +323,32 @@ test("failed OAuth Web hot replacement restores the previous listener and OAuth 
     assert.equal(persisted.web.auth.mode, "oauth2");
     if (persisted.web.auth.mode !== "oauth2") throw new Error("restored Web auth mode is not oauth2");
     assert.equal(persisted.web.auth.oauth2.resourceName, "web-before");
-    const restoredSession = await fetch(`${origin}/web/session`, {
-        headers: { connection: "close" }
-    });
+    const restoredSession = await requestHttp(origin, "/web/session");
     assert.equal(restoredSession.status, 401);
-    await restoredSession.arrayBuffer();
-    const restoredMetadata = await fetch(`${origin}/.well-known/oauth-protected-resource/web`, {
-        headers: { connection: "close" }
-    });
+    const restoredMetadata = await requestHttp(origin, "/.well-known/oauth-protected-resource/web");
     assert.equal(restoredMetadata.status, 200);
-    assert.equal((await restoredMetadata.json() as { resource_name: string }).resource_name, "web-before");
+    assert.equal((JSON.parse(restoredMetadata.body) as { resource_name: string }).resource_name, "web-before");
 });
+
+async function requestHttp(origin: string, path: string): Promise<{ body: string; status: number }> {
+    return await new Promise((resolve, reject) => {
+        const requestHandle = request(new URL(path, origin), {
+            agent: false,
+            headers: { connection: "close" },
+            method: "GET"
+        }, (response) => {
+            const chunks: Buffer[] = [];
+            response.on("data", (chunk: Buffer) => chunks.push(chunk));
+            response.once("error", reject);
+            response.once("end", () => resolve({
+                body: Buffer.concat(chunks).toString("utf8"),
+                status: response.statusCode ?? 0
+            }));
+        });
+        requestHandle.once("error", reject);
+        requestHandle.end();
+    });
+}
 
 async function reservePort(): Promise<number> {
     const server = createServer();

@@ -218,7 +218,6 @@ export class ControlRuntime {
             await this.#mcp.stopRetiredWebHost(previousHost).catch(reportRetiredWebHostFailure);
         } catch (error) {
             nextFlowUninstall?.();
-            await nextRuntime?.provider.close().catch(() => undefined);
             await this.#mcp.restoreWebHost(previousHost, previousConfig);
             this.#webProvider = previousProvider;
             this.#webFlow = previousFlow;
