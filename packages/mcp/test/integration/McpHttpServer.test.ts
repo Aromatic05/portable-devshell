@@ -83,6 +83,51 @@ test("a namespace with no auth remains runnable behind a public MCP URL", async 
     }
 });
 
+test("a running host can add an OAuth namespace without exposing it as local auth", async () => {
+    const storageDir = await mkdtemp(join(tmpdir(), "portable-devshell-mcp-dynamic-oauth-"));
+    const host = createHost({
+        publicBaseUrl: "http://127.0.0.1",
+        storageDir
+    });
+    await host.start();
+
+    try {
+        host.registerInstance(createInstance("dynamic", {
+            enabled: true,
+            oauth2: {
+                requiredScopes: ["mcp-dynamic"],
+                resourceName: "dynamic"
+            },
+            provider: "oauth2"
+        }));
+        const port = requireTcpPort(host.server.address);
+        const endpoint = `http://127.0.0.1:${port}/dynamic/mcp`;
+        const unauthorized = await fetch(endpoint, {
+            method: "POST",
+            headers: {
+                accept: "application/json, text/event-stream",
+                "content-type": "application/json"
+            },
+            body: JSON.stringify(await readFixture("mcp-initialize.json"))
+        });
+        assert.equal(unauthorized.status, 401);
+
+        const metadata = await fetch(`http://127.0.0.1:${port}/.well-known/oauth-protected-resource/dynamic/mcp`);
+        assert.equal(metadata.status, 200);
+        assert.deepEqual(await metadata.json(), {
+            authorization_servers: ["http://127.0.0.1"],
+            resource: "http://127.0.0.1/dynamic/mcp",
+            resource_name: "dynamic",
+            scopes_supported: ["mcp-dynamic"]
+        });
+        assert.equal(host.status().authMode, "oauth2");
+        assert.equal(host.status().oauthReady, true);
+    } finally {
+        await host.stop();
+        await rm(storageDir, { force: true, recursive: true });
+    }
+});
+
 test("oauth2 exposes protected resource metadata and accepts a valid bearer token", async () => {
     const port = await reservePort();
     const storageDir = await mkdtemp(join(tmpdir(), "portable-devshell-mcp-oidc-"));

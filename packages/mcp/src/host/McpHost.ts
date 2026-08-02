@@ -61,11 +61,15 @@ export class McpHost {
     constructor(config: McpHostConfig) {
         this.#config = config;
         this.#contextRegistry = new McpContextRegistry({ filePath: config.contextFile });
+        const configuredOAuth = oauthConfig(config.instances);
         this.#oauth =
-            oauthConfig(config.instances) !== undefined && config.publicBaseUrl !== undefined && config.storageDir !== undefined
-                ? new McpOAuthProtectedResource(oauthConfig(config.instances)!, new URL(config.publicBaseUrl).origin, config.storageDir, {
-                      trustProxy: isLoopbackHost(config.listenHost)
-                  })
+            config.publicBaseUrl !== undefined && config.storageDir !== undefined
+                ? new McpOAuthProtectedResource(
+                      configuredOAuth ?? defaultOAuthConfig(),
+                      new URL(config.publicBaseUrl).origin,
+                      config.storageDir,
+                      { trustProxy: isLoopbackHost(config.listenHost) }
+                  )
                 : undefined;
 
         for (const instance of config.instances) {
@@ -173,14 +177,15 @@ export class McpHost {
         const address = this.#httpServer.address;
         const running = this.#started && address !== undefined && address !== null;
         const listenAddress = typeof address === "object" && address !== null ? `${address.address}:${address.port}` : undefined;
-        const authProviders = this.#config.instances
+        const registered = this.#registry.list();
+        const authProviders = registered
             .map((instance) => instance.auth?.provider)
             .filter((provider): provider is "oauth2" | "token" => provider === "oauth2" || provider === "token");
         const authMode = authProviders.includes("oauth2") ? "oauth2" : authProviders.includes("token") ? "token" : "none";
         return {
             authMode,
             ...(listenAddress === undefined ? {} : { listenAddress }),
-            oauthReady: oauthConfig(this.#config.instances) === undefined || this.#oauth !== undefined,
+            oauthReady: !authProviders.includes("oauth2") || this.#oauth !== undefined,
             protocolReadiness: "notChecked",
             ...(this.#config.publicBaseUrl === undefined ? {} : { publicBaseUrl: this.#config.publicBaseUrl }),
             publicReachability: "notChecked",
@@ -201,6 +206,13 @@ function oauthConfig(instances: readonly McpHostInstanceConfig[]) {
         documentationUrl: first!.documentationUrl,
         requiredScopes: [...new Set(oauth.flatMap((entry) => entry.requiredScopes))],
         resourceName: first!.resourceName
+    };
+}
+
+function defaultOAuthConfig() {
+    return {
+        requiredScopes: [],
+        resourceName: "portable-devshell"
     };
 }
 

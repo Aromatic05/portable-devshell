@@ -291,16 +291,19 @@ class McpOAuthResourceVerifier implements OAuthTokenVerifier {
             throw new InvalidTokenError("Token is invalid or expired.");
         }
 
-        const resource = readTokenResource(accessToken.aud);
-        if (
-            resource !== undefined &&
+        const resources = readTokenResources(accessToken.aud);
+        if (resources === undefined) {
+            throw new InvalidTokenError("Token resource audience is missing or invalid.");
+        }
+        const resource = resources.find((candidate) =>
             checkResourceAllowed({
                 configuredResource: this.#expectedResourceUrl,
-                requestedResource: resource
-            }) === false
-        ) {
+                requestedResource: candidate
+            })
+        );
+        if (resource === undefined) {
             throw new InvalidTokenError(
-                `Token resource ${resource.href} is not valid for ${this.#expectedResourceUrl.href}.`
+                `Token resource audience is not valid for ${this.#expectedResourceUrl.href}.`
             );
         }
 
@@ -348,22 +351,26 @@ function readLocalAccountId(): string {
     }
 }
 
-function readTokenResource(
+function readTokenResources(
     audience: string | string[] | undefined
-): URL | undefined {
+): URL[] | undefined {
     const values = typeof audience === "string"
         ? [audience]
         : Array.isArray(audience)
             ? audience
             : [];
+    if (values.length === 0) {
+        return undefined;
+    }
+    const resources: URL[] = [];
     for (const value of values) {
         try {
-            return new URL(value);
+            resources.push(new URL(value));
         } catch {
-            continue;
+            return undefined;
         }
     }
-    return undefined;
+    return resources;
 }
 
 function toRegistrationApprovalInput(client: unknown): OAuthApprovalInput {

@@ -59,9 +59,8 @@ export class HttpHost {
             return;
         }
 
-        if (this.#oauth !== undefined && !this.#oauthInstalled) {
-            this.installOAuth(this.#oauth);
-            this.#oauthInstalled = true;
+        if (this.#oauth !== undefined && this.#usesOAuth()) {
+            this.#installPrimaryOAuth();
         }
 
         this.#server = createServer({ maxHeaderSize: 16 * 1024 }, this.#app);
@@ -235,10 +234,14 @@ export class HttpHost {
     registerBinding(path: string, binding: McpEndpointBinding, auth?: McpAuthConfig): void {
         this.#bindings.set(path, { auth, binding });
         const resourceServerUrl = this.#toPublicResourceUrl(path);
-        if (auth?.provider === "oauth2" && this.#oauth !== undefined && resourceServerUrl !== undefined) {
-            this.#oauth.registerResource(resourceServerUrl, auth.oauth2);
+        const activateOAuth = auth?.provider === "oauth2" && this.#oauth !== undefined && resourceServerUrl !== undefined;
+        if (activateOAuth) {
+            this.#oauth!.registerResource(resourceServerUrl!, auth.oauth2);
         }
         if (this.#registeredPaths.has(path)) {
+            if (activateOAuth && this.#server !== undefined) {
+                this.#installPrimaryOAuth();
+            }
             return;
         }
 
@@ -275,6 +278,9 @@ export class HttpHost {
                 response.status(500).json({ error: "Internal server error" });
             }
         });
+        if (activateOAuth && this.#server !== undefined) {
+            this.#installPrimaryOAuth();
+        }
     }
 
     unregisterBinding(path: string): void {
@@ -293,6 +299,10 @@ export class HttpHost {
                 this.#oauthProtectedResourceMetadataPath(resourceServerUrl),
                 this.#oauth.protectedResourceMetadataHandler(resourceServerUrl, auth.oauth2)
             );
+        } else if (auth?.provider === "oauth2") {
+            routeHandlers.push((_request: Request, response: Response) => {
+                response.status(503).json({ error: "OAuth authentication is unavailable" });
+            });
         } else if (auth?.provider === "token") {
             routeHandlers.push((request: Request, response: Response, next: NextFunction) => {
                 const requestAuth = new McpAuthProviderToken(auth.token).authenticate(request.headers.authorization);
@@ -321,6 +331,10 @@ export class HttpHost {
                 void this.#oauth.requestAuthHandler(resourceServerUrl, auth.oauth2)(request, response, next);
                 return;
             }
+            if (auth.provider === "oauth2") {
+                response.status(503).json({ error: "OAuth authentication is unavailable" });
+                return;
+            }
             if (auth.provider === "token") {
                 const requestAuth = new McpAuthProviderToken(auth.token).authenticate(request.headers.authorization);
                 if (requestAuth === undefined) {
@@ -334,6 +348,21 @@ export class HttpHost {
             setRequestAuth(request, { clientId: "local", scopes: [], token: "local" });
             next();
         };
+    }
+
+    #installPrimaryOAuth(): void {
+        if (this.#oauth === undefined || this.#oauthInstalled) {
+            return;
+        }
+        this.installOAuth(this.#oauth);
+        this.#oauthInstalled = true;
+    }
+
+    #usesOAuth(): boolean {
+        if (this.#auth?.provider === "oauth2") {
+            return true;
+        }
+        return [...this.#bindings.values()].some((binding) => binding.auth?.provider === "oauth2");
     }
 
     async #readJsonBody(request: IncomingMessage): Promise<JsonValue> {

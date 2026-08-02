@@ -330,7 +330,7 @@ test("endpoint runtime failure restores the prior persisted configuration", asyn
     assert.equal(config.web.listenPort, 17890);
 });
 
-test("namespace auth updates restart the HTTP runtime before exposing OAuth", async () => {
+test("namespace auth updates apply runtime protection before exposing OAuth", async () => {
     let config = createConfig();
     let applyCalls = 0;
     const service = new ConfigEditorCoordinator({

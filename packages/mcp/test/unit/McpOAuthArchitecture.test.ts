@@ -72,6 +72,41 @@ test("McpOAuthProviderRuntime owns provider lifecycle, resources, metadata, and 
 });
 
 
+test("OAuth resource verification rejects tokens with missing or malformed audience", async () => {
+    const storageDir = await mkdtemp(join(tmpdir(), "mcp-oauth-audience-"));
+    const runtime = new McpOAuthProviderRuntime({
+        approvals: new McpOAuthApprovalService(storageDir),
+        config,
+        publicBaseUrl: "https://mcp.example.test/",
+        storageDir
+    });
+    const resource = new URL("https://mcp.example.test/demo/mcp");
+    runtime.registerResource(resource, config);
+    await runtime.warmup();
+
+    try {
+        const adapter = runtime.provider.AccessToken.adapter as {
+            upsert(id: string, payload: Record<string, unknown>, expiresIn: number): Promise<void>;
+        };
+        const now = Math.floor(Date.now() / 1000);
+        const base = {
+            clientId: "client-audience-test",
+            exp: now + 3600,
+            iat: now,
+            kind: "AccessToken",
+            scope: "mcp"
+        };
+        await adapter.upsert("missing-audience", base, 3600);
+        await adapter.upsert("malformed-audience", { ...base, aud: "not a URL" }, 3600);
+
+        await assert.rejects(runtime.verifyAccessToken(resource, "missing-audience"), /resource|audience|invalid/iu);
+        await assert.rejects(runtime.verifyAccessToken(resource, "malformed-audience"), /resource|audience|invalid/iu);
+    } finally {
+        await rm(storageDir, { force: true, recursive: true });
+    }
+});
+
+
 test("McpOAuthInteraction renders escaped approval state with the configured base path", async () => {
     const storageDir = await mkdtemp(join(tmpdir(), "mcp-oauth-interaction-"));
     const approvals = new McpOAuthApprovalService(storageDir);
