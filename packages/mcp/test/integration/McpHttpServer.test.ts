@@ -128,9 +128,10 @@ test("a running host can add an OAuth namespace without exposing it as local aut
     }
 });
 
-test("oauth2 enforces resource isolation, refresh rotation, replay detection, and revocation", async () => {
+test("none, token, and oauth2 enforce real HTTP authentication with refresh rotation and revocation", async () => {
     const port = await reservePort();
     const storageDir = await mkdtemp(join(tmpdir(), "portable-devshell-mcp-oidc-"));
+    const staticToken = "t".repeat(48);
     const host = createHost({
         auth: {
             enabled: true,
@@ -155,6 +156,11 @@ test("oauth2 enforces resource isolation, refresh rotation, replay detection, an
         provider: "oauth2"
     }));
     host.registerInstance(createInstance("open", { enabled: false, provider: "none" }));
+    host.registerInstance(createInstance("token", {
+        enabled: true,
+        provider: "token",
+        token: staticToken
+    }));
 
     await host.start();
 
@@ -203,6 +209,21 @@ test("oauth2 enforces resource isolation, refresh rotation, replay detection, an
             body: JSON.stringify(await readFixture("mcp-initialize.json"))
         });
         assert.equal(open.status, 200);
+
+        const tokenEndpoint = `http://127.0.0.1:${port}/token/mcp`;
+        assert.equal((await initializeWithBearer(tokenEndpoint, "wrong-token")).status, 401);
+        const tokenWithoutCredentials = await fetch(tokenEndpoint, {
+            method: "POST",
+            headers: {
+                accept: "application/json, text/event-stream",
+                "content-type": "application/json"
+            },
+            body: JSON.stringify(await readFixture("mcp-initialize.json"))
+        });
+        assert.equal(tokenWithoutCredentials.status, 401);
+        const tokenAuthenticated = await initializeWithBearer(tokenEndpoint, staticToken);
+        assert.equal(tokenAuthenticated.status, 200);
+        assert.equal(typeof tokenAuthenticated.headers.get("mcp-session-id"), "string");
 
         const authorizationServerMetadata = await fetch(`http://127.0.0.1:${port}/.well-known/openid-configuration`);
         assert.equal(authorizationServerMetadata.status, 200);

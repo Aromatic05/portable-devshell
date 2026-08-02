@@ -71,10 +71,10 @@ export class ControlWebOAuthFlow {
 
     async warmup(): Promise<void> {
         await this.#loadClientState();
+        this.#protectedResource.registerResource(this.resourceUrl, this.#providerConfig());
         if (this.#ownsProvider) {
             await this.#protectedResource.warmup();
         }
-        this.#protectedResource.registerResource(this.resourceUrl, this.#providerConfig());
     }
 
     install(http: HttpHost): () => void {
@@ -228,6 +228,7 @@ export class ControlWebOAuthFlow {
                 grant_types: ["authorization_code", "refresh_token"],
                 redirect_uris: [this.#redirectUri],
                 response_types: ["code"],
+                scope: this.#scope(),
                 token_endpoint_auth_method: "none"
             }),
             headers: { "content-type": "application/json" },
@@ -252,11 +253,13 @@ export class ControlWebOAuthFlow {
                 clientId?: unknown;
                 issuer?: unknown;
                 redirectUri?: unknown;
+                scope?: unknown;
             };
             if (
                 typeof value.clientId === "string" &&
                 value.issuer === this.#protectedResource.issuerUrl.href &&
-                value.redirectUri === this.#redirectUri
+                value.redirectUri === this.#redirectUri &&
+                value.scope === this.#scope()
             ) {
                 this.#clientId = value.clientId;
             }
@@ -276,7 +279,8 @@ export class ControlWebOAuthFlow {
             await file.writeFile(JSON.stringify({
                 clientId: this.#clientId,
                 issuer: this.#protectedResource.issuerUrl.href,
-                redirectUri: this.#redirectUri
+                redirectUri: this.#redirectUri,
+                scope: this.#scope()
             }), "utf8");
             await file.sync();
             await file.close();

@@ -196,7 +196,12 @@ export class McpOAuthProviderRuntime {
             scopes: [
                 "openid",
                 "offline_access",
-                ...this.#config.requiredScopes
+                ...new Set([
+                    ...this.#config.requiredScopes,
+                    ...[...this.#registeredResources.values()].flatMap(
+                        (resource) => resource.requiredScopes
+                    )
+                ])
             ],
             ttl: {
                 AccessToken: () => ACCESS_TOKEN_TTL_SECONDS,

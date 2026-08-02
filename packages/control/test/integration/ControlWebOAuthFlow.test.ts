@@ -8,15 +8,25 @@ import test from "node:test";
 
 import { HttpHost, McpOAuthProtectedResource, type McpOAuthApprovalService } from "@portable-devshell/mcp";
 import { McpHost } from "@portable-devshell/mcp/testing";
-import { controlWebBasePath } from "@portable-devshell/shared";
+import {
+    ClientConnection,
+    PrefixRoute,
+    controlWebBasePath,
+    createError,
+    type JsonValue,
+    type PrefixRouteSnapshot
+} from "@portable-devshell/shared";
 
+import { ControlChannelServer } from "../../src/server/channel/ControlChannelServer.ts";
 import { ControlWebOAuthFlow } from "../../src/server/web/ControlWebOAuthFlow.ts";
 import { ControlWebSessionService } from "../../src/server/web/ControlWebSessionService.ts";
+import { ControlWebSocketChannelProvider } from "../../src/server/web/ControlWebSocketChannelProvider.ts";
+import { NodeWebSocketFrameChannel } from "../WebSocketTestSupport.ts";
 
 const WEB_RESOURCE_NAME = "demo-web";
 const WEB_SCOPES = ["web"];
 
-test("web oauth2 runs a browser authorization-code PKCE flow into a session cookie", async (t) => {
+test("web oauth2 completes browser PKCE and authenticates the real control WebSocket", async (t) => {
     const port = await reservePort();
     const publicBaseUrl = `http://127.0.0.1:${port}`;
     const storage = await mkdtemp(join(tmpdir(), "portable-devshell-web-oauth-"));
@@ -40,13 +50,17 @@ test("web oauth2 runs a browser authorization-code PKCE flow into a session cook
         sessions
     });
     const uninstall = flow.install(http);
-    const uninstallSession = sessions.install(http);
+    const channels = new ControlChannelServer({
+        providers: [new ControlWebSocketChannelProvider({ http, sessions })],
+        routes: { connectionClosed() {}, snapshot: createRouteSnapshot }
+    });
     http.installOAuth(protectedResource);
     await flow.warmup();
+    await channels.start();
     await http.start();
     t.after(async () => {
+        await channels.close().catch(() => undefined);
         uninstall();
-        uninstallSession();
         await http.stop().catch(() => undefined);
         await rm(storage, { force: true, recursive: true });
     });
@@ -72,6 +86,24 @@ test("web oauth2 runs a browser authorization-code PKCE flow into a session cook
         headers: { cookie: sessionCookie! }
     });
     assert.equal(authenticated.status, 204);
+
+    const connection = new ClientConnection({
+        channelProvider: {
+            connect: async () => await NodeWebSocketFrameChannel.connect(
+                `${publicBaseUrl.replace("http", "ws")}/web/rpc`,
+                sessionCookie!
+            )
+        },
+        mapError: (error) => error instanceof Error ? error : new Error(String(error)),
+        mapRemoteError: (error) => createError(error),
+        mode: "persistent",
+        peer: "web"
+    });
+    t.after(() => connection.close());
+    assert.deepEqual(
+        await connection.request<JsonValue>("@control", "service", "ping"),
+        { pong: true }
+    );
 });
 
 test("web oauth2 rejects a callback whose state cookie does not match", async (t) => {
@@ -342,7 +374,8 @@ async function walkBrowserFlow(
                 redirect: "manual"
             });
             cookieHeader = mergeCookieHeader(cookieHeader, callback);
-            assert.equal(callback.status, 302);
+            const callbackBody = await callback.text();
+            assert.equal(callback.status, 302, callbackBody);
             assert.equal(new URL(callback.headers.get("location")!, origin).pathname, `${basePath}/`);
             return extractCookie(cookieHeader, "devshell_web_session");
         }
@@ -412,4 +445,20 @@ async function reservePort(): Promise<number> {
     if (address === null) throw new Error("Port reservation failed.");
     await new Promise<void>((resolve, reject) => server.close((error) => error === undefined ? resolve() : reject(error)));
     return address.port;
+}
+
+function createRouteSnapshot(): PrefixRouteSnapshot {
+    return PrefixRoute.snapshot([
+        {
+            destination: "@control",
+            modules: [
+                {
+                    name: "service",
+                    operations: [
+                        { name: "ping", handle: () => ({ pong: true }) }
+                    ]
+                }
+            ]
+        }
+    ]);
 }
