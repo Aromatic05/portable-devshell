@@ -80,6 +80,13 @@ function coerceValue(key: string, value: JsonValue): JsonValue {
     if (numericFields.has(key) && /^\d+$/u.test(value)) {
         return Number(value);
     }
+    if (jsonFields.has(key) && value.trim().length > 0) {
+        try {
+            return JSON.parse(value) as JsonValue;
+        } catch {
+            return value;
+        }
+    }
     if (listFields.has(key)) {
         return value.split(",").map((item) => item.trim()).filter((item) => item.length > 0);
     }
@@ -97,6 +104,8 @@ const numericFields = new Set([
     "queueTimeoutMs",
     "retentionDays"
 ]);
+
+const jsonFields = new Set(["byTool", "env", "mounts", "rules"]);
 
 const listFields = new Set(["capabilities", "groups", "requiredScopes"]);
 

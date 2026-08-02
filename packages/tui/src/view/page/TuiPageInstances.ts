@@ -7,7 +7,7 @@ import type { BoxModel } from "../component/TuiComponentExpandableBox.js";
 import type { TuiAppState } from "../../state/reducer/TuiStoreModel.js";
 import { compactSummary, formatField, makeBox, runtimeStatus, shortenPath } from "./TuiPageBoxSupport.js";
 import { editorDraft, readPath } from "../../state/editor/TuiEditorDraft.js";
-import { buttonLine, fieldLine } from "../editor/TuiEditorView.js";
+import { buttonLine, choiceLine, fieldLine, secretFieldLine } from "../editor/TuiEditorView.js";
 
 export function buildInstancesPageBoxes(state: TuiAppState): BoxModel[] {
     if (state.interaction.editor?.kind === "create") {
@@ -135,7 +135,7 @@ function buildCreateWizard(state: TuiAppState): BoxModel {
     const error = editor.error;
     const summary = editor.summary === undefined ? undefined : JSON.stringify(editor.summary);
     const detailLines = [
-        `Step ${step}/5 ${stepName(step)}`,
+        `Step ${step}/6 ${stepName(step)}`,
         "",
         ...wizardFields(step, draft),
         ...(error === undefined ? [] : [{ id: "validation-error", text: `error: ${error}`, tone: "danger" as const }]),
@@ -163,38 +163,122 @@ function wizardFields(step: number, draft: Record<string, JsonValue>): Array<str
         case 1:
             return [
                 fieldLine("name", "name", readPath(draft, "name")),
-                fieldLine("provider", "provider", readPath(draft, "provider")),
+                choiceLine("provider", "provider", readPath(draft, "provider")),
                 fieldLine("workspace", "defaultWorkspace", readPath(draft, "workspace")),
                 fieldLine("enabled", "enabled", readPath(draft, "enabled"))
             ];
         case 2:
-            return [
-                fieldLine("ssh.command", "ssh command", readPath(draft, "ssh.command")),
-                fieldLine("container.mode", "container mode", readPath(draft, "container.mode")),
-                fieldLine("container.preset", "distro preset", readPath(draft, "container.preset")),
-                fieldLine("container.image", "existing image", readPath(draft, "container.image")),
-                fieldLine("container.containerName", "stopped container", readPath(draft, "container.containerName")),
-                fieldLine("container.build.context", "dockerfile context", readPath(draft, "container.build.context")),
-                fieldLine("container.build.dockerfile", "dockerfile", readPath(draft, "container.build.dockerfile")),
-                fieldLine("container.compose.file", "compose file", readPath(draft, "container.compose.file")),
-                fieldLine("container.compose.service", "compose service", readPath(draft, "container.compose.service")),
-                "Modes: Distro preset -> preset; Dockerfile -> dockerfile; Compose -> compose",
-                "       Existing image -> existingImage; Existing stopped container -> existingStoppedContainer"
-            ];
-        case 3:
+            return providerWizardFields(draft);
+        case 3: {
+            const auth = readPath(draft, "mcp.auth");
             return [
                 fieldLine("mcp.enabled", "mcp.enabled", readPath(draft, "mcp.enabled")),
+                choiceLine("mcp.auth", "mcp.auth", auth),
+                ...(auth === "token"
+                    ? [secretFieldLine("mcp.token", "token", readPath(draft, "mcp.token"))]
+                    : []),
+                ...(auth === "oauth2"
+                    ? [
+                          fieldLine("mcp.oauth2.resourceName", "resource", readPath(draft, "mcp.oauth2.resourceName")),
+                          fieldLine("mcp.oauth2.requiredScopes", "scopes", readPath(draft, "mcp.oauth2.requiredScopes")),
+                          fieldLine("mcp.oauth2.documentationUrl", "documentationUrl", readPath(draft, "mcp.oauth2.documentationUrl"))
+                      ]
+                    : []),
                 `path preview        /${String(readPath(draft, "name") ?? "<name>")}/mcp`,
                 fieldLine("mcp.tools.groups", "groups", readPath(draft, "mcp.tools.groups")),
                 fieldLine("mcp.tools.capabilities", "capabilities", readPath(draft, "mcp.tools.capabilities"))
             ];
+        }
         case 4:
-            return [fieldLine("security.mode", "security mode", readPath(draft, "security.mode")), "approval policy: not available in create schema"];
+            return [
+                choiceLine("security.mode", "security mode", readPath(draft, "security.mode")),
+                choiceLine("approvalPolicy.mode", "approval mode", readPath(draft, "approvalPolicy.mode")),
+                fieldLine("approvalPolicy.rules", "approval rules", readPath(draft, "approvalPolicy.rules"))
+            ];
+        case 5:
+            return [
+                fieldLine("env", "environment JSON", readPath(draft, "env")),
+                fieldLine("logs.retentionDays", "retentionDays", readPath(draft, "logs.retentionDays")),
+                fieldLine("logs.maxBytes", "maxBytes", readPath(draft, "logs.maxBytes")),
+                fieldLine("logs.eventBufferSize", "eventBufferSize", readPath(draft, "logs.eventBufferSize")),
+                fieldLine("tools.scheduler.maxRunning", "maxRunning", readPath(draft, "tools.scheduler.maxRunning")),
+                fieldLine("tools.scheduler.maxRunningPerSession", "perSession", readPath(draft, "tools.scheduler.maxRunningPerSession")),
+                fieldLine("tools.scheduler.queueDepth", "queueDepth", readPath(draft, "tools.scheduler.queueDepth")),
+                fieldLine("tools.scheduler.queueDepthPerSession", "queuePerSession", readPath(draft, "tools.scheduler.queueDepthPerSession")),
+                fieldLine("tools.scheduler.queueTimeoutMs", "queueTimeoutMs", readPath(draft, "tools.scheduler.queueTimeoutMs")),
+                fieldLine("tools.scheduler.byTool", "byTool JSON", readPath(draft, "tools.scheduler.byTool"))
+            ];
         default:
             return ["Review normalized draft", JSON.stringify(draft)];
     }
 }
 
+function providerWizardFields(draft: Record<string, JsonValue>): Array<string | { id: string; text: string }> {
+    const provider = readPath(draft, "provider");
+    if (provider === "ssh") {
+        return [fieldLine("ssh.command", "ssh command", readPath(draft, "ssh.command"))];
+    }
+    if (provider !== "docker" && provider !== "podman") {
+        return ["No provider-specific settings."];
+    }
+
+    const mode = readPath(draft, "container.mode");
+    const common = [
+        choiceLine("container.mode", "container mode", mode),
+        ...(provider === "docker"
+            ? [fieldLine("dockerBinary", "docker binary", readPath(draft, "dockerBinary"))]
+            : [fieldLine("podmanBinary", "podman binary", readPath(draft, "podmanBinary"))])
+    ];
+    switch (mode) {
+        case "preset":
+            return [
+                ...common,
+                choiceLine("container.preset", "distro preset", readPath(draft, "container.preset")),
+                fieldLine("container.image", "image", readPath(draft, "container.image")),
+                ...managedContainerFields(draft)
+            ];
+        case "dockerfile":
+            return [
+                ...common,
+                fieldLine("container.build.context", "build context", readPath(draft, "container.build.context")),
+                fieldLine("container.build.dockerfile", "dockerfile", readPath(draft, "container.build.dockerfile")),
+                fieldLine("container.build.tag", "build tag", readPath(draft, "container.build.tag")),
+                ...managedContainerFields(draft)
+            ];
+        case "compose":
+            return [
+                ...common,
+                fieldLine("container.compose.file", "compose file", readPath(draft, "container.compose.file")),
+                fieldLine("container.compose.service", "compose service", readPath(draft, "container.compose.service")),
+                fieldLine("container.compose.projectName", "project name", readPath(draft, "container.compose.projectName"))
+            ];
+        case "existingImage":
+            return [
+                ...common,
+                fieldLine("container.image", "existing image", readPath(draft, "container.image")),
+                ...managedContainerFields(draft)
+            ];
+        case "existingStoppedContainer":
+            return [
+                ...common,
+                fieldLine("container.containerName", "stopped container", readPath(draft, "container.containerName")),
+                fieldLine("container.adoptLifecycle", "adopt lifecycle", readPath(draft, "container.adoptLifecycle"))
+            ];
+        default:
+            return common;
+    }
+}
+
+function managedContainerFields(draft: Record<string, JsonValue>): Array<{ id: string; text: string }> {
+    return [
+        fieldLine("container.containerName", "container name", readPath(draft, "container.containerName")),
+        fieldLine("container.user", "user", readPath(draft, "container.user")),
+        fieldLine("container.network", "network", readPath(draft, "container.network")),
+        fieldLine("container.mounts", "mounts JSON", readPath(draft, "container.mounts")),
+        fieldLine("container.env", "container env JSON", readPath(draft, "container.env"))
+    ];
+}
+
 function stepName(step: number): string {
-    return ["Basic", "Provider", "MCP", "Security / Approval", "Review"][step - 1] ?? "Review";
+    return ["Basic", "Provider", "MCP", "Security / Approval", "Runtime", "Review"][step - 1] ?? "Review";
 }

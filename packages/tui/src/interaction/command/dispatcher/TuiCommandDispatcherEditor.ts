@@ -46,8 +46,10 @@ export class TuiCommandDispatcherEditor {
             const key = "create";
             if (this.#store.getState().ui.formDrafts[key] === undefined) {
                 this.#store.setFormDraft(key, {
+                    approvalPolicy: { mode: "disabled" },
                     enabled: schema.defaultEnabled,
                     mcp: {
+                        auth: "none",
                         enabled: schema.defaultMcpEnabled,
                         tools: {
                             capabilities: [...schema.defaultMcpCapabilities],
@@ -205,9 +207,11 @@ export class TuiCommandDispatcherEditor {
                 ? (currentIndex - 1 + choices.length) % choices.length
                 : (currentIndex + 1) % choices.length;
             const choice = choices[currentIndex === -1 ? 0 : nextIndex]!;
-            const nextDraft = editor.kind === "connector" && (field === "web.auth" || field === "mcp.auth")
-                ? applyAuthModeChoice(draft, target.path, choice)
-                : setPath(draft, target.path, choice);
+            const nextDraft = editor.kind === "create"
+                ? applyCreateChoice(draft, field, choice, editor.schema)
+                : editor.kind === "connector" && (field === "web.auth" || field === "mcp.auth")
+                    ? applyAuthModeChoice(draft, target.path, choice)
+                    : setPath(draft, target.path, choice);
             this.#store.setFormDraft(target.key, nextDraft);
             this.#store.setEditor({ ...editor, editing: false, error: undefined });
             return true;
@@ -228,6 +232,18 @@ export class TuiCommandDispatcherEditor {
             }
             if (field === "container.mode") {
                 return editor.schema?.container.modes;
+            }
+            if (field === "container.preset") {
+                return editor.schema?.container.presets.map((entry) => entry.preset);
+            }
+            if (field === "mcp.auth") {
+                return ["none", "token", "oauth2"];
+            }
+            if (field === "security.mode") {
+                return ["disabled", "workspace"];
+            }
+            if (field === "approvalPolicy.mode") {
+                return ["disabled", "allow", "ask", "deny"];
             }
             return undefined;
         }
@@ -435,7 +451,7 @@ export class TuiCommandDispatcherEditor {
         if (editor?.kind !== "create") {
             return false;
         }
-        const step = Math.min(5, Math.max(1, (editor.step ?? 1) + (direction === "next" ? 1 : -1)));
+        const step = Math.min(6, Math.max(1, (editor.step ?? 1) + (direction === "next" ? 1 : -1)));
         this.#store.setEditor({ ...editor, editing: false, step });
         this.#selectFirstEditorItem();
         return true;
@@ -540,7 +556,13 @@ export class TuiCommandDispatcherEditor {
 }
 
 function inputText(value: JsonValue | undefined): string {
-    return Array.isArray(value) ? value.join(", ") : String(value ?? "");
+    if (Array.isArray(value)) {
+        return value.join(", ");
+    }
+    if (typeof value === "object" && value !== null) {
+        return JSON.stringify(value);
+    }
+    return String(value ?? "");
 }
 
 function readErrorMessage(error: unknown): string {
@@ -557,6 +579,83 @@ function describeApplyResult(result: JsonValue, restarted: boolean): string {
         return "Saved. Control restart is required for MCP changes.";
     }
     return record?.reloadRequired === true ? "Saved and hot-applied to future instance operations." : "Saved.";
+}
+
+
+function applyCreateChoice(
+    draft: Record<string, JsonValue>,
+    field: string,
+    choice: JsonValue,
+    schema: InstanceCreateSchema | undefined
+): Record<string, JsonValue> {
+    if (field === "mcp.auth") {
+        return applyAuthModeChoice(draft, "mcp.auth", choice);
+    }
+    if (field === "provider" && typeof choice === "string") {
+        let next = setPath(draft, "provider", choice);
+        for (const path of ["container", "dockerBinary", "podmanBinary", "ssh"]) {
+            next = deletePath(next, path);
+        }
+        if (choice === "ssh") {
+            return setPath(next, "ssh", { command: "" });
+        }
+        if (choice === "docker" || choice === "podman") {
+            const preset = schema?.container.presets[0];
+            next = setPath(next, "container", {
+                containerName: defaultContainerName(draft),
+                image: preset?.image ?? "",
+                mode: schema?.container.defaultMode ?? "preset",
+                preset: preset?.preset ?? ""
+            });
+        }
+        return next;
+    }
+    if (field === "container.mode" && typeof choice === "string") {
+        return setPath(draft, "container", defaultContainerDraft(choice, draft, schema));
+    }
+    if (field === "container.preset" && typeof choice === "string") {
+        const preset = schema?.container.presets.find((entry) => entry.preset === choice);
+        let next = setPath(draft, "container.preset", choice);
+        if (preset !== undefined) {
+            next = setPath(next, "container.image", preset.image);
+        }
+        return next;
+    }
+    return setPath(draft, field, choice);
+}
+
+function defaultContainerDraft(
+    mode: string,
+    draft: Record<string, JsonValue>,
+    schema: InstanceCreateSchema | undefined
+): Record<string, JsonValue> {
+    const containerName = defaultContainerName(draft);
+    switch (mode) {
+        case "preset": {
+            const preset = schema?.container.presets[0];
+            return {
+                containerName,
+                image: preset?.image ?? "",
+                mode,
+                preset: preset?.preset ?? ""
+            };
+        }
+        case "dockerfile":
+            return { build: { context: "", tag: `${containerName}:latest` }, containerName, mode };
+        case "compose":
+            return { compose: { file: "", service: "" }, mode };
+        case "existingImage":
+            return { containerName, image: "", mode };
+        case "existingStoppedContainer":
+            return { adoptLifecycle: false, containerName, mode };
+        default:
+            return { mode };
+    }
+}
+
+function defaultContainerName(draft: Record<string, JsonValue>): string {
+    const name = readPath(draft, "name");
+    return typeof name === "string" && name.length > 0 ? `devshell-${name}` : "devshell-instance";
 }
 
 function applyAuthModeChoice(

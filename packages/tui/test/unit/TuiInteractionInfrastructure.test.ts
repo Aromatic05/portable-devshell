@@ -780,6 +780,51 @@ test("Create flow uses a wizard with focusable fields and command buttons", asyn
     );
 });
 
+test("create wizard provider and container choices replace incompatible fields", async () => {
+    const harness = createHarness();
+    await openCreateWizard(harness);
+    const expandedKey = "instances:all:create-wizard";
+    harness.store.setFormDraft("create", {
+        approvalPolicy: { mode: "disabled" },
+        container: { containerName: "stale", image: "stale", mode: "existingImage" },
+        enabled: true,
+        mcp: { auth: "none", enabled: true, tools: { capabilities: ["read"], groups: ["file"] } },
+        name: "choice-test",
+        provider: "local",
+        security: { mode: "disabled" },
+        ssh: { command: "stale" },
+        workspace: "/workspace"
+    }, true);
+    harness.store.setSelectedDetailLine(expandedKey, "create-wizard:field:provider");
+
+    await harness.dispatch({ direction: "right", type: "editor.cursorMove" });
+    let draft = harness.store.getState().ui.formDrafts.create as Record<string, JsonValue>;
+    assert.equal(draft.provider, "ssh");
+    assert.deepEqual(draft.ssh, { command: "" });
+    assert.equal(draft.container, undefined);
+
+    await harness.dispatch({ direction: "right", type: "editor.cursorMove" });
+    draft = harness.store.getState().ui.formDrafts.create as Record<string, JsonValue>;
+    assert.equal(draft.provider, "docker");
+    assert.equal(draft.ssh, undefined);
+    assert.deepEqual(draft.container, {
+        containerName: "devshell-choice-test",
+        image: "",
+        mode: "preset",
+        preset: ""
+    });
+
+    harness.store.setEditor({ ...harness.store.getState().interaction.editor!, step: 2 });
+    harness.store.setSelectedDetailLine(expandedKey, "create-wizard:field:container.mode");
+    await harness.dispatch({ direction: "right", type: "editor.cursorMove" });
+    draft = harness.store.getState().ui.formDrafts.create as Record<string, JsonValue>;
+    assert.deepEqual(draft.container, {
+        build: { context: "", tag: "devshell-choice-test:latest" },
+        containerName: "devshell-choice-test",
+        mode: "dockerfile"
+    });
+});
+
 test("wizard validation keeps the draft and reports the control error", async () => {
     const harness = createHarness({
         onValidateInstanceCreateDraft: async () => {
