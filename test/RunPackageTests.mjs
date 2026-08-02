@@ -1,10 +1,11 @@
 import { globSync } from "node:fs";
 import { resolve } from "node:path";
 import { spawnSync } from "node:child_process";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const options = parseArguments(process.argv.slice(2));
 const cwd = process.cwd();
+const testTsconfig = fileURLToPath(new URL("../tsconfig.test.json", import.meta.url));
 const files = [];
 const seenFiles = new Set();
 for (const pattern of options.patterns) {
@@ -30,7 +31,11 @@ const args = [
 ];
 const result = spawnSync(process.execPath, args, {
     cwd,
-    env: process.env,
+    env: {
+        ...process.env,
+        TSX_TSCONFIG_PATH:
+            process.env.TSX_TSCONFIG_PATH ?? testTsconfig
+    },
     stdio: "inherit",
     windowsHide: true
 });
