@@ -106,9 +106,6 @@ enabled = true
 listenHost = "127.0.0.1"
 listenPort = 17890
 publicBaseUrl = "http://127.0.0.1:17890"
-
-[mcp.auth]
-mode = "none"
 ```
 
 确认实例配置中已经启用 MCP：
@@ -116,6 +113,8 @@ mode = "none"
 ```toml
 [mcp]
 enabled = true
+auth = "none"
+path = "/demo-local/mcp"
 
 [mcp.tools]
 groups = ["file", "bash", "artifact", "tmux", "todo", "context"]

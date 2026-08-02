@@ -19,12 +19,12 @@ endpoint 出现需要同时满足：
 1. 全局 `mcp.enabled = true`；
 2. 实例 `[mcp].enabled = true`。
 
-## 全局配置
+## 全局 listener 配置
 
 编辑 `~/.devshell/control/config.toml`：
 
 ```toml
-version = 1
+version = 2
 
 [control]
 logLevel = "info"
@@ -34,14 +34,11 @@ enabled = true
 listenHost = "127.0.0.1"
 listenPort = 17890
 publicBaseUrl = "http://127.0.0.1:17890"
-
-[mcp.auth]
-mode = "none"
 ```
 
-这只适合 localhost。公网暴露必须启用认证。
+全局 `[mcp]` 只管理 listener，不包含认证。认证由每个 instance 文件中的 `[mcp]` 独立配置。
 
-## 实例配置
+## Instance 配置与独立认证
 
 编辑 `~/.devshell/control/instances/demo-local.toml`：
 
@@ -54,13 +51,46 @@ workspace = "/absolute/path/to/workspace"
 
 [mcp]
 enabled = true
+auth = "none"
+path = "/demo-local/mcp"
 
 [mcp.tools]
 groups = ["file", "bash", "artifact", "tmux", "todo", "context"]
 capabilities = ["read", "write", "execute"]
 ```
 
-工具策略只通过 `[mcp.tools]` 下的 `groups` 和 `capabilities` 表达。
+同一 listener 下可以分别配置：
+
+```toml
+# instance A
+[mcp]
+enabled = true
+auth = "none"
+path = "/open-local/mcp"
+```
+
+```toml
+# instance B
+[mcp]
+enabled = true
+auth = "token"
+token = "replace-with-a-random-secret-of-at-least-32-bytes"
+path = "/token-local/mcp"
+```
+
+```toml
+# instance C
+[mcp]
+enabled = true
+auth = "oauth2"
+path = "/oauth-local/mcp"
+
+[mcp.oauth2]
+resourceName = "oauth-local"
+requiredScopes = ["mcp"]
+```
+
+工具策略只通过 `[mcp.tools]` 下的 `groups` 和 `capabilities` 表达。`path` 固定为 `/<instance>/mcp`，由 instance 名生成。
 
 ## 工具组与能力
 
@@ -107,18 +137,6 @@ capabilities = ["read", "write", "execute", "manage"]
 当前 endpoint 才会暴露实例管理工具。此时其他 worker 工具还会获得可选 `instance` 参数，用于把调用路由到另一个受管实例。
 
 这是高权限能力，不应默认用于公网 endpoint。
-
-## 自定义路径
-
-实例可以覆盖默认路径：
-
-```toml
-[mcp]
-enabled = true
-path = "/custom/mcp"
-```
-
-路径必须在同一个 MCP HTTP host 上保持唯一。
 
 ## 应用配置
 

@@ -101,6 +101,7 @@ export class McpOAuthProtectedResource {
                 next();
                 return;
             }
+            this.#ensureOfflineConsent(request);
             this.#runtime.provider.callback()(request, response);
         });
     }
@@ -121,6 +122,18 @@ export class McpOAuthProtectedResource {
             }
             next();
         });
+    }
+
+    #ensureOfflineConsent(request: { url?: string }): void {
+        const current = new URL(request.url ?? "/", "http://127.0.0.1");
+        if (current.pathname !== `${this.#runtime.basePath}/authorize`) return;
+        const scopes = new Set((current.searchParams.get("scope") ?? "").split(/\s+/u).filter(Boolean));
+        if (!scopes.has("offline_access")) return;
+        const prompts = new Set((current.searchParams.get("prompt") ?? "").split(/\s+/u).filter(Boolean));
+        if (prompts.has("consent")) return;
+        prompts.add("consent");
+        current.searchParams.set("prompt", [...prompts].join(" "));
+        request.url = `${current.pathname}${current.search}`;
     }
 
     #shouldHandleRequest(requestUrl: string | undefined): boolean {

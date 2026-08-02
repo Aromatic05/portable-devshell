@@ -154,12 +154,6 @@ function endpointPreview(mcp: Record<string, JsonValue>, configuredPath: JsonVal
     }
 }
 
-function isPublic(mcp: Record<string, JsonValue>): boolean {
-    const publicBaseUrl = readPath(mcp, "publicBaseUrl");
-    const host = readPath(mcp, "listenHost");
-    return (typeof publicBaseUrl === "string" && !/^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(?::|\/|$)/.test(publicBaseUrl)) || host === "0.0.0.0";
-}
-
 function runtimeStatus(
     state: TuiAppState,
     instance: Record<string, JsonValue>,

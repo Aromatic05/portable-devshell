@@ -51,8 +51,10 @@ worker 和 tmux 在 Unix 上仍维护各 instance 的独立运行目录与 socke
 
 ## 全局配置
 
+全局文件只配置 control、MCP listener 和 Web 管理界面。MCP 认证不在全局文件中配置，而是由每个 instance 独立决定。
+
 ```toml
-version = 1
+version = 2
 
 [control]
 logLevel = "info"
@@ -63,29 +65,80 @@ listenHost = "127.0.0.1"
 listenPort = 17890
 publicBaseUrl = "http://127.0.0.1:17890"
 
-[mcp.auth]
-mode = "none"
+[web]
+enabled = false
+listenHost = "127.0.0.1"
+listenPort = 17891
+publicBaseUrl = "http://127.0.0.1:17891/web"
+auth = "none"
 ```
 
-认证模式：
-
-```text
-none
-token
-oauth2
-```
-
-`token` 模式必须配置至少 32 字节的随机密钥：
+Web 认证支持 `none`、`token` 和 `oauth2`。`token` 模式直接在 `[web]` 中配置至少 32 字节的随机 token：
 
 ```toml
-[mcp.auth]
-mode = "token"
+[web]
+enabled = true
+listenHost = "127.0.0.1"
+listenPort = 17891
+publicBaseUrl = "https://devshell.example.com/web"
+auth = "token"
 token = "replace-with-a-random-secret-of-at-least-32-bytes"
 ```
 
-客户端必须发送完全匹配的 `Authorization: Bearer <token>`。配置文件会以当前用户可读写权限保存；不要把真实 token 提交到仓库。
+Web OAuth 使用独立的 `[web.oauth2]`：
 
-公网建议只使用 `oauth2`。
+```toml
+[web]
+enabled = true
+listenHost = "127.0.0.1"
+listenPort = 17891
+publicBaseUrl = "https://devshell.example.com/web"
+auth = "oauth2"
+
+[web.oauth2]
+resourceName = "portable-devshell-web"
+requiredScopes = ["web"]
+documentationUrl = "https://devshell.example.com/docs"
+```
+
+## Instance MCP 认证
+
+每个 instance 的 MCP endpoint 独立配置认证，因此同一个 listener 可以同时存在匿名、token 和 OAuth endpoint。
+
+匿名 instance：
+
+```toml
+[mcp]
+enabled = true
+auth = "none"
+path = "/demo-local/mcp"
+```
+
+Token instance：
+
+```toml
+[mcp]
+enabled = true
+auth = "token"
+token = "replace-with-a-random-secret-of-at-least-32-bytes"
+path = "/demo-token/mcp"
+```
+
+OAuth instance：
+
+```toml
+[mcp]
+enabled = true
+auth = "oauth2"
+path = "/demo-oauth/mcp"
+
+[mcp.oauth2]
+resourceName = "demo-oauth"
+requiredScopes = ["mcp"]
+documentationUrl = "https://devshell.example.com/docs"
+```
+
+Token 以明文保存在权限为 `0600` 的用户配置文件中。配置视图和 TUI 会用 `********` 遮蔽已有 token；提交该占位符会保留原 token。
 
 ## 本地实例配置
 
@@ -98,6 +151,7 @@ workspace = "/absolute/path/to/workspace"
 
 [mcp]
 enabled = true
+auth = "none"
 path = "/demo-local/mcp"
 
 [mcp.tools]
@@ -110,17 +164,21 @@ mode = "workspace"
 
 常用字段：
 
-- `version`：实例配置固定为 `2`；
+- `version`：全局和实例配置当前均为 `2`；
 - `name`：必须包含连字符；
 - `provider`：`local`、`ssh`、`docker`、`podman`、`reverse`；
 - `workspace`：worker 启动和工具运行的工作区；
-- `[mcp].enabled`：是否注册 MCP endpoint；
-- `[mcp].path`：可选，自定义 endpoint；
+- `[mcp].enabled`：是否注册该 instance 的 MCP endpoint；
+- `[mcp].auth`：该 instance 独立使用 `none`、`token` 或 `oauth2`；
+- `[mcp].token`：仅在 `auth = "token"` 时使用，至少 32 UTF-8 字节；
+- `[mcp].path`：固定为 `/<instance>/mcp`，不可自定义；
 - `[mcp.tools].groups`：启用的工具组；
 - `[mcp.tools].capabilities`：授予的 `read`、`write`、`execute`、`manage`；
 - `[security].mode`：`disabled` 或 `workspace`。
 
-实例配置只接受当前 schema；建议通过交互式创建或 TUI 生成后再按需编辑。
+Web auth 和 instance MCP auth 完全独立：修改 `[web]` 不会改变任何 instance endpoint；不同 instance 也可以使用不同认证模式和 token。
+
+全局 version 1 配置仅作为旧格式迁移入口读取。旧 `[mcp.auth]` 会在迁移时下沉到 instance，写回后统一成为 version 2；新配置不要继续使用旧结构。
 
 ## SSH 实例
 

@@ -208,11 +208,18 @@ test("oauth2 exposes protected resource metadata and accepts a valid bearer toke
         assert.equal(authorizationServerMetadata.status, 200);
         const metadata = await authorizationServerMetadata.json() as {
             authorization_endpoint: string;
+            code_challenge_methods_supported?: string[];
             issuer: string;
             registration_endpoint: string;
+            scopes_supported?: string[];
             token_endpoint: string;
+            token_endpoint_auth_methods_supported?: string[];
         };
         assert.equal(metadata.issuer, `http://127.0.0.1:${port}`);
+        assert.equal(metadata.code_challenge_methods_supported?.includes("S256"), true);
+        assert.equal(metadata.token_endpoint_auth_methods_supported?.includes("none"), true);
+        assert.equal(metadata.scopes_supported?.includes("offline_access"), true);
+        assert.equal(metadata.scopes_supported?.includes("mcp"), true);
 
         const clientRegistration = await fetch(metadata.registration_endpoint, {
             method: "POST",
@@ -221,9 +228,9 @@ test("oauth2 exposes protected resource metadata and accepts a valid bearer toke
             },
             body: JSON.stringify({
                 application_type: "native",
-                client_name: "codex-aromatic",
+                client_name: "ChatGPT",
                 grant_types: ["authorization_code", "refresh_token"],
-                redirect_uris: ["http://127.0.0.1:45678/callback"],
+                redirect_uris: ["https://chatgpt.com/connector/oauth/test-callback"],
                 response_types: ["code"],
                 token_endpoint_auth_method: "none"
             })
@@ -275,13 +282,33 @@ test("oauth2 exposes protected resource metadata and accepts a valid bearer toke
                 code,
                 code_verifier: verifier,
                 grant_type: "authorization_code",
-                redirect_uri: redirectUri
+                redirect_uri: redirectUri,
+                resource: endpoint
             })
         });
         assert.equal(tokenResponse.status, 200);
-        const tokens = await tokenResponse.json() as { access_token: string; expires_in: number };
+        const tokens = await tokenResponse.json() as {
+            access_token: string;
+            expires_in: number;
+            refresh_token?: string;
+        };
         assert.equal(typeof tokens.access_token, "string");
-        assert.equal(tokens.expires_in, 100 * 365 * 24 * 60 * 60);
+        assert.equal(typeof tokens.refresh_token, "string");
+        assert.equal(tokens.expires_in, 60 * 60);
+
+        const refreshResponse = await fetch(metadata.token_endpoint, {
+            method: "POST",
+            headers: { "content-type": "application/x-www-form-urlencoded" },
+            body: new URLSearchParams({
+                client_id: client.client_id,
+                grant_type: "refresh_token",
+                refresh_token: tokens.refresh_token!,
+                resource: endpoint
+            })
+        });
+        assert.equal(refreshResponse.status, 200);
+        const refreshedTokens = await refreshResponse.json() as { access_token?: string };
+        assert.equal(typeof refreshedTokens.access_token, "string");
 
         const rejectedByOtherNamespace = await fetch(`http://127.0.0.1:${port}/other/mcp`, {
             method: "POST",
@@ -298,7 +325,7 @@ test("oauth2 exposes protected resource metadata and accepts a valid bearer toke
             method: "POST",
             headers: {
                 accept: "application/json, text/event-stream",
-                authorization: `Bearer ${tokens.access_token}`,
+                authorization: `Bearer ${refreshedTokens.access_token}`,
                 "content-type": "application/json"
             },
             body: JSON.stringify(await readFixture("mcp-initialize.json"))

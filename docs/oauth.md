@@ -12,12 +12,12 @@ MCP client → HTTPS proxy/tunnel → 127.0.0.1:17890 → portable-devshell
 
 这样不需要直接把 control 的 HTTP 端口暴露到公网。
 
-## 全局配置
+## 全局 listener 配置
 
 编辑 `~/.devshell/control/config.toml`：
 
 ```toml
-version = 1
+version = 2
 
 [control]
 logLevel = "info"
@@ -27,28 +27,13 @@ enabled = true
 listenHost = "127.0.0.1"
 listenPort = 17890
 publicBaseUrl = "https://devshell.example.com"
-
-[mcp.auth]
-mode = "oauth2"
-
-[mcp.auth.oauth2]
-resourceName = "portable-devshell"
-requiredScopes = ["mcp"]
-documentationUrl = "https://devshell.example.com/docs"
 ```
 
-必需条件：
+全局文件不设置 MCP auth。它只确定所有 instance endpoint 共用的 listener 和公网基址。
 
-- `mcp.enabled = true`；
-- `publicBaseUrl` 与客户端实际访问的 HTTPS 根地址一致；
-- `mcp.auth.mode = "oauth2"`；
-- `resourceName` 非空。
+## Instance OAuth 配置
 
-`documentationUrl` 可选。
-
-## 实例配置
-
-每个要暴露的实例仍需单独启用 MCP：
+每个需要 OAuth 的 instance 独立配置：
 
 ```toml
 version = 2
@@ -59,11 +44,28 @@ workspace = "/absolute/path/to/workspace"
 
 [mcp]
 enabled = true
+auth = "oauth2"
+path = "/demo-local/mcp"
+
+[mcp.oauth2]
+resourceName = "demo-local"
+requiredScopes = ["mcp"]
+documentationUrl = "https://devshell.example.com/docs"
 
 [mcp.tools]
 groups = ["file", "bash", "artifact", "tmux", "todo", "context"]
 capabilities = ["read", "write", "execute"]
 ```
+
+必需条件：
+
+- 全局 `mcp.enabled = true`；
+- 全局 `publicBaseUrl` 与客户端实际访问的 HTTPS 根地址一致；
+- 目标 instance 的 `[mcp].enabled = true`；
+- 目标 instance 的 `[mcp].auth = "oauth2"`；
+- `[mcp.oauth2].resourceName` 非空。
+
+`documentationUrl` 可选。不同 instance 可以配置不同 OAuth scope；也可以让其他 instance 使用 `none` 或独立 token。
 
 ## 重启与审批
 

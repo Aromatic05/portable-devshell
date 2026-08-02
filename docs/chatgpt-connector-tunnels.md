@@ -15,6 +15,25 @@ https://<public-host>/<instance>/mcp
 
 两种方式都应保留本项目的 OAuth 2.1 认证；不要以“公网地址难以猜测”代替认证。
 
+## ChatGPT 兼容性范围
+
+当前实现已覆盖 ChatGPT 开发者模式连接远程 MCP server 所需的核心流程：
+
+- Streamable HTTP MCP endpoint；
+- `401` Bearer challenge 与 `resource_metadata`；
+- OAuth protected-resource metadata 和 authorization-server discovery；
+- Dynamic Client Registration；
+- public client、PKCE `S256` 和 ChatGPT 动态 callback URI；
+- authorization request 与 token request 中的 RFC 8707 `resource`；
+- 按 instance 校验 token audience 和 scope；
+- `offline_access`、refresh token 签发和 refresh grant；
+- token 撤销 endpoint；
+- OAuth client、grant、token、签名密钥和 Web 内置 client ID 持久化。
+
+Access token 默认有效期为 1 小时；refresh token、grant 和登录 session 默认保留 90 天。用户无需在 control 重启后重新注册 Web 内置 OAuth client。
+
+当前仍使用 DCR，不提供 Client ID Metadata Document。ChatGPT 当前兼容 DCR，因此这不阻塞连接；CIMD 可作为大规模、预注册客户端部署的后续增强。工具 schema 已提供名称、描述、输入和输出 schema，但尚未对全部 worker/control 工具建立经过审计的 MCP `annotations`。在完成显式工具语义建模前，不通过工具名或 capability 猜测 destructive/read-only 标记。
+
 ## 公共前提
 
 目标 instance 必须启用 MCP：
@@ -29,6 +48,12 @@ workspace = "/absolute/path/to/workspace"
 
 [mcp]
 enabled = true
+auth = "oauth2"
+path = "/demo-local/mcp"
+
+[mcp.oauth2]
+resourceName = "demo-local"
+requiredScopes = ["mcp"]
 
 [mcp.tools]
 groups = ["file", "bash", "artifact", "tmux", "todo", "context"]
@@ -44,13 +69,6 @@ enabled = true
 listenHost = "127.0.0.1"
 listenPort = 17890
 publicBaseUrl = "https://dev.example.com"
-
-[mcp.auth]
-mode = "oauth2"
-
-[mcp.auth.oauth2]
-resourceName = "portable-devshell"
-requiredScopes = ["mcp"]
 ```
 
 修改全局配置后重启 control 并启动目标 instance：
@@ -205,5 +223,5 @@ ChatGPT 发起注册和授权后，在本机 TUI 的 `OAuth` 面板依次批准�
 - 公开 endpoint 返回 `502`：确认隧道已连接，以及上游 `127.0.0.1:17890` 正在监听。
 - discovery 中出现 `http://`：确认 control 只监听 `127.0.0.1` 或 `::1`，并确认反向代理保留了 `Host`、`X-Forwarded-Host` 和 `X-Forwarded-Proto: https`。
 - ChatGPT 一直等待授权：打开 TUI 的 `OAuth` 面板，检查注册或授权请求是否待批准、被拒绝或已过期。
-- TUI 没有新请求：确认 `[mcp.auth] mode = "oauth2"`，并等待最多一秒让审批轮询刷新。
+- TUI 没有新请求：确认目标 instance 的 `[mcp] auth = "oauth2"`，并等待最多一秒让审批轮询刷新。
 - 工具调用被拒绝：OAuth 授权与 instance 的 `approvalPolicy` 独立；后者控制 MCP 工具实际执行。
