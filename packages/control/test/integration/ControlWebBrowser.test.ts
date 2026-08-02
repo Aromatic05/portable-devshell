@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
+import { createRequire } from "node:module";
 import { access, rm } from "node:fs/promises";
 import { createServer } from "node:net";
+import { join } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import test from "node:test";
 
 import { chromium, type Browser, type Page } from "playwright";
@@ -17,7 +20,6 @@ import {
 } from "@portable-devshell/shared";
 
 import { ControlChannelServer } from "../../src/server/channel/ControlChannelServer.ts";
-import { resolveControlWebAssetsDirectory } from "../../src/server/web/ControlWebAssets.ts";
 import { ControlWebOAuthFlow } from "../../src/server/web/ControlWebOAuthFlow.ts";
 import { ControlWebSessionService } from "../../src/server/web/ControlWebSessionService.ts";
 import { ControlWebSocketChannelProvider } from "../../src/server/web/ControlWebSocketChannelProvider.ts";
@@ -103,6 +105,8 @@ async function startBrowserRuntime(options: {
     const publicBaseUrl = `${origin}${options.prefix}`;
     const basePath = controlWebBasePath(publicBaseUrl);
     const storage = await createTestTempDirectory("web-browser");
+    const assetDirectory = join(storage, "web-assets");
+    await buildBrowserAssets(assetDirectory);
     const http = new HttpHost({ listenHost: "127.0.0.1", listenPort: port });
     const sessions = new ControlWebSessionService({
         auth: options.auth === "none"
@@ -117,7 +121,7 @@ async function startBrowserRuntime(options: {
     const channels = new ControlChannelServer({
         providers: [
             new ControlWebSocketChannelProvider({
-                assetDirectory: resolveControlWebAssetsDirectory(),
+                assetDirectory,
                 basePath,
                 http,
                 sessions,
@@ -175,6 +179,26 @@ async function startBrowserRuntime(options: {
             await rm(storage, { force: true, recursive: true });
         },
     };
+}
+
+async function buildBrowserAssets(outputDirectory: string): Promise<void> {
+    const require = createRequire(
+        new URL("../../../web/package.json", import.meta.url),
+    );
+    const viteModule = (await import(
+        pathToFileURL(require.resolve("vite")).href
+    )) as {
+        build(options: {
+            build: { emptyOutDir: boolean; outDir: string };
+            logLevel: "silent";
+            root: string;
+        }): Promise<unknown>;
+    };
+    await viteModule.build({
+        build: { emptyOutDir: true, outDir: outputDirectory },
+        logLevel: "silent",
+        root: fileURLToPath(new URL("../../../web/", import.meta.url)),
+    });
 }
 
 function createRouteSnapshot(calls: { hello: number; overview: number }): PrefixRouteSnapshot {
