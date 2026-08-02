@@ -941,24 +941,19 @@ test("config choices use angle selectors and replace incompatible provider field
     openEditorForBox(harness, "config", "configuration");
     harness.store.setFormDraft("config:alpha", {
         approvalPolicy: { mode: "ask" },
-        container: {
-            containerName: "devshell-alpha",
-            image: "archlinux:latest",
-            mode: "existingImage",
-        },
-        dockerBinary: "/usr/bin/docker",
         enabled: true,
         mcp: { enabled: true, path: "/alpha/mcp" },
         name: "alpha",
-        provider: "docker",
+        provider: "ssh",
         security: { mode: "disabled" },
+        ssh: { command: "ssh alpha.example" },
         workspace: "/workspace/alpha",
     });
 
     const general = expandBox(harness, "configuration");
     const security = expandBox(harness, "security");
     assert.equal(
-        general.expandedLines.some((line) => line.text.endsWith("<docker>")),
+        general.expandedLines.some((line) => line.text.endsWith("<ssh>")),
         true,
     );
     assert.equal(
@@ -971,7 +966,7 @@ test("config choices use angle selectors and replace incompatible provider field
     );
 
     const provider = general.expandedLines.find((line) =>
-        line.text.endsWith("<docker>"),
+        line.text.endsWith("<ssh>"),
     );
     assert.ok(provider?.id);
     harness.store.setMainFocusId(general.id);
@@ -984,10 +979,10 @@ test("config choices use angle selectors and replace incompatible provider field
         provider?: unknown;
         ssh?: { command?: unknown };
     };
-    assert.equal(switched.provider, "ssh");
+    assert.equal(switched.provider, "local");
     assert.equal(switched.container, undefined);
     assert.equal(switched.dockerBinary, undefined);
-    assert.deepEqual(switched.ssh, { command: "" });
+    assert.equal(switched.ssh, undefined);
 });
 test("config exposes reload, save-only, and save-and-restart semantics", () => {
     const harness = createHarness();
