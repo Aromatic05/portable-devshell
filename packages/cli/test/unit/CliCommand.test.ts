@@ -7,23 +7,60 @@ import { CliMain } from "../../src/CliMain.ts";
 test("CliMain handles control lifecycle commands and exit code mapping", async () => {
     const stdout = createBuffer();
     const stderr = createBuffer();
+    const lifecycleCalls: string[] = [];
+    const restoredInstances: string[] = [];
     const lifecycle = {
         async logs() {
             return "line-1\n";
         },
         async start() {
+            lifecycleCalls.push("start");
             return { instanceCount: 1, pid: 10, running: true };
         },
         async status() {
             return { instanceCount: 1, pid: 10, running: true };
         },
         async stop() {
+            lifecycleCalls.push("stop");
             return { instanceCount: 0, running: false };
         }
     };
 
     const cli = new CliMain({
-        createCliClients: () => testClients({}),
+        createCliClients: () => testClients({
+            async listInstances() {
+                return [
+                    {
+                        mcpEnabled: true,
+                        name: "running-local",
+                        snapshot: {
+                            connectionState: "connected",
+                            daemonState: "running",
+                            lastSeq: 1,
+                            name: "running-local",
+                            ready: true,
+                            status: "ready"
+                        }
+                    },
+                    {
+                        mcpEnabled: true,
+                        name: "stopped-local",
+                        snapshot: {
+                            connectionState: "disconnected",
+                            daemonState: "stopped",
+                            lastSeq: 0,
+                            name: "stopped-local",
+                            ready: false,
+                            status: "stopped"
+                        }
+                    }
+                ];
+            },
+            async startInstance(instance: string) {
+                restoredInstances.push(instance);
+                return { name: instance };
+            }
+        }),
         createLifecycleManager: async () => lifecycle,
         stderr,
         stdout
@@ -31,6 +68,12 @@ test("CliMain handles control lifecycle commands and exit code mapping", async (
 
     assert.equal(await cli.run(["start"]), 0);
     assert.match(stdout.flush(), /control: running/u);
+
+    lifecycleCalls.length = 0;
+    assert.equal(await cli.run(["restart"]), 0);
+    assert.match(stdout.flush(), /control: running/u);
+    assert.deepEqual(lifecycleCalls, ["stop", "start"]);
+    assert.deepEqual(restoredInstances, ["running-local"]);
 
     assert.equal(await cli.run(["status"]), 0);
     assert.match(stdout.flush(), /instances: 1/u);

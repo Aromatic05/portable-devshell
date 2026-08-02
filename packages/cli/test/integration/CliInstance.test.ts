@@ -245,6 +245,13 @@ async function runInteractiveCreateFlow(t: { after(callback: () => Promise<void>
     assert.equal(await cli.run(["instance", "start", "aromatic-pc"]), 0);
     assert.match(stdout.flush(), /status: ready/u);
 
+    const previousControlPid = controlPid;
+    assert.equal(await cli.run(["restart"]), 0);
+    assert.match(stdout.flush(), /control: running/u);
+    controlPid = await readControlPid(homeDirectory);
+    assert.notEqual(controlPid, previousControlPid);
+    await ensureProcessExit(previousControlPid);
+
     assert.equal(
         await cli.run([
             "instance",

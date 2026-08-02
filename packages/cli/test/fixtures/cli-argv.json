@@ -1,6 +1,7 @@
 [
     { "argv": [], "expected": { "kind": "control.status" } },
     { "argv": ["start"], "expected": { "kind": "control.start" } },
+    { "argv": ["restart"], "expected": { "kind": "control.restart" } },
     { "argv": ["tui"], "expected": { "kind": "tui" } },
     { "argv": ["instance", "create"], "expected": { "kind": "instance.create" } },
     { "argv": ["instance", "list"], "expected": { "kind": "instance.list" } },

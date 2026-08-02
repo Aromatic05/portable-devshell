@@ -88,6 +88,25 @@ export class CliMain {
             case "control.start":
                 this.#stdout.write(renderControlStatus(await (await this.#lifecycle()).start()));
                 return;
+            case "control.restart": {
+                const lifecycle = await this.#lifecycle();
+                const current = await lifecycle.status();
+                const instancesToRestore = current.running
+                    ? (await this.#clients.instance.list()).filter((entry) =>
+                        entry.snapshot.reverse === undefined &&
+                        (entry.snapshot.daemonState === "running" ||
+                            entry.snapshot.daemonState === "starting" ||
+                            entry.snapshot.daemonState === "stale")
+                    )
+                    : [];
+                await lifecycle.stop();
+                const status = await lifecycle.start();
+                for (const entry of instancesToRestore) {
+                    await this.#clients.runtime.start(entry.name);
+                }
+                this.#stdout.write(renderControlStatus(status));
+                return;
+            }
             case "control.stop":
                 this.#stdout.write(renderControlStatus(await (await this.#lifecycle()).stop()));
                 return;

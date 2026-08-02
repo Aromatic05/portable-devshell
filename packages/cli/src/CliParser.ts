@@ -4,6 +4,7 @@ import { CliRenderError } from "./render/CliRenderError.js";
 
 export type CliParsedCommand =
     | { kind: "control.logs" }
+    | { kind: "control.restart" }
     | { kind: "control.start" }
     | { kind: "control.status" }
     | { kind: "control.stop" }
@@ -32,6 +33,8 @@ export class CliParser {
         switch (argv[0]) {
             case "start":
                 return this.#expectNoExtra(argv, { kind: "control.start" });
+            case "restart":
+                return this.#expectNoExtra(argv, { kind: "control.restart" });
             case "stop":
                 return this.#expectNoExtra(argv, { kind: "control.stop" });
             case "status":
