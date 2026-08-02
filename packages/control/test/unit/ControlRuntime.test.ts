@@ -301,7 +301,9 @@ test("failed OAuth Web hot replacement restores the previous listener and OAuth 
     });
 
     await runtime.start();
-    assert.equal((await fetch(`${origin}/.well-known/oauth-protected-resource/web`)).status, 200);
+    assert.equal((await fetch(`${origin}/.well-known/oauth-protected-resource/web`, {
+        headers: { connection: "close" }
+    })).status, 200);
 
     const oauthStorage = mcp.webOauthDir;
     const oauthBackup = `${oauthStorage}.backup`;
