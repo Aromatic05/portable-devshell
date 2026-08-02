@@ -34,7 +34,7 @@ export interface ReverseConnectionGatewayOptions {
 
 export class ReverseConnectionGateway {
     readonly #connectionService: ReverseConnectionService;
-    readonly #publicBaseUrl: string;
+    #publicBaseUrl: string;
     readonly #webSocketServer = new WebSocketServer({
         clientTracking: false,
         noServer: true
@@ -43,6 +43,10 @@ export class ReverseConnectionGateway {
     constructor(options: ReverseConnectionGatewayOptions) {
         this.#publicBaseUrl = options.publicBaseUrl;
         this.#connectionService = new ReverseConnectionService(options);
+    }
+
+    setPublicBaseUrl(publicBaseUrl: string): void {
+        this.#publicBaseUrl = publicBaseUrl;
     }
 
     install(server: HttpHost): void {

@@ -74,10 +74,12 @@ export class ControlRuntime {
             const retired = await this.#mcp.replaceMcpHost(next);
             try {
                 const host = this.#mcp.host;
-                if (host !== undefined) this.#reverse.install(host.server);
+                if (host !== undefined) this.#reverse.install(host.server, next.mcp.publicBaseUrl);
                 await retired?.stop();
             } catch (error) {
                 await this.#mcp.restoreMcpHost(retired);
+                const host = this.#mcp.host;
+                if (host !== undefined) this.#reverse.install(host.server, _previous.mcp.publicBaseUrl);
                 throw error;
             }
         });

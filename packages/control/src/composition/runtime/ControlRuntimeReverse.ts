@@ -44,7 +44,14 @@ export class ControlRuntimeReverse {
         this.#gateway?.stop();
     }
 
-    install(server: Parameters<ReverseConnectionGateway["install"]>[0]): void {
+    install(
+        server: Parameters<ReverseConnectionGateway["install"]>[0],
+        publicBaseUrl?: string
+    ): void {
+        if (publicBaseUrl !== undefined) {
+            this.service?.setPublicBaseUrl(publicBaseUrl);
+            this.#gateway?.setPublicBaseUrl(publicBaseUrl);
+        }
         this.#gateway?.install(server);
     }
 }

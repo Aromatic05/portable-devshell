@@ -6,7 +6,7 @@ import { ReverseCredentialStore } from "./ReverseCredentialStore.js";
 export class ReverseCredentialService {
     readonly #credentialStore: ReverseCredentialStore;
     readonly #instanceRegistry: ReverseInstanceLookupPort;
-    readonly #publicBaseUrl: string;
+    #publicBaseUrl: string;
     #disconnect?: (instance: string) => void;
 
     constructor(options: {
@@ -17,6 +17,10 @@ export class ReverseCredentialService {
         this.#credentialStore = options.credentialStore;
         this.#instanceRegistry = options.instanceRegistry;
         this.#publicBaseUrl = options.publicBaseUrl;
+    }
+
+    setPublicBaseUrl(publicBaseUrl: string): void {
+        this.#publicBaseUrl = publicBaseUrl;
     }
 
     setDisconnectHandler(handler: (instance: string) => void): void {
