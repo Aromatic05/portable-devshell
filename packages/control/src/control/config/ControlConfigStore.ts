@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { chmod, mkdir, open, readFile, readdir, rename, rm } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { chmod, lstat, mkdir, open, readFile, readdir, rename, rm } from "node:fs/promises";
+import { basename, dirname, join } from "node:path";
 
 import {
     ConfigInputError,
@@ -43,6 +43,7 @@ export class ControlConfigStore {
 
     async readOrCreate(homeDirectory?: string): Promise<ControlConfig> {
         const paths = new ControlPathHome(homeDirectory);
+        await recoverConfigTransaction(paths);
         let globalConfig: ControlGlobalConfig | undefined;
         let legacyMcpAuth: ConfigMcpAuthDraft | undefined;
 
@@ -72,18 +73,37 @@ export class ControlConfigStore {
 
     async write(config: ControlConfig, homeDirectory?: string): Promise<void> {
         const paths = new ControlPathHome(homeDirectory);
+        await recoverConfigTransaction(paths);
         const validated = this.#validator.validate(config);
         const globalSource = this.#tomlCodec.encode(this.#globalDocument.encode(validated));
         const instanceSources = validated.instances.map((instance) => ({
+            fileName: basename(paths.instanceConfigFile(instance.name)),
             filePath: paths.instanceConfigFile(instance.name),
             source: this.#tomlCodec.encode(this.#instanceDocument.encode(instance))
         }));
 
         await secureDirectory(paths.controlHomeDir);
         await secureDirectory(paths.instancesDir);
-        await atomicWriteFile(paths.configFile, globalSource);
-        for (const entry of instanceSources) await atomicWriteFile(entry.filePath, entry.source);
-        await this.#removeStaleInstances(paths, new Set(instanceSources.map((entry) => entry.filePath)));
+        const transaction = await prepareConfigTransaction(
+            paths,
+            instanceSources.map((entry) => entry.fileName)
+        );
+        try {
+            await atomicWriteFile(paths.configFile, globalSource);
+            for (const entry of instanceSources) await atomicWriteFile(entry.filePath, entry.source);
+            await this.#removeStaleInstances(paths, new Set(instanceSources.map((entry) => entry.filePath)));
+            await commitConfigTransaction(transaction);
+        } catch (error) {
+            try {
+                await rollbackConfigTransaction(paths, transaction);
+            } catch (rollbackError) {
+                throw new AggregateError(
+                    [error, rollbackError],
+                    "Control configuration write failed and the previous generation could not be restored."
+                );
+            }
+            throw error;
+        }
     }
 
     async #readInstances(paths: ControlPathHome, legacyMcpAuth?: ConfigMcpAuthDraft): Promise<ControlInstanceConfig[]> {
@@ -133,6 +153,200 @@ export class ControlConfigStore {
             const filePath = join(paths.instancesDir, entry.name);
             if (!activeFiles.has(filePath)) await rm(filePath, { force: true });
         }
+    }
+}
+
+
+interface ConfigTransactionManifest {
+    existingGlobal: boolean;
+    existingInstances: string[];
+    nextInstances: string[];
+}
+
+interface PreparedConfigTransaction {
+    directory: string;
+    manifest: ConfigTransactionManifest;
+    markerFile: string;
+}
+
+async function prepareConfigTransaction(
+    paths: ControlPathHome,
+    nextInstances: string[]
+): Promise<PreparedConfigTransaction> {
+    const id = randomUUID();
+    const directory = join(paths.controlHomeDir, `.config-transaction-${id}`);
+    const markerFile = join(paths.controlHomeDir, ".config-transaction");
+    const backupDirectory = join(directory, "backup");
+    const backupInstancesDirectory = join(backupDirectory, "instances");
+    await secureDirectory(backupInstancesDirectory);
+
+    const globalSource = await readOptionalFile(paths.configFile);
+    if (globalSource !== undefined) {
+        await atomicWriteFile(join(backupDirectory, "config.toml"), globalSource);
+    }
+    const existingInstances = await listInstanceConfigFiles(paths.instancesDir);
+    for (const fileName of existingInstances) {
+        const source = await readFile(join(paths.instancesDir, fileName), "utf8");
+        await atomicWriteFile(join(backupInstancesDirectory, fileName), source);
+    }
+
+    const manifest: ConfigTransactionManifest = {
+        existingGlobal: globalSource !== undefined,
+        existingInstances,
+        nextInstances: [...nextInstances]
+    };
+    await atomicWriteFile(join(directory, "manifest.json"), JSON.stringify(manifest));
+    await atomicWriteFile(markerFile, id);
+    return { directory, manifest, markerFile };
+}
+
+async function recoverConfigTransaction(paths: ControlPathHome): Promise<void> {
+    const markerFile = join(paths.controlHomeDir, ".config-transaction");
+    const marker = await readOptionalFile(markerFile);
+    if (marker === undefined) {
+        return;
+    }
+    const id = marker.trim();
+    if (!/^[0-9a-f-]{36}$/u.test(id)) {
+        throw createError({
+            code: errorCodes.controlConfigLoadFailed,
+            details: { configFile: markerFile, phase: "recover" },
+            message: "Control configuration transaction marker is invalid.",
+            retryable: false
+        });
+    }
+    const directory = join(paths.controlHomeDir, `.config-transaction-${id}`);
+    let manifest: ConfigTransactionManifest;
+    try {
+        manifest = parseConfigTransactionManifest(
+            JSON.parse(await readFile(join(directory, "manifest.json"), "utf8")) as unknown
+        );
+    } catch (error) {
+        throw createError({
+            code: errorCodes.controlConfigLoadFailed,
+            cause: error,
+            details: { configFile: markerFile, phase: "recover" },
+            message: "Failed to recover the previous control configuration generation.",
+            retryable: false
+        });
+    }
+    await rollbackConfigTransaction(paths, { directory, manifest, markerFile });
+}
+
+async function rollbackConfigTransaction(
+    paths: ControlPathHome,
+    transaction: PreparedConfigTransaction
+): Promise<void> {
+    const backupDirectory = join(transaction.directory, "backup");
+    if (transaction.manifest.existingGlobal) {
+        await atomicWriteFile(
+            paths.configFile,
+            await readFile(join(backupDirectory, "config.toml"), "utf8")
+        );
+    } else {
+        await removeFileIfPresent(paths.configFile);
+    }
+
+    const allInstances = new Set([
+        ...transaction.manifest.existingInstances,
+        ...transaction.manifest.nextInstances
+    ]);
+    for (const fileName of allInstances) {
+        const target = join(paths.instancesDir, fileName);
+        if (transaction.manifest.existingInstances.includes(fileName)) {
+            await atomicWriteFile(
+                target,
+                await readFile(join(backupDirectory, "instances", fileName), "utf8")
+            );
+        } else {
+            await removeFileIfPresent(target);
+        }
+    }
+    await rm(transaction.markerFile, { force: true });
+    await syncDirectory(paths.controlHomeDir);
+    await rm(transaction.directory, { force: true, recursive: true });
+}
+
+async function commitConfigTransaction(transaction: PreparedConfigTransaction): Promise<void> {
+    await rm(transaction.markerFile, { force: true });
+    await syncDirectory(dirname(transaction.markerFile));
+    await rm(transaction.directory, { force: true, recursive: true });
+}
+
+function parseConfigTransactionManifest(value: unknown): ConfigTransactionManifest {
+    if (typeof value !== "object" || value === null || Array.isArray(value)) {
+        throw new Error("Configuration transaction manifest must be an object.");
+    }
+    const record = value as Record<string, unknown>;
+    if (
+        typeof record.existingGlobal !== "boolean" ||
+        !isSafeInstanceFileList(record.existingInstances) ||
+        !isSafeInstanceFileList(record.nextInstances)
+    ) {
+        throw new Error("Configuration transaction manifest is invalid.");
+    }
+    return {
+        existingGlobal: record.existingGlobal,
+        existingInstances: record.existingInstances,
+        nextInstances: record.nextInstances
+    };
+}
+
+function isSafeInstanceFileList(value: unknown): value is string[] {
+    return Array.isArray(value) && value.every((entry) =>
+        typeof entry === "string" &&
+        /^[A-Za-z0-9-]+\.toml$/u.test(entry) &&
+        !entry.startsWith("-")
+    );
+}
+
+async function listInstanceConfigFiles(directory: string): Promise<string[]> {
+    try {
+        return (await readdir(directory, { encoding: "utf8", withFileTypes: true }))
+            .filter((entry) => entry.isFile() && entry.name.endsWith(".toml"))
+            .map((entry) => entry.name)
+            .sort((left, right) => left.localeCompare(right));
+    } catch (error) {
+        if (isFileMissingError(error)) {
+            return [];
+        }
+        throw error;
+    }
+}
+
+async function readOptionalFile(filePath: string): Promise<string | undefined> {
+    try {
+        return await readFile(filePath, "utf8");
+    } catch (error) {
+        if (isFileMissingError(error)) {
+            return undefined;
+        }
+        throw error;
+    }
+}
+
+async function removeFileIfPresent(filePath: string): Promise<void> {
+    try {
+        const entry = await lstat(filePath);
+        if (entry.isFile()) {
+            await rm(filePath, { force: true });
+        }
+    } catch (error) {
+        if (!isFileMissingError(error)) {
+            throw error;
+        }
+    }
+}
+
+async function syncDirectory(directory: string): Promise<void> {
+    if (process.platform === "win32") {
+        return;
+    }
+    const handle = await open(directory, "r");
+    try {
+        await handle.sync();
+    } finally {
+        await handle.close();
     }
 }
 

@@ -1,6 +1,7 @@
 import { createError, errorCodes, type ControlConfig } from "@portable-devshell/shared";
 
 import { ControlConfigStore } from "../../control/config/ControlConfigStore.js";
+import { ControlConfigMutationLock } from "../../control/config/ControlConfigMutationLock.js";
 import { InstanceRegistry } from "../../control/instance/registry/InstanceRegistry.js";
 import { InstanceRegistryFactory } from "../../control/instance/registry/InstanceRegistryFactory.js";
 
@@ -12,6 +13,7 @@ export interface ControlRuntimeStateOptions {
 
 export class ControlRuntimeState {
     readonly configStore: ControlConfigStore;
+    readonly configMutations = new ControlConfigMutationLock();
     readonly homeDirectory?: string;
     readonly #instanceRegistryFactory: InstanceRegistryFactory;
     #config?: ControlConfig;

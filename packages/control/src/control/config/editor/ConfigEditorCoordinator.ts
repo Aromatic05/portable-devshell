@@ -27,6 +27,7 @@ import { InstanceFactory } from "../../instance/InstanceFactory.js";
 import type { InstanceRegistry } from "../../instance/registry/InstanceRegistry.js";
 import { McpEndpointFactory } from "../../../composition/McpEndpointFactory.js";
 import { ControlConfigValidator } from "../ControlConfigValidator.js";
+import { ControlConfigMutationLock, type ControlConfigMutationRunner } from "../ControlConfigMutationLock.js";
 import { HttpEndpointPreflight } from "../../../server/http/HttpEndpointPreflight.js";
 import {
     buildApplyResult,
@@ -50,6 +51,7 @@ interface ConfigEditorCoordinatorOptions {
     instanceConfigMapper?: InstanceFactory;
     instanceRegistry: InstanceRegistry;
     mcpEndpointConfigMapper?: McpEndpointFactory;
+    mutationRunner?: ControlConfigMutationRunner;
     runtimeApply?: { apply(previous: ControlConfig, next: ControlConfig): Promise<boolean> };
     setConfig: (config: ControlConfig) => void;
     runtimePreflight?: { assertAvailable(previous: ControlConfig, next: ControlConfig): Promise<void> };
@@ -65,6 +67,7 @@ export class ConfigEditorCoordinator {
     readonly #instanceConfigMapper: InstanceFactory;
     readonly #instanceRegistry: InstanceRegistry;
     readonly #mcpEndpointConfigMapper: McpEndpointFactory;
+    readonly #mutationRunner: ControlConfigMutationRunner;
     readonly #setConfig: (config: ControlConfig) => void;
     readonly #runtimePreflight: { assertAvailable(previous: ControlConfig, next: ControlConfig): Promise<void> };
     readonly #runtimeApply?: { apply(previous: ControlConfig, next: ControlConfig): Promise<boolean> };
@@ -80,6 +83,7 @@ export class ConfigEditorCoordinator {
         this.#instanceConfigMapper = options.instanceConfigMapper ?? new InstanceFactory();
         this.#instanceRegistry = options.instanceRegistry;
         this.#mcpEndpointConfigMapper = options.mcpEndpointConfigMapper ?? new McpEndpointFactory();
+        this.#mutationRunner = options.mutationRunner ?? new ControlConfigMutationLock();
         this.#setConfig = options.setConfig;
         this.#runtimePreflight = options.runtimePreflight ?? new HttpEndpointPreflight();
         this.#runtimeApply = options.runtimeApply;
@@ -97,6 +101,10 @@ export class ConfigEditorCoordinator {
     }
 
     async updateConfig(params: JsonValue | undefined): Promise<JsonValue> {
+        return await this.#mutationRunner.runExclusive(async () => await this.#updateConfig(params));
+    }
+
+    async #updateConfig(params: JsonValue | undefined): Promise<JsonValue> {
         const request = this.#readConfigInput(() => parseConfigBatchUpdateRequest(params));
         const currentConfig = this.#getConfig();
         const instanceRequest = request.instance;
@@ -168,6 +176,10 @@ export class ConfigEditorCoordinator {
     }
 
     async updateInstanceConfig(params: JsonValue | undefined): Promise<JsonValue> {
+        return await this.#mutationRunner.runExclusive(async () => await this.#updateInstanceConfig(params));
+    }
+
+    async #updateInstanceConfig(params: JsonValue | undefined): Promise<JsonValue> {
         const request = this.#readConfigInput(() => parseConfigUpdateInstanceRequest(params));
         const currentConfig = this.#getConfig();
         const existing = currentConfig.instances.find((entry) => entry.name === request.instanceName);
@@ -199,6 +211,10 @@ export class ConfigEditorCoordinator {
     }
 
     async updateMcpConfig(params: JsonValue | undefined): Promise<JsonValue> {
+        return await this.#mutationRunner.runExclusive(async () => await this.#updateMcpConfig(params));
+    }
+
+    async #updateMcpConfig(params: JsonValue | undefined): Promise<JsonValue> {
         const request = this.#readConfigInput(() => parseConfigUpdateMcpRequest(params));
         const currentConfig = this.#getConfig();
         const global = this.#readConfigInput(() =>
@@ -217,6 +233,10 @@ export class ConfigEditorCoordinator {
     }
 
     async updateWebConfig(params: JsonValue | undefined): Promise<JsonValue> {
+        return await this.#mutationRunner.runExclusive(async () => await this.#updateWebConfig(params));
+    }
+
+    async #updateWebConfig(params: JsonValue | undefined): Promise<JsonValue> {
         const request = this.#readConfigInput(() => parseConfigUpdateWebRequest(params));
         const currentConfig = this.#getConfig();
         const global = this.#readConfigInput(() =>
@@ -235,6 +255,10 @@ export class ConfigEditorCoordinator {
     }
 
     async deleteInstance(params: JsonValue | undefined): Promise<JsonValue> {
+        return await this.#mutationRunner.runExclusive(async () => await this.#deleteInstance(params));
+    }
+
+    async #deleteInstance(params: JsonValue | undefined): Promise<JsonValue> {
         const { instanceName } = this.#readConfigInput(() => parseConfigInstanceTargetRequest(params));
         const currentConfig = this.#getConfig();
         const existing = currentConfig.instances.find((entry) => entry.name === instanceName);
@@ -256,13 +280,17 @@ export class ConfigEditorCoordinator {
     }
 
     async enableInstance(params: JsonValue | undefined): Promise<JsonValue> {
-        const { instanceName } = this.#readConfigInput(() => parseConfigInstanceTargetRequest(params));
-        return await this.#setInstanceEnabled(instanceName, true);
+        return await this.#mutationRunner.runExclusive(async () => {
+            const { instanceName } = this.#readConfigInput(() => parseConfigInstanceTargetRequest(params));
+            return await this.#setInstanceEnabled(instanceName, true);
+        });
     }
 
     async disableInstance(params: JsonValue | undefined): Promise<JsonValue> {
-        const { instanceName } = this.#readConfigInput(() => parseConfigInstanceTargetRequest(params));
-        return await this.#setInstanceEnabled(instanceName, false);
+        return await this.#mutationRunner.runExclusive(async () => {
+            const { instanceName } = this.#readConfigInput(() => parseConfigInstanceTargetRequest(params));
+            return await this.#setInstanceEnabled(instanceName, false);
+        });
     }
 
     applyConfig(): JsonValue {

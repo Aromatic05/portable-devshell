@@ -22,6 +22,7 @@ import { InstanceFactory } from "../InstanceFactory.js";
 import type { InstanceRegistry } from "../registry/InstanceRegistry.js";
 import { McpEndpointFactory } from "../../../composition/McpEndpointFactory.js";
 import { ControlConfigValidator } from "../../config/ControlConfigValidator.js";
+import { ControlConfigMutationLock, type ControlConfigMutationRunner } from "../../config/ControlConfigMutationLock.js";
 import { listInstanceCreateProviders } from "./InstanceCreateProviderCatalog.js";
 
 const containerPresets = defaultConfigNormalizeContext.containerPresets satisfies readonly InstanceContainerPresetSchema[];
@@ -55,6 +56,7 @@ export interface InstanceCreateCoordinatorOptions {
     instanceRegistry: InstanceRegistry;
     platform?: NodeJS.Platform;
     mcpEndpointConfigMapper?: McpEndpointFactory;
+    mutationRunner?: ControlConfigMutationRunner;
     setConfig: (config: ControlConfig) => void;
     validator?: ControlConfigValidator;
 }
@@ -68,6 +70,7 @@ export class InstanceCreateCoordinator {
     readonly #instanceConfigMapper: InstanceFactory;
     readonly #instanceRegistry: InstanceRegistry;
     readonly #mcpEndpointConfigMapper: McpEndpointFactory;
+    readonly #mutationRunner: ControlConfigMutationRunner;
     readonly #platform: NodeJS.Platform;
     readonly #setConfig: (config: ControlConfig) => void;
     readonly #validator: ControlConfigValidator;
@@ -81,6 +84,7 @@ export class InstanceCreateCoordinator {
         this.#instanceConfigMapper = options.instanceConfigMapper ?? new InstanceFactory();
         this.#instanceRegistry = options.instanceRegistry;
         this.#mcpEndpointConfigMapper = options.mcpEndpointConfigMapper ?? new McpEndpointFactory();
+        this.#mutationRunner = options.mutationRunner ?? new ControlConfigMutationLock();
         this.#platform = options.platform ?? process.platform;
         this.#setConfig = options.setConfig;
         this.#validator = options.validator ?? new ControlConfigValidator();
@@ -100,10 +104,20 @@ export class InstanceCreateCoordinator {
     }
 
     async createInstance(params: JsonValue | undefined): Promise<InstanceCreateResult> {
-        return await this.#createNormalized(this.#normalizeDraft(params));
+        const normalized = this.#normalizeDraft(params);
+        return await this.#mutationRunner.runExclusive(async () => await this.#createNormalized(normalized));
     }
 
     async createSshInstanceFromMcp(
+        sourceInstanceName: string,
+        input: McpSshInstanceCreateInput
+    ): Promise<InstanceCreateResult> {
+        return await this.#mutationRunner.runExclusive(async () =>
+            await this.#createSshInstanceFromMcp(sourceInstanceName, input)
+        );
+    }
+
+    async #createSshInstanceFromMcp(
         sourceInstanceName: string,
         input: McpSshInstanceCreateInput
     ): Promise<InstanceCreateResult> {

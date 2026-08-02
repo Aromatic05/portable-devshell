@@ -56,6 +56,7 @@ export class ControlRuntimeMcp {
             getMcpInstanceGateway: () => gatewayHolder.value,
             homeDirectory: options.state.homeDirectory,
             instanceRegistry: options.state.instances,
+            mutationRunner: options.state.configMutations,
             setConfig: (config) => options.state.setConfig(config)
         });
         this.instanceGateway = new McpInstanceGatewayControl({
@@ -83,6 +84,7 @@ export class ControlRuntimeMcp {
             getMcpInstanceGateway: () => this.instanceGateway,
             homeDirectory: options.state.homeDirectory,
             instanceRegistry: options.state.instances,
+            mutationRunner: options.state.configMutations,
             runtimeApply: {
                 apply: async (previous, next) => await this.#applyConfig(previous, next)
             },

@@ -7,6 +7,7 @@ export * from "./control/artifact/host/ArtifactHostModel.js";
 export * from "./control/config/editor/ConfigEditorCoordinator.js";
 export * from "./control/config/ControlConfigDefaults.js";
 export * from "./control/config/ControlConfigStore.js";
+export * from "./control/config/ControlConfigMutationLock.js";
 export * from "./control/config/toml/ControlConfigTomlCodec.js";
 export * from "./control/config/toml/ControlConfigTomlDocument.js";
 export * from "./control/config/ControlConfigValidator.js";
