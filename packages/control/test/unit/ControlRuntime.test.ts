@@ -301,9 +301,11 @@ test("failed OAuth Web hot replacement restores the previous listener and OAuth 
     });
 
     await runtime.start();
-    assert.equal((await fetch(`${origin}/.well-known/oauth-protected-resource/web`, {
+    const initialMetadata = await fetch(`${origin}/.well-known/oauth-protected-resource/web`, {
         headers: { connection: "close" }
-    })).status, 200);
+    });
+    assert.equal(initialMetadata.status, 200);
+    await initialMetadata.arrayBuffer();
 
     const oauthStorage = mcp.webOauthDir;
     const oauthBackup = `${oauthStorage}.backup`;
@@ -323,8 +325,14 @@ test("failed OAuth Web hot replacement restores the previous listener and OAuth 
     assert.equal(persisted.web.auth.mode, "oauth2");
     if (persisted.web.auth.mode !== "oauth2") throw new Error("restored Web auth mode is not oauth2");
     assert.equal(persisted.web.auth.oauth2.resourceName, "web-before");
-    assert.equal((await fetch(`${origin}/web/session`)).status, 401);
-    const restoredMetadata = await fetch(`${origin}/.well-known/oauth-protected-resource/web`);
+    const restoredSession = await fetch(`${origin}/web/session`, {
+        headers: { connection: "close" }
+    });
+    assert.equal(restoredSession.status, 401);
+    await restoredSession.arrayBuffer();
+    const restoredMetadata = await fetch(`${origin}/.well-known/oauth-protected-resource/web`, {
+        headers: { connection: "close" }
+    });
     assert.equal(restoredMetadata.status, 200);
     assert.equal((await restoredMetadata.json() as { resource_name: string }).resource_name, "web-before");
 });
