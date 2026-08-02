@@ -170,7 +170,3 @@ export class TuiCommandDispatcherOverlay {
         return true;
     }
 }
-
-function readErrorMessage(error: unknown): string {
-    return error instanceof Error ? error.message : String(error);
-}

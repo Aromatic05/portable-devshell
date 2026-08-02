@@ -47,7 +47,6 @@ export class McpEndpointDispatch {
     readonly #contextMessage: McpEndpointHandlerContextMessage;
     readonly #contextRegistry: McpContextRegistry;
     readonly #environment: McpEndpointHandlerEnvironment;
-    readonly #gateway?: McpInstanceGateway;
     readonly #instance: McpEndpointHandlerInstance;
     readonly #instanceName: string;
     readonly #todo: McpEndpointHandlerTodo;
@@ -57,7 +56,6 @@ export class McpEndpointDispatch {
     constructor(options: McpEndpointDispatchOptions) {
         this.#catalog = options.catalog;
         this.#contextRegistry = options.contextRegistry ?? new McpContextRegistry();
-        this.#gateway = options.gateway;
         this.#instanceName = options.instanceName;
         this.#worker = options.worker;
         const controlOptions = {
