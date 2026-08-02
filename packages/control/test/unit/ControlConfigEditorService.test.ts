@@ -178,10 +178,12 @@ test("config batch preflight failure leaves every requested scope unchanged", as
     }
 });
 
-test("config view and validation mask the web token while updateWeb preserves the masked secret", async () => {
+test("config view and validation mask all tokens while updates preserve masked secrets", async () => {
     const strongToken = "a".repeat(48);
+    const instanceToken = "instance-" + "b".repeat(48);
     let config = createConfig();
     config.web.auth = { mode: "token", token: strongToken };
+    config.instances[0]!.mcp.auth = { mode: "token", token: instanceToken };
     const service = new ConfigEditorCoordinator({
         configStore: {
             async write(nextConfig: ControlConfig) {
@@ -202,6 +204,8 @@ test("config view and validation mask the web token while updateWeb preserves th
     assert.equal(view.web.auth, "token");
     assert.equal(view.web.token, MASKED_CONFIG_TOKEN);
     assert.ok(!JSON.stringify(view).includes(strongToken));
+    assert.equal((view.instances[0]?.mcp as { token?: string }).token, MASKED_CONFIG_TOKEN);
+    assert.ok(!JSON.stringify(view).includes(instanceToken));
 
     const draft = {
         ...view,
@@ -213,6 +217,13 @@ test("config view and validation mask the web token while updateWeb preserves th
     const validated = service.validateConfigDraft(draft as unknown as JsonValue) as { web: { token?: string } };
     assert.equal(validated.web.token, MASKED_CONFIG_TOKEN);
     assert.ok(!JSON.stringify(validated).includes(strongToken));
+    assert.ok(!JSON.stringify(validated).includes(instanceToken));
+
+    await service.updateInstanceConfig({
+        instanceName: config.instances[0]!.name,
+        patch: { mcp: { auth: "token", token: MASKED_CONFIG_TOKEN } }
+    });
+    assert.deepEqual(config.instances[0]!.mcp.auth, { mode: "token", token: instanceToken });
 
     await service.updateWebConfig({ patch: { auth: "token", token: MASKED_CONFIG_TOKEN } });
     assert.deepEqual(config.web.auth, { mode: "token", token: strongToken });

@@ -92,7 +92,7 @@ export class ConfigEditorCoordinator {
 
     validateConfigDraft(params: JsonValue | undefined): JsonValue {
         const draft = this.#readConfigInput(() => parseConfigDraft(params));
-        const config = this.#readConfigInput(() => normalizeConfigDraft(this.#resolveMaskedWebToken(draft)));
+        const config = this.#readConfigInput(() => normalizeConfigDraft(this.#resolveMaskedTokens(draft)));
         return toConfigView(this.#validateConfig(config)) as unknown as JsonValue;
     }
 
@@ -400,10 +400,19 @@ export class ConfigEditorCoordinator {
         return this.#validator.validate(config);
     }
 
-    #resolveMaskedWebToken(draft: ConfigDraft): ConfigDraft {
-        const auth = this.#getConfig().web.auth;
-        if (draft.web?.token !== MASKED_CONFIG_TOKEN || auth.mode !== "token") return draft;
-        return { ...draft, web: { ...draft.web, token: auth.token } };
+    #resolveMaskedTokens(draft: ConfigDraft): ConfigDraft {
+        const current = this.#getConfig();
+        const webAuth = current.web.auth;
+        const web = draft.web?.token === MASKED_CONFIG_TOKEN && webAuth.mode === "token"
+            ? { ...draft.web, token: webAuth.token }
+            : draft.web;
+        const instances = draft.instances?.map((instance) => {
+            if (instance.mcp?.token !== MASKED_CONFIG_TOKEN) return instance;
+            const existing = current.instances.find((candidate) => candidate.name === instance.name);
+            if (existing?.mcp.auth.mode !== "token") return instance;
+            return { ...instance, mcp: { ...instance.mcp, token: existing.mcp.auth.token } };
+        });
+        return { ...draft, web, instances };
     }
 
     #readConfigInput<T>(read: () => T): T {

@@ -82,6 +82,78 @@ test("one OAuth authorization transaction shares approval across login and conse
     }
 });
 
+test("OAuth approval reuse is bound to the complete authorization request", async () => {
+    const storageDir = await mkdtemp(join(tmpdir(), "portable-devshell-oauth-request-binding-"));
+    const service = new McpOAuthApprovalService(storageDir);
+
+    try {
+        await service.warmup();
+        const registration = await service.registerClient({
+            clientId: "chatgpt",
+            clientName: "ChatGPT",
+            redirectUris: ["https://chatgpt.com/callback"]
+        });
+        await service.decide(registration.approvalId, "approve", "tui");
+
+        const read = await service.requestAuthorization("read-login", "shared-pkce", {
+            clientId: "chatgpt",
+            clientName: "ChatGPT",
+            redirectUris: ["https://chatgpt.com/callback"],
+            requestedResources: ["https://example.test/read/mcp"],
+            requestedScopes: ["openid", "read"]
+        });
+        await service.decide(read.approvalId, "approve", "tui");
+
+        const manage = await service.requestAuthorization("manage-login", "shared-pkce", {
+            clientId: "chatgpt",
+            clientName: "ChatGPT",
+            redirectUris: ["https://chatgpt.com/other-callback"],
+            requestedResources: ["https://example.test/admin/mcp"],
+            requestedScopes: ["openid", "manage"]
+        });
+
+        assert.notEqual(manage.approvalId, read.approvalId);
+        assert.equal(manage.status, "pending");
+        assert.equal((await service.list()).filter((request) => request.kind === "authorization").length, 2);
+    } finally {
+        await rm(storageDir, { force: true, recursive: true });
+    }
+});
+
+test("completed OAuth authorization transactions cannot reuse a prior approval", async () => {
+    const storageDir = await mkdtemp(join(tmpdir(), "portable-devshell-oauth-transaction-complete-"));
+    const service = new McpOAuthApprovalService(storageDir);
+
+    try {
+        await service.warmup();
+        const registration = await service.registerClient({
+            clientId: "chatgpt",
+            clientName: "ChatGPT",
+            redirectUris: ["https://chatgpt.com/callback"]
+        });
+        await service.decide(registration.approvalId, "approve", "tui");
+        const input = {
+            clientId: "chatgpt",
+            clientName: "ChatGPT",
+            redirectUris: ["https://chatgpt.com/callback"],
+            requestedResources: ["https://example.test/demo/mcp"],
+            requestedScopes: ["openid", "mcp"]
+        };
+
+        const first = await service.requestAuthorization("login-1", "pkce-flow-1", input);
+        await service.decide(first.approvalId, "approve", "tui");
+        const consent = await service.requestAuthorization("consent-1", "pkce-flow-1", input);
+        assert.equal(consent.approvalId, first.approvalId);
+        await service.completeAuthorization("consent-1");
+
+        const replay = await service.requestAuthorization("login-2", "pkce-flow-1", input);
+        assert.notEqual(replay.approvalId, first.approvalId);
+        assert.equal(replay.status, "pending");
+    } finally {
+        await rm(storageDir, { force: true, recursive: true });
+    }
+});
+
 test("OAuth approvals expire after five-minute policy is exceeded", async () => {
     const storageDir = await mkdtemp(join(tmpdir(), "portable-devshell-oauth-approval-expiry-"));
     let now = 0;

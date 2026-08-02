@@ -14,6 +14,14 @@ export function secretFieldLine(id: string, label: string, value: JsonValue | un
     };
 }
 
+export function secretRecordFieldLine(id: string, label: string, value: JsonValue | undefined): { id: string; text: string } {
+    const keys = typeof value === "object" && value !== null && !Array.isArray(value)
+        ? Object.keys(value).sort((left, right) => left.localeCompare(right))
+        : [];
+    const display = keys.map((key) => `${key}=********`).join(", ");
+    return { id: `field:${id}`, text: `${label.padEnd(18, " ")} [ ${display} ]  (secret JSON)` };
+}
+
 export function choiceLine(id: string, label: string, value: JsonValue | undefined): { id: string; text: string } {
     return { id: `field:${id}`, text: `${label.padEnd(18, " ")} <${displayValue(value)}>` };
 }

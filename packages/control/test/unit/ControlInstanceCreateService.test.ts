@@ -85,6 +85,38 @@ test("instance create validates existing stopped container drafts with adoptLife
     });
 });
 
+test("instance create validation summary never returns secret values", () => {
+    const service = createService("linux");
+
+    const summary = service.validateDraft({
+        container: {
+            containerName: "devshell-demo-docker",
+            env: { CONTAINER_TOKEN: "container-secret" },
+            image: "archlinux:latest",
+            mode: "existingImage"
+        },
+        env: { API_TOKEN: "instance-secret" },
+        mcp: {
+            auth: "token",
+            enabled: true,
+            token: "mcp-secret-" + "x".repeat(32)
+        },
+        name: "demo-docker",
+        provider: "docker",
+        workspace: "/workspace"
+    });
+
+    const serialized = JSON.stringify(summary);
+    assert.equal(serialized.includes("instance-secret"), false);
+    assert.equal(serialized.includes("container-secret"), false);
+    assert.equal(serialized.includes("mcp-secret-"), false);
+    assert.deepEqual(summary.env, { API_TOKEN: "********" });
+    assert.deepEqual(
+        summary.container?.mode === "existingImage" ? summary.container.env : undefined,
+        { CONTAINER_TOKEN: "********" }
+    );
+});
+
 function createService(platform?: NodeJS.Platform) {
     let config = createDefaultControlConfig();
 

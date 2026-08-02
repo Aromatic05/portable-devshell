@@ -1,3 +1,5 @@
+import { join } from "node:path";
+
 import { controlWebBasePath } from "@portable-devshell/shared";
 
 import { McpOAuthProtectedResource, type HttpHost } from "@portable-devshell/mcp";
@@ -176,6 +178,7 @@ export class ControlRuntime {
 
         return new ControlWebOAuthFlow({
             basePath,
+            clientStateFile: join(this.#mcp.webOauthDir, "client.json"),
             config: providerConfig,
             installProvider: reused === undefined || http !== mcpHost?.server,
             ownsProvider: reused === undefined,

@@ -35,6 +35,23 @@ function wizard(step: number, patch: Record<string, JsonValue> = {}) {
     return expanded.expandedLines.map((line) => line.id);
 }
 
+function wizardText(
+    step: number,
+    patch: Record<string, JsonValue>,
+    summary?: Record<string, JsonValue>
+): string {
+    const store = new TuiAppStore();
+    store.setSelectedPage("instances");
+    store.setEditor({ editing: false, key: "create-instance", kind: "create", schema, step, summary });
+    store.setFormDraft("create-instance", deepMerge(createDefaultInstanceDraft(), patch), true);
+    const box = buildInstancesPageBoxes(store.getState())[0];
+    assert.ok(box);
+    store.toggleExpanded(box.expandedKey);
+    const expanded = buildInstancesPageBoxes(store.getState())[0];
+    assert.ok(expanded?.expanded);
+    return expanded.expandedLines.map((line) => line.text).join("\n");
+}
+
 test("create provider step exposes only fields relevant to the selected provider and mode", () => {
     assert.equal(wizard(2, { provider: "local" }).some((id) => id.includes(":field:ssh.command")), false);
     assert.equal(wizard(2, { provider: "local" }).some((id) => id.includes(":field:container.mode")), false);
@@ -78,6 +95,38 @@ test("create wizard exposes complete MCP authentication, approval, logs, environ
     ]) {
         assert.equal(runtime.some((id) => id.includes(`:field:${field}`)), true, field);
     }
+});
+
+test("create wizard review and validation output redact every secret value", () => {
+    const text = wizardText(
+        6,
+        {
+            container: {
+                containerName: "devshell-demo-docker",
+                env: { CONTAINER_TOKEN: "container-secret" },
+                image: "archlinux:latest",
+                mode: "existingImage"
+            },
+            env: { API_TOKEN: "instance-secret" },
+            mcp: {
+                auth: "token",
+                enabled: true,
+                token: "mcp-secret",
+                tools: { capabilities: ["read"], groups: ["file"] }
+            },
+            name: "demo-docker",
+            provider: "docker"
+        },
+        {
+            env: { API_TOKEN: "summary-secret" },
+            name: "demo-docker"
+        }
+    );
+
+    for (const secret of ["container-secret", "instance-secret", "mcp-secret", "summary-secret"]) {
+        assert.equal(text.includes(secret), false, secret);
+    }
+    assert.equal(text.includes("********"), true);
 });
 
 function deepMerge(base: Record<string, JsonValue>, patch: Record<string, JsonValue>): Record<string, JsonValue> {

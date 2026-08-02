@@ -113,6 +113,65 @@ test("web oauth2 rejects a callback whose state cookie does not match", async (t
     assert.equal(forged.status, 400);
 });
 
+test("web oauth2 reuses its persisted dynamic client after a control restart", async (t) => {
+    const port = await reservePort();
+    const publicBaseUrl = `http://127.0.0.1:${port}`;
+    const storage = await mkdtemp(join(tmpdir(), "portable-devshell-web-oauth-client-state-"));
+    const clientStateFile = join(storage, "web-client.json");
+    t.after(async () => await rm(storage, { force: true, recursive: true }));
+
+    const startRuntime = async () => {
+        const protectedResource = new McpOAuthProtectedResource(
+            { requiredScopes: WEB_SCOPES, resourceName: WEB_RESOURCE_NAME },
+            publicBaseUrl,
+            storage,
+            { trustProxy: true }
+        );
+        const http = new HttpHost({ listenHost: "127.0.0.1", listenPort: port });
+        const sessions = new ControlWebSessionService({
+            auth: { mode: "oauth2", oauth2: { requiredScopes: WEB_SCOPES, resourceName: WEB_RESOURCE_NAME } },
+            basePath: "/web"
+        });
+        const flow = new ControlWebOAuthFlow({
+            basePath: "/web",
+            clientStateFile,
+            config: { requiredScopes: WEB_SCOPES, resourceName: WEB_RESOURCE_NAME },
+            ownsProvider: true,
+            protectedResource,
+            publicBaseUrl,
+            sessions
+        });
+        http.installOAuth(protectedResource);
+        flow.install(http);
+        await flow.warmup();
+        await http.start();
+        return { http, protectedResource };
+    };
+
+    const first = await startRuntime();
+    const firstStart = await fetch(`${publicBaseUrl}/web/oauth/start`, { redirect: "manual" });
+    assert.equal(firstStart.status, 302);
+    await waitFor(async () =>
+        (await first.protectedResource.approvals.list()).filter((approval) => approval.kind === "registration").length === 1
+    );
+    const firstRegistration = (await first.protectedResource.approvals.list()).find(
+        (approval) => approval.kind === "registration"
+    );
+    assert.notEqual(firstRegistration, undefined);
+    await first.http.stop();
+
+    const second = await startRuntime();
+    t.after(async () => await second.http.stop().catch(() => undefined));
+    const secondStart = await fetch(`${publicBaseUrl}/web/oauth/start`, { redirect: "manual" });
+    assert.equal(secondStart.status, 302);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    const registrations = (await second.protectedResource.approvals.list()).filter(
+        (approval) => approval.kind === "registration"
+    );
+    assert.equal(registrations.length, 1);
+    assert.equal(registrations[0]?.clientId, firstRegistration?.clientId);
+});
+
 test("web oauth2 shares one provider with MCP on a shared listener without route conflicts", async (t) => {
     const port = await reservePort();
     const publicBaseUrl = `http://127.0.0.1:${port}`;
@@ -335,6 +394,15 @@ function readSetCookieEntries(response: Response): string[] {
     }
     const header = response.headers.get("set-cookie");
     return header === null ? [] : [header];
+}
+
+async function waitFor(predicate: () => Promise<boolean>): Promise<void> {
+    const deadline = Date.now() + 1_000;
+    while (Date.now() < deadline) {
+        if (await predicate()) return;
+        await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    assert.fail("condition was not met before timeout");
 }
 
 async function reservePort(): Promise<number> {

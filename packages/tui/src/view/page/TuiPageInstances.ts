@@ -7,7 +7,7 @@ import type { BoxModel } from "../component/TuiComponentExpandableBox.js";
 import type { TuiAppState } from "../../state/reducer/TuiStoreModel.js";
 import { compactSummary, formatField, makeBox, runtimeStatus, shortenPath } from "./TuiPageBoxSupport.js";
 import { editorDraft, readPath } from "../../state/editor/TuiEditorDraft.js";
-import { buttonLine, choiceLine, fieldLine, secretFieldLine } from "../editor/TuiEditorView.js";
+import { buttonLine, choiceLine, fieldLine, secretFieldLine, secretRecordFieldLine } from "../editor/TuiEditorView.js";
 
 export function buildInstancesPageBoxes(state: TuiAppState): BoxModel[] {
     if (state.interaction.editor?.kind === "create") {
@@ -133,7 +133,7 @@ function buildCreateWizard(state: TuiAppState): BoxModel {
     const draft = editorDraft(state, editor.key, createDefaultInstanceDraft());
     const step = editor.step ?? 1;
     const error = editor.error;
-    const summary = editor.summary === undefined ? undefined : JSON.stringify(editor.summary);
+    const summary = editor.summary === undefined ? undefined : JSON.stringify(redactCreateSecrets(editor.summary));
     const detailLines = [
         `Step ${step}/6 ${stepName(step)}`,
         "",
@@ -197,7 +197,7 @@ function wizardFields(step: number, draft: Record<string, JsonValue>): Array<str
             ];
         case 5:
             return [
-                fieldLine("env", "environment JSON", readPath(draft, "env")),
+                secretRecordFieldLine("env", "environment JSON", readPath(draft, "env")),
                 fieldLine("logs.retentionDays", "retentionDays", readPath(draft, "logs.retentionDays")),
                 fieldLine("logs.maxBytes", "maxBytes", readPath(draft, "logs.maxBytes")),
                 fieldLine("logs.eventBufferSize", "eventBufferSize", readPath(draft, "logs.eventBufferSize")),
@@ -209,7 +209,7 @@ function wizardFields(step: number, draft: Record<string, JsonValue>): Array<str
                 fieldLine("tools.scheduler.byTool", "byTool JSON", readPath(draft, "tools.scheduler.byTool"))
             ];
         default:
-            return ["Review normalized draft", JSON.stringify(draft)];
+            return ["Review normalized draft", JSON.stringify(redactCreateSecrets(draft))];
     }
 }
 
@@ -275,10 +275,28 @@ function managedContainerFields(draft: Record<string, JsonValue>): Array<{ id: s
         fieldLine("container.user", "user", readPath(draft, "container.user")),
         fieldLine("container.network", "network", readPath(draft, "container.network")),
         fieldLine("container.mounts", "mounts JSON", readPath(draft, "container.mounts")),
-        fieldLine("container.env", "container env JSON", readPath(draft, "container.env"))
+        secretRecordFieldLine("container.env", "container env JSON", readPath(draft, "container.env"))
     ];
 }
 
 function stepName(step: number): string {
     return ["Basic", "Provider", "MCP", "Security / Approval", "Runtime", "Review"][step - 1] ?? "Review";
+}
+
+function redactCreateSecrets(value: JsonValue): JsonValue {
+    if (Array.isArray(value)) return value.map(redactCreateSecrets);
+    if (typeof value !== "object" || value === null) return value;
+    const output: Record<string, JsonValue> = {};
+    for (const [key, entry] of Object.entries(value)) {
+        if (key === "token" && typeof entry === "string") {
+            output[key] = "********";
+            continue;
+        }
+        if (key === "env" && typeof entry === "object" && entry !== null && !Array.isArray(entry)) {
+            output[key] = Object.fromEntries(Object.keys(entry).map((name) => [name, "********"]));
+            continue;
+        }
+        output[key] = redactCreateSecrets(entry);
+    }
+    return output;
 }

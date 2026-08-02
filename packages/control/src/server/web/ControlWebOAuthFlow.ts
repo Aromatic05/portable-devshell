@@ -1,5 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
+import { chmod, mkdir, open, readFile, rename, rm } from "node:fs/promises";
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { dirname } from "node:path";
 
 import type { HttpHost, McpOAuthProtectedResource } from "@portable-devshell/mcp";
 import type { ControlWebOAuth2Config } from "@portable-devshell/shared";
@@ -12,6 +14,7 @@ const STATE_TTL_SECONDS = Math.floor(STATE_TTL_MS / 1_000);
 
 export interface ControlWebOAuthFlowOptions {
     basePath: string;
+    clientStateFile?: string;
     config: ControlWebOAuth2Config;
     installProvider?: boolean;
     now?: () => number;
@@ -35,6 +38,7 @@ interface PendingAuthorization {
 
 export class ControlWebOAuthFlow {
     readonly #basePath: string;
+    readonly #clientStateFile?: string;
     readonly #config: ControlWebOAuth2Config;
     readonly #installProvider: boolean;
     readonly #now: () => number;
@@ -49,6 +53,7 @@ export class ControlWebOAuthFlow {
 
     constructor(options: ControlWebOAuthFlowOptions) {
         this.#basePath = normalizeBasePath(options.basePath);
+        this.#clientStateFile = options.clientStateFile;
         this.#config = options.config;
         this.#installProvider = options.installProvider ?? options.ownsProvider;
         this.#now = options.now ?? Date.now;
@@ -65,6 +70,7 @@ export class ControlWebOAuthFlow {
     }
 
     async warmup(): Promise<void> {
+        await this.#loadClientState();
         if (this.#ownsProvider) {
             await this.#protectedResource.warmup();
         }
@@ -235,7 +241,52 @@ export class ControlWebOAuthFlow {
             throw new Error("OAuth client registration returned no client identifier.");
         }
         this.#clientId = client.client_id;
+        await this.#persistClientState();
         return this.#clientId;
+    }
+
+    async #loadClientState(): Promise<void> {
+        if (this.#clientStateFile === undefined) return;
+        try {
+            const value = JSON.parse(await readFile(this.#clientStateFile, "utf8")) as {
+                clientId?: unknown;
+                issuer?: unknown;
+                redirectUri?: unknown;
+            };
+            if (
+                typeof value.clientId === "string" &&
+                value.issuer === this.#protectedResource.issuerUrl.href &&
+                value.redirectUri === this.#redirectUri
+            ) {
+                this.#clientId = value.clientId;
+            }
+        } catch (error) {
+            if (!isMissingFile(error)) throw error;
+        }
+    }
+
+    async #persistClientState(): Promise<void> {
+        if (this.#clientStateFile === undefined || this.#clientId === undefined) return;
+        const directory = dirname(this.#clientStateFile);
+        await mkdir(directory, { mode: 0o700, recursive: true });
+        if (process.platform !== "win32") await chmod(directory, 0o700);
+        const temporary = `${this.#clientStateFile}.${process.pid}.${randomBytes(8).toString("hex")}.tmp`;
+        const file = await open(temporary, "wx", 0o600);
+        try {
+            await file.writeFile(JSON.stringify({
+                clientId: this.#clientId,
+                issuer: this.#protectedResource.issuerUrl.href,
+                redirectUri: this.#redirectUri
+            }), "utf8");
+            await file.sync();
+            await file.close();
+            await rename(temporary, this.#clientStateFile);
+            if (process.platform !== "win32") await chmod(this.#clientStateFile, 0o600);
+        } catch (error) {
+            await file.close().catch(() => undefined);
+            await rm(temporary, { force: true }).catch(() => undefined);
+            throw error;
+        }
     }
 
     #prunePending(): void {
@@ -257,6 +308,10 @@ export class ControlWebOAuthFlow {
             ...(this.#secureCookie ? ["Secure"] : [])
         ].join("; ");
     }
+}
+
+function isMissingFile(error: unknown): error is NodeJS.ErrnoException {
+    return typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT";
 }
 
 function normalizeBasePath(value: string): string {

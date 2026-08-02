@@ -167,6 +167,15 @@ export function applyConfigInstancePatch(
     const provider = patch.provider ?? current.provider;
     const providerChanged = provider !== current.provider;
     const base = toConfigInstanceDraft(current);
+    const mcpPatch = patch.mcp === undefined
+        ? undefined
+        : {
+              ...patch.mcp,
+              token:
+                  patch.mcp.token === MASKED_CONFIG_TOKEN && current.mcp.auth.mode === "token"
+                      ? current.mcp.auth.token
+                      : patch.mcp.token
+          };
 
     return {
         ...base,
@@ -181,27 +190,27 @@ export function applyConfigInstancePatch(
         env: applyNullable(patch.env, base.env),
         logs: applyNullable(patch.logs, base.logs),
         mcp:
-            patch.mcp === undefined
+            mcpPatch === undefined
                 ? base.mcp
                 : {
                       ...toInstanceMcpAuthDraft(
-                          patch.mcp.auth === undefined
+                          mcpPatch.auth === undefined
                               ? normalizeInstanceMcpAuth(base.mcp)
                               : normalizeInstanceMcpAuth({
-                                    auth: patch.mcp.auth,
-                                    oauth2: patch.mcp.oauth2,
-                                    token: patch.mcp.token
+                                    auth: mcpPatch.auth,
+                                    oauth2: mcpPatch.oauth2,
+                                    token: mcpPatch.token
                                 })
                       ),
-                      enabled: patch.mcp.enabled ?? base.mcp?.enabled,
-                      path: applyNullable(patch.mcp.path, base.mcp?.path),
+                      enabled: mcpPatch.enabled ?? base.mcp?.enabled,
+                      path: applyNullable(mcpPatch.path, base.mcp?.path),
                       tools:
-                          patch.mcp.tools === undefined
+                          mcpPatch.tools === undefined
                               ? base.mcp?.tools
                               : {
                                     capabilities:
-                                        patch.mcp.tools.capabilities ?? base.mcp?.tools?.capabilities,
-                                    groups: patch.mcp.tools.groups ?? base.mcp?.tools?.groups
+                                        mcpPatch.tools.capabilities ?? base.mcp?.tools?.capabilities,
+                                    groups: mcpPatch.tools.groups ?? base.mcp?.tools?.groups
                                 }
                   },
         podmanBinary: providerChanged
@@ -264,13 +273,17 @@ export function applyConfigWebPatch(
 export function toConfigView(config: ControlConfig): ConfigView {
     return {
         control: { ...config.control },
-        instances: config.instances.map((instance) => ({
-            ...toConfigInstanceDraft(instance),
-            security: {
-                effectiveMode: instance.security.mode,
-                mode: instance.security.mode
-            }
-        })) as unknown as ConfigView["instances"],
+        instances: config.instances.map((instance) => {
+            const draft = toConfigInstanceDraft(instance);
+            if (draft.mcp?.auth === "token") draft.mcp.token = MASKED_CONFIG_TOKEN;
+            return {
+                ...draft,
+                security: {
+                    effectiveMode: instance.security.mode,
+                    mode: instance.security.mode
+                }
+            };
+        }) as unknown as ConfigView["instances"],
         mcp: { ...config.mcp },
         web: toWebView(config.web)
     };

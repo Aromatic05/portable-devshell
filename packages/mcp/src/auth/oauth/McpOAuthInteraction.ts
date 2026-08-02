@@ -279,6 +279,7 @@ export class McpOAuthInteraction {
             { consent: { grantId: await grant.save() } },
             { mergeWithLastSubmission: true }
         );
+        await this.#approvals.completeAuthorization(String(interaction.uid));
     }
 
     async #finishDeniedInteraction(

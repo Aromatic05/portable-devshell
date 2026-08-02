@@ -306,9 +306,9 @@ function isStructuredError(error: unknown): error is { details?: JsonValue; mess
 function toSummary(instance: ControlInstanceConfig): InstanceCreateSummary {
     return {
         ...(instance.approvalPolicy === undefined ? {} : { approvalPolicy: structuredClone(instance.approvalPolicy) }),
-        ...(instance.container === undefined ? {} : { container: instance.container }),
+        ...(instance.container === undefined ? {} : { container: redactContainerSecrets(instance.container) }),
         ...(instance.dockerBinary === undefined ? {} : { dockerBinary: instance.dockerBinary }),
-        ...(instance.env === undefined ? {} : { env: { ...instance.env } }),
+        ...(instance.env === undefined ? {} : { env: redactSecretRecord(instance.env) }),
         ...(instance.logs === undefined ? {} : { logs: { ...instance.logs } }),
         ...(instance.podmanBinary === undefined ? {} : { podmanBinary: instance.podmanBinary }),
         enabled: instance.enabled,
@@ -335,4 +335,14 @@ function toSummary(instance: ControlInstanceConfig): InstanceCreateSummary {
         ...(instance.tools === undefined ? {} : { tools: structuredClone(instance.tools) }),
         workspace: instance.workspace
     };
+}
+
+function redactContainerSecrets(container: ControlInstanceConfig["container"]): NonNullable<ControlInstanceConfig["container"]> {
+    const copy = structuredClone(container!);
+    if ("env" in copy && copy.env !== undefined) copy.env = redactSecretRecord(copy.env);
+    return copy;
+}
+
+function redactSecretRecord(record: Record<string, string>): Record<string, string> {
+    return Object.fromEntries(Object.keys(record).map((key) => [key, "********"]));
 }

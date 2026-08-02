@@ -32,7 +32,7 @@ export class McpOAuthApprovalService {
     readonly #timeoutMs: number;
     readonly #requests = new Map<string, OAuthApprovalRequest>();
     readonly #authorizationByInteraction = new Map<string, string>();
-    readonly #authorizationByTransaction = new Map<string, string>();
+    readonly #authorizationByTransaction = new Map<string, { approvalId: string; requestKey: string }>();
 
     constructor(storageDir: string, options: McpOAuthApprovalServiceOptions = {}) {
         this.#filePath = join(storageDir, "approvals.jsonl");
@@ -122,9 +122,10 @@ export class McpOAuthApprovalService {
                 }
             }
 
+            const requestKey = authorizationRequestKey(input);
             const transactionApproval = this.#authorizationByTransaction.get(transactionId);
-            if (transactionApproval !== undefined) {
-                const existing = this.#requests.get(transactionApproval);
+            if (transactionApproval !== undefined && transactionApproval.requestKey === requestKey) {
+                const existing = this.#requests.get(transactionApproval.approvalId);
                 if (existing !== undefined) {
                     this.#authorizationByInteraction.set(interactionId, existing.approvalId);
                     if (expired) {
@@ -136,7 +137,7 @@ export class McpOAuthApprovalService {
 
             const request = this.#createLocked("authorization", input);
             this.#authorizationByInteraction.set(interactionId, request.approvalId);
-            this.#authorizationByTransaction.set(transactionId, request.approvalId);
+            this.#authorizationByTransaction.set(transactionId, { approvalId: request.approvalId, requestKey });
             await this.#persistLocked();
             return request;
         });
@@ -167,6 +168,14 @@ export class McpOAuthApprovalService {
             }
             const approvalId = this.#authorizationByInteraction.get(interactionId);
             return approvalId === undefined ? undefined : this.#requests.get(approvalId);
+        });
+    }
+
+    async completeAuthorization(interactionId: string): Promise<void> {
+        await this.#mutex.runExclusive(async () => {
+            const approvalId = this.#authorizationByInteraction.get(interactionId);
+            if (approvalId === undefined) return;
+            this.#removeApprovalBindingsLocked(approvalId);
         });
     }
 
@@ -243,6 +252,7 @@ export class McpOAuthApprovalService {
                 break;
             }
             this.#requests.delete(removable.approvalId);
+            this.#removeApprovalBindingsLocked(removable.approvalId);
             changed = true;
         }
         return changed;
@@ -255,6 +265,16 @@ export class McpOAuthApprovalService {
                 throw new Error(`The OAuth approval storage limit of ${this.#maxEntries} entries was reached.`);
             }
             this.#requests.delete(removable.approvalId);
+            this.#removeApprovalBindingsLocked(removable.approvalId);
+        }
+    }
+
+    #removeApprovalBindingsLocked(approvalId: string): void {
+        for (const [interactionId, candidate] of this.#authorizationByInteraction) {
+            if (candidate === approvalId) this.#authorizationByInteraction.delete(interactionId);
+        }
+        for (const [transactionId, candidate] of this.#authorizationByTransaction) {
+            if (candidate.approvalId === approvalId) this.#authorizationByTransaction.delete(transactionId);
         }
     }
 
@@ -327,6 +347,20 @@ export class McpOAuthApprovalService {
             .filter((line) => line.length > 0)
             .map((line) => JSON.parse(line) as OAuthApprovalRequest);
     }
+}
+
+function authorizationRequestKey(input: OAuthApprovalInput): string {
+    return JSON.stringify({
+        clientId: input.clientId,
+        clientName: input.clientName,
+        redirectUris: normalizedStringSet(input.redirectUris),
+        requestedResources: normalizedStringSet(input.requestedResources ?? []),
+        requestedScopes: normalizedStringSet(input.requestedScopes ?? [])
+    });
+}
+
+function normalizedStringSet(values: readonly string[]): string[] {
+    return [...new Set(values)].sort((left, right) => left.localeCompare(right));
 }
 
 class AsyncMutex {
