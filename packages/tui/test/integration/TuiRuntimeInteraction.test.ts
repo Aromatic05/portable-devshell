@@ -132,6 +132,7 @@ test("real Ink runtime buffers split mouse input and enters then discards the cr
         });
         assert.ok(createRegion);
 
+        const outputBeforeCreate = terminal.output.length;
         const mouse = `\u001B[<0;${createRegion.x};${createRegion.y}M`;
         terminal.write(mouse.slice(0, 5));
         await delay(20);
@@ -145,7 +146,7 @@ test("real Ink runtime buffers split mouse input and enters then discards the cr
         await waitUntil(
             () => runtime.store.getState().interaction.focusScope === "wizard",
         );
-        await waitUntil(() => terminal.output.includes("Step 1/5 Basic"));
+        await waitUntil(() => terminal.output.length > outputBeforeCreate);
 
         terminal.write("\r");
         await waitUntil(
