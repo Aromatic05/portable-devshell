@@ -25,7 +25,7 @@
         "package:app": "node ./scripts/package-app.mjs",
         "smoke:package": "node ./scripts/smoke-package.mjs",
         "smoke:install-release": "node ./scripts/smoke-install-release.mjs",
-        "test:release-layout": "node --test scripts/application-layout.test.mjs scripts/build-output.test.mjs scripts/build-worker.test.mjs scripts/install-release.test.mjs scripts/package-app.test.mjs scripts/verify-release-ci.test.mjs scripts/version-state.test.mjs",
+        "test:release-layout": "node --test scripts/application-layout.test.mjs scripts/build-output.test.mjs scripts/build-worker.test.mjs scripts/install-release.test.mjs scripts/package-app.test.mjs scripts/verify-release-ci.test.mjs scripts/version-state.test.mjs scripts/testspace.test.mjs",
         "test:prepare": "cargo build --locked -p devshell-worker",
         "test:prepared": "pnpm test:prepare && pnpm test",
         "typecheck:test": "tsc --noEmit -p tsconfig.test.json",
@@ -35,7 +35,8 @@
         "acceptance:worker": "node ./acceptance/run-real-worker-smoke.mjs",
         "acceptance:mcp": "node ./acceptance/run-mcp-smoke.mjs",
         "typecheck:source": "tsc --noEmit -p tsconfig.typecheck.json",
-        "test:worker:tmux": "cargo test --locked -p devshell-worker --test tmux_tools_contract -- --ignored"
+        "test:worker:tmux": "cargo test --locked -p devshell-worker --test tmux_tools_contract -- --ignored",
+        "testspace": "node ./scripts/testspace.mjs"
     },
     "devDependencies": {
         "@modelcontextprotocol/sdk": "1.29.0",

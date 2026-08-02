@@ -27,3 +27,4 @@
 
 - [portable-devshell-ts-design.md](portable-devshell-ts-design.md)：设计文档入口。
 - [archive/portable-devshell-ts-design-0.1.md](archive/portable-devshell-ts-design-0.1.md)：2026-07-07 的 0.1 冻结设计归档，不代表当前实现。
+- [testspace.md](testspace.md)：启动完整本地 DevShell 与 GPT 风格 MCP connector，用于观察 TUI/Web。
