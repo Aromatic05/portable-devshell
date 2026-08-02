@@ -280,15 +280,13 @@ mod tests {
     #[cfg(target_os = "linux")]
     use std::os::unix::fs::symlink;
 
-    use tempfile::tempdir;
-
     use crate::security::path::parse_requested_path;
 
     use super::{resolve_create_target, resolve_existing_target};
 
     #[test]
     fn existing_workspace_path_resolves_inside_the_workspace() {
-        let root = tempdir().unwrap();
+        let root = crate::testing::temp_dir();
         fs::write(root.path().join("file.txt"), "inside").unwrap();
         let requested = parse_requested_path("./file.txt").unwrap();
 
@@ -306,7 +304,7 @@ mod tests {
 
     #[test]
     fn create_workspace_path_resolves_inside_an_existing_parent() {
-        let root = tempdir().unwrap();
+        let root = crate::testing::temp_dir();
         fs::create_dir(root.path().join("safe")).unwrap();
         let requested = parse_requested_path("./safe/new.txt").unwrap();
 
@@ -326,8 +324,8 @@ mod tests {
     #[cfg(target_os = "linux")]
     #[test]
     fn existing_workspace_path_remains_anchored_after_parent_swap() {
-        let root = tempdir().unwrap();
-        let outside = tempdir().unwrap();
+        let root = crate::testing::temp_dir();
+        let outside = crate::testing::temp_dir();
         fs::create_dir(root.path().join("safe")).unwrap();
         fs::write(root.path().join("safe/file.txt"), "inside").unwrap();
         fs::write(outside.path().join("file.txt"), "outside").unwrap();
@@ -350,8 +348,8 @@ mod tests {
     #[cfg(target_os = "linux")]
     #[test]
     fn create_workspace_path_remains_anchored_after_parent_swap() {
-        let root = tempdir().unwrap();
-        let outside = tempdir().unwrap();
+        let root = crate::testing::temp_dir();
+        let outside = crate::testing::temp_dir();
         fs::create_dir(root.path().join("safe")).unwrap();
         let requested = parse_requested_path("./safe/new.txt").unwrap();
         let resolved = resolve_create_target(root.path(), &requested).unwrap();

@@ -1,15 +1,15 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdtemp, readFile, readlink, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { readFile, readlink, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
 
 import { WorkerInstallerLocal, getWorkerTargetByKey, type WorkerAsset } from "@portable-devshell/core/testing";
+import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
 
 test("WorkerInstallerLocal installs into target-specific directory and refreshes symlink", { skip: process.platform === "win32" ? "requires Unix symlink semantics" : false }, async (t) => {
-    const devshellHomeDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-home-"));
-    const workerDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-worker-"));
+    const devshellHomeDirectory = await createTestTempDirectory("home");
+    const workerDirectory = await createTestTempDirectory("worker");
     t.after(async () => {
         await rm(devshellHomeDirectory, { recursive: true, force: true });
         await rm(workerDirectory, { recursive: true, force: true });
@@ -34,8 +34,8 @@ test("WorkerInstallerLocal installs into target-specific directory and refreshes
 });
 
 test("WorkerInstallerLocal installs a Windows executable without requiring symlink privileges", async (t) => {
-    const devshellHomeDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-home-"));
-    const workerDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-worker-"));
+    const devshellHomeDirectory = await createTestTempDirectory("home");
+    const workerDirectory = await createTestTempDirectory("worker");
     t.after(async () => {
         await rm(devshellHomeDirectory, { recursive: true, force: true });
         await rm(workerDirectory, { recursive: true, force: true });
@@ -62,8 +62,8 @@ test("WorkerInstallerLocal installs a Windows executable without requiring symli
 });
 
 test("WorkerInstallerLocal rejects asset target mismatch", async (t) => {
-    const devshellHomeDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-home-"));
-    const workerDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-worker-"));
+    const devshellHomeDirectory = await createTestTempDirectory("home");
+    const workerDirectory = await createTestTempDirectory("worker");
     t.after(async () => {
         await rm(devshellHomeDirectory, { recursive: true, force: true });
         await rm(workerDirectory, { recursive: true, force: true });

@@ -1304,8 +1304,6 @@ fn invalid_edit(message: impl Into<String>) -> ToolError {
 mod tests {
     use std::fs;
 
-    use tempfile::tempdir;
-
     use super::{ParsedOperation, atomic_move_no_replace, parse_change_set};
 
     #[test]
@@ -1352,7 +1350,7 @@ mod tests {
 
     #[test]
     fn atomic_move_never_replaces_an_existing_target() {
-        let directory = tempdir().unwrap();
+        let directory = crate::testing::temp_dir();
         let source = directory.path().join("source.txt");
         let target = directory.path().join("target.txt");
         fs::write(&source, "source").unwrap();

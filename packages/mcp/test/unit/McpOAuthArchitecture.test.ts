@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
 
@@ -9,6 +8,7 @@ import { McpOAuthInteraction } from "../../src/auth/oauth/McpOAuthInteraction.ts
 import { createMcpOAuthOidcFileAdapterFactory } from "../../src/auth/oauth/McpOAuthOidcFileAdapter.ts";
 import { McpOAuthProviderRuntime } from "../../src/auth/oauth/McpOAuthProviderRuntime.ts";
 import { McpOAuthRegistrationLimiter } from "../../src/auth/oauth/McpOAuthRegistrationLimiter.ts";
+import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
 
 const config = {
     documentationUrl: "https://docs.example.test/aromatic",
@@ -17,7 +17,7 @@ const config = {
 };
 
 test("McpOAuthProviderRuntime owns provider lifecycle, resources, metadata, and durable signing keys", async () => {
-    const storageDir = await mkdtemp(join(tmpdir(), "mcp-oauth-provider-runtime-"));
+    const storageDir = await createTestTempDirectory("mcp-oauth-provider-runtime");
     const approvals = new McpOAuthApprovalService(storageDir);
     const runtime = new McpOAuthProviderRuntime({
         approvals,
@@ -72,7 +72,7 @@ test("McpOAuthProviderRuntime owns provider lifecycle, resources, metadata, and 
 });
 
 test("McpOAuthProviderRuntime upgrades persisted dynamic clients for OIDC refresh-token scopes", async () => {
-    const storageDir = await mkdtemp(join(tmpdir(), "mcp-oauth-client-scope-upgrade-"));
+    const storageDir = await createTestTempDirectory("mcp-oauth-client-scope-upgrade");
     const adapterDir = join(storageDir, "adapter");
     const clientFile = join(adapterDir, "Client.json");
     await mkdir(adapterDir, { recursive: true });
@@ -119,7 +119,7 @@ test("McpOAuthProviderRuntime upgrades persisted dynamic clients for OIDC refres
 
 
 test("OAuth resource verification rejects tokens with missing or malformed audience", async () => {
-    const storageDir = await mkdtemp(join(tmpdir(), "mcp-oauth-audience-"));
+    const storageDir = await createTestTempDirectory("mcp-oauth-audience");
     const runtime = new McpOAuthProviderRuntime({
         approvals: new McpOAuthApprovalService(storageDir),
         config,
@@ -154,7 +154,7 @@ test("OAuth resource verification rejects tokens with missing or malformed audie
 
 
 test("McpOAuthInteraction renders escaped approval state with the configured base path", async () => {
-    const storageDir = await mkdtemp(join(tmpdir(), "mcp-oauth-interaction-"));
+    const storageDir = await createTestTempDirectory("mcp-oauth-interaction");
     const approvals = new McpOAuthApprovalService(storageDir);
     await approvals.warmup();
     const interaction = new McpOAuthInteraction({
@@ -193,7 +193,7 @@ test("McpOAuthInteraction renders escaped approval state with the configured bas
 });
 
 test("McpOAuthInteraction renders approved registration as a reload flow", async () => {
-    const storageDir = await mkdtemp(join(tmpdir(), "mcp-oauth-registration-page-"));
+    const storageDir = await createTestTempDirectory("mcp-oauth-registration-page");
     const interaction = new McpOAuthInteraction({
         accountId: "aromatic",
         approvals: new McpOAuthApprovalService(storageDir),
@@ -225,7 +225,7 @@ test("McpOAuthInteraction renders approved registration as a reload flow", async
 });
 
 test("OIDC file adapter serializes concurrent updates without losing records", async () => {
-    const storageDir = await mkdtemp(join(tmpdir(), "mcp-oauth-adapter-"));
+    const storageDir = await createTestTempDirectory("mcp-oauth-adapter");
     const adapter = createMcpOAuthOidcFileAdapterFactory(storageDir)("Client");
 
     try {

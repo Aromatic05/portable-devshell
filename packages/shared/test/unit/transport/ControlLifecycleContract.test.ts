@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { mkdir, rm, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import test from "node:test";
 
@@ -14,9 +13,10 @@ import {
     type ControlPidFilePort,
     type ControlSocketFilePort
 } from "@portable-devshell/shared";
+import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.ts";
 
 test("control logger and pid file persist below the selected home and tolerate missing files", async () => {
-    const home = await mkdtemp(resolve(tmpdir(), "portable-devshell-shared-lifecycle-"));
+    const home = await createTestTempDirectory("shared-lifecycle");
     try {
         const logger = new ControlLogger(home);
         assert.equal(await logger.readAll(), "");
@@ -172,7 +172,7 @@ test("control lifecycle start is idempotent and stop tolerates the shutdown sock
 });
 
 test("control lifecycle start failure includes the latest daemon log tail", async () => {
-    const root = await mkdtemp(resolve(tmpdir(), "portable-devshell-shared-start-failure-"));
+    const root = await createTestTempDirectory("shared-start-failure");
     const pidPath = resolve(root, "control.pid");
     const socketPath = resolve(root, "control.sock");
     await mkdir(dirname(pidPath), { recursive: true });

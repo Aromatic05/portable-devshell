@@ -1,13 +1,13 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { rm } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
 
 import { McpOAuthApprovalService } from "../../src/auth/oauth/McpOAuthApprovalService.ts";
+import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
 
 test("OAuth approvals persist registration and authorization decisions", async () => {
-    const storageDir = await mkdtemp(join(tmpdir(), "portable-devshell-oauth-approvals-"));
+    const storageDir = await createTestTempDirectory("oauth-approvals");
     const service = new McpOAuthApprovalService(storageDir);
 
     try {
@@ -45,7 +45,7 @@ test("OAuth approvals persist registration and authorization decisions", async (
 });
 
 test("one OAuth authorization transaction shares approval across login and consent interactions", async () => {
-    const storageDir = await mkdtemp(join(tmpdir(), "portable-devshell-oauth-shared-authorization-"));
+    const storageDir = await createTestTempDirectory("oauth-shared-authorization");
     const service = new McpOAuthApprovalService(storageDir);
 
     try {
@@ -83,7 +83,7 @@ test("one OAuth authorization transaction shares approval across login and conse
 });
 
 test("OAuth approval reuse is bound to the complete authorization request", async () => {
-    const storageDir = await mkdtemp(join(tmpdir(), "portable-devshell-oauth-request-binding-"));
+    const storageDir = await createTestTempDirectory("oauth-request-binding");
     const service = new McpOAuthApprovalService(storageDir);
 
     try {
@@ -121,7 +121,7 @@ test("OAuth approval reuse is bound to the complete authorization request", asyn
 });
 
 test("completed OAuth authorization transactions cannot reuse a prior approval", async () => {
-    const storageDir = await mkdtemp(join(tmpdir(), "portable-devshell-oauth-transaction-complete-"));
+    const storageDir = await createTestTempDirectory("oauth-transaction-complete");
     const service = new McpOAuthApprovalService(storageDir);
 
     try {
@@ -155,7 +155,7 @@ test("completed OAuth authorization transactions cannot reuse a prior approval",
 });
 
 test("OAuth approvals expire after five-minute policy is exceeded", async () => {
-    const storageDir = await mkdtemp(join(tmpdir(), "portable-devshell-oauth-approval-expiry-"));
+    const storageDir = await createTestTempDirectory("oauth-approval-expiry");
     let now = 0;
     const service = new McpOAuthApprovalService(storageDir, { now: () => now, timeoutMs: 300_000 });
 
@@ -170,7 +170,7 @@ test("OAuth approvals expire after five-minute policy is exceeded", async () => 
 });
 
 test("expired OAuth registration can be requested again for the same client", async () => {
-    const storageDir = await mkdtemp(join(tmpdir(), "portable-devshell-oauth-registration-retry-"));
+    const storageDir = await createTestTempDirectory("oauth-registration-retry");
     let now = 0;
     const service = new McpOAuthApprovalService(storageDir, { now: () => now, timeoutMs: 300_000 });
 
@@ -190,7 +190,7 @@ test("expired OAuth registration can be requested again for the same client", as
 });
 
 test("OAuth approvals enforce a pending registration quota", async () => {
-    const storageDir = await mkdtemp(join(tmpdir(), "portable-devshell-oauth-registration-limit-"));
+    const storageDir = await createTestTempDirectory("oauth-registration-limit");
     const service = new McpOAuthApprovalService(storageDir, { maxPendingRegistrations: 2 });
 
     try {

@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm, symlink } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { rm, symlink } from "node:fs/promises";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import test from "node:test";
 
 import { isCliEntrypoint } from "../../src/CliEntrypoint.ts";
+import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
 
 test("isCliEntrypoint compares the module URL with the platform-native argv path", () => {
     const argvPath = process.argv[1] ?? process.execPath;
@@ -20,7 +20,7 @@ test(
     "isCliEntrypoint resolves a Unix command symlink before comparing paths",
     { skip: process.platform === "win32" },
     async () => {
-        const directory = await mkdtemp(resolve(tmpdir(), "portable-devshell-cli-entry-"));
+        const directory = await createTestTempDirectory("cli-entry");
         const commandPath = resolve(directory, "devshell");
 
         try {

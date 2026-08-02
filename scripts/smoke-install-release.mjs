@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
-import { chmod, copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { chmod, copyFile, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { isAbsolute, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { createTestTempDirectory } from "../test/TestTempDirectory.mjs";
 
 const repositoryRoot = fileURLToPath(new URL("../", import.meta.url));
 const archiveArgument = process.argv.slice(2).find((argument) => argument !== "--");
@@ -17,7 +17,7 @@ if (process.platform === "win32") {
 
 const archive = isAbsolute(archiveArgument) ? archiveArgument : resolve(process.cwd(), archiveArgument);
 const archiveSha = `${archive}.sha256`;
-const root = await mkdtemp(resolve(tmpdir(), "portable-devshell-release-install-smoke-"));
+const root = await createTestTempDirectory("release-install-smoke");
 const release = resolve(root, "release");
 const home = resolve(root, "home");
 const runtime = resolve(root, "runtime");

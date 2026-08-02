@@ -1,13 +1,13 @@
 import assert from "node:assert/strict";
-import { mkdtemp, stat } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { stat } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
 
 import { ReverseCredentialStore, reverseRoute } from "../../src/testing.ts";
+import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
 
 test("reverse device code is single-use and device token is stored in user-only files", async () => {
-    const home = await mkdtemp(join(tmpdir(), "devshell-reverse-"));
+    const home = await createTestTempDirectory("devshell-reverse");
     const store = new ReverseCredentialStore(home);
     const code = await store.createDeviceCode("remote-test");
 
@@ -28,7 +28,7 @@ test("reverse device code is single-use and device token is stored in user-only 
 });
 
 test("issuing a replacement code keeps the old token valid until the code is consumed", async () => {
-    const home = await mkdtemp(join(tmpdir(), "devshell-reverse-"));
+    const home = await createTestTempDirectory("devshell-reverse");
     const store = new ReverseCredentialStore(home);
     const firstCode = await store.createDeviceCode("remote-test");
     const first = await store.consumeDeviceCode(firstCode.deviceCode);
@@ -42,7 +42,7 @@ test("issuing a replacement code keeps the old token valid until the code is con
 });
 
 test("token rotation and revocation invalidate the previous credential", async () => {
-    const home = await mkdtemp(join(tmpdir(), "devshell-reverse-"));
+    const home = await createTestTempDirectory("devshell-reverse");
     const store = new ReverseCredentialStore(home);
     const code = await store.createDeviceCode("remote-test");
     const first = await store.consumeDeviceCode(code.deviceCode);

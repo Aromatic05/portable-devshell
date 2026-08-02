@@ -803,7 +803,7 @@ mod tests {
 
     #[test]
     fn opens_and_reads_artifact_content_through_a_persisted_lease() {
-        let root = tempfile::tempdir().unwrap();
+        let root = crate::testing::temp_dir();
         let artifacts = ArtifactStore::new(root.path().join("artifacts")).unwrap();
         let mut draft = artifacts.begin(ArtifactStream::Stdout).unwrap();
         draft.write_chunk(b"artifact bytes").unwrap();
@@ -826,7 +826,7 @@ mod tests {
 
     #[test]
     fn regular_file_payload_is_a_stable_snapshot() {
-        let root = tempfile::tempdir().unwrap();
+        let root = crate::testing::temp_dir();
         let workspace = root.path().join("workspace");
         fs::create_dir(&workspace).unwrap();
         fs::write(workspace.join("result.bin"), b"before").unwrap();
@@ -851,7 +851,7 @@ mod tests {
 
     #[test]
     fn directory_payload_is_deterministic_tar_zstd_and_rejects_symlinks() {
-        let root = tempfile::tempdir().unwrap();
+        let root = crate::testing::temp_dir();
         let workspace = root.path().join("workspace");
         let source = workspace.join("dist");
         fs::create_dir_all(source.join("assets")).unwrap();
@@ -928,7 +928,7 @@ mod tests {
 
     #[test]
     fn payload_metadata_survives_store_reopen() {
-        let root = tempfile::tempdir().unwrap();
+        let root = crate::testing::temp_dir();
         let workspace = root.path().join("workspace");
         fs::create_dir(&workspace).unwrap();
         fs::write(workspace.join("stable.txt"), b"stable").unwrap();

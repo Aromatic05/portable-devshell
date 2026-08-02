@@ -41,7 +41,7 @@ mod tests {
 
     #[test]
     fn receives_file_with_strict_offsets_and_atomic_commit() {
-        let root = tempfile::tempdir().unwrap();
+        let root = crate::testing::temp_dir();
         let workspace = root.path().join("workspace");
         fs::create_dir(&workspace).unwrap();
         let store = ArtifactReceiveStore::new(root.path().join("receives")).unwrap();
@@ -80,7 +80,7 @@ mod tests {
 
     #[test]
     fn refuses_existing_target_without_overwrite_and_abort_cleans_state() {
-        let root = tempfile::tempdir().unwrap();
+        let root = crate::testing::temp_dir();
         let workspace = root.path().join("workspace");
         fs::create_dir(&workspace).unwrap();
         fs::write(workspace.join("result.bin"), b"existing").unwrap();
@@ -117,7 +117,7 @@ mod tests {
 
     #[test]
     fn restores_directory_archive_and_verifies_manifest() {
-        let root = tempfile::tempdir().unwrap();
+        let root = crate::testing::temp_dir();
         let source_workspace = root.path().join("source");
         let source = source_workspace.join("dist");
         fs::create_dir_all(source.join("assets")).unwrap();
@@ -184,7 +184,7 @@ mod tests {
 
     #[test]
     fn reopening_store_cleans_abandoned_receive_files() {
-        let root = tempfile::tempdir().unwrap();
+        let root = crate::testing::temp_dir();
         let workspace = root.path().join("workspace");
         fs::create_dir(&workspace).unwrap();
         let receive_root = root.path().join("receives");

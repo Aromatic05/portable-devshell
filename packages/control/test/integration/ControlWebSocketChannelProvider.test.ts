@@ -1,8 +1,7 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import type { AddressInfo } from "node:net";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
@@ -22,6 +21,7 @@ import { ControlChannelServer } from "../../src/server/channel/ControlChannelSer
 import { ControlWebSessionService } from "../../src/server/web/ControlWebSessionService.ts";
 import { ControlWebSocketChannelProvider } from "../../src/server/web/ControlWebSocketChannelProvider.ts";
 import { NodeWebSocketFrameChannel } from "../WebSocketTestSupport.ts";
+import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
 
 const WEB_TOKEN = "portable-devshell-web-token-value";
 
@@ -112,7 +112,7 @@ test("web session cookie authenticates the shared control RPC over WebSocket", a
 });
 
 test("Web none auth stays independent when its shared MCP listener requires OAuth2", async (t) => {
-    const storage = await mkdtemp(join(tmpdir(), "portable-devshell-web-mcp-oauth-"));
+    const storage = await createTestTempDirectory("web-mcp-oauth");
     const port = await reservePort();
     const host = new McpHost({
         instances: [{
@@ -245,7 +245,7 @@ test("web token auth never accepts an MCP namespace bearer token", async (t) => 
 
 test("web routes and cookies follow the public base URL path prefix", async (t) => {
     const basePath = controlWebBasePath("https://controller.example/devshell");
-    const assetDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-web-prefix-"));
+    const assetDirectory = await createTestTempDirectory("web-prefix");
     await writeFile(join(assetDirectory, "index.html"), '<script src="./assets/app.js"></script>', "utf8");
     t.after(async () => await rm(assetDirectory, { force: true, recursive: true }));
     const http = new HttpHost({

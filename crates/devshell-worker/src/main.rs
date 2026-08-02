@@ -7,6 +7,8 @@ mod rpc;
 mod security;
 mod socket;
 mod storage;
+#[cfg(test)]
+mod testing;
 mod tools;
 
 use instance::InstanceName;

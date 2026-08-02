@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp } from "node:fs/promises";
-import { tmpdir } from "node:os";
+
 import { join } from "node:path";
 import test from "node:test";
 
@@ -18,9 +17,10 @@ import {
     ReverseCredentialStore,
     TodoService
 } from "../../src/testing.ts";
+import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
 
 test("WSS reverse connection authenticates, handshakes, and a higher generation replaces the old channel", async () => {
-    const home = await mkdtemp(join(tmpdir(), "devshell-reverse-gateway-"));
+    const home = await createTestTempDirectory("devshell-reverse-gateway");
     const connector = new WorkerRpcInboundConnector();
     const worker = new WorkerInstanceFactory().create({
         defaultWorkspace: asWorkspacePath(home),
@@ -129,7 +129,7 @@ test("WSS reverse connection authenticates, handshakes, and a higher generation 
 });
 
 test("SSE plus POST fallback completes RPC handshake and deduplicates repeated upstream frames", async () => {
-    const home = await mkdtemp(join(tmpdir(), "devshell-reverse-sse-"));
+    const home = await createTestTempDirectory("devshell-reverse-sse");
     const connector = new WorkerRpcInboundConnector();
     const worker = new WorkerInstanceFactory().create({
         defaultWorkspace: asWorkspacePath(home),

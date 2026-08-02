@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
-import { copyFile, mkdir, mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { copyFile, mkdir, rm } from "node:fs/promises";
 import { basename, dirname, isAbsolute, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { spawnSync } from "node:child_process";
+import { createTestTempDirectory } from "../test/TestTempDirectory.mjs";
 
 if (process.platform !== "win32") {
     throw new Error("smoke-install-release-windows.mjs must run on Windows.");
@@ -18,7 +18,7 @@ const repositoryRoot = fileURLToPath(new URL("../", import.meta.url));
 const archive = isAbsolute(archiveArgument) ? archiveArgument : resolve(process.cwd(), archiveArgument);
 const target = hostTarget();
 const workerName = `devshell-worker-${target}.exe`;
-const root = await mkdtemp(resolve(tmpdir(), "portable-devshell-windows-release-install-smoke-"));
+const root = await createTestTempDirectory("windows-release-install-smoke");
 const release = resolve(root, "release");
 const home = resolve(root, "home");
 const installRoot = resolve(root, "install");

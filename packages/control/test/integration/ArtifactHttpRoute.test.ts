@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { rm } from "node:fs/promises";
 import { join } from "node:path";
 import test, { type TestContext } from "node:test";
 
@@ -13,6 +12,7 @@ import {
     artifactShareRoute,
     type ArtifactServiceEndpoint
 } from "@portable-devshell/control/testing";
+import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
 
 class MemoryShareEndpoint implements ArtifactServiceEndpoint {
     readonly events: Array<{ type: string; data?: JsonValue }> = [];
@@ -83,7 +83,7 @@ async function fixture(
     t: TestContext,
     publicBaseUrl?: string
 ) {
-    const storageDir = await mkdtemp(join(tmpdir(), "artifact-http-"));
+    const storageDir = await createTestTempDirectory("artifact-http");
     const endpoint = new MemoryShareEndpoint(Buffer.from("0123456789abcdef"));
     const server = new HttpHost({
         auth: { enabled: false, provider: "none" },

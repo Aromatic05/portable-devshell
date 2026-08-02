@@ -1,13 +1,13 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
 
 import { TodoService } from "../../src/instance/todo/TodoService.ts";
+import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
 
 test("TodoService creates, validates revisions, persists atomically, and emits derived summaries", async () => {
-    const root = await mkdtemp(join(tmpdir(), "portable-devshell-todo-"));
+    const root = await createTestTempDirectory("todo");
     const filePath = join(root, "todo.json");
     const events: Array<{ type: string; data: unknown }> = [];
     const service = new TodoService({
@@ -73,9 +73,7 @@ test("TodoService creates, validates revisions, persists atomically, and emits d
 });
 
 test("TodoService rejects duplicate ids, multiple in-progress items, and missing failure detail", async () => {
-    const root = await mkdtemp(
-        join(tmpdir(), "portable-devshell-todo-invalid-"),
-    );
+    const root = await createTestTempDirectory("todo-invalid");
     const service = new TodoService({
         appendEvent: async () => undefined,
         filePath: join(root, "todo.json"),
@@ -111,9 +109,7 @@ test("TodoService rejects duplicate ids, multiple in-progress items, and missing
 });
 
 test("TodoService emits terminal events once, archives terminal tasks, and reloads persisted state", async () => {
-    const root = await mkdtemp(
-        join(tmpdir(), "portable-devshell-todo-archive-"),
-    );
+    const root = await createTestTempDirectory("todo-archive");
     const filePath = join(root, "todo.json");
     const eventTypes: string[] = [];
     const createService = () =>

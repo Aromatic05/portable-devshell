@@ -1,8 +1,7 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rename, rm, writeFile } from "node:fs/promises";
+import { rename, rm, writeFile } from "node:fs/promises";
 import { request } from "node:http";
 import { createServer } from "node:net";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
@@ -18,9 +17,10 @@ import { ControlRuntime } from "../../src/testing.ts";
 import { ControlRuntimeMcp } from "../../src/composition/runtime/ControlRuntimeMcp.ts";
 import { ControlRuntimeState } from "../../src/composition/runtime/ControlRuntimeState.ts";
 import { createTestIpcPath, ipcEndpointAcceptsConnections } from "../../../../test/TestPlatformSupport.ts";
+import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
 
 test("runtime stop does not settle until owned cleanup completes", async (t) => {
-    const runtimeDir = await mkdtemp(join(tmpdir(), "portable-devshell-runtime-stop-"));
+    const runtimeDir = await createTestTempDirectory("runtime-stop");
     const socketPath = createTestIpcPath("control-runtime", runtimeDir);
     let releaseArtifact!: () => void;
     const artifactGate = new Promise<void>((resolve) => {
@@ -86,7 +86,7 @@ async function waitFor(predicate: () => boolean): Promise<void> {
 }
 
 test("runtime stop attempts every cleanup step after failures", async (t) => {
-    const runtimeDir = await mkdtemp(join(tmpdir(), "portable-devshell-runtime-failure-"));
+    const runtimeDir = await createTestTempDirectory("runtime-failure");
     const socketPath = createTestIpcPath("control-runtime", runtimeDir);
     const calls: string[] = [];
     const runtime = new ControlRuntime({
@@ -139,7 +139,7 @@ test("runtime stop attempts every cleanup step after failures", async (t) => {
 });
 
 test("runtime mounts web session and RPC routes on the MCP HTTP host", async (t) => {
-    const runtimeDir = await mkdtemp(join(tmpdir(), "portable-devshell-runtime-web-"));
+    const runtimeDir = await createTestTempDirectory("runtime-web");
     const socketPath = createTestIpcPath("control-runtime", runtimeDir);
     const rawRoutes: Array<{ method: string; path: string }> = [];
     const authenticatedRoutes: Array<{ method: string; path: string }> = [];
@@ -209,7 +209,7 @@ test("runtime mounts web session and RPC routes on the MCP HTTP host", async (t)
 });
 
 test("runtime does not mount WebUI routes when web.enabled is false", async (t) => {
-    const runtimeDir = await mkdtemp(join(tmpdir(), "portable-devshell-runtime-no-web-"));
+    const runtimeDir = await createTestTempDirectory("runtime-no-web");
     const socketPath = createTestIpcPath("control-runtime", runtimeDir);
     const runtime = new ControlRuntime({
         artifact: { service: undefined, async stop() {} } as never,
@@ -249,7 +249,7 @@ test("runtime does not mount WebUI routes when web.enabled is false", async (t) 
 });
 
 test("failed OAuth Web hot replacement restores the previous listener and OAuth routes", async (t) => {
-    const homeDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-runtime-web-rollback-"));
+    const homeDirectory = await createTestTempDirectory("runtime-web-rollback");
     const socketPath = createTestIpcPath("control-runtime", homeDirectory);
     const port = await reservePort();
     const origin = `http://127.0.0.1:${port}`;

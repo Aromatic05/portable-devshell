@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp } from "node:fs/promises";
-import { tmpdir } from "node:os";
+
 import { join } from "node:path";
 import test from "node:test";
 
@@ -8,11 +7,10 @@ import type { InstanceEventType, JsonValue } from "@portable-devshell/shared";
 
 import { ContextMessageService } from "../../src/instance/context/ContextMessageService.ts";
 import { ContextMessageState } from "../../src/instance/context/ContextMessageState.ts";
+import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
 
 test("ContextMessageService persists pending messages and marks only the matching context delivered", async () => {
-    const root = await mkdtemp(
-        join(tmpdir(), "portable-devshell-context-message-"),
-    );
+    const root = await createTestTempDirectory("context-message");
     const events: Array<{ data: JsonValue; type: InstanceEventType }> = [];
     const options = {
         appendEvent: async (
@@ -76,9 +74,7 @@ test("ContextMessageService persists pending messages and marks only the matchin
 });
 
 test("ContextMessageService marks a queued message failed when its audit event cannot be recorded", async () => {
-    const root = await mkdtemp(
-        join(tmpdir(), "portable-devshell-context-message-failure-"),
-    );
+    const root = await createTestTempDirectory("context-message-failure");
     const service = new ContextMessageService({
         appendEvent: async (type) => {
             if (type === "context.message.queued")
@@ -98,9 +94,7 @@ test("ContextMessageService marks a queued message failed when its audit event c
 });
 
 test("ContextMessageService keeps a message pending when delivery audit fails and retries it", async () => {
-    const root = await mkdtemp(
-        join(tmpdir(), "portable-devshell-context-message-retry-"),
-    );
+    const root = await createTestTempDirectory("context-message-retry");
     let failDelivery = true;
     const service = new ContextMessageService({
         appendEvent: async (type) => {

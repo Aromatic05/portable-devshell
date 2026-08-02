@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { rm } from "node:fs/promises";
 import { createConnection } from "node:net";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
@@ -25,9 +24,10 @@ import {
     TuiRuntimeOperations
 } from "../../src/testing.ts";
 import { createTestIpcPath } from "../../../../test/TestPlatformSupport.ts";
+import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
 
 test("TuiControlSession pulls instances, snapshots, subscribes, and recovers from stream.gap", async (t) => {
-    const runtimeDir = await mkdtemp(join(tmpdir(), "portable-devshell-tui-session-"));
+    const runtimeDir = await createTestTempDirectory("tui-session");
     const socketPath = createTestIpcPath("tui-control", runtimeDir);
     const worker = new FakeWorker("alpha");
     const server = createServer(socketPath, worker, () => 7);
@@ -135,7 +135,7 @@ test("TuiControlSession pulls instances, snapshots, subscribes, and recovers fro
 });
 
 test("TuiControlSession refreshes a visible overview after relevant instance events", async (t) => {
-    const runtimeDir = await mkdtemp(join(tmpdir(), "portable-devshell-tui-overview-refresh-"));
+    const runtimeDir = await createTestTempDirectory("tui-overview-refresh");
     const socketPath = createTestIpcPath("tui-overview", runtimeDir);
     const worker = new FakeWorker("alpha");
     const server = createServer(socketPath, worker, () => 7);
@@ -182,7 +182,7 @@ test("TuiControlSession refreshes a visible overview after relevant instance eve
 });
 
 test("TuiControlSession polls operational metrics only while Overview is visible", async (t) => {
-    const runtimeDir = await mkdtemp(join(tmpdir(), "portable-devshell-tui-overview-poll-"));
+    const runtimeDir = await createTestTempDirectory("tui-overview-poll");
     const socketPath = createTestIpcPath("tui-overview-poll", runtimeDir);
     const worker = new FakeWorker("alpha");
     const server = createServer(socketPath, worker, () => 7);
@@ -214,7 +214,7 @@ test("TuiControlSession polls operational metrics only while Overview is visible
 });
 
 test("TuiControlSession reports missing control without auto-starting it", async () => {
-    const runtimeDir = await mkdtemp(join(tmpdir(), "portable-devshell-tui-not-running-"));
+    const runtimeDir = await createTestTempDirectory("tui-not-running");
     const socketPath = createTestIpcPath("tui-control", runtimeDir);
     const session = new TuiControlSession({
         clients: createTuiClients({ socketPath })
@@ -233,7 +233,7 @@ test("TuiControlSession reports missing control without auto-starting it", async
 });
 
 test("TuiControlSession does not poll OAuth approvals when OAuth is unavailable", async (t) => {
-    const runtimeDir = await mkdtemp(join(tmpdir(), "portable-devshell-tui-no-oauth-poll-"));
+    const runtimeDir = await createTestTempDirectory("tui-no-oauth-poll");
     const socketPath = createTestIpcPath("tui-control", runtimeDir);
     const worker = new FakeWorker("alpha");
     const server = createServer(socketPath, worker, () => 7);
@@ -261,7 +261,7 @@ test("TuiControlSession does not poll OAuth approvals when OAuth is unavailable"
 });
 
 test("TuiControlSession drops events that have no TUI presentation", async (t) => {
-    const runtimeDir = await mkdtemp(join(tmpdir(), "portable-devshell-tui-event-filter-"));
+    const runtimeDir = await createTestTempDirectory("tui-event-filter");
     const socketPath = createTestIpcPath("tui-control", runtimeDir);
     const worker = new FakeWorker("alpha");
     const server = createServer(socketPath, worker, () => 7);
@@ -285,7 +285,7 @@ test("TuiControlSession drops events that have no TUI presentation", async (t) =
 });
 
 test("module TUI clients send explicit instance operations and preserve start relay output", async (t) => {
-    const runtimeDir = await mkdtemp(join(tmpdir(), "portable-devshell-tui-operations-"));
+    const runtimeDir = await createTestTempDirectory("tui-operations");
     const socketPath = createTestIpcPath("tui-control", runtimeDir);
     const worker = new FakeWorker("alpha");
     const server = createServer(socketPath, worker, () => 7);
@@ -326,7 +326,7 @@ test("module TUI clients send explicit instance operations and preserve start re
 });
 
 test("TUI control restart reconnects after the socket runtime is replaced", async (t) => {
-    const runtimeDir = await mkdtemp(join(tmpdir(), "portable-devshell-tui-control-restart-"));
+    const runtimeDir = await createTestTempDirectory("tui-control-restart");
     const socketPath = createTestIpcPath("tui-control-restart", runtimeDir);
     const worker = new FakeWorker("alpha");
     const server = createServer(socketPath, worker, () => 7, { restartable: true });
@@ -356,7 +356,7 @@ test("TUI control restart reconnects after the socket runtime is replaced", asyn
 });
 
 test("module TUI client sends an OAuth approval payload accepted by the control route", async (t) => {
-    const runtimeDir = await mkdtemp(join(tmpdir(), "portable-devshell-tui-oauth-decision-"));
+    const runtimeDir = await createTestTempDirectory("tui-oauth-decision");
     const socketPath = createTestIpcPath("tui-oauth-decision", runtimeDir);
     const pending = oauthApproval("oauth-1");
     const decisions: Array<{ approvalId: string; decidedBy: string; decision: string }> = [];

@@ -1,8 +1,6 @@
 import assert from "node:assert/strict";
 import { createServer, type Server } from "node:net";
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { rm } from "node:fs/promises";
 import test from "node:test";
 
 import {
@@ -20,6 +18,7 @@ import {
     type PrefixRouteStream
 } from "@portable-devshell/shared";
 import { createTestIpcPath } from "../../../../../test/TestPlatformSupport.ts";
+import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.ts";
 
 class EventQueue {
     readonly #events: PrefixRouteIncoming[] = [];
@@ -48,7 +47,7 @@ interface RoutePair {
 }
 
 async function pair(snapshot: () => PrefixRouteSnapshot): Promise<RoutePair> {
-    const directory = await mkdtemp(join(tmpdir(), "portable-devshell-prefix-route-"));
+    const directory = await createTestTempDirectory("prefix-route");
     const socketPath = createTestIpcPath("prefix-route", directory);
     const listener = createServer();
     await new Promise<void>((resolve, reject) => {

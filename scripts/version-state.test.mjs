@@ -1,15 +1,15 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import { createTestTempDirectory } from "../test/TestTempDirectory.mjs";
 
 const script = fileURLToPath(new URL("./version-state.mjs", import.meta.url));
 
 async function createRepository(version, releaseTag) {
-    const root = await mkdtemp(join(tmpdir(), "portable-devshell-version-"));
+    const root = await createTestTempDirectory("version");
     await mkdir(join(root, "crates/devshell-worker"), { recursive: true });
     await writeFile(join(root, "package.json"), `${JSON.stringify({ name: "portable-devshell", version }, null, 4)}\n`);
     await writeFile(join(root, "crates/devshell-worker/Cargo.toml"), `[package]\nname = "devshell-worker"\nversion = "${version}"\nedition = "2024"\n`);

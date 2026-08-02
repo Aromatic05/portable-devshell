@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
-import { chmod, lstat, mkdir, mkdtemp, readFile, readlink, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { chmod, lstat, mkdir, readFile, readlink, rm, writeFile } from "node:fs/promises";
 import { basename, resolve } from "node:path";
 import test from "node:test";
 import { pathToFileURL, fileURLToPath } from "node:url";
+import { createTestTempDirectory } from "../test/TestTempDirectory.mjs";
 
 const repositoryRoot = fileURLToPath(new URL("../", import.meta.url));
 test("PowerShell release installer is UTF-8 with BOM for Windows PowerShell", async () => {
@@ -34,7 +34,7 @@ const allTargets = [
 test("Unix release installer activates the manifest-declared CLI and supports replacement", {
     skip: process.platform === "win32"
 }, async () => {
-    const root = await mkdtemp(resolve(tmpdir(), "portable-devshell-release-install-test-"));
+    const root = await createTestTempDirectory("release-install-test");
     const release = resolve(root, "release");
     const app = resolve(root, "app");
     const home = resolve(root, "home");
@@ -112,7 +112,7 @@ test("Unix release installer activates the manifest-declared CLI and supports re
 test("Unix release installer rejects an application that cannot start before activation", {
     skip: process.platform === "win32"
 }, async () => {
-    const root = await mkdtemp(resolve(tmpdir(), "portable-devshell-release-broken-test-"));
+    const root = await createTestTempDirectory("release-broken-test");
     const release = resolve(root, "release");
     const app = resolve(root, "app");
     const home = resolve(root, "home");
@@ -182,7 +182,7 @@ test("Unix release installer rejects an application that cannot start before act
 test("Windows release installer activates a fresh application with the host worker", {
     skip: process.platform !== "win32"
 }, async () => {
-    const root = await mkdtemp(resolve(tmpdir(), "portable-devshell-windows-release-install-test-"));
+    const root = await createTestTempDirectory("windows-release-install-test");
     const release = resolve(root, "release");
     const app = resolve(root, "app");
     const home = resolve(root, "home");

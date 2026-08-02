@@ -1,14 +1,14 @@
 import { spawn, spawnSync } from "node:child_process";
-import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { mkdir, readFile, rm } from "node:fs/promises";
 import { isAbsolute, resolve } from "node:path";
+import { createTestTempDirectory } from "../test/TestTempDirectory.mjs";
 
 const workerArgument = process.argv[2];
 if (workerArgument === undefined) {
     throw new Error("usage: node scripts/smoke-worker.mjs <worker executable>");
 }
 const worker = isAbsolute(workerArgument) ? workerArgument : resolve(process.cwd(), workerArgument);
-const root = await mkdtemp(resolve(tmpdir(), "portable-devshell-worker-smoke-"));
+const root = await createTestTempDirectory("worker-smoke");
 const workspace = resolve(root, "workspace");
 const instance = `windows-smoke-${process.pid}`;
 const env = {

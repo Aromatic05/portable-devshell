@@ -1,10 +1,10 @@
 import { spawnSync } from "node:child_process";
-import { lstat, mkdir, mkdtemp, readdir, rm, symlink } from "node:fs/promises";
+import { lstat, mkdir, readdir, rm, symlink } from "node:fs/promises";
 import { createRequire } from "node:module";
-import { tmpdir } from "node:os";
 import { isAbsolute, resolve } from "node:path";
 
 import { assertPackageBinFile, readPackageBinPath } from "./application-layout.mjs";
+import { createTestTempDirectory } from "../test/TestTempDirectory.mjs";
 
 const archiveArgument = process.argv.slice(2).find((argument) => argument !== "--");
 if (archiveArgument === undefined) {
@@ -12,7 +12,7 @@ if (archiveArgument === undefined) {
 }
 
 const archive = isAbsolute(archiveArgument) ? archiveArgument : resolve(process.cwd(), archiveArgument);
-const root = await mkdtemp(resolve(tmpdir(), "portable-devshell-package-smoke-"));
+const root = await createTestTempDirectory("package-smoke");
 const app = resolve(root, "app");
 const home = resolve(root, "home");
 const runtime = resolve(root, "runtime");

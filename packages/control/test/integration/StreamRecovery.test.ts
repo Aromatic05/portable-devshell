@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { rm } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
 
@@ -18,9 +17,10 @@ import { ControlSocketServer } from "../../src/server/socket/ControlSocketServer
 import { InstanceRegistry } from "../../src/control/instance/registry/InstanceRegistry.ts";
 import { createTestIpcPath } from "../../../../test/TestPlatformSupport.ts";
 import { createTestInstanceDescriptor } from "../ControlTestFixtures.ts";
+import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
 
 test("stream gap is non-terminal and the dedicated subscription remains usable", async (t) => {
-    const directory = await mkdtemp(join(tmpdir(), "portable-devshell-stream-recovery-"));
+    const directory = await createTestTempDirectory("stream-recovery");
     const socketPath = createTestIpcPath("stream-recovery", directory);
     const worker = new FakeWorker("alpha");
     worker.emit("instance.started", { workspacePath: "/tmp/ws" });
@@ -73,7 +73,7 @@ test("stream gap is non-terminal and the dedicated subscription remains usable",
 });
 
 test("an initial unavailable sequence returns a normal stream.gap error reply", async (t) => {
-    const directory = await mkdtemp(join(tmpdir(), "portable-devshell-stream-initial-gap-"));
+    const directory = await createTestTempDirectory("stream-initial-gap");
     const socketPath = createTestIpcPath("stream-recovery", directory);
     const worker = new FakeWorker("alpha");
     worker.emit("instance.started", {});

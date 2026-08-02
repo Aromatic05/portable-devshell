@@ -42,13 +42,11 @@ mod tests {
     use std::fs;
     use std::io::Write;
 
-    use tempfile::tempdir;
-
     use super::{PublishMode, new_temp, publish};
 
     #[test]
     fn no_clobber_publish_never_replaces_a_racing_target() {
-        let directory = tempdir().unwrap();
+        let directory = crate::testing::temp_dir();
         let target = directory.path().join("target.txt");
         fs::write(&target, "existing").unwrap();
         let mut temp = new_temp(&target).unwrap();

@@ -1,8 +1,7 @@
 import assert from "node:assert/strict";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
@@ -20,13 +19,14 @@ import { ControlPathHome } from "@portable-devshell/shared";
 import { ReverseCredentialStore } from "../../src/control/reverse/credential/ReverseCredentialStore.ts";
 import { encodeGlobalConfig, encodeInstanceConfig } from "../ConfigTomlTestSupport.ts";
 import { installUniqueWindowsTestIdentity, realWorkerTestOptions, resolveTestWorkerBinary, readRelativeMarkerCommand } from "../../../../test/TestPlatformSupport.ts";
+import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
 
 const workerBinary = resolveTestWorkerBinary();
 
 test("real Rust reverse worker connects to the TS gateway and executes a tool call", realWorkerTestOptions(workerBinary), async (t) => {
-    const homeDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-reverse-real-home-"));
-    const xdgRuntimeDir = await mkdtemp(join(tmpdir(), "portable-devshell-reverse-real-runtime-"));
-    const workspace = await mkdtemp(join(tmpdir(), "portable-devshell-reverse-real-workspace-"));
+    const homeDirectory = await createTestTempDirectory("reverse-real-home");
+    const xdgRuntimeDir = await createTestTempDirectory("reverse-real-runtime");
+    const workspace = await createTestTempDirectory("reverse-real-workspace");
     const workspaceMarkerName = "reverse-real-workspace-marker.txt";
     const workspaceMarker = "portable-devshell-reverse-workspace";
     await writeFile(join(workspace, workspaceMarkerName), workspaceMarker, "utf8");

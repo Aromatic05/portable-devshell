@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { mkdir, rm, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import test from "node:test";
 
 import { resolvePnpmCommand } from "./PnpmCommand.mjs";
+import { createTestTempDirectory } from "../test/TestTempDirectory.mjs";
 
 test("Unix invokes pnpm directly", () => {
     assert.deepEqual(resolvePnpmCommand({ platform: "linux" }), {
@@ -14,7 +14,7 @@ test("Unix invokes pnpm directly", () => {
 });
 
 test("Windows invokes the PNPM_HOME JavaScript entry through Node", async () => {
-    const root = await mkdtemp(resolve(tmpdir(), "portable-devshell-pnpm-command-"));
+    const root = await createTestTempDirectory("pnpm-command");
     try {
         const pnpmHome = resolve(root, "node_modules", ".bin");
         const cli = resolve(root, "node_modules", "pnpm", "bin", "pnpm.cjs");

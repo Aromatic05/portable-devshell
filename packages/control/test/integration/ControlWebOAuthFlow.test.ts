@@ -1,8 +1,7 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { rm } from "node:fs/promises";
 import { createServer } from "node:net";
 import type { AddressInfo } from "node:net";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
@@ -22,6 +21,7 @@ import { ControlWebOAuthFlow } from "../../src/server/web/ControlWebOAuthFlow.ts
 import { ControlWebSessionService } from "../../src/server/web/ControlWebSessionService.ts";
 import { ControlWebSocketChannelProvider } from "../../src/server/web/ControlWebSocketChannelProvider.ts";
 import { NodeWebSocketFrameChannel } from "../WebSocketTestSupport.ts";
+import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
 
 const WEB_RESOURCE_NAME = "demo-web";
 const WEB_SCOPES = ["web"];
@@ -29,7 +29,7 @@ const WEB_SCOPES = ["web"];
 test("web oauth2 completes browser PKCE and authenticates the real control WebSocket", async (t) => {
     const port = await reservePort();
     const publicBaseUrl = `http://127.0.0.1:${port}`;
-    const storage = await mkdtemp(join(tmpdir(), "portable-devshell-web-oauth-"));
+    const storage = await createTestTempDirectory("web-oauth");
     const protectedResource = new McpOAuthProtectedResource(
         { requiredScopes: WEB_SCOPES, resourceName: WEB_RESOURCE_NAME },
         publicBaseUrl,
@@ -109,7 +109,7 @@ test("web oauth2 completes browser PKCE and authenticates the real control WebSo
 test("web oauth2 rejects a callback whose state cookie does not match", async (t) => {
     const port = await reservePort();
     const publicBaseUrl = `http://127.0.0.1:${port}`;
-    const storage = await mkdtemp(join(tmpdir(), "portable-devshell-web-oauth-csrf-"));
+    const storage = await createTestTempDirectory("web-oauth-csrf");
     const protectedResource = new McpOAuthProtectedResource(
         { requiredScopes: WEB_SCOPES, resourceName: WEB_RESOURCE_NAME },
         publicBaseUrl,
@@ -148,7 +148,7 @@ test("web oauth2 rejects a callback whose state cookie does not match", async (t
 test("web oauth2 reuses its persisted dynamic client after a control restart", async (t) => {
     const port = await reservePort();
     const publicBaseUrl = `http://127.0.0.1:${port}`;
-    const storage = await mkdtemp(join(tmpdir(), "portable-devshell-web-oauth-client-state-"));
+    const storage = await createTestTempDirectory("web-oauth-client-state");
     const clientStateFile = join(storage, "web-client.json");
     t.after(async () => await rm(storage, { force: true, recursive: true }));
 
@@ -207,7 +207,7 @@ test("web oauth2 reuses its persisted dynamic client after a control restart", a
 test("web oauth2 shares one provider with MCP on a shared listener without route conflicts", async (t) => {
     const port = await reservePort();
     const publicBaseUrl = `http://127.0.0.1:${port}`;
-    const storage = await mkdtemp(join(tmpdir(), "portable-devshell-web-oauth-shared-"));
+    const storage = await createTestTempDirectory("web-oauth-shared");
     const host = new McpHost({
         instances: [{
             auth: {
@@ -267,7 +267,7 @@ test("web oauth2 preserves a public URL path prefix across discovery, PKCE, and 
     const origin = `http://127.0.0.1:${port}`;
     const publicBaseUrl = `${origin}/devshell`;
     const basePath = controlWebBasePath(publicBaseUrl);
-    const storage = await mkdtemp(join(tmpdir(), "portable-devshell-web-oauth-prefix-"));
+    const storage = await createTestTempDirectory("web-oauth-prefix");
     const protectedResource = new McpOAuthProtectedResource(
         { requiredScopes: WEB_SCOPES, resourceName: WEB_RESOURCE_NAME },
         origin,

@@ -763,7 +763,7 @@ mod tests {
 
     #[test]
     fn reverse_dispatcher_accepts_cancel_while_a_tool_is_running() {
-        let root = tempfile::tempdir().unwrap();
+        let root = crate::testing::temp_dir();
         let workspace = root.path().join("workspace");
         fs::create_dir(&workspace).unwrap();
         let instance = InstanceName::parse("reverse-cancel").unwrap();

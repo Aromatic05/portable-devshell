@@ -1,12 +1,13 @@
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
-import { chmod, copyFile, lstat, mkdir, mkdtemp, readFile, readlink, rename, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, copyFile, lstat, mkdir, readFile, readlink, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { assertPackageBinFile, readPackageBinPath, writePortableApplicationManifest, tryReadPackageBinPath } from "./application-layout.mjs";
 import { resolveInstallHome } from "./install-home.mjs";
+import { createTestTempDirectory } from "../test/TestTempDirectory.mjs";
 
 const installStepTotal = 5;
 let installStep = 0;
@@ -298,7 +299,7 @@ async function assertInstalledCommandStarts() {
 }
 
 async function assertCommandStarts(command, args, shell, failureLabel) {
-    const smokeRoot = await mkdtemp(join(tmpdir(), "portable-devshell-install-smoke-"));
+    const smokeRoot = await createTestTempDirectory("install-smoke");
     const smokeRuntime = resolve(smokeRoot, "runtime");
     try {
         await mkdir(smokeRuntime, { recursive: true });

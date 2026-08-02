@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import test from "node:test";
 import { pathToFileURL } from "node:url";
@@ -13,6 +12,7 @@ import {
     probeLocalWorkerTarget,
     supportedWorkerTargets
 } from "@portable-devshell/core/testing";
+import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
 
 test("WorkerTargetMapper maps supported uname values to canonical keys", () => {
     assert.equal(mapUnameWorkerTarget({ provider: "ssh", operation: "probeTarget", rawOs: "Linux", rawArch: "x86_64" }).key, "linux-x64");
@@ -143,7 +143,7 @@ test("WorkerAssetResolver allows host target to use dev fallback", async (t) => 
 });
 
 test("WorkerAssetResolver discovers a host dev worker through pnpm's nested module layout", async (t) => {
-    const root = await mkdtemp(join(tmpdir(), "portable-devshell-pnpm-resolver-"));
+    const root = await createTestTempDirectory("pnpm-resolver");
     const devshellHome = join(root, "devshell-home");
     const modulePath = join(
         root,
@@ -246,7 +246,7 @@ async function createResolverFixture(): Promise<{
     resolver: WorkerAssetResolver;
     cleanup: () => Promise<void>;
 }> {
-    const root = await mkdtemp(join(tmpdir(), "portable-devshell-resolver-"));
+    const root = await createTestTempDirectory("resolver");
     const devshellHome = join(root, "devshell-home");
     const modulePath = join(root, "src", "worker", "WorkerAssetResolver.js");
     const previousFetch = globalThis.fetch;
@@ -319,7 +319,7 @@ test("WorkerAssetResolver uses an installed target worker before release lookup"
 });
 
 test("WorkerAssetResolver uses the exact release directory recorded by the installer", async (t) => {
-    const root = await mkdtemp(join(tmpdir(), "portable-devshell-installed-resolver-"));
+    const root = await createTestTempDirectory("installed-resolver");
     const appRoot = join(root, "app");
     const modulePath = join(
         appRoot,

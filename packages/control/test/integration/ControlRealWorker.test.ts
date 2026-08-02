@@ -1,14 +1,6 @@
 import assert from "node:assert/strict";
-import {
-    mkdir,
-    mkdtemp,
-    readFile,
-    rm,
-    stat,
-    writeFile,
-} from "node:fs/promises";
+import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { spawn } from "node:child_process";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -38,6 +30,7 @@ import {
     encodeGlobalConfig,
     encodeInstanceConfig,
 } from "../ConfigTomlTestSupport.ts";
+import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
 
 const workerBinaryPath = resolveTestWorkerBinary();
 
@@ -54,15 +47,9 @@ if (process.env.PORTABLE_DEVSHELL_REAL_WORKER_CHILD !== "1") {
         "control lifecycle smoke drives the frozen worker and persists Task 12 artifacts",
         realWorkerTestOptions(workerBinaryPath),
         async (t) => {
-            const homeDirectory = await mkdtemp(
-                join(tmpdir(), "portable-devshell-control-real-home-"),
-            );
-            const xdgRuntimeDir = await mkdtemp(
-                join(tmpdir(), "portable-devshell-control-real-runtime-"),
-            );
-            const workspacePath = await mkdtemp(
-                join(tmpdir(), "portable-devshell-control-real-workspace-"),
-            );
+            const homeDirectory = await createTestTempDirectory("control-real-home");
+            const xdgRuntimeDir = await createTestTempDirectory("control-real-runtime");
+            const workspacePath = await createTestTempDirectory("control-real-workspace");
             const workspaceMarkerName = "control-real-workspace-marker.txt";
             const workspaceMarker = "portable-devshell-control-workspace";
             await writeFile(join(workspacePath, workspaceMarkerName), workspaceMarker, "utf8");

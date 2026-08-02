@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, rm } from "node:fs/promises";
+import { mkdir, rm } from "node:fs/promises";
 import { createServer } from "node:net";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
@@ -10,9 +9,10 @@ import { Channel, Codec, type JsonValue } from "@portable-devshell/shared";
 import { createCliClients } from "../../src/client/CliClientComposition.ts";
 import { createTestIpcPath } from "../../../../test/TestPlatformSupport.ts";
 import { CliMain } from "../../src/CliMain.ts";
+import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
 
 test("module CLI clients perform control rpc over unix socket", async (t) => {
-    const runtimeRoot = await mkdtemp(join(tmpdir(), "portable-devshell-cli-control-"));
+    const runtimeRoot = await createTestTempDirectory("cli-control");
     const socketPath = createTestIpcPath("cli-control", runtimeRoot);
     const methods: string[] = [];
     const server = createServer((socket) => {
@@ -75,7 +75,7 @@ test("module CLI clients perform control rpc over unix socket", async (t) => {
 });
 
 test("CliMain reports control not running without auto-starting it", async () => {
-    const runtimeRoot = await mkdtemp(join(tmpdir(), "portable-devshell-cli-missing-"));
+    const runtimeRoot = await createTestTempDirectory("cli-missing");
     const stdout = createBuffer();
     const stderr = createBuffer();
     const cli = new CliMain({

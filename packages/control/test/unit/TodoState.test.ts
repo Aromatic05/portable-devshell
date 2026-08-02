@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
-import { mkdtemp } from "node:fs/promises";
-import { tmpdir } from "node:os";
+
 import { join } from "node:path";
 import test from "node:test";
 
 import { TodoState } from "../../src/instance/todo/TodoState.ts";
 import { TodoStore } from "../../src/instance/todo/TodoStore.ts";
+import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
 
 test("TodoState owns validation, transitions, summaries, and associations", () => {
     const state = new TodoState("aromatic-pc", {
@@ -223,7 +223,7 @@ test("TodoState rejects invalid item sets and stale revisions", () => {
 });
 
 test("TodoStore persists and reloads normalized state independently", async () => {
-    const root = await mkdtemp(join(tmpdir(), "portable-devshell-todo-state-"));
+    const root = await createTestTempDirectory("todo-state");
     const filePath = join(root, "todo.json");
     const state = new TodoState("aromatic-pc", {
         now: () => "2026-07-16T00:00:00.000Z",
@@ -249,7 +249,7 @@ test("TodoStore persists and reloads normalized state independently", async () =
 
 test("TodoStore discards obsolete comments while loading legacy documents", async () => {
     const { readFile, writeFile } = await import("node:fs/promises");
-    const root = await mkdtemp(join(tmpdir(), "portable-devshell-todo-migration-"));
+    const root = await createTestTempDirectory("todo-migration");
     const state = new TodoState("aromatic-pc");
     const storedState = {
         activeCtxId: "ctx-legacy",

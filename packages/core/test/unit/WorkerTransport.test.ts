@@ -2,8 +2,7 @@ import assert from "node:assert/strict";
 import { spawn as nodeSpawn, type ChildProcess, type SpawnOptions } from "node:child_process";
 import { createHash } from "node:crypto";
 import { EventEmitter } from "node:events";
-import { chmod, mkdir, mkdtemp, readFile, readlink, rm, stat, unlink, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { chmod, mkdir, readFile, readlink, rm, stat, unlink, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { PassThrough } from "node:stream";
 import test from "node:test";
@@ -22,7 +21,8 @@ import {
     probeLocalWorkerTarget
 } from "@portable-devshell/core/testing";
 import { createError, errorCodes } from "@portable-devshell/shared";
-import { createCanonicalTestDirectory, realWorkerTestOptions, resolveTestWorkerBinary } from "../../../../test/TestPlatformSupport.ts";
+import { realWorkerTestOptions, resolveTestWorkerBinary } from "../../../../test/TestPlatformSupport.ts";
+import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
 
 const workerBinaryPath = resolveTestWorkerBinary();
 
@@ -86,7 +86,7 @@ test("local transport runs installWorker probe", async () => {
 });
 
 test("local transport honors command PORTABLE_DEVSHELL_HOME for worker lookup and installation", async (t) => {
-    const root = await mkdtemp(join(tmpdir(), "portable-devshell-custom-home-"));
+    const root = await createTestTempDirectory("custom-home");
     const devshellHome = join(root, "custom-devshell-home");
     const worker = await createDummyWorkerBinary("custom-home");
     t.after(async () => {
@@ -123,7 +123,7 @@ test("local transport honors command PORTABLE_DEVSHELL_HOME for worker lookup an
 });
 
 test("local start upgrades a changed worker while status keeps the active worker stable", async (t) => {
-    const root = await mkdtemp(join(tmpdir(), "portable-devshell-local-upgrade-"));
+    const root = await createTestTempDirectory("local-upgrade");
     const devshellHome = join(root, "devshell-home");
     const oldWorker = await createDummyWorkerBinary("old");
     const newWorker = await createDummyWorkerBinary("new");
@@ -388,7 +388,7 @@ test("ssh transport runs installWorker probe via remote shell", async () => {
 
 
 test("Windows skill archives assign portable Unix modes from entry type and shebang", async (t) => {
-    const root = await mkdtemp(join(tmpdir(), "portable-devshell-windows-skill-mode-"));
+    const root = await createTestTempDirectory("windows-skill-mode");
     const skillsDirectory = join(root, "skill");
     await mkdir(join(skillsDirectory, "review", "scripts"), { recursive: true });
     await writeFile(join(skillsDirectory, "review", "SKILL.md"), "# Review\n");
@@ -410,7 +410,7 @@ test("Windows skill archives assign portable Unix modes from entry type and sheb
 });
 
 test("ssh transport mirrors control skills to the remote user skill directory", async (t) => {
-    const root = await mkdtemp(join(tmpdir(), "portable-devshell-skills-"));
+    const root = await createTestTempDirectory("skills");
     const skillsDirectory = join(root, "skill");
     await mkdir(join(skillsDirectory, "review", "scripts"), { recursive: true });
     await writeFile(join(skillsDirectory, "review", "SKILL.md"), "# Review\n");
@@ -462,7 +462,7 @@ test("remote skill synchronization atomically replaces the real target directory
         return;
     }
 
-    const root = await mkdtemp(join(tmpdir(), "portable-devshell-real-skill-sync-"));
+    const root = await createTestTempDirectory("real-skill-sync");
     const source = join(root, "control", "skill");
     const remoteHome = join(root, "remote-home");
     await mkdir(join(source, "review", "scripts"), { recursive: true });
@@ -905,7 +905,7 @@ test("docker transport runs installWorker probe via exec", async () => {
 });
 
 test("docker transport mirrors control skills into the container user home", async (t) => {
-    const root = await mkdtemp(join(tmpdir(), "portable-devshell-container-skills-"));
+    const root = await createTestTempDirectory("container-skills");
     const skillsDirectory = join(root, "skill");
     await mkdir(join(skillsDirectory, "build"), { recursive: true });
     await writeFile(join(skillsDirectory, "build", "SKILL.md"), "# Build\n");
@@ -1445,9 +1445,9 @@ test("podman transport rejects already running existing stopped containers", asy
 });
 
 test("local transport executes frozen devshell-worker start status logs stop rpc", realWorkerTestOptions(workerBinaryPath), async (t) => {
-    const workspacePath = await createCanonicalTestDirectory("portable-devshell-core-");
-    const homeDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-core-home-"));
-    const runtimeDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-core-runtime-"));
+    const workspacePath = await createTestTempDirectory("core");
+    const homeDirectory = await createTestTempDirectory("core-home");
+    const runtimeDirectory = await createTestTempDirectory("core-runtime");
     const instanceName = `task-3-${process.pid}`;
     const env = { ...process.env, HOME: homeDirectory, XDG_RUNTIME_DIR: runtimeDirectory };
     const transport = new WorkerTransportDriverLocal({
@@ -1603,7 +1603,7 @@ async function createDummyWorkerBinary(tag: string = "remote"): Promise<{
     contents: Buffer;
     cleanup: () => Promise<void>;
 }> {
-    const directory = await mkdtemp(join(tmpdir(), "portable-devshell-core-worker-"));
+    const directory = await createTestTempDirectory("core-worker");
     const path = join(directory, "devshell-worker");
     const contents = Buffer.from(`#!/bin/sh\necho remote worker ${tag}\n`, "utf8");
 

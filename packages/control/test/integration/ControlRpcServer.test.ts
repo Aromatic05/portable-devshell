@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { rm } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
 
@@ -27,6 +26,7 @@ import { InstanceRegistryFactory } from "../../src/control/instance/registry/Ins
 import { ControlSocketServer } from "../../src/server/socket/ControlSocketServer.ts";
 import { createTestIpcPath } from "../../../../test/TestPlatformSupport.ts";
 import { createTestInstanceDescriptor } from "../ControlTestFixtures.ts";
+import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
 
 interface Harness {
     cleanup(): Promise<void>;
@@ -124,7 +124,7 @@ test("ControlSocketServer routes canonical control and instance operations over 
 });
 
 test("config RPC masks the Web token across get, validate, and update responses", async (t) => {
-    const directory = await mkdtemp(join(tmpdir(), "portable-devshell-config-rpc-secret-"));
+    const directory = await createTestTempDirectory("config-rpc-secret");
     const homeDirectory = join(directory, "home");
     const socketPath = createTestIpcPath("control-config-rpc", directory);
     const strongToken = "a".repeat(48);
@@ -191,7 +191,7 @@ test("config RPC masks the Web token across get, validate, and update responses"
 });
 
 test("ControlSocketServer rebuilds the immutable route snapshot after registry changes", async (t) => {
-    const directory = await mkdtemp(join(tmpdir(), "portable-devshell-route-snapshot-"));
+    const directory = await createTestTempDirectory("route-snapshot");
     const socketPath = createTestIpcPath("control-rpc", directory);
     const registry = new InstanceRegistry([]);
     const routes = new ControlRouteComposition({ instances: registry, shutdown() {} });
@@ -240,7 +240,7 @@ test("interactive runtime receives stream input while the root handler is still 
 });
 
 test("service.shutdown replies before invoking the shutdown action", async (t) => {
-    const directory = await mkdtemp(join(tmpdir(), "portable-devshell-shutdown-reply-"));
+    const directory = await createTestTempDirectory("shutdown-reply");
     const socketPath = createTestIpcPath("control-rpc", directory);
     let shutdownRequested = false;
     const routes = new ControlRouteComposition({
@@ -263,7 +263,7 @@ test("service.shutdown replies before invoking the shutdown action", async (t) =
 });
 
 async function createHarness(): Promise<Harness> {
-    const directory = await mkdtemp(join(tmpdir(), "portable-devshell-control-socket-"));
+    const directory = await createTestTempDirectory("control-socket");
     const socketPath = createTestIpcPath("control-rpc", directory);
     const worker = new FakeWorker("alpha");
     const registry = new InstanceRegistry([createDescriptor(worker)]);

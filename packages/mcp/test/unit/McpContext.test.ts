@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
 
 import { McpContextRegistry, McpEndpointWorker } from "@portable-devshell/mcp/testing";
 import type { JsonValue, ToolCallContext, ToolDefinition } from "@portable-devshell/shared";
+import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
 
 const bashRun: ToolDefinition = {
     description: "Run a shell command.",
@@ -22,7 +22,7 @@ const bashRun: ToolDefinition = {
 };
 
 test("McpContextRegistry persists active contexts and renews their sliding expiry", async () => {
-    const root = await mkdtemp(join(tmpdir(), "portable-devshell-context-"));
+    const root = await createTestTempDirectory("context");
     const filePath = join(root, "contexts.json");
     let now = Date.parse("2026-07-15T00:00:00.000Z");
 

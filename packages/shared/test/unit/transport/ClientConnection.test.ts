@@ -1,8 +1,6 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { rm } from "node:fs/promises";
 import { createServer, type Server, type Socket } from "node:net";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import test from "node:test";
 
 import {
@@ -17,6 +15,7 @@ import {
     SocketChannelProvider
 } from "@portable-devshell/shared";
 import { createTestIpcPath } from "../../../../../test/TestPlatformSupport.ts";
+import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.ts";
 
 interface ReceivedEvent {
     codec: Codec;
@@ -39,7 +38,7 @@ class ControlPeer {
     }
 
     static async create(): Promise<ControlPeer> {
-        const directory = await mkdtemp(join(tmpdir(), "portable-devshell-client-connection-"));
+        const directory = await createTestTempDirectory("client-connection");
         const socketPath = createTestIpcPath("client-connection", directory);
         const listener = createServer();
         const peer = new ControlPeer(directory, listener, socketPath);

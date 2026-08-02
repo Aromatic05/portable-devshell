@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { rm } from "node:fs/promises";
 import { createServer } from "node:net";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
@@ -9,9 +8,10 @@ import { ControlPathHome, createDefaultControlConfig, normalizeConfigInstanceDra
 
 import { ControlRuntimeMcp } from "../../src/composition/runtime/ControlRuntimeMcp.ts";
 import { ControlRuntimeState } from "../../src/composition/runtime/ControlRuntimeState.ts";
+import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
 
 test("MCP and Web reuse one listener only when their bind endpoints match", async (t) => {
-    const homeDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-runtime-listener-shared-"));
+    const homeDirectory = await createTestTempDirectory("runtime-listener-shared");
     const config = createConfig(0, 0);
     const runtime = await createRuntime(config, homeDirectory);
     t.after(async () => {
@@ -27,7 +27,7 @@ test("MCP and Web reuse one listener only when their bind endpoints match", asyn
 });
 
 test("separate Web listener can stop without interrupting MCP", async (t) => {
-    const homeDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-runtime-listener-separate-"));
+    const homeDirectory = await createTestTempDirectory("runtime-listener-separate");
     const runtime = await createRuntime(createConfig(await reservePort(), await reservePort()), homeDirectory);
     t.after(async () => {
         await runtime.stop().catch(() => undefined);
@@ -45,7 +45,7 @@ test("separate Web listener can stop without interrupting MCP", async (t) => {
 });
 
 test("replacing an independent Web listener keeps the MCP listener running", async (t) => {
-    const homeDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-runtime-listener-replace-"));
+    const homeDirectory = await createTestTempDirectory("runtime-listener-replace");
     const config = createConfig(await reservePort(), await reservePort());
     const runtime = await createRuntime(config, homeDirectory);
     t.after(async () => {
@@ -69,7 +69,7 @@ test("replacing an independent Web listener keeps the MCP listener running", asy
 });
 
 test("replacing an independent MCP listener keeps the Web listener running", async (t) => {
-    const homeDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-runtime-mcp-replace-"));
+    const homeDirectory = await createTestTempDirectory("runtime-mcp-replace");
     const config = createConfig(await reservePort(), await reservePort());
     const runtime = await createRuntime(config, homeDirectory);
     t.after(async () => {
@@ -91,7 +91,7 @@ test("replacing an independent MCP listener keeps the Web listener running", asy
 });
 
 test("instance MCP auth updates do not replace an unrelated Web listener", async (t) => {
-    const homeDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-runtime-instance-auth-"));
+    const homeDirectory = await createTestTempDirectory("runtime-instance-auth");
     let config = createConfig(await reservePort(), await reservePort());
     config.instances = [normalizeConfigInstanceDraft({
         name: "demo-local",
@@ -131,7 +131,7 @@ test("instance MCP auth updates do not replace an unrelated Web listener", async
 });
 
 test("MCP migration starts a different listener before retiring the previous listener", async (t) => {
-    const homeDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-runtime-mcp-order-"));
+    const homeDirectory = await createTestTempDirectory("runtime-mcp-order");
     const previous = createConfig(17890, 17891);
     previous.web.enabled = false;
     const next = structuredClone(previous);
@@ -176,7 +176,7 @@ test("MCP migration starts a different listener before retiring the previous lis
 });
 
 test("shared listener Web auth changes require an explicit control restart without stopping the current runtime", async (t) => {
-    const homeDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-runtime-listener-shared-apply-"));
+    const homeDirectory = await createTestTempDirectory("runtime-listener-shared-apply");
     const port = await reservePort();
     let config = createConfig(port, port);
     let webHotApplyCalls = 0;

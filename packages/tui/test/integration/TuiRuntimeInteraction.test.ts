@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
-import { chmod, mkdtemp, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { chmod, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import type { ReadStream, WriteStream } from "node:tty";
@@ -25,6 +24,7 @@ import {
     selectMainScreenModel,
     selectMainScrollKey,
 } from "../../src/view/model/TuiViewProjection.ts";
+import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
 
 test("real Ink runtime handles keyboard navigation, search, redraw, and terminal cleanup", async () => {
     const terminal = createTerminal();
@@ -516,9 +516,7 @@ test(
     "real Ink runtime suspends and remounts around an Attach Shell child process",
     { skip: process.platform === "win32" },
     async (context) => {
-        const shellDirectory = await mkdtemp(
-            join(tmpdir(), "devshell-tui-shell-"),
-        );
+        const shellDirectory = await createTestTempDirectory("devshell-tui-shell");
         const shellPath = join(shellDirectory, "shell");
         await writeFile(shellPath, "#!/bin/sh\nexit 0\n", "utf8");
         await chmod(shellPath, 0o755);

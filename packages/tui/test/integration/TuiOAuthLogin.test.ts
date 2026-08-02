@@ -1,9 +1,8 @@
 import assert from "node:assert/strict";
 import { createHash, randomBytes } from "node:crypto";
-import { mkdtemp, rm } from "node:fs/promises";
+import { rm } from "node:fs/promises";
 import { createServer } from "node:net";
 import type { AddressInfo } from "node:net";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import type { ReadStream, WriteStream } from "node:tty";
@@ -25,9 +24,10 @@ import {
     selectMainScreenModel,
     topTuiOverlay,
 } from "../../src/testing.ts";
+import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
 
 test("real TUI keyboard approval completes registration, authorization, token exchange, and MCP login", async (t) => {
-    const directory = await mkdtemp(join(tmpdir(), "portable-devshell-tui-oauth-login-"));
+    const directory = await createTestTempDirectory("tui-oauth-login");
     const socketPath = createTestIpcPath("tui-oauth-login", directory);
     const port = await reservePort();
     const origin = `http://127.0.0.1:${port}`;

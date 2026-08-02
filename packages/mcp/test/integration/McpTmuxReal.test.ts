@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn as nodeSpawn, spawnSync } from "node:child_process";
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { rm } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
@@ -12,6 +11,7 @@ import { WorkerTransportDriverLocal, WorkerBinary, WorkerInstanceFactory } from 
 import { McpHost } from "@portable-devshell/mcp/testing";
 import { asInstanceName, asWorkspacePath } from "@portable-devshell/shared";
 import { resolveTestWorkerBinary, tmuxTestOptions } from "../../../../test/TestPlatformSupport.ts";
+import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
 
 const workerBinaryPath = resolveTestWorkerBinary();
 
@@ -153,9 +153,9 @@ interface TmuxHarness {
 }
 
 async function withTmuxHarness(instanceName: string, body: (harness: TmuxHarness) => Promise<void>): Promise<void> {
-    const homeDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-mcp-tmux-home-"));
-    const runtimeDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-mcp-tmux-runtime-"));
-    const workspacePath = await mkdtemp(join(tmpdir(), "portable-devshell-mcp-tmux-workspace-"));
+    const homeDirectory = await createTestTempDirectory("mcp-tmux-home");
+    const runtimeDirectory = await createTestTempDirectory("mcp-tmux-runtime");
+    const workspacePath = await createTestTempDirectory("mcp-tmux-workspace");
     const instance = new WorkerInstanceFactory().create({
         defaultWorkspace: asWorkspacePath(workspacePath),
         env: {

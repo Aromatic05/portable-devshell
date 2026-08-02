@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
-import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { copyFile, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 import test from "node:test";
+
+import { createTestTempDirectory } from "../test/TestTempDirectory.mjs";
 
 const sourceRoot = fileURLToPath(new URL("../", import.meta.url));
 const sourceScript = resolve(sourceRoot, "scripts", "build-worker.mjs");
@@ -69,7 +70,7 @@ test("build-worker rejects --target because targets are positional", async () =>
 });
 
 async function createFixture() {
-    const root = await mkdtemp(resolve(tmpdir(), "portable-devshell-build-worker-"));
+    const root = await createTestTempDirectory("build-worker");
     const scriptsDirectory = resolve(root, "scripts");
     const script = resolve(scriptsDirectory, "build-worker.mjs");
     const cargoScript = resolve(root, "cargo-fake.mjs");

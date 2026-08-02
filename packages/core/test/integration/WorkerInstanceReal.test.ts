@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn as nodeSpawn } from "node:child_process";
-import { mkdtemp, rm, stat } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { rm, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import test from "node:test";
@@ -22,16 +21,17 @@ import {
     type WorkerCommandTransport,
     type WorkerRpcResponseEnvelope
 } from "@portable-devshell/core/testing";
-import { createCanonicalTestDirectory, realWorkerTestOptions, resolveTestWorkerBinary } from "../../../../test/TestPlatformSupport.ts";
+import { realWorkerTestOptions, resolveTestWorkerBinary } from "../../../../test/TestPlatformSupport.ts";
+import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
 
 const workerBinaryPath = resolveTestWorkerBinary();
 
 const cliToolCallContext = { source: "cli" } as const;
 
 test("WorkerInstance completes lifecycle against frozen devshell-worker", realWorkerTestOptions(workerBinaryPath), async (t) => {
-    const workspacePath = await createCanonicalTestDirectory("portable-devshell-instance-");
-    const homeDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-instance-home-"));
-    const runtimeDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-instance-runtime-"));
+    const workspacePath = await createTestTempDirectory("instance");
+    const homeDirectory = await createTestTempDirectory("instance-home");
+    const runtimeDirectory = await createTestTempDirectory("instance-runtime");
     const instanceName = asInstanceName(`task-6-${process.pid}`);
     const factory = new WorkerInstanceFactory();
     const instance = factory.create({
@@ -102,7 +102,7 @@ test("WorkerInstance completes lifecycle against frozen devshell-worker", realWo
 });
 
 test("WorkerInstance serializes start and stop lifecycle operations", async () => {
-    const homeDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-instance-serialized-"));
+    const homeDirectory = await createTestTempDirectory("instance-serialized");
     const harness = createWorkerInstanceHarness();
     const commands: string[] = [];
     let releaseStart!: () => void;
@@ -145,7 +145,7 @@ test("WorkerInstance serializes start and stop lifecycle operations", async () =
 });
 
 test("WorkerInstance audits control-owned tool calls while the worker is stopped", async () => {
-    const homeDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-control-audit-"));
+    const homeDirectory = await createTestTempDirectory("control-audit");
     const harness = createWorkerInstanceHarness();
     const instance = new WorkerInstanceFactory().create({
         homeDirectory,
@@ -256,7 +256,7 @@ test("WorkerInstance audits control-owned tool calls while the worker is stopped
 });
 
 test("WorkerInstance rejects not-ready and schedules concurrent tool calls while persisting history", async () => {
-    const homeDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-instance-harness-"));
+    const homeDirectory = await createTestTempDirectory("instance-harness");
     const harness = createWorkerInstanceHarness();
     const instanceName = asInstanceName("task-6-harness");
     const instance = new WorkerInstanceFactory().create({
@@ -426,7 +426,7 @@ test("WorkerInstance rejects not-ready and schedules concurrent tool calls while
 });
 
 test("WorkerInstance waits for approval before invoking tools and persists approval records", async () => {
-    const homeDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-instance-approval-"));
+    const homeDirectory = await createTestTempDirectory("instance-approval");
     const harness = createWorkerInstanceHarness();
     const instance = new WorkerInstanceFactory().create({
         approvalPolicy: { mode: "ask" },
@@ -515,7 +515,7 @@ test("WorkerInstance waits for approval before invoking tools and persists appro
 });
 
 test("WorkerInstance cancels a pending approval when the caller aborts", async () => {
-    const homeDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-instance-approval-cancel-"));
+    const homeDirectory = await createTestTempDirectory("instance-approval-cancel");
     const harness = createWorkerInstanceHarness();
     const instance = new WorkerInstanceFactory().create({
         approvalPolicy: { mode: "ask" },
@@ -574,7 +574,7 @@ test("WorkerInstance cancels a pending approval when the caller aborts", async (
 });
 
 test("WorkerInstance denies and expires approval-gated calls without invoking tools", async () => {
-    const homeDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-instance-approval-fail-"));
+    const homeDirectory = await createTestTempDirectory("instance-approval-fail");
     const harness = createWorkerInstanceHarness();
     const instance = new WorkerInstanceFactory().create({
         approvalPolicy: { mode: "ask" },
@@ -634,7 +634,7 @@ test("WorkerInstance denies and expires approval-gated calls without invoking to
 });
 
 test("WorkerInstance restores a stopped disconnected snapshot when start fails", async () => {
-    const homeDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-instance-start-failure-"));
+    const homeDirectory = await createTestTempDirectory("instance-start-failure");
     const transport: WorkerCommandTransport = {
         async runWorkerCommand(command): Promise<WorkerCommandResult> {
             assert.equal(command, "start");
@@ -684,7 +684,7 @@ test("WorkerInstance restores a stopped disconnected snapshot when start fails",
 });
 
 test("WorkerInstance refreshes actual daemon state when stop fails", async () => {
-    const homeDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-instance-stop-failure-"));
+    const homeDirectory = await createTestTempDirectory("instance-stop-failure");
     const harness = createWorkerInstanceHarness();
     const transport: WorkerCommandTransport = {
         ...harness.transport,
@@ -730,7 +730,7 @@ test("WorkerInstance refreshes actual daemon state when stop fails", async () =>
 });
 
 test("WorkerInstance refreshStatus updates snapshot from worker status without auto start", async () => {
-    const homeDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-instance-refresh-"));
+    const homeDirectory = await createTestTempDirectory("instance-refresh");
     const harness = createWorkerInstanceHarness();
     const instance = new WorkerInstanceFactory().create({
         homeDirectory,
@@ -780,7 +780,7 @@ test("WorkerInstance refreshStatus updates snapshot from worker status without a
 });
 
 test("WorkerInstance reconnectRpc refreshes schema after an rpc disconnect", async () => {
-    const homeDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-instance-reconnect-"));
+    const homeDirectory = await createTestTempDirectory("instance-reconnect");
     const harness = createWorkerInstanceHarness();
     const instance = new WorkerInstanceFactory().create({
         homeDirectory,

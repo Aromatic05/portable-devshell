@@ -840,7 +840,7 @@ mod recovery_tests {
 
     #[test]
     fn startup_restores_backup_when_commit_was_interrupted() {
-        let root = tempfile::tempdir().unwrap();
+        let root = crate::testing::temp_dir();
         let workspace = root.path().join("workspace");
         fs::create_dir(&workspace).unwrap();
         let target = workspace.join("result.bin");

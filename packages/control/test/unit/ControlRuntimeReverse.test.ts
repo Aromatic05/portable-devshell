@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { rm } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
 
@@ -16,6 +15,7 @@ import {
 } from "../../src/testing.ts";
 import type { ControlRuntimeMcp } from "../../src/composition/runtime/ControlRuntimeMcp.ts";
 import type { ControlRuntimeState } from "../../src/composition/runtime/ControlRuntimeState.ts";
+import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
 
 class RecordingHttpHost {
     readonly rawPaths: string[] = [];
@@ -33,7 +33,7 @@ class RecordingHttpHost {
 }
 
 test("reverse runtime is ready before the first reverse instance is created", async (t) => {
-    const homeDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-reverse-runtime-empty-"));
+    const homeDirectory = await createTestTempDirectory("reverse-runtime-empty");
     t.after(async () => await rm(homeDirectory, { force: true, recursive: true }));
     const config = createDefaultControlConfig();
     config.mcp.enabled = true;
@@ -57,7 +57,7 @@ test("reverse runtime is ready before the first reverse instance is created", as
 });
 
 test("reverse runtime adopts a changed MCP public URL on the replacement host", async (t) => {
-    const homeDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-reverse-runtime-"));
+    const homeDirectory = await createTestTempDirectory("reverse-runtime");
     t.after(async () => await rm(homeDirectory, { force: true, recursive: true }));
     const config = reverseConfig("https://controller.example.test/old");
     const instances = new InstanceRegistryFactory().build(config);

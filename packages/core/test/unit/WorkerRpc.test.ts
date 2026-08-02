@@ -1,8 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn as nodeSpawn } from "node:child_process";
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { rm } from "node:fs/promises";
 import { PassThrough } from "node:stream";
 import test from "node:test";
 
@@ -21,7 +19,8 @@ import {
     type WorkerCommandTransport,
     type WorkerRpcResponseEnvelope
 } from "@portable-devshell/core/testing";
-import { createCanonicalTestDirectory, realWorkerTestOptions, resolveTestWorkerBinary } from "../../../../test/TestPlatformSupport.ts";
+import { realWorkerTestOptions, resolveTestWorkerBinary } from "../../../../test/TestPlatformSupport.ts";
+import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
 
 const workerBinaryPath = resolveTestWorkerBinary();
 
@@ -205,9 +204,9 @@ test("WorkerRpcBridge surfaces spawn failures as structured rpc spawn errors", a
 });
 
 test("WorkerProtocolClient performs ping, handshake, and tools.list against frozen devshell-worker", realWorkerTestOptions(workerBinaryPath), async (t) => {
-    const workspacePath = await createCanonicalTestDirectory("portable-devshell-core-rpc-");
-    const homeDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-core-rpc-home-"));
-    const runtimeDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-core-rpc-runtime-"));
+    const workspacePath = await createTestTempDirectory("core-rpc");
+    const homeDirectory = await createTestTempDirectory("core-rpc-home");
+    const runtimeDirectory = await createTestTempDirectory("core-rpc-runtime");
     const instanceName = `task-4-${process.pid}`;
     const env = { ...process.env, HOME: homeDirectory, XDG_RUNTIME_DIR: runtimeDirectory };
     const transport = new WorkerTransportDriverLocal({

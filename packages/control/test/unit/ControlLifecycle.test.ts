@@ -1,8 +1,7 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
@@ -23,6 +22,7 @@ import {
 import { controlDaemonModulePath } from "../../src/testing.ts";
 import { createTestIpcPath, installUniqueWindowsTestIdentity } from "../../../../test/TestPlatformSupport.ts";
 import { encodeGlobalConfig, encodeInstanceConfig } from "../ConfigTomlTestSupport.ts";
+import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
 
 test("start creates control directory, socket, pid and status uses rpc", async (t) => {
     const harness = await createHarness();
@@ -145,7 +145,7 @@ test("start failure includes recent control log output", async () => {
 });
 
 test("pid publication failure terminates the spawned control process", async (t) => {
-    const root = await mkdtemp(join(tmpdir(), "portable-devshell-control-pid-failure-"));
+    const root = await createTestTempDirectory("control-pid-failure");
     let childPid: number | undefined;
     t.after(async () => {
         if (childPid !== undefined && isProcessRunning(childPid)) {
@@ -315,7 +315,7 @@ test("stop refuses to signal a live pid that cannot be verified over rpc", async
 });
 
 test("status times out when a control endpoint accepts but never replies", async (t) => {
-    const runtimeRoot = await mkdtemp(join(tmpdir(), "portable-devshell-control-status-timeout-"));
+    const runtimeRoot = await createTestTempDirectory("control-status-timeout");
     const socketPath = createTestIpcPath("control-status-timeout", runtimeRoot);
     const sockets = new Set<import("node:net").Socket>();
     const server = createServer((socket) => {
@@ -359,7 +359,7 @@ test("status times out when a control endpoint accepts but never replies", async
 });
 
 test("stop tolerates shutdown socket races in the real lifecycle rpc client", async (t) => {
-    const runtimeRoot = await mkdtemp(join(tmpdir(), "portable-devshell-control-stop-race-"));
+    const runtimeRoot = await createTestTempDirectory("control-stop-race");
     const socketPath = createTestIpcPath("control-stop-race", runtimeRoot);
     let shutdownRequested = false;
     const server = createServer((socket) => {
@@ -425,8 +425,8 @@ test("stop tolerates shutdown socket races in the real lifecycle rpc client", as
 });
 
 test("start keeps real worker config registered and does not auto-start worker", async (t) => {
-    const homeDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-control-real-home-"));
-    const xdgRuntimeDir = await mkdtemp(join(tmpdir(), "portable-devshell-control-real-runtime-"));
+    const homeDirectory = await createTestTempDirectory("control-real-home");
+    const xdgRuntimeDir = await createTestTempDirectory("control-real-runtime");
     const restoreWindowsIdentity = installUniqueWindowsTestIdentity("control-registered-config");
     const homePaths = new ControlPathHome(homeDirectory);
     const runtimePaths = new ControlPathRuntime(xdgRuntimeDir);
@@ -483,8 +483,8 @@ async function createHarness(): Promise<{
     paths: { controlHomeDir: string; socketFile: string };
     xdgRuntimeDir: string;
 }> {
-    const homeDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-control-home-"));
-    const xdgRuntimeDir = await mkdtemp(join(tmpdir(), "portable-devshell-control-runtime-"));
+    const homeDirectory = await createTestTempDirectory("control-home");
+    const xdgRuntimeDir = await createTestTempDirectory("control-runtime");
     const restoreWindowsIdentity = installUniqueWindowsTestIdentity("control-lifecycle-harness");
     const manager = new ControlLifecycleManager({
         daemonModulePath: controlDaemonModulePath(),

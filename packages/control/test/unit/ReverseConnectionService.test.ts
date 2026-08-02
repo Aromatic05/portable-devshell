@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp } from "node:fs/promises";
-import { tmpdir } from "node:os";
+
 import { join } from "node:path";
 import test from "node:test";
 
@@ -10,6 +9,7 @@ import { asInstanceName, type InstanceSnapshot, type JsonValue } from "@portable
 import { ReverseConnectionService } from "../../src/control/reverse/connection/ReverseConnectionService.ts";
 import { ReverseCredentialService } from "../../src/control/reverse/credential/ReverseCredentialService.ts";
 import { ReverseCredentialStore } from "../../src/control/reverse/credential/ReverseCredentialStore.ts";
+import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
 
 class MemoryRpcChannel implements WorkerRpcChannel {
     readonly sent: JsonValue[] = [];
@@ -47,7 +47,7 @@ class MemoryRpcChannel implements WorkerRpcChannel {
 }
 
 test("ReverseConnectionService enrolls and authenticates without an HTTP server", async () => {
-    const home = await mkdtemp(join(tmpdir(), "reverse-connection-service-"));
+    const home = await createTestTempDirectory("reverse-connection-service");
     const credentialStore = new ReverseCredentialStore(home);
     const enrollmentStates: string[] = [];
     const descriptor = {
@@ -107,7 +107,7 @@ test("ReverseConnectionService enrolls and authenticates without an HTTP server"
 });
 
 test("ReverseConnectionService owns generation replacement and disconnect state", async () => {
-    const home = await mkdtemp(join(tmpdir(), "reverse-generation-service-"));
+    const home = await createTestTempDirectory("reverse-generation-service");
     const credentialStore = new ReverseCredentialStore(home);
     let generation = 0;
     const accepted: Array<{ channel: WorkerRpcChannel; generation: number; transport: string }> = [];
@@ -184,7 +184,7 @@ test("ReverseConnectionService owns generation replacement and disconnect state"
 });
 
 test("ReverseConnectionService rejects activation after an authenticated token is revoked", async () => {
-    const home = await mkdtemp(join(tmpdir(), "reverse-revoked-activation-"));
+    const home = await createTestTempDirectory("reverse-revoked-activation");
     const credentialStore = new ReverseCredentialStore(home);
     let accepted = 0;
     const descriptor = reverseDescriptor(async () => {
@@ -221,7 +221,7 @@ test("ReverseConnectionService rejects activation after an authenticated token i
 });
 
 test("ReverseConnectionService lets token rotation disconnect a pending activation", async () => {
-    const home = await mkdtemp(join(tmpdir(), "reverse-activation-rotation-"));
+    const home = await createTestTempDirectory("reverse-activation-rotation");
     const credentialStore = new ReverseCredentialStore(home);
     let releaseActivation!: () => void;
     let signalActivation!: () => void;
@@ -272,7 +272,7 @@ test("ReverseConnectionService lets token rotation disconnect a pending activati
 });
 
 test("ReverseConnectionService rejects queued activation after stop", async () => {
-    const home = await mkdtemp(join(tmpdir(), "reverse-stop-activation-"));
+    const home = await createTestTempDirectory("reverse-stop-activation");
     const credentialStore = new ReverseCredentialStore(home);
     let accepted = 0;
     let releaseFirst!: () => void;

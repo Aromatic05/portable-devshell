@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { access, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { access, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, posix } from "node:path";
 import test from "node:test";
@@ -20,6 +20,7 @@ import {
     normalizeConfigInstanceDraft,
     parseConfigInstanceDraft
 } from "@portable-devshell/shared";
+import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
 
 const fixturesDir = fileURLToPath(new URL("../fixtures/", import.meta.url));
 const toml = new ControlConfigTomlCodec();
@@ -27,7 +28,7 @@ const globalDocument = new ControlGlobalTomlDocument();
 const instanceDocument = new ControlInstanceTomlDocument();
 
 test("default config is generated at the fixed control config path", async () => {
-    const homeDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-control-home-"));
+    const homeDirectory = await createTestTempDirectory("control-home");
 
     try {
         const config = await new ControlConfigStore().readOrCreate(homeDirectory);
@@ -59,7 +60,7 @@ test("default config is generated at the fixed control config path", async () =>
 });
 
 test("valid global and instance documents are assembled into canonical config", async () => {
-    const homeDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-control-home-"));
+    const homeDirectory = await createTestTempDirectory("control-home");
 
     try {
         const paths = new ControlPathHome(homeDirectory);
@@ -80,7 +81,7 @@ test("valid global and instance documents are assembled into canonical config", 
 });
 
 test("version 1 global MCP auth migrates to each enabled namespace and writes version 2", async () => {
-    const homeDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-control-home-"));
+    const homeDirectory = await createTestTempDirectory("control-home");
     const token = "0123456789abcdef0123456789abcdef";
 
     try {
@@ -114,7 +115,7 @@ test("version 1 global MCP auth migrates to each enabled namespace and writes ve
 });
 
 test("version 2 legacy default MCP groups gain context without widening custom allowlists", async () => {
-    const homeDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-control-home-"));
+    const homeDirectory = await createTestTempDirectory("control-home");
 
     try {
         const paths = new ControlPathHome(homeDirectory);
@@ -235,7 +236,7 @@ test("global TOML decode rejects web token residual alongside auth=none", () => 
 });
 
 test("invalid TOML field type is reported with file and structural path", async () => {
-    const homeDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-control-home-"));
+    const homeDirectory = await createTestTempDirectory("control-home");
 
     try {
         const paths = new ControlPathHome(homeDirectory);
@@ -254,7 +255,7 @@ test("invalid TOML field type is reported with file and structural path", async 
 });
 
 test("explicitly exposed MCP without auth remains a valid user choice", async () => {
-    const homeDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-control-home-"));
+    const homeDirectory = await createTestTempDirectory("control-home");
 
     try {
         const paths = new ControlPathHome(homeDirectory);

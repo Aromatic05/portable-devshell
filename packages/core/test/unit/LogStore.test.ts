@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
-import { access, mkdtemp, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { access, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
 
@@ -13,11 +12,12 @@ import {
     AuditToolCallHistory,
     type InstanceLogEntry
 } from "@portable-devshell/core/testing";
+import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
 
 const MIB = 1024 * 1024;
 
 test("AuditDatabase appends and reads records", async () => {
-    const root = await mkdtemp(join(tmpdir(), "portable-devshell-sqlite-"));
+    const root = await createTestTempDirectory("sqlite");
 
     try {
         const database = new AuditDatabase(join(root, "audit.sqlite3"), {
@@ -43,7 +43,7 @@ test("AuditDatabase appends and reads records", async () => {
 });
 
 test("AuditDatabase migrates legacy JSONL exactly once", async () => {
-    const root = await mkdtemp(join(tmpdir(), "portable-devshell-sqlite-migrate-"));
+    const root = await createTestTempDirectory("sqlite-migrate");
     const legacyFile = join(root, "logs.jsonl");
     const databaseFile = join(root, "audit.sqlite3");
 
@@ -84,7 +84,7 @@ test("AuditDatabase migrates legacy JSONL exactly once", async () => {
 });
 
 test("AuditDatabase removes expired rows on read and evicts oldest rows above maxBytes", async () => {
-    const root = await mkdtemp(join(tmpdir(), "portable-devshell-sqlite-cleanup-"));
+    const root = await createTestTempDirectory("sqlite-cleanup");
     let now = Date.parse("2026-07-15T00:00:00.000Z");
 
     try {
@@ -118,7 +118,7 @@ test("AuditDatabase removes expired rows on read and evicts oldest rows above ma
 });
 
 test("InstanceEventBuffer replays from fromSeq and reports stream.gap", async () => {
-    const root = await mkdtemp(join(tmpdir(), "portable-devshell-events-"));
+    const root = await createTestTempDirectory("events");
     const instanceName = asInstanceName("task-5-events");
 
     try {
@@ -159,7 +159,7 @@ test("InstanceEventBuffer replays from fromSeq and reports stream.gap", async ()
 });
 
 test("LogStoreInstance and AuditToolCallHistory persist per-instance records", async () => {
-    const root = await mkdtemp(join(tmpdir(), "portable-devshell-storage-"));
+    const root = await createTestTempDirectory("storage");
     const instanceName = asInstanceName("task-5-storage");
 
     try {

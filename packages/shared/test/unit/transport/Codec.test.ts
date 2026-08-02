@@ -1,8 +1,6 @@
 import assert from "node:assert/strict";
 import { createServer, type Server } from "node:net";
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { rm } from "node:fs/promises";
 import test from "node:test";
 
 import {
@@ -13,6 +11,7 @@ import {
     type FrameChannel
 } from "@portable-devshell/shared";
 import { createTestIpcPath } from "../../../../../test/TestPlatformSupport.ts";
+import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.ts";
 
 interface CodecPair {
     client: Codec;
@@ -23,7 +22,7 @@ interface CodecPair {
 }
 
 async function pair(clientPeer: "tui" | "web" = "tui"): Promise<CodecPair> {
-    const directory = await mkdtemp(join(tmpdir(), "portable-devshell-codec-"));
+    const directory = await createTestTempDirectory("codec");
     const socketPath = createTestIpcPath("codec", directory);
     const listener = createServer();
     await new Promise<void>((resolve, reject) => {

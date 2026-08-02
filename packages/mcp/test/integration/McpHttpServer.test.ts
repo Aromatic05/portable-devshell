@@ -1,8 +1,7 @@
 import assert from "node:assert/strict";
 import { createServer as createNodeServer } from "node:http";
 import { createHash, randomBytes } from "node:crypto";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { readFile, rm } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
@@ -11,6 +10,7 @@ import { requireTcpPort } from "../../../../test/TestHttpSupport.ts";
 
 import { McpHost } from "@portable-devshell/mcp/testing";
 import type { McpAuthConfig, McpHostInstanceConfig } from "@portable-devshell/mcp";
+import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
 
 const fixturesDirectory = resolve(dirname(fileURLToPath(import.meta.url)), "../fixtures");
 type JsonValue = boolean | number | null | string | JsonValue[] | { [key: string]: JsonValue };
@@ -84,7 +84,7 @@ test("a namespace with no auth remains runnable behind a public MCP URL", async 
 });
 
 test("a running host can add an OAuth namespace without exposing it as local auth", async () => {
-    const storageDir = await mkdtemp(join(tmpdir(), "portable-devshell-mcp-dynamic-oauth-"));
+    const storageDir = await createTestTempDirectory("mcp-dynamic-oauth");
     const host = createHost({
         publicBaseUrl: "http://127.0.0.1",
         storageDir
@@ -130,7 +130,7 @@ test("a running host can add an OAuth namespace without exposing it as local aut
 
 test("none, token, and oauth2 enforce real HTTP authentication with refresh rotation and revocation", async () => {
     const port = await reservePort();
-    const storageDir = await mkdtemp(join(tmpdir(), "portable-devshell-mcp-oidc-"));
+    const storageDir = await createTestTempDirectory("mcp-oidc");
     const staticToken = "t".repeat(48);
     const host = createHost({
         auth: {
@@ -438,7 +438,7 @@ test("none, token, and oauth2 enforce real HTTP authentication with refresh rota
 });
 
 test("oauth2 emits HTTPS endpoints behind a loopback reverse proxy", async () => {
-    const storageDir = await mkdtemp(join(tmpdir(), "portable-devshell-mcp-proxy-"));
+    const storageDir = await createTestTempDirectory("mcp-proxy");
     const host = createHost({
         auth: {
             enabled: true,
@@ -480,7 +480,7 @@ test("oauth2 emits HTTPS endpoints behind a loopback reverse proxy", async () =>
 test("oauth2 keeps a public path prefix on resources while using the origin as issuer", async () => {
     const port = await reservePort();
     const origin = `http://127.0.0.1:${port}`;
-    const storageDir = await mkdtemp(join(tmpdir(), "portable-devshell-mcp-prefix-"));
+    const storageDir = await createTestTempDirectory("mcp-prefix");
     const host = createHost({
         auth: {
             enabled: true,

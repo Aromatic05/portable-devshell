@@ -513,7 +513,7 @@ mod tests {
     use crate::tools::artifact::types::{ArtifactEncoding, ArtifactReadInput, ArtifactStream};
 
     fn store(policy: ArtifactPolicy) -> (tempfile::TempDir, std::sync::Arc<ArtifactStore>) {
-        let root = tempfile::tempdir().unwrap();
+        let root = crate::testing::temp_dir();
         let store = ArtifactStore::with_policy(root.path().join("artifacts"), policy).unwrap();
         (root, store)
     }

@@ -15,15 +15,9 @@ pub struct TestEnv {
 #[allow(dead_code)]
 impl TestEnv {
     pub fn new() -> Self {
-        let home = tempfile::tempdir().unwrap();
-        #[cfg(unix)]
-        let runtime = tempfile::Builder::new()
-            .prefix("devshell-test-")
-            .tempdir_in("/tmp")
-            .unwrap();
-        #[cfg(windows)]
-        let runtime = tempfile::tempdir().unwrap();
-        let workspace = tempfile::tempdir().unwrap();
+        let home = test_temp_dir();
+        let runtime = test_temp_dir();
+        let workspace = test_temp_dir();
         Self {
             home_root: home.path().join(".devshell"),
             runtime_root: runtime.path().to_path_buf(),
@@ -180,6 +174,15 @@ impl TestEnv {
             .env_remove("HOMEDRIVE")
             .env_remove("HOMEPATH");
     }
+}
+
+fn test_temp_dir() -> tempfile::TempDir {
+    let namespace = std::env::temp_dir().join("devshell-test");
+    std::fs::create_dir_all(&namespace).unwrap();
+    tempfile::Builder::new()
+        .prefix("test-")
+        .tempdir_in(&namespace)
+        .unwrap()
 }
 
 fn protocol_path(path: &Path) -> String {

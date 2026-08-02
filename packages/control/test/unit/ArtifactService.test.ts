@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
 
@@ -14,6 +13,7 @@ import {
     type ArtifactServiceEndpoint,
     type ArtifactServiceSchedule
 } from "@portable-devshell/control/testing";
+import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
 
 const png = Buffer.from(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
@@ -145,7 +145,7 @@ async function waitForStatus(
 }
 
 test("artifact transfer returns queued immediately and completes asynchronously", async (t) => {
-    const storageDir = await mkdtemp(join(tmpdir(), "artifact-service-"));
+    const storageDir = await createTestTempDirectory("artifact-service");
     t.after(() => rm(storageDir, { force: true, recursive: true }));
     const gate = new Deferred();
     const source = new MemoryArtifactEndpoint(Buffer.from("abcdefgh"), gate);
@@ -180,7 +180,7 @@ test("artifact transfer returns queued immediately and completes asynchronously"
 });
 
 test("artifact image view reads through the payload protocol and always closes the lease", async (t) => {
-    const storageDir = await mkdtemp(join(tmpdir(), "artifact-image-"));
+    const storageDir = await createTestTempDirectory("artifact-image");
     t.after(() => rm(storageDir, { force: true, recursive: true }));
     const source = new MemoryArtifactEndpoint(png);
     const service = new ArtifactService({
@@ -209,7 +209,7 @@ test("artifact image view reads through the payload protocol and always closes t
 });
 
 test("artifact image view rejects unsupported and oversized payloads before returning content", async (t) => {
-    const storageDir = await mkdtemp(join(tmpdir(), "artifact-image-invalid-"));
+    const storageDir = await createTestTempDirectory("artifact-image-invalid");
     t.after(() => rm(storageDir, { force: true, recursive: true }));
     const unsupported = new MemoryArtifactEndpoint(Buffer.from("not an image"));
     const oversized = new MemoryArtifactEndpoint(Buffer.alloc(10 * 1024 * 1024 + 1));
@@ -233,7 +233,7 @@ test("artifact image view rejects unsupported and oversized payloads before retu
 });
 
 test("queued transfer resumes after restart while active transfer becomes interrupted", async (t) => {
-    const storageDir = await mkdtemp(join(tmpdir(), "artifact-recovery-"));
+    const storageDir = await createTestTempDirectory("artifact-recovery");
     t.after(() => rm(storageDir, { force: true, recursive: true }));
     const scheduled: Array<() => void> = [];
     const manualSchedule: ArtifactServiceSchedule = (task) => scheduled.push(task);
@@ -267,7 +267,7 @@ test("queued transfer resumes after restart while active transfer becomes interr
     const recovered = await second.waitForTransfer(queued.transfer.transferId);
     assert.equal(recovered.status, "completed");
 
-    const activeStorageDir = await mkdtemp(join(tmpdir(), "artifact-interrupted-"));
+    const activeStorageDir = await createTestTempDirectory("artifact-interrupted");
     t.after(() => rm(activeStorageDir, { force: true, recursive: true }));
     const gate = new Deferred();
     const blockedSource = new MemoryArtifactEndpoint(Buffer.from("blocked"), gate);
@@ -310,7 +310,7 @@ test("queued transfer resumes after restart while active transfer becomes interr
 });
 
 test("artifact share persists its payload lease and revoke closes it", async (t) => {
-    const storageDir = await mkdtemp(join(tmpdir(), "artifact-share-"));
+    const storageDir = await createTestTempDirectory("artifact-share");
     t.after(() => rm(storageDir, { force: true, recursive: true }));
     const source = new MemoryArtifactEndpoint(Buffer.from("share"));
     const service = new ArtifactService({
@@ -331,7 +331,7 @@ test("artifact share persists its payload lease and revoke closes it", async (t)
 });
 
 test("expired share is closed and unavailable after restart", async (t) => {
-    const storageDir = await mkdtemp(join(tmpdir(), "artifact-share-expired-"));
+    const storageDir = await createTestTempDirectory("artifact-share-expired");
     t.after(() => rm(storageDir, { force: true, recursive: true }));
     const source = new MemoryArtifactEndpoint(Buffer.from("expired"));
     const options = {

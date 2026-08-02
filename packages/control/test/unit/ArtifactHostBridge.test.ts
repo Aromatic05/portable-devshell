@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
-import { chmod, mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { chmod, mkdir, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import test, { type TestContext } from "node:test";
 
 import type { ArtifactPayloadDescriptor, JsonValue } from "@portable-devshell/shared";
 import { ArtifactHostBridge, type ArtifactHostAccessContext } from "@portable-devshell/control/testing";
+import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
 
 function context(overrides?: Partial<ArtifactHostAccessContext>): ArtifactHostAccessContext {
     return {
@@ -44,7 +44,7 @@ async function readPayload(endpoint: ReturnType<ArtifactHostBridge["endpointFor"
 }
 
 async function fixture(t: TestContext) {
-    const root = await mkdtemp(join(tmpdir(), "artifact-host-"));
+    const root = await createTestTempDirectory("artifact-host");
     const homeDirectory = join(root, "home");
     const processCwd = join(root, "cwd");
     const storageDir = join(root, "storage");

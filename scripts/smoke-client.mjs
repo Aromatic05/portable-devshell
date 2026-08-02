@@ -1,10 +1,10 @@
 import { spawnSync } from "node:child_process";
-import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { isAbsolute, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { assertPackageBinFile, readPackageBinPath } from "./application-layout.mjs";
+import { createTestTempDirectory } from "../test/TestTempDirectory.mjs";
 
 const workerArgument = process.argv[2];
 if (workerArgument === undefined) {
@@ -16,7 +16,7 @@ const cli = process.env.PORTABLE_DEVSHELL_CLI_PATH ?? (await assertPackageBinFil
     await readPackageBinPath(resolve(repositoryRoot, "packages", "cli"), "devshell")
 )).absolutePath;
 const worker = isAbsolute(workerArgument) ? workerArgument : resolve(process.cwd(), workerArgument);
-const root = await mkdtemp(resolve(tmpdir(), "portable-devshell-client-smoke-"));
+const root = await createTestTempDirectory("client-smoke");
 const home = resolve(root, "user");
 const devshellHome = resolve(home, ".devshell");
 const workspace = resolve(root, "workspace");

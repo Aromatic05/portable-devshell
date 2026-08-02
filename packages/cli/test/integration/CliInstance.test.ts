@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { createServer, type Socket } from "node:net";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Readable } from "node:stream";
 import test from "node:test";
@@ -11,11 +10,12 @@ import { Channel, Codec, resolveControlSocketPath, type Event, type JsonValue } 
 import { createCliClients } from "../../src/client/CliClientComposition.ts";
 import { CliMain } from "../../src/CliMain.ts";
 import { createTestIpcPath, installUniqueWindowsTestIdentity, ipcEndpointAcceptsConnections, realWorkerTestOptions, readRelativeMarkerCommand, resolveTestWorkerBinary, workerPathEnvironmentName } from "../../../../test/TestPlatformSupport.ts";
+import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
 
 const workerBinaryPath = resolveTestWorkerBinary();
 
 async function runInstanceCommandsThroughControlRpc(t: { after(callback: () => Promise<void> | void): void }): Promise<void> {
-    const runtimeRoot = await mkdtemp(join(tmpdir(), "portable-devshell-cli-instance-"));
+    const runtimeRoot = await createTestTempDirectory("cli-instance");
     const socketPath = createTestIpcPath("cli-instance", runtimeRoot);
     const harness = createInstanceHarness();
     const server = createServer((socket) => {
@@ -68,9 +68,9 @@ async function runInstanceCommandsThroughControlRpc(t: { after(callback: () => P
 }
 
 async function runRealWorkerSmoke(): Promise<void> {
-    const homeDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-cli-real-home-"));
-    const xdgRuntimeDir = await mkdtemp(join(tmpdir(), "portable-devshell-cli-real-runtime-"));
-    const workspacePath = await mkdtemp(join(tmpdir(), "portable-devshell-cli-real-workspace-"));
+    const homeDirectory = await createTestTempDirectory("cli-real-home");
+    const xdgRuntimeDir = await createTestTempDirectory("cli-real-runtime");
+    const workspacePath = await createTestTempDirectory("cli-real-workspace");
     const workspaceMarkerName = "cli-real-workspace-marker.txt";
     const workspaceMarker = "portable-devshell-cli-real-workspace";
     await writeFile(join(workspacePath, workspaceMarkerName), workspaceMarker, "utf8");
@@ -170,9 +170,9 @@ async function runRealWorkerSmoke(): Promise<void> {
 }
 
 async function runInteractiveCreateFlow(t: { after(callback: () => Promise<void> | void): void }): Promise<void> {
-    const homeDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-cli-create-home-"));
-    const xdgRuntimeDir = await mkdtemp(join(tmpdir(), "portable-devshell-cli-create-runtime-"));
-    const workspacePath = await mkdtemp(join(tmpdir(), "portable-devshell-cli-create-workspace-"));
+    const homeDirectory = await createTestTempDirectory("cli-create-home");
+    const xdgRuntimeDir = await createTestTempDirectory("cli-create-runtime");
+    const workspacePath = await createTestTempDirectory("cli-create-workspace");
     const workspaceMarkerName = "cli-create-workspace-marker.txt";
     const workspaceMarker = "portable-devshell-cli-create-workspace";
     await writeFile(join(workspacePath, workspaceMarkerName), workspaceMarker, "utf8");

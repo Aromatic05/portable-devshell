@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { createServer } from "node:net";
-import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { createTestTempDirectory } from "../test/TestTempDirectory.mjs";
 
 export const repoRoot = fileURLToPath(new URL("../", import.meta.url));
 export const sourceLoader = resolve(repoRoot, "packages", "mcp", "test", "RegisterWorkspacePackages.mjs");
@@ -41,7 +41,7 @@ export function workerEnvironmentName(platform = process.platform, arch = proces
 }
 
 export async function createAcceptanceFixture() {
-    const root = await mkdtemp(join(tmpdir(), "portable-devshell-acceptance-"));
+    const root = await createTestTempDirectory("acceptance");
     const home = join(root, "home");
     const runtime = join(root, "runtime");
     const workspace = join(root, "workspace");

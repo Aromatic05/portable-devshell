@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import test from "node:test";
 
@@ -11,6 +10,7 @@ import {
     resolvePackageBinPath,
     writePortableApplicationManifest
 } from "./application-layout.mjs";
+import { createTestTempDirectory } from "../test/TestTempDirectory.mjs";
 
 
 test("CLI argument normalization removes only the pnpm separator", () => {
@@ -67,7 +67,7 @@ test("package bin resolver rejects missing, absolute, and escaping entries", () 
 });
 
 test("package bin file assertion accepts a regular file and rejects directories and symlinks", async () => {
-    const root = await mkdtemp(resolve(tmpdir(), "portable-devshell-layout-test-"));
+    const root = await createTestTempDirectory("layout-test");
     try {
         await mkdir(resolve(root, "dist"), { recursive: true });
         await writeFile(resolve(root, "dist", "CliMain.js"), "#!/usr/bin/env node\n", "utf8");
@@ -103,7 +103,7 @@ test("package bin file assertion accepts a regular file and rejects directories 
 });
 
 test("portable application manifest removes workspace paths and publishes the release version", async () => {
-    const root = await mkdtemp(resolve(tmpdir(), "portable-devshell-manifest-test-"));
+    const root = await createTestTempDirectory("manifest-test");
     try {
         await mkdir(resolve(root, "dist"), { recursive: true });
         await writeFile(resolve(root, "dist", "CliMain.js"), "#!/usr/bin/env node\n", "utf8");

@@ -1,12 +1,11 @@
 import assert from "node:assert/strict";
 import { createConnection, createServer, type Server, Socket } from "node:net";
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { rm } from "node:fs/promises";
 import test from "node:test";
 
 import { CHANNEL_MAX_FRAME_SIZE, Channel } from "@portable-devshell/shared";
 import { createTestIpcPath } from "../../../../../test/TestPlatformSupport.ts";
+import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.ts";
 
 interface ListeningSocket {
     directory: string;
@@ -15,7 +14,7 @@ interface ListeningSocket {
 }
 
 async function listen(): Promise<ListeningSocket> {
-    const directory = await mkdtemp(join(tmpdir(), "portable-devshell-channel-"));
+    const directory = await createTestTempDirectory("channel");
     const socketPath = createTestIpcPath("channel", directory);
     const server = createServer();
     await new Promise<void>((resolve, reject) => {

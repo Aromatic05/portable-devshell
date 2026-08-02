@@ -1,13 +1,13 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { rm } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
 
 import { ControlServer } from "../../src/server/ControlServer.ts";
+import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
 
 test("concurrent restart then shutdown preserves lifecycle request order", async (t) => {
-    const xdgRuntimeDir = await mkdtemp(join(tmpdir(), "portable-devshell-control-server-"));
+    const xdgRuntimeDir = await createTestTempDirectory("control-server");
     t.after(async () => {
         await rm(xdgRuntimeDir, { force: true, recursive: true });
     });

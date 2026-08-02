@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm, writeFile, mkdir } from "node:fs/promises";
+import { rm, writeFile, mkdir } from "node:fs/promises";
 import { request as httpRequest, type IncomingHttpHeaders } from "node:http";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
 import { HttpHost } from "@portable-devshell/mcp/testing";
+import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
 
 test("MCP HTTP server rejects a declared oversized request body before dispatch", async () => {
     const server = new HttpHost({
@@ -41,7 +41,7 @@ test("MCP HTTP server rejects a declared oversized request body before dispatch"
 });
 
 test("HTTP server serves WebUI assets with browser security and cache headers", async () => {
-    const directory = await mkdtemp(join(tmpdir(), "portable-devshell-web-assets-"));
+    const directory = await createTestTempDirectory("web-assets");
     await mkdir(join(directory, "assets"));
     await writeFile(join(directory, "index.html"), "<!doctype html><title>devshell</title>", "utf8");
     await writeFile(join(directory, "assets", "app-abc123.js"), "export {};", "utf8");

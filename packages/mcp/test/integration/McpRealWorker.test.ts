@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn as nodeSpawn } from "node:child_process";
-import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { readFile, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
@@ -12,6 +11,7 @@ import { asInstanceName, asWorkspacePath, errorCodes } from "@portable-devshell/
 import { WorkerTransportDriverLocal, WorkerBinary, WorkerInstanceFactory } from "@portable-devshell/core/testing";
 import { McpHost } from "@portable-devshell/mcp/testing";
 import { commandAvailable, realWorkerTestOptions, resolveTestWorkerBinary } from "../../../../test/TestPlatformSupport.ts";
+import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
 
 const fixturesDirectory = resolve(dirname(fileURLToPath(import.meta.url)), "../fixtures");
 const workerBinaryPath = resolveTestWorkerBinary();
@@ -20,8 +20,8 @@ type JsonValue = boolean | number | null | string | JsonValue[] | { [key: string
 
 test("MCP initialize tools/list and tools/call succeed against the frozen worker", realWorkerTestOptions(workerBinaryPath), async () => {
     const instanceName = "aromatic-pc-mcp-real";
-    const homeDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-mcp-real-home-"));
-    const workspacePath = await mkdtemp(join(tmpdir(), "portable-devshell-mcp-real-workspace-"));
+    const homeDirectory = await createTestTempDirectory("mcp-real-home");
+    const workspacePath = await createTestTempDirectory("mcp-real-workspace");
     const workspaceMarkerName = "mcp-real-workspace-marker.txt";
     const workspaceMarker = "portable-devshell-mcp-real-workspace";
     await writeFile(join(workspacePath, workspaceMarkerName), workspaceMarker, "utf8");
@@ -149,8 +149,8 @@ test("MCP initialize tools/list and tools/call succeed against the frozen worker
 
 test("MCP tools/call waits for approval before invoking the worker tool", realWorkerTestOptions(workerBinaryPath), async () => {
     const instanceName = "aromatic-pc-mcp-approval";
-    const homeDirectory = await mkdtemp(join(tmpdir(), "portable-devshell-mcp-approval-home-"));
-    const workspacePath = await mkdtemp(join(tmpdir(), "portable-devshell-mcp-approval-workspace-"));
+    const homeDirectory = await createTestTempDirectory("mcp-approval-home");
+    const workspacePath = await createTestTempDirectory("mcp-approval-workspace");
     const instance = new WorkerInstanceFactory().create({
         approvalPolicy: { mode: "ask" },
         defaultWorkspace: asWorkspacePath(workspacePath),
