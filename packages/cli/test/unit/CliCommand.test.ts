@@ -745,6 +745,7 @@ test("CliMain runs interactive instance create through control rpc", async () =>
                 return {
                     enabled: true,
                     mcp: {
+                        auth: { mode: "none" },
                         enabled: true,
                         path: "/demo-local/mcp",
                         tools: {
@@ -783,6 +784,11 @@ test("CliMain runs interactive instance create through control rpc", async () =>
             "\n",
             "\n",
             "/tmp/workspace\n",
+            "\n",
+            "\n",
+            "\n",
+            "\n",
+            "\n",
             "\n",
             "\n",
             "\n",
