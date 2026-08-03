@@ -8,11 +8,15 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import {
     buildTestspaceGlobalConfig,
     buildTestspaceInstanceConfig,
-    resolveTestspaceCommand,
+    resolveTestspaceInvocation,
     TESTSPACE_INSTANCE,
     testspaceUrls,
 } from "./testspace/TestspaceConfig.mjs";
 import { runConnectorLoop } from "./testspace/TestspaceConnector.mjs";
+import {
+    resolveTestspaceRuntimeDirectory,
+    stopTestspaceTmux,
+} from "./testspace/TestspaceRuntime.mjs";
 
 const repoRoot = fileURLToPath(new URL("../", import.meta.url));
 const root = resolve(process.env.DEVSHELL_TESTSPACE_ROOT ?? join(repoRoot, ".testspace"));
@@ -23,14 +27,14 @@ const paths = {
     controlConfig: join(root, "home", ".devshell", "control", "config.toml"),
     home: join(root, "home"),
     instanceConfig: join(root, "home", ".devshell", "control", "instances", `${TESTSPACE_INSTANCE}.toml`),
-    runtime: join(root, "runtime"),
+    legacyRuntime: join(root, "runtime"),
+    runtime: resolveTestspaceRuntimeDirectory(root),
     state: join(root, "state.json"),
     stopFile: join(root, "connector.stop"),
     workspace: join(root, "workspace"),
 };
 
-const command = resolveTestspaceCommand(process.argv[2]);
-const args = process.argv.slice(3);
+const { args, command } = resolveTestspaceInvocation(process.argv.slice(2));
 
 switch (command) {
     case "start":
@@ -57,8 +61,9 @@ async function start(argv) {
     const skipBuild = argv.includes("--skip-build");
     const existing = await readState();
     if (existing !== undefined && isProcessAlive(existing.controlPid)) {
+        const runtimeDirectory = stateRuntimeDirectory(existing);
         if (!isProcessAlive(existing.connectorPid)) {
-            existing.connectorPid = await startConnector(testspaceEnvironment());
+            existing.connectorPid = await startConnector(testspaceEnvironment(runtimeDirectory));
             await writeState(existing);
             process.stdout.write("testspace connector was restarted.\n");
         } else {
@@ -77,14 +82,20 @@ async function start(argv) {
     await requireFile(cliEntry(), "run `pnpm build` first");
     await requireFile(workerPath(), "run `pnpm test:prepare` first");
 
+    const previousRuntime = stateRuntimeDirectory(existing);
     const orphanControlPid = await readOptionalControlPid();
     if (existing === undefined && isProcessAlive(orphanControlPid)) {
-        const orphanEnvironment = testspaceEnvironment();
+        const orphanEnvironment = testspaceEnvironment(previousRuntime);
         runCli(["instance", "stop", TESTSPACE_INSTANCE], orphanEnvironment, {
             allowFailure: true,
         });
         runCli(["stop"], orphanEnvironment, { allowFailure: true });
     }
+
+    stopTestspaceTmux(previousRuntime, TESTSPACE_INSTANCE);
+    await Promise.all(runtimeDirectories(previousRuntime).map(async (directory) =>
+        await rm(directory, { force: true, recursive: true })
+    ));
 
     await rm(paths.stopFile, { force: true });
     await Promise.all([
@@ -110,6 +121,7 @@ async function start(argv) {
         intervalMs,
         mcpPort,
         root,
+        runtimeDirectory: paths.runtime,
         webPort,
     };
     await writeState(state);
@@ -122,11 +134,11 @@ async function start(argv) {
 }
 
 async function tui() {
-    await requireRunningState();
+    const state = await requireRunningState();
     await requireFile(tuiEntry(), "run `pnpm build` first");
     const result = spawnSync(process.execPath, [tuiEntry()], {
         cwd: repoRoot,
-        env: testspaceEnvironment(),
+        env: testspaceEnvironment(stateRuntimeDirectory(state)),
         stdio: "inherit",
     });
     if (result.status !== 0) {
@@ -152,22 +164,35 @@ async function web(argv) {
 
 async function stop() {
     const state = await readState();
+    const runtimeDirectory = stateRuntimeDirectory(state);
+    let controlPid = state?.controlPid;
     if (state === undefined) {
         await stopConnector(await readOptionalConnectorPid());
         const orphanControlPid = await readOptionalControlPid();
+        controlPid = orphanControlPid;
         if (isProcessAlive(orphanControlPid)) {
-            const env = testspaceEnvironment();
+            const env = testspaceEnvironment(runtimeDirectory);
             runCli(["instance", "stop", TESTSPACE_INSTANCE], env, { allowFailure: true, inherit: true });
             runCli(["stop"], env, { allowFailure: true, inherit: true });
         }
     } else {
         await writeFile(paths.stopFile, "stop\n", "utf8");
         await stopConnector(state.connectorPid);
-        const env = testspaceEnvironment();
+        const env = testspaceEnvironment(runtimeDirectory);
         runCli(["instance", "stop", TESTSPACE_INSTANCE], env, { allowFailure: true, inherit: true });
         runCli(["stop"], env, { allowFailure: true, inherit: true });
     }
-    await rm(root, { force: true, recursive: true });
+    await waitForProcessExit(controlPid, 3_000);
+    if (isProcessAlive(controlPid)) {
+        throw new Error(`testspace control process ${String(controlPid)} is still running`);
+    }
+    stopTestspaceTmux(runtimeDirectory, TESTSPACE_INSTANCE);
+    await Promise.all([
+        rm(root, { force: true, recursive: true }),
+        ...runtimeDirectories(runtimeDirectory).map(async (directory) =>
+            await rm(directory, { force: true, recursive: true })
+        ),
+    ]);
     process.stdout.write("testspace stopped and removed.\n");
 }
 
@@ -192,6 +217,9 @@ async function stopConnector(pid) {
         const deadline = Date.now() + 3000;
         while (isProcessAlive(pid) && Date.now() < deadline) {
             await delay(25);
+        }
+        if (isProcessAlive(pid)) {
+            throw new Error(`testspace connector process ${String(pid)} did not stop`);
         }
     }
     await rm(paths.connectorPid, { force: true });
@@ -239,16 +267,33 @@ function run(executable, commandArgs) {
     if (result.status !== 0) throw new Error(`${executable} ${commandArgs.join(" ")} failed`);
 }
 
-function testspaceEnvironment() {
+function testspaceEnvironment(runtimeDirectory = paths.runtime) {
     return {
         ...process.env,
         HOME: paths.home,
-        LOCALAPPDATA: paths.runtime,
+        LOCALAPPDATA: runtimeDirectory,
         PORTABLE_DEVSHELL_HOME: join(paths.home, ".devshell"),
         USERPROFILE: paths.home,
-        XDG_RUNTIME_DIR: paths.runtime,
+        XDG_RUNTIME_DIR: runtimeDirectory,
         [workerEnvironmentName()]: workerPath(),
     };
+}
+
+function stateRuntimeDirectory(state) {
+    return typeof state?.runtimeDirectory === "string" && state.runtimeDirectory.length > 0
+        ? state.runtimeDirectory
+        : paths.legacyRuntime;
+}
+
+function runtimeDirectories(primary) {
+    return [...new Set([primary, paths.runtime, paths.legacyRuntime])];
+}
+
+async function waitForProcessExit(pid, timeoutMs) {
+    const deadline = Date.now() + timeoutMs;
+    while (isProcessAlive(pid) && Date.now() < deadline) {
+        await delay(25);
+    }
 }
 
 function workerEnvironmentName() {
@@ -404,6 +449,6 @@ function printUrls(state) {
 
 function usage(message) {
     process.stderr.write(`${message}\n`);
-    process.stderr.write("Usage: pnpm testspace [tui|web|stop]\n");
+    process.stderr.write("Usage: pnpm testspace [start|tui|web|stop] [options]\n");
     process.exit(2);
 }

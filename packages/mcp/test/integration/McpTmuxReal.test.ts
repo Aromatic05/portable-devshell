@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { spawn as nodeSpawn, spawnSync } from "node:child_process";
-import { rm } from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
@@ -154,7 +155,7 @@ interface TmuxHarness {
 
 async function withTmuxHarness(instanceName: string, body: (harness: TmuxHarness) => Promise<void>): Promise<void> {
     const homeDirectory = await createTestTempDirectory("mcp-tmux-home");
-    const runtimeDirectory = await createTestTempDirectory("mcp-tmux-runtime");
+    const runtimeDirectory = await mkdtemp(join(tmpdir(), "pds-mcp-tmux-"));
     const workspacePath = await createTestTempDirectory("mcp-tmux-workspace");
     const instance = new WorkerInstanceFactory().create({
         defaultWorkspace: asWorkspacePath(workspacePath),
@@ -235,7 +236,14 @@ async function withTmuxHarness(instanceName: string, body: (harness: TmuxHarness
         await instance.stop().catch(() => undefined);
         await instance.close().catch(() => undefined);
         const tmuxSocket = join(runtimeDirectory, "devshell-worker", instanceName, "tmux.sock");
-        spawnSync("tmux", ["-S", tmuxSocket, "kill-server"], { stdio: "ignore" });
+        const cleanup = spawnSync("tmux", ["-S", tmuxSocket, "kill-server"], {
+            encoding: "utf8",
+        });
+        assert.equal(
+            cleanup.status,
+            0,
+            cleanup.stderr || cleanup.error?.message || "failed to stop test tmux server",
+        );
         await rm(homeDirectory, { force: true, recursive: true });
         await rm(runtimeDirectory, { force: true, recursive: true });
         await rm(workspacePath, { force: true, recursive: true });

@@ -3,9 +3,19 @@ export const DEFAULT_TESTSPACE_COMMAND = "start";
 const USER_TESTSPACE_COMMANDS = new Set(["stop", "tui", "web"]);
 
 export function resolveTestspaceCommand(value) {
-    if (value === undefined) return DEFAULT_TESTSPACE_COMMAND;
+    if (value === undefined || value === "start" || value.startsWith("-")) {
+        return DEFAULT_TESTSPACE_COMMAND;
+    }
     if (value === "connector-loop") return value;
     return USER_TESTSPACE_COMMANDS.has(value) ? value : "invalid";
+}
+
+export function resolveTestspaceInvocation(argv) {
+    const command = resolveTestspaceCommand(argv[0]);
+    const args = command === DEFAULT_TESTSPACE_COMMAND && argv[0]?.startsWith("-")
+        ? argv
+        : argv.slice(1);
+    return { args, command };
 }
 
 export function buildTestspaceGlobalConfig({ mcpPort, webPort }) {
