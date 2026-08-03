@@ -1,8 +1,10 @@
 import type { JsonValue } from "@portable-devshell/shared";
 
 import { CliRenderError } from "./render/CliRenderError.js";
+import { renderCliUsage, renderInstanceUsage, renderWatchUsage } from "./render/CliRenderUsage.js";
 
 export type CliParsedCommand =
+    | { kind: "help" }
     | { kind: "control.logs" }
     | { kind: "control.restart" }
     | { kind: "control.start" }
@@ -12,6 +14,7 @@ export type CliParsedCommand =
     | { kind: "tui" }
     | { input: JsonValue; instance: string; kind: "instance.call"; toolName: string }
     | { kind: "instance.create" }
+    | { kind: "instance.help" }
     | { instance: string; kind: "instance.deviceCode" }
     | { kind: "instance.list" }
     | { follow: boolean; instance: string; kind: "instance.logs" }
@@ -22,7 +25,8 @@ export type CliParsedCommand =
     | { instance: string; kind: "instance.revokeToken" }
     | { instance: string; kind: "instance.rotateToken" }
     | { instance: string; kind: "watch.logs" }
-    | { instance: string; kind: "watch.status" };
+    | { instance: string; kind: "watch.status" }
+    | { kind: "watch.help" };
 
 export class CliParser {
     parse(argv: readonly string[]): CliParsedCommand {
@@ -31,6 +35,10 @@ export class CliParser {
         }
 
         switch (argv[0]) {
+            case "help":
+            case "--help":
+            case "-h":
+                return this.#expectNoExtra(argv, { kind: "help" });
             case "start":
                 return this.#expectNoExtra(argv, { kind: "control.start" });
             case "restart":
@@ -50,12 +58,16 @@ export class CliParser {
             case "watch":
                 return this.#parseWatch(argv.slice(1));
             default:
-                throw CliRenderError.usage(`Unknown command: ${argv[0]}`);
+                throw CliRenderError.usage(`Unknown command: ${argv[0]}\n\n${renderCliUsage()}`);
         }
     }
 
     #parseInstance(argv: readonly string[]): CliParsedCommand {
         switch (argv[0]) {
+            case "help":
+            case "--help":
+            case "-h":
+                return this.#expectNoExtra(argv, { kind: "instance.help" });
             case "create":
                 return this.#expectNoExtra(argv, { kind: "instance.create" });
             case "device-code":
@@ -98,12 +110,18 @@ export class CliParser {
                     toolName: this.#required(argv[2], "tool name is required")
                 };
             default:
-                throw CliRenderError.usage(`Unknown instance command: ${argv[0] ?? ""}`.trim());
+                throw CliRenderError.usage(
+                    `${`Unknown instance command: ${argv[0] ?? ""}`.trim()}\n\n${renderInstanceUsage()}`,
+                );
         }
     }
 
     #parseWatch(argv: readonly string[]): CliParsedCommand {
         switch (argv[0]) {
+            case "help":
+            case "--help":
+            case "-h":
+                return this.#expectNoExtra(argv, { kind: "watch.help" });
             case "logs":
                 if (argv.length !== 2) {
                     throw CliRenderError.usage("watch logs requires <instance>");
@@ -123,7 +141,9 @@ export class CliParser {
                     kind: "watch.status"
                 };
             default:
-                throw CliRenderError.usage(`Unknown watch command: ${argv[0] ?? ""}`.trim());
+                throw CliRenderError.usage(
+                    `${`Unknown watch command: ${argv[0] ?? ""}`.trim()}\n\n${renderWatchUsage()}`,
+                );
         }
     }
 

@@ -132,6 +132,34 @@ test("CliMain handles control lifecycle commands and exit code mapping", async (
     assert.equal(stderr.flush(), "missing\n");
 });
 
+test("CliMain renders top-level and nested help without contacting Control", async () => {
+    const stdout = createBuffer();
+    const stderr = createBuffer();
+    const cli = new CliMain({
+        createCliClients: () => testClients({
+            async listInstances() {
+                throw new Error("help must not contact Control");
+            },
+        }),
+        createLifecycleManager: async () => {
+            throw new Error("help must not use Control lifecycle");
+        },
+        stderr,
+        stdout,
+    });
+
+    assert.equal(await cli.run(["--help"]), 0);
+    assert.match(stdout.flush(), /portable-devshell[\s\S]*devshell instance --help/u);
+    assert.equal(await cli.run(["instance", "-h"]), 0);
+    assert.match(stdout.flush(), /devshell instance call <instance> <toolName> <jsonInput>/u);
+    assert.equal(await cli.run(["watch", "help"]), 0);
+    assert.match(stdout.flush(), /devshell watch status <instance>/u);
+    assert.equal(stderr.flush(), "");
+
+    assert.equal(await cli.run(["unknown"]), 2);
+    assert.match(stderr.flush(), /Unknown command: unknown[\s\S]*Usage:/u);
+});
+
 test("CliMain routes the tui command through the injected runtime", async () => {
     const stdout = createBuffer();
     const stderr = createBuffer();

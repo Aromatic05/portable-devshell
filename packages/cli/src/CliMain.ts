@@ -11,6 +11,7 @@ import { CliCommandWatchStatus } from "./command/watch/CliCommandWatchStatus.js"
 import { cliExitCodes } from "./exit/CliExitCode.js";
 import { CliExitMapper } from "./exit/CliExitMapper.js";
 import { renderCliError } from "./render/CliRenderError.js";
+import { renderCliUsage, renderInstanceUsage, renderWatchUsage } from "./render/CliRenderUsage.js";
 import { renderControlLogs } from "./render/control/CliRenderControlLogs.js";
 import { renderControlStatus } from "./render/control/CliRenderControlStatus.js";
 import { renderInstanceList } from "./render/instance/CliRenderInstanceList.js";
@@ -85,6 +86,9 @@ export class CliMain {
 
     async #execute(command: CliParsedCommand): Promise<void> {
         switch (command.kind) {
+            case "help":
+                this.#stdout.write(`${renderCliUsage()}\n`);
+                return;
             case "control.start":
                 this.#stdout.write(renderControlStatus(await (await this.#lifecycle()).start()));
                 return;
@@ -141,6 +145,9 @@ export class CliMain {
 
                 return;
             }
+            case "instance.help":
+                this.#stdout.write(`${renderInstanceUsage()}\n`);
+                return;
             case "instance.deviceCode":
                 this.#stdout.write(
                     renderReverseDeviceCode(await this.#clients.reverse.createCode(command.instance))
@@ -215,6 +222,9 @@ export class CliMain {
                     },
                     this.#followEventLimit
                 );
+                return;
+            case "watch.help":
+                this.#stdout.write(`${renderWatchUsage()}\n`);
                 return;
             case "watch.status":
                 await new CliCommandWatchStatus().execute(

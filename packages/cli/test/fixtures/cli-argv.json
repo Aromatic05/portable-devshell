@@ -1,10 +1,13 @@
 [
     { "argv": [], "expected": { "kind": "control.status" } },
+    { "argv": ["--help"], "expected": { "kind": "help" } },
     { "argv": ["start"], "expected": { "kind": "control.start" } },
     { "argv": ["restart"], "expected": { "kind": "control.restart" } },
     { "argv": ["tui"], "expected": { "kind": "tui" } },
     { "argv": ["instance", "create"], "expected": { "kind": "instance.create" } },
+    { "argv": ["instance", "--help"], "expected": { "kind": "instance.help" } },
     { "argv": ["instance", "list"], "expected": { "kind": "instance.list" } },
+    { "argv": ["watch", "--help"], "expected": { "kind": "watch.help" } },
     { "argv": ["instance", "status", "demo-local"], "expected": { "instance": "demo-local", "kind": "instance.status" } },
     { "argv": ["instance", "logs", "demo-local", "-f"], "expected": { "follow": true, "instance": "demo-local", "kind": "instance.logs" } },
     {

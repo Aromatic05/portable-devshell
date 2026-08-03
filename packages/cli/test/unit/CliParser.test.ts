@@ -25,6 +25,8 @@ test("CliParser rejects invalid command shapes", () => {
     assert.throws(() => parser.parse(["instance", "create", "demo-local"]), /Unexpected arguments/u);
     assert.throws(() => parser.parse(["instance", "logs", "demo-local", "--bad"]), /\[-f\]/u);
     assert.throws(() => parser.parse(["watch", "status"]), /requires <instance>/u);
+    assert.throws(() => parser.parse(["unknown"]), /Unknown command:[\s\S]*Usage:/u);
+    assert.throws(() => parser.parse(["instance", "unknown"]), /Unknown instance command:[\s\S]*Usage:/u);
 });
 
 
