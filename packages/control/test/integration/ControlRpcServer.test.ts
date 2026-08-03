@@ -6,6 +6,7 @@ import test from "node:test";
 import type { WorkerCommandInteractiveSession, WorkerInstance } from "@portable-devshell/core/testing";
 import {
     asInstanceName,
+    type ActiveTodoSummary,
     ClientConnection,
     MASKED_CONFIG_TOKEN,
     createDefaultControlConfig,
@@ -214,7 +215,16 @@ test("ControlSocketServer rebuilds the immutable route snapshot after registry c
 });
 
 test("interactive runtime receives stream input while the root handler is still running", async (t) => {
-    const harness = await createHarness();
+    const activeTodos: ActiveTodoSummary[] = [{
+        completed: 1,
+        currentItem: "Verify release lifecycle",
+        revision: 3,
+        status: "in_progress",
+        taskId: "release-review",
+        title: "Release review",
+        total: 2
+    }];
+    const harness = await createHarness(activeTodos);
     t.after(() => harness.cleanup());
     const client = createClient(harness.socketPath, "cli");
     const opened = await client.openStream(
@@ -237,6 +247,20 @@ test("interactive runtime receives stream input while the root handler is still 
     const completed = await stream.nextEvent();
     assert.equal(completed.name, "stream.completed");
     assert.equal((completed.payload as { ready: boolean }).ready, true);
+    assert.deepEqual(
+        (completed.payload as { activeTodos?: ActiveTodoSummary[] }).activeTodos,
+        activeTodos
+    );
+
+    const stopped = await request(
+        harness.socketPath,
+        asInstanceName("alpha"),
+        "runtime.stop"
+    );
+    assert.deepEqual(
+        (stopped.payload as { activeTodos?: ActiveTodoSummary[] }).activeTodos,
+        activeTodos
+    );
 });
 
 test("service.shutdown replies before invoking the shutdown action", async (t) => {
@@ -262,11 +286,11 @@ test("service.shutdown replies before invoking the shutdown action", async (t) =
     await waitFor(() => shutdownRequested);
 });
 
-async function createHarness(): Promise<Harness> {
+async function createHarness(activeTodos: ActiveTodoSummary[] = []): Promise<Harness> {
     const directory = await createTestTempDirectory("control-socket");
     const socketPath = createTestIpcPath("control-rpc", directory);
     const worker = new FakeWorker("alpha");
-    const registry = new InstanceRegistry([createDescriptor(worker)]);
+    const registry = new InstanceRegistry([createDescriptor(worker, activeTodos)]);
     const routes = new ControlRouteComposition({ instances: registry, shutdown() {} });
     const server = new ControlSocketServer({ routes, socketPath });
     await server.start();
@@ -284,10 +308,17 @@ async function createHarness(): Promise<Harness> {
     };
 }
 
-function createDescriptor(worker: FakeWorker) {
-    return createTestInstanceDescriptor(worker as unknown as WorkerInstance, {
+function createDescriptor(worker: FakeWorker, activeTodos: ActiveTodoSummary[] = []) {
+    const descriptor = createTestInstanceDescriptor(worker as unknown as WorkerInstance, {
         name: "alpha"
     });
+    return {
+        ...descriptor,
+        todo: {
+            ...descriptor.todo,
+            summaries: () => activeTodos
+        }
+    };
 }
 
 function createClient(socketPath: string, peer: Exclude<Peer, "server">): ClientConnection {

@@ -111,7 +111,10 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
                 retryable: false
             });
         }
-        const snapshot = await descriptor.worker.start();
+        const snapshot = withTodoSummaries(
+            await descriptor.worker.start(),
+            descriptor.todo.summaries()
+        );
         this.#instanceRegistry.markOwned(instance);
         return snapshot as unknown as JsonValue;
     }
@@ -130,7 +133,10 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
 
     async stopInstance(instance: string): Promise<JsonValue> {
         const descriptor = this.#requireDescriptor(instance);
-        const snapshot = await descriptor.worker.stop();
+        const snapshot = withTodoSummaries(
+            await descriptor.worker.stop(),
+            descriptor.todo.summaries()
+        );
         this.#instanceRegistry.clearOwned(instance);
         return snapshot as unknown as JsonValue;
     }

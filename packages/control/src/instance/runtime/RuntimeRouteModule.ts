@@ -66,7 +66,13 @@ export function createRuntimeRouteModule(
             );
             relay.bindOutput(async (chunk) => await stream.emit("output", { chunk }));
             try {
-                const result = await instance.worker.startInteractive(readRuntimeWorkspacePath(request.payload), relay);
+                const result = withTodoSummaries(
+                    await instance.worker.startInteractive(
+                        readRuntimeWorkspacePath(request.payload),
+                        relay
+                    ),
+                    instance.todoSummaries()
+                );
                 ownership.markOwned(instance.name);
                 await stream.complete(result as unknown as JsonValue);
             } finally {
@@ -75,7 +81,10 @@ export function createRuntimeRouteModule(
             return undefined;
         },
         stop: async () => {
-            const result = await instance.worker.stop();
+            const result = withTodoSummaries(
+                await instance.worker.stop(),
+                instance.todoSummaries()
+            );
             ownership.clearOwned(instance.name);
             if (!instance.enabled) {
                 ownership.delete(instance.name);
