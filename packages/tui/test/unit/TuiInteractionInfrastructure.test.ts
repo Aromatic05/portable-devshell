@@ -32,7 +32,7 @@ import {
     tuiViewProjection,
     wrapTerminalText,
 } from "../../src/testing.ts";
-import { fieldLine } from "../../src/view/editor/TuiEditorView.ts";
+import { choiceLine, fieldLine } from "../../src/view/editor/TuiEditorView.ts";
 
 test("Prompt 3 urgent fix uses page + instance coordinates with a two-stage Tab cycle", async () => {
     const harness = createHarness();
@@ -688,6 +688,54 @@ test("only real editable fields render with the shared underline affordance", ()
         false,
     );
     assert.equal(readOnlyLine?.segments?.some((segment) => segment.underline === true) ?? false, false);
+});
+
+test("choice fields underline the whole selector and blink it while editing", () => {
+    const choice = choiceLine("enabled", "enabled", true);
+    const base = {
+        collapsedLines: [{ text: "summary" }] as const,
+        enterable: false,
+        expandable: true,
+        expanded: true,
+        expandedKey: "choice-editor",
+        focused: true,
+        id: "choice-editor",
+        selectedDetailLineId: "field:enabled",
+        status: "normal" as const,
+        title: "Configuration",
+    };
+
+    const browsing = renderExpandableBoxLines(
+        { ...base, expandedLines: [choice] },
+        80,
+    ).find((line) => line.key.includes("field:enabled"));
+    assert.equal(
+        browsing?.segments?.some(
+            (segment) => segment.text === "<true>" && segment.underline === true,
+        ),
+        true,
+    );
+
+    const visible = renderExpandableBoxLines(
+        {
+            ...base,
+            expandedLines: [{ ...choice, editing: true, cursorVisible: true }],
+        },
+        80,
+    ).find((line) => line.key.includes("field:enabled"));
+    assert.deepEqual(
+        visible?.segments?.filter((segment) => segment.underline === true).map((segment) => segment.text),
+        ["<true>"],
+    );
+
+    const hidden = renderExpandableBoxLines(
+        {
+            ...base,
+            expandedLines: [{ ...choice, editing: true, cursorVisible: false }],
+        },
+        80,
+    ).find((line) => line.key.includes("field:enabled"));
+    assert.equal(hidden?.segments?.some((segment) => segment.underline === true) ?? false, false);
 });
 
 test("box borders encode result status and retain severity while focused", () => {

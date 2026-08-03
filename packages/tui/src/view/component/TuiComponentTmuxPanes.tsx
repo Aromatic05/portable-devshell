@@ -27,8 +27,8 @@ export function TuiComponentTmuxPanes(props: TuiComponentTmuxPanesProps) {
     const help = active?.attached === true
         ? "type to send · Esc view · Ctrl+] sidebar"
         : active === undefined
-          ? "↑/↓ pane · Enter open · Ctrl+] sidebar"
-          : "←/→ pane · ↑/↓ scroll · Enter attach · Esc close · Ctrl+] sidebar";
+          ? "↑/↓ pane · Enter open · Esc sidebar"
+          : "←/→ pane · ↑/↓ scroll · Enter attach · Esc close";
     const paneLabel = pane === undefined
         ? "no pane"
         : `${snapshot.selectedIndex + 1}/${snapshot.panes.length} · ${pane.name} · ${pane.status}`;

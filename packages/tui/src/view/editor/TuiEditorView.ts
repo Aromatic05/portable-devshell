@@ -22,7 +22,20 @@ export function secretRecordFieldLine(id: string, label: string, value: JsonValu
 }
 
 export function choiceLine(id: string, label: string, value: JsonValue | undefined): EditableLine {
-    return editableLine(id, label, displayValue(value));
+    const choice = displayValue(value);
+    const prefix = `${label.padEnd(18, " ")} `;
+    const display = choice.length === 0 ? "<empty>" : choice;
+    return {
+        editable: true,
+        editableValue: {
+            emptyPlaceholder: "<empty>",
+            kind: "choice",
+            prefix,
+            value: choice,
+        },
+        id: `field:${id}`,
+        text: `${prefix}<${display}>`,
+    };
 }
 
 export function editableLine(id: string, label: string, value: string, suffix = ""): EditableLine {
@@ -32,6 +45,7 @@ export function editableLine(id: string, label: string, value: string, suffix = 
         editable: true,
         editableValue: {
             emptyPlaceholder: "<empty>",
+            kind: "text",
             prefix,
             suffix,
             value,

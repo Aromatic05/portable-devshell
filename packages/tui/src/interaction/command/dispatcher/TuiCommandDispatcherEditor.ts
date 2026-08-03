@@ -150,7 +150,7 @@ export class TuiCommandDispatcherEditor {
             const draft = this.#editorDraft(target.key, target.fallback);
             const current = readPath(draft, target.path);
             if (this.#choiceValues(editor, field) !== undefined) {
-                this.#store.setEditor({ ...editor, editing: false, error: undefined });
+                this.#store.setEditor({ ...editor, editing: true, error: undefined });
                 return true;
             }
             if (typeof current === "boolean") {
@@ -215,7 +215,7 @@ export class TuiCommandDispatcherEditor {
                         ? applyAuthModeChoice(draft, target.path, choice)
                         : setPath(draft, target.path, choice);
             this.#store.setFormDraft(target.key, nextDraft);
-            this.#store.setEditor({ ...editor, editing: false, error: undefined });
+            this.#store.setEditor({ ...editor, editing: true, error: undefined });
             return true;
         }
         if (!editor.editing) {
@@ -231,6 +231,9 @@ export class TuiCommandDispatcherEditor {
         if (editor.kind === "create") {
             if (field === "provider") {
                 return editor.schema?.providers;
+            }
+            if (field === "enabled" || field === "mcp.enabled") {
+                return [true, false];
             }
             if (field === "container.mode") {
                 return editor.schema?.container.modes;
@@ -252,6 +255,9 @@ export class TuiCommandDispatcherEditor {
         if (editor.kind === "connector") {
             if (field === "web.auth" || field === "mcp.auth") {
                 return ["none", "token", "oauth2"];
+            }
+            if (field === "instance.mcp.enabled" || field === "web.enabled") {
+                return [true, false];
             }
             return undefined;
         }

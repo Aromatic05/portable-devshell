@@ -76,6 +76,7 @@ function composerBox(
                 editable: true,
                 editableValue: {
                     emptyPlaceholder: "<empty>",
+                    kind: "text",
                     prefix,
                     value: draft,
                 },

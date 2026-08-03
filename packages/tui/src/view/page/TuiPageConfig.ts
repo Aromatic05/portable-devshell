@@ -19,7 +19,7 @@ export function buildConfigPageBoxes(state: TuiAppState, instanceName: string): 
     return [
         makeBox(state, "config", instanceName, {
             detailLines: [
-                fieldLine("enabled", "enabled", readPath(draft, "enabled")),
+                choiceLine("enabled", "enabled", readPath(draft, "enabled")),
                 choiceLine("provider", "provider", readPath(draft, "provider")),
                 fieldLine("workspace", "defaultWorkspace", readPath(draft, "workspace")),
                 ...editorErrorLine(state, "config", "configuration", ["enabled", "provider", "workspace"])
@@ -46,7 +46,7 @@ export function buildConfigPageBoxes(state: TuiAppState, instanceName: string): 
         }),
         makeBox(state, "config", instanceName, {
             detailLines: [
-                fieldLine("mcp.enabled", "mcp.enabled", readPath(draft, "mcp.enabled")),
+                choiceLine("mcp.enabled", "mcp.enabled", readPath(draft, "mcp.enabled")),
                 { id: "mcp-path", text: `mcp.path           ${stringValue(readPath(draft, "mcp.path"), `/${instanceName}/mcp`)} (fixed)` },
                 fieldLine("mcp.tools.groups", "groups", readPath(draft, "mcp.tools.groups")),
                 fieldLine("mcp.tools.capabilities", "capabilities", readPath(draft, "mcp.tools.capabilities")),

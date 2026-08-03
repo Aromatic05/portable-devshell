@@ -166,18 +166,6 @@ export class TuiTmuxPaneTerminalSession {
 
         const selectedIndex = clampIndex(this.#snapshot.selectedIndex, panes.length);
         let active = this.#snapshot.active;
-        if (active === undefined && panes.length > 0) {
-            this.#replace({
-                active: undefined,
-                error: undefined,
-                instance,
-                panes,
-                selectedIndex,
-                status: "ready",
-            });
-            await this.#openSelected(false);
-            return;
-        }
         if (active !== undefined) {
             const current = panes.find((pane) => pane.id === active?.paneId);
             if (current === undefined) {
@@ -461,8 +449,11 @@ export class TuiTmuxPaneTerminalSession {
         if (clamped === this.#snapshot.selectedIndex) {
             return;
         }
+        const keepViewOpen = this.#snapshot.active !== undefined;
         this.#replace({ ...this.#snapshot, active: undefined, selectedIndex: clamped });
-        void this.#openSelected(false);
+        if (keepViewOpen) {
+            void this.#openSelected(false);
+        }
     }
 
     #replace(snapshot: TuiTmuxPaneTerminalSnapshot): void {

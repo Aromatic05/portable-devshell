@@ -4,7 +4,7 @@ import type { BoxModel } from "../component/TuiComponentExpandableBox.js";
 import type { TuiAppState } from "../../state/reducer/TuiStoreModel.js";
 import { compactSummary, makeBox } from "./TuiPageBoxSupport.js";
 import { asRecord, editorDraft, readPath } from "../../state/editor/TuiEditorDraft.js";
-import { buttonLine, editorErrorLine, fieldLine, secretFieldLine } from "../editor/TuiEditorView.js";
+import { buttonLine, choiceLine, editorErrorLine, fieldLine, secretFieldLine } from "../editor/TuiEditorView.js";
 
 export function buildConnectorPageBoxes(state: TuiAppState, instanceName: string): BoxModel[] {
     const instanceDraft = editorDraft(state, `config:${instanceName}`, selectedInstanceDraft(state, instanceName));
@@ -23,7 +23,7 @@ export function buildConnectorPageBoxes(state: TuiAppState, instanceName: string
     return [
         makeBox(state, "connections", instanceName, {
             detailLines: [
-                fieldLine("instance.mcp.enabled", "mcp.enabled", readPath(instanceDraft, "mcp.enabled")),
+                choiceLine("instance.mcp.enabled", "mcp.enabled", readPath(instanceDraft, "mcp.enabled")),
                 fieldLine("instance.mcp.path", "mcp.path", readPath(instanceDraft, "mcp.path")),
                 ...editorErrorLine(state, "connector", "mcp-endpoint", ["mcp"]),
                 `MCP runtime        ${runtime.runtime}`,
@@ -48,8 +48,8 @@ export function buildConnectorPageBoxes(state: TuiAppState, instanceName: string
         }),
         makeBox(state, "connections", instanceName, {
             detailLines: [
-                fieldLine("web.enabled", "enabled", readPath(webDraft, "enabled")),
-                fieldLine("web.auth", "auth", webAuthMode),
+                choiceLine("web.enabled", "enabled", readPath(webDraft, "enabled")),
+                choiceLine("web.auth", "auth", webAuthMode),
                 ...(webAuthMode === "token"
                     ? [secretFieldLine("web.token", "token", readPath(webDraft, "token"))]
                     : []),
@@ -71,7 +71,7 @@ export function buildConnectorPageBoxes(state: TuiAppState, instanceName: string
         }),
         makeBox(state, "connections", instanceName, {
             detailLines: [
-                fieldLine("mcp.auth", "mcp.auth", authMode),
+                choiceLine("mcp.auth", "mcp.auth", authMode),
                 ...(authMode === "token"
                     ? [secretFieldLine("mcp.token", "mcp.token", readPath(instanceDraft, "mcp.token"))]
                     : []),

@@ -8,6 +8,7 @@ export interface TuiBoxLine {
     editable?: boolean;
     editableValue?: {
         emptyPlaceholder?: string;
+        kind: "choice" | "text";
         prefix: string;
         suffix?: string;
         value: string;

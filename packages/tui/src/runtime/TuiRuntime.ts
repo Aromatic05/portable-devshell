@@ -666,6 +666,20 @@ export class TuiRuntime {
                 continue;
             }
             if (tab === "tmuxPanes") {
+                if (
+                    action.type === "data" &&
+                    action.data === "\u001B" &&
+                    this.tmuxPanes.getSnapshot().active === undefined
+                ) {
+                    focused = false;
+                    const cursor = this.store.getState().interaction.sidebarCursor;
+                    this.store.setFocusScope(
+                        cursor?.kind === "instance"
+                            ? "sidebarInstances"
+                            : "sidebarPages",
+                    );
+                    continue;
+                }
                 this.#dispatchTmuxPaneInputAction(action);
                 continue;
             }

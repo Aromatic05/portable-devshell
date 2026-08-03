@@ -80,9 +80,15 @@ function renderEditableBodyLine(
 ): { segments: Array<{ text: string; underline?: boolean }>; text: string } {
     const editable = line.editableValue!;
     const value = editable.value;
-    const valueSegments = line.editing === true
-        ? editCursorSegments(value, line.cursor ?? value.length, line.cursorVisible === true)
-        : [{ text: value.length === 0 ? editable.emptyPlaceholder ?? "<empty>" : value, underline: true }];
+    const displayValue = value.length === 0 ? editable.emptyPlaceholder ?? "<empty>" : value;
+    const valueSegments = editable.kind === "choice"
+        ? [{
+              text: `<${displayValue}>`,
+              underline: line.editing === true ? line.cursorVisible || undefined : true,
+          }]
+        : line.editing === true
+          ? editCursorSegments(value, line.cursor ?? value.length, line.cursorVisible === true)
+          : [{ text: displayValue, underline: true }];
     const content = fitStyledSegments(
         [
             { text: editable.prefix },

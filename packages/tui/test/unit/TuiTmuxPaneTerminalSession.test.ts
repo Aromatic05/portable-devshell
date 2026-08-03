@@ -96,7 +96,6 @@ test("bind lists panes, projects them, and defaults the selection to the first p
 
     assert.deepEqual(harness.calls, [
         { args: ["alpha"], method: "listPanes" },
-        { args: ["alpha", "%0"], method: "inspectPane" },
     ]);
     const snapshot = session.getSnapshot();
     assert.equal(snapshot.status, "ready");
@@ -332,6 +331,30 @@ test("polling is bounded: it refreshes per tick and stops after maxTicks", async
     assert.equal(harness.calls.filter((call) => call.method === "listPanes").length, listCallsAfterPolling);
 });
 
+test("polling never reopens a pane view after Esc returns to the full-width pane list", async () => {
+    const harness = createOperationsHarness();
+    harness.setPanes([idlePane]);
+    harness.inspectByPane.set("%0", { id: "%0", lines: ["ready"], name: "main", status: "idle" });
+    const scheduler = createManualScheduler();
+    const session = new TuiTmuxPaneTerminalSession({ operations: harness.operations, scheduler: scheduler.scheduler });
+    await session.bind("alpha");
+    await session.handleRawInput("\r");
+    assert.notEqual(session.getSnapshot().active, undefined);
+
+    await session.handleRawInput("\u001b");
+    assert.equal(session.getSnapshot().active, undefined);
+
+    session.startPolling(50, 1);
+    scheduler.tick();
+    await flush();
+
+    assert.equal(session.getSnapshot().active, undefined);
+    assert.equal(
+        harness.calls.filter((call) => call.method === "inspectPane").length,
+        1,
+    );
+});
+
 test("dispose stops polling and ignores undeliverable input", async () => {
     const harness = createOperationsHarness();
     harness.setPanes([runningPane]);
@@ -372,6 +395,7 @@ test("handleRawInput in view mode scrolls up and Esc closes the internal pane vi
     harness.inspectByPane.set("%0", { id: "%0", lines: ["a", "b", "c"], name: "main", status: "idle" });
     const session = new TuiTmuxPaneTerminalSession({ operations: harness.operations, viewportRows: 2 });
     await session.bind("alpha");
+    await session.handleRawInput("\r");
     assert.deepEqual(viewLines(session), ["b", "c"]);
     assert.equal(session.getSnapshot().active?.scroll.atBottom, true);
 

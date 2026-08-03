@@ -113,8 +113,8 @@ export function routeTmuxPaneBrowseInput(raw: string, mode: TuiTmuxPaneBrowseMod
         if (raw === "\u001b") return { kind: "close" };
         return { kind: "noop" };
     }
-    if (raw === "\u001b[A" || raw === "k") return { direction: "previous", kind: "select" };
-    if (raw === "\u001b[B" || raw === "j") return { direction: "next", kind: "select" };
+    if (raw === "\u001b[A" || raw === "k" || raw === "\u001b[D" || raw === "h") return { direction: "previous", kind: "select" };
+    if (raw === "\u001b[B" || raw === "j" || raw === "\u001b[C" || raw === "l") return { direction: "next", kind: "select" };
     if (raw === "\r" || raw === "\n") return { kind: "activate" };
     if (raw === "\u001b") return { kind: "close" };
     return { kind: "noop" };
