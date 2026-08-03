@@ -3,6 +3,8 @@ import stringWidth from "string-width";
 import type { TuiBoxLineTone, TuiBoxModel } from "../../state/TuiViewModel.js";
 import type { TuiExpandableBoxStatus } from "../../state/TuiUiState.js";
 
+const graphemeSegmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+
 export type { TuiBoxLine as BoxLine, TuiBoxLineTone as BoxLineTone, TuiBoxModel as BoxModel } from "../../state/TuiViewModel.js";
 
 export interface TuiComponentExpandableBoxRenderLine {
@@ -10,8 +12,8 @@ export interface TuiComponentExpandableBoxRenderLine {
     color?: string;
     dimColor?: boolean;
     key: string;
+    segments?: Array<{ text: string; underline?: boolean }>;
     text: string;
-    underline?: boolean;
 }
 
 export function renderExpandableBoxLines(box: TuiBoxModel, requestedInnerWidth: number): TuiComponentExpandableBoxRenderLine[] {
@@ -34,13 +36,24 @@ export function renderExpandableBoxLines(box: TuiBoxModel, requestedInnerWidth: 
         ...bodyLines.flatMap((line, index) => {
             const selected = box.expanded && box.focused && box.selectedDetailLineId === line.id;
 
+            if (line.editableValue !== undefined) {
+                const rendered = renderEditableBodyLine(line, innerWidth);
+                return [{
+                    backgroundColor: selected ? "cyan" : box.focused ? "magenta" : undefined,
+                    color: selected ? "black" : box.focused ? "white" : lineColor(line.tone),
+                    dimColor: !selected && !box.focused && (line.tone === "muted" || line.disabled === true),
+                    key: `${box.id}-${line.id ?? index}-0`,
+                    segments: rendered.segments,
+                    text: rendered.text,
+                }];
+            }
+
             return wrapTerminalText(line.text, innerWidth).map((wrapped, wrappedIndex) => ({
                 backgroundColor: selected ? "cyan" : box.focused ? "magenta" : undefined,
                 color: selected ? "black" : box.focused ? "white" : lineColor(line.tone),
                 dimColor: !selected && !box.focused && (line.tone === "muted" || line.disabled === true),
                 key: `${box.id}-${line.id ?? index}-${wrappedIndex}`,
                 text: renderBodyLine(wrapped, innerWidth),
-                underline: line.editable === true
             }));
         }),
         {
@@ -55,7 +68,65 @@ export function renderExpandableBoxLines(box: TuiBoxModel, requestedInnerWidth: 
 export function measureExpandableBoxHeight(box: TuiBoxModel, requestedInnerWidth = 80): number {
     const innerWidth = Math.max(24, requestedInnerWidth);
     const bodyLines = box.expanded ? box.expandedLines : box.collapsedLines;
-    return bodyLines.reduce((height, line) => height + wrapTerminalText(line.text, innerWidth).length, 2);
+    return bodyLines.reduce(
+        (height, line) => height + (line.editableValue === undefined ? wrapTerminalText(line.text, innerWidth).length : 1),
+        2,
+    );
+}
+
+function renderEditableBodyLine(
+    line: TuiBoxModel["expandedLines"][number],
+    innerWidth: number,
+): { segments: Array<{ text: string; underline?: boolean }>; text: string } {
+    const editable = line.editableValue!;
+    const value = editable.value;
+    const valueSegments = line.editing === true
+        ? editCursorSegments(value, line.cursor ?? value.length, line.cursorVisible === true)
+        : [{ text: value.length === 0 ? editable.emptyPlaceholder ?? "<empty>" : value, underline: true }];
+    const content = fitStyledSegments(
+        [
+            { text: editable.prefix },
+            ...valueSegments,
+            { text: editable.suffix ?? "" },
+        ],
+        innerWidth,
+    );
+    const segments = [{ text: "│ " }, ...content, { text: " │" }];
+    return { segments, text: segments.map((segment) => segment.text).join("") };
+}
+
+function editCursorSegments(
+    value: string,
+    requestedCursor: number,
+    visible: boolean,
+): Array<{ text: string; underline?: boolean }> {
+    const cursor = Math.min(Math.max(0, requestedCursor), value.length);
+    return [
+        { text: value.slice(0, cursor) },
+        { text: value[cursor] ?? " ", underline: visible || undefined },
+        { text: value.slice(cursor + (cursor < value.length ? 1 : 0)) },
+    ];
+}
+
+function fitStyledSegments(
+    segments: Array<{ text: string; underline?: boolean }>,
+    width: number,
+): Array<{ text: string; underline?: boolean }> {
+    const output: Array<{ text: string; underline?: boolean }> = [];
+    let used = 0;
+    for (const segment of segments) {
+        let text = "";
+        for (const item of graphemeSegmenter.segment(segment.text)) {
+            const nextWidth = stringWidth(item.segment);
+            if (used + nextWidth > width) break;
+            text += item.segment;
+            used += nextWidth;
+        }
+        if (text.length > 0) output.push({ text, underline: segment.underline });
+        if (used >= width) break;
+    }
+    if (used < width) output.push({ text: " ".repeat(width - used) });
+    return output;
 }
 
 function renderTopBorder(title: string, innerWidth: number, frame: { horizontal: string; topLeft: string; topRight: string }): string {

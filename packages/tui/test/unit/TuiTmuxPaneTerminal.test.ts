@@ -91,11 +91,11 @@ test("Attach warning states per-pane mutex serialization with nondeterministic c
     assert.equal(warning.includes("nondeterministic"), true);
     assert.equal(warning.includes("uncoordinated"), true);
     assert.equal(warning.includes("interleave"), false);
-    assert.equal(warning.includes("ctrl+["), true);
+    assert.equal(warning.includes("esc"), true);
     assert.equal(warning.includes("no lock"), false);
 });
 
-test("Ctrl+[ exits Attach instead of being forwarded to tmux_input", () => {
+test("Esc exits Attach instead of being forwarded to tmux_input", () => {
     assert.deepEqual(routeTmuxAttachInput("\u001b"), { kind: "exit" });
 });
 
@@ -128,11 +128,13 @@ test("list browsing maps arrows and vi keys to selection, Enter to activate, Esc
     assert.deepEqual(routeTmuxPaneBrowseInput("x", "list"), { kind: "noop" });
 });
 
-test("view browsing maps arrows and vi keys to scrolling and Esc to close, not selection", () => {
+test("view browsing scrolls vertically, switches panes horizontally, Enter attaches, and Esc closes", () => {
     assert.deepEqual(routeTmuxPaneBrowseInput("\u001b[B", "view"), { delta: 1, kind: "scroll" });
     assert.deepEqual(routeTmuxPaneBrowseInput("j", "view"), { delta: 1, kind: "scroll" });
     assert.deepEqual(routeTmuxPaneBrowseInput("\u001b[A", "view"), { delta: -1, kind: "scroll" });
     assert.deepEqual(routeTmuxPaneBrowseInput("k", "view"), { delta: -1, kind: "scroll" });
+    assert.deepEqual(routeTmuxPaneBrowseInput("\u001b[D", "view"), { direction: "previous", kind: "select" });
+    assert.deepEqual(routeTmuxPaneBrowseInput("\u001b[C", "view"), { direction: "next", kind: "select" });
     assert.deepEqual(routeTmuxPaneBrowseInput("\u001b", "view"), { kind: "close" });
-    assert.deepEqual(routeTmuxPaneBrowseInput("\r", "view"), { kind: "noop" });
+    assert.deepEqual(routeTmuxPaneBrowseInput("\r", "view"), { kind: "activate" });
 });

@@ -41,8 +41,14 @@ export function buildAuditCallBoxes(
                 formatField("Request", call.requestId ?? "-"),
                 formatField("Task", call.taskId ?? "-"),
                 formatField("Todo item", call.todoItemId ?? "-"),
-                `input ${auditInputSummary(call.input, call.inputSummary)}`,
-                `result ${auditOutputSummary(output)}`,
+                {
+                    id: "input",
+                    text: formatField("Input", auditInputSummary(call.input, call.inputSummary)),
+                },
+                {
+                    id: "output",
+                    text: formatField("Output", auditOutputSummary(output)),
+                },
                 ...(call.error === undefined
                     ? []
                     : [formatField("Error", call.error)]),

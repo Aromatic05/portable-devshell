@@ -17,7 +17,7 @@ use crate::socket::SocketPaths;
 use crate::storage::InstancePaths;
 use crate::storage::permissions::ensure_dir;
 use crate::tools::ToolError;
-use crate::tools::tmux::codec::{TmuxInputChunk, parse_tmux_input, sanitize_terminal_output};
+use crate::tools::tmux::codec::{TmuxInputChunk, parse_tmux_input, sanitize_terminal_snapshot};
 use crate::tools::tmux::shell::prepare_shell_launch;
 
 pub const TMUX_SESSION: &str = "devshell";
@@ -292,6 +292,7 @@ impl TmuxBackend {
         let raw = self.run(&[
             "capture-pane".into(),
             "-p".into(),
+            "-e".into(),
             "-t".into(),
             tmux_pane_id.into(),
             "-S".into(),
@@ -299,7 +300,7 @@ impl TmuxBackend {
             "-E".into(),
             "-".into(),
         ])?;
-        let sanitized = sanitize_terminal_output(&raw);
+        let sanitized = sanitize_terminal_snapshot(&raw);
         let lines = sanitized.lines().map(ToOwned::to_owned).collect::<Vec<_>>();
         let logical_start = lines.len().saturating_sub(start.unsigned_abs() as usize);
         let logical_end = lines.len().saturating_sub(end.unsigned_abs() as usize);

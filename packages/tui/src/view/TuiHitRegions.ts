@@ -30,11 +30,8 @@ export type TuiHitTarget =
     | { kind: "terminalTab"; tab: TuiTerminalTab };
 
 export function tuiTerminalFullScreen(state: TuiAppState): boolean {
-    if (state.ui.selectedPage !== "terminal") {
-        return false;
-    }
-    const route = currentTuiRoute(state);
-    return route.page === "terminal" && route.tab === "tmuxPanes";
+    void state;
+    return false;
 }
 
 export interface TuiHitRegion {

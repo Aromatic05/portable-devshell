@@ -7,7 +7,7 @@ import type {
 } from "@portable-devshell/shared";
 
 import { routeModule } from "../../route/ControlRouteFactory.js";
-import { readTodoSubscriptionFromSeq } from "./TodoRouteInput.js";
+import { readTodoSubscriptionFromSeq, readTodoTitle } from "./TodoRouteInput.js";
 import type { TodoService } from "./TodoService.js";
 
 export interface TodoRouteSubscriptionPort {
@@ -31,9 +31,9 @@ export function createTodoRouteModule(
     subscriptions: TodoRouteSubscriptionPort
 ): PrefixRouteModuleDefinition {
     return routeModule("todo", {
-        get: async () => ({
+        get: async (request) => ({
             lastSeq: instance.worker.snapshot().lastSeq,
-            todo: await instance.todo.read()
+            todo: await instance.todo.read(readTodoTitle(request.payload))
         }) as unknown as JsonValue,
         subscribe: async (request, context) => {
             await subscriptions.subscribe(

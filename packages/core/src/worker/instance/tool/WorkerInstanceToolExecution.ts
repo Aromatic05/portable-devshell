@@ -42,7 +42,13 @@ export class WorkerInstanceToolExecution {
         this.#toolInvoker = options.toolInvoker;
     }
 
-    async call(toolName: string, input: JsonValue, context: ToolCallContext, signal?: AbortSignal): Promise<JsonValue> {
+    async call(
+        toolName: string,
+        input: JsonValue,
+        context: ToolCallContext,
+        signal?: AbortSignal,
+        transformResult?: (result: JsonValue) => Promise<JsonValue>
+    ): Promise<JsonValue> {
         this.#assertReady();
         throwIfToolCallAborted(signal);
 
@@ -86,10 +92,13 @@ export class WorkerInstanceToolExecution {
         let toolExecutionSucceeded = false;
 
         try {
-            const result = await reservation.run(async () => {
+            const rawResult = await reservation.run(async () => {
                 await this.#audit.running(scope, runningContext, approvalState);
                 return await this.#toolInvoker.invoke(toolName, input, context, signal);
             });
+            const result = transformResult === undefined
+                ? rawResult
+                : await transformResult(rawResult);
             toolExecutionSucceeded = true;
             const bashResult = toolName === "bash_run" ? asBashToolResult(result) : undefined;
             await this.#audit.completed(

@@ -20,7 +20,8 @@ export class McpEndpointHandlerWorker {
         context: ToolCallContext,
         selected: ToolDefinition | undefined,
         instanceRoutingEnabled: boolean,
-        signal?: AbortSignal
+        signal?: AbortSignal,
+        transformResult?: (result: JsonValue) => Promise<JsonValue>
     ): Promise<JsonValue> {
         const routed = readMcpRoutedInput(input, instanceRoutingEnabled, this.options.instanceName);
         if (routed.instance === this.options.instanceName) {
@@ -29,7 +30,7 @@ export class McpEndpointHandlerWorker {
                 throw mcpEndpointToolNotExposed(toolName, this.options.instanceName);
             }
             this.options.catalog.assertAdaptable(selected);
-            return await this.options.worker.callTool(toolName, routed.input, context, signal);
+            return await this.options.worker.callTool(toolName, routed.input, context, signal, transformResult);
         }
 
         const gateway = requireMcpEndpointGateway(this.options.gateway, this.options.instanceName);
@@ -39,6 +40,6 @@ export class McpEndpointHandlerWorker {
             throw mcpEndpointToolNotExposed(toolName, routed.instance);
         }
         this.options.catalog.assertAdaptable(targetTool);
-        return await gateway.callTool(routed.instance, toolName, routed.input, context, signal);
+        return await gateway.callTool(routed.instance, toolName, routed.input, context, signal, transformResult);
     }
 }

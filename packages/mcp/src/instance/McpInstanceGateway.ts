@@ -29,7 +29,8 @@ export interface McpInstanceGateway {
         toolName: string,
         input: JsonValue,
         context: ToolCallContext,
-        signal?: AbortSignal
+        signal?: AbortSignal,
+        transformResult?: (result: JsonValue) => Promise<JsonValue>
     ): Promise<JsonValue>;
     closeToolSession?(sessionId: string): Promise<void>;
     createSshInstance(sourceInstance: string, input: McpSshInstanceCreateInput): Promise<JsonValue>;

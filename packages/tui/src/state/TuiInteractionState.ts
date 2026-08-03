@@ -11,7 +11,7 @@ import type {
     TuiSidebarCursor,
 } from "./TuiUiState.js";
 
-export type TuiEditorKind = "config" | "connector" | "create";
+export type TuiEditorKind = "comment" | "config" | "connector" | "create";
 
 export interface TuiEditorState {
     cursor?: number;
@@ -120,8 +120,10 @@ export type TuiUiIntent =
     | { transferId: string; type: "artifact.cancelTransfer" }
     | { approvalId: string; instance: string; type: "approval.open" }
     | { type: "contextConversation.openCurrent" }
+    | { type: "contextConversation.edit" }
     | { text: string; type: "contextConversation.append" }
     | { type: "contextConversation.backspace" }
+    | { direction: "left" | "right"; type: "contextConversation.cursorMove" }
     | { type: "contextConversation.submit" }
     | {
           approvalId: string;

@@ -841,7 +841,8 @@ function createWorkerHarness(options?: {
                 toolName: string,
                 input: JsonValue,
                 context: { ctxId?: string; requestId?: string; source: string },
-                signal?: AbortSignal
+                signal?: AbortSignal,
+                transformResult?: (result: JsonValue) => Promise<JsonValue>
             ) {
                 if (!ready) {
                     const error = new Error("not ready");
@@ -854,9 +855,12 @@ function createWorkerHarness(options?: {
                 }
 
                 calls.push({ toolName, input, ...context });
-                return options?.callHandler === undefined
+                const toolResult = options?.callHandler === undefined
                     ? result
                     : await options.callHandler(toolName, input, context, signal);
+                return transformResult === undefined
+                    ? toolResult
+                    : await transformResult(toolResult);
             }
         }
     } as const;

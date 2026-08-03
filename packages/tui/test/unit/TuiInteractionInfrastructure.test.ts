@@ -420,7 +420,7 @@ test("Comment conversation shows exact history and keeps the route open after se
     assert.match(text, /delivery failed/i);
     assert.match(text, /2026-08-02T00:01:00.000Z/);
 
-    harness.store.setFocusScope("contextConversation" as never);
+    await harness.dispatch({ type: "contextConversation.edit" });
     await harness.press("new guidance");
     await harness.press("", { return: true });
     assert.deepEqual(sent, ["new guidance"]);
@@ -675,8 +675,19 @@ test("only real editable fields render with the shared underline affordance", ()
         line.key.includes("field:workspace"),
     );
     const readOnlyLine = lines.find((line) => line.key.includes("runtime"));
-    assert.equal(editableLine?.underline, true);
-    assert.equal(readOnlyLine?.underline, false);
+    assert.equal(
+        editableLine?.segments?.some(
+            (segment) => segment.text.includes("/workspace") && segment.underline === true,
+        ),
+        true,
+    );
+    assert.equal(
+        editableLine?.segments?.some(
+            (segment) => segment.text.includes("Workspace") && segment.underline === true,
+        ),
+        false,
+    );
+    assert.equal(readOnlyLine?.segments?.some((segment) => segment.underline === true) ?? false, false);
 });
 
 test("box borders encode result status and retain severity while focused", () => {
@@ -909,10 +920,13 @@ test("editing a field supports backspace, cursor movement, and inline cursor ren
         "zcd",
     );
     const wizard = selectMainScreenModel(harness.store.getState()).boxes[0];
-    assert.equal(
-        wizard?.expandedLines.some((line) => line.text.includes("█")),
-        true,
+    const selectedLine = renderExpandableBoxLines(wizard!, 80).find((line) =>
+        line.key.includes(wizard?.selectedDetailLineId ?? "missing"),
     );
+    const cursors = selectedLine?.segments?.filter((segment) => segment.underline === true) ?? [];
+    assert.equal(cursors.length, 1);
+    assert.equal(cursors[0]?.text.length, 1);
+    assert.equal(wizard?.expandedLines.some((line) => line.text.includes("█")), false);
 });
 
 test("wizard normalizes friendly container mode labels before control validation", async () => {
@@ -990,20 +1004,20 @@ test("config choices use angle selectors and replace incompatible provider field
     const general = expandBox(harness, "configuration");
     const security = expandBox(harness, "security");
     assert.equal(
-        general.expandedLines.some((line) => line.text.endsWith("<ssh>")),
+        general.expandedLines.some((line) => line.editableValue?.value === "ssh"),
         true,
     );
     assert.equal(
-        security.expandedLines.some((line) => line.text.endsWith("<disabled>")),
+        security.expandedLines.some((line) => line.editableValue?.value === "disabled"),
         true,
     );
     assert.equal(
-        security.expandedLines.some((line) => line.text.endsWith("<ask>")),
+        security.expandedLines.some((line) => line.editableValue?.value === "ask"),
         true,
     );
 
     const provider = general.expandedLines.find((line) =>
-        line.text.endsWith("<ssh>"),
+        line.editableValue?.value === "ssh",
     );
     assert.ok(provider?.id);
     harness.store.setMainFocusId(general.id);
@@ -1175,7 +1189,7 @@ test("config exposes container and tool scheduler settings", () => {
         true,
     );
     assert.equal(
-        provider.expandedLines.some((line) => line.text.endsWith("<dockerfile>")),
+        provider.expandedLines.some((line) => line.editableValue?.value === "dockerfile"),
         true,
     );
     assert.equal(
@@ -1407,7 +1421,9 @@ test("audit renders legacy records without an input summary", () => {
     enterAuditUnscoped(harness);
     const audit = expandBox(harness, "audit-call:legacy-call");
     assert.equal(
-        audit.expandedLines.some((line) => line.text === "input -"),
+        audit.expandedLines.some(
+            (line) => line.id === "audit-call:legacy-call:input" && line.text.trimEnd().endsWith("-"),
+        ),
         true,
     );
     assert.equal(

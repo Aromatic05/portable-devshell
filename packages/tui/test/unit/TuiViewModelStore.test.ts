@@ -184,7 +184,7 @@ test("Audit page renders control-owned tool calls from live events", () => {
         false,
     );
     assert.equal(
-        expanded?.expandedLines.some((line) => line.text.startsWith("result ")),
+        expanded?.expandedLines.some((line) => line.text.trimStart().startsWith("Output")),
         true,
     );
 });
@@ -324,11 +324,11 @@ test("Audit page creates expensive input and output detail only for expanded rec
     const expanded = selectMainScreenModel(store.getState()).boxes[0];
     assert.equal(expanded?.expanded, true);
     assert.equal(
-        expanded?.expandedLines.some((line) => line.text.startsWith("input ")),
+        expanded?.expandedLines.some((line) => line.text.trimStart().startsWith("Input")),
         true,
     );
     assert.equal(
-        expanded?.expandedLines.some((line) => line.text.startsWith("result ")),
+        expanded?.expandedLines.some((line) => line.text.trimStart().startsWith("Output")),
         true,
     );
 });

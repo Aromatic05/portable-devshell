@@ -49,8 +49,14 @@ export function TuiScreenRouter(props: TuiScreenRouterProps) {
             {model.emptyState !== undefined ? <Text color="yellow">{model.emptyState}</Text> : undefined}
             {model.emptyState === undefined
                 ? visibleLines.map((line) => (
-                      <Text backgroundColor={line.backgroundColor} color={line.color} dimColor={line.dimColor} key={line.key} underline={line.underline}>
-                          {line.text}
+                      <Text backgroundColor={line.backgroundColor} color={line.color} dimColor={line.dimColor} key={line.key}>
+                          {line.segments === undefined
+                              ? line.text
+                              : line.segments.map((segment, index) => (
+                                    <Text key={`${line.key}:${index}`} underline={segment.underline}>
+                                        {segment.text}
+                                    </Text>
+                                ))}
                       </Text>
                   ))
                 : undefined}

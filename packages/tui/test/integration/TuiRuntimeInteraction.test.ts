@@ -1020,8 +1020,8 @@ test("real Ink runtime switches terminal sources and drives tmux View and Attach
                     region.target.kind === "page" ||
                     region.target.kind === "instance",
             ),
-            false,
-            "tmuxPanes tab must not reserve sidebar hit regions",
+            true,
+            "tmux output must retain the main side panel for switching and exit",
         );
 
         const instancesTabRegion = tabTargets.find(

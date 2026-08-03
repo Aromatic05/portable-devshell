@@ -73,17 +73,10 @@ test("real TuiRuntime drives Todo overview to detail through the control socket"
             overviewBoxes.some((box) => box.id === "todo-task:task-1"),
             "overview should render the root task box",
         );
-        assert.ok(
-            overviewBoxes.some((box) => box.id === "todo-item:inspect"),
-            "overview should render the inspect sub-task box",
-        );
-        assert.ok(
-            overviewBoxes.some((box) => box.id === "todo-item:implement"),
-            "overview should render the implement sub-task box",
-        );
-        assert.ok(
-            overviewBoxes.some((box) => box.id === "todo-item:verify"),
-            "overview should render the verify sub-task box",
+        assert.equal(
+            overviewBoxes.some((box) => box.id.startsWith("todo-item:")),
+            false,
+            "overview uses summaries; full items are loaded after opening the task",
         );
         for (const box of overviewBoxes) {
             assert.notEqual(
@@ -97,16 +90,6 @@ test("real TuiRuntime drives Todo overview to detail through the control socket"
         await waitUntil(
             () => runtime.store.getState().interaction.focusScope === "mainBoxes",
         );
-
-        terminal.write("\u001B[B");
-        await waitUntil(
-            () => runtime.store.getState().ui.mainFocusId === "todo-item:inspect",
-        );
-        terminal.write("\u001B[A");
-        await waitUntil(
-            () => runtime.store.getState().ui.mainFocusId === "todo-task:task-1",
-        );
-        await delay(100);
 
         terminal.write(" ");
         await waitUntil(
@@ -138,6 +121,11 @@ test("real TuiRuntime drives Todo overview to detail through the control socket"
             const route = currentTuiRoute(runtime.store.getState());
             return route.page === "todo" && route.view === "detail";
         });
+        await waitUntil(() =>
+            selectMainScreenModel(runtime.store.getState()).boxes.some(
+                (box) => box.id === "todo-item:inspect",
+            ),
+        );
 
         const detailBoxes = selectMainScreenModel(runtime.store.getState()).boxes;
         assert.ok(
@@ -258,8 +246,15 @@ function createTodoServer(socketPath: string): {
                 currentAssociation() {
                     return undefined;
                 },
-                async read() {
-                    return todoFixture;
+                async read(title?: string) {
+                    return title === todoFixture.title
+                        ? todoFixture
+                        : {
+                              items: [],
+                              revision: 0,
+                              summary: { completed: 0, total: 0 },
+                              tasks: todoFixture.tasks,
+                          };
                 },
                 summaries() {
                     return todoFixture.tasks ?? [];

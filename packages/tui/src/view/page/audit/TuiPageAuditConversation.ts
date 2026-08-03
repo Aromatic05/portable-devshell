@@ -67,13 +67,20 @@ function composerBox(
     ctxId: string,
 ): BoxModel {
     const draft = readContextConversationDraft(state, instance, ctxId);
+    const prefix = "Draft              ";
+    const display = draft.length === 0 ? "<empty>" : draft;
     return makeBox(state, "audit", instance, {
         detailLines: [
             formatField("Context", ctxId),
             {
                 editable: true,
+                editableValue: {
+                    emptyPlaceholder: "<empty>",
+                    prefix,
+                    value: draft,
+                },
                 id: "draft",
-                text: formatField("Draft", draft.length === 0 ? "<empty>" : draft),
+                text: `${prefix}${display}`,
             },
             "Enter queues the Comment.",
             "Esc or Ctrl+[ returns to the Audit Context.",

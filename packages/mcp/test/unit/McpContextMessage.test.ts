@@ -173,9 +173,16 @@ function createHarness(
         ): Promise<T> {
             return await operation();
         },
-        async callTool(): Promise<JsonValue> {
+        async callTool(
+            _toolName: string,
+            _input: JsonValue,
+            _context: ToolCallContext,
+            _signal?: AbortSignal,
+            transformResult?: (result: JsonValue) => Promise<JsonValue>,
+        ): Promise<JsonValue> {
             if (worker.fail) throw new Error("worker failed");
-            return { exitCode: 0, stderr: "", stdout: "ok" };
+            const result = { exitCode: 0, stderr: "", stdout: "ok" };
+            return transformResult === undefined ? result : await transformResult(result);
         },
         handshake: {
             instance: "alpha",

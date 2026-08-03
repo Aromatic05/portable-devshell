@@ -94,7 +94,10 @@ test("bind lists panes, projects them, and defaults the selection to the first p
 
     await session.bind("alpha");
 
-    assert.deepEqual(harness.calls, [{ args: ["alpha"], method: "listPanes" }]);
+    assert.deepEqual(harness.calls, [
+        { args: ["alpha"], method: "listPanes" },
+        { args: ["alpha", "%0"], method: "inspectPane" },
+    ]);
     const snapshot = session.getSnapshot();
     assert.equal(snapshot.status, "ready");
     assert.equal(snapshot.instance, "alpha");
@@ -175,7 +178,7 @@ test("attached input is encoded and forwarded to the selected running task id", 
     assert.equal(active?.attached, true);
 });
 
-test("Ctrl+[ exits Attach without forwarding to tmux_input", async () => {
+test("Esc exits Attach without forwarding to tmux_input", async () => {
     const harness = createOperationsHarness();
     harness.setPanes([runningPane]);
     harness.inspectByPane.set("%1", { id: "%1", lines: [], name: "server", status: "running", taskId: "task-9", taskStatus: "running" });
@@ -346,14 +349,15 @@ test("dispose stops polling and ignores undeliverable input", async () => {
     assert.equal(harness.calls.some((call) => call.method === "sendInput"), false);
 });
 
-test("handleRawInput in list mode selects with arrows and activates with Enter", async () => {
+test("handleRawInput switches the visible pane horizontally and Enter attaches", async () => {
     const harness = createOperationsHarness();
     harness.setPanes([idlePane, runningPane]);
     harness.inspectByPane.set("%1", { id: "%1", lines: ["ready"], name: "server", status: "running", taskId: "task-9", taskStatus: "running" });
     const session = new TuiTmuxPaneTerminalSession({ operations: harness.operations });
     await session.bind("alpha");
 
-    await session.handleRawInput("\u001b[B");
+    await session.handleRawInput("\u001b[C");
+    await flush();
     assert.equal(session.getSnapshot().selectedIndex, 1);
 
     await session.handleRawInput("\r");
@@ -362,13 +366,12 @@ test("handleRawInput in list mode selects with arrows and activates with Enter",
     assert.equal(active?.attached, true);
 });
 
-test("handleRawInput in view mode scrolls up from the bottom and closes with Esc", async () => {
+test("handleRawInput in view mode scrolls up and Esc closes the internal pane view", async () => {
     const harness = createOperationsHarness();
     harness.setPanes([idlePane]);
     harness.inspectByPane.set("%0", { id: "%0", lines: ["a", "b", "c"], name: "main", status: "idle" });
     const session = new TuiTmuxPaneTerminalSession({ operations: harness.operations, viewportRows: 2 });
     await session.bind("alpha");
-    await session.handleRawInput("\r");
     assert.deepEqual(viewLines(session), ["b", "c"]);
     assert.equal(session.getSnapshot().active?.scroll.atBottom, true);
 
@@ -380,7 +383,7 @@ test("handleRawInput in view mode scrolls up from the bottom and closes with Esc
     assert.equal(session.getSnapshot().active, undefined);
 });
 
-test("handleRawInput in attach mode forwards input and exits on Ctrl+[ without forwarding", async () => {
+test("handleRawInput in attach mode forwards input and exits on Esc without forwarding", async () => {
     const harness = createOperationsHarness();
     harness.setPanes([runningPane]);
     harness.inspectByPane.set("%1", { id: "%1", lines: [], name: "server", status: "running", taskId: "task-9", taskStatus: "running" });
@@ -570,11 +573,12 @@ test("session inspects the selected pane by stable id when pane names are duplic
     const session = new TuiTmuxPaneTerminalSession({ operations: harness.operations });
     await session.bind("alpha");
     session.selectIndex(1);
+    await flush();
 
     await session.activate();
 
     assert.deepEqual(
-        harness.calls.find((call) => call.method === "inspectPane"),
+        harness.calls.filter((call) => call.method === "inspectPane").at(-1),
         { args: ["alpha", "%2"], method: "inspectPane" },
     );
     assert.equal(session.getSnapshot().active?.paneId, "%2");
@@ -607,7 +611,7 @@ test("a stale polling inspect cannot overwrite output returned by tmux_input", a
     const operations: TuiTmuxPaneTerminalOperations = {
         async inspectPane() {
             inspectCount += 1;
-            if (inspectCount === 1) {
+            if (inspectCount <= 2) {
                 return {
                     id: "%1",
                     lines: [],

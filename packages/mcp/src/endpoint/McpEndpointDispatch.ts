@@ -120,36 +120,29 @@ export class McpEndpointDispatch {
             }
             const owner = known.owner;
             this.#catalog.assertAdaptable(selected.definition);
-            return await this.#withComments(toolName, await this.#auditControlTool(
+            return await this.#auditControlTool(
                 owner,
                 toolName,
                 input,
                 context,
                 signal
-            ), context);
+            );
         }
 
-        return await this.#withComments(toolName, await this.#workerHandler.call(
+        return await this.#workerHandler.call(
             toolName,
             input,
             context,
             selected?.definition,
             snapshot.instanceRoutingEnabled,
-            signal
-        ), context);
+            signal,
+            async (result) => await this.#attachComments(toolName, result, context)
+        );
     }
 
-    async #withComments(toolName: string, result: McpEndpointResult, context: ToolCallContext): Promise<McpEndpointResult> {
+    async #attachComments(toolName: string, result: JsonValue, context: ToolCallContext): Promise<JsonValue> {
         if (context.ctxId === undefined) return result;
         const queuedComments = await this.#consumeQueuedComments(context.ctxId);
-        if (result instanceof McpNativeToolResult) {
-            const comments = mergeComments(queuedComments, resolveResultHints(toolName, result.structuredContent));
-            return new McpNativeToolResult({
-                content: result.content,
-                isError: result.isError,
-                structuredContent: attachMcpComments(result.structuredContent, comments)
-            });
-        }
         const comments = mergeComments(queuedComments, resolveResultHints(toolName, result));
         return attachMcpComments(result, comments);
     }
@@ -200,10 +193,15 @@ export class McpEndpointDispatch {
             async () => {
                 const result = await this.#callControlTool(owner, toolName, input, context, signal);
                 if (result instanceof McpNativeToolResult) {
-                    nativeResult = result;
-                    return result.structuredContent;
+                    const structuredContent = await this.#attachComments(toolName, result.structuredContent, context);
+                    nativeResult = new McpNativeToolResult({
+                        content: result.content,
+                        isError: result.isError,
+                        structuredContent
+                    });
+                    return structuredContent;
                 }
-                return result;
+                return await this.#attachComments(toolName, result, context);
             },
             signal
         );

@@ -157,6 +157,12 @@ export class TuiKeyDispatcher {
         if (press.key.return) {
             return [{ type: "contextConversation.submit" }];
         }
+        if (press.key.leftArrow) {
+            return [{ direction: "left", type: "contextConversation.cursorMove" }];
+        }
+        if (press.key.rightArrow) {
+            return [{ direction: "right", type: "contextConversation.cursorMove" }];
+        }
         if (press.key.pageUp) return [{ type: "screen.pageUp" }];
         if (press.key.pageDown) return [{ type: "screen.pageDown" }];
         if (press.key.home) return [{ type: "screen.home" }];

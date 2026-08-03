@@ -79,13 +79,16 @@ test("real Ink and control socket edit and deliver Comments only to the matching
     await waitUntil(
         () => box(harness.runtime, "conversation-composer")?.expanded === true,
     );
+    const browseDraft = renderExpandableBoxLines(
+        box(harness.runtime, "conversation-composer")!,
+        80,
+    ).find((line) => line.segments?.some((segment) => segment.text.includes("<empty>")));
     assert.equal(
-        renderExpandableBoxLines(
-            box(harness.runtime, "conversation-composer")!,
-            80,
-        ).some((line) => line.underline === true),
+        browseDraft?.segments?.some(
+            (segment) => segment.text.includes("<empty>") && segment.underline === true,
+        ),
         true,
-        "the real Comment draft field must carry the editable underline",
+        "only the Comment value must be underlined in browse mode",
     );
     harness.terminal.write("\u001b[B");
     await waitUntil(
@@ -139,7 +142,15 @@ test("real Ink keeps Space, Enter, route hierarchy, logical focus and rendered h
         status: "completed",
         toolName: "bash_run",
     };
-    const harness = await createHarness([toolCall]);
+    const secondToolCall: ToolCallRecord = {
+        ...toolCall,
+        callId: "call-2",
+        input: { path: "./README.md" },
+        inputSummary: '{"path":"./README.md"}',
+        startedAt: "2026-08-03T00:00:01.000Z",
+        toolName: "file_read",
+    };
+    const harness = await createHarness([toolCall, secondToolCall]);
     t.after(async () => await harness.close());
     await harness.messages.queue({ ctxId: "ctx-alpha", text: "focus message" });
     await harness.start();
@@ -254,7 +265,9 @@ async function createHarness(toolCalls: readonly ToolCallRecord[] = []): Promise
         async start() {
             running = runtime.run();
             await waitUntil(() => runtime.store.getState().connection.status === "connected");
-            await waitUntil(() => terminal.rawModes.includes(true));
+            await waitUntil(() => terminal.rawModes.includes(true)).catch((error) => {
+                throw new Error(`${error instanceof Error ? error.message : String(error)}\n${terminal.output}`);
+            });
         },
         async close() {
             await runtime.stop().catch(() => undefined);

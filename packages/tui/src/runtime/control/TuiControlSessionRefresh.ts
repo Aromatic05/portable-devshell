@@ -150,9 +150,9 @@ export class TuiControlSessionRefresh {
         ]);
     }
 
-    async refreshTodo(instance: string, generation?: number, signal?: AbortSignal): Promise<void> {
+    async refreshTodo(instance: string, generation?: number, signal?: AbortSignal, title?: string): Promise<void> {
         await this.#refreshGroup(`todo:${instance}:todo`, generation, signal, [
-            ["todo", () => this.#reloadTodo(instance, generation, signal)]
+            ["todo", () => this.#reloadTodo(instance, generation, signal, title)]
         ]);
     }
 
@@ -231,10 +231,10 @@ export class TuiControlSessionRefresh {
         }
     }
 
-    async #reloadTodo(instance: string, generation?: number, signal?: AbortSignal): Promise<void> {
+    async #reloadTodo(instance: string, generation?: number, signal?: AbortSignal, title?: string): Promise<void> {
         const key = `todo:${instance}`;
         const version = this.#beginRequest(key);
-        const envelope = await this.#request(this.#clients.todo.get(instance), `todo.get:${instance}`);
+        const envelope = await this.#request(this.#clients.todo.get(instance, title), `todo.get:${instance}`);
         if (this.#current(generation, signal) && this.#latestRequest(key, version)) this.#store.replaceTodo(instance, envelope.todo);
     }
 

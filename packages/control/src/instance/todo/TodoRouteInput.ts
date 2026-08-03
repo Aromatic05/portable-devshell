@@ -11,6 +11,26 @@ export function readTodoSubscriptionFromSeq(payload?: JsonValue): number {
     return payload.fromSeq;
 }
 
+export function readTodoTitle(payload?: JsonValue): string | undefined {
+    if (payload === undefined) return undefined;
+    if (!isRecord(payload)) {
+        throw createError({
+            code: errorCodes.targetInvalid,
+            message: "todo.get payload must be an object.",
+            retryable: false
+        });
+    }
+    if (payload.title === undefined) return undefined;
+    if (typeof payload.title !== "string" || payload.title.trim().length === 0) {
+        throw createError({
+            code: errorCodes.targetInvalid,
+            message: "todo.get title must be a non-empty string.",
+            retryable: false
+        });
+    }
+    return payload.title;
+}
+
 function isRecord(value: JsonValue | undefined): value is Record<string, JsonValue> {
     return typeof value === "object" && value !== null && !Array.isArray(value);
 }

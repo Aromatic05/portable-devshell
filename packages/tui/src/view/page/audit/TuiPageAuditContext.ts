@@ -1,6 +1,5 @@
 import type {
     ApprovalRequest,
-    ContextMessageRecord,
     ToolCallRecord,
 } from "@portable-devshell/shared";
 
@@ -39,10 +38,6 @@ export function buildAuditContextBoxes(
             at: approval.createdAt,
             box: approvalBox(state, instance, approval),
         })),
-        ...context.messages.map((message) => ({
-            at: message.createdAt,
-            box: messageBox(state, instance, message),
-        })),
     ]
         .sort((left, right) => left.at.localeCompare(right.at))
         .map((entry) => entry.box);
@@ -70,9 +65,12 @@ function callBox(
             formatField("Operation", call.requestId ?? "-"),
             {
                 id: "input",
-                text: `input ${auditInputSummary(call.input, call.inputSummary)}`,
+                text: formatField("Input", auditInputSummary(call.input, call.inputSummary)),
             },
-            { id: "output", text: `result ${auditOutputSummary(output)}` },
+            {
+                id: "output",
+                text: formatField("Output", auditOutputSummary(output)),
+            },
             ...(call.error === undefined
                 ? []
                 : [formatField("Error", call.error)]),
@@ -97,43 +95,6 @@ function callBox(
             ),
         ],
         title: `${call.toolName} · ${call.status}`,
-    });
-}
-
-function messageBox(
-    state: TuiAppState,
-    instance: string,
-    message: ContextMessageRecord,
-): BoxModel {
-    return makeBox(state, "audit", instance, {
-        detailLines: [
-            formatField("Message", message.id),
-            formatField("Context", message.ctxId),
-            formatField("Created", message.createdAt),
-            formatField("Status", message.status),
-            ...(message.deliveredAt === undefined
-                ? []
-                : [formatField("Delivered", message.deliveredAt)]),
-            ...(message.error === undefined
-                ? []
-                : [formatField("Error", message.error)]),
-            formatField("Text", message.text),
-        ],
-        id: `context-message:${message.id}`,
-        status:
-            message.status === "delivered"
-                ? "ready"
-                : message.status === "failed"
-                  ? "failed"
-                  : "pending",
-        summaryLines: [
-            compactSummary(
-                ["message", message.status],
-                ["created", message.createdAt],
-            ),
-            message.text,
-        ],
-        title: "Context Message",
     });
 }
 

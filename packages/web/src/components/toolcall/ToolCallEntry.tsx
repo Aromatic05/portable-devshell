@@ -48,7 +48,7 @@ function ToolCallDetails({
             <div><dt>Exit code</dt><dd>{call.exitCode ?? "-"}</dd></div>
         </dl>
         <h3>Input</h3><pre>{formatToolValue(call.input, call.inputSummary)}</pre>
-        <h3>Result</h3><pre>{formatToolValue(output)}</pre>
+        <h3>Output</h3><pre>{formatToolValue(output)}</pre>
         {call.error === undefined ? null : <><h3>Error</h3><pre className="error">{call.error}</pre></>}
     </>;
 }

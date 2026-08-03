@@ -65,8 +65,14 @@ export class WorkerInstanceTool {
         });
     }
 
-    async call(toolName: string, input: JsonValue, context: ToolCallContext, signal?: AbortSignal): Promise<JsonValue> {
-        return await this.#execution.call(toolName, input, context, signal);
+    async call(
+        toolName: string,
+        input: JsonValue,
+        context: ToolCallContext,
+        signal?: AbortSignal,
+        transformResult?: (result: JsonValue) => Promise<JsonValue>
+    ): Promise<JsonValue> {
+        return await this.#execution.call(toolName, input, context, signal, transformResult);
     }
 
     async auditToolCall<T extends JsonValue>(

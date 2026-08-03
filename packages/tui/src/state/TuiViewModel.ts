@@ -6,6 +6,15 @@ export type TuiBoxLineTone = "normal" | "muted" | "accent" | "success" | "warnin
 export interface TuiBoxLine {
     disabled?: boolean;
     editable?: boolean;
+    editableValue?: {
+        emptyPlaceholder?: string;
+        prefix: string;
+        suffix?: string;
+        value: string;
+    };
+    editing?: boolean;
+    cursor?: number;
+    cursorVisible?: boolean;
     id?: string;
     text: string;
     tone?: TuiBoxLineTone;

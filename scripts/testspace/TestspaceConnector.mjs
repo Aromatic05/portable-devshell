@@ -114,6 +114,20 @@ export async function runConnectorLoop(options) {
                     ],
                     model: "testspace-gpt-simulator",
                 });
+                if (toolNames.has("todo_write")) {
+                    const revision = await readTodoRevision(client, ctxId);
+                    const initialTodo = createSafeAction("todo_write", {
+                        ctxId,
+                        iteration: 1,
+                        revision,
+                    });
+                    const result = await client.callTool(initialTodo);
+                    await log(options.logFile, {
+                        at: new Date().toISOString(),
+                        event: "testspace.todo.seeded",
+                        structuredContent: result.structuredContent,
+                    });
+                }
             }
 
             iteration += 1;

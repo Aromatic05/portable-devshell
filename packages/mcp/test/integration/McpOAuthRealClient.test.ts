@@ -118,6 +118,17 @@ test("a real MCP SDK client receives a queued Comment in the next ordinary tool 
             (first.structuredContent as { comment?: string[] } | undefined)?.comment,
             ["Inspect this result before continuing"],
         );
+        const audited = (await instance.readToolCalls()).find(
+            (record) =>
+                record.ctxId === ctxId &&
+                record.toolName === "bash_run" &&
+                record.status === "completed",
+        );
+        assert.deepEqual(
+            (audited?.output as { comment?: string[] } | undefined)?.comment,
+            ["Inspect this result before continuing"],
+            "Audit Output must persist the same Comment payload returned to the MCP consumer",
+        );
         assert.equal((await messages.list(ctxId))[0]?.status, "delivered");
         assert.equal(
             (await messages.list("ctx-other")).find(

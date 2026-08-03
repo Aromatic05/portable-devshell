@@ -86,10 +86,14 @@ export class TuiCommandDispatcherNavigation {
                 return true;
             case "contextConversation.openCurrent":
                 return this.#openContextConversation();
+            case "contextConversation.edit":
+                return this.#startContextConversationEditing();
             case "contextConversation.append":
-                return this.#updateContextConversationDraft((draft) => `${draft}${intent.text}`);
+                return this.#editContextConversationDraft(intent.text, false);
             case "contextConversation.backspace":
-                return this.#updateContextConversationDraft((draft) => draft.slice(0, -1));
+                return this.#editContextConversationDraft("", true);
+            case "contextConversation.cursorMove":
+                return this.#moveContextConversationCursor(intent.direction);
             case "contextConversation.submit":
                 return await this.#submitContextConversation();
             default:
@@ -201,16 +205,52 @@ export class TuiCommandDispatcherNavigation {
         return true;
     }
 
-    #updateContextConversationDraft(update: (draft: string) => string): boolean {
+    #startContextConversationEditing(): boolean {
         const target = this.#contextConversationTarget();
         if (target === undefined) return false;
         const draft = readContextConversationDraft(this.#store.getState(), target.instance, target.ctxId);
+        this.#store.setEditor({
+            cursor: draft.length,
+            editing: true,
+            key: contextConversationDraftKey(target.instance, target.ctxId),
+            kind: "comment",
+        });
+        this.#store.setFocusScope("contextConversation");
+        return true;
+    }
+
+    #editContextConversationDraft(input: string, backspace: boolean): boolean {
+        const target = this.#contextConversationTarget();
+        const editor = this.#store.getState().interaction.editor;
+        if (target === undefined || editor?.kind !== "comment" || editor.editing !== true) return false;
+        const draft = readContextConversationDraft(this.#store.getState(), target.instance, target.ctxId);
+        const cursor = Math.min(Math.max(editor.cursor ?? draft.length, 0), draft.length);
+        const next = backspace
+            ? `${draft.slice(0, Math.max(0, cursor - 1))}${draft.slice(cursor)}`
+            : `${draft.slice(0, cursor)}${input}${draft.slice(cursor)}`;
         this.#store.setFormDraft(
             contextConversationDraftKey(target.instance, target.ctxId),
-            update(draft),
+            next,
             true,
         );
+        this.#store.setEditor({
+            ...editor,
+            cursor: backspace ? Math.max(0, cursor - 1) : cursor + input.length,
+        });
         this.#store.setScreenStatus("audit", undefined);
+        return true;
+    }
+
+    #moveContextConversationCursor(direction: "left" | "right"): boolean {
+        const target = this.#contextConversationTarget();
+        const editor = this.#store.getState().interaction.editor;
+        if (target === undefined || editor?.kind !== "comment" || editor.editing !== true) return false;
+        const draft = readContextConversationDraft(this.#store.getState(), target.instance, target.ctxId);
+        const cursor = Math.min(Math.max(editor.cursor ?? draft.length, 0), draft.length);
+        this.#store.setEditor({
+            ...editor,
+            cursor: direction === "left" ? Math.max(0, cursor - 1) : Math.min(draft.length, cursor + 1),
+        });
         return true;
     }
 
@@ -237,6 +277,12 @@ export class TuiCommandDispatcherNavigation {
                 "",
                 false,
             );
+            this.#store.setEditor({
+                cursor: 0,
+                editing: true,
+                key: contextConversationDraftKey(target.instance, target.ctxId),
+                kind: "comment",
+            });
             this.#store.setScreenStatus("audit", "Comment queued.");
             this.#store.setFocusScope("contextConversation");
             return true;

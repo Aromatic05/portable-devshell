@@ -20,7 +20,8 @@ export interface McpEndpointWorkerPort extends McpEndpointCatalogWorker {
         toolName: string,
         input: JsonValue,
         context: ToolCallContext,
-        signal?: AbortSignal
+        signal?: AbortSignal,
+        transformResult?: (result: JsonValue) => Promise<JsonValue>
     ): Promise<JsonValue>;
     readonly handshake?: McpEndpointEnvironmentHandshake;
     readonly workspacePath?: string;

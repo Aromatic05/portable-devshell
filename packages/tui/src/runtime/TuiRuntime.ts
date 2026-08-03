@@ -648,6 +648,7 @@ export class TuiRuntime {
             }
             if (action.type === "focus.leave") {
                 focused = false;
+                this.tmuxPanes.exitAttach();
                 const cursor = this.store.getState().interaction.sidebarCursor;
                 this.store.setFocusScope(
                     cursor?.kind === "instance"

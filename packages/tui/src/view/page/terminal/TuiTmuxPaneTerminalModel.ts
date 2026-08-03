@@ -76,7 +76,7 @@ export function scrollTmuxInspectView(
 }
 
 export const TUI_TMUX_MULTI_WRITER_WARNING =
-    "Attached via tmux_input. The pane mutex atomically serializes each input batch; when multiple clients write concurrently, batch order is nondeterministic, so shell command order is uncoordinated. Ctrl+[ exits Attach.";
+    "Attached via tmux_input. The pane mutex atomically serializes each input batch; when multiple clients write concurrently, batch order is nondeterministic, so shell command order is uncoordinated. Esc exits Attach.";
 
 export type TuiTmuxAttachAction =
     | { kind: "exit" }
@@ -107,6 +107,9 @@ export function routeTmuxPaneBrowseInput(raw: string, mode: TuiTmuxPaneBrowseMod
     if (mode === "view") {
         if (raw === "\u001b[A" || raw === "k") return { delta: -1, kind: "scroll" };
         if (raw === "\u001b[B" || raw === "j") return { delta: 1, kind: "scroll" };
+        if (raw === "\u001b[D" || raw === "h") return { direction: "previous", kind: "select" };
+        if (raw === "\u001b[C" || raw === "l") return { direction: "next", kind: "select" };
+        if (raw === "\r" || raw === "\n") return { kind: "activate" };
         if (raw === "\u001b") return { kind: "close" };
         return { kind: "noop" };
     }

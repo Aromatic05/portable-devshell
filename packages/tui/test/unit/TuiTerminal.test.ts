@@ -227,7 +227,7 @@ test("terminal input router preserves order across split shortcuts and mouse rep
     );
 });
 
-test("terminal input router emits source toggle and flushes a standalone Ctrl+[ without breaking split CSI", () => {
+test("terminal input router emits source toggle and flushes a standalone Esc without breaking split CSI", () => {
     const router = new TuiTerminalInputRouter();
 
     assert.deepEqual(router.push("before\u0014after"), [

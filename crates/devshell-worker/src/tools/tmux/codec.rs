@@ -105,52 +105,42 @@ pub fn parse_tmux_input(input: &str) -> Result<Vec<TmuxInputChunk>, ToolError> {
     Ok(out)
 }
 
-pub fn sanitize_terminal_output(raw: &str) -> String {
+pub fn sanitize_terminal_snapshot(raw: &str) -> String {
     let normalized = raw.replace("\r\n", "\n");
     let chars = normalized.chars().collect::<Vec<_>>();
     let mut out = String::new();
-    let mut line = String::new();
-    let mut cursor = 0_usize;
     let mut index = 0_usize;
 
     while index < chars.len() {
         match chars[index] {
+            '\x1b' if index + 1 < chars.len() && chars[index + 1] == '[' => {
+                let start = index;
+                index += 2;
+                while index < chars.len() {
+                    let final_char = chars[index];
+                    index += 1;
+                    if ('@'..='~').contains(&final_char) {
+                        if final_char == 'm' {
+                            out.extend(chars[start..index].iter());
+                        }
+                        break;
+                    }
+                }
+            }
             '\x1b' => index = skip_escape_sequence(&chars, index + 1),
-            '\r' => {
-                cursor = 0;
+            '\n' | '\t' => {
+                out.push(chars[index]);
                 index += 1;
             }
-            '\n' => {
-                out.push_str(&line);
-                out.push('\n');
-                line.clear();
-                cursor = 0;
-                index += 1;
-            }
-            '\t' => {
-                write_visible_char(&mut line, &mut cursor, '\t');
-                index += 1;
-            }
+            '\r' => index += 1,
             ch if !ch.is_control() => {
-                write_visible_char(&mut line, &mut cursor, ch);
+                out.push(ch);
                 index += 1;
             }
             _ => index += 1,
         }
     }
-    out.push_str(&line);
     out
-}
-
-fn write_visible_char(line: &mut String, cursor: &mut usize, ch: char) {
-    if *cursor >= line.chars().count() {
-        line.push(ch);
-    } else {
-        let mut chars = line.chars().collect::<Vec<_>>();
-        chars[*cursor] = ch;
-        *line = chars.into_iter().collect();
-    }
-    *cursor += 1;
 }
 
 fn skip_escape_sequence(chars: &[char], mut index: usize) -> usize {
@@ -195,5 +185,13 @@ mod tests {
         assert_eq!(decode_caret_input("^C^D^I"), "\u{0003}\u{0004}\u{0009}");
         assert_eq!(decode_caret_input("^B"), "\u{0002}");
         assert_eq!(decode_caret_input("^^"), "^");
+    }
+
+    #[test]
+    fn terminal_snapshot_keeps_sgr_and_removes_other_controls() {
+        assert_eq!(
+            sanitize_terminal_snapshot("\x1b[31mred\x1b[0m\x1b[2J\r\nnext\x07"),
+            "\x1b[31mred\x1b[0m\nnext"
+        );
     }
 }

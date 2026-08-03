@@ -159,8 +159,8 @@ export class TuiControlSession {
         await this.#refresh.refreshLogsForInstance(instance, generation, signal);
     }
 
-    async refreshTodo(instance: string, generation = this.#generation, signal?: AbortSignal): Promise<void> {
-        await this.#refresh.refreshTodo(instance, generation, signal);
+    async refreshTodo(instance: string, generation = this.#generation, signal?: AbortSignal, title?: string): Promise<void> {
+        await this.#refresh.refreshTodo(instance, generation, signal, title);
     }
 
     async refreshArtifacts(generation = this.#generation): Promise<void> {
@@ -243,7 +243,10 @@ export class TuiControlSession {
             this.#scheduleOverviewRefresh(generation);
         }
         if (message.event.name.startsWith("todo.")) {
-            this.#runBackgroundRefresh("todo", generation, async () => await this.#refresh.refreshTodo(instance, generation));
+            const current = this.#store.getState().todoByInstance[instance];
+            this.#runBackgroundRefresh("todo", generation, async () =>
+                await this.#refresh.refreshTodo(instance, generation, undefined, current?.title)
+            );
         }
         if (isTerminalToolCallEvent(message.event.name)) {
             this.#scheduleAuditRefresh(instance, generation);

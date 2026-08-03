@@ -61,6 +61,7 @@ export function makeBox(
             | {
                   disabled?: boolean;
                   editable?: boolean;
+                  editableValue?: BoxLine["editableValue"];
                   id: string;
                   text: string;
                   tone?: BoxLine["tone"];
@@ -90,14 +91,13 @@ export function makeBox(
     const expandedLines = expanded
         ? normalizeExpandedLines(input.id, input.detailLines).map((line) =>
               state.interaction.editor?.editing === true &&
-              line.id === selectedDetailLineId
+              line.id === selectedDetailLineId &&
+              line.editableValue !== undefined
                   ? {
                         ...line,
-                        text: insertCursor(
-                            line.text,
-                            state.interaction.editor.cursor ?? 0,
-                            state.interaction.redrawNonce % 2 === 0,
-                        ),
+                        cursor: state.interaction.editor.cursor ?? line.editableValue.value.length,
+                        cursorVisible: state.interaction.redrawNonce % 2 === 0,
+                        editing: true,
                     }
                   : line,
           )
@@ -266,6 +266,7 @@ function normalizeExpandedLines(
         | {
               disabled?: boolean;
               editable?: boolean;
+              editableValue?: BoxLine["editableValue"];
               id: string;
               text: string;
               tone?: BoxLine["tone"];
@@ -293,6 +294,9 @@ function normalizeExpandedLines(
             ...(typeof line === "string" || line.editable !== true
                 ? {}
                 : { editable: true }),
+            ...(typeof line === "string" || line.editableValue === undefined
+                ? {}
+                : { editableValue: line.editableValue }),
             ...(typeof line === "string" || line.tone === undefined
                 ? {}
                 : { tone: line.tone }),
@@ -303,18 +307,6 @@ function normalizeExpandedLines(
 function stableDetailLineId(text: string): string {
     const field = text.trim().split(/\s{2,}|\s/)[0] ?? "detail";
     return field.replace(/[^a-zA-Z0-9_.:-]/g, "-") || "detail";
-}
-
-function insertCursor(text: string, offset: number, visible: boolean): string {
-    const start = text.lastIndexOf("[ ");
-    const end = text.lastIndexOf(" ]");
-    if (start === -1 || end <= start) {
-        return text;
-    }
-    const valueStart = start + 2;
-    const value = text.slice(valueStart, end);
-    const cursor = Math.min(Math.max(offset, 0), value.length);
-    return `${text.slice(0, valueStart)}${value.slice(0, cursor)}${visible ? "█" : " "}${value.slice(cursor)}${text.slice(end)}`;
 }
 
 function collapsedToneFor(line: string, index: number): BoxLine["tone"] {

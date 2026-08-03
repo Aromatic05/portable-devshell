@@ -166,6 +166,18 @@ export class TuiTmuxPaneTerminalSession {
 
         const selectedIndex = clampIndex(this.#snapshot.selectedIndex, panes.length);
         let active = this.#snapshot.active;
+        if (active === undefined && panes.length > 0) {
+            this.#replace({
+                active: undefined,
+                error: undefined,
+                instance,
+                panes,
+                selectedIndex,
+                status: "ready",
+            });
+            await this.#openSelected(false);
+            return;
+        }
         if (active !== undefined) {
             const current = panes.find((pane) => pane.id === active?.paneId);
             if (current === undefined) {
@@ -220,6 +232,10 @@ export class TuiTmuxPaneTerminalSession {
     }
 
     async activate(): Promise<void> {
+        await this.#openSelected(true);
+    }
+
+    async #openSelected(attach: boolean): Promise<void> {
         if (this.#disposed) {
             return;
         }
@@ -252,7 +268,7 @@ export class TuiTmuxPaneTerminalSession {
         this.#replace({
             ...this.#snapshot,
             active: {
-                attached: taskId !== undefined,
+                attached: attach && taskId !== undefined,
                 command: detail?.command,
                 cwd: detail?.cwd,
                 historyLimit: TUI_TMUX_INSPECT_MAX_LINES,
@@ -262,7 +278,7 @@ export class TuiTmuxPaneTerminalSession {
                 scroll: renderTmuxInspectView(lines, this.#viewportRows, lines.length),
                 status: detail?.status ?? pane.status,
                 taskId,
-                warning: taskId !== undefined ? TUI_TMUX_MULTI_WRITER_WARNING : undefined,
+                warning: attach && taskId !== undefined ? TUI_TMUX_MULTI_WRITER_WARNING : undefined,
             },
             error: undefined,
         });
@@ -445,7 +461,8 @@ export class TuiTmuxPaneTerminalSession {
         if (clamped === this.#snapshot.selectedIndex) {
             return;
         }
-        this.#replace({ ...this.#snapshot, selectedIndex: clamped });
+        this.#replace({ ...this.#snapshot, active: undefined, selectedIndex: clamped });
+        void this.#openSelected(false);
     }
 
     #replace(snapshot: TuiTmuxPaneTerminalSnapshot): void {
