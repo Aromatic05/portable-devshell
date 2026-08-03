@@ -124,8 +124,19 @@ async function transfer(
         operation: "start",
         overwrite: parsed.flags.has("--overwrite"),
         targetInstance,
-        targetPath
+        targetPath: normalizeArtifactTargetPath(targetPath)
     });
+}
+
+function normalizeArtifactTargetPath(value: string): string {
+    const path = required(value, "targetPath");
+    if (path.startsWith("/") || path.startsWith("./") || /^[A-Za-z]:[\\/]/u.test(path)) {
+        return path;
+    }
+    if (path.startsWith(".\\")) {
+        return `./${path.slice(2)}`;
+    }
+    return `./${path}`;
 }
 
 function parseShareSource(value: string): { handle: string } | { path: string } {
@@ -207,7 +218,9 @@ export function artifactUsage(): string {
         "  devshell artifact transfer <source-instance> <source> <target-instance> <target-path> [--overwrite] [--authority <instance>]",
         "  devshell artifact transfer status <transferId>",
         "  devshell artifact transfer cancel <transferId>",
-        "  devshell artifact transfers"
+        "  devshell artifact transfers",
+        "",
+        "Bare target paths are workspace-relative to the target instance."
     ].join("\n");
 }
 

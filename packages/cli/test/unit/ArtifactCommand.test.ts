@@ -141,6 +141,36 @@ test("artifact transfer returns queued and infers authority for a host source", 
     assert.match(runtime.stdout.flush(), /"status": "queued"/u);
 });
 
+test("artifact transfer treats a bare target path as workspace-relative", async () => {
+    const client = createCliClientArtifact();
+    const runtime = cli(client);
+    assert.equal(
+        await runtime.instance.run([
+            "artifact",
+            "transfer",
+            "source-a",
+            "path:./input.bin",
+            "target-b",
+            "copy.bin"
+        ]),
+        0
+    );
+    assert.deepEqual(client.calls[0], {
+        input: {
+            defaultInstance: "source-a",
+            input: {
+                instance: "source-a",
+                operation: "start",
+                overwrite: false,
+                sourcePath: "./input.bin",
+                targetInstance: "target-b",
+                targetPath: "./copy.bin"
+            }
+        },
+        method: "transfer"
+    });
+});
+
 test("artifact status cancel list and revoke use typed control methods", async () => {
     const client = createCliClientArtifact();
     const runtime = cli(client);
@@ -160,7 +190,9 @@ test("artifact help hides host and invalid input follows common usage exit mappi
     const client = createCliClientArtifact();
     const runtime = cli(client);
     assert.equal(await runtime.instance.run(["artifact", "help"]), 0);
-    assert.doesNotMatch(runtime.stdout.flush(), /\bhost\b/u);
+    const help = runtime.stdout.flush();
+    assert.doesNotMatch(help, /\bhost\b/u);
+    assert.match(help, /workspace-relative/u);
 
     assert.equal(await runtime.instance.run(["artifact", "share", "source-a", "./dist"]), 2);
     assert.equal(client.calls.length, 0);

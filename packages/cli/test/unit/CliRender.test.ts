@@ -10,6 +10,7 @@ import { renderControlStatus } from "../../src/render/control/CliRenderControlSt
 import { renderInstanceList } from "../../src/render/instance/CliRenderInstanceList.ts";
 import { renderInstanceLogs } from "../../src/render/instance/CliRenderInstanceLogs.ts";
 import { renderInstanceSnapshot } from "../../src/render/instance/CliRenderInstanceSnapshot.ts";
+import { renderInstanceTodo } from "../../src/render/instance/CliRenderInstanceTodo.ts";
 import { renderToolResult } from "../../src/render/tool/CliRenderToolResult.ts";
 
 test("renderers format control, instance, and tool outputs", async () => {
@@ -53,6 +54,27 @@ test("renderers format control, instance, and tool outputs", async () => {
     assert.equal(
         renderToolResult({ kind: "list", panes: [] }),
         '{\n  "kind": "list",\n  "panes": []\n}\n'
+    );
+});
+
+test("Todo renderer shows aggregate task summaries instead of reporting none", () => {
+    assert.equal(
+        renderInstanceTodo({
+            items: [],
+            revision: 0,
+            summary: { completed: 0, total: 0 },
+            tasks: [{
+                completed: 0,
+                currentItem: "Generate harmless connector calls",
+                revision: 281,
+                status: "in_progress",
+                taskId: "task-1",
+                title: "testspace connector activity",
+                total: 3,
+                updatedAt: "2026-08-03T11:30:33.157Z"
+            }]
+        }),
+        "Tasks:\n● testspace connector activity [0/3] — Generate harmless connector calls\n"
     );
 });
 

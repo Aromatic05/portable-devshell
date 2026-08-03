@@ -1,4 +1,4 @@
-import type { TodoItem, TodoReadResult } from "@portable-devshell/shared";
+import type { TodoItem, TodoReadResult, TodoTaskSummary } from "@portable-devshell/shared";
 
 const symbols: Record<TodoItem["status"], string> = {
     blocked: "!",
@@ -11,7 +11,11 @@ const symbols: Record<TodoItem["status"], string> = {
 
 export function renderInstanceTodo(todo: TodoReadResult): string {
     if (todo.taskId === undefined) {
-        return "Todo: none\n";
+        const tasks = todo.tasks ?? [];
+        if (tasks.length === 0) {
+            return "Todo: none\n";
+        }
+        return `Tasks:\n${tasks.map(renderTaskSummary).join("\n")}\n`;
     }
 
     const current = todo.items.find(
@@ -25,6 +29,12 @@ export function renderInstanceTodo(todo: TodoReadResult): string {
         ...todo.items.map(renderItem),
     ];
     return `${lines.join("\n")}\n`;
+}
+
+function renderTaskSummary(task: TodoTaskSummary): string {
+    const symbol = task.status === "none" ? "·" : symbols[task.status];
+    const current = task.currentItem === undefined ? "" : ` — ${task.currentItem}`;
+    return `${symbol} ${task.title} [${task.completed}/${task.total}]${current}`;
 }
 
 function renderItem(item: TodoItem): string {
