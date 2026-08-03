@@ -12,7 +12,7 @@ import { createDefaultInstanceDraft } from "../../../state/editor/TuiEditorInsta
 import { editableProviderChoices } from "../../../state/editor/TuiEditorProviderChoices.js";
 import type { TuiAppStore } from "../../../state/TuiAppStore.js";
 import { asRecord, cloneRecord, deletePath, editorDraft, readPath, setPath } from "../../../state/editor/TuiEditorDraft.js";
-import { coerceTuiEditorRecord, parseTuiConfigDraft, parseTuiInstanceDraft, parseTuiInstancePatch, parseTuiMcpPatch, parseTuiWebPatch, toTuiInstanceEditorRecord } from "../../../state/editor/TuiEditorConfigAdapter.js";
+import { coerceTuiEditorRecord, parseTuiConfigDraft, parseTuiInstanceDraft, parseTuiInstancePatch, parseTuiMcpPatch, parseTuiWebPatch, toTuiInstanceEditorRecord, tuiEditorRecordsEqual } from "../../../state/editor/TuiEditorConfigAdapter.js";
 import type { TuiInteractionProjection } from "../../TuiInteractionProjection.js";
 import type { TuiEditorState, TuiUiIntent } from "../../../state/TuiInteractionState.js";
 
@@ -161,7 +161,7 @@ export class TuiCommandDispatcherEditor {
                 return true;
             }
             if (typeof current === "boolean") {
-                this.#store.setFormDraft(target.key, setPath(draft, target.path, !current));
+                this.#setEditorDraft(target, setPath(draft, target.path, !current));
                 return true;
             }
             this.#store.setEditor({ ...editor, cursor: inputText(current).length, editing: true, error: undefined });
@@ -187,7 +187,7 @@ export class TuiCommandDispatcherEditor {
         const text = inputText(current);
         const cursor = Math.min(Math.max(editor.cursor ?? text.length, 0), text.length);
         const next = backspace ? `${text.slice(0, Math.max(0, cursor - 1))}${text.slice(cursor)}` : `${text.slice(0, cursor)}${input}${text.slice(cursor)}`;
-        this.#store.setFormDraft(target.key, setPath(draft, target.path, next));
+        this.#setEditorDraft(target, setPath(draft, target.path, next));
         this.#store.setEditor({ ...editor, cursor: backspace ? Math.max(0, cursor - 1) : cursor + input.length });
         return true;
     }
@@ -221,7 +221,7 @@ export class TuiCommandDispatcherEditor {
                     : editor.kind === "connector" && (field === "web.auth" || field === "mcp.auth")
                         ? applyAuthModeChoice(draft, target.path, choice)
                         : setPath(draft, target.path, choice);
-            this.#store.setFormDraft(target.key, nextDraft);
+            this.#setEditorDraft(target, nextDraft);
             this.#store.setEditor({ ...editor, editing: true, error: undefined });
             return true;
         }
@@ -503,6 +503,21 @@ export class TuiCommandDispatcherEditor {
 
     #editorDraft(key: string, fallback: Record<string, JsonValue>): Record<string, JsonValue> {
         return editorDraft(this.#store.getState(), key, fallback);
+    }
+
+    #setEditorDraft(
+        target: { fallback: Record<string, JsonValue>; key: string },
+        value: Record<string, JsonValue>,
+    ): void {
+        const editor = this.#store.getState().interaction.editor;
+        const dirty = editor?.kind === "create"
+            ? true
+            : !tuiEditorRecordsEqual(
+                  target.fallback,
+                  value,
+                  target.key.startsWith("config:"),
+              );
+        this.#store.setFormDraft(target.key, value, dirty);
     }
 
     #editorDraftKeys(editor: TuiEditorState): string[] {

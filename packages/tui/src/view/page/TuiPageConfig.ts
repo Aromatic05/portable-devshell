@@ -4,18 +4,19 @@ import type { BoxModel } from "../component/TuiComponentExpandableBox.js";
 import type { TuiAppState } from "../../state/reducer/TuiStoreModel.js";
 import { buildSelectedInstancePageContext, compactSummary, makeBox, shortenPath } from "./TuiPageBoxSupport.js";
 import { asRecord, editorDraft, readPath } from "../../state/editor/TuiEditorDraft.js";
-import { toTuiInstanceEditorRecord } from "../../state/editor/TuiEditorConfigAdapter.js";
+import { normalizeTuiInstanceEditorRecord, toTuiInstanceEditorRecord, tuiEditorRecordsEqual } from "../../state/editor/TuiEditorConfigAdapter.js";
 import { buttonLine, choiceLine, editorErrorLine, fieldLine, secretRecordFieldLine } from "../editor/TuiEditorView.js";
 
 export function buildConfigPageBoxes(state: TuiAppState, instanceName: string): BoxModel[] {
     const { instance, snapshot } = buildSelectedInstancePageContext(state, instanceName);
-    const fallback = instanceDraft(state, instanceName);
+    const fallback = comparableInstanceDraft(instanceDraft(state, instanceName));
     const draft = editorDraft(state, `config:${instanceName}`, fallback);
-    const dirty = state.ui.dirtyForms[`config:${instanceName}`] === true;
+    const comparableDraft = comparableInstanceDraft(draft);
+    const dirty = !tuiEditorRecordsEqual(fallback, comparableDraft, true);
     const unsaved = dirty ? " [UNSAVED]" : "";
-    const restartRequired = requiresRestart(fallback, draft);
+    const restartRequired = requiresRestart(fallback, comparableDraft);
     const running = snapshot?.daemonState === "running" || snapshot?.ready === true;
-    const changes = draftDiff(fallback, draft);
+    const changes = draftDiff(fallback, comparableDraft);
 
     return [
         makeBox(state, "config", instanceName, {
@@ -283,6 +284,11 @@ function instanceDraft(state: TuiAppState, instanceName: string): Record<string,
         workspace: ""
     } : toTuiInstanceEditorRecord(record);
 }
+
+function comparableInstanceDraft(value: Record<string, JsonValue>): Record<string, JsonValue> {
+    return normalizeTuiInstanceEditorRecord(value);
+}
+
 
 function requiresRestart(previous: Record<string, JsonValue>, next: Record<string, JsonValue>): boolean {
     return ["provider", "ssh", "container", "dockerBinary", "podmanBinary", "logs", "mcp"].some(

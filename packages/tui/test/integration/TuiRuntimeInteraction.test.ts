@@ -171,6 +171,28 @@ test("real Ink runtime saves a restart-required Config edit through cross-box ke
             } | undefined;
             return draft?.logs?.retentionDays === "";
         });
+        terminal.write("7");
+        await waitUntil(
+            () => runtime.store.getState().ui.dirtyForms["config:alpha"] === false,
+        );
+        const unchangedActions = selectMainScreenModel(runtime.store.getState()).boxes.find(
+            (box) => box.id === "configuration-actions",
+        );
+        assert.equal(unchangedActions?.title, "Actions");
+        assert.equal(
+            unchangedActions?.expandedLines.some(
+                (line) => line.text === "Apply mode          hot apply",
+            ),
+            true,
+        );
+
+        terminal.write("\u0008");
+        await waitUntil(() => {
+            const draft = runtime.store.getState().ui.formDrafts["config:alpha"] as {
+                logs?: { retentionDays?: unknown };
+            } | undefined;
+            return draft?.logs?.retentionDays === "";
+        });
         terminal.write("8");
         await waitUntil(() => {
             const draft = runtime.store.getState().ui.formDrafts["config:alpha"] as {

@@ -1199,6 +1199,23 @@ test("config keyboard focus reaches Save & Restart from an edited Logs box", asy
 
     await harness.press("", { return: true });
     await harness.press("", { backspace: true });
+    await harness.press("7");
+    assert.equal(
+        harness.store.getState().ui.dirtyForms["config:alpha"],
+        false,
+    );
+    const actionsView = selectMainScreenModel(harness.store.getState()).boxes.find(
+        (box) => box.id === "configuration-actions",
+    );
+    assert.equal(actionsView?.title, "Actions");
+    assert.equal(
+        actionsView?.expandedLines.some(
+            (line) => line.text === "Apply mode          hot apply",
+        ),
+        true,
+    );
+
+    await harness.press("", { backspace: true });
     await harness.press("8");
     assert.equal(
         selectMainScreenModel(harness.store.getState())

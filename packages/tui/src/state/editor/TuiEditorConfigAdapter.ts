@@ -44,6 +44,21 @@ export function toTuiInstanceEditorRecord(value: Record<string, JsonValue>): Rec
     return stripDerivedInstanceFields(cloneRecord(value));
 }
 
+export function normalizeTuiInstanceEditorRecord(value: Record<string, JsonValue>): Record<string, JsonValue> {
+    return stripDerivedInstanceFields(coerceTuiEditorRecord(value));
+}
+
+export function tuiEditorRecordsEqual(
+    previous: Record<string, JsonValue>,
+    next: Record<string, JsonValue>,
+    instance = false,
+): boolean {
+    const normalize = instance
+        ? normalizeTuiInstanceEditorRecord
+        : coerceTuiEditorRecord;
+    return semanticJson(normalize(previous)) === semanticJson(normalize(next));
+}
+
 function stripDerivedInstanceFields(value: Record<string, JsonValue>): Record<string, JsonValue> {
     const draft = cloneRecord(value);
     const security = asRecord(draft.security);
@@ -52,6 +67,19 @@ function stripDerivedInstanceFields(value: Record<string, JsonValue>): Record<st
         draft.security = persistedSecurity;
     }
     return draft;
+}
+
+function semanticJson(value: JsonValue): string {
+    if (Array.isArray(value)) {
+        return `[${value.map(semanticJson).join(",")}]`;
+    }
+    if (typeof value === "object" && value !== null) {
+        return `{${Object.entries(value)
+            .sort(([left], [right]) => left.localeCompare(right))
+            .map(([key, entry]) => `${JSON.stringify(key)}:${semanticJson(entry)}`)
+            .join(",")}}`;
+    }
+    return JSON.stringify(value);
 }
 
 function coerceRecord(value: Record<string, JsonValue>): Record<string, JsonValue> {
