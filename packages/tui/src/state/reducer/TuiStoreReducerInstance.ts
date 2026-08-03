@@ -1,6 +1,6 @@
 import { applyEventRecord } from "./TuiStoreReducerEvent.js";
 import { mergeTuiContextMessageList } from "../context/TuiContextMessageState.js";
-import { boundToolCalls, dedupeLogs, mergeLogEntry, pruneByInstanceNames, pruneByInstances, selectInstanceAfterListReplace, withDerivedState } from "./TuiStoreReducerSupport.js";
+import { boundCommentCalls, boundToolCalls, dedupeLogs, mergeLogEntry, pruneByInstanceNames, pruneByInstances, selectInstanceAfterListReplace, withDerivedState } from "./TuiStoreReducerSupport.js";
 import type { TuiAppAction, TuiAppState } from "./TuiStoreModel.js";
 
 export function reduceTuiStoreReducerInstance(state: TuiAppState, action: TuiAppAction): TuiAppState | undefined {
@@ -9,6 +9,7 @@ export function reduceTuiStoreReducerInstance(state: TuiAppState, action: TuiApp
             return withDerivedState(selectInstanceAfterListReplace({
                 ...state,
                 approvalsByInstance: pruneByInstances(state.approvalsByInstance, action.instances),
+                commentCallsByInstance: pruneByInstances(state.commentCallsByInstance, action.instances),
                 contextMessagesByInstance: pruneByInstances(state.contextMessagesByInstance, action.instances),
                 instances: [...action.instances],
                 lastSeqByInstance: pruneByInstanceNames(state.lastSeqByInstance, action.instances),
@@ -18,6 +19,14 @@ export function reduceTuiStoreReducerInstance(state: TuiAppState, action: TuiApp
                 todoByInstance: pruneByInstances(state.todoByInstance, action.instances),
                 toolCallsByInstance: pruneByInstances(state.toolCallsByInstance, action.instances)
             }));
+        case "commentCall.replace":
+            return {
+                ...state,
+                commentCallsByInstance: {
+                    ...state.commentCallsByInstance,
+                    [action.instance]: boundCommentCalls(action.records),
+                },
+            };
         case "contextMessage.replace":
             return {
                 ...state,

@@ -9,7 +9,7 @@ import { ContextMessageService } from "../../src/instance/context/ContextMessage
 import { ContextMessageState } from "../../src/instance/context/ContextMessageState.ts";
 import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
 
-test("ContextMessageService persists sent messages and marks only the matching context delivered", async () => {
+test("ContextMessageService merges pending Comments into one call-bound delivery", async () => {
     const root = await createTestTempDirectory("context-message");
     const events: Array<{ data: JsonValue; type: InstanceEventType }> = [];
     const options = {
@@ -28,6 +28,10 @@ test("ContextMessageService persists sent messages and marks only the matching c
         ctxId: "ctx-a",
         text: "Check the latest failure",
     });
+    const followUp = await service.queue({
+        ctxId: "ctx-a",
+        text: "Then compare the next output",
+    });
     const second = await service.queue({
         ctxId: "ctx-b",
         text: "Keep this sent",
@@ -36,31 +40,39 @@ test("ContextMessageService persists sent messages and marks only the matching c
     assert.equal(first.status, "sent");
     assert.deepEqual(
         (await service.list()).map((message) => message.status),
-        ["sent", "sent"],
+        ["sent", "sent", "sent"],
     );
-    assert.deepEqual(await service.readPending("ctx-missing"), {
+    assert.deepEqual(await service.consumePending("ctx-missing", "call-missing"), {
+        callId: "call-missing",
         messages: [],
     });
 
-    const delivered = await service.readPending("ctx-a");
-    assert.deepEqual(
-        delivered.messages.map((message) => message.text),
-        ["Check the latest failure"],
+    const delivered = await service.consumePending("ctx-a", "call-1");
+    assert.equal(delivered.callId, "call-1");
+    assert.equal(
+        delivered.comment,
+        "Check the latest failure\n\nThen compare the next output",
     );
     assert.deepEqual(
-        (await service.list()).map((message) => [message.id, message.status]),
+        delivered.messages.map((message) => message.text),
+        ["Check the latest failure", "Then compare the next output"],
+    );
+    assert.deepEqual(
+        (await service.list()).map((message) => [message.id, message.status, message.callId]),
         [
-            [first.id, "delivered"],
-            [second.id, "sent"],
+            [first.id, "delivered", "call-1"],
+            [followUp.id, "delivered", "call-1"],
+            [second.id, "sent", undefined],
         ],
     );
 
     const reloaded = new ContextMessageService(options);
     assert.deepEqual(
-        (await reloaded.list()).map((message) => [message.id, message.status]),
+        (await reloaded.list()).map((message) => [message.id, message.status, message.callId]),
         [
-            [first.id, "delivered"],
-            [second.id, "sent"],
+            [first.id, "delivered", "call-1"],
+            [followUp.id, "delivered", "call-1"],
+            [second.id, "sent", undefined],
         ],
     );
     assert.deepEqual(
@@ -68,9 +80,13 @@ test("ContextMessageService persists sent messages and marks only the matching c
         [
             "context.message.queued",
             "context.message.queued",
+            "context.message.queued",
             "context.message.delivered",
         ],
     );
+    const deliveryEvent = events.at(-1)?.data as Record<string, JsonValue>;
+    assert.equal(deliveryEvent.callId, "call-1");
+    assert.deepEqual(deliveryEvent.ids, [first.id, followUp.id]);
 });
 
 test("ContextMessageService marks a queued message failed when its audit event cannot be recorded", async () => {
@@ -93,13 +109,11 @@ test("ContextMessageService marks a queued message failed when its audit event c
     assert.equal(record?.error, "audit unavailable");
 });
 
-test("ContextMessageService keeps a message sent when delivery audit fails and retries it", async () => {
+test("ContextMessageService delivery event failure never blocks or requeues a completed call", async () => {
     const root = await createTestTempDirectory("context-message-retry");
-    let failDelivery = true;
     const service = new ContextMessageService({
         appendEvent: async (type) => {
-            if (type === "context.message.delivered" && failDelivery) {
-                failDelivery = false;
+            if (type === "context.message.delivered") {
                 throw new Error("audit temporarily unavailable");
             }
         },
@@ -111,18 +125,20 @@ test("ContextMessageService keeps a message sent when delivery audit fails and r
         text: "Retry this message",
     });
 
-    await assert.rejects(
-        service.readPending("ctx-a"),
-        /audit temporarily unavailable/u,
-    );
-    assert.equal((await service.list("ctx-a"))[0]?.status, "sent");
-
-    const retried = await service.readPending("ctx-a");
+    const delivered = await service.consumePending("ctx-a", "call-1");
     assert.deepEqual(
-        retried.messages.map((message) => message.id),
+        delivered.messages.map((message) => message.id),
         [queued.id],
     );
-    assert.equal((await service.list("ctx-a"))[0]?.status, "delivered");
+    assert.equal(delivered.comment, "Retry this message");
+    assert.deepEqual(
+        (await service.list("ctx-a")).map((message) => [message.status, message.callId]),
+        [["delivered", "call-1"]],
+    );
+    assert.deepEqual(await service.consumePending("ctx-a", "call-2"), {
+        callId: "call-2",
+        messages: [],
+    });
 });
 
 test("ContextMessageState retains all pending messages while bounding terminal history", () => {

@@ -7,6 +7,28 @@ import type { WebState, WebStore } from "../src/state/WebStore.js";
 
 const state: WebState = {
     approvals: {},
+    commentCalls: {
+        alpha: [
+            {
+                callId: "call-comment-old",
+                completedAt: "2026-07-30T09:00:01Z",
+                ctxId: "ctx-alpha",
+                input: { command: "pwd" },
+                inputSummary: '{"command":"pwd"}',
+                instance: asInstanceName("alpha"),
+                output: {
+                    comment: ["Review the previous failure."],
+                    exitCode: 0,
+                    stderr: "",
+                    stdout: "/workspace\n",
+                },
+                source: "mcp",
+                startedAt: "2026-07-30T09:00:00Z",
+                status: "completed",
+                toolName: "bash_run",
+            },
+        ],
+    },
     connection: "online",
     contextMessages: {
         alpha: [
@@ -60,6 +82,7 @@ const state: WebState = {
                 input: { command: "false" },
                 inputSummary: '{"command":"false"}',
                 instance: asInstanceName("alpha"),
+                output: { exitCode: 1, stderr: "failed", stdout: "" },
                 source: "mcp",
                 startedAt: "2026-07-31T09:00:00Z",
                 status: "failed",
@@ -82,7 +105,7 @@ const state: WebState = {
     },
 };
 
-it("filters structured tool calls by ctxId and queues a message for the selected Context", async () => {
+it("filters structured tool calls by ctxId and queues a Comment for the selected Context", async () => {
     const queueContextMessage = vi.fn(async () => true);
     const store = { queueContextMessage } as unknown as WebStore;
     render(<ToolCalls state={state} store={store} />);
@@ -104,10 +127,12 @@ it("filters structured tool calls by ctxId and queues a message for the selected
         target: { value: "context:ctx-alpha" },
     });
     expect(screen.getByText("Check the failing command.")).toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText("Message"), {
+    expect(screen.getByText("Review the previous failure.")).toBeInTheDocument();
+    expect(screen.getByText("call-comment-old")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Comment"), {
         target: { value: "Retry after checking the environment." },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    fireEvent.click(screen.getByRole("button", { name: "Queue Comment" }));
 
     await waitFor(() =>
         expect(queueContextMessage).toHaveBeenCalledWith(
@@ -125,11 +150,11 @@ it("clears Context synchronously when the selected instance changes", async () =
 
     fireEvent.change(screen.getByLabelText("Instance"), { target: { value: "alpha" } });
     fireEvent.change(screen.getByLabelText("Context"), { target: { value: "context:ctx-alpha" } });
-    fireEvent.change(screen.getByLabelText("Message"), { target: { value: "Do not misroute" } });
+    fireEvent.change(screen.getByLabelText("Comment"), { target: { value: "Do not misroute" } });
     fireEvent.change(screen.getByLabelText("Instance"), { target: { value: "beta" } });
 
     expect(screen.getByLabelText("Context")).toHaveValue("all");
-    expect(screen.queryByRole("button", { name: "Send message" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Queue Comment" })).not.toBeInTheDocument();
     expect(queueContextMessage).not.toHaveBeenCalled();
 });
 
@@ -166,6 +191,7 @@ it("normalizes a Context filter that disappears after refresh", () => {
     view.rerender(<ToolCalls
         state={{
             ...state,
+            commentCalls: { ...state.commentCalls, alpha: [] },
             contextMessages: { alpha: [] },
             toolCalls: {
                 ...state.toolCalls,

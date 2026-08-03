@@ -793,10 +793,10 @@ function createWorkerHarness(options?: {
                 toolName: string,
                 input: JsonValue,
                 context: { ctxId?: string; requestId?: string; source: string },
-                operation: () => Promise<T>
+                operation: (callId: string) => Promise<T>
             ): Promise<T> {
                 auditedCalls.push({ context, input, toolName });
-                return await operation();
+                return await operation("call-test");
             },
             async appendMcpSessionClosed(sessionId: string) {
                 events.push({ data: { sessionId }, type: "mcp.sessionClosed" });
@@ -842,7 +842,7 @@ function createWorkerHarness(options?: {
                 input: JsonValue,
                 context: { ctxId?: string; requestId?: string; source: string },
                 signal?: AbortSignal,
-                transformResult?: (result: JsonValue) => Promise<JsonValue>
+                transformResult?: (result: JsonValue, callId: string) => Promise<JsonValue>
             ) {
                 if (!ready) {
                     const error = new Error("not ready");
@@ -860,7 +860,7 @@ function createWorkerHarness(options?: {
                     : await options.callHandler(toolName, input, context, signal);
                 return transformResult === undefined
                     ? toolResult
-                    : await transformResult(toolResult);
+                    : await transformResult(toolResult, "call-test");
             }
         }
     } as const;

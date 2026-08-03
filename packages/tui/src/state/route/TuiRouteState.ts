@@ -1,3 +1,5 @@
+import type { ToolCallRecord } from "@portable-devshell/shared";
+
 import type { TuiAppState } from "../reducer/TuiStoreModel.js";
 import type { TuiPageId } from "../TuiUiState.js";
 import {
@@ -391,7 +393,10 @@ function isTuiRouteResourceValid(
 ): boolean {
     if (route.page === "audit" && route.view !== "contexts") {
         if (instance === undefined) return false;
-        const calls = state.toolCallsByInstance[instance] ?? [];
+        const calls = mergeCalls(
+            state.toolCallsByInstance[instance] ?? [],
+            state.commentCallsByInstance[instance] ?? [],
+        );
         const approvals = state.approvalsByInstance[instance] ?? [];
         const messages = state.contextMessagesByInstance[instance] ?? [];
         if (route.scope === "unscoped") {
@@ -447,4 +452,13 @@ function assertRoutePage(state: TuiAppState, route: TuiRoute): void {
             `Cannot navigate to ${route.page} while ${state.ui.selectedPage} is selected.`,
         );
     }
+}
+
+function mergeCalls(
+    calls: readonly ToolCallRecord[],
+    commentCalls: readonly ToolCallRecord[],
+): ToolCallRecord[] {
+    const byId = new Map(calls.map((call) => [call.callId, call] as const));
+    for (const call of commentCalls) byId.set(call.callId, call);
+    return [...byId.values()];
 }

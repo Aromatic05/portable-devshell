@@ -75,11 +75,23 @@ test("a real MCP SDK client receives a queued Comment in the next ordinary tool 
         instanceName: "real-comment",
     });
     const gateway = {
-        async consumeContextMessages(instance: string, ctxId: string) {
-            assert.equal(instance, "real-comment");
-            return await messages.readPending(ctxId);
+        assertReady() {},
+        async callTool() {
+            throw new Error("routed calls are not used by this test");
         },
-    } as unknown as McpInstanceGateway;
+        async consumeContextMessages(instance: string, ctxId: string, callId: string) {
+            assert.equal(instance, "real-comment");
+            return await messages.consumePending(ctxId, callId);
+        },
+        async createSshInstance() { return null; },
+        async listInstances() { return []; },
+        listTools() { return []; },
+        async readTodo() { return { items: [], revision: 0 }; },
+        async startInstance() { return null; },
+        async statusInstance() { return null; },
+        async stopInstance() { return null; },
+        async writeTodo() { return { items: [], revision: 0 }; },
+    } satisfies McpInstanceGateway;
     const { cleanupDirs, host, instance, workspaceMarker } = await startFrozenWorkerHost(
         "real-comment",
         { enabled: false, provider: "none" },
@@ -105,6 +117,10 @@ test("a real MCP SDK client receives a queued Comment in the next ordinary tool 
             ctxId,
             text: "Inspect this result before continuing",
         });
+        const followUp = await messages.queue({
+            ctxId,
+            text: "Compare it with the next call",
+        });
         const other = await messages.queue({
             ctxId: "ctx-other",
             text: "This belongs to another context",
@@ -116,7 +132,7 @@ test("a real MCP SDK client receives a queued Comment in the next ordinary tool 
         });
         assert.deepEqual(
             (first.structuredContent as { comment?: string[] } | undefined)?.comment,
-            ["Inspect this result before continuing"],
+            ["Inspect this result before continuing\n\nCompare it with the next call"],
         );
         const audited = (await instance.readToolCalls()).find(
             (record) =>
@@ -126,10 +142,17 @@ test("a real MCP SDK client receives a queued Comment in the next ordinary tool 
         );
         assert.deepEqual(
             (audited?.output as { comment?: string[] } | undefined)?.comment,
-            ["Inspect this result before continuing"],
+            ["Inspect this result before continuing\n\nCompare it with the next call"],
             "Audit Output must persist the same Comment payload returned to the MCP consumer",
         );
-        assert.equal((await messages.list(ctxId))[0]?.status, "delivered");
+        assert.ok(audited?.callId);
+        assert.deepEqual(
+            (await messages.list(ctxId)).map((message) => [message.id, message.status, message.callId]),
+            [
+                [queued.id, "delivered", audited.callId],
+                [followUp.id, "delivered", audited.callId],
+            ],
+        );
         assert.equal(
             (await messages.list("ctx-other")).find(
                 (message) => message.id === other.id,
@@ -144,6 +167,26 @@ test("a real MCP SDK client receives a queued Comment in the next ordinary tool 
         assert.equal(
             (second.structuredContent as { comment?: string[] } | undefined)?.comment,
             undefined,
+        );
+        const third = await client.callTool({
+            arguments: { command: "printf third", ctxId },
+            name: "bash_run",
+        });
+        assert.equal(third.isError, false);
+        const completedCalls = (await instance.readToolCalls()).filter(
+            (record) => record.ctxId === ctxId && record.toolName === "bash_run",
+        );
+        assert.equal(completedCalls.length, 3);
+        assert.equal(completedCalls.every((record) => record.status === "completed"), true);
+        assert.deepEqual(
+            (await instance.readToolCalls({ callIds: [audited.callId], ctxId })).map(
+                (record) => record.callId,
+            ),
+            [audited.callId],
+        );
+        assert.equal(
+            (await instance.readToolCalls({ callIds: [audited.callId], ctxId: "ctx-other" })).length,
+            0,
         );
         await client.close();
     } finally {
@@ -198,11 +241,17 @@ test("a real MCP SDK OAuth consumer completes registration, PKCE authorization, 
     const storageDir = await createTestTempDirectory("mcp-oauth-real-client");
     const workspacePath = await createTestTempDirectory("mcp-oauth-real-workspace");
     const homeDirectory = await createTestTempDirectory("mcp-oauth-real-home");
+    const runtimeDirectory = await createTestTempDirectory("mcp-oauth-real-runtime");
     const markerName = "oauth-real-marker.txt";
     const markerValue = "oauth-real-frozen-worker";
     await writeFile(join(workspacePath, markerName), markerValue, "utf8");
 
-    const instance = createFrozenWorker("real-oauth", homeDirectory, workspacePath);
+    const instance = createFrozenWorker(
+        "real-oauth",
+        homeDirectory,
+        runtimeDirectory,
+        workspacePath,
+    );
     const host = new McpHost({
         instances: [
             {
@@ -353,6 +402,7 @@ test("a real MCP SDK OAuth consumer completes registration, PKCE authorization, 
         await rm(storageDir, { force: true, recursive: true });
         await rm(workspacePath, { force: true, recursive: true });
         await rm(homeDirectory, { force: true, recursive: true });
+        await rm(runtimeDirectory, { force: true, recursive: true });
     }
 });
 
@@ -552,10 +602,20 @@ function endpointFor(host: McpHost, name: string): string {
     return `http://127.0.0.1:${port}/${name}/mcp`;
 }
 
-function createFrozenWorker(name: string, homeDirectory: string, workspacePath: string) {
+function createFrozenWorker(
+    name: string,
+    homeDirectory: string,
+    runtimeDirectory: string,
+    workspacePath: string,
+) {
     return new WorkerInstanceFactory().create({
         defaultWorkspace: asWorkspacePath(workspacePath),
-        env: { ...process.env, HOME: homeDirectory },
+        env: {
+            ...process.env,
+            HOME: homeDirectory,
+            LOCALAPPDATA: runtimeDirectory,
+            XDG_RUNTIME_DIR: runtimeDirectory,
+        },
         homeDirectory,
         name: asInstanceName(name),
         transport: new WorkerTransportDriverLocal({
@@ -571,12 +631,18 @@ async function startFrozenWorkerHost(
     gateway?: McpInstanceGateway,
 ) {
     const homeDirectory = await createTestTempDirectory(`mcp-real-${name}-home`);
+    const runtimeDirectory = await createTestTempDirectory(`mcp-real-${name}-runtime`);
     const workspacePath = await createTestTempDirectory(`mcp-real-${name}-workspace`);
     const markerName = `real-${name}-marker.txt`;
     const markerValue = `real-${name}-frozen-worker`;
     await writeFile(join(workspacePath, markerName), markerValue, "utf8");
 
-    const instance = createFrozenWorker(name, homeDirectory, workspacePath);
+    const instance = createFrozenWorker(
+        name,
+        homeDirectory,
+        runtimeDirectory,
+        workspacePath,
+    );
     const host = new McpHost({
         instances: [
             {
@@ -598,7 +664,7 @@ async function startFrozenWorkerHost(
         host,
         instance,
         workspaceMarker: { name: markerName, value: markerValue },
-        cleanupDirs: [homeDirectory, workspacePath]
+        cleanupDirs: [homeDirectory, runtimeDirectory, workspacePath]
     };
 }
 

@@ -330,6 +330,14 @@ export class TuiAppStore {
         });
     }
 
+    replaceCommentCalls(instance: string, records: ToolCallRecord[]): void {
+        this.dispatch({
+            instance,
+            records,
+            type: "commentCall.replace",
+        });
+    }
+
     replaceApprovals(instance: string, approvals: ApprovalRequest[]): void {
         this.dispatch({
             approvals,

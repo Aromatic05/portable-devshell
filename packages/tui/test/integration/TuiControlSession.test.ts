@@ -9,6 +9,7 @@ import {
     type ApprovalRequest,
     type JsonValue,
     type OAuthApprovalRequest,
+    type ToolCallQuery,
     type ToolCallRecord
 } from "@portable-devshell/shared";
 import type { WorkerInstance } from "@portable-devshell/core/testing";
@@ -179,6 +180,108 @@ test("TuiControlSession refreshes a visible overview after relevant instance eve
         ),
         true
     );
+});
+
+test("Comment delivery never stalls visible Audit refreshes for the bound call or later calls", async (t) => {
+    const runtimeDir = await createTestTempDirectory("tui-comment-audit-refresh");
+    const socketPath = createTestIpcPath("tui-comment-audit", runtimeDir);
+    const worker = new FakeWorker("alpha");
+    const server = createServer(socketPath, worker, () => 7);
+    const session = new TuiControlSession({
+        clients: createTuiClients({ socketPath }),
+    });
+
+    await server.start();
+    t.after(async () => {
+        await session.stop();
+        await server.stop().catch(() => undefined);
+        await rm(runtimeDir, { force: true, recursive: true });
+    });
+
+    await session.start();
+    await waitFor(() => session.store.getState().connection.status === "connected");
+    session.store.setSelectedInstance("alpha");
+    session.store.setSelectedPage("audit");
+
+    const firstCompletedAt = new Date(10).toISOString();
+    worker.addToolCall({
+        callId: "comment-call",
+        completedAt: firstCompletedAt,
+        ctxId: "ctx-alpha",
+        input: { command: "pwd" },
+        inputSummary: '{"command":"pwd"}',
+        instance: asInstanceName("alpha"),
+        output: {
+            comment: ["first guidance\n\nsecond guidance"],
+            exitCode: 0,
+            stderr: "",
+            stdout: "/workspace\n",
+        },
+        source: "mcp",
+        startedAt: new Date(9).toISOString(),
+        status: "completed",
+        toolName: "bash_run",
+    });
+    worker.emit("context.message.delivered", {
+        callId: "comment-call",
+        comment: "first guidance\n\nsecond guidance",
+        ctxId: "ctx-alpha",
+        deliveredAt: firstCompletedAt,
+        ids: ["message-1", "message-2"],
+        status: "delivered",
+    });
+    worker.emit("toolCall.completed", {
+        callId: "comment-call",
+        completedAt: firstCompletedAt,
+        ctxId: "ctx-alpha",
+        source: "mcp",
+        startedAt: new Date(9).toISOString(),
+        status: "completed",
+        toolName: "bash_run",
+    });
+
+    await waitFor(() => {
+        const call = session.store.getState().toolCallsByInstance.alpha?.find(
+            (record) => record.callId === "comment-call",
+        );
+        return (
+            (call?.output as { comment?: string[] } | undefined)?.comment?.[0] ===
+            "first guidance\n\nsecond guidance"
+        );
+    });
+    const readsAfterComment = worker.toolCallReadCount;
+
+    const laterCompletedAt = new Date(20).toISOString();
+    worker.addToolCall({
+        callId: "later-call",
+        completedAt: laterCompletedAt,
+        ctxId: "ctx-alpha",
+        input: { command: "printf later" },
+        inputSummary: '{"command":"printf later"}',
+        instance: asInstanceName("alpha"),
+        output: { exitCode: 0, stderr: "", stdout: "later" },
+        source: "mcp",
+        startedAt: new Date(19).toISOString(),
+        status: "completed",
+        toolName: "bash_run",
+    });
+    worker.emit("toolCall.completed", {
+        callId: "later-call",
+        completedAt: laterCompletedAt,
+        ctxId: "ctx-alpha",
+        source: "mcp",
+        startedAt: new Date(19).toISOString(),
+        status: "completed",
+        toolName: "bash_run",
+    });
+
+    await waitFor(() => {
+        const call = session.store.getState().toolCallsByInstance.alpha?.find(
+            (record) => record.callId === "later-call",
+        );
+        return (call?.output as { stdout?: string } | undefined)?.stdout === "later";
+    });
+    assert.equal(worker.toolCallReadCount > readsAfterComment, true);
 });
 
 test("TuiControlSession polls operational metrics only while Overview is visible", async (t) => {
@@ -595,9 +698,18 @@ class FakeWorker {
         return this.#logs;
     }
 
-    async readToolCalls() {
+    async readToolCalls(query: ToolCallQuery = {}) {
         this.toolCallReadCount += 1;
-        return this.#toolCalls;
+        const callIds = query.callIds === undefined ? undefined : new Set(query.callIds);
+        const filtered = this.#toolCalls.filter((record) => {
+            if (callIds !== undefined && !callIds.has(record.callId)) return false;
+            if (query.ctxId !== undefined && record.ctxId !== query.ctxId) return false;
+            if (query.source !== undefined && record.source !== query.source) return false;
+            if (query.status !== undefined && record.status !== query.status) return false;
+            if (query.toolName !== undefined && record.toolName !== query.toolName) return false;
+            return true;
+        });
+        return query.limit === undefined ? filtered : filtered.slice(-query.limit);
     }
 
     async listApprovals() {

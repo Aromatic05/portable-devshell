@@ -13,6 +13,7 @@ export type ConnectionState = "connecting" | "online" | "offline";
 
 export interface WebState {
     approvals: Record<string, ApprovalRequest[]>;
+    commentCalls: Record<string, ToolCallRecord[]>;
     connection: ConnectionState;
     contextMessages: Record<string, ContextMessageRecord[]>;
     error?: string;
@@ -31,6 +32,7 @@ export interface WebState {
 export function createInitialWebState(): WebState {
     return {
         approvals: {},
+        commentCalls: {},
         connection: "connecting",
         contextMessages: {},
         instances: [],

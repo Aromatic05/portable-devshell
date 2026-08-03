@@ -99,6 +99,7 @@ export interface TuiAppState {
     artifactTransfers: ArtifactTransferRecord[];
     approvalsByInstance: Record<string, ApprovalRequest[]>;
     commandRecords: TuiCommandRecord[];
+    commentCallsByInstance: Record<string, ToolCallRecord[]>;
     contextMessagesByInstance: Record<string, ContextMessageRecord[]>;
     configView?: Record<string, JsonValue>;
     connection: TuiConnectionState;
@@ -132,6 +133,7 @@ export type TuiAppAction =
       }
     | { approvals: OAuthApprovalRequest[]; type: "oauthApproval.replace" }
     | { overview?: OperationalOverview; type: "overview.replace" }
+    | { instance: string; records: ToolCallRecord[]; type: "commentCall.replace" }
     | { command: TuiCommandRecord; type: "command.upsert" }
     | {
           instance: string;

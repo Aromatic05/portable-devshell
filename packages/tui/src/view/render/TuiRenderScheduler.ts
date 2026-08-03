@@ -129,6 +129,11 @@ export function isRenderRelevantChange(
     if (page === "audit") {
         return (
             selectedValueChanged(
+                previous.commentCallsByInstance,
+                next.commentCallsByInstance,
+                instance,
+            ) ||
+            selectedValueChanged(
                 previous.approvalsByInstance,
                 next.approvalsByInstance,
                 instance,

@@ -210,7 +210,7 @@ export class WorkerInstance {
         input: JsonValue,
         context: ToolCallContext,
         signal?: AbortSignal,
-        transformResult?: (result: JsonValue) => Promise<JsonValue>
+        transformResult?: (result: JsonValue, callId: string) => Promise<JsonValue>
     ): Promise<JsonValue> {
         return await this.#tool.call(toolName, input, context, signal, transformResult);
     }
@@ -219,7 +219,7 @@ export class WorkerInstance {
         toolName: string,
         input: JsonValue,
         context: ToolCallContext,
-        operation: () => Promise<T>,
+        operation: (callId: string) => Promise<T>,
         signal?: AbortSignal
     ): Promise<T> {
         return await this.#tool.auditToolCall(toolName, input, context, operation, signal);

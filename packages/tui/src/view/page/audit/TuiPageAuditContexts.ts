@@ -58,15 +58,11 @@ export function buildAuditContextListBoxes(
                     `tool ${approval.toolName}`,
                     approval.approvalId,
                 ]),
-                ...context.messages.map(
-                    (message) => `status ${message.status} ${message.text}`,
-                ),
             ].join(" "),
             status: context.status,
             summaryLines: [
                 compactSummary(
                     ["calls", String(context.calls.length)],
-                    ["messages", String(context.messages.length)],
                     ["latest", context.latestCall?.toolName ?? "-"],
                 ),
                 context.latestActivityAt,

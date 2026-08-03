@@ -28,12 +28,20 @@ export function readToolCallQuery(payload?: JsonValue): ToolCallQuery {
     if (payload.limit !== undefined && typeof payload.limit !== "number") {
         throw invalid("tool.listCalls requires numeric limit.");
     }
+    if (payload.ctxId !== undefined && typeof payload.ctxId !== "string") {
+        throw invalid("tool.listCalls requires string ctxId.");
+    }
+    const callIds = payload.callIds === undefined
+        ? undefined
+        : readCallIds(payload.callIds);
     if (payload.toolName !== undefined && typeof payload.toolName !== "string") {
         throw invalid("tool.listCalls requires string toolName.");
     }
     return {
         ...(payload.after === undefined ? {} : { after: payload.after }),
         ...(payload.before === undefined ? {} : { before: payload.before }),
+        ...(callIds === undefined ? {} : { callIds }),
+        ...(payload.ctxId === undefined ? {} : { ctxId: payload.ctxId }),
         ...(payload.limit === undefined ? {} : { limit: payload.limit }),
         ...(payload.source === undefined ? {} : { source: readSource(payload.source) }),
         ...(payload.status === undefined ? {} : { status: readStatus(payload.status) }),
@@ -87,6 +95,20 @@ function readStatus(value: JsonValue): ToolCallStatus {
         return value;
     }
     throw invalid("tool.listCalls received an invalid status.");
+}
+
+function readCallIds(value: JsonValue): string[] {
+    if (!Array.isArray(value)) {
+        throw invalid("tool.listCalls requires non-empty string callIds.");
+    }
+    const callIds: string[] = [];
+    for (const callId of value) {
+        if (typeof callId !== "string" || callId.length === 0) {
+            throw invalid("tool.listCalls requires non-empty string callIds.");
+        }
+        callIds.push(callId);
+    }
+    return callIds;
 }
 
 function isRecord(value: JsonValue | undefined): value is Record<string, JsonValue> {

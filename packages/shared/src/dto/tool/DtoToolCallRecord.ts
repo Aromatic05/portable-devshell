@@ -22,6 +22,8 @@ export type ToolCallApprovalDecision = "approved" | "denied" | "expired";
 export interface ToolCallQuery {
     after?: string;
     before?: string;
+    callIds?: string[];
+    ctxId?: string;
     limit?: number;
     source?: ToolCallSource;
     status?: ToolCallStatus;

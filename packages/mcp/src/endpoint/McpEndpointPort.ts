@@ -7,7 +7,7 @@ export interface McpEndpointWorkerPort extends McpEndpointCatalogWorker {
         toolName: string,
         input: JsonValue,
         context: ToolCallContext,
-        operation: () => Promise<T>,
+        operation: (callId: string) => Promise<T>,
         signal?: AbortSignal
     ): Promise<T>;
     appendMcpSessionClosed(sessionId: string): Promise<void>;
@@ -21,7 +21,7 @@ export interface McpEndpointWorkerPort extends McpEndpointCatalogWorker {
         input: JsonValue,
         context: ToolCallContext,
         signal?: AbortSignal,
-        transformResult?: (result: JsonValue) => Promise<JsonValue>
+        transformResult?: (result: JsonValue, callId: string) => Promise<JsonValue>
     ): Promise<JsonValue>;
     readonly handshake?: McpEndpointEnvironmentHandshake;
     readonly workspacePath?: string;

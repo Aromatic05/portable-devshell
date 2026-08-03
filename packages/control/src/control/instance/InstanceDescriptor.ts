@@ -11,7 +11,7 @@ import type {
 export interface InstanceContextMessagePort {
     list(ctxId?: string): Promise<ContextMessageRecord[]>;
     queue(input: ContextMessageQueueInput): Promise<ContextMessageRecord>;
-    readPending(ctxId: string): Promise<ContextMessageReadResult>;
+    consumePending(ctxId: string, callId: string): Promise<ContextMessageReadResult>;
 }
 
 export interface InstanceTodoPort {

@@ -208,7 +208,16 @@ export class AuditToolCallHistory {
 }
 
 function sliceByFilters(records: ToolCallRecord[], query: ToolCallQuery): ToolCallRecord[] {
+    const callIds = query.callIds === undefined ? undefined : new Set(query.callIds);
     return records.filter((record) => {
+        if (callIds !== undefined && !callIds.has(record.callId)) {
+            return false;
+        }
+
+        if (query.ctxId !== undefined && record.ctxId !== query.ctxId) {
+            return false;
+        }
+
         if (query.source !== undefined && record.source !== query.source) {
             return false;
         }

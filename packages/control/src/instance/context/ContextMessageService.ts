@@ -67,23 +67,29 @@ export class ContextMessageService {
             );
     }
 
-    async readPending(ctxId: string): Promise<ContextMessageReadResult> {
-        return await this.#runExclusive(async () => {
-            const transition = this.#state.deliver(this.#store.read(), ctxId);
-            if (transition.delivered.length === 0) return { messages: [] };
-            for (const message of transition.delivered) {
-                await this.#appendEvent(
-                    "context.message.delivered",
-                    eventData(message),
-                );
-            }
+    async consumePending(ctxId: string, callId: string): Promise<ContextMessageReadResult> {
+        const delivered = await this.#runExclusive(async () => {
+            const transition = this.#state.deliver(this.#store.read(), ctxId, callId);
+            if (transition.delivered.length === 0) return [];
             await this.#store.write(transition.document);
-            return {
-                messages: transition.delivered.map(
-                    ({ createdAt, id, text }) => ({ createdAt, id, text }),
-                ),
-            };
+            return transition.delivered;
         });
+        const comment = delivered.map((message) => message.text).join("\n\n");
+        if (delivered.length > 0) {
+            await this.#appendEvent("context.message.delivered", {
+                callId,
+                comment,
+                ctxId,
+                deliveredAt: delivered[0]?.deliveredAt ?? new Date().toISOString(),
+                ids: delivered.map((message) => message.id),
+                status: "delivered",
+            }).catch(() => undefined);
+        }
+        return {
+            callId,
+            ...(comment.length === 0 ? {} : { comment }),
+            messages: delivered.map(({ createdAt, id, text }) => ({ createdAt, id, text })),
+        };
     }
 
     async #markFailed(
@@ -120,6 +126,7 @@ export class ContextMessageService {
 
 function eventData(record: ContextMessageRecord): Record<string, JsonValue> {
     return {
+        ...(record.callId === undefined ? {} : { callId: record.callId }),
         createdAt: record.createdAt,
         ctxId: record.ctxId,
         id: record.id,

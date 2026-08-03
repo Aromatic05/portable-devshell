@@ -215,7 +215,7 @@ export class WorkerInstanceToolAudit {
         toolName: string,
         input: JsonValue,
         context: ToolCallContext,
-        operation: () => Promise<T>,
+        operation: (callId: string) => Promise<T>,
         signal?: AbortSignal
     ): Promise<T> {
         throwIfToolCallAborted(signal);
@@ -242,7 +242,7 @@ export class WorkerInstanceToolAudit {
 
         try {
             throwIfToolCallAborted(signal);
-            const result = await operation();
+            const result = await operation(scope.callId);
             const completedAt = new Date().toISOString();
             await this.#toolCallHistory.completed(scope.callId, completedAt, { output: result });
             await this.#appendEvent(

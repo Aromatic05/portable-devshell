@@ -54,10 +54,10 @@ function createWorker(options: {
             toolName: string,
             _input: JsonValue,
             _context: ToolCallContext,
-            operation: () => Promise<T>
+            operation: (callId: string) => Promise<T>
         ): Promise<T> {
             audited.push(toolName);
-            return await operation();
+            return await operation("call-test");
         },
         async appendMcpSessionClosed(sessionId: string): Promise<void> {
             events.push({ data: { sessionId }, type: "closed" });

@@ -3,6 +3,7 @@ import type { ApprovalRequest, JsonValue, ToolCallRecord } from "@portable-devsh
 import type { TuiAppState, TuiInstanceListEntry, TuiLogEntry } from "./TuiStoreModel.js";
 
 const MAX_LOGS_PER_INSTANCE = 100;
+const MAX_COMMENT_CALLS_PER_INSTANCE = 1_000;
 const MAX_TOOL_CALLS_PER_INSTANCE = 100;
 
 export function selectInstanceAfterListReplace(state: TuiAppState): TuiAppState {
@@ -106,6 +107,12 @@ export function boundToolCalls(records: readonly ToolCallRecord[]): ToolCallReco
     return [...records]
         .sort(compareToolCallRecord)
         .slice(0, MAX_TOOL_CALLS_PER_INSTANCE);
+}
+
+export function boundCommentCalls(records: readonly ToolCallRecord[]): ToolCallRecord[] {
+    return [...records]
+        .sort(compareToolCallRecord)
+        .slice(0, MAX_COMMENT_CALLS_PER_INSTANCE);
 }
 
 export function pruneByInstances<T>(value: Record<string, T>, instances: TuiInstanceListEntry[]): Record<string, T> {

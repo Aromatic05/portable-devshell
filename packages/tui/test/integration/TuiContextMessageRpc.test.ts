@@ -27,12 +27,25 @@ import { renderExpandableBoxLines } from "../../src/view/component/TuiComponentE
 import { selectMainScreenModel } from "../../src/view/model/TuiViewProjection.js";
 
 test("real Ink and control socket edit and deliver Comments only to the matching ctxId", async (t) => {
-    const harness = await createHarness();
+    const harness = await createHarness([
+        {
+            callId: "call-seed-alpha",
+            ctxId: "ctx-alpha",
+            input: { command: "pwd" },
+            inputSummary: '{"command":"pwd"}',
+            instance: "alpha" as never,
+            output: { exitCode: 0, stderr: "", stdout: "/workspace\n" },
+            source: "mcp",
+            startedAt: "2026-08-03T00:00:00.000Z",
+            status: "completed",
+            toolName: "bash_run",
+        },
+    ]);
     t.after(async () => await harness.close());
 
     await harness.messages.queue({ ctxId: "ctx-beta", text: "beta seed comment" });
     await delay(5);
-    const alphaSeed = await harness.messages.queue({
+    await harness.messages.queue({
         ctxId: "ctx-alpha",
         text: "alpha seed comment",
     });
@@ -50,23 +63,17 @@ test("real Ink and control socket edit and deliver Comments only to the matching
     await waitUntil(
         () =>
             harness.runtime.store.getState().ui.mainFocusId ===
-            `conversation-message:${alphaSeed.id}`,
+            "conversation-pending",
     );
     harness.terminal.write(" ");
     await waitUntil(
         () =>
-            box(
-                harness.runtime,
-                `conversation-message:${alphaSeed.id}`,
-            )?.expanded === true,
+            box(harness.runtime, "conversation-pending")?.expanded === true,
     );
     harness.terminal.write(" ");
     await waitUntil(
         () =>
-            box(
-                harness.runtime,
-                `conversation-message:${alphaSeed.id}`,
-            )?.expanded === false,
+            box(harness.runtime, "conversation-pending")?.expanded === false,
     );
     harness.terminal.write("\u001b[B");
     await waitUntil(

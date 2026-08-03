@@ -1,5 +1,7 @@
 import { type FormEvent, useEffect, useMemo, useState } from "react";
 
+import type { JsonValue, ToolCallRecord } from "@portable-devshell/shared/browser";
+
 import { ToolCallFilters } from "../components/toolcall/ToolCallFilters.js";
 import { ToolCallEntry } from "../components/toolcall/ToolCallEntry.js";
 import {
@@ -28,6 +30,10 @@ export function ToolCalls({
         () => Object.values(state.toolCalls).flat(),
         [state.toolCalls],
     );
+    const allCommentCalls = useMemo(
+        () => Object.values(state.commentCalls).flat(),
+        [state.commentCalls],
+    );
     const instances = useMemo(
         () => state.instances.map((instance) => instance.name).sort(),
         [state.instances],
@@ -37,20 +43,14 @@ export function ToolCalls({
             ? filters.instance
             : "all";
     const contexts = useMemo(() => {
-        const fromCalls = allCalls
+        return [...new Set([...allCalls, ...allCommentCalls]
             .filter(
                 (call) =>
                     call.ctxId !== undefined &&
                     (instance === "all" || call.instance === instance),
             )
-            .map((call) => call.ctxId!);
-        const fromMessages = Object.entries(state.contextMessages)
-            .filter(([messageInstance]) =>
-                instance === "all" || messageInstance === instance
-            )
-            .flatMap(([, messages]) => messages.map((message) => message.ctxId));
-        return [...new Set([...fromCalls, ...fromMessages])].sort();
-    }, [allCalls, instance, state.contextMessages]);
+            .map((call) => call.ctxId!))].sort();
+    }, [allCalls, allCommentCalls, instance]);
     const selectedCtxId = selectedContextId(filters.ctxId);
     const contextFilter =
         filters.ctxId === allContextsFilter ||
@@ -76,10 +76,28 @@ export function ToolCalls({
         effectiveFilters.instance !== "all" &&
         ctxId !== undefined &&
         contexts.includes(ctxId);
-    const messages = concreteContext
+    const queuedComments = concreteContext
         ? (state.contextMessages[effectiveFilters.instance] ?? [])
-              .filter((message) => message.ctxId === ctxId)
+              .filter(
+                  (message) =>
+                      message.ctxId === ctxId &&
+                      message.status !== "delivered",
+              )
               .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
+        : [];
+    const commentCalls = concreteContext
+        ? allCommentCalls
+              .filter(
+                  (call) =>
+                      call.instance === effectiveFilters.instance &&
+                      call.ctxId === ctxId &&
+                      readCallComments(call).length > 0,
+              )
+              .sort((left, right) =>
+                  (right.completedAt ?? right.startedAt).localeCompare(
+                      left.completedAt ?? left.startedAt,
+                  ),
+              )
         : [];
     const operation = concreteContext
         ? `context-message:${effectiveFilters.instance}:${ctxId}`
@@ -135,18 +153,18 @@ export function ToolCalls({
             }}
             tools={tools}
         />
-        <section className="card context-composer" aria-labelledby="context-message-title">
-            <h3 id="context-message-title">Message to Context</h3>
+        <section className="card context-composer" aria-labelledby="context-comment-title">
+            <h3 id="context-comment-title">Comment for next tool call</h3>
             {concreteContext ? <>
                 <p className="hint">{effectiveFilters.instance} · {ctxId}</p>
                 <form onSubmit={(event) => void submit(event)}>
                     <label>
-                        Message
+                        Comment
                         <textarea
                             disabled={!interactive}
                             maxLength={20_000}
                             onChange={(event) => setDraft(event.target.value)}
-                            placeholder="Send guidance to the Agent working in this Context"
+                            placeholder="Attach guidance to the next tool call in this Context"
                             rows={4}
                             value={draft}
                         />
@@ -162,21 +180,33 @@ export function ToolCalls({
                     >
                         {operation !== undefined && state.operations[operation] !== undefined
                             ? "Sending…"
-                            : "Send message"}
+                            : "Queue Comment"}
                     </button>
                 </form>
                 {!interactive ? <p className="empty">
-                    {disabled ? "Finish the session operation before sending a message." : "Reconnect before sending a message."}
+                    {disabled ? "Finish the session operation before queuing a Comment." : "Reconnect before queuing a Comment."}
                 </p> : null}
-                {messages.length === 0 ? <p className="empty">No messages sent to this Context.</p> : <ol className="context-messages">
-                    {messages.map((message) => <li key={message.id}>
+                {queuedComments.length === 0 ? null : <>
+                    <h4>Queued for next call</h4>
+                    <ol className="context-messages">
+                    {queuedComments.map((message) => <li key={message.id}>
                         <span className={`result ${message.status === "delivered" ? "success" : message.status === "failed" ? "failure" : "pending"}`}>{message.status}</span>
                         <time>{message.createdAt}</time>
                         <p>{message.text}</p>
                         {message.error === undefined ? null : <p className="error">{message.error}</p>}
                     </li>)}
+                    </ol>
+                </>}
+                <h4>Comment history</h4>
+                {commentCalls.length === 0 ? <p className="empty">No tool calls with Comments in this Context.</p> : <ol className="context-messages">
+                    {commentCalls.map((call) => <li key={call.callId}>
+                        <span className="result success">{call.toolName}</span>
+                        <time>{call.completedAt ?? call.startedAt}</time>
+                        <p><strong>{call.callId}</strong></p>
+                        {readCallComments(call).map((comment, index) => <p key={`${call.callId}:${index}`}>{comment}</p>)}
+                    </li>)}
                 </ol>}
-            </> : <p className="empty">Select one instance and one scoped Context to send a message.</p>}
+            </> : <p className="empty">Select one instance and one scoped Context to queue a Comment.</p>}
         </section>
         {state.connection === "offline" && allCalls.length === 0
             ? <p className="empty">Tool calls are unavailable while offline.</p>
@@ -192,4 +222,16 @@ export function ToolCalls({
                     />)}
                 </ol>}
     </section>;
+}
+
+function readCallComments(call: ToolCallRecord): string[] {
+    return readComments(call.output);
+}
+
+function readComments(value: JsonValue | undefined): string[] {
+    if (typeof value !== "object" || value === null || Array.isArray(value)) return [];
+    const comment = (value as Record<string, JsonValue>).comment;
+    return Array.isArray(comment) && comment.every((entry) => typeof entry === "string")
+        ? comment
+        : [];
 }

@@ -44,28 +44,39 @@ test("queued Comments are not exposed as a standalone MCP tool", () => {
 
 test("the next successful tool result carries queued Comments for its exact ctxId once", async () => {
     const pendingByCtx = new Map<string, ContextMessageReadResult>();
-    const consumed: Array<{ ctxId: string; instance: string }> = [];
+    const consumed: Array<{ callId: string; ctxId: string; instance: string }> = [];
     const { dispatch } = createHarness({
-        async consumeContextMessages(instance, ctxId) {
-            consumed.push({ ctxId, instance });
-            const result = pendingByCtx.get(ctxId) ?? { messages: [] };
+        async consumeContextMessages(instance, ctxId, callId) {
+            consumed.push({ callId, ctxId, instance });
+            const result = pendingByCtx.get(ctxId);
             pendingByCtx.delete(ctxId);
-            return result;
+            return result === undefined
+                ? { callId, messages: [] }
+                : { ...result, callId };
         },
     });
 
     const first = await createContext(dispatch, "ctx-a");
     const second = await createContext(dispatch, "ctx-b");
     pendingByCtx.set(first, {
+        callId: "pending",
+        comment: "Review the failure before continuing\n\nThen compare the next output",
         messages: [
             {
                 createdAt: "2026-08-03T00:00:00.000Z",
                 id: "message-a",
                 text: "Review the failure before continuing",
             },
+            {
+                createdAt: "2026-08-03T00:00:00.500Z",
+                id: "message-a-2",
+                text: "Then compare the next output",
+            },
         ],
     });
     pendingByCtx.set(second, {
+        callId: "pending",
+        comment: "This belongs only to context B",
         messages: [
             {
                 createdAt: "2026-08-03T00:00:01.000Z",
@@ -81,7 +92,7 @@ test("the next successful tool result carries queued Comments for its exact ctxI
         { principal: "tester", requestId: "call-a-1" },
     );
     assert.deepEqual(firstResult, {
-        comment: ["Review the failure before continuing"],
+        comment: ["Review the failure before continuing\n\nThen compare the next output"],
         exitCode: 0,
         stderr: "",
         stdout: "ok",
@@ -106,18 +117,20 @@ test("the next successful tool result carries queued Comments for its exact ctxI
         stdout: "ok",
     });
     assert.deepEqual(consumed, [
-        { ctxId: first, instance: "alpha" },
-        { ctxId: first, instance: "alpha" },
-        { ctxId: second, instance: "alpha" },
+        { callId: "worker-call-1", ctxId: first, instance: "alpha" },
+        { callId: "worker-call-2", ctxId: first, instance: "alpha" },
+        { callId: "worker-call-3", ctxId: second, instance: "alpha" },
     ]);
 });
 
 test("a failed tool call does not consume a queued Comment", async () => {
     let consumeCount = 0;
     const { dispatch, worker } = createHarness({
-        async consumeContextMessages() {
+        async consumeContextMessages(_instance, _ctxId, callId) {
             consumeCount += 1;
             return {
+                callId,
+                comment: "Keep this pending",
                 messages: [
                     {
                         createdAt: "2026-08-03T00:00:00.000Z",
@@ -159,9 +172,11 @@ function createHarness(
         consumeContextMessages?(
             instance: string,
             ctxId: string,
+            callId: string,
         ): Promise<ContextMessageReadResult>;
     } = {},
 ) {
+    let callSequence = 0;
     const worker = {
         fail: false,
         async appendMcpToolCalled() {},
@@ -169,20 +184,21 @@ function createHarness(
             _toolName: string,
             _input: JsonValue,
             _context: ToolCallContext,
-            operation: () => Promise<T>,
+            operation: (callId: string) => Promise<T>,
         ): Promise<T> {
-            return await operation();
+            return await operation("call-test");
         },
         async callTool(
             _toolName: string,
             _input: JsonValue,
             _context: ToolCallContext,
             _signal?: AbortSignal,
-            transformResult?: (result: JsonValue) => Promise<JsonValue>,
+            transformResult?: (result: JsonValue, callId: string) => Promise<JsonValue>,
         ): Promise<JsonValue> {
             if (worker.fail) throw new Error("worker failed");
             const result = { exitCode: 0, stderr: "", stdout: "ok" };
-            return transformResult === undefined ? result : await transformResult(result);
+            const callId = `worker-call-${++callSequence}`;
+            return transformResult === undefined ? result : await transformResult(result, callId);
         },
         handshake: {
             instance: "alpha",

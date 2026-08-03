@@ -49,7 +49,7 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
         input: JsonValue,
         context: ToolCallContext,
         signal?: AbortSignal,
-        transformResult?: (result: JsonValue) => Promise<JsonValue>
+        transformResult?: (result: JsonValue, callId: string) => Promise<JsonValue>
     ): Promise<JsonValue> {
         const descriptor = this.#requireDescriptor(instance);
         return await descriptor.worker.callTool(toolName, input, context, signal, transformResult);
@@ -81,7 +81,7 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
         }) as unknown as JsonValue;
     }
 
-    async consumeContextMessages(instance: string, ctxId: string) {
+    async consumeContextMessages(instance: string, ctxId: string, callId: string) {
         const service = this.#requireDescriptor(instance).contextMessages;
         if (service === undefined) {
             throw createError({
@@ -90,7 +90,7 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
                 retryable: false
             });
         }
-        return await service.readPending(ctxId);
+        return await service.consumePending(ctxId, callId);
     }
 
     async readTodo(instance: string, title?: string): Promise<JsonValue> {

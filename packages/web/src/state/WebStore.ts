@@ -281,6 +281,7 @@ export class WebStore {
             this.set({
                 ...this.#state,
                 approvals: loaded.instanceModels.approvals,
+                commentCalls: loaded.instanceModels.commentCalls,
                 connection: "online",
                 contextMessages: loaded.instanceModels.contextMessages,
                 instances: loaded.instances,

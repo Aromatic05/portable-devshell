@@ -61,6 +61,7 @@ export class ContextMessageState {
     deliver(
         document: ContextMessageDocument,
         ctxId: string,
+        callId: string,
         now = new Date().toISOString(),
     ): { delivered: ContextMessageRecord[]; document: ContextMessageDocument } {
         const delivered: ContextMessageRecord[] = [];
@@ -69,6 +70,7 @@ export class ContextMessageState {
                 return message;
             const next = {
                 ...message,
+                callId,
                 deliveredAt: now,
                 status: "delivered" as const,
             };
@@ -137,6 +139,7 @@ function normalizeRecord(value: unknown): ContextMessageRecord {
     )
         throw new Error("invalid context message status");
     return {
+        ...(typeof value.callId === "string" ? { callId: value.callId } : {}),
         createdAt: requireStoredText(value.createdAt, "createdAt"),
         ctxId: requireStoredText(value.ctxId, "ctxId"),
         ...(typeof value.deliveredAt === "string"

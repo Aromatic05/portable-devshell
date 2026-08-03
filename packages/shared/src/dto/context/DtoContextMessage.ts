@@ -1,6 +1,7 @@
 export type ContextMessageStatus = "pending" | "sent" | "delivered" | "failed";
 
 export interface ContextMessageRecord {
+    callId?: string;
     createdAt: string;
     ctxId: string;
     deliveredAt?: string;
@@ -22,5 +23,7 @@ export interface ContextMessageListInput {
 }
 
 export interface ContextMessageReadResult {
+    callId: string;
+    comment?: string;
     messages: Array<Pick<ContextMessageRecord, "createdAt" | "id" | "text">>;
 }

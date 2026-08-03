@@ -21,7 +21,7 @@ export class McpEndpointHandlerWorker {
         selected: ToolDefinition | undefined,
         instanceRoutingEnabled: boolean,
         signal?: AbortSignal,
-        transformResult?: (result: JsonValue) => Promise<JsonValue>
+        transformResult?: (result: JsonValue, callId: string) => Promise<JsonValue>
     ): Promise<JsonValue> {
         const routed = readMcpRoutedInput(input, instanceRoutingEnabled, this.options.instanceName);
         if (routed.instance === this.options.instanceName) {

@@ -22,6 +22,7 @@ import type { WebState } from "./WebState.js";
 
 export interface InitialInstanceReadModels {
     approvals: Record<string, ApprovalRequest[]>;
+    commentCalls: Record<string, ToolCallRecord[]>;
     contextMessages: Record<string, ContextMessageRecord[]>;
     failures: Record<string, string>;
     logs: Record<string, InstanceLogEntry[]>;
@@ -35,6 +36,7 @@ export class InstanceReadModelCoordinator {
     readonly #approvals: InstanceReadModelChannel<ApprovalRequest[]>;
     readonly #todos: InstanceReadModelChannel<TodoReadResult>;
     readonly #toolCalls: InstanceReadModelChannel<ToolCallRecord[]>;
+    readonly #commentCalls: InstanceReadModelChannel<ToolCallRecord[]>;
     readonly #contextMessages: InstanceReadModelChannel<ContextMessageRecord[]>;
     readonly #channels: readonly InstanceReadModelChannel<unknown>[];
     #authoritativeSnapshots = new Map<string, InstanceSnapshot>();
@@ -96,6 +98,24 @@ export class InstanceReadModelCoordinator {
                 toolCalls: { ...state.toolCalls, [instance]: calls },
             }),
         );
+        this.#commentCalls = channel(
+            "commentCalls",
+            async (instance) => {
+                const messages = await clients.contextMessage.list(instance);
+                const callIds = [...new Set(messages.flatMap((message) =>
+                    message.status === "delivered" && message.callId !== undefined
+                        ? [message.callId]
+                        : []
+                ))];
+                return callIds.length === 0
+                    ? []
+                    : await clients.tool.listCalls(instance, { callIds, limit: 1_000 });
+            },
+            (state, instance, calls) => ({
+                ...state,
+                commentCalls: { ...state.commentCalls, [instance]: calls },
+            }),
+        );
         this.#contextMessages = channel(
             "contextMessages",
             (instance) => clients.contextMessage.list(instance),
@@ -116,6 +136,7 @@ export class InstanceReadModelCoordinator {
             this.#approvals,
             this.#todos,
             this.#toolCalls,
+            this.#commentCalls,
             this.#contextMessages,
         ] as readonly InstanceReadModelChannel<unknown>[];
     }
@@ -123,6 +144,7 @@ export class InstanceReadModelCoordinator {
     async loadInitial(names: readonly string[]): Promise<InitialInstanceReadModels> {
         const result: InitialInstanceReadModels = {
             approvals: {},
+            commentCalls: {},
             contextMessages: {},
             failures: {},
             logs: {},
@@ -130,17 +152,19 @@ export class InstanceReadModelCoordinator {
             toolCalls: {},
         };
         await Promise.all(names.map(async (instance) => {
-            const [logs, approvals, todos, toolCalls, contextMessages] = await Promise.all([
+            const [logs, approvals, todos, toolCalls, commentCalls, contextMessages] = await Promise.all([
                 this.#logs.load(instance),
                 this.#approvals.load(instance),
                 this.#todos.load(instance),
                 this.#toolCalls.load(instance),
+                this.#commentCalls.load(instance),
                 this.#contextMessages.load(instance),
             ]);
             this.assignInitial(result, instance, "logs", logs);
             this.assignInitial(result, instance, "approvals", approvals);
             this.assignInitial(result, instance, "todos", todos);
             this.assignInitial(result, instance, "toolCalls", toolCalls);
+            this.assignInitial(result, instance, "commentCalls", commentCalls);
             this.assignInitial(result, instance, "contextMessages", contextMessages);
         }));
         return result;
@@ -205,6 +229,7 @@ export class InstanceReadModelCoordinator {
             this.#approvals.refresh(instance, generation),
             this.#todos.refresh(instance, generation),
             this.#toolCalls.refresh(instance, generation),
+            this.#commentCalls.refresh(instance, generation),
         ]);
     }
 
@@ -219,9 +244,11 @@ export class InstanceReadModelCoordinator {
         if (event.type.startsWith("todo.")) this.#todos.schedule(instance, generation);
         if (event.type.startsWith("toolCall.")) {
             this.#toolCalls.schedule(instance, generation);
+            this.#commentCalls.schedule(instance, generation);
         }
         if (event.type.startsWith("context.message.")) {
             this.#contextMessages.schedule(instance, generation);
+            this.#commentCalls.schedule(instance, generation);
         }
     }
 
@@ -285,6 +312,7 @@ export class InstanceReadModelCoordinator {
             case "approvals": return this.#approvals;
             case "todos": return this.#todos;
             case "toolCalls": return this.#toolCalls;
+            case "commentCalls": return this.#commentCalls;
             case "contextMessages": return this.#contextMessages;
         }
     }

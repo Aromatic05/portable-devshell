@@ -66,7 +66,8 @@ describe("WebStore", () => {
             text: queued.text,
         });
         expect(store.state.contextMessages.demo).toEqual([queued]);
-        expect(clients.contextMessage.list).toHaveBeenCalledOnce();
+        expect(clients.contextMessage.list).toHaveBeenCalledTimes(2);
+        expect(store.state.commentCalls.demo).toEqual([]);
         expect(clients.overview.get).toHaveBeenCalledOnce();
     });
 
@@ -906,7 +907,7 @@ describe("WebStore recovery and consistency", () => {
         await store.load();
         await vi.waitFor(() => expect(subscription).toBe(2));
 
-        expect(reads).toEqual({ contexts: 2, logs: 2, toolCalls: 2, todos: 2 });
+        expect(reads).toEqual({ contexts: 4, logs: 2, toolCalls: 2, todos: 2 });
     });
 
     it("returns the result of each Context message operation independently", async () => {

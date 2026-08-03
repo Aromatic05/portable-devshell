@@ -30,12 +30,12 @@ export interface McpInstanceGateway {
         input: JsonValue,
         context: ToolCallContext,
         signal?: AbortSignal,
-        transformResult?: (result: JsonValue) => Promise<JsonValue>
+        transformResult?: (result: JsonValue, callId: string) => Promise<JsonValue>
     ): Promise<JsonValue>;
     closeToolSession?(sessionId: string): Promise<void>;
     createSshInstance(sourceInstance: string, input: McpSshInstanceCreateInput): Promise<JsonValue>;
     listInstances(): Promise<JsonValue>;
-    consumeContextMessages?(instance: string, ctxId: string): Promise<ContextMessageReadResult>;
+    consumeContextMessages?(instance: string, ctxId: string, callId: string): Promise<ContextMessageReadResult>;
     readTodo(instance: string, title?: string): Promise<JsonValue>;
     listTools(instance: string): ToolDefinition[];
     startInstance(instance: string): Promise<JsonValue>;

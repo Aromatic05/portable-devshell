@@ -17,6 +17,7 @@ import type {
 import { withTuiRequestTimeout } from "./TuiRequestTimeout.js";
 
 const LOG_READ_LIMIT = 100;
+const COMMENT_CALL_READ_LIMIT = 1_000;
 const TOOL_CALL_READ_LIMIT = 100;
 
 export interface TuiControlSubscriptionRequest {
@@ -140,7 +141,7 @@ export class TuiControlSessionRefresh {
         await this.#refreshGroup(`audit:${instance}:readModels`, generation, signal, [
             ["tool calls", () => this.#reloadToolCalls(instance, generation, signal)],
             ["approvals", () => this.#reloadApprovals(instance, generation, signal)],
-            ["context messages", () => this.#reloadContextMessages(instance, generation, signal)]
+            ["comments", () => this.#reloadCommentHistory(instance, generation, signal)]
         ]);
     }
 
@@ -214,20 +215,46 @@ export class TuiControlSessionRefresh {
         return await this.refreshRuntimeInstance(instance, generation);
     }
 
-    async #reloadContextMessages(instance: string, generation?: number, signal?: AbortSignal): Promise<void> {
-        const key = `contextMessages:${instance}`;
+    async #reloadCommentHistory(instance: string, generation?: number, signal?: AbortSignal): Promise<void> {
+        const key = `commentHistory:${instance}`;
         const version = this.#beginRequest(key);
         const client = this.#clients.contextMessage;
         if (client === undefined) {
-            if (this.#current(generation, signal) && this.#latestRequest(key, version)) this.#store.replaceContextMessages(instance, []);
+            if (this.#current(generation, signal) && this.#latestRequest(key, version)) {
+                this.#store.replaceContextMessages(instance, []);
+                this.#store.replaceCommentCalls(instance, []);
+            }
             return;
         }
         try {
             const messages = await this.#request(client.list(instance), `contextMessage.list:${instance}`);
-            if (this.#current(generation, signal) && this.#latestRequest(key, version)) this.#store.replaceContextMessages(instance, messages);
+            if (!this.#current(generation, signal) || !this.#latestRequest(key, version)) return;
+            this.#store.replaceContextMessages(instance, messages);
+            const callIds = [...new Set(messages.flatMap((message) =>
+                message.status === "delivered" && message.callId !== undefined
+                    ? [message.callId]
+                    : []
+            ))];
+            if (callIds.length === 0) {
+                this.#store.replaceCommentCalls(instance, []);
+                return;
+            }
+            const records = await this.#request(
+                this.#clients.tool.listCalls(instance, {
+                    callIds,
+                    limit: COMMENT_CALL_READ_LIMIT,
+                }),
+                `tool.commentCalls:${instance}`,
+            );
+            if (this.#current(generation, signal) && this.#latestRequest(key, version)) {
+                this.#store.replaceCommentCalls(instance, records);
+            }
         } catch (error) {
             if (readErrorCode(error) !== "control.methodNotFound") throw error;
-            if (this.#current(generation, signal) && this.#latestRequest(key, version)) this.#store.replaceContextMessages(instance, []);
+            if (this.#current(generation, signal) && this.#latestRequest(key, version)) {
+                this.#store.replaceContextMessages(instance, []);
+                this.#store.replaceCommentCalls(instance, []);
+            }
         }
     }
 

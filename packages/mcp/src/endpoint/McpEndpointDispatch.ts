@@ -136,22 +136,22 @@ export class McpEndpointDispatch {
             selected?.definition,
             snapshot.instanceRoutingEnabled,
             signal,
-            async (result) => await this.#attachComments(toolName, result, context)
+            async (result, callId) => await this.#attachComments(toolName, result, context, callId)
         );
     }
 
-    async #attachComments(toolName: string, result: JsonValue, context: ToolCallContext): Promise<JsonValue> {
+    async #attachComments(toolName: string, result: JsonValue, context: ToolCallContext, callId: string): Promise<JsonValue> {
         if (context.ctxId === undefined) return result;
-        const queuedComments = await this.#consumeQueuedComments(context.ctxId);
+        const queuedComments = await this.#consumeQueuedComments(context.ctxId, callId);
         const comments = mergeComments(queuedComments, resolveResultHints(toolName, result));
         return attachMcpComments(result, comments);
     }
 
-    async #consumeQueuedComments(ctxId: string): Promise<string[]> {
+    async #consumeQueuedComments(ctxId: string, callId: string): Promise<string[]> {
         const consume = this.#gateway?.consumeContextMessages;
         if (consume === undefined) return [];
-        const result = await consume.call(this.#gateway, this.#instanceName, ctxId);
-        return result.messages.map((message) => message.text);
+        const result = await consume.call(this.#gateway, this.#instanceName, ctxId, callId);
+        return result.comment === undefined ? [] : [result.comment];
     }
 
     async #createToolContext(
@@ -190,10 +190,10 @@ export class McpEndpointDispatch {
             toolName,
             input,
             context,
-            async () => {
+            async (callId) => {
                 const result = await this.#callControlTool(owner, toolName, input, context, signal);
                 if (result instanceof McpNativeToolResult) {
-                    const structuredContent = await this.#attachComments(toolName, result.structuredContent, context);
+                    const structuredContent = await this.#attachComments(toolName, result.structuredContent, context, callId);
                     nativeResult = new McpNativeToolResult({
                         content: result.content,
                         isError: result.isError,
@@ -201,7 +201,7 @@ export class McpEndpointDispatch {
                     });
                     return structuredContent;
                 }
-                return await this.#attachComments(toolName, result, context);
+                return await this.#attachComments(toolName, result, context, callId);
             },
             signal
         );

@@ -8,6 +8,7 @@ import {
     type InstanceCreateDraft,
     type InstanceCreateSummary,
     type JsonValue,
+    type ToolCallRecord,
 } from "@portable-devshell/shared";
 
 import {
@@ -380,6 +381,27 @@ test("Comment conversation shows exact history and keeps the route open after se
         },
     });
     enableContextMessageMcp(harness);
+    const commentCall: ToolCallRecord = {
+        callId: "call-comment",
+        completedAt: "2026-08-02T00:01:30.000Z",
+        ctxId: "ctx-alpha",
+        input: { command: "pwd" },
+        inputSummary: '{"command":"pwd"}',
+        instance: asInstanceName("alpha"),
+        output: {
+            comment: ["first comment"],
+            exitCode: 0,
+            stderr: "",
+            stdout: "/workspace\n",
+        },
+        source: "mcp",
+        startedAt: "2026-08-02T00:01:00.000Z",
+        status: "completed",
+        toolName: "bash_run",
+    };
+    harness.store.replaceToolCalls("alpha", []);
+    harness.store.replaceCommentCalls("alpha", [commentCall]);
+    assert.equal(harness.store.getState().toolCallsByInstance.alpha?.length, 0);
     harness.store.replaceContextMessages("alpha", [
         {
             createdAt: "2026-08-02T00:02:00.000Z",
@@ -390,15 +412,6 @@ test("Comment conversation shows exact history and keeps the route open after se
             instance: "alpha",
             status: "failed",
             text: "second comment",
-        },
-        {
-            createdAt: "2026-08-02T00:01:00.000Z",
-            ctxId: "ctx-alpha",
-            deliveredAt: "2026-08-02T00:01:30.000Z",
-            id: "message-delivered",
-            instance: "alpha",
-            status: "delivered",
-            text: "first comment",
         },
         {
             createdAt: "2026-08-02T00:00:00.000Z",
@@ -415,10 +428,11 @@ test("Comment conversation shows exact history and keeps the route open after se
     let text = conversationScreenText(harness);
     assert.equal(text.includes("other context comment"), false);
     assert.ok(text.indexOf("first comment") < text.indexOf("second comment"));
-    assert.match(text, /delivered/i);
+    assert.match(text, /call-comment/i);
+    assert.match(text, /bash_run/i);
     assert.match(text, /failed/i);
     assert.match(text, /delivery failed/i);
-    assert.match(text, /2026-08-02T00:01:00.000Z/);
+    assert.match(text, /2026-08-02T00:01:30.000Z/);
 
     await harness.dispatch({ type: "contextConversation.edit" });
     await harness.press("new guidance");
@@ -432,7 +446,7 @@ test("Comment conversation shows exact history and keeps the route open after se
     } as never);
     text = conversationScreenText(harness);
     assert.match(text, /new guidance/);
-    assert.match(text, /pending/i);
+    assert.match(text, /next call/i);
 
     await harness.press("", { return: true });
     assert.deepEqual(sent, ["new guidance"], "successful send must clear the draft");

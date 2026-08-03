@@ -1,6 +1,5 @@
 import type {
     ApprovalRequest,
-    ContextMessageRecord,
     ToolCallRecord,
 } from "@portable-devshell/shared";
 
@@ -18,7 +17,6 @@ export interface TuiAuditContextSummary {
     readonly label: string;
     readonly latestActivityAt: string;
     readonly latestCall?: ToolCallRecord;
-    readonly messages: readonly ContextMessageRecord[];
     readonly status: TuiExpandableBoxStatus;
 }
 
@@ -27,7 +25,6 @@ interface MutableAuditContext {
     calls: ToolCallRecord[];
     key: TuiAuditContextKey;
     label: string;
-    messages: ContextMessageRecord[];
 }
 
 export function projectAuditContexts(
@@ -49,22 +46,23 @@ export function projectAuditContexts(
             calls: [],
             key,
             label: key.kind === "unscoped" ? "unscoped" : key.ctxId,
-            messages: [],
         };
         contexts.set(mapKey, created);
         return created;
     };
 
-    for (const call of state.toolCallsByInstance[instance] ?? []) {
+    const callsById = new Map(
+        (state.toolCallsByInstance[instance] ?? []).map((call) => [call.callId, call] as const),
+    );
+    for (const call of state.commentCallsByInstance[instance] ?? []) {
+        callsById.set(call.callId, call);
+    }
+    for (const call of callsById.values()) {
         resolve(call.ctxId).calls.push(call);
     }
     for (const approval of state.approvalsByInstance[instance] ?? []) {
         resolve(approval.ctxId).approvals.push(approval);
     }
-    for (const message of state.contextMessagesByInstance[instance] ?? []) {
-        resolve(message.ctxId).messages.push(message);
-    }
-
     return [...contexts.values()]
         .map(toSummary)
         .sort((left, right) =>
@@ -93,12 +91,6 @@ function toSummary(context: MutableAuditContext): TuiAuditContextSummary {
         [
             ...sortedCalls.map((call) => call.completedAt ?? call.startedAt),
             ...context.approvals.map((approval) => approval.createdAt),
-            ...context.messages.map(
-                (message) =>
-                    message.deliveredAt ??
-                    message.failedAt ??
-                    message.createdAt,
-            ),
         ]
             .sort()
             .at(-1) ?? "-";
@@ -112,20 +104,14 @@ function toSummary(context: MutableAuditContext): TuiAuditContextSummary {
         label: context.label,
         latestActivityAt,
         latestCall,
-        messages: [...context.messages].sort((left, right) =>
-            left.createdAt.localeCompare(right.createdAt),
-        ),
-        status: contextStatus(sortedCalls, context.approvals, context.messages),
+        status: contextStatus(sortedCalls, context.approvals),
     };
 }
 
 function contextStatus(
     calls: readonly ToolCallRecord[],
     approvals: readonly ApprovalRequest[],
-    messages: readonly ContextMessageRecord[],
 ): TuiExpandableBoxStatus {
-    if (messages.some((message) => message.status === "failed"))
-        return "failed";
     if (
         calls.some(
             (call) =>
@@ -136,11 +122,7 @@ function contextStatus(
     )
         return "failed";
     if (
-        approvals.some((approval) => approval.status === "pending") ||
-        messages.some(
-            (message) =>
-                message.status === "pending" || message.status === "sent",
-        )
+        approvals.some((approval) => approval.status === "pending")
     )
         return "pending";
     if (

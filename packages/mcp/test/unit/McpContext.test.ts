@@ -101,8 +101,8 @@ test("McpEndpointWorker exposes environ_info and requires ctxId on every other t
                 _toolName: string,
                 _input: JsonValue,
                 _context: ToolCallContext,
-                operation: () => Promise<T>
-            ): Promise<T> { return await operation(); },
+                operation: (callId: string) => Promise<T>
+            ): Promise<T> { return await operation("call-test"); },
             async appendMcpSessionClosed() {},
             async appendMcpSessionOpened() {},
             async appendMcpToolCalled() {},
@@ -226,8 +226,8 @@ test("only environ_info omits ctxId across the complete 25-tool endpoint catalog
                 _toolName: string,
                 _input: JsonValue,
                 _context: ToolCallContext,
-                operation: () => Promise<T>
-            ): Promise<T> { return await operation(); },
+                operation: (callId: string) => Promise<T>
+            ): Promise<T> { return await operation("call-test"); },
             async appendMcpSessionClosed() {},
             async appendMcpSessionOpened() {},
             async appendMcpToolCalled() {},

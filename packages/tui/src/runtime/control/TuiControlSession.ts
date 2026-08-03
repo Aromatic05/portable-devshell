@@ -511,7 +511,6 @@ function isOverviewRefreshEvent(name: string): boolean {
     return isInstanceHealthEvent(name) ||
         name.startsWith("toolCall.") ||
         name.startsWith("approval.") ||
-        name.startsWith("context.message.") ||
         name.startsWith("todo.");
 }
 

@@ -104,11 +104,37 @@ function applyContextMessageEvent(
     at: string,
     data: Record<string, JsonValue>
 ): TuiAppState {
+    if (
+        event === "context.message.delivered" &&
+        typeof data.callId === "string" &&
+        Array.isArray(data.ids) &&
+        data.ids.every((id) => typeof id === "string")
+    ) {
+        const ids = new Set(data.ids);
+        const current = state.contextMessagesByInstance[instance] ?? [];
+        return {
+            ...state,
+            contextMessagesByInstance: {
+                ...state.contextMessagesByInstance,
+                [instance]: current.map((message) =>
+                    ids.has(message.id)
+                        ? {
+                              ...message,
+                              callId: data.callId as string,
+                              deliveredAt: typeof data.deliveredAt === "string" ? data.deliveredAt : at,
+                              status: "delivered" as const,
+                          }
+                        : message,
+                ),
+            },
+        };
+    }
     if (typeof data.id !== "string" || typeof data.ctxId !== "string" || typeof data.createdAt !== "string" || typeof data.text !== "string") return state;
     const current = state.contextMessagesByInstance[instance] ?? [];
     const existing = current.find((message) => message.id === data.id);
     const status = event === "context.message.queued" ? "sent" : event === "context.message.delivered" ? "delivered" : event === "context.message.failed" ? "failed" : "pending";
     const record: ContextMessageRecord = {
+        ...(typeof data.callId === "string" ? { callId: data.callId } : existing?.callId === undefined ? {} : { callId: existing.callId }),
         createdAt: data.createdAt,
         ctxId: data.ctxId,
         ...(status === "delivered" ? { deliveredAt: at } : existing?.deliveredAt === undefined ? {} : { deliveredAt: existing.deliveredAt }),

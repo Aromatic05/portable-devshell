@@ -15,6 +15,7 @@ function label(key: string): string {
     const [kind, instance] = key.split(":", 2);
     const names: Record<string, string> = {
         approvals: "Approvals",
+        commentCalls: "Comment calls",
         contextMessages: "Context messages",
         instance: "Instance state",
         logs: "Logs",

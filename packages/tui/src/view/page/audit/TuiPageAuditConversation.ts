@@ -1,4 +1,4 @@
-import type { ContextMessageRecord } from "@portable-devshell/shared";
+import type { ContextMessageRecord, JsonValue, ToolCallRecord } from "@portable-devshell/shared";
 
 import type { BoxModel } from "../../component/TuiComponentExpandableBox.js";
 import type { TuiAppState } from "../../../state/reducer/TuiStoreModel.js";
@@ -13,51 +13,97 @@ export function buildAuditConversationBoxes(
     const messages = (state.contextMessagesByInstance[instance] ?? [])
         .filter((message) => message.ctxId === ctxId)
         .sort((left, right) => left.createdAt.localeCompare(right.createdAt));
+    const deliveredCalls = (state.commentCallsByInstance[instance] ?? [])
+        .filter((call) => call.ctxId === ctxId && readCallComments(call).length > 0)
+        .sort((left, right) => left.startedAt.localeCompare(right.startedAt));
+    const pending = messages.filter(
+        (message) => message.status === "pending" || message.status === "sent",
+    );
+    const failed = messages.filter((message) => message.status === "failed");
+
     return [
-        ...messages.map((message) => messageBox(state, instance, message)),
+        ...deliveredCalls.map((call) => deliveredCommentBox(state, instance, call)),
+        ...(failed.length === 0 ? [] : [failedCommentBox(state, instance, failed)]),
+        ...(pending.length === 0 ? [] : [pendingCommentBox(state, instance, pending)]),
         composerBox(state, instance, ctxId),
     ];
 }
 
-function messageBox(
+function deliveredCommentBox(
     state: TuiAppState,
     instance: string,
-    message: ContextMessageRecord,
+    call: ToolCallRecord,
 ): BoxModel {
+    const comments = readCallComments(call);
+    const comment = comments.join("\n\n");
     return makeBox(state, "audit", instance, {
         detailLines: [
-            formatField("Message", message.id),
-            formatField("Context", message.ctxId),
-            formatField("Created", message.createdAt),
-            formatField("Status", message.status),
-            ...(message.deliveredAt === undefined
-                ? []
-                : [formatField("Delivered", message.deliveredAt)]),
-            ...(message.failedAt === undefined
-                ? []
-                : [formatField("Failed", message.failedAt)]),
-            ...(message.error === undefined
-                ? []
-                : [formatField("Error", message.error)]),
-            formatField("Text", message.text),
+            formatField("Call ID", call.callId),
+            formatField("Tool", call.toolName),
+            formatField("Completed", call.completedAt ?? "-"),
+            formatField("Comment", comment),
         ],
-        id: `conversation-message:${message.id}`,
-        searchText: `${message.status} ${message.createdAt} ${message.text} ${message.error ?? ""}`,
-        status:
-            message.status === "delivered"
-                ? "ready"
-                : message.status === "failed"
-                  ? "failed"
-                  : message.status === "sent"
-                    ? "running"
-                    : "pending",
+        id: `conversation-call:${call.callId}`,
+        searchText: `${call.callId} ${call.toolName} ${comment}`,
+        status: "ready",
         summaryLines: [
-            compactSummary(["status", message.status], ["created", message.createdAt]),
-            message.error === undefined
-                ? message.text
-                : `${message.text}  error=${message.error}`,
+            compactSummary(
+                ["call", call.callId],
+                ["tool", call.toolName],
+                ["completed", call.completedAt ?? call.startedAt],
+            ),
+            comment,
         ],
-        title: `Comment · ${message.status}`,
+        title: `Comment · ${call.toolName}`,
+    });
+}
+
+function pendingCommentBox(
+    state: TuiAppState,
+    instance: string,
+    messages: readonly ContextMessageRecord[],
+): BoxModel {
+    const comment = mergeCommentText(messages);
+    return makeBox(state, "audit", instance, {
+        detailLines: [
+            formatField("Target", "next tool call"),
+            formatField("Queued", messages[0]?.createdAt ?? "-"),
+            formatField("Comments", String(messages.length)),
+            formatField("Comment", comment),
+        ],
+        id: "conversation-pending",
+        searchText: `pending next call ${comment}`,
+        status: "pending",
+        summaryLines: [
+            compactSummary(["target", "next call"], ["comments", String(messages.length)]),
+            comment,
+        ],
+        title: "Comment · next call",
+    });
+}
+
+function failedCommentBox(
+    state: TuiAppState,
+    instance: string,
+    messages: readonly ContextMessageRecord[],
+): BoxModel {
+    const comment = mergeCommentText(messages);
+    const errors = [...new Set(messages.flatMap((message) => message.error ?? []))].join("; ");
+    return makeBox(state, "audit", instance, {
+        detailLines: [
+            formatField("Target", "next tool call"),
+            formatField("Comments", String(messages.length)),
+            formatField("Comment", comment),
+            formatField("Error", errors.length === 0 ? "delivery failed" : errors),
+        ],
+        id: "conversation-failed",
+        searchText: `failed ${comment} ${errors}`,
+        status: "failed",
+        summaryLines: [
+            compactSummary(["delivery", "failed"], ["comments", String(messages.length)]),
+            `${comment}  error=${errors.length === 0 ? "delivery failed" : errors}`,
+        ],
+        title: "Comment · failed",
     });
 }
 
@@ -83,7 +129,7 @@ function composerBox(
                 id: "draft",
                 text: `${prefix}${display}`,
             },
-            "Enter queues the Comment.",
+            "Enter queues this Comment for the next tool call.",
             "Esc or Ctrl+[ returns to the Audit Context.",
         ],
         expandedKey: `audit-conversation:${instance}:${ctxId}:composer`,
@@ -96,4 +142,20 @@ function composerBox(
         ],
         title: "Write Comment",
     });
+}
+
+function mergeCommentText(messages: readonly ContextMessageRecord[]): string {
+    return messages.map((message) => message.text).join("\n\n");
+}
+
+function readCallComments(call: ToolCallRecord): string[] {
+    return readComments(call.output);
+}
+
+function readComments(value: JsonValue | undefined): string[] {
+    if (typeof value !== "object" || value === null || Array.isArray(value)) return [];
+    const comment = (value as Record<string, JsonValue>).comment;
+    return Array.isArray(comment) && comment.every((entry) => typeof entry === "string")
+        ? comment
+        : [];
 }

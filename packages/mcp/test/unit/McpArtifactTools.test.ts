@@ -166,8 +166,8 @@ function createWorker(ready: boolean, hasSchema: boolean) {
             _toolName: string,
             _input: JsonValue,
             _context: ToolCallContext,
-            operation: () => Promise<T>
-        ): Promise<T> { return await operation(); },
+            operation: (callId: string) => Promise<T>
+        ): Promise<T> { return await operation("call-test"); },
         async appendMcpSessionClosed() {},
         async appendMcpSessionOpened() {},
         async appendMcpToolCalled() {},

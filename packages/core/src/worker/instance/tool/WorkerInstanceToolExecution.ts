@@ -47,7 +47,7 @@ export class WorkerInstanceToolExecution {
         input: JsonValue,
         context: ToolCallContext,
         signal?: AbortSignal,
-        transformResult?: (result: JsonValue) => Promise<JsonValue>
+        transformResult?: (result: JsonValue, callId: string) => Promise<JsonValue>
     ): Promise<JsonValue> {
         this.#assertReady();
         throwIfToolCallAborted(signal);
@@ -98,7 +98,7 @@ export class WorkerInstanceToolExecution {
             });
             const result = transformResult === undefined
                 ? rawResult
-                : await transformResult(rawResult);
+                : await transformResult(rawResult, scope.callId);
             toolExecutionSucceeded = true;
             const bashResult = toolName === "bash_run" ? asBashToolResult(result) : undefined;
             await this.#audit.completed(

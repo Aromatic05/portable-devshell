@@ -14,7 +14,7 @@ interface WorkerInstanceLike {
         toolName: string,
         input: JsonValue,
         context: ToolCallContext,
-        operation: () => Promise<T>,
+        operation: (callId: string) => Promise<T>,
         signal?: AbortSignal
     ): Promise<T>;
     appendMcpSessionClosed(sessionId: string): Promise<void>;
