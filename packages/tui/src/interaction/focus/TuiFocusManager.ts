@@ -13,6 +13,7 @@ import { type TuiMode } from "../../state/TuiInteractionState.js";
 import type { TuiPageId } from "../../state/TuiUiState.js";
 
 export interface TuiFocusManagerContext {
+    boxIdForLine(lineId: string): string | undefined;
     currentPage(): TuiPageId;
     expandedKeyFor(boxId: string): string | undefined;
     graphFor(page: TuiPageId, mode: TuiMode): TuiFocusGraph;
@@ -282,17 +283,7 @@ export class TuiFocusManager {
                     this.currentMode() === "form" ||
                     this.currentMode() === "wizard"
                 ) {
-                    const state = this.#store.getState();
-                    const boxId = state.ui.mainFocusId;
-                    if (boxId !== undefined) {
-                        const expandedKey = this.#context.expandedKeyFor(boxId);
-                        if (expandedKey !== undefined) {
-                            this.#store.setSelectedDetailLine(
-                                expandedKey,
-                                item.id,
-                            );
-                        }
-                    }
+                    this.#applyEditorFocus(item.id);
                     return;
                 }
                 const overlay = topTuiOverlay(
@@ -313,23 +304,25 @@ export class TuiFocusManager {
                     this.currentMode() === "form" ||
                     this.currentMode() === "wizard"
                 ) {
-                    const state = this.#store.getState();
-                    const boxId = state.ui.mainFocusId;
-                    if (boxId !== undefined) {
-                        const expandedKey = this.#context.expandedKeyFor(boxId);
-                        if (expandedKey !== undefined) {
-                            this.#store.setSelectedDetailLine(
-                                expandedKey,
-                                item.id,
-                            );
-                        }
-                    }
+                    this.#applyEditorFocus(item.id);
                     return;
                 }
                 this.#store.setFocusScope(
                     this.currentMode() === "toolForm" ? "toolForm" : "search",
                 );
                 return;
+        }
+    }
+
+    #applyEditorFocus(lineId: string): void {
+        const boxId =
+            this.#context.boxIdForLine(lineId) ??
+            this.#store.getState().ui.mainFocusId;
+        if (boxId === undefined) return;
+        this.#store.setMainFocusId(boxId);
+        const expandedKey = this.#context.expandedKeyFor(boxId);
+        if (expandedKey !== undefined) {
+            this.#store.setSelectedDetailLine(expandedKey, lineId);
         }
     }
 }

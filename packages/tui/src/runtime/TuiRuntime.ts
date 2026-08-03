@@ -127,6 +127,10 @@ export class TuiRuntime {
         this.scheduler = new TuiRenderScheduler(this.store);
         this.terminal = dependencies.terminal ?? new TuiTerminalSession();
         this.focusManager = new TuiFocusManager(this.store, {
+            boxIdForLine: (lineId) =>
+                selectMainScreenModel(this.store.getState()).boxes.find((box) =>
+                    box.expandedLines.some((line) => line.id === lineId),
+                )?.id,
             currentPage: () => this.store.getState().ui.selectedPage,
             expandedKeyFor: (boxId) =>
                 selectMainScreenModel(this.store.getState()).boxes.find(

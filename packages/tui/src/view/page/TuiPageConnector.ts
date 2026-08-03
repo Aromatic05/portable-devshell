@@ -94,12 +94,17 @@ export function buildConnectorPageBoxes(state: TuiAppState, instanceName: string
                 `Instance changes   ${instanceDirty ? "yes" : "no"}`,
                 `MCP changes        ${globalDirty ? "yes" : "no"}`,
                 `Web changes        ${webDirty ? "yes" : "no"}`,
+                ...editorErrorLine(state, "connector", "connector-actions", []),
                 buttonLine("save", "Save", !instanceDirty && !globalDirty && !webDirty),
                 buttonLine("cancel", "Cancel", !instanceDirty && !globalDirty && !webDirty),
                 buttonLine("restart-control", "Restart Control", !state.ui.controlRestartRequired)
             ],
             id: "connector-actions",
-            status: instanceDirty || globalDirty || webDirty ? "warning" : "normal",
+            status: state.interaction.editor?.kind === "connector" && state.interaction.editor.error !== undefined
+                ? "failed"
+                : instanceDirty || globalDirty || webDirty
+                  ? "warning"
+                  : "normal",
             summaryLines: [compactSummary(["scopes", affectedScopes], ["dirty", instanceDirty || globalDirty || webDirty ? "yes" : "no"])],
             title: "Page Actions"
         }),

@@ -19,7 +19,8 @@ export function coerceTuiEditorRecord(value: Record<string, JsonValue>): Record<
 }
 
 export function parseTuiConfigDraft(value: Record<string, JsonValue>): ConfigDraft {
-    return parseConfigDraft(coerceTuiEditorRecord(value));
+    const { restartControlRequired: _restartControlRequired, ...draft } = coerceTuiEditorRecord(value);
+    return parseConfigDraft(draft);
 }
 
 export function parseTuiInstanceDraft(value: Record<string, JsonValue>): ConfigInstanceDraft {

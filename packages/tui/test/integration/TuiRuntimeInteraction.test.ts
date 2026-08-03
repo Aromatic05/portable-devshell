@@ -94,6 +94,138 @@ test("real Ink runtime handles keyboard navigation, search, redraw, and terminal
     assert.equal(terminal.output.includes("\u001B[?1049l"), true);
 });
 
+test("real Ink runtime saves a restart-required Config edit through cross-box keyboard focus", async () => {
+    const terminal = createTerminal();
+    const clients = createClients({
+        configView: {
+            control: { logLevel: "info" },
+            instances: [{
+                enabled: true,
+                logs: {
+                    eventBufferSize: 500,
+                    maxBytes: 16_777_216,
+                    retentionDays: 7,
+                },
+                mcp: { enabled: true, path: "/alpha/mcp" },
+                name: "alpha",
+                provider: "local",
+                security: {
+                    effectiveMode: "workspace",
+                    mode: "workspace",
+                },
+                workspace: "/workspace/alpha",
+            }],
+            mcp: { enabled: false, listenHost: "127.0.0.1", listenPort: 0 },
+            restartControlRequired: false,
+        },
+        instanceList: [{
+            defaultWorkspace: "/workspace/alpha",
+            enabled: true,
+            mcpEnabled: true,
+            name: "alpha",
+            provider: "local",
+        }],
+    });
+    const runtime = new TuiRuntime(
+        { stdin: terminal.stdin, stdout: terminal.stdout },
+        { clients: clients.value, inkDebug: true },
+    );
+    const running = runtime.run();
+
+    try {
+        await waitUntil(
+            () => runtime.store.getState().connection.status === "connected",
+        );
+        await waitUntil(
+            () => runtime.store.getState().ui.selectedInstance === "alpha",
+        );
+        await waitUntil(
+            () => runtime.store.getState().snapshotsByInstance.alpha?.ready === true,
+        );
+        runtime.store.setSelectedPage("config");
+        await delay(20);
+        const logs = selectMainScreenModel(runtime.store.getState()).boxes.find(
+            (box) => box.id === "logs",
+        );
+        assert.ok(logs);
+        if (!logs.expanded) runtime.store.toggleExpanded(logs.expandedKey);
+        runtime.store.setMainFocusId(logs.id);
+        runtime.store.setFocusScope("boxDetail");
+        runtime.store.setSelectedDetailLine(
+            logs.expandedKey,
+            "logs:field:logs.retentionDays",
+        );
+
+        terminal.write("\r");
+        await waitUntil(
+            () => runtime.store.getState().interaction.focusScope === "form",
+        );
+        terminal.write("\r");
+        await waitUntil(
+            () => runtime.store.getState().interaction.editor?.editing === true,
+        );
+        terminal.write("\u0008");
+        await waitUntil(() => {
+            const draft = runtime.store.getState().ui.formDrafts["config:alpha"] as {
+                logs?: { retentionDays?: unknown };
+            } | undefined;
+            return draft?.logs?.retentionDays === "";
+        });
+        terminal.write("8");
+        await waitUntil(() => {
+            const draft = runtime.store.getState().ui.formDrafts["config:alpha"] as {
+                logs?: { retentionDays?: unknown };
+            } | undefined;
+            return draft?.logs?.retentionDays === "8";
+        });
+
+        for (let index = 0; index < 5; index += 1) {
+            terminal.write("\t");
+            await delay(20);
+        }
+        await waitUntil(
+            () => runtime.store.getState().ui.mainFocusId === "configuration-actions",
+        );
+        const actions = selectMainScreenModel(runtime.store.getState()).boxes.find(
+            (box) => box.id === "configuration-actions",
+        );
+        assert.ok(actions);
+        assert.equal(
+            runtime.store.getState().interaction.selectedDetailLineIds[
+                actions.expandedKey
+            ],
+            "configuration-actions:button:save-restart",
+        );
+
+        terminal.write("\r");
+        await waitUntil(() => clients.configUpdates().length === 1);
+        await waitUntil(
+            () => clients.lifecycleActions().join(",") === "stop:alpha,start:alpha",
+        );
+        await waitUntil(
+            () => runtime.store.getState().ui.dirtyForms["config:alpha"] === false,
+        );
+        assert.deepEqual(clients.lifecycleActions(), ["stop:alpha", "start:alpha"]);
+        assert.equal(
+            JSON.stringify(clients.configUpdates()[0]).includes("effectiveMode"),
+            false,
+        );
+        assert.equal(
+            JSON.stringify(clients.configUpdates()[0]).includes("restartControlRequired"),
+            false,
+        );
+
+        terminal.write("\u0004");
+        await waitUntil(
+            () => runtime.store.getState().interaction.focusScope !== "form",
+        );
+        terminal.write("\u0004");
+        await running;
+    } finally {
+        await runtime.stop();
+    }
+});
+
 test("real Ink runtime buffers split mouse input and enters then discards the create wizard", async () => {
     const terminal = createTerminal();
     const clients = createClients();
@@ -1219,6 +1351,7 @@ test("real Ink runtime renders artifact_viewImage audit output in the detail pan
 
 function createClients(
     options: {
+        configUpdate?: (request: unknown) => unknown;
         configView?: Record<string, unknown>;
         instanceList?: Array<{
             defaultWorkspace?: string;
@@ -1247,7 +1380,9 @@ function createClients(
     let closeCount = 0;
     let configView = options.configView ?? { instances: [] };
     let instanceList = options.instanceList ?? [];
+    const configUpdates: unknown[] = [];
     const imageReads: Array<{ input: unknown; instance: string }> = [];
+    const lifecycleActions: string[] = [];
     let refreshCount = 0;
     let schemaCalls = 0;
     const toolCalls: Array<{ input: unknown; instance: string; toolName: string }> = [];
@@ -1273,6 +1408,13 @@ function createClients(
         config: {
             async get() {
                 return configView;
+            },
+            async update(request: unknown) {
+                configUpdates.push(request);
+                return options.configUpdate?.(request) ?? {};
+            },
+            async validate(draft: unknown) {
+                return draft;
             },
         },
         instance: {
@@ -1304,6 +1446,9 @@ function createClients(
             },
         },
         mcp: {
+            async listApprovals() {
+                return [];
+            },
             async status() {
                 return {};
             },
@@ -1333,6 +1478,37 @@ function createClients(
         async reconnect() {},
         reverse: {},
         runtime: {
+            async readLogs() {
+                return [];
+            },
+            async subscribe() {
+                let closed = false;
+                let resolveClosed: ((message: { kind: "connection.closed" }) => void) | undefined;
+                return {
+                    close() {
+                        closed = true;
+                        resolveClosed?.({ kind: "connection.closed" });
+                    },
+                    async nextMessage() {
+                        if (closed) return { kind: "connection.closed" as const };
+                        return await new Promise<{ kind: "connection.closed" }>((resolve) => {
+                            resolveClosed = resolve;
+                        });
+                    },
+                };
+            },
+            async snapshot(instance: string) {
+                return {
+                    snapshot: {
+                        connectionState: "connected",
+                        daemonState: "running",
+                        lastSeq: 2,
+                        name: instance,
+                        ready: true,
+                        status: "ready",
+                    },
+                };
+            },
             async refresh(instance: string) {
                 refreshCount += 1;
                 return {
@@ -1346,6 +1522,28 @@ function createClients(
                     },
                 };
             },
+            async start(instance: string) {
+                lifecycleActions.push(`start:${instance}`);
+                return {
+                    connectionState: "connected",
+                    daemonState: "running",
+                    lastSeq: 4,
+                    name: instance,
+                    ready: true,
+                    status: "ready",
+                };
+            },
+            async stop(instance: string) {
+                lifecycleActions.push(`stop:${instance}`);
+                return {
+                    connectionState: "disconnected",
+                    daemonState: "stopped",
+                    lastSeq: 3,
+                    name: instance,
+                    ready: false,
+                    status: "stopped",
+                };
+            },
         },
         service: {
             async ping() {
@@ -1355,7 +1553,17 @@ function createClients(
                 return { pong: true };
             },
         },
-        todo: {},
+        todo: {
+            async get() {
+                return {
+                    todo: {
+                        items: [],
+                        revision: 0,
+                        summary: { completed: 0, total: 0 },
+                    },
+                };
+            },
+        },
         tool: {
             async call(instance: string, toolName: string, input: unknown) {
                 toolCalls.push({ input, instance, toolName });
@@ -1366,8 +1574,10 @@ function createClients(
 
     return {
         closed: () => closeCount,
+        configUpdates: () => configUpdates,
         createSchemaCalls: () => schemaCalls,
         imageReads: () => imageReads,
+        lifecycleActions: () => lifecycleActions,
         refreshCalls: () => refreshCount,
         toolCalls: () => toolCalls,
         setControlState(

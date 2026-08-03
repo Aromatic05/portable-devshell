@@ -408,6 +408,10 @@ test("instance box shows artifact activity and confirms revoke or cancel before 
     const revoked: string[] = [];
     const cancelled: string[] = [];
     const focusManager = new TuiFocusManager(store, {
+        boxIdForLine: (lineId) =>
+            selectMainScreenModel(store.getState()).boxes.find((box) =>
+                box.expandedLines.some((line) => line.id === lineId),
+            )?.id,
         currentPage: () => store.getState().ui.selectedPage,
         expandedKeyFor: (boxId) =>
             selectMainScreenModel(store.getState()).boxes.find(

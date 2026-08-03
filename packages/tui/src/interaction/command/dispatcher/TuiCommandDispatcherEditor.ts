@@ -93,6 +93,13 @@ export class TuiCommandDispatcherEditor {
         if (box !== undefined && !box.expanded) {
             this.#store.toggleExpanded(box.expandedKey);
         }
+        const actionBoxId = kind === "config" ? "configuration-actions" : "connector-actions";
+        const actionBox = this.#projection
+            .selectMainScreenModel(this.#store.getState())
+            .boxes.find((candidate) => candidate.id === actionBoxId);
+        if (actionBox !== undefined && !actionBox.expanded) {
+            this.#store.toggleExpanded(actionBox.expandedKey);
+        }
         this.#store.setMainFocusId(boxId);
         this.#store.setEditor({ editing: false, key, kind });
         this.#store.setFocusScope("form");
@@ -543,7 +550,14 @@ export class TuiCommandDispatcherEditor {
             ? rawInstances.map((entry) => {
                   const record = asRecord(entry);
                   return record?.name === instance
-                      ? coerceTuiEditorRecord(this.#editorDraft(`config:${instance}`, this.#instanceDraft(instance)))
+                      ? toTuiInstanceEditorRecord(
+                            coerceTuiEditorRecord(
+                                this.#editorDraft(
+                                    `config:${instance}`,
+                                    this.#instanceDraft(instance),
+                                ),
+                            ),
+                        )
                       : record === undefined
                         ? entry
                         : toTuiInstanceEditorRecord(cloneRecord(record));

@@ -132,14 +132,37 @@ export function buildFocusGraphForState(state: TuiAppState): TuiFocusGraph {
             return new TuiFocusGraph([{ item: { id: "search.query", kind: "field" } }]);
         case "toolForm":
             return new TuiFocusGraph([{ item: { id: "toolForm.input", kind: "field" } }]);
-        case "form":
+        case "form": {
+            const boxes = selectMainScreenModel(state).boxes.filter(
+                (candidate) => candidate.expanded,
+            );
+            return buildLinearGraph(
+                boxes.flatMap((box) =>
+                    box.expandedLines
+                        .filter(
+                            (line) =>
+                                line.disabled !== true &&
+                                (line.editable === true ||
+                                    line.id?.includes(":button:") === true),
+                        )
+                        .map((line) => ({
+                            id: line.id!,
+                            kind: line.id!.includes(":button:")
+                                ? ("button" as const)
+                                : ("field" as const),
+                        })),
+                ),
+            );
+        }
         case "wizard": {
             const box = selectMainScreenModel(state).boxes.find((candidate) => candidate.id === state.ui.mainFocusId);
             return buildLinearGraph(
                 (box?.expandedLines ?? []).map((line) => ({
                     id: line.id!,
-                    kind: line.id!.includes(":button:") ? ("button" as const) : ("field" as const)
-                }))
+                    kind: line.id!.includes(":button:")
+                        ? ("button" as const)
+                        : ("field" as const),
+                })),
             );
         }
         case "sidebarPages":

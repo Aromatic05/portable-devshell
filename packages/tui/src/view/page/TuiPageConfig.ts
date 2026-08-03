@@ -4,6 +4,7 @@ import type { BoxModel } from "../component/TuiComponentExpandableBox.js";
 import type { TuiAppState } from "../../state/reducer/TuiStoreModel.js";
 import { buildSelectedInstancePageContext, compactSummary, makeBox, shortenPath } from "./TuiPageBoxSupport.js";
 import { asRecord, editorDraft, readPath } from "../../state/editor/TuiEditorDraft.js";
+import { toTuiInstanceEditorRecord } from "../../state/editor/TuiEditorConfigAdapter.js";
 import { buttonLine, choiceLine, editorErrorLine, fieldLine, secretRecordFieldLine } from "../editor/TuiEditorView.js";
 
 export function buildConfigPageBoxes(state: TuiAppState, instanceName: string): BoxModel[] {
@@ -119,6 +120,7 @@ export function buildConfigPageBoxes(state: TuiAppState, instanceName: string): 
         makeBox(state, "config", instanceName, {
             detailLines: [
                 `Apply mode          ${restartRequired ? "restart required" : "hot apply"}`,
+                ...editorErrorLine(state, "config", "configuration-actions", []),
                 ...(restartRequired && running ? ["Save Only is unavailable until the instance is stopped."] : []),
                 ...(dirty
                     ? ["", { id: "pending-changes", text: "Pending changes", tone: "warning" as const }, ...changes.map((change, index) => ({ id: `pending-change:${index}`, text: change, tone: "warning" as const }))]
@@ -132,7 +134,13 @@ export function buildConfigPageBoxes(state: TuiAppState, instanceName: string): 
                 buttonLine("delete", "Delete")
             ],
             id: "configuration-actions",
-            status: dirty ? "warning" : restartRequired ? "warning" : "ready",
+            status: state.interaction.editor?.kind === "config" && state.interaction.editor.error !== undefined
+                ? "failed"
+                : dirty
+                  ? "warning"
+                  : restartRequired
+                    ? "warning"
+                    : "ready",
             summaryLines: [compactSummary(["apply", restartRequired ? "restart" : "hot"])],
             title: `Actions${unsaved}`
         })
@@ -266,14 +274,14 @@ function instanceDraft(state: TuiAppState, instanceName: string): Record<string,
         : undefined;
     const record = asRecord(existing);
 
-    return record ?? {
+    return record === undefined ? {
         enabled: true,
         mcp: { auth: "none", enabled: true, path: `/${instanceName}/mcp`, tools: { capabilities: ["read", "write", "execute"], groups: [...defaultMcpToolGroups] } },
         name: instanceName,
         provider: "local",
         security: { mode: "disabled" },
         workspace: ""
-    };
+    } : toTuiInstanceEditorRecord(record);
 }
 
 function requiresRestart(previous: Record<string, JsonValue>, next: Record<string, JsonValue>): boolean {

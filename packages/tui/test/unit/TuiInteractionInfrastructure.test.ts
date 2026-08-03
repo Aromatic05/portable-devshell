@@ -1046,6 +1046,16 @@ test("config validation errors render in the active field box", async () => {
         true,
     );
     assert.equal(configuration?.status, "failed");
+
+    harness.store.setMainFocusId("configuration-actions");
+    const actions = expandBox(harness, "configuration-actions");
+    assert.equal(
+        actions.expandedLines.some(
+            (line) => line.text === "error: workspace must be an absolute path",
+        ),
+        true,
+    );
+    assert.equal(actions.status, "failed");
 });
 
 test("config choices use angle selectors and replace incompatible provider fields", async () => {
@@ -1138,6 +1148,90 @@ test("config exposes reload, save-only, and save-and-restart semantics", () => {
             (line) => line.text === "Apply mode          restart required",
         ),
         true,
+    );
+});
+test("config keyboard focus reaches Save & Restart from an edited Logs box", async () => {
+    const updates: Array<Record<string, unknown>> = [];
+    const harness = createHarness({
+        onConfigUpdate: async (value) => {
+            updates.push(value);
+            return {};
+        },
+    });
+    const view = harness.store.getState().configView!;
+    harness.store.setConfigView({
+        ...view,
+        restartControlRequired: false,
+        instances: (view.instances as JsonValue[]).map((entry) => {
+            const record = entry as Record<string, JsonValue>;
+            return record.name === "alpha"
+                ? {
+                      ...record,
+                      logs: {
+                          eventBufferSize: 500,
+                          maxBytes: 16_777_216,
+                          retentionDays: 7,
+                      },
+                      security: {
+                          effectiveMode: "workspace",
+                          mode: "workspace",
+                      },
+                  }
+                : entry;
+        }),
+    });
+    harness.store.setSelectedPage("config");
+    const logs = expandBox(harness, "logs");
+    const retention = logs.expandedLines.find(
+        (line) => line.id === "logs:field:logs.retentionDays",
+    );
+    assert.ok(retention?.id);
+    harness.store.setMainFocusId(logs.id);
+    harness.store.setFocusScope("boxDetail");
+    harness.store.setSelectedDetailLine(logs.expandedKey, retention.id);
+
+    await harness.dispatch({ type: "focus.activate" });
+    assert.equal(harness.store.getState().interaction.focusScope, "form");
+    const actions = selectMainScreenModel(harness.store.getState()).boxes.find(
+        (box) => box.id === "configuration-actions",
+    );
+    assert.equal(actions?.expanded, true);
+
+    await harness.press("", { return: true });
+    await harness.press("", { backspace: true });
+    await harness.press("8");
+    assert.equal(
+        selectMainScreenModel(harness.store.getState())
+            .boxes.find((box) => box.id === "configuration-actions")
+            ?.expandedLines.some((line) => line.text.includes("effectiveMode")),
+        false,
+    );
+
+    for (let index = 0; index < 4; index += 1) {
+        await harness.press("", { tab: true });
+    }
+    assert.equal(
+        harness.store.getState().ui.mainFocusId,
+        "configuration-actions",
+    );
+    assert.equal(
+        harness.store.getState().interaction.selectedDetailLineIds[
+            actions!.expandedKey
+        ],
+        "configuration-actions:button:save-restart",
+    );
+
+    await harness.press("", { return: true });
+    assert.equal(updates.length, 1);
+    assert.equal(JSON.stringify(updates[0]).includes("effectiveMode"), false);
+    assert.equal(JSON.stringify(updates[0]).includes("restartControlRequired"), false);
+    assert.deepEqual(harness.instanceActions(), [
+        { action: "stop", instance: "alpha" },
+        { action: "start", instance: "alpha" },
+    ]);
+    assert.equal(
+        harness.store.getState().ui.dirtyForms["config:alpha"],
+        false,
     );
 });
 test("failed Save & Restart restores a previously running instance", async () => {
@@ -2454,6 +2548,10 @@ function createHarness(
     const pageReloads: Array<{ instance: string | undefined; page: string }> =
         [];
     const focusManager = new TuiFocusManager(store, {
+        boxIdForLine: (lineId) =>
+            selectMainScreenModel(store.getState()).boxes.find((box) =>
+                box.expandedLines.some((line) => line.id === lineId),
+            )?.id,
         currentPage: () => store.getState().ui.selectedPage,
         expandedKeyFor: (boxId) =>
             selectMainScreenModel(store.getState()).boxes.find(

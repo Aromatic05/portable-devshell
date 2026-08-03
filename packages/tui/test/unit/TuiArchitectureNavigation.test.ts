@@ -41,6 +41,10 @@ function createHarness() {
         status: "ready",
     });
     const focusManager = new TuiFocusManager(store, {
+        boxIdForLine: (lineId) =>
+            selectMainScreenModel(store.getState()).boxes.find((box) =>
+                box.expandedLines.some((line) => line.id === lineId),
+            )?.id,
         currentPage: () => store.getState().ui.selectedPage,
         expandedKeyFor: (boxId) =>
             selectMainScreenModel(store.getState()).boxes.find(

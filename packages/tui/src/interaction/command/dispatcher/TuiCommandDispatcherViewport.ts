@@ -155,7 +155,11 @@ export class TuiCommandDispatcherViewport {
             scope === "form" ||
             scope === "wizard"
         ) {
-            return this.#focusManager.move(direction);
+            const moved = this.#focusManager.move(direction);
+            if (moved && (scope === "form" || scope === "wizard")) {
+                this.#focus.ensureMainFocusVisible();
+            }
+            return moved;
         }
         if (scope === "sidebarPages" || scope === "sidebarInstances") {
             if (this.#store.getState().ui.selectedPage === "terminal") {
@@ -201,10 +205,14 @@ export class TuiCommandDispatcherViewport {
                 this.returnToSidebar();
                 return true;
             }
-            return (
+            const moved = (
                 (direction === "up" || direction === "down") &&
                 this.#focusManager.move(direction)
             );
+            if (moved && (scope === "form" || scope === "wizard")) {
+                this.#focus.ensureMainFocusVisible();
+            }
+            return moved;
         }
         if (
             (scope === "sidebarPages" || scope === "sidebarInstances") &&
