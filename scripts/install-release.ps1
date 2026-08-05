@@ -200,6 +200,60 @@ function Install-Worker([string]$Target, [string]$Temporary, [string]$DevshellHo
     Copy-Item -Force -LiteralPath $source -Destination (Join-Path $workerBinDirectory $asset)
 }
 
+function Restore-WorkerAliases([string[]]$Targets, [string]$DevshellHome, [string]$BackupDirectory) {
+    $workerBinDirectory = Join-Path $DevshellHome "bin"
+    $failures = @()
+    foreach ($target in $Targets) {
+        $asset = Get-WorkerAssetName $target
+        $path = Join-Path $workerBinDirectory $asset
+        try {
+            Remove-Item -Force -ErrorAction SilentlyContinue -LiteralPath $path
+            $backup = Join-Path $BackupDirectory $asset
+            if (Test-Path -LiteralPath $backup) {
+                Copy-Item -Force -LiteralPath $backup -Destination $path
+            }
+        } catch {
+            $failures += $_
+        }
+    }
+    $defaultPath = Join-Path $workerBinDirectory "devshell-worker.exe"
+    try {
+        Remove-Item -Force -ErrorAction SilentlyContinue -LiteralPath $defaultPath
+        $defaultBackup = Join-Path $BackupDirectory "devshell-worker.exe"
+        if (Test-Path -LiteralPath $defaultBackup) {
+            Copy-Item -Force -LiteralPath $defaultBackup -Destination $defaultPath
+        }
+    } catch {
+        $failures += $_
+    }
+    if ($failures.Count -gt 0) {
+        throw "Worker alias rollback failed; backup was preserved at $BackupDirectory"
+    }
+    Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $BackupDirectory
+}
+
+function Backup-WorkerAliases([string[]]$Targets, [string]$DevshellHome, [string]$BackupDirectory) {
+    $workerBinDirectory = Join-Path $DevshellHome "bin"
+    Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $BackupDirectory
+    New-Item -ItemType Directory -Force -Path $BackupDirectory | Out-Null
+    try {
+        foreach ($target in $Targets) {
+            $asset = Get-WorkerAssetName $target
+            $path = Join-Path $workerBinDirectory $asset
+            if (Test-Path -LiteralPath $path) {
+                Copy-Item -Force -LiteralPath $path -Destination (Join-Path $BackupDirectory $asset)
+            }
+        }
+        $defaultPath = Join-Path $workerBinDirectory "devshell-worker.exe"
+        if (Test-Path -LiteralPath $defaultPath) {
+            Copy-Item -Force -LiteralPath $defaultPath -Destination (Join-Path $BackupDirectory "devshell-worker.exe")
+        }
+    } catch {
+        Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $BackupDirectory
+        throw
+    }
+}
+
 Write-InstallStep "检查安装环境"
 if ($null -eq (Get-Command node -ErrorAction SilentlyContinue)) { throw "缺少必需命令：node" }
 if ($null -eq (Get-Command tar.exe -ErrorAction SilentlyContinue)) { throw "缺少必需命令：tar.exe" }
@@ -284,9 +338,12 @@ try {
     $backupDirectory = Join-Path $installRoot ".backup-$version-$PID"
     $currentDirectory = Join-Path $installRoot "current"
     $currentBackupDirectory = Join-Path $installRoot ".current-backup-$PID"
+    $workerBackupDirectory = Join-Path $devshellHome ".install-worker-backup-$PID"
     $commandPath = Join-Path $binDirectory "devshell.cmd"
+    $previousVersionPresent = Test-Path -LiteralPath $versionDirectory
+    $previousCurrentPresent = Test-Path -LiteralPath $currentDirectory
     New-Item -ItemType Directory -Force -Path $installRoot, $versionsDirectory, $binDirectory, $devshellHome | Out-Null
-    Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $stagingDirectory, $backupDirectory, $currentBackupDirectory
+    Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $stagingDirectory, $backupDirectory, $currentBackupDirectory, $workerBackupDirectory
     Copy-Item -Recurse -Force -LiteralPath $appDirectory -Destination $stagingDirectory
     $cliRelativePath = Get-ApplicationCliRelativePath $stagingDirectory
     $stagingCli = Join-Path $stagingDirectory $cliRelativePath
@@ -304,20 +361,21 @@ try {
     }
     Stop-InstalledControl $currentCli $devshellHome
 
-    foreach ($target in $targets) {
-        Write-InstallDetail "安装 $target Worker"
-        Install-Worker $target $temporary $devshellHome
-    }
-    $hostAsset = Get-WorkerAssetName $hostTarget
-    Copy-Item -Force -LiteralPath (Join-Path $devshellHome "bin\$hostAsset") -Destination (Join-Path $devshellHome "bin\devshell-worker.exe")
-
     $previousCommandContent = if (Test-Path -LiteralPath $commandPath -PathType Leaf) {
         Get-Content -Raw -LiteralPath $commandPath
     } else {
         $null
     }
     $activated = $false
+    Backup-WorkerAliases $targets $devshellHome $workerBackupDirectory
     try {
+        foreach ($target in $targets) {
+            Write-InstallDetail "安装 $target Worker"
+            Install-Worker $target $temporary $devshellHome
+        }
+        $hostAsset = Get-WorkerAssetName $hostTarget
+        Copy-Item -Force -LiteralPath (Join-Path $devshellHome "bin\$hostAsset") -Destination (Join-Path $devshellHome "bin\devshell-worker.exe")
+
         if (Test-Path -LiteralPath $versionDirectory) { Move-Item -Force $versionDirectory $backupDirectory }
         if (Test-Path -LiteralPath $currentDirectory) { Move-Item -Force $currentDirectory $currentBackupDirectory }
         Move-Item -Force $stagingDirectory $versionDirectory
@@ -330,17 +388,30 @@ try {
         $activated = $true
     } finally {
         if (-not $activated) {
-            Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $currentDirectory, $versionDirectory
-            if (Test-Path -LiteralPath $currentBackupDirectory) { Move-Item -Force $currentBackupDirectory $currentDirectory }
-            if (Test-Path -LiteralPath $backupDirectory) { Move-Item -Force $backupDirectory $versionDirectory }
-            if ($null -eq $previousCommandContent) {
-                Remove-Item -Force -ErrorAction SilentlyContinue $commandPath
-            } else {
-                Set-Content -Encoding ASCII -LiteralPath $commandPath -Value $previousCommandContent
+            try {
+                if (Test-Path -LiteralPath $currentBackupDirectory) {
+                    Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $currentDirectory
+                    Move-Item -Force $currentBackupDirectory $currentDirectory
+                } elseif (-not $previousCurrentPresent) {
+                    Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $currentDirectory
+                }
+                if (Test-Path -LiteralPath $backupDirectory) {
+                    Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $versionDirectory
+                    Move-Item -Force $backupDirectory $versionDirectory
+                } elseif (-not $previousVersionPresent) {
+                    Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $versionDirectory
+                }
+                if ($null -eq $previousCommandContent) {
+                    Remove-Item -Force -ErrorAction SilentlyContinue $commandPath
+                } else {
+                    Set-Content -Encoding ASCII -LiteralPath $commandPath -Value $previousCommandContent
+                }
+            } finally {
+                Restore-WorkerAliases $targets $devshellHome $workerBackupDirectory
             }
         }
     }
-    Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $backupDirectory, $currentBackupDirectory
+    Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $backupDirectory, $currentBackupDirectory, $workerBackupDirectory
     Write-InstallDetail "已安装命令可以正常启动"
 
     Write-Host ""

@@ -14,7 +14,7 @@ use uuid::Uuid;
 
 use crate::security::SecurityPolicy;
 use crate::security::path::{
-    FilesystemCapability, PathNamespace, parse_requested_path, resolve_create_target,
+    FilesystemCapability, PathNamespace, ResolvedPath, parse_requested_path, resolve_create_target,
 };
 use crate::tools::ToolError;
 use crate::tools::artifact::payload::{ArtifactPayloadDescriptor, ArtifactPayloadType};
@@ -74,6 +74,10 @@ struct ArtifactReceiveMetadata {
     descriptor: ArtifactPayloadDescriptor,
     overwrite: bool,
     target_path: PathBuf,
+    #[serde(default)]
+    workspace: Option<PathBuf>,
+    #[serde(default)]
+    requested_target_path: Option<String>,
     temporary_path: PathBuf,
     staged_path: Option<PathBuf>,
     backup_path: Option<PathBuf>,
@@ -138,18 +142,22 @@ impl ArtifactReceiveStore {
         policy
             .check_capability(capability)
             .map_err(ToolError::from)?;
-        let target_path = resolve_create_target(workspace, &requested)?.canonical;
-        reject_symlink_target(&target_path)?;
-        if target_path.symlink_metadata().is_ok() && !input.overwrite {
+        let resolved_target = resolve_create_target(workspace, &requested)?;
+        reject_symlink_target(resolved_target.target_path())?;
+        if resolved_target.target_path().symlink_metadata().is_ok() && !input.overwrite {
             return Err(ToolError::new(
                 "artifact.targetExists",
                 "artifact destination already exists",
             ));
         }
-        let parent = target_path
+        let parent = resolved_target
+            .target_path()
             .parent()
             .ok_or_else(|| ToolError::new("artifact.invalidTarget", "target has no parent"))?;
         fs::create_dir_all(parent)
+            .map_err(|error| ToolError::new("artifact.receiveFailed", error.to_string()))?;
+        let canonical_workspace = workspace
+            .canonicalize()
             .map_err(|error| ToolError::new("artifact.receiveFailed", error.to_string()))?;
 
         let _guard = self.lock()?;
@@ -157,7 +165,7 @@ impl ArtifactReceiveStore {
         let temporary = Builder::new()
             .prefix(&format!(".devshell-receive-{receive_id}-"))
             .suffix(".payload")
-            .tempfile_in(parent)
+            .tempfile_in(&self.root)
             .map_err(|error| ToolError::new("artifact.receiveFailed", error.to_string()))?;
         let (_, temporary_path) = temporary
             .keep()
@@ -167,7 +175,9 @@ impl ArtifactReceiveStore {
             receive_id: receive_id.clone(),
             descriptor: input.descriptor,
             overwrite: input.overwrite,
-            target_path,
+            target_path: resolved_target.canonical,
+            workspace: Some(canonical_workspace),
+            requested_target_path: Some(input.target_path),
             temporary_path: temporary_path.clone(),
             staged_path: None,
             backup_path: None,
@@ -272,33 +282,32 @@ impl ArtifactReceiveStore {
             ));
         }
 
-        let staged_path = match metadata.descriptor.payload_type {
+        let resolved_target = self.rebind_target(&metadata)?;
+        let target_path = resolved_target.target_path();
+        let staged_name = receive_staged_name(&metadata);
+        let staged_path = sibling_path(target_path, &staged_name)?;
+        let canonical_staged_path = sibling_path(&metadata.target_path, &staged_name)?;
+        metadata.staged_path = Some(canonical_staged_path);
+        self.write_metadata(&metadata)?;
+        remove_path_if_exists(&staged_path)?;
+
+        match metadata.descriptor.payload_type {
             ArtifactPayloadType::DirectoryArchive => {
-                let staged = sibling_path(
-                    &metadata.target_path,
-                    &format!(".devshell-receive-{receive_id}.dir"),
-                )?;
-                remove_path_if_exists(&staged)?;
-                fs::create_dir(&staged)
+                fs::create_dir(&staged_path)
                     .map_err(|error| ToolError::new("artifact.receiveFailed", error.to_string()))?;
-                if let Err(error) = extract_directory(&metadata, &staged) {
-                    let _ = fs::remove_dir_all(&staged);
+                if let Err(error) = extract_directory(&metadata, &staged_path) {
+                    let _ = fs::remove_dir_all(&staged_path);
                     return Err(error);
                 }
-                Some(staged)
             }
             ArtifactPayloadType::Stdout
             | ArtifactPayloadType::Stderr
-            | ArtifactPayloadType::File => None,
-        };
-        metadata.staged_path = staged_path.clone();
-        self.write_metadata(&metadata)?;
+            | ArtifactPayloadType::File => {
+                copy_payload_file(&metadata.temporary_path, &staged_path)?
+            }
+        }
 
-        let source_path = staged_path
-            .as_deref()
-            .unwrap_or(metadata.temporary_path.as_path())
-            .to_path_buf();
-        self.commit_locked(&mut metadata, &source_path)?;
+        self.commit_locked(&mut metadata, &staged_path, target_path)?;
         let target_path = metadata.target_path.display().to_string();
         let _ = fs::remove_file(&metadata.temporary_path);
         let _ = fs::remove_file(self.metadata_path(receive_id));
@@ -325,9 +334,10 @@ impl ArtifactReceiveStore {
         &self,
         metadata: &mut ArtifactReceiveMetadata,
         source_path: &Path,
+        target_path: &Path,
     ) -> Result<(), ToolError> {
-        reject_symlink_target(&metadata.target_path)?;
-        let target_exists = metadata.target_path.symlink_metadata().is_ok();
+        reject_symlink_target(target_path)?;
+        let target_exists = target_path.symlink_metadata().is_ok();
         if target_exists && !metadata.overwrite {
             return Err(ToolError::new(
                 "artifact.targetExists",
@@ -338,33 +348,29 @@ impl ArtifactReceiveStore {
 
         let incoming_directory =
             metadata.descriptor.payload_type == ArtifactPayloadType::DirectoryArchive;
-        let direct_file_replace = target_exists
-            && metadata.overwrite
-            && !incoming_directory
-            && metadata.target_path.is_file();
+        let direct_file_replace =
+            target_exists && metadata.overwrite && !incoming_directory && target_path.is_file();
         if direct_file_replace {
             self.write_metadata(metadata)?;
-            fs::rename(source_path, &metadata.target_path)
+            fs::rename(source_path, target_path)
                 .map_err(|error| ToolError::new("artifact.commitFailed", error.to_string()))?;
-            sync_parent(&metadata.target_path)?;
+            sync_parent(target_path)?;
             return Ok(());
         }
 
         if target_exists {
-            let backup = sibling_path(
-                &metadata.target_path,
-                &format!(".devshell-receive-{}.backup", metadata.receive_id),
-            )?;
+            let backup_name = format!(".devshell-receive-{}.backup", metadata.receive_id);
+            let backup = sibling_path(target_path, &backup_name)?;
             remove_path_if_exists(&backup)?;
-            metadata.backup_path = Some(backup.clone());
+            metadata.backup_path = Some(sibling_path(&metadata.target_path, &backup_name)?);
             self.write_metadata(metadata)?;
-            fs::rename(&metadata.target_path, &backup)
+            fs::rename(target_path, &backup)
                 .map_err(|error| ToolError::new("artifact.commitFailed", error.to_string()))?;
-            if let Err(error) = fs::rename(source_path, &metadata.target_path) {
-                let _ = fs::rename(&backup, &metadata.target_path);
+            if let Err(error) = fs::rename(source_path, target_path) {
+                let _ = fs::rename(&backup, target_path);
                 return Err(ToolError::new("artifact.commitFailed", error.to_string()));
             }
-            sync_parent(&metadata.target_path)?;
+            sync_parent(target_path)?;
             remove_path_if_exists(&backup)?;
             metadata.backup_path = None;
             return Ok(());
@@ -372,10 +378,10 @@ impl ArtifactReceiveStore {
 
         self.write_metadata(metadata)?;
         if incoming_directory || metadata.overwrite {
-            fs::rename(source_path, &metadata.target_path)
+            fs::rename(source_path, target_path)
                 .map_err(|error| ToolError::new("artifact.commitFailed", error.to_string()))?;
         } else {
-            fs::hard_link(source_path, &metadata.target_path).map_err(|error| {
+            fs::hard_link(source_path, target_path).map_err(|error| {
                 if error.kind() == std::io::ErrorKind::AlreadyExists {
                     ToolError::new(
                         "artifact.targetExists",
@@ -388,7 +394,33 @@ impl ArtifactReceiveStore {
             fs::remove_file(source_path)
                 .map_err(|error| ToolError::new("artifact.commitFailed", error.to_string()))?;
         }
-        sync_parent(&metadata.target_path)
+        sync_parent(target_path)
+    }
+
+    fn rebind_target(&self, metadata: &ArtifactReceiveMetadata) -> Result<ResolvedPath, ToolError> {
+        let workspace = metadata.workspace.as_deref().ok_or_else(|| {
+            ToolError::retryable(
+                "artifact.targetChanged",
+                "artifact destination cannot be safely rebound",
+            )
+        })?;
+        let raw = metadata.requested_target_path.as_deref().ok_or_else(|| {
+            ToolError::retryable(
+                "artifact.targetChanged",
+                "artifact destination cannot be safely rebound",
+            )
+        })?;
+        let requested = parse_requested_path(raw)
+            .map_err(|error| ToolError::retryable("artifact.targetChanged", error.message))?;
+        let resolved = resolve_create_target(workspace, &requested)
+            .map_err(|error| ToolError::retryable("artifact.targetChanged", error.message))?;
+        if resolved.canonical != metadata.target_path {
+            return Err(ToolError::retryable(
+                "artifact.targetChanged",
+                "artifact destination changed after the receive began",
+            ));
+        }
+        Ok(resolved)
     }
 
     fn recover_locked(&self) -> Result<(), ToolError> {
@@ -409,20 +441,82 @@ impl ArtifactReceiveStore {
         &self,
         metadata: &ArtifactReceiveMetadata,
     ) -> Result<(), ToolError> {
-        if let Some(backup) = &metadata.backup_path {
-            let target_exists = metadata.target_path.symlink_metadata().is_ok();
+        let rebound = match (&metadata.workspace, &metadata.requested_target_path) {
+            (Some(_), Some(_)) => match self.rebind_target(metadata) {
+                Ok(resolved) => Some(resolved),
+                Err(_)
+                    if metadata.phase != ArtifactReceivePhase::Committing
+                        && metadata.backup_path.is_none()
+                        && metadata.staged_path.is_none() =>
+                {
+                    let _ = fs::remove_file(&metadata.temporary_path);
+                    let _ = fs::remove_file(self.metadata_path(&metadata.receive_id));
+                    return Ok(());
+                }
+                Err(error) => {
+                    return Err(ToolError::new(
+                        "artifact.recoveryFailed",
+                        format!(
+                            "artifact destination cannot be safely rebound; recovery state was preserved: {}",
+                            error.message,
+                        ),
+                    ));
+                }
+            },
+            (None, None)
+                if metadata.phase != ArtifactReceivePhase::Committing
+                    && metadata.backup_path.is_none()
+                    && metadata.staged_path.is_none() =>
+            {
+                let _ = fs::remove_file(&metadata.temporary_path);
+                let _ = fs::remove_file(self.metadata_path(&metadata.receive_id));
+                return Ok(());
+            }
+            (None, None) => {
+                return Err(ToolError::new(
+                    "artifact.recoveryFailed",
+                    "legacy artifact recovery state cannot be safely rebound; recovery state was preserved",
+                ));
+            }
+            _ => {
+                return Err(ToolError::new(
+                    "artifact.recoveryFailed",
+                    "artifact recovery metadata is incomplete; recovery state was preserved",
+                ));
+            }
+        };
+        let target_path = rebound
+            .as_ref()
+            .map(ResolvedPath::target_path)
+            .unwrap_or(metadata.target_path.as_path());
+
+        if metadata.backup_path.is_some() {
+            let backup = if rebound.is_some() {
+                sibling_path(
+                    target_path,
+                    &format!(".devshell-receive-{}.backup", metadata.receive_id),
+                )?
+            } else {
+                metadata.backup_path.clone().expect("backup path exists")
+            };
+            let target_exists = target_path.symlink_metadata().is_ok();
             let backup_exists = backup.symlink_metadata().is_ok();
             if backup_exists && !target_exists {
-                fs::rename(backup, &metadata.target_path).map_err(|error| {
+                fs::rename(&backup, target_path).map_err(|error| {
                     ToolError::new("artifact.recoveryFailed", error.to_string())
                 })?;
             } else if backup_exists && target_exists {
-                remove_path_if_exists(backup)?;
+                remove_path_if_exists(&backup)?;
             }
         }
         let _ = fs::remove_file(&metadata.temporary_path);
         if let Some(staged) = &metadata.staged_path {
-            remove_path_if_exists(staged)?;
+            let staged_path = if rebound.is_some() {
+                sibling_path(target_path, &receive_staged_name(metadata))?
+            } else {
+                staged.clone()
+            };
+            remove_path_if_exists(&staged_path)?;
         }
         let _ = fs::remove_file(self.metadata_path(&metadata.receive_id));
         Ok(())
@@ -677,6 +771,21 @@ fn hash_file(path: &Path) -> Result<(usize, String), ToolError> {
     Ok((bytes, hasher.finalize().to_hex().to_string()))
 }
 
+fn copy_payload_file(source: &Path, target: &Path) -> Result<(), ToolError> {
+    let mut input = File::open(source)
+        .map_err(|error| ToolError::new("artifact.receiveFailed", error.to_string()))?;
+    let mut output = OpenOptions::new()
+        .create_new(true)
+        .write(true)
+        .open(target)
+        .map_err(|error| ToolError::new("artifact.receiveFailed", error.to_string()))?;
+    std::io::copy(&mut input, &mut output)
+        .map_err(|error| ToolError::new("artifact.receiveFailed", error.to_string()))?;
+    output
+        .sync_all()
+        .map_err(|error| ToolError::new("artifact.receiveFailed", error.to_string()))
+}
+
 fn validate_descriptor(descriptor: &ArtifactPayloadDescriptor) -> Result<(), ToolError> {
     if descriptor.name.is_empty()
         || descriptor.media_type.is_empty()
@@ -737,6 +846,18 @@ fn validate_archive_path(path: &Path) -> Result<(), ToolError> {
 
 fn validate_id(value: &str) -> Result<(), ToolError> {
     storage::validate_uuid(value, "artifact.invalidReceiveId", "receiveId is invalid")
+}
+
+fn receive_staged_name(metadata: &ArtifactReceiveMetadata) -> String {
+    format!(
+        ".devshell-receive-{}.{}",
+        metadata.receive_id,
+        if metadata.descriptor.payload_type == ArtifactPayloadType::DirectoryArchive {
+            "dir"
+        } else {
+            "file"
+        }
+    )
 }
 
 fn sibling_path(target: &Path, name: &str) -> Result<PathBuf, ToolError> {
@@ -829,6 +950,8 @@ fn set_mode(_path: &Path, _mode: u32) -> Result<(), ToolError> {
 #[cfg(test)]
 mod recovery_tests {
     use std::fs;
+    #[cfg(unix)]
+    use std::os::unix::fs::symlink;
 
     use base64::{Engine as _, engine::general_purpose::STANDARD};
 
@@ -889,5 +1012,109 @@ mod recovery_tests {
         assert_eq!(fs::read(&target).unwrap(), b"original");
         assert!(!backup.exists());
         assert!(!begun.temporary_path.exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn startup_preserves_commit_recovery_state_when_the_workspace_was_rebound() {
+        let root = crate::testing::temp_dir();
+        let outside = crate::testing::temp_dir();
+        let workspace = root.path().join("workspace");
+        fs::create_dir(&workspace).unwrap();
+        let target = workspace.join("result.bin");
+        fs::write(&target, b"original").unwrap();
+        let receive_root = root.path().join("receives");
+        let store = ArtifactReceiveStore::new(receive_root.clone()).unwrap();
+        let begun = store
+            .begin(
+                &workspace,
+                &DisabledSecurityPolicy,
+                ArtifactReceiveBeginInput {
+                    descriptor: ArtifactPayloadDescriptor {
+                        payload_type: ArtifactPayloadType::File,
+                        name: "result.bin".to_string(),
+                        media_type: "application/octet-stream".to_string(),
+                        payload_bytes: 0,
+                        payload_blake3: blake3::hash(b"").to_hex().to_string(),
+                        logical_bytes: None,
+                        entry_count: None,
+                        manifest_blake3: None,
+                    },
+                    overwrite: true,
+                    target_path: "./result.bin".to_string(),
+                },
+            )
+            .unwrap();
+        let mut metadata = store.load_metadata(&begun.receive_id).unwrap();
+        let backup = sibling_path(
+            &metadata.target_path,
+            &format!(".devshell-receive-{}.backup", begun.receive_id),
+        )
+        .unwrap();
+        metadata.phase = ArtifactReceivePhase::Committing;
+        metadata.backup_path = Some(backup.clone());
+        store.write_metadata(&metadata).unwrap();
+        fs::rename(&target, &backup).unwrap();
+        drop(store);
+
+        let moved_workspace = root.path().join("workspace-old");
+        fs::rename(&workspace, &moved_workspace).unwrap();
+        symlink(outside.path(), &workspace).unwrap();
+        let moved_backup = moved_workspace.join(backup.file_name().unwrap());
+
+        let error = match ArtifactReceiveStore::new(receive_root.clone()) {
+            Ok(_) => panic!("rebound commit recovery must not be discarded"),
+            Err(error) => error,
+        };
+        assert_eq!(error.code, "artifact.recoveryFailed");
+        assert!(moved_backup.exists());
+        assert!(
+            receive_root
+                .join(format!("{}.json", begun.receive_id))
+                .exists()
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn finish_rejects_a_workspace_target_rebound_to_an_outside_directory() {
+        let root = crate::testing::temp_dir();
+        let outside = crate::testing::temp_dir();
+        let workspace = root.path().join("workspace");
+        fs::create_dir_all(workspace.join("safe")).unwrap();
+        let bytes = b"received";
+        let store = ArtifactReceiveStore::new(root.path().join("receives")).unwrap();
+        let begun = store
+            .begin(
+                &workspace,
+                &DisabledSecurityPolicy,
+                ArtifactReceiveBeginInput {
+                    descriptor: ArtifactPayloadDescriptor {
+                        payload_type: ArtifactPayloadType::File,
+                        name: "result.bin".to_string(),
+                        media_type: "application/octet-stream".to_string(),
+                        payload_bytes: bytes.len(),
+                        payload_blake3: blake3::hash(bytes).to_hex().to_string(),
+                        logical_bytes: None,
+                        entry_count: None,
+                        manifest_blake3: None,
+                    },
+                    overwrite: false,
+                    target_path: "./safe/result.bin".to_string(),
+                },
+            )
+            .unwrap();
+        store
+            .write(&begun.receive_id, 0, STANDARD.encode(bytes))
+            .unwrap();
+
+        fs::rename(workspace.join("safe"), workspace.join("safe-old")).unwrap();
+        symlink(outside.path(), workspace.join("safe")).unwrap();
+
+        let error = store.finish(&begun.receive_id).unwrap_err();
+        assert_eq!(error.code, "artifact.targetChanged");
+        assert!(!outside.path().join("result.bin").exists());
+        assert!(!workspace.join("safe-old/result.bin").exists());
+        store.abort(&begun.receive_id).unwrap();
     }
 }

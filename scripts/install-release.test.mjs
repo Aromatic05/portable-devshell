@@ -349,3 +349,141 @@ test("Windows installer smoke allows slower ARM package activation", async () =>
     assert.match(source, /install-release\.ps1"\)\r?\n\s*\], false, false, 180_000\);/u);
     assert.match(source, /timeoutMs = 45_000/u);
 });
+
+test("Unix release installer rolls back application and worker aliases as one transaction", {
+    skip: process.platform === "win32"
+}, async () => {
+    await verifyTransactionalRollback(false);
+});
+
+test("Windows release installer rolls back application and worker aliases as one transaction", {
+    skip: process.platform !== "win32"
+}, async () => {
+    await verifyTransactionalRollback(true);
+});
+
+async function verifyTransactionalRollback(windows) {
+    const root = await createTestTempDirectory(windows
+        ? "windows-release-rollback-test"
+        : "release-rollback-test");
+    const release = resolve(root, "release");
+    const app = resolve(root, "app");
+    const home = resolve(root, "home");
+    const installRoot = resolve(root, "installed");
+    const binDirectory = resolve(root, "bin");
+    const devshellHome = resolve(root, "devshell-home");
+    const environment = {
+        ...process.env,
+        HOME: home,
+        XDG_DATA_HOME: resolve(root, "data"),
+        PORTABLE_DEVSHELL_RELEASE_BASE_URL: pathToFileURL(release).href.replace(/\/$/u, ""),
+        PORTABLE_DEVSHELL_INSTALL_ROOT: installRoot,
+        PORTABLE_DEVSHELL_BIN_DIR: binDirectory,
+        PORTABLE_DEVSHELL_HOME: devshellHome,
+        ...(windows ? {
+            USERPROFILE: home,
+            LOCALAPPDATA: resolve(root, "local-app-data")
+        } : {})
+    };
+    const oldVersion = windows ? "9.8.7-old-windows" : "9.8.7-old";
+    const brokenVersion = windows
+        ? "9.8.8-broken-after-activation-windows"
+        : "9.8.8-broken-after-activation";
+
+    try {
+        await writeTransactionalReleaseFixture({
+            app,
+            release,
+            version: oldVersion,
+            workerContent: "old-worker\n"
+        });
+        const installed = runInstallerRaw(environment, windows);
+        assert.equal(installed.status, 0, `${installed.stdout}${installed.stderr}`);
+
+        const workerAlias = resolve(devshellHome, "bin", workerAssetName());
+        const defaultAlias = resolve(devshellHome, "bin", windows ? "devshell-worker.exe" : "devshell-worker");
+        assert.equal(await readFile(workerAlias, "utf8"), "old-worker\n");
+        assert.equal(await readFile(defaultAlias, "utf8"), "old-worker\n");
+
+        await writeTransactionalReleaseFixture({
+            app,
+            failAfterActivation: true,
+            release,
+            version: brokenVersion,
+            workerContent: "new-worker\n"
+        });
+        const failed = runInstallerRaw(environment, windows);
+        assert.notEqual(failed.status, 0, `${failed.stdout}${failed.stderr}`);
+        assert.match(`${failed.stdout}${failed.stderr}`, /安装结果验证失败/u);
+
+        const restored = JSON.parse(await readFile(resolve(installRoot, "current", "package.json"), "utf8"));
+        assert.equal(restored.version, oldVersion);
+        assert.equal(await readFile(workerAlias, "utf8"), "old-worker\n");
+        assert.equal(await readFile(defaultAlias, "utf8"), "old-worker\n");
+    } finally {
+        await rm(root, { force: true, recursive: true });
+    }
+}
+
+async function writeTransactionalReleaseFixture({ app, failAfterActivation = false, release, version, workerContent }) {
+    await rm(app, { force: true, recursive: true });
+    await mkdir(resolve(app, "custom"), { recursive: true });
+    await mkdir(release, { recursive: true });
+    await writeFile(resolve(app, "package.json"), `${JSON.stringify({
+        name: "portable-devshell",
+        version,
+        private: true,
+        type: "module",
+        bin: { devshell: "./custom/devshell-entry.js" },
+        engines: { node: ">=24" }
+    }, null, 2)}\n`, "utf8");
+    await writeFile(resolve(app, "portable-devshell-install.json"), `${JSON.stringify({
+        minimumNodeMajor: 24,
+        version
+    }, null, 2)}\n`, "utf8");
+    const cli = resolve(app, "custom", "devshell-entry.js");
+    await writeFile(cli, [
+        "#!/usr/bin/env node",
+        "import { realpathSync } from 'node:fs';",
+        "const command = process.argv[2] ?? 'status';",
+        ...(failAfterActivation ? [
+            "const staged = realpathSync(process.argv[1]).includes('.staging-');",
+            "if (command === 'status' && !staged) { process.stderr.write('post-activation failure\\n'); process.exit(1); }"
+        ] : []),
+        "if (command === 'status') process.stdout.write('control: stopped\\n');",
+        "else if (command === 'stop') process.exit(0);",
+        "else { process.stderr.write(`unsupported test command: ${command}\\n`); process.exit(2); }",
+        ""
+    ].join("\n"), "utf8");
+    if (process.platform !== "win32") await chmod(cli, 0o755);
+
+    const archive = resolve(release, applicationAssetName());
+    run(process.platform === "win32" ? "tar.exe" : "tar", ["-czf", archive, "-C", app, "."]);
+    await writeChecksum(archive);
+    const worker = resolve(release, workerAssetName());
+    await writeFile(worker, workerContent, "utf8");
+    await writeChecksum(worker);
+}
+
+function runInstallerRaw(environment, windows) {
+    const executable = windows ? "powershell.exe" : "sh";
+    const args = windows ? [
+        "-NoProfile",
+        "-NonInteractive",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        resolve(repositoryRoot, "scripts", "install-release.ps1")
+    ] : [resolve(repositoryRoot, "scripts", "install-release.sh")];
+    return spawnSync(executable, args, {
+        cwd: repositoryRoot,
+        encoding: "utf8",
+        env: environment,
+        timeout: 30_000
+    });
+}
+
+function workerAssetName() {
+    const target = hostTarget();
+    return target.startsWith("windows-") ? `devshell-worker-${target}.exe` : `devshell-worker-${target}`;
+}

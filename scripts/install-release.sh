@@ -229,21 +229,94 @@ install_worker() {
     ln -sfn "../workers/$target/$sha/$binary_name" "$worker_bin_directory/$asset"
 }
 
+backup_worker_aliases() {
+    rm -rf "$worker_backup_directory"
+    mkdir -p -m 700 "$worker_backup_directory"
+    for target in $targets; do
+        case "$target" in
+            windows-*) asset="devshell-worker-$target.exe" ;;
+            *) asset="devshell-worker-$target" ;;
+        esac
+        path="$worker_bin_directory/$asset"
+        if [ -e "$path" ] || [ -L "$path" ]; then
+            if ! cp -P "$path" "$worker_backup_directory/$asset"; then
+                rm -rf "$worker_backup_directory"
+                return 1
+            fi
+        fi
+    done
+    path="$worker_bin_directory/devshell-worker"
+    if [ -e "$path" ] || [ -L "$path" ]; then
+        if ! cp -P "$path" "$worker_backup_directory/devshell-worker"; then
+            rm -rf "$worker_backup_directory"
+            return 1
+        fi
+    fi
+}
+
+restore_worker_aliases() {
+    restore_worker_failed=0
+    for target in $targets; do
+        case "$target" in
+            windows-*) asset="devshell-worker-$target.exe" ;;
+            *) asset="devshell-worker-$target" ;;
+        esac
+        rm -f "$worker_bin_directory/$asset" || restore_worker_failed=1
+        if [ -e "$worker_backup_directory/$asset" ] || [ -L "$worker_backup_directory/$asset" ]; then
+            cp -P "$worker_backup_directory/$asset" "$worker_bin_directory/$asset" || restore_worker_failed=1
+        fi
+    done
+    rm -f "$worker_bin_directory/devshell-worker" || restore_worker_failed=1
+    if [ -e "$worker_backup_directory/devshell-worker" ] || [ -L "$worker_backup_directory/devshell-worker" ]; then
+        cp -P "$worker_backup_directory/devshell-worker" "$worker_bin_directory/devshell-worker" || restore_worker_failed=1
+    fi
+    if [ "$restore_worker_failed" -eq 0 ]; then
+        rm -rf "$worker_backup_directory" || restore_worker_failed=1
+    fi
+    return "$restore_worker_failed"
+}
+
 rollback_application() {
-    rm -rf "$version_directory"
+    rollback_app_failed=0
     if [ -e "$backup_directory" ] || [ -L "$backup_directory" ]; then
-        mv "$backup_directory" "$version_directory"
+        if rm -rf "$version_directory"; then
+            mv "$backup_directory" "$version_directory" || rollback_app_failed=1
+        else
+            rollback_app_failed=1
+        fi
+    elif [ "$previous_version_present" -eq 0 ]; then
+        rm -rf "$version_directory" || rollback_app_failed=1
     fi
     if [ -n "${previous_current_target:-}" ]; then
-        ln -sfn "$previous_current_target" "$current_link"
+        ln -sfn "$previous_current_target" "$current_link" || rollback_app_failed=1
     else
-        rm -f "$current_link"
+        rm -f "$current_link" || rollback_app_failed=1
     fi
     if [ -n "${previous_command_target:-}" ]; then
-        ln -sfn "$previous_command_target" "$command_link"
+        ln -sfn "$previous_command_target" "$command_link" || rollback_app_failed=1
     else
-        rm -f "$command_link"
+        rm -f "$command_link" || rollback_app_failed=1
     fi
+    return "$rollback_app_failed"
+}
+
+rollback_installation() {
+    rollback_install_failed=0
+    if [ "$application_transaction_active" -eq 1 ]; then
+        if rollback_application; then
+            application_transaction_active=0
+        else
+            rollback_install_failed=1
+        fi
+    fi
+    if [ "$worker_transaction_active" -eq 1 ]; then
+        if restore_worker_aliases; then
+            worker_transaction_active=0
+        else
+            rollback_install_failed=1
+        fi
+    fi
+    return "$rollback_install_failed"
 }
 
 repository=${PORTABLE_DEVSHELL_RELEASE_REPOSITORY:-Aromatic05/portable-devshell}
@@ -260,6 +333,7 @@ require_command curl
 require_command node
 require_command tar
 require_command install
+require_command cp
 require_command readlink
 require_command ps
 
@@ -349,8 +423,32 @@ backup_directory="$install_root/.backup-$version-$$"
 current_link="$install_root/current"
 command_link="$bin_directory/devshell"
 worker_bin_directory="$devshell_home/bin"
+worker_backup_directory="$devshell_home/.install-worker-backup-$$"
+application_transaction_active=0
+worker_transaction_active=0
+previous_version_present=0
+if [ -e "$version_directory" ] || [ -L "$version_directory" ]; then
+    previous_version_present=1
+fi
 
-rm -rf "$staging_directory" "$backup_directory"
+cleanup_installation() {
+    status=$?
+    trap - EXIT HUP INT TERM
+    if [ "$application_transaction_active" -eq 1 ] || [ "$worker_transaction_active" -eq 1 ]; then
+        if ! rollback_installation; then
+            echo "安装回滚未完整完成；备份目录已保留以便人工恢复。" >&2
+            status=1
+        fi
+    fi
+    rm -rf "$temporary"
+    exit "$status"
+}
+trap cleanup_installation EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+rm -rf "$staging_directory" "$backup_directory" "$worker_backup_directory"
 mkdir -p -m 700 "$install_root" "$versions_directory" "$worker_bin_directory" "$staging_directory"
 mkdir -p "$bin_directory"
 cp -R "$temporary/app/." "$staging_directory/"
@@ -377,6 +475,8 @@ if ! stop_installed_control "$current_cli"; then
     exit 1
 fi
 
+backup_worker_aliases
+worker_transaction_active=1
 for target in $targets; do
     detail "安装 $target Worker"
     install_worker "$target"
@@ -392,30 +492,30 @@ if [ -L "$command_link" ]; then
     previous_command_target=$(readlink "$command_link")
 fi
 
+application_transaction_active=1
 if [ -e "$version_directory" ] || [ -L "$version_directory" ]; then
     mv "$version_directory" "$backup_directory"
 fi
 
 if ! mv "$staging_directory" "$version_directory"; then
-    rm -rf "$version_directory"
-    if [ -e "$backup_directory" ]; then
-        mv "$backup_directory" "$version_directory"
-    fi
+    rollback_installation
     exit 1
 fi
 if ! ln -sfn "versions/$version" "$current_link" || ! ln -sfn "$current_link/$cli_relative_path" "$command_link"; then
     echo "无法激活新版本，正在恢复原安装。" >&2
-    rollback_application
+    rollback_installation
     exit 1
 fi
 
 step "验证安装结果"
 if ! smoke_cli "$command_link" "安装结果验证失败"; then
     echo "新版本未通过启动验证，正在恢复原安装。" >&2
-    rollback_application
+    rollback_installation
     exit 1
 fi
-rm -rf "$backup_directory"
+rm -rf "$backup_directory" "$worker_backup_directory"
+application_transaction_active=0
+worker_transaction_active=0
 detail "已安装命令可以正常启动"
 
 printf '\n已安装 portable-devshell %s。\n' "$version"

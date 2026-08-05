@@ -1,5 +1,6 @@
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::fs;
+use std::os::unix::fs::MetadataExt;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -8,7 +9,8 @@ use super::warning;
 
 use crate::platform::unix_time_millis;
 use crate::security::path::{
-    FilesystemCapability, PathNamespace, parse_requested_path, resolve_existing_target,
+    FilesystemCapability, PathNamespace, ResolvedPath, parse_requested_path,
+    resolve_existing_target,
 };
 use crate::tools::tmux::backend::{BackendPane, BackendWorkspace, MAX_PANES, TmuxBackend};
 use crate::tools::tmux::output::{OutputWindow, take_output};
@@ -148,7 +150,12 @@ impl TmuxState {
                     ));
                 }
                 let name = next_auto_name(&workspace);
-                let pane = self.backend.create_pane(&name, &call.workspace, true)?;
+                let cwd = resolve_cwd(call, None)?;
+                let pane = self.backend.create_pane(&name, &cwd.canonical, true)?;
+                if let Err(error) = verify_pane_cwd(&pane, &cwd) {
+                    let _ = self.backend.close_pane(&pane);
+                    return Err(error);
+                }
                 workspace = self.backend.capture_workspace()?;
                 auto_created = true;
                 pane
@@ -408,11 +415,7 @@ impl TmuxState {
         let mut panes = Vec::with_capacity(selected.len());
         for pane in selected {
             let lines = self.backend.capture_lines(&pane.tmux_pane_id, start, end)?;
-            panes.push(pane_detail(
-                &pane,
-                current_task(&tasks, &pane.id),
-                lines,
-            ));
+            panes.push(pane_detail(&pane, current_task(&tasks, &pane.id), lines));
         }
         Ok(self.pane_output(panes, self.output_warnings(&workspace)?))
     }
@@ -479,7 +482,13 @@ impl TmuxState {
                 format!("tmux pane capacity reached ({MAX_PANES})"),
             ));
         }
-        let pane = self.backend.create_pane(&params.name, &cwd, false)?;
+        let pane = self
+            .backend
+            .create_pane(&params.name, &cwd.canonical, false)?;
+        if let Err(error) = verify_pane_cwd(&pane, &cwd) {
+            let _ = self.backend.close_pane(&pane);
+            return Err(error);
+        }
         let after = self.backend.capture_workspace()?;
         Ok(TmuxCreateOutput {
             pane: pane_ref(&pane),
@@ -713,7 +722,7 @@ impl TmuxState {
                         unread: Vec::new(),
                     },
                     start_status_seq: pane.status_seq,
-                        finished_at_ms: None,
+                    finished_at_ms: None,
                     last_pane: pane.clone(),
                     warnings: Vec::new(),
                 })
@@ -1007,7 +1016,6 @@ fn pane_gc_eligible(
     }
 }
 
-
 fn next_auto_name(workspace: &BackendWorkspace) -> String {
     for index in 1..=MAX_PANES {
         let name = format!("auto-{index}");
@@ -1040,33 +1048,65 @@ fn require_read(call: &ToolCall) -> Result<(), ToolError> {
         .map_err(ToolError::from)
 }
 
-fn resolve_cwd(call: &ToolCall, requested: Option<&str>) -> Result<PathBuf, ToolError> {
-    let Some(raw) = requested else {
-        return Ok(call.workspace.clone());
-    };
+fn resolve_cwd(call: &ToolCall, requested: Option<&str>) -> Result<ResolvedPath, ToolError> {
+    let explicit = requested.is_some();
+    let raw = requested.unwrap_or("./");
     let requested = parse_requested_path(raw)?;
-    let (read, write) = match requested.namespace {
-        PathNamespace::Workspace => (
-            FilesystemCapability::WorkspaceRead,
-            FilesystemCapability::WorkspaceWrite,
-        ),
-        PathNamespace::Absolute => (
-            FilesystemCapability::AbsoluteRead,
-            FilesystemCapability::AbsoluteWrite,
-        ),
-    };
-    call.policy
-        .check_capability(read)
-        .and_then(|_| call.policy.check_capability(write))
-        .map_err(ToolError::from)?;
-    let resolved = resolve_existing_target(&call.workspace, &requested)?.canonical;
-    if !resolved.is_dir() {
+    if explicit {
+        let (read, write) = match requested.namespace {
+            PathNamespace::Workspace => (
+                FilesystemCapability::WorkspaceRead,
+                FilesystemCapability::WorkspaceWrite,
+            ),
+            PathNamespace::Absolute => (
+                FilesystemCapability::AbsoluteRead,
+                FilesystemCapability::AbsoluteWrite,
+            ),
+        };
+        call.policy
+            .check_capability(read)
+            .and_then(|_| call.policy.check_capability(write))
+            .map_err(ToolError::from)?;
+    }
+    let resolved = resolve_existing_target(&call.workspace, &requested)?;
+    if !resolved.access_path().is_dir() {
         return Err(ToolError::new(
             "tmux.invalidCwd",
-            format!("pane cwd is not a directory: {}", resolved.display()),
+            format!(
+                "pane cwd is not a directory: {}",
+                resolved.canonical.display()
+            ),
         ));
     }
     Ok(resolved)
+}
+
+fn verify_pane_cwd(pane: &BackendPane, expected: &ResolvedPath) -> Result<(), ToolError> {
+    let expected_metadata = fs::metadata(expected.access_path()).map_err(|error| {
+        ToolError::retryable(
+            "tmux.cwdChanged",
+            format!("resolved pane cwd cannot be verified: {error}"),
+        )
+    })?;
+    let actual_metadata = fs::metadata(&pane.cwd).map_err(|error| {
+        ToolError::retryable(
+            "tmux.cwdChanged",
+            format!("created pane cwd cannot be verified: {error}"),
+        )
+    })?;
+    if actual_metadata.dev() != expected_metadata.dev()
+        || actual_metadata.ino() != expected_metadata.ino()
+    {
+        return Err(ToolError::retryable(
+            "tmux.cwdChanged",
+            format!(
+                "created pane cwd does not match the resolved directory: expected {}, received {}",
+                expected.canonical.display(),
+                pane.cwd,
+            ),
+        ));
+    }
+    Ok(())
 }
 
 fn non_empty<T>(values: Vec<T>) -> Option<Vec<T>> {
@@ -1100,7 +1140,12 @@ fn lock_error(name: &str) -> ToolError {
 
 #[cfg(test)]
 mod tests {
-    use super::{AUTO_PANE_IDLE_TTL_MS, PaneGcTrigger, next_auto_name, pane_gc_eligible};
+    use std::fs;
+
+    use super::{
+        AUTO_PANE_IDLE_TTL_MS, PaneGcTrigger, next_auto_name, pane_gc_eligible, verify_pane_cwd,
+    };
+    use crate::security::path::{parse_requested_path, resolve_existing_target};
     use crate::tools::tmux::backend::{BackendPane, BackendWorkspace};
 
     #[test]
@@ -1187,5 +1232,20 @@ mod tests {
             foreign_panes: 0,
         };
         assert_eq!(next_auto_name(&workspace), "auto-2");
+    }
+
+    #[test]
+    fn pane_cwd_verification_rejects_a_created_pane_outside_the_resolved_directory() {
+        let root = crate::testing::temp_dir();
+        let outside = crate::testing::temp_dir();
+        let workspace = root.path().join("workspace");
+        fs::create_dir_all(workspace.join("safe")).unwrap();
+        let requested = parse_requested_path("./safe").unwrap();
+        let resolved = resolve_existing_target(&workspace, &requested).unwrap();
+        let mut created = pane("created");
+        created.cwd = outside.path().to_string_lossy().into_owned();
+
+        let error = verify_pane_cwd(&created, &resolved).unwrap_err();
+        assert_eq!(error.code, "tmux.cwdChanged");
     }
 }

@@ -1,8 +1,7 @@
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
-import { chmod, copyFile, mkdir, readFile, rm, writeFile } from "node:fs/promises";
-import { isAbsolute, resolve } from "node:path";
+import { copyFile, mkdir, rm } from "node:fs/promises";
+import { basename, dirname, isAbsolute, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createTestTempDirectory } from "../test/TestTempDirectory.mjs";
 
@@ -49,11 +48,10 @@ try {
         const asset = target.startsWith("windows-")
             ? `devshell-worker-${target}.exe`
             : `devshell-worker-${target}`;
-        const path = resolve(release, asset);
-        await writeFile(path, "#!/bin/sh\nexit 0\n", "utf8");
-        await chmod(path, 0o755);
-        const sha256 = createHash("sha256").update(await readFile(path)).digest("hex");
-        await writeFile(`${path}.sha256`, `${sha256}  ${asset}\n`, "utf8");
+        const source = resolve(dirname(archive), asset);
+        for (const path of [source, `${source}.sha256`]) {
+            await copyFile(path, resolve(release, basename(path)));
+        }
     }
 
     const install = run("sh", [resolve(repositoryRoot, "scripts", "install-release.sh")], environment);

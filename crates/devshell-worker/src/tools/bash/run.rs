@@ -1,7 +1,6 @@
 use std::collections::VecDeque;
 use std::io::{Read, Write};
 use std::ops::{Deref, DerefMut};
-use std::path::PathBuf;
 use std::process::{Child, ExitStatus};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -10,7 +9,9 @@ use std::time::{Duration, Instant};
 
 use crate::daemon::process_registry::ActiveProcessGuard;
 use crate::platform;
-use crate::security::path::{FilesystemCapability, parse_requested_path, resolve_existing_target};
+use crate::security::path::{
+    FilesystemCapability, ResolvedPath, parse_requested_path, resolve_existing_target,
+};
 use crate::tools::artifact::store::{ArtifactDraft, ArtifactStore};
 use crate::tools::artifact::types::{ArtifactReference, ArtifactStream};
 use crate::tools::bash::backend::spawn_shell;
@@ -275,15 +276,15 @@ struct StreamOutput {
     artifact_draft: Option<ArtifactDraft>,
     artifact_warning: Option<String>,
 }
-fn resolve_cwd(call: &ToolCall, raw: Option<&str>) -> Result<PathBuf, ToolError> {
+fn resolve_cwd(call: &ToolCall, raw: Option<&str>) -> Result<ResolvedPath, ToolError> {
     let requested = parse_requested_path(raw.unwrap_or("./"))
         .map_err(|_| ToolError::new("bash.invalidCwd", "cwd must use `./` or `/` syntax"))?;
     let resolved = resolve_existing_target(&call.workspace, &requested)
         .map_err(|error| ToolError::new("bash.invalidCwd", error.message))?;
-    if !resolved.canonical.is_dir() {
+    if !resolved.access_path().is_dir() {
         return Err(ToolError::new("bash.invalidCwd", "cwd is not a directory"));
     }
-    Ok(resolved.canonical)
+    Ok(resolved)
 }
 fn spawn_reader(
     mut reader: impl Read + Send + 'static,

@@ -1,7 +1,7 @@
-#[cfg(target_os = "linux")]
+#[cfg(unix)]
 use std::os::fd::{AsRawFd, OwnedFd};
 use std::path::{Path, PathBuf};
-#[cfg(target_os = "linux")]
+#[cfg(unix)]
 use std::sync::Arc;
 
 use crate::security::path::{PathNamespace, RequestedPath};
@@ -12,7 +12,7 @@ pub struct ResolvedPath {
     pub canonical: PathBuf,
     access: PathBuf,
     target: PathBuf,
-    #[cfg(target_os = "linux")]
+    #[cfg(unix)]
     _anchors: Option<Arc<Vec<OwnedFd>>>,
 }
 
@@ -30,7 +30,7 @@ impl ResolvedPath {
             canonical: self.canonical.join(relative),
             access: self.access.join(relative),
             target: self.target.join(relative),
-            #[cfg(target_os = "linux")]
+            #[cfg(unix)]
             _anchors: self._anchors.clone(),
         }
     }
@@ -41,7 +41,7 @@ pub fn resolve_existing_target(
     requested: &RequestedPath,
 ) -> Result<ResolvedPath, ToolError> {
     if requested.namespace == PathNamespace::Workspace {
-        #[cfg(target_os = "linux")]
+        #[cfg(unix)]
         {
             return resolve_workspace_existing(workspace, requested);
         }
@@ -73,7 +73,7 @@ pub fn resolve_create_target(
     }
 
     if requested.namespace == PathNamespace::Workspace {
-        #[cfg(target_os = "linux")]
+        #[cfg(unix)]
         {
             return resolve_workspace_create(workspace, requested);
         }
@@ -106,12 +106,12 @@ fn plain(canonical: PathBuf) -> ResolvedPath {
         access: canonical.clone(),
         target: canonical.clone(),
         canonical,
-        #[cfg(target_os = "linux")]
+        #[cfg(unix)]
         _anchors: None,
     }
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(unix)]
 fn resolve_workspace_existing(
     workspace: &Path,
     requested: &RequestedPath,
@@ -173,7 +173,7 @@ fn resolve_workspace_existing(
     })
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(unix)]
 fn resolve_workspace_create(
     workspace: &Path,
     requested: &RequestedPath,
@@ -218,7 +218,7 @@ fn resolve_workspace_create(
     })
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(unix)]
 fn workspace_segments(requested: &RequestedPath) -> Result<Vec<std::ffi::OsString>, ToolError> {
     let relative = requested
         .raw
@@ -233,12 +233,16 @@ fn workspace_segments(requested: &RequestedPath) -> Result<Vec<std::ffi::OsStrin
         .collect())
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(unix)]
 fn descriptor_path(fd: &OwnedFd) -> PathBuf {
-    PathBuf::from("/proc/self/fd").join(fd.as_raw_fd().to_string())
+    #[cfg(target_os = "linux")]
+    let root = Path::new("/proc/self/fd");
+    #[cfg(not(target_os = "linux"))]
+    let root = Path::new("/dev/fd");
+    root.join(fd.as_raw_fd().to_string())
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(unix)]
 fn map_resolution_error(error: nix::errno::Errno, requested: &RequestedPath) -> ToolError {
     let code = match error {
         nix::errno::Errno::ENOENT => "file.notFound",
@@ -277,7 +281,7 @@ fn require_workspace_containment(
 #[cfg(test)]
 mod tests {
     use std::fs;
-    #[cfg(target_os = "linux")]
+    #[cfg(unix)]
     use std::os::unix::fs::symlink;
 
     use crate::security::path::parse_requested_path;
@@ -321,7 +325,7 @@ mod tests {
         );
     }
 
-    #[cfg(target_os = "linux")]
+    #[cfg(unix)]
     #[test]
     fn existing_workspace_path_remains_anchored_after_parent_swap() {
         let root = crate::testing::temp_dir();
@@ -345,7 +349,7 @@ mod tests {
         );
     }
 
-    #[cfg(target_os = "linux")]
+    #[cfg(unix)]
     #[test]
     fn create_workspace_path_remains_anchored_after_parent_swap() {
         let root = crate::testing::temp_dir();

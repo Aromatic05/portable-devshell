@@ -17,7 +17,8 @@ use uuid::Uuid;
 use crate::platform::unix_time_millis;
 use crate::security::SecurityPolicy;
 use crate::security::path::{
-    FilesystemCapability, PathNamespace, parse_requested_path, resolve_existing_target,
+    FilesystemCapability, PathNamespace, ResolvedPath, parse_requested_path,
+    resolve_existing_target,
 };
 use crate::tools::ToolError;
 use crate::tools::artifact::storage;
@@ -210,7 +211,15 @@ impl ArtifactPayloadStore {
             ));
         }
         let resolved = resolve_existing_target(workspace, &requested)?;
-        let metadata = fs::symlink_metadata(&resolved.canonical)
+        self.open_resolved_path(&resolved, expires_at_ms)
+    }
+
+    fn open_resolved_path(
+        &self,
+        resolved: &ResolvedPath,
+        expires_at_ms: u128,
+    ) -> Result<ArtifactPayloadOpenResult, ToolError> {
+        let metadata = fs::metadata(resolved.access_path())
             .map_err(|error| ToolError::new("artifact.readFailed", error.to_string()))?;
 
         let _guard = self.lock()?;
@@ -218,9 +227,9 @@ impl ArtifactPayloadStore {
 
         let payload_id = Uuid::new_v4().to_string();
         let descriptor = if metadata.is_file() {
-            self.create_file_payload(&payload_id, &resolved.canonical)?
+            self.create_file_payload(&payload_id, resolved.access_path(), &resolved.canonical)?
         } else if metadata.is_dir() {
-            self.create_directory_payload(&payload_id, &resolved.canonical)?
+            self.create_directory_payload(&payload_id, resolved.access_path(), &resolved.canonical)?
         } else {
             return Err(ToolError::new(
                 "artifact.directoryUnsafe",
@@ -315,8 +324,9 @@ impl ArtifactPayloadStore {
         &self,
         payload_id: &str,
         source_path: &Path,
+        display_path: &Path,
     ) -> Result<ArtifactPayloadDescriptor, ToolError> {
-        let name = utf8_file_name(source_path)?;
+        let name = utf8_file_name(display_path)?;
         let mut source = File::open(source_path)
             .map_err(|error| ToolError::new("artifact.readFailed", error.to_string()))?;
         if !source
@@ -354,8 +364,9 @@ impl ArtifactPayloadStore {
         &self,
         payload_id: &str,
         source_path: &Path,
+        display_path: &Path,
     ) -> Result<ArtifactPayloadDescriptor, ToolError> {
-        let source_name = utf8_file_name(source_path).unwrap_or_else(|_| "directory".to_string());
+        let source_name = utf8_file_name(display_path).unwrap_or_else(|_| "directory".to_string());
         let entries = collect_directory_entries(source_path)?;
         let mut temp = self.new_temp("payload-directory-")?;
         let mut manifest_hasher = blake3::Hasher::new();
@@ -847,6 +858,35 @@ mod tests {
         assert_eq!(STANDARD.decode(chunk.content).unwrap(), b"before");
         assert_eq!(opened.descriptor.payload_type, ArtifactPayloadType::File);
         assert_eq!(opened.descriptor.payload_bytes, 6);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn regular_file_payload_keeps_the_resolved_source_anchored_after_parent_swap() {
+        use std::os::unix::fs::symlink;
+
+        use crate::security::path::{parse_requested_path, resolve_existing_target};
+
+        let root = crate::testing::temp_dir();
+        let outside = crate::testing::temp_dir();
+        let workspace = root.path().join("workspace");
+        fs::create_dir_all(workspace.join("safe")).unwrap();
+        fs::write(workspace.join("safe/result.bin"), b"inside").unwrap();
+        fs::write(outside.path().join("result.bin"), b"outside").unwrap();
+        let requested = parse_requested_path("./safe/result.bin").unwrap();
+        let resolved = resolve_existing_target(&workspace, &requested).unwrap();
+
+        fs::rename(workspace.join("safe"), workspace.join("safe-old")).unwrap();
+        symlink(outside.path(), workspace.join("safe")).unwrap();
+
+        let artifacts = ArtifactStore::new(root.path().join("artifacts")).unwrap();
+        let payloads = ArtifactPayloadStore::new(root.path().join("payloads"), artifacts).unwrap();
+        let opened = payloads
+            .open_resolved_path(&resolved, expires_at_ms())
+            .unwrap();
+        assert_eq!(opened.descriptor.name, "result.bin");
+        let chunk = payloads.read(&opened.payload_id, 0, 1024).unwrap();
+        assert_eq!(STANDARD.decode(chunk.content).unwrap(), b"inside");
     }
 
     #[test]

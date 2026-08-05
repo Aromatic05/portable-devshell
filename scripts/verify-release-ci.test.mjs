@@ -68,8 +68,18 @@ test("development CI validates every native target and exercises its target-spec
 
 test("release workflow requires the development CI gate before packaging any release assets", async () => {
     const workflow = await readFile(resolve(repositoryRoot, ".github", "workflows", "release.yml"), "utf8");
+    assert.match(workflow, /concurrency:\r?\n\s+group: release-\$\{\{ github\.ref \}\}\r?\n\s+cancel-in-progress: false/u);
     assert.match(workflow, /verify-development-ci:/u);
+    assert.match(workflow, /version-state\.mjs check-release "\$GITHUB_REF_NAME"/u);
+    assert.match(workflow, /publish-release\.mjs --check-absent --tag "\$GITHUB_REF_NAME" --repository "\$GITHUB_REPOSITORY"/u);
     assert.match(workflow, /node \.\/scripts\/verify-release-ci\.mjs/u);
     assert.match(workflow, /build-worker:\r?\n\s+needs: verify-development-ci/u);
     assert.match(workflow, /pnpm package:app -- --target "\$\{\{ matrix\.target \}\}"/u);
+    assert.match(workflow, /smoke-worker\.mjs \.\/release-assets\/devshell-worker-\$\{\{ matrix\.target \}\}/u);
+    assert.match(workflow, /smoke-client\.mjs \.\/release-assets\/devshell-worker-\$\{\{ matrix\.target \}\}/u);
+    assert.match(workflow, /smoke:package -- \.\/release-assets\/portable-devshell-app-\$\{\{ matrix\.target \}\}\.tar\.gz/u);
+    assert.match(workflow, /smoke:install-release -- \.\/release-assets\/portable-devshell-app-\$\{\{ matrix\.target \}\}\.tar\.gz/u);
+    assert.match(workflow, /smoke-install-release-windows\.mjs \.\/release-assets\/portable-devshell-app-\$\{\{ matrix\.target \}\}\.tar\.gz/u);
+    assert.match(workflow, /publish-release\.mjs --tag "\$GITHUB_REF_NAME" --asset-dir \.\/release-assets/u);
+    assert.doesNotMatch(workflow, /gh release upload|--clobber/u);
 });

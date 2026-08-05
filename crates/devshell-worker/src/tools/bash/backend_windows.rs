@@ -1,22 +1,22 @@
 use std::collections::BTreeMap;
-use std::path::Path;
 use std::process::{Child, Command, Stdio};
 
 use crate::platform::configure_child_process;
+use crate::security::path::ResolvedPath;
 use crate::tools::ToolError;
 use crate::tools::bash::runtime::{ShellRuntime, powershell_command};
 
 pub fn spawn_shell(
     shell: &ShellRuntime,
     command_text: &str,
-    cwd: &Path,
+    cwd: &ResolvedPath,
     env: &BTreeMap<String, Option<String>>,
 ) -> Result<Child, ToolError> {
     let mut command = Command::new(&shell.executable);
     command
         .args(["-NoLogo", "-NoProfile", "-NonInteractive", "-Command"])
         .arg(powershell_command(command_text))
-        .current_dir(cwd)
+        .current_dir(cwd.access_path())
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());

@@ -1,24 +1,24 @@
 use std::collections::BTreeMap;
 use std::os::unix::process::CommandExt;
-use std::path::Path;
 use std::process::{Child, Command, Stdio};
 
 use nix::unistd::{Pid, setpgid};
 
+use crate::security::path::ResolvedPath;
 use crate::tools::ToolError;
 use crate::tools::bash::runtime::ShellRuntime;
 
 pub fn spawn_shell(
     shell: &ShellRuntime,
     command_text: &str,
-    cwd: &Path,
+    cwd: &ResolvedPath,
     env: &BTreeMap<String, Option<String>>,
 ) -> Result<Child, ToolError> {
     let mut command = Command::new(&shell.executable);
     command
         .arg("-lc")
         .arg(command_text)
-        .current_dir(cwd)
+        .current_dir(cwd.access_path())
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -44,5 +44,44 @@ fn apply_environment(command: &mut Command, env: &BTreeMap<String, Option<String
                 command.env_remove(key);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeMap;
+    use std::fs;
+    use std::os::unix::fs::symlink;
+
+    use crate::security::path::{parse_requested_path, resolve_existing_target};
+    use crate::tools::bash::runtime::ShellRuntime;
+
+    use super::spawn_shell;
+
+    #[test]
+    fn spawned_shell_uses_the_anchored_directory_after_parent_swap() {
+        let root = crate::testing::temp_dir();
+        let outside = crate::testing::temp_dir();
+        let workspace = root.path().join("workspace");
+        fs::create_dir_all(workspace.join("safe")).unwrap();
+        fs::write(workspace.join("safe/marker.txt"), "inside").unwrap();
+        fs::write(outside.path().join("marker.txt"), "outside").unwrap();
+        let requested = parse_requested_path("./safe").unwrap();
+        let resolved = resolve_existing_target(&workspace, &requested).unwrap();
+
+        fs::rename(workspace.join("safe"), workspace.join("safe-old")).unwrap();
+        symlink(outside.path(), workspace.join("safe")).unwrap();
+
+        let output = spawn_shell(
+            &ShellRuntime::detect().unwrap(),
+            "cat marker.txt",
+            &resolved,
+            &BTreeMap::new(),
+        )
+        .unwrap()
+        .wait_with_output()
+        .unwrap();
+        assert!(output.status.success());
+        assert_eq!(String::from_utf8(output.stdout).unwrap().trim(), "inside");
     }
 }
