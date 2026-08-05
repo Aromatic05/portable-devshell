@@ -44,6 +44,7 @@ export * from "./worker/tool/WorkerToolCatalog.js";
 export * from "./worker/tool/WorkerToolCallScheduler.js";
 export * from "./worker/tool/WorkerToolInvoker.js";
 export * from "./worker/transport/driver/WorkerTransportDriverDocker.js";
+export * from "./worker/transport/driver/WorkerTransportDriverContainerBase.js";
 export * from "./worker/transport/driver/WorkerTransportDriverLocal.js";
 export * from "./worker/transport/driver/WorkerTransportDriverPodman.js";
 export * from "./worker/transport/driver/WorkerTransportDriverSsh.js";

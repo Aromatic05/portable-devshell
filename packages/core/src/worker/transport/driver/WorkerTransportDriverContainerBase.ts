@@ -276,36 +276,12 @@ export class WorkerTransportDriverContainerBase implements WorkerCommandTranspor
         keys: string[];
         processEnv?: NodeJS.ProcessEnv;
     } {
-        if (env === undefined) {
-            return { keys: [] };
-        }
-
-        const conflicts = Object.keys(env)
-            .filter((key) => env[key] !== undefined && providerEnvironmentKeys.has(key))
-            .sort();
-        if (conflicts.length > 0) {
-            throw createError({
-                code: errorCodes.coreProviderFailed,
-                details: {
-                    environmentKeys: conflicts,
-                    provider: this.#provider
-                },
-                message: `Container instance environment cannot override provider-reserved variables: ${conflicts.join(", ")}.`,
-                retryable: false
-            });
-        }
-
-        const processEnv = { ...process.env };
-        const keys: string[] = [];
-        for (const [key, value] of Object.entries(env)) {
-            if (value === undefined || isInternalWorkerEnvironmentKey(key)) {
-                continue;
-            }
-            processEnv[key] = value;
-            keys.push(key);
-        }
-        keys.sort();
-        return { keys, processEnv };
+        return createContainerWorkerEnvironment({
+            env,
+            platform: process.platform,
+            processEnvironment: process.env,
+            provider: this.#provider
+        });
     }
 
     #createExecInvocation(
@@ -383,6 +359,80 @@ const providerEnvironmentKeys = new Set([
     "XDG_DATA_HOME",
     "XDG_RUNTIME_DIR"
 ]);
+
+export function createContainerWorkerEnvironment(options: {
+    env: NodeJS.ProcessEnv | undefined;
+    platform: NodeJS.Platform;
+    processEnvironment: NodeJS.ProcessEnv;
+    provider: "docker" | "podman";
+}): { keys: string[]; processEnv?: NodeJS.ProcessEnv } {
+    if (options.env === undefined) {
+        return { keys: [] };
+    }
+
+    const conflicts = [...new Set(Object.keys(options.env)
+        .filter((key) => options.env?.[key] !== undefined)
+        .map((key) => canonicalProviderEnvironmentKey(key, options.platform))
+        .filter((key): key is string => key !== undefined))]
+        .sort();
+    if (conflicts.length > 0) {
+        throw createError({
+            code: errorCodes.coreProviderFailed,
+            details: {
+                environmentKeys: conflicts,
+                provider: options.provider
+            },
+            message: `Container instance environment cannot override provider-reserved variables: ${conflicts.join(", ")}.`,
+            retryable: false
+        });
+    }
+
+    const processEnv = normalizeProviderProcessEnvironment(options.processEnvironment, options.platform);
+    const keys: string[] = [];
+    for (const [key, value] of Object.entries(options.env)) {
+        if (value === undefined || isInternalWorkerEnvironmentKey(key)) {
+            continue;
+        }
+        processEnv[key] = value;
+        keys.push(key);
+    }
+    keys.sort();
+    return { keys, processEnv };
+}
+
+function canonicalProviderEnvironmentKey(key: string, platform: NodeJS.Platform): string | undefined {
+    if (platform === "win32") {
+        const normalized = key.toUpperCase();
+        return providerEnvironmentKeys.has(normalized) ? normalized : undefined;
+    }
+    return providerEnvironmentKeys.has(key) ? key : undefined;
+}
+
+function normalizeProviderProcessEnvironment(
+    environment: NodeJS.ProcessEnv,
+    platform: NodeJS.Platform
+): NodeJS.ProcessEnv {
+    const normalized = { ...environment };
+    if (platform !== "win32") {
+        return normalized;
+    }
+
+    for (const canonical of providerEnvironmentKeys) {
+        const matches = Object.keys(normalized).filter((key) => key.toUpperCase() === canonical);
+        if (matches.length === 0) {
+            continue;
+        }
+        const selected = matches.includes(canonical) ? canonical : matches[0];
+        const value = selected === undefined ? undefined : normalized[selected];
+        for (const key of matches) {
+            delete normalized[key];
+        }
+        if (value !== undefined) {
+            normalized[canonical] = value;
+        }
+    }
+    return normalized;
+}
 
 function isInternalWorkerEnvironmentKey(key: string): boolean {
     return key === "DEVSHELL_WORKER_INTERNAL_INSTANCE"

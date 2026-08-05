@@ -10,6 +10,7 @@ import test from "node:test";
 import { extract } from "tar-stream";
 
 import {
+    createContainerWorkerEnvironment,
     WorkerTransportDriverDocker,
     WorkerTransportDriverLocal,
     WorkerTransportDriverPodman,
@@ -1230,6 +1231,34 @@ test("podman transport preserves provider storage environment and forwards worke
     assert.equal(exec.options.env?.XDG_RUNTIME_DIR, "/control/runtime");
     assert.equal(exec.options.env?.FOO, "bar");
     assert.equal(exec.options.env?.DEVSHELL_WORKER_SECURITY_MODE, "workspace");
+});
+
+test("Windows container provider environment canonicalizes reserved keys case-insensitively", () => {
+    const environment = createContainerWorkerEnvironment({
+        env: { FOO: "bar" },
+        platform: "win32",
+        processEnvironment: {
+            HOME: "C:\\Users\\runner",
+            Path: "C:\\provider\\bin",
+            Xdg_Runtime_Dir: "C:\\runtime"
+        },
+        provider: "podman"
+    });
+
+    assert.equal(environment.processEnv?.PATH, "C:\\provider\\bin");
+    assert.equal(environment.processEnv?.XDG_RUNTIME_DIR, "C:\\runtime");
+    assert.equal(environment.processEnv?.Path, undefined);
+    assert.equal(environment.processEnv?.Xdg_Runtime_Dir, undefined);
+    assert.equal(environment.processEnv?.FOO, "bar");
+    assert.throws(
+        () => createContainerWorkerEnvironment({
+            env: { path: "C:\\override" },
+            platform: "win32",
+            processEnvironment: {},
+            provider: "podman"
+        }),
+        /cannot override provider-reserved variables: PATH/u
+    );
 });
 
 test("podman transport rejects provider-reserved instance environment before provisioning", async () => {
