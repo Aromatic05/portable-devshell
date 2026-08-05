@@ -15,6 +15,7 @@ import {
 import { runConnectorLoop } from "./testspace/TestspaceConnector.mjs";
 import {
     createTestspaceProcessEnvironment,
+    removeTestspaceDockerContainers,
     resetTestspacePodmanStorage,
     resolveTestspaceRuntimeDirectory,
     stopTestspaceTmux,
@@ -29,6 +30,7 @@ const paths = {
     controlConfig: join(root, "home", ".devshell", "control", "config.toml"),
     home: join(root, "home"),
     instanceConfig: join(root, "home", ".devshell", "control", "instances", `${TESTSPACE_INSTANCE}.toml`),
+    instanceConfigDirectory: join(root, "home", ".devshell", "control", "instances"),
     legacyRuntime: join(root, "runtime"),
     runtime: resolveTestspaceRuntimeDirectory(root),
     state: join(root, "state.json"),
@@ -95,7 +97,9 @@ async function start(argv) {
     }
 
     stopTestspaceTmux(previousRuntime, TESTSPACE_INSTANCE);
+    removeTestspaceDockerContainers(paths.instanceConfigDirectory);
     resetTestspacePodmanStorage(paths.home, previousRuntime);
+    await rm(root, { force: true, recursive: true });
     await Promise.all(runtimeDirectories(previousRuntime).map(async (directory) =>
         await rm(directory, { force: true, recursive: true })
     ));
@@ -190,6 +194,7 @@ async function stop() {
         throw new Error(`testspace control process ${String(controlPid)} is still running`);
     }
     stopTestspaceTmux(runtimeDirectory, TESTSPACE_INSTANCE);
+    removeTestspaceDockerContainers(paths.instanceConfigDirectory);
     resetTestspacePodmanStorage(paths.home, runtimeDirectory);
     await Promise.all([
         rm(root, { force: true, recursive: true }),

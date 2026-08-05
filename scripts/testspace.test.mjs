@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -18,6 +18,7 @@ import {
 import { createSafeAction, SAFE_ACTIONS } from "./testspace/TestspaceConnector.mjs";
 import {
     createTestspaceProcessEnvironment,
+    removeTestspaceDockerContainers,
     resetTestspacePodmanStorage,
     resolveTestspaceRuntimeDirectory,
     stopTestspaceTmux,
@@ -169,6 +170,61 @@ test("testspace Podman cleanup resets the isolated store before directory remova
         calls[1].options.env.XDG_RUNTIME_DIR,
         "/tmp/testspace-runtime",
     );
+});
+
+test("testspace Docker cleanup removes only managed containers declared by isolated configs", async (t) => {
+    const root = await mkdtemp(join(tmpdir(), "pds-testspace-docker-cleanup-"));
+    t.after(async () => await rm(root, { force: true, recursive: true }));
+    await writeFile(join(root, "managed.toml"), [
+        'version = 2',
+        'name = "managed-docker"',
+        'provider = "docker"',
+        '',
+        '[container]',
+        'mode = "existingImage"',
+        'image = "ubuntu:24.04"',
+        'containerName = "managed-container"',
+    ].join("\n"), "utf8");
+    await writeFile(join(root, "default-name.toml"), [
+        'version = 2',
+        'name = "default-docker"',
+        'provider = "docker"',
+        '',
+        '[container]',
+        'mode = "preset"',
+        'preset = "ubuntu"',
+    ].join("\n"), "utf8");
+    await writeFile(join(root, "adopted.toml"), [
+        'version = 2',
+        'name = "adopted-docker"',
+        'provider = "docker"',
+        '',
+        '[container]',
+        'mode = "existingStoppedContainer"',
+        'containerName = "user-container"',
+    ].join("\n"), "utf8");
+    await writeFile(join(root, "podman.toml"), [
+        'version = 2',
+        'name = "managed-podman"',
+        'provider = "podman"',
+        '',
+        '[container]',
+        'mode = "existingImage"',
+        'image = "ubuntu:24.04"',
+        'containerName = "podman-container"',
+    ].join("\n"), "utf8");
+    const calls = [];
+    const removed = removeTestspaceDockerContainers(root, {
+        spawn(command, args) {
+            calls.push({ command, args });
+            return { status: 0, stderr: "", stdout: `${args.at(-1)}\n` };
+        },
+    });
+    assert.deepEqual(removed, ["devshell-default-docker", "managed-container"]);
+    assert.deepEqual(calls, [
+        { command: "docker", args: ["rm", "--force", "devshell-default-docker"] },
+        { command: "docker", args: ["rm", "--force", "managed-container"] },
+    ]);
 });
 
 test("testspace stop terminates its real tmux server", {
