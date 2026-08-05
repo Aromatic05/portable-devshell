@@ -358,6 +358,115 @@ test("ssh transport uses remote cwd only for start command", async () => {
     });
 });
 
+test("ssh transport uploads instance environment without replacing the local ssh environment", async () => {
+    const recorder = createSpawnRecorder((call, child, callIndex) => {
+        if (callIndex === 0) {
+            child.stdin.once("finish", () => closeRecordedChild(child));
+            return true;
+        }
+        return false;
+    });
+    const transport = new WorkerTransportDriverSsh({
+        command: "ssh-bin devbox",
+        workspace: "/srv/workspace",
+        workerBinary: new WorkerBinary("/usr/local/bin/devshell-worker"),
+        spawnFunction: recorder.spawn
+    });
+
+    const result = await transport.runWorkerCommand("start", {
+        env: {
+            API_TOKEN: "remote-secret",
+            DEVSHELL_WORKER_INTERNAL_SECURITY_MODE: "workspace",
+            DEVSHELL_WORKER_SECURITY_MODE: "workspace",
+            HOME: "/remote/home",
+            PATH: "/remote/bin"
+        },
+        instanceName: "task-3-ssh",
+        workspacePath: "/srv/workspace"
+    });
+
+    assert.equal(result.exitCode, 0);
+    assert.equal(recorder.calls.length, 2);
+    const upload = recorder.calls[0];
+    const start = recorder.calls[1];
+    assert.ok(upload);
+    assert.ok(start);
+    assert.equal(upload.command, "ssh-bin");
+    assert.equal(upload.options.env, undefined);
+    assert.deepEqual(upload.options.stdio, ["pipe", "pipe", "pipe"]);
+    assert.match(upload.args.at(-1) ?? "", /umask 077; cat > .*portable-devshell-env-/u);
+    const uploaded = Buffer.concat(recorder.children[0]?.stdinChunks ?? []).toString("utf8");
+    assert.match(uploaded, /API_TOKEN='remote-secret'/u);
+    assert.match(uploaded, /DEVSHELL_WORKER_SECURITY_MODE='workspace'/u);
+    assert.match(uploaded, /HOME='\/remote\/home'/u);
+    assert.match(uploaded, /PATH='\/remote\/bin'/u);
+    assert.doesNotMatch(uploaded, /DEVSHELL_WORKER_INTERNAL_SECURITY_MODE/u);
+
+    assert.equal(start.options.env, undefined);
+    assert.deepEqual(start.options.stdio, ["ignore", "pipe", "pipe"]);
+    assert.match(start.args.at(-1) ?? "", /env_file=.*portable-devshell-env-/u);
+    assert.match(start.args.at(-1) ?? "", /exec .*devshell-worker/u);
+    assert.doesNotMatch(JSON.stringify(start.args), /remote-secret|\/remote\/home|\/remote\/bin/u);
+    assert.doesNotMatch(JSON.stringify(result.details), /remote-secret|\/remote\/home|\/remote\/bin/u);
+});
+
+test("ssh RPC exit cleans an uploaded environment file after an early local termination", async () => {
+    const recorder = createSpawnRecorder((_call, child, callIndex) => {
+        if (callIndex === 0) {
+            child.stdin.once("finish", () => closeRecordedChild(child));
+            return true;
+        }
+        if (callIndex === 1) {
+            return true;
+        }
+        return false;
+    });
+    const transport = new WorkerTransportDriverSsh({
+        command: "ssh-bin devbox",
+        workspace: "/srv/workspace",
+        workerBinary: new WorkerBinary("/usr/local/bin/devshell-worker"),
+        spawnFunction: recorder.spawn
+    });
+
+    const rpc = await transport.spawnWorkerRpc({
+        env: { API_TOKEN: "remote-secret" },
+        instanceName: "task-3-ssh"
+    });
+    assert.equal(recorder.calls.length, 2);
+    assert.equal(rpc.kill("SIGTERM"), true);
+    assert.deepEqual(await rpc.exit, { code: null, signal: "SIGTERM" });
+    assert.equal(recorder.calls.length, 3);
+    const cleanup = recorder.calls[2];
+    assert.ok(cleanup);
+    assert.equal(cleanup.command, "ssh-bin");
+    assert.match(cleanup.args.at(-1) ?? "", /rm -f .*portable-devshell-env-/u);
+    assert.doesNotMatch(JSON.stringify(cleanup.args), /remote-secret/u);
+});
+
+test("ssh transport rejects environment keys that cannot be represented safely", async () => {
+    const recorder = createSpawnRecorder();
+    const transport = new WorkerTransportDriverSsh({
+        command: "ssh-bin devbox",
+        workspace: "/srv/workspace",
+        workerBinary: new WorkerBinary("/usr/local/bin/devshell-worker"),
+        spawnFunction: recorder.spawn
+    });
+
+    await assert.rejects(
+        transport.runWorkerCommand("start", {
+            env: { "INVALID-KEY": "value" },
+            instanceName: "task-3-ssh",
+            workspacePath: "/srv/workspace"
+        }),
+        (error: unknown) => {
+            assert.equal((error as { code?: string }).code, "core.providerFailed");
+            assert.match(String((error as Error).message), /INVALID-KEY/u);
+            return true;
+        }
+    );
+    assert.equal(recorder.calls.length, 0);
+});
+
 test("ssh transport runs installWorker probe via remote shell", async () => {
     const recorder = createSpawnRecorder();
     const transport = new WorkerTransportDriverSsh({
