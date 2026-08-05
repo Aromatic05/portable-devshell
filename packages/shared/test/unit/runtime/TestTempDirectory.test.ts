@@ -58,6 +58,7 @@ test("cleaning one test temp directory leaves siblings intact", async (t) => {
 test("process cleanup removes every directory registered by the helper", async () => {
     const first = await createTestTempDirectory("process-cleanup-first");
     const second = await createTestTempDirectory("process-cleanup-second");
+    const namespace = await resolveTestTempNamespace();
     await writeFile(`${first}/marker.txt`, "first", "utf8");
     await writeFile(`${second}/marker.txt`, "second", "utf8");
 
@@ -65,4 +66,10 @@ test("process cleanup removes every directory registered by the helper", async (
 
     await assert.rejects(stat(first));
     await assert.rejects(stat(second));
+    assert.equal((await stat(namespace)).isDirectory(), true);
+
+    const subsequent = await createTestTempDirectory("process-cleanup-subsequent");
+    await writeFile(`${subsequent}/marker.txt`, "subsequent", "utf8");
+    assert.equal((await stat(`${subsequent}/marker.txt`)).isFile(), true);
+    await rm(subsequent, { force: true, recursive: true });
 });

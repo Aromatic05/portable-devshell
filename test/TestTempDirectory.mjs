@@ -25,7 +25,14 @@ export async function createTestTempDirectory(label = "test") {
 export function cleanupTestTempDirectories() {
     for (const directory of activeDirectories) {
         try {
-            rmSync(directory, { force: true, recursive: true });
+            rmSync(directory, {
+                force: true,
+                maxRetries: 5,
+                recursive: true,
+                retryDelay: 50,
+            });
+        } catch {
+            // Process-exit cleanup is best effort; active handles may still be closing on Windows.
         } finally {
             activeDirectories.delete(directory);
         }
