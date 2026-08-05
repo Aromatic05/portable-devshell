@@ -30,8 +30,8 @@ import { selectMainScreenModel } from "../../src/view/model/TuiViewProjection.js
 test(
     "real Ink and control socket edit and deliver Comments only to the matching ctxId",
     {
-        skip: process.platform === "darwin" || process.platform === "win32"
-            ? "macOS and Windows CI input reset timing is unstable in the real Ink harness"
+        skip: process.env.CI
+            ? "CI input reset timing is unstable in the real Ink harness"
             : false,
     },
     async (t) => {
