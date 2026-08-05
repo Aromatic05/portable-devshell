@@ -72,8 +72,14 @@ function Assert-CliStarts([string]$CliPath, [string]$FailureLabel, [bool]$Comman
         $env:PORTABLE_DEVSHELL_HOME = Join-Path $smokeRoot ".devshell"
         $env:XDG_RUNTIME_DIR = Join-Path $smokeRoot "runtime"
         New-Item -ItemType Directory -Force -Path $env:LOCALAPPDATA, $env:XDG_RUNTIME_DIR | Out-Null
-        $output = if ($CommandWrapper) { @(& $CliPath status 2>&1) } else { @(& node $CliPath status 2>&1) }
-        $exitCode = $LASTEXITCODE
+        $previousErrorActionPreference = $ErrorActionPreference
+        try {
+            $ErrorActionPreference = "Continue"
+            $output = if ($CommandWrapper) { @(& $CliPath status 2>&1) } else { @(& node $CliPath status 2>&1) }
+            $exitCode = $LASTEXITCODE
+        } finally {
+            $ErrorActionPreference = $previousErrorActionPreference
+        }
         $text = $output -join [Environment]::NewLine
         if ($exitCode -ne 0 -or -not $text.Contains("control: stopped")) {
             throw "$FailureLabel：CLI 无法正常执行 status。`n$text"

@@ -3,12 +3,16 @@ import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
-import { extname, join } from "node:path";
+import { extname, join, posix, win32 } from "node:path";
 
 const require = createRequire(new URL("../../packages/control/package.json", import.meta.url));
 const toml = require("smol-toml");
 
-export function resolveTestspaceRuntimeDirectory(root) {
+export function resolveTestspaceRuntimeDirectory(root, options = {}) {
+    const platform = options.platform ?? process.platform;
+    const temporaryDirectory = options.temporaryDirectory ?? tmpdir();
+    const runtimeRoot = platform === "win32" ? temporaryDirectory : "/tmp";
+    const joinPath = platform === "win32" ? win32.join : posix.join;
     const userIdentity = typeof process.getuid === "function"
         ? String(process.getuid())
         : (process.env.USERNAME ?? process.env.USER ?? "unknown");
@@ -16,7 +20,7 @@ export function resolveTestspaceRuntimeDirectory(root) {
         .update(`${userIdentity}:${root}`)
         .digest("hex")
         .slice(0, 16);
-    return join(tmpdir(), `pds-testspace-${identity}`);
+    return joinPath(runtimeRoot, `pds-testspace-${identity}`);
 }
 
 export function createTestspaceProcessEnvironment(homeDirectory, runtimeDirectory, baseEnvironment = process.env) {

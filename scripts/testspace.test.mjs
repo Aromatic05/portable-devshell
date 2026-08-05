@@ -118,17 +118,28 @@ test("connector safe actions cannot escape into destructive operations", () => {
     }
 });
 
-test("testspace runtime is deterministic and short enough for worker sockets", () => {
-    const first = resolveTestspaceRuntimeDirectory("/workspace/portable-devshell");
-    const repeated = resolveTestspaceRuntimeDirectory("/workspace/portable-devshell");
-    const other = resolveTestspaceRuntimeDirectory("/workspace/portable-devshell-other");
+test("testspace runtime is deterministic and keeps Unix worker sockets short", () => {
+    const options = {
+        platform: "darwin",
+        temporaryDirectory: "/var/folders/very/long/per-user/temporary/directory"
+    };
+    const first = resolveTestspaceRuntimeDirectory("/workspace/portable-devshell", options);
+    const repeated = resolveTestspaceRuntimeDirectory("/workspace/portable-devshell", options);
+    const other = resolveTestspaceRuntimeDirectory("/workspace/portable-devshell-other", options);
 
     assert.equal(first, repeated);
     assert.notEqual(first, other);
+    assert.match(first, /^\/tmp\/pds-testspace-[0-9a-f]{16}$/u);
     assert.equal(
         join(first, "devshell-worker", TESTSPACE_INSTANCE, "worker.sock").length < 100,
         true,
     );
+
+    const windows = resolveTestspaceRuntimeDirectory("C:\\workspace\\portable-devshell", {
+        platform: "win32",
+        temporaryDirectory: "C:\\Users\\runner\\AppData\\Local\\Temp"
+    });
+    assert.match(windows, /^C:\\Users\\runner\\AppData\\Local\\Temp\\pds-testspace-[0-9a-f]{16}$/u);
 });
 
 test("testspace process environment isolates runtime and container storage", () => {

@@ -1,4 +1,4 @@
-import { rmdirSync, rmSync } from "node:fs";
+import { rmSync } from "node:fs";
 import { mkdir, mkdtemp, realpath } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -29,10 +29,5 @@ export function cleanupTestTempDirectories() {
         } finally {
             activeDirectories.delete(directory);
         }
-    }
-    try {
-        rmdirSync(join(tmpdir(), TEST_TEMP_NAMESPACE));
-    } catch {
-        // Another test process may still own directories in the shared namespace.
     }
 }

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import test from "node:test";
 
@@ -10,8 +10,18 @@ import {
     resolvePackageBinPath,
     writePortableApplicationManifest
 } from "./application-layout.mjs";
-import { createTestTempDirectory } from "../test/TestTempDirectory.mjs";
+import {
+    cleanupTestTempDirectories,
+    createTestTempDirectory,
+    resolveTestTempNamespace
+} from "../test/TestTempDirectory.mjs";
 
+
+test("test temp cleanup preserves the shared namespace for concurrent test processes", async () => {
+    const namespace = await resolveTestTempNamespace();
+    cleanupTestTempDirectories();
+    assert.equal(await realpath(namespace), namespace);
+});
 
 test("CLI argument normalization removes only the pnpm separator", () => {
     assert.deepEqual(normalizeCliArguments(["--", "status"]), ["status"]);
