@@ -55,6 +55,13 @@ test("development CI validates every native target and exercises its target-spec
     assert.match(workflow, /node \.\/scripts\/smoke-pty\.mjs/u);
     assert.match(workflow, /portable-devshell-app-\$\{\{ matrix\.target \}\}\.tar\.gz/u);
     assert.match(workflow, /smoke-install-release-windows\.mjs/u);
+    const chromiumIndex = workflow.indexOf("playwright install --with-deps chromium");
+    const browserEnvironmentIndex = workflow.indexOf("PORTABLE_DEVSHELL_CHROMIUM=$chromium_path");
+    const acceptanceIndex = workflow.indexOf("bash acceptance/run-final-acceptance.sh");
+    assert.ok(chromiumIndex >= 0 && browserEnvironmentIndex > chromiumIndex);
+    assert.ok(acceptanceIndex > browserEnvironmentIndex);
+    const finalAcceptance = await readFile(resolve(repositoryRoot, "acceptance", "run-final-acceptance.mjs"), "utf8");
+    assert.match(finalAcceptance, /acceptance\/run-web-browser-smoke\.mjs/u);
 });
 
 test("release workflow requires the development CI gate before packaging any release assets", async () => {

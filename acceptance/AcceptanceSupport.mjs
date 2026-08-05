@@ -52,6 +52,10 @@ export async function createAcceptanceFixture() {
     ]);
     await writeFile(join(workspace, "README.md"), "portable-devshell acceptance workspace\n", "utf8");
     const port = await reservePort();
+    let webPort = await reservePort();
+    while (webPort === port) {
+        webPort = await reservePort();
+    }
     const globalConfig = [
         "version = 1",
         "",
@@ -66,6 +70,13 @@ export async function createAcceptanceFixture() {
         "",
         "[mcp.auth]",
         'mode = "none"',
+        "",
+        "[web]",
+        "enabled = true",
+        'listenHost = "127.0.0.1"',
+        `listenPort = ${webPort}`,
+        `publicBaseUrl = "http://127.0.0.1:${webPort}"`,
+        'auth = "none"',
         ""
     ].join("\n");
     const instanceConfig = [
@@ -106,6 +117,7 @@ export async function createAcceptanceFixture() {
         port,
         root,
         runtime,
+        webPort,
         worker,
         workspace,
         async cleanup() {

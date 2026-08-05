@@ -14,3 +14,4 @@ if (process.platform !== "win32" && commandAvailable("tmux", ["-V"])) {
 }
 runCommand(process.execPath, ["acceptance/run-real-worker-smoke.mjs"], { env, inherit: true });
 runCommand(process.execPath, ["acceptance/run-mcp-smoke.mjs"], { env, inherit: true });
+runCommand(process.execPath, ["acceptance/run-web-browser-smoke.mjs"], { env, inherit: true });

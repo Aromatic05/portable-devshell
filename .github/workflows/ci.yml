@@ -93,6 +93,13 @@ jobs:
             - name: Windows release installer smoke
               if: runner.os == 'Windows'
               run: node ./scripts/smoke-install-release-windows.mjs ./ci-artifacts/portable-devshell-app-${{ matrix.target }}.tar.gz
+            - name: 安装 Web 验收 Chromium
+              if: matrix.target == 'linux-x64'
+              shell: bash
+              run: |
+                  pnpm --filter @portable-devshell/control exec playwright install --with-deps chromium
+                  chromium_path=$(pnpm --filter @portable-devshell/control exec node -e "const { chromium } = require('playwright'); process.stdout.write(chromium.executablePath())")
+                  echo "PORTABLE_DEVSHELL_CHROMIUM=$chromium_path" >> "$GITHUB_ENV"
             - name: 运行最终验收
               if: matrix.target == 'linux-x64'
               shell: bash

@@ -1,6 +1,6 @@
 export const TESTSPACE_INSTANCE = "testspace-local";
 export const DEFAULT_TESTSPACE_COMMAND = "start";
-const USER_TESTSPACE_COMMANDS = new Set(["stop", "tui", "web"]);
+const USER_TESTSPACE_COMMANDS = new Set(["stop", "tui", "web", "web-smoke"]);
 
 export function resolveTestspaceCommand(value) {
     if (value === undefined || value === "start" || value.startsWith("-")) {

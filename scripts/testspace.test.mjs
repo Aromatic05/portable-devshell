@@ -23,6 +23,10 @@ import {
     resolveTestspaceRuntimeDirectory,
     stopTestspaceTmux,
 } from "./testspace/TestspaceRuntime.mjs";
+import {
+    assertWebSmokeState,
+    resolveChromiumExecutable,
+} from "./testspace/TestspaceWebSmoke.mjs";
 
 const require = createRequire(new URL("../packages/control/package.json", import.meta.url));
 const toml = require("smol-toml");
@@ -78,11 +82,16 @@ test("testspace starts when invoked without a subcommand", () => {
     assert.equal(resolveTestspaceCommand("--skip-build"), "start");
     assert.equal(resolveTestspaceCommand("tui"), "tui");
     assert.equal(resolveTestspaceCommand("web"), "web");
+    assert.equal(resolveTestspaceCommand("web-smoke"), "web-smoke");
     assert.equal(resolveTestspaceCommand("stop"), "stop");
     assert.equal(resolveTestspaceCommand("status"), "invalid");
     assert.equal(resolveTestspaceCommand("logs"), "invalid");
     assert.equal(resolveTestspaceCommand("reset"), "invalid");
     assert.deepEqual(resolveTestspaceInvocation([]), { args: [], command: "start" });
+    assert.deepEqual(resolveTestspaceInvocation(["web-smoke"]), {
+        args: [],
+        command: "web-smoke",
+    });
     assert.deepEqual(resolveTestspaceInvocation(["start", "--skip-build"]), {
         args: ["--skip-build"],
         command: "start",
@@ -225,6 +234,44 @@ test("testspace Docker cleanup removes only managed containers declared by isola
         { command: "docker", args: ["rm", "--force", "devshell-default-docker"] },
         { command: "docker", args: ["rm", "--force", "managed-container"] },
     ]);
+});
+
+test("Web smoke requires a non-secure online SPA with the real instance read model", () => {
+    const healthy = {
+        alerts: [],
+        body: "portable-devshell\nOnline\nOverview\ntestspace-local",
+        randomUuidType: "undefined",
+        secureContext: false,
+    };
+    assert.doesNotThrow(() => assertWebSmokeState(healthy));
+    assert.throws(
+        () => assertWebSmokeState({ ...healthy, body: "Offline\nOverview\ntestspace-local" }),
+        /did not connect/u,
+    );
+    assert.throws(
+        () => assertWebSmokeState({ ...healthy, alerts: ["transport failed"] }),
+        /rendered errors/u,
+    );
+    assert.throws(
+        () => assertWebSmokeState(healthy, [{ method: "Runtime.exceptionThrown" }]),
+        /Chromium reported Web failures/u,
+    );
+});
+
+test("Web smoke resolves an explicit Chromium executable before default candidates", () => {
+    const probes = [];
+    assert.equal(
+        resolveChromiumExecutable(
+            { PORTABLE_DEVSHELL_CHROMIUM: "/opt/chromium" },
+            "linux",
+            (candidate) => {
+                probes.push(candidate);
+                return candidate === "/opt/chromium";
+            },
+        ),
+        "/opt/chromium",
+    );
+    assert.deepEqual(probes, ["/opt/chromium"]);
 });
 
 test("testspace stop terminates its real tmux server", {
