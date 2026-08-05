@@ -1,4 +1,4 @@
-import { ControlError, errorCodes, type InstanceContainerConfig } from "@portable-devshell/shared";
+import { ControlError, createError, errorCodes, type InstanceContainerConfig } from "@portable-devshell/shared";
 
 import { WorkerBinary } from "../../WorkerBinary.js";
 import { WorkerInstallerRemote } from "../../install/WorkerInstallerRemote.js";
@@ -88,6 +88,7 @@ export class WorkerTransportDriverContainerBase implements WorkerCommandTranspor
     }
 
     async runWorkerCommand(command: WorkerCommandName, options: WorkerCommandOptions): Promise<WorkerCommandResult> {
+        const environment = this.#workerCommandEnvironment(options.env);
         switch (command) {
             case "start":
                 await this.#provision.ensureReady("start");
@@ -116,15 +117,17 @@ export class WorkerTransportDriverContainerBase implements WorkerCommandTranspor
             command,
             [workerCommand.command, ...workerCommand.args],
             options.instanceName,
-            command === "start"
+            command === "start",
+            environment.keys
         );
         return await this.#process.run(invocation.context, {
-            env: options.env,
+            env: environment.processEnv,
             stdio: ["ignore", "pipe", "pipe"]
         });
     }
 
     async spawnWorkerRpc(options: WorkerRpcOptions): Promise<WorkerRpcProcess> {
+        const environment = this.#workerCommandEnvironment(options.env);
         await this.#provision.ensureReady("spawnWorkerRpc");
         const executable = await this.#resolveExecutable();
         await this.#installer.syncSkills();
@@ -132,12 +135,14 @@ export class WorkerTransportDriverContainerBase implements WorkerCommandTranspor
         const invocation = this.#createExecInvocation(
             "spawnWorkerRpc",
             [workerCommand.command, ...workerCommand.args],
-            options.instanceName
+            options.instanceName,
+            false,
+            environment.keys
         );
         return createWorkerRpcProcess(
             this.#process.spawn(
                 invocation.context,
-                { env: options.env, stdio: ["pipe", "pipe", "pipe"] },
+                { env: environment.processEnv, stdio: ["pipe", "pipe", "pipe"] },
                 errorCodes.coreWorkerRpcSpawnFailed
             )
         );
@@ -153,13 +158,16 @@ export class WorkerTransportDriverContainerBase implements WorkerCommandTranspor
             options.instanceName,
             options.extraArgs
         );
+        const environment = this.#workerCommandEnvironment(options.env);
         const invocation = this.#createExecInvocation(
             "status",
             [workerCommand.command, ...workerCommand.args],
-            options.instanceName
+            options.instanceName,
+            false,
+            environment.keys
         );
         return await this.#process.run(invocation.context, {
-            env: options.env,
+            env: environment.processEnv,
             stdio: ["ignore", "pipe", "pipe"]
         });
     }
@@ -174,13 +182,16 @@ export class WorkerTransportDriverContainerBase implements WorkerCommandTranspor
             options.instanceName,
             options.extraArgs
         );
+        const environment = this.#workerCommandEnvironment(options.env);
         const invocation = this.#createExecInvocation(
             "stop",
             [workerCommand.command, ...workerCommand.args],
-            options.instanceName
+            options.instanceName,
+            false,
+            environment.keys
         );
         const result = await this.#process.run(invocation.context, {
-            env: options.env,
+            env: environment.processEnv,
             stdio: ["ignore", "pipe", "pipe"]
         });
 
@@ -261,13 +272,50 @@ export class WorkerTransportDriverContainerBase implements WorkerCommandTranspor
         return result;
     }
 
+    #workerCommandEnvironment(env: NodeJS.ProcessEnv | undefined): {
+        keys: string[];
+        processEnv?: NodeJS.ProcessEnv;
+    } {
+        if (env === undefined) {
+            return { keys: [] };
+        }
+
+        const conflicts = Object.keys(env)
+            .filter((key) => env[key] !== undefined && providerEnvironmentKeys.has(key))
+            .sort();
+        if (conflicts.length > 0) {
+            throw createError({
+                code: errorCodes.coreProviderFailed,
+                details: {
+                    environmentKeys: conflicts,
+                    provider: this.#provider
+                },
+                message: `Container instance environment cannot override provider-reserved variables: ${conflicts.join(", ")}.`,
+                retryable: false
+            });
+        }
+
+        const processEnv = { ...process.env };
+        const keys: string[] = [];
+        for (const [key, value] of Object.entries(env)) {
+            if (value === undefined || isInternalWorkerEnvironmentKey(key)) {
+                continue;
+            }
+            processEnv[key] = value;
+            keys.push(key);
+        }
+        keys.sort();
+        return { keys, processEnv };
+    }
+
     #createExecInvocation(
         operation: string,
         command: readonly string[],
         instance?: string,
-        useRemoteCwd: boolean = false
+        useRemoteCwd: boolean = false,
+        environmentKeys: readonly string[] = []
     ) {
-        const args = this.#provision.buildExecArgs(command, useRemoteCwd);
+        const args = this.#provision.buildExecArgs(command, useRemoteCwd, environmentKeys);
         return {
             args,
             context: createCommandContext({
@@ -319,6 +367,27 @@ export class WorkerTransportDriverContainerBase implements WorkerCommandTranspor
             stdout
         };
     }
+}
+
+const providerEnvironmentKeys = new Set([
+    "CONTAINERS_CONF",
+    "CONTAINERS_STORAGE_CONF",
+    "CONTAINER_HOST",
+    "DOCKER_CONFIG",
+    "DOCKER_HOST",
+    "HOME",
+    "PATH",
+    "TMPDIR",
+    "XDG_CACHE_HOME",
+    "XDG_CONFIG_HOME",
+    "XDG_DATA_HOME",
+    "XDG_RUNTIME_DIR"
+]);
+
+function isInternalWorkerEnvironmentKey(key: string): boolean {
+    return key === "DEVSHELL_WORKER_INTERNAL_INSTANCE"
+        || key === "DEVSHELL_WORKER_INTERNAL_WORKSPACE"
+        || key === "DEVSHELL_WORKER_INTERNAL_SECURITY_MODE";
 }
 
 function isMissingContainerMessage(value: string): boolean {

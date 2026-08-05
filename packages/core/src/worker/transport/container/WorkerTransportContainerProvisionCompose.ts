@@ -1,6 +1,7 @@
 import type { InstanceContainerConfig } from "@portable-devshell/shared";
 
 import {
+    workerTransportContainerEnvironmentArgs,
     workerTransportContainerWorkingDirectoryArgs,
     type WorkerTransportContainerProvision,
     type WorkerTransportContainerProvisionOperations
@@ -44,11 +45,16 @@ export class WorkerTransportContainerProvisionCompose implements WorkerTransport
 
     async afterWorkerStop(): Promise<void> {}
 
-    buildExecArgs(command: readonly string[], useRemoteCwd: boolean): string[] {
+    buildExecArgs(
+        command: readonly string[],
+        useRemoteCwd: boolean,
+        environmentKeys: readonly string[] = []
+    ): string[] {
         return this.#buildComposeArgs([
             "exec",
             "-T",
             ...workerTransportContainerWorkingDirectoryArgs(this.#operations.remoteCwd, useRemoteCwd),
+            ...workerTransportContainerEnvironmentArgs(environmentKeys),
             this.#config.compose.service,
             ...command
         ]);

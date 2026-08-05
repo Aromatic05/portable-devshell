@@ -1,6 +1,7 @@
 import type { InstanceContainerConfig, InstanceContainerMountConfig } from "@portable-devshell/shared";
 
 import {
+    workerTransportContainerEnvironmentArgs,
     workerTransportContainerWorkingDirectoryArgs,
     type WorkerTransportContainerProvision,
     type WorkerTransportContainerProvisionOperations
@@ -55,11 +56,16 @@ export class WorkerTransportContainerProvisionManaged implements WorkerTransport
         );
     }
 
-    buildExecArgs(command: readonly string[], useRemoteCwd: boolean): string[] {
+    buildExecArgs(
+        command: readonly string[],
+        useRemoteCwd: boolean,
+        environmentKeys: readonly string[] = []
+    ): string[] {
         return [
             "exec",
             ...workerTransportContainerWorkingDirectoryArgs(this.#operations.remoteCwd, useRemoteCwd),
             "-i",
+            ...workerTransportContainerEnvironmentArgs(environmentKeys),
             this.#config.containerName,
             ...command
         ];
@@ -93,6 +99,25 @@ export class WorkerTransportContainerProvisionManaged implements WorkerTransport
         return tag;
     }
 
+    #containerMounts(): InstanceContainerMountConfig[] {
+        const configured = this.#config.mounts ?? [];
+        const workspace = this.#operations.remoteCwd;
+        if (
+            workspace === undefined ||
+            configured.some((mount) => mount.target === workspace)
+        ) {
+            return [...configured];
+        }
+        return [
+            ...configured,
+            {
+                mode: "rw",
+                source: workspace,
+                target: workspace
+            }
+        ];
+    }
+
     #buildCreateArgs(image: string): string[] {
         return [
             "create",
@@ -102,7 +127,7 @@ export class WorkerTransportContainerProvisionManaged implements WorkerTransport
             ...(this.#config.user === undefined ? [] : ["--user", this.#config.user]),
             ...(this.#config.network === undefined ? [] : ["--network", this.#config.network]),
             ...Object.entries(this.#config.env ?? {}).flatMap(([key, value]) => ["-e", `${key}=${value}`]),
-            ...(this.#config.mounts ?? []).flatMap((mount) => ["-v", renderContainerMount(mount)]),
+            ...this.#containerMounts().flatMap((mount) => ["-v", renderContainerMount(mount)]),
             image,
             "sh",
             "-lc",

@@ -1067,6 +1067,88 @@ test("podman transport builds exec command", async () => {
     });
 });
 
+test("podman transport preserves provider storage environment and forwards worker environment", async () => {
+    const recorder = createSpawnRecorder((call, child, callIndex) => {
+        if (callIndex === 0) {
+            closeRecordedChild(child, { stdout: "running\n" });
+            return true;
+        }
+        return false;
+    });
+    const transport = new WorkerTransportDriverPodman({
+        container: createManagedContainerConfig(),
+        podmanBinary: "podman-bin",
+        remoteCwd: "/workspace",
+        workerBinary: new WorkerBinary("/usr/local/bin/devshell-worker"),
+        spawnFunction: recorder.spawn
+    });
+    const previousHome = process.env.HOME;
+    const previousPath = process.env.PATH;
+    const previousRuntime = process.env.XDG_RUNTIME_DIR;
+    process.env.HOME = "/control/home";
+    process.env.PATH = "/provider/bin";
+    process.env.XDG_RUNTIME_DIR = "/control/runtime";
+
+    try {
+        await transport.runWorkerCommand("stop", {
+            env: {
+                DEVSHELL_WORKER_INTERNAL_SECURITY_MODE: "workspace",
+                DEVSHELL_WORKER_SECURITY_MODE: "workspace",
+                FOO: "bar"
+            },
+            instanceName: "task-3-podman"
+        });
+    } finally {
+        restoreEnv("HOME", previousHome);
+        restoreEnv("PATH", previousPath);
+        restoreEnv("XDG_RUNTIME_DIR", previousRuntime);
+    }
+
+    const exec = recorder.calls[1];
+    assert.ok(exec);
+    assert.deepEqual(exec.args.slice(0, 7), [
+        "exec",
+        "-i",
+        "-e",
+        "DEVSHELL_WORKER_SECURITY_MODE",
+        "-e",
+        "FOO",
+        "worker-container"
+    ]);
+    assert.equal(exec.args.includes("DEVSHELL_WORKER_INTERNAL_SECURITY_MODE"), false);
+    assert.equal(exec.options.env?.HOME, "/control/home");
+    assert.equal(exec.options.env?.PATH, "/provider/bin");
+    assert.equal(exec.options.env?.XDG_RUNTIME_DIR, "/control/runtime");
+    assert.equal(exec.options.env?.FOO, "bar");
+    assert.equal(exec.options.env?.DEVSHELL_WORKER_SECURITY_MODE, "workspace");
+});
+
+test("podman transport rejects provider-reserved instance environment before provisioning", async () => {
+    const recorder = createSpawnRecorder();
+    const transport = new WorkerTransportDriverPodman({
+        container: createManagedContainerConfig(),
+        podmanBinary: "podman-bin",
+        remoteCwd: "/workspace",
+        workerBinary: new WorkerBinary("/usr/local/bin/devshell-worker"),
+        spawnFunction: recorder.spawn
+    });
+
+    await assert.rejects(
+        transport.runWorkerCommand("start", {
+            env: { HOME: "/worker/home", PATH: "/worker/bin" },
+            instanceName: "task-3-podman",
+            workspacePath: "/workspace"
+        }),
+        (error: unknown) => {
+            assert.equal((error as { code?: string }).code, "core.providerFailed");
+            assert.match(String((error as Error).message), /HOME, PATH/u);
+            return true;
+        }
+    );
+    assert.equal(recorder.calls.length, 0);
+});
+
+
 test("podman transport runs installWorker probe via exec", async () => {
     const recorder = createSpawnRecorder((call, child, callIndex) => {
         if (callIndex === 0) {
@@ -1218,7 +1300,9 @@ test("docker transport creates and starts managed containers before starting the
 
     assert.equal(result.exitCode, 0);
     assert.deepEqual(recorder.calls[0]?.args, ["inspect", "--type", "container", "--format", "{{.State.Status}}", "worker-container"]);
-    assert.deepEqual(recorder.calls[1]?.args.slice(0, 4), ["create", "--name", "worker-container", "archlinux:latest"]);
+    assert.deepEqual(recorder.calls[1]?.args.slice(0, 3), ["create", "--name", "worker-container"]);
+    assert.equal(recorder.calls[1]?.args.includes("/workspace:/workspace:rw"), true);
+    assert.equal(recorder.calls[1]?.args.includes("archlinux:latest"), true);
     assert.deepEqual(recorder.calls[2]?.args, ["start", "worker-container"]);
     assert.deepEqual(recorder.calls[3]?.args, [
         "exec",
@@ -1272,7 +1356,7 @@ test("dockerfile container mode builds the image before creating the managed con
         ["image", "inspect", "devshell-test:latest"],
         ["build", "-t", "devshell-test:latest", "-f", "/project/Containerfile", "/project"],
         ["inspect", "--type", "container", "--format", "{{.State.Status}}", "dockerfile-container"],
-        ["create", "--name", "dockerfile-container", "devshell-test:latest", "sh", "-lc", "trap 'exit 0' TERM INT; while :; do sleep 2147483647; done"],
+        ["create", "--name", "dockerfile-container", "-v", "/workspace:/workspace:rw", "devshell-test:latest", "sh", "-lc", "trap 'exit 0' TERM INT; while :; do sleep 2147483647; done"],
         ["start", "dockerfile-container"],
         [
             "exec",
@@ -1365,8 +1449,48 @@ test("existing image container mode creates a dedicated managed container", asyn
         "--userns=keep-id"
     ]);
     assert.equal(recorder.calls[1]?.args.includes("registry.example/devshell:latest"), true);
+    assert.equal(
+        recorder.calls[1]?.args.includes("/workspace:/workspace:rw"),
+        true
+    );
     assert.deepEqual(recorder.calls[2]?.args, ["start", "existing-image-container"]);
     assert.deepEqual(recorder.calls[3]?.args.slice(0, 5), ["exec", "-w", "/workspace", "-i", "existing-image-container"]);
+});
+
+test("managed container uses an explicit workspace mount without adding a duplicate", async () => {
+    const recorder = createSpawnRecorder((call, child) => {
+        if (call.args[0] === "inspect") {
+            closeRecordedChild(child, { stderr: "No such container\n", code: 1 });
+            return true;
+        }
+        return false;
+    });
+    const transport = new WorkerTransportDriverPodman({
+        container: {
+            containerName: "mounted-container",
+            image: "registry.example/devshell:latest",
+            mode: "existingImage",
+            mounts: [{ mode: "ro", source: "/host/project", target: "/workspace" }]
+        },
+        podmanBinary: "podman-bin",
+        remoteCwd: "/workspace",
+        workerBinary: new WorkerBinary("/usr/local/bin/devshell-worker"),
+        spawnFunction: recorder.spawn
+    });
+
+    await transport.runWorkerCommand("start", {
+        instanceName: "task-3-mounted-image",
+        workspacePath: "/workspace"
+    });
+
+    assert.equal(
+        recorder.calls[1]?.args.filter((arg) => arg.endsWith(":/workspace:rw")).length,
+        0
+    );
+    assert.equal(
+        recorder.calls[1]?.args.filter((arg) => arg === "/host/project:/workspace:ro").length,
+        1
+    );
 });
 
 test("existing stopped container mode adopts and restores the configured lifecycle", async () => {

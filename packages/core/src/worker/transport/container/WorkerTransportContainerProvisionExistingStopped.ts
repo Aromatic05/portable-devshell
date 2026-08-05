@@ -1,6 +1,7 @@
 import { createError, errorCodes, type InstanceContainerConfig } from "@portable-devshell/shared";
 
 import {
+    workerTransportContainerEnvironmentArgs,
     workerTransportContainerWorkingDirectoryArgs,
     type WorkerTransportContainerProvision,
     type WorkerTransportContainerProvisionOperations
@@ -62,11 +63,16 @@ export class WorkerTransportContainerProvisionExistingStopped implements WorkerT
         this.#adopted = false;
     }
 
-    buildExecArgs(command: readonly string[], useRemoteCwd: boolean): string[] {
+    buildExecArgs(
+        command: readonly string[],
+        useRemoteCwd: boolean,
+        environmentKeys: readonly string[] = []
+    ): string[] {
         return [
             "exec",
             ...workerTransportContainerWorkingDirectoryArgs(this.#operations.remoteCwd, useRemoteCwd),
             "-i",
+            ...workerTransportContainerEnvironmentArgs(environmentKeys),
             this.#config.containerName,
             ...command
         ];

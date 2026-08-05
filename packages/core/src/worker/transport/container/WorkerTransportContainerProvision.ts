@@ -9,7 +9,11 @@ export type WorkerTransportContainerLifecycleStatus = "missing" | "running" | "s
 
 export interface WorkerTransportContainerProvision {
     afterWorkerStop(): Promise<void>;
-    buildExecArgs(command: readonly string[], useRemoteCwd: boolean): string[];
+    buildExecArgs(
+        command: readonly string[],
+        useRemoteCwd: boolean,
+        environmentKeys?: readonly string[]
+    ): string[];
     buildShellExecArgs(commandLine: string): string[];
     ensureReady(operation: string): Promise<void>;
     isAvailable(): Promise<boolean>;
@@ -51,6 +55,12 @@ export function createWorkerTransportContainerProvision(options: {
                 operations: options.operations
             });
     }
+}
+
+export function workerTransportContainerEnvironmentArgs(
+    environmentKeys: readonly string[] | undefined
+): string[] {
+    return (environmentKeys ?? []).flatMap((key) => ["-e", key]);
 }
 
 export function workerTransportContainerWorkingDirectoryArgs(
