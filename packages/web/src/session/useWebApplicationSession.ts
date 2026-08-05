@@ -67,6 +67,10 @@ export function useWebApplicationSession(
                     activeSession.startOAuth();
                     return;
                 }
+                if (mode === "token") {
+                    if (current()) setSessionState("login");
+                    return;
+                }
                 if (await activeSession.establish()) {
                     if (current()) activateStore(generation);
                     return;

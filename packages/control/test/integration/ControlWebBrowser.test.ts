@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
-import { access, rm } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { rm } from "node:fs/promises";
 import { createServer } from "node:net";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -26,8 +27,15 @@ import { ControlWebSocketChannelProvider } from "../../src/server/web/ControlWeb
 
 const WEB_SCOPES = ["web"];
 const WEB_RESOURCE_NAME = "browser-web";
+const WEB_TOKEN = "browser-web-token-0123456789abcdef0123456789abcdef";
+const CHROMIUM_EXECUTABLE = resolveChromiumExecutable();
+const BROWSER_TEST_OPTIONS = {
+    skip: CHROMIUM_EXECUTABLE === undefined
+        ? "A Chromium executable is unavailable on this target."
+        : false,
+};
 
-test("real Chromium opens auth=none WebUI, establishes a session, and boots through control WebSocket RPC", async (t) => {
+test("real Chromium opens auth=none WebUI, establishes a session, and boots through control WebSocket RPC", BROWSER_TEST_OPTIONS, async (t) => {
     const runtime = await startBrowserRuntime({ auth: "none", prefix: "" });
     const browser = await launchBrowser();
     t.after(async () => {
@@ -49,7 +57,70 @@ test("real Chromium opens auth=none WebUI, establishes a session, and boots thro
     assertPageHealthy(page);
 });
 
-test("real Chromium follows Web OAuth redirects, completes both approvals, and returns to the live SPA", async (t) => {
+test("real Chromium rejects a wrong Web token, accepts the configured token, and logs out", BROWSER_TEST_OPTIONS, async (t) => {
+    const runtime = await startBrowserRuntime({ auth: "token", prefix: "" });
+    const browser = await launchBrowser();
+    t.after(async () => {
+        await browser.close().catch(() => undefined);
+        await runtime.close();
+    });
+
+    const page = await guardedPage(browser);
+    await page.goto(`${runtime.origin}${runtime.basePath}/`, { waitUntil: "domcontentloaded" });
+    const tokenInput = page.getByLabel("Access token");
+    await tokenInput.waitFor({ state: "visible" });
+    await tokenInput.fill("wrong-token");
+    await page.getByRole("button", { name: "Sign in" }).click();
+    await page.getByRole("alert").filter({ hasText: "Sign-in was not accepted." }).waitFor({
+        state: "visible",
+    });
+    assert.equal(runtime.calls.hello, 0, "a rejected token must not open the control WebSocket");
+    assert.equal(
+        page.__browserFailures.every((failure) =>
+            failure.includes("401 (Unauthorized)") && failure.includes(`${runtime.basePath}/session`)
+        ),
+        true,
+        page.__browserFailures.join("\n"),
+    );
+    page.__browserFailures.length = 0;
+
+    await tokenInput.fill(WEB_TOKEN);
+    await page.getByRole("button", { name: "Sign in" }).click();
+    await assertOverview(page);
+    assert.equal(runtime.calls.hello > 0, true);
+    assert.equal(runtime.calls.overview > 0, true);
+    assert.deepEqual(
+        await page.evaluate(() => ({
+            local: window.localStorage.getItem("token"),
+            session: window.sessionStorage.getItem("token"),
+        })),
+        { local: null, session: null },
+    );
+
+    assertPageHealthy(page);
+    page.__browserFailures.length = 0;
+    const logoutResponse = page.waitForResponse((response) =>
+        response.request().method() === "DELETE" &&
+        new URL(response.url()).pathname === `${runtime.basePath}/session`
+    );
+    await page.getByRole("button", { name: "Log out" }).click();
+    assert.equal((await logoutResponse).status(), 204);
+    await page.getByRole("button", { name: "Sign in" }).waitFor({ state: "visible" });
+    assert.equal(
+        (await page.context().cookies()).some((cookie) => cookie.name === "devshell_web_session"),
+        false,
+    );
+    await page.waitForTimeout(50);
+    assert.deepEqual(
+        page.__browserFailures.filter((failure) =>
+            !failure.includes(`requestfailed: DELETE ${runtime.origin}${runtime.basePath}/session net::ERR_ABORTED`)
+        ),
+        [],
+        page.__browserResponses.join("\n"),
+    );
+});
+
+test("real Chromium follows Web OAuth redirects, completes both approvals, and returns to the live SPA", BROWSER_TEST_OPTIONS, async (t) => {
     const runtime = await startBrowserRuntime({ auth: "oauth2", prefix: "" });
     const browser = await launchBrowser();
     t.after(async () => {
@@ -71,7 +142,7 @@ test("real Chromium follows Web OAuth redirects, completes both approvals, and r
     assertPageHealthy(page);
 });
 
-test("real Chromium preserves a public URL prefix through session bootstrap and WebSocket RPC", async (t) => {
+test("real Chromium preserves a public URL prefix through session bootstrap and WebSocket RPC", BROWSER_TEST_OPTIONS, async (t) => {
     const runtime = await startBrowserRuntime({ auth: "none", prefix: "/devshell" });
     const browser = await launchBrowser();
     t.after(async () => {
@@ -97,7 +168,7 @@ interface BrowserRuntime {
 }
 
 async function startBrowserRuntime(options: {
-    auth: "none" | "oauth2";
+    auth: "none" | "oauth2" | "token";
     prefix: string;
 }): Promise<BrowserRuntime> {
     const port = await reservePort();
@@ -111,10 +182,12 @@ async function startBrowserRuntime(options: {
     const sessions = new ControlWebSessionService({
         auth: options.auth === "none"
             ? { mode: "none" }
-            : {
-                  mode: "oauth2",
-                  oauth2: { requiredScopes: WEB_SCOPES, resourceName: WEB_RESOURCE_NAME },
-              },
+            : options.auth === "token"
+              ? { mode: "token", token: WEB_TOKEN }
+              : {
+                    mode: "oauth2",
+                    oauth2: { requiredScopes: WEB_SCOPES, resourceName: WEB_RESOURCE_NAME },
+                },
         basePath,
     });
     const calls = { hello: 0, overview: 0 };
@@ -270,30 +343,27 @@ function overviewPayload(): JsonValue {
 }
 
 async function launchBrowser(): Promise<Browser> {
+    if (CHROMIUM_EXECUTABLE === undefined) {
+        throw new Error("A Chromium executable is required for this browser test.");
+    }
     return await chromium.launch({
-        executablePath: await resolveChromiumExecutable(),
+        executablePath: CHROMIUM_EXECUTABLE,
         headless: true,
     });
 }
 
-async function resolveChromiumExecutable(): Promise<string> {
+function resolveChromiumExecutable(): string | undefined {
     const candidates = [
+        process.env.PORTABLE_DEVSHELL_CHROMIUM,
         process.env.DEVSHELL_TEST_CHROMIUM,
+        chromium.executablePath(),
         "/usr/bin/chromium",
         "/usr/bin/chromium-browser",
         "/usr/bin/google-chrome",
         "/usr/bin/google-chrome-stable",
         "/opt/google/chrome/chrome",
     ].filter((candidate): candidate is string => candidate !== undefined && candidate.length > 0);
-    for (const candidate of candidates) {
-        try {
-            await access(candidate);
-            return candidate;
-        } catch {
-            // Try the next explicitly supported browser location.
-        }
-    }
-    throw new Error("A system Chromium executable is required. Set DEVSHELL_TEST_CHROMIUM.");
+    return candidates.find((candidate) => existsSync(candidate));
 }
 
 interface GuardedPage extends Page {

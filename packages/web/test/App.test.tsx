@@ -37,7 +37,7 @@ describe("authenticated application shell", () => {
     });
 
     it("boots auth=none anonymously before creating clients", async () => {
-        const session = fakeSession({ check: false, establish: true });
+        const session = fakeSession({ authMode: "none", check: false, establish: true });
         const createClients = vi.fn(fakeClients);
 
         render(<App createClients={createClients} session={session} />);
@@ -47,6 +47,14 @@ describe("authenticated application shell", () => {
         ).toBeInTheDocument();
         expect(session.establish).toHaveBeenCalledWith();
         expect(createClients).toHaveBeenCalledOnce();
+    });
+
+    it("shows token login without submitting an empty bearer token", async () => {
+        const session = fakeSession({ authMode: "token", check: false });
+        render(<App createClients={fakeClients} session={session} />);
+
+        expect(await screen.findByRole("button", { name: "Sign in" })).toBeInTheDocument();
+        expect(session.establish).not.toHaveBeenCalled();
     });
 
     it("redirects to the OAuth start endpoint when auth=oauth2", async () => {

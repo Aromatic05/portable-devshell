@@ -57,9 +57,11 @@ test("development CI validates every native target and exercises its target-spec
     assert.match(workflow, /smoke-install-release-windows\.mjs/u);
     const chromiumIndex = workflow.indexOf("playwright install --with-deps chromium");
     const browserEnvironmentIndex = workflow.indexOf("PORTABLE_DEVSHELL_CHROMIUM=$chromium_path");
+    const packageTestIndex = workflow.indexOf("pnpm test");
     const acceptanceIndex = workflow.indexOf("bash acceptance/run-final-acceptance.sh");
-    assert.ok(chromiumIndex >= 0 && browserEnvironmentIndex > chromiumIndex);
-    assert.ok(acceptanceIndex > browserEnvironmentIndex);
+    assert.ok(chromiumIndex > installIndex && browserEnvironmentIndex > chromiumIndex);
+    assert.ok(packageTestIndex > browserEnvironmentIndex);
+    assert.ok(acceptanceIndex > packageTestIndex);
     const finalAcceptance = await readFile(resolve(repositoryRoot, "acceptance", "run-final-acceptance.mjs"), "utf8");
     assert.match(finalAcceptance, /acceptance\/run-web-browser-smoke\.mjs/u);
 });
