@@ -34,6 +34,7 @@ export function resolveChromiumExecutable(
 export async function runTestspaceWebSmoke({
     browserExecutable = resolveChromiumExecutable(),
     webPort,
+    exerciseLifecycle = false,
     expectedInstance = "testspace-local",
     timeoutMs = DEFAULT_TIMEOUT_MS,
 }) {
@@ -103,8 +104,12 @@ export async function runTestspaceWebSmoke({
                 (event.method === "Log.entryAdded" && event.params?.entry?.level === "error")
             );
             assertWebSmokeState(pageState, failures, expectedInstance);
+            if (exerciseLifecycle) {
+                await exerciseInstanceLifecycle(devtools, expectedInstance, timeoutMs);
+            }
             return {
                 browser: browserExecutable,
+                instanceLifecycle: exerciseLifecycle ? "stop-start" : "not-exercised",
                 instanceVisible: pageState.body.includes(expectedInstance),
                 online: true,
                 randomUuidAvailable: pageState.randomUuidType === "function",
@@ -122,6 +127,101 @@ export async function runTestspaceWebSmoke({
         }
         await rm(profile, { recursive: true, force: true });
     }
+}
+
+async function exerciseInstanceLifecycle(devtools, instanceName, timeoutMs) {
+    await clickButton(devtools, "Instances", { prefix: true });
+    await waitForCondition(
+        devtools,
+        `document.body?.innerText.includes(${JSON.stringify(instanceName)}) === true`,
+        timeoutMs,
+        "Instances page did not render the target instance.",
+    );
+    await evaluateRequired(
+        devtools,
+        `(() => {
+            const target = [...document.querySelectorAll('button.instance.card')]
+                .find((button) => button.textContent?.includes(${JSON.stringify(instanceName)}));
+            if (!(target instanceof HTMLElement)) return false;
+            target.click();
+            return true;
+        })()`,
+        "Target instance card is not clickable.",
+    );
+    await waitForCondition(
+        devtools,
+        `document.body?.innerText.includes('Runtime: ready') === true`,
+        timeoutMs,
+        "Instance detail did not reach ready state before Stop.",
+    );
+
+    await clickButton(devtools, "Stop", { outsideDialog: true });
+    await clickButton(devtools, "Stop", { insideDialog: true });
+    await waitForCondition(
+        devtools,
+        `document.body?.innerText.includes('Runtime: stopped') === true`,
+        timeoutMs,
+        "Web Stop action did not reach stopped state.",
+    );
+
+    await clickButton(devtools, "Start", { outsideDialog: true });
+    await clickButton(devtools, "Start", { insideDialog: true });
+    await waitForCondition(
+        devtools,
+        `document.body?.innerText.includes('Runtime: ready') === true`,
+        timeoutMs,
+        "Web Start action did not return the instance to ready state.",
+    );
+}
+
+async function clickButton(devtools, label, options = {}) {
+    await evaluateRequired(
+        devtools,
+        `(() => {
+            const target = [...document.querySelectorAll('button')]
+                .filter((button) => {
+                    const inDialog = button.closest('[role="dialog"]') !== null;
+                    if (${options.insideDialog === true} && !inDialog) return false;
+                    if (${options.outsideDialog === true} && inDialog) return false;
+                    return true;
+                })
+                .find((button) => {
+                    const text = button.textContent?.trim() ?? '';
+                    return ${options.prefix === true}
+                        ? text.startsWith(${JSON.stringify(label)})
+                        : text === ${JSON.stringify(label)};
+                });
+            if (!(target instanceof HTMLElement) || target.hasAttribute('disabled')) return false;
+            target.click();
+            return true;
+        })()`,
+        `Button ${label} is not clickable.`,
+    );
+}
+
+async function evaluateRequired(devtools, expression, message) {
+    const evaluated = await devtools.send("Runtime.evaluate", {
+        expression,
+        returnByValue: true,
+    });
+    if (evaluated.result?.value !== true) {
+        throw new Error(message);
+    }
+}
+
+async function waitForCondition(devtools, expression, timeoutMs, message) {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+        const evaluated = await devtools.send("Runtime.evaluate", {
+            expression,
+            returnByValue: true,
+        });
+        if (evaluated.result?.value === true) {
+            return;
+        }
+        await delay(100);
+    }
+    throw new Error(message);
 }
 
 export function assertWebSmokeState(pageState, failures = [], expectedInstance = "testspace-local") {

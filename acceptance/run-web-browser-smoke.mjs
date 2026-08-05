@@ -21,9 +21,14 @@ if (browserExecutable === undefined) {
         runCli(["instance", "start", "aromatic-pc"], fixture.env);
         const result = await runTestspaceWebSmoke({
             browserExecutable,
+            exerciseLifecycle: true,
             expectedInstance: "aromatic-pc",
             webPort: fixture.webPort,
         });
+        const status = runCli(["instance", "status", "aromatic-pc"], fixture.env);
+        if (!/^status: ready$/mu.test(status.stdout)) {
+            throw new Error(`Web lifecycle smoke did not restore the instance to ready.\n${status.stdout}`);
+        }
         process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
     } finally {
         await fixture.cleanup();
