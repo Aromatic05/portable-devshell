@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use crate::security::path::ResolvedPath;
 use crate::tools::file::state::{FULL_SNAPSHOT_LIMIT, TextFile, TextMetadata};
 use crate::tools::file::structure;
 use crate::tools::file::types::{FileParseStatus, FileReadInput, FileReadOutput, FileReadView};
@@ -47,24 +48,27 @@ impl ToolHandler for FileReadTool {
 
         let ordinal = self.state.next_snapshot_ordinal();
         let (_, resolved) = resolve_existing(&call, &input.path, false)?;
-        let path = resolved.access_path();
-        if !path.is_file() {
+        if !resolved
+            .metadata()
+            .map_err(|error| ToolError::new("file.readFailed", error.to_string()))?
+            .is_file()
+        {
             return Err(ToolError::new("file.notFile", "path is not a file"));
         }
-        let metadata = TextMetadata::inspect(&path)?;
+        let metadata = TextMetadata::inspect_file(
+            resolved
+                .open_file()
+                .map_err(|error| ToolError::new("file.readFailed", error.to_string()))?,
+        )?;
         let resolved_view = resolve_view(&input, &resolved.canonical, &metadata);
 
         let output = match resolved_view {
-            FileReadView::Outline => self.read_outline(
-                &call,
-                path,
-                &resolved.canonical,
-                &metadata,
-                ordinal,
-            )?,
+            FileReadView::Outline => {
+                self.read_outline(&call, &resolved, &resolved.canonical, &metadata, ordinal)?
+            }
             FileReadView::Content | FileReadView::Auto => self.read_content(
                 &call,
-                path,
+                &resolved,
                 &resolved.canonical,
                 &metadata,
                 &input,
@@ -79,7 +83,7 @@ impl FileReadTool {
     fn read_outline(
         &self,
         call: &ToolCall,
-        access_path: &std::path::Path,
+        resolved: &ResolvedPath,
         canonical_path: &std::path::Path,
         metadata: &TextMetadata,
         ordinal: u64,
@@ -90,7 +94,11 @@ impl FileReadTool {
                 "outline view is limited to files that fit in a full snapshot",
             ));
         }
-        let text = TextFile::read(access_path)?;
+        let text = TextFile::read_file(
+            resolved
+                .open_file()
+                .map_err(|error| ToolError::new("file.readFailed", error.to_string()))?,
+        )?;
         call.check_cancelled()?;
         if text.revision != metadata.revision {
             return Err(ToolError::retryable(
@@ -127,7 +135,7 @@ impl FileReadTool {
     fn read_content(
         &self,
         call: &ToolCall,
-        access_path: &std::path::Path,
+        resolved: &ResolvedPath,
         canonical_path: &std::path::Path,
         metadata: &TextMetadata,
         input: &FileReadInput,
@@ -150,8 +158,13 @@ impl FileReadTool {
         } else {
             parse_selector(input.selector.as_deref(), metadata.total_lines)?
         };
-        let selected =
-            TextMetadata::read_selected(access_path, &selector.ranges, MAX_CONTENT_BYTES)?;
+        let selected = TextMetadata::read_selected_file(
+            resolved
+                .open_file()
+                .map_err(|error| ToolError::new("file.readFailed", error.to_string()))?,
+            &selector.ranges,
+            MAX_CONTENT_BYTES,
+        )?;
         call.check_cancelled()?;
         if selected.metadata.revision != metadata.revision {
             return Err(ToolError::retryable(
@@ -182,7 +195,11 @@ impl FileReadTool {
 
         call.check_cancelled()?;
         if metadata.total_bytes <= FULL_SNAPSHOT_LIMIT {
-            let text = TextFile::read(access_path)?;
+            let text = TextFile::read_file(
+                resolved
+                    .open_file()
+                    .map_err(|error| ToolError::new("file.readFailed", error.to_string()))?,
+            )?;
             call.check_cancelled()?;
             if text.revision != metadata.revision {
                 return Err(ToolError::retryable(
@@ -272,7 +289,6 @@ fn resolve_view(
         }
     }
 }
-
 
 struct ParsedSelector {
     ranges: Vec<(usize, usize)>,

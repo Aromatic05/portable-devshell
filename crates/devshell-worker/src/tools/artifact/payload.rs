@@ -1,13 +1,10 @@
 use std::ffi::OsStr;
-use std::fs::{self, File, Metadata};
+use std::fs::{self, File};
 use std::io::{Read, Seek, SeekFrom, Write};
 #[cfg(unix)]
 use std::os::unix::ffi::OsStrExt;
-#[cfg(unix)]
-use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use std::time::UNIX_EPOCH;
 
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use serde::{Deserialize, Serialize};
@@ -17,8 +14,8 @@ use uuid::Uuid;
 use crate::platform::unix_time_millis;
 use crate::security::SecurityPolicy;
 use crate::security::path::{
-    FilesystemCapability, PathNamespace, ResolvedPath, parse_requested_path,
-    resolve_existing_target,
+    FilesystemCapability, PathNamespace, ResolvedDirectory, ResolvedMetadata, ResolvedPath,
+    parse_requested_path, resolve_existing_target,
 };
 use crate::tools::ToolError;
 use crate::tools::artifact::storage;
@@ -96,7 +93,6 @@ struct ArtifactPayloadMetadata {
 
 #[derive(Clone, Debug)]
 struct DirectoryEntry {
-    absolute_path: PathBuf,
     relative_path: String,
     entry_type: DirectoryEntryType,
     mode: u32,
@@ -219,7 +215,8 @@ impl ArtifactPayloadStore {
         resolved: &ResolvedPath,
         expires_at_ms: u128,
     ) -> Result<ArtifactPayloadOpenResult, ToolError> {
-        let metadata = fs::metadata(resolved.access_path())
+        let metadata = resolved
+            .metadata()
             .map_err(|error| ToolError::new("artifact.readFailed", error.to_string()))?;
 
         let _guard = self.lock()?;
@@ -227,9 +224,21 @@ impl ArtifactPayloadStore {
 
         let payload_id = Uuid::new_v4().to_string();
         let descriptor = if metadata.is_file() {
-            self.create_file_payload(&payload_id, resolved.access_path(), &resolved.canonical)?
+            self.create_file_payload(
+                &payload_id,
+                resolved
+                    .open_file()
+                    .map_err(|error| ToolError::new("artifact.readFailed", error.to_string()))?,
+                &resolved.canonical,
+            )?
         } else if metadata.is_dir() {
-            self.create_directory_payload(&payload_id, resolved.access_path(), &resolved.canonical)?
+            self.create_directory_payload(
+                &payload_id,
+                resolved
+                    .open_directory()
+                    .map_err(|error| ToolError::new("artifact.readFailed", error.to_string()))?,
+                &resolved.canonical,
+            )?
         } else {
             return Err(ToolError::new(
                 "artifact.directoryUnsafe",
@@ -323,12 +332,10 @@ impl ArtifactPayloadStore {
     fn create_file_payload(
         &self,
         payload_id: &str,
-        source_path: &Path,
+        mut source: File,
         display_path: &Path,
     ) -> Result<ArtifactPayloadDescriptor, ToolError> {
         let name = utf8_file_name(display_path)?;
-        let mut source = File::open(source_path)
-            .map_err(|error| ToolError::new("artifact.readFailed", error.to_string()))?;
         if !source
             .metadata()
             .map_err(|error| ToolError::new("artifact.readFailed", error.to_string()))?
@@ -363,11 +370,11 @@ impl ArtifactPayloadStore {
     fn create_directory_payload(
         &self,
         payload_id: &str,
-        source_path: &Path,
+        source: ResolvedDirectory,
         display_path: &Path,
     ) -> Result<ArtifactPayloadDescriptor, ToolError> {
         let source_name = utf8_file_name(display_path).unwrap_or_else(|_| "directory".to_string());
-        let entries = collect_directory_entries(source_path)?;
+        let entries = collect_directory_entries(&source)?;
         let mut temp = self.new_temp("payload-directory-")?;
         let mut manifest_hasher = blake3::Hasher::new();
         let mut logical_bytes = 0usize;
@@ -378,7 +385,7 @@ impl ArtifactPayloadStore {
             let mut archive = tar::Builder::new(encoder);
             archive.mode(tar::HeaderMode::Deterministic);
             for entry in &entries {
-                append_directory_entry(&mut archive, entry, &mut manifest_hasher)?;
+                append_directory_entry(&source, &mut archive, entry, &mut manifest_hasher)?;
                 if entry.entry_type == DirectoryEntryType::File {
                     logical_bytes = logical_bytes.saturating_add(entry.size as usize);
                 }
@@ -522,9 +529,9 @@ fn descriptor_from_lease(lease: &ArtifactLease) -> ArtifactPayloadDescriptor {
     }
 }
 
-fn collect_directory_entries(root: &Path) -> Result<Vec<DirectoryEntry>, ToolError> {
+fn collect_directory_entries(root: &ResolvedDirectory) -> Result<Vec<DirectoryEntry>, ToolError> {
     let mut entries = Vec::new();
-    collect_directory_entries_from(root, root, &mut entries)?;
+    collect_directory_entries_from(root, Path::new(""), &mut entries)?;
     entries.sort_by(|left, right| {
         left.relative_path
             .as_bytes()
@@ -534,33 +541,28 @@ fn collect_directory_entries(root: &Path) -> Result<Vec<DirectoryEntry>, ToolErr
 }
 
 fn collect_directory_entries_from(
-    root: &Path,
+    root: &ResolvedDirectory,
     current: &Path,
     entries: &mut Vec<DirectoryEntry>,
 ) -> Result<(), ToolError> {
-    let mut children = fs::read_dir(current)
-        .map_err(|error| ToolError::new("artifact.readFailed", error.to_string()))?
-        .collect::<Result<Vec<_>, _>>()
+    let directory = root
+        .open_directory(current)
         .map_err(|error| ToolError::new("artifact.readFailed", error.to_string()))?;
-    children.sort_by(|left, right| {
-        os_sort_key(&left.file_name()).cmp(&os_sort_key(&right.file_name()))
-    });
-    for child in children {
-        let absolute_path = child.path();
-        let metadata = fs::symlink_metadata(&absolute_path)
+    let mut children = directory
+        .entries()
+        .map_err(|error| ToolError::new("artifact.readFailed", error.to_string()))?;
+    children.sort_by(|left, right| os_sort_key(left).cmp(&os_sort_key(right)));
+    for name in children {
+        let relative = current.join(&name);
+        let metadata = root
+            .metadata(&relative, false)
             .map_err(|error| ToolError::new("artifact.readFailed", error.to_string()))?;
-        if metadata.file_type().is_symlink() {
+        if metadata.is_symlink() {
             return Err(ToolError::new(
                 "artifact.directoryUnsafe",
-                format!(
-                    "directory contains symbolic link: {}",
-                    absolute_path.display()
-                ),
+                format!("directory contains symbolic link: {}", relative.display()),
             ));
         }
-        let relative = absolute_path.strip_prefix(root).map_err(|_| {
-            ToolError::new("artifact.directoryUnsafe", "directory member escaped root")
-        })?;
         let relative_path = relative
             .to_str()
             .ok_or_else(|| {
@@ -582,7 +584,6 @@ fn collect_directory_entries_from(
             ));
         };
         entries.push(DirectoryEntry {
-            absolute_path: absolute_path.clone(),
             relative_path,
             entry_type,
             mode: metadata_mode(&metadata, entry_type),
@@ -590,13 +591,14 @@ fn collect_directory_entries_from(
             size,
         });
         if entry_type == DirectoryEntryType::Directory {
-            collect_directory_entries_from(root, &absolute_path, entries)?;
+            collect_directory_entries_from(root, &relative, entries)?;
         }
     }
     Ok(())
 }
 
 fn append_directory_entry<W: Write>(
+    root: &ResolvedDirectory,
     archive: &mut tar::Builder<W>,
     entry: &DirectoryEntry,
     manifest_hasher: &mut blake3::Hasher,
@@ -617,7 +619,8 @@ fn append_directory_entry<W: Write>(
             update_manifest_hash(manifest_hasher, entry, None);
         }
         DirectoryEntryType::File => {
-            let mut file = File::open(&entry.absolute_path)
+            let mut file = root
+                .open_file(Path::new(&entry.relative_path))
                 .map_err(|error| ToolError::new("artifact.readFailed", error.to_string()))?;
             let file_metadata = file
                 .metadata()
@@ -756,22 +759,25 @@ fn utf8_file_name(path: &Path) -> Result<String, ToolError> {
         })
 }
 
-fn modified_at_seconds(metadata: &Metadata) -> u64 {
-    metadata
-        .modified()
-        .ok()
-        .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
-        .map(|duration| duration.as_secs())
-        .unwrap_or(0)
+fn modified_at_seconds(metadata: &ResolvedMetadata) -> u64 {
+    #[cfg(unix)]
+    {
+        return metadata.modified_at_seconds().max(0) as u64;
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = metadata;
+        0
+    }
 }
 
 #[cfg(unix)]
-fn metadata_mode(metadata: &Metadata, _entry_type: DirectoryEntryType) -> u32 {
-    metadata.permissions().mode() & 0o777
+fn metadata_mode(metadata: &ResolvedMetadata, _entry_type: DirectoryEntryType) -> u32 {
+    metadata.mode() & 0o777
 }
 
 #[cfg(windows)]
-fn metadata_mode(_metadata: &Metadata, entry_type: DirectoryEntryType) -> u32 {
+fn metadata_mode(_metadata: &ResolvedMetadata, entry_type: DirectoryEntryType) -> u32 {
     match entry_type {
         DirectoryEntryType::Directory => 0o755,
         DirectoryEntryType::File => 0o644,

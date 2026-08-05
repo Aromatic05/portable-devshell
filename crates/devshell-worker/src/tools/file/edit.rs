@@ -1,10 +1,8 @@
 use std::collections::{BTreeSet, HashMap};
-use std::fs;
-use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use crate::security::path::{ResolvedPath, parse_requested_path};
+use crate::security::path::{ResolvedPath, ResolvedTarget, parse_requested_path};
 use crate::tools::file::context_patch;
 use crate::tools::file::diff;
 use crate::tools::file::publish::{self, PublishMode};
@@ -329,7 +327,9 @@ impl FileEditTool {
             }
         }
 
-        FileChangeSetOutput { operations: outputs }
+        FileChangeSetOutput {
+            operations: outputs,
+        }
     }
 
     fn execute_one(
@@ -391,22 +391,33 @@ impl FileEditTool {
         local_snapshots: &mut HashMap<PathBuf, ContextFileSnapshot>,
     ) -> Result<FileChangeOperationOutput, ToolError> {
         let resolved = rebind_for_execution(call, &display, &path)?;
-        let target = resolved.target_path();
+        let target = resolved
+            .target()
+            .map_err(|error| ToolError::new("file.writeFailed", error.to_string()))?;
         let lock = self.state.write_lock(&path);
         let _guard = lock.lock().unwrap();
-        if target.symlink_metadata().is_ok() {
+        if target
+            .metadata(false)
+            .map_err(|error| ToolError::new("file.writeFailed", error.to_string()))?
+            .is_some()
+        {
             return Err(ToolError::new(
                 "file.alreadyExists",
                 "Write File target already exists",
             ));
         }
-        let mut temp = publish::new_temp(target)?;
-        temp.write_all(content.as_bytes())
-            .map_err(|error| ToolError::new("file.writeFailed", error.to_string()))?;
-        temp.flush()
-            .map_err(|error| ToolError::new("file.writeFailed", error.to_string()))?;
-        publish::publish(temp, target, PublishMode::NoClobber)?;
-        let text = TextFile::read(target)?;
+        publish::write_atomic(
+            &target,
+            content.as_bytes(),
+            PublishMode::NoClobber,
+            None,
+            || Ok(()),
+        )?;
+        let text = TextFile::read_file(
+            target
+                .open_file()
+                .map_err(|error| ToolError::new("file.readFailed", error.to_string()))?,
+        )?;
         let snapshot = self.remember_complete(call, &path, &text);
         local_snapshots.insert(path.clone(), snapshot);
         Ok(applied_text_output(
@@ -435,15 +446,14 @@ impl FileEditTool {
         let resolved = rebind_for_execution(call, &display, &path)?;
         let lock = self.state.write_lock(&path);
         let _guard = lock.lock().unwrap();
-        let current = TextFile::read(resolved.access_path())?;
+        let current = TextFile::read_file(
+            resolved
+                .open_file()
+                .map_err(|error| ToolError::new("file.readFailed", error.to_string()))?,
+        )?;
         require_revision(&base, &current)?;
         let rewritten = TextFile::from_normalized(&current, &content)?;
-        publish_text(
-            resolved.target_path(),
-            resolved.access_path(),
-            &rewritten,
-            Some(&current),
-        )?;
+        publish_text(&resolved, &rewritten, Some(&current))?;
         let snapshot = self.remember_complete(call, &path, &rewritten);
         local_snapshots.insert(path.clone(), snapshot);
         Ok(applied_text_output(
@@ -472,7 +482,11 @@ impl FileEditTool {
         let resolved = rebind_for_execution(call, &display, &path)?;
         let lock = self.state.write_lock(&path);
         let _guard = lock.lock().unwrap();
-        let current = TextFile::read(resolved.access_path())?;
+        let current = TextFile::read_file(
+            resolved
+                .open_file()
+                .map_err(|error| ToolError::new("file.readFailed", error.to_string()))?,
+        )?;
         let (original, may_merge) = match &base.content {
             SnapshotContent::Full(content) => (content.clone(), true),
             SnapshotContent::Sparse => {
@@ -493,12 +507,7 @@ impl FileEditTool {
             return Err(revision_mismatch());
         };
         let updated = TextFile::from_normalized(&current, &normalized)?;
-        publish_text(
-            resolved.target_path(),
-            resolved.access_path(),
-            &updated,
-            Some(&current),
-        )?;
+        publish_text(&resolved, &updated, Some(&current))?;
 
         let seen = if merged {
             application.resulting_known_lines.clone()
@@ -534,9 +543,16 @@ impl FileEditTool {
         let resolved = rebind_for_execution(call, &display, &path)?;
         let lock = self.state.write_lock(&path);
         let _guard = lock.lock().unwrap();
-        let current = TextFile::read(resolved.access_path())?;
+        let current = TextFile::read_file(
+            resolved
+                .open_file()
+                .map_err(|error| ToolError::new("file.readFailed", error.to_string()))?,
+        )?;
         require_revision(&base, &current)?;
-        fs::remove_file(resolved.target_path())
+        resolved
+            .target()
+            .map_err(|error| ToolError::new("file.writeFailed", error.to_string()))?
+            .remove()
             .map_err(|error| ToolError::new("file.writeFailed", error.to_string()))?;
         self.state
             .context_snapshots
@@ -588,15 +604,29 @@ impl FileEditTool {
         };
         let _first_guard = first.lock().unwrap();
         let _second_guard = second.lock().unwrap();
-        let current = TextFile::read(source_resolved.access_path())?;
+        let current = TextFile::read_file(
+            source_resolved
+                .open_file()
+                .map_err(|error| ToolError::new("file.readFailed", error.to_string()))?,
+        )?;
         require_revision(&base, &current)?;
-        if target_resolved.target_path().symlink_metadata().is_ok() {
+        let source_target = source_resolved
+            .target()
+            .map_err(|error| ToolError::new("file.writeFailed", error.to_string()))?;
+        let target_target = target_resolved
+            .target()
+            .map_err(|error| ToolError::new("file.writeFailed", error.to_string()))?;
+        if target_target
+            .metadata(false)
+            .map_err(|error| ToolError::new("file.writeFailed", error.to_string()))?
+            .is_some()
+        {
             return Err(ToolError::new(
                 "file.alreadyExists",
                 "Move File target already exists",
             ));
         }
-        atomic_move_no_replace(source_resolved.target_path(), target_resolved.target_path())?;
+        atomic_move_no_replace_resolved(&source_target, &target_target)?;
         self.state
             .context_snapshots
             .lock()
@@ -1100,35 +1130,60 @@ fn revision_mismatch() -> ToolError {
 }
 
 fn publish_text(
-    target_path: &Path,
-    access_path: &Path,
+    resolved: &ResolvedPath,
     text: &TextFile,
     source: Option<&TextFile>,
 ) -> Result<(), ToolError> {
-    let mut temp = publish::new_temp(target_path)?;
-    temp.write_all(&text.encoded())
-        .map_err(|error| ToolError::new("file.writeFailed", error.to_string()))?;
-    temp.flush()
+    let target = resolved
+        .target()
         .map_err(|error| ToolError::new("file.writeFailed", error.to_string()))?;
     #[cfg(unix)]
-    if source.is_some() {
-        use std::os::unix::fs::PermissionsExt;
-        let metadata = fs::metadata(access_path)
-            .map_err(|error| ToolError::new("file.writeFailed", error.to_string()))?;
-        temp.as_file()
-            .set_permissions(fs::Permissions::from_mode(metadata.permissions().mode()))
-            .map_err(|error| ToolError::new("file.writeFailed", error.to_string()))?;
+    let permissions = source
+        .map(|_| resolved.metadata())
+        .transpose()
+        .map_err(|error| ToolError::new("file.writeFailed", error.to_string()))?
+        .map(|metadata| metadata.mode());
+    #[cfg(not(unix))]
+    let permissions = None;
+    publish::write_atomic(
+        &target,
+        &text.encoded(),
+        PublishMode::Replace,
+        permissions,
+        || {
+            if let Some(source) = source {
+                let current = TextFile::read_file(
+                    resolved
+                        .open_file()
+                        .map_err(|error| ToolError::new("file.readFailed", error.to_string()))?,
+                )?;
+                if current.revision != source.revision {
+                    return Err(ToolError::retryable(
+                        "file.revisionMismatch",
+                        "file changed while preparing the write",
+                    ));
+                }
+            }
+            Ok(())
+        },
+    )
+}
+
+fn atomic_move_no_replace_resolved(
+    source: &ResolvedTarget,
+    target: &ResolvedTarget,
+) -> Result<(), ToolError> {
+    if !source.is_anchored() || !target.is_anchored() {
+        return atomic_move_no_replace(source.path(), target.path());
     }
-    if let Some(source) = source {
-        let current = TextFile::read(access_path)?;
-        if current.revision != source.revision {
-            return Err(ToolError::retryable(
-                "file.revisionMismatch",
-                "file changed while preparing the write",
-            ));
-        }
+    source.hard_link_to(target).map_err(map_move_error)?;
+    if let Err(error) = source.remove() {
+        let _ = target.remove();
+        return Err(ToolError::new("file.writeFailed", error.to_string()));
     }
-    publish::publish(temp, target_path, PublishMode::Replace)
+    target
+        .sync_parent()
+        .map_err(|error| ToolError::new("file.writeFailed", error.to_string()))
 }
 
 fn applied_text_output(

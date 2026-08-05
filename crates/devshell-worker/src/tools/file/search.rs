@@ -1,5 +1,5 @@
 use std::collections::{BTreeMap, HashSet, VecDeque};
-use std::fs;
+use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -122,7 +122,10 @@ impl ToolHandler for FileSearchTool {
                 call.check_cancelled()?;
                 let ordinal = self.state.next_snapshot_ordinal();
                 let Ok((metadata, matches, shown)) = search_stream(
-                    entry.resolved.access_path(),
+                    entry
+                        .resolved
+                        .open_file()
+                        .map_err(|error| ToolError::new("file.notFound", error.to_string()))?,
                     &matcher,
                     per_file,
                     context,
@@ -200,7 +203,12 @@ impl ToolHandler for FileSearchTool {
         for matched in page {
             call.check_cancelled()?;
             if matched.metadata.total_bytes <= FULL_SNAPSHOT_LIMIT {
-                let text = TextFile::read(matched.resolved.access_path())?;
+                let text = TextFile::read_file(
+                    matched
+                        .resolved
+                        .open_file()
+                        .map_err(|error| ToolError::new("file.notFound", error.to_string()))?,
+                )?;
                 if text.revision != matched.metadata.revision {
                     return Err(ToolError::retryable(
                         "file.revisionMismatch",
@@ -214,7 +222,12 @@ impl ToolHandler for FileSearchTool {
                     ordinal: matched.ordinal,
                 });
             } else {
-                let metadata = TextMetadata::inspect(matched.resolved.access_path())?;
+                let metadata = TextMetadata::inspect_file(
+                    matched
+                        .resolved
+                        .open_file()
+                        .map_err(|error| ToolError::new("file.notFound", error.to_string()))?,
+                )?;
                 if metadata.revision != matched.metadata.revision {
                     return Err(ToolError::retryable(
                         "file.revisionMismatch",
@@ -259,14 +272,12 @@ impl ToolHandler for FileSearchTool {
 type SearchStreamResult = (TextMetadata, Vec<usize>, BTreeMap<usize, String>);
 
 fn search_stream(
-    path: &std::path::Path,
+    file: File,
     matcher: &regex::Regex,
     limit: usize,
     context: Option<usize>,
     cancellation: &crate::tools::ToolCancellation,
 ) -> Result<SearchStreamResult, ToolError> {
-    let file =
-        fs::File::open(path).map_err(|error| ToolError::new("file.notFound", error.to_string()))?;
     let mut reader = BufReader::new(file);
     let (before, after) = context.map_or((1usize, 3usize), |value| (value, value));
     let mut previous = VecDeque::<(usize, String)>::new();

@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::os::unix::process::CommandExt;
 use std::process::{Child, Command, Stdio};
 
-use nix::unistd::{Pid, setpgid};
+use nix::unistd::{Pid, fchdir, setpgid};
 
 use crate::security::path::ResolvedPath;
 use crate::tools::ToolError;
@@ -14,17 +14,25 @@ pub fn spawn_shell(
     cwd: &ResolvedPath,
     env: &BTreeMap<String, Option<String>>,
 ) -> Result<Child, ToolError> {
+    let anchored_cwd = cwd
+        .cloned_directory_file()
+        .map_err(|error| ToolError::new("bash.invalidCwd", error.to_string()))?;
     let mut command = Command::new(&shell.executable);
     command
         .arg("-lc")
         .arg(command_text)
-        .current_dir(cwd.access_path())
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+    if anchored_cwd.is_none() {
+        command.current_dir(cwd.access_path());
+    }
     apply_environment(&mut command, env);
     unsafe {
-        command.pre_exec(|| {
+        command.pre_exec(move || {
+            if let Some(directory) = &anchored_cwd {
+                fchdir(directory).map_err(std::io::Error::other)?;
+            }
             setpgid(Pid::from_raw(0), Pid::from_raw(0)).map_err(std::io::Error::other)?;
             Ok(())
         });

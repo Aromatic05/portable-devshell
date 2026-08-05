@@ -1069,7 +1069,11 @@ fn resolve_cwd(call: &ToolCall, requested: Option<&str>) -> Result<ResolvedPath,
             .map_err(ToolError::from)?;
     }
     let resolved = resolve_existing_target(&call.workspace, &requested)?;
-    if !resolved.access_path().is_dir() {
+    if !resolved
+        .metadata()
+        .map_err(|error| ToolError::new("tmux.invalidCwd", error.to_string()))?
+        .is_dir()
+    {
         return Err(ToolError::new(
             "tmux.invalidCwd",
             format!(
@@ -1082,7 +1086,7 @@ fn resolve_cwd(call: &ToolCall, requested: Option<&str>) -> Result<ResolvedPath,
 }
 
 fn verify_pane_cwd(pane: &BackendPane, expected: &ResolvedPath) -> Result<(), ToolError> {
-    let expected_metadata = fs::metadata(expected.access_path()).map_err(|error| {
+    let expected_metadata = expected.metadata().map_err(|error| {
         ToolError::retryable(
             "tmux.cwdChanged",
             format!("resolved pane cwd cannot be verified: {error}"),
@@ -1094,9 +1098,8 @@ fn verify_pane_cwd(pane: &BackendPane, expected: &ResolvedPath) -> Result<(), To
             format!("created pane cwd cannot be verified: {error}"),
         )
     })?;
-    if actual_metadata.dev() != expected_metadata.dev()
-        || actual_metadata.ino() != expected_metadata.ino()
-    {
+    let (expected_device, expected_inode) = expected_metadata.device_and_inode();
+    if actual_metadata.dev() != expected_device || actual_metadata.ino() != expected_inode {
         return Err(ToolError::retryable(
             "tmux.cwdChanged",
             format!(

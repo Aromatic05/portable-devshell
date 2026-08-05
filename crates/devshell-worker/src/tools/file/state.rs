@@ -1,6 +1,6 @@
 use std::collections::{BTreeSet, HashMap};
 use std::fs;
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, Read};
 use std::path::Path;
 
 use crate::platform::unix_time_millis;
@@ -190,13 +190,7 @@ impl ContextSnapshotStore {
 }
 
 impl TextMetadata {
-    pub fn inspect(path: &Path) -> Result<Self, ToolError> {
-        let file = fs::File::open(path).map_err(|error| {
-            ToolError::new(
-                "file.notFound",
-                format!("failed to read {}: {error}", path.display()),
-            )
-        })?;
+    pub fn inspect_file(file: fs::File) -> Result<Self, ToolError> {
         let mut reader = BufReader::new(file);
         let mut hasher = blake3::Hasher::new();
         let mut buffer = Vec::new();
@@ -237,17 +231,11 @@ impl TextMetadata {
         })
     }
 
-    pub fn read_selected(
-        path: &Path,
+    pub fn read_selected_file(
+        file: fs::File,
         ranges: &[(usize, usize)],
         max_rendered_bytes: usize,
     ) -> Result<SelectedLines, ToolError> {
-        let file = fs::File::open(path).map_err(|error| {
-            ToolError::new(
-                "file.notFound",
-                format!("failed to read {}: {error}", path.display()),
-            )
-        })?;
         let mut reader = BufReader::new(file);
         let mut hasher = blake3::Hasher::new();
         let mut buffer = Vec::new();
@@ -325,13 +313,10 @@ impl TextMetadata {
 }
 
 impl TextFile {
-    pub fn read(path: &Path) -> Result<Self, ToolError> {
-        let bytes = fs::read(path).map_err(|error| {
-            ToolError::new(
-                "file.notFound",
-                format!("failed to read {}: {error}", path.display()),
-            )
-        })?;
+    pub fn read_file(mut file: fs::File) -> Result<Self, ToolError> {
+        let mut bytes = Vec::new();
+        file.read_to_end(&mut bytes)
+            .map_err(|error| ToolError::new("file.readFailed", error.to_string()))?;
         if bytes.contains(&0) {
             return Err(ToolError::new("file.notText", "file contains NUL bytes"));
         }

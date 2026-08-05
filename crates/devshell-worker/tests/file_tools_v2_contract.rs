@@ -695,7 +695,11 @@ fn file_edit_returns_diff_only_when_requested() {
     );
     assert_eq!(summary["ok"], true, "{summary}");
     assert!(summary["result"]["operations"][0].get("diff").is_none());
-    assert!(summary["result"]["operations"][0].get("truncated").is_none());
+    assert!(
+        summary["result"]["operations"][0]
+            .get("truncated")
+            .is_none()
+    );
 
     let detailed = call(
         &env,
@@ -710,7 +714,11 @@ fn file_edit_returns_diff_only_when_requested() {
     );
     assert_eq!(detailed["ok"], true, "{detailed}");
     assert!(detailed["result"]["operations"][0]["diff"].is_string());
-    assert!(detailed["result"]["operations"][0].get("truncated").is_none());
+    assert!(
+        detailed["result"]["operations"][0]
+            .get("truncated")
+            .is_none()
+    );
 
     env.json_command(&["stop", "--instance", instance]);
 }
@@ -1016,7 +1024,10 @@ fn file_edit_rejects_conflicting_external_changes_without_overwriting_them() {
     );
 
     assert_eq!(edited["ok"], true, "{edited}");
-    assert_eq!(edited["result"]["operations"][0]["status"], "failed", "{edited}");
+    assert_eq!(
+        edited["result"]["operations"][0]["status"], "failed",
+        "{edited}"
+    );
     assert_eq!(
         edited["result"]["operations"][0]["error"]["code"],
         "file.revisionMismatch"

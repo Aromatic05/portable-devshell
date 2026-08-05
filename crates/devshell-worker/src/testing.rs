@@ -21,7 +21,11 @@ mod tests {
     fn temp_dirs_live_under_the_devshell_test_namespace() {
         let directory = temp_dir();
         let namespace = test_temp_namespace();
-        assert!(directory.path().starts_with(&namespace), "{:?}", directory.path());
+        assert!(
+            directory.path().starts_with(&namespace),
+            "{:?}",
+            directory.path()
+        );
         assert!(directory.path().is_dir());
     }
 
@@ -29,7 +33,11 @@ mod tests {
     fn concurrent_temp_dirs_never_collide() {
         let directories: Vec<tempfile::TempDir> = (0..16).map(|_| temp_dir()).collect();
         let mut paths: Vec<_> = directories.iter().map(|d| d.path().to_path_buf()).collect();
-        let unique = paths.iter().cloned().collect::<std::collections::HashSet<_>>().len();
+        let unique = paths
+            .iter()
+            .cloned()
+            .collect::<std::collections::HashSet<_>>()
+            .len();
         assert_eq!(unique, paths.len());
         paths.sort();
         for window in paths.windows(2) {

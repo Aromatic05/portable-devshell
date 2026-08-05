@@ -281,7 +281,11 @@ fn resolve_cwd(call: &ToolCall, raw: Option<&str>) -> Result<ResolvedPath, ToolE
         .map_err(|_| ToolError::new("bash.invalidCwd", "cwd must use `./` or `/` syntax"))?;
     let resolved = resolve_existing_target(&call.workspace, &requested)
         .map_err(|error| ToolError::new("bash.invalidCwd", error.message))?;
-    if !resolved.access_path().is_dir() {
+    if !resolved
+        .metadata()
+        .map_err(|error| ToolError::new("bash.invalidCwd", error.to_string()))?
+        .is_dir()
+    {
         return Err(ToolError::new("bash.invalidCwd", "cwd is not a directory"));
     }
     Ok(resolved)
