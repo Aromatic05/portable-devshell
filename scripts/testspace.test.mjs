@@ -17,6 +17,8 @@ import {
 } from "./testspace/TestspaceConfig.mjs";
 import { createSafeAction, SAFE_ACTIONS } from "./testspace/TestspaceConnector.mjs";
 import {
+    createTestspaceProcessEnvironment,
+    resetTestspacePodmanStorage,
     resolveTestspaceRuntimeDirectory,
     stopTestspaceTmux,
 } from "./testspace/TestspaceRuntime.mjs";
@@ -116,6 +118,56 @@ test("testspace runtime is deterministic and short enough for worker sockets", (
     assert.equal(
         join(first, "devshell-worker", TESTSPACE_INSTANCE, "worker.sock").length < 100,
         true,
+    );
+});
+
+test("testspace process environment isolates runtime and container storage", () => {
+    const env = createTestspaceProcessEnvironment(
+        "/tmp/testspace-home",
+        "/tmp/testspace-runtime",
+        { PATH: "/usr/bin" },
+    );
+    assert.equal(env.HOME, "/tmp/testspace-home");
+    assert.equal(env.USERPROFILE, "/tmp/testspace-home");
+    assert.equal(env.XDG_RUNTIME_DIR, "/tmp/testspace-runtime");
+    assert.equal(env.XDG_DATA_HOME, "/tmp/testspace-home/.local/share");
+    assert.equal(env.XDG_CONFIG_HOME, "/tmp/testspace-home/.config");
+    assert.equal(env.XDG_CACHE_HOME, "/tmp/testspace-home/.cache");
+    assert.equal(env.PATH, "/usr/bin");
+});
+
+test("testspace Podman cleanup resets the isolated store before directory removal", () => {
+    const calls = [];
+    const reset = resetTestspacePodmanStorage(
+        "/tmp/testspace-home",
+        "/tmp/testspace-runtime",
+        {
+            ensureRuntime(directory) {
+                calls.push({ directory, type: "runtime" });
+            },
+            exists: () => true,
+            spawn(command, args, options) {
+                calls.push({ command, args, options });
+                return { status: 0, stderr: "" };
+            },
+        },
+    );
+    assert.equal(reset, true);
+    assert.equal(calls.length, 2);
+    assert.deepEqual(calls[0], {
+        directory: "/tmp/testspace-runtime",
+        type: "runtime",
+    });
+    assert.equal(calls[1].command, "podman");
+    assert.deepEqual(calls[1].args, ["system", "reset", "--force"]);
+    assert.equal(calls[1].options.env.HOME, "/tmp/testspace-home");
+    assert.equal(
+        calls[1].options.env.XDG_DATA_HOME,
+        "/tmp/testspace-home/.local/share",
+    );
+    assert.equal(
+        calls[1].options.env.XDG_RUNTIME_DIR,
+        "/tmp/testspace-runtime",
     );
 });
 

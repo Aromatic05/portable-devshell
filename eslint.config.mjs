@@ -10,6 +10,7 @@ export default [
             "node_modules/**",
             "target/**",
             ".codegraph/**",
+            ".testspace/**",
         ],
     },
     js.configs.recommended,

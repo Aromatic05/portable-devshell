@@ -14,6 +14,8 @@ import {
 } from "./testspace/TestspaceConfig.mjs";
 import { runConnectorLoop } from "./testspace/TestspaceConnector.mjs";
 import {
+    createTestspaceProcessEnvironment,
+    resetTestspacePodmanStorage,
     resolveTestspaceRuntimeDirectory,
     stopTestspaceTmux,
 } from "./testspace/TestspaceRuntime.mjs";
@@ -93,6 +95,7 @@ async function start(argv) {
     }
 
     stopTestspaceTmux(previousRuntime, TESTSPACE_INSTANCE);
+    resetTestspacePodmanStorage(paths.home, previousRuntime);
     await Promise.all(runtimeDirectories(previousRuntime).map(async (directory) =>
         await rm(directory, { force: true, recursive: true })
     ));
@@ -187,6 +190,7 @@ async function stop() {
         throw new Error(`testspace control process ${String(controlPid)} is still running`);
     }
     stopTestspaceTmux(runtimeDirectory, TESTSPACE_INSTANCE);
+    resetTestspacePodmanStorage(paths.home, runtimeDirectory);
     await Promise.all([
         rm(root, { force: true, recursive: true }),
         ...runtimeDirectories(runtimeDirectory).map(async (directory) =>
@@ -269,12 +273,8 @@ function run(executable, commandArgs) {
 
 function testspaceEnvironment(runtimeDirectory = paths.runtime) {
     return {
-        ...process.env,
-        HOME: paths.home,
-        LOCALAPPDATA: runtimeDirectory,
+        ...createTestspaceProcessEnvironment(paths.home, runtimeDirectory),
         PORTABLE_DEVSHELL_HOME: join(paths.home, ".devshell"),
-        USERPROFILE: paths.home,
-        XDG_RUNTIME_DIR: runtimeDirectory,
         [workerEnvironmentName()]: workerPath(),
     };
 }
