@@ -38,7 +38,8 @@ export function resetTestspacePodmanStorage(
     runtimeDirectory,
     options = {},
 ) {
-    if (process.platform === "win32") return false;
+    const platform = options.platform ?? process.platform;
+    if (platform === "win32") return false;
     const exists = options.exists ?? existsSync;
     const ensureRuntime = options.ensureRuntime ?? ((directory) =>
         mkdirSync(directory, { mode: 0o700, recursive: true })

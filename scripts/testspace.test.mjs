@@ -140,9 +140,9 @@ test("testspace process environment isolates runtime and container storage", () 
     assert.equal(env.HOME, "/tmp/testspace-home");
     assert.equal(env.USERPROFILE, "/tmp/testspace-home");
     assert.equal(env.XDG_RUNTIME_DIR, "/tmp/testspace-runtime");
-    assert.equal(env.XDG_DATA_HOME, "/tmp/testspace-home/.local/share");
-    assert.equal(env.XDG_CONFIG_HOME, "/tmp/testspace-home/.config");
-    assert.equal(env.XDG_CACHE_HOME, "/tmp/testspace-home/.cache");
+    assert.equal(env.XDG_DATA_HOME, join("/tmp/testspace-home", ".local", "share"));
+    assert.equal(env.XDG_CONFIG_HOME, join("/tmp/testspace-home", ".config"));
+    assert.equal(env.XDG_CACHE_HOME, join("/tmp/testspace-home", ".cache"));
     assert.equal(env.PATH, "/usr/bin");
 });
 
@@ -152,6 +152,7 @@ test("testspace Podman cleanup resets the isolated store before directory remova
         "/tmp/testspace-home",
         "/tmp/testspace-runtime",
         {
+            platform: "linux",
             ensureRuntime(directory) {
                 calls.push({ directory, type: "runtime" });
             },
@@ -173,11 +174,22 @@ test("testspace Podman cleanup resets the isolated store before directory remova
     assert.equal(calls[1].options.env.HOME, "/tmp/testspace-home");
     assert.equal(
         calls[1].options.env.XDG_DATA_HOME,
-        "/tmp/testspace-home/.local/share",
+        join("/tmp/testspace-home", ".local", "share"),
     );
     assert.equal(
         calls[1].options.env.XDG_RUNTIME_DIR,
         "/tmp/testspace-runtime",
+    );
+});
+
+test("testspace Podman cleanup is disabled on Windows", () => {
+    assert.equal(
+        resetTestspacePodmanStorage(
+            "C:\\testspace-home",
+            "C:\\testspace-runtime",
+            { platform: "win32" },
+        ),
+        false,
     );
 });
 
