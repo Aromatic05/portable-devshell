@@ -1,9 +1,8 @@
-#[cfg(unix)]
 use std::ffi::OsString;
 use std::fs::{self, File, Metadata};
 use std::io;
-#[cfg(unix)]
-use std::os::fd::AsRawFd;
+#[cfg(target_os = "linux")]
+use std::os::fd::{AsRawFd, OwnedFd};
 #[cfg(unix)]
 use std::os::unix::fs::{MetadataExt as _, PermissionsExt as _};
 use std::path::{Path, PathBuf};
@@ -485,7 +484,18 @@ impl ResolvedPath {
         #[cfg(unix)]
         if let Some(access) = &self.anchored_access {
             return match access {
-                AnchoredAccess::File(file) => File::open(descriptor_path(file.as_ref())),
+                AnchoredAccess::File(_) => {
+                    let target = self.anchored_target.as_ref().ok_or_else(|| {
+                        io::Error::new(
+                            io::ErrorKind::InvalidInput,
+                            "anchored file has no parent capability",
+                        )
+                    })?;
+                    target
+                        .directory
+                        .open(&target.path)
+                        .map(|file| file.into_std())
+                }
                 AnchoredAccess::Directory(_) => Err(io::Error::new(
                     io::ErrorKind::IsADirectory,
                     "path is a directory",
@@ -849,13 +859,9 @@ fn workspace_segments(requested: &RequestedPath) -> Result<Vec<OsString>, ToolEr
         .collect())
 }
 
-#[cfg(unix)]
-fn descriptor_path(fd: &impl AsRawFd) -> PathBuf {
-    #[cfg(target_os = "linux")]
-    let root = Path::new("/proc/self/fd");
-    #[cfg(not(target_os = "linux"))]
-    let root = Path::new("/dev/fd");
-    root.join(fd.as_raw_fd().to_string())
+#[cfg(target_os = "linux")]
+fn descriptor_path(fd: &OwnedFd) -> PathBuf {
+    PathBuf::from("/proc/self/fd").join(fd.as_raw_fd().to_string())
 }
 
 #[cfg(unix)]
