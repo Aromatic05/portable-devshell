@@ -47,21 +47,21 @@ test("release CI gate rejects failures, release-tag runs, and runs for another c
 test("development CI validates every native target and exercises its target-specific package", async () => {
     const workflow = await readFile(resolve(repositoryRoot, ".github", "workflows", "ci.yml"), "utf8");
     const installIndex = workflow.indexOf("pnpm install --frozen-lockfile");
-    const scriptTestIndex = workflow.indexOf("node --test ./scripts/*.test.mjs");
-    assert.ok(installIndex >= 0 && scriptTestIndex > installIndex);
+    const suiteIndex = workflow.indexOf("run-development-ci.mjs");
+    assert.ok(installIndex >= 0 && suiteIndex > installIndex);
     for (const target of ["linux-x64", "linux-arm64", "darwin-x64", "darwin-arm64", "windows-x64", "windows-arm64"]) {
         assert.match(workflow, new RegExp(`target: ${target}`, "u"));
     }
-    assert.match(workflow, /node \.\/scripts\/smoke-pty\.mjs/u);
-    assert.match(workflow, /portable-devshell-app-\$\{\{ matrix\.target \}\}\.tar\.gz/u);
-    assert.match(workflow, /smoke-install-release-windows\.mjs/u);
     const chromiumIndex = workflow.indexOf("playwright install --with-deps chromium");
     const browserEnvironmentIndex = workflow.indexOf("PORTABLE_DEVSHELL_CHROMIUM=$chromium_path");
-    const packageTestIndex = workflow.indexOf("pnpm test");
-    const acceptanceIndex = workflow.indexOf("bash acceptance/run-final-acceptance.sh");
     assert.ok(chromiumIndex > installIndex && browserEnvironmentIndex > chromiumIndex);
-    assert.ok(packageTestIndex > browserEnvironmentIndex);
-    assert.ok(acceptanceIndex > packageTestIndex);
+    assert.ok(suiteIndex > browserEnvironmentIndex);
+    assert.match(workflow, /if: always\(\)/u);
+    const suite = await readFile(resolve(repositoryRoot, "scripts", "run-development-ci.mjs"), "utf8");
+    assert.match(suite, /smoke-pty\.mjs/u);
+    assert.match(suite, /portable-devshell-app-\$\{target\}\.tar\.gz/u);
+    assert.match(suite, /smoke-install-release-windows\.mjs/u);
+    assert.match(suite, /acceptance\/run-final-acceptance\.sh/u);
     const finalAcceptance = await readFile(resolve(repositoryRoot, "acceptance", "run-final-acceptance.mjs"), "utf8");
     assert.match(finalAcceptance, /acceptance\/run-web-browser-smoke\.mjs/u);
 });

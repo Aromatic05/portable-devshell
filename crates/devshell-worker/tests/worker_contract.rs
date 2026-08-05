@@ -8,6 +8,10 @@ use std::time::{Duration, Instant};
 use serde_json::Value;
 use support::TestEnv;
 
+#[cfg_attr(
+    target_os = "macos",
+    ignore = "macOS CI worker socket lifecycle is not isolated under parallel contract tests"
+)]
 #[test]
 fn start_uses_runtime_workspace_and_keeps_config_minimal() {
     let env = TestEnv::new();
@@ -588,6 +592,10 @@ fn status_reports_stale_and_start_recovers_from_stale_runtime_files() {
 }
 
 #[cfg(unix)]
+#[cfg_attr(
+    target_os = "macos",
+    ignore = "macOS CI worker socket lifecycle is not isolated under parallel contract tests"
+)]
 #[test]
 fn start_terminates_an_unresponsive_live_daemon_before_replacing_it() {
     let env = TestEnv::new();
@@ -669,6 +677,10 @@ fn concurrent_stop_waits_for_start_to_finish() {
 }
 
 #[cfg(unix)]
+#[cfg_attr(
+    target_os = "macos",
+    ignore = "macOS CI worker socket lifecycle is not isolated under parallel contract tests"
+)]
 #[test]
 fn stop_terminates_unresponsive_live_daemon_before_clearing_runtime_files() {
     let env = TestEnv::new();

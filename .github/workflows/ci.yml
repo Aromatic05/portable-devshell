@@ -78,34 +78,8 @@ jobs:
                   pnpm --filter @portable-devshell/control exec playwright install --with-deps chromium
                   chromium_path=$(pnpm --filter @portable-devshell/control exec node -e "const { chromium } = require('playwright'); process.stdout.write(chromium.executablePath())")
                   echo "PORTABLE_DEVSHELL_CHROMIUM=$chromium_path" >> "$GITHUB_ENV"
-            - run: node --test ./scripts/*.test.mjs
-            - run: pnpm lint
-            - run: pnpm build
-            - run: pnpm typecheck
-            - run: cargo test --locked --workspace
-            - run: pnpm test
-            - run: node ./scripts/smoke-pty.mjs
-            - run: pnpm build:worker "${{ matrix.target }}" --output-dir ./ci-artifacts
-            - name: Worker daemon smoke
-              timeout-minutes: 3
-              run: node ./scripts/smoke-worker.mjs ./ci-artifacts/devshell-worker-${{ matrix.target }}${{ runner.os == 'Windows' && '.exe' || '' }}
-            - name: Client and local instance smoke
-              timeout-minutes: 3
-              run: node ./scripts/smoke-client.mjs ./ci-artifacts/devshell-worker-${{ matrix.target }}${{ runner.os == 'Windows' && '.exe' || '' }}
-            - run: pnpm package:app -- --target "${{ matrix.target }}" --output-dir ./ci-artifacts
-            - run: pnpm smoke:package -- ./ci-artifacts/portable-devshell-app-${{ matrix.target }}.tar.gz
-            - name: Unix release installer smoke
-              if: runner.os != 'Windows'
-              run: pnpm smoke:install-release -- ./ci-artifacts/portable-devshell-app-${{ matrix.target }}.tar.gz
-            - name: Windows release installer smoke
-              if: runner.os == 'Windows'
-              run: node ./scripts/smoke-install-release-windows.mjs ./ci-artifacts/portable-devshell-app-${{ matrix.target }}.tar.gz
-            - name: 运行最终验收
-              if: matrix.target == 'linux-x64'
-              shell: bash
-              run: |
-                  set -o pipefail
-                  bash acceptance/run-final-acceptance.sh 2>&1 | tee acceptance.log
+            - name: 运行完整开发验收套件
+              run: node ./scripts/run-development-ci.mjs "${{ matrix.target }}"
             - name: 上传最终验收日志
               if: always() && matrix.target == 'linux-x64'
               uses: actions/upload-artifact@v7
@@ -113,6 +87,8 @@ jobs:
                   name: linux-acceptance-${{ github.sha }}
                   path: acceptance.log
             - uses: actions/upload-artifact@v7
+              if: always()
               with:
                   name: release-assets-${{ matrix.target }}-${{ github.sha }}
                   path: ci-artifacts/*
+                  if-no-files-found: ignore

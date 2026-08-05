@@ -31,6 +31,22 @@ export function resolveChromiumExecutable(
     return candidates.find((candidate) => probe(candidate));
 }
 
+export function chromiumLaunchArguments(options = {}) {
+    const environment = options.environment ?? process.env;
+    const platform = options.platform ?? process.platform;
+    return [
+        "--headless=new",
+        ...(platform === "linux" && environment.CI ? ["--no-sandbox"] : []),
+        "--no-first-run",
+        "--no-default-browser-check",
+        "--disable-gpu",
+        "--disable-dev-shm-usage",
+        "--disable-background-networking",
+        `--host-resolver-rules=MAP ${TEST_HOST} 127.0.0.1`,
+        "--disable-features=HttpsUpgrades,HttpsFirstBalancedModeAutoEnable",
+    ];
+}
+
 export async function runTestspaceWebSmoke({
     browserExecutable = resolveChromiumExecutable(),
     webPort,
@@ -50,16 +66,9 @@ export async function runTestspaceWebSmoke({
     const debuggingPort = await reservePort();
     const profile = await mkdtemp(join(tmpdir(), "pds-web-smoke-"));
     const browser = spawn(browserExecutable, [
-        "--headless=new",
+        ...chromiumLaunchArguments(),
         `--remote-debugging-port=${debuggingPort}`,
         `--user-data-dir=${profile}`,
-        "--no-first-run",
-        "--no-default-browser-check",
-        "--disable-gpu",
-        "--disable-dev-shm-usage",
-        "--disable-background-networking",
-        `--host-resolver-rules=MAP ${TEST_HOST} 127.0.0.1`,
-        "--disable-features=HttpsUpgrades,HttpsFirstBalancedModeAutoEnable",
         "about:blank",
     ], {
         stdio: ["ignore", "ignore", "pipe"],

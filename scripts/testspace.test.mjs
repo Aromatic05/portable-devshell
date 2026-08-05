@@ -25,6 +25,7 @@ import {
 } from "./testspace/TestspaceRuntime.mjs";
 import {
     assertWebSmokeState,
+    chromiumLaunchArguments,
     resolveChromiumExecutable,
 } from "./testspace/TestspaceWebSmoke.mjs";
 
@@ -73,6 +74,24 @@ test("testspace URLs point at the isolated instance and Web UI", () => {
         mcp: `http://127.0.0.1:19000/${TESTSPACE_INSTANCE}/mcp`,
         web: "http://127.0.0.1:19001/web/",
     });
+});
+
+test("Web smoke disables the Chromium sandbox only for Linux CI", () => {
+    assert.equal(
+        chromiumLaunchArguments({ environment: { CI: "true" }, platform: "linux" })
+            .includes("--no-sandbox"),
+        true,
+    );
+    assert.equal(
+        chromiumLaunchArguments({ environment: {}, platform: "linux" })
+            .includes("--no-sandbox"),
+        false,
+    );
+    assert.equal(
+        chromiumLaunchArguments({ environment: { CI: "true" }, platform: "darwin" })
+            .includes("--no-sandbox"),
+        false,
+    );
 });
 
 test("testspace starts when invoked without a subcommand", () => {
