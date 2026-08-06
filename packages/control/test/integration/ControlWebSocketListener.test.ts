@@ -9,6 +9,7 @@ import { HttpHost } from "@portable-devshell/mcp";
 import { McpHost } from "@portable-devshell/mcp/testing";
 import {
     ClientConnection,
+    CONTROL_PROTOCOL_VERSION,
     CONTROL_REMOTE_RPC_PATH,
     PrefixRoute,
     WebSocketChannel,
@@ -20,6 +21,7 @@ import {
 import WebSocket from "ws";
 
 import { ControlChannelServer } from "../../src/server/channel/ControlChannelServer.ts";
+import { negotiateControlProtocol } from "../../src/control/service/ServiceRouteModule.ts";
 import { ControlWebSessionService } from "../../src/server/web/ControlWebSessionService.ts";
 import { ControlWebSocketAccessService } from "../../src/server/web/ControlWebSocketAccessService.ts";
 import { ControlWebSocketListener } from "../../src/server/web/ControlWebSocketListener.ts";
@@ -65,6 +67,14 @@ test("web session cookie authenticates the shared control RPC over WebSocket", a
     assert.equal(login.status, 200);
     const cookie = login.headers.get("set-cookie");
     assert.notEqual(cookie, null);
+    const browserCredentialOnNativePath = await openRejected(
+        `${origin.replace("http", "ws")}${CONTROL_REMOTE_RPC_PATH}`,
+        {
+            cookie: cookie!.split(";", 1)[0]!,
+            protocol: "devshell-control-rpc.v1",
+        },
+    );
+    assert.match(browserCredentialOnNativePath, /401/iu);
     const crossOrigin = await openRejected(`${origin.replace("http", "ws")}/web/rpc`, {
         cookie: cookie!.split(";", 1)[0]!,
         origin: "https://attacker.example",
@@ -84,11 +94,33 @@ test("web session cookie authenticates the shared control RPC over WebSocket", a
         peer: "web"
     });
     t.after(() => connection.close());
+    await negotiate(connection, "web");
 
     assert.deepEqual(
         await connection.request<JsonValue>("@control", "service", "ping"),
         { pong: true }
     );
+
+    const forgedNative = new ClientConnection({
+        connectChannel: async () =>
+            await NodeWebSocketChannel.connect(
+                `${origin.replace("http", "ws")}/web/rpc`,
+                cookie!.split(";", 1)[0]!
+            ),
+        mapError: normalizeError,
+        mapRemoteError: (error) => createError(error),
+        mode: "persistent",
+        peer: "cli",
+    });
+    t.after(() => forgedNative.close());
+    await assert.rejects(
+        negotiate(forgedNative, "cli"),
+        (error: unknown) =>
+            (error as { code?: string }).code === "control.clientIdentityInvalid",
+    );
+    forgedNative.close();
+    await waitUntil(() => closedConnections.length === 1);
+    closedConnections.length = 0;
 
     const session = await fetch(`${origin}/web/session`, {
         headers: { cookie: cookie!.split(";", 1)[0]! }
@@ -146,6 +178,13 @@ test("Web none auth stays independent when its shared MCP listener requires OAut
     });
 
     const origin = `http://127.0.0.1:${port}`;
+    await assert.rejects(
+        WebSocketChannel.connect({
+            token: "anonymous-native-is-not-enabled",
+            url: `${origin.replace("http", "ws")}${CONTROL_REMOTE_RPC_PATH}`,
+        }),
+        /failed|rejected|Unauthorized/iu,
+    );
     const mcp = await fetch(`${origin}/demo/mcp`, { method: "POST" });
     assert.equal(mcp.status, 401);
     const session = await fetch(`${origin}/web/session`, { method: "POST" });
@@ -154,13 +193,18 @@ test("Web none auth stays independent when its shared MCP listener requires OAut
     assert.notEqual(cookie, undefined);
     const webSocket = await NodeWebSocketChannel.connect(`${origin.replace("http", "ws")}/web/rpc`, cookie!);
     t.after(() => webSocket.close());
-    assert.deepEqual(await new ClientConnection({
+    const connection = new ClientConnection({
         connectChannel: async () => webSocket,
         mapError: normalizeError,
         mapRemoteError: (error) => createError(error),
         mode: "persistent",
         peer: "web"
-    }).request<JsonValue>("@control", "service", "ping"), { pong: true });
+    });
+    await negotiate(connection, "web");
+    assert.deepEqual(
+        await connection.request<JsonValue>("@control", "service", "ping"),
+        { pong: true },
+    );
 });
 
 test("web token auth exchanges the configured web bearer token for a session cookie", async (t) => {
@@ -201,13 +245,18 @@ test("web token auth exchanges the configured web bearer token for a session coo
     assert.equal((await fetch(`${origin}/web/session`, { headers: { cookie: cookie! } })).status, 200);
     const webSocket = await NodeWebSocketChannel.connect(`${origin.replace("http", "ws")}/web/rpc`, cookie!);
     t.after(() => webSocket.close());
-    assert.deepEqual(await new ClientConnection({
+    const connection = new ClientConnection({
         connectChannel: async () => webSocket,
         mapError: normalizeError,
         mapRemoteError: (error) => createError(error),
         mode: "persistent",
         peer: "web"
-    }).request<JsonValue>("@control", "service", "ping"), { pong: true });
+    });
+    await negotiate(connection, "web");
+    assert.deepEqual(
+        await connection.request<JsonValue>("@control", "service", "ping"),
+        { pong: true },
+    );
 });
 
 test("web token auth never accepts an MCP namespace bearer token", async (t) => {
@@ -301,6 +350,7 @@ test("web routes and cookies follow the public base URL path prefix", async (t) 
         peer: "web"
     });
     t.after(() => connection.close());
+    await negotiate(connection, "web");
     assert.deepEqual(
         await connection.request<JsonValue>("@control", "service", "ping"),
         { pong: true }
@@ -474,6 +524,13 @@ test("native TUI and CLI bearer clients use the shared remote Control WebSocket 
         WebSocketChannel.connect({ token: "wrong-token", url }),
         /failed|rejected|Unauthorized/iu
     );
+    await assert.rejects(
+        WebSocketChannel.connect({
+            token: remoteToken,
+            url: `${origin.replace("http", "ws")}/web/rpc`,
+        }),
+        /failed|rejected|Unauthorized/iu,
+    );
 
     for (const peer of ["tui", "cli"] as const) {
         const connection = new ClientConnection({
@@ -485,11 +542,26 @@ test("native TUI and CLI bearer clients use the shared remote Control WebSocket 
             peer
         });
         t.after(() => connection.close());
+        await negotiate(connection, peer);
         assert.deepEqual(
             await connection.request<JsonValue>("@control", "service", "ping"),
             { pong: true }
         );
     }
+    const forgedWeb = new ClientConnection({
+        connectChannel: (signal) =>
+            WebSocketChannel.connect({ token: remoteToken, url }, signal),
+        mapError: normalizeError,
+        mapRemoteError: (error) => createError(error),
+        mode: "persistent",
+        peer: "web",
+    });
+    t.after(() => forgedWeb.close());
+    await assert.rejects(
+        negotiate(forgedWeb, "web"),
+        (error: unknown) =>
+            (error as { code?: string }).code === "control.clientIdentityInvalid",
+    );
 });
 
 function createRouteSnapshot(): PrefixRouteSnapshot {
@@ -500,12 +572,31 @@ function createRouteSnapshot(): PrefixRouteSnapshot {
                 {
                     name: "service",
                     operations: [
+                        {
+                            name: "hello",
+                            handle: (request, context) =>
+                                negotiateControlProtocol(
+                                    request.payload,
+                                    context.peer,
+                                ) as unknown as JsonValue,
+                        },
                         { name: "ping", handle: () => ({ pong: true }) }
                     ]
                 }
             ]
         }
     ]);
+}
+
+async function negotiate(
+    connection: ClientConnection,
+    clientKind: "cli" | "tui" | "web",
+): Promise<void> {
+    await connection.request("@control", "service", "hello", {
+        clientKind,
+        maxProtocolVersion: CONTROL_PROTOCOL_VERSION,
+        minProtocolVersion: CONTROL_PROTOCOL_VERSION,
+    });
 }
 
 function httpOrigin(server: HttpHost): string {

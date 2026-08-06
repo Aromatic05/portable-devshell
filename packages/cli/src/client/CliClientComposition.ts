@@ -24,6 +24,8 @@ export type CliClientTodo = Omit<ControlClients["todo"], "subscribe"> & {
 };
 
 export type CliClients = Omit<ControlClients, "runtime" | "todo"> & {
+    close?(): void;
+    reconnect?(): Promise<void>;
     runtime: CliClientRuntime;
     todo: CliClientTodo;
 };
@@ -31,7 +33,7 @@ export type CliClients = Omit<ControlClients, "runtime" | "todo"> & {
 export function createCliClients(options: CliClientOptions = {}): CliClients {
     const connection = new ClientConnection({
         connectChannel: (signal) => connectControlClientChannel(options, signal),
-        mode: "short",
+        mode: "persistent",
         peer: "cli",
         mapError: toClientError,
         mapRemoteError: toRemoteError,
@@ -39,6 +41,8 @@ export function createCliClients(options: CliClientOptions = {}): CliClients {
     const clients = createControlClients(connection, { clientKind: "cli" });
     return {
         ...clients,
+        close: () => connection.close(),
+        reconnect: async () => await connection.reconnect(),
         runtime: createCliRuntimeAdapter(connection, clients.runtime),
         todo: {
             get: clients.todo.get,

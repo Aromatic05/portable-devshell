@@ -309,35 +309,45 @@ async function request(
         mapError: (error) =>
             error instanceof Error ? error : new Error(String(error)),
         mapRemoteError: (error) => createError(error),
+        mode: "persistent",
         peer: clientKind,
     });
-    if (operation === "runtime.start") {
-        const opened = await client.openStream(
-            destination,
-            module!,
-            method!,
-            params,
-        );
-        try {
-            while (true) {
-                const event = await opened.stream.nextEvent();
-                if (event.name === "stream.completed") {
-                    return event.payload;
+    try {
+        await client.request("@control", "service", "hello", {
+            clientKind,
+            maxProtocolVersion: 1,
+            minProtocolVersion: 1,
+        });
+        if (operation === "runtime.start") {
+            const opened = await client.openStream(
+                destination,
+                module!,
+                method!,
+                params,
+            );
+            try {
+                while (true) {
+                    const event = await opened.stream.nextEvent();
+                    if (event.name === "stream.completed") {
+                        return event.payload;
+                    }
+                    if (event.name === "stream.cancelled") {
+                        throw createError(
+                            event.error ?? {
+                                code: "control.requestFailed",
+                                message: "runtime.start was cancelled",
+                                retryable: false,
+                            },
+                        );
+                    }
                 }
-                if (event.name === "stream.cancelled") {
-                    throw createError(
-                        event.error ?? {
-                            code: "control.requestFailed",
-                            message: "runtime.start was cancelled",
-                            retryable: false,
-                        },
-                    );
-                }
+            } finally {
+                opened.stream.close();
             }
-        } finally {
-            opened.stream.close();
         }
-    }
 
-    return await client.request(destination, module!, method!, params);
+        return await client.request(destination, module!, method!, params);
+    } finally {
+        client.close();
+    }
 }

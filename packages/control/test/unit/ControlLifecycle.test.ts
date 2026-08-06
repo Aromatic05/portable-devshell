@@ -370,6 +370,19 @@ test("stop tolerates shutdown socket races in the real lifecycle rpc client", as
         const channel = SocketChannel.accept(socket);
         const codec = new Codec(channel, { local: "server" });
         codec.onEvent((event) => {
+            if (event.name === "service.hello") {
+                void codec.send({
+                    id: `reply-${event.id}`,
+                    replyTo: event.id,
+                    destination: "@control",
+                    name: "service.hello",
+                    payload: {
+                        capabilities: ["request", "stream", "streamResume"],
+                        protocolVersion: 1,
+                    },
+                }).catch(() => undefined);
+                return;
+            }
             if (event.name === "service.status") {
                 void codec.send({
                     id: `reply-${event.id}`,
@@ -606,7 +619,17 @@ async function request(socketPath: string, operation: Event["name"], params?: Js
         connectChannel: (signal) => SocketChannel.connect(socketPath, { signal }),
         mapError: (error) => error instanceof Error ? error : new Error(String(error)),
         mapRemoteError: (error) => createError(error),
+        mode: "persistent",
         peer: "cli"
     });
-    return await client.request("@control", module!, method!, params);
+    try {
+        await client.request("@control", "service", "hello", {
+            clientKind: "cli",
+            maxProtocolVersion: 1,
+            minProtocolVersion: 1,
+        });
+        return await client.request("@control", module!, method!, params);
+    } finally {
+        client.close();
+    }
 }

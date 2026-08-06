@@ -1,9 +1,16 @@
 import {
     Codec,
     PrefixRoute,
+    createError,
+    errorCodes,
     type Channel,
+    type ControlClientKind,
+    type PrefixRouteIncoming,
+    type PrefixRouteSubject,
     type PrefixRouteSnapshot
 } from "@portable-devshell/shared";
+
+import { negotiateControlProtocol } from "../../control/service/ServiceRouteModule.js";
 
 export interface ControlChannelRouteProvider {
     connectionClosed(connectionId: string): void;
@@ -11,8 +18,18 @@ export interface ControlChannelRouteProvider {
 }
 
 export interface ControlChannelListener {
-    start(accept: (channel: Channel) => void): Promise<void>;
+    start(accept: (connection: ControlAcceptedChannel) => void): Promise<void>;
     close(): Promise<void>;
+}
+
+export interface ControlChannelAdmission {
+    readonly allowedPeers: readonly ControlClientKind[];
+    readonly subject: PrefixRouteSubject;
+}
+
+export interface ControlAcceptedChannel {
+    readonly admission: ControlChannelAdmission;
+    readonly channel: Channel;
 }
 
 export interface ControlChannelServerOptions {
@@ -92,7 +109,7 @@ export class ControlChannelServer {
             throw new Error("Control channel listener is not active.");
         }
 
-        await next.start((channel) => this.#accept(channel));
+        await next.start((connection) => this.#accept(connection));
         this.#listeners[index] = next;
         const startedIndex = this.#startedListeners.indexOf(previous);
         this.#startedListeners[startedIndex] = next;
@@ -105,7 +122,7 @@ export class ControlChannelServer {
         this.#stopping = false;
         try {
             for (const listener of this.#listeners) {
-                await listener.start((channel) => this.#accept(channel));
+                await listener.start((connection) => this.#accept(connection));
                 this.#startedListeners.push(listener);
             }
             this.#started = true;
@@ -129,15 +146,90 @@ export class ControlChannelServer {
         await this.#closeInternal();
     }
 
-    #accept(channel: Channel): void {
+    #accept(connection: ControlAcceptedChannel): void {
+        const { admission, channel } = connection;
         if (this.#stopping) {
             channel.close(new Error("Control channel server is stopping."));
             return;
         }
         try {
+            let negotiated:
+                | { peer: ControlClientKind; protocolVersion: number }
+                | undefined;
+            let pending:
+                | {
+                      peer: ControlClientKind;
+                      protocolVersion: number;
+                      requestId: string;
+                  }
+                | undefined;
             const route = new PrefixRoute(new Codec(channel, { local: "server" }), {
+                authorizeRequest: (incoming) => {
+                    if (negotiated === undefined) {
+                        assertHelloRequest(incoming);
+                        if (pending !== undefined) {
+                            throw createError({
+                                code: errorCodes.controlClientIdentityInvalid,
+                                message: "Control connection identity negotiation is already in progress.",
+                                retryable: false,
+                            });
+                        }
+                        const peer = readClientPeer(incoming.peer);
+                        if (!admission.allowedPeers.includes(peer)) {
+                            throw createError({
+                                code: errorCodes.controlClientIdentityInvalid,
+                                details: {
+                                    allowedPeers: [...admission.allowedPeers],
+                                    requestedPeer: peer,
+                                    subject: admission.subject.id,
+                                },
+                                message: `Control transport subject ${admission.subject.id} cannot connect as ${peer}.`,
+                                retryable: false,
+                            });
+                        }
+                        const hello = negotiateControlProtocol(
+                            incoming.event.payload,
+                            peer,
+                        );
+                        pending = {
+                            peer,
+                            protocolVersion: hello.protocolVersion,
+                            requestId: incoming.event.id,
+                        };
+                        return;
+                    }
+                    if (isHelloRequest(incoming)) {
+                        throw createError({
+                            code: errorCodes.controlClientIdentityInvalid,
+                            message: "Control connection identity is already negotiated.",
+                            retryable: false,
+                        });
+                    }
+                    if (incoming.peer !== negotiated.peer) {
+                        throw createError({
+                            code: errorCodes.controlClientIdentityInvalid,
+                            message: `Control connection is negotiated as ${negotiated.peer}, not ${incoming.peer}.`,
+                            retryable: false,
+                        });
+                    }
+                },
                 eventIdPrefix: "server",
-                getSnapshot: () => this.#routes.snapshot()
+                getConnectionContext: () => ({
+                    protocolVersion:
+                        negotiated?.protocolVersion ?? pending?.protocolVersion,
+                    subject: admission.subject,
+                }),
+                getSnapshot: () => this.#routes.snapshot(),
+                onRequestResult: (incoming, result) => {
+                    if (pending?.requestId !== incoming.event.id) return;
+                    if (result.ok) {
+                        negotiated = {
+                            peer: pending.peer,
+                            protocolVersion: pending.protocolVersion,
+                        };
+                    }
+                    pending = undefined;
+                },
             });
             this.#connections.set(route.connectionId, route);
             channel.onClose(() => {
@@ -185,4 +277,36 @@ export class ControlChannelServer {
             throw new AggregateError(failures, "Control channel listeners failed to close.");
         }
     }
+}
+
+function assertHelloRequest(incoming: PrefixRouteIncoming): void {
+    if (isHelloRequest(incoming)) return;
+    throw createError({
+        code: errorCodes.controlClientIdentityRequired,
+        details: {
+            destination: incoming.destination,
+            module: incoming.module,
+            operation: incoming.event.name,
+        },
+        message: "service.hello must be the first request on a Control connection.",
+        retryable: false,
+    });
+}
+
+function isHelloRequest(incoming: PrefixRouteIncoming): boolean {
+    return (
+        incoming.destination === "@control" &&
+        incoming.module === "service" &&
+        incoming.event.name === "hello" &&
+        incoming.event.streamId === undefined
+    );
+}
+
+function readClientPeer(peer: PrefixRouteIncoming["peer"]): ControlClientKind {
+    if (peer === "cli" || peer === "tui" || peer === "web") return peer;
+    throw createError({
+        code: errorCodes.controlClientIdentityInvalid,
+        message: "Server peer cannot initiate a Control client connection.",
+        retryable: false,
+    });
 }

@@ -52,10 +52,22 @@ export interface PrefixRouteContext {
     readonly destination: Destination;
     readonly module: string;
     readonly peer: Exclude<Peer, "server">;
+    readonly protocolVersion?: number;
     readonly requestId: string;
     readonly signal: AbortSignal;
+    readonly subject?: PrefixRouteSubject;
     afterReply(action: () => Promise<void> | void): void;
     openStream(initialPayload?: JsonValue, options?: PrefixRouteStreamOptions): Promise<PrefixRouteStream>;
+}
+
+export interface PrefixRouteSubject {
+    readonly id: string;
+    readonly kind: string;
+}
+
+export interface PrefixRouteConnectionContext {
+    readonly protocolVersion?: number;
+    readonly subject?: PrefixRouteSubject;
 }
 
 export type PrefixRouteHandler = (
@@ -86,9 +98,15 @@ export interface PrefixRouteSnapshot {
 }
 
 export interface PrefixRouteOptions {
+    authorizeRequest?: (incoming: PrefixRouteIncoming) => Promise<void> | void;
     connectionId?: string;
+    getConnectionContext?: () => PrefixRouteConnectionContext;
     getSnapshot?: () => PrefixRouteSnapshot;
     eventIdPrefix?: string;
+    onRequestResult?: (
+        incoming: PrefixRouteIncoming,
+        result: { ok: boolean },
+    ) => Promise<void> | void;
 }
 
 interface ActiveServerStream {
@@ -102,7 +120,10 @@ interface ActiveServerStream {
 export class PrefixRoute {
     readonly #codec: Codec;
     readonly #connectionId: string;
+    readonly #authorizeRequest?: PrefixRouteOptions["authorizeRequest"];
+    readonly #getConnectionContext?: PrefixRouteOptions["getConnectionContext"];
     readonly #getSnapshot?: () => PrefixRouteSnapshot;
+    readonly #onRequestResult?: PrefixRouteOptions["onRequestResult"];
     readonly #eventIdPrefix: string;
     readonly #abortController = new AbortController();
     readonly #eventListeners = new Set<(incoming: PrefixRouteIncoming) => void>();
@@ -142,8 +163,11 @@ export class PrefixRoute {
 
     constructor(codec: Codec, options: PrefixRouteOptions = {}) {
         this.#codec = codec;
+        this.#authorizeRequest = options.authorizeRequest;
         this.#connectionId = options.connectionId ?? createTransportId();
+        this.#getConnectionContext = options.getConnectionContext;
         this.#getSnapshot = options.getSnapshot;
+        this.#onRequestResult = options.onRequestResult;
         this.#eventIdPrefix = options.eventIdPrefix ?? codec.localPeer;
         codec.onEvent((event) => {
             void this.#accept(event).catch((error) => {
@@ -207,6 +231,7 @@ export class PrefixRoute {
             throw protocolFailure("Clients must not send reply events to the server route.");
         }
         if (event.streamId !== undefined) {
+            await this.#authorizeRequest?.(incoming);
             await this.#acceptStream(incoming);
             return;
         }
@@ -241,6 +266,13 @@ export class PrefixRoute {
     }
 
     async #route(incoming: PrefixRouteIncoming): Promise<void> {
+        try {
+            await this.#authorizeRequest?.(incoming);
+        } catch (error) {
+            await this.#sendErrorReply(incoming, normalizeError(error));
+            await this.#onRequestResult?.(incoming, { ok: false });
+            return;
+        }
         const snapshot = this.#getSnapshot!();
         const modules = snapshot.destinations.get(incoming.destination);
         if (modules === undefined) {
@@ -249,6 +281,7 @@ export class PrefixRoute {
                 message: `Destination ${incoming.destination} was not found.`,
                 retryable: false
             }).toBody());
+            await this.#onRequestResult?.(incoming, { ok: false });
             return;
         }
         const operations = modules.get(incoming.module);
@@ -258,6 +291,7 @@ export class PrefixRoute {
                 message: `Module ${incoming.module} was not found for ${incoming.destination}.`,
                 retryable: false
             }).toBody());
+            await this.#onRequestResult?.(incoming, { ok: false });
             return;
         }
         const handler = operations.get(incoming.event.name);
@@ -267,11 +301,13 @@ export class PrefixRoute {
                 message: `Operation ${incoming.module}.${incoming.event.name} was not found for ${incoming.destination}.`,
                 retryable: false
             }).toBody());
+            await this.#onRequestResult?.(incoming, { ok: false });
             return;
         }
 
         const afterReply: Array<() => Promise<void> | void> = [];
         let openedStream: PrefixRouteStream | undefined;
+        const connectionContext = this.#getConnectionContext?.() ?? {};
         const context: PrefixRouteContext = {
             afterReply: (action) => afterReply.push(action),
             connectionId: this.#connectionId,
@@ -300,8 +336,14 @@ export class PrefixRoute {
                 return openedStream;
             },
             peer: incoming.peer as Exclude<Peer, "server">,
+            ...(connectionContext.protocolVersion === undefined
+                ? {}
+                : { protocolVersion: connectionContext.protocolVersion }),
             requestId: incoming.event.id,
-            signal: this.#abortController.signal
+            signal: this.#abortController.signal,
+            ...(connectionContext.subject === undefined
+                ? {}
+                : { subject: connectionContext.subject })
         };
 
         try {
@@ -311,6 +353,7 @@ export class PrefixRoute {
                 ...(incoming.event.payload === undefined ? {} : { payload: incoming.event.payload }),
                 ...(incoming.event.seq === undefined ? {} : { seq: incoming.event.seq })
             }, context);
+            await this.#onRequestResult?.(incoming, { ok: true });
             if (openedStream === undefined) {
                 await this.send(incoming.destination, incoming.module, {
                     id: this.#nextId(),
@@ -333,6 +376,7 @@ export class PrefixRoute {
             } else {
                 await this.#sendErrorReply(incoming, body);
             }
+            await this.#onRequestResult?.(incoming, { ok: false });
         }
     }
 

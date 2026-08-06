@@ -5,6 +5,7 @@ import { dirname, join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 
 import { createError } from "../../error/ErrorFactoryCreate.js";
+import { CONTROL_PROTOCOL_VERSION } from "../../dto/DtoControlProtocol.js";
 import type { JsonValue } from "../../type/TypeJsonValue.js";
 import { ClientConnection } from "../ClientConnection.js";
 import { SocketChannel } from "./SocketChannel.js";
@@ -410,29 +411,40 @@ function createSocketControlLifecycleRpcClient(
     socketPath: string,
     requestTimeoutMs: number
 ): ControlLifecycleRpcClient {
-    const connection = new ClientConnection({
-        connectChannel: async (signal) =>
-            await SocketChannel.connect(socketPath, {
-                signal,
-                socketFactory: (path) => {
-                    const socket = createConnection(path);
-                    socket.setTimeout(requestTimeoutMs, () => {
-                        socket.destroy(
-                            new Error(
-                                `Control RPC request timed out after ${requestTimeoutMs}ms.`,
-                            ),
-                        );
-                    });
-                    return socket;
-                },
-            }),
-        mapError: toError,
-        mapRemoteError: (error) => createError(error),
-        mode: "short",
-        peer: "cli"
-    });
     return {
-        request: async (operation) => await connection.request("@control", "service", operation)
+        request: async (operation) => {
+            const connection = new ClientConnection({
+                connectChannel: async (signal) =>
+                    await SocketChannel.connect(socketPath, {
+                        signal,
+                        socketFactory: (path) => {
+                            const socket = createConnection(path);
+                            socket.setTimeout(requestTimeoutMs, () => {
+                                socket.destroy(
+                                    new Error(
+                                        `Control RPC request timed out after ${requestTimeoutMs}ms.`,
+                                    ),
+                                );
+                            });
+                            return socket;
+                        },
+                    }),
+                mapError: toError,
+                mapRemoteError: (error) => createError(error),
+                mode: "persistent",
+                peer: "cli"
+            });
+            try {
+                await connection.request("@control", "service", "hello", {
+                    clientKind: "cli",
+                    maxProtocolVersion: CONTROL_PROTOCOL_VERSION,
+                    minProtocolVersion: CONTROL_PROTOCOL_VERSION,
+                });
+                return await connection.request("@control", "service", operation);
+            } finally {
+                connection.close();
+            }
+        }
     };
 }
 

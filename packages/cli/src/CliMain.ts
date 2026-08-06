@@ -95,6 +95,8 @@ export class CliMain {
         } catch (error) {
             this.#stderr.write(renderCliError(error, { debug, verbose }));
             return this.#exitMapper.map(error);
+        } finally {
+            this.#clients.close?.();
         }
     }
 
@@ -126,6 +128,7 @@ export class CliMain {
                 await lifecycle.stop();
                 const status = await lifecycle.start();
                 if (instancesToRestore.length > 0) {
+                    await this.#clients.reconnect?.();
                     await negotiateCliControl(this.#clients);
                 }
                 for (const entry of instancesToRestore) {

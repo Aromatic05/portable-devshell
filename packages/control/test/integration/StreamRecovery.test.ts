@@ -36,7 +36,9 @@ test("stream gap is non-terminal and the dedicated subscription remains usable",
         await rm(directory, { force: true, recursive: true });
     });
 
-    const opened = await connect(socketPath).openStream(
+    const connection = await connect(socketPath);
+    t.after(() => connection.close());
+    const opened = await connection.openStream(
         asInstanceName("alpha"),
         "runtime",
         "subscribe",
@@ -91,7 +93,9 @@ test("an initial unavailable sequence returns a normal stream.gap error reply", 
         await rm(directory, { force: true, recursive: true });
     });
 
-    const reply = await connect(socketPath).requestEvent(
+    const connection = await connect(socketPath);
+    t.after(() => connection.close());
+    const reply = await connection.requestEvent(
         asInstanceName("alpha"),
         "runtime",
         "subscribe",
@@ -107,13 +111,20 @@ test("an initial unavailable sequence returns a normal stream.gap error reply", 
     });
 });
 
-function connect(socketPath: string): ClientConnection {
-    return new ClientConnection({
+async function connect(socketPath: string): Promise<ClientConnection> {
+    const connection = new ClientConnection({
         connectChannel: (signal) => SocketChannel.connect(socketPath, { signal }),
         mapError: (error) => error instanceof Error ? error : new Error(String(error)),
         mapRemoteError: (error) => createError(error),
+        mode: "persistent",
         peer: "cli"
     });
+    await connection.request("@control", "service", "hello", {
+        clientKind: "cli",
+        maxProtocolVersion: 1,
+        minProtocolVersion: 1,
+    });
+    return connection;
 }
 
 class FakeWorker {

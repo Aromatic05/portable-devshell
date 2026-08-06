@@ -40,10 +40,7 @@ export class ControlWebSocketAccessService implements ControlWebSocketAccessAuth
         const token = readBearerToken(request);
         const auth = this.#sessions.auth;
         if (auth.mode === "none") {
-            return {
-                key: token === undefined ? "native:none" : nativeKey(token),
-                kind: "native"
-            };
+            return undefined;
         }
         if (token === undefined) return undefined;
         if (auth.mode === "token") {
@@ -83,7 +80,7 @@ export class ControlWebSocketSessionAccess implements ControlWebSocketAccessAuth
 }
 
 function sessionKey(token: string): string {
-    return `session:${token}`;
+    return `session:${createHash("sha256").update(token).digest("hex")}`;
 }
 
 function nativeKey(token: string): string {

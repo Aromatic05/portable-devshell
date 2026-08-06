@@ -6,7 +6,10 @@ import test from "node:test";
 
 import { Codec, SocketChannel, type JsonValue } from "@portable-devshell/shared";
 
-import { createCliClients } from "../../src/client/CliClientComposition.ts";
+import {
+    createCliClients,
+    negotiateCliControl,
+} from "../../src/client/CliClientComposition.ts";
 import { createTestIpcPath } from "../../../../test/TestPlatformSupport.ts";
 import { CliMain } from "../../src/CliMain.ts";
 import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
@@ -65,6 +68,8 @@ test("module CLI clients perform control rpc over unix socket", async (t) => {
     });
 
     const clients = createCliClients({ socketPath });
+    await negotiateCliControl(clients);
+    t.after(() => clients.close?.());
     const instances = await clients.instance.list();
     const logs = await clients.runtime.readLogs("demo-local", { limit: 1 });
 

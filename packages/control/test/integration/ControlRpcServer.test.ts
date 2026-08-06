@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { rm } from "node:fs/promises";
+import { rm, stat } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
 
@@ -43,6 +43,10 @@ test("ControlSocketServer routes canonical control and instance operations over 
     const harness = await createHarness();
     t.after(() => harness.cleanup());
 
+    if (process.platform !== "win32") {
+        assert.equal((await stat(harness.socketPath)).mode & 0o777, 0o600);
+    }
+
     assert.deepEqual((await request(harness.socketPath, "@control", "service.ping")).payload, { pong: true });
     assert.deepEqual((await request(harness.socketPath, "@control", "service.status")).payload, {
         instanceCount: 1,
@@ -53,8 +57,8 @@ test("ControlSocketServer routes canonical control and instance operations over 
         harness.socketPath,
         "@control",
         "service.hello",
-        { clientKind: "web", maxProtocolVersion: 1, minProtocolVersion: 1 },
-        "web"
+        { clientKind: "tui", maxProtocolVersion: 1, minProtocolVersion: 1 },
+        "tui"
     )).payload, {
         capabilities: ["request", "stream", "streamResume"],
         protocolVersion: 1
@@ -63,9 +67,16 @@ test("ControlSocketServer routes canonical control and instance operations over 
         harness.socketPath,
         "@control",
         "service.hello",
-        { clientKind: "web", maxProtocolVersion: 2, minProtocolVersion: 2 },
-        "web"
+        { clientKind: "tui", maxProtocolVersion: 2, minProtocolVersion: 2 },
+        "tui"
     )).error?.code, "protocol.versionUnsupported");
+    assert.equal((await request(
+        harness.socketPath,
+        "@control",
+        "service.hello",
+        { clientKind: "web", maxProtocolVersion: 1, minProtocolVersion: 1 },
+        "web"
+    )).error?.code, "control.clientIdentityInvalid");
 
     const listed = (await request(harness.socketPath, "@control", "instance.list")).payload as Array<{
         name: string;
@@ -101,14 +112,15 @@ test("ControlSocketServer routes canonical control and instance operations over 
     assert.equal(typeof harness.worker.lastToolCall?.requestId, "string");
     assert.equal(typeof harness.worker.lastToolCall?.ctxId, "string");
 
-    await request(
+    const rejectedWeb = await request(
         harness.socketPath,
         asInstanceName("alpha"),
         "tool.call",
         { input: { command: "pwd" }, toolName: "bash_run" },
         "web"
     );
-    assert.equal(harness.worker.lastToolCall?.source, "web");
+    assert.equal(rejectedWeb.error?.code, "control.clientIdentityInvalid");
+    assert.equal(harness.worker.lastToolCall?.source, "tui");
 
     const missingDestination = await request(
         harness.socketPath,
@@ -228,6 +240,7 @@ test("interactive runtime receives stream input while the root handler is still 
     const harness = await createHarness(activeTodos);
     t.after(() => harness.cleanup());
     const client = createClient(harness.socketPath, "cli");
+    await negotiateClient(client, "cli");
     const opened = await client.openStream(
         asInstanceName("alpha"),
         "runtime",
@@ -288,6 +301,7 @@ test("terminal RPC streams real session input, resize, detach, and sequence resu
     });
 
     const client = createClient(socketPath, "tui");
+    await negotiateClient(client, "tui");
     const opened = await client.request<{ generation: number; terminalId: string }>(
         asInstanceName("alpha"),
         "terminal",
@@ -405,6 +419,7 @@ test("terminal stream cancels a slow attachment at the unacknowledged window wit
     });
 
     const client = createClient(socketPath, "tui");
+    await negotiateClient(client, "tui");
     const opened = await client.request<{ generation: number; terminalId: string }>(
         asInstanceName("alpha"),
         "terminal",
@@ -504,7 +519,19 @@ function createClient(socketPath: string, peer: Exclude<Peer, "server">): Client
         connectChannel: (signal) => SocketChannel.connect(socketPath, { signal }),
         mapError: (error) => error instanceof Error ? error : new Error(String(error)),
         mapRemoteError: (error) => createError(error),
+        mode: "persistent",
         peer
+    });
+}
+
+async function negotiateClient(
+    connection: ClientConnection,
+    peer: Exclude<Peer, "server">,
+): Promise<void> {
+    await connection.request("@control", "service", "hello", {
+        clientKind: peer,
+        maxProtocolVersion: 1,
+        minProtocolVersion: 1,
     });
 }
 
@@ -516,7 +543,40 @@ async function request(
     peer: Exclude<Peer, "server"> = "cli"
 ): Promise<ClientEvent> {
     const [module, operation] = name.split(".");
-    return await createClient(socketPath, peer).requestEvent(destination, module!, operation!, payload);
+    const connection = createClient(socketPath, peer);
+    if (name === "service.hello") {
+        try {
+            return await connection.requestEvent(
+                destination,
+                module!,
+                operation!,
+                payload,
+            );
+        } finally {
+            connection.close();
+        }
+    }
+    try {
+        const hello = await connection.requestEvent(
+            "@control",
+            "service",
+            "hello",
+            {
+                clientKind: peer,
+                maxProtocolVersion: 1,
+                minProtocolVersion: 1,
+            },
+        );
+        if (hello.error !== undefined) return hello;
+        return await connection.requestEvent(
+            destination,
+            module!,
+            operation!,
+            payload,
+        );
+    } finally {
+        connection.close();
+    }
 }
 
 class FakeTerminalProcess implements TerminalProcess {

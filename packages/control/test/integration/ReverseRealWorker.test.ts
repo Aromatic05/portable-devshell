@@ -215,7 +215,17 @@ async function request(
         connectChannel: (signal) => SocketChannel.connect(socketPath, { signal }),
         mapError: (error) => error instanceof Error ? error : new Error(String(error)),
         mapRemoteError: (error) => createError(error),
+        mode: "persistent",
         peer: "cli"
     });
-    return await client.request(destination, module!, method!, params);
+    try {
+        await client.request("@control", "service", "hello", {
+            clientKind: "cli",
+            maxProtocolVersion: 1,
+            minProtocolVersion: 1,
+        });
+        return await client.request(destination, module!, method!, params);
+    } finally {
+        client.close();
+    }
 }

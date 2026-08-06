@@ -8,6 +8,7 @@ test("CliMain handles control lifecycle commands and exit code mapping", async (
     const stdout = createBuffer();
     const stderr = createBuffer();
     const lifecycleCalls: string[] = [];
+    const clientCalls: string[] = [];
     const restoredInstances: string[] = [];
     const lifecycle = {
         async logs() {
@@ -28,6 +29,16 @@ test("CliMain handles control lifecycle commands and exit code mapping", async (
 
     const cli = new CliMain({
         createCliClients: () => testClients({
+            close() {
+                clientCalls.push("close");
+            },
+            async hello() {
+                clientCalls.push("hello");
+                return {
+                    capabilities: ["request", "stream", "streamResume"],
+                    protocolVersion: 1,
+                };
+            },
             async listInstances() {
                 return [
                     {
@@ -57,8 +68,12 @@ test("CliMain handles control lifecycle commands and exit code mapping", async (
                 ];
             },
             async startInstance(instance: string) {
+                clientCalls.push(`start:${instance}`);
                 restoredInstances.push(instance);
                 return { name: instance };
+            },
+            async reconnect() {
+                clientCalls.push("reconnect");
             }
         }),
         createLifecycleManager: async () => lifecycle,
@@ -70,10 +85,18 @@ test("CliMain handles control lifecycle commands and exit code mapping", async (
     assert.match(stdout.flush(), /control: running/u);
 
     lifecycleCalls.length = 0;
+    clientCalls.length = 0;
     assert.equal(await cli.run(["restart"]), 0);
     assert.match(stdout.flush(), /control: running/u);
     assert.deepEqual(lifecycleCalls, ["stop", "start"]);
     assert.deepEqual(restoredInstances, ["running-local"]);
+    assert.deepEqual(clientCalls, [
+        "hello",
+        "reconnect",
+        "hello",
+        "start:running-local",
+        "close",
+    ]);
 
     assert.equal(await cli.run(["status"]), 0);
     assert.match(stdout.flush(), /instances: 1/u);
@@ -994,8 +1017,19 @@ function testClients(client: Record<string, unknown>) {
         return Reflect.apply(method, client, args) as unknown;
     };
     return {
+        close: () =>
+            typeof client.close === "function"
+                ? invoke("close", [])
+                : undefined,
+        reconnect: async () =>
+            typeof client.reconnect === "function"
+                ? await invoke("reconnect", [])
+                : undefined,
         service: {
             async hello() {
+                if (typeof client.hello === "function") {
+                    return await invoke("hello", []);
+                }
                 return {
                     capabilities: ["request", "stream", "streamResume"],
                     protocolVersion: 1,

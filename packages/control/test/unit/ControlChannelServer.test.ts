@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+    CONTROL_PROTOCOL_VERSION,
     ClientConnection,
     PrefixRoute,
     createError,
@@ -12,8 +13,11 @@ import {
 
 import {
     ControlChannelServer,
+    type ControlAcceptedChannel,
+    type ControlChannelAdmission,
     type ControlChannelListener
 } from "../../src/server/channel/ControlChannelServer.ts";
+import { negotiateControlProtocol } from "../../src/control/service/ServiceRouteModule.ts";
 
 class MemoryChannel implements Channel {
     readonly #closeListeners = new Set<(error?: Error) => void>();
@@ -92,11 +96,19 @@ class MemoryChannel implements Channel {
 }
 
 class MemoryControlChannelListener implements ControlChannelListener {
-    #accept?: (channel: Channel) => void;
+    readonly #admission: ControlChannelAdmission;
+    #accept?: (connection: ControlAcceptedChannel) => void;
     closed = false;
     started = false;
 
-    async start(accept: (channel: Channel) => void): Promise<void> {
+    constructor(admission: ControlChannelAdmission = {
+        allowedPeers: ["cli", "tui"],
+        subject: { id: "uid:test", kind: "local-owner" },
+    }) {
+        this.#admission = admission;
+    }
+
+    async start(accept: (connection: ControlAcceptedChannel) => void): Promise<void> {
         assert.equal(this.started, false);
         this.started = true;
         this.#accept = accept;
@@ -116,7 +128,7 @@ class MemoryControlChannelListener implements ControlChannelListener {
         const server = new MemoryChannel();
         client.bind(server);
         server.bind(client);
-        accept(server);
+        accept({ admission: this.#admission, channel: server });
         return client;
     }
 }
@@ -216,8 +228,14 @@ class BlockingRetryCloseControlChannelListener implements ControlChannelListener
 
 
 test("ControlChannelServer serves the same routes through multiple channel providers", async (t) => {
-    const socketProvider = new MemoryControlChannelListener();
-    const webProvider = new MemoryControlChannelListener();
+    const socketProvider = new MemoryControlChannelListener({
+        allowedPeers: ["cli", "tui"],
+        subject: { id: "uid:1000", kind: "local-owner" },
+    });
+    const webProvider = new MemoryControlChannelListener({
+        allowedPeers: ["web"],
+        subject: { id: "session:abc", kind: "web-session" },
+    });
     const closedConnections: string[] = [];
     const routes = {
         connectionClosed(connectionId: string) {
@@ -237,13 +255,38 @@ test("ControlChannelServer serves the same routes through multiple channel provi
     t.after(() => socketConnection.close());
     t.after(() => webConnection.close());
 
+    await assert.rejects(
+        socketConnection.request("@control", "service", "ping"),
+        (error: unknown) =>
+            (error as { code?: string }).code === "control.clientIdentityRequired",
+    );
+    await negotiate(socketConnection, "tui");
+    await negotiate(webConnection, "web");
+
     assert.deepEqual(
         await socketConnection.request<JsonValue>("@control", "service", "ping"),
-        { pong: true }
+        {
+            pong: true,
+            protocolVersion: CONTROL_PROTOCOL_VERSION,
+            subject: { id: "uid:1000", kind: "local-owner" },
+        }
     );
     assert.deepEqual(
         await webConnection.request<JsonValue>("@control", "service", "ping"),
-        { pong: true }
+        {
+            pong: true,
+            protocolVersion: CONTROL_PROTOCOL_VERSION,
+            subject: { id: "session:abc", kind: "web-session" },
+        }
+    );
+    await assert.rejects(
+        webConnection.request("@control", "service", "hello", {
+            clientKind: "web",
+            maxProtocolVersion: CONTROL_PROTOCOL_VERSION,
+            minProtocolVersion: CONTROL_PROTOCOL_VERSION,
+        }),
+        (error: unknown) =>
+            (error as { code?: string }).code === "control.clientIdentityInvalid",
     );
 
     await server.close();
@@ -253,6 +296,89 @@ test("ControlChannelServer serves the same routes through multiple channel provi
     await assert.rejects(
         webConnection.request("@control", "service", "ping"),
         /closed/iu
+    );
+});
+
+test("ControlChannelServer rejects a self-asserted peer outside transport admission", async (t) => {
+    const provider = new MemoryControlChannelListener({
+        allowedPeers: ["web"],
+        subject: { id: "session:abc", kind: "web-session" },
+    });
+    const server = new ControlChannelServer({
+        listeners: [provider],
+        routes: { connectionClosed() {}, snapshot: createRouteSnapshot },
+    });
+    await server.start();
+    t.after(async () => await server.close().catch(() => undefined));
+    const connection = createClient(provider, "tui");
+    t.after(() => connection.close());
+
+    await assert.rejects(
+        negotiate(connection, "tui"),
+        (error: unknown) =>
+            (error as { code?: string }).code === "control.clientIdentityInvalid",
+    );
+});
+
+test("ControlChannelServer rejects unsupported protocol ranges during first request", async (t) => {
+    const provider = new MemoryControlChannelListener();
+    const server = new ControlChannelServer({
+        listeners: [provider],
+        routes: { connectionClosed() {}, snapshot: createRouteSnapshot },
+    });
+    await server.start();
+    t.after(async () => await server.close().catch(() => undefined));
+    const connection = createClient(provider, "tui");
+    t.after(() => connection.close());
+
+    await assert.rejects(
+        connection.request("@control", "service", "hello", {
+            clientKind: "tui",
+            maxProtocolVersion: CONTROL_PROTOCOL_VERSION + 1,
+            minProtocolVersion: CONTROL_PROTOCOL_VERSION + 1,
+        }),
+        (error: unknown) =>
+            (error as { code?: string }).code === "protocol.versionUnsupported",
+    );
+});
+
+test("ControlChannelServer does not authenticate a connection when hello handling fails", async (t) => {
+    const provider = new MemoryControlChannelListener();
+    const server = new ControlChannelServer({
+        listeners: [provider],
+        routes: {
+            connectionClosed() {},
+            snapshot: () => PrefixRoute.snapshot([
+                {
+                    destination: "@control",
+                    modules: [
+                        {
+                            name: "service",
+                            operations: [
+                                {
+                                    name: "hello",
+                                    handle: () => {
+                                        throw new Error("hello failed");
+                                    },
+                                },
+                                { name: "ping", handle: () => ({ pong: true }) },
+                            ],
+                        },
+                    ],
+                },
+            ]),
+        },
+    });
+    await server.start();
+    t.after(async () => await server.close().catch(() => undefined));
+    const connection = createClient(provider, "tui");
+    t.after(() => connection.close());
+
+    await assert.rejects(negotiate(connection, "tui"), /hello failed/u);
+    await assert.rejects(
+        connection.request("@control", "service", "ping"),
+        (error: unknown) =>
+            (error as { code?: string }).code === "control.clientIdentityRequired",
     );
 });
 
@@ -426,14 +552,37 @@ function createRouteSnapshot(): PrefixRouteSnapshot {
                     name: "service",
                     operations: [
                         {
+                            name: "hello",
+                            handle: (request, context) =>
+                                negotiateControlProtocol(
+                                    request.payload,
+                                    context.peer,
+                                ) as unknown as JsonValue,
+                        },
+                        {
                             name: "ping",
-                            handle: () => ({ pong: true })
+                            handle: (_request, context) => ({
+                                pong: true,
+                                protocolVersion: context.protocolVersion,
+                                subject: context.subject,
+                            })
                         }
                     ]
                 }
             ]
         }
     ]);
+}
+
+async function negotiate(
+    connection: ClientConnection,
+    clientKind: "cli" | "tui" | "web",
+): Promise<void> {
+    await connection.request("@control", "service", "hello", {
+        clientKind,
+        maxProtocolVersion: CONTROL_PROTOCOL_VERSION,
+        minProtocolVersion: CONTROL_PROTOCOL_VERSION,
+    });
 }
 
 function normalizeError(error: unknown): Error {

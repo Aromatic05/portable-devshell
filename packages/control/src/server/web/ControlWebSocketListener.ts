@@ -10,10 +10,14 @@ import {
 import { TRANSPORT_MAX_FRAME_SIZE } from "@portable-devshell/shared/transport/frame";
 import { WebSocketServer } from "ws";
 
-import type { ControlChannelListener } from "../channel/ControlChannelServer.js";
+import type {
+    ControlAcceptedChannel,
+    ControlChannelListener,
+} from "../channel/ControlChannelServer.js";
 import { ControlWebSessionService } from "./ControlWebSessionService.js";
 import {
     ControlWebSocketSessionAccess,
+    type ControlWebSocketAccess,
     type ControlWebSocketAccessAuthorizer
 } from "./ControlWebSocketAccessService.js";
 import { ControlWebSocketChannel } from "./ControlWebSocketChannel.js";
@@ -34,10 +38,13 @@ export class ControlWebSocketListener implements ControlChannelListener {
     readonly #basePath: string;
     readonly #channelsByAccess = new Map<string, Set<ControlWebSocketChannel>>();
     readonly #http: HttpHost;
-    readonly #paths: string[];
+    readonly #paths: Array<{
+        accessKind: ControlWebSocketAccess["kind"];
+        path: string;
+    }>;
     readonly #sessions: ControlWebSessionService;
     #unsubscribeRevocation?: () => void;
-    #accept?: (channel: ControlWebSocketChannel) => void;
+    #accept?: (connection: ControlAcceptedChannel) => void;
     #removeRoutes?: () => void;
     #routesInstalled = false;
     #started = false;
@@ -49,17 +56,29 @@ export class ControlWebSocketListener implements ControlChannelListener {
         this.#http = options.http;
         this.#sessions = options.sessions;
         this.#access = options.access ?? new ControlWebSocketSessionAccess(options.sessions);
-        const browserPath = options.path ?? `${this.#basePath}/rpc`;
+        const browserPath = normalizeAbsolutePath(
+            options.path ?? `${this.#basePath}/rpc`,
+        );
         const remotePath = options.remotePath ?? (options.access === undefined
             ? false
             : CONTROL_REMOTE_RPC_PATH);
-        this.#paths = [...new Set([
-            browserPath,
-            ...(remotePath === false ? [] : [normalizeAbsolutePath(remotePath)])
-        ])];
+        const normalizedRemotePath = remotePath === false
+            ? undefined
+            : normalizeAbsolutePath(remotePath);
+        if (normalizedRemotePath === browserPath) {
+            throw new Error(
+                "Control browser and native WebSocket paths must be distinct.",
+            );
+        }
+        this.#paths = [
+            { accessKind: "browser", path: browserPath },
+            ...(normalizedRemotePath === undefined
+                ? []
+                : [{ accessKind: "native" as const, path: normalizedRemotePath }]),
+        ];
     }
 
-    async start(accept: (channel: ControlWebSocketChannel) => void): Promise<void> {
+    async start(accept: (connection: ControlAcceptedChannel) => void): Promise<void> {
         if (this.#started) return;
         this.#accept = accept;
         this.#unsubscribeRevocation = this.#access.onRevoked((key) => {
@@ -72,11 +91,16 @@ export class ControlWebSocketListener implements ControlChannelListener {
                     this.#http.registerStaticDirectory(this.#basePath, this.#assetDirectory)
                 );
             }
-            for (const path of this.#paths) {
+            for (const route of this.#paths) {
                 removeRoutes.push(this.#http.registerUpgradeHandler(
-                    path,
+                    route.path,
                     async (request, socket, head) => {
-                        await this.#handleUpgrade(request, socket, head);
+                        await this.#handleUpgrade(
+                            request,
+                            socket,
+                            head,
+                            route.accessKind,
+                        );
                     }
                 ));
             }
@@ -119,7 +143,8 @@ export class ControlWebSocketListener implements ControlChannelListener {
     async #handleUpgrade(
         request: IncomingMessage,
         socket: Duplex,
-        head: Buffer
+        head: Buffer,
+        expectedAccessKind: ControlWebSocketAccess["kind"],
     ): Promise<void> {
         const server = this.#webSocketServer;
         const accept = this.#accept;
@@ -132,7 +157,7 @@ export class ControlWebSocketListener implements ControlChannelListener {
             return;
         }
         const access = await this.#access.authorize(request);
-        if (access === undefined) {
+        if (access === undefined || access.kind !== expectedAccessKind) {
             writeUpgradeError(socket, 401, "Unauthorized");
             return;
         }
@@ -145,7 +170,20 @@ export class ControlWebSocketListener implements ControlChannelListener {
         server.handleUpgrade(request, socket, head, (webSocket) => {
             const channel = new ControlWebSocketChannel(webSocket);
             this.#registerAccessChannel(access.key, channel);
-            accept(channel);
+            accept({
+                admission: {
+                    allowedPeers: access.kind === "browser"
+                        ? ["web"]
+                        : ["cli", "tui"],
+                    subject: {
+                        id: access.key,
+                        kind: access.kind === "browser"
+                            ? "web-session"
+                            : "bearer",
+                    },
+                },
+                channel,
+            });
         });
     }
 

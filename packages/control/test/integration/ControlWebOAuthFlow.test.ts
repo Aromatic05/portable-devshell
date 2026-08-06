@@ -9,6 +9,7 @@ import { HttpHost, McpOAuthProtectedResource, type McpOAuthApprovalService } fro
 import { McpHost } from "@portable-devshell/mcp/testing";
 import {
     ClientConnection,
+    CONTROL_PROTOCOL_VERSION,
     PrefixRoute,
     controlWebBasePath,
     createError,
@@ -17,6 +18,7 @@ import {
 } from "@portable-devshell/shared";
 
 import { ControlChannelServer } from "../../src/server/channel/ControlChannelServer.ts";
+import { negotiateControlProtocol } from "../../src/control/service/ServiceRouteModule.ts";
 import { ControlWebOAuthFlow } from "../../src/server/web/ControlWebOAuthFlow.ts";
 import { ControlWebSessionService } from "../../src/server/web/ControlWebSessionService.ts";
 import { ControlWebSocketListener } from "../../src/server/web/ControlWebSocketListener.ts";
@@ -99,6 +101,11 @@ test("web oauth2 completes browser PKCE and authenticates the real control WebSo
         peer: "web"
     });
     t.after(() => connection.close());
+    await connection.request("@control", "service", "hello", {
+        clientKind: "web",
+        maxProtocolVersion: CONTROL_PROTOCOL_VERSION,
+        minProtocolVersion: CONTROL_PROTOCOL_VERSION,
+    });
     assert.deepEqual(
         await connection.request<JsonValue>("@control", "service", "ping"),
         { pong: true }
@@ -454,6 +461,14 @@ function createRouteSnapshot(): PrefixRouteSnapshot {
                 {
                     name: "service",
                     operations: [
+                        {
+                            name: "hello",
+                            handle: (request, context) =>
+                                negotiateControlProtocol(
+                                    request.payload,
+                                    context.peer,
+                                ) as unknown as JsonValue,
+                        },
                         { name: "ping", handle: () => ({ pong: true }) }
                     ]
                 }

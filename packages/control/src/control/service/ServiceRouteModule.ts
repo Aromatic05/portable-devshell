@@ -19,7 +19,7 @@ export interface ServiceRouteModuleOptions {
 
 export function createServiceRouteModule(options: ServiceRouteModuleOptions): PrefixRouteModuleDefinition {
     return routeModule("service", {
-        hello: (request, context) => negotiateProtocol(
+        hello: (request, context) => negotiateControlProtocol(
             request.payload,
             context.peer
         ) as unknown as JsonValue,
@@ -38,7 +38,7 @@ export function createServiceRouteModule(options: ServiceRouteModuleOptions): Pr
     });
 }
 
-function negotiateProtocol(
+export function negotiateControlProtocol(
     payload: JsonValue | undefined,
     peer: ControlClientKind
 ): ControlProtocolHelloResponse {
