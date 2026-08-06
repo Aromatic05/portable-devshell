@@ -1,6 +1,6 @@
 import type { TodoReadResult } from "@portable-devshell/shared";
 
-import type { CliClientTodo } from "../../client/todo/CliClientTodo.js";
+import type { CliClientTodo } from "../../client/CliClientComposition.js";
 import { followCliCommandWatchStream } from "../watch/CliCommandWatchStream.js";
 
 export class CliCommandInstanceTodo {

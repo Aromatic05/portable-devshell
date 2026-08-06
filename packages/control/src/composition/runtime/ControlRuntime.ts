@@ -1,16 +1,17 @@
 import { join } from "node:path";
 
-import { controlWebBasePath } from "@portable-devshell/shared";
+import { controlRemoteRpcPath, controlWebBasePath } from "@portable-devshell/shared";
 
 import { McpOAuthProtectedResource, type HttpHost } from "@portable-devshell/mcp";
 import type { InstanceRegistry } from "../../control/instance/registry/InstanceRegistry.js";
 import { OperationalOverviewService } from "../../control/overview/OperationalOverviewService.js";
-import { ControlChannelServer, type ControlChannelProvider } from "../../server/channel/ControlChannelServer.js";
-import { ControlSocketChannelProvider } from "../../server/socket/ControlSocketChannelProvider.js";
+import { ControlChannelServer, type ControlChannelListener } from "../../server/channel/ControlChannelServer.js";
+import { ControlSocketListener } from "../../server/socket/ControlSocketListener.js";
 import { resolveControlWebAssetsDirectory } from "../../server/web/ControlWebAssets.js";
 import { ControlWebOAuthFlow } from "../../server/web/ControlWebOAuthFlow.js";
 import { ControlWebSessionService } from "../../server/web/ControlWebSessionService.js";
-import { ControlWebSocketChannelProvider } from "../../server/web/ControlWebSocketChannelProvider.js";
+import { ControlWebSocketAccessService } from "../../server/web/ControlWebSocketAccessService.js";
+import { ControlWebSocketListener } from "../../server/web/ControlWebSocketListener.js";
 import { ControlRouteComposition } from "../ControlRouteComposition.js";
 import type { ControlRuntimeArtifact } from "./ControlRuntimeArtifact.js";
 import type { ControlRuntimeMcp } from "./ControlRuntimeMcp.js";
@@ -29,7 +30,7 @@ export interface ControlRuntimeOptions {
 interface ControlWebRuntime {
     flow?: ControlWebOAuthFlow;
     host: HttpHost;
-    provider: ControlWebSocketChannelProvider;
+    listener: ControlWebSocketListener;
 }
 
 export class ControlRuntime {
@@ -39,8 +40,8 @@ export class ControlRuntime {
     readonly #mcp: ControlRuntimeMcp;
     readonly #reverse: ControlRuntimeReverse;
     readonly #routes: ControlRouteComposition;
-    readonly #socketProvider: ControlSocketChannelProvider;
-    #webProvider?: ControlWebSocketChannelProvider;
+    readonly #socketListener: ControlSocketListener;
+    #webListener?: ControlWebSocketListener;
     #webFlow?: ControlWebOAuthFlow;
     #webFlowUninstall?: () => void;
 
@@ -64,14 +65,14 @@ export class ControlRuntime {
             reverse: options.reverse.service,
             shutdown: options.shutdown
         });
-        this.#socketProvider = new ControlSocketChannelProvider({ socketPath: options.socketPath });
-        const providers: ControlChannelProvider[] = [this.#socketProvider];
+        this.#socketListener = new ControlSocketListener({ socketPath: options.socketPath });
+        const listeners: ControlChannelListener[] = [this.#socketListener];
         const webRuntime = this.#createWebRuntime();
-        if (webRuntime !== undefined) providers.push(webRuntime.provider);
-        this.#webProvider = webRuntime?.provider;
+        if (webRuntime !== undefined) listeners.push(webRuntime.listener);
+        this.#webListener = webRuntime?.listener;
         this.#webFlow = webRuntime?.flow;
-        this.#channels = new ControlChannelServer({ providers, routes: this.#routes });
-        this.#mcp.setWebConfigApplier?.(async (previous, next) => await this.#replaceWebProvider(previous, next));
+        this.#channels = new ControlChannelServer({ listeners, routes: this.#routes });
+        this.#mcp.setWebConfigApplier?.(async (previous, next) => await this.#replaceWebListener(previous, next));
         this.#mcp.setMcpConfigApplier?.(async (_previous, next) => {
             const retired = await this.#mcp.replaceMcpHost(_previous, next);
             try {
@@ -121,7 +122,7 @@ export class ControlRuntime {
         } catch (error) {
             failures.push(error);
         }
-        await this.#socketProvider.removeEndpoint().catch((error) => failures.push(error));
+        await this.#socketListener.removeEndpoint().catch((error) => failures.push(error));
         if (failures.length > 0) {
             throw new AggregateError(failures, "Control runtime failed to stop cleanly.");
         }
@@ -138,13 +139,21 @@ export class ControlRuntime {
             secureCookie
         });
         const flow = this.#createWebOAuthFlow(http, basePath, secureCookie, sessions);
+        const access = new ControlWebSocketAccessService({
+            sessions,
+            ...(flow === undefined
+                ? {}
+                : { verifyBearer: async (token: string) => await flow.verifyAccessToken(token) })
+        });
         return {
             ...(flow === undefined ? {} : { flow }),
             host: http,
-            provider: new ControlWebSocketChannelProvider({
+            listener: new ControlWebSocketListener({
+                access,
                 assetDirectory: resolveControlWebAssetsDirectory(),
                 basePath,
                 http,
+                remotePath: controlRemoteRpcPath(this.#mcp.webPublicBaseUrl),
                 sessions
             })
         };
@@ -189,12 +198,12 @@ export class ControlRuntime {
         });
     }
 
-    async #replaceWebProvider(
+    async #replaceWebListener(
         previousConfig: import("@portable-devshell/shared").ControlConfig,
         nextConfig: import("@portable-devshell/shared").ControlConfig
     ): Promise<void> {
         const previousHost = await this.#mcp.replaceWebHost(previousConfig, nextConfig);
-        const previousProvider = this.#webProvider;
+        const previousListener = this.#webListener;
         const previousFlow = this.#webFlow;
         const previousFlowUninstall = this.#webFlowUninstall;
         let previousFlowRemoved = false;
@@ -202,7 +211,7 @@ export class ControlRuntime {
         let nextFlowUninstall: (() => void) | undefined;
         try {
             nextRuntime = this.#createWebRuntime();
-            if (previousProvider === undefined || nextRuntime === undefined) {
+            if (previousListener === undefined || nextRuntime === undefined) {
                 throw new Error("Web listener hot replacement requires Web to remain enabled.");
             }
             await nextRuntime.flow?.warmup();
@@ -211,15 +220,15 @@ export class ControlRuntime {
                 previousFlowRemoved = true;
             }
             nextFlowUninstall = nextRuntime.flow?.install(nextRuntime.host);
-            await this.#channels.replaceProvider(previousProvider, nextRuntime.provider);
-            this.#webProvider = nextRuntime.provider;
+            await this.#channels.replaceListener(previousListener, nextRuntime.listener);
+            this.#webListener = nextRuntime.listener;
             this.#webFlow = nextRuntime.flow;
             this.#webFlowUninstall = nextFlowUninstall;
             await this.#mcp.stopRetiredWebHost(previousHost).catch(reportRetiredWebHostFailure);
         } catch (error) {
             nextFlowUninstall?.();
             await this.#mcp.restoreWebHost(previousHost, previousConfig);
-            this.#webProvider = previousProvider;
+            this.#webListener = previousListener;
             this.#webFlow = previousFlow;
             if (previousFlowRemoved && previousFlow !== undefined && this.#mcp.webHost !== undefined) {
                 await previousFlow.warmup();

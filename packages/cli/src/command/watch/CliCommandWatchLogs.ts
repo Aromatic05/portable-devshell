@@ -1,6 +1,6 @@
 import type { InstanceLogEntry } from "@portable-devshell/shared";
 
-import type { CliClientRuntime } from "../../client/runtime/CliClientRuntime.js";
+import type { CliClientRuntime } from "../../client/CliRuntimeAdapter.js";
 import { followCliCommandWatchStream } from "./CliCommandWatchStream.js";
 
 export class CliCommandWatchLogs {

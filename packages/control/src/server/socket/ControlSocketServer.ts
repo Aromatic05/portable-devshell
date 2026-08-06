@@ -2,7 +2,7 @@ import {
     ControlChannelServer,
     type ControlChannelRouteProvider
 } from "../channel/ControlChannelServer.js";
-import { ControlSocketChannelProvider } from "./ControlSocketChannelProvider.js";
+import { ControlSocketListener } from "./ControlSocketListener.js";
 
 export type ControlRouteProvider = ControlChannelRouteProvider;
 
@@ -12,13 +12,13 @@ export interface ControlSocketServerOptions {
 }
 
 export class ControlSocketServer {
-    readonly #provider: ControlSocketChannelProvider;
+    readonly #listener: ControlSocketListener;
     readonly #server: ControlChannelServer;
 
     constructor(options: ControlSocketServerOptions) {
-        this.#provider = new ControlSocketChannelProvider({ socketPath: options.socketPath });
+        this.#listener = new ControlSocketListener({ socketPath: options.socketPath });
         this.#server = new ControlChannelServer({
-            providers: [this.#provider],
+            listeners: [this.#listener],
             routes: options.routes
         });
     }
@@ -37,6 +37,6 @@ export class ControlSocketServer {
     }
 
     async removeEndpoint(): Promise<void> {
-        await this.#provider.removeEndpoint();
+        await this.#listener.removeEndpoint();
     }
 }

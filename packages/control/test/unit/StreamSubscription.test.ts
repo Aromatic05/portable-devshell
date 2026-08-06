@@ -33,7 +33,7 @@ test("RuntimeSubscriptionManager returns snapshot lastSeq and pushes sequenced e
     manager.unsubscribeConnection("conn-1");
 });
 
-test("RuntimeSubscriptionManager preserves dotted context message operations", async () => {
+test("RuntimeSubscriptionManager transports multi-segment event types through valid route segments", async () => {
     const manager = new RuntimeSubscriptionManager(5);
     const worker = new FakeWorker("alpha");
     await worker.start("/tmp/ws");
@@ -52,8 +52,8 @@ test("RuntimeSubscriptionManager preserves dotted context message operations", a
     });
     await waitFor(() => harness.events.length === 1);
 
-    assert.equal(harness.events[0]?.module, "context");
-    assert.equal(harness.events[0]?.name, "message.delivered");
+    assert.equal(harness.events[0]?.module, "instanceEvent");
+    assert.equal(harness.events[0]?.name, "published");
     assert.equal(
         (harness.events[0]?.payload as { data?: { ctxId?: string } }).data
             ?.ctxId,
@@ -210,6 +210,10 @@ function createStreamContext(
         async complete() {},
         async emit(name, payload, seq, module) {
             await beforeEmit?.();
+            assert.match(name, /^[A-Za-z][A-Za-z0-9]*$/u);
+            if (module !== undefined) {
+                assert.match(module, /^[A-Za-z][A-Za-z0-9]*$/u);
+            }
             result.events.push({
                 ...(module === undefined ? {} : { module }),
                 name,

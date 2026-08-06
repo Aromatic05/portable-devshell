@@ -1,24 +1,51 @@
+export { ControlReadModel } from "./read-model/ControlReadModel.js";
+export type {
+    ControlInstanceReadKey,
+    ControlInstanceReadState,
+    ControlReadModelLoadOptions,
+    ControlReadModelOptions,
+    ControlReadModelState
+} from "./read-model/ControlReadModel.js";
+export { createControlClients, readInstanceSnapshot } from "./client/ControlClients.js";
+export type {
+    ControlClients,
+    ControlServiceStatus,
+    McpRuntimeStatus,
+    RuntimeStartOptions
+} from "./client/ControlClients.js";
+export { InstanceEventStream, readInstanceEvent } from "./client/InstanceEventStream.js";
+export type {
+    InstanceEventStreamPort,
+    InstanceStreamMessage
+} from "./client/InstanceEventStream.js";
 export { createError } from "./error/ErrorFactoryCreate.js";
 export type { ControlErrorBody } from "./error/ErrorBodyControl.js";
 export {
     ClientConnection,
     ClientStream,
     controlClientModule,
-    instanceClientModule,
-    readClientSubscriptionEvents
+    instanceClientModule
 } from "./transport/ClientConnection.js";
 export type {
     ClientConnectionOptions,
     ClientEvent
 } from "./transport/ClientConnection.js";
-export type { ChannelProvider } from "./transport/ChannelProvider.js";
-export type { FrameChannel } from "./transport/FrameChannel.js";
+export type { Channel } from "./transport/protocol/Channel.js";
+export { WebSocketChannel } from "./transport/websocket/WebSocketChannel.js";
+export type {
+    WebSocketChannelConnectOptions,
+    WebSocketClientLike
+} from "./transport/websocket/WebSocketChannel.js";
 export {
     CONTROL_PROTOCOL_VERSION,
+    CONTROL_REMOTE_BEARER_SUBPROTOCOL_PREFIX,
+    CONTROL_REMOTE_RPC_PATH,
+    CONTROL_REMOTE_RPC_SUBPROTOCOL,
     CONTROL_WEB_BASE_PATH,
     CONTROL_WEB_RPC_PATH,
     CONTROL_WEB_RPC_SUBPROTOCOL,
     CONTROL_WEB_SESSION_PATH,
+    controlRemoteRpcPath,
     controlWebBasePath
 } from "./dto/DtoControlProtocol.js";
 export type {
@@ -72,3 +99,15 @@ export type {
 export { asInstanceName } from "./type/identity/TypeIdentityInstanceName.js";
 export type { InstanceName } from "./type/identity/TypeIdentityInstanceName.js";
 export type { JsonValue } from "./type/TypeJsonValue.js";
+
+export type {
+    TerminalAttachInput,
+    TerminalAttachResult,
+    TerminalOpenInput,
+    TerminalOpenResult,
+    TerminalOutputFrame,
+    TerminalSessionDescriptor,
+    TerminalSessionState,
+    TerminalStreamCommandIdentity,
+    TerminalVersionedIdentity
+} from "./dto/terminal/DtoTerminal.js";

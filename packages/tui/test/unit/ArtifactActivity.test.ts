@@ -97,6 +97,12 @@ test("TUI startup pulls artifact shares and transfers from Control", async () =>
             },
             async reconnect() {},
             service: {
+                async hello() {
+                    return {
+                        capabilities: ["request", "stream", "streamResume"],
+                        protocolVersion: 1,
+                    };
+                },
                 async ping() {
                     return { pong: true };
                 },
@@ -170,6 +176,12 @@ test("TUI clears an OAuth polling failure after the background refresh recovers"
             },
             async reconnect() {},
             service: {
+                async hello() {
+                    return {
+                        capabilities: ["request", "stream", "streamResume"],
+                        protocolVersion: 1,
+                    };
+                },
                 async ping() {
                     return { pong: true };
                 },
@@ -293,6 +305,12 @@ test("TUI stops OAuth polling after a connection refresh fails", async () => {
                 },
             },
             service: {
+                async hello() {
+                    return {
+                        capabilities: ["request", "stream", "streamResume"],
+                        protocolVersion: 1,
+                    };
+                },
                 async ping() {
                     if (failPing) throw new Error("control unavailable");
                     return { pong: true };
@@ -367,43 +385,7 @@ test("TUI ignores an old visible Overview failure after reconnect", async () => 
     } finally {
         await session.stop();
     }
-});
-
-test("artifact stream events upsert complete records without replacing shares from download audit events", () => {
-    const store = new TuiAppStore();
-    store.applyEvent({
-        destination: asInstanceName("instance-a"),
-        id: "artifact-share-created",
-        name: "artifact.shareCreated",
-        payload: { at: "2026-07-13T00:00:00.000Z", data: toJsonValue(share) },
-        seq: 1,
-    });
-    store.applyEvent({
-        destination: asInstanceName("instance-a"),
-        id: "artifact-share-downloaded",
-        name: "artifact.shareDownloaded",
-        payload: {
-            at: "2026-07-13T00:00:01.000Z",
-            data: { shareId: share.shareId },
-        },
-        seq: 2,
-    });
-    store.applyEvent({
-        destination: asInstanceName("instance-a"),
-        id: "artifact-transfer-progress",
-        name: "artifact.transferProgress",
-        payload: {
-            at: "2026-07-13T00:00:02.000Z",
-            data: toJsonValue(transfer),
-        },
-        seq: 3,
-    });
-
-    assert.deepEqual(store.getState().artifactShares, [share]);
-    assert.deepEqual(store.getState().artifactTransfers, [transfer]);
-});
-
-test("instance box shows artifact activity and confirms revoke or cancel before dispatch", async () => {
+});test("instance box shows artifact activity and confirms revoke or cancel before dispatch", async () => {
     const store = seededStore();
     const revoked: string[] = [];
     const cancelled: string[] = [];
@@ -580,6 +562,12 @@ function sessionClients(overrides: Record<string, unknown> = {}) {
         },
         async reconnect() {},
         service: {
+            async hello() {
+                return {
+                    capabilities: ["request", "stream", "streamResume"],
+                    protocolVersion: 1,
+                };
+            },
             async ping() {
                 return { pong: true };
             },

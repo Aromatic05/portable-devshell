@@ -1,5 +1,4 @@
 import { applyEventRecord } from "./TuiStoreReducerEvent.js";
-import { mergeTuiContextMessageList } from "../context/TuiContextMessageState.js";
 import { boundCommentCalls, boundToolCalls, dedupeLogs, mergeLogEntry, pruneByInstanceNames, pruneByInstances, selectInstanceAfterListReplace, withDerivedState } from "./TuiStoreReducerSupport.js";
 import type { TuiAppAction, TuiAppState } from "./TuiStoreModel.js";
 
@@ -32,10 +31,7 @@ export function reduceTuiStoreReducerInstance(state: TuiAppState, action: TuiApp
                 ...state,
                 contextMessagesByInstance: {
                     ...state.contextMessagesByInstance,
-                    [action.instance]: mergeTuiContextMessageList(
-                        state.contextMessagesByInstance[action.instance] ?? [],
-                        action.messages
-                    )
+                    [action.instance]: [...action.messages]
                 }
             };
         case "log.append": {

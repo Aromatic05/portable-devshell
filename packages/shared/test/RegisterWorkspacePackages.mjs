@@ -3,7 +3,7 @@ import { registerHooks } from "node:module";
 const workspacePackages = new Map([
     ["@portable-devshell/shared", new URL("../src/index.ts", import.meta.url).href],
     ["@portable-devshell/shared/browser", new URL("../src/browser.ts", import.meta.url).href],
-    ["@portable-devshell/shared/transport/frame", new URL("../src/transport/Frame.ts", import.meta.url).href],
+    ["@portable-devshell/shared/transport/frame", new URL("../src/transport/protocol/Frame.ts", import.meta.url).href],
 ]);
 
 registerHooks({

@@ -326,16 +326,22 @@ function fakeClients(): WebClients {
         close() {},
         onTransportClose: () => () => undefined,
         reconnect: async () => undefined,
+        artifact: {} as WebClients["artifact"],
+        config: {} as WebClients["config"],
+        reverse: {} as WebClients["reverse"],
+        terminal: {} as WebClients["terminal"],
         service: {
             hello: async () => ({
                 capabilities: ["request", "stream", "streamResume"],
                 protocolVersion: 1,
             }),
+            ping: async () => ({ pong: true }),
+            restart: async () => ({ accepted: true }),
             status: async () => ({ instanceCount: 1, ok: true }),
         },
         instance: {
             list: async () => [{ mcpEnabled: true, name: "demo", snapshot }],
-        },
+        } as WebClients["instance"],
         overview: {
             get: async () => ({ activity: [], alerts: [], controller: { pid: 1, uptimeSeconds: 1 }, counts: { activeTodos: 0, failedCalls24h: 0, instancesAttention: 0, instancesCritical: 0, instancesReady: 1, instancesTotal: 1, pendingApprovals: 0 }, generatedAt: "2026-07-31T00:00:00Z", health: "healthy", instances: [], todos: [] }),
         },

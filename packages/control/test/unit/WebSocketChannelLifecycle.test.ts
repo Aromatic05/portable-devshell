@@ -10,7 +10,7 @@ import WebSocket from "ws";
 import { ReverseRpcFrameCodec } from "../../src/control/reverse/rpc/ReverseRpcFrameCodec.ts";
 import { ReverseRpcSseChannel } from "../../src/control/reverse/rpc/ReverseRpcSseChannel.ts";
 import { ReverseRpcWebSocketChannel } from "../../src/control/reverse/rpc/ReverseRpcWebSocketChannel.ts";
-import { ControlWebSocketFrameChannel } from "../../src/server/web/ControlWebSocketFrameChannel.ts";
+import { ControlWebSocketChannel } from "../../src/server/web/ControlWebSocketChannel.ts";
 
 class FakeWebSocket extends EventEmitter {
     readyState: number = WebSocket.OPEN;
@@ -88,7 +88,7 @@ class FakeServerResponse extends EventEmitter {
 test("control WebSocket heartbeat converts ping races into channel closure", async () => {
     const socket = new FakeWebSocket();
     socket.pingError = new Error("ping failed");
-    const channel = new ControlWebSocketFrameChannel(socket as unknown as WebSocket, {
+    const channel = new ControlWebSocketChannel(socket as unknown as WebSocket, {
         deadConnectionMs: 1_000,
         heartbeatIntervalMs: 1,
         now: () => 0
@@ -105,7 +105,7 @@ test("control WebSocket heartbeat converts ping races into channel closure", asy
 test("control WebSocket close remains terminal when socket.close throws", async () => {
     const socket = new FakeWebSocket();
     socket.closeError = new Error("close failed");
-    const channel = new ControlWebSocketFrameChannel(socket as unknown as WebSocket);
+    const channel = new ControlWebSocketChannel(socket as unknown as WebSocket);
     const closed = new Promise<Error | undefined>((resolve) => channel.onClose(resolve));
 
     channel.close();
@@ -119,7 +119,7 @@ test("control WebSocket close remains terminal when socket.close throws", async 
 test("control WebSocket send failure closes the channel and rejects queued sends", async () => {
     const socket = new FakeWebSocket();
     socket.deferSend = true;
-    const channel = new ControlWebSocketFrameChannel(socket as unknown as WebSocket);
+    const channel = new ControlWebSocketChannel(socket as unknown as WebSocket);
     const closed = new Promise<Error | undefined>((resolve) => channel.onClose(resolve));
 
     const first = channel.send(new Uint8Array([1]));
@@ -137,7 +137,7 @@ test("control WebSocket send failure closes the channel and rejects queued sends
 test("control WebSocket rejects text frames even when the close frame fails", async () => {
     const socket = new FakeWebSocket();
     socket.closeError = new Error("close frame failed");
-    const channel = new ControlWebSocketFrameChannel(socket as unknown as WebSocket);
+    const channel = new ControlWebSocketChannel(socket as unknown as WebSocket);
     const closed = new Promise<Error | undefined>((resolve) => channel.onClose(resolve));
 
     socket.message("not binary", false);
@@ -283,7 +283,7 @@ test("reverse RPC frame codec rejects invalid UTF-8 inside otherwise valid JSON"
 
 test("control WebSocket isolates late close listener failures", async () => {
     const socket = new FakeWebSocket();
-    const channel = new ControlWebSocketFrameChannel(socket as unknown as WebSocket);
+    const channel = new ControlWebSocketChannel(socket as unknown as WebSocket);
     const warnings: unknown[] = [];
     const originalWarn = console.warn;
     console.warn = (warning) => warnings.push(warning);

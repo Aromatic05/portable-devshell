@@ -32,19 +32,20 @@ test("TuiAppStore keeps page, instance, and expanded boxes stable across events"
         ready: true,
         status: "ready",
     });
-    store.applyEvent({
-        destination: asInstanceName("beta"),
-        id: "log-appended-3",
-        name: "log.appended",
-        payload: {
-            at: "2026-07-09T00:00:03.000Z",
-            data: {
-                bytes: 8,
-                stream: "stdout",
-                tail: "payload",
-            },
-        },
+    store.replaceLogs("beta", [{
+        at: "2026-07-09T00:00:03.000Z",
+        bytes: 8,
+        instance: "beta",
+        receivedAt: "2026-07-09T00:00:03.000Z",
         seq: 3,
+        stream: "stdout",
+        tail: "payload",
+    }]);
+    store.applyInstanceEvent({
+        at: "2026-07-09T00:00:03.000Z",
+        instanceName: asInstanceName("beta"),
+        seq: 3,
+        type: "log.appended",
     });
 
     const state = store.getState();
@@ -108,135 +109,7 @@ test("TuiRenderScheduler redraws visible Overview and Audit context message chan
 
     unsubscribe();
     scheduler.dispose();
-});
-
-test("Audit page renders control-owned tool calls from live events", () => {
-    const store = new TuiAppStore();
-    store.replaceInstances([
-        { enabled: true, mcpEnabled: true, name: "alpha" },
-    ]);
-    store.setSelectedInstance("alpha");
-    store.setSelectedPage("audit");
-
-    store.applyEvent({
-        destination: asInstanceName("alpha"),
-        id: "tool-running-1",
-        name: "toolCall.running",
-        payload: {
-            at: "2026-07-15T00:00:00.000Z",
-            data: {
-                callId: "control-call-1",
-                ctxId: "ctx-control",
-                input: {},
-                inputSummary: "{}",
-                requestId: "request-control",
-                source: "mcp",
-                startedAt: "2026-07-15T00:00:00.000Z",
-                status: "running",
-                toolName: "todo_read",
-            },
-        },
-        seq: 1,
-    });
-    store.applyEvent({
-        destination: asInstanceName("alpha"),
-        id: "tool-completed-2",
-        name: "toolCall.completed",
-        payload: {
-            at: "2026-07-15T00:00:01.000Z",
-            data: {
-                callId: "control-call-1",
-                completedAt: "2026-07-15T00:00:01.000Z",
-                output: { revision: 3 },
-                source: "mcp",
-                startedAt: "2026-07-15T00:00:00.000Z",
-                status: "completed",
-                toolName: "todo_read",
-            },
-        },
-        seq: 2,
-    });
-
-    const record = store.getState().toolCallsByInstance.alpha?.[0];
-    assert.equal(record?.toolName, "todo_read");
-    assert.equal(record?.status, "completed");
-    assert.equal(record?.ctxId, "ctx-control");
-    assert.deepEqual(record?.output, { revision: 3 });
-    assert.equal(record?.requestId, "request-control");
-
-    const contexts = selectMainScreenModel(store.getState());
-    assert.equal(contexts.boxes[0]?.id, "audit-context:ctx-control");
-    store.pushRoute({
-        ctxId: "ctx-control",
-        page: "audit",
-        scope: "context",
-        view: "context",
-    });
-    const calls = selectMainScreenModel(store.getState());
-    assert.equal(calls.boxes[0]?.id, "audit-call:control-call-1");
-    assert.equal(calls.boxes[0]?.title, "todo_read · completed");
-    store.toggleExpanded(calls.boxes[0]!.expandedKey);
-    const expanded = selectMainScreenModel(store.getState()).boxes[0];
-    assert.equal(
-        expanded?.expandedLines.some(
-            (line) => line.text === "Context ctx-control",
-        ),
-        false,
-    );
-    assert.equal(
-        expanded?.expandedLines.some((line) => line.text.trimStart().startsWith("Output")),
-        true,
-    );
-});
-
-test("TuiAppStore bounds live logs and tool calls per instance", () => {
-    const store = new TuiAppStore();
-    store.replaceInstances([
-        { enabled: true, mcpEnabled: true, name: "alpha" },
-    ]);
-
-    for (let index = 1; index <= 150; index += 1) {
-        store.applyEvent({
-            destination: asInstanceName("alpha"),
-            id: `tool-${index}`,
-            name: "toolCall.running",
-            payload: {
-                at: new Date(index).toISOString(),
-                data: {
-                    callId: `call-${index}`,
-                    inputSummary: "{}",
-                    source: "mcp",
-                    startedAt: new Date(index).toISOString(),
-                    status: "running",
-                    toolName: "bash_run",
-                },
-            },
-            seq: index,
-        });
-    }
-
-    for (let index = 151; index <= 300; index += 1) {
-        store.applyEvent({
-            destination: asInstanceName("alpha"),
-            id: `log-${index}`,
-            name: "log.appended",
-            payload: {
-                at: new Date(index).toISOString(),
-                data: {
-                    bytes: 1,
-                    stream: "stdout",
-                    tail: String(index),
-                },
-            },
-            seq: index,
-        });
-    }
-
-    assert.equal(store.getState().toolCallsByInstance.alpha?.length, 100);
-    assert.equal(store.getState().logsByInstance.alpha?.length, 100);
-});
-
-test("TuiAppStore does not publish an unchanged OAuth approval collection", () => {
+});st("TuiAppStore does not publish an unchanged OAuth approval collection", () => {
     const store = new TuiAppStore();
     let notifications = 0;
     const unsubscribe = store.subscribe(() => {

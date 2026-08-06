@@ -11,7 +11,7 @@ import {
     MASKED_CONFIG_TOKEN,
     createDefaultControlConfig,
     createError,
-    SocketChannelProvider,
+    SocketChannel,
     type ClientEvent,
     type ClientStream,
     type Destination,
@@ -323,7 +323,7 @@ function createDescriptor(worker: FakeWorker, activeTodos: ActiveTodoSummary[] =
 
 function createClient(socketPath: string, peer: Exclude<Peer, "server">): ClientConnection {
     return new ClientConnection({
-        channelProvider: new SocketChannelProvider({ socketPath }),
+        connectChannel: (signal) => SocketChannel.connect(socketPath, { signal }),
         mapError: (error) => error instanceof Error ? error : new Error(String(error)),
         mapRemoteError: (error) => createError(error),
         peer

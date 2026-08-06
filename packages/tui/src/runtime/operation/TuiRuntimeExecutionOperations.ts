@@ -96,11 +96,11 @@ export class TuiRuntimeExecutionOperations {
             workspace: entry?.defaultWorkspace
         });
         const snapshot = await this.#request(this.options.clients.runtime.start(instance, {
-            relay: {
-                onOutput: (chunk) => this.options.store.appendRelayOutput(commandId, chunk),
-                onRequestId: (requestId) => this.options.store.setRelayMetadata(commandId, { requestId })
-            },
-            workspacePath: entry?.defaultWorkspace
+            onOutput: (chunk) =>
+                this.options.store.appendRelayOutput(commandId, chunk),
+            onRequestId: (requestId) =>
+                this.options.store.setRelayMetadata(commandId, { requestId }),
+            workspacePath: entry?.defaultWorkspace,
         }), `runtime.start:${instance}`);
         this.options.session.applyAuthoritativeSnapshot(snapshot);
         await this.#refreshInstanceBestEffort(instance);

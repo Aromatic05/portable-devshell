@@ -148,14 +148,15 @@ export class RuntimeSubscriptionManager {
 }
 
 function splitEventType(type: string): [module: string, operation: string] {
-    const separator = type.indexOf(".");
-    if (separator <= 0 || separator === type.length - 1) {
+    const segments = type.split(".");
+    if (
+        segments.length < 2 ||
+        segments.some((segment) => !/^[A-Za-z][A-Za-z0-9]*$/u.test(segment))
+    ) {
         throw new Error(`Invalid instance event type: ${type}`);
     }
-    const module = type.slice(0, separator);
-    const operation = type.slice(separator + 1);
-    if (!/^[A-Za-z][A-Za-z0-9]*$/.test(module)) {
-        throw new Error(`Invalid instance event type: ${type}`);
+    if (segments.length === 2) {
+        return [segments[0]!, segments[1]!];
     }
-    return [module, operation];
+    return ["instanceEvent", "published"];
 }

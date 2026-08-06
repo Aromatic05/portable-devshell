@@ -11,7 +11,7 @@
                 "./packages/shared/dist/browser.d.ts"
             ],
             "@portable-devshell/shared/transport/frame": [
-                "./packages/shared/dist/transport/Frame.d.ts"
+                "./packages/shared/dist/transport/protocol/Frame.d.ts"
             ],
             "@portable-devshell/core": [
                 "./packages/core/dist/index.d.ts"

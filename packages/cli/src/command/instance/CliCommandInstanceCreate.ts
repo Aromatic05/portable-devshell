@@ -1,7 +1,9 @@
 import type { InstanceCreateResult, ReverseDeviceCodeResult } from "@portable-devshell/shared";
 
-import type { CliClientInstance } from "../../client/instance/CliClientInstance.js";
-import type { CliClientReverse } from "../../client/reverse/CliClientReverse.js";
+import type { ControlClients } from "@portable-devshell/shared";
+
+type CliClientInstance = ControlClients["instance"];
+type CliClientReverse = ControlClients["reverse"];
 import { CliWizardInstanceCreate } from "../../wizard/CliWizardInstanceCreate.js";
 
 export interface CliInstanceCreateResult extends InstanceCreateResult {

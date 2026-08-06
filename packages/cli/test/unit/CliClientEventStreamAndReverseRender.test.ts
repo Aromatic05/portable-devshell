@@ -3,15 +3,12 @@ import test from "node:test";
 
 import {
     asInstanceName,
-    ClientStream,
     errorCodes,
-    type ClientEvent
+    type InstanceEventStreamPort,
+    type InstanceStreamMessage
 } from "@portable-devshell/shared";
 
-import {
-    CliClientEventStream,
-    createCliClientEventStream
-} from "../../src/client/CliClientEventStream.ts";
+import { CliClientEventStream } from "../../src/client/CliClientEventStream.ts";
 import {
     renderReverseDeviceCode,
     renderReverseTokenRevocation,
@@ -20,98 +17,80 @@ import {
 
 const destination = asInstanceName("demo-local");
 
-test("CLI event stream drains acknowledgement events before reading the live stream", async () => {
-    const liveEvents: ClientEvent[] = [event("live", "instance.started")];
-    let liveReads = 0;
-    const stream = new ClientStream("stream-1", {
-        close() {},
-        async nextEvent() {
-            liveReads += 1;
-            return liveEvents.shift()!;
-        },
-        async send() {}
-    });
-    const wrapped = new CliClientEventStream(stream, [
-        event("initial-1", "instance.statusChanged"),
-        event("initial-2", "instance.readyChanged")
-    ]);
+test("CLI event stream forwards shared instance events", async () => {
+    const wrapped = new CliClientEventStream(
+        stream({
+            event: {
+                at: "2026-07-16T00:00:00.000Z",
+                instanceName: destination,
+                seq: 4,
+                type: "instance.started",
+            },
+            kind: "event",
+        }),
+    );
 
-    assert.equal((await wrapped.nextEvent()).id, "initial-1");
-    assert.equal((await wrapped.nextEvent()).id, "initial-2");
-    assert.equal(liveReads, 0);
-    assert.equal((await wrapped.nextEvent()).id, "live");
-    assert.equal(liveReads, 1);
+    const event = await wrapped.nextEvent();
+    assert.equal(event.instanceName, destination);
+    assert.equal(event.seq, 4);
+    assert.equal(event.type, "instance.started");
 });
 
-test("CLI event stream maps gap and terminal stream events to actionable errors", async () => {
-    const gap = createStreamWithEvent(event("gap", "stream.gap", { oldestSeq: 10 }));
+test("CLI event stream maps gaps and terminal closure to actionable errors", async () => {
+    const gap = new CliClientEventStream(
+        stream({
+            details: {
+                latestSeq: 20,
+                oldestAvailableSeq: 10,
+                requestedFromSeq: 2,
+            },
+            fromSeq: 2,
+            kind: "gap",
+            lastSeq: 20,
+            nextSeq: 10,
+        }),
+    );
     await assert.rejects(gap.nextEvent(), (error: unknown) => {
         assert.equal(readField(error, "code"), errorCodes.streamGap);
         assert.equal(readField(error, "retryable"), true);
-        assert.deepEqual(readField(error, "details"), { oldestSeq: 10 });
+        assert.deepEqual(readField(error, "details"), {
+            latestSeq: 20,
+            oldestAvailableSeq: 10,
+            requestedFromSeq: 2,
+        });
         return true;
     });
 
-    const cancelled = createStreamWithEvent({
-        ...event("cancelled", "stream.cancelled"),
-        error: {
-            code: "stream.remoteCancelled",
-            message: "remote stopped",
-            retryable: true
-        }
+    const remote = Object.assign(new Error("remote stopped"), {
+        code: "stream.remoteCancelled",
+        retryable: true,
     });
-    await assert.rejects(cancelled.nextEvent(), (error: unknown) => {
-        assert.equal(readField(error, "code"), "stream.remoteCancelled");
-        assert.equal(readField(error, "retryable"), true);
-        return true;
-    });
-
     await assert.rejects(
-        createStreamWithEvent(event("cancelled", "stream.cancelled")).nextEvent(),
-        /control stream was cancelled/u
+        new CliClientEventStream(stream({ error: remote, kind: "closed" }))
+            .nextEvent(),
+        (error: unknown) => {
+            assert.equal(error, remote);
+            assert.equal(readField(error, "code"), "stream.remoteCancelled");
+            assert.equal(readField(error, "retryable"), true);
+            return true;
+        },
     );
     await assert.rejects(
-        createStreamWithEvent(event("completed", "stream.completed")).nextEvent(),
-        /control stream completed/u
+        new CliClientEventStream(stream({ kind: "closed" })).nextEvent(),
+        /control stream completed/u,
     );
 });
 
-test("CLI event stream closes the underlying stream and converts acknowledgement payloads", async () => {
+test("CLI event stream closes the shared stream once", () => {
     let closed = 0;
-    const stream = new ClientStream("stream-1", {
+    const wrapped = new CliClientEventStream({
         close() {
             closed += 1;
         },
-        async nextEvent() {
-            return event("live", "instance.started");
+        async next() {
+            return { kind: "closed" };
         },
-        async send() {}
     });
-    const wrapped = createCliClientEventStream("demo-local", {
-        acknowledgement: {
-            destination,
-            id: "ack",
-            name: "runtime.subscribe",
-            payload: {
-                events: [
-                    {
-                        at: "2026-07-16T00:00:00.000Z",
-                        instanceName: "demo-local",
-                        seq: 4,
-                        type: "instance.started"
-                    }
-                ]
-            },
-            streamId: "stream-1"
-        },
-        stream
-    });
-
-    const initial = await wrapped.nextEvent();
-    assert.equal(initial.id, "initial-4");
-    assert.equal(initial.destination, destination);
-    assert.equal(initial.name, "instance.started");
-    assert.equal(initial.seq, 4);
 
     wrapped.close();
     wrapped.close();
@@ -144,25 +123,12 @@ test("reverse CLI renderers include copyable enrollment and credential instructi
     );
 });
 
-function createStreamWithEvent(next: ClientEvent): CliClientEventStream {
-    return new CliClientEventStream(
-        new ClientStream("stream-1", {
-            close() {},
-            async nextEvent() {
-                return next;
-            },
-            async send() {}
-        }),
-        []
-    );
-}
-
-function event(id: string, name: ClientEvent["name"], payload?: ClientEvent["payload"]): ClientEvent {
+function stream(message: InstanceStreamMessage): InstanceEventStreamPort {
     return {
-        destination,
-        id,
-        name,
-        ...(payload === undefined ? {} : { payload })
+        close() {},
+        async next() {
+            return message;
+        },
     };
 }
 

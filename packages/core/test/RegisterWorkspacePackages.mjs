@@ -37,7 +37,7 @@ const workspacePackages = new Map([
     ["@portable-devshell/core", new URL("../src/index.ts", import.meta.url).href],
     ["@portable-devshell/core/testing", new URL("../src/testing.ts", import.meta.url).href],
     ["@portable-devshell/shared", new URL("../../shared/src/index.ts", import.meta.url).href],
-    ["@portable-devshell/shared/transport/frame", new URL("../../shared/src/transport/Frame.ts", import.meta.url).href],
+    ["@portable-devshell/shared/transport/frame", new URL("../../shared/src/transport/protocol/Frame.ts", import.meta.url).href],
 ]);
 
 registerHooks({

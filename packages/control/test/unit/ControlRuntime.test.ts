@@ -202,7 +202,7 @@ test("runtime mounts web session and RPC routes on the MCP HTTP host", async (t)
         { method: "get", path: CONTROL_WEB_SESSION_PATH },
         { method: "delete", path: CONTROL_WEB_SESSION_PATH }
     ]);
-    assert.deepEqual(upgradeRoutes, [CONTROL_WEB_RPC_PATH]);
+    assert.deepEqual(upgradeRoutes, [CONTROL_WEB_RPC_PATH, "/control/v1/connect"]);
     assert.equal(staticRoutes.length, 1);
     assert.equal(staticRoutes[0]?.path, "/web");
     assert.match(staticRoutes[0]?.directory ?? "", /[/\\]web[/\\]dist[/\\]?$/u);

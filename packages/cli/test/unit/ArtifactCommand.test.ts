@@ -82,7 +82,21 @@ function cli(client: ReturnType<typeof createCliClientArtifact>) {
     const stdout = createBuffer();
     const stderr = createBuffer();
     return {
-        instance: new CliMain({ createCliClients: () => ({ artifact: client } as never), stderr, stdout }),
+        instance: new CliMain({
+            createCliClients: () => ({
+                artifact: client,
+                service: {
+                    async hello() {
+                        return {
+                            capabilities: ["request", "stream", "streamResume"],
+                            protocolVersion: 1,
+                        };
+                    },
+                },
+            } as never),
+            stderr,
+            stdout,
+        }),
         stderr,
         stdout
     };

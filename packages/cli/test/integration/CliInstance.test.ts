@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { Readable } from "node:stream";
 import test from "node:test";
 
-import { Channel, Codec, resolveControlSocketPath, type Event, type JsonValue } from "@portable-devshell/shared";
+import { Codec, SocketChannel, resolveControlSocketPath, type Event, type JsonValue } from "@portable-devshell/shared";
 
 import { createCliClients } from "../../src/client/CliClientComposition.ts";
 import { CliMain } from "../../src/CliMain.ts";
@@ -294,7 +294,7 @@ test("CliInstance integration", async (t) => {
 function createInstanceHarness(): { attach: (socket: Socket) => void } {
     return {
         attach(socket: Socket) {
-            const codec = new Codec(Channel.accept(socket), { local: "server" });
+            const codec = new Codec(SocketChannel.accept(socket), { local: "server" });
             codec.onEvent((event) => {
                 void handleHarnessEvent(codec, event).catch(() => undefined);
             });

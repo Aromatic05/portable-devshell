@@ -202,6 +202,24 @@ test("Comment delivery never stalls visible Audit refreshes for the bound call o
     await waitFor(() => session.store.getState().connection.status === "connected");
     session.store.setSelectedInstance("alpha");
     session.store.setSelectedPage("audit");
+    session.store.replaceContextMessages("alpha", [
+        {
+            createdAt: new Date(8).toISOString(),
+            ctxId: "ctx-alpha",
+            id: "message-1",
+            instance: "alpha",
+            status: "sent",
+            text: "first guidance",
+        },
+        {
+            createdAt: new Date(8).toISOString(),
+            ctxId: "ctx-alpha",
+            id: "message-2",
+            instance: "alpha",
+            status: "sent",
+            text: "second guidance",
+        },
+    ]);
 
     const firstCompletedAt = new Date(10).toISOString();
     worker.addToolCall({
@@ -230,6 +248,13 @@ test("Comment delivery never stalls visible Audit refreshes for the bound call o
         ids: ["message-1", "message-2"],
         status: "delivered",
     });
+    await waitFor(() =>
+        session.store.getState().contextMessagesByInstance.alpha?.every(
+            (message) =>
+                message.status === "delivered" &&
+                message.callId === "comment-call",
+        ) === true,
+    );
     worker.emit("toolCall.completed", {
         callId: "comment-call",
         completedAt: firstCompletedAt,
@@ -407,12 +432,10 @@ test("module TUI clients send explicit instance operations and preserve start re
 
     const relayOutput: string[] = [];
     const started = await clients.runtime.start("alpha", {
-        relay: {
-            onOutput: (chunk) => {
-                relayOutput.push(chunk);
-            }
+        onOutput: (chunk) => {
+            relayOutput.push(chunk);
         },
-        workspacePath: "/workspace/alpha"
+        workspacePath: "/workspace/alpha",
     });
     assert.equal(started.name, "alpha");
     assert.deepEqual(relayOutput, ["starting alpha\n"]);

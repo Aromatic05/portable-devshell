@@ -5,11 +5,12 @@ import test from "node:test";
 
 import {
     asInstanceName,
-    Channel,
+    SocketChannel,
     Codec,
     createError,
     errorCodes,
     PrefixRoute,
+    type Channel,
     type Destination,
     type JsonValue,
     type PrefixRouteEvent,
@@ -54,8 +55,8 @@ async function pair(snapshot: () => PrefixRouteSnapshot): Promise<RoutePair> {
         listener.once("error", reject);
         listener.listen(socketPath, resolve);
     });
-    const accepted = new Promise<Channel>((resolve) => listener.once("connection", (socket) => resolve(Channel.accept(socket))));
-    const clientChannel = await Channel.connect(socketPath);
+    const accepted = new Promise<Channel>((resolve) => listener.once("connection", (socket) => resolve(SocketChannel.accept(socket))));
+    const clientChannel = await SocketChannel.connect(socketPath);
     const serverChannel = await accepted;
     const client = new PrefixRoute(new Codec(clientChannel, { local: "tui", remote: "server" }));
     const events = new EventQueue();

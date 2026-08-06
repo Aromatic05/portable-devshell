@@ -69,6 +69,10 @@ export class ControlWebOAuthFlow {
         return new URL(this.#resourceUrl.href);
     }
 
+    async verifyAccessToken(token: string): Promise<{ clientId: string; scopes: string[] }> {
+        return await this.#protectedResource.verifyAccessToken(this.resourceUrl, token);
+    }
+
     async warmup(): Promise<void> {
         await this.#loadClientState();
         this.#protectedResource.registerResource(this.resourceUrl, this.#providerConfig());

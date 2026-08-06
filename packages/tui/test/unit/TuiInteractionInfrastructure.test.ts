@@ -1413,43 +1413,20 @@ test("audit truncates input and output previews while opening complete structure
         complete: true,
         files: [{ path: "src/example.ts", diff: "+new\n".repeat(40) }],
     };
-    harness.store.applyEvent({
-        destination: asInstanceName("alpha"),
-        id: "tool-queued-live-patch",
-        name: "toolCall.queued",
-        payload: {
-            at: "2026-07-14T00:00:00.000Z",
-            data: {
-                callId: "live-patch",
-                ctxId: "ctx-live-patch",
-                input: { input: patch },
-                inputSummary: JSON.stringify({ input: patch }),
-                source: "mcp",
-                startedAt: "2026-07-14T00:00:00.000Z",
-                status: "queued",
-                toolName: "file_edit",
-            },
-        },
-        seq: 21,
-    });
-    harness.store.applyEvent({
-        destination: asInstanceName("alpha"),
-        id: "tool-completed-live-patch",
-        name: "toolCall.completed",
-        payload: {
-            at: "2026-07-14T00:00:01.000Z",
-            data: {
-                callId: "live-patch",
-                completedAt: "2026-07-14T00:00:01.000Z",
-                output,
-                source: "mcp",
-                startedAt: "2026-07-14T00:00:00.000Z",
-                status: "completed",
-                toolName: "file_edit",
-            },
-        },
-        seq: 22,
-    });
+    const record: ToolCallRecord = {
+        callId: "live-patch",
+        completedAt: "2026-07-14T00:00:01.000Z",
+        ctxId: "ctx-live-patch",
+        input: { input: patch },
+        inputSummary: JSON.stringify({ input: patch }),
+        instance: asInstanceName("alpha"),
+        output,
+        source: "mcp",
+        startedAt: "2026-07-14T00:00:00.000Z",
+        status: "completed",
+        toolName: "file_edit",
+    };
+    harness.store.replaceToolCalls("alpha", [record]);
     enterAuditContext(harness, "ctx-live-patch");
     const audit = expandBox(harness, "audit-call:live-patch");
     const inputLine = audit.expandedLines.find(

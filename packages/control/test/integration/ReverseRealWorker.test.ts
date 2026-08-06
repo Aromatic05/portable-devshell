@@ -9,7 +9,7 @@ import {
     asInstanceName,
     ClientConnection,
     createError,
-    SocketChannelProvider,
+    SocketChannel,
     type Destination,
     type JsonValue
 } from "@portable-devshell/shared";
@@ -212,7 +212,7 @@ async function request(
 ): Promise<any> {
     const [module, method] = operation.split(".");
     const client = new ClientConnection({
-        channelProvider: new SocketChannelProvider({ socketPath }),
+        connectChannel: (signal) => SocketChannel.connect(socketPath, { signal }),
         mapError: (error) => error instanceof Error ? error : new Error(String(error)),
         mapRemoteError: (error) => createError(error),
         peer: "cli"

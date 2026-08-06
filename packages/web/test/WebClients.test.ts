@@ -1,16 +1,12 @@
 import { describe, expect, it } from "vitest";
-import type {
-    ChannelProvider,
-    FrameChannel,
-} from "@portable-devshell/shared/browser";
+import type { Channel } from "@portable-devshell/shared/browser";
 
 import { createWebClients } from "../src/client/WebClients.js";
 
 describe("typed web client routing", () => {
     it("negotiates service.hello before using canonical control operations", async () => {
         const channel = new ReplyChannel();
-        const provider: ChannelProvider = { connect: async () => channel };
-        const clients = createWebClients(provider);
+        const clients = createWebClients(async () => channel);
 
         const hello = await clients.service.hello();
         await clients.service.status();
@@ -21,6 +17,13 @@ describe("typed web client routing", () => {
         await clients.tool.listApprovals("demo");
         await clients.contextMessage.list("demo", "ctx-demo");
         await clients.contextMessage.queue("demo", { ctxId: "ctx-demo", text: "hello" });
+        await clients.terminal.list("demo");
+        await clients.terminal.open("demo", { cols: 80, rows: 24 });
+        await clients.terminal.kill("demo", {
+            generation: 1,
+            terminalId: "terminal-demo",
+            version: 1,
+        });
         await clients.mcp.status();
         await clients.mcp.listApprovals();
 
@@ -35,6 +38,9 @@ describe("typed web client routing", () => {
             "tool.listApprovals",
             "contextMessage.list",
             "contextMessage.queue",
+            "terminal.list",
+            "terminal.open",
+            "terminal.kill",
             "mcp.status",
             "mcp.listApprovals",
         ]);
@@ -46,7 +52,7 @@ describe("typed web client routing", () => {
     });
     it("reports an unexpected persistent transport close", async () => {
         const channel = new ReplyChannel();
-        const clients = createWebClients({ connect: async () => channel });
+        const clients = createWebClients(async () => channel);
         const failures: string[] = [];
         clients.onTransportClose((error) => failures.push(error.message));
         await clients.service.hello();
@@ -58,7 +64,7 @@ describe("typed web client routing", () => {
 
 });
 
-class ReplyChannel implements FrameChannel {
+class ReplyChannel implements Channel {
     closed = false;
     operations: string[] = [];
     payloads: unknown[] = [];

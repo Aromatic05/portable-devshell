@@ -1,7 +1,7 @@
-import type { FrameChannel } from "@portable-devshell/shared";
+import type { Channel } from "@portable-devshell/shared";
 import WebSocket, { type RawData } from "ws";
 
-export class NodeWebSocketFrameChannel implements FrameChannel {
+export class NodeWebSocketChannel implements Channel {
     readonly #closeListeners = new Set<(error?: Error) => void>();
     readonly #frameListeners = new Set<(frame: Uint8Array) => void>();
     readonly #socket: WebSocket;
@@ -17,7 +17,7 @@ export class NodeWebSocketFrameChannel implements FrameChannel {
         });
     }
 
-    static async connect(url: string, cookie: string): Promise<NodeWebSocketFrameChannel> {
+    static async connect(url: string, cookie: string): Promise<NodeWebSocketChannel> {
         const socket = new WebSocket(url, "devshell-control-rpc.v1", {
             headers: { cookie }
         });
@@ -25,7 +25,7 @@ export class NodeWebSocketFrameChannel implements FrameChannel {
             socket.once("open", resolve);
             socket.once("error", reject);
         });
-        return new NodeWebSocketFrameChannel(socket);
+        return new NodeWebSocketChannel(socket);
     }
 
     get closed(): boolean {

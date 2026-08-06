@@ -1,7 +1,7 @@
 import {
     Codec,
     PrefixRoute,
-    type FrameChannel,
+    type Channel,
     type PrefixRouteSnapshot
 } from "@portable-devshell/shared";
 
@@ -10,31 +10,31 @@ export interface ControlChannelRouteProvider {
     snapshot(): PrefixRouteSnapshot;
 }
 
-export interface ControlChannelProvider {
-    start(accept: (channel: FrameChannel) => void): Promise<void>;
+export interface ControlChannelListener {
+    start(accept: (channel: Channel) => void): Promise<void>;
     close(): Promise<void>;
 }
 
 export interface ControlChannelServerOptions {
-    providers: readonly ControlChannelProvider[];
+    listeners: readonly ControlChannelListener[];
     routes: ControlChannelRouteProvider;
 }
 
 export class ControlChannelServer {
-    #providers: ControlChannelProvider[];
+    #listeners: ControlChannelListener[];
     readonly #routes: ControlChannelRouteProvider;
     readonly #connections = new Map<string, PrefixRoute>();
-    readonly #startedProviders: ControlChannelProvider[] = [];
+    readonly #startedListeners: ControlChannelListener[] = [];
     #closePromise?: Promise<void>;
     #startPromise?: Promise<void>;
     #started = false;
     #stopping = false;
 
     constructor(options: ControlChannelServerOptions) {
-        if (options.providers.length === 0) {
-            throw new Error("Control channel server requires at least one provider.");
+        if (options.listeners.length === 0) {
+            throw new Error("Control channel server requires at least one listener.");
         }
-        this.#providers = [...options.providers];
+        this.#listeners = [...options.listeners];
         this.#routes = options.routes;
     }
 
@@ -61,8 +61,8 @@ export class ControlChannelServer {
         if (this.#started) {
             return;
         }
-        if (this.#startedProviders.length > 0) {
-            await this.#closeProviders();
+        if (this.#startedListeners.length > 0) {
+            await this.#closeListeners();
         }
         await this.#startInternal();
     }
@@ -83,19 +83,19 @@ export class ControlChannelServer {
         }
     }
 
-    async replaceProvider(previous: ControlChannelProvider, next: ControlChannelProvider): Promise<void> {
+    async replaceListener(previous: ControlChannelListener, next: ControlChannelListener): Promise<void> {
         if (!this.#started) {
             throw new Error("Control channel server is not started.");
         }
-        const index = this.#providers.indexOf(previous);
-        if (index < 0 || !this.#startedProviders.includes(previous)) {
-            throw new Error("Control channel provider is not active.");
+        const index = this.#listeners.indexOf(previous);
+        if (index < 0 || !this.#startedListeners.includes(previous)) {
+            throw new Error("Control channel listener is not active.");
         }
 
         await next.start((channel) => this.#accept(channel));
-        this.#providers[index] = next;
-        const startedIndex = this.#startedProviders.indexOf(previous);
-        this.#startedProviders[startedIndex] = next;
+        this.#listeners[index] = next;
+        const startedIndex = this.#startedListeners.indexOf(previous);
+        this.#startedListeners[startedIndex] = next;
         setImmediate(() => {
             void previous.close().catch(() => undefined);
         });
@@ -104,16 +104,16 @@ export class ControlChannelServer {
     async #startInternal(): Promise<void> {
         this.#stopping = false;
         try {
-            for (const provider of this.#providers) {
-                await provider.start((channel) => this.#accept(channel));
-                this.#startedProviders.push(provider);
+            for (const listener of this.#listeners) {
+                await listener.start((channel) => this.#accept(channel));
+                this.#startedListeners.push(listener);
             }
             this.#started = true;
         } catch (error) {
             this.#stopping = true;
             this.#closeConnections();
             try {
-                await this.#closeProviders();
+                await this.#closeListeners();
             } catch (closeError) {
                 throw new AggregateError(
                     [error, closeError],
@@ -129,7 +129,7 @@ export class ControlChannelServer {
         await this.#closeInternal();
     }
 
-    #accept(channel: FrameChannel): void {
+    #accept(channel: Channel): void {
         if (this.#stopping) {
             channel.close(new Error("Control channel server is stopping."));
             return;
@@ -153,7 +153,7 @@ export class ControlChannelServer {
         this.#stopping = true;
         this.#closeConnections();
         try {
-            await this.#closeProviders();
+            await this.#closeListeners();
         } finally {
             this.#started = false;
         }
@@ -166,23 +166,23 @@ export class ControlChannelServer {
         this.#connections.clear();
     }
 
-    async #closeProviders(): Promise<void> {
+    async #closeListeners(): Promise<void> {
         const failures: unknown[] = [];
-        const providers = this.#startedProviders.splice(0);
-        const failed = new Set<ControlChannelProvider>();
-        for (const provider of [...providers].reverse()) {
-            await provider.close().catch((error) => {
-                failed.add(provider);
+        const listeners = this.#startedListeners.splice(0);
+        const failed = new Set<ControlChannelListener>();
+        for (const listener of [...listeners].reverse()) {
+            await listener.close().catch((error) => {
+                failed.add(listener);
                 failures.push(error);
             });
         }
-        for (const provider of providers) {
-            if (failed.has(provider)) {
-                this.#startedProviders.push(provider);
+        for (const listener of listeners) {
+            if (failed.has(listener)) {
+                this.#startedListeners.push(listener);
             }
         }
         if (failures.length > 0) {
-            throw new AggregateError(failures, "Control channel providers failed to close.");
+            throw new AggregateError(failures, "Control channel listeners failed to close.");
         }
     }
 }

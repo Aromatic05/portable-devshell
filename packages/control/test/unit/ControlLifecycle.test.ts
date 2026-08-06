@@ -7,14 +7,13 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 import {
-    Channel,
     ClientConnection,
     Codec,
     createError,
     ControlLifecycleManager,
     ControlPathHome,
     ControlPathRuntime,
-    SocketChannelProvider,
+    SocketChannel,
     type Event,
     type JsonValue
 } from "@portable-devshell/shared";
@@ -368,7 +367,7 @@ test("stop tolerates shutdown socket races in the real lifecycle rpc client", as
             return;
         }
 
-        const channel = Channel.accept(socket);
+        const channel = SocketChannel.accept(socket);
         const codec = new Codec(channel, { local: "server" });
         codec.onEvent((event) => {
             if (event.name === "service.status") {
@@ -604,7 +603,7 @@ async function reserveTcpPort(): Promise<number> {
 async function request(socketPath: string, operation: Event["name"], params?: JsonValue): Promise<any> {
     const [module, method] = operation.split(".");
     const client = new ClientConnection({
-        channelProvider: new SocketChannelProvider({ socketPath }),
+        connectChannel: (signal) => SocketChannel.connect(socketPath, { signal }),
         mapError: (error) => error instanceof Error ? error : new Error(String(error)),
         mapRemoteError: (error) => createError(error),
         peer: "cli"

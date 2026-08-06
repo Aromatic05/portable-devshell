@@ -1,69 +1,85 @@
-import type { Socket } from "node:net";
-
 import {
+    CONTROL_PROTOCOL_VERSION,
     ClientConnection,
-    SocketChannelProvider,
-    type ControlErrorBody
+    connectControlClientChannel,
+    createControlClients,
+    type ControlClientChannelOptions,
+    type ControlClients,
+    type ControlErrorBody,
 } from "@portable-devshell/shared";
 
-import { createCliClientArtifact, type CliClientArtifact } from "./artifact/CliClientArtifact.js";
-import { createCliClientInstance, type CliClientInstance } from "./instance/CliClientInstance.js";
-import { createCliClientReverse, type CliClientReverse } from "./reverse/CliClientReverse.js";
-import { createCliClientRuntime, type CliClientRuntime } from "./runtime/CliClientRuntime.js";
-import { createCliClientTodo, type CliClientTodo } from "./todo/CliClientTodo.js";
-import { createCliClientTool, type CliClientTool } from "./tool/CliClientTool.js";
 import { CliRenderError } from "../render/CliRenderError.js";
+import {
+    CliClientEventStream,
+} from "./CliClientEventStream.js";
+import {
+    createCliRuntimeAdapter,
+    type CliClientRuntime,
+} from "./CliRuntimeAdapter.js";
 
-export interface CliClientOptions {
-    socketFactory?: (path: string) => Socket;
-    socketPath?: string;
-    xdgRuntimeDir?: string;
-}
+export interface CliClientOptions extends ControlClientChannelOptions {}
 
-export interface CliClients {
-    artifact: CliClientArtifact;
-    instance: CliClientInstance;
-    reverse: CliClientReverse;
+export type CliClientTodo = Omit<ControlClients["todo"], "subscribe"> & {
+    subscribe(instance: string, fromSeq: number): Promise<CliClientEventStream>;
+};
+
+export type CliClients = Omit<ControlClients, "runtime" | "todo"> & {
     runtime: CliClientRuntime;
     todo: CliClientTodo;
-    tool: CliClientTool;
-}
+};
 
 export function createCliClients(options: CliClientOptions = {}): CliClients {
     const connection = new ClientConnection({
-        channelProvider: new SocketChannelProvider(options),
+        connectChannel: (signal) => connectControlClientChannel(options, signal),
         mode: "short",
         peer: "cli",
         mapError: toClientError,
-        mapRemoteError: toRemoteError
+        mapRemoteError: toRemoteError,
     });
+    const clients = createControlClients(connection, { clientKind: "cli" });
     return {
-        artifact: createCliClientArtifact(connection),
-        instance: createCliClientInstance(connection),
-        reverse: createCliClientReverse(connection),
-        runtime: createCliClientRuntime(connection),
-        todo: createCliClientTodo(connection),
-        tool: createCliClientTool(connection)
+        ...clients,
+        runtime: createCliRuntimeAdapter(connection, clients.runtime),
+        todo: {
+            get: clients.todo.get,
+            subscribe: async (instance, fromSeq) =>
+                new CliClientEventStream(
+                    await clients.todo.subscribe(instance, fromSeq),
+                ),
+        },
     };
+}
+
+export async function negotiateCliControl(clients: CliClients): Promise<void> {
+    const hello = await clients.service.hello();
+    if (hello.protocolVersion !== CONTROL_PROTOCOL_VERSION) {
+        throw new CliRenderError(
+            "control.protocolVersionMismatch",
+            `Incompatible control protocol version: ${hello.protocolVersion}.`,
+        );
+    }
 }
 
 function toRemoteError(error: ControlErrorBody): Error {
     return new CliRenderError(error.code, error.message, {
         cause: error.cause,
         details: error.details,
-        retryable: error.retryable
+        retryable: error.retryable,
     });
 }
 
 function toClientError(error: unknown): Error {
-    if (error instanceof CliRenderError) {
-        return error;
-    }
+    if (error instanceof CliRenderError) return error;
     if (typeof error === "object" && error !== null && "code" in error) {
         const code = String(error.code);
         if (code === "ENOENT" || code === "ECONNREFUSED") {
-            return new CliRenderError("control.notRunning", "control server is not running.");
+            return new CliRenderError(
+                "control.notRunning",
+                "control server is not running.",
+            );
         }
     }
-    return error instanceof Error ? error : new CliRenderError("control.notRunning", String(error));
+    return error instanceof Error
+        ? error
+        : new CliRenderError("control.notRunning", String(error));
 }

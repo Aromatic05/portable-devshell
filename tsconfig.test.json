@@ -9,7 +9,8 @@
         "noEmit": true,
         "paths": {
             "@portable-devshell/shared": ["./packages/shared/src/index.ts"],
-            "@portable-devshell/shared/transport/frame": ["./packages/shared/src/transport/Frame.ts"],
+            "@portable-devshell/shared/browser": ["./packages/shared/src/browser.ts"],
+            "@portable-devshell/shared/transport/frame": ["./packages/shared/src/transport/protocol/Frame.ts"],
             "@portable-devshell/core": ["./packages/core/src/index.ts"],
             "@portable-devshell/core/testing": ["./packages/core/src/testing.ts"],
             "@portable-devshell/control": ["./packages/control/src/index.ts"],

@@ -19,8 +19,8 @@ import {
 import { ControlChannelServer } from "../../src/server/channel/ControlChannelServer.ts";
 import { ControlWebOAuthFlow } from "../../src/server/web/ControlWebOAuthFlow.ts";
 import { ControlWebSessionService } from "../../src/server/web/ControlWebSessionService.ts";
-import { ControlWebSocketChannelProvider } from "../../src/server/web/ControlWebSocketChannelProvider.ts";
-import { NodeWebSocketFrameChannel } from "../WebSocketTestSupport.ts";
+import { ControlWebSocketListener } from "../../src/server/web/ControlWebSocketListener.ts";
+import { NodeWebSocketChannel } from "../WebSocketTestSupport.ts";
 import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
 
 const WEB_RESOURCE_NAME = "demo-web";
@@ -51,7 +51,7 @@ test("web oauth2 completes browser PKCE and authenticates the real control WebSo
     });
     const uninstall = flow.install(http);
     const channels = new ControlChannelServer({
-        providers: [new ControlWebSocketChannelProvider({ http, sessions })],
+        listeners: [new ControlWebSocketListener({ http, sessions })],
         routes: { connectionClosed() {}, snapshot: createRouteSnapshot }
     });
     http.installOAuth(protectedResource);
@@ -88,12 +88,11 @@ test("web oauth2 completes browser PKCE and authenticates the real control WebSo
     assert.equal(authenticated.status, 200);
 
     const connection = new ClientConnection({
-        channelProvider: {
-            connect: async () => await NodeWebSocketFrameChannel.connect(
+        connectChannel: async () =>
+            await NodeWebSocketChannel.connect(
                 `${publicBaseUrl.replace("http", "ws")}/web/rpc`,
                 sessionCookie!
-            )
-        },
+            ),
         mapError: (error) => error instanceof Error ? error : new Error(String(error)),
         mapRemoteError: (error) => createError(error),
         mode: "persistent",

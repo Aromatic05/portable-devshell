@@ -1,10 +1,18 @@
 import type { ControlErrorBody } from "../error/ErrorBodyControl.js";
 import type { JsonValue } from "../type/TypeJsonValue.js";
-import { asInstanceName, type InstanceName } from "../type/identity/TypeIdentityInstanceName.js";
-import type { ChannelProvider } from "./ChannelProvider.js";
-import { Codec, type Destination, type Peer } from "./Codec.js";
-import { PrefixRoute, type PrefixRouteEvent, type PrefixRouteIncoming } from "./PrefixRoute.js";
-import { randomUuid } from "./RandomUuid.js";
+import { asInstanceName } from "../type/identity/TypeIdentityInstanceName.js";
+import type { Channel } from "./protocol/Channel.js";
+import {
+    Codec,
+    createTransportId,
+    type Destination,
+    type Peer,
+} from "./protocol/Codec.js";
+import {
+    PrefixRoute,
+    type PrefixRouteEvent,
+    type PrefixRouteIncoming,
+} from "./protocol/PrefixRoute.js";
 
 export interface ClientEvent {
     id: string;
@@ -20,11 +28,11 @@ export interface ClientEvent {
 export type ClientConnectionMode = "short" | "persistent";
 
 export interface ClientConnectionOptions {
+    connectChannel(signal?: AbortSignal): Promise<Channel>;
     mapError(error: unknown): Error;
     mapRemoteError(error: ControlErrorBody): Error;
     mode?: ClientConnectionMode;
     peer: Exclude<Peer, "server">;
-    channelProvider: ChannelProvider;
 }
 
 export interface OpenedClientStream {
@@ -102,11 +110,11 @@ export class ClientStream {
 }
 
 export class ClientConnection {
+    readonly #connectChannel: ClientConnectionOptions["connectChannel"];
     readonly #mapError: (error: unknown) => Error;
     readonly #mapRemoteError: (error: ControlErrorBody) => Error;
     readonly #mode: ClientConnectionMode;
     readonly #peer: Exclude<Peer, "server">;
-    readonly #channelProvider: ChannelProvider;
     readonly #connectCancellers = new Set<(error: Error) => void>();
     #closed = false;
     #persistentFailure?: Error;
@@ -116,11 +124,11 @@ export class ClientConnection {
     #persistentSessionPromise?: Promise<ClientSession>;
 
     constructor(options: ClientConnectionOptions) {
+        this.#connectChannel = options.connectChannel;
         this.#mapError = options.mapError;
         this.#mapRemoteError = options.mapRemoteError;
         this.#mode = options.mode ?? "short";
         this.#peer = options.peer;
-        this.#channelProvider = options.channelProvider;
     }
 
     async request<TResult>(
@@ -313,13 +321,13 @@ export class ClientConnection {
             };
         });
         this.#connectCancellers.add(cancel);
-        const connecting = this.#channelProvider.connect(controller.signal).then((channel) => {
+        const connecting = this.#connectChannel(controller.signal).then((channel) => {
             if (
                 cancellationError !== undefined ||
                 generation !== this.#persistentGeneration ||
                 this.#closed
             ) {
-                closeFrameChannel(channel);
+                closeChannel(channel);
                 throw cancellationError ?? new Error("Client connection was reset while connecting.");
             }
             return channel;
@@ -331,7 +339,7 @@ export class ClientConnection {
             this.#connectCancellers.delete(cancel);
         }
         if (generation !== this.#persistentGeneration || this.#closed) {
-            closeFrameChannel(channel);
+            closeChannel(channel);
             throw cancellationError ?? new Error("Client connection was reset while connecting.");
         }
         const route = new PrefixRoute(new Codec(channel, { local: this.#peer, remote: "server" }), {
@@ -388,7 +396,7 @@ class ClientSession {
         expectsStream: boolean
     ): Promise<ClientEvent> {
         this.#assertOpen();
-        const id = `${this.#peer}-${randomUuid()}`;
+        const id = `${this.#peer}-${createTransportId()}`;
         const response = new Promise<ClientEvent>((resolve, reject) => {
             this.#pending.set(id, { destination, expectsStream, id, module, reject, resolve });
         });
@@ -430,7 +438,7 @@ class ClientSession {
             throw stream.closeError ?? this.#closeError ?? new Error("Client stream is closed.");
         }
         await this.#route.send(stream.destination, stream.module, {
-            id: `${this.#peer}-${randomUuid()}`,
+            id: `${this.#peer}-${createTransportId()}`,
             streamId,
             name: operation,
             ...(payload === undefined ? {} : { payload })
@@ -453,7 +461,7 @@ class ClientSession {
             waiter.reject(stream.closeError);
         }
         void this.#route.send(stream.destination, "stream", {
-            id: `${this.#peer}-${randomUuid()}`,
+            id: `${this.#peer}-${createTransportId()}`,
             streamId,
             name: "cancel"
         }).catch((error) => {
@@ -618,27 +626,6 @@ export function instanceClientModule(connection: ClientConnection, module: strin
     };
 }
 
-export function readClientSubscriptionEvents(
-    destination: InstanceName,
-    payload: JsonValue | undefined
-): ClientEvent[] {
-    if (!isRecord(payload) || !Array.isArray(payload.events)) {
-        throw new Error("Invalid subscription acknowledgement.");
-    }
-    return payload.events.map((value) => {
-        if (!isRecord(value) || typeof value.type !== "string" || typeof value.seq !== "number") {
-            throw new Error("Invalid initial subscription event.");
-        }
-        return {
-            id: `initial-${value.seq}`,
-            destination,
-            name: value.type as ClientEvent["name"],
-            payload: value,
-            seq: value.seq
-        };
-    });
-}
-
 function toClientEvent(incoming: PrefixRouteIncoming): ClientEvent {
     const event: PrefixRouteEvent = incoming.event;
     return {
@@ -661,7 +648,7 @@ function isRecord(value: JsonValue | undefined): value is Record<string, JsonVal
     return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function closeFrameChannel(channel: import("./FrameChannel.js").FrameChannel): void {
+function closeChannel(channel: Channel): void {
     try {
         channel.close();
     } catch {

@@ -5,10 +5,10 @@ import test from "node:test";
 
 import {
     asInstanceName,
-    Channel,
+    SocketChannel,
     Codec,
     type Event,
-    type FrameChannel
+    type Channel
 } from "@portable-devshell/shared";
 import { createTestIpcPath } from "../../../../../test/TestPlatformSupport.ts";
 import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.ts";
@@ -29,8 +29,8 @@ async function pair(clientPeer: "tui" | "web" = "tui"): Promise<CodecPair> {
         listener.once("error", reject);
         listener.listen(socketPath, resolve);
     });
-    const accepted = new Promise<Channel>((resolve) => listener.once("connection", (socket) => resolve(Channel.accept(socket))));
-    const clientChannel = await Channel.connect(socketPath);
+    const accepted = new Promise<Channel>((resolve) => listener.once("connection", (socket) => resolve(SocketChannel.accept(socket))));
+    const clientChannel = await SocketChannel.connect(socketPath);
     const serverChannel = await accepted;
     return {
         client: new Codec(clientChannel, { local: clientPeer, remote: "server" }),
@@ -57,7 +57,7 @@ function onceEvent(codec: Codec): Promise<Event> {
     });
 }
 
-class FailingFrameChannel implements FrameChannel {
+class FailingChannel implements Channel {
     readonly #closeListeners = new Set<(error?: Error) => void>();
     readonly #frameListeners = new Set<(frame: Uint8Array) => void>();
     closed = false;
@@ -192,7 +192,7 @@ test("Codec rejects a peer change after first-event binding", async (t) => {
 });
 
 test("Codec send failure closes the protocol and notifies listeners", async () => {
-    const channel = new FailingFrameChannel();
+    const channel = new FailingChannel();
     channel.sendError = new Error("frame send failed");
     const codec = new Codec(channel, { local: "tui", remote: "server" });
     const closed = new Promise<Error | undefined>((resolve) => codec.onClose(resolve));
@@ -208,7 +208,7 @@ test("Codec send failure closes the protocol and notifies listeners", async () =
 });
 
 test("Codec closes locally when the transport close operation throws", async () => {
-    const channel = new FailingFrameChannel();
+    const channel = new FailingChannel();
     channel.closeError = new Error("transport close failed");
     const codec = new Codec(channel, { local: "tui", remote: "server" });
     const closed = new Promise<Error | undefined>((resolve) => codec.onClose(resolve));
@@ -220,7 +220,7 @@ test("Codec closes locally when the transport close operation throws", async () 
 });
 
 test("Codec isolates late close listener failures", async () => {
-    const channel = new FailingFrameChannel();
+    const channel = new FailingChannel();
     const codec = new Codec(channel, { local: "tui", remote: "server" });
     const warnings: unknown[] = [];
     const originalWarn = console.warn;

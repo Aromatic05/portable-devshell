@@ -5,8 +5,10 @@ import {
     type ClientEvent,
     type ContextMessageRecord,
     type ControlError,
+    type InstanceEvent,
     type InstanceSnapshot,
     type JsonValue,
+    type McpRuntimeStatus,
     type OAuthApprovalRequest,
     type OperationalOverview,
     type TodoReadResult,
@@ -100,7 +102,7 @@ export class TuiAppStore {
         this.dispatch({ required, type: "control.setRestartRequired" });
     }
 
-    setMcpStatus(mcpStatus?: Record<string, JsonValue>): void {
+    setMcpStatus(mcpStatus?: McpRuntimeStatus): void {
         this.dispatch({ mcpStatus, type: "control.setMcpStatus" });
     }
 
@@ -392,6 +394,15 @@ export class TuiAppStore {
     }
 
     appendRawEvent(event: ClientEvent): void {
+        this.dispatch({
+            rawEvent: toRawEventRecord(event),
+            type: "event.append",
+        });
+    }
+
+    applyInstanceEvent(event: InstanceEvent): void {
+        const lastSeq = this.#state.lastSeqByInstance[event.instanceName] ?? 0;
+        if (event.seq <= lastSeq) return;
         this.dispatch({
             rawEvent: toRawEventRecord(event),
             type: "event.append",

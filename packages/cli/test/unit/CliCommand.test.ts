@@ -957,6 +957,34 @@ test("CliMain reads and follows Todo through control RPC", async () => {
     assert.equal(stderr.flush(), "");
 });
 
+
+test("CliMain rejects an incompatible protocol before a business request", async () => {
+    const stdout = createBuffer();
+    const stderr = createBuffer();
+    let listCalls = 0;
+    const cli = new CliMain({
+        createCliClients: () => ({
+            service: {
+                async hello() {
+                    return { capabilities: [], protocolVersion: 0 };
+                },
+            },
+            instance: {
+                async list() {
+                    listCalls += 1;
+                    return [];
+                },
+            },
+        } as never),
+        stderr,
+        stdout,
+    });
+
+    assert.notEqual(await cli.run(["instance", "list"]), 0);
+    assert.equal(listCalls, 0);
+    assert.match(stderr.flush(), /Incompatible control protocol version/u);
+});
+
 function testClients(client: Record<string, unknown>) {
     const invoke = (name: string, args: unknown[]) => {
         const method = client[name];
@@ -966,6 +994,14 @@ function testClients(client: Record<string, unknown>) {
         return Reflect.apply(method, client, args) as unknown;
     };
     return {
+        service: {
+            async hello() {
+                return {
+                    capabilities: ["request", "stream", "streamResume"],
+                    protocolVersion: 1,
+                };
+            },
+        },
         artifact: {
             cancelTransfer: (...args: unknown[]) => invoke("cancelTransfer", args),
             createShare: (...args: unknown[]) => invoke("createShare", args),

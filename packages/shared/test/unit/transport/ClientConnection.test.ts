@@ -4,15 +4,13 @@ import { createServer, type Server, type Socket } from "node:net";
 import test from "node:test";
 
 import {
-    Channel,
-    type ChannelProvider,
+    type Channel,
     ClientConnection,
     Codec,
     createError,
     type Event,
-    type FrameChannel,
     type JsonValue,
-    SocketChannelProvider
+    SocketChannel
 } from "@portable-devshell/shared";
 import { createTestIpcPath } from "../../../../../test/TestPlatformSupport.ts";
 import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.ts";
@@ -106,7 +104,7 @@ class ControlPeer {
         this.connectionCount += 1;
         this.#sockets.add(socket);
         socket.once("close", () => this.#sockets.delete(socket));
-        const codec = new Codec(Channel.accept(socket), { local: "server" });
+        const codec = new Codec(SocketChannel.accept(socket), { local: "server" });
         codec.onEvent((event) => {
             const received = { codec, event };
             const waiter = this.#waiters.shift();
@@ -119,15 +117,15 @@ class ControlPeer {
     }
 }
 
-class BlockingSocketChannelProvider implements ChannelProvider {
-    readonly #delegate: SocketChannelProvider;
+class BlockingSocketConnector {
+    readonly #socketPath: string;
     connectCount = 0;
     #gate?: Promise<void>;
     #releaseGate?: () => void;
     #signalStarted?: () => void;
 
     constructor(socketPath: string) {
-        this.#delegate = new SocketChannelProvider({ socketPath });
+        this.#socketPath = socketPath;
     }
 
     blockNextConnect(): Promise<void> {
@@ -144,7 +142,7 @@ class BlockingSocketChannelProvider implements ChannelProvider {
         this.#releaseGate?.();
     }
 
-    async connect() {
+    async connect(signal?: AbortSignal) {
         this.connectCount += 1;
         const gate = this.#gate;
         if (gate !== undefined) {
@@ -156,11 +154,11 @@ class BlockingSocketChannelProvider implements ChannelProvider {
                 this.#signalStarted = undefined;
             }
         }
-        return await this.#delegate.connect();
+        return await SocketChannel.connect(this.#socketPath, { signal });
     }
 }
 
-class TrackingFrameChannel implements FrameChannel {
+class TrackingChannel implements Channel {
     readonly #closeListeners = new Set<(error?: Error) => void>();
     readonly #frameListeners = new Set<(frame: Uint8Array) => void>();
     closed = false;
@@ -184,9 +182,9 @@ class TrackingFrameChannel implements FrameChannel {
     }
 }
 
-class SequencedChannelProvider implements ChannelProvider {
-    readonly first = new TrackingFrameChannel();
-    readonly second = new TrackingFrameChannel();
+class SequencedChannelConnector {
+    readonly first = new TrackingChannel();
+    readonly second = new TrackingChannel();
     readonly firstStarted: Promise<void>;
     connectCount = 0;
     firstSignal?: AbortSignal;
@@ -199,7 +197,7 @@ class SequencedChannelProvider implements ChannelProvider {
         });
     }
 
-    async connect(signal?: AbortSignal): Promise<FrameChannel> {
+    async connect(signal?: AbortSignal): Promise<Channel> {
         this.connectCount += 1;
         if (this.connectCount === 1) {
             this.firstSignal = signal;
@@ -223,7 +221,7 @@ function client(socketPath: string, mode: "short" | "persistent" = "persistent")
         mapRemoteError: (error) => createError(error),
         mode,
         peer: "tui",
-        channelProvider: new SocketChannelProvider({ socketPath })
+        connectChannel: (signal) => SocketChannel.connect(socketPath, { signal })
     });
 }
 
@@ -269,17 +267,15 @@ test("short ClientConnection keeps one-request-per-socket behavior", async (t) =
     assert.equal(peer.connectionCount, 2);
 });
 
-test("ClientConnection obtains each short session from an injected channel provider", async (t) => {
+test("ClientConnection obtains each short session from an injected channel connector", async (t) => {
     const peer = await ControlPeer.create();
     let connectCount = 0;
-    const channelProvider: ChannelProvider = {
-        connect: async () => {
-            connectCount += 1;
-            return await Channel.connect(peer.socketPath);
-        }
+    const connectChannel = async () => {
+        connectCount += 1;
+        return await SocketChannel.connect(peer.socketPath);
     };
     const connection = new ClientConnection({
-        channelProvider,
+        connectChannel,
         mapError: (error) => error instanceof Error ? error : new Error(String(error)),
         mapRemoteError: (error) => createError(error),
         mode: "short",
@@ -408,9 +404,9 @@ test("disconnect rejects every pending request and active stream waiter until ex
 
 test("persistent ClientConnection coalesces concurrent reconnect calls", async (t) => {
     const peer = await ControlPeer.create();
-    const provider = new BlockingSocketChannelProvider(peer.socketPath);
+    const provider = new BlockingSocketConnector(peer.socketPath);
     const connection = new ClientConnection({
-        channelProvider: provider,
+        connectChannel: (signal) => provider.connect(signal),
         mapError: (error) => error instanceof Error ? error : new Error(String(error)),
         mapRemoteError: (error) => createError(error),
         mode: "persistent",
@@ -443,10 +439,10 @@ test("persistent ClientConnection coalesces concurrent reconnect calls", async (
     assert.deepEqual((await recoveredRequest).payload, { ready: true });
 });
 
-test("ClientConnection close immediately cancels a stalled provider connect", async () => {
-    const provider = new SequencedChannelProvider();
+test("ClientConnection close immediately cancels a stalled channel connect", async () => {
+    const provider = new SequencedChannelConnector();
     const connection = new ClientConnection({
-        channelProvider: provider,
+        connectChannel: (signal) => provider.connect(signal),
         mapError: (error) => error instanceof Error ? error : new Error(String(error)),
         mapRemoteError: (error) => createError(error),
         mode: "persistent",
@@ -465,9 +461,9 @@ test("ClientConnection close immediately cancels a stalled provider connect", as
 });
 
 test("ClientConnection reconnect cancels a stalled connect and uses the new channel", async () => {
-    const provider = new SequencedChannelProvider();
+    const provider = new SequencedChannelConnector();
     const connection = new ClientConnection({
-        channelProvider: provider,
+        connectChannel: (signal) => provider.connect(signal),
         mapError: (error) => error instanceof Error ? error : new Error(String(error)),
         mapRemoteError: (error) => createError(error),
         mode: "persistent",

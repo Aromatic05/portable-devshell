@@ -23,7 +23,7 @@ import {
 import { ControlChannelServer } from "../../src/server/channel/ControlChannelServer.ts";
 import { ControlWebOAuthFlow } from "../../src/server/web/ControlWebOAuthFlow.ts";
 import { ControlWebSessionService } from "../../src/server/web/ControlWebSessionService.ts";
-import { ControlWebSocketChannelProvider } from "../../src/server/web/ControlWebSocketChannelProvider.ts";
+import { ControlWebSocketListener } from "../../src/server/web/ControlWebSocketListener.ts";
 
 const WEB_SCOPES = ["web"];
 const WEB_RESOURCE_NAME = "browser-web";
@@ -192,8 +192,8 @@ async function startBrowserRuntime(options: {
     });
     const calls = { hello: 0, overview: 0 };
     const channels = new ControlChannelServer({
-        providers: [
-            new ControlWebSocketChannelProvider({
+        listeners: [
+            new ControlWebSocketListener({
                 assetDirectory,
                 basePath,
                 http,

@@ -1505,15 +1505,15 @@ function createClients(
             },
             async subscribe() {
                 let closed = false;
-                let resolveClosed: ((message: { kind: "connection.closed" }) => void) | undefined;
+                let resolveClosed: ((message: { kind: "closed" }) => void) | undefined;
                 return {
                     close() {
                         closed = true;
-                        resolveClosed?.({ kind: "connection.closed" });
+                        resolveClosed?.({ kind: "closed" });
                     },
-                    async nextMessage() {
-                        if (closed) return { kind: "connection.closed" as const };
-                        return await new Promise<{ kind: "connection.closed" }>((resolve) => {
+                    async next() {
+                        if (closed) return { kind: "closed" as const };
+                        return await new Promise<{ kind: "closed" }>((resolve) => {
                             resolveClosed = resolve;
                         });
                     },
@@ -1568,6 +1568,12 @@ function createClients(
             },
         },
         service: {
+            async hello() {
+                return {
+                    capabilities: ["request", "stream", "streamResume"],
+                    protocolVersion: 1,
+                };
+            },
             async ping() {
                 if (options.pingError !== undefined) {
                     throw options.pingError;

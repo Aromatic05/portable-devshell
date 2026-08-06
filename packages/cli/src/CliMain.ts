@@ -3,7 +3,11 @@
 import { isCliEntrypoint } from "./CliEntrypoint.js";
 import { CliParser, type CliParsedCommand } from "./CliParser.js";
 import { executeArtifactCommand } from "./command/artifact/CliCommandArtifact.js";
-import { createCliClients as createControlClients, type CliClients } from "./client/CliClientComposition.js";
+import {
+    createCliClients as createControlClients,
+    negotiateCliControl,
+    type CliClients,
+} from "./client/CliClientComposition.js";
 import { CliCommandInstanceCreate } from "./command/instance/CliCommandInstanceCreate.js";
 import { CliCommandInstanceTodo } from "./command/instance/CliCommandInstanceTodo.js";
 import { CliCommandWatchLogs } from "./command/watch/CliCommandWatchLogs.js";
@@ -30,6 +34,8 @@ import { CliWizardInstanceCreate } from "./wizard/CliWizardInstanceCreate.js";
 
 export interface CliMainOptions {
     createCliClients?: () => CliClients;
+    controlToken?: string;
+    controlUrl?: string;
     createLifecycleManager?: () => Promise<CliLifecycleManagerLike>;
     followEventLimit?: number;
     homeDirectory?: string;
@@ -49,6 +55,8 @@ export interface CliLifecycleManagerLike {
 
 export class CliMain {
     readonly #clients: CliClients;
+    readonly #controlToken?: string;
+    readonly #controlUrl?: string;
     readonly #createLifecycleManager?: () => Promise<CliLifecycleManagerLike>;
     readonly #exitMapper = new CliExitMapper();
     readonly #followEventLimit?: number;
@@ -61,6 +69,8 @@ export class CliMain {
     readonly #xdgRuntimeDir?: string;
 
     constructor(options: CliMainOptions = {}) {
+        this.#controlToken = options.controlToken;
+        this.#controlUrl = options.controlUrl;
         this.#createLifecycleManager = options.createLifecycleManager;
         this.#followEventLimit = options.followEventLimit;
         this.#runTui = options.runTui;
@@ -69,7 +79,11 @@ export class CliMain {
         this.#stdout = options.stdout ?? process.stdout;
         this.#homeDirectory = options.homeDirectory;
         this.#xdgRuntimeDir = options.xdgRuntimeDir;
-        this.#clients = options.createCliClients?.() ?? createControlClients({ xdgRuntimeDir: this.#xdgRuntimeDir });
+        this.#clients = options.createCliClients?.() ?? createControlClients({
+            ...(options.controlToken === undefined ? {} : { controlToken: options.controlToken }),
+            ...(options.controlUrl === undefined ? {} : { controlUrl: options.controlUrl }),
+            xdgRuntimeDir: this.#xdgRuntimeDir
+        });
     }
 
     async run(argv: readonly string[]): Promise<number> {
@@ -85,6 +99,9 @@ export class CliMain {
     }
 
     async #execute(command: CliParsedCommand): Promise<void> {
+        if (commandUsesControlClient(command)) {
+            await negotiateCliControl(this.#clients);
+        }
         switch (command.kind) {
             case "help":
                 this.#stdout.write(`${renderCliUsage()}\n`);
@@ -95,6 +112,9 @@ export class CliMain {
             case "control.restart": {
                 const lifecycle = await this.#lifecycle();
                 const current = await lifecycle.status();
+                if (current.running) {
+                    await negotiateCliControl(this.#clients);
+                }
                 const instancesToRestore = current.running
                     ? (await this.#clients.instance.list()).filter((entry) =>
                         entry.snapshot.reverse === undefined &&
@@ -105,6 +125,9 @@ export class CliMain {
                     : [];
                 await lifecycle.stop();
                 const status = await lifecycle.start();
+                if (instancesToRestore.length > 0) {
+                    await negotiateCliControl(this.#clients);
+                }
                 for (const entry of instancesToRestore) {
                     await this.#clients.runtime.start(entry.name);
                 }
@@ -262,10 +285,16 @@ export class CliMain {
         }
 
         const imported = (await import("@portable-devshell/tui")) as {
-            runTui(options?: { xdgRuntimeDir?: string }): Promise<void>;
+            runTui(options?: {
+                controlToken?: string;
+                controlUrl?: string;
+                xdgRuntimeDir?: string;
+            }): Promise<void>;
         };
 
         await imported.runTui({
+            ...(this.#controlToken === undefined ? {} : { controlToken: this.#controlToken }),
+            ...(this.#controlUrl === undefined ? {} : { controlUrl: this.#controlUrl }),
             xdgRuntimeDir: this.#xdgRuntimeDir
         });
     }
@@ -292,4 +321,15 @@ function splitGlobalFlags(argv: readonly string[]): { commandArgs: string[]; deb
     }
 
     return { commandArgs, debug, verbose };
+}
+
+function commandUsesControlClient(command: CliParsedCommand): boolean {
+    if (command.kind === "artifact") {
+        return ["share", "shares", "revoke", "transfer", "transfers"].includes(
+            command.args[0] ?? "",
+        );
+    }
+    return (command.kind.startsWith("instance.") &&
+            command.kind !== "instance.help") ||
+        (command.kind.startsWith("watch.") && command.kind !== "watch.help");
 }

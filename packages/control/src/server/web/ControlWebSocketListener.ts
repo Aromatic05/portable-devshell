@@ -1,0 +1,217 @@
+import type { IncomingMessage } from "node:http";
+import type { Duplex } from "node:stream";
+
+import type { HttpHost } from "@portable-devshell/mcp";
+import {
+    CONTROL_REMOTE_RPC_PATH,
+    CONTROL_REMOTE_RPC_SUBPROTOCOL,
+    CONTROL_WEB_BASE_PATH
+} from "@portable-devshell/shared";
+import { TRANSPORT_MAX_FRAME_SIZE } from "@portable-devshell/shared/transport/frame";
+import { WebSocketServer } from "ws";
+
+import type { ControlChannelListener } from "../channel/ControlChannelServer.js";
+import { ControlWebSessionService } from "./ControlWebSessionService.js";
+import {
+    ControlWebSocketSessionAccess,
+    type ControlWebSocketAccessAuthorizer
+} from "./ControlWebSocketAccessService.js";
+import { ControlWebSocketChannel } from "./ControlWebSocketChannel.js";
+
+export interface ControlWebSocketListenerOptions {
+    access?: ControlWebSocketAccessAuthorizer;
+    assetDirectory?: string;
+    basePath?: string;
+    http: HttpHost;
+    path?: string;
+    remotePath?: string | false;
+    sessions: ControlWebSessionService;
+}
+
+export class ControlWebSocketListener implements ControlChannelListener {
+    readonly #access: ControlWebSocketAccessAuthorizer;
+    readonly #assetDirectory?: string;
+    readonly #basePath: string;
+    readonly #channelsByAccess = new Map<string, Set<ControlWebSocketChannel>>();
+    readonly #http: HttpHost;
+    readonly #paths: string[];
+    readonly #sessions: ControlWebSessionService;
+    #unsubscribeRevocation?: () => void;
+    #accept?: (channel: ControlWebSocketChannel) => void;
+    #removeRoutes?: () => void;
+    #routesInstalled = false;
+    #started = false;
+    #webSocketServer?: WebSocketServer;
+
+    constructor(options: ControlWebSocketListenerOptions) {
+        this.#assetDirectory = options.assetDirectory;
+        this.#basePath = normalizeBasePath(options.basePath ?? CONTROL_WEB_BASE_PATH);
+        this.#http = options.http;
+        this.#sessions = options.sessions;
+        this.#access = options.access ?? new ControlWebSocketSessionAccess(options.sessions);
+        const browserPath = options.path ?? `${this.#basePath}/rpc`;
+        const remotePath = options.remotePath ?? (options.access === undefined
+            ? false
+            : CONTROL_REMOTE_RPC_PATH);
+        this.#paths = [...new Set([
+            browserPath,
+            ...(remotePath === false ? [] : [normalizeAbsolutePath(remotePath)])
+        ])];
+    }
+
+    async start(accept: (channel: ControlWebSocketChannel) => void): Promise<void> {
+        if (this.#started) return;
+        this.#accept = accept;
+        this.#unsubscribeRevocation = this.#access.onRevoked((key) => {
+            this.#closeAccessChannels(key);
+        });
+        if (!this.#routesInstalled) {
+            const removeRoutes = [this.#sessions.install(this.#http)];
+            if (this.#assetDirectory !== undefined) {
+                removeRoutes.push(
+                    this.#http.registerStaticDirectory(this.#basePath, this.#assetDirectory)
+                );
+            }
+            for (const path of this.#paths) {
+                removeRoutes.push(this.#http.registerUpgradeHandler(
+                    path,
+                    async (request, socket, head) => {
+                        await this.#handleUpgrade(request, socket, head);
+                    }
+                ));
+            }
+            this.#removeRoutes = () => {
+                for (const remove of removeRoutes.reverse()) remove();
+            };
+            this.#routesInstalled = true;
+        }
+        this.#webSocketServer = new WebSocketServer({
+            clientTracking: true,
+            handleProtocols: (protocols) => protocols.has(CONTROL_REMOTE_RPC_SUBPROTOCOL)
+                ? CONTROL_REMOTE_RPC_SUBPROTOCOL
+                : false,
+            maxPayload: TRANSPORT_MAX_FRAME_SIZE,
+            noServer: true
+        });
+        this.#started = true;
+    }
+
+    async close(): Promise<void> {
+        this.#started = false;
+        this.#accept = undefined;
+        this.#sessions.clear();
+        this.#unsubscribeRevocation?.();
+        this.#unsubscribeRevocation = undefined;
+        this.#channelsByAccess.clear();
+        this.#removeRoutes?.();
+        this.#removeRoutes = undefined;
+        this.#routesInstalled = false;
+        const server = this.#webSocketServer;
+        this.#webSocketServer = undefined;
+        if (server === undefined) return;
+        for (const socket of server.clients) {
+            socket.close(1001, "control server stopping");
+            socket.terminate();
+        }
+        await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+
+    async #handleUpgrade(
+        request: IncomingMessage,
+        socket: Duplex,
+        head: Buffer
+    ): Promise<void> {
+        const server = this.#webSocketServer;
+        const accept = this.#accept;
+        if (!this.#started || server === undefined || accept === undefined) {
+            writeUpgradeError(socket, 503, "Service Unavailable");
+            return;
+        }
+        if (!hasSameOrigin(request)) {
+            writeUpgradeError(socket, 403, "Forbidden");
+            return;
+        }
+        const access = await this.#access.authorize(request);
+        if (access === undefined) {
+            writeUpgradeError(socket, 401, "Unauthorized");
+            return;
+        }
+        if (!hasProtocol(request, CONTROL_REMOTE_RPC_SUBPROTOCOL)) {
+            writeUpgradeError(socket, 426, "Upgrade Required", {
+                "Sec-WebSocket-Protocol": CONTROL_REMOTE_RPC_SUBPROTOCOL
+            });
+            return;
+        }
+        server.handleUpgrade(request, socket, head, (webSocket) => {
+            const channel = new ControlWebSocketChannel(webSocket);
+            this.#registerAccessChannel(access.key, channel);
+            accept(channel);
+        });
+    }
+
+    #registerAccessChannel(key: string, channel: ControlWebSocketChannel): void {
+        const channels = this.#channelsByAccess.get(key) ?? new Set();
+        channels.add(channel);
+        this.#channelsByAccess.set(key, channels);
+        channel.onClose(() => {
+            channels.delete(channel);
+            if (channels.size === 0) this.#channelsByAccess.delete(key);
+        });
+    }
+
+    #closeAccessChannels(key: string): void {
+        const channels = this.#channelsByAccess.get(key);
+        if (channels === undefined) return;
+        this.#channelsByAccess.delete(key);
+        for (const channel of [...channels]) {
+            channel.close(new Error("Control client authorization was revoked."));
+        }
+    }
+}
+
+function normalizeBasePath(value: string): string {
+    if (!value.startsWith("/") || value === "/") {
+        throw new Error("Control web basePath must be an absolute non-root path.");
+    }
+    return value.replace(/\/+$/u, "");
+}
+
+function normalizeAbsolutePath(value: string): string {
+    if (!value.startsWith("/")) throw new Error("Control WebSocket path must be absolute.");
+    return value.replace(/\/+$/u, "");
+}
+
+function hasProtocol(request: IncomingMessage, expected: string): boolean {
+    const header = request.headers["sec-websocket-protocol"];
+    const value = Array.isArray(header) ? header.join(",") : header;
+    return value?.split(",").some((protocol) => protocol.trim() === expected) ?? false;
+}
+
+function hasSameOrigin(request: IncomingMessage): boolean {
+    const origin = request.headers.origin;
+    if (origin === undefined) return true;
+    const host = request.headers.host;
+    if (host === undefined) return false;
+    try {
+        return new URL(origin).host === host;
+    } catch {
+        return false;
+    }
+}
+
+function writeUpgradeError(
+    socket: Duplex,
+    statusCode: number,
+    statusText: string,
+    headers: Record<string, string> = {}
+): void {
+    const lines = [
+        `HTTP/1.1 ${statusCode} ${statusText}`,
+        "Connection: close",
+        "Content-Length: 0",
+        ...Object.entries(headers).map(([name, value]) => `${name}: ${value}`),
+        "",
+        ""
+    ];
+    socket.end(lines.join("\r\n"));
+}

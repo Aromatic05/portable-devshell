@@ -5,28 +5,28 @@ import {
     ClientConnection,
     PrefixRoute,
     createError,
-    type FrameChannel,
+    type Channel,
     type JsonValue,
     type PrefixRouteSnapshot
 } from "@portable-devshell/shared";
 
 import {
     ControlChannelServer,
-    type ControlChannelProvider
+    type ControlChannelListener
 } from "../../src/server/channel/ControlChannelServer.ts";
 
-class MemoryFrameChannel implements FrameChannel {
+class MemoryChannel implements Channel {
     readonly #closeListeners = new Set<(error?: Error) => void>();
     readonly #frameListeners = new Set<(frame: Uint8Array) => void>();
     #closeError?: Error;
     #closed = false;
-    #peer?: MemoryFrameChannel;
+    #peer?: MemoryChannel;
 
     get closed(): boolean {
         return this.#closed;
     }
 
-    bind(peer: MemoryFrameChannel): void {
+    bind(peer: MemoryChannel): void {
         this.#peer = peer;
     }
 
@@ -91,12 +91,12 @@ class MemoryFrameChannel implements FrameChannel {
     }
 }
 
-class MemoryControlChannelProvider implements ControlChannelProvider {
-    #accept?: (channel: FrameChannel) => void;
+class MemoryControlChannelListener implements ControlChannelListener {
+    #accept?: (channel: Channel) => void;
     closed = false;
     started = false;
 
-    async start(accept: (channel: FrameChannel) => void): Promise<void> {
+    async start(accept: (channel: Channel) => void): Promise<void> {
         assert.equal(this.started, false);
         this.started = true;
         this.#accept = accept;
@@ -107,13 +107,13 @@ class MemoryControlChannelProvider implements ControlChannelProvider {
         this.#accept = undefined;
     }
 
-    connect(): FrameChannel {
+    connect(): Channel {
         const accept = this.#accept;
         if (accept === undefined) {
             throw new Error("Provider is not started.");
         }
-        const client = new MemoryFrameChannel();
-        const server = new MemoryFrameChannel();
+        const client = new MemoryChannel();
+        const server = new MemoryChannel();
         client.bind(server);
         server.bind(client);
         accept(server);
@@ -121,7 +121,7 @@ class MemoryControlChannelProvider implements ControlChannelProvider {
     }
 }
 
-class BlockingControlChannelProvider implements ControlChannelProvider {
+class BlockingControlChannelListener implements ControlChannelListener {
     readonly started: Promise<void>;
     closeCount = 0;
     startCount = 0;
@@ -151,7 +151,7 @@ class BlockingControlChannelProvider implements ControlChannelProvider {
     }
 }
 
-class RetryCloseControlChannelProvider implements ControlChannelProvider {
+class RetryCloseControlChannelListener implements ControlChannelListener {
     readonly events: string[] = [];
     closeCount = 0;
     startCount = 0;
@@ -176,7 +176,7 @@ class RetryCloseControlChannelProvider implements ControlChannelProvider {
     }
 }
 
-class BlockingRetryCloseControlChannelProvider implements ControlChannelProvider {
+class BlockingRetryCloseControlChannelListener implements ControlChannelListener {
     readonly cleanupStarted: Promise<void>;
     readonly events: string[] = [];
     closeCount = 0;
@@ -216,8 +216,8 @@ class BlockingRetryCloseControlChannelProvider implements ControlChannelProvider
 
 
 test("ControlChannelServer serves the same routes through multiple channel providers", async (t) => {
-    const socketProvider = new MemoryControlChannelProvider();
-    const webProvider = new MemoryControlChannelProvider();
+    const socketProvider = new MemoryControlChannelListener();
+    const webProvider = new MemoryControlChannelListener();
     const closedConnections: string[] = [];
     const routes = {
         connectionClosed(connectionId: string) {
@@ -226,7 +226,7 @@ test("ControlChannelServer serves the same routes through multiple channel provi
         snapshot: createRouteSnapshot
     };
     const server = new ControlChannelServer({
-        providers: [socketProvider, webProvider],
+        listeners: [socketProvider, webProvider],
         routes
     });
     await server.start();
@@ -257,8 +257,8 @@ test("ControlChannelServer serves the same routes through multiple channel provi
 });
 
 test("ControlChannelServer closes earlier providers when a later provider fails to start", async () => {
-    const first = new MemoryControlChannelProvider();
-    const failure: ControlChannelProvider = {
+    const first = new MemoryControlChannelListener();
+    const failure: ControlChannelListener = {
         async start() {
             throw new Error("provider failed to start");
         },
@@ -267,7 +267,7 @@ test("ControlChannelServer closes earlier providers when a later provider fails 
         }
     };
     const server = new ControlChannelServer({
-        providers: [first, failure],
+        listeners: [first, failure],
         routes: {
             connectionClosed() {},
             snapshot: createRouteSnapshot
@@ -279,9 +279,9 @@ test("ControlChannelServer closes earlier providers when a later provider fails 
 });
 
 test("ControlChannelServer coalesces concurrent start calls", async (t) => {
-    const provider = new BlockingControlChannelProvider();
+    const provider = new BlockingControlChannelListener();
     const server = new ControlChannelServer({
-        providers: [provider],
+        listeners: [provider],
         routes: {
             connectionClosed() {},
             snapshot: createRouteSnapshot
@@ -301,9 +301,9 @@ test("ControlChannelServer coalesces concurrent start calls", async (t) => {
 });
 
 test("ControlChannelServer waits for an active start before closing providers", async () => {
-    const provider = new BlockingControlChannelProvider();
+    const provider = new BlockingControlChannelListener();
     const server = new ControlChannelServer({
-        providers: [provider],
+        listeners: [provider],
         routes: {
             connectionClosed() {},
             snapshot: createRouteSnapshot
@@ -323,9 +323,9 @@ test("ControlChannelServer waits for an active start before closing providers", 
 });
 
 test("ControlChannelServer retries providers that failed to close", async () => {
-    const provider = new RetryCloseControlChannelProvider(1);
+    const provider = new RetryCloseControlChannelListener(1);
     const server = new ControlChannelServer({
-        providers: [provider],
+        listeners: [provider],
         routes: {
             connectionClosed() {},
             snapshot: createRouteSnapshot
@@ -341,9 +341,9 @@ test("ControlChannelServer retries providers that failed to close", async () => 
 });
 
 test("ControlChannelServer finishes failed cleanup before restarting providers", async () => {
-    const provider = new RetryCloseControlChannelProvider(1);
+    const provider = new RetryCloseControlChannelListener(1);
     const server = new ControlChannelServer({
-        providers: [provider],
+        listeners: [provider],
         routes: {
             connectionClosed() {},
             snapshot: createRouteSnapshot
@@ -359,9 +359,9 @@ test("ControlChannelServer finishes failed cleanup before restarting providers",
 });
 
 test("ControlChannelServer coalesces restarts while failed cleanup is retried", async () => {
-    const provider = new BlockingRetryCloseControlChannelProvider();
+    const provider = new BlockingRetryCloseControlChannelListener();
     const server = new ControlChannelServer({
-        providers: [provider],
+        listeners: [provider],
         routes: {
             connectionClosed() {},
             snapshot: createRouteSnapshot
@@ -385,16 +385,16 @@ test("ControlChannelServer coalesces restarts while failed cleanup is retried", 
 });
 
 test("ControlChannelServer replaces one started provider without closing others", async () => {
-    const socket = new MemoryControlChannelProvider();
-    const web = new MemoryControlChannelProvider();
-    const replacement = new MemoryControlChannelProvider();
+    const socket = new MemoryControlChannelListener();
+    const web = new MemoryControlChannelListener();
+    const replacement = new MemoryControlChannelListener();
     const server = new ControlChannelServer({
-        providers: [socket, web],
+        listeners: [socket, web],
         routes: { connectionClosed() {}, snapshot: createRouteSnapshot }
     });
 
     await server.start();
-    await server.replaceProvider(web, replacement);
+    await server.replaceListener(web, replacement);
     await new Promise((resolve) => setImmediate(resolve));
 
     assert.equal(socket.closed, false);
@@ -405,11 +405,11 @@ test("ControlChannelServer replaces one started provider without closing others"
 
 
 function createClient(
-    provider: MemoryControlChannelProvider,
+    provider: MemoryControlChannelListener,
     peer: "tui" | "web"
 ): ClientConnection {
     return new ClientConnection({
-        channelProvider: { connect: async () => provider.connect() },
+        connectChannel: async () => provider.connect(),
         mapError: normalizeError,
         mapRemoteError: (error) => createError(error),
         mode: "persistent",

@@ -3,6 +3,7 @@ import type {
     ArtifactShareResult,
     ArtifactTransferRecord,
     ClientEvent,
+    InstanceEvent,
     ContextMessageRecord,
     ControlError,
     InstanceSnapshot,
@@ -109,7 +110,7 @@ export interface TuiAppState {
     lastSeqByInstance: Record<string, number>;
     lastStatusChangeAtByInstance: Record<string, string>;
     logsByInstance: Record<string, TuiLogEntry[]>;
-    mcpStatus?: Record<string, JsonValue>;
+    mcpStatus?: McpRuntimeStatus;
     oauthApprovals: OAuthApprovalRequest[];
     operationalOverview?: OperationalOverview;
     rawEvents: TuiRawEventRecord[];
@@ -150,7 +151,7 @@ export type TuiAppAction =
           type: "relay.setMetadata";
       }
     | { configView?: Record<string, JsonValue>; type: "control.setConfigView" }
-    | { mcpStatus?: Record<string, JsonValue>; type: "control.setMcpStatus" }
+    | { mcpStatus?: McpRuntimeStatus; type: "control.setMcpStatus" }
     | {
           errorCode?: string;
           errorMessage?: string;
@@ -192,7 +193,17 @@ export type TuiAppAction =
     | { instance: string; records: ToolCallRecord[]; type: "toolCall.replace" }
     | { maxEvents?: number; rawEvent: TuiRawEventRecord; type: "event.append" };
 
-export function toRawEventRecord(event: ClientEvent): TuiRawEventRecord {
+export function toRawEventRecord(
+    event: ClientEvent | InstanceEvent,
+): TuiRawEventRecord {
+    if ("instanceName" in event) {
+        return {
+            event: event.type,
+            instance: event.instanceName,
+            payload: event as unknown as JsonValue,
+            seq: event.seq,
+        };
+    }
     return {
         event: event.name,
         instance: event.destination,

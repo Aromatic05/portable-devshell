@@ -630,16 +630,21 @@ function fakeClients(
             return () => transportListeners.delete(listener);
         },
         reconnect: vi.fn(async () => undefined),
+        artifact: {} as WebClients["artifact"],
+        config: {} as WebClients["config"],
+        reverse: {} as WebClients["reverse"],
         service: {
             hello: async () => ({
                 capabilities: ["request", "stream", "streamResume"],
                 protocolVersion: 1,
             }),
+            ping: async () => ({ pong: true }),
+            restart: async () => ({ accepted: true }),
             status: async () => ({ instanceCount: 1, ok: true }),
         },
         instance: {
             list: async () => [{ mcpEnabled: true, name: "demo", snapshot }],
-        },
+        } as WebClients["instance"],
         overview: { get: async () => operationalOverview() },
         tool: {
             listCalls: async () => [],
@@ -648,6 +653,21 @@ function fakeClients(
                 throw new Error("Not used.");
             },
             decideApproval: async () => {
+                throw new Error("Not used.");
+            },
+        },
+        terminal: {
+            attach: async () => {
+                throw new Error("Not used.");
+            },
+            get: async () => {
+                throw new Error("Not used.");
+            },
+            kill: async () => {
+                throw new Error("Not used.");
+            },
+            list: async () => [],
+            open: async () => {
                 throw new Error("Not used.");
             },
         },
@@ -965,6 +985,70 @@ describe("WebStore recovery and consistency", () => {
         await queue;
 
         expect(store.state.contextMessages.demo?.[0]?.status).toBe("delivered");
+    });
+
+    it("applies a delivered Context message read that started before the queue response", async () => {
+        vi.useFakeTimers();
+        const stream = controllableStream();
+        const clients = fakeClients({ subscribe: async () => stream });
+        let releaseQueue!: () => void;
+        clients.contextMessage.queue = vi.fn(
+            () =>
+                new Promise<ContextMessageRecord>((resolve) => {
+                    releaseQueue = () =>
+                        resolve({
+                            createdAt: "2026-07-31T00:00:00Z",
+                            ctxId: "ctx-demo",
+                            id: "message-1",
+                            instance: "demo",
+                            status: "sent",
+                            text: "Continue.",
+                        });
+                }),
+        );
+        const store = new WebStore(clients);
+        await store.load();
+
+        let releaseDeliveredRead!: () => void;
+        const deliveredRead = new Promise<ContextMessageRecord[]>((resolve) => {
+            releaseDeliveredRead = () =>
+                resolve([
+                    {
+                        callId: "call-1",
+                        createdAt: "2026-07-31T00:00:00Z",
+                        ctxId: "ctx-demo",
+                        deliveredAt: "2026-07-31T00:00:01Z",
+                        id: "message-1",
+                        instance: "demo",
+                        status: "delivered",
+                        text: "Continue.",
+                    },
+                ]);
+        });
+        clients.contextMessage.list = vi.fn(() => deliveredRead);
+
+        const queue = store.queueContextMessage(
+            "demo",
+            "ctx-demo",
+            "Continue.",
+        );
+        stream.push(instanceEvent("context.message.delivered"));
+        await vi.advanceTimersByTimeAsync(250);
+        expect(clients.contextMessage.list).toHaveBeenCalledTimes(2);
+
+        releaseQueue();
+        await queue;
+        expect(store.state.contextMessages.demo?.[0]?.status).toBe("sent");
+
+        releaseDeliveredRead();
+        await vi.waitFor(() =>
+            expect(store.state.contextMessages.demo?.[0]?.status).toBe(
+                "delivered",
+            ),
+        );
+
+        store.close();
+        vi.useRealTimers();
     });
 
     it("uses the authoritative lifecycle response even when follow-up reads fail", async () => {

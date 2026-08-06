@@ -4,7 +4,7 @@ import { createServer } from "node:net";
 import { join } from "node:path";
 import test from "node:test";
 
-import { Channel, Codec, type JsonValue } from "@portable-devshell/shared";
+import { Codec, SocketChannel, type JsonValue } from "@portable-devshell/shared";
 
 import { createCliClients } from "../../src/client/CliClientComposition.ts";
 import { createTestIpcPath } from "../../../../test/TestPlatformSupport.ts";
@@ -16,7 +16,7 @@ test("module CLI clients perform control rpc over unix socket", async (t) => {
     const socketPath = createTestIpcPath("cli-control", runtimeRoot);
     const methods: string[] = [];
     const server = createServer((socket) => {
-        const codec = new Codec(Channel.accept(socket), { local: "server" });
+        const codec = new Codec(SocketChannel.accept(socket), { local: "server" });
         codec.onEvent((event) => {
             methods.push(event.name);
             const payload: JsonValue = event.name === "instance.list"
