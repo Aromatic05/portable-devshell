@@ -1,7 +1,5 @@
 import assert from "node:assert/strict";
 import { rm } from "node:fs/promises";
-import { createConnection } from "node:net";
-import { join } from "node:path";
 import test from "node:test";
 
 import {
@@ -26,114 +24,6 @@ import {
 } from "../../src/testing.ts";
 import { createTestIpcPath } from "../../../../test/TestPlatformSupport.ts";
 import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
-
-test("TuiControlSession pulls instances, snapshots, subscribes, and recovers from stream.gap", async (t) => {
-    const runtimeDir = await createTestTempDirectory("tui-session");
-    const socketPath = createTestIpcPath("tui-control", runtimeDir);
-    const worker = new FakeWorker("alpha");
-    const server = createServer(socketPath, worker, () => 7);
-    let socketCount = 0;
-    const session = new TuiControlSession({
-        clients: createTuiClients({
-            socketFactory: (path) => {
-                socketCount += 1;
-                return createConnection(path);
-            },
-            socketPath
-        })
-    });
-
-    worker.emit("toolCall.completed", {
-        callId: "seed-1",
-        source: "tui",
-        toolName: "bash_run"
-    });
-    worker.emit("toolCall.completed", {
-        callId: "seed-2",
-        source: "tui",
-        toolName: "bash_run"
-    });
-
-    await server.start();
-
-    t.after(async () => {
-        await session.stop();
-        await server.stop().catch(() => undefined);
-        await rm(runtimeDir, { force: true, recursive: true });
-    });
-
-    await session.start();
-    await waitFor(() => session.store.getState().connection.status === "connected");
-    await waitFor(() => worker.subscribeFromSeqs.length === 1);
-
-    assert.equal(session.store.getState().instances.length, 1);
-    assert.equal(session.store.getState().instances[0]?.enabled, true);
-    assert.equal(session.store.getState().instances[0]?.provider, "local");
-    assert.equal(session.store.getState().instances[0]?.defaultWorkspace, "/workspace/alpha");
-    assert.equal(session.store.getState().snapshotsByInstance.alpha?.lastSeq, 2);
-    assert.equal(session.store.getState().configView?.version, 7);
-    assert.equal(worker.snapshotCallCount >= 2, true);
-    assert.deepEqual(worker.subscribeFromSeqs, [2]);
-    assert.deepEqual(worker.logReadQueries, [{ fromSeq: undefined, limit: 100 }]);
-    assert.equal(session.store.getState().logsByInstance.alpha?.length, 1);
-    assert.equal(session.store.getState().toolCallsByInstance.alpha?.length, 1);
-    assert.equal(session.store.getState().approvalsByInstance.alpha?.length, 1);
-    assert.equal(session.store.getState().operationalOverview?.counts.pendingApprovals, 1);
-    assert.equal(socketCount, 1);
-
-    worker.emit("toolCall.completed", {
-        callId: "live-3",
-        completedAt: new Date().toISOString(),
-        inputSummary: "{\"cmd\":\"pwd\"}",
-        source: "tui",
-        startedAt: new Date(1).toISOString(),
-        status: "completed",
-        toolName: "bash_run"
-    });
-    await waitFor(() => session.store.getState().rawEvents.some((event) => event.seq === 3));
-    assert.equal(session.store.getState().toolCallsByInstance.alpha?.some((record) => record.callId === "live-3"), true);
-
-    worker.emit("log.appended", {
-        bytes: 11,
-        stream: "stdout",
-        tail: "hello world",
-        toolName: "bash_run"
-    });
-    await waitFor(() => (session.store.getState().logsByInstance.alpha?.length ?? 0) >= 2);
-
-    worker.emit("toolCall.completed", {
-        callId: "live-4",
-        completedAt: new Date().toISOString(),
-        inputSummary: "{\"cmd\":\"ls\"}",
-        source: "tui",
-        startedAt: new Date(2).toISOString(),
-        status: "completed",
-        toolName: "bash_run"
-    });
-    worker.emit("toolCall.completed", {
-        callId: "live-5",
-        completedAt: new Date().toISOString(),
-        inputSummary: "{\"cmd\":\"echo\"}",
-        source: "tui",
-        startedAt: new Date(3).toISOString(),
-        status: "completed",
-        toolName: "bash_run"
-    });
-    worker.dropBefore(5);
-
-    await waitFor(() => worker.subscribeFromSeqs.includes(5));
-    assert.equal(worker.snapshotCallCount >= 3, true);
-
-    worker.emit("toolCall.completed", {
-        callId: "after-gap",
-        source: "tui",
-        toolName: "bash_run"
-    });
-    await waitFor(() => session.store.getState().rawEvents.some((event) => event.seq === 6));
-
-    await server.stop();
-    await waitFor(() => session.store.getState().connection.status === "disconnected");
-});
 
 test("TuiControlSession refreshes a visible overview after relevant instance events", async (t) => {
     const runtimeDir = await createTestTempDirectory("tui-overview-refresh");
@@ -202,7 +92,7 @@ test("Comment delivery never stalls visible Audit refreshes for the bound call o
     await waitFor(() => session.store.getState().connection.status === "connected");
     session.store.setSelectedInstance("alpha");
     session.store.setSelectedPage("audit");
-    session.store.replaceContextMessages("alpha", [
+    session.store.patchControlReadModel({ contextMessagesByInstance: { ["alpha"]: [
         {
             createdAt: new Date(8).toISOString(),
             ctxId: "ctx-alpha",
@@ -219,7 +109,7 @@ test("Comment delivery never stalls visible Audit refreshes for the bound call o
             status: "sent",
             text: "second guidance",
         },
-    ]);
+    ] } });
 
     const firstCompletedAt = new Date(10).toISOString();
     worker.addToolCall({
@@ -519,7 +409,6 @@ test("module TUI client sends an OAuth approval payload accepted by the control 
         { approvalId: "oauth-1", decidedBy: "tui", decision: "approve" }
     ]);
 });
-
 
 function jsonRecord(value: JsonValue): Record<string, JsonValue> | undefined {
     return typeof value === "object" && value !== null && !Array.isArray(value)

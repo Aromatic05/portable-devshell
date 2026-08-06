@@ -1,29 +1,13 @@
-import type {
-    ConfigBatchUpdateRequest,
-    ConfigDraft,
-    ConfigInstancePatch,
-    ConfigMcpPatch,
-    ConfigWebPatch,
-    InstanceCreateDraft,
-    InstanceCreateSchema,
-    InstanceCreateSummary,
-    JsonValue
-} from "@portable-devshell/shared";
-
 import type { TuiClients } from "./client/TuiClientComposition.js";
 import type { TuiControlSession } from "./control/TuiControlSession.js";
-import type { TuiAppStore } from "../state/TuiAppStore.js";
-import type { TuiPageId } from "../state/TuiUiState.js";
 import { TuiRuntimeAttachOperations } from "./operation/TuiRuntimeAttachOperations.js";
 import { TuiRuntimeControlOperations } from "./operation/TuiRuntimeControlOperations.js";
 import { TuiRuntimeExecutionOperations } from "./operation/TuiRuntimeExecutionOperations.js";
 import { TuiRuntimeTmuxOperations } from "./operation/TuiRuntimeTmuxOperations.js";
+import type { TuiAppStore } from "../state/TuiAppStore.js";
 
 export interface TuiRuntimeOperationsOptions {
-    attachHooks?: {
-        resume(): void;
-        suspend(): void;
-    };
+    attachHooks?: { resume(): void; suspend(): void };
     clients: TuiClients;
     operationTimeoutMs?: number;
     reconnectDelayMs?: number;
@@ -32,123 +16,67 @@ export interface TuiRuntimeOperationsOptions {
 }
 
 export class TuiRuntimeOperations {
-    readonly #attach: TuiRuntimeAttachOperations;
-    readonly #control: TuiRuntimeControlOperations;
-    readonly #execution: TuiRuntimeExecutionOperations;
-    readonly #tmux: TuiRuntimeTmuxOperations;
+    readonly attachShell: TuiRuntimeAttachOperations["attachShell"];
+    readonly callTool: TuiRuntimeExecutionOperations["callTool"];
+    readonly cancelArtifactTransfer: TuiRuntimeControlOperations["cancelArtifactTransfer"];
+    readonly createInstance: TuiRuntimeControlOperations["createInstance"];
+    readonly decideApproval: TuiRuntimeExecutionOperations["decideApproval"];
+    readonly decideOAuthApproval: TuiRuntimeControlOperations["decideOAuthApproval"];
+    readonly deleteInstance: TuiRuntimeControlOperations["deleteInstance"];
+    readonly getInstanceCreateSchema: TuiRuntimeControlOperations["getInstanceCreateSchema"];
+    readonly reloadLogs: TuiRuntimeControlOperations["reloadLogs"];
+    readonly reloadPage: TuiRuntimeControlOperations["reloadPage"];
+    readonly restartControl: TuiRuntimeControlOperations["restartControl"];
+    readonly revokeArtifactShare: TuiRuntimeControlOperations["revokeArtifactShare"];
+    readonly runInstanceAction: TuiRuntimeExecutionOperations["runInstanceAction"];
+    readonly setInstanceEnabled: TuiRuntimeControlOperations["setInstanceEnabled"];
+    readonly tmuxOperations: TuiRuntimeTmuxOperations;
+    readonly updateConfig: TuiRuntimeControlOperations["updateConfig"];
+    readonly updateInstanceConfig: TuiRuntimeControlOperations["updateInstanceConfig"];
+    readonly updateMcpEndpoint: TuiRuntimeControlOperations["updateMcpEndpoint"];
+    readonly updateWeb: TuiRuntimeControlOperations["updateWeb"];
+    readonly validateConfigDraft: TuiRuntimeControlOperations["validateConfigDraft"];
+    readonly validateInstanceCreateDraft: TuiRuntimeControlOperations["validateInstanceCreateDraft"];
+    readonly queueContextMessage: TuiRuntimeControlOperations["queueContextMessage"];
 
     constructor(options: TuiRuntimeOperationsOptions) {
-        this.#attach = new TuiRuntimeAttachOperations(options);
-        this.#control = new TuiRuntimeControlOperations({
+        const timeout = options.operationTimeoutMs ?? 30_000;
+        const attach = new TuiRuntimeAttachOperations(options);
+        const control = new TuiRuntimeControlOperations({
             clients: options.clients,
-            operationTimeoutMs: options.operationTimeoutMs ?? 30_000,
+            operationTimeoutMs: timeout,
             reconnectDelayMs: options.reconnectDelayMs ?? 100,
             session: options.session,
-            store: options.store
+            store: options.store,
         });
-        this.#execution = new TuiRuntimeExecutionOperations({
+        const execution = new TuiRuntimeExecutionOperations({
             ...options,
-            operationTimeoutMs: options.operationTimeoutMs ?? 30_000
+            operationTimeoutMs: timeout,
         });
-        this.#tmux = new TuiRuntimeTmuxOperations({
+        this.tmuxOperations = new TuiRuntimeTmuxOperations({
             clients: options.clients,
-            operationTimeoutMs: options.operationTimeoutMs ?? 30_000
+            operationTimeoutMs: timeout,
         });
+        this.attachShell = attach.attachShell.bind(attach);
+        this.callTool = execution.callTool.bind(execution);
+        this.decideApproval = execution.decideApproval.bind(execution);
+        this.runInstanceAction = execution.runInstanceAction.bind(execution);
+        this.cancelArtifactTransfer = control.cancelArtifactTransfer.bind(control);
+        this.createInstance = control.createInstance.bind(control);
+        this.decideOAuthApproval = control.decideOAuthApproval.bind(control);
+        this.deleteInstance = control.deleteInstance.bind(control);
+        this.getInstanceCreateSchema = control.getInstanceCreateSchema.bind(control);
+        this.queueContextMessage = control.queueContextMessage.bind(control);
+        this.reloadLogs = control.reloadLogs.bind(control);
+        this.reloadPage = control.reloadPage.bind(control);
+        this.restartControl = control.restartControl.bind(control);
+        this.revokeArtifactShare = control.revokeArtifactShare.bind(control);
+        this.setInstanceEnabled = control.setInstanceEnabled.bind(control);
+        this.updateConfig = control.updateConfig.bind(control);
+        this.updateInstanceConfig = control.updateInstanceConfig.bind(control);
+        this.updateMcpEndpoint = control.updateMcpEndpoint.bind(control);
+        this.updateWeb = control.updateWeb.bind(control);
+        this.validateConfigDraft = control.validateConfigDraft.bind(control);
+        this.validateInstanceCreateDraft = control.validateInstanceCreateDraft.bind(control);
     }
-
-    async revokeArtifactShare(shareId: string): Promise<void> {
-        await this.#control.revokeArtifactShare(shareId);
-    }
-
-    async cancelArtifactTransfer(transferId: string): Promise<void> {
-        await this.#control.cancelArtifactTransfer(transferId);
-    }
-
-    async queueContextMessage(instance: string, ctxId: string, text: string): Promise<void> {
-        await this.#control.queueContextMessage(instance, ctxId, text);
-    }
-
-    async restartControl(): Promise<void> {
-        await this.#control.restartControl();
-    }
-
-    async createInstance(draft: InstanceCreateDraft): Promise<string | undefined> {
-        return await this.#control.createInstance(draft);
-    }
-
-    async getInstanceCreateSchema(): Promise<InstanceCreateSchema> {
-        return await this.#control.getInstanceCreateSchema();
-    }
-
-    async updateConfig(request: ConfigBatchUpdateRequest): Promise<JsonValue> {
-        return await this.#control.updateConfig(request);
-    }
-
-    async updateInstanceConfig(instanceName: string, patch: ConfigInstancePatch): Promise<void> {
-        await this.#control.updateInstanceConfig(instanceName, patch);
-    }
-
-    async deleteInstance(instance: string): Promise<void> {
-        await this.#control.deleteInstance(instance);
-    }
-
-    async setInstanceEnabled(instance: string, enabled: boolean): Promise<void> {
-        await this.#control.setInstanceEnabled(instance, enabled);
-    }
-
-    async updateMcpEndpoint(mcp: ConfigMcpPatch): Promise<void> {
-        await this.#control.updateMcpEndpoint(mcp);
-    }
-
-    async updateWeb(web: ConfigWebPatch): Promise<void> {
-        await this.#control.updateWeb(web);
-    }
-
-    async decideOAuthApproval(approvalId: string, decision: "approve" | "deny"): Promise<void> {
-        await this.#control.decideOAuthApproval(approvalId, decision);
-    }
-
-    async validateConfigDraft(draft: ConfigDraft): Promise<void> {
-        await this.#control.validateConfigDraft(draft);
-    }
-
-    async validateInstanceCreateDraft(draft: InstanceCreateDraft): Promise<InstanceCreateSummary> {
-        return await this.#control.validateInstanceCreateDraft(draft);
-    }
-
-    async reloadLogs(): Promise<void> {
-        await this.#control.reloadLogs();
-    }
-
-    async reloadPage(page: TuiPageId, instance: string | undefined): Promise<void> {
-        await this.#control.reloadPage(page, instance);
-    }
-
-    async runInstanceAction(
-        action: "refresh" | "restart" | "start" | "stop",
-        instance: string
-    ): Promise<void> {
-        await this.#execution.runInstanceAction(action, instance);
-    }
-
-    async attachShell(instance: string): Promise<void> {
-        await this.#attach.attachShell(instance);
-    }
-
-    async decideApproval(
-        instance: string,
-        approvalId: string,
-        decision: "approve" | "deny"
-    ): Promise<void> {
-        await this.#execution.decideApproval(instance, approvalId, decision);
-    }
-
-    async callTool(instance: string, toolName: string, input: string): Promise<boolean> {
-        return await this.#execution.callTool(instance, toolName, input);
-    }
-
-    get tmuxOperations(): TuiRuntimeTmuxOperations {
-        return this.#tmux;
-    }
-
 }

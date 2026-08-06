@@ -1,3 +1,4 @@
+import { formatBytes, formatDuration } from "@portable-devshell/shared";
 import {
     isArtifactTransferTerminal,
     type ArtifactShareResult,
@@ -74,27 +75,4 @@ export function buildArtifactActivityView(
 
 function shortId(value: string): string {
     return value.length <= 8 ? value : value.slice(0, 8);
-}
-
-function formatDuration(seconds: number): string {
-    if (seconds < 60) {
-        return `${seconds}s`;
-    }
-    if (seconds < 3600) {
-        return `${Math.ceil(seconds / 60)}m`;
-    }
-    return `${Math.ceil(seconds / 3600)}h`;
-}
-
-function formatBytes(bytes: number): string {
-    if (bytes < 1024) {
-        return `${bytes} B`;
-    }
-    if (bytes < 1024 * 1024) {
-        return `${(bytes / 1024).toFixed(1)} KiB`;
-    }
-    if (bytes < 1024 * 1024 * 1024) {
-        return `${(bytes / (1024 * 1024)).toFixed(1)} MiB`;
-    }
-    return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GiB`;
 }

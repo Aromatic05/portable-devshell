@@ -1,7 +1,9 @@
 import {
-    ControlError,
     createError,
+    errorMessage,
+    toControlError,
     errorCodes,
+    withRequestTimeout,
     type ConfigBatchUpdateRequest,
     type ConfigDraft,
     type ConfigInstancePatch,
@@ -15,7 +17,6 @@ import {
 
 import type { TuiClients } from "../client/TuiClientComposition.js";
 import type { TuiControlSession } from "../control/TuiControlSession.js";
-import { withTuiRequestTimeout } from "../control/TuiRequestTimeout.js";
 import type { TuiPageId } from "../../state/TuiUiState.js";
 import type { TuiAppStore } from "../../state/TuiAppStore.js";
 
@@ -36,13 +37,7 @@ export class TuiRuntimeControlOperations {
     }
 
     async queueContextMessage(instance: string, ctxId: string, text: string): Promise<void> {
-        const client = this.options.clients.contextMessage;
-        if (client === undefined) throw new Error("Context message client is unavailable.");
-        const message = await this.#request(
-            client.queue(instance, { ctxId, text }),
-            `contextMessage.queue:${instance}`
-        );
-        this.options.store.replaceContextMessages(instance, [message]);
+        await this.options.session.commands.queueContextMessage(instance, ctxId, text);
         await this.#refreshBestEffort(`audit:${instance}`, async () => {
             await this.options.session.refreshAudit(instance);
         });
@@ -70,7 +65,7 @@ export class TuiRuntimeControlOperations {
             }
             try {
                 const remainingMs = Math.max(1, deadline - Date.now());
-                await withTuiRequestTimeout(
+                await withRequestTimeout(
                     this.options.session.reconnect(),
                     remainingMs,
                     "control.reconnect"
@@ -84,7 +79,7 @@ export class TuiRuntimeControlOperations {
 
         const failure = createError({
             code: errorCodes.controlRestartFailed,
-            message: `Control restart was accepted, but the replacement runtime did not become ready: ${readErrorMessage(lastError)}`,
+            message: `Control restart was accepted, but the replacement runtime did not become ready: ${errorMessage(lastError)}`,
             retryable: true
         });
         this.options.store.setPanelError(errorKey, failure);
@@ -202,10 +197,7 @@ export class TuiRuntimeControlOperations {
     }
 
     async decideOAuthApproval(approvalId: string, decision: "approve" | "deny"): Promise<void> {
-        await this.#request(
-            this.options.clients.mcp.decideApproval(approvalId, decision),
-            `oauthApproval.${decision}:${approvalId}`
-        );
+        await this.options.session.commands.decideOAuthApproval(approvalId, decision);
         await this.#refreshBestEffort(this.#panelKey("connections"), async () => {
             await this.options.session.refreshOAuth();
         });
@@ -267,24 +259,10 @@ export class TuiRuntimeControlOperations {
     }
 
     async #request<T>(request: Promise<T>, label: string): Promise<T> {
-        return await withTuiRequestTimeout(request, this.options.operationTimeoutMs, label);
+        return await withRequestTimeout(request, this.options.operationTimeoutMs, label, "uncertain");
     }
 
     #panelKey(page: TuiPageId): string {
         return `${page}:${this.options.store.getState().ui.selectedInstance ?? "-"}`;
     }
-}
-
-function toControlError(error: unknown): ControlError {
-    if (error instanceof ControlError) return error;
-    const candidate = error as { code?: unknown; message?: unknown; retryable?: unknown } | undefined;
-    return createError({
-        code: typeof candidate?.code === "string" ? candidate.code : errorCodes.targetInvalid,
-        message: typeof candidate?.message === "string" ? candidate.message : String(error),
-        retryable: candidate?.retryable === true
-    });
-}
-
-function readErrorMessage(error: unknown): string {
-    return error instanceof Error ? error.message : String(error);
 }

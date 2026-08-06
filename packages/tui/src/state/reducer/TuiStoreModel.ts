@@ -2,7 +2,6 @@ import type {
     ApprovalRequest,
     ArtifactShareResult,
     ArtifactTransferRecord,
-    ClientEvent,
     InstanceEvent,
     ContextMessageRecord,
     ControlError,
@@ -122,25 +121,28 @@ export interface TuiAppState {
     ui: TuiUiState;
 }
 
+export type TuiControlReadModelProjection = Pick<
+    TuiAppState,
+    | "artifactShares"
+    | "artifactTransfers"
+    | "approvalsByInstance"
+    | "commentCallsByInstance"
+    | "configView"
+    | "contextMessagesByInstance"
+    | "instances"
+    | "lastSeqByInstance"
+    | "logsByInstance"
+    | "mcpStatus"
+    | "oauthApprovals"
+    | "operationalOverview"
+    | "snapshotsByInstance"
+    | "todoByInstance"
+    | "toolCallsByInstance"
+>;
+
 export type TuiAppAction =
-    | { shares: ArtifactShareResult[]; type: "artifact.share.replace" }
-    | { share: ArtifactShareResult; type: "artifact.share.upsert" }
-    | { transfers: ArtifactTransferRecord[]; type: "artifact.transfer.replace" }
-    | { transfer: ArtifactTransferRecord; type: "artifact.transfer.upsert" }
-    | {
-          approvals: ApprovalRequest[];
-          instance: string;
-          type: "approval.replace";
-      }
-    | { approvals: OAuthApprovalRequest[]; type: "oauthApproval.replace" }
-    | { overview?: OperationalOverview; type: "overview.replace" }
-    | { instance: string; records: ToolCallRecord[]; type: "commentCall.replace" }
+    | { projection: TuiControlReadModelProjection; type: "control.readModel.replace" }
     | { command: TuiCommandRecord; type: "command.upsert" }
-    | {
-          instance: string;
-          messages: ContextMessageRecord[];
-          type: "contextMessage.replace";
-      }
     | { error?: ControlError; key: string; type: "panelError.set" }
     | { commandId: string; chunk: string; type: "relay.appendOutput" }
     | {
@@ -150,8 +152,6 @@ export type TuiAppAction =
           workspace?: string;
           type: "relay.setMetadata";
       }
-    | { configView?: Record<string, JsonValue>; type: "control.setConfigView" }
-    | { mcpStatus?: McpRuntimeStatus; type: "control.setMcpStatus" }
     | {
           errorCode?: string;
           errorMessage?: string;
@@ -159,10 +159,6 @@ export type TuiAppAction =
           type: "control.setConnectionState";
       }
     | { focusScope: TuiFocusScope; type: "focus.scope.set" }
-    | { instance: string; seq: number; type: "instance.setLastSeq" }
-    | { instances: TuiInstanceListEntry[]; type: "instance.replaceList" }
-    | { entry: TuiLogEntry; type: "log.append" }
-    | { instance: string; logs: TuiLogEntry[]; type: "log.replace" }
     | { type: "log.clearBuffer" }
     | { mainFocusId?: string; type: "mainFocus.set" }
     | { key: string; lineId?: string; type: "detailLine.select" }
@@ -188,26 +184,13 @@ export type TuiAppAction =
     | { instance: string; seq?: number; type: "logs.setPausedAtSeq" }
     | { required: boolean; type: "control.setRestartRequired" }
     | { type: "ui.bumpRedrawNonce" }
-    | { snapshot: InstanceSnapshot; type: "snapshot.replace" }
-    | { instance: string; todo: TodoReadResult; type: "todo.replace" }
-    | { instance: string; records: ToolCallRecord[]; type: "toolCall.replace" }
     | { maxEvents?: number; rawEvent: TuiRawEventRecord; type: "event.append" };
 
-export function toRawEventRecord(
-    event: ClientEvent | InstanceEvent,
-): TuiRawEventRecord {
-    if ("instanceName" in event) {
-        return {
-            event: event.type,
-            instance: event.instanceName,
-            payload: event as unknown as JsonValue,
-            seq: event.seq,
-        };
-    }
+export function toRawEventRecord(event: InstanceEvent): TuiRawEventRecord {
     return {
-        event: event.name,
-        instance: event.destination,
-        payload: event.payload,
-        seq: event.seq ?? 0,
+        event: event.type,
+        instance: event.instanceName,
+        payload: event as unknown as JsonValue,
+        seq: event.seq,
     };
 }

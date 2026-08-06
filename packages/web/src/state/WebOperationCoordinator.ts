@@ -1,5 +1,5 @@
 import type { WebState } from "./WebState.js";
-import { withWebRequestTimeout } from "./WebRequestTimeout.js";
+import { errorMessage, withRequestTimeout } from "@portable-devshell/shared/browser";
 
 export interface WebOperationAccess {
     getState(): WebState;
@@ -37,10 +37,11 @@ export class WebOperationCoordinator {
         });
         const aborted = abortPromise(controller.signal);
         try {
-            await withWebRequestTimeout(
+            await withRequestTimeout(
                 Promise.race([action(controller.signal), aborted.promise]),
                 this.timeoutMs,
                 operation,
+                "uncertain",
             );
             if (!this.access.isCurrent(generation) || controller.signal.aborted) {
                 return false;
@@ -96,8 +97,4 @@ function abortError(signal: AbortSignal): Error {
     return signal.reason instanceof Error
         ? signal.reason
         : new Error("Web operation was aborted.");
-}
-
-function errorMessage(error: unknown): string {
-    return error instanceof Error ? error.message : String(error);
 }

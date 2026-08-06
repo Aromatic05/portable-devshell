@@ -1,18 +1,6 @@
 import {
-    type ApprovalRequest,
-    type ArtifactShareResult,
-    type ArtifactTransferRecord,
-    type ClientEvent,
-    type ContextMessageRecord,
     type ControlError,
     type InstanceEvent,
-    type InstanceSnapshot,
-    type JsonValue,
-    type McpRuntimeStatus,
-    type OAuthApprovalRequest,
-    type OperationalOverview,
-    type TodoReadResult,
-    type ToolCallRecord,
 } from "@portable-devshell/shared";
 
 import type { TuiEditorState } from "./TuiInteractionState.js";
@@ -33,8 +21,7 @@ import {
     type TuiAppState,
     type TuiCommandRecord,
     type TuiConnectionStatus,
-    type TuiInstanceListEntry,
-    type TuiLogEntry,
+    type TuiControlReadModelProjection,
 } from "./reducer/TuiStoreModel.js";
 
 export interface TuiAppStoreOptions {
@@ -82,35 +69,51 @@ export class TuiAppStore {
         }
     }
 
-    replaceArtifactShares(shares: ArtifactShareResult[]): void {
-        this.dispatch({ shares, type: "artifact.share.replace" });
+    replaceControlReadModel(projection: TuiControlReadModelProjection): void {
+        this.dispatch({ projection, type: "control.readModel.replace" });
     }
 
-    upsertArtifactShare(share: ArtifactShareResult): void {
-        this.dispatch({ share, type: "artifact.share.upsert" });
+    patchControlReadModel(
+        patch: Partial<TuiControlReadModelProjection>,
+    ): void {
+        const state = this.#state;
+        this.replaceControlReadModel({
+            artifactShares: patch.artifactShares ?? state.artifactShares,
+            artifactTransfers: patch.artifactTransfers ?? state.artifactTransfers,
+            approvalsByInstance: mergeRecord(state.approvalsByInstance, patch.approvalsByInstance),
+            commentCallsByInstance: mergeRecord(state.commentCallsByInstance, patch.commentCallsByInstance),
+            configView: patch.configView ?? state.configView,
+            contextMessagesByInstance: mergeRecord(
+                state.contextMessagesByInstance,
+                patch.contextMessagesByInstance,
+            ),
+            instances: patch.instances ?? state.instances,
+            lastSeqByInstance: mergeRecord(state.lastSeqByInstance, patch.lastSeqByInstance),
+            logsByInstance: mergeRecord(state.logsByInstance, patch.logsByInstance),
+            mcpStatus: patch.mcpStatus ?? state.mcpStatus,
+            oauthApprovals: patch.oauthApprovals ?? state.oauthApprovals,
+            operationalOverview: patch.operationalOverview ?? state.operationalOverview,
+            snapshotsByInstance: mergeRecord(
+                state.snapshotsByInstance,
+                patch.snapshotsByInstance,
+            ),
+            todoByInstance: mergeRecord(state.todoByInstance, patch.todoByInstance),
+            toolCallsByInstance: mergeRecord(
+                state.toolCallsByInstance,
+                patch.toolCallsByInstance,
+            ),
+        });
     }
 
-    replaceArtifactTransfers(transfers: ArtifactTransferRecord[]): void {
-        this.dispatch({ transfers, type: "artifact.transfer.replace" });
-    }
-
-    upsertArtifactTransfer(transfer: ArtifactTransferRecord): void {
-        this.dispatch({ transfer, type: "artifact.transfer.upsert" });
+    patchControlSnapshot(snapshot: TuiAppState["snapshotsByInstance"][string]): void {
+        this.patchControlReadModel({
+            lastSeqByInstance: { [snapshot.name]: snapshot.lastSeq },
+            snapshotsByInstance: { [snapshot.name]: snapshot },
+        });
     }
 
     setControlRestartRequired(required: boolean): void {
         this.dispatch({ required, type: "control.setRestartRequired" });
-    }
-
-    setMcpStatus(mcpStatus?: McpRuntimeStatus): void {
-        this.dispatch({ mcpStatus, type: "control.setMcpStatus" });
-    }
-
-    setConfigView(configView?: Record<string, JsonValue>): void {
-        this.dispatch({
-            configView,
-            type: "control.setConfigView",
-        });
     }
 
     setConnectionState(
@@ -284,81 +287,6 @@ export class TuiAppStore {
         });
     }
 
-    replaceInstances(instances: TuiInstanceListEntry[]): void {
-        this.dispatch({
-            instances,
-            type: "instance.replaceList",
-        });
-    }
-
-    replaceContextMessages(
-        instance: string,
-        messages: ContextMessageRecord[],
-    ): void {
-        this.dispatch({ instance, messages, type: "contextMessage.replace" });
-    }
-
-    replaceTodo(instance: string, todo: TodoReadResult): void {
-        this.dispatch({ instance, todo, type: "todo.replace" });
-    }
-
-    replaceSnapshot(snapshot: InstanceSnapshot): void {
-        this.dispatch({
-            snapshot,
-            type: "snapshot.replace",
-        });
-    }
-
-    replaceLogs(instance: string, logs: TuiLogEntry[]): void {
-        this.dispatch({
-            instance,
-            logs,
-            type: "log.replace",
-        });
-    }
-
-    appendLog(entry: TuiLogEntry): void {
-        this.dispatch({
-            entry,
-            type: "log.append",
-        });
-    }
-
-    replaceToolCalls(instance: string, records: ToolCallRecord[]): void {
-        this.dispatch({
-            instance,
-            records,
-            type: "toolCall.replace",
-        });
-    }
-
-    replaceCommentCalls(instance: string, records: ToolCallRecord[]): void {
-        this.dispatch({
-            instance,
-            records,
-            type: "commentCall.replace",
-        });
-    }
-
-    replaceApprovals(instance: string, approvals: ApprovalRequest[]): void {
-        this.dispatch({
-            approvals,
-            instance,
-            type: "approval.replace",
-        });
-    }
-
-    replaceOAuthApprovals(approvals: OAuthApprovalRequest[]): void {
-        this.dispatch({
-            approvals,
-            type: "oauthApproval.replace",
-        });
-    }
-
-    replaceOperationalOverview(overview?: OperationalOverview): void {
-        this.dispatch({ overview, type: "overview.replace" });
-    }
-
     upsertCommand(command: TuiCommandRecord): void {
         this.dispatch({
             command,
@@ -385,21 +313,6 @@ export class TuiAppStore {
         });
     }
 
-    setInstanceLastSeq(instance: string, seq: number): void {
-        this.dispatch({
-            instance,
-            seq,
-            type: "instance.setLastSeq",
-        });
-    }
-
-    appendRawEvent(event: ClientEvent): void {
-        this.dispatch({
-            rawEvent: toRawEventRecord(event),
-            type: "event.append",
-        });
-    }
-
     applyInstanceEvent(event: InstanceEvent): void {
         const lastSeq = this.#state.lastSeqByInstance[event.instanceName] ?? 0;
         if (event.seq <= lastSeq) return;
@@ -409,16 +322,11 @@ export class TuiAppStore {
         });
     }
 
-    applyEvent(event: ClientEvent): void {
-        if (event.destination === "@control" || event.seq === undefined) {
-            return;
-        }
-        const lastSeq = this.#state.lastSeqByInstance[event.destination] ?? 0;
+}
 
-        if (event.seq <= lastSeq) {
-            return;
-        }
-
-        this.appendRawEvent(event);
-    }
+function mergeRecord<T>(
+    current: Record<string, T>,
+    patch: Record<string, T> | undefined,
+): Record<string, T> {
+    return patch === undefined ? current : { ...current, ...patch };
 }

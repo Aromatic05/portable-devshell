@@ -1,7 +1,8 @@
 import {
     ControlError,
     createError,
-    errorCodes,
+    toControlError,
+    withRequestTimeout,
     type JsonValue
 } from "@portable-devshell/shared";
 
@@ -9,7 +10,6 @@ import type { TuiClients } from "../client/TuiClientComposition.js";
 import type { TuiControlSession } from "../control/TuiControlSession.js";
 import type { TuiAppStore } from "../../state/TuiAppStore.js";
 import type { TuiCommandRecord } from "../../state/reducer/TuiStoreModel.js";
-import { withTuiRequestTimeout } from "../control/TuiRequestTimeout.js";
 
 export class TuiRuntimeExecutionOperations {
     #commandCounter = 0;
@@ -25,8 +25,7 @@ export class TuiRuntimeExecutionOperations {
         switch (action) {
             case "refresh":
                 await this.#runCommand(`Refresh Status: ${instance}`, instance, async () => {
-                    const result = await this.#request(this.options.clients.runtime.refresh(instance), `runtime.refresh:${instance}`);
-                    this.options.session.applyAuthoritativeSnapshot(result.snapshot);
+                    await this.options.session.commands.refreshInstance(instance);
                     await this.#refreshInstanceBestEffort(instance);
                 });
                 return;
@@ -35,14 +34,13 @@ export class TuiRuntimeExecutionOperations {
                 return;
             case "restart":
                 await this.#runCommand(`Restart Worker: ${instance}`, instance, async (commandId) => {
-                    await this.#request(this.options.clients.runtime.stop(instance), `runtime.stop:${instance}`);
+                    await this.options.session.commands.stopInstance(instance);
                     await this.#startInstanceWithinCommand(instance, commandId);
                 });
                 return;
             case "stop":
                 await this.#runCommand(`Stop Worker: ${instance}`, instance, async () => {
-                    const snapshot = await this.#request(this.options.clients.runtime.stop(instance), `runtime.stop:${instance}`);
-                    this.options.session.applyAuthoritativeSnapshot(snapshot);
+                    await this.options.session.commands.stopInstance(instance);
                     await this.#refreshInstanceBestEffort(instance);
                 });
         }
@@ -53,11 +51,7 @@ export class TuiRuntimeExecutionOperations {
             `${decision === "approve" ? "Approve" : "Deny"} Approval: ${approvalId}`,
             instance,
             async () => {
-                await this.#request(this.options.clients.tool.getApproval(instance, approvalId), `approval.get:${approvalId}`);
-                await this.#request(
-                    this.options.clients.tool.decideApproval(instance, approvalId, decision),
-                    `approval.${decision}:${approvalId}`
-                );
+                await this.options.session.commands.decideToolApproval(instance, approvalId, decision);
                 await this.#refreshInstanceBestEffort(instance);
             }
         );
@@ -95,14 +89,13 @@ export class TuiRuntimeExecutionOperations {
             provider: entry?.provider,
             workspace: entry?.defaultWorkspace
         });
-        const snapshot = await this.#request(this.options.clients.runtime.start(instance, {
+        await this.options.session.commands.startInstance(instance, {
             onOutput: (chunk) =>
                 this.options.store.appendRelayOutput(commandId, chunk),
             onRequestId: (requestId) =>
                 this.options.store.setRelayMetadata(commandId, { requestId }),
             workspacePath: entry?.defaultWorkspace,
-        }), `runtime.start:${instance}`);
-        this.options.session.applyAuthoritativeSnapshot(snapshot);
+        });
         await this.#refreshInstanceBestEffort(instance);
     }
 
@@ -117,10 +110,11 @@ export class TuiRuntimeExecutionOperations {
     }
 
     async #request<T>(request: Promise<T>, label: string): Promise<T> {
-        return await withTuiRequestTimeout(
+        return await withRequestTimeout(
             request,
             this.options.operationTimeoutMs,
-            label
+            label,
+            "uncertain",
         );
     }
 
@@ -161,14 +155,4 @@ export class TuiRuntimeExecutionOperations {
             status
         });
     }
-}
-
-function toControlError(error: unknown): ControlError {
-    if (error instanceof ControlError) return error;
-    const candidate = error as { code?: unknown; message?: unknown; retryable?: unknown } | undefined;
-    return createError({
-        code: typeof candidate?.code === "string" ? candidate.code : errorCodes.targetInvalid,
-        message: typeof candidate?.message === "string" ? candidate.message : String(error),
-        retryable: candidate?.retryable === true
-    });
 }

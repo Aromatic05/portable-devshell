@@ -1,5 +1,6 @@
-import type {
-    OperationalOverview,
+import {
+    toolCallOutcome,
+    type OperationalOverview,
     OperationalOverviewActivity,
     OperationalOverviewInstance,
 } from "@portable-devshell/shared";
@@ -240,11 +241,10 @@ function activityDuration(activity: OperationalOverviewActivity): string {
 function activityTone(
     status: OperationalOverviewActivity["status"],
 ): TuiOverviewTone {
-    if (status === "failed" || status === "denied" || status === "queueTimeout")
-        return "danger";
-    if (status === "running" || status === "queued") return "accent";
-    if (status === "completed") return "success";
-    return "muted";
+    const outcome = toolCallOutcome(status);
+    if (outcome === "failure") return "danger";
+    if (outcome === "pending") return "accent";
+    return "success";
 }
 
 function systemMeters(overview: OperationalOverview): TuiOverviewMeterModel[] {

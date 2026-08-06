@@ -1,4 +1,4 @@
-import type { ToolCallRecord } from "@portable-devshell/shared/browser";
+import { toolCallOutcome, type ToolCallRecord } from "@portable-devshell/shared/browser";
 
 import { formatToolSearchValue } from "../formatters/toolCalls.js";
 
@@ -33,27 +33,10 @@ export const emptyToolCallFilters: ToolCallFilters = {
     tool: "all",
 };
 
-const failureStatuses = new Set([
-    "cancelled",
-    "denied",
-    "expired",
-    "failed",
-    "queueTimeout",
-]);
-
-const pendingStatuses = new Set([
-    "pendingApproval",
-    "queued",
-    "running",
-]);
-
 export function toolCallResult(
     call: ToolCallRecord,
 ): Exclude<ToolCallResult, "all"> {
-    if (call.status === "completed") return "success";
-    if (pendingStatuses.has(call.status)) return "pending";
-    if (failureStatuses.has(call.status)) return "failure";
-    return "failure";
+    return toolCallOutcome(call.status);
 }
 
 export function selectToolCalls(

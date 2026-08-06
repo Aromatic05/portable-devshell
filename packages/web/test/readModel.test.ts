@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { asInstanceName, type InstanceSnapshot } from "@portable-devshell/shared/browser";
+import { expect, it } from "vitest";
+import { asInstanceName, createInitialControlReadModelState, type InstanceSnapshot } from "@portable-devshell/shared/browser";
 
 import { openTodos, todoSummaries } from "../src/selectors/readModel.js";
 import type { WebState } from "../src/state/WebStore.js";
@@ -15,11 +15,27 @@ const snapshot: InstanceSnapshot = {
 
 it("aggregates read-only todos without assigning operational health", () => {
     const state: WebState = {
-        commentCalls: {},
-        contextMessages: {},
-        toolCalls: {},
-        approvals: { "failed-instance": [] }, connection: "online", instances: [{ mcpEnabled: true, name: "failed-instance", snapshot }], logs: {}, oauthApprovals: [], operations: {}, partialFailures: {}, todos: {
-            "failed-instance": { items: [], revision: 7, summary: { completed: 1, total: 3 }, tasks: [{ completed: 1, revision: 7, status: "in_progress", taskId: "deploy", title: "Deploy service", total: 3, updatedAt: "2026-07-31T00:00:00Z" }] },
+        connection: "online",
+        operations: {},
+        readModel: {
+            ...createInitialControlReadModelState(),
+            instances: [{ mcpEnabled: true, name: "failed-instance", snapshot }],
+            instanceState: {
+                "failed-instance": {
+                    approvals: [],
+                    commentCalls: [],
+                    contextMessages: [],
+                    logs: [],
+                    sequence: 4,
+                    todo: {
+                        items: [],
+                        revision: 7,
+                        summary: { completed: 1, total: 3 },
+                        tasks: [{ completed: 1, revision: 7, status: "in_progress", taskId: "deploy", title: "Deploy service", total: 3, updatedAt: "2026-07-31T00:00:00Z" }],
+                    },
+                    toolCalls: [],
+                },
+            },
         },
     };
 

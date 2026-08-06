@@ -121,7 +121,7 @@ const overview: OperationalOverview = {
 
 test("overview projects system meters and an instance table without expandable boxes", () => {
     const store = new TuiAppStore();
-    store.replaceOperationalOverview(overview);
+    store.patchControlReadModel({ operationalOverview: overview });
     store.setSelectedPage("overview");
     store.setMainFocusId("overview-instance:alpha");
 
@@ -174,10 +174,10 @@ test("overview projects system meters and an instance table without expandable b
 
 test("overview Enter opens the selected instance row", () => {
     const store = new TuiAppStore();
-    store.replaceInstances([
+    store.patchControlReadModel({ instances: [
         { enabled: true, mcpEnabled: true, name: "alpha", provider: "local" },
-    ]);
-    store.replaceOperationalOverview(overview);
+    ] });
+    store.patchControlReadModel({ operationalOverview: overview });
     store.setSelectedPage("overview");
     store.setFocusScope("mainBoxes");
     store.setMainFocusId("overview-instance:alpha");
@@ -219,7 +219,7 @@ test("overview uses zero without changing the established one-to-eight page shor
 
 test("overview exposes mouse hit regions for visible instance rows", () => {
     const store = new TuiAppStore();
-    store.replaceOperationalOverview(overview);
+    store.patchControlReadModel({ operationalOverview: overview });
     store.setSelectedPage("overview");
 
     const region = buildTuiHitRegions(store.getState(), {

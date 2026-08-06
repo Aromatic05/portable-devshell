@@ -1,8 +1,9 @@
-import type {
-    ApprovalRequest,
-    OperationalOverview,
-    OperationalOverviewActivity,
-    OperationalOverviewAlert,
+import {
+    projectTodoTaskSummaries,
+    type ApprovalRequest,
+    type OperationalOverview,
+    type OperationalOverviewActivity,
+    type OperationalOverviewAlert,
 } from "@portable-devshell/shared/browser";
 
 import type { WebState } from "../state/WebStore.js";
@@ -20,28 +21,19 @@ export interface TodoSummary {
 export function pendingApprovals(state: WebState): number {
     return (
         toolApprovals(state).length +
-        state.oauthApprovals.filter((approval) => approval.status === "pending").length
+        state.readModel.oauthApprovals.filter((approval) => approval.status === "pending").length
     );
 }
 
 export function toolApprovals(state: WebState): ApprovalRequest[] {
-    return Object.values(state.approvals).flatMap((approvals) =>
+    return Object.values(state.readModel.instanceState).map((instance) => instance.approvals).flatMap((approvals) =>
         approvals.filter((approval) => approval.status === "pending"),
     );
 }
 
 export function todoSummaries(state: WebState): TodoSummary[] {
-    return Object.entries(state.todos).flatMap(([instance, todo]) => {
-        const tasks = todo.tasks ?? (todo.title === undefined ? [] : [{
-            completed: todo.summary.completed,
-            revision: todo.revision,
-            status: todo.summary.currentItemId === undefined ? "none" : "in_progress",
-            taskId: todo.taskId ?? todo.title,
-            title: todo.title,
-            total: todo.summary.total,
-            updatedAt: "",
-        }]);
-        return tasks.map((task) => ({
+    return Object.entries(state.readModel.instanceState).flatMap(([instance, value]) => value.todo === undefined ? [] : [[instance, value.todo] as const]).flatMap(([instance, todo]) =>
+        projectTodoTaskSummaries(todo).map((task) => ({
             completed: task.completed,
             instance,
             revision: task.revision,
@@ -49,8 +41,8 @@ export function todoSummaries(state: WebState): TodoSummary[] {
             taskId: task.taskId,
             title: task.title,
             total: task.total,
-        }));
-    });
+        })),
+    );
 }
 
 export function openTodos(state: WebState): number {

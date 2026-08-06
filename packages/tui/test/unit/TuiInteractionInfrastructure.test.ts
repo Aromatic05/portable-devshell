@@ -113,7 +113,7 @@ test("page shortcuts include Todo, Help, and Terminal and reload works on every 
 });
 test("Overview instance rows open the matching instance page", async () => {
     const harness = createHarness();
-    harness.store.replaceOperationalOverview({
+    harness.store.patchControlReadModel({ operationalOverview: {
         activity: [
             {
                 callId: "call-1",
@@ -165,7 +165,7 @@ test("Overview instance rows open the matching instance page", async () => {
                 total: 1,
             },
         ],
-    });
+    } });
 
     await harness.dispatch({ page: "overview", type: "page.select" });
     harness.store.setFocusScope("mainBoxes");
@@ -377,7 +377,7 @@ test("Comment conversation shows exact history and keeps the route open after se
                 status: "pending",
                 text,
             };
-            harness.store.replaceContextMessages(instance, [pending]);
+            harness.store.patchControlReadModel({ contextMessagesByInstance: { [instance]: [pending] } });
         },
     });
     enableContextMessageMcp(harness);
@@ -399,10 +399,10 @@ test("Comment conversation shows exact history and keeps the route open after se
         status: "completed",
         toolName: "bash_run",
     };
-    harness.store.replaceToolCalls("alpha", []);
-    harness.store.replaceCommentCalls("alpha", [commentCall]);
+    harness.store.patchControlReadModel({ toolCallsByInstance: { ["alpha"]: [] } });
+    harness.store.patchControlReadModel({ commentCallsByInstance: { ["alpha"]: [commentCall] } });
     assert.equal(harness.store.getState().toolCallsByInstance.alpha?.length, 0);
-    harness.store.replaceContextMessages("alpha", [
+    harness.store.patchControlReadModel({ contextMessagesByInstance: { ["alpha"]: [
         {
             createdAt: "2026-08-02T00:02:00.000Z",
             ctxId: "ctx-alpha",
@@ -421,7 +421,7 @@ test("Comment conversation shows exact history and keeps the route open after se
             status: "pending",
             text: "other context comment",
         },
-    ]);
+    ] } });
     enterAuditContext(harness, "ctx-alpha");
     await harness.press("m");
 
@@ -1159,7 +1159,7 @@ test("config keyboard focus reaches Save & Restart from an edited Logs box", asy
         },
     });
     const view = harness.store.getState().configView!;
-    harness.store.setConfigView({
+    harness.store.patchControlReadModel({ configView: {
         ...view,
         restartControlRequired: false,
         instances: (view.instances as JsonValue[]).map((entry) => {
@@ -1179,7 +1179,7 @@ test("config keyboard focus reaches Save & Restart from an edited Logs box", asy
                   }
                 : entry;
         }),
-    });
+    } });
     harness.store.setSelectedPage("config");
     const logs = expandBox(harness, "logs");
     const retention = logs.expandedLines.find(
@@ -1426,7 +1426,7 @@ test("audit truncates input and output previews while opening complete structure
         status: "completed",
         toolName: "file_edit",
     };
-    harness.store.replaceToolCalls("alpha", [record]);
+    harness.store.patchControlReadModel({ toolCallsByInstance: { ["alpha"]: [record] } });
     enterAuditContext(harness, "ctx-live-patch");
     const audit = expandBox(harness, "audit-call:live-patch");
     const inputLine = audit.expandedLines.find(
@@ -1485,7 +1485,7 @@ test("artifact_viewImage audit output loads an image into the detail panel", asy
             };
         },
     });
-    harness.store.replaceToolCalls("alpha", [
+    harness.store.patchControlReadModel({ toolCallsByInstance: { ["alpha"]: [
         {
             callId: "image-call",
             completedAt: "2026-07-18T00:00:01.000Z",
@@ -1508,7 +1508,7 @@ test("artifact_viewImage audit output loads an image into the detail panel", asy
             status: "completed",
             toolName: "artifact_viewImage",
         },
-    ]);
+    ] } });
     enterAuditContext(harness, "ctx-image");
     const audit = expandBox(harness, "audit-call:image-call");
     harness.store.setFocusScope("boxDetail");
@@ -1541,7 +1541,7 @@ test("artifact_viewImage audit output loads an image into the detail panel", asy
 });
 test("audit renders legacy records without an input summary", () => {
     const harness = createHarness();
-    harness.store.replaceToolCalls("alpha", [
+    harness.store.patchControlReadModel({ toolCallsByInstance: { ["alpha"]: [
         {
             callId: "legacy-call",
             instance: "alpha",
@@ -1550,8 +1550,8 @@ test("audit renders legacy records without an input summary", () => {
             status: "completed",
             toolName: "bash_run",
         } as never,
-    ]);
-    harness.store.replaceLogs("alpha", [
+    ] } });
+    harness.store.patchControlReadModel({ logsByInstance: { ["alpha"]: [
         {
             at: "2026-07-14T00:00:01.000Z",
             bytes: 14,
@@ -1567,7 +1567,7 @@ test("audit renders legacy records without an input summary", () => {
             tail: "legacy output\n",
             toolName: "bash_run",
         },
-    ]);
+    ] } });
     enterAuditUnscoped(harness);
     const audit = expandBox(harness, "audit-call:legacy-call");
     assert.equal(
@@ -1672,7 +1672,7 @@ test("expanded instance entries expose only compact lifecycle controls", async (
 
 test("Prompt 3 detail line selection clamps to a valid line after data replacement", () => {
     const harness = createHarness();
-    harness.store.replaceLogs("alpha", [
+    harness.store.patchControlReadModel({ logsByInstance: { ["alpha"]: [
         {
             at: "2026-07-31T00:00:01.000Z",
             ctxId: "ctx-alpha",
@@ -1691,12 +1691,12 @@ test("Prompt 3 detail line selection clamps to a valid line after data replaceme
             seq: 2,
             stream: "stdout",
         },
-    ]);
+    ] } });
     enterLogContext(harness, "ctx-alpha");
     let logs = expandBox(harness, "logs");
     harness.store.setMainFocusId(logs.id);
     harness.store.setSelectedDetailLine(logs.expandedKey, "logs:log:2");
-    harness.store.replaceLogs("alpha", [
+    harness.store.patchControlReadModel({ logsByInstance: { ["alpha"]: [
         {
             at: "2026-07-31T00:00:01.000Z",
             ctxId: "ctx-alpha",
@@ -1706,7 +1706,7 @@ test("Prompt 3 detail line selection clamps to a valid line after data replaceme
             seq: 1,
             stream: "stdout",
         },
-    ]);
+    ] } });
     harness.focusManager.syncPanel(
         harness.store.getState().ui.selectedPage,
         harness.store.getState().interaction.focusScope,
@@ -1746,7 +1746,7 @@ test("connector editor presents unavailable endpoints and control runtime limits
         ["endpoint=unavailable", "reason=missing publicBaseUrl"],
     );
 
-    harness.store.setConfigView({
+    harness.store.patchControlReadModel({ configView: {
         instances: [
             {
                 mcp: { auth: "none", enabled: true, path: "/alpha/custom-mcp" },
@@ -1760,7 +1760,7 @@ test("connector editor presents unavailable endpoints and control runtime limits
             listenPort: 3210,
             publicBaseUrl: "https://example.test/tunnel",
         },
-    });
+    } });
     assert.deepEqual(
         selectMainScreenModel(harness.store.getState())
             .boxes.find((box) => box.id === "endpoint-preview")
@@ -1826,7 +1826,7 @@ test("connector page actions send all affected scopes in one configuration trans
 });
 test("long detail lines open a wrapped full-text viewer", async () => {
     const harness = createHarness();
-    harness.store.replaceOAuthApprovals([
+    harness.store.patchControlReadModel({ oauthApprovals: [
         {
             approvalId: "oauth-long",
             clientId: "client-long",
@@ -1841,7 +1841,7 @@ test("long detail lines open a wrapped full-text viewer", async () => {
             requestedScopes: ["mcp"],
             status: "approved",
         },
-    ]);
+    ] });
     enterConnectionsRoute(harness, "oauth");
     const approval = expandBox(harness, "oauth-approval-oauth-long");
     const redirect = approval.expandedLines.find((line) =>
@@ -1865,7 +1865,7 @@ test("long detail lines open a wrapped full-text viewer", async () => {
 });
 test("OAuth panel approves pending registration requests", async () => {
     const harness = createHarness();
-    harness.store.replaceOAuthApprovals([
+    harness.store.patchControlReadModel({ oauthApprovals: [
         {
             approvalId: "oauth-1",
             clientId: "chatgpt-client",
@@ -1878,7 +1878,7 @@ test("OAuth panel approves pending registration requests", async () => {
             requestedScopes: [],
             status: "pending",
         },
-    ]);
+    ] });
     enterConnectionsRoute(harness, "oauth");
     const approval = expandBox(harness, "oauth-approval-oauth-1");
     assert.equal(approval.title, "OAuth registration approval");
@@ -1904,7 +1904,7 @@ test("OAuth panel approves pending registration requests", async () => {
 });
 test("OAuth detail keeps static rows selectable after expanding a completed approval", async () => {
     const harness = createHarness();
-    harness.store.replaceOAuthApprovals([
+    harness.store.patchControlReadModel({ oauthApprovals: [
         {
             approvalId: "oauth-completed",
             clientId: "completed-client",
@@ -1917,7 +1917,7 @@ test("OAuth detail keeps static rows selectable after expanding a completed appr
             requestedScopes: ["mcp"],
             status: "approved",
         },
-    ]);
+    ] });
     enterConnectionsRoute(harness, "oauth");
     harness.store.setFocusScope("mainBoxes");
     harness.store.setMainFocusId("oauth-approval-oauth-completed");
@@ -1944,7 +1944,7 @@ test("OAuth detail keeps static rows selectable after expanding a completed appr
 });
 test("logs render timestamps and correlation metadata", () => {
     const harness = createHarness();
-    harness.store.replaceLogs("alpha", [
+    harness.store.patchControlReadModel({ logsByInstance: { ["alpha"]: [
         {
             at: "2026-07-11T12:34:56.000Z",
             callId: "call-1",
@@ -1958,7 +1958,7 @@ test("logs render timestamps and correlation metadata", () => {
             stream: "stdout",
             toolName: "bash_run",
         },
-    ]);
+    ] } });
     enterLogContext(harness, "session-1");
     const logs = expandBox(harness, "logs");
     assert.equal(
@@ -2021,7 +2021,7 @@ test("Main viewport scrolling uses one page-instance offset instead of per-box o
 });
 test("Moving focus down advances the shared main viewport to keep the focused box visible", async () => {
     const harness = createHarness();
-    harness.store.replaceInstances([
+    harness.store.patchControlReadModel({ instances: [
         ...harness.store.getState().instances,
         ...Array.from({ length: 8 }, (_, index) => ({
             enabled: true,
@@ -2029,7 +2029,7 @@ test("Moving focus down advances the shared main viewport to keep the focused bo
             name: `extra-${index}`,
             provider: "local",
         })),
-    ]);
+    ] });
     harness.store.setSelectedPage("instances");
     harness.store.setFocusScope("mainBoxes");
     harness.store.setMainFocusId("instance:alpha");
@@ -2085,13 +2085,11 @@ test("enabled toggle disables through confirmation and enables directly", async 
         { enabled: false, instance: "alpha" },
     ]);
 
-    harness.store.replaceInstances(
-        harness.store
+    harness.store.patchControlReadModel({ instances: harness.store
             .getState()
             .instances.map((entry) =>
                 entry.name === "alpha" ? { ...entry, enabled: false } : entry,
-            ),
-    );
+            ) });
     instance = expandBox(harness, "instance:alpha");
     harness.store.setMainFocusId(instance.id);
     harness.store.setFocusScope("boxDetail");
@@ -2196,15 +2194,13 @@ test("approval detail Back restores the audit list focus and scroll position", a
 });
 test("Attach Shell is invoked directly from the expanded instance box", async () => {
     const harness = createHarness();
-    harness.store.replaceInstances(
-        harness.store
+    harness.store.patchControlReadModel({ instances: harness.store
             .getState()
             .instances.map((instance) =>
                 instance.name === "alpha"
                     ? { ...instance, provider: "ssh" }
                     : instance,
-            ),
-    );
+            ) });
     const instance = expandBox(harness, "instance:alpha");
     harness.store.setMainFocusId(instance.id);
     harness.store.setFocusScope("boxDetail");
@@ -2257,7 +2253,7 @@ async function openPrimaryRoute(
 function enableContextMessageMcp(harness: ReturnType<typeof createHarness>): void {
     const view = harness.store.getState().configView!;
     const instances = Array.isArray(view.instances) ? view.instances : [];
-    harness.store.setConfigView({
+    harness.store.patchControlReadModel({ configView: {
         ...view,
         instances: instances.map((value): JsonValue => {
             if (typeof value !== "object" || value === null || Array.isArray(value)) {
@@ -2283,7 +2279,7 @@ function enableContextMessageMcp(harness: ReturnType<typeof createHarness>): voi
                 },
             };
         }),
-    });
+    } });
 }
 
 function conversationScreenText(harness: ReturnType<typeof createHarness>): string {
@@ -2676,7 +2672,7 @@ function createHarness(
 }
 
 function seedPrompt3State(store: TuiAppStore) {
-    store.replaceInstances([
+    store.patchControlReadModel({ instances: [
         {
             defaultWorkspace: "/workspace/alpha",
             enabled: true,
@@ -2693,8 +2689,8 @@ function seedPrompt3State(store: TuiAppStore) {
             name: "beta",
             provider: "ssh",
         },
-    ]);
-    store.setConfigView({
+    ] });
+    store.patchControlReadModel({ configView: {
         instances: [
             {
                 enabled: true,
@@ -2716,8 +2712,8 @@ function seedPrompt3State(store: TuiAppStore) {
             listenHost: "127.0.0.1",
             listenPort: 3210,
         },
-    });
-    store.replaceSnapshot({
+    } });
+    store.patchControlSnapshot({
         connectionState: "connected",
         daemonState: "running",
         lastSeq: 20,
@@ -2725,7 +2721,7 @@ function seedPrompt3State(store: TuiAppStore) {
         ready: true,
         status: "ready",
     } as never);
-    store.replaceSnapshot({
+    store.patchControlSnapshot({
         connectionState: "connected",
         daemonState: "stopped",
         lastSeq: 12,
@@ -2733,7 +2729,7 @@ function seedPrompt3State(store: TuiAppStore) {
         ready: false,
         status: "stopped",
     } as never);
-    store.replaceTodo("alpha", {
+    store.patchControlReadModel({ todoByInstance: { ["alpha"]: {
         items: [
             { content: "Inspect", id: "inspect", status: "completed" },
             {
@@ -2748,8 +2744,8 @@ function seedPrompt3State(store: TuiAppStore) {
         summary: { completed: 1, currentItemId: "implement", total: 3 },
         taskId: "task-1",
         title: "Todo support",
-    });
-    store.replaceToolCalls("alpha", [
+    } } });
+    store.patchControlReadModel({ toolCallsByInstance: { ["alpha"]: [
         {
             callId: "call-1",
             ctxId: "ctx-alpha",
@@ -2762,8 +2758,8 @@ function seedPrompt3State(store: TuiAppStore) {
             termination: "exited",
             toolName: "bash_run",
         },
-    ]);
-    store.replaceApprovals("alpha", [
+    ] } });
+    store.patchControlReadModel({ approvalsByInstance: { ["alpha"]: [
         {
             approvalId: "approval-1",
             callId: "call-1",
@@ -2778,8 +2774,8 @@ function seedPrompt3State(store: TuiAppStore) {
             status: "pending",
             toolName: "bash_run",
         },
-    ]);
-    store.replaceLogs("alpha", [
+    ] } });
+    store.patchControlReadModel({ logsByInstance: { ["alpha"]: [
         ...Array.from({ length: 20 }, (_, index) => ({
             ctxId: "ctx-alpha",
             instance: "alpha",
@@ -2788,8 +2784,8 @@ function seedPrompt3State(store: TuiAppStore) {
             seq: index + 1,
             stream: "stdout" as const,
         })),
-    ]);
-    store.replaceLogs("beta", [
+    ] } });
+    store.patchControlReadModel({ logsByInstance: { ["beta"]: [
         {
             ctxId: "ctx-beta",
             instance: "beta",
@@ -2798,5 +2794,5 @@ function seedPrompt3State(store: TuiAppStore) {
             seq: 1,
             stream: "stderr" as const,
         },
-    ]);
+    ] } });
 }

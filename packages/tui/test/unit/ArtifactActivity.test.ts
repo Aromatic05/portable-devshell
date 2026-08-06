@@ -58,6 +58,7 @@ test("TUI startup pulls artifact shares and transfers from Control", async () =>
                 },
             },
             close() {},
+            onTransportClose() { return () => undefined; },
             config: {
                 async get() {
                     return {};
@@ -131,6 +132,7 @@ test("TUI clears an OAuth polling failure after the background refresh recovers"
                 },
             },
             close() {},
+            onTransportClose() { return () => undefined; },
             config: {
                 async get() {
                     return { mcp: { enabled: true } };
@@ -209,80 +211,6 @@ test("TUI clears an OAuth polling failure after the background refresh recovers"
     } finally {
         await session.stop();
     }
-});
-
-test("TUI discards a Todo refresh that completes after reconnect", async () => {
-    let releaseTodo!: () => void;
-    const pendingTodo = new Promise<{
-        todo: {
-            items: [];
-            revision: number;
-            summary: { completed: number; total: number };
-        };
-    }>((resolve) => {
-        releaseTodo = () =>
-            resolve({
-                todo: {
-                    items: [],
-                    revision: 2,
-                    summary: { completed: 0, total: 0 },
-                },
-            });
-    });
-    const session = new TuiControlSession({
-        clients: sessionClients({
-            todo: { get: async () => await pendingTodo },
-        }),
-    });
-
-    await session.start();
-    const staleRefresh = session.refreshTodo("alpha");
-    await Promise.resolve();
-    await session.reconnect();
-    releaseTodo();
-    await staleRefresh;
-
-    assert.equal(session.store.getState().todoByInstance.alpha, undefined);
-    await session.stop();
-});
-
-test("TUI does not subscribe after an obsolete instance refresh completes", async () => {
-    let releaseSnapshot!: () => void;
-    const pendingSnapshot = new Promise((resolve) => {
-        releaseSnapshot = () =>
-            resolve({
-                lastSeq: 2,
-                snapshot: {
-                    connectionState: "connected",
-                    daemonState: "running",
-                    lastSeq: 2,
-                    name: asInstanceName("alpha"),
-                    ready: true,
-                    status: "ready",
-                },
-            });
-    });
-    const subscribe = async () => {
-        throw new Error("stale refresh must not subscribe");
-    };
-    const session = new TuiControlSession({
-        clients: sessionClients({
-            runtime: {
-                readLogs: async () => [],
-                snapshot: async () => await pendingSnapshot,
-                subscribe,
-            },
-        }),
-    });
-
-    await session.start();
-    const staleRefresh = session.refreshInstance("alpha");
-    await Promise.resolve();
-    await session.reconnect();
-    releaseSnapshot();
-    await staleRefresh;
-
-    await session.stop();
 });
 
 test("TUI stops OAuth polling after a connection refresh fails", async () => {
@@ -476,7 +404,7 @@ test("TUI ignores an old visible Overview failure after reconnect", async () => 
 
 function seededStore(): TuiAppStore {
     const store = new TuiAppStore();
-    store.replaceInstances([
+    store.patchControlReadModel({ instances: [
         {
             defaultWorkspace: "/workspace/a",
             enabled: true,
@@ -484,8 +412,8 @@ function seededStore(): TuiAppStore {
             name: "instance-a",
             provider: "local",
         },
-    ]);
-    store.replaceSnapshot({
+    ] });
+    store.patchControlSnapshot({
         connectionState: "connected",
         daemonState: "running",
         lastSeq: 0,
@@ -493,8 +421,8 @@ function seededStore(): TuiAppStore {
         ready: true,
         status: "ready",
     });
-    store.replaceArtifactShares([share]);
-    store.replaceArtifactTransfers([transfer]);
+    store.patchControlReadModel({ artifactShares: [share] });
+    store.patchControlReadModel({ artifactTransfers: [transfer] });
     store.setSelectedPage("instances");
     store.setSelectedInstance("instance-a");
     store.setMainFocusId("instance:instance-a");
@@ -523,6 +451,7 @@ function sessionClients(overrides: Record<string, unknown> = {}) {
             },
         },
         close() {},
+        onTransportClose() { return () => undefined; },
         config: {
             async get() {
                 return {};

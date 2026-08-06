@@ -10,7 +10,7 @@ function expandedWebBox(webDraft: Record<string, JsonValue>) {
     const store = new TuiAppStore();
     store.setSelectedPage("connections");
     store.setSelectedInstance("alpha");
-    store.setConfigView({
+    store.patchControlReadModel({ configView: {
         control: {},
         instances: [
             {
@@ -29,7 +29,7 @@ function expandedWebBox(webDraft: Record<string, JsonValue>) {
             publicBaseUrl: "http://127.0.0.1:3210",
         },
         web: webDraft,
-    });
+    } });
     store.setFormDraft("web", webDraft, true);
 
     const collapsed = buildConnectorPageBoxes(store.getState(), "alpha").find(

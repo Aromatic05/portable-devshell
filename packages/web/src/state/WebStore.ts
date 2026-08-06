@@ -1,11 +1,13 @@
 import {
+    ControlCommands,
     ControlReadModel,
-    type ControlReadModelState,
+    ControlRefreshScheduler,
+    errorMessage,
+    withRequestTimeout,
 } from "@portable-devshell/shared/browser";
 
 import type { WebClients } from "../client/WebClients.js";
 import { WebOperationCoordinator } from "./WebOperationCoordinator.js";
-import { withWebRequestTimeout } from "./WebRequestTimeout.js";
 import { createInitialWebState, type WebState } from "./WebState.js";
 
 export type { ConnectionState, WebState } from "./WebState.js";
@@ -23,13 +25,11 @@ export class WebStore {
     #state = createInitialWebState();
     readonly #listeners = new Set<() => void>();
     readonly #model: ControlReadModel;
+    readonly #commands: ControlCommands;
     readonly #operations: WebOperationCoordinator;
     readonly #requestTimeoutMs: number;
     readonly #offTransportClose: () => void;
-    readonly #isPageVisible: () => boolean;
-    readonly #overviewRefreshIntervalMs: number;
-    #overviewPoll?: ReturnType<typeof setInterval>;
-    #overviewRefresh?: ReturnType<typeof setTimeout>;
+    readonly #refreshScheduler: ControlRefreshScheduler;
     #stopped = false;
     #loadPromise?: Promise<void>;
     #reconnectPromise?: Promise<void>;
@@ -38,10 +38,9 @@ export class WebStore {
 
     constructor(readonly clients: WebClients, options: WebStoreOptions = {}) {
         this.#requestTimeoutMs = options.requestTimeoutMs ?? 10_000;
-        this.#isPageVisible = options.isPageVisible ?? (() =>
+        const isPageVisible = options.isPageVisible ?? (() =>
             typeof document === "undefined" || document.visibilityState !== "hidden"
         );
-        this.#overviewRefreshIntervalMs = options.overviewRefreshIntervalMs ?? 5_000;
         this.#operations = new WebOperationCoordinator(
             {
                 getState: () => this.#state,
@@ -53,12 +52,35 @@ export class WebStore {
         this.#model = new ControlReadModel({
             clients,
             onEvent: (event) => {
-                if (event.type !== "log.appended") this.#scheduleOverview();
+                if (event.type !== "log.appended") this.#refreshScheduler.scheduleOverview(250);
             },
             requestTimeoutMs: this.#requestTimeoutMs,
             retryBaseMs: options.streamRetryBaseMs,
             stableAfterMs: options.streamStableAfterMs,
         });
+        this.#commands = new ControlCommands({
+            clients,
+            model: this.#model,
+            timeoutMs: options.operationTimeoutMs ?? 30_000,
+        });
+        this.#refreshScheduler = new ControlRefreshScheduler({
+            model: this.#model,
+            overviewIntervalMs: options.overviewRefreshIntervalMs,
+            shouldRefreshOAuth: () => {
+                const status = this.#model.state.mcpStatus;
+                return this.#listeners.size > 0 &&
+                    this.#state.connection === "online" &&
+                    isPageVisible() &&
+                    status?.authMode === "oauth2" &&
+                    status.oauthReady === true &&
+                    status.running === true;
+            },
+            shouldRefreshOverview: () =>
+                this.#listeners.size > 0 &&
+                this.#state.connection === "online" &&
+                isPageVisible(),
+        });
+        this.#refreshScheduler.start();
         this.#model.subscribe(() => this.#syncModel());
         this.#offTransportClose = clients.onTransportClose((error) =>
             this.#transportClosed(error)
@@ -71,11 +93,7 @@ export class WebStore {
 
     readonly subscribe = (listener: () => void): (() => void) => {
         this.#listeners.add(listener);
-        this.#reconcileOverviewPolling();
-        return () => {
-            this.#listeners.delete(listener);
-            this.#reconcileOverviewPolling();
-        };
+        return () => this.#listeners.delete(listener);
     };
 
     async load(): Promise<void> {
@@ -129,18 +147,8 @@ export class WebStore {
             "Approval recorded.",
             generation,
             async (signal) => {
-                const decided = await this.clients.tool.decideApproval(
-                    instance,
-                    approvalId,
-                    decision,
-                );
+                await this.#commands.decideToolApproval(instance, approvalId, decision);
                 if (signal.aborted || !this.#current(generation)) return;
-                this.#model.recordToolDecision(instance, decided.approvalId);
-                void this.#model.refreshInstance(
-                    instance,
-                    ["approvals", "todo", "toolCalls", "commentCalls"],
-                );
-                void this.#model.refreshOverview();
             },
         );
     }
@@ -155,11 +163,8 @@ export class WebStore {
             "Approval recorded.",
             generation,
             async (signal) => {
-                const decided = await this.clients.mcp.decideApproval(approvalId, decision);
+                await this.#commands.decideOAuthApproval(approvalId, decision);
                 if (signal.aborted || !this.#current(generation)) return;
-                this.#model.recordOAuthDecision(decided.approvalId);
-                void this.#model.refreshOAuth();
-                void this.#model.refreshOverview();
             },
         );
     }
@@ -175,10 +180,7 @@ export class WebStore {
             "Message queued.",
             generation,
             async (signal) => {
-                const queued = await this.clients.contextMessage.queue(instance, { ctxId, text });
-                if (!signal.aborted && this.#current(generation)) {
-                    this.#model.mergeQueuedContextMessage(instance, queued);
-                }
+                await this.#commands.queueContextMessage(instance, ctxId, text);
             },
         );
     }
@@ -197,7 +199,8 @@ export class WebStore {
         this.#generation += 1;
         this.#offTransportClose();
         this.#operations.cancelAll(new Error("Web store closed."));
-        this.#stopOverviewPolling();
+        this.#commands.reset();
+        this.#refreshScheduler.stop();
         this.#model.close();
         this.clients.close();
     }
@@ -209,13 +212,11 @@ export class WebStore {
             `${instance} ${action} requested.`,
             generation,
             async (signal) => {
-                const snapshot = action === "start"
-                    ? await this.clients.runtime.start(instance, { signal })
-                    : await this.clients.runtime.stop(instance);
-                if (signal.aborted || !this.#current(generation)) return;
-                this.#model.applyAuthoritativeSnapshot(snapshot);
-                void this.#model.refreshInstance(instance);
-                void this.#model.refreshOverview();
+                if (action === "start") {
+                    await this.#commands.startInstance(instance, { signal });
+                } else {
+                    await this.#commands.stopInstance(instance);
+                }
             },
         );
     }
@@ -224,6 +225,7 @@ export class WebStore {
         this.#generation += 1;
         const generation = this.#generation;
         this.#operations.cancelAll(new Error("Web connection is reconnecting."));
+        this.#commands.reset();
         this.#model.reset();
         this.#set({
             ...this.#state,
@@ -234,7 +236,7 @@ export class WebStore {
         });
         this.#ignoreTransportClose = true;
         try {
-            await withWebRequestTimeout(
+            await withRequestTimeout(
                 this.clients.reconnect(),
                 this.#requestTimeoutMs,
                 "control.reconnect",
@@ -252,44 +254,14 @@ export class WebStore {
 
     #syncModel(): void {
         if (this.#stopped) return;
-        const model = this.#model.state;
-        const approvals: WebState["approvals"] = {};
-        const commentCalls: WebState["commentCalls"] = {};
-        const contextMessages: WebState["contextMessages"] = {};
-        const logs: WebState["logs"] = {};
-        const todos: WebState["todos"] = {};
-        const toolCalls: WebState["toolCalls"] = {};
-        for (const [name, instance] of Object.entries(model.instanceState)) {
-            approvals[name] = instance.approvals;
-            commentCalls[name] = instance.commentCalls;
-            contextMessages[name] = instance.contextMessages;
-            logs[name] = instance.logs;
-            toolCalls[name] = instance.toolCalls;
-            if (instance.todo !== undefined) todos[name] = instance.todo;
-        }
-        this.#set({
-            ...this.#state,
-            approvals,
-            commentCalls,
-            contextMessages,
-            instances: model.instances.map((entry) => ({
-                ...entry,
-                snapshot: model.instanceState[entry.name]?.snapshot ?? entry.snapshot,
-            })),
-            logs,
-            oauthApprovals: model.oauthApprovals,
-            overview: model.overview,
-            partialFailures: webFailures(model),
-            service: model.service,
-            todos,
-            toolCalls,
-        });
+        this.#set({ ...this.#state, readModel: this.#model.state });
     }
 
     #transportClosed(error: Error): void {
         if (this.#stopped || this.#ignoreTransportClose) return;
         this.#generation += 1;
         this.#operations.cancelAll(error);
+        this.#commands.reset();
         this.#model.reset();
         this.#set({
             ...this.#state,
@@ -300,58 +272,13 @@ export class WebStore {
         });
     }
 
-    #scheduleOverview(): void {
-        if (this.#overviewRefresh !== undefined) return;
-        this.#overviewRefresh = setTimeout(() => {
-            this.#overviewRefresh = undefined;
-            if (!this.#stopped) void this.#model.refreshOverview();
-        }, 250);
-    }
-
-    #reconcileOverviewPolling(): void {
-        const active = this.#listeners.size > 0 &&
-            this.#state.connection === "online" &&
-            this.#overviewRefreshIntervalMs > 0;
-        if (!active) {
-            this.#stopOverviewPolling();
-            return;
-        }
-        if (this.#overviewPoll !== undefined) return;
-        this.#overviewPoll = setInterval(() => {
-            if (this.#state.connection === "online" && this.#isPageVisible()) {
-                void this.#model.refreshOverview();
-            }
-        }, this.#overviewRefreshIntervalMs);
-    }
-
-    #stopOverviewPolling(): void {
-        if (this.#overviewPoll !== undefined) clearInterval(this.#overviewPoll);
-        if (this.#overviewRefresh !== undefined) clearTimeout(this.#overviewRefresh);
-        this.#overviewPoll = undefined;
-        this.#overviewRefresh = undefined;
-    }
-
     #current(generation: number): boolean {
         return !this.#stopped && this.#generation === generation;
     }
 
     #set(state: WebState): void {
         if (this.#stopped) return;
-        const connectionChanged = state.connection !== this.#state.connection;
         this.#state = state;
-        if (connectionChanged) this.#reconcileOverviewPolling();
         for (const listener of this.#listeners) listener();
     }
-}
-
-function webFailures(model: Readonly<ControlReadModelState>): Record<string, string> {
-    return Object.fromEntries(Object.entries(model.failures).map(([key, value]) => {
-        if (key.startsWith("snapshot:")) return [`instance:${key.slice(9)}`, value.message];
-        if (key.startsWith("todo:")) return [`todos:${key.slice(5)}`, value.message];
-        return [key, value.message];
-    }));
-}
-
-function errorMessage(error: unknown): string {
-    return error instanceof Error ? error.message : String(error);
 }

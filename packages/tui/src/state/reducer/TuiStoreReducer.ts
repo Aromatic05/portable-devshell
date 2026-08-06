@@ -1,5 +1,4 @@
 import { reconcileTuiRouteResources } from "../route/TuiRouteState.js";
-import { reduceTuiStoreReducerArtifact } from "./TuiStoreReducerArtifact.js";
 import { reduceTuiStoreReducerControl } from "./TuiStoreReducerControl.js";
 import { reduceTuiStoreReducerInstance } from "./TuiStoreReducerInstance.js";
 import { reduceTuiStoreReducerInteraction } from "./TuiStoreReducerInteraction.js";
@@ -9,7 +8,6 @@ import type { TuiAppAction, TuiAppState } from "./TuiStoreModel.js";
 
 export function tuiAppReducer(state: TuiAppState, action: TuiAppAction): TuiAppState {
     const nextState =
-        reduceTuiStoreReducerArtifact(state, action) ??
         reduceTuiStoreReducerControl(state, action) ??
         reduceTuiStoreReducerRoute(state, action) ??
         reduceTuiStoreReducerOverlay(state, action) ??

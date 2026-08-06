@@ -10,11 +10,11 @@ async function flush(): Promise<void> {
 
 test("route lifecycle aborts stale loads and runs route cleanup exactly once", async () => {
     const store = new TuiAppStore();
-    store.replaceInstances([
+    store.patchControlReadModel({ instances: [
         { enabled: true, mcpEnabled: true, name: "alpha" },
-    ]);
+    ] });
     store.setSelectedInstance("alpha");
-    store.replaceToolCalls("alpha", [
+    store.patchControlReadModel({ toolCallsByInstance: { ["alpha"]: [
         {
             callId: "call-1",
             ctxId: "ctx-a",
@@ -25,7 +25,7 @@ test("route lifecycle aborts stale loads and runs route cleanup exactly once", a
             status: "completed",
             toolName: "bash_run",
         },
-    ]);
+    ] } });
     const entered: string[] = [];
     const aborted: string[] = [];
     const cleaned: string[] = [];

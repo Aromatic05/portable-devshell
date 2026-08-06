@@ -537,7 +537,7 @@ test("real Ink runtime routes every page and drives approval and text detail scr
             );
         }
 
-        runtime.store.replaceInstances([
+        runtime.store.patchControlReadModel({ instances: [
             {
                 defaultWorkspace: "/workspace/alpha",
                 enabled: true,
@@ -545,9 +545,9 @@ test("real Ink runtime routes every page and drives approval and text detail scr
                 name: "alpha",
                 provider: "local",
             },
-        ]);
+        ] });
         runtime.store.setSelectedInstance("alpha");
-        runtime.store.replaceToolCalls("alpha", [
+        runtime.store.patchControlReadModel({ toolCallsByInstance: { ["alpha"]: [
             {
                 callId: "call-1",
                 input: { command: "pwd" },
@@ -558,8 +558,8 @@ test("real Ink runtime routes every page and drives approval and text detail scr
                 status: "running",
                 toolName: "bash_run",
             },
-        ]);
-        runtime.store.replaceApprovals("alpha", [
+        ] } });
+        runtime.store.patchControlReadModel({ approvalsByInstance: { ["alpha"]: [
             {
                 approvalId: "approval-1",
                 callId: "call-1",
@@ -573,7 +573,7 @@ test("real Ink runtime routes every page and drives approval and text detail scr
                 status: "pending",
                 toolName: "bash_run",
             },
-        ]);
+        ] } });
         runtime.store.setSelectedPage("audit");
         runtime.store.pushOverlay({
             approvalId: "approval-1",
@@ -727,7 +727,7 @@ test(
                     ],
                 },
             );
-            runtime.store.replaceInstances([
+            runtime.store.patchControlReadModel({ instances: [
                 {
                     defaultWorkspace: process.cwd(),
                     enabled: true,
@@ -735,8 +735,8 @@ test(
                     name: "alpha",
                     provider: "local",
                 },
-            ]);
-            runtime.store.replaceSnapshot({
+            ] });
+            runtime.store.patchControlSnapshot({
                 connectionState: "connected",
                 daemonState: "running",
                 lastSeq: 1,
@@ -902,7 +902,7 @@ test("real Ink runtime routes terminal scrollback and mouse without trapping sid
                 ],
             },
         );
-        runtime.store.replaceInstances([
+        runtime.store.patchControlReadModel({ instances: [
             {
                 defaultWorkspace: process.cwd(),
                 enabled: true,
@@ -910,8 +910,8 @@ test("real Ink runtime routes terminal scrollback and mouse without trapping sid
                 name: "alpha",
                 provider: "ssh",
             },
-        ]);
-        runtime.store.setConfigView({
+        ] });
+        runtime.store.patchControlReadModel({ configView: {
             instances: [
                 {
                     name: "alpha",
@@ -919,7 +919,7 @@ test("real Ink runtime routes terminal scrollback and mouse without trapping sid
                     ssh: { command: "ssh example.test" },
                 },
             ],
-        } as never);
+        } as never });
         runtime.store.setSelectedInstance("alpha");
 
         host.write("8");
@@ -1289,16 +1289,16 @@ test("real Ink runtime renders artifact_viewImage audit output in the detail pan
             ],
             { instances: [{ name: "alpha", provider: "local" }] },
         );
-        runtime.store.replaceInstances([
+        runtime.store.patchControlReadModel({ instances: [
             {
                 enabled: true,
                 mcpEnabled: true,
                 name: "alpha",
                 provider: "local",
             },
-        ]);
+        ] });
         runtime.store.setSelectedInstance("alpha");
-        runtime.store.replaceToolCalls("alpha", [
+        runtime.store.patchControlReadModel({ toolCallsByInstance: { ["alpha"]: [
             {
                 callId: "image-call",
                 ctxId: "ctx-image",
@@ -1321,7 +1321,7 @@ test("real Ink runtime renders artifact_viewImage audit output in the detail pan
                 status: "completed",
                 toolName: "artifact_viewImage",
             },
-        ]);
+        ] } });
         runtime.store.setSelectedPage("audit");
         runtime.store.pushRoute({
             ctxId: "ctx-image",

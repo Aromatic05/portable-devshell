@@ -1,12 +1,21 @@
-export { ControlReadModel } from "./read-model/ControlReadModel.js";
+export { ControlReadModel, createInitialControlReadModelState } from "./read-model/ControlReadModel.js";
+export { ControlRefreshScheduler } from "./read-model/ControlRefreshScheduler.js";
+export type { ControlRefreshKind, ControlRefreshSchedulerOptions } from "./read-model/ControlRefreshScheduler.js";
 export type {
+    ControlGlobalReadKey,
     ControlInstanceReadKey,
     ControlInstanceReadState,
+    ControlReadFailure,
     ControlReadModelLoadOptions,
     ControlReadModelOptions,
     ControlReadModelState
 } from "./read-model/ControlReadModel.js";
 export { createControlClients, readInstanceSnapshot } from "./client/ControlClients.js";
+export { ControlCommands } from "./client/ControlCommands.js";
+export type { ControlCommandsOptions } from "./client/ControlCommands.js";
+export { createPersistentControlClients } from "./client/ControlClientSession.js";
+export type { PersistentControlClients, PersistentControlClientOptions } from "./client/ControlClientSession.js";
+export { RequestTimeoutError, withRequestTimeout } from "./client/RequestTimeout.js";
 export type {
     ControlClients,
     ControlServiceStatus,
@@ -18,7 +27,7 @@ export type {
     InstanceEventStreamPort,
     InstanceStreamMessage
 } from "./client/InstanceEventStream.js";
-export { createError } from "./error/ErrorFactoryCreate.js";
+export { createError, errorMessage, toControlError } from "./error/ErrorFactoryCreate.js";
 export type { ControlErrorBody } from "./error/ErrorBodyControl.js";
 export {
     ClientConnection,
@@ -111,3 +120,6 @@ export type {
     TerminalStreamCommandIdentity,
     TerminalVersionedIdentity
 } from "./dto/terminal/DtoTerminal.js";
+
+export { formatBytes, formatDuration, formatJsonSummary, formatJsonValue, formatPercent, jsonDetailLimits, jsonSearchLimits, parseJsonFallback, projectTodoTaskSummaries, resolveToolOutput, toolCallOutcome, toolCallOutput } from "./presentation/ControlPresentation.js";
+export type { JsonFormatLimits } from "./presentation/ControlPresentation.js";

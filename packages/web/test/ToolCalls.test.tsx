@@ -1,107 +1,102 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { asInstanceName } from "@portable-devshell/shared/browser";
+import { asInstanceName, createInitialControlReadModelState } from "@portable-devshell/shared/browser";
 import { expect, it, vi } from "vitest";
 
 import { ToolCalls } from "../src/views/ToolCalls.js";
 import type { WebState, WebStore } from "../src/state/WebStore.js";
 
+const alphaCall = {
+    callId: "call-alpha",
+    completedAt: "2026-07-31T09:00:01Z",
+    ctxId: "ctx-alpha",
+    input: { command: "false" },
+    inputSummary: '{"command":"false"}',
+    instance: asInstanceName("alpha"),
+    output: { exitCode: 1, stderr: "failed", stdout: "" },
+    source: "mcp" as const,
+    startedAt: "2026-07-31T09:00:00Z",
+    status: "failed" as const,
+    toolName: "bash_run",
+};
+
 const state: WebState = {
-    approvals: {},
-    commentCalls: {
-        alpha: [
-            {
-                callId: "call-comment-old",
-                completedAt: "2026-07-30T09:00:01Z",
-                ctxId: "ctx-alpha",
-                input: { command: "pwd" },
-                inputSummary: '{"command":"pwd"}',
-                instance: asInstanceName("alpha"),
-                output: {
-                    comment: ["Review the previous failure."],
-                    exitCode: 0,
-                    stderr: "",
-                    stdout: "/workspace\n",
-                },
-                source: "mcp",
-                startedAt: "2026-07-30T09:00:00Z",
-                status: "completed",
-                toolName: "bash_run",
-            },
-        ],
-    },
     connection: "online",
-    contextMessages: {
-        alpha: [
-            {
-                createdAt: "2026-07-31T09:05:00Z",
-                ctxId: "ctx-alpha",
-                id: "message-1",
-                instance: "alpha",
-                status: "pending",
-                text: "Check the failing command.",
-            },
-        ],
-    },
-    instances: [
-        {
-            mcpEnabled: true,
-            name: "alpha",
-            snapshot: {
-                connectionState: "connected",
-                daemonState: "running",
-                lastSeq: 1,
-                name: asInstanceName("alpha"),
-                ready: true,
-                status: "ready",
-            },
-        },
-        {
-            mcpEnabled: true,
-            name: "beta",
-            snapshot: {
-                connectionState: "connected",
-                daemonState: "running",
-                lastSeq: 1,
-                name: asInstanceName("beta"),
-                ready: true,
-                status: "ready",
-            },
-        },
-    ],
-    logs: {},
-    oauthApprovals: [],
     operations: {},
-    partialFailures: {},
-    todos: {},
-    toolCalls: {
-        alpha: [
+    readModel: {
+        ...createInitialControlReadModelState(),
+        instances: [
             {
-                callId: "call-alpha",
-                completedAt: "2026-07-31T09:00:01Z",
-                ctxId: "ctx-alpha",
-                input: { command: "false" },
-                inputSummary: '{"command":"false"}',
-                instance: asInstanceName("alpha"),
-                output: { exitCode: 1, stderr: "failed", stdout: "" },
-                source: "mcp",
-                startedAt: "2026-07-31T09:00:00Z",
-                status: "failed",
-                toolName: "bash_run",
+                mcpEnabled: true,
+                name: "alpha",
+                snapshot: {
+                    connectionState: "connected",
+                    daemonState: "running",
+                    lastSeq: 1,
+                    name: asInstanceName("alpha"),
+                    ready: true,
+                    status: "ready",
+                },
+            },
+            {
+                mcpEnabled: true,
+                name: "beta",
+                snapshot: {
+                    connectionState: "connected",
+                    daemonState: "running",
+                    lastSeq: 1,
+                    name: asInstanceName("beta"),
+                    ready: true,
+                    status: "ready",
+                },
             },
         ],
-        beta: [
-            {
-                callId: "call-beta",
-                completedAt: "2026-07-31T09:10:01Z",
-                ctxId: "ctx-beta",
-                inputSummary: '{"path":"README.md"}',
-                instance: asInstanceName("beta"),
-                source: "mcp",
-                startedAt: "2026-07-31T09:10:00Z",
-                status: "completed",
-                toolName: "file_read",
+        instanceState: {
+            alpha: {
+                approvals: [],
+                commentCalls: [{
+                    callId: "call-comment-old",
+                    completedAt: "2026-07-30T09:00:01Z",
+                    ctxId: "ctx-alpha",
+                    input: { command: "pwd" },
+                    inputSummary: '{"command":"pwd"}',
+                    instance: asInstanceName("alpha"),
+                    output: { comment: ["Review the previous failure."], exitCode: 0, stderr: "", stdout: "/workspace\n" },
+                    source: "mcp",
+                    startedAt: "2026-07-30T09:00:00Z",
+                    status: "completed",
+                    toolName: "bash_run",
+                }],
+                contextMessages: [{
+                    createdAt: "2026-07-31T09:05:00Z",
+                    ctxId: "ctx-alpha",
+                    id: "message-1",
+                    instance: "alpha",
+                    status: "pending",
+                    text: "Check the failing command.",
+                }],
+                logs: [],
+                sequence: 1,
+                toolCalls: [alphaCall],
             },
-        ],
+            beta: {
+                approvals: [],
+                commentCalls: [],
+                contextMessages: [],
+                logs: [],
+                sequence: 1,
+                toolCalls: [{
+                    callId: "call-beta",
+                    completedAt: "2026-07-31T09:10:01Z",
+                    ctxId: "ctx-beta",
+                    inputSummary: '{"path":"README.md"}',
+                    instance: asInstanceName("beta"),
+                    source: "mcp",
+                    startedAt: "2026-07-31T09:10:00Z",
+                    status: "completed",
+                    toolName: "file_read",
+                }],
+            },
+        },
     },
 };
 
@@ -163,12 +158,15 @@ it("does not render large Tool Call details until the row is expanded", () => {
     const output = `${token}${"x".repeat(200_000)}`;
     const largeState: WebState = {
         ...state,
-        toolCalls: {
-            alpha: [{
-                ...state.toolCalls.alpha![0]!,
-                callId: "large-call",
-                output,
-            }],
+        readModel: {
+            ...state.readModel,
+            instanceState: {
+                ...state.readModel.instanceState,
+                alpha: {
+                    ...state.readModel.instanceState.alpha!,
+                    toolCalls: [{ ...alphaCall, callId: "large-call", output }],
+                },
+            },
         },
     };
     render(<ToolCalls state={largeState} store={{ queueContextMessage: vi.fn() } as unknown as WebStore} />);
@@ -191,14 +189,17 @@ it("normalizes a Context filter that disappears after refresh", () => {
     view.rerender(<ToolCalls
         state={{
             ...state,
-            commentCalls: { ...state.commentCalls, alpha: [] },
-            contextMessages: { alpha: [] },
-            toolCalls: {
-                ...state.toolCalls,
-                alpha: [{
-                    ...state.toolCalls.alpha![0]!,
-                    ctxId: "ctx-new",
-                }],
+            readModel: {
+                ...state.readModel,
+                instanceState: {
+                    ...state.readModel.instanceState,
+                    alpha: {
+                        ...state.readModel.instanceState.alpha!,
+                        commentCalls: [],
+                        contextMessages: [],
+                        toolCalls: [{ ...alphaCall, ctxId: "ctx-new" }],
+                    },
+                },
             },
         }}
         store={store}
@@ -211,12 +212,19 @@ it("normalizes a Context filter that disappears after refresh", () => {
 it("shows the display limit without claiming it is the match total", () => {
     const manyState: WebState = {
         ...state,
-        toolCalls: {
-            alpha: Array.from({ length: 150 }, (_, index) => ({
-                ...state.toolCalls.alpha![0]!,
-                callId: `call-${index}`,
-                startedAt: `2026-07-31T09:${String(index % 60).padStart(2, "0")}:00Z`,
-            })),
+        readModel: {
+            ...state.readModel,
+            instanceState: {
+                ...state.readModel.instanceState,
+                alpha: {
+                    ...state.readModel.instanceState.alpha!,
+                    toolCalls: Array.from({ length: 150 }, (_, index) => ({
+                        ...alphaCall,
+                        callId: `call-${index}`,
+                        startedAt: `2026-07-31T09:${String(index % 60).padStart(2, "0")}:00Z`,
+                    })),
+                },
+            },
         },
     };
 

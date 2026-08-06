@@ -75,13 +75,13 @@ test("a committed context message remains successful when the follow-up audit re
 
 test("runtime commands time out and leave the running state", async () => {
     const store = new TuiAppStore();
-    store.replaceInstances([{
+    store.patchControlReadModel({ instances: [{
         defaultWorkspace: "/workspace/alpha",
         enabled: true,
         mcpEnabled: false,
         name: "alpha",
         provider: "local",
-    }]);
+    }] });
     const operations = new TuiRuntimeOperations({
         clients: {
             runtime: {
@@ -91,7 +91,7 @@ test("runtime commands time out and leave the running state", async () => {
         operationTimeoutMs: 15,
         session: {
             applyAuthoritativeSnapshot(value: never) {
-                store.replaceSnapshot(value);
+                store.patchControlSnapshot(value);
             },
         } as never,
         store,

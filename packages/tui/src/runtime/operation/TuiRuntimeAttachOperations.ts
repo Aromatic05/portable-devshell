@@ -50,7 +50,7 @@ export class TuiRuntimeAttachOperations {
 
         try {
             const refreshed = await this.options.clients.runtime.refresh(instance);
-            this.options.store.replaceSnapshot(refreshed.snapshot);
+            this.options.session.applyAuthoritativeSnapshot(refreshed.snapshot);
             await this.options.session.refreshInstance(instance);
             this.options.store.setScreenStatus(
                 this.options.store.getState().ui.selectedPage,

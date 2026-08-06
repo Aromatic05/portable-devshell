@@ -1,32 +1,22 @@
 import {
-    ClientConnection,
     connectControlClientChannel,
-    createControlClients,
+    createPersistentControlClients,
     type ControlClientChannelOptions,
-    type ControlClients,
     type ControlErrorBody,
+    type PersistentControlClients,
 } from "@portable-devshell/shared";
 
 export interface TuiClientOptions extends ControlClientChannelOptions {}
-
-export interface TuiClients extends ControlClients {
-    close(): void;
-    reconnect(): Promise<void>;
-}
+export type TuiClients = PersistentControlClients;
 
 export function createTuiClients(options: TuiClientOptions = {}): TuiClients {
-    const connection = new ClientConnection({
-        connectChannel: (signal) => connectControlClientChannel(options, signal),
-        mode: "persistent",
-        peer: "tui",
+    return createPersistentControlClients({
+        clientKind: "tui",
+        connectChannel: async (signal) => await connectControlClientChannel(options, signal),
         mapError: toClientError,
         mapRemoteError: toRemoteError,
+        peer: "tui",
     });
-    return {
-        ...createControlClients(connection, { clientKind: "tui" }),
-        close: () => connection.close(),
-        reconnect: async () => await connection.reconnect(),
-    };
 }
 
 function toRemoteError(error: ControlErrorBody): Error {

@@ -15,13 +15,14 @@ export function Instances({
     store: WebStore;
 }) {
     const state = store.state;
+    const model = state.readModel;
     const [selected, setSelected] = useState<string>();
     const [confirmation, setConfirmation] = useState<{
         action: "Start" | "Stop";
         instance: string;
     }>();
-    const entry = state.instances.find(({ name }) => name === selected);
-    const selectedWorker = state.overview?.instances.find(
+    const entry = model.instances.find(({ name }) => name === selected);
+    const selectedWorker = model.overview?.instances.find(
         ({ name }) => name === entry?.name,
     )?.worker;
     const operation = confirmation === undefined
@@ -31,10 +32,10 @@ export function Instances({
 
     return <section>
         <h2>Instances</h2>
-        {state.instances.length === 0
+        {model.instances.length === 0
             ? <p className="empty">No instances are available.</p>
             : <div className="instances">
-                {state.instances.map((item) => <button
+                {model.instances.map((item) => <button
                     className="instance card"
                     key={item.name}
                     onClick={() => {
@@ -44,7 +45,7 @@ export function Instances({
                 >
                     <strong>{item.name}</strong>
                     <span>{item.snapshot.status} · {item.snapshot.connectionState}</span>
-                    <WorkerSummary worker={state.overview?.instances.find(
+                    <WorkerSummary worker={model.overview?.instances.find(
                         ({ name }) => name === item.name,
                     )?.worker} />
                 </button>)}
@@ -76,7 +77,7 @@ export function Instances({
                 </button>
             </div>
             <h4>Recent logs</h4>
-            <pre>{(state.logs[entry.name] ?? [])
+            <pre>{(model.instanceState[entry.name]?.logs ?? [])
                 .map((log) => `${log.at} ${log.message}`)
                 .join("\n") || "No recent logs."}</pre>
         </article>}

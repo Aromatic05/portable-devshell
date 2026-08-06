@@ -26,7 +26,7 @@ export function Approvals({
 }) {
     const state = store.state;
     const tools = toolApprovals(state);
-    const oauth = state.oauthApprovals.filter((item) => item.status === "pending");
+    const oauth = state.readModel.oauthApprovals.filter((item) => item.status === "pending");
     const [selection, setSelection] = useState<Selection>();
     const operation = selection === undefined
         ? undefined

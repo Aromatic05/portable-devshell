@@ -1,6 +1,7 @@
-import type {
-    ApprovalRequest,
-    ToolCallRecord,
+import {
+    toolCallOutcome,
+    type ApprovalRequest,
+    type ToolCallRecord,
 } from "@portable-devshell/shared";
 
 import type { TuiAppState } from "../../../state/reducer/TuiStoreModel.js";
@@ -112,24 +113,8 @@ function contextStatus(
     calls: readonly ToolCallRecord[],
     approvals: readonly ApprovalRequest[],
 ): TuiExpandableBoxStatus {
-    if (
-        calls.some(
-            (call) =>
-                call.status === "failed" ||
-                call.status === "denied" ||
-                call.status === "queueTimeout",
-        )
-    )
-        return "failed";
-    if (
-        approvals.some((approval) => approval.status === "pending")
-    )
-        return "pending";
-    if (
-        calls.some(
-            (call) => call.status === "running" || call.status === "queued",
-        )
-    )
-        return "running";
+    if (calls.some((call) => toolCallOutcome(call.status) === "failure")) return "failed";
+    if (approvals.some((approval) => approval.status === "pending")) return "pending";
+    if (calls.some((call) => toolCallOutcome(call.status) === "pending")) return "running";
     return calls.length === 0 ? "normal" : "ready";
 }

@@ -1,41 +1,27 @@
 import { isDeepStrictEqual } from "node:util";
 
-import { withDerivedState } from "./TuiStoreReducerSupport.js";
+import { selectInstanceAfterListReplace, withDerivedState } from "./TuiStoreReducerSupport.js";
 import type { TuiAppAction, TuiAppState } from "./TuiStoreModel.js";
 
-export function reduceTuiStoreReducerControl(state: TuiAppState, action: TuiAppAction): TuiAppState | undefined {
+export function reduceTuiStoreReducerControl(
+    state: TuiAppState,
+    action: TuiAppAction,
+): TuiAppState | undefined {
     switch (action.type) {
-        case "approval.replace":
-            return withDerivedState({
+        case "control.readModel.replace":
+            return withDerivedState(selectInstanceAfterListReplace({
                 ...state,
-                approvalsByInstance: {
-                    ...state.approvalsByInstance,
-                    [action.instance]: [...action.approvals].sort((left, right) => right.createdAt.localeCompare(left.createdAt))
-                }
-            });
-        case "oauthApproval.replace": {
-            const nextApprovals = [...action.approvals].sort((left, right) => right.createdAt.localeCompare(left.createdAt));
-            if (isDeepStrictEqual(state.oauthApprovals, nextApprovals)) {
-                return state;
-            }
-            return withDerivedState({
-                ...state,
-                oauthApprovals: nextApprovals
-            });
-        }
-        case "overview.replace":
-            if (isDeepStrictEqual(state.operationalOverview, action.overview)) {
-                return state;
-            }
-            return {
-                ...state,
-                operationalOverview: action.overview
-            };
+                ...action.projection,
+            }));
         case "command.upsert": {
-            const without = state.commandRecords.filter((command) => command.commandId !== action.command.commandId);
+            const without = state.commandRecords.filter(
+                (command) => command.commandId !== action.command.commandId,
+            );
             return {
                 ...state,
-                commandRecords: [...without, action.command].sort((left, right) => right.startedAt.localeCompare(left.startedAt))
+                commandRecords: [...without, action.command].sort((left, right) =>
+                    right.startedAt.localeCompare(left.startedAt)
+                ),
             };
         }
         case "panelError.set": {
@@ -43,29 +29,33 @@ export function reduceTuiStoreReducerControl(state: TuiAppState, action: TuiAppA
             if (
                 (action.error === undefined && current === undefined) ||
                 (action.error !== undefined && isDeepStrictEqual(current, action.error))
-            ) {
-                return state;
-            }
+            ) return state;
             const panelErrors = { ...state.panelErrors };
             if (action.error === undefined) delete panelErrors[action.key];
             else panelErrors[action.key] = action.error;
             return { ...state, panelErrors };
         }
         case "relay.appendOutput": {
-            const current = state.relayByCommand[action.commandId] ?? { commandId: action.commandId, output: [] };
+            const current = state.relayByCommand[action.commandId] ?? {
+                commandId: action.commandId,
+                output: [],
+            };
             return {
                 ...state,
                 relayByCommand: {
                     ...state.relayByCommand,
                     [action.commandId]: {
                         ...current,
-                        output: [...current.output, action.chunk]
-                    }
-                }
+                        output: [...current.output, action.chunk],
+                    },
+                },
             };
         }
         case "relay.setMetadata": {
-            const current = state.relayByCommand[action.commandId] ?? { commandId: action.commandId, output: [] };
+            const current = state.relayByCommand[action.commandId] ?? {
+                commandId: action.commandId,
+                output: [],
+            };
             return {
                 ...state,
                 relayByCommand: {
@@ -74,34 +64,24 @@ export function reduceTuiStoreReducerControl(state: TuiAppState, action: TuiAppA
                         ...current,
                         ...(action.provider === undefined ? {} : { provider: action.provider }),
                         ...(action.requestId === undefined ? {} : { requestId: action.requestId }),
-                        ...(action.workspace === undefined ? {} : { workspace: action.workspace })
-                    }
-                }
+                        ...(action.workspace === undefined ? {} : { workspace: action.workspace }),
+                    },
+                },
             };
         }
-        case "control.setConfigView":
-            return {
-                ...state,
-                configView: action.configView
-            };
-        case "control.setMcpStatus":
-            return {
-                ...state,
-                mcpStatus: action.mcpStatus
-            };
         case "control.setConnectionState":
             return {
                 ...state,
                 connection: {
                     errorCode: action.errorCode,
                     errorMessage: action.errorMessage,
-                    status: action.status
-                }
+                    status: action.status,
+                },
             };
         case "control.setRestartRequired":
             return {
                 ...state,
-                ui: { ...state.ui, controlRestartRequired: action.required }
+                ui: { ...state.ui, controlRestartRequired: action.required },
             };
     }
 }

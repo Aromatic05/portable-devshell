@@ -116,6 +116,7 @@ export class ClientConnection {
     readonly #mode: ClientConnectionMode;
     readonly #peer: Exclude<Peer, "server">;
     readonly #connectCancellers = new Set<(error: Error) => void>();
+    readonly #transportCloseListeners = new Set<(error: Error) => void>();
     #closed = false;
     #persistentFailure?: Error;
     #persistentGeneration = 0;
@@ -206,6 +207,11 @@ export class ClientConnection {
         }
     }
 
+    onTransportClose(listener: (error: Error) => void): () => void {
+        this.#transportCloseListeners.add(listener);
+        return () => this.#transportCloseListeners.delete(listener);
+    }
+
     async reconnect(): Promise<void> {
         if (this.#mode === "short") {
             return;
@@ -247,6 +253,7 @@ export class ClientConnection {
         this.#persistentSession = undefined;
         this.#persistentSessionPromise = undefined;
         this.#persistentFailure = undefined;
+        this.#transportCloseListeners.clear();
         session?.close();
     }
 
@@ -285,7 +292,9 @@ export class ClientConnection {
             if (this.#persistentSession === session) {
                 this.#persistentSession = undefined;
             }
-            this.#persistentFailure = this.mapError(error ?? new Error("Client connection closed."));
+            const failure = this.mapError(error ?? new Error("Client connection closed."));
+            this.#persistentFailure = failure;
+            for (const listener of [...this.#transportCloseListeners]) listener(failure);
         }).then((session) => {
             if (generation !== this.#persistentGeneration || this.#closed) {
                 session.close();

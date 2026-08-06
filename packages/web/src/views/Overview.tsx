@@ -1,10 +1,12 @@
 import type { WebState } from "../state/WebStore.js";
+import { webFailures } from "../state/WebState.js";
 import { SystemResources } from "../components/diagnostics/SystemResources.js";
 import { overviewAlertRoute, overviewAlerts, overviewToolCalls } from "../selectors/readModel.js";
 
 export function Overview({ state }: { state: WebState }) {
-    if (state.overview === undefined) {
-        const failure = state.partialFailures.overview;
+    const overview = state.readModel.overview;
+    if (overview === undefined) {
+        const failure = webFailures(state.readModel).overview;
         const message = state.connection === "offline"
             ? "Overview is unavailable while offline."
             : failure === undefined
@@ -12,7 +14,6 @@ export function Overview({ state }: { state: WebState }) {
               : `Overview could not be refreshed: ${failure}`;
         return <section><h2>Overview</h2><p className={failure === undefined ? "empty" : "error"}>{message}</p></section>;
     }
-    const overview = state.overview;
     const currentAlerts = overviewAlerts(overview);
     return (
         <section>

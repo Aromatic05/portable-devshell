@@ -16,7 +16,7 @@ import {
 
 function createHarness() {
     const store = new TuiAppStore();
-    store.replaceInstances([
+    store.patchControlReadModel({ instances: [
         {
             defaultWorkspace: "/workspace/alpha",
             enabled: true,
@@ -31,8 +31,8 @@ function createHarness() {
             name: "beta",
             provider: "ssh",
         },
-    ]);
-    store.replaceSnapshot({
+    ] });
+    store.patchControlSnapshot({
         connectionState: "connected",
         daemonState: "running",
         lastSeq: 1,

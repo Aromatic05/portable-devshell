@@ -17,14 +17,14 @@ test("TuiAppStore keeps page, instance, and expanded boxes stable across events"
     const store = new TuiAppStore({ maxRawEvents: 2 });
 
     store.setConnectionState("connected");
-    store.replaceInstances([
+    store.patchControlReadModel({ instances: [
         { enabled: true, mcpEnabled: false, name: "alpha" },
         { enabled: true, mcpEnabled: true, name: "beta" },
-    ]);
+    ] });
     store.setSelectedPage("logs");
     store.setSelectedInstance("beta");
     store.toggleExpanded("logs:beta:logs");
-    store.replaceSnapshot({
+    store.patchControlSnapshot({
         connectionState: "connected",
         daemonState: "running",
         lastSeq: 2,
@@ -32,7 +32,7 @@ test("TuiAppStore keeps page, instance, and expanded boxes stable across events"
         ready: true,
         status: "ready",
     });
-    store.replaceLogs("beta", [{
+    store.patchControlReadModel({ logsByInstance: { ["beta"]: [{
         at: "2026-07-09T00:00:03.000Z",
         bytes: 8,
         instance: "beta",
@@ -40,7 +40,7 @@ test("TuiAppStore keeps page, instance, and expanded boxes stable across events"
         seq: 3,
         stream: "stdout",
         tail: "payload",
-    }]);
+    }] } });
     store.applyInstanceEvent({
         at: "2026-07-09T00:00:03.000Z",
         instanceName: asInstanceName("beta"),
@@ -83,9 +83,9 @@ test("TuiRenderScheduler batches multiple store updates into one render notifica
 
 test("TuiRenderScheduler redraws visible Overview and Audit context message changes", async () => {
     const store = new TuiAppStore();
-    store.replaceInstances([
+    store.patchControlReadModel({ instances: [
         { enabled: true, mcpEnabled: true, name: "alpha" },
-    ]);
+    ] });
     store.setSelectedInstance("alpha");
     const scheduler = new TuiRenderScheduler(store, 2);
     let renders = 0;
@@ -96,28 +96,30 @@ test("TuiRenderScheduler redraws visible Overview and Audit context message chan
     store.setSelectedPage("overview");
     await delay(10);
     renders = 0;
-    store.replaceOperationalOverview(emptyOverview());
+    store.patchControlReadModel({ operationalOverview: emptyOverview() });
     await delay(10);
     assert.equal(renders, 1);
 
     store.setSelectedPage("audit");
     await delay(10);
     renders = 0;
-    store.replaceContextMessages("alpha", [contextMessage("message-1")]);
+    store.patchControlReadModel({ contextMessagesByInstance: { ["alpha"]: [contextMessage("message-1")] } });
     await delay(10);
     assert.equal(renders, 1);
 
     unsubscribe();
     scheduler.dispose();
-});st("TuiAppStore does not publish an unchanged OAuth approval collection", () => {
+});
+
+test("TuiAppStore does not publish an unchanged OAuth approval collection", () => {
     const store = new TuiAppStore();
     let notifications = 0;
     const unsubscribe = store.subscribe(() => {
         notifications += 1;
     });
 
-    store.replaceOAuthApprovals([]);
-    store.replaceOAuthApprovals([]);
+    store.patchControlReadModel({ oauthApprovals: [] });
+    store.patchControlReadModel({ oauthApprovals: [] });
 
     unsubscribe();
     assert.equal(notifications, 0);
@@ -125,10 +127,10 @@ test("TuiRenderScheduler redraws visible Overview and Audit context message chan
 
 test("TuiRenderScheduler ignores updates outside the visible page and instance", async () => {
     const store = new TuiAppStore();
-    store.replaceInstances([
+    store.patchControlReadModel({ instances: [
         { enabled: true, mcpEnabled: true, name: "alpha" },
         { enabled: true, mcpEnabled: true, name: "beta" },
-    ]);
+    ] });
     store.setSelectedPage("help");
     store.setSelectedInstance("alpha");
     const scheduler = new TuiRenderScheduler(store, 2);
@@ -137,7 +139,7 @@ test("TuiRenderScheduler ignores updates outside the visible page and instance",
         renderCount += 1;
     });
 
-    store.replaceToolCalls("alpha", [toolCall("alpha-help")]);
+    store.patchControlReadModel({ toolCallsByInstance: { ["alpha"]: [toolCall("alpha-help")] } });
     await delay(10);
     assert.equal(renderCount, 0);
 
@@ -145,11 +147,11 @@ test("TuiRenderScheduler ignores updates outside the visible page and instance",
     await delay(10);
     renderCount = 0;
 
-    store.replaceToolCalls("beta", [toolCall("beta-audit")]);
+    store.patchControlReadModel({ toolCallsByInstance: { ["beta"]: [toolCall("beta-audit")] } });
     await delay(10);
     assert.equal(renderCount, 0);
 
-    store.replaceToolCalls("alpha", [toolCall("alpha-audit")]);
+    store.patchControlReadModel({ toolCallsByInstance: { ["alpha"]: [toolCall("alpha-audit")] } });
     await delay(10);
     assert.equal(renderCount, 1);
 
@@ -159,30 +161,30 @@ test("TuiRenderScheduler ignores updates outside the visible page and instance",
 
 test("Audit page creates expensive input and output detail only for expanded records", () => {
     const store = new TuiAppStore();
-    store.replaceInstances([
+    store.patchControlReadModel({ instances: [
         { enabled: true, mcpEnabled: true, name: "alpha" },
-    ]);
+    ] });
     store.setSelectedInstance("alpha");
     store.setSelectedPage("audit");
-    store.replaceToolCalls("alpha", [
+    store.patchControlReadModel({ toolCallsByInstance: { ["alpha"]: [
         {
             ...toolCall("large-output"),
             input: { command: "x".repeat(20_000) },
             output: { stdout: "y".repeat(20_000) },
         },
-    ]);
+    ] } });
 
     const contexts = selectMainScreenModel(store.getState()).boxes;
     assert.equal(contexts[0]?.id, "audit-scope:unscoped");
 
-    store.replaceToolCalls("alpha", [
+    store.patchControlReadModel({ toolCallsByInstance: { ["alpha"]: [
         {
             ...toolCall("large-output"),
             ctxId: "ctx-large",
             input: { command: "x".repeat(20_000) },
             output: { stdout: "y".repeat(20_000) },
         },
-    ]);
+    ] } });
     store.pushRoute({
         ctxId: "ctx-large",
         page: "audit",

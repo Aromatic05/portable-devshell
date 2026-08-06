@@ -21,7 +21,7 @@ test("attach operation reports an unavailable selected instance without invoking
 
 test("attach operation reports resolver failures before suspending the TUI", async () => {
     const harness = createHarness();
-    harness.store.replaceInstances([
+    harness.store.patchControlReadModel({ instances: [
         {
             defaultWorkspace: "/workspace/alpha",
             enabled: true,
@@ -29,8 +29,8 @@ test("attach operation reports resolver failures before suspending the TUI", asy
             name: "alpha",
             provider: "docker"
         }
-    ]);
-    harness.store.setConfigView({
+    ] });
+    harness.store.patchControlReadModel({ configView: {
         instances: [
             {
                 container: { containerName: "alpha", mode: "preset" },
@@ -38,8 +38,8 @@ test("attach operation reports resolver failures before suspending the TUI", asy
                 provider: "docker"
             }
         ]
-    } as never);
-    harness.store.replaceSnapshot({
+    } as never });
+    harness.store.patchControlSnapshot({
         connectionState: "disconnected",
         daemonState: "stopped",
         lastSeq: 0,
@@ -62,7 +62,7 @@ test(
     { skip: process.platform === "win32" },
     async () => {
         const harness = createHarness();
-        harness.store.replaceInstances([
+        harness.store.patchControlReadModel({ instances: [
             {
                 defaultWorkspace: process.cwd(),
                 enabled: true,
@@ -70,7 +70,7 @@ test(
                 name: "alpha",
                 provider: "local"
             }
-        ]);
+        ] });
 
         await harness.operations.attachShell("alpha");
 

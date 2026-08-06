@@ -5,6 +5,7 @@ import { PartialFailures } from "../components/PartialFailures.js";
 import { useHashRoute } from "../routing/hashRoute.js";
 import { openTodos, pendingApprovals } from "../selectors/readModel.js";
 import type { WebStore } from "../state/WebStore.js";
+import { webFailures } from "../state/WebState.js";
 import type { ApplicationBusy } from "../session/useWebApplicationSession.js";
 import { Approvals } from "../views/Approvals.js";
 import { Instances } from "../views/Instances.js";
@@ -34,7 +35,7 @@ export function Application({
     const interactionDisabled = busy !== undefined;
     const counts = {
         approvals: pendingApprovals(state),
-        instances: state.instances.length,
+        instances: state.readModel.instances.length,
         todos: openTodos(state),
     };
 
@@ -56,7 +57,7 @@ export function Application({
                     {busy === "logout" ? "Logging out…" : "Log out"}
                 </button>
             </header>
-            <PartialFailures failures={state.partialFailures} />
+            <PartialFailures failures={webFailures(state.readModel)} />
             <div aria-live="polite">
                 {state.notice === undefined ? null : <p className="notice">{state.notice}</p>}
                 {state.error === undefined ? null : <p className="error" role="alert">{state.error}</p>}

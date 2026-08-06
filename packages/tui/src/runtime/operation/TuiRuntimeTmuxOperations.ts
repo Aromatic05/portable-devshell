@@ -1,7 +1,6 @@
 import type { JsonValue } from "@portable-devshell/shared";
 
 import type { TuiClients } from "../client/TuiClientComposition.js";
-import { withTuiRequestTimeout } from "../control/TuiRequestTimeout.js";
 import { TUI_TMUX_INSPECT_MAX_LINES, type TuiTmuxListPane } from "../../view/page/terminal/TuiTmuxPaneTerminalModel.js";
 
 export interface TuiTmuxInspectPane {
@@ -65,10 +64,11 @@ export class TuiRuntimeTmuxOperations {
     }
 
     private async call(instance: string, toolName: string, input: JsonValue): Promise<Record<string, JsonValue>> {
-        const feedback = (await withTuiRequestTimeout(
+        const feedback = (await withRequestTimeout(
             this.options.clients.tool.call(instance, toolName, input),
             this.options.operationTimeoutMs,
-            `tool.call:${toolName}`
+            `tool.call:${toolName}`,
+            "uncertain",
         )) as Record<string, JsonValue>;
         const error = feedback.error as { code?: string; message?: string } | undefined;
         if (error !== undefined && typeof error === "object" && error.code !== undefined) {

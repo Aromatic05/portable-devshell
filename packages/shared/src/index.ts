@@ -1,5 +1,8 @@
 export * from "./client/ControlClientConnection.js";
 export * from "./client/ControlClients.js";
+export * from "./client/ControlCommands.js";
+export * from "./client/ControlClientSession.js";
+export * from "./client/RequestTimeout.js";
 export * from "./client/InstanceEventStream.js";
 export * from "./config/ConfigIssue.js";
 export * from "./config/ConfigModel.js";
@@ -29,6 +32,7 @@ export * from "./error/ErrorFactoryCreate.js";
 export * from "./hint/index.js";
 export * from "./schema/SchemaTool.js";
 export * from "./read-model/ControlReadModel.js";
+export * from "./read-model/ControlRefreshScheduler.js";
 export * from "./transport/ClientConnection.js";
 export * from "./transport/protocol/Channel.js";
 export * from "./transport/protocol/Codec.js";
@@ -41,3 +45,5 @@ export * from "./type/TypeJsonValue.js";
 export * from "./type/TypeProviderKind.js";
 export * from "./type/identity/TypeIdentityInstanceName.js";
 export * from "./type/identity/TypeIdentityWorkspacePath.js";
+
+export * from "./presentation/ControlPresentation.js";

@@ -40,4 +40,3 @@ export * from "./view/TuiRootLayout.js";
 export * from "./runtime/route/TuiRouteLifecycleController.js";
 export * from "./state/overlay/TuiOverlay.js";
 export * from "./state/audit/TuiAuditPresentation.js";
-export * from "./runtime/control/TuiRequestTimeout.js";

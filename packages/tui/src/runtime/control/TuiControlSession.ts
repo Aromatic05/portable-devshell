@@ -1,7 +1,10 @@
 import {
+    ControlCommands,
     ControlReadModel,
-    createError,
-    errorCodes,
+    ControlRefreshScheduler,
+    errorMessage,
+    toControlError,
+    withRequestTimeout,
     type ControlReadModelState,
     type InstanceEvent,
     type InstanceListEntry,
@@ -18,7 +21,6 @@ import type {
     TuiInstanceListEntry,
     TuiLogEntry,
 } from "../../state/reducer/TuiStoreModel.js";
-import { withTuiRequestTimeout } from "./TuiRequestTimeout.js";
 import { selectMainScrollKey } from "../../view/model/TuiViewProjection.js";
 
 export interface TuiControlSessionOptions {
@@ -32,38 +34,63 @@ export interface TuiControlSessionOptions {
 
 export class TuiControlSession {
     readonly #clients: TuiClients;
+    readonly #commands: ControlCommands;
     readonly #model: ControlReadModel;
-    readonly #overviewRefreshIntervalMs: number;
     readonly #readTimeoutMs: number;
+    readonly #refreshScheduler: ControlRefreshScheduler;
     readonly #store: TuiAppStore;
     readonly #appliedPanelFailures = new Set<string>();
-    #oauthRefreshRequest?: Promise<void>;
-    #oauthRefreshTimer?: ReturnType<typeof setInterval>;
-    #overviewPollTimer?: ReturnType<typeof setInterval>;
-    #overviewRefreshRequest?: Promise<void>;
-    #overviewRefreshTimer?: ReturnType<typeof setTimeout>;
+    readonly #offTransportClose: () => void;
     #started = false;
     #generation = 0;
 
     constructor(options: TuiControlSessionOptions = {}) {
         this.#clients = options.clients ?? createControlClients();
-        this.#overviewRefreshIntervalMs = options.overviewRefreshIntervalMs ?? 5_000;
         this.#readTimeoutMs = options.readTimeoutMs ?? 10_000;
         this.#store = options.store ?? new TuiAppStore();
         this.#model = new ControlReadModel({
             clients: this.#clients,
-            onConnectionClosed: () => this.#handleDisconnected(),
             onEvent: (event) => this.#handleInstanceEvent(event),
             requestTimeoutMs: this.#readTimeoutMs,
             retryBaseMs: options.subscriptionRetryBaseMs,
             scheduleDelayMs: 50,
             stableAfterMs: options.subscriptionStableAfterMs,
         });
+        this.#commands = new ControlCommands({
+            clients: this.#clients,
+            model: this.#model,
+            timeoutMs: 30_000,
+        });
+        this.#refreshScheduler = new ControlRefreshScheduler({
+            model: this.#model,
+            onFailure: (kind, error) =>
+                this.#reportRefreshFailure(kind === "oauth" ? "connections" : "overview", error),
+            onSuccess: (kind) =>
+                this.#clearRefreshFailure(kind === "oauth" ? "connections" : "overview"),
+            overviewIntervalMs: options.overviewRefreshIntervalMs,
+            shouldRefreshOAuth: () => {
+                const status = this.#model.state.mcpStatus;
+                return this.#started &&
+                    this.#store.getState().connection.status === "connected" &&
+                    status?.authMode === "oauth2" &&
+                    status.oauthReady === true &&
+                    status.running === true;
+            },
+            shouldRefreshOverview: () =>
+                this.#started &&
+                this.#store.getState().connection.status === "connected" &&
+                this.#store.getState().ui.selectedPage === "overview",
+        });
         this.#model.subscribe(() => this.#syncModel());
+        this.#offTransportClose = this.#clients.onTransportClose(() => this.#handleDisconnected());
     }
 
     get store(): TuiAppStore {
         return this.#store;
+    }
+
+    get commands(): ControlCommands {
+        return this.#commands;
     }
 
     applyAuthoritativeSnapshot(snapshot: InstanceSnapshot): void {
@@ -76,8 +103,7 @@ export class TuiControlSession {
         const generation = ++this.#generation;
         await this.refresh(generation);
         if (this.#current(generation) && this.#store.getState().connection.status === "connected") {
-            this.#startOAuthRefresh();
-            this.#startOverviewPolling();
+            this.#refreshScheduler.start();
         }
     }
 
@@ -85,6 +111,8 @@ export class TuiControlSession {
         this.#generation += 1;
         this.#started = false;
         this.#stopBackgroundRefresh();
+        this.#offTransportClose();
+        this.#commands.reset();
         this.#model.close();
         this.#clients.close();
     }
@@ -93,9 +121,10 @@ export class TuiControlSession {
         if (!this.#started) return;
         const generation = ++this.#generation;
         this.#stopBackgroundRefresh();
+        this.#commands.reset();
         this.#model.reset();
         try {
-            await withTuiRequestTimeout(
+            await withRequestTimeout(
                 this.#clients.reconnect(),
                 this.#readTimeoutMs,
                 "control.reconnect",
@@ -103,8 +132,7 @@ export class TuiControlSession {
             this.#assertCurrent(generation, "Control connection changed while reconnecting.");
             await this.#load(generation);
             this.#assertCurrent(generation, "Control connection changed while refreshing after reconnect.");
-            this.#startOAuthRefresh();
-            this.#startOverviewPolling();
+            this.#refreshScheduler.start();
         } catch (error) {
             if (this.#current(generation)) this.#applyConnectionFailure(error);
             throw error;
@@ -114,18 +142,14 @@ export class TuiControlSession {
     async refreshConfig(generation = this.#generation, signal?: AbortSignal): Promise<void> {
         if (!this.#canRefresh(generation, signal)) return;
         await this.#model.refreshControl();
-        if (this.#canRefresh(generation, signal)) {
-            this.#stopOAuthRefresh();
-            this.#startOAuthRefresh();
-        }
     }
 
     async refreshOverview(generation = this.#generation, signal?: AbortSignal): Promise<void> {
-        if (this.#canRefresh(generation, signal)) await this.#requestOverviewRefresh();
+        if (this.#canRefresh(generation, signal)) await this.#refreshScheduler.refresh("overview");
     }
 
     async refreshOAuth(generation = this.#generation, signal?: AbortSignal): Promise<void> {
-        if (this.#canRefresh(generation, signal)) await this.#requestOAuthRefresh();
+        if (this.#canRefresh(generation, signal)) await this.#refreshScheduler.refresh("oauth");
     }
 
     async refreshAudit(
@@ -203,32 +227,51 @@ export class TuiControlSession {
 
     #syncModel(): void {
         const model = this.#model.state;
-        this.#store.setMcpStatus(model.mcpStatus);
-        this.#store.setConfigView(model.configView);
-        this.#store.setControlRestartRequired(model.configView?.restartControlRequired === true);
-        this.#store.replaceInstances(mergeInstances(model.configView, model.instances));
-        this.#store.replaceOAuthApprovals(model.oauthApprovals);
-        this.#store.replaceOperationalOverview(model.overview);
-        this.#store.replaceArtifactShares(model.artifactShares);
-        this.#store.replaceArtifactTransfers(model.artifactTransfers);
+        const approvalsByInstance: Record<string, typeof model.instanceState[string]["approvals"]> = {};
+        const commentCallsByInstance: Record<string, typeof model.instanceState[string]["commentCalls"]> = {};
+        const contextMessagesByInstance: Record<string, typeof model.instanceState[string]["contextMessages"]> = {};
+        const lastSeqByInstance: Record<string, number> = {};
+        const logsByInstance: Record<string, TuiLogEntry[]> = {};
+        const snapshotsByInstance: Record<string, InstanceSnapshot> = {};
+        const todoByInstance: Record<string, NonNullable<typeof model.instanceState[string]["todo"]>> = {};
+        const toolCallsByInstance: Record<string, typeof model.instanceState[string]["toolCalls"]> = {};
         for (const [name, instance] of Object.entries(model.instanceState)) {
-            if (instance.snapshot !== undefined) this.#store.replaceSnapshot(instance.snapshot);
-            this.#store.replaceLogs(name, instance.logs.map(mapLogEntry));
-            this.#store.replaceApprovals(name, instance.approvals);
-            this.#store.replaceToolCalls(name, instance.toolCalls);
-            this.#store.replaceCommentCalls(name, instance.commentCalls);
-            this.#store.replaceContextMessages(name, instance.contextMessages);
-            if (instance.todo !== undefined) this.#store.replaceTodo(name, instance.todo);
+            approvalsByInstance[name] = instance.approvals;
+            commentCallsByInstance[name] = instance.commentCalls;
+            contextMessagesByInstance[name] = instance.contextMessages;
+            lastSeqByInstance[name] = instance.sequence;
+            logsByInstance[name] = instance.logs.map(mapLogEntry);
+            if (instance.snapshot !== undefined) snapshotsByInstance[name] = instance.snapshot;
+            if (instance.todo !== undefined) todoByInstance[name] = instance.todo;
+            toolCallsByInstance[name] = instance.toolCalls;
         }
+        this.#store.replaceControlReadModel({
+            approvalsByInstance,
+            artifactShares: model.artifactShares,
+            artifactTransfers: model.artifactTransfers,
+            commentCallsByInstance,
+            configView: model.configView,
+            contextMessagesByInstance,
+            instances: mergeInstances(model.configView, model.instances),
+            lastSeqByInstance,
+            logsByInstance,
+            mcpStatus: model.mcpStatus,
+            oauthApprovals: model.oauthApprovals,
+            operationalOverview: model.overview,
+            snapshotsByInstance,
+            todoByInstance,
+            toolCallsByInstance,
+        });
+        this.#store.setControlRestartRequired(model.configView?.restartControlRequired === true);
         this.#syncFailures(model);
     }
 
     #syncFailures(model: Readonly<ControlReadModelState>): void {
         const next = new Map<string, Error[]>();
-        for (const [key, error] of Object.entries(model.failures)) {
-            const panel = tuiFailurePanel(key);
+        for (const failure of Object.values(model.failures)) {
+            const panel = tuiFailurePanel(failure);
             const errors = next.get(panel) ?? [];
-            errors.push(error);
+            errors.push(failure.error);
             next.set(panel, errors);
         }
         for (const panel of this.#appliedPanelFailures) {
@@ -239,7 +282,7 @@ export class TuiControlSession {
             this.#appliedPanelFailures.add(panel);
             this.#store.setPanelError(
                 panel,
-                toPanelError(new Error(errors.map((error) => error.message).join("; "))),
+                toControlError(new Error(errors.map((error) => error.message).join("; "))),
             );
         }
     }
@@ -250,7 +293,7 @@ export class TuiControlSession {
         if (
             this.#store.getState().ui.selectedPage === "overview" &&
             isOverviewRefreshEvent(event.type)
-        ) this.#scheduleOverviewRefresh();
+        ) this.#refreshScheduler.scheduleOverview(75);
         const state = this.#store.getState();
         if (
             event.type === "log.appended" &&
@@ -267,6 +310,7 @@ export class TuiControlSession {
         this.#generation += 1;
         this.#stopBackgroundRefresh();
         this.#store.setConnectionState("disconnected");
+        this.#commands.reset();
         this.#model.reset();
     }
 
@@ -275,100 +319,12 @@ export class TuiControlSession {
         const failure = toFailure(error);
         this.#store.setConnectionState(failure.status, failure.error);
         this.#stopBackgroundRefresh();
+        this.#commands.reset();
         this.#model.reset();
     }
 
-    #startOAuthRefresh(): void {
-        const status = this.#model.state.mcpStatus;
-        if (
-            this.#oauthRefreshTimer !== undefined ||
-            status?.authMode !== "oauth2" ||
-            status.oauthReady !== true ||
-            status.running !== true
-        ) return;
-        this.#oauthRefreshTimer = setInterval(() => {
-            const generation = this.#generation;
-            this.#runBackgroundRefresh(
-                "connections",
-                generation,
-                async () => await this.#requestOAuthRefresh(),
-            );
-        }, 1_000);
-    }
-
-    async #requestOAuthRefresh(): Promise<void> {
-        if (this.#oauthRefreshRequest !== undefined) return await this.#oauthRefreshRequest;
-        const request = this.#model.refreshOAuth().finally(() => {
-            if (this.#oauthRefreshRequest === request) this.#oauthRefreshRequest = undefined;
-        });
-        this.#oauthRefreshRequest = request;
-        return await request;
-    }
-
-    #stopOAuthRefresh(): void {
-        if (this.#oauthRefreshTimer !== undefined) clearInterval(this.#oauthRefreshTimer);
-        this.#oauthRefreshTimer = undefined;
-        this.#oauthRefreshRequest = undefined;
-    }
-
-    #startOverviewPolling(): void {
-        if (this.#overviewPollTimer !== undefined || this.#overviewRefreshIntervalMs <= 0) return;
-        this.#overviewPollTimer = setInterval(() => {
-            if (
-                this.#started &&
-                this.#store.getState().connection.status === "connected" &&
-                this.#store.getState().ui.selectedPage === "overview"
-            ) void this.#refreshVisibleOverview();
-        }, this.#overviewRefreshIntervalMs);
-    }
-
-    #scheduleOverviewRefresh(): void {
-        if (this.#overviewRefreshTimer !== undefined) clearTimeout(this.#overviewRefreshTimer);
-        this.#overviewRefreshTimer = setTimeout(() => {
-            this.#overviewRefreshTimer = undefined;
-            if (this.#started && this.#store.getState().ui.selectedPage === "overview") {
-                void this.#refreshVisibleOverview();
-            }
-        }, 75);
-    }
-
-    async #requestOverviewRefresh(): Promise<void> {
-        if (this.#overviewRefreshRequest !== undefined) return await this.#overviewRefreshRequest;
-        const request = this.#model.refreshOverview().finally(() => {
-            if (this.#overviewRefreshRequest === request) this.#overviewRefreshRequest = undefined;
-        });
-        this.#overviewRefreshRequest = request;
-        return await request;
-    }
-
-    async #refreshVisibleOverview(): Promise<void> {
-        const generation = this.#generation;
-        try {
-            await this.#requestOverviewRefresh();
-            if (this.#current(generation)) this.#clearRefreshFailure("overview");
-        } catch (error) {
-            if (this.#current(generation)) this.#reportRefreshFailure("overview", error);
-        }
-    }
-
     #stopBackgroundRefresh(): void {
-        this.#stopOAuthRefresh();
-        if (this.#overviewPollTimer !== undefined) clearInterval(this.#overviewPollTimer);
-        if (this.#overviewRefreshTimer !== undefined) clearTimeout(this.#overviewRefreshTimer);
-        this.#overviewPollTimer = undefined;
-        this.#overviewRefreshTimer = undefined;
-        this.#overviewRefreshRequest = undefined;
-    }
-
-    #runBackgroundRefresh(
-        page: "audit" | "connections" | "todo",
-        generation: number,
-        refresh: () => Promise<void>,
-    ): void {
-        void refresh().then(
-            () => { if (this.#current(generation)) this.#clearRefreshFailure(page); },
-            (error: unknown) => { if (this.#current(generation)) this.#reportRefreshFailure(page, error); },
-        );
+        this.#refreshScheduler.stop();
     }
 
     #clearRefreshFailure(page: "audit" | "connections" | "overview" | "todo"): void {
@@ -385,7 +341,7 @@ export class TuiControlSession {
         if (this.#started) {
             this.#store.setScreenStatus(
                 page,
-                `${refreshPageLabel(page)} refresh failed: ${readErrorMessage(error)}`,
+                `${refreshPageLabel(page)} refresh failed: ${errorMessage(error)}`,
             );
         }
     }
@@ -403,21 +359,23 @@ export class TuiControlSession {
     }
 }
 
-function tuiFailurePanel(key: string): string {
-    const separator = key.indexOf(":");
-    const kind = separator < 0 ? key : key.slice(0, separator);
-    const instance = separator < 0 ? "-" : key.slice(separator + 1);
-    if (kind === "snapshot") return `instances:${instance}:snapshot`;
-    if (kind === "stream") return `instances:${instance}:subscription`;
-    if (kind === "logs") return `logs:${instance}:logs`;
-    if (kind === "todo") return `todo:${instance}:todo`;
-    if (["approvals", "toolCalls", "commentCalls", "contextMessages"].includes(kind)) {
+function tuiFailurePanel(
+    failure: ControlReadModelState["failures"][string],
+): string {
+    const instance = failure.instance ?? "-";
+    if (failure.key === "snapshot") return `instances:${instance}:snapshot`;
+    if (failure.key === "stream") return `instances:${instance}:subscription`;
+    if (failure.key === "logs") return `logs:${instance}:logs`;
+    if (failure.key === "todo") return `todo:${instance}:todo`;
+    if (["approvals", "toolCalls", "commentCalls", "contextMessages"].includes(failure.key)) {
         return `audit:${instance}:readModels`;
     }
-    if (kind === "overview") return "overview:-:overview";
-    if (kind === "oauthApprovals" || kind === "mcp") return "connections:-:oauth";
-    if (kind === "artifacts") return "instances:-:artifacts";
-    return `instances:-:${kind}`;
+    if (failure.key === "overview") return "overview:-:overview";
+    if (failure.key === "oauthApprovals" || failure.key === "mcp") {
+        return "connections:-:oauth";
+    }
+    if (failure.key === "artifacts") return "instances:-:artifacts";
+    return `instances:-:${failure.key}`;
 }
 
 function mergeInstances(
@@ -513,21 +471,12 @@ function isInstanceHealthEvent(name: string): boolean {
     ].includes(name);
 }
 
-function toPanelError(error: unknown) {
-    const candidate = error as { code?: unknown; message?: unknown; retryable?: unknown } | undefined;
-    return createError({
-        code: typeof candidate?.code === "string" ? candidate.code : errorCodes.targetInvalid,
-        message: typeof candidate?.message === "string" ? candidate.message : String(error),
-        retryable: candidate?.retryable === true,
-    });
-}
-
 function toFailure(error: unknown): {
     error: { code?: string; message?: string };
     status: "disconnected" | "error";
 } {
     const code = readTuiControlErrorCode(error);
-    const message = readErrorMessage(error);
+    const message = errorMessage(error);
     return code === "control.notRunning"
         ? { error: { code, message }, status: "disconnected" }
         : {
@@ -541,13 +490,4 @@ export function readTuiControlErrorCode(error: unknown): string | undefined {
         typeof error.code === "string"
         ? error.code
         : undefined;
-}
-
-function readErrorMessage(error: unknown): string {
-    if (error instanceof Error) return error.message;
-    if (
-        typeof error === "object" && error !== null && "message" in error &&
-        typeof error.message === "string"
-    ) return error.message;
-    return String(error);
 }

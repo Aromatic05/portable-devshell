@@ -26,17 +26,18 @@ export function ToolCalls({
 }) {
     const [filters, setFilters] = useState<Filters>(emptyToolCallFilters);
     const [draft, setDraft] = useState("");
+    const instanceState = state.readModel.instanceState;
     const allCalls = useMemo(
-        () => Object.values(state.toolCalls).flat(),
-        [state.toolCalls],
+        () => Object.values(instanceState).flatMap((value) => value.toolCalls),
+        [instanceState],
     );
     const allCommentCalls = useMemo(
-        () => Object.values(state.commentCalls).flat(),
-        [state.commentCalls],
+        () => Object.values(instanceState).flatMap((value) => value.commentCalls),
+        [instanceState],
     );
     const instances = useMemo(
-        () => state.instances.map((instance) => instance.name).sort(),
-        [state.instances],
+        () => state.readModel.instances.map((instance) => instance.name).sort(),
+        [state.readModel.instances],
     );
     const instance =
         filters.instance === "all" || instances.includes(filters.instance)
@@ -77,7 +78,7 @@ export function ToolCalls({
         ctxId !== undefined &&
         contexts.includes(ctxId);
     const queuedComments = concreteContext
-        ? (state.contextMessages[effectiveFilters.instance] ?? [])
+        ? (instanceState[effectiveFilters.instance]?.contextMessages ?? [])
               .filter(
                   (message) =>
                       message.ctxId === ctxId &&
@@ -218,7 +219,7 @@ export function ToolCalls({
                     {selection.items.map((call) => <ToolCallEntry
                         call={call}
                         key={`${call.instance}-${call.callId}`}
-                        logs={state.logs[call.instance] ?? []}
+                        logs={instanceState[call.instance]?.logs ?? []}
                     />)}
                 </ol>}
     </section>;

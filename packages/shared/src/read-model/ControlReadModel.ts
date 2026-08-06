@@ -15,6 +15,7 @@ import type { ApprovalRequest } from "../dto/tool/DtoToolApproval.js";
 import type { ToolCallRecord } from "../dto/tool/DtoToolCallRecord.js";
 import type { JsonValue } from "../type/TypeJsonValue.js";
 import type { ControlClients, ControlServiceStatus, McpRuntimeStatus } from "../client/ControlClients.js";
+import { withRequestTimeout } from "../client/RequestTimeout.js";
 import type { InstanceEventStreamPort, InstanceStreamMessage } from "../client/InstanceEventStream.js";
 
 export type ControlInstanceReadKey =
@@ -37,11 +38,26 @@ export interface ControlInstanceReadState {
     toolCalls: ToolCallRecord[];
 }
 
+export type ControlGlobalReadKey =
+    | "artifacts"
+    | "config"
+    | "instances"
+    | "mcp"
+    | "oauthApprovals"
+    | "overview";
+
+export interface ControlReadFailure {
+    error: Error;
+    id: string;
+    instance?: string;
+    key: ControlGlobalReadKey | ControlInstanceReadKey | "stream";
+}
+
 export interface ControlReadModelState {
     artifactShares: ArtifactShareResult[];
     artifactTransfers: ArtifactTransferRecord[];
     configView?: Record<string, JsonValue>;
-    failures: Record<string, Error>;
+    failures: Record<string, ControlReadFailure>;
     instances: InstanceListEntry[];
     instanceState: Record<string, ControlInstanceReadState>;
     mcpStatus?: McpRuntimeStatus;
@@ -67,7 +83,6 @@ type InstanceReadValue =
 
 export interface ControlReadModelOptions {
     clients: ControlClients;
-    onConnectionClosed?(error?: Error): void;
     onEvent?(event: InstanceEvent): void;
     requestTimeoutMs?: number;
     retryBaseMs?: number;
@@ -88,7 +103,6 @@ const instanceKeys: readonly ControlInstanceReadKey[] = [
 export class ControlReadModel {
     readonly #clients: ControlClients;
     readonly #listeners = new Set<() => void>();
-    readonly #onConnectionClosed?: (error?: Error) => void;
     readonly #onEvent?: (event: InstanceEvent) => void;
     readonly #requestTimeoutMs: number;
     readonly #retryBaseMs: number;
@@ -108,11 +122,10 @@ export class ControlReadModel {
     readonly #gapStreaks = new Map<string, number>();
     #epoch = 0;
     #loadOptions: ControlReadModelLoadOptions = {};
-    #state = initialState();
+    #state = createInitialControlReadModelState();
 
     constructor(options: ControlReadModelOptions) {
         this.#clients = options.clients;
-        this.#onConnectionClosed = options.onConnectionClosed;
         this.#onEvent = options.onEvent;
         this.#requestTimeoutMs = options.requestTimeoutMs ?? 10_000;
         this.#retryBaseMs = options.retryBaseMs ?? 1_000;
@@ -229,8 +242,12 @@ export class ControlReadModel {
                 "artifact.list",
             );
             if (!this.#valid("artifacts", version, epoch)) return;
-            this.#state.artifactShares = shares;
-            this.#state.artifactTransfers = transfers;
+            this.#state.artifactShares = [...shares].sort(
+                (left, right) => right.expiresAtMs - left.expiresAtMs,
+            );
+            this.#state.artifactTransfers = [...transfers].sort(
+                (left, right) => right.createdAt.localeCompare(left.createdAt),
+            );
             this.#clearFailure("artifacts");
             this.#emit();
         } catch (error) {
@@ -320,7 +337,7 @@ export class ControlReadModel {
         this.#decidedToolApprovals.clear();
         this.#decidedOAuthApprovals.clear();
         this.#closeSubscriptions();
-        this.#state = initialState();
+        this.#state = createInitialControlReadModelState();
         this.#emit();
     }
 
@@ -592,8 +609,6 @@ export class ControlReadModel {
                 this.#closeSubscription(instance, false);
                 if (message.kind === "gap") {
                     await this.#recoverGap(instance, message, fromSeq, epoch);
-                } else if (this.#onConnectionClosed !== undefined) {
-                    this.#onConnectionClosed(message.error);
                 } else {
                     this.#setFailure(
                         this.failureKey(instance, "stream"),
@@ -739,8 +754,15 @@ export class ControlReadModel {
         };
     }
 
-    #setFailure(key: string, error: unknown): void {
-        this.#state.failures[key] = error instanceof Error ? error : new Error(String(error));
+    #setFailure(id: string, error: unknown): void {
+        const separator = id.indexOf(":");
+        const key = (separator < 0 ? id : id.slice(0, separator)) as ControlReadFailure["key"];
+        this.#state.failures[id] = {
+            error: error instanceof Error ? error : new Error(String(error)),
+            id,
+            ...(separator < 0 ? {} : { instance: id.slice(separator + 1) }),
+            key,
+        };
         this.#emit();
     }
 
@@ -767,29 +789,16 @@ export class ControlReadModel {
     }
 
     async #request<T>(request: Promise<T>, label: string): Promise<T> {
-        if (!Number.isFinite(this.#requestTimeoutMs) || this.#requestTimeoutMs <= 0) return await request;
-        let timer: ReturnType<typeof setTimeout> | undefined;
-        try {
-            return await Promise.race([
-                request,
-                new Promise<never>((_resolve, reject) => {
-                    timer = setTimeout(
-                        () => reject(new Error(`${label} timed out after ${this.#requestTimeoutMs}ms.`)),
-                        this.#requestTimeoutMs,
-                    );
-                }),
-            ]);
-        } finally {
-            if (timer !== undefined) clearTimeout(timer);
-        }
+        return await withRequestTimeout(request, this.#requestTimeoutMs, label);
     }
 
     #emit(): void {
+        this.#state = snapshotState(this.#state);
         for (const listener of this.#listeners) listener();
     }
 }
 
-function initialState(): ControlReadModelState {
+export function createInitialControlReadModelState(): ControlReadModelState {
     return {
         artifactShares: [],
         artifactTransfers: [],
@@ -797,6 +806,27 @@ function initialState(): ControlReadModelState {
         instances: [],
         instanceState: {},
         oauthApprovals: [],
+    };
+}
+
+function snapshotState(state: ControlReadModelState): ControlReadModelState {
+    return {
+        ...state,
+        artifactShares: [...state.artifactShares],
+        artifactTransfers: [...state.artifactTransfers],
+        failures: { ...state.failures },
+        instances: [...state.instances],
+        instanceState: Object.fromEntries(
+            Object.entries(state.instanceState).map(([name, value]) => [name, {
+                ...value,
+                approvals: [...value.approvals],
+                commentCalls: [...value.commentCalls],
+                contextMessages: [...value.contextMessages],
+                logs: [...value.logs],
+                toolCalls: [...value.toolCalls],
+            }]),
+        ),
+        oauthApprovals: [...state.oauthApprovals],
     };
 }
 

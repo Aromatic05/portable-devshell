@@ -16,12 +16,12 @@ import {
 
 function createStore(): TuiAppStore {
     const store = new TuiAppStore();
-    store.replaceInstances([
+    store.patchControlReadModel({ instances: [
         { enabled: true, mcpEnabled: true, name: "alpha" },
         { enabled: true, mcpEnabled: true, name: "beta" },
-    ]);
+    ] });
     store.setSelectedInstance("alpha");
-    store.replaceToolCalls("alpha", [
+    store.patchControlReadModel({ toolCallsByInstance: { ["alpha"]: [
         {
             callId: "call-2",
             ctxId: "ctx-a",
@@ -32,7 +32,7 @@ function createStore(): TuiAppStore {
             status: "completed",
             toolName: "bash_run",
         },
-    ]);
+    ] } });
     return store;
 }
 
@@ -56,7 +56,7 @@ test("route stacks are isolated by feature page and instance and restore route v
     store.setScrollOffset(selectMainScrollKey(store.getState()), 11);
 
     store.setSelectedPage("logs");
-    store.replaceLogs("alpha", [
+    store.patchControlReadModel({ logsByInstance: { ["alpha"]: [
         {
             at: "2026-07-31T00:00:01.000Z",
             ctxId: "ctx-a",
@@ -66,7 +66,7 @@ test("route stacks are isolated by feature page and instance and restore route v
             seq: 18,
             stream: "stdout",
         },
-    ]);
+    ] } });
     store.pushRoute({
         ctxId: "ctx-a",
         page: "logs",
@@ -121,7 +121,7 @@ test("route stacks are isolated by feature page and instance and restore route v
 test("resource refresh removes invalid trailing routes instead of retaining a blank detail page", () => {
     const store = createStore();
     store.setSelectedPage("audit");
-    store.replaceToolCalls("alpha", [
+    store.patchControlReadModel({ toolCallsByInstance: { ["alpha"]: [
         {
             callId: "call-1",
             ctxId: "ctx-a",
@@ -132,7 +132,7 @@ test("resource refresh removes invalid trailing routes instead of retaining a bl
             status: "completed",
             toolName: "bash_run",
         },
-    ]);
+    ] } });
     store.pushRoute({
         ctxId: "ctx-a",
         page: "audit",
@@ -140,7 +140,7 @@ test("resource refresh removes invalid trailing routes instead of retaining a bl
         view: "context",
     });
 
-    store.replaceToolCalls("alpha", []);
+    store.patchControlReadModel({ toolCallsByInstance: { ["alpha"]: [] } });
 
     assert.deepEqual(currentTuiRoute(store.getState()), {
         page: "audit",
@@ -151,7 +151,7 @@ test("resource refresh removes invalid trailing routes instead of retaining a bl
 test("footer breadcrumb follows the route stack and excludes overlay state", () => {
     const store = createStore();
     store.setSelectedPage("audit");
-    store.replaceToolCalls("alpha", [
+    store.patchControlReadModel({ toolCallsByInstance: { ["alpha"]: [
         {
             callId: "bash_run",
             inputSummary: "{}",
@@ -161,7 +161,7 @@ test("footer breadcrumb follows the route stack and excludes overlay state", () 
             status: "completed",
             toolName: "bash_run",
         },
-    ]);
+    ] } });
     store.pushRoute({
         page: "audit",
         scope: "unscoped",
@@ -192,7 +192,7 @@ test("footer breadcrumb follows the route stack and excludes overlay state", () 
 
 test("Todo detail breadcrumb uses the task title instead of the selected instance", () => {
     const store = createStore();
-    store.replaceTodo("alpha", {
+    store.patchControlReadModel({ todoByInstance: { ["alpha"]: {
         items: [],
         revision: 1,
         summary: { completed: 0, total: 0 },
@@ -207,7 +207,7 @@ test("Todo detail breadcrumb uses the task title instead of the selected instanc
                 updatedAt: "2026-07-31T00:00:00.000Z",
             },
         ],
-    });
+    } } });
     store.setSelectedPage("todo");
     store.pushRoute({ page: "todo", todoId: "task-1", view: "detail" });
 
@@ -219,7 +219,7 @@ test("Todo detail breadcrumb uses the task title instead of the selected instanc
 
 test("Logs groups one instance by context and Enter opens only the focused context", () => {
     const store = createStore();
-    store.replaceLogs("alpha", [
+    store.patchControlReadModel({ logsByInstance: { ["alpha"]: [
         {
             at: "2026-07-31T00:00:01.000Z",
             ctxId: "ctx-a",
@@ -255,7 +255,7 @@ test("Logs groups one instance by context and Enter opens only the focused conte
             seq: 4,
             stream: "stdout",
         },
-    ]);
+    ] } });
     store.setSelectedPage("logs");
 
     assert.deepEqual(

@@ -14,7 +14,7 @@ function createHarness(options: {
     restartReconnectFailures?: number;
 } = {}) {
     const store = new TuiAppStore();
-    store.replaceInstances([
+    store.patchControlReadModel({ instances: [
         {
             defaultWorkspace: "/workspace/alpha",
             enabled: true,
@@ -22,7 +22,7 @@ function createHarness(options: {
             name: "alpha",
             provider: "local",
         },
-    ]);
+    ] });
     const calls: string[] = [];
     const refreshed: string[] = [];
     let reconnectAttempts = 0;
@@ -134,7 +134,7 @@ function createHarness(options: {
     } as never;
     const session = {
         applyAuthoritativeSnapshot(snapshot: { name: string }) {
-            store.replaceSnapshot(snapshot as never);
+            store.patchControlSnapshot(snapshot as never);
         },
         async reconnect() {
             reconnectAttempts += 1;
@@ -237,7 +237,7 @@ test("reverse instance creation reports committed creation when device code gene
 
 test("failed disable restores a worker that was running before the config update", async () => {
     const harness = createHarness({ failConfigUpdate: true });
-    harness.store.replaceSnapshot({
+    harness.store.patchControlSnapshot({
         connectionState: "connected",
         daemonState: "running",
         lastSeq: 1,

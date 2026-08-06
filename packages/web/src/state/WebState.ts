@@ -1,46 +1,36 @@
-import type {
-    ApprovalRequest,
-    ContextMessageRecord,
-    InstanceListEntry,
-    InstanceLogEntry,
-    OAuthApprovalRequest,
-    OperationalOverview,
-    TodoReadResult,
-    ToolCallRecord,
+import {
+    createInitialControlReadModelState,
+    type ControlReadModelState,
 } from "@portable-devshell/shared/browser";
 
 export type ConnectionState = "connecting" | "online" | "offline";
 
 export interface WebState {
-    approvals: Record<string, ApprovalRequest[]>;
-    commentCalls: Record<string, ToolCallRecord[]>;
     connection: ConnectionState;
-    contextMessages: Record<string, ContextMessageRecord[]>;
     error?: string;
-    instances: InstanceListEntry[];
-    logs: Record<string, InstanceLogEntry[]>;
     notice?: string;
-    oauthApprovals: OAuthApprovalRequest[];
     operations: Record<string, "pending">;
-    overview?: OperationalOverview;
-    partialFailures: Record<string, string>;
-    service?: { instanceCount: number; ok: boolean; pid?: number };
-    todos: Record<string, TodoReadResult>;
-    toolCalls: Record<string, ToolCallRecord[]>;
+    readModel: ControlReadModelState;
 }
 
 export function createInitialWebState(): WebState {
     return {
-        approvals: {},
-        commentCalls: {},
         connection: "connecting",
-        contextMessages: {},
-        instances: [],
-        logs: {},
-        oauthApprovals: [],
         operations: {},
-        partialFailures: {},
-        todos: {},
-        toolCalls: {},
+        readModel: createInitialControlReadModelState(),
     };
+}
+
+export function webFailures(
+    model: Readonly<ControlReadModelState>,
+): Record<string, string> {
+    return Object.fromEntries(Object.values(model.failures).map((failure) => {
+        if (failure.key === "snapshot") {
+            return [`instance:${failure.instance ?? "-"}`, failure.error.message];
+        }
+        if (failure.key === "todo") {
+            return [`todos:${failure.instance ?? "-"}`, failure.error.message];
+        }
+        return [failure.id, failure.error.message];
+    }));
 }
