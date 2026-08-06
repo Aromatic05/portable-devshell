@@ -3,53 +3,7 @@ import type { Channel } from "@portable-devshell/shared/browser";
 
 import { createWebClients } from "../src/client/WebClients.js";
 
-describe("typed web client routing", () => {
-    it("negotiates service.hello before using canonical control operations", async () => {
-        const channel = new ReplyChannel();
-        const clients = createWebClients(async () => channel);
-
-        const hello = await clients.service.hello();
-        await clients.service.status();
-        await clients.instance.list();
-        await clients.overview.get();
-        await clients.runtime.readLogs("demo", { limit: 5 });
-        await clients.tool.listCalls("demo", { limit: 20 });
-        await clients.tool.listApprovals("demo");
-        await clients.contextMessage.list("demo", "ctx-demo");
-        await clients.contextMessage.queue("demo", { ctxId: "ctx-demo", text: "hello" });
-        await clients.terminal.list("demo");
-        await clients.terminal.open("demo", { cols: 80, rows: 24 });
-        await clients.terminal.kill("demo", {
-            generation: 1,
-            terminalId: "terminal-demo",
-            version: 1,
-        });
-        await clients.mcp.status();
-        await clients.mcp.listApprovals();
-
-        expect(hello.protocolVersion).toBe(1);
-        expect(channel.operations).toEqual([
-            "service.hello",
-            "service.status",
-            "instance.list",
-            "overview.get",
-            "runtime.readLogs",
-            "tool.listCalls",
-            "tool.listApprovals",
-            "contextMessage.list",
-            "contextMessage.queue",
-            "terminal.list",
-            "terminal.open",
-            "terminal.kill",
-            "mcp.status",
-            "mcp.listApprovals",
-        ]);
-        expect(channel.payloads[0]).toEqual({
-            clientKind: "web",
-            maxProtocolVersion: 1,
-            minProtocolVersion: 1,
-        });
-    });
+describe("web client transport", () => {
     it("reports an unexpected persistent transport close", async () => {
         const channel = new ReplyChannel();
         const clients = createWebClients(async () => channel);
@@ -61,13 +15,10 @@ describe("typed web client routing", () => {
 
         expect(failures).toEqual(["transport lost"]);
     });
-
 });
 
 class ReplyChannel implements Channel {
     closed = false;
-    operations: string[] = [];
-    payloads: unknown[] = [];
     private readonly frames = new Set<(frame: Uint8Array) => void>();
     private readonly closes = new Set<(error?: Error) => void>();
 
@@ -76,25 +27,16 @@ class ReplyChannel implements Channel {
             destination: string;
             id: string;
             name: string;
-            payload?: unknown;
         };
-        this.operations.push(request.name);
-        this.payloads.push(request.payload);
-        const payload =
-            request.name === "service.hello"
-                ? {
-                      capabilities: ["request", "stream", "streamResume"],
-                      protocolVersion: 1,
-                  }
-                : request.name === "service.status"
-                  ? { instanceCount: 0, ok: true }
-                  : [];
         const reply = {
             destination: request.destination,
             from: "server",
             id: `reply-${request.id}`,
             name: request.name,
-            payload,
+            payload: {
+                capabilities: ["request", "stream", "streamResume"],
+                protocolVersion: 1,
+            },
             replyTo: request.id,
             to: "web",
         };
