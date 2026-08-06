@@ -666,186 +666,101 @@ test("real Ink runtime routes every page and drives approval and text detail scr
     }
 });
 
-test(
-    "real Ink runtime suspends and remounts around an Attach Shell child process",
-    { skip: process.platform === "win32" },
-    async (context) => {
-        const shellDirectory = await createTestTempDirectory("devshell-tui-shell");
-        const shellPath = join(shellDirectory, "shell");
-        await writeFile(shellPath, "#!/bin/sh\nexit 0\n", "utf8");
-        await chmod(shellPath, 0o755);
-        const previousShell = process.env.SHELL;
-        process.env.SHELL = shellPath;
-        context.after(() => {
-            if (previousShell === undefined) {
-                delete process.env.SHELL;
-            } else {
-                process.env.SHELL = previousShell;
-            }
-        });
+test("real Ink runtime routes Open Terminal without suspending the TUI", async () => {
+    const host = createTerminal();
+    const clients = createClients();
+    let detached = 0;
+    const embedded = new TuiTerminalSession({
+        ptyFactory: () => ({
+            kill() { detached += 1; },
+            onData() { return { dispose() {} }; },
+            onExit() { return { dispose() {} }; },
+            resize() {},
+            write() {},
+        }),
+    });
+    const runtime = new TuiRuntime(
+        { stdin: host.stdin, stdout: host.stdout },
+        { clients: clients.value, inkDebug: true, terminal: embedded },
+    );
+    const running = runtime.run();
 
-        const terminal = createTerminal();
-        const clients = createClients();
-        const runtime = new TuiRuntime(
-            { stdin: terminal.stdin, stdout: terminal.stdout },
-            { clients: clients.value, inkDebug: true },
-        );
-        let sessionRefreshes = 0;
-        (
-            runtime.session as unknown as {
-                refreshInstance(instance: string): Promise<void>;
-            }
-        ).refreshInstance = async (instance) => {
-            assert.equal(instance, "alpha");
-            sessionRefreshes += 1;
-        };
-        const running = runtime.run();
-
-        try {
-            await waitUntil(
-                () =>
-                    runtime.store.getState().connection.status === "connected",
-            );
-            clients.setControlState(
-                [
-                    {
-                        defaultWorkspace: process.cwd(),
-                        enabled: true,
-                        mcpEnabled: false,
-                        name: "alpha",
-                        provider: "local",
-                    },
-                ],
-                {
-                    instances: [
-                        {
-                            enabled: true,
-                            name: "alpha",
-                            provider: "local",
-                            workspace: process.cwd(),
-                        },
-                    ],
-                },
-            );
-            runtime.store.patchControlReadModel({ instances: [
-                {
-                    defaultWorkspace: process.cwd(),
+    try {
+        await waitUntil(() => runtime.store.getState().connection.status === "connected");
+        clients.setControlState(
+            [{
+                defaultWorkspace: process.cwd(),
+                enabled: true,
+                mcpEnabled: false,
+                name: "alpha",
+                provider: "local",
+            }],
+            {
+                instances: [{
                     enabled: true,
-                    mcpEnabled: false,
                     name: "alpha",
                     provider: "local",
-                },
-            ] });
-            runtime.store.patchControlSnapshot({
-                connectionState: "connected",
-                daemonState: "running",
-                lastSeq: 1,
-                name: asInstanceName("alpha"),
-                ready: true,
-                status: "ready",
-            });
+                    workspace: process.cwd(),
+                }],
+            },
+        );
+        runtime.store.patchControlReadModel({ instances: [{
+            defaultWorkspace: process.cwd(),
+            enabled: true,
+            mcpEnabled: false,
+            name: "alpha",
+            provider: "local",
+        }] });
+        runtime.store.patchControlSnapshot({
+            connectionState: "connected",
+            daemonState: "running",
+            lastSeq: 1,
+            name: asInstanceName("alpha"),
+            ready: true,
+            status: "ready",
+        });
 
-            await waitUntil(() =>
-                selectMainScreenModel(runtime.store.getState()).boxes.some(
-                    (box) => box.id === "instance:alpha",
-                ),
-            );
-            const titleRegion = buildTuiHitRegions(runtime.store.getState(), {
-                columns: runtime.columns,
-                rows: runtime.rows,
-            }).find(
-                (region) =>
-                    region.target.kind === "boxTitle" &&
-                    region.target.boxId === "instance:alpha",
-            );
-            assert.ok(titleRegion);
-            terminal.write(
-                mouseSequence(0, titleRegion.x, titleRegion.y, "press"),
-            );
-            await waitUntil(
-                () =>
-                    runtime.store.getState().ui.expandedBoxes[
-                        "instances:alpha:instance"
-                    ] === true,
-            );
+        await waitUntil(() =>
+            selectMainScreenModel(runtime.store.getState()).boxes.some(
+                (box) => box.id === "instance:alpha",
+            ),
+        );
+        let instanceBox = selectMainScreenModel(runtime.store.getState()).boxes.find(
+            (box) => box.id === "instance:alpha",
+        );
+        assert.ok(instanceBox?.expandedKey);
+        runtime.store.toggleExpanded(instanceBox.expandedKey);
+        instanceBox = selectMainScreenModel(runtime.store.getState()).boxes.find(
+            (box) => box.id === "instance:alpha",
+        );
+        const attachLine = instanceBox?.expandedLines.find(
+            (line) => line.id?.endsWith(":button:open-terminal") === true,
+        );
+        assert.ok(instanceBox?.expandedKey);
+        assert.ok(attachLine?.id);
+        runtime.store.setMainFocusId(instanceBox.id);
+        runtime.store.setSelectedDetailLine(instanceBox.expandedKey, attachLine.id);
+        runtime.store.setFocusScope("boxDetail");
 
-            const instanceBox = selectMainScreenModel(
-                runtime.store.getState(),
-            ).boxes.find((box) => box.id === "instance:alpha");
-            const attachLine = instanceBox?.expandedLines.find(
-                (line) => line.id?.endsWith(":button:attach-shell") === true,
-            );
-            assert.ok(instanceBox?.expandedKey);
-            assert.ok(attachLine?.id);
-            runtime.store.setScreenStatus("instances", undefined);
-            runtime.store.setMainFocusId(instanceBox.id);
-            runtime.store.setSelectedDetailLine(
-                instanceBox.expandedKey,
-                attachLine.id,
-            );
-            runtime.store.setFocusScope("boxDetail");
-            await runtime.commandDispatcher.dispatch({
-                type: "focus.activate",
-            });
+        const enters = countOccurrences(host.output, "\u001B[?1049h");
+        const exits = countOccurrences(host.output, "\u001B[?1049l");
+        await runtime.commandDispatcher.dispatch({ type: "focus.activate" });
+        await waitUntil(() => runtime.store.getState().ui.selectedPage === "terminal");
+        await waitUntil(() => embedded.getSnapshot().status === "running");
 
-            await waitUntil(
-                () =>
-                    runtime.store.getState().interaction.focusScope ===
-                    "confirm",
-            );
-            const shellConfirm = topTuiOverlay(
-                runtime.store.getState().interaction.overlays,
-            );
-            assert.equal(shellConfirm?.kind, "confirmation");
-            assert.equal(
-                shellConfirm?.kind === "confirmation"
-                    ? shellConfirm.title
-                    : undefined,
-                "UNMANAGED SHELL",
-            );
-            assert.equal(
-                shellConfirm?.kind === "confirmation"
-                    ? shellConfirm.selectedAction
-                    : undefined,
-                "cancel",
-            );
-            terminal.write("\u001B[C");
-            await waitUntil(() => {
-                const overlay = topTuiOverlay(
-                    runtime.store.getState().interaction.overlays,
-                );
-                return (
-                    overlay?.kind === "confirmation" &&
-                    overlay.selectedAction === "confirm"
-                );
-            });
-            terminal.write("\r");
+        assert.equal(runtime.store.getState().interaction.focusScope, "terminal");
+        assert.equal(countOccurrences(host.output, "\u001B[?1049h"), enters);
+        assert.equal(countOccurrences(host.output, "\u001B[?1049l"), exits);
+        assert.equal(detached, 0);
 
-            await waitUntil(() => sessionRefreshes === 1);
-            assert.equal(
-                runtime.store.getState().interaction.screenStatusByPage
-                    .instances,
-                "Shell exited. Status refreshed from control.",
-            );
-            assert.equal(clients.refreshCalls(), 1);
-            assert.equal(
-                countOccurrences(terminal.output, "\u001B[?1049h") >= 2,
-                true,
-            );
-            assert.equal(
-                countOccurrences(terminal.output, "\u001B[?1049l") >= 1,
-                true,
-            );
+        await runtime.stop();
+        await running;
+    } finally {
+        await runtime.stop();
+    }
 
-            terminal.write("\u0004");
-            await running;
-        } finally {
-            await runtime.stop();
-        }
-
-        assert.equal(terminal.rawModes.at(-1), false);
-    },
-);
+    assert.equal(detached, 1);
+});
 
 test("real Ink runtime routes terminal scrollback and mouse without trapping sidebar clicks", async () => {
     const host = createTerminal();

@@ -1706,7 +1706,7 @@ test("expanded instance entries expose only compact lifecycle controls", async (
         (box) => box.id === "instance:alpha",
     );
     const lines = entry?.expandedLines.map((line) => line.text) ?? [];
-    assert.equal(lines.includes("[ Attach Shell ]"), true);
+    assert.equal(lines.includes("[ Open Terminal ]"), true);
     assert.equal(lines.includes("[ Restart ]"), true);
     assert.equal(lines.includes("[ Stop ]"), true);
     assert.equal(lines.includes("[ Delete ]"), true);
@@ -2251,7 +2251,7 @@ test("approval detail Back restores the audit list focus and scroll position", a
     assert.equal(harness.store.getState().ui.mainFocusId, approval.id);
     assert.equal(harness.store.getState().ui.scrollOffsets[key], 2);
 });
-test("Attach Shell is invoked directly from the expanded instance box", async () => {
+test("Open Terminal is invoked directly from the expanded instance box", async () => {
     const harness = createHarness();
     harness.store.patchControlReadModel({ instances: harness.store
             .getState()
@@ -2265,19 +2265,13 @@ test("Attach Shell is invoked directly from the expanded instance box", async ()
     harness.store.setFocusScope("boxDetail");
     harness.store.setSelectedDetailLine(
         instance.expandedKey,
-        "instance:alpha:button:attach-shell",
+        "instance:alpha:button:open-terminal",
     );
     await harness.dispatch({ type: "focus.activate" });
-    const overlay = topTuiOverlay(
-        harness.store.getState().interaction.overlays,
-    );
     assert.equal(
-        overlay?.kind === "confirmation" ? overlay.title : undefined,
-        "UNMANAGED SHELL",
+        topTuiOverlay(harness.store.getState().interaction.overlays),
+        undefined,
     );
-    assert.deepEqual(harness.shellAttaches(), []);
-    await harness.dispatch({ button: "confirm", type: "confirm.focus" });
-    await harness.dispatch({ type: "confirm.accept" });
     assert.deepEqual(harness.shellAttaches(), ["alpha"]);
 });
 async function dispatchResult(
@@ -2557,7 +2551,7 @@ function createHarness(
             name: string;
             source: unknown;
         }>;
-        onAttachShell?: (instance: string) => Promise<void>;
+        onOpenTerminal?: (instance: string) => Promise<void>;
         onOAuthApprovalDecision?: (
             approvalId: string,
             decision: "approve" | "deny",
@@ -2634,8 +2628,8 @@ function createHarness(
         onInstanceEnabledChange: async (instance, enabled) => {
             enabledChanges.push({ enabled, instance });
         },
-        onAttachShell:
-            options.onAttachShell ??
+        onOpenTerminal:
+            options.onOpenTerminal ??
             (async (instance) => {
                 shellAttaches.push(instance);
             }),

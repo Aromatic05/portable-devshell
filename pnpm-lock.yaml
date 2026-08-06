@@ -159,15 +159,9 @@ importers:
       ink:
         specifier: ^5.2.1
         version: 5.2.1(@types/react@18.3.31)(react@18.3.1)
-      node-pty:
-        specifier: 1.2.0-beta.14
-        version: 1.2.0-beta.14
       react:
         specifier: ^18.3.1
         version: 18.3.1
-      string-argv:
-        specifier: ^0.3.2
-        version: 0.3.2
       string-width:
         specifier: ^7.2.0
         version: 7.2.0

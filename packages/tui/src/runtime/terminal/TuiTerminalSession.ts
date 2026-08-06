@@ -1,6 +1,4 @@
-import { spawn } from "node-pty";
-
-import type { TuiAttachShellCommand } from "../attach/TuiAttachShellModel.js";
+import type { TuiTerminalCommand } from "./TuiTerminalModel.js";
 import { TuiTerminalBuffer } from "./TuiTerminalBuffer.js";
 import { TuiTerminalGraphicsParser, type TuiTerminalOutputToken } from "./TuiTerminalGraphicsParser.js";
 import type {
@@ -19,8 +17,7 @@ export class TuiTerminalSession {
     readonly #ptyFactory: TuiTerminalPtyFactory;
     #buffer?: TuiTerminalBuffer;
     #bufferDataSubscription?: TuiTerminalDisposable;
-    #command?: TuiAttachShellCommand;
-    #fallbackCommands: TuiAttachShellCommand[] = [];
+    #command?: TuiTerminalCommand;
     #focused = false;
     #graphicsParser = new TuiTerminalGraphicsParser();
     #outputQueue: Promise<void> = Promise.resolve();
@@ -30,8 +27,8 @@ export class TuiTerminalSession {
     #ptyExitSubscription?: TuiTerminalDisposable;
     #snapshot: TuiTerminalSnapshot = emptySnapshot();
 
-    constructor(options: { ptyFactory?: TuiTerminalPtyFactory } = {}) {
-        this.#ptyFactory = options.ptyFactory ?? defaultPtyFactory;
+    constructor(options: { ptyFactory: TuiTerminalPtyFactory }) {
+        this.#ptyFactory = options.ptyFactory;
     }
 
     dispose(): void {
@@ -98,7 +95,6 @@ export class TuiTerminalSession {
         const rows = clampDimension(options.rows);
         this.#buffer = new TuiTerminalBuffer({ columns, rows });
         this.#command = options.command;
-        this.#fallbackCommands = [...(options.command.fallbackCommands ?? [])];
         this.#replaceSnapshot({
             ...this.#buffer.getSnapshot(),
             instance: options.instance,
@@ -194,7 +190,7 @@ export class TuiTerminalSession {
         }
     }
 
-    #spawn(command: TuiAttachShellCommand, environment: NodeJS.ProcessEnv | undefined, instance: string, generation: number): void {
+    #spawn(command: TuiTerminalCommand, environment: NodeJS.ProcessEnv | undefined, instance: string, generation: number): void {
         const columns = this.#snapshot.columns;
         const rows = this.#snapshot.rows;
         const pty = this.#ptyFactory(command.command, command.args, {
@@ -225,22 +221,6 @@ export class TuiTerminalSession {
                     return;
                 }
                 await this.#writeOutputTokens(finalTokens, generation);
-                const fallback = event.exitCode === this.#command?.fallbackOnExitCode
-                    ? this.#fallbackCommands.shift()
-                    : undefined;
-                if (fallback !== undefined) {
-                    this.#disposeProcess(false);
-                    try {
-                        this.#spawn(fallback, environment, instance, generation);
-                    } catch (error) {
-                        this.#replaceSnapshot({
-                            ...this.#snapshot,
-                            error: readErrorMessage(error),
-                            status: "error"
-                        });
-                    }
-                    return;
-                }
                 this.#replaceSnapshot({
                     ...this.#snapshot,
                     exitCode: event.exitCode,
@@ -309,26 +289,11 @@ export class TuiTerminalSession {
     }
 }
 
-function defaultPtyFactory(command: string, args: readonly string[], options: Parameters<TuiTerminalPtyFactory>[2]): TuiTerminalPty {
-    return spawn(command, [...args], {
-        cols: options.columns,
-        cwd: options.cwd,
-        env: options.environment,
-        name: "xterm-256color",
-        rows: options.rows
-    });
-}
-
 function terminalEnvironment(environment: NodeJS.ProcessEnv | undefined): Record<string, string> {
-    const output: Record<string, string> = {};
-    for (const [key, value] of Object.entries(environment ?? process.env)) {
-        if (value !== undefined) {
-            output[key] = value;
-        }
-    }
-    output.TERM = "xterm-256color";
-    output.COLORTERM ??= "truecolor";
-    return output;
+    return Object.fromEntries(
+        Object.entries(environment ?? process.env)
+            .filter((entry): entry is [string, string] => entry[1] !== undefined)
+    );
 }
 
 function emptySnapshot(columns = 1, rows = 1): TuiTerminalSnapshot {

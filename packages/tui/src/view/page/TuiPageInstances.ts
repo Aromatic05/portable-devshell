@@ -1,6 +1,6 @@
 import type { JsonValue } from "@portable-devshell/shared";
 
-import { isTuiAttachShellSupported } from "../../state/instance/TuiInstanceAttachCapability.js";
+import { isTuiTerminalSupported } from "../../state/instance/TuiInstanceTerminalCapability.js";
 import { buildArtifactActivityView } from "../component/TuiComponentArtifactActivityBox.js";
 import { createDefaultInstanceDraft } from "../../state/editor/TuiEditorInstanceCreateDraft.js";
 import type { BoxModel } from "../component/TuiComponentExpandableBox.js";
@@ -75,7 +75,7 @@ export function buildInstancesPageBoxes(state: TuiAppState): BoxModel[] {
                     ...artifactActivity.detailLines,
                     "",
                     "Actions",
-                    buttonLine("attach-shell", "Attach Shell", !lifecycle.attach),
+                    buttonLine("open-terminal", "Open Terminal", !lifecycle.attach),
                     buttonLine(lifecycle.restart ? "restart" : "start", lifecycle.restart ? "Restart" : "Start", !lifecycle.startOrRestart),
                     buttonLine("stop", "Stop", !lifecycle.stop),
                     buttonLine("delete", "Delete")
@@ -121,7 +121,10 @@ function lifecycleAvailability(
     const restart = !selfManaged && running;
 
     return {
-        attach: enabled && isTuiAttachShellSupported(provider) && !selfManaged && running && !transitional,
+        attach: enabled &&
+            isTuiTerminalSupported(provider) &&
+            (selfManaged ? reverseOnline : running) &&
+            !transitional,
         restart,
         startOrRestart: enabled && !selfManaged && !transitional,
         stop: enabled && (selfManaged ? reverseOnline : running) && !transitional

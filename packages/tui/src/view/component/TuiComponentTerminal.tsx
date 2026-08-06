@@ -43,7 +43,9 @@ export function TuiComponentTerminal(props: TuiComponentTerminalProps) {
     const graphics = snapshot.graphics.count === 0
         ? ""
         : ` · graphics ${snapshot.graphics.count} ${snapshot.graphics.protocols.join("+")}`;
-    const controls = props.focused ? "drag copy · Shift+PgUp/PgDn · Ctrl+] sidebar" : "→/Tab focus · r restart";
+    const controls = props.focused
+        ? "drag copy · Shift+PgUp/PgDn · Ctrl+] sidebar"
+        : "→/Tab focus · r replay · K kill";
     return (
         <Box flexDirection="column" height={props.rows + 1} overflow="hidden">
             <Text bold color={props.focused ? "cyan" : undefined}>

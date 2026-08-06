@@ -36,7 +36,6 @@ import {
 import { TuiRuntimeOperations } from "./TuiRuntimeOperations.js";
 import { TuiRouteDataLoader } from "./route/TuiRouteDataLoader.js";
 import { TuiRouteLifecycleController } from "./route/TuiRouteLifecycleController.js";
-import { TuiAttachShellCommandResolver } from "./attach/TuiAttachShellCommandResolver.js";
 import {
     detectTerminalGraphicsSupport,
     renderTerminalGraphicsFrame,
@@ -51,12 +50,16 @@ import {
     type TuiTerminalImageSupport,
 } from "./terminal/TuiTerminalImageRenderer.js";
 import { TuiTerminalInputRouter } from "./terminal/TuiTerminalInputRouter.js";
+import { TuiControlTerminalPtyFactory } from "./terminal/TuiControlTerminalPty.js";
 import { TuiTerminalSession } from "./terminal/TuiTerminalSession.js";
 import { TuiTmuxPaneTerminalSession } from "./terminal/TuiTmuxPaneTerminalSession.js";
 
 const TERMINAL_ESCAPE_TIMEOUT_MS = 100;
 
 export interface TuiRuntimeOptions {
+    controlToken?: string;
+    controlUrl?: string;
+    environment?: NodeJS.ProcessEnv;
     stdin?: ReadStream;
     stdout?: WriteStream;
     xdgRuntimeDir?: string;
@@ -89,8 +92,7 @@ export class TuiRuntime {
     readonly #terminalGraphicsSupport: TuiTerminalGraphicsSupport;
     readonly #terminalImageSupport: TuiTerminalImageSupport;
     readonly #terminalInputRouter = new TuiTerminalInputRouter();
-    #attachResume?: () => void;
-    #attachWait?: Promise<void>;
+    readonly #controlTerminalPty?: TuiControlTerminalPtyFactory;
     #cursorBlinkTimer?: ReturnType<typeof setInterval>;
     #ink?: InkInstance;
     #inputStarted = false;
@@ -125,7 +127,6 @@ export class TuiRuntime {
         this.#alternateScreen = new AlternateScreen(this.#stdout);
         this.store = new TuiAppStore();
         this.scheduler = new TuiRenderScheduler(this.store);
-        this.terminal = dependencies.terminal ?? new TuiTerminalSession();
         this.focusManager = new TuiFocusManager(this.store, {
             boxIdForLine: (lineId) =>
                 selectMainScreenModel(this.store.getState()).boxes.find((box) =>
@@ -155,17 +156,26 @@ export class TuiRuntime {
         const clients =
             dependencies.clients ??
             createTuiClients({
+                ...(options.controlToken === undefined ? {} : { controlToken: options.controlToken }),
+                ...(options.controlUrl === undefined ? {} : { controlUrl: options.controlUrl }),
+                ...(options.environment === undefined ? {} : { environment: options.environment }),
                 xdgRuntimeDir: options.xdgRuntimeDir,
             });
+        if (dependencies.terminal === undefined) {
+            this.#controlTerminalPty = new TuiControlTerminalPtyFactory({
+                client: clients.terminal,
+            });
+            this.terminal = new TuiTerminalSession({
+                ptyFactory: this.#controlTerminalPty.create(),
+            });
+        } else {
+            this.terminal = dependencies.terminal;
+        }
         this.session = new TuiControlSession({
             clients,
             store: this.store,
         });
         this.#operations = new TuiRuntimeOperations({
-            attachHooks: {
-                resume: () => this.#resumeAfterAttach(),
-                suspend: () => this.#suspendForAttach(),
-            },
             clients,
             session: this.session,
             store: this.store,
@@ -213,8 +223,23 @@ export class TuiRuntime {
                     text,
                 );
             },
-            onAttachShell: async (instance) => {
-                await this.#operations.attachShell(instance);
+            onOpenTerminal: async (instance) => {
+                this.store.setSelectedInstance(instance);
+                this.store.setSelectedPage("terminal");
+                this.store.setFocusScope("terminal");
+                await this.openTerminal(
+                    instance,
+                    this.#terminalColumns,
+                    this.#terminalRows,
+                );
+            },
+            onTerminalKill: async (instance) => {
+                const killed = await this.#controlTerminalPty?.kill(instance);
+                if (killed === undefined) {
+                    throw new Error(
+                        `No running persistent terminal is available for ${instance}.`,
+                    );
+                }
             },
             onControlRestart: async () => {
                 await this.#operations.restartControl();
@@ -320,16 +345,11 @@ export class TuiRuntime {
         while (!this.#stopped) {
             const ink = this.#ink;
             if (ink === undefined) {
-                await this.#attachWait;
-                continue;
+                break;
             }
             await ink.waitUntilExit();
             if (this.#stopped) {
                 break;
-            }
-            if (this.#attachWait !== undefined) {
-                await this.#attachWait;
-                continue;
             }
             break;
         }
@@ -399,17 +419,10 @@ export class TuiRuntime {
         }
 
         try {
-            const command = new TuiAttachShellCommandResolver().resolve({
-                configView: this.store.getState().configView,
-                environment: process.env,
-                instance: entry,
-                snapshot: this.store.getState().snapshotsByInstance[instance],
-            });
             this.#terminalInstance = instance;
             await this.terminal.start({
                 columns: this.#terminalColumns,
-                command,
-                environment: process.env,
+                command: { args: [], command: instance },
                 instance,
                 rows: this.#terminalRows,
             });
@@ -967,29 +980,7 @@ export class TuiRuntime {
         await this.commandDispatcher.dispatch({ type: "focus.activate" });
     }
 
-    #suspendForAttach(): void {
-        if (this.#attachWait !== undefined) {
-            return;
-        }
-        this.#attachWait = new Promise<void>((resolve) => {
-            this.#attachResume = resolve;
-        });
-        this.#stopInput();
-        this.#mouseBuffer = "";
-        this.#ink?.unmount();
-        this.#ink = undefined;
-        this.#alternateScreen.exit();
-    }
 
-    #resumeAfterAttach(): void {
-        this.#alternateScreen.enter();
-        this.#mountInk();
-        this.#startInput();
-        const resume = this.#attachResume;
-        this.#attachResume = undefined;
-        this.#attachWait = undefined;
-        resume?.();
-    }
 }
 
 function readErrorMessage(error: unknown): string {

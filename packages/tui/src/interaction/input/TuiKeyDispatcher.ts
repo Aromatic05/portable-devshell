@@ -286,6 +286,9 @@ export class TuiKeyDispatcher {
         if (press.input === "r" || press.input === "R") {
             return [{ type: "page.reload" }];
         }
+        if (press.input === "K") {
+            return [{ type: "terminal.requestKill" }];
+        }
         return [];
     }
 }

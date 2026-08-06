@@ -156,8 +156,11 @@ export class TuiCommandDispatcherDetail {
             if (button !== undefined && state.ui.selectedPage === "instances") {
                 return await this.#activateInstanceButton(boxId, button);
             }
-            if (actionId?.startsWith("instance.attachShell:")) {
-                return await this.#openAttachShellConfirm(actionId.slice("instance.attachShell:".length));
+            if (actionId?.startsWith("instance.openTerminal:")) {
+                return await this.#dispatch({
+                    instance: actionId.slice("instance.openTerminal:".length),
+                    type: "instance.openTerminal"
+                });
             }
             if (selectedLine !== undefined && selectedLine.text.length > 60) {
                 return await this.#dispatch({
@@ -198,8 +201,8 @@ export class TuiCommandDispatcherDetail {
             });
         }
         switch (button) {
-            case "attach-shell":
-                return await this.#openAttachShellConfirm(instance);
+            case "open-terminal":
+                return await this.#dispatch({ instance, type: "instance.openTerminal" });
             case "start":
                 return await this.#dispatch({ instance, type: "instance.start" });
             case "restart":
@@ -229,16 +232,6 @@ export class TuiCommandDispatcherDetail {
             default:
                 return false;
         }
-    }
-
-    async #openAttachShellConfirm(instance: string): Promise<boolean> {
-        return this.#dispatch({
-            body: "This shell is not audited and is not controlled by devshell.",
-            confirmIntent: { instance, type: "instance.attachShell" },
-            confirmLabel: "Attach Shell",
-            title: "UNMANAGED SHELL",
-            type: "overlay.openConfirm"
-        });
     }
 
 

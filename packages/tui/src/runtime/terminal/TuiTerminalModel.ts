@@ -1,4 +1,8 @@
-import type { TuiAttachShellCommand } from "../attach/TuiAttachShellModel.js";
+export interface TuiTerminalCommand {
+    args: string[];
+    command: string;
+    cwd?: string;
+}
 
 export interface TuiTerminalDisposable {
     dispose(): void;
@@ -112,7 +116,7 @@ export type TuiTerminalPtyFactory = (
 
 export interface TuiTerminalStartOptions {
     columns: number;
-    command: TuiAttachShellCommand;
+    command: TuiTerminalCommand;
     environment?: NodeJS.ProcessEnv;
     instance: string;
     rows: number;

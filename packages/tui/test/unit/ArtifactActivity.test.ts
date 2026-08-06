@@ -349,7 +349,7 @@ test("TUI ignores an old visible Overview failure after reconnect", async () => 
         onArtifactRevokeShare: async (shareId) => {
             revoked.push(shareId);
         },
-        onAttachShell: async () => undefined,
+        onOpenTerminal: async () => undefined,
         onInstanceAction: async () => undefined,
         onLogsReload: async () => undefined,
         onPageReload: async () => undefined,

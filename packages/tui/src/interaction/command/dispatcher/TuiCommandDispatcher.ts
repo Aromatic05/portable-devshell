@@ -38,7 +38,8 @@ export interface TuiCommandDispatcherOptions {
         action: "refresh" | "restart" | "start" | "stop",
         instance: string
     ): Promise<void>;
-    onAttachShell(instance: string): Promise<void>;
+    onOpenTerminal(instance: string): Promise<void>;
+    onTerminalKill?(instance: string): Promise<void>;
     mainViewportRows(): number;
     onLogsReload(): Promise<void>;
     onPageReload(page: TuiPageId, instance: string | undefined): Promise<void>;
@@ -169,8 +170,29 @@ export class TuiCommandDispatcher {
                     intent.enabled
                 );
                 return true;
-            case "instance.attachShell":
-                await this.#options.onAttachShell(intent.instance);
+            case "instance.openTerminal":
+                await this.#options.onOpenTerminal(intent.instance);
+                return true;
+            case "terminal.requestKill": {
+                const state = this.#store.getState();
+                const instance = state.ui.selectedInstance;
+                if (state.ui.selectedPage !== "terminal" || instance === undefined) {
+                    return false;
+                }
+                return await this.dispatch({
+                    body: `Kill the persistent terminal for ${instance}? This terminates the remote PTY and cannot be undone.`,
+                    confirmIntent: { instance, type: "terminal.kill" },
+                    confirmLabel: "Kill Terminal",
+                    title: "Confirm Terminal Kill",
+                    type: "overlay.openConfirm",
+                });
+            }
+            case "terminal.kill":
+                await (this.#options.onTerminalKill ?? unavailable)(intent.instance);
+                this.#store.setScreenStatus(
+                    "terminal",
+                    `Terminal for ${intent.instance} was killed.`,
+                );
                 return true;
             case "instance.delete":
                 await (this.#options.onInstanceDangerAction ?? unavailable)(

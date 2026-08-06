@@ -1,13 +1,11 @@
 import type { TuiClients } from "./client/TuiClientComposition.js";
 import type { TuiControlSession } from "./control/TuiControlSession.js";
-import { TuiRuntimeAttachOperations } from "./operation/TuiRuntimeAttachOperations.js";
 import { TuiRuntimeControlOperations } from "./operation/TuiRuntimeControlOperations.js";
 import { TuiRuntimeExecutionOperations } from "./operation/TuiRuntimeExecutionOperations.js";
 import { TuiRuntimeTmuxOperations } from "./operation/TuiRuntimeTmuxOperations.js";
 import type { TuiAppStore } from "../state/TuiAppStore.js";
 
 export interface TuiRuntimeOperationsOptions {
-    attachHooks?: { resume(): void; suspend(): void };
     clients: TuiClients;
     operationTimeoutMs?: number;
     reconnectDelayMs?: number;
@@ -16,7 +14,6 @@ export interface TuiRuntimeOperationsOptions {
 }
 
 export class TuiRuntimeOperations {
-    readonly attachShell: TuiRuntimeAttachOperations["attachShell"];
     readonly callTool: TuiRuntimeExecutionOperations["callTool"];
     readonly cancelArtifactTransfer: TuiRuntimeControlOperations["cancelArtifactTransfer"];
     readonly createInstance: TuiRuntimeControlOperations["createInstance"];
@@ -24,6 +21,7 @@ export class TuiRuntimeOperations {
     readonly decideOAuthApproval: TuiRuntimeControlOperations["decideOAuthApproval"];
     readonly deleteInstance: TuiRuntimeControlOperations["deleteInstance"];
     readonly getInstanceCreateSchema: TuiRuntimeControlOperations["getInstanceCreateSchema"];
+    readonly queueContextMessage: TuiRuntimeControlOperations["queueContextMessage"];
     readonly reloadLogs: TuiRuntimeControlOperations["reloadLogs"];
     readonly reloadPage: TuiRuntimeControlOperations["reloadPage"];
     readonly restartControl: TuiRuntimeControlOperations["restartControl"];
@@ -37,11 +35,9 @@ export class TuiRuntimeOperations {
     readonly updateWeb: TuiRuntimeControlOperations["updateWeb"];
     readonly validateConfigDraft: TuiRuntimeControlOperations["validateConfigDraft"];
     readonly validateInstanceCreateDraft: TuiRuntimeControlOperations["validateInstanceCreateDraft"];
-    readonly queueContextMessage: TuiRuntimeControlOperations["queueContextMessage"];
 
     constructor(options: TuiRuntimeOperationsOptions) {
         const timeout = options.operationTimeoutMs ?? 30_000;
-        const attach = new TuiRuntimeAttachOperations(options);
         const control = new TuiRuntimeControlOperations({
             clients: options.clients,
             operationTimeoutMs: timeout,
@@ -57,7 +53,6 @@ export class TuiRuntimeOperations {
             clients: options.clients,
             operationTimeoutMs: timeout,
         });
-        this.attachShell = attach.attachShell.bind(attach);
         this.callTool = execution.callTool.bind(execution);
         this.decideApproval = execution.decideApproval.bind(execution);
         this.runInstanceAction = execution.runInstanceAction.bind(execution);

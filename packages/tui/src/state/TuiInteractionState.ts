@@ -114,7 +114,9 @@ export type TuiUiIntent =
     | { instance: string; type: "instance.restart" }
     | { enabled: boolean; instance: string; type: "instance.setEnabled" }
     | { instance: string; type: "instance.stop" }
-    | { instance: string; type: "instance.attachShell" }
+    | { instance: string; type: "instance.openTerminal" }
+    | { type: "terminal.requestKill" }
+    | { instance: string; type: "terminal.kill" }
     | { instance: string; type: "instance.delete" }
     | { shareId: string; type: "artifact.revokeShare" }
     | { transferId: string; type: "artifact.cancelTransfer" }
