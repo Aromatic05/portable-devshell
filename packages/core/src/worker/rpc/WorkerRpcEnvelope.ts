@@ -17,6 +17,12 @@ export interface WorkerRpcRequestEnvelope {
 
 export type WorkerRpcErrorBody = ControlErrorBody;
 
+export interface WorkerRpcNotificationEnvelope extends Record<string, JsonValue> {
+    type: "notification";
+    method: string;
+    params: JsonValue;
+}
+
 export interface WorkerRpcSuccessEnvelope {
     type: "response";
     id: string;

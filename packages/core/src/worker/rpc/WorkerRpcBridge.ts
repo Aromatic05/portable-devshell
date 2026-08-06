@@ -8,6 +8,7 @@ import type { WorkerRpcOptions } from "../command/WorkerCommandOptions.js";
 import type { WorkerRpcChannel, WorkerRpcConnector } from "./WorkerRpcChannel.js";
 import { WorkerRpcError } from "./WorkerRpcError.js";
 import type {
+    WorkerRpcNotificationEnvelope,
     WorkerRpcRequestEnvelope,
     WorkerRpcResponseEnvelope
 } from "./WorkerRpcEnvelope.js";
@@ -42,7 +43,9 @@ export class WorkerRpcBridge {
     readonly #connector: WorkerRpcConnector;
     readonly #rpcOptions: WorkerRpcOptions;
     readonly #preservePendingOnDisconnect: boolean;
+    readonly #connectedListeners = new Set<() => void>();
     readonly #disconnectListeners = new Set<(error: WorkerRpcError) => void>();
+    readonly #notificationListeners = new Set<(notification: WorkerRpcNotificationEnvelope) => void>();
     readonly #pending = new Map<string, PendingResponse>();
     #channel?: WorkerRpcChannel;
     #connectionGeneration = 0;
@@ -76,10 +79,26 @@ export class WorkerRpcBridge {
         await this.#ensureChannel();
     }
 
+    onConnected(listener: () => void): () => void {
+        this.#connectedListeners.add(listener);
+        return () => {
+            this.#connectedListeners.delete(listener);
+        };
+    }
+
     onDisconnect(listener: (error: WorkerRpcError) => void): () => void {
         this.#disconnectListeners.add(listener);
         return () => {
             this.#disconnectListeners.delete(listener);
+        };
+    }
+
+    onNotification(
+        listener: (notification: WorkerRpcNotificationEnvelope) => void
+    ): () => void {
+        this.#notificationListeners.add(listener);
+        return () => {
+            this.#notificationListeners.delete(listener);
         };
     }
 
@@ -144,6 +163,7 @@ export class WorkerRpcBridge {
             connectAbortController?.abort(normalized);
             throw error;
         }
+        this.#notifyConnected();
         handoff?.resolve(channel);
         connectAbortController?.abort(new Error("Worker RPC connector was replaced by an attached channel."));
     }
@@ -205,6 +225,7 @@ export class WorkerRpcBridge {
                         this.#closeChannel(channel);
                         throw new Error("Worker RPC connection was reset while connecting.");
                     }
+                    this.#notifyConnected();
                     return channel;
                 });
             const promise = Promise.race([connection, handoff])
@@ -238,11 +259,21 @@ export class WorkerRpcBridge {
     }
 
     #handleMessage(channel: WorkerRpcChannel, message: JsonValue): void {
+        if (isWorkerRpcNotificationEnvelope(message)) {
+            for (const listener of [...this.#notificationListeners]) {
+                try {
+                    listener(message);
+                } catch (error) {
+                    console.warn(error instanceof Error ? error : new Error(String(error)));
+                }
+            }
+            return;
+        }
         if (!isWorkerRpcResponseEnvelope(message)) {
             this.#disconnectChannel(
                 channel,
                 this.#createDisconnectError(
-                    new Error("Worker RPC channel returned an invalid response payload.")
+                    new Error("Worker RPC channel returned an invalid message payload.")
                 )
             );
             return;
@@ -393,6 +424,17 @@ export class WorkerRpcBridge {
         }
     }
 
+
+    #notifyConnected(): void {
+        for (const listener of [...this.#connectedListeners]) {
+            try {
+                listener();
+            } catch (error) {
+                console.warn(error instanceof Error ? error : new Error(String(error)));
+            }
+        }
+    }
+
     #takeConnectingHandoff(): ConnectingHandoff | undefined {
         const handoff = this.#connectingHandoff;
         this.#connectingHandoff = undefined;
@@ -404,6 +446,20 @@ export class WorkerRpcBridge {
         this.#connectAbortController = undefined;
         return controller;
     }
+}
+
+
+function isWorkerRpcNotificationEnvelope(
+    value: JsonValue
+): value is WorkerRpcNotificationEnvelope {
+    if (typeof value !== "object" || value === null || Array.isArray(value)) {
+        return false;
+    }
+    const candidate = value as Record<string, JsonValue>;
+    return candidate.type === "notification" &&
+        typeof candidate.method === "string" &&
+        candidate.method.length > 0 &&
+        Object.prototype.hasOwnProperty.call(candidate, "params");
 }
 
 function isWorkerRpcResponseEnvelope(value: JsonValue): value is WorkerRpcResponseFrame {

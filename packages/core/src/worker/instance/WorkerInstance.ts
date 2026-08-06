@@ -38,6 +38,15 @@ import type { WorkerRpcChannel } from "../rpc/WorkerRpcChannel.js";
 import type { WorkerToolCatalog } from "../tool/WorkerToolCatalog.js";
 import type { WorkerToolInvoker } from "../tool/WorkerToolInvoker.js";
 import type { WorkerToolCallScheduler } from "../tool/WorkerToolCallScheduler.js";
+import type {
+    WorkerTerminalAttachResult,
+    WorkerTerminalClient,
+    WorkerTerminalDescriptor,
+    WorkerTerminalIdentity,
+    WorkerTerminalNotification,
+    WorkerTerminalOpenInput
+} from "../terminal/WorkerTerminalClient.js";
+import type { WorkerRpcError } from "../rpc/WorkerRpcError.js";
 import type { AuditToolCallHistory } from "../../audit/tool/AuditToolCallHistory.js";
 import type { InstanceStateMachine } from "../../instance/state/InstanceStateMachine.js";
 import type { InstanceSnapshot } from "../../instance/state/InstanceStateSnapshot.js";
@@ -62,6 +71,7 @@ interface WorkerInstanceDependencies {
     protocolClient: WorkerProtocolClient;
     rpcBridge: WorkerRpcBridge;
     stateMachine: InstanceStateMachine;
+    terminalClient: WorkerTerminalClient;
     toolCallAssociationProvider?: (context: ToolCallContext) => ToolCallAssociation | undefined;
     toolCallHistory: AuditToolCallHistory;
     toolCallScheduler: WorkerToolCallScheduler;
@@ -77,6 +87,7 @@ export class WorkerInstance {
     readonly #connection: WorkerInstanceConnection;
     readonly #lifecycle: WorkerInstanceLifecycle;
     readonly #state: WorkerInstanceState;
+    readonly #terminalClient: WorkerTerminalClient;
     readonly #tool: WorkerInstanceTool;
 
     constructor(dependencies: WorkerInstanceDependencies) {
@@ -97,6 +108,7 @@ export class WorkerInstance {
             rpcBridge: dependencies.rpcBridge,
             snapshot: () => this.snapshot()
         });
+        this.#terminalClient = dependencies.terminalClient;
         this.#lifecycle = new WorkerInstanceLifecycle({
             appendEvent: (type) => this.#state.appendEvent(type),
             applyStateUpdate: (update) => this.#state.apply(update, this.#connection.snapshotReverse()),
@@ -144,6 +156,53 @@ export class WorkerInstance {
         input: { connectedAt?: string; generation: number; transport: ReverseTransport }
     ): Promise<InstanceSnapshot> {
         return await this.#connection.acceptReverseChannel(channel, input);
+    }
+
+
+    async openTerminal(input: WorkerTerminalOpenInput): Promise<WorkerTerminalDescriptor> {
+        return await this.#terminalClient.open(input);
+    }
+
+    async attachTerminal(input: {
+        fromSeq: number;
+        generation: number;
+        terminalId: string;
+    }): Promise<WorkerTerminalAttachResult> {
+        return await this.#terminalClient.attach(input);
+    }
+
+    async writeTerminal(
+        input: WorkerTerminalIdentity & { data: string }
+    ): Promise<WorkerTerminalIdentity & { accepted: boolean }> {
+        return await this.#terminalClient.write(input);
+    }
+
+    async resizeTerminal(
+        input: WorkerTerminalIdentity & { cols: number; rows: number }
+    ): Promise<WorkerTerminalIdentity & { accepted: boolean }> {
+        return await this.#terminalClient.resize(input);
+    }
+
+    async killTerminal(input: WorkerTerminalIdentity): Promise<WorkerTerminalDescriptor> {
+        return await this.#terminalClient.kill(input);
+    }
+
+    async listTerminals(): Promise<WorkerTerminalDescriptor[]> {
+        return await this.#terminalClient.list();
+    }
+
+    onTerminalNotification(
+        listener: (notification: WorkerTerminalNotification) => void
+    ): () => void {
+        return this.#terminalClient.onNotification(listener);
+    }
+
+    onRpcConnected(listener: () => void): () => void {
+        return this.#terminalClient.onConnected(listener);
+    }
+
+    onRpcDisconnected(listener: (error: WorkerRpcError) => void): () => void {
+        return this.#terminalClient.onDisconnected(listener);
     }
 
     async appendControlEvent(type: InstanceEventInput["type"], data?: JsonValue) {

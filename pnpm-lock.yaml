@@ -73,9 +73,15 @@ importers:
       hash-wasm:
         specifier: ^4.12.0
         version: 4.12.0
+      node-pty:
+        specifier: 1.2.0-beta.14
+        version: 1.2.0-beta.14
       smol-toml:
         specifier: 1.7.0
         version: 1.7.0
+      string-argv:
+        specifier: ^0.3.2
+        version: 0.3.2
       tar-stream:
         specifier: ^3.2.0
         version: 3.2.0

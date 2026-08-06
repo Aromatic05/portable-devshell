@@ -1,4 +1,5 @@
 import type { WorkerInstance, WorkerRpcInboundConnector } from "@portable-devshell/core";
+import type { TerminalBackend } from "../terminal/TerminalProcess.js";
 import type { ContextMessageQueueInput, ContextMessageReadResult, ContextMessageRecord } from "@portable-devshell/shared";
 import type {
     ActiveTodoSummary,
@@ -31,6 +32,7 @@ export interface InstanceDescriptor {
     name: string;
     provider: "docker" | "local" | "podman" | "reverse" | "ssh";
     reverseConnector?: WorkerRpcInboundConnector;
+    terminal?: TerminalBackend;
     todo: InstanceTodoPort;
     worker: WorkerInstance;
     workspace?: string;

@@ -7,6 +7,7 @@ mod rpc;
 mod security;
 mod socket;
 mod storage;
+mod terminal;
 #[cfg(test)]
 mod testing;
 mod tools;

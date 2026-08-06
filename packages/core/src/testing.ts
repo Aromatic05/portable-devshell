@@ -49,3 +49,5 @@ export * from "./worker/transport/driver/WorkerTransportDriverLocal.js";
 export * from "./worker/transport/driver/WorkerTransportDriverPodman.js";
 export * from "./worker/transport/driver/WorkerTransportDriverSsh.js";
 export * from "./worker/transport/factory/WorkerTransportFactory.js";
+
+export * from "./worker/terminal/WorkerTerminalClient.js";

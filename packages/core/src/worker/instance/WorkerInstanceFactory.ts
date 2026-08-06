@@ -13,6 +13,7 @@ import { WorkerRpcClient } from "../rpc/WorkerRpcClient.js";
 import { WorkerToolCatalog } from "../tool/WorkerToolCatalog.js";
 import { WorkerToolInvoker } from "../tool/WorkerToolInvoker.js";
 import { WorkerToolCallScheduler } from "../tool/WorkerToolCallScheduler.js";
+import { WorkerTerminalClient } from "../terminal/WorkerTerminalClient.js";
 import { InstancePaths } from "../../instance/InstancePaths.js";
 import { InstanceStateMachine } from "../../instance/state/InstanceStateMachine.js";
 import { WorkerInstance } from "./WorkerInstance.js";
@@ -77,6 +78,7 @@ export class WorkerInstanceFactory {
             }),
             toolCallAssociationProvider: options.toolCallAssociationProvider,
             toolCallHistory: new AuditToolCallHistory(resolved.name, toolCallStore),
+            terminalClient: new WorkerTerminalClient(rpcClient, rpcBridge),
             toolCallScheduler: new WorkerToolCallScheduler(resolved.toolScheduler),
             toolInvoker: new WorkerToolInvoker(rpcClient, catalog)
         });

@@ -25,6 +25,9 @@ import { createRuntimeRouteModule } from "../instance/runtime/RuntimeRouteModule
 import { RuntimeSubscriptionManager } from "../instance/runtime/RuntimeSubscriptionManager.js";
 import { createServiceRouteModule } from "../control/service/ServiceRouteModule.js";
 import { createTodoRouteModule } from "../instance/todo/TodoRouteModule.js";
+import { createTerminalRouteModule } from "../control/terminal/TerminalRouteModule.js";
+import type { TerminalBackend } from "../control/terminal/TerminalProcess.js";
+import { TerminalSessionService } from "../control/terminal/TerminalSessionService.js";
 import { createToolRouteModule } from "../instance/tool/ToolRouteModule.js";
 
 export interface ControlRouteCompositionOptions {
@@ -38,12 +41,15 @@ export interface ControlRouteCompositionOptions {
     restart?: () => Promise<void> | void;
     reverse?: ReverseCredentialService;
     shutdown(): Promise<void> | void;
+    terminalMaxUnackedBytes?: number;
 }
 
 export class ControlRouteComposition {
     readonly #overview: OperationalOverviewPort;
     readonly #options: ControlRouteCompositionOptions;
     readonly #subscriptions = new RuntimeSubscriptionManager();
+    readonly #terminalBackends = new Map<string, TerminalBackend>();
+    readonly #terminals = new TerminalSessionService();
     readonly #unsubscribeInstances: () => void;
     #snapshot: PrefixRouteSnapshot;
 
@@ -69,9 +75,12 @@ export class ControlRouteComposition {
 
     dispose(): void {
         this.#unsubscribeInstances();
+        this.#terminals.close();
     }
 
     #build(): PrefixRouteSnapshot {
+        const descriptors = this.#options.instances.list();
+        const nextTerminalBackends = new Map<string, TerminalBackend>();
         const definitions: PrefixRouteDestinationDefinition[] = [
             {
                 destination: "@control",
@@ -101,7 +110,10 @@ export class ControlRouteComposition {
             }
         ];
 
-        for (const descriptor of this.#options.instances.list()) {
+        for (const descriptor of descriptors) {
+            if (descriptor.terminal !== undefined) {
+                nextTerminalBackends.set(descriptor.name, descriptor.terminal);
+            }
             definitions.push({
                 destination: asInstanceName(descriptor.name),
                 modules: [
@@ -117,9 +129,30 @@ export class ControlRouteComposition {
                     ),
                     ...(descriptor.contextMessages === undefined ? [] : [createContextMessageRouteModule(descriptor.contextMessages)]),
                     createTodoRouteModule(descriptor, this.#subscriptions),
-                    createToolRouteModule(descriptor)
+                    createToolRouteModule(descriptor),
+                    ...(descriptor.terminal === undefined ? [] : [createTerminalRouteModule({
+                        backend: descriptor.terminal,
+                        instance: descriptor.name,
+                        ...(this.#options.terminalMaxUnackedBytes === undefined
+                            ? {}
+                            : { maxUnackedBytes: this.#options.terminalMaxUnackedBytes }),
+                        sessions: this.#terminals
+                    })])
                 ]
             });
+        }
+
+        for (const [name, backend] of this.#terminalBackends) {
+            if (nextTerminalBackends.get(name) === backend) continue;
+            void this.#terminals.closeInstance(name).catch((error: unknown) => {
+                console.warn(
+                    error instanceof Error ? error : new Error(String(error)),
+                );
+            });
+        }
+        this.#terminalBackends.clear();
+        for (const [name, backend] of nextTerminalBackends) {
+            this.#terminalBackends.set(name, backend);
         }
 
         return PrefixRoute.snapshot(definitions);

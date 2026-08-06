@@ -165,6 +165,7 @@ impl ReverseConnector {
         let (mut socket, _) = connect(request)
             .map_err(|error| format!("failed to connect reverse websocket: {error}"))?;
         set_websocket_read_timeout(&mut socket, Some(Duration::from_millis(50)))?;
+        self.router.clear_notifications()?;
         append_log(
             &self.paths,
             &format!("reverse connection established transport=wss generation={generation}"),
@@ -215,6 +216,11 @@ impl ReverseConnector {
                 return Err(error.to_string());
             }
         }
+        while let Some(frame) = self.router.try_pop_notification()? {
+            socket
+                .send(Message::Binary(frame.into()))
+                .map_err(|error| error.to_string())?;
+        }
         Ok(())
     }
 
@@ -234,6 +240,7 @@ impl ReverseConnector {
             .error_for_status()
             .map_err(|error| format!("reverse SSE rejected: {error}"))?;
 
+        self.router.clear_notifications()?;
         append_log(
             &self.paths,
             &format!("reverse connection established transport=sse generation={generation}"),
@@ -391,18 +398,31 @@ impl SseUploader {
             let mut upstream_seq = 0_u64;
             while thread_running.load(Ordering::SeqCst) && !connector.router.shutdown_requested() {
                 let response = match thread_responses.wait_pop(Duration::from_millis(100)) {
-                    Ok(Some(response)) => response,
-                    Ok(None) => continue,
+                    Ok(response) => response,
                     Err(error) => {
                         set_upload_error(&upload_error, error);
                         return;
                     }
                 };
+                let frame = if let Some(response) = &response {
+                    response.frame.clone()
+                } else {
+                    match connector.router.try_pop_notification() {
+                        Ok(Some(frame)) => frame,
+                        Ok(None) => continue,
+                        Err(error) => {
+                            set_upload_error(&upload_error, error);
+                            return;
+                        }
+                    }
+                };
                 upstream_seq = upstream_seq.saturating_add(1);
                 if let Err(error) =
-                    connector.post_upstream(&client, generation, upstream_seq, &response.frame)
+                    connector.post_upstream(&client, generation, upstream_seq, &frame)
                 {
-                    let _ = thread_responses.push_front(response);
+                    if let Some(response) = response {
+                        let _ = thread_responses.push_front(response);
+                    }
                     set_upload_error(&upload_error, error);
                     return;
                 }

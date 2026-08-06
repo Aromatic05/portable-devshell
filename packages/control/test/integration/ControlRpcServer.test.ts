@@ -4,6 +4,7 @@ import { join } from "node:path";
 import test from "node:test";
 
 import type { WorkerCommandInteractiveSession, WorkerInstance } from "@portable-devshell/core/testing";
+import type { TerminalProcess, TerminalProcessExit } from "../../src/control/terminal/TerminalProcess.ts";
 import {
     asInstanceName,
     type ActiveTodoSummary,
@@ -263,6 +264,183 @@ test("interactive runtime receives stream input while the root handler is still 
     );
 });
 
+test("terminal RPC streams real session input, resize, detach, and sequence resume", async (t) => {
+    const directory = await createTestTempDirectory("terminal-rpc");
+    const socketPath = createTestIpcPath("terminal-rpc", directory);
+    const process = new FakeTerminalProcess();
+    const descriptor = createTestInstanceDescriptor(
+        new FakeWorker("alpha") as unknown as WorkerInstance,
+        {
+            name: "alpha",
+            terminal: { open: async () => process },
+        },
+    );
+    const routes = new ControlRouteComposition({
+        instances: new InstanceRegistry([descriptor]),
+        shutdown() {},
+    });
+    const server = new ControlSocketServer({ routes, socketPath });
+    await server.start();
+    t.after(async () => {
+        await server.stop().catch(() => undefined);
+        routes.dispose();
+        await rm(directory, { force: true, recursive: true });
+    });
+
+    const client = createClient(socketPath, "tui");
+    const opened = await client.request<{ generation: number; terminalId: string }>(
+        asInstanceName("alpha"),
+        "terminal",
+        "open",
+        { cols: 80, rows: 24 },
+    );
+    process.emit("before-attach");
+
+    const attached = await client.openStream(
+        asInstanceName("alpha"),
+        "terminal",
+        "attach",
+        { fromSeq: 0, generation: opened.generation, terminalId: opened.terminalId },
+    );
+    t.after(() => attached.stream.close());
+    assert.equal(
+        ((attached.acknowledgement.payload as { session: { terminalId: string } }).session).terminalId,
+        opened.terminalId,
+    );
+    const replay = await attached.stream.nextEvent();
+    assert.equal(replay.name, "terminal.output");
+    assert.deepEqual(replay.payload, { data: "before-attach", seq: 1 });
+
+    await attached.stream.send("input", {
+        clientSeq: 1,
+        data: "printf ok\r",
+        generation: opened.generation,
+        terminalId: opened.terminalId,
+        version: 1,
+    });
+    const inputAccepted = await attached.stream.nextEvent();
+    assert.equal(inputAccepted.name, "terminal.inputAccepted");
+    assert.deepEqual(inputAccepted.payload, {
+        clientSeq: 1,
+        generation: opened.generation,
+        requestId: (inputAccepted.payload as { requestId: string }).requestId,
+        terminalId: opened.terminalId,
+        version: 1,
+    });
+
+    await attached.stream.send("resize", {
+        clientSeq: 2,
+        cols: 120,
+        generation: opened.generation,
+        rows: 40,
+        terminalId: opened.terminalId,
+        version: 1,
+    });
+    const resized = await attached.stream.nextEvent();
+    assert.equal(resized.name, "terminal.resized");
+    assert.deepEqual(resized.payload, {
+        clientSeq: 2,
+        generation: opened.generation,
+        requestId: (resized.payload as { requestId: string }).requestId,
+        terminalId: opened.terminalId,
+        version: 2,
+    });
+    assert.deepEqual(process.inputs, ["printf ok\r"]);
+    assert.deepEqual(process.resizes, [{ cols: 120, rows: 40 }]);
+
+    process.emit("live");
+    assert.deepEqual((await attached.stream.nextEvent()).payload, { data: "live", seq: 2 });
+    process.exit({ exitCode: 0, signal: 0 });
+    await attached.stream.send("ack", {
+        generation: opened.generation,
+        terminalId: opened.terminalId,
+        throughSeq: 2,
+        version: 2,
+    });
+    attached.stream.close();
+    process.emit("detached");
+    assert.equal(process.killed, false);
+
+    const resumed = await client.openStream(
+        asInstanceName("alpha"),
+        "terminal",
+        "attach",
+        { fromSeq: 2, generation: opened.generation, terminalId: opened.terminalId },
+    );
+    t.after(() => resumed.stream.close());
+    assert.deepEqual((await resumed.stream.nextEvent()).payload, { data: "detached", seq: 3 });
+
+    await client.request(
+        asInstanceName("alpha"),
+        "terminal",
+        "kill",
+        {
+            generation: opened.generation,
+            terminalId: opened.terminalId,
+            version: 2,
+        },
+    );
+    assert.equal(process.killed, true);
+});
+
+test("terminal stream cancels a slow attachment at the unacknowledged window without killing the PTY", async (t) => {
+    const directory = await createTestTempDirectory("terminal-window");
+    const socketPath = createTestIpcPath("terminal-window", directory);
+    const process = new FakeTerminalProcess();
+    const descriptor = createTestInstanceDescriptor(
+        new FakeWorker("alpha") as unknown as WorkerInstance,
+        { name: "alpha", terminal: { open: async () => process } },
+    );
+    const routes = new ControlRouteComposition({
+        instances: new InstanceRegistry([descriptor]),
+        shutdown() {},
+        terminalMaxUnackedBytes: 8,
+    });
+    const server = new ControlSocketServer({ routes, socketPath });
+    await server.start();
+    t.after(async () => {
+        await server.stop().catch(() => undefined);
+        routes.dispose();
+        await rm(directory, { force: true, recursive: true });
+    });
+
+    const client = createClient(socketPath, "tui");
+    const opened = await client.request<{ generation: number; terminalId: string }>(
+        asInstanceName("alpha"),
+        "terminal",
+        "open",
+        { cols: 80, rows: 24 },
+    );
+    const attached = await client.openStream(
+        asInstanceName("alpha"),
+        "terminal",
+        "attach",
+        { fromSeq: 0, generation: opened.generation, terminalId: opened.terminalId },
+    );
+    process.emit("12345");
+    process.emit("67890");
+
+    let cancelled = false;
+    for (let index = 0; index < 4 && !cancelled; index += 1) {
+        const event = await attached.stream.nextEvent();
+        if (event.name === "stream.cancelled") {
+            cancelled = true;
+            assert.equal(event.error?.code, "stream.gap");
+        }
+    }
+    assert.equal(cancelled, true);
+    assert.equal(process.killed, false);
+
+    const resumed = await client.openStream(
+        asInstanceName("alpha"),
+        "terminal",
+        "attach",
+        { fromSeq: 0, generation: opened.generation, terminalId: opened.terminalId },
+    );
+    assert.deepEqual((await resumed.stream.nextEvent()).payload, { data: "12345", seq: 1 });
+    resumed.stream.close();
+});
+
 test("service.shutdown replies before invoking the shutdown action", async (t) => {
     const directory = await createTestTempDirectory("shutdown-reply");
     const socketPath = createTestIpcPath("control-rpc", directory);
@@ -339,6 +517,44 @@ async function request(
 ): Promise<ClientEvent> {
     const [module, operation] = name.split(".");
     return await createClient(socketPath, peer).requestEvent(destination, module!, operation!, payload);
+}
+
+class FakeTerminalProcess implements TerminalProcess {
+    readonly inputs: string[] = [];
+    readonly resizes: Array<{ cols: number; rows: number }> = [];
+    killed = false;
+    readonly #data = new Set<(data: string) => void>();
+    readonly #exit = new Set<(exit: TerminalProcessExit) => void>();
+
+    emit(data: string): void {
+        for (const listener of [...this.#data]) listener(data);
+    }
+
+    exit(exit: TerminalProcessExit): void {
+        for (const listener of [...this.#exit]) listener(exit);
+    }
+
+    kill(): void {
+        this.killed = true;
+    }
+
+    onData(listener: (data: string) => void): () => void {
+        this.#data.add(listener);
+        return () => this.#data.delete(listener);
+    }
+
+    onExit(listener: (exit: TerminalProcessExit) => void): () => void {
+        this.#exit.add(listener);
+        return () => this.#exit.delete(listener);
+    }
+
+    resize(cols: number, rows: number): void {
+        this.resizes.push({ cols, rows });
+    }
+
+    write(data: string): void {
+        this.inputs.push(data);
+    }
 }
 
 class FakeWorker {

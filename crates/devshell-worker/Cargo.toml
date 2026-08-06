@@ -36,9 +36,10 @@ uuid = { version = "1.23.0", features = ["v4"] }
 [target.'cfg(unix)'.dependencies]
 cap-primitives = "4.0.2"
 cap-std = "4.0.2"
-nix = { version = "0.30.1", features = ["fs", "process", "signal"] }
+nix = { version = "0.30.1", features = ["fs", "process", "signal", "term"] }
 
 [target.'cfg(windows)'.dependencies]
+portable-pty = "0.9.0"
 windows-sys = { version = "0.61.2", features = [
     "Win32_Foundation",
     "Win32_Security",

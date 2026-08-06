@@ -62,8 +62,9 @@ pub fn handler(config: WorkerConfig, runtime: WorkerRuntimeContext) -> Arc<dyn C
             },
             "capabilities": {
                 "tools": true,
-                "streaming": false,
-                "cancel": true
+                "streaming": true,
+                "cancel": true,
+                "terminalPty": crate::rpc::control::terminal::capabilities()
             }
         }))
     })

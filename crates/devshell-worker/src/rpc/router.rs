@@ -14,6 +14,7 @@ use crate::rpc::error::RpcError;
 use crate::rpc::request::RpcRequest;
 use crate::rpc::response::RpcResponse;
 use crate::security::{SecurityPolicy, build_security_policy};
+use crate::terminal::TerminalManager;
 use crate::tools::artifact::payload::ArtifactPayloadStore;
 use crate::tools::artifact::receive::ArtifactReceiveStore;
 use crate::tools::{ToolCall, ToolCancellation, ToolName, ToolRegistry};
@@ -29,6 +30,7 @@ pub struct RpcRouter {
     tools: Arc<ToolRegistry>,
     policy: Arc<dyn SecurityPolicy>,
     shutdown_requested: Arc<AtomicBool>,
+    terminals: TerminalManager,
 }
 
 impl RpcRouter {
@@ -43,6 +45,7 @@ impl RpcRouter {
         let active_tool_calls = Arc::new(ActiveToolCallRegistry::new());
         let shutdown_requested = Arc::new(AtomicBool::new(false));
         let policy = build_security_policy(runtime.security_mode.clone());
+        let terminals = TerminalManager::new(PathBuf::from(&runtime.workspace));
         let mut control_handlers = HashMap::new();
         register_control_handlers(
             &mut control_handlers,
@@ -55,6 +58,7 @@ impl RpcRouter {
             Arc::clone(&policy),
             payloads,
             receives,
+            terminals.clone(),
         );
 
         Self {
@@ -65,6 +69,7 @@ impl RpcRouter {
             tools,
             policy,
             shutdown_requested,
+            terminals,
         }
     }
 
@@ -92,6 +97,13 @@ impl RpcRouter {
 
     pub fn shutdown_requested(&self) -> bool {
         self.shutdown_requested.load(Ordering::SeqCst)
+    }
+    pub fn try_pop_notification(&self) -> Result<Option<Vec<u8>>, String> {
+        self.terminals.try_pop_notification()
+    }
+
+    pub fn clear_notifications(&self) -> Result<(), String> {
+        self.terminals.clear_notifications()
     }
 
     fn dispatch_tool_inner(

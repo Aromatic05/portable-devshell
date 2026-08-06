@@ -71,6 +71,85 @@ class MemoryChannel implements WorkerRpcChannel {
     }
 }
 
+test("WorkerRpcBridge reports current channel activation after pending replay", async () => {
+    const connector = new DeferredConnector();
+    const first = new MemoryChannel();
+    connector.channel = first;
+    const bridge = new WorkerRpcBridge({
+        connector,
+        preservePendingOnDisconnect: true,
+        rpcOptions: { instanceName: "connected-listener" }
+    });
+    const activations: number[] = [];
+    bridge.onConnected(() => activations.push(activations.length + 1));
+
+    await bridge.connect();
+    assert.deepEqual(activations, [1]);
+
+    const second = new MemoryChannel();
+    await bridge.replaceChannel(second);
+    assert.deepEqual(activations, [1, 2]);
+
+    first.publish({ type: "notification", method: "stale", params: {} });
+    assert.deepEqual(activations, [1, 2]);
+});
+
+test("WorkerRpcBridge delivers typed notifications without consuming pending responses", async () => {
+    const connector = new DeferredConnector();
+    const channel = new MemoryChannel();
+    connector.channel = channel;
+    const bridge = new WorkerRpcBridge({
+        connector,
+        preservePendingOnDisconnect: true,
+        rpcOptions: { instanceName: "notification-test" }
+    });
+    const notifications: Array<{ method: string; params: JsonValue }> = [];
+    bridge.onNotification((notification) => notifications.push(notification));
+
+    const pending = bridge.request({
+        id: "pending-request",
+        method: "worker.ping",
+        params: {},
+        type: "request"
+    });
+    await waitUntil(() => channel.sent.length === 1);
+    channel.publish({
+        type: "notification",
+        method: "terminal.output",
+        params: { terminalId: "remote-1", seq: 1, data: "hello" }
+    });
+
+    assert.deepEqual(notifications, [{
+        type: "notification",
+        method: "terminal.output",
+        params: { terminalId: "remote-1", seq: 1, data: "hello" }
+    }]);
+    channel.respond("pending-request", { pong: true });
+    assert.deepEqual(successResult(await pending), { pong: true });
+    assert.equal(bridge.connected, true);
+});
+
+test("WorkerRpcBridge ignores notifications from a superseded reverse channel", async () => {
+    const connector = new DeferredConnector();
+    const first = new MemoryChannel();
+    connector.channel = first;
+    const bridge = new WorkerRpcBridge({
+        connector,
+        preservePendingOnDisconnect: true,
+        rpcOptions: { instanceName: "notification-generation" }
+    });
+    const notifications: string[] = [];
+    bridge.onNotification((notification) => notifications.push(notification.method));
+    await bridge.connect();
+
+    const second = new MemoryChannel();
+    await bridge.replaceChannel(second);
+    first.publish({ type: "notification", method: "terminal.stale", params: {} });
+    second.publish({ type: "notification", method: "terminal.current", params: {} });
+
+    assert.deepEqual(notifications, ["terminal.current"]);
+});
+
 test("reverse RPC bridge replays pending request with the original request id after channel replacement", async () => {
     const connector = new DeferredConnector();
     const first = new MemoryChannel();

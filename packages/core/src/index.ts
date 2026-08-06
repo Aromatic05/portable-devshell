@@ -24,3 +24,14 @@ export type {
 export { WorkerRpcInboundConnector } from "./worker/rpc/WorkerRpcInboundConnector.js";
 export { WorkerTransportFactory } from "./worker/transport/factory/WorkerTransportFactory.js";
 export type { WorkerTransportFactoryOptions } from "./worker/transport/factory/WorkerTransportFactory.js";
+
+export type {
+    WorkerTerminalAttachResult,
+    WorkerTerminalDescriptor,
+    WorkerTerminalIdentity,
+    WorkerTerminalNotification,
+    WorkerTerminalOpenInput,
+    WorkerTerminalOutputFrame
+} from "./worker/terminal/WorkerTerminalClient.js";
+
+export { WorkerRpcError } from "./worker/rpc/WorkerRpcError.js";
