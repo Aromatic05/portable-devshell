@@ -9,6 +9,10 @@ import { TuiCommandDispatcherViewport } from "./TuiCommandDispatcherViewport.js"
 import { selectTuiOverviewInstanceName } from "../../../view/page/TuiOverviewPresentation.js";
 import { topTuiOverlay } from "../../../state/overlay/TuiOverlay.js";
 import { currentTuiRoute } from "../../../state/route/TuiRouteState.js";
+import {
+    isLatestObservedContext,
+    latestObservedContextId,
+} from "../../../state/audit/TuiAuditContextActivity.js";
 
 export interface TuiCommandDispatcherNavigationOptions {
     dispatch?(intent: TuiUiIntent): Promise<boolean>;
@@ -257,8 +261,17 @@ export class TuiCommandDispatcherNavigation {
     async #submitContextConversation(): Promise<boolean> {
         const target = this.#contextConversationTarget();
         if (target === undefined) return false;
+        const state = this.#store.getState();
+        if (!isLatestObservedContext(state, target.instance, target.ctxId)) {
+            const latest = latestObservedContextId(state, target.instance);
+            this.#store.setScreenStatus(
+                "audit",
+                `Comment not queued: this context is no longer the latest observed context${latest === undefined ? "." : `; open ${latest}.`}`,
+            );
+            return false;
+        }
         const text = readContextConversationDraft(
-            this.#store.getState(),
+            state,
             target.instance,
             target.ctxId,
         ).trim();

@@ -13,6 +13,7 @@ import {
     testspaceUrls,
 } from "./testspace/TestspaceConfig.mjs";
 import { runConnectorLoop } from "./testspace/TestspaceConnector.mjs";
+import { runTestspaceCommentSmoke } from "./testspace/TestspaceCommentSmoke.mjs";
 import { runTestspaceWebSmoke } from "./testspace/TestspaceWebSmoke.mjs";
 import {
     createTestspaceProcessEnvironment,
@@ -53,6 +54,9 @@ switch (command) {
         break;
     case "web-smoke":
         await webSmoke();
+        break;
+    case "comment-smoke":
+        await commentSmoke();
         break;
     case "stop":
         await stop();
@@ -176,6 +180,16 @@ async function web(argv) {
 async function webSmoke() {
     const state = await requireRunningState();
     const result = await runTestspaceWebSmoke({ webPort: state.webPort });
+    process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+}
+
+async function commentSmoke() {
+    const state = await requireRunningState();
+    const result = await runTestspaceCommentSmoke({
+        endpoint: testspaceUrls(state).mcp,
+        instance: TESTSPACE_INSTANCE,
+        runtimeDirectory: stateRuntimeDirectory(state),
+    });
     process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
 }
 
@@ -453,6 +467,7 @@ function printCommands(state) {
         "Observe TUI:  pnpm testspace tui",
         "Open Web:     pnpm testspace web",
         "Smoke Web:    pnpm testspace web-smoke",
+        "Smoke Comment: pnpm testspace comment-smoke",
         "Stop/remove:   pnpm testspace stop",
         "",
     ].join("\n"));
@@ -465,6 +480,6 @@ function printUrls(state) {
 
 function usage(message) {
     process.stderr.write(`${message}\n`);
-    process.stderr.write("Usage: pnpm testspace [start|tui|web|web-smoke|stop] [options]\n");
+    process.stderr.write("Usage: pnpm testspace [start|comment-smoke|tui|web|web-smoke|stop] [options]\n");
     process.exit(2);
 }

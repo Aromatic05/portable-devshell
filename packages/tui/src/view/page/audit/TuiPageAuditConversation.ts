@@ -3,6 +3,10 @@ import type { ContextMessageRecord, JsonValue, ToolCallRecord } from "@portable-
 import type { BoxModel } from "../../component/TuiComponentExpandableBox.js";
 import type { TuiAppState } from "../../../state/reducer/TuiStoreModel.js";
 import { readContextConversationDraft } from "../../../interaction/command/dispatcher/TuiCommandDispatcherNavigation.js";
+import {
+    isLatestObservedContext,
+    latestObservedContextId,
+} from "../../../state/audit/TuiAuditContextActivity.js";
 import { compactSummary, formatField, makeBox } from "../TuiPageBoxSupport.js";
 
 export function buildAuditConversationBoxes(
@@ -113,11 +117,19 @@ function composerBox(
     ctxId: string,
 ): BoxModel {
     const draft = readContextConversationDraft(state, instance, ctxId);
+    const current = isLatestObservedContext(state, instance, ctxId);
+    const latest = latestObservedContextId(state, instance);
     const prefix = "Draft              ";
     const display = draft.length === 0 ? "<empty>" : draft;
     return makeBox(state, "audit", instance, {
         detailLines: [
             formatField("Context", ctxId),
+            formatField(
+                "Delivery",
+                current
+                    ? "next tool call in this context"
+                    : `blocked; latest observed context is ${latest ?? "unknown"}`,
+            ),
             {
                 editable: true,
                 editableValue: {
@@ -129,16 +141,20 @@ function composerBox(
                 id: "draft",
                 text: `${prefix}${display}`,
             },
-            "Enter queues this Comment for the next tool call.",
+            current
+                ? "Enter queues this Comment for the next tool call."
+                : "Sending is blocked because this context is no longer current.",
             "Esc or Ctrl+[ returns to the Audit Context.",
         ],
         expandedKey: `audit-conversation:${instance}:${ctxId}:composer`,
         editable: true,
         id: "conversation-composer",
-        status: draft.length === 0 ? "normal" : "running",
+        status: current ? (draft.length === 0 ? "normal" : "running") : "failed",
         summaryLines: [
             draft.length === 0 ? "draft=<empty>" : `draft=${draft}`,
-            "Enter edit · Space expand · Esc back",
+            current
+                ? "Enter edit · Space expand · Esc back"
+                : `sending blocked · latest=${latest ?? "unknown"}`,
         ],
         title: "Write Comment",
     });

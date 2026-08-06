@@ -24,6 +24,7 @@ import {
     isTerminalSizeSupported,
     mainInnerWidth,
     renderExpandableBoxLines,
+    readContextConversationDraft,
     TuiAppStore,
     TuiFocusManager,
     currentTuiRoute,
@@ -450,6 +451,64 @@ test("Comment conversation shows exact history and keeps the route open after se
 
     await harness.press("", { return: true });
     assert.deepEqual(sent, ["new guidance"], "successful send must clear the draft");
+});
+
+test("Comment conversation blocks a stale ctxId instead of reporting a false queue success", async () => {
+    const sent: Array<{ ctxId: string; text: string }> = [];
+    const harness = createHarness({
+        onContextMessage: async (_instance, ctxId, text) => {
+            sent.push({ ctxId, text });
+        },
+    });
+    enableContextMessageMcp(harness);
+    harness.store.patchControlReadModel({ toolCallsByInstance: { ["alpha"]: [
+        {
+            callId: "call-old",
+            completedAt: "2026-08-06T11:40:00.000Z",
+            ctxId: "ctx-old",
+            input: { path: "./old" },
+            inputSummary: '{"path":"./old"}',
+            instance: asInstanceName("alpha"),
+            output: {},
+            source: "mcp",
+            startedAt: "2026-08-06T11:39:00.000Z",
+            status: "completed",
+            toolName: "file_read",
+        },
+        {
+            callId: "call-current",
+            completedAt: "2026-08-06T11:53:00.000Z",
+            ctxId: "ctx-current",
+            input: { path: "./current" },
+            inputSummary: '{"path":"./current"}',
+            instance: asInstanceName("alpha"),
+            output: {},
+            source: "mcp",
+            startedAt: "2026-08-06T11:52:00.000Z",
+            status: "completed",
+            toolName: "file_read",
+        },
+    ] } });
+    enterAuditContext(harness, "ctx-old");
+    await harness.press("m");
+    await harness.dispatch({ type: "contextConversation.edit" });
+    await harness.press("must reach the current chat");
+    await harness.press("", { return: true });
+
+    assert.deepEqual(sent, []);
+    assert.equal(
+        readContextConversationDraft(
+            harness.store.getState(),
+            "alpha",
+            "ctx-old",
+        ),
+        "must reach the current chat",
+    );
+    assert.match(
+        harness.store.getState().interaction.screenStatusByPage.audit ?? "",
+        /not queued.*ctx-current/iu,
+    );
+    assert.match(conversationScreenText(harness), /sending blocked/iu);
 });
 
 test("Todo uses a dedicated instance-scoped page and does not appear in Instances boxes", async () => {
