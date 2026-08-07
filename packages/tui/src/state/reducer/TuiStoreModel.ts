@@ -1,16 +1,10 @@
 import type {
-    ApprovalRequest,
-    ArtifactShareResult,
-    ArtifactTransferRecord,
-    InstanceEvent,
-    ContextMessageRecord,
     ControlError,
-    InstanceSnapshot,
+    ControlInstanceReadState,
+    ControlReadModelState,
+    InstanceEvent,
+    InstanceLogEntry,
     JsonValue,
-    OAuthApprovalRequest,
-    OperationalOverview,
-    TodoReadResult,
-    ToolCallRecord,
 } from "@portable-devshell/shared";
 
 import type {
@@ -39,22 +33,7 @@ export interface TuiInstanceListEntry {
     provider?: string;
 }
 
-export interface TuiLogEntry {
-    at?: string;
-    bytes?: number;
-    callId?: string;
-    instance: string;
-    message?: string;
-    preview?: string;
-    receivedAt: string;
-    requestId?: string;
-    seq: number;
-    ctxId?: string;
-    source?: "cli" | "tui" | "web" | "mcp";
-    stream: "stderr" | "stdout";
-    tail?: string;
-    toolName?: string;
-}
+export type TuiLogEntry = InstanceLogEntry;
 
 export interface TuiConnectionState {
     errorCode?: string;
@@ -95,53 +74,26 @@ export interface TuiRelayRecord {
 }
 
 export interface TuiAppState {
-    artifactShares: ArtifactShareResult[];
-    artifactTransfers: ArtifactTransferRecord[];
-    approvalsByInstance: Record<string, ApprovalRequest[]>;
     commandRecords: TuiCommandRecord[];
-    commentCallsByInstance: Record<string, ToolCallRecord[]>;
-    contextMessagesByInstance: Record<string, ContextMessageRecord[]>;
-    configView?: Record<string, JsonValue>;
     connection: TuiConnectionState;
     globalDerived: TuiGlobalDerivedState;
     interaction: TuiInteractionState;
     instances: TuiInstanceListEntry[];
-    lastSeqByInstance: Record<string, number>;
     lastStatusChangeAtByInstance: Record<string, string>;
-    logsByInstance: Record<string, TuiLogEntry[]>;
-    mcpStatus?: McpRuntimeStatus;
-    oauthApprovals: OAuthApprovalRequest[];
-    operationalOverview?: OperationalOverview;
-    rawEvents: TuiRawEventRecord[];
     panelErrors: Record<string, ControlError>;
+    rawEvents: TuiRawEventRecord[];
+    readModel: ControlReadModelState;
     relayByCommand: Record<string, TuiRelayRecord>;
-    snapshotsByInstance: Record<string, InstanceSnapshot>;
-    todoByInstance: Record<string, TodoReadResult>;
-    toolCallsByInstance: Record<string, ToolCallRecord[]>;
     ui: TuiUiState;
 }
 
-export type TuiControlReadModelProjection = Pick<
-    TuiAppState,
-    | "artifactShares"
-    | "artifactTransfers"
-    | "approvalsByInstance"
-    | "commentCallsByInstance"
-    | "configView"
-    | "contextMessagesByInstance"
-    | "instances"
-    | "lastSeqByInstance"
-    | "logsByInstance"
-    | "mcpStatus"
-    | "oauthApprovals"
-    | "operationalOverview"
-    | "snapshotsByInstance"
-    | "todoByInstance"
-    | "toolCallsByInstance"
->;
+export type TuiControlReadModelPatch = Partial<Omit<ControlReadModelState, "instanceState" | "instances">> & {
+    instanceState?: Record<string, Partial<ControlInstanceReadState>>;
+    instances?: TuiInstanceListEntry[];
+};
 
 export type TuiAppAction =
-    | { projection: TuiControlReadModelProjection; type: "control.readModel.replace" }
+    | { instances: TuiInstanceListEntry[]; readModel: ControlReadModelState; type: "control.readModel.replace" }
     | { command: TuiCommandRecord; type: "command.upsert" }
     | { error?: ControlError; key: string; type: "panelError.set" }
     | { commandId: string; chunk: string; type: "relay.appendOutput" }
@@ -193,4 +145,11 @@ export function toRawEventRecord(event: InstanceEvent): TuiRawEventRecord {
         payload: event as unknown as JsonValue,
         seq: event.seq,
     };
+}
+
+export function selectTuiLogs(state: TuiAppState, instance: string): InstanceLogEntry[] {
+    const throughSeq = state.ui.logsClearedThroughSeqByInstance[instance] ?? 0;
+    return (state.readModel.instanceState[instance]?.logs ?? []).filter(
+        (entry) => entry.seq > throughSeq,
+    );
 }

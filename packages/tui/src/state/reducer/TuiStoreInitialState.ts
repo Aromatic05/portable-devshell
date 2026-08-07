@@ -1,14 +1,10 @@
+import { createInitialControlReadModelState } from "@portable-devshell/shared";
 import { createEmptyInteractionState } from "../TuiInteractionState.js";
 import type { TuiAppState } from "./TuiStoreModel.js";
 
 export function createInitialTuiAppState(): TuiAppState {
     return {
-        artifactShares: [],
-        artifactTransfers: [],
-        approvalsByInstance: {},
         commandRecords: [],
-        commentCallsByInstance: {},
-        contextMessagesByInstance: {},
         connection: {
             status: "connecting",
         },
@@ -19,21 +15,17 @@ export function createInitialTuiAppState(): TuiAppState {
         },
         interaction: createEmptyInteractionState(),
         instances: [],
-        lastSeqByInstance: {},
         lastStatusChangeAtByInstance: {},
-        logsByInstance: {},
-        oauthApprovals: [],
         panelErrors: {},
         rawEvents: [],
+        readModel: createInitialControlReadModelState(),
         relayByCommand: {},
-        snapshotsByInstance: {},
-        todoByInstance: {},
-        toolCallsByInstance: {},
         ui: {
             controlRestartRequired: false,
             dirtyForms: {},
             expandedBoxes: {},
             formDrafts: {},
+            logsClearedThroughSeqByInstance: {},
             logsFollowByInstance: {},
             logsPausedAtSeqByInstance: {},
             mainFocusId: undefined,

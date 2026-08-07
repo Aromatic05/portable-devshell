@@ -69,9 +69,7 @@ export function isRenderRelevantChange(
     previous: TuiAppState,
     next: TuiAppState,
 ): boolean {
-    if (previous === next) {
-        return false;
-    }
+    if (previous === next) return false;
     if (
         previous.connection !== next.connection ||
         previous.instances !== next.instances ||
@@ -80,121 +78,63 @@ export function isRenderRelevantChange(
         previous.panelErrors !== next.panelErrors ||
         previous.commandRecords !== next.commandRecords ||
         previous.relayByCommand !== next.relayByCommand ||
-        previous.globalDerived.connectedInstanceCount !==
-            next.globalDerived.connectedInstanceCount ||
-        previous.globalDerived.pendingApprovalCount !==
-            next.globalDerived.pendingApprovalCount
-    ) {
-        return true;
-    }
+        previous.globalDerived.connectedInstanceCount !== next.globalDerived.connectedInstanceCount ||
+        previous.globalDerived.pendingApprovalCount !== next.globalDerived.pendingApprovalCount
+    ) return true;
 
-    const page = next.ui.selectedPage;
-    const instance = next.ui.selectedInstance;
-    if (page === "overview") {
-        return previous.operationalOverview !== next.operationalOverview;
+    const before = selectedInstanceState(previous);
+    const after = selectedInstanceState(next);
+    switch (next.ui.selectedPage) {
+        case "overview":
+            return previous.readModel.overview !== next.readModel.overview;
+        case "instances":
+            return anyInstanceFieldChanged(previous, next, "snapshot") ||
+                anyInstanceFieldChanged(previous, next, "approvals") ||
+                previous.readModel.artifactShares !== next.readModel.artifactShares ||
+                previous.readModel.artifactTransfers !== next.readModel.artifactTransfers ||
+                previous.readModel.configView !== next.readModel.configView;
+        case "connections":
+            return previous.readModel.oauthApprovals !== next.readModel.oauthApprovals ||
+                previous.readModel.configView !== next.readModel.configView ||
+                previous.readModel.mcpStatus !== next.readModel.mcpStatus ||
+                before?.snapshot !== after?.snapshot;
+        case "config":
+            return previous.readModel.configView !== next.readModel.configView ||
+                before?.snapshot !== after?.snapshot;
+        case "audit":
+            return before?.commentCalls !== after?.commentCalls ||
+                before?.approvals !== after?.approvals ||
+                before?.logs !== after?.logs ||
+                before?.toolCalls !== after?.toolCalls ||
+                before?.contextMessages !== after?.contextMessages ||
+                before?.snapshot !== after?.snapshot;
+        case "logs":
+            return before?.logs !== after?.logs || before?.snapshot !== after?.snapshot;
+        case "todo":
+            return before?.todo !== after?.todo || before?.snapshot !== after?.snapshot;
+        default:
+            return false;
     }
-    if (page === "instances") {
-        return (
-            previous.snapshotsByInstance !== next.snapshotsByInstance ||
-            previous.lastStatusChangeAtByInstance !==
-                next.lastStatusChangeAtByInstance ||
-            previous.approvalsByInstance !== next.approvalsByInstance ||
-            previous.artifactShares !== next.artifactShares ||
-            previous.artifactTransfers !== next.artifactTransfers ||
-            previous.configView !== next.configView
-        );
-    }
-    if (page === "connections") {
-        return (
-            previous.oauthApprovals !== next.oauthApprovals ||
-            previous.configView !== next.configView ||
-            previous.mcpStatus !== next.mcpStatus ||
-            selectedValueChanged(
-                previous.snapshotsByInstance,
-                next.snapshotsByInstance,
-                instance,
-            )
-        );
-    }
-    if (page === "config") {
-        return (
-            previous.configView !== next.configView ||
-            selectedValueChanged(
-                previous.snapshotsByInstance,
-                next.snapshotsByInstance,
-                instance,
-            )
-        );
-    }
-    if (page === "audit") {
-        return (
-            selectedValueChanged(
-                previous.commentCallsByInstance,
-                next.commentCallsByInstance,
-                instance,
-            ) ||
-            selectedValueChanged(
-                previous.approvalsByInstance,
-                next.approvalsByInstance,
-                instance,
-            ) ||
-            selectedValueChanged(
-                previous.logsByInstance,
-                next.logsByInstance,
-                instance,
-            ) ||
-            selectedValueChanged(
-                previous.toolCallsByInstance,
-                next.toolCallsByInstance,
-                instance,
-            ) ||
-            selectedValueChanged(
-                previous.contextMessagesByInstance,
-                next.contextMessagesByInstance,
-                instance,
-            ) ||
-            selectedValueChanged(
-                previous.snapshotsByInstance,
-                next.snapshotsByInstance,
-                instance,
-            )
-        );
-    }
-    if (page === "logs") {
-        return (
-            selectedValueChanged(
-                previous.logsByInstance,
-                next.logsByInstance,
-                instance,
-            ) ||
-            selectedValueChanged(
-                previous.snapshotsByInstance,
-                next.snapshotsByInstance,
-                instance,
-            )
-        );
-    }
-    if (page === "todo") {
-        return (
-            selectedValueChanged(
-                previous.todoByInstance,
-                next.todoByInstance,
-                instance,
-            ) ||
-            selectedValueChanged(
-                previous.snapshotsByInstance,
-                next.snapshotsByInstance,
-                instance,
-            )
-        );
-    }
-    return false;
 }
 
-function selectedValueChanged<T>(
-    previous: Record<string, T>,
-    next: Record<string, T>,
-    instance: string | undefined,
+function selectedInstanceState(state: TuiAppState) {
+    const instance = state.ui.selectedInstance;
+    return instance === undefined ? undefined : state.readModel.instanceState[instance];
+}
+
+function anyInstanceFieldChanged(
+    previous: TuiAppState,
+    next: TuiAppState,
+    field: "approvals" | "snapshot",
 ): boolean {
-    return instance !== undefined && previous[instance] !== next[instance];
+    const names = new Set([
+        ...Object.keys(previous.readModel.instanceState),
+        ...Object.keys(next.readModel.instanceState),
+    ]);
+    for (const name of names) {
+        if (previous.readModel.instanceState[name]?.[field] !== next.readModel.instanceState[name]?.[field]) {
+            return true;
+        }
+    }
+    return false;
 }

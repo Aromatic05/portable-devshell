@@ -87,15 +87,13 @@ function createHarness(options: {
             async start(
                 instance: string,
                 input: {
-                    relay?: {
-                        onOutput(chunk: string): void;
-                        onRequestId(requestId: string): void;
-                    };
-                },
+                    onOutput?(chunk: string): void;
+                    onRequestId?(requestId: string): void;
+                } = {},
             ) {
                 calls.push(`runtime.start:${instance}`);
-                input.relay?.onRequestId("request-start");
-                input.relay?.onOutput("starting alpha\n");
+                input.onRequestId?.("request-start");
+                input.onOutput?.("starting alpha\n");
                 if (options.failStart) {
                     const error = new Error("start failed");
                     Object.assign(error, { code: "core.startFailed" });
@@ -133,6 +131,20 @@ function createHarness(options: {
         },
     } as never;
     const session = {
+        commands: {
+            async decideToolApproval(instance: string, approvalId: string, decision: string) {
+                return await clients.tool.decideApproval(instance, approvalId, decision);
+            },
+            async refreshInstance(instance: string) {
+                return (await clients.runtime.refresh(instance)).snapshot;
+            },
+            async startInstance(instance: string, input = {}) {
+                return await clients.runtime.start(instance, input);
+            },
+            async stopInstance(instance: string) {
+                return await clients.runtime.stop(instance);
+            },
+        },
         applyAuthoritativeSnapshot(snapshot: { name: string }) {
             store.patchControlSnapshot(snapshot as never);
         },

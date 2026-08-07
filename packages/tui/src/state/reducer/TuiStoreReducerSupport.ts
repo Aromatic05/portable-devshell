@@ -8,23 +8,22 @@ export function selectInstanceAfterListReplace(state: TuiAppState): TuiAppState 
         state.ui.selectedInstance !== undefined && names.has(state.ui.selectedInstance)
             ? state.ui.selectedInstance
             : state.instances[0]?.name;
-    return {
-        ...state,
-        ui: { ...state.ui, selectedInstance },
-    };
+    return selectedInstance === state.ui.selectedInstance
+        ? state
+        : { ...state, ui: { ...state.ui, selectedInstance } };
 }
 
 export function withDerivedState(state: TuiAppState): TuiAppState {
-    const pendingApprovalCount = Object.values(state.approvalsByInstance).reduce(
-        (count, approvals) =>
-            count + approvals.filter((approval) => approval.status === "pending").length,
+    const instanceStates = Object.values(state.readModel.instanceState);
+    const pendingApprovalCount = instanceStates.reduce(
+        (count, instance) => count + instance.approvals.filter((approval) => approval.status === "pending").length,
         0,
     );
     return {
         ...state,
         globalDerived: {
-            connectedInstanceCount: Object.values(state.snapshotsByInstance).filter(
-                (snapshot) => snapshot.connectionState === "connected",
+            connectedInstanceCount: instanceStates.filter(
+                (instance) => instance.snapshot?.connectionState === "connected",
             ).length,
             pendingApprovalCount,
             totalEventCount: state.rawEvents.length,

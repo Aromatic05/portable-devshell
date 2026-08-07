@@ -126,18 +126,18 @@ export function buildConnectorPageBoxes(state: TuiAppState, instanceName: string
 }
 
 function selectedInstanceDraft(state: TuiAppState, instanceName: string): Record<string, JsonValue> {
-    const entry = Array.isArray(state.configView?.instances)
-        ? state.configView.instances.find((value) => asRecord(value)?.name === instanceName)
+    const entry = Array.isArray(state.readModel.configView?.instances)
+        ? state.readModel.configView.instances.find((value) => asRecord(value)?.name === instanceName)
         : undefined;
     return asRecord(entry) ?? { mcp: { auth: "none", enabled: true, path: `/${instanceName}/mcp`, tools: { capabilities: ["read", "write", "execute"], groups: [...defaultMcpToolGroups] } }, name: instanceName };
 }
 
 function globalMcpDraft(state: TuiAppState): Record<string, JsonValue> {
-    return asRecord(state.configView?.mcp) ?? { enabled: false, listenHost: "127.0.0.1", listenPort: 0 };
+    return asRecord(state.readModel.configView?.mcp) ?? { enabled: false, listenHost: "127.0.0.1", listenPort: 0 };
 }
 
 function globalWebDraft(state: TuiAppState): Record<string, JsonValue> {
-    return asRecord(state.configView?.web) ?? {
+    return asRecord(state.readModel.configView?.web) ?? {
         auth: "none", enabled: false, listenHost: "127.0.0.1", listenPort: 0
     };
 }
@@ -168,7 +168,7 @@ function runtimeStatus(
     if (readPath(instance, "mcp.enabled") !== true || readPath(mcp, "enabled") !== true) {
         return { publicEndpoint: "unavailable", reason: "MCP is disabled", runtime: "disabled" };
     }
-    const status = state.mcpStatus;
+    const status = state.readModel.mcpStatus;
     if (status?.running !== true) {
         return { publicEndpoint: "unavailable", reason: typeof status?.reason === "string" ? status.reason : "MCP host is not listening", runtime: "stopped" };
     }

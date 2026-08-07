@@ -49,13 +49,13 @@ export function TuiOverlayView(props: TuiOverlayViewProps) {
             );
         case "approval": {
             const approval = (
-                props.state.approvalsByInstance[overlay.instance] ?? []
+                props.state.readModel.instanceState[overlay.instance]?.approvals ?? []
             ).find((candidate) => candidate.approvalId === overlay.approvalId);
             const toolCall =
                 approval === undefined
                     ? undefined
                     : (
-                          props.state.toolCallsByInstance[overlay.instance] ??
+                          props.state.readModel.instanceState[overlay.instance]?.toolCalls ??
                           []
                       ).find(
                           (candidate) => candidate.callId === approval.callId,

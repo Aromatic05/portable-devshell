@@ -114,7 +114,7 @@ test("page shortcuts include Todo, Help, and Terminal and reload works on every 
 });
 test("Overview instance rows open the matching instance page", async () => {
     const harness = createHarness();
-    harness.store.patchControlReadModel({ operationalOverview: {
+    harness.store.patchControlReadModel({ overview: {
         activity: [
             {
                 callId: "call-1",
@@ -378,7 +378,7 @@ test("Comment conversation shows exact history and keeps the route open after se
                 status: "pending",
                 text,
             };
-            harness.store.patchControlReadModel({ contextMessagesByInstance: { [instance]: [pending] } });
+            harness.store.patchControlReadModel({ instanceState: { [instance]: { contextMessages: [pending] } } });
         },
     });
     enableContextMessageMcp(harness);
@@ -400,10 +400,10 @@ test("Comment conversation shows exact history and keeps the route open after se
         status: "completed",
         toolName: "bash_run",
     };
-    harness.store.patchControlReadModel({ toolCallsByInstance: { ["alpha"]: [] } });
-    harness.store.patchControlReadModel({ commentCallsByInstance: { ["alpha"]: [commentCall] } });
-    assert.equal(harness.store.getState().toolCallsByInstance.alpha?.length, 0);
-    harness.store.patchControlReadModel({ contextMessagesByInstance: { ["alpha"]: [
+    harness.store.patchControlReadModel({ instanceState: { ["alpha"]: { toolCalls: [] } } });
+    harness.store.patchControlReadModel({ instanceState: { ["alpha"]: { commentCalls: [commentCall] } } });
+    assert.equal(harness.store.getState().readModel.instanceState.alpha?.toolCalls?.length, 0);
+    harness.store.patchControlReadModel({ instanceState: { ["alpha"]: { contextMessages: [
         {
             createdAt: "2026-08-02T00:02:00.000Z",
             ctxId: "ctx-alpha",
@@ -422,7 +422,7 @@ test("Comment conversation shows exact history and keeps the route open after se
             status: "pending",
             text: "other context comment",
         },
-    ] } });
+    ] } } });
     enterAuditContext(harness, "ctx-alpha");
     await harness.press("m");
 
@@ -461,7 +461,7 @@ test("Comment conversation blocks a stale ctxId instead of reporting a false que
         },
     });
     enableContextMessageMcp(harness);
-    harness.store.patchControlReadModel({ toolCallsByInstance: { ["alpha"]: [
+    harness.store.patchControlReadModel({ instanceState: { ["alpha"]: { toolCalls: [
         {
             callId: "call-old",
             completedAt: "2026-08-06T11:40:00.000Z",
@@ -488,7 +488,7 @@ test("Comment conversation blocks a stale ctxId instead of reporting a false que
             status: "completed",
             toolName: "file_read",
         },
-    ] } });
+    ] } } });
     enterAuditContext(harness, "ctx-old");
     await harness.press("m");
     await harness.dispatch({ type: "contextConversation.edit" });
@@ -1217,7 +1217,7 @@ test("config keyboard focus reaches Save & Restart from an edited Logs box", asy
             return {};
         },
     });
-    const view = harness.store.getState().configView!;
+    const view = harness.store.getState().readModel.configView!;
     harness.store.patchControlReadModel({ configView: {
         ...view,
         restartControlRequired: false,
@@ -1485,7 +1485,7 @@ test("audit truncates input and output previews while opening complete structure
         status: "completed",
         toolName: "file_edit",
     };
-    harness.store.patchControlReadModel({ toolCallsByInstance: { ["alpha"]: [record] } });
+    harness.store.patchControlReadModel({ instanceState: { ["alpha"]: { toolCalls: [record] } } });
     enterAuditContext(harness, "ctx-live-patch");
     const audit = expandBox(harness, "audit-call:live-patch");
     const inputLine = audit.expandedLines.find(
@@ -1529,7 +1529,7 @@ test("audit truncates input and output previews while opening complete structure
 });
 test("Audit Call detail page opens complete Input and Output content", async () => {
     const harness = createHarness();
-    harness.store.patchControlReadModel({ toolCallsByInstance: { ["alpha"]: [
+    harness.store.patchControlReadModel({ instanceState: { ["alpha"]: { toolCalls: [
         {
             callId: "call-detail",
             completedAt: "2026-08-06T12:00:01.000Z",
@@ -1542,7 +1542,7 @@ test("Audit Call detail page opens complete Input and Output content", async () 
             status: "completed",
             toolName: "bash_run",
         },
-    ] } });
+    ] } } });
     harness.store.setSelectedInstance("alpha");
     harness.store.setSelectedPage("audit");
     harness.store.replaceRoute({
@@ -1596,7 +1596,7 @@ test("artifact_viewImage audit output loads an image into the detail panel", asy
             };
         },
     });
-    harness.store.patchControlReadModel({ toolCallsByInstance: { ["alpha"]: [
+    harness.store.patchControlReadModel({ instanceState: { ["alpha"]: { toolCalls: [
         {
             callId: "image-call",
             completedAt: "2026-07-18T00:00:01.000Z",
@@ -1619,7 +1619,7 @@ test("artifact_viewImage audit output loads an image into the detail panel", asy
             status: "completed",
             toolName: "artifact_viewImage",
         },
-    ] } });
+    ] } } });
     enterAuditContext(harness, "ctx-image");
     const audit = expandBox(harness, "audit-call:image-call");
     harness.store.setFocusScope("boxDetail");
@@ -1652,7 +1652,7 @@ test("artifact_viewImage audit output loads an image into the detail panel", asy
 });
 test("audit renders legacy records without an input summary", () => {
     const harness = createHarness();
-    harness.store.patchControlReadModel({ toolCallsByInstance: { ["alpha"]: [
+    harness.store.patchControlReadModel({ instanceState: { ["alpha"]: { toolCalls: [
         {
             callId: "legacy-call",
             instance: "alpha",
@@ -1661,8 +1661,8 @@ test("audit renders legacy records without an input summary", () => {
             status: "completed",
             toolName: "bash_run",
         } as never,
-    ] } });
-    harness.store.patchControlReadModel({ logsByInstance: { ["alpha"]: [
+    ] } } });
+    harness.store.patchControlReadModel({ instanceState: { ["alpha"]: { logs: [
         {
             at: "2026-07-14T00:00:01.000Z",
             bytes: 14,
@@ -1678,7 +1678,7 @@ test("audit renders legacy records without an input summary", () => {
             tail: "legacy output\n",
             toolName: "bash_run",
         },
-    ] } });
+    ] } } });
     enterAuditUnscoped(harness);
     const audit = expandBox(harness, "audit-call:legacy-call");
     assert.equal(
@@ -1783,7 +1783,7 @@ test("expanded instance entries expose only compact lifecycle controls", async (
 
 test("Prompt 3 detail line selection clamps to a valid line after data replacement", () => {
     const harness = createHarness();
-    harness.store.patchControlReadModel({ logsByInstance: { ["alpha"]: [
+    harness.store.patchControlReadModel({ instanceState: { ["alpha"]: { logs: [
         {
             at: "2026-07-31T00:00:01.000Z",
             ctxId: "ctx-alpha",
@@ -1802,12 +1802,12 @@ test("Prompt 3 detail line selection clamps to a valid line after data replaceme
             seq: 2,
             stream: "stdout",
         },
-    ] } });
+    ] } } });
     enterLogContext(harness, "ctx-alpha");
     let logs = expandBox(harness, "logs");
     harness.store.setMainFocusId(logs.id);
     harness.store.setSelectedDetailLine(logs.expandedKey, "logs:log:2");
-    harness.store.patchControlReadModel({ logsByInstance: { ["alpha"]: [
+    harness.store.patchControlReadModel({ instanceState: { ["alpha"]: { logs: [
         {
             at: "2026-07-31T00:00:01.000Z",
             ctxId: "ctx-alpha",
@@ -1817,7 +1817,7 @@ test("Prompt 3 detail line selection clamps to a valid line after data replaceme
             seq: 1,
             stream: "stdout",
         },
-    ] } });
+    ] } } });
     harness.focusManager.syncPanel(
         harness.store.getState().ui.selectedPage,
         harness.store.getState().interaction.focusScope,
@@ -2055,7 +2055,7 @@ test("OAuth detail keeps static rows selectable after expanding a completed appr
 });
 test("logs render timestamps and correlation metadata", () => {
     const harness = createHarness();
-    harness.store.patchControlReadModel({ logsByInstance: { ["alpha"]: [
+    harness.store.patchControlReadModel({ instanceState: { ["alpha"]: { logs: [
         {
             at: "2026-07-11T12:34:56.000Z",
             callId: "call-1",
@@ -2069,7 +2069,7 @@ test("logs render timestamps and correlation metadata", () => {
             stream: "stdout",
             toolName: "bash_run",
         },
-    ] } });
+    ] } } });
     enterLogContext(harness, "session-1");
     const logs = expandBox(harness, "logs");
     assert.equal(
@@ -2356,7 +2356,7 @@ async function openPrimaryRoute(
 }
 
 function enableContextMessageMcp(harness: ReturnType<typeof createHarness>): void {
-    const view = harness.store.getState().configView!;
+    const view = harness.store.getState().readModel.configView!;
     const instances = Array.isArray(view.instances) ? view.instances : [];
     harness.store.patchControlReadModel({ configView: {
         ...view,
@@ -2834,7 +2834,7 @@ function seedPrompt3State(store: TuiAppStore) {
         ready: false,
         status: "stopped",
     } as never);
-    store.patchControlReadModel({ todoByInstance: { ["alpha"]: {
+    store.patchControlReadModel({ instanceState: { ["alpha"]: { todo: {
         items: [
             { content: "Inspect", id: "inspect", status: "completed" },
             {
@@ -2849,8 +2849,8 @@ function seedPrompt3State(store: TuiAppStore) {
         summary: { completed: 1, currentItemId: "implement", total: 3 },
         taskId: "task-1",
         title: "Todo support",
-    } } });
-    store.patchControlReadModel({ toolCallsByInstance: { ["alpha"]: [
+    } } } });
+    store.patchControlReadModel({ instanceState: { ["alpha"]: { toolCalls: [
         {
             callId: "call-1",
             ctxId: "ctx-alpha",
@@ -2863,8 +2863,8 @@ function seedPrompt3State(store: TuiAppStore) {
             termination: "exited",
             toolName: "bash_run",
         },
-    ] } });
-    store.patchControlReadModel({ approvalsByInstance: { ["alpha"]: [
+    ] } } });
+    store.patchControlReadModel({ instanceState: { ["alpha"]: { approvals: [
         {
             approvalId: "approval-1",
             callId: "call-1",
@@ -2879,8 +2879,8 @@ function seedPrompt3State(store: TuiAppStore) {
             status: "pending",
             toolName: "bash_run",
         },
-    ] } });
-    store.patchControlReadModel({ logsByInstance: { ["alpha"]: [
+    ] } } });
+    store.patchControlReadModel({ instanceState: { ["alpha"]: { logs: [
         ...Array.from({ length: 20 }, (_, index) => ({
             ctxId: "ctx-alpha",
             instance: "alpha",
@@ -2889,8 +2889,8 @@ function seedPrompt3State(store: TuiAppStore) {
             seq: index + 1,
             stream: "stdout" as const,
         })),
-    ] } });
-    store.patchControlReadModel({ logsByInstance: { ["beta"]: [
+    ] } } });
+    store.patchControlReadModel({ instanceState: { ["beta"]: { logs: [
         {
             ctxId: "ctx-beta",
             instance: "beta",
@@ -2899,5 +2899,5 @@ function seedPrompt3State(store: TuiAppStore) {
             seq: 1,
             stream: "stderr" as const,
         },
-    ] } });
+    ] } } });
 }

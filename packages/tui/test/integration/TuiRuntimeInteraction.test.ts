@@ -140,7 +140,7 @@ test("real Ink runtime saves a restart-required Config edit through cross-box ke
             () => runtime.store.getState().ui.selectedInstance === "alpha",
         );
         await waitUntil(
-            () => runtime.store.getState().snapshotsByInstance.alpha?.ready === true,
+            () => runtime.store.getState().readModel.instanceState.alpha?.snapshot?.ready === true,
         );
         runtime.store.setSelectedPage("config");
         await delay(20);
@@ -547,7 +547,7 @@ test("real Ink runtime routes every page and drives approval and text detail scr
             },
         ] });
         runtime.store.setSelectedInstance("alpha");
-        runtime.store.patchControlReadModel({ toolCallsByInstance: { ["alpha"]: [
+        runtime.store.patchControlReadModel({ instanceState: { ["alpha"]: { toolCalls: [
             {
                 callId: "call-1",
                 input: { command: "pwd" },
@@ -558,8 +558,8 @@ test("real Ink runtime routes every page and drives approval and text detail scr
                 status: "running",
                 toolName: "bash_run",
             },
-        ] } });
-        runtime.store.patchControlReadModel({ approvalsByInstance: { ["alpha"]: [
+        ] } } });
+        runtime.store.patchControlReadModel({ instanceState: { ["alpha"]: { approvals: [
             {
                 approvalId: "approval-1",
                 callId: "call-1",
@@ -573,7 +573,7 @@ test("real Ink runtime routes every page and drives approval and text detail scr
                 status: "pending",
                 toolName: "bash_run",
             },
-        ] } });
+        ] } } });
         runtime.store.setSelectedPage("audit");
         runtime.store.pushOverlay({
             approvalId: "approval-1",
@@ -1213,7 +1213,7 @@ test("real Ink runtime renders artifact_viewImage audit output in the detail pan
             },
         ] });
         runtime.store.setSelectedInstance("alpha");
-        runtime.store.patchControlReadModel({ toolCallsByInstance: { ["alpha"]: [
+        runtime.store.patchControlReadModel({ instanceState: { ["alpha"]: { toolCalls: [
             {
                 callId: "image-call",
                 ctxId: "ctx-image",
@@ -1236,7 +1236,7 @@ test("real Ink runtime renders artifact_viewImage audit output in the detail pan
                 status: "completed",
                 toolName: "artifact_viewImage",
             },
-        ] } });
+        ] } } });
         runtime.store.setSelectedPage("audit");
         runtime.store.pushRoute({
             ctxId: "ctx-image",

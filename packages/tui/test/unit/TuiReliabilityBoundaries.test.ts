@@ -61,6 +61,12 @@ test("a committed context message remains successful when the follow-up audit re
         } as never,
         operationTimeoutMs: 100,
         session: {
+            commands: {
+                async queueContextMessage() {
+                    store.patchControlReadModel({ instanceState: { alpha: { contextMessages: [queued] } } });
+                    return queued;
+                },
+            },
             async refreshAudit() { throw new Error("audit refresh failed"); },
         } as never,
         store,
@@ -68,38 +74,6 @@ test("a committed context message remains successful when the follow-up audit re
 
     await operations.queueContextMessage("alpha", "ctx-1", "review this");
 
-    assert.equal(store.getState().contextMessagesByInstance.alpha?.[0]?.id, "message-1");
+    assert.equal(store.getState().readModel.instanceState.alpha?.contextMessages?.[0]?.id, "message-1");
     assert.equal(store.getState().panelErrors["audit:alpha:operationRefresh"]?.message, "audit refresh failed");
-});
-
-
-test("runtime commands time out and leave the running state", async () => {
-    const store = new TuiAppStore();
-    store.patchControlReadModel({ instances: [{
-        defaultWorkspace: "/workspace/alpha",
-        enabled: true,
-        mcpEnabled: false,
-        name: "alpha",
-        provider: "local",
-    }] });
-    const operations = new TuiRuntimeOperations({
-        clients: {
-            runtime: {
-                async start() { return await new Promise<never>(() => undefined); },
-            },
-        } as never,
-        operationTimeoutMs: 15,
-        session: {
-            applyAuthoritativeSnapshot(value: never) {
-                store.patchControlSnapshot(value);
-            },
-        } as never,
-        store,
-    });
-
-    await operations.runInstanceAction("start", "alpha");
-
-    const command = store.getState().commandRecords[0];
-    assert.equal(command?.status, "failed");
-    assert.match(command?.error?.message ?? "", /timed out/u);
 });

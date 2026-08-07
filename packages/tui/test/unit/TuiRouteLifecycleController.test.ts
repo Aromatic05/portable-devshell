@@ -14,7 +14,7 @@ test("route lifecycle aborts stale loads and runs route cleanup exactly once", a
         { enabled: true, mcpEnabled: true, name: "alpha" },
     ] });
     store.setSelectedInstance("alpha");
-    store.patchControlReadModel({ toolCallsByInstance: { ["alpha"]: [
+    store.patchControlReadModel({ instanceState: { ["alpha"]: { toolCalls: [
         {
             callId: "call-1",
             ctxId: "ctx-a",
@@ -25,7 +25,7 @@ test("route lifecycle aborts stale loads and runs route cleanup exactly once", a
             status: "completed",
             toolName: "bash_run",
         },
-    ] } });
+    ] } } });
     const entered: string[] = [];
     const aborted: string[] = [];
     const cleaned: string[] = [];

@@ -113,8 +113,8 @@ test("TUI startup pulls artifact shares and transfers from Control", async () =>
     });
 
     await session.start();
-    assert.deepEqual(store.getState().artifactShares, [share]);
-    assert.deepEqual(store.getState().artifactTransfers, [transfer]);
+    assert.deepEqual(store.getState().readModel.artifactShares, [share]);
+    assert.deepEqual(store.getState().readModel.artifactTransfers, [transfer]);
     await session.stop();
 });
 

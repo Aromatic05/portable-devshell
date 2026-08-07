@@ -10,6 +10,7 @@ import {
     resolveAuditOutput,
 } from "../../../state/audit/TuiAuditPresentation.js";
 import type { TuiAppStore } from "../../../state/TuiAppStore.js";
+import { selectTuiLogs } from "../../../state/reducer/TuiStoreModel.js";
 import type { TuiUiIntent } from "../../../state/TuiInteractionState.js";
 import { topTuiOverlay } from "../../../state/overlay/TuiOverlay.js";
 import type { TuiFocusManager } from "../../focus/TuiFocusManager.js";
@@ -58,7 +59,7 @@ export class TuiCommandDispatcherAudit {
     async openInput(instance: string, callId: string): Promise<boolean> {
         const record = this.#store
             .getState()
-            .toolCallsByInstance[instance]?.find(
+            .readModel.instanceState[instance]?.toolCalls.find(
                 (candidate) => candidate.callId === callId,
             );
         if (record === undefined) return false;
@@ -72,13 +73,13 @@ export class TuiCommandDispatcherAudit {
     async openOutput(instance: string, callId: string): Promise<boolean> {
         const record = this.#store
             .getState()
-            .toolCallsByInstance[instance]?.find(
+            .readModel.instanceState[instance]?.toolCalls.find(
                 (candidate) => candidate.callId === callId,
             );
         if (record === undefined) return false;
         const output = resolveAuditOutput(
             record.output,
-            this.#store.getState().logsByInstance[instance] ?? [],
+            selectTuiLogs(this.#store.getState(), instance),
             callId,
         );
         const imageInput =
@@ -117,7 +118,7 @@ export class TuiCommandDispatcherAudit {
         const state = this.#store.getState();
         const overlay = topTuiOverlay(state.interaction.overlays);
         if (overlay?.kind !== "approval") return false;
-        const approval = state.approvalsByInstance[overlay.instance]?.find(
+        const approval = state.readModel.instanceState[overlay.instance]?.approvals?.find(
             (candidate) => candidate.approvalId === overlay.approvalId,
         );
         if (approval === undefined) return this.returnToPage();
@@ -126,9 +127,9 @@ export class TuiCommandDispatcherAudit {
             case "back":
                 return this.returnToPage();
             case "input": {
-                const toolCall = state.toolCallsByInstance[
+                const toolCall = state.readModel.instanceState[
                     overlay.instance
-                ]?.find((candidate) => candidate.callId === approval.callId);
+                ]?.toolCalls?.find((candidate) => candidate.callId === approval.callId);
                 return await this.#dispatch({
                     body: auditInputText(
                         toolCall?.input,

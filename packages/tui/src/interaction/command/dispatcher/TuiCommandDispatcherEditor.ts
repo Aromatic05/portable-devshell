@@ -327,7 +327,7 @@ export class TuiCommandDispatcherEditor {
             return false;
         }
         const state = this.#store.getState();
-        const wasRunning = state.snapshotsByInstance[instance]?.daemonState === "running" || state.snapshotsByInstance[instance]?.ready === true;
+        const wasRunning = state.readModel.instanceState[instance]?.snapshot?.daemonState === "running" || state.readModel.instanceState[instance]?.snapshot?.ready === true;
         let stoppedForRestart = false;
         try {
             if (restartInstance && wasRunning) {
@@ -530,7 +530,7 @@ export class TuiCommandDispatcherEditor {
     }
 
     #instanceDraft(instanceName: string): Record<string, JsonValue> {
-        const configView = this.#store.getState().configView;
+        const configView = this.#store.getState().readModel.configView;
         const entries = configView?.instances;
         const entry = Array.isArray(entries)
             ? entries.find((value) => asRecord(value)?.name === instanceName)
@@ -541,11 +541,11 @@ export class TuiCommandDispatcherEditor {
     }
 
     #mcpDraft(): Record<string, JsonValue> {
-        return cloneRecord(asRecord(this.#store.getState().configView?.mcp) ?? { enabled: false, listenHost: "127.0.0.1", listenPort: 0 });
+        return cloneRecord(asRecord(this.#store.getState().readModel.configView?.mcp) ?? { enabled: false, listenHost: "127.0.0.1", listenPort: 0 });
     }
 
     #webDraft(): Record<string, JsonValue> {
-        const web = asRecord(this.#store.getState().configView?.web);
+        const web = asRecord(this.#store.getState().readModel.configView?.web);
         if (web === undefined) {
             return { auth: "none", enabled: false, listenHost: "127.0.0.1", listenPort: 0 };
         }
@@ -559,7 +559,7 @@ export class TuiCommandDispatcherEditor {
     #fullConfigDraft(includeGlobal: boolean): ConfigDraft {
         const state = this.#store.getState();
         const instance = state.ui.selectedInstance!;
-        const config = cloneRecord(state.configView ?? { control: {}, instances: [], mcp: this.#mcpDraft() });
+        const config = cloneRecord(state.readModel.configView ?? { control: {}, instances: [], mcp: this.#mcpDraft() });
         const rawInstances = config.instances;
         const instances = Array.isArray(rawInstances)
             ? rawInstances.map((entry) => {

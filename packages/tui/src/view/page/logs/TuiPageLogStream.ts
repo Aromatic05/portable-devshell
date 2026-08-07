@@ -1,7 +1,8 @@
 import type { BoxModel } from "../../component/TuiComponentExpandableBox.js";
-import type {
-    TuiAppState,
-    TuiLogEntry,
+import {
+    selectTuiLogs,
+    type TuiAppState,
+    type TuiLogEntry,
 } from "../../../state/reducer/TuiStoreModel.js";
 import type { TuiLogContextKey } from "./TuiPageLogSources.js";
 import { buttonLine } from "../../editor/TuiEditorView.js";
@@ -18,7 +19,7 @@ export function buildLogContextBoxes(
 ): BoxModel[] {
     const label = context.kind === "unscoped" ? "unscoped" : context.ctxId;
     const sourceEntries = entriesForContext(
-        state.logsByInstance[instance] ?? [],
+        selectTuiLogs(state, instance),
         context,
     );
     const query = state.ui.searchQueries.logs ?? "";
@@ -115,7 +116,7 @@ export function filterLogEntries(
             entry.callId?.toLowerCase() !== filters.call
         )
             return false;
-        const timestamp = entry.at ?? entry.receivedAt;
+        const timestamp = entry.at;
         if (filters.after !== undefined && timestamp < filters.after)
             return false;
         if (filters.before !== undefined && timestamp > filters.before)

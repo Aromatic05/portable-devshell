@@ -1,6 +1,6 @@
 import type { ToolCallRecord } from "@portable-devshell/shared";
 
-import type { TuiAppState } from "../reducer/TuiStoreModel.js";
+import { selectTuiLogs, type TuiAppState } from "../reducer/TuiStoreModel.js";
 import type { TuiPageId } from "../TuiUiState.js";
 import {
     defaultTuiRouteViewState,
@@ -305,7 +305,7 @@ function resolveTodoBreadcrumbTitle(
 ): string {
     const instance = state.ui.selectedInstance;
     const todo =
-        instance === undefined ? undefined : state.todoByInstance[instance];
+        instance === undefined ? undefined : state.readModel.instanceState[instance]?.todo;
     const title =
         todo?.taskId === todoId
             ? todo.title
@@ -394,11 +394,11 @@ function isTuiRouteResourceValid(
     if (route.page === "audit" && route.view !== "contexts") {
         if (instance === undefined) return false;
         const calls = mergeCalls(
-            state.toolCallsByInstance[instance] ?? [],
-            state.commentCallsByInstance[instance] ?? [],
+            state.readModel.instanceState[instance]?.toolCalls ?? [],
+            state.readModel.instanceState[instance]?.commentCalls ?? [],
         );
-        const approvals = state.approvalsByInstance[instance] ?? [];
-        const messages = state.contextMessagesByInstance[instance] ?? [];
+        const approvals = state.readModel.instanceState[instance]?.approvals ?? [];
+        const messages = state.readModel.instanceState[instance]?.contextMessages ?? [];
         if (route.scope === "unscoped") {
             return route.view === "context"
                 ? calls.some(
@@ -427,7 +427,7 @@ function isTuiRouteResourceValid(
     }
     if (route.page === "todo" && route.view === "detail") {
         if (instance === undefined) return false;
-        const todo = state.todoByInstance[instance];
+        const todo = state.readModel.instanceState[instance]?.todo;
         return (
             todo?.taskId === route.todoId ||
             todo?.tasks?.some((task) => task.taskId === route.todoId) === true
@@ -435,7 +435,7 @@ function isTuiRouteResourceValid(
     }
     if (route.page === "logs" && route.view === "context") {
         if (instance === undefined) return false;
-        const logs = state.logsByInstance[instance] ?? [];
+        const logs = selectTuiLogs(state, instance);
         return route.scope === "unscoped"
             ? logs.some(
                   (entry) =>

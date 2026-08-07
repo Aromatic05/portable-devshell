@@ -13,8 +13,8 @@ import { latestObservedContextId } from "../../src/state/audit/TuiAuditContextAc
 test("latest observed Context follows call start order instead of completion order", () => {
     const store = new TuiAppStore();
     store.patchControlReadModel({
-        toolCallsByInstance: {
-            alpha: [
+        instanceState: {
+            alpha: { toolCalls: [
                 toolCall({
                     callId: "old-slow",
                     completedAt: "2026-08-07T00:10:00.000Z",
@@ -27,7 +27,8 @@ test("latest observed Context follows call start order instead of completion ord
                     ctxId: "ctx-new",
                     startedAt: "2026-08-07T00:05:00.000Z",
                 }),
-            ],
+                ],
+            },
         },
     });
 
@@ -37,18 +38,17 @@ test("latest observed Context follows call start order instead of completion ord
 test("latest observed Context includes a newer pending approval before its tool call starts", () => {
     const store = new TuiAppStore();
     store.patchControlReadModel({
-        approvalsByInstance: {
-            alpha: [approval("approval-new", "ctx-new", "2026-08-07T00:05:00.000Z")],
-        },
-        toolCallsByInstance: {
-            alpha: [
+        instanceState: {
+            alpha: {
+                approvals: [approval("approval-new", "ctx-new", "2026-08-07T00:05:00.000Z")],
+                toolCalls: [
                 toolCall({
                     callId: "old-call",
                     completedAt: "2026-08-07T00:04:00.000Z",
                     ctxId: "ctx-old",
                     startedAt: "2026-08-07T00:00:00.000Z",
                 }),
-            ],
+            ] },
         },
     });
 

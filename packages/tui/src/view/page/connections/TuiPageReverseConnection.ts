@@ -4,7 +4,7 @@ import { formatField, makeBox } from "../TuiPageBoxSupport.js";
 
 export function buildReverseConnectionBoxes(state: TuiAppState, selectedInstance: string, routeInstance: string): BoxModel[] {
     const entry = state.instances.find((candidate) => candidate.name === routeInstance);
-    const snapshot = state.snapshotsByInstance[routeInstance];
+    const snapshot = state.readModel.instanceState[routeInstance]?.snapshot;
     return [makeBox(state, "connections", selectedInstance, {
         detailLines: [
             formatField("Instance", routeInstance),

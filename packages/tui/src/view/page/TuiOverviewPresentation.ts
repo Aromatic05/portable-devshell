@@ -39,7 +39,7 @@ const EMPTY_COUNTS: TuiOverviewPresentation["counts"] = {
 export function selectTuiOverviewPresentation(
     state: TuiAppState,
 ): TuiOverviewPresentation {
-    const overview = state.operationalOverview;
+    const overview = state.readModel.overview;
     const query = (state.ui.searchQueries.overview ?? "").trim().toLowerCase();
     if (overview === undefined) {
         return {

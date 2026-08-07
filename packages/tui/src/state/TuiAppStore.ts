@@ -1,5 +1,7 @@
 import {
     type ControlError,
+    type ControlInstanceReadState,
+    type ControlReadModelState,
     type InstanceEvent,
 } from "@portable-devshell/shared";
 
@@ -21,7 +23,8 @@ import {
     type TuiAppState,
     type TuiCommandRecord,
     type TuiConnectionStatus,
-    type TuiControlReadModelProjection,
+    type TuiControlReadModelPatch,
+    type TuiInstanceListEntry,
 } from "./reducer/TuiStoreModel.js";
 
 export interface TuiAppStoreOptions {
@@ -69,46 +72,46 @@ export class TuiAppStore {
         }
     }
 
-    replaceControlReadModel(projection: TuiControlReadModelProjection): void {
-        this.dispatch({ projection, type: "control.readModel.replace" });
-    }
-
-    patchControlReadModel(
-        patch: Partial<TuiControlReadModelProjection>,
+    replaceControlReadModel(
+        readModel: ControlReadModelState,
+        instances: TuiInstanceListEntry[] = this.#state.instances,
     ): void {
-        const state = this.#state;
-        this.replaceControlReadModel({
-            artifactShares: patch.artifactShares ?? state.artifactShares,
-            artifactTransfers: patch.artifactTransfers ?? state.artifactTransfers,
-            approvalsByInstance: mergeRecord(state.approvalsByInstance, patch.approvalsByInstance),
-            commentCallsByInstance: mergeRecord(state.commentCallsByInstance, patch.commentCallsByInstance),
-            configView: patch.configView ?? state.configView,
-            contextMessagesByInstance: mergeRecord(
-                state.contextMessagesByInstance,
-                patch.contextMessagesByInstance,
-            ),
-            instances: patch.instances ?? state.instances,
-            lastSeqByInstance: mergeRecord(state.lastSeqByInstance, patch.lastSeqByInstance),
-            logsByInstance: mergeRecord(state.logsByInstance, patch.logsByInstance),
-            mcpStatus: patch.mcpStatus ?? state.mcpStatus,
-            oauthApprovals: patch.oauthApprovals ?? state.oauthApprovals,
-            operationalOverview: patch.operationalOverview ?? state.operationalOverview,
-            snapshotsByInstance: mergeRecord(
-                state.snapshotsByInstance,
-                patch.snapshotsByInstance,
-            ),
-            todoByInstance: mergeRecord(state.todoByInstance, patch.todoByInstance),
-            toolCallsByInstance: mergeRecord(
-                state.toolCallsByInstance,
-                patch.toolCallsByInstance,
-            ),
-        });
+        this.dispatch({ instances, readModel, type: "control.readModel.replace" });
     }
 
-    patchControlSnapshot(snapshot: TuiAppState["snapshotsByInstance"][string]): void {
+    patchControlReadModel(patch: TuiControlReadModelPatch): void {
+        const { instanceState, instances, ...global } = patch;
+        const current = this.#state.readModel;
+        const nextInstanceState = instanceState === undefined
+            ? current.instanceState
+            : { ...current.instanceState };
+        if (instanceState !== undefined) {
+            for (const [name, value] of Object.entries(instanceState)) {
+                nextInstanceState[name] = {
+                    ...emptyInstanceReadState(),
+                    ...current.instanceState[name],
+                    ...value,
+                };
+            }
+        }
+        this.replaceControlReadModel(
+            {
+                ...current,
+                ...global,
+                instanceState: nextInstanceState,
+            },
+            instances ?? this.#state.instances,
+        );
+    }
+
+    patchControlSnapshot(snapshot: NonNullable<ControlInstanceReadState["snapshot"]>): void {
         this.patchControlReadModel({
-            lastSeqByInstance: { [snapshot.name]: snapshot.lastSeq },
-            snapshotsByInstance: { [snapshot.name]: snapshot },
+            instanceState: {
+                [snapshot.name]: {
+                    sequence: snapshot.lastSeq,
+                    snapshot,
+                },
+            },
         });
     }
 
@@ -314,7 +317,7 @@ export class TuiAppStore {
     }
 
     applyInstanceEvent(event: InstanceEvent): void {
-        const lastSeq = this.#state.lastSeqByInstance[event.instanceName] ?? 0;
+        const lastSeq = this.#state.readModel.instanceState[event.instanceName]?.sequence ?? 0;
         if (event.seq <= lastSeq) return;
         this.dispatch({
             rawEvent: toRawEventRecord(event),
@@ -324,9 +327,13 @@ export class TuiAppStore {
 
 }
 
-function mergeRecord<T>(
-    current: Record<string, T>,
-    patch: Record<string, T> | undefined,
-): Record<string, T> {
-    return patch === undefined ? current : { ...current, ...patch };
+function emptyInstanceReadState(): ControlInstanceReadState {
+    return {
+        approvals: [],
+        commentCalls: [],
+        contextMessages: [],
+        logs: [],
+        sequence: 0,
+        toolCalls: [],
+    };
 }

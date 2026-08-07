@@ -4,7 +4,7 @@ import type {
 } from "@portable-devshell/shared";
 
 import type { BoxModel } from "../../component/TuiComponentExpandableBox.js";
-import type { TuiAppState } from "../../../state/reducer/TuiStoreModel.js";
+import { selectTuiLogs, type TuiAppState } from "../../../state/reducer/TuiStoreModel.js";
 import {
     auditInputSummary,
     auditOutputSummary,
@@ -51,7 +51,7 @@ function callBox(
 ): BoxModel {
     const output = resolveAuditOutput(
         call.output,
-        state.logsByInstance[instance] ?? [],
+        selectTuiLogs(state, instance),
         call.callId,
     );
     return makeBox(state, "audit", instance, {

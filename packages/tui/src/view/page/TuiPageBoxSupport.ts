@@ -1,4 +1,5 @@
 import type {
+    InstanceSnapshot,
     ApprovalRequest,
     JsonValue,
     ToolCallRecord,
@@ -15,10 +16,11 @@ import type {
     TuiExpandableBoxStatus,
     TuiPageId,
 } from "../../state/TuiUiState.js";
-import type {
-    TuiAppState,
-    TuiLogEntry,
-    TuiInstanceListEntry,
+import {
+    selectTuiLogs,
+    type TuiAppState,
+    type TuiLogEntry,
+    type TuiInstanceListEntry,
 } from "../../state/reducer/TuiStoreModel.js";
 
 export interface SelectedInstancePageContext {
@@ -31,7 +33,7 @@ export interface SelectedInstancePageContext {
         | undefined;
     instance: TuiInstanceListEntry | undefined;
     logs: TuiLogEntry[];
-    snapshot: TuiAppState["snapshotsByInstance"][string] | undefined;
+    snapshot: InstanceSnapshot | undefined;
     toolCalls: ToolCallRecord[];
 }
 
@@ -40,14 +42,14 @@ export function buildSelectedInstancePageContext(
     instanceName: string,
 ): SelectedInstancePageContext {
     return {
-        approvals: (state.approvalsByInstance[instanceName] ?? []).filter(
+        approvals: (state.readModel.instanceState[instanceName]?.approvals ?? []).filter(
             (approval) => approval.status === "pending",
         ),
         config: readConfigInstance(state, instanceName),
         instance: state.instances.find((entry) => entry.name === instanceName),
-        logs: state.logsByInstance[instanceName] ?? [],
-        snapshot: state.snapshotsByInstance[instanceName],
-        toolCalls: state.toolCallsByInstance[instanceName] ?? [],
+        logs: selectTuiLogs(state, instanceName),
+        snapshot: state.readModel.instanceState[instanceName]?.snapshot,
+        toolCalls: state.readModel.instanceState[instanceName]?.toolCalls ?? [],
     };
 }
 
@@ -160,8 +162,8 @@ export function readConfigInstance(
           publicBaseUrl?: string;
       }
     | undefined {
-    const instances = state.configView?.instances;
-    const mcp = asRecord(state.configView?.mcp);
+    const instances = state.readModel.configView?.instances;
+    const mcp = asRecord(state.readModel.configView?.mcp);
     const auth = asRecord(mcp?.auth);
 
     if (!Array.isArray(instances)) {
@@ -193,7 +195,7 @@ export function readConfigInstance(
 }
 
 export function runtimeStatus(
-    snapshot: TuiAppState["snapshotsByInstance"][string] | undefined,
+    snapshot: InstanceSnapshot | undefined,
 ): TuiExpandableBoxStatus {
     if (snapshot?.status === "ready") {
         return "ready";
@@ -241,7 +243,7 @@ export function renderLogLine(entry: TuiLogEntry): string {
     ]
         .filter(Boolean)
         .join(" ");
-    return `${entry.at ?? entry.receivedAt} ${entry.stream} #${entry.seq}${context.length === 0 ? "" : ` ${context}`} ${entry.message ?? entry.tail ?? entry.preview ?? ""}`;
+    return `${entry.at} ${entry.stream} #${entry.seq}${context.length === 0 ? "" : ` ${context}`} ${entry.message}`;
 }
 
 function normalizeCollapsedLines(

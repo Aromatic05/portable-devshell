@@ -53,6 +53,7 @@ export type TuiUiState = {
     searchQueries: Record<string, string>;
     formDrafts: Record<string, unknown>;
     dirtyForms: Record<string, boolean>;
+    logsClearedThroughSeqByInstance: Record<string, number>;
     logsFollowByInstance: Record<string, boolean>;
     logsPausedAtSeqByInstance: Record<string, number | undefined>;
     controlRestartRequired: boolean;

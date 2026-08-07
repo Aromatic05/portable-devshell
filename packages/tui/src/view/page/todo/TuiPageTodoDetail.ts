@@ -16,7 +16,7 @@ const symbols: Record<TodoItem["status"], string> = {
 };
 
 export function buildTodoDetailBoxes(state: TuiAppState, instance: string, todoId: string): BoxModel[] {
-    const todo = state.todoByInstance[instance];
+    const todo = state.readModel.instanceState[instance]?.todo;
     const summary = projectTodoSummaries(todo).find((candidate) => candidate.taskId === todoId);
     if (summary === undefined) return [];
     if (todo?.taskId !== todoId) {

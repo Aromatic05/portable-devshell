@@ -6,12 +6,12 @@ import { compactSummary, formatField, makeBox } from "../TuiPageBoxSupport.js";
 
 export function buildConnectionsOverviewBoxes(state: TuiAppState, instance: string): BoxModel[] {
     const entry = state.instances.find((candidate) => candidate.name === instance);
-    const mcp = asRecord(state.configView?.mcp);
+    const mcp = asRecord(state.readModel.configView?.mcp);
     const auth = asRecord(mcp?.auth);
     const authMode = typeof auth?.mode === "string" ? auth.mode : "none";
-    const running = state.mcpStatus?.running === true;
-    const pendingOAuth = state.oauthApprovals.filter((approval) => approval.status === "pending").length;
-    const snapshot = state.snapshotsByInstance[instance];
+    const running = state.readModel.mcpStatus?.running === true;
+    const pendingOAuth = state.readModel.oauthApprovals.filter((approval) => approval.status === "pending").length;
+    const snapshot = state.readModel.instanceState[instance]?.snapshot;
 
     return [
         makeBox(state, "connections", instance, {
@@ -30,12 +30,12 @@ export function buildConnectionsOverviewBoxes(state: TuiAppState, instance: stri
         makeBox(state, "connections", instance, {
             detailLines: [
                 formatField("Provider", authMode),
-                formatField("Ready", String(state.mcpStatus?.oauthReady === true)),
+                formatField("Ready", String(state.readModel.mcpStatus?.oauthReady === true)),
                 formatField("Pending", String(pendingOAuth))
             ],
             id: "connections:oauth:default",
             primaryRoute: { page: "connections", providerId: "default", view: "oauth" },
-            status: authMode !== "oauth2" ? "disabled" : state.mcpStatus?.oauthReady === true ? "ready" : "failed",
+            status: authMode !== "oauth2" ? "disabled" : state.readModel.mcpStatus?.oauthReady === true ? "ready" : "failed",
             summaryLines: [compactSummary(["provider", authMode], ["pending", String(pendingOAuth)])],
             title: "OAuth Provider"
         }),

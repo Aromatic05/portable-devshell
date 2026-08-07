@@ -12,15 +12,15 @@ export function buildOAuthPageBoxes(state: TuiAppState, instanceName: string): B
             `Runtime            ${status.runtime}`,
             `Public base URL    ${status.publicBaseUrl}`,
             `Reason             ${status.reason}`,
-            `Pending requests   ${state.oauthApprovals.filter((approval) => approval.status === "pending").length}`
+            `Pending requests   ${state.readModel.oauthApprovals.filter((approval) => approval.status === "pending").length}`
         ],
         id: "oauth-runtime",
         status: status.runtime === "running" ? "ready" : status.runtime === "disabled" ? "disabled" : "failed",
-        summaryLines: [compactSummary(["provider", status.provider], ["runtime", status.runtime], ["pending", String(state.oauthApprovals.filter((approval) => approval.status === "pending").length)])],
+        summaryLines: [compactSummary(["provider", status.provider], ["runtime", status.runtime], ["pending", String(state.readModel.oauthApprovals.filter((approval) => approval.status === "pending").length)])],
         title: "[Global] OAuth Runtime"
     });
 
-    if (state.oauthApprovals.length === 0) {
+    if (state.readModel.oauthApprovals.length === 0) {
         return [
             statusBox,
             makeBox(state, "connections", instanceName, {
@@ -32,7 +32,7 @@ export function buildOAuthPageBoxes(state: TuiAppState, instanceName: string): B
         ];
     }
 
-    return [statusBox, ...state.oauthApprovals.map((approval) => oauthApprovalBox(state, instanceName, approval))];
+    return [statusBox, ...state.readModel.oauthApprovals.map((approval) => oauthApprovalBox(state, instanceName, approval))];
 }
 
 function oauthApprovalBox(state: TuiAppState, instanceName: string, approval: OAuthApprovalRequest): BoxModel {
@@ -62,7 +62,7 @@ function oauthApprovalBox(state: TuiAppState, instanceName: string, approval: OA
 }
 
 function oauthRuntimeStatus(state: TuiAppState): { provider: string; publicBaseUrl: string; reason: string; runtime: string } {
-    const status = state.mcpStatus;
+    const status = state.readModel.mcpStatus;
     const provider = typeof status?.authMode === "string" ? status.authMode : "none";
     if (provider !== "oauth2") {
         return { provider, publicBaseUrl: typeof status?.publicBaseUrl === "string" ? status.publicBaseUrl : "unavailable", reason: "OAuth authentication is not enabled", runtime: "disabled" };

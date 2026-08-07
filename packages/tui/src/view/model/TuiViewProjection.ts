@@ -361,7 +361,7 @@ function overviewLoadState(
     state: TuiAppState,
     error: string | undefined,
 ): TuiPageLoadState {
-    const available = state.operationalOverview !== undefined;
+    const available = state.readModel.overview !== undefined;
     if (error !== undefined)
         return available
             ? { kind: "stale", reason: error }

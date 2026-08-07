@@ -1,4 +1,5 @@
 import type { TuiAppStore } from "../../state/TuiAppStore.js";
+import { selectTuiLogs } from "../../state/reducer/TuiStoreModel.js";
 import type { TuiRouteLifecycleContext } from "./TuiRouteLifecycleController.js";
 import type { TuiControlSession } from "../control/TuiControlSession.js";
 
@@ -30,7 +31,7 @@ export class TuiRouteDataLoader {
             case "todo":
                 if (instance !== undefined) {
                     const title = route.view === "detail"
-                        ? this.options.store.getState().todoByInstance[instance]?.tasks?.find(
+                        ? this.options.store.getState().readModel.instanceState[instance]?.todo?.tasks?.find(
                               (task) => task.taskId === route.todoId,
                           )?.title
                         : undefined;
@@ -43,7 +44,7 @@ export class TuiRouteDataLoader {
                     this.options.store.setLogsFollow(instance, true);
                     await this.options.session.refreshLogsForInstance(instance, undefined, signal);
                     return () => {
-                        const logs = this.options.store.getState().logsByInstance[instance] ?? [];
+                        const logs = selectTuiLogs(this.options.store.getState(), instance);
                         this.options.store.setLogsFollow(instance, false);
                         this.options.store.setLogsPausedAtSeq(instance, logs.at(-1)?.seq);
                     };

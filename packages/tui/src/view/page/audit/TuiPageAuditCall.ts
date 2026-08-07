@@ -1,5 +1,5 @@
 import type { BoxModel } from "../../component/TuiComponentExpandableBox.js";
-import type { TuiAppState } from "../../../state/reducer/TuiStoreModel.js";
+import { selectTuiLogs, type TuiAppState } from "../../../state/reducer/TuiStoreModel.js";
 import type { TuiAuditContextKey } from "./TuiAuditContextProjection.js";
 import {
     auditInputSummary,
@@ -14,7 +14,7 @@ export function buildAuditCallBoxes(
     key: TuiAuditContextKey,
     callId: string,
 ): BoxModel[] {
-    const call = (state.toolCallsByInstance[instance] ?? []).find(
+    const call = (state.readModel.instanceState[instance]?.toolCalls ?? []).find(
         (candidate) =>
             candidate.callId === callId &&
             (key.kind === "unscoped"
@@ -24,7 +24,7 @@ export function buildAuditCallBoxes(
     if (call === undefined) return [];
     const output = resolveAuditOutput(
         call.output,
-        state.logsByInstance[instance] ?? [],
+        selectTuiLogs(state, instance),
         call.callId
     );
     return [

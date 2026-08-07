@@ -8,11 +8,17 @@ export function reduceTuiStoreReducerControl(
     action: TuiAppAction,
 ): TuiAppState | undefined {
     switch (action.type) {
-        case "control.readModel.replace":
+        case "control.readModel.replace": {
+            if (
+                isDeepStrictEqual(state.instances, action.instances) &&
+                isDeepStrictEqual(state.readModel, action.readModel)
+            ) return state;
             return withDerivedState(selectInstanceAfterListReplace({
                 ...state,
-                ...action.projection,
+                instances: action.instances,
+                readModel: action.readModel,
             }));
+        }
         case "command.upsert": {
             const without = state.commandRecords.filter(
                 (command) => command.commandId !== action.command.commandId,

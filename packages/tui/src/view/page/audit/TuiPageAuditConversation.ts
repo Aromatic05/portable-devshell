@@ -14,10 +14,10 @@ export function buildAuditConversationBoxes(
     instance: string,
     ctxId: string,
 ): BoxModel[] {
-    const messages = (state.contextMessagesByInstance[instance] ?? [])
+    const messages = (state.readModel.instanceState[instance]?.contextMessages ?? [])
         .filter((message) => message.ctxId === ctxId)
         .sort((left, right) => left.createdAt.localeCompare(right.createdAt));
-    const deliveredCalls = (state.commentCallsByInstance[instance] ?? [])
+    const deliveredCalls = (state.readModel.instanceState[instance]?.commentCalls ?? [])
         .filter((call) => call.ctxId === ctxId && readCallComments(call).length > 0)
         .sort((left, right) => left.startedAt.localeCompare(right.startedAt));
     const pending = messages.filter(

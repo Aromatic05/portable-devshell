@@ -260,7 +260,7 @@ async function approvePendingWithKeyboard(
         () =>
             runtime.store
                 .getState()
-                .oauthApprovals.some(
+                .readModel.oauthApprovals.some(
                     (approval) =>
                         approval.kind === kind && approval.status === "pending",
                 ),
@@ -268,7 +268,7 @@ async function approvePendingWithKeyboard(
     );
     const pending = runtime.store
         .getState()
-        .oauthApprovals.find(
+        .readModel.oauthApprovals.find(
             (approval) => approval.kind === kind && approval.status === "pending",
         );
     assert.ok(pending);

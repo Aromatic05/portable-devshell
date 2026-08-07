@@ -124,7 +124,7 @@ export class TuiCommandDispatcherViewport {
         } else {
             this.#store.setLogsPausedAtSeq(
                 instance,
-                state.logsByInstance[instance]?.at(-1)?.seq,
+                state.readModel.instanceState[instance]?.logs?.at(-1)?.seq,
             );
         }
         this.#store.setScreenStatus(

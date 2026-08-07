@@ -269,7 +269,7 @@ function managedContainerLines(draft: Record<string, JsonValue>): Array<{ id: st
 }
 
 function instanceDraft(state: TuiAppState, instanceName: string): Record<string, JsonValue> {
-    const entries = state.configView?.instances;
+    const entries = state.readModel.configView?.instances;
     const existing = Array.isArray(entries)
         ? entries.find((entry) => asRecord(entry)?.name === instanceName)
         : undefined;

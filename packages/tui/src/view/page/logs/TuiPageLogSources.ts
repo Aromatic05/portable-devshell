@@ -1,6 +1,5 @@
-import type { TuiLogEntry } from "../../../state/reducer/TuiStoreModel.js";
+import { selectTuiLogs, type TuiAppState, type TuiLogEntry } from "../../../state/reducer/TuiStoreModel.js";
 import type { BoxModel } from "../../component/TuiComponentExpandableBox.js";
-import type { TuiAppState } from "../../../state/reducer/TuiStoreModel.js";
 import { compactSummary, formatField, makeBox } from "../TuiPageBoxSupport.js";
 
 export type TuiLogContextKey =
@@ -18,7 +17,7 @@ export function buildLogContextListBoxes(
     state: TuiAppState,
     instance: string,
 ): BoxModel[] {
-    const contexts = projectLogContexts(state.logsByInstance[instance] ?? []);
+    const contexts = projectLogContexts(selectTuiLogs(state, instance));
     if (contexts.length === 0) {
         return [
             makeBox(state, "logs", instance, {
@@ -130,5 +129,5 @@ export function projectLogContexts(
 }
 
 function logTimestamp(entry: TuiLogEntry | undefined): string {
-    return entry?.at ?? entry?.receivedAt ?? "-";
+    return entry?.at ?? "-";
 }

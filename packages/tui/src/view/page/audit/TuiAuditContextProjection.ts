@@ -53,15 +53,15 @@ export function projectAuditContexts(
     };
 
     const callsById = new Map(
-        (state.toolCallsByInstance[instance] ?? []).map((call) => [call.callId, call] as const),
+        (state.readModel.instanceState[instance]?.toolCalls ?? []).map((call) => [call.callId, call] as const),
     );
-    for (const call of state.commentCallsByInstance[instance] ?? []) {
+    for (const call of state.readModel.instanceState[instance]?.commentCalls ?? []) {
         callsById.set(call.callId, call);
     }
     for (const call of callsById.values()) {
         resolve(call.ctxId).calls.push(call);
     }
-    for (const approval of state.approvalsByInstance[instance] ?? []) {
+    for (const approval of state.readModel.instanceState[instance]?.approvals ?? []) {
         resolve(approval.ctxId).approvals.push(approval);
     }
     return [...contexts.values()]

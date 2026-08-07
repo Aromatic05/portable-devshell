@@ -24,8 +24,7 @@ export type ControlInstanceReadKey =
     | "approvals"
     | "todo"
     | "toolCalls"
-    | "commentCalls"
-    | "contextMessages";
+    | "comments";
 
 export interface ControlInstanceReadState {
     approvals: ApprovalRequest[];
@@ -78,7 +77,7 @@ type InstanceReadValue =
     | ApprovalRequest[]
     | TodoReadResult
     | ToolCallRecord[]
-    | ContextMessageRecord[]
+    | { commentCalls: ToolCallRecord[]; contextMessages: ContextMessageRecord[] }
     | { sequence: number; snapshot: InstanceSnapshot };
 
 export interface ControlReadModelOptions {
@@ -96,8 +95,7 @@ const instanceKeys: readonly ControlInstanceReadKey[] = [
     "approvals",
     "todo",
     "toolCalls",
-    "commentCalls",
-    "contextMessages",
+    "comments",
 ];
 
 export class ControlReadModel {
@@ -323,7 +321,7 @@ export class ControlReadModel {
     mergeQueuedContextMessage(instance: string, message: ContextMessageRecord): void {
         const state = this.#instance(instance);
         state.contextMessages = mergeContextMessage(state.contextMessages, message);
-        this.#clearFailure(this.failureKey(instance, "contextMessages"));
+        this.#clearFailure(this.failureKey(instance, "comments"));
         this.#emit();
     }
 
@@ -403,8 +401,8 @@ export class ControlReadModel {
             this.#emit();
         } catch (error) {
             if (!this.#valid(versionKey, version, epoch)) return;
-            if ((key === "contextMessages" || key === "commentCalls") && methodNotFound(error)) {
-                this.#applyInstanceValue(instance, key, []);
+            if (key === "comments" && methodNotFound(error)) {
+                this.#applyInstanceValue(instance, key, { commentCalls: [], contextMessages: [] });
                 this.#clearFailure(this.failureKey(instance, key));
                 this.#emit();
                 return;
@@ -431,18 +429,19 @@ export class ControlReadModel {
                 return (await this.#clients.todo.get(instance, todoTitle)).todo;
             case "toolCalls":
                 return await this.#clients.tool.listCalls(instance, { limit: 200 });
-            case "contextMessages":
-                return await this.#clients.contextMessage.list(instance);
-            case "commentCalls": {
-                const messages = await this.#clients.contextMessage.list(instance);
-                const callIds = [...new Set(messages.flatMap((message) =>
+            case "comments": {
+                const contextMessages = await this.#clients.contextMessage.list(instance);
+                const callIds = [...new Set(contextMessages.flatMap((message) =>
                     message.status === "delivered" && message.callId !== undefined
                         ? [message.callId]
                         : [],
                 ))];
-                return callIds.length === 0
-                    ? []
-                    : await this.#clients.tool.listCalls(instance, { callIds, limit: 1_000 });
+                return {
+                    commentCalls: callIds.length === 0
+                        ? []
+                        : await this.#clients.tool.listCalls(instance, { callIds, limit: 1_000 }),
+                    contextMessages,
+                };
             }
         }
     }
@@ -473,14 +472,18 @@ export class ControlReadModel {
             case "toolCalls":
                 state.toolCalls = value as ToolCallRecord[];
                 return;
-            case "commentCalls":
-                state.commentCalls = value as ToolCallRecord[];
-                return;
-            case "contextMessages":
+            case "comments": {
+                const comments = value as {
+                    commentCalls: ToolCallRecord[];
+                    contextMessages: ContextMessageRecord[];
+                };
+                state.commentCalls = comments.commentCalls;
                 state.contextMessages = mergeContextMessageList(
                     state.contextMessages,
-                    value as ContextMessageRecord[],
+                    comments.contextMessages,
                 );
+                return;
+            }
         }
     }
 
@@ -836,8 +839,8 @@ function keysForEvent(event: InstanceEvent): ControlInstanceReadKey[] {
     if (event.type === "log.appended") keys.push("logs");
     if (event.type.startsWith("approval.")) keys.push("approvals");
     if (event.type.startsWith("todo.")) keys.push("todo");
-    if (event.type.startsWith("toolCall.")) keys.push("toolCalls", "commentCalls");
-    if (event.type.startsWith("context.message.")) keys.push("contextMessages", "commentCalls");
+    if (event.type.startsWith("toolCall.")) keys.push("toolCalls", "comments");
+    if (event.type.startsWith("context.message.")) keys.push("comments");
     return keys;
 }
 

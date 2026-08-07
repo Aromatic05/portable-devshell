@@ -8,7 +8,6 @@ import {
     type ControlReadModelState,
     type InstanceEvent,
     type InstanceListEntry,
-    type InstanceLogEntry,
     type InstanceSnapshot,
     type JsonValue,
 } from "@portable-devshell/shared";
@@ -17,10 +16,7 @@ import {
     type TuiClients,
 } from "../client/TuiClientComposition.js";
 import { TuiAppStore } from "../../state/TuiAppStore.js";
-import type {
-    TuiInstanceListEntry,
-    TuiLogEntry,
-} from "../../state/reducer/TuiStoreModel.js";
+import type { TuiInstanceListEntry } from "../../state/reducer/TuiStoreModel.js";
 import { selectMainScrollKey } from "../../view/model/TuiViewProjection.js";
 
 export interface TuiControlSessionOptions {
@@ -160,7 +156,7 @@ export class TuiControlSession {
         if (!this.#canRefresh(generation, signal)) return;
         await this.#model.refreshInstance(
             instance,
-            ["toolCalls", "approvals", "commentCalls", "contextMessages"],
+            ["toolCalls", "approvals", "comments"],
         );
     }
 
@@ -227,41 +223,10 @@ export class TuiControlSession {
 
     #syncModel(): void {
         const model = this.#model.state;
-        const approvalsByInstance: Record<string, typeof model.instanceState[string]["approvals"]> = {};
-        const commentCallsByInstance: Record<string, typeof model.instanceState[string]["commentCalls"]> = {};
-        const contextMessagesByInstance: Record<string, typeof model.instanceState[string]["contextMessages"]> = {};
-        const lastSeqByInstance: Record<string, number> = {};
-        const logsByInstance: Record<string, TuiLogEntry[]> = {};
-        const snapshotsByInstance: Record<string, InstanceSnapshot> = {};
-        const todoByInstance: Record<string, NonNullable<typeof model.instanceState[string]["todo"]>> = {};
-        const toolCallsByInstance: Record<string, typeof model.instanceState[string]["toolCalls"]> = {};
-        for (const [name, instance] of Object.entries(model.instanceState)) {
-            approvalsByInstance[name] = instance.approvals;
-            commentCallsByInstance[name] = instance.commentCalls;
-            contextMessagesByInstance[name] = instance.contextMessages;
-            lastSeqByInstance[name] = instance.sequence;
-            logsByInstance[name] = instance.logs.map(mapLogEntry);
-            if (instance.snapshot !== undefined) snapshotsByInstance[name] = instance.snapshot;
-            if (instance.todo !== undefined) todoByInstance[name] = instance.todo;
-            toolCallsByInstance[name] = instance.toolCalls;
-        }
-        this.#store.replaceControlReadModel({
-            approvalsByInstance,
-            artifactShares: model.artifactShares,
-            artifactTransfers: model.artifactTransfers,
-            commentCallsByInstance,
-            configView: model.configView,
-            contextMessagesByInstance,
-            instances: mergeInstances(model.configView, model.instances),
-            lastSeqByInstance,
-            logsByInstance,
-            mcpStatus: model.mcpStatus,
-            oauthApprovals: model.oauthApprovals,
-            operationalOverview: model.overview,
-            snapshotsByInstance,
-            todoByInstance,
-            toolCallsByInstance,
-        });
+        this.#store.replaceControlReadModel(
+            model,
+            mergeInstances(model.configView, model.instances),
+        );
         this.#store.setControlRestartRequired(model.configView?.restartControlRequired === true);
         this.#syncFailures(model);
     }
@@ -367,7 +332,7 @@ function tuiFailurePanel(
     if (failure.key === "stream") return `instances:${instance}:subscription`;
     if (failure.key === "logs") return `logs:${instance}:logs`;
     if (failure.key === "todo") return `todo:${instance}:todo`;
-    if (["approvals", "toolCalls", "commentCalls", "contextMessages"].includes(failure.key)) {
+    if (["approvals", "toolCalls", "comments"].includes(failure.key)) {
         return `audit:${instance}:readModels`;
     }
     if (failure.key === "overview") return "overview:-:overview";
@@ -425,25 +390,6 @@ function readConfigInstances(
             provider: typeof entry.provider === "string" ? entry.provider : undefined,
         }];
     });
-}
-
-function mapLogEntry(entry: InstanceLogEntry): TuiLogEntry {
-    return {
-        at: entry.at,
-        bytes: Buffer.byteLength(entry.message, "utf8"),
-        callId: entry.callId,
-        ctxId: entry.ctxId,
-        instance: entry.instanceName,
-        message: entry.message,
-        preview: entry.message.slice(0, 160),
-        receivedAt: entry.at,
-        requestId: entry.requestId,
-        seq: entry.seq,
-        source: entry.source,
-        stream: entry.stream,
-        tail: entry.message.slice(-160),
-        toolName: entry.toolName,
-    };
 }
 
 function refreshPageLabel(page: "audit" | "connections" | "overview" | "todo"): string {

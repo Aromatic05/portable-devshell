@@ -155,12 +155,12 @@ export class TuiRuntimeControlOperations {
     }
 
     async setInstanceEnabled(instance: string, enabled: boolean): Promise<void> {
-        const snapshot = this.options.store.getState().snapshotsByInstance[instance];
+        const snapshot = this.options.store.getState().readModel.instanceState[instance]?.snapshot;
         const wasRunning = !enabled && snapshot?.daemonState !== undefined && snapshot.daemonState !== "stopped";
         let stoppedForDisable = false;
         try {
             if (wasRunning) {
-                await this.#request(this.options.clients.runtime.stop(instance), `runtime.stop:${instance}`);
+                await this.options.session.commands.stopInstance(instance);
                 stoppedForDisable = true;
             }
             await this.#request(
@@ -173,7 +173,7 @@ export class TuiRuntimeControlOperations {
         } catch (error) {
             if (stoppedForDisable) {
                 try {
-                    await this.#request(this.options.clients.runtime.start(instance, {}), `runtime.start:${instance}`);
+                    await this.options.session.commands.startInstance(instance);
                 } catch (restoreError) {
                     throw new AggregateError(
                         [error, restoreError],

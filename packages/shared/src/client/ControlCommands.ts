@@ -71,7 +71,7 @@ export class ControlCommands {
         );
         if (this.#current(epoch)) {
             this.#model.recordToolDecision(instance, decided.approvalId);
-            this.#refreshInstance(instance, ["approvals", "todo", "toolCalls", "commentCalls"]);
+            this.#refreshInstance(instance, ["approvals", "todo", "toolCalls", "comments"]);
             this.#refreshOverview();
         }
         return decided;
@@ -106,7 +106,7 @@ export class ControlCommands {
         );
         if (this.#current(epoch)) {
             this.#model.mergeQueuedContextMessage(instance, queued);
-            this.#refreshInstance(instance, ["contextMessages", "commentCalls"]);
+            this.#refreshInstance(instance, ["comments"]);
         }
         return queued;
     }

@@ -16,7 +16,7 @@ const symbols: Record<TodoItem["status"], string> = {
 };
 
 export function buildTodoOverviewBoxes(state: TuiAppState, instance: string): BoxModel[] {
-    const todo = state.todoByInstance[instance];
+    const todo = state.readModel.instanceState[instance]?.todo;
     const summaries = projectTodoSummaries(todo);
     if (summaries.length === 0) {
         return [makeBox(state, "todo", instance, {

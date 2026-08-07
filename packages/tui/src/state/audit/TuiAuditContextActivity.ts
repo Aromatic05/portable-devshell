@@ -10,15 +10,15 @@ export function latestObservedContextId(
     instance: string,
 ): string | undefined {
     const calls = new Map<string, ToolCallRecord>();
-    for (const call of state.toolCallsByInstance[instance] ?? []) {
+    for (const call of state.readModel.instanceState[instance]?.toolCalls ?? []) {
         calls.set(call.callId, call);
     }
-    for (const call of state.commentCallsByInstance[instance] ?? []) {
+    for (const call of state.readModel.instanceState[instance]?.commentCalls ?? []) {
         calls.set(call.callId, call);
     }
     const activities = [
         ...[...calls.values()].flatMap(callActivity),
-        ...(state.approvalsByInstance[instance] ?? []).flatMap(approvalActivity),
+        ...(state.readModel.instanceState[instance]?.approvals ?? []).flatMap(approvalActivity),
     ];
     return activities.sort((left, right) => right.at.localeCompare(left.at))[0]
         ?.ctxId;

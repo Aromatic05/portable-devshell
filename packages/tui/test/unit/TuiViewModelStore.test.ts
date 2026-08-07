@@ -32,7 +32,7 @@ test("TuiAppStore keeps page, instance, and expanded boxes stable across events"
         ready: true,
         status: "ready",
     });
-    store.patchControlReadModel({ logsByInstance: { ["beta"]: [{
+    store.patchControlReadModel({ instanceState: { ["beta"]: { logs: [{
         at: "2026-07-09T00:00:03.000Z",
         bytes: 8,
         instance: "beta",
@@ -40,7 +40,7 @@ test("TuiAppStore keeps page, instance, and expanded boxes stable across events"
         seq: 3,
         stream: "stdout",
         tail: "payload",
-    }] } });
+    }] } } });
     store.applyInstanceEvent({
         at: "2026-07-09T00:00:03.000Z",
         instanceName: asInstanceName("beta"),
@@ -54,8 +54,8 @@ test("TuiAppStore keeps page, instance, and expanded boxes stable across events"
     assert.equal(state.ui.selectedPage, "logs");
     assert.equal(state.ui.selectedInstance, "beta");
     assert.equal(state.ui.expandedBoxes["logs:beta:logs"], true);
-    assert.equal(state.logsByInstance.beta?.length, 1);
-    assert.equal(state.lastSeqByInstance.beta, 3);
+    assert.equal(state.readModel.instanceState.beta?.logs.length, 1);
+    assert.equal(state.rawEvents.at(-1)?.seq, 3);
     assert.equal(state.globalDerived.connectedInstanceCount, 1);
 });
 
@@ -96,14 +96,14 @@ test("TuiRenderScheduler redraws visible Overview and Audit context message chan
     store.setSelectedPage("overview");
     await delay(10);
     renders = 0;
-    store.patchControlReadModel({ operationalOverview: emptyOverview() });
+    store.patchControlReadModel({ overview: emptyOverview() });
     await delay(10);
     assert.equal(renders, 1);
 
     store.setSelectedPage("audit");
     await delay(10);
     renders = 0;
-    store.patchControlReadModel({ contextMessagesByInstance: { ["alpha"]: [contextMessage("message-1")] } });
+    store.patchControlReadModel({ instanceState: { ["alpha"]: { contextMessages: [contextMessage("message-1")] } } });
     await delay(10);
     assert.equal(renders, 1);
 
@@ -139,7 +139,7 @@ test("TuiRenderScheduler ignores updates outside the visible page and instance",
         renderCount += 1;
     });
 
-    store.patchControlReadModel({ toolCallsByInstance: { ["alpha"]: [toolCall("alpha-help")] } });
+    store.patchControlReadModel({ instanceState: { ["alpha"]: { toolCalls: [toolCall("alpha-help")] } } });
     await delay(10);
     assert.equal(renderCount, 0);
 
@@ -147,11 +147,11 @@ test("TuiRenderScheduler ignores updates outside the visible page and instance",
     await delay(10);
     renderCount = 0;
 
-    store.patchControlReadModel({ toolCallsByInstance: { ["beta"]: [toolCall("beta-audit")] } });
+    store.patchControlReadModel({ instanceState: { ["beta"]: { toolCalls: [toolCall("beta-audit")] } } });
     await delay(10);
     assert.equal(renderCount, 0);
 
-    store.patchControlReadModel({ toolCallsByInstance: { ["alpha"]: [toolCall("alpha-audit")] } });
+    store.patchControlReadModel({ instanceState: { ["alpha"]: { toolCalls: [toolCall("alpha-audit")] } } });
     await delay(10);
     assert.equal(renderCount, 1);
 
@@ -166,25 +166,25 @@ test("Audit page creates expensive input and output detail only for expanded rec
     ] });
     store.setSelectedInstance("alpha");
     store.setSelectedPage("audit");
-    store.patchControlReadModel({ toolCallsByInstance: { ["alpha"]: [
+    store.patchControlReadModel({ instanceState: { ["alpha"]: { toolCalls: [
         {
             ...toolCall("large-output"),
             input: { command: "x".repeat(20_000) },
             output: { stdout: "y".repeat(20_000) },
         },
-    ] } });
+    ] } } });
 
     const contexts = selectMainScreenModel(store.getState()).boxes;
     assert.equal(contexts[0]?.id, "audit-scope:unscoped");
 
-    store.patchControlReadModel({ toolCallsByInstance: { ["alpha"]: [
+    store.patchControlReadModel({ instanceState: { ["alpha"]: { toolCalls: [
         {
             ...toolCall("large-output"),
             ctxId: "ctx-large",
             input: { command: "x".repeat(20_000) },
             output: { stdout: "y".repeat(20_000) },
         },
-    ] } });
+    ] } } });
     store.pushRoute({
         ctxId: "ctx-large",
         page: "audit",

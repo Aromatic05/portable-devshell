@@ -63,9 +63,9 @@ test("TuiControlSession refreshes a visible overview after relevant instance eve
         toolName: "bash_run"
     });
 
-    await waitFor(() => session.store.getState().operationalOverview?.counts.failedCalls24h === 1);
+    await waitFor(() => session.store.getState().readModel.overview?.counts.failedCalls24h === 1);
     assert.equal(
-        session.store.getState().operationalOverview?.alerts.some(
+        session.store.getState().readModel.overview?.alerts.some(
             (alert) => alert.kind === "activity.failed" && alert.instance === "alpha"
         ),
         true
@@ -92,7 +92,7 @@ test("Comment delivery never stalls visible Audit refreshes for the bound call o
     await waitFor(() => session.store.getState().connection.status === "connected");
     session.store.setSelectedInstance("alpha");
     session.store.setSelectedPage("audit");
-    session.store.patchControlReadModel({ contextMessagesByInstance: { ["alpha"]: [
+    session.store.patchControlReadModel({ instanceState: { ["alpha"]: { contextMessages: [
         {
             createdAt: new Date(8).toISOString(),
             ctxId: "ctx-alpha",
@@ -109,7 +109,7 @@ test("Comment delivery never stalls visible Audit refreshes for the bound call o
             status: "sent",
             text: "second guidance",
         },
-    ] } });
+    ] } } });
 
     const firstCompletedAt = new Date(10).toISOString();
     worker.addToolCall({
@@ -139,7 +139,7 @@ test("Comment delivery never stalls visible Audit refreshes for the bound call o
         status: "delivered",
     });
     await waitFor(() =>
-        session.store.getState().contextMessagesByInstance.alpha?.every(
+        session.store.getState().readModel.instanceState.alpha?.contextMessages?.every(
             (message) =>
                 message.status === "delivered" &&
                 message.callId === "comment-call",
@@ -156,7 +156,7 @@ test("Comment delivery never stalls visible Audit refreshes for the bound call o
     });
 
     await waitFor(() => {
-        const call = session.store.getState().toolCallsByInstance.alpha?.find(
+        const call = session.store.getState().readModel.instanceState.alpha?.toolCalls?.find(
             (record) => record.callId === "comment-call",
         );
         return (
@@ -191,7 +191,7 @@ test("Comment delivery never stalls visible Audit refreshes for the bound call o
     });
 
     await waitFor(() => {
-        const call = session.store.getState().toolCallsByInstance.alpha?.find(
+        const call = session.store.getState().readModel.instanceState.alpha?.toolCalls?.find(
             (record) => record.callId === "later-call",
         );
         return (call?.output as { stdout?: string } | undefined)?.stdout === "later";

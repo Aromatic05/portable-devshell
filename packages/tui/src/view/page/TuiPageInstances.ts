@@ -1,4 +1,5 @@
-import type { JsonValue } from "@portable-devshell/shared";
+import type {
+    InstanceSnapshot, JsonValue } from "@portable-devshell/shared";
 
 import { isTuiTerminalSupported } from "../../state/instance/TuiInstanceTerminalCapability.js";
 import { buildArtifactActivityView } from "../component/TuiComponentArtifactActivityBox.js";
@@ -35,13 +36,13 @@ export function buildInstancesPageBoxes(state: TuiAppState): BoxModel[] {
             title: "Create Instance"
         }),
         ...state.instances.map((entry) => {
-            const snapshot = state.snapshotsByInstance[entry.name];
-            const approvals = (state.approvalsByInstance[entry.name] ?? []).filter((approval) => approval.status === "pending");
+            const snapshot = state.readModel.instanceState[entry.name]?.snapshot;
+            const approvals = (state.readModel.instanceState[entry.name]?.approvals ?? []).filter((approval) => approval.status === "pending");
             const lifecycle = lifecycleAvailability(state, entry.name, entry.enabled, entry.provider, snapshot);
             const artifactActivity = buildArtifactActivityView(
                 entry.name,
-                state.artifactShares,
-                state.artifactTransfers
+                state.readModel.artifactShares,
+                state.readModel.artifactTransfers
             );
 
             return makeBox(state, "instances", entry.name, {
@@ -97,7 +98,7 @@ export function buildInstancesPageBoxes(state: TuiAppState): BoxModel[] {
     ];
 }
 
-function instanceRuntimeSummary(snapshot: TuiAppState["snapshotsByInstance"][string] | undefined): string {
+function instanceRuntimeSummary(snapshot: InstanceSnapshot | undefined): string {
     if (snapshot?.ready === true) {
         return "ready";
     }
@@ -110,7 +111,7 @@ function lifecycleAvailability(
     instance: string,
     enabled: boolean,
     provider: string | undefined,
-    snapshot: TuiAppState["snapshotsByInstance"][string] | undefined
+    snapshot: InstanceSnapshot | undefined
 ): { attach: boolean; restart: boolean; startOrRestart: boolean; stop: boolean } {
     const busy = state.commandRecords.some((record) => record.targetInstance === instance && record.status === "running");
     const daemon = snapshot?.daemonState;

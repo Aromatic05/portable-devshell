@@ -1,4 +1,5 @@
 import type { TuiAppStore } from "../../../state/TuiAppStore.js";
+import { selectTuiLogs } from "../../../state/reducer/TuiStoreModel.js";
 import type { TuiInteractionProjection } from "../../TuiInteractionProjection.js";
 import type { TuiUiIntent } from "../../../state/TuiInteractionState.js";
 import type { TuiCommandDispatcherAudit } from "./TuiCommandDispatcherAudit.js";
@@ -74,7 +75,7 @@ export class TuiCommandDispatcherDetail {
                     return false;
                 }
                 if (entry.enabled) {
-                    const running = state.snapshotsByInstance[instance]?.daemonState !== "stopped";
+                    const running = state.readModel.instanceState[instance]?.snapshot?.daemonState !== "stopped";
                     return await this.#dispatch({
                         body: running ? `Stop and disable ${instance}?` : `Disable ${instance}?`,
                         confirmIntent: { enabled: false, instance, type: "instance.setEnabled" },
@@ -142,7 +143,7 @@ export class TuiCommandDispatcherDetail {
                 }
             }
             if (state.ui.selectedPage === "logs" && actionId?.startsWith("log:")) {
-                const entry = state.logsByInstance[state.ui.selectedInstance ?? ""]?.find((candidate) => candidate.seq === Number(actionId.slice("log:".length)));
+                const entry = selectTuiLogs(state, state.ui.selectedInstance ?? "").find((candidate) => candidate.seq === Number(actionId.slice("log:".length)));
                 if (entry?.callId === undefined) {
                     this.#store.setScreenStatus("logs", "This log entry has no linked tool call.");
                     return false;
