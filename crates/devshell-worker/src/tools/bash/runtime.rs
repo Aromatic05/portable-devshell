@@ -46,7 +46,7 @@ impl ShellRuntime {
     }
 }
 
-#[cfg(any(windows, test))]
+#[cfg(windows)]
 pub fn powershell_command(command_text: &str) -> String {
     format!(
         "$__devshellUtf8 = [System.Text.UTF8Encoding]::new($false); [Console]::InputEncoding = $__devshellUtf8; [Console]::OutputEncoding = $__devshellUtf8; $OutputEncoding = $__devshellUtf8; {command_text}"

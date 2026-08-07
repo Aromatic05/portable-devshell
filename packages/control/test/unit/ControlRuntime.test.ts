@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import { rename, rm, writeFile } from "node:fs/promises";
 import { request } from "node:http";
-import { createServer } from "node:net";
 import { join } from "node:path";
 import test from "node:test";
 
@@ -17,6 +16,7 @@ import { ControlRuntime } from "../../src/testing.ts";
 import { ControlRuntimeMcp } from "../../src/composition/runtime/ControlRuntimeMcp.ts";
 import { ControlRuntimeState } from "../../src/composition/runtime/ControlRuntimeState.ts";
 import { createTestIpcPath, ipcEndpointAcceptsConnections } from "../../../../test/TestPlatformSupport.ts";
+import { requireTcpPort, startLoopbackHttpProxy } from "../../../../test/TestHttpSupport.ts";
 import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
 
 test("runtime stop does not settle until owned cleanup completes", async (t) => {
@@ -251,8 +251,8 @@ test("runtime does not mount WebUI routes when web.enabled is false", async (t) 
 test("failed OAuth Web hot replacement restores the previous listener and OAuth routes", async (t) => {
     const homeDirectory = await createTestTempDirectory("runtime-web-rollback");
     const socketPath = createTestIpcPath("control-runtime", homeDirectory);
-    const port = await reservePort();
-    const origin = `http://127.0.0.1:${port}`;
+    const proxy = await startLoopbackHttpProxy();
+    const origin = proxy.origin;
     let persisted = createDefaultControlConfig();
     persisted.web = {
         auth: {
@@ -261,7 +261,7 @@ test("failed OAuth Web hot replacement restores the previous listener and OAuth 
         },
         enabled: true,
         listenHost: "127.0.0.1",
-        listenPort: port,
+        listenPort: 0,
         publicBaseUrl: origin
     };
     const state = new ControlRuntimeState({
@@ -297,11 +297,16 @@ test("failed OAuth Web hot replacement restores the previous listener and OAuth 
         socketPath
     });
     t.after(async () => {
-        await runtime.stop().catch(() => undefined);
-        await rm(homeDirectory, { force: true, recursive: true });
+        try {
+            await runtime.stop();
+            await rm(homeDirectory, { force: true, recursive: true });
+        } finally {
+            await proxy.close();
+        }
     });
 
     await runtime.start();
+    proxy.setTarget(`http://127.0.0.1:${requireTcpPort(mcp.webHost?.address)}`);
     const initialMetadata = await requestHttp(origin, "/.well-known/oauth-protected-resource/web");
     assert.equal(initialMetadata.status, 200);
 
@@ -319,6 +324,7 @@ test("failed OAuth Web hot replacement restores the previous listener and OAuth 
         }),
         /EEXIST|ENOTDIR|not a directory/iu
     );
+    proxy.setTarget(`http://127.0.0.1:${requireTcpPort(mcp.webHost?.address)}`);
 
     assert.equal(persisted.web.auth.mode, "oauth2");
     if (persisted.web.auth.mode !== "oauth2") throw new Error("restored Web auth mode is not oauth2");
@@ -348,15 +354,4 @@ async function requestHttp(origin: string, path: string): Promise<{ body: string
         requestHandle.once("error", reject);
         requestHandle.end();
     });
-}
-
-async function reservePort(): Promise<number> {
-    const server = createServer();
-    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-    const address = server.address();
-    assert.ok(typeof address === "object" && address !== null);
-    await new Promise<void>((resolve, reject) => {
-        server.close((error) => error === undefined ? resolve() : reject(error));
-    });
-    return address.port;
 }

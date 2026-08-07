@@ -1,7 +1,5 @@
 import assert from "node:assert/strict";
 import { rm } from "node:fs/promises";
-import { createServer } from "node:net";
-import type { AddressInfo } from "node:net";
 import { join } from "node:path";
 import test from "node:test";
 
@@ -24,21 +22,22 @@ import { ControlWebSessionService } from "../../src/server/web/ControlWebSession
 import { ControlWebSocketListener } from "../../src/server/web/ControlWebSocketListener.ts";
 import { NodeWebSocketChannel } from "../WebSocketTestSupport.ts";
 import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
+import { requireTcpPort, startLoopbackHttpProxy } from "../../../../test/TestHttpSupport.ts";
 
 const WEB_RESOURCE_NAME = "demo-web";
 const WEB_SCOPES = ["web"];
 
 test("web oauth2 completes browser PKCE and authenticates the real control WebSocket", async (t) => {
-    const port = await reservePort();
-    const publicBaseUrl = `http://127.0.0.1:${port}`;
     const storage = await createTestTempDirectory("web-oauth");
+    const http = new HttpHost({ listenHost: "127.0.0.1", listenPort: 0 });
+    await http.start();
+    const publicBaseUrl = `http://127.0.0.1:${requireTcpPort(http.address)}`;
     const protectedResource = new McpOAuthProtectedResource(
         { requiredScopes: WEB_SCOPES, resourceName: WEB_RESOURCE_NAME },
         publicBaseUrl,
         storage,
         { trustProxy: true }
     );
-    const http = new HttpHost({ listenHost: "127.0.0.1", listenPort: port });
     const sessions = new ControlWebSessionService({
         auth: { mode: "oauth2", oauth2: { requiredScopes: WEB_SCOPES, resourceName: WEB_RESOURCE_NAME } },
         basePath: "/web"
@@ -59,7 +58,6 @@ test("web oauth2 completes browser PKCE and authenticates the real control WebSo
     http.installOAuth(protectedResource);
     await flow.warmup();
     await channels.start();
-    await http.start();
     t.after(async () => {
         await channels.close().catch(() => undefined);
         uninstall();
@@ -113,16 +111,16 @@ test("web oauth2 completes browser PKCE and authenticates the real control WebSo
 });
 
 test("web oauth2 rejects a callback whose state cookie does not match", async (t) => {
-    const port = await reservePort();
-    const publicBaseUrl = `http://127.0.0.1:${port}`;
     const storage = await createTestTempDirectory("web-oauth-csrf");
+    const http = new HttpHost({ listenHost: "127.0.0.1", listenPort: 0 });
+    await http.start();
+    const publicBaseUrl = `http://127.0.0.1:${requireTcpPort(http.address)}`;
     const protectedResource = new McpOAuthProtectedResource(
         { requiredScopes: WEB_SCOPES, resourceName: WEB_RESOURCE_NAME },
         publicBaseUrl,
         storage,
         { trustProxy: true }
     );
-    const http = new HttpHost({ listenHost: "127.0.0.1", listenPort: port });
     const sessions = new ControlWebSessionService({
         auth: { mode: "oauth2", oauth2: { requiredScopes: WEB_SCOPES, resourceName: WEB_RESOURCE_NAME } },
         basePath: "/web"
@@ -138,7 +136,6 @@ test("web oauth2 rejects a callback whose state cookie does not match", async (t
     const uninstall = flow.install(http);
     http.installOAuth(protectedResource);
     await flow.warmup();
-    await http.start();
     t.after(async () => {
         uninstall();
         await http.stop().catch(() => undefined);
@@ -151,12 +148,17 @@ test("web oauth2 rejects a callback whose state cookie does not match", async (t
     assert.equal(forged.status, 400);
 });
 
-test("web oauth2 reuses its persisted dynamic client after a control restart", async (t) => {
-    const port = await reservePort();
-    const publicBaseUrl = `http://127.0.0.1:${port}`;
+test("web oauth2 reuses its persisted dynamic client after runtime recreation", async (t) => {
+    const proxy = await startLoopbackHttpProxy();
+    const publicBaseUrl = proxy.origin;
     const storage = await createTestTempDirectory("web-oauth-client-state");
     const clientStateFile = join(storage, "web-client.json");
-    t.after(async () => await rm(storage, { force: true, recursive: true }));
+    const runtimes: HttpHost[] = [];
+    t.after(async () => {
+        for (const http of runtimes) await http.stop();
+        await proxy.close();
+        await rm(storage, { force: true, recursive: true });
+    });
 
     const startRuntime = async () => {
         const protectedResource = new McpOAuthProtectedResource(
@@ -165,7 +167,7 @@ test("web oauth2 reuses its persisted dynamic client after a control restart", a
             storage,
             { trustProxy: true }
         );
-        const http = new HttpHost({ listenHost: "127.0.0.1", listenPort: port });
+        const http = new HttpHost({ listenHost: "127.0.0.1", listenPort: 0 });
         const sessions = new ControlWebSessionService({
             auth: { mode: "oauth2", oauth2: { requiredScopes: WEB_SCOPES, resourceName: WEB_RESOURCE_NAME } },
             basePath: "/web"
@@ -183,6 +185,8 @@ test("web oauth2 reuses its persisted dynamic client after a control restart", a
         flow.install(http);
         await flow.warmup();
         await http.start();
+        runtimes.push(http);
+        proxy.setTarget(`http://127.0.0.1:${requireTcpPort(http.address)}`);
         return { http, protectedResource };
     };
 
@@ -210,7 +214,6 @@ test("web oauth2 reuses its persisted dynamic client after a control restart", a
         globalThis.fetch = originalFetch;
     });
     const second = await startRuntime();
-    t.after(async () => await second.http.stop().catch(() => undefined));
     const secondStart = await fetch(`${publicBaseUrl}/web/oauth/start`, { redirect: "manual" });
     assert.equal(secondStart.status, 302);
     assert.deepEqual(secondRuntimePosts, []);
@@ -222,8 +225,8 @@ test("web oauth2 reuses its persisted dynamic client after a control restart", a
 });
 
 test("web oauth2 shares one provider with MCP on a shared listener without route conflicts", async (t) => {
-    const port = await reservePort();
-    const publicBaseUrl = `http://127.0.0.1:${port}`;
+    const proxy = await startLoopbackHttpProxy();
+    const publicBaseUrl = proxy.origin;
     const storage = await createTestTempDirectory("web-oauth-shared");
     const host = new McpHost({
         instances: [{
@@ -237,7 +240,7 @@ test("web oauth2 shares one provider with MCP on a shared listener without route
             worker: createMcpWorker()
         }],
         listenHost: "127.0.0.1",
-        listenPort: port,
+        listenPort: 0,
         publicBaseUrl,
         storageDir: storage
     });
@@ -260,10 +263,12 @@ test("web oauth2 shares one provider with MCP on a shared listener without route
     const uninstallSession = sessions.install(host.server);
     await flow.warmup();
     await host.start();
+    proxy.setTarget(`http://127.0.0.1:${requireTcpPort(host.server.address)}`);
     t.after(async () => {
         uninstall();
         uninstallSession();
-        await host.stop().catch(() => undefined);
+        await host.stop();
+        await proxy.close();
         await rm(storage, { force: true, recursive: true });
     });
 
@@ -280,18 +285,18 @@ test("web oauth2 shares one provider with MCP on a shared listener without route
 });
 
 test("web oauth2 preserves a public URL path prefix across discovery, PKCE, and redirect", async (t) => {
-    const port = await reservePort();
-    const origin = `http://127.0.0.1:${port}`;
+    const storage = await createTestTempDirectory("web-oauth-prefix");
+    const http = new HttpHost({ listenHost: "127.0.0.1", listenPort: 0 });
+    await http.start();
+    const origin = `http://127.0.0.1:${requireTcpPort(http.address)}`;
     const publicBaseUrl = `${origin}/devshell`;
     const basePath = controlWebBasePath(publicBaseUrl);
-    const storage = await createTestTempDirectory("web-oauth-prefix");
     const protectedResource = new McpOAuthProtectedResource(
         { requiredScopes: WEB_SCOPES, resourceName: WEB_RESOURCE_NAME },
         origin,
         storage,
         { trustProxy: true }
     );
-    const http = new HttpHost({ listenHost: "127.0.0.1", listenPort: port });
     const sessions = new ControlWebSessionService({
         auth: { mode: "oauth2", oauth2: { requiredScopes: WEB_SCOPES, resourceName: WEB_RESOURCE_NAME } },
         basePath
@@ -307,7 +312,6 @@ test("web oauth2 preserves a public URL path prefix across discovery, PKCE, and 
     await flow.warmup();
     const uninstall = flow.install(http);
     const uninstallSession = sessions.install(http);
-    await http.start();
     t.after(async () => {
         uninstall();
         uninstallSession();
@@ -453,15 +457,6 @@ async function waitFor(predicate: () => Promise<boolean>): Promise<void> {
         await new Promise((resolve) => setTimeout(resolve, 10));
     }
     assert.fail("condition was not met before timeout");
-}
-
-async function reservePort(): Promise<number> {
-    const server = createServer();
-    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-    const address = server.address() as AddressInfo | null;
-    if (address === null) throw new Error("Port reservation failed.");
-    await new Promise<void>((resolve, reject) => server.close((error) => error === undefined ? resolve() : reject(error)));
-    return address.port;
 }
 
 function createRouteSnapshot(): PrefixRouteSnapshot {

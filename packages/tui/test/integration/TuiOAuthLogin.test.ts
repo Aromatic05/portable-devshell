@@ -1,8 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash, randomBytes } from "node:crypto";
 import { rm } from "node:fs/promises";
-import { createServer } from "node:net";
-import type { AddressInfo } from "node:net";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import type { ReadStream, WriteStream } from "node:tty";
@@ -17,6 +15,7 @@ import { type McpOAuthApprovalService } from "@portable-devshell/mcp";
 import { McpHost } from "@portable-devshell/mcp/testing";
 
 import { createTestIpcPath } from "../../../../test/TestPlatformSupport.ts";
+import { requireTcpPort, startLoopbackHttpProxy } from "../../../../test/TestHttpSupport.ts";
 import { TuiRuntime } from "../../src/runtime/TuiRuntime.ts";
 import {
     createTuiClients,
@@ -29,8 +28,8 @@ import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
 test("real TUI keyboard approval completes registration, authorization, token exchange, and MCP login", async (t) => {
     const directory = await createTestTempDirectory("tui-oauth-login");
     const socketPath = createTestIpcPath("tui-oauth-login", directory);
-    const port = await reservePort();
-    const origin = `http://127.0.0.1:${port}`;
+    const proxy = await startLoopbackHttpProxy();
+    const origin = proxy.origin;
     const endpoint = `${origin}/demo/mcp`;
     const host = new McpHost({
         instances: [
@@ -49,10 +48,13 @@ test("real TUI keyboard approval completes registration, authorization, token ex
             },
         ],
         listenHost: "127.0.0.1",
-        listenPort: port,
+        listenPort: 0,
         publicBaseUrl: origin,
         storageDir: join(directory, "oauth"),
     });
+    await host.start();
+    const listenPort = requireTcpPort(host.server.address);
+    proxy.setTarget(`http://127.0.0.1:${listenPort}`);
     const routes = new ControlRouteComposition({
         config: {
             getConfigView() {
@@ -80,7 +82,7 @@ test("real TUI keyboard approval completes registration, authorization, token ex
                         },
                         enabled: true,
                         listenHost: "127.0.0.1",
-                        listenPort: port,
+                        listenPort,
                         publicBaseUrl: origin,
                     },
                 };
@@ -101,12 +103,12 @@ test("real TUI keyboard approval completes registration, authorization, token ex
         },
     );
 
-    await host.start();
     await control.start();
     t.after(async () => {
         await control.stop();
         routes.dispose();
         await host.stop();
+        await proxy.close();
         await rm(directory, { force: true, recursive: true });
     });
 
@@ -517,15 +519,4 @@ async function waitUntil(
         }
         await new Promise<void>((resolve) => setImmediate(resolve));
     }
-}
-
-async function reservePort(): Promise<number> {
-    const server = createServer();
-    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-    const address = server.address() as AddressInfo | null;
-    assert.notEqual(address, null);
-    await new Promise<void>((resolve, reject) =>
-        server.close((error) => (error === undefined ? resolve() : reject(error))),
-    );
-    return address!.port;
 }

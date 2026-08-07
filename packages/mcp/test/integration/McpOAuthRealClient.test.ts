@@ -4,9 +4,13 @@ import { rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
 
-import { requireTcpPort } from "../../../../test/TestHttpSupport.ts";
+import { requireTcpPort, startLoopbackHttpProxy } from "../../../../test/TestHttpSupport.ts";
 import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
-import { realWorkerTestOptions, resolveTestWorkerBinary } from "../../../../test/TestPlatformSupport.ts";
+import {
+    readRelativeMarkerCommand,
+    realWorkerTestOptions,
+    resolveTestWorkerBinary,
+} from "../../../../test/TestPlatformSupport.ts";
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
@@ -49,7 +53,7 @@ test("a real MCP SDK client drives a none-auth frozen worker through initialize,
 
         const ctxId = await readContextId(client);
         const result = await client.callTool({
-            arguments: { command: `cat -- './${workspaceMarker.name}'`, ctxId },
+            arguments: { command: readRelativeMarkerCommand(workspaceMarker.name), ctxId },
             name: "bash_run"
         });
         assert.equal(result.isError, false);
@@ -127,7 +131,7 @@ test("a real MCP SDK client receives a queued Comment in the next ordinary tool 
         });
         assert.equal(queued.status, "sent");
         const first = await client.callTool({
-            arguments: { command: `cat -- './${workspaceMarker.name}'`, ctxId },
+            arguments: { command: readRelativeMarkerCommand(workspaceMarker.name), ctxId },
             name: "bash_run",
         });
         assert.deepEqual(
@@ -169,7 +173,7 @@ test("a real MCP SDK client receives a queued Comment in the next ordinary tool 
             undefined,
         );
         const third = await client.callTool({
-            arguments: { command: "printf third", ctxId },
+            arguments: { command: readRelativeMarkerCommand(workspaceMarker.name), ctxId },
             name: "bash_run",
         });
         assert.equal(third.isError, false);
@@ -221,7 +225,7 @@ test("a real MCP SDK client authenticates to a token-auth frozen worker with a b
 
         const ctxId = await readContextId(client);
         const result = await client.callTool({
-            arguments: { command: `cat -- './${workspaceMarker.name}'`, ctxId },
+            arguments: { command: readRelativeMarkerCommand(workspaceMarker.name), ctxId },
             name: "bash_run"
         });
         assert.equal(result.isError, false);
@@ -236,8 +240,8 @@ test("a real MCP SDK client authenticates to a token-auth frozen worker with a b
 });
 
 test("a real MCP SDK OAuth consumer completes registration, PKCE authorization, approval, token exchange, refresh, revocation and tools/call against a frozen worker", realWorkerTestOptions(workerBinaryPath), async () => {
-    const port = await reservePort();
-    const origin = `http://127.0.0.1:${port}`;
+    const proxy = await startLoopbackHttpProxy();
+    const origin = proxy.origin;
     const storageDir = await createTestTempDirectory("mcp-oauth-real-client");
     const workspacePath = await createTestTempDirectory("mcp-oauth-real-workspace");
     const homeDirectory = await createTestTempDirectory("mcp-oauth-real-home");
@@ -270,7 +274,7 @@ test("a real MCP SDK OAuth consumer completes registration, PKCE authorization, 
             }
         ],
         listenHost: "127.0.0.1",
-        listenPort: port,
+        listenPort: 0,
         publicBaseUrl: origin,
         storageDir
     });
@@ -278,6 +282,7 @@ test("a real MCP SDK OAuth consumer completes registration, PKCE authorization, 
     try {
         await instance.start();
         await host.start();
+        proxy.setTarget(`http://127.0.0.1:${requireTcpPort(host.server.address)}`);
 
         const endpoint = `${origin}/real-oauth/mcp`;
         const approvals = host.oauthApprovals;
@@ -329,7 +334,7 @@ test("a real MCP SDK OAuth consumer completes registration, PKCE authorization, 
         assert.equal(tools.tools.some((tool) => tool.name === "bash_run"), true);
         const ctxId = await readContextId(client);
         const result = await client.callTool({
-            arguments: { command: `cat -- './${markerName}'`, ctxId },
+            arguments: { command: readRelativeMarkerCommand(markerName), ctxId },
             name: "bash_run"
         });
         assert.equal(result.isError, false);
@@ -398,11 +403,15 @@ test("a real MCP SDK OAuth consumer completes registration, PKCE authorization, 
             "an access token tied to a revoked grant must no longer open a session"
         );
     } finally {
-        await teardownFrozenWorker(host, instance);
-        await rm(storageDir, { force: true, recursive: true });
-        await rm(workspacePath, { force: true, recursive: true });
-        await rm(homeDirectory, { force: true, recursive: true });
-        await rm(runtimeDirectory, { force: true, recursive: true });
+        try {
+            await teardownFrozenWorker(host, instance);
+            await rm(storageDir, { force: true, recursive: true });
+            await rm(workspacePath, { force: true, recursive: true });
+            await rm(homeDirectory, { force: true, recursive: true });
+            await rm(runtimeDirectory, { force: true, recursive: true });
+        } finally {
+            await proxy.close();
+        }
     }
 });
 
@@ -673,26 +682,10 @@ async function teardownFrozenWorker(
     instance: { close(): Promise<void>; stop(): Promise<unknown> },
     cleanupDirs: readonly string[] = []
 ): Promise<void> {
-    await host.stop().catch(() => undefined);
-    await instance.stop().catch(() => undefined);
-    await instance.close().catch(() => undefined);
+    await host.stop();
+    await instance.stop();
+    await instance.close();
     for (const dir of cleanupDirs) {
         await rm(dir, { force: true, recursive: true });
     }
-}
-
-async function reservePort(): Promise<number> {
-    const { createServer } = await import("node:http");
-    const server = createServer();
-    await new Promise<void>((resolve) => {
-        server.listen(0, "127.0.0.1", () => resolve());
-    });
-    const port = requireTcpPort(server.address());
-    await new Promise<void>((resolve, reject) => {
-        server.close((error) => {
-            if (error) reject(error);
-            else resolve();
-        });
-    });
-    return port;
 }

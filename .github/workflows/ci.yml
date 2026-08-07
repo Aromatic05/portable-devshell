@@ -51,6 +51,16 @@ jobs:
               with:
                   node-version: 24
                   cache: pnpm
+            - name: 安装 Unix 测试依赖
+              if: runner.os != 'Windows'
+              shell: bash
+              run: |
+                  if [[ "$RUNNER_OS" == "Linux" ]]; then
+                      sudo apt-get update
+                      sudo apt-get install -y tmux fish
+                  else
+                      brew install tmux fish
+                  fi
             - name: 安装 Rust 工具链
               run: |
                   rustup toolchain install stable --profile minimal
@@ -78,6 +88,7 @@ jobs:
                   pnpm --filter @portable-devshell/control exec playwright install --with-deps chromium
                   chromium_path=$(pnpm --filter @portable-devshell/control exec node -e "const { chromium } = require('playwright'); process.stdout.write(chromium.executablePath())")
                   echo "PORTABLE_DEVSHELL_CHROMIUM=$chromium_path" >> "$GITHUB_ENV"
+                  echo "PORTABLE_DEVSHELL_REQUIRE_CHROMIUM=1" >> "$GITHUB_ENV"
             - name: 运行完整开发验收套件
               run: node ./scripts/run-development-ci.mjs "${{ matrix.target }}"
             - name: 上传最终验收日志

@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile, spawn, spawnSync, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { mkdir, rm, writeFile } from "node:fs/promises";
-import { createServer } from "node:net";
 import { join } from "node:path";
 import test from "node:test";
 import { promisify } from "node:util";
@@ -34,6 +33,7 @@ import {
     terminalSizeProbeCommand,
 } from "../../../../test/TestPlatformSupport.ts";
 import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
+import { startLoopbackHttpProxy, type LoopbackHttpProxy } from "../../../../test/TestHttpSupport.ts";
 
 const workerBinary = resolveTestWorkerBinary();
 const execFileAsync = promisify(execFile);
@@ -57,8 +57,8 @@ test(
             workspaceMarker,
             "utf8",
         );
-        const port = await reservePort();
-        const publicBaseUrl = `http://127.0.0.1:${port}`;
+        const proxy = await startLoopbackHttpProxy();
+        const publicBaseUrl = proxy.origin;
         const restoreWindowsIdentity = installUniqueWindowsTestIdentity(
             "reverse-real-worker",
         );
@@ -69,8 +69,13 @@ test(
         let workerStderr = "";
 
         t.after(async () => {
-            workerRef.value?.kill("SIGTERM");
-            await server.stop().catch(() => undefined);
+            const worker = workerRef.value;
+            if (worker !== undefined && worker.exitCode === null && worker.signalCode === null) {
+                worker.kill("SIGTERM");
+                await waitForExit(worker);
+            }
+            await server.stop();
+            await proxy.close();
             restoreWindowsIdentity();
             await rm(homeDirectory, { force: true, recursive: true });
             await rm(xdgRuntimeDir, { force: true, recursive: true });
@@ -86,7 +91,7 @@ test(
                 mcp: {
                     enabled: true,
                     listenHost: "127.0.0.1",
-                    listenPort: port,
+                    listenPort: 0,
                     publicBaseUrl,
                 },
             }),
@@ -137,6 +142,7 @@ test(
         );
 
         await server.start();
+        await pointProxyAtControlMcp(proxy, server.socketPath);
         const worker = spawn(workerBinary!, [], {
             env: {
                 ...process.env,
@@ -318,6 +324,7 @@ test(
         terminalClient.close();
 
         await server.restart();
+        await pointProxyAtControlMcp(proxy, server.socketPath);
         await waitUntil(
             async () => {
                 const snapshot = await request(
@@ -390,8 +397,8 @@ test(
         const markerName = "reverse-reenroll-marker.txt";
         const marker = "reverse-reenroll-ok";
         await writeFile(join(workspace, markerName), marker, "utf8");
-        const port = await reservePort();
-        const publicBaseUrl = `http://127.0.0.1:${port}`;
+        const proxy = await startLoopbackHttpProxy();
+        const publicBaseUrl = proxy.origin;
         const paths = new ControlPathHome(controlHome);
         const server = new ControlServer({
             homeDirectory: controlHome,
@@ -415,7 +422,8 @@ test(
                 workspace,
                 true,
             );
-            await server.stop().catch(() => undefined);
+            await server.stop();
+            await proxy.close();
             await Promise.all([
                 rm(controlHome, { force: true, recursive: true }),
                 rm(controlRuntime, { force: true, recursive: true }),
@@ -434,7 +442,7 @@ test(
                 mcp: {
                     enabled: true,
                     listenHost: "127.0.0.1",
-                    listenPort: port,
+                    listenPort: 0,
                     publicBaseUrl,
                 },
             }),
@@ -459,6 +467,7 @@ test(
             "utf8",
         );
         await server.start();
+        await pointProxyAtControlMcp(proxy, server.socketPath);
 
         const enroll = async () => {
             const code = await new ReverseCredentialStore(controlHome).createDeviceCode(
@@ -522,22 +531,10 @@ test(
     },
 );
 
-async function reservePort(): Promise<number> {
-    const server = createServer();
-    await new Promise<void>((resolvePromise, rejectPromise) => {
-        server.once("error", rejectPromise);
-        server.listen(0, "127.0.0.1", resolvePromise);
-    });
-    const address = server.address();
-    assert.equal(typeof address, "object");
-    assert.notEqual(address, null);
-    const port = (address as { port: number }).port;
-    await new Promise<void>((resolvePromise, rejectPromise) => {
-        server.close((error) =>
-            error === undefined ? resolvePromise() : rejectPromise(error),
-        );
-    });
-    return port;
+async function pointProxyAtControlMcp(proxy: LoopbackHttpProxy, socketPath: string): Promise<void> {
+    const status = await request(socketPath, "mcp.status", "@control") as { listenAddress?: string };
+    assert.equal(typeof status.listenAddress, "string");
+    proxy.setTarget(`http://${status.listenAddress}`);
 }
 
 function runWorkerCommand(

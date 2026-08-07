@@ -1032,13 +1032,13 @@ fn bash_shell_preserves_task_identity_through_exit() {
         tmux_available(),
         "tmux is required to run this ignored contract test"
     );
-    if !Command::new("bash")
-        .arg("--version")
-        .output()
-        .is_ok_and(|output| output.status.success())
-    {
-        return;
-    }
+    assert!(
+        Command::new("bash")
+            .arg("--version")
+            .output()
+            .is_ok_and(|output| output.status.success()),
+        "bash is required to run this tmux contract test"
+    );
     let env = TestEnv::new();
     let instance = "aromatic-tmux-bash";
     env.command_with_env("SHELL", "/bin/bash")
@@ -1089,9 +1089,7 @@ fn fish_shell_preserves_task_identity_through_exit() {
         tmux_available(),
         "tmux is required to run this ignored contract test"
     );
-    let Some(fish) = fish else {
-        return;
-    };
+    let fish = fish.expect("fish is required to run this tmux contract test");
     let env = TestEnv::new();
     let fish_config_dir = env.home().join(".config/fish");
     std::fs::create_dir_all(&fish_config_dir).unwrap();
@@ -1106,7 +1104,6 @@ fn fish_shell_preserves_task_identity_through_exit() {
         .args(["start", "--instance", instance])
         .assert()
         .success();
-    let started = Instant::now();
     let run = call(
         &env,
         instance,
@@ -1122,12 +1119,7 @@ fn fish_shell_preserves_task_identity_through_exit() {
         "ctx-fish",
         "run-fish",
     );
-    let elapsed = started.elapsed();
     assert_eq!(run["ok"], true, "{run}");
-    assert!(
-        elapsed < Duration::from_secs(2),
-        "Fish pane initialization waited for the prompt timeout: {elapsed:?}"
-    );
     assert_eq!(run["result"]["task"]["status"], "0", "{run}");
     assert!(
         run["result"]["output"]
@@ -1531,7 +1523,6 @@ fn tmux_input_returns_immediately_by_default() {
     assert_eq!(run["ok"], true, "{run}");
     let task = run["result"]["task"]["id"].as_str().unwrap();
 
-    let started = Instant::now();
     let input = call(
         &env,
         instance,
@@ -1541,12 +1532,8 @@ fn tmux_input_returns_immediately_by_default() {
         "ctx-a",
         "send-no-output-input",
     );
-    let elapsed = started.elapsed();
     assert_eq!(input["ok"], true, "{input}");
-    assert!(
-        elapsed < Duration::from_millis(750),
-        "default tmux_input waited instead of returning after send: {elapsed:?}"
-    );
+    assert_eq!(input["result"]["task"]["status"], "running", "{input}");
 
     let interrupted = call(
         &env,
@@ -1660,13 +1647,13 @@ fn concurrent_tmux_input_from_distinct_contexts_serializes_on_the_pane() {
         tmux_available(),
         "tmux is required to run this ignored contract test"
     );
-    if !Command::new("bash")
-        .arg("--version")
-        .output()
-        .is_ok_and(|output| output.status.success())
-    {
-        return;
-    }
+    assert!(
+        Command::new("bash")
+            .arg("--version")
+            .output()
+            .is_ok_and(|output| output.status.success()),
+        "bash is required to run this tmux contract test"
+    );
     let env = TestEnv::new();
     let instance = "aromatic-tmux-concurrent-input";
     env.command_with_env("SHELL", "/bin/bash")

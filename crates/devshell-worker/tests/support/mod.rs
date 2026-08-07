@@ -1,3 +1,4 @@
+use std::fs;
 use std::path::{Path, PathBuf};
 
 use assert_cmd::Command;
@@ -73,18 +74,7 @@ impl TestEnv {
     pub fn std_command(&self) -> std::process::Command {
         let mut command =
             std::process::Command::new(assert_cmd::cargo::cargo_bin("devshell-worker"));
-        command
-            .env("HOME", self._home_guard.path())
-            .env("PORTABLE_DEVSHELL_HOME", &self.home_root)
-            .env("XDG_RUNTIME_DIR", &self.runtime_root)
-            .env_remove("DEVSHELL_WORKER_INTERNAL_INSTANCE")
-            .env_remove("DEVSHELL_WORKER_INTERNAL_WORKSPACE")
-            .env_remove("DEVSHELL_WORKER_INTERNAL_SECURITY_MODE");
-        #[cfg(windows)]
-        command
-            .env("USERPROFILE", self._home_guard.path())
-            .env_remove("HOMEDRIVE")
-            .env_remove("HOMEPATH");
+        self.configure_std_command(&mut command);
         command
     }
 
@@ -173,6 +163,46 @@ impl TestEnv {
             .env("USERPROFILE", self._home_guard.path())
             .env_remove("HOMEDRIVE")
             .env_remove("HOMEPATH");
+    }
+
+    fn configure_std_command(&self, command: &mut std::process::Command) {
+        command
+            .env("HOME", self._home_guard.path())
+            .env("PORTABLE_DEVSHELL_HOME", &self.home_root)
+            .env("XDG_RUNTIME_DIR", &self.runtime_root)
+            .env_remove("DEVSHELL_WORKER_INTERNAL_INSTANCE")
+            .env_remove("DEVSHELL_WORKER_INTERNAL_WORKSPACE")
+            .env_remove("DEVSHELL_WORKER_INTERNAL_SECURITY_MODE");
+        #[cfg(windows)]
+        command
+            .env("USERPROFILE", self._home_guard.path())
+            .env_remove("HOMEDRIVE")
+            .env_remove("HOMEPATH");
+    }
+
+    fn stop_remaining_workers(&self) {
+        let Ok(entries) = fs::read_dir(&self.home_root) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !path.join("state/worker.pid").is_file() {
+                continue;
+            }
+            let Some(instance) = entry.file_name().to_str().map(ToOwned::to_owned) else {
+                continue;
+            };
+            let mut command =
+                std::process::Command::new(assert_cmd::cargo::cargo_bin("devshell-worker"));
+            self.configure_std_command(&mut command);
+            let _ = command.args(["stop", "--instance", &instance]).output();
+        }
+    }
+}
+
+impl Drop for TestEnv {
+    fn drop(&mut self) {
+        self.stop_remaining_workers();
     }
 }
 

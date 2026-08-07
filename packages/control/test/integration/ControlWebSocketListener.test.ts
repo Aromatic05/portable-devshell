@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import { rm, writeFile } from "node:fs/promises";
-import { createServer } from "node:net";
 import type { AddressInfo } from "node:net";
 import { join } from "node:path";
 import test from "node:test";
@@ -147,7 +146,6 @@ test("web session cookie authenticates the shared control RPC over WebSocket", a
 
 test("Web none auth stays independent when its shared MCP listener requires OAuth2", async (t) => {
     const storage = await createTestTempDirectory("web-mcp-oauth");
-    const port = await reservePort();
     const host = new McpHost({
         instances: [{
             auth: {
@@ -160,8 +158,8 @@ test("Web none auth stays independent when its shared MCP listener requires OAut
             worker: createMcpWorker()
         }],
         listenHost: "127.0.0.1",
-        listenPort: port,
-        publicBaseUrl: `http://127.0.0.1:${port}`,
+        listenPort: 0,
+        publicBaseUrl: "https://mcp.example.test",
         storageDir: storage
     });
     const sessions = new ControlWebSessionService();
@@ -177,7 +175,7 @@ test("Web none auth stays independent when its shared MCP listener requires OAut
         await rm(storage, { force: true, recursive: true });
     });
 
-    const origin = `http://127.0.0.1:${port}`;
+    const origin = httpOrigin(host.server);
     await assert.rejects(
         WebSocketChannel.connect({
             token: "anonymous-native-is-not-enabled",
@@ -616,15 +614,6 @@ function createMcpWorker() {
         listTools() { return []; },
         snapshot() { return { ready: true }; }
     } as never;
-}
-
-async function reservePort(): Promise<number> {
-    const server = createServer();
-    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-    const address = server.address();
-    if (typeof address !== "object" || address === null) throw new Error("Port reservation failed.");
-    await new Promise<void>((resolve, reject) => server.close((error) => error === undefined ? resolve() : reject(error)));
-    return address.port;
 }
 
 async function openRejected(

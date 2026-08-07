@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { createDevelopmentCiSteps, runCiSteps } from "./run-development-ci.mjs";
+import { runCiSteps } from "./run-development-ci.mjs";
 
 test("development CI runs every step before reporting aggregate failure", () => {
     const invoked = [];
@@ -24,16 +24,6 @@ test("development CI runs every step before reporting aggregate failure", () => 
     assert.equal(result.ok, false);
     assert.deepEqual(result.failures, [{ name: "second", status: 7 }]);
 });
-
-test("development CI passes explicit script test paths without shell glob expansion", () => {
-    const step = createDevelopmentCiSteps("linux-arm64", "linux")
-        .find((candidate) => candidate.name === "Script tests");
-
-    assert.ok(step);
-    assert.equal(step.args.includes("./scripts/*.test.mjs"), false);
-    assert.equal(step.args.some((argument) => argument.endsWith(".test.mjs")), true);
-});
-
 
 test("development CI continues after an executor throws", () => {
     const invoked = [];

@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 import { existsSync } from "node:fs";
 import { rm } from "node:fs/promises";
-import { createServer } from "node:net";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import test from "node:test";
@@ -10,6 +9,8 @@ import test from "node:test";
 import { chromium, type Browser, type Page } from "playwright";
 
 import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
+import { requireTcpPort } from "../../../../test/TestHttpSupport.ts";
+import { chromiumTestOptions } from "../../../../test/TestPlatformSupport.ts";
 
 import { HttpHost, McpOAuthProtectedResource, type McpOAuthApprovalService } from "@portable-devshell/mcp";
 import {
@@ -29,11 +30,7 @@ const WEB_SCOPES = ["web"];
 const WEB_RESOURCE_NAME = "browser-web";
 const WEB_TOKEN = "browser-web-token-0123456789abcdef0123456789abcdef";
 const CHROMIUM_EXECUTABLE = resolveChromiumExecutable();
-const BROWSER_TEST_OPTIONS = {
-    skip: CHROMIUM_EXECUTABLE === undefined
-        ? "A Chromium executable is unavailable on this target."
-        : false,
-};
+const BROWSER_TEST_OPTIONS = chromiumTestOptions(CHROMIUM_EXECUTABLE);
 
 test("real Chromium opens auth=none WebUI, establishes a session, and boots through control WebSocket RPC", BROWSER_TEST_OPTIONS, async (t) => {
     const runtime = await startBrowserRuntime({ auth: "none", prefix: "" });
@@ -171,14 +168,14 @@ async function startBrowserRuntime(options: {
     auth: "none" | "oauth2" | "token";
     prefix: string;
 }): Promise<BrowserRuntime> {
-    const port = await reservePort();
-    const origin = `http://127.0.0.1:${port}`;
-    const publicBaseUrl = `${origin}${options.prefix}`;
-    const basePath = controlWebBasePath(publicBaseUrl);
     const storage = await createTestTempDirectory("web-browser");
     const assetDirectory = join(storage, "web-assets");
     await buildBrowserAssets(assetDirectory);
-    const http = new HttpHost({ listenHost: "127.0.0.1", listenPort: port });
+    const http = new HttpHost({ listenHost: "127.0.0.1", listenPort: 0 });
+    await http.start();
+    const origin = `http://127.0.0.1:${requireTcpPort(http.address)}`;
+    const publicBaseUrl = `${origin}${options.prefix}`;
+    const basePath = controlWebBasePath(publicBaseUrl);
     const sessions = new ControlWebSessionService({
         auth: options.auth === "none"
             ? { mode: "none" }
@@ -231,7 +228,6 @@ async function startBrowserRuntime(options: {
 
     try {
         await channels.start();
-        await http.start();
     } catch (error) {
         uninstallFlow?.();
         await channels.close().catch(() => undefined);
@@ -442,15 +438,4 @@ async function approveBrowserFlow(
         await page.waitForTimeout(100);
     }
     throw new Error(`Web OAuth browser flow did not return to ${expectedReturnUrl}; current URL is ${page.url()}`);
-}
-
-async function reservePort(): Promise<number> {
-    const server = createServer();
-    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-    const address = server.address();
-    if (typeof address !== "object" || address === null) throw new Error("Port reservation failed.");
-    await new Promise<void>((resolve, reject) => {
-        server.close((error) => error === undefined ? resolve() : reject(error));
-    });
-    return address.port;
 }

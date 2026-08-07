@@ -10,7 +10,12 @@ import { requireTcpPort } from "../../../../test/TestHttpSupport.ts";
 import { asInstanceName, asWorkspacePath, errorCodes } from "@portable-devshell/shared";
 import { WorkerTransportDriverLocal, WorkerBinary, WorkerInstanceFactory } from "@portable-devshell/core/testing";
 import { McpHost } from "@portable-devshell/mcp/testing";
-import { commandAvailable, realWorkerTestOptions, resolveTestWorkerBinary } from "../../../../test/TestPlatformSupport.ts";
+import {
+    commandAvailable,
+    readRelativeMarkerCommand,
+    realWorkerTestOptions,
+    resolveTestWorkerBinary,
+} from "../../../../test/TestPlatformSupport.ts";
 import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
 
 const fixturesDirectory = resolve(dirname(fileURLToPath(import.meta.url)), "../fixtures");
@@ -117,9 +122,7 @@ test("MCP initialize tools/list and tools/call succeed against the frozen worker
             await readFixture("mcp-tools-call.json"),
             ctxId
         ) as { params: { arguments: Record<string, JsonValue> } };
-        callRequest.params.arguments.command = process.platform === "win32"
-            ? `[Console]::Out.Write((Get-Content -Raw -LiteralPath '.\\${workspaceMarkerName}'))`
-            : `cat -- './${workspaceMarkerName}'`;
+        callRequest.params.arguments.command = readRelativeMarkerCommand(workspaceMarkerName);
         const call = await postJson(endpoint, callRequest as JsonValue, sessionHeaders);
         assert.equal(call.error, undefined);
         assert.equal(call.result?.isError, false);
@@ -139,9 +142,9 @@ test("MCP initialize tools/list and tools/call succeed against the frozen worker
         assert.equal(replay.events.some((event) => event.type === "mcp.sessionOpened"), true);
         assert.equal(replay.events.some((event) => event.type === "mcp.toolCalled"), true);
     } finally {
-        await host.stop().catch(() => undefined);
-        await instance.stop().catch(() => undefined);
-        await instance.close().catch(() => undefined);
+        await host.stop();
+        await instance.stop();
+        await instance.close();
         await rm(homeDirectory, { force: true, recursive: true });
         await rm(workspacePath, { force: true, recursive: true });
     }
@@ -263,9 +266,9 @@ test("MCP tools/call waits for approval before invoking the worker tool", realWo
         await denyPendingApprovals(instance).catch(() => undefined);
         await callPromise?.catch(() => undefined);
         await deniedPromise?.catch(() => undefined);
-        await host.stop().catch(() => undefined);
-        await instance.stop().catch(() => undefined);
-        await instance.close().catch(() => undefined);
+        await host.stop();
+        await instance.stop();
+        await instance.close();
         await rm(homeDirectory, { force: true, recursive: true });
         await rm(workspacePath, { force: true, recursive: true });
     }

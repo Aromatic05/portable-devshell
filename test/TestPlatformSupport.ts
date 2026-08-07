@@ -66,6 +66,23 @@ export function realWorkerTestOptions(
     };
 }
 
+export function chromiumTestOptions(
+    chromiumExecutable: string | undefined,
+    environment: NodeJS.ProcessEnv = process.env,
+): { skip: false | string } {
+    if (
+        chromiumExecutable === undefined &&
+        environment.PORTABLE_DEVSHELL_REQUIRE_CHROMIUM === "1"
+    ) {
+        throw new Error("This test target requires Chromium browser acceptance.");
+    }
+    return {
+        skip: chromiumExecutable === undefined
+            ? "A Chromium executable is unavailable on this target."
+            : false,
+    };
+}
+
 export function createTestWindowsIdentity(label: string): string {
     return `portable-devshell-${label.replaceAll(/[^A-Za-z0-9._-]/gu, "-")}-${process.pid}-${randomUUID()}`;
 }

@@ -446,7 +446,6 @@ test("start keeps real worker config registered and does not auto-start worker",
         waitTimeoutMs: 10_000
     });
     const fixturePath = fileURLToPath(new URL("../fixtures/config-valid.toml", import.meta.url));
-    const listenPort = await reserveTcpPort();
 
     t.after(async () => {
         await manager.stop().catch(() => undefined);
@@ -458,7 +457,7 @@ test("start keeps real worker config registered and does not auto-start worker",
     await mkdir(homePaths.controlHomeDir, { recursive: true });
     await writeFile(
         homePaths.configFile,
-        (await readFile(fixturePath, "utf8")).replace('listenPort = 17890', `listenPort = ${listenPort}`),
+        (await readFile(fixturePath, "utf8")).replace('listenPort = 17890', "listenPort = 0"),
         "utf8"
     );
     await mkdir(homePaths.instancesDir, { recursive: true });
@@ -503,7 +502,6 @@ async function createHarness(): Promise<{
     });
     const homePaths = new ControlPathHome(homeDirectory);
     const runtimePaths = new ControlPathRuntime(xdgRuntimeDir);
-    const listenPort = await reserveTcpPort();
 
     try {
         await mkdir(homePaths.controlHomeDir, { recursive: true });
@@ -516,7 +514,7 @@ async function createHarness(): Promise<{
                 mcp: {
                     enabled: false,
                     listenHost: "127.0.0.1",
-                    listenPort
+                    listenPort: 0
                 }
             }),
             "utf8"
@@ -579,34 +577,6 @@ function isProcessRunning(pid: number): boolean {
     } catch (error) {
         return !(typeof error === "object" && error !== null && "code" in error && error.code === "ESRCH");
     }
-}
-
-async function reserveTcpPort(): Promise<number> {
-    const server = createServer();
-
-    await new Promise<void>((resolve, reject) => {
-        server.once("error", reject);
-        server.listen(0, "127.0.0.1", () => resolve());
-    });
-
-    const address = server.address();
-
-    await new Promise<void>((resolve, reject) => {
-        server.close((error) => {
-            if (error === undefined) {
-                resolve();
-                return;
-            }
-
-            reject(error);
-        });
-    });
-
-    if (address === null || typeof address !== "object") {
-        throw new Error("Failed to reserve TCP port.");
-    }
-
-    return address.port;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any

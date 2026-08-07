@@ -74,14 +74,22 @@ test("host source snapshots arbitrary paths when security is disabled and persis
     await reopenedEndpoint.closeArtifactPayload(opened.payloadId);
 });
 
-test("host source workspace mode permits only a local provider workspace and rejects symlinks", { skip: process.platform === "win32" ? "requires Unix symlink semantics" : false }, async (t) => {
+test("host source workspace mode permits only a local provider workspace and rejects link escapes", async (t) => {
     const { bridge, root } = await fixture(t);
     const workspace = join(root, "workspace");
     const outside = join(root, "outside.txt");
+    const outsideDirectory = join(root, "outside-directory");
     await mkdir(workspace);
+    await mkdir(outsideDirectory);
     await writeFile(join(workspace, "inside.txt"), "inside");
     await writeFile(outside, "outside");
-    await symlink(outside, join(workspace, "link.txt"));
+    await writeFile(join(outsideDirectory, "linked.txt"), "linked outside");
+    const linkPath = join(workspace, "link");
+    if (process.platform === "win32") {
+        await symlink(outsideDirectory, linkPath, "junction");
+    } else {
+        await symlink(outsideDirectory, linkPath, "dir");
+    }
     const local = bridge.endpointFor(context({ provider: "local", securityMode: "workspace", workspace }));
 
     const inside = await local.openArtifactPayload({
@@ -96,9 +104,9 @@ test("host source workspace mode permits only a local provider workspace and rej
     await assert.rejects(
         local.openArtifactPayload({
             expiresAtMs: Date.now() + 60_000,
-            path: join(workspace, "link.txt")
+            path: join(linkPath, "linked.txt")
         }),
-        hasCode("artifact.directoryUnsafe")
+        hasAnyCode("artifact.directoryUnsafe", "artifact.hostPathDenied")
     );
 
     const remote = bridge.endpointFor(context({ provider: "ssh", securityMode: "workspace", workspace }));
@@ -215,4 +223,13 @@ test("artifact service routes hidden host source and target with the real author
 function hasCode(code: string): (error: unknown) => boolean {
     return (error) =>
         typeof error === "object" && error !== null && "code" in error && error.code === code;
+}
+
+function hasAnyCode(...codes: string[]): (error: unknown) => boolean {
+    return (error) =>
+        typeof error === "object" &&
+        error !== null &&
+        "code" in error &&
+        typeof error.code === "string" &&
+        codes.includes(error.code);
 }

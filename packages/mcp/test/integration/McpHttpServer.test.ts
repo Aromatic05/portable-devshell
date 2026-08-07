@@ -1,11 +1,10 @@
 import assert from "node:assert/strict";
-import { createServer as createNodeServer } from "node:http";
 import { readFile, rm } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { requireTcpPort } from "../../../../test/TestHttpSupport.ts";
+import { requireTcpPort, startLoopbackHttpProxy } from "../../../../test/TestHttpSupport.ts";
 import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
 
 import { McpHost } from "@portable-devshell/mcp/testing";
@@ -168,8 +167,8 @@ test("oauth2 emits HTTPS endpoints behind a loopback reverse proxy", async () =>
 });
 
 test("oauth2 keeps a public path prefix on resources while using the origin as issuer", async () => {
-    const port = await reservePort();
-    const origin = `http://127.0.0.1:${port}`;
+    const proxy = await startLoopbackHttpProxy();
+    const origin = proxy.origin;
     const storageDir = await createTestTempDirectory("mcp-prefix");
     const host = createHost({
         auth: {
@@ -180,11 +179,12 @@ test("oauth2 keeps a public path prefix on resources while using the origin as i
             },
             provider: "oauth2"
         },
-        listenPort: port,
+        listenPort: 0,
         publicBaseUrl: `${origin}/devshell`,
         storageDir
     });
     await host.start();
+    proxy.setTarget(`http://127.0.0.1:${requireTcpPort(host.server.address)}`);
 
     try {
         const protectedMetadata = await fetch(
@@ -207,8 +207,12 @@ test("oauth2 keeps a public path prefix on resources while using the origin as i
         assert.equal(issuer.issuer, origin);
         assert.equal(issuer.authorization_endpoint, `${origin}/authorize`);
     } finally {
-        await host.stop();
-        await rm(storageDir, { force: true, recursive: true });
+        try {
+            await host.stop();
+            await rm(storageDir, { force: true, recursive: true });
+        } finally {
+            await proxy.close();
+        }
     }
 });
 
@@ -253,29 +257,6 @@ function createInstance(name: string, auth: McpAuthConfig): McpHostInstanceConfi
                     }
                 } as never
             };
-}
-
-async function reservePort(): Promise<number> {
-    const server = createNodeServer();
-
-    await new Promise<void>((resolve) => {
-        server.listen(0, "127.0.0.1", () => resolve());
-    });
-
-    const port = requireTcpPort(server.address());
-
-    await new Promise<void>((resolve, reject) => {
-        server.close((error) => {
-            if (error) {
-                reject(error);
-                return;
-            }
-
-            resolve();
-        });
-    });
-
-    return port;
 }
 
 test("running host replaces and unregisters instance bindings without restart", async () => {

@@ -232,9 +232,9 @@ async function withTmuxHarness(instanceName: string, body: (harness: TmuxHarness
 
         await body({ callTool, createContext, listTools });
     } finally {
-        await host.stop().catch(() => undefined);
-        await instance.stop().catch(() => undefined);
-        await instance.close().catch(() => undefined);
+        await host.stop();
+        await instance.stop();
+        await instance.close();
         const tmuxSocket = join(runtimeDirectory, "devshell-worker", instanceName, "tmux.sock");
         const cleanup = spawnSync("tmux", ["-S", tmuxSocket, "kill-server"], {
             encoding: "utf8",

@@ -12,10 +12,6 @@ use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use serde_json::Value;
 use support::TestEnv;
 
-#[cfg_attr(
-    target_os = "macos",
-    ignore = "macOS CI worker socket lifecycle is not isolated under parallel contract tests"
-)]
 #[test]
 fn start_uses_runtime_workspace_and_keeps_config_minimal() {
     let env = TestEnv::new();
@@ -427,6 +423,42 @@ fn rejects_old_cli_shapes_and_invalid_instance_names() {
 }
 
 #[test]
+fn dropping_test_env_terminates_workers_started_inside_it() {
+    let env = TestEnv::new();
+    let instance = "aromatic-drop-cleanup";
+    let started = env.json_command(&["start", "--instance", instance]);
+    let pid = started["pid"].as_i64().expect("started worker pid") as i32;
+
+    drop(env);
+
+    let cleaned = process_exits_within(pid, Duration::from_secs(2));
+    if !cleaned {
+        force_terminate_process(pid);
+        assert!(
+            process_exits_within(pid, Duration::from_secs(5)),
+            "failed to clean leaked worker daemon {pid} after the harness assertion"
+        );
+    }
+    assert!(cleaned, "dropping TestEnv leaked worker daemon {pid}");
+}
+
+#[test]
+fn independent_test_envs_isolate_same_named_worker_lifecycles() {
+    let first = TestEnv::new();
+    let second = TestEnv::new();
+    let instance = "aromatic-test-env-isolation";
+
+    let first_started = first.json_command(&["start", "--instance", instance]);
+    let second_started = second.json_command(&["start", "--instance", instance]);
+    assert_ne!(first_started["pid"], second_started["pid"]);
+
+    first.json_command(&["stop", "--instance", instance]);
+    let second_status = second.json_command(&["status", "--instance", instance]);
+    assert_eq!(second_status["running"], true, "{second_status}");
+    second.json_command(&["stop", "--instance", instance]);
+}
+
+#[test]
 fn invalid_rpc_requests_return_structured_errors() {
     let env = TestEnv::new();
     let instance = "aromatic-errors";
@@ -596,10 +628,6 @@ fn status_reports_stale_and_start_recovers_from_stale_runtime_files() {
 }
 
 #[cfg(unix)]
-#[cfg_attr(
-    target_os = "macos",
-    ignore = "macOS CI worker socket lifecycle is not isolated under parallel contract tests"
-)]
 #[test]
 fn start_terminates_an_unresponsive_live_daemon_before_replacing_it() {
     let env = TestEnv::new();
@@ -681,10 +709,6 @@ fn concurrent_stop_waits_for_start_to_finish() {
 }
 
 #[cfg(unix)]
-#[cfg_attr(
-    target_os = "macos",
-    ignore = "macOS CI worker socket lifecycle is not isolated under parallel contract tests"
-)]
 #[test]
 fn stop_terminates_unresponsive_live_daemon_before_clearing_runtime_files() {
     let env = TestEnv::new();
@@ -1015,6 +1039,7 @@ fn persistent_rpc_bridge_forwards_terminal_notifications() {
 fn tool_call_cancel_terminates_a_running_bash_process_group() {
     let env = TestEnv::new();
     let instance = "aromatic-cancel-rpc";
+    let started_marker = env.workspace().join("cancelled-command-started");
     let marker = env.workspace().join("cancelled-command-finished");
 
     env.command()
@@ -1034,10 +1059,15 @@ fn tool_call_cancel_terminates_a_running_bash_process_group() {
     let mut stdout = bridge.stdout.take().unwrap();
 
     #[cfg(unix)]
-    let cancel_command = format!("sleep 5; printf done > {}", marker.display());
+    let cancel_command = format!(
+        "printf started > {}; sleep 5; printf done > {}",
+        started_marker.display(),
+        marker.display()
+    );
     #[cfg(windows)]
     let cancel_command = format!(
-        "Start-Sleep -Seconds 5; [System.IO.File]::WriteAllText('{}', 'done')",
+        "[System.IO.File]::WriteAllText('{}', 'started'); Start-Sleep -Seconds 5; [System.IO.File]::WriteAllText('{}', 'done')",
+        started_marker.display().to_string().replace('\'', "''"),
         marker.display().to_string().replace('\'', "''")
     );
 
@@ -1058,7 +1088,7 @@ fn tool_call_cancel_terminates_a_running_bash_process_group() {
             }
         }),
     );
-    std::thread::sleep(Duration::from_millis(100));
+    wait_until_path_exists(&started_marker);
     write_rpc_frame(
         &mut stdin,
         &serde_json::json!({
@@ -1296,14 +1326,36 @@ fn process_is_running(pid: i32) -> bool {
 }
 
 fn wait_until_process_exits(pid: i32) {
-    let deadline = Instant::now() + Duration::from_secs(10);
+    assert!(
+        process_exits_within(pid, Duration::from_secs(10)),
+        "worker daemon process {pid} did not exit"
+    );
+}
+
+fn process_exits_within(pid: i32, timeout: Duration) -> bool {
+    let deadline = Instant::now() + timeout;
     while Instant::now() < deadline {
         if !process_is_running(pid) {
-            return;
+            return true;
         }
         std::thread::sleep(Duration::from_millis(25));
     }
-    panic!("worker daemon process {pid} did not exit");
+    !process_is_running(pid)
+}
+
+#[cfg(unix)]
+fn force_terminate_process(pid: i32) {
+    use nix::sys::signal::{Signal, kill};
+    use nix::unistd::Pid;
+
+    let _ = kill(Pid::from_raw(pid), Signal::SIGKILL);
+}
+
+#[cfg(windows)]
+fn force_terminate_process(pid: i32) {
+    let _ = Command::new("taskkill")
+        .args(["/PID", &pid.to_string(), "/T", "/F"])
+        .status();
 }
 
 fn wait_until_path_exists(path: &std::path::Path) {

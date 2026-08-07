@@ -144,6 +144,79 @@ test("WorkerInstallerLocal installs and replaces a Windows executable without re
     );
 });
 
+test("WorkerInstallerLocal repairs corrupted Windows target content before activation", async (t) => {
+    const devshellHomeDirectory = await createTestTempDirectory("home-windows-repair");
+    const workerDirectory = await createTestTempDirectory("worker-windows-repair");
+    t.after(async () => {
+        await rm(devshellHomeDirectory, { recursive: true, force: true });
+        await rm(workerDirectory, { recursive: true, force: true });
+    });
+
+    const target = getWorkerTargetByKey("windows-x64");
+    const binaryPath = join(workerDirectory, "devshell-worker.exe");
+    const contents = Buffer.from("windows-worker-repair", "utf8");
+    const sha256 = createHash("sha256").update(contents).digest("hex");
+    await writeFile(binaryPath, contents);
+
+    const installer = new WorkerInstallerLocal();
+    await installer.ensure(devshellHomeDirectory, createAsset(binaryPath, sha256, target), target);
+    const installed = join(
+        devshellHomeDirectory,
+        "workers",
+        target.key,
+        sha256,
+        "devshell-worker.exe",
+    );
+    await writeFile(installed, "corrupt", "utf8");
+
+    await installer.ensure(devshellHomeDirectory, createAsset(binaryPath, sha256, target), target);
+
+    assert.equal(await readFile(installed, "utf8"), contents.toString("utf8"));
+    assert.equal(
+        await readFile(join(devshellHomeDirectory, "bin", `devshell-worker-${target.key}.exe`), "utf8"),
+        contents.toString("utf8"),
+    );
+});
+
+test("WorkerInstallerLocal preserves the active Windows alias when replacement activation fails", async (t) => {
+    const devshellHomeDirectory = await createTestTempDirectory("home-windows-activation");
+    const workerDirectory = await createTestTempDirectory("worker-windows-activation");
+    t.after(async () => {
+        await rm(devshellHomeDirectory, { recursive: true, force: true });
+        await rm(workerDirectory, { recursive: true, force: true });
+    });
+
+    const target = getWorkerTargetByKey("windows-x64");
+    const binaryPath = join(workerDirectory, "devshell-worker.exe");
+    const first = Buffer.from("windows-worker-v1", "utf8");
+    const firstSha = createHash("sha256").update(first).digest("hex");
+    await writeFile(binaryPath, first);
+    const installer = new WorkerInstallerLocal();
+    await installer.ensure(devshellHomeDirectory, createAsset(binaryPath, firstSha, target), target);
+    const alias = join(devshellHomeDirectory, "bin", `devshell-worker-${target.key}.exe`);
+    assert.equal(await readFile(alias, "utf8"), first.toString("utf8"));
+
+    const second = Buffer.from("windows-worker-v2", "utf8");
+    const secondSha = createHash("sha256").update(second).digest("hex");
+    await writeFile(binaryPath, second);
+    const failing = new WorkerInstallerLocal({
+        fileSystem: {
+            rename: async (source, destination) => {
+                if (String(source).includes(".next-") && destination === alias) {
+                    throw new Error("injected Windows alias activation failure");
+                }
+                await rename(source, destination);
+            },
+        },
+    });
+
+    await assert.rejects(
+        failing.ensure(devshellHomeDirectory, createAsset(binaryPath, secondSha, target), target),
+        /injected Windows alias activation failure/u,
+    );
+    assert.equal(await readFile(alias, "utf8"), first.toString("utf8"));
+});
+
 test("WorkerInstallerLocal rejects asset target mismatch", async (t) => {
     const devshellHomeDirectory = await createTestTempDirectory("home");
     const workerDirectory = await createTestTempDirectory("worker");

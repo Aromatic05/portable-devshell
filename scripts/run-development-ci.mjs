@@ -1,5 +1,4 @@
 import { spawnSync } from "node:child_process";
-import { readdirSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -54,16 +53,13 @@ export function createDevelopmentCiSteps(target, platform = process.platform) {
         `devshell-worker-${target}${platform === "win32" ? ".exe" : ""}`,
     );
     const application = join("ci-artifacts", `portable-devshell-app-${target}.tar.gz`);
-    const scriptTests = readdirSync(new URL(".", import.meta.url))
-        .filter((name) => name.endsWith(".test.mjs"))
-        .sort()
-        .map((name) => `./scripts/${name}`);
     const steps = [
-        { args: ["--test", ...scriptTests], command: process.execPath, name: "Script tests" },
+        pnpmStep("Script tests", ["test:scripts"]),
         pnpmStep("Lint", ["lint"]),
         pnpmStep("Build", ["build"]),
         pnpmStep("Typecheck", ["typecheck"]),
         { args: ["test", "--locked", "--workspace"], command: "cargo", name: "Rust workspace tests" },
+        ...(platform === "win32" ? [] : [pnpmStep("Worker tmux contract tests", ["test:worker:tmux"])]),
         pnpmStep("Prepare test Worker", ["test:prepare"]),
         pnpmStep("Package tests", ["test"]),
         { args: ["./scripts/smoke-pty.mjs"], command: process.execPath, name: "PTY smoke" },

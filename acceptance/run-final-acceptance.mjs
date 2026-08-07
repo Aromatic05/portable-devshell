@@ -1,7 +1,7 @@
 import { pathToFileURL } from "node:url";
 
 import { runCiSteps } from "../scripts/run-development-ci.mjs";
-import { commandAvailable, resolvePreparedWorker, runCommand } from "./AcceptanceSupport.mjs";
+import { resolvePreparedWorker, runCommand } from "./AcceptanceSupport.mjs";
 
 export function runFinalAcceptance() {
     let env = { ...process.env };
@@ -38,12 +38,8 @@ export function runFinalAcceptance() {
         {
             name: "tmux Worker contracts",
             run() {
-                if (process.platform !== "win32" && commandAvailable("tmux", ["-V"])) {
+                if (process.platform !== "win32") {
                     runCommand("pnpm", ["test:worker:tmux"], { env, inherit: true });
-                } else {
-                    process.stdout.write(
-                        "tmux worker contracts: skipped (tmux unavailable or unsupported platform)\n",
-                    );
                 }
             },
         },

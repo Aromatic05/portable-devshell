@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import { rm } from "node:fs/promises";
-import { createServer } from "node:net";
 import { join } from "node:path";
 import test from "node:test";
 
@@ -28,7 +27,7 @@ test("MCP and Web reuse one listener only when their bind endpoints match", asyn
 
 test("separate Web listener can stop without interrupting MCP", async (t) => {
     const homeDirectory = await createTestTempDirectory("runtime-listener-separate");
-    const runtime = await createRuntime(createConfig(await reservePort(), await reservePort()), homeDirectory);
+    const runtime = await createRuntime(createIndependentConfig(), homeDirectory);
     t.after(async () => {
         await runtime.stop().catch(() => undefined);
         await rm(homeDirectory, { force: true, recursive: true });
@@ -46,7 +45,7 @@ test("separate Web listener can stop without interrupting MCP", async (t) => {
 
 test("replacing an independent Web listener keeps the MCP listener running", async (t) => {
     const homeDirectory = await createTestTempDirectory("runtime-listener-replace");
-    const config = createConfig(await reservePort(), await reservePort());
+    const config = createIndependentConfig();
     const runtime = await createRuntime(config, homeDirectory);
     t.after(async () => {
         await runtime.stop().catch(() => undefined);
@@ -57,7 +56,6 @@ test("replacing an independent Web listener keeps the MCP listener running", asy
     assert.ok(typeof mcpAddress === "object" && mcpAddress !== null);
     const previousWeb = runtime.webHost;
     const next = structuredClone(config);
-    next.web.listenPort = await reservePort();
 
     const retired = await runtime.replaceWebHost(config, next);
     await runtime.stopRetiredWebHost(retired);
@@ -70,7 +68,7 @@ test("replacing an independent Web listener keeps the MCP listener running", asy
 
 test("replacing an independent MCP listener keeps the Web listener running", async (t) => {
     const homeDirectory = await createTestTempDirectory("runtime-mcp-replace");
-    const config = createConfig(await reservePort(), await reservePort());
+    const config = createIndependentConfig();
     const runtime = await createRuntime(config, homeDirectory);
     t.after(async () => {
         await runtime.stop().catch(() => undefined);
@@ -79,7 +77,6 @@ test("replacing an independent MCP listener keeps the Web listener running", asy
     await runtime.start();
     const web = runtime.webHost;
     const next = structuredClone(config);
-    next.mcp.listenPort = await reservePort();
 
     const retired = await runtime.replaceMcpHost(config, next);
     await retired?.stop();
@@ -92,7 +89,7 @@ test("replacing an independent MCP listener keeps the Web listener running", asy
 
 test("instance MCP auth updates do not replace an unrelated Web listener", async (t) => {
     const homeDirectory = await createTestTempDirectory("runtime-instance-auth");
-    let config = createConfig(await reservePort(), await reservePort());
+    let config = createIndependentConfig();
     config.instances = [normalizeConfigInstanceDraft({
         name: "demo-local",
         provider: "local",
@@ -177,8 +174,7 @@ test("MCP migration starts a different listener before retiring the previous lis
 
 test("shared listener Web auth changes require an explicit control restart without stopping the current runtime", async (t) => {
     const homeDirectory = await createTestTempDirectory("runtime-listener-shared-apply");
-    const port = await reservePort();
-    let config = createConfig(port, port);
+    let config = createConfig(0, 0);
     let webHotApplyCalls = 0;
     const state = new ControlRuntimeState({
         configStore: {
@@ -254,11 +250,8 @@ function createConfig(mcpPort: number, webPort: number): ControlConfig {
     return config;
 }
 
-async function reservePort(): Promise<number> {
-    const server = createServer();
-    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-    const address = server.address();
-    assert.ok(typeof address === "object" && address !== null);
-    await new Promise<void>((resolve, reject) => server.close((error) => error === undefined ? resolve() : reject(error)));
-    return address.port;
+function createIndependentConfig(): ControlConfig {
+    const config = createConfig(0, 0);
+    config.web.listenHost = "0.0.0.0";
+    return config;
 }
