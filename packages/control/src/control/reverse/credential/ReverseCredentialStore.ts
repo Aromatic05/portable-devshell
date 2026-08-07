@@ -1,5 +1,5 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
-import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
+import { access, mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 
 import {
     asInstanceName,
@@ -9,6 +9,10 @@ import {
 } from "@portable-devshell/shared";
 
 import { ControlPathHome } from "@portable-devshell/shared";
+import {
+    createReverseCredentialFileSecurity,
+    type ReverseCredentialFileSecurity,
+} from "./ReverseCredentialFileSecurity.js";
 
 const DEVICE_CODE_LIFETIME_MS = 10 * 60 * 1000;
 
@@ -36,10 +40,15 @@ export interface StoredReverseDeviceCode {
 }
 
 export class ReverseCredentialStore {
+    readonly #fileSecurity: ReverseCredentialFileSecurity;
     readonly #paths: ControlPathHome;
     #operationQueue: Promise<unknown> = Promise.resolve();
 
-    constructor(homeDirectory?: string) {
+    constructor(
+        homeDirectory?: string,
+        fileSecurity: ReverseCredentialFileSecurity = createReverseCredentialFileSecurity(),
+    ) {
+        this.#fileSecurity = fileSecurity;
         this.#paths = new ControlPathHome(homeDirectory);
     }
 
@@ -206,11 +215,17 @@ export class ReverseCredentialStore {
 
     async #write(record: ReverseCredentialRecord): Promise<void> {
         await mkdir(this.#paths.reverseDir, { recursive: true, mode: 0o700 });
+        await this.#fileSecurity.secureDirectory(this.#paths.reverseDir);
+        const credentialFile = this.#paths.reverseCredentialFile(record.instance);
+        if (await pathExists(credentialFile)) {
+            await this.#fileSecurity.secureFile(credentialFile);
+        }
         await writeFile(
-            this.#paths.reverseCredentialFile(record.instance),
+            credentialFile,
             `${JSON.stringify(record, null, 2)}\n`,
             { encoding: "utf8", mode: 0o600 }
         );
+        await this.#fileSecurity.secureFile(credentialFile);
     }
 
     async #exclusive<T>(operation: () => Promise<T>): Promise<T> {
@@ -220,6 +235,16 @@ export class ReverseCredentialStore {
             () => undefined
         );
         return await next;
+    }
+}
+
+async function pathExists(path: string): Promise<boolean> {
+    try {
+        await access(path);
+        return true;
+    } catch (error) {
+        if (isMissingFile(error)) return false;
+        throw error;
     }
 }
 

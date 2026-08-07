@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { createServer, request } from "node:http";
-import { connect, type AddressInfo, type Socket } from "node:net";
+import { connect, type AddressInfo } from "node:net";
+import type { Duplex } from "node:stream";
 
 export function requireTcpPort(address: AddressInfo | string | null | undefined): number {
     assert.notEqual(address, null);
@@ -17,7 +18,7 @@ export interface LoopbackHttpProxy {
 
 export async function startLoopbackHttpProxy(): Promise<LoopbackHttpProxy> {
     let targetOrigin: URL | undefined;
-    const upgradedSockets = new Set<Socket>();
+    const upgradedSockets = new Set<Duplex>();
     const server = createServer((incoming, response) => {
         if (targetOrigin === undefined) {
             response.writeHead(503);
@@ -56,7 +57,7 @@ export async function startLoopbackHttpProxy(): Promise<LoopbackHttpProxy> {
         const upstream = connect(targetPort, targetOrigin.hostname);
         upgradedSockets.add(socket);
         upgradedSockets.add(upstream);
-        const forget = (candidate: Socket) => () => upgradedSockets.delete(candidate);
+        const forget = (candidate: Duplex) => () => upgradedSockets.delete(candidate);
         socket.once("close", forget(socket));
         upstream.once("close", forget(upstream));
         upstream.once("connect", () => {
