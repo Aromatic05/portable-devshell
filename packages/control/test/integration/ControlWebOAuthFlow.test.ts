@@ -21,6 +21,7 @@ import { ControlWebOAuthFlow } from "../../src/server/web/ControlWebOAuthFlow.ts
 import { ControlWebSessionService } from "../../src/server/web/ControlWebSessionService.ts";
 import { ControlWebSocketListener } from "../../src/server/web/ControlWebSocketListener.ts";
 import { NodeWebSocketChannel } from "../WebSocketTestSupport.ts";
+import { cleanupInOrder } from "../../../../test/TestCleanup.ts";
 import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
 import { requireTcpPort, startLoopbackHttpProxy } from "../../../../test/TestHttpSupport.ts";
 
@@ -59,10 +60,12 @@ test("web oauth2 completes browser PKCE and authenticates the real control WebSo
     await flow.warmup();
     await channels.start();
     t.after(async () => {
-        await channels.close().catch(() => undefined);
-        uninstall();
-        await http.stop().catch(() => undefined);
-        await rm(storage, { force: true, recursive: true });
+        await cleanupInOrder(
+            () => channels.close(),
+            () => uninstall(),
+            () => http.stop(),
+            () => rm(storage, { force: true, recursive: true }),
+        );
     });
 
     const metadata = await fetch(`${publicBaseUrl}/.well-known/oauth-protected-resource/web`);
@@ -137,9 +140,11 @@ test("web oauth2 rejects a callback whose state cookie does not match", async (t
     http.installOAuth(protectedResource);
     await flow.warmup();
     t.after(async () => {
-        uninstall();
-        await http.stop().catch(() => undefined);
-        await rm(storage, { force: true, recursive: true });
+        await cleanupInOrder(
+            () => uninstall(),
+            () => http.stop(),
+            () => rm(storage, { force: true, recursive: true }),
+        );
     });
 
     const forged = await fetch(`${publicBaseUrl}/web/oauth/callback?code=abc&state=forged`, {
@@ -155,9 +160,11 @@ test("web oauth2 reuses its persisted dynamic client after runtime recreation", 
     const clientStateFile = join(storage, "web-client.json");
     const runtimes: HttpHost[] = [];
     t.after(async () => {
-        for (const http of runtimes) await http.stop();
-        await proxy.close();
-        await rm(storage, { force: true, recursive: true });
+        await cleanupInOrder(
+            ...runtimes.map((http) => () => http.stop()),
+            () => proxy.close(),
+            () => rm(storage, { force: true, recursive: true }),
+        );
     });
 
     const startRuntime = async () => {
@@ -313,10 +320,12 @@ test("web oauth2 preserves a public URL path prefix across discovery, PKCE, and 
     const uninstall = flow.install(http);
     const uninstallSession = sessions.install(http);
     t.after(async () => {
-        uninstall();
-        uninstallSession();
-        await http.stop().catch(() => undefined);
-        await rm(storage, { force: true, recursive: true });
+        await cleanupInOrder(
+            () => uninstall(),
+            () => uninstallSession(),
+            () => http.stop(),
+            () => rm(storage, { force: true, recursive: true }),
+        );
     });
 
     const metadata = await fetch(`${origin}/.well-known/oauth-protected-resource${basePath}`);

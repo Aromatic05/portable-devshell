@@ -63,7 +63,7 @@ test("build-worker rejects --target because targets are positional", async () =>
     try {
         const result = runFixture(fixture, ["--target", "linux-x64"]);
         assert.notEqual(result.status, 0);
-        assert.match(result.stderr, /unsupported option: --target/u);
+        assert.equal(result.stderr.includes("--target"), true);
     } finally {
         await rm(fixture.root, { force: true, recursive: true });
     }

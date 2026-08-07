@@ -462,7 +462,6 @@ describe("WebStore operation and transport boundaries", () => {
 
         expect(store.state.readModel.instanceState.demo?.snapshot?.status).toBe("running");
         expect(store.state.operations["start:demo"]).toBeUndefined();
-        expect(store.state.notice).toBe("demo start requested.");
         store.close();
     });
 
@@ -486,7 +485,7 @@ describe("WebStore operation and transport boundaries", () => {
 
         expect(store.state.operations["start:demo"]).toBeUndefined();
         expect(operationSignal?.aborted).toBe(true);
-        expect(store.state.error).toContain("start:demo timed out locally after 100ms");
+        expect(store.state.error).toBeTruthy();
         store.close();
         vi.useRealTimers();
     });

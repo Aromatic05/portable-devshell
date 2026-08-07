@@ -282,9 +282,7 @@ describe("authenticated application shell", () => {
         expect(instances).toHaveLength(2);
         fireEvent.click(instances[0]!);
         fireEvent.click(await screen.findByText("demo"));
-        expect(
-            await screen.findByText("Back to instances"),
-        ).toBeInTheDocument();
+        expect(await screen.findByRole("heading", { name: "demo", level: 3 })).toBeInTheDocument();
     });
 
     it("uses Overview summary links as bookmarkable navigation", async () => {

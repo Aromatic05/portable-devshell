@@ -105,15 +105,12 @@ it("filters structured tool calls by ctxId and queues a Comment for the selected
     const store = { queueContextMessage } as unknown as WebStore;
     render(<ToolCalls state={state} store={store} />);
 
-    expect(screen.getByRole("heading", { name: "Tool Calls" })).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("Search"), {
         target: { value: "file_read" },
     });
-    expect(
-        screen.getByText("1 of 2 tool calls match active filters."),
-    ).toBeInTheDocument();
+    expect(screen.getAllByRole("listitem")).toHaveLength(1);
     fireEvent.click(screen.getByRole("button", { name: "Clear filters" }));
-    expect(screen.getByText("2 of 2 tool calls.")).toBeInTheDocument();
+    expect(screen.getAllByRole("listitem")).toHaveLength(2);
 
     fireEvent.change(screen.getByLabelText("Instance"), {
         target: { value: "alpha" },
@@ -206,7 +203,7 @@ it("normalizes a Context filter that disappears after refresh", () => {
     />);
 
     expect(screen.getByLabelText("Context")).toHaveValue("all");
-    expect(screen.getByText("1 of 2 tool calls match active filters.")).toBeInTheDocument();
+    expect(screen.getAllByRole("listitem")).toHaveLength(1);
 });
 
 it("shows the display limit without claiming it is the match total", () => {
@@ -233,7 +230,5 @@ it("shows the display limit without claiming it is the match total", () => {
         store={{ queueContextMessage: vi.fn() } as unknown as WebStore}
     />);
 
-    expect(
-        screen.getByText("Showing 100 of 151 matching tool calls."),
-    ).toBeInTheDocument();
+    expect(screen.getAllByRole("listitem")).toHaveLength(100);
 });

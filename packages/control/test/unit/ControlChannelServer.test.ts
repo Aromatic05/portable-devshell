@@ -248,7 +248,7 @@ test("ControlChannelServer serves the same routes through multiple channel provi
         routes
     });
     await server.start();
-    t.after(async () => await server.close().catch(() => undefined));
+    t.after(async () => await server.close());
 
     const socketConnection = createClient(socketProvider, "tui");
     const webConnection = createClient(webProvider, "web");
@@ -309,7 +309,7 @@ test("ControlChannelServer rejects a self-asserted peer outside transport admiss
         routes: { connectionClosed() {}, snapshot: createRouteSnapshot },
     });
     await server.start();
-    t.after(async () => await server.close().catch(() => undefined));
+    t.after(async () => await server.close());
     const connection = createClient(provider, "tui");
     t.after(() => connection.close());
 
@@ -327,7 +327,7 @@ test("ControlChannelServer rejects unsupported protocol ranges during first requ
         routes: { connectionClosed() {}, snapshot: createRouteSnapshot },
     });
     await server.start();
-    t.after(async () => await server.close().catch(() => undefined));
+    t.after(async () => await server.close());
     const connection = createClient(provider, "tui");
     t.after(() => connection.close());
 
@@ -370,7 +370,7 @@ test("ControlChannelServer does not authenticate a connection when hello handlin
         },
     });
     await server.start();
-    t.after(async () => await server.close().catch(() => undefined));
+    t.after(async () => await server.close());
     const connection = createClient(provider, "tui");
     t.after(() => connection.close());
 
@@ -413,7 +413,7 @@ test("ControlChannelServer coalesces concurrent start calls", async (t) => {
             snapshot: createRouteSnapshot
         }
     });
-    t.after(async () => await server.close().catch(() => undefined));
+    t.after(async () => await server.close());
 
     const first = server.start();
     await provider.started;

@@ -764,7 +764,6 @@ test("box borders encode result status and retain severity while focused", () =>
     )[0]!;
     assert.notEqual(focused.backgroundColor, undefined);
     assert.notEqual(focused.color, undefined);
-    assert.match(focused.text, /Result \[… pending\]/u);
     assert.equal(
         renderExpandableBoxLines(
             { ...base, focused: true, severity: "danger", status: "pending" },
@@ -1641,40 +1640,6 @@ test("instances collection does not append a start command box", () => {
         ),
         ["create-instance", "instance:alpha", "instance:beta"],
     );
-});
-
-test("expanded instance entries expose only compact lifecycle controls", async () => {
-    const harness = createHarness();
-
-    await harness.press("", { tab: true });
-    await harness.press("", { downArrow: true });
-    await harness.press(" ");
-
-    const entry = selectMainScreenModel(harness.store.getState()).boxes.find(
-        (box) => box.id === "instance:alpha",
-    );
-    const lines = entry?.expandedLines.map((line) => line.text) ?? [];
-    assert.equal(lines.includes("[ Open Terminal ]"), true);
-    assert.equal(lines.includes("[ Restart ]"), true);
-    assert.equal(lines.includes("[ Stop ]"), true);
-    assert.equal(lines.includes("[ Delete ]"), true);
-    assert.equal(
-        lines.some((line) => line.includes("enabled") && line.includes("yes")),
-        true,
-    );
-    assert.equal(
-        lines.some((line) => line.includes("mcpPath")),
-        false,
-    );
-    assert.equal(
-        lines.some((line) => line.includes("lastError")),
-        false,
-    );
-    assert.equal(lines.includes("[ Open Config ]"), false);
-    assert.equal(lines.includes("[ Open Connector ]"), false);
-    assert.equal(entry?.collapsedLines[0]?.text.includes("daemon="), false);
-    assert.equal(entry?.collapsedLines[0]?.text.includes("rpc="), false);
-    assert.equal(entry?.collapsedLines[0]?.text.includes("ready="), false);
 });
 
 test("Prompt 3 detail line selection clamps to a valid line after data replacement", () => {

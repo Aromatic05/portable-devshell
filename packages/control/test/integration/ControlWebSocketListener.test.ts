@@ -25,6 +25,7 @@ import { ControlWebSessionService } from "../../src/server/web/ControlWebSession
 import { ControlWebSocketAccessService } from "../../src/server/web/ControlWebSocketAccessService.ts";
 import { ControlWebSocketListener } from "../../src/server/web/ControlWebSocketListener.ts";
 import { NodeWebSocketChannel } from "../WebSocketTestSupport.ts";
+import { cleanupInOrder } from "../../../../test/TestCleanup.ts";
 import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
 
 const WEB_TOKEN = "portable-devshell-web-token-value";
@@ -49,8 +50,10 @@ test("web session cookie authenticates the shared control RPC over WebSocket", a
     await channels.start();
     await http.start();
     t.after(async () => {
-        await channels.close().catch(() => undefined);
-        await http.stop().catch(() => undefined);
+        await cleanupInOrder(
+            () => channels.close(),
+            () => http.stop(),
+        );
     });
 
     const origin = httpOrigin(http);
@@ -170,9 +173,11 @@ test("Web none auth stays independent when its shared MCP listener requires OAut
     await channels.start();
     await host.start();
     t.after(async () => {
-        await channels.close().catch(() => undefined);
-        await host.stop().catch(() => undefined);
-        await rm(storage, { force: true, recursive: true });
+        await cleanupInOrder(
+            () => channels.close(),
+            () => host.stop(),
+            () => rm(storage, { force: true, recursive: true }),
+        );
     });
 
     const origin = httpOrigin(host.server);
@@ -220,8 +225,10 @@ test("web token auth exchanges the configured web bearer token for a session coo
     await channels.start();
     await http.start();
     t.after(async () => {
-        await channels.close().catch(() => undefined);
-        await http.stop().catch(() => undefined);
+        await cleanupInOrder(
+            () => channels.close(),
+            () => http.stop(),
+        );
     });
 
     const origin = httpOrigin(http);
@@ -273,8 +280,10 @@ test("web token auth never accepts an MCP namespace bearer token", async (t) => 
     await channels.start();
     await http.start();
     t.after(async () => {
-        await channels.close().catch(() => undefined);
-        await http.stop().catch(() => undefined);
+        await cleanupInOrder(
+            () => channels.close(),
+            () => http.stop(),
+        );
     });
 
     const origin = httpOrigin(http);
@@ -314,8 +323,10 @@ test("web routes and cookies follow the public base URL path prefix", async (t) 
     await channels.start();
     await http.start();
     t.after(async () => {
-        await channels.close().catch(() => undefined);
-        await http.stop().catch(() => undefined);
+        await cleanupInOrder(
+            () => channels.close(),
+            () => http.stop(),
+        );
     });
 
     const origin = httpOrigin(http);
@@ -375,8 +386,10 @@ test("web session expiry closes its active channel", async (t) => {
     await channels.start();
     await http.start();
     t.after(async () => {
-        await channels.close().catch(() => undefined);
-        await http.stop().catch(() => undefined);
+        await cleanupInOrder(
+            () => channels.close(),
+            () => http.stop(),
+        );
     });
 
     const origin = httpOrigin(http);
@@ -417,8 +430,10 @@ test("web RPC requires the canonical subprotocol", async (t) => {
     await channels.start();
     await http.start();
     t.after(async () => {
-        await channels.close().catch(() => undefined);
-        await http.stop().catch(() => undefined);
+        await cleanupInOrder(
+            () => channels.close(),
+            () => http.stop(),
+        );
     });
 
     const origin = httpOrigin(http);
@@ -459,8 +474,10 @@ test("web session capacity evicts the oldest browser session and closes its chan
     await channels.start();
     await http.start();
     t.after(async () => {
-        await channels.close().catch(() => undefined);
-        await http.stop().catch(() => undefined);
+        await cleanupInOrder(
+            () => channels.close(),
+            () => http.stop(),
+        );
     });
 
     const origin = httpOrigin(http);
@@ -512,8 +529,10 @@ test("native TUI and CLI bearer clients use the shared remote Control WebSocket 
     await channels.start();
     await http.start();
     t.after(async () => {
-        await channels.close().catch(() => undefined);
-        await http.stop().catch(() => undefined);
+        await cleanupInOrder(
+            () => channels.close(),
+            () => http.stop(),
+        );
     });
 
     const origin = httpOrigin(http);

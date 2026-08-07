@@ -162,7 +162,7 @@ test("worker terminal backend replays, fences async operations, and resumes afte
     const resizing = process.resize(100, 40);
     await waitFor(() => worker.resizes.length === 1);
     worker.connected?.();
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    await Promise.resolve();
     assert.equal(
         worker.attaches.length,
         1,

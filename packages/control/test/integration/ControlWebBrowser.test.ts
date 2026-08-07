@@ -9,6 +9,7 @@ import test from "node:test";
 import { chromium, type Browser, type Page } from "playwright";
 
 import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
+import { cleanupInOrder } from "../../../../test/TestCleanup.ts";
 import { requireTcpPort } from "../../../../test/TestHttpSupport.ts";
 import { chromiumTestOptions } from "../../../../test/TestPlatformSupport.ts";
 
@@ -36,8 +37,10 @@ test("real Chromium opens auth=none WebUI, establishes a session, and boots thro
     const runtime = await startBrowserRuntime({ auth: "none", prefix: "" });
     const browser = await launchBrowser();
     t.after(async () => {
-        await browser.close().catch(() => undefined);
-        await runtime.close();
+        await cleanupInOrder(
+            () => browser.close(),
+            () => runtime.close(),
+        );
     });
 
     const page = await guardedPage(browser);
@@ -58,8 +61,10 @@ test("real Chromium rejects a wrong Web token, accepts the configured token, and
     const runtime = await startBrowserRuntime({ auth: "token", prefix: "" });
     const browser = await launchBrowser();
     t.after(async () => {
-        await browser.close().catch(() => undefined);
-        await runtime.close();
+        await cleanupInOrder(
+            () => browser.close(),
+            () => runtime.close(),
+        );
     });
 
     const page = await guardedPage(browser);
@@ -107,7 +112,6 @@ test("real Chromium rejects a wrong Web token, accepts the configured token, and
         (await page.context().cookies()).some((cookie) => cookie.name === "devshell_web_session"),
         false,
     );
-    await page.waitForTimeout(50);
     assert.deepEqual(
         page.__browserFailures.filter((failure) =>
             !failure.includes(`requestfailed: DELETE ${runtime.origin}${runtime.basePath}/session net::ERR_ABORTED`)
@@ -121,8 +125,10 @@ test("real Chromium follows Web OAuth redirects, completes both approvals, and r
     const runtime = await startBrowserRuntime({ auth: "oauth2", prefix: "" });
     const browser = await launchBrowser();
     t.after(async () => {
-        await browser.close().catch(() => undefined);
-        await runtime.close();
+        await cleanupInOrder(
+            () => browser.close(),
+            () => runtime.close(),
+        );
     });
 
     const page = await guardedPage(browser);
@@ -143,8 +149,10 @@ test("real Chromium preserves a public URL prefix through session bootstrap and 
     const runtime = await startBrowserRuntime({ auth: "none", prefix: "/devshell" });
     const browser = await launchBrowser();
     t.after(async () => {
-        await browser.close().catch(() => undefined);
-        await runtime.close();
+        await cleanupInOrder(
+            () => browser.close(),
+            () => runtime.close(),
+        );
     });
 
     const page = await guardedPage(browser);
@@ -229,10 +237,19 @@ async function startBrowserRuntime(options: {
     try {
         await channels.start();
     } catch (error) {
-        uninstallFlow?.();
-        await channels.close().catch(() => undefined);
-        await http.stop().catch(() => undefined);
-        await rm(storage, { force: true, recursive: true });
+        try {
+            await cleanupInOrder(
+                () => channels.close(),
+                () => uninstallFlow?.(),
+                () => http.stop(),
+                () => rm(storage, { force: true, recursive: true }),
+            );
+        } catch (cleanupError) {
+            throw new AggregateError(
+                [error, cleanupError],
+                "Browser runtime startup and cleanup both failed.",
+            );
+        }
         throw error;
     }
 
@@ -242,10 +259,12 @@ async function startBrowserRuntime(options: {
         calls,
         origin,
         async close() {
-            await channels.close().catch(() => undefined);
-            uninstallFlow?.();
-            await http.stop().catch(() => undefined);
-            await rm(storage, { force: true, recursive: true });
+            await cleanupInOrder(
+                () => channels.close(),
+                () => uninstallFlow?.(),
+                () => http.stop(),
+                () => rm(storage, { force: true, recursive: true }),
+            );
         },
     };
 }

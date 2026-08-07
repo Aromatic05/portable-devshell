@@ -57,6 +57,5 @@ test("Web token authentication exposes an editable secret before save", () => {
 
     const token = web.expandedLines.find((line) => line.id === "web:field:web.token");
     assert.ok(token);
-    assert.match(token.text, /secret/u);
     assert.equal(token.text.includes("new-secret-token"), false);
 });

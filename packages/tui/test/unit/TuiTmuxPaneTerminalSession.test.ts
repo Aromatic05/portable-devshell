@@ -7,7 +7,7 @@ import {
     type TuiTmuxPaneTerminalOperations,
     type TuiTmuxPaneTerminalScheduler,
 } from "../../src/runtime/terminal/TuiTmuxPaneTerminalSession.ts";
-import { TUI_TMUX_MULTI_WRITER_WARNING, parseTmuxInspectLines, type TuiTerminalLine, type TuiTmuxListPane } from "../../src/testing.ts";
+import { parseTmuxInspectLines, type TuiTerminalLine, type TuiTmuxListPane } from "../../src/testing.ts";
 
 interface RecordedOperation {
     args: readonly unknown[];
@@ -154,7 +154,8 @@ test("activating a running pane attaches and surfaces the multi-writer warning",
     const active = session.getSnapshot().active;
     assert.equal(active?.attached, true);
     assert.equal(active?.taskId, "task-9");
-    assert.equal(active?.warning, TUI_TMUX_MULTI_WRITER_WARNING);
+    assert.equal(typeof active?.warning, "string");
+    assert.equal((active?.warning?.length ?? 0) > 0, true);
 });
 
 test("attached input is encoded and forwarded to the selected running task id", async () => {

@@ -18,6 +18,7 @@ import { InstanceRegistry } from "../../src/control/instance/registry/InstanceRe
 import { createTestIpcPath } from "../../../../test/TestPlatformSupport.ts";
 import { createTestInstanceDescriptor } from "../ControlTestFixtures.ts";
 import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
+import { cleanupInOrder } from "../../../../test/TestCleanup.ts";
 
 test("stream gap is non-terminal and the dedicated subscription remains usable", async (t) => {
     const directory = await createTestTempDirectory("stream-recovery");
@@ -31,9 +32,11 @@ test("stream gap is non-terminal and the dedicated subscription remains usable",
     const server = new ControlSocketServer({ routes, socketPath });
     await server.start();
     t.after(async () => {
-        await server.stop().catch(() => undefined);
-        routes.dispose();
-        await rm(directory, { force: true, recursive: true });
+        await cleanupInOrder(
+            () => server.stop(),
+            () => routes.dispose(),
+            () => rm(directory, { force: true, recursive: true }),
+        );
     });
 
     const connection = await connect(socketPath);
@@ -88,9 +91,11 @@ test("an initial unavailable sequence returns a normal stream.gap error reply", 
     const server = new ControlSocketServer({ routes, socketPath });
     await server.start();
     t.after(async () => {
-        await server.stop().catch(() => undefined);
-        routes.dispose();
-        await rm(directory, { force: true, recursive: true });
+        await cleanupInOrder(
+            () => server.stop(),
+            () => routes.dispose(),
+            () => rm(directory, { force: true, recursive: true }),
+        );
     });
 
     const connection = await connect(socketPath);

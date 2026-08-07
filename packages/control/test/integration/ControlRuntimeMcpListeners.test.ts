@@ -8,14 +8,17 @@ import { ControlPathHome, createDefaultControlConfig, normalizeConfigInstanceDra
 import { ControlRuntimeMcp } from "../../src/composition/runtime/ControlRuntimeMcp.ts";
 import { ControlRuntimeState } from "../../src/composition/runtime/ControlRuntimeState.ts";
 import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
+import { cleanupInOrder } from "../../../../test/TestCleanup.ts";
 
 test("MCP and Web reuse one listener only when their bind endpoints match", async (t) => {
     const homeDirectory = await createTestTempDirectory("runtime-listener-shared");
     const config = createConfig(0, 0);
     const runtime = await createRuntime(config, homeDirectory);
     t.after(async () => {
-        await runtime.stop().catch(() => undefined);
-        await rm(homeDirectory, { force: true, recursive: true });
+        await cleanupInOrder(
+            () => runtime.stop(),
+            () => rm(homeDirectory, { force: true, recursive: true }),
+        );
     });
 
     assert.equal(runtime.webHost, runtime.host?.server);
@@ -29,8 +32,10 @@ test("separate Web listener can stop without interrupting MCP", async (t) => {
     const homeDirectory = await createTestTempDirectory("runtime-listener-separate");
     const runtime = await createRuntime(createIndependentConfig(), homeDirectory);
     t.after(async () => {
-        await runtime.stop().catch(() => undefined);
-        await rm(homeDirectory, { force: true, recursive: true });
+        await cleanupInOrder(
+            () => runtime.stop(),
+            () => rm(homeDirectory, { force: true, recursive: true }),
+        );
     });
 
     assert.notEqual(runtime.webHost, runtime.host?.server);
@@ -48,8 +53,10 @@ test("replacing an independent Web listener keeps the MCP listener running", asy
     const config = createIndependentConfig();
     const runtime = await createRuntime(config, homeDirectory);
     t.after(async () => {
-        await runtime.stop().catch(() => undefined);
-        await rm(homeDirectory, { force: true, recursive: true });
+        await cleanupInOrder(
+            () => runtime.stop(),
+            () => rm(homeDirectory, { force: true, recursive: true }),
+        );
     });
     await runtime.start();
     const mcpAddress = runtime.host?.server.address;
@@ -71,8 +78,10 @@ test("replacing an independent MCP listener keeps the Web listener running", asy
     const config = createIndependentConfig();
     const runtime = await createRuntime(config, homeDirectory);
     t.after(async () => {
-        await runtime.stop().catch(() => undefined);
-        await rm(homeDirectory, { force: true, recursive: true });
+        await cleanupInOrder(
+            () => runtime.stop(),
+            () => rm(homeDirectory, { force: true, recursive: true }),
+        );
     });
     await runtime.start();
     const web = runtime.webHost;
@@ -113,8 +122,10 @@ test("instance MCP auth updates do not replace an unrelated Web listener", async
     runtime.setWebConfigApplier(async () => { webApplyCalls += 1; });
     runtime.setMcpConfigApplier(async () => { mcpApplyCalls += 1; });
     t.after(async () => {
-        await runtime.stop().catch(() => undefined);
-        await rm(homeDirectory, { force: true, recursive: true });
+        await cleanupInOrder(
+            () => runtime.stop(),
+            () => rm(homeDirectory, { force: true, recursive: true }),
+        );
     });
 
     const result = await runtime.configEditor.updateInstanceConfig({
@@ -200,8 +211,10 @@ test("shared listener Web auth changes require an explicit control restart witho
         webHotApplyCalls += 1;
     });
     t.after(async () => {
-        await runtime.stop().catch(() => undefined);
-        await rm(homeDirectory, { force: true, recursive: true });
+        await cleanupInOrder(
+            () => runtime.stop(),
+            () => rm(homeDirectory, { force: true, recursive: true }),
+        );
     });
 
     const result = await runtime.configEditor.updateWebConfig({

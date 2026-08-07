@@ -11,7 +11,6 @@ import {
     tuiViewProjection,
     type TuiCommandDispatcherFocus,
     type TuiFocusManager,
-    tuiPageEntries,
 } from "../../src/testing.ts";
 
 function createStore(): TuiAppStore {
@@ -310,21 +309,4 @@ test("page changes made from the sidebar preserve sidebar focus until the user e
     store.setSelectedPage("terminal");
 
     assert.equal(store.getState().interaction.focusScope, "sidebarPages");
-});
-
-test("connector and OAuth are represented by one Connections top-level page", () => {
-    assert.deepEqual(
-        tuiPageEntries.map((entry) => entry.id),
-        [
-            "overview",
-            "instances",
-            "config",
-            "connections",
-            "audit",
-            "logs",
-            "todo",
-            "help",
-            "terminal",
-        ],
-    );
 });

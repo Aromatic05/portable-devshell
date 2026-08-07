@@ -29,6 +29,7 @@ import { ControlSocketServer } from "../../src/server/socket/ControlSocketServer
 import { createTestIpcPath } from "../../../../test/TestPlatformSupport.ts";
 import { createTestInstanceDescriptor } from "../ControlTestFixtures.ts";
 import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
+import { cleanupInOrder } from "../../../../test/TestCleanup.ts";
 
 interface Harness {
     cleanup(): Promise<void>;
@@ -166,9 +167,11 @@ test("config RPC masks the Web token across get, validate, and update responses"
     const server = new ControlSocketServer({ routes, socketPath });
     await server.start();
     t.after(async () => {
-        await server.stop().catch(() => undefined);
-        routes.dispose();
-        await rm(directory, { force: true, recursive: true });
+        await cleanupInOrder(
+            () => server.stop(),
+            () => routes.dispose(),
+            () => rm(directory, { force: true, recursive: true }),
+        );
     });
 
     const getReply = await request(socketPath, "@control", "config.get");
@@ -212,9 +215,11 @@ test("ControlSocketServer rebuilds the immutable route snapshot after registry c
     const server = new ControlSocketServer({ routes, socketPath });
     await server.start();
     t.after(async () => {
-        await server.stop().catch(() => undefined);
-        routes.dispose();
-        await rm(directory, { force: true, recursive: true });
+        await cleanupInOrder(
+            () => server.stop(),
+            () => routes.dispose(),
+            () => rm(directory, { force: true, recursive: true }),
+        );
     });
 
     const before = await request(socketPath, asInstanceName("alpha"), "runtime.snapshot");
@@ -295,9 +300,11 @@ test("terminal RPC streams real session input, resize, detach, and sequence resu
     const server = new ControlSocketServer({ routes, socketPath });
     await server.start();
     t.after(async () => {
-        await server.stop().catch(() => undefined);
-        routes.dispose();
-        await rm(directory, { force: true, recursive: true });
+        await cleanupInOrder(
+            () => server.stop(),
+            () => routes.dispose(),
+            () => rm(directory, { force: true, recursive: true }),
+        );
     });
 
     const client = createClient(socketPath, "tui");
@@ -412,9 +419,11 @@ test("terminal stream cancels a slow attachment at the unacknowledged window wit
     const server = new ControlSocketServer({ routes, socketPath });
     await server.start();
     t.after(async () => {
-        await server.stop().catch(() => undefined);
-        routes.dispose();
-        await rm(directory, { force: true, recursive: true });
+        await cleanupInOrder(
+            () => server.stop(),
+            () => routes.dispose(),
+            () => rm(directory, { force: true, recursive: true }),
+        );
     });
 
     const client = createClient(socketPath, "tui");
@@ -468,9 +477,11 @@ test("service.shutdown replies before invoking the shutdown action", async (t) =
     const server = new ControlSocketServer({ routes, socketPath });
     await server.start();
     t.after(async () => {
-        await server.stop().catch(() => undefined);
-        routes.dispose();
-        await rm(directory, { force: true, recursive: true });
+        await cleanupInOrder(
+            () => server.stop(),
+            () => routes.dispose(),
+            () => rm(directory, { force: true, recursive: true }),
+        );
     });
 
     const reply = await request(socketPath, "@control", "service.shutdown");
@@ -488,9 +499,11 @@ async function createHarness(activeTodos: ActiveTodoSummary[] = []): Promise<Har
     await server.start();
     return {
         async cleanup() {
-            await server.stop().catch(() => undefined);
-            routes.dispose();
-            await rm(directory, { force: true, recursive: true });
+            await cleanupInOrder(
+                () => server.stop(),
+                () => routes.dispose(),
+                () => rm(directory, { force: true, recursive: true }),
+            );
         },
         registry,
         routes,

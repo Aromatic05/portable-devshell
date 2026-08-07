@@ -18,6 +18,7 @@ import { ControlRuntimeState } from "../../src/composition/runtime/ControlRuntim
 import { createTestIpcPath, ipcEndpointAcceptsConnections } from "../../../../test/TestPlatformSupport.ts";
 import { requireTcpPort, startLoopbackHttpProxy } from "../../../../test/TestHttpSupport.ts";
 import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
+import { cleanupInOrder } from "../../../../test/TestCleanup.ts";
 
 test("runtime stop does not settle until owned cleanup completes", async (t) => {
     const runtimeDir = await createTestTempDirectory("runtime-stop");
@@ -58,8 +59,10 @@ test("runtime stop does not settle until owned cleanup completes", async (t) => 
     });
     t.after(async () => {
         releaseArtifact();
-        await runtime.stop().catch(() => undefined);
-        await rm(runtimeDir, { force: true, recursive: true });
+        await cleanupInOrder(
+            () => runtime.stop(),
+            () => rm(runtimeDir, { force: true, recursive: true }),
+        );
     });
 
     await runtime.start();
@@ -148,15 +151,19 @@ test("runtime mounts web session and RPC routes on the MCP HTTP host", async (t)
     const http = {
         registerAuthenticatedRawRoute(method: string, path: string) {
             authenticatedRoutes.push({ method, path });
+            return () => undefined;
         },
         registerRawRoute(method: string, path: string) {
             rawRoutes.push({ method, path });
+            return () => undefined;
         },
         registerStaticDirectory(path: string, directory: string) {
             staticRoutes.push({ directory, path });
+            return () => undefined;
         },
         registerUpgradeHandler(path: string) {
             upgradeRoutes.push(path);
+            return () => undefined;
         }
     };
     const runtime = new ControlRuntime({
@@ -190,8 +197,10 @@ test("runtime mounts web session and RPC routes on the MCP HTTP host", async (t)
         socketPath
     });
     t.after(async () => {
-        await runtime.stop().catch(() => undefined);
-        await rm(runtimeDir, { force: true, recursive: true });
+        await cleanupInOrder(
+            () => runtime.stop(),
+            () => rm(runtimeDir, { force: true, recursive: true }),
+        );
     });
 
     await runtime.start();
@@ -241,8 +250,10 @@ test("runtime does not mount WebUI routes when web.enabled is false", async (t) 
         socketPath
     });
     t.after(async () => {
-        await runtime.stop().catch(() => undefined);
-        await rm(runtimeDir, { force: true, recursive: true });
+        await cleanupInOrder(
+            () => runtime.stop(),
+            () => rm(runtimeDir, { force: true, recursive: true }),
+        );
     });
 
     await runtime.start();
