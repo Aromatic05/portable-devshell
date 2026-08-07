@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import { spawn as nodeSpawn, type ChildProcess, type SpawnOptions } from "node:child_process";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
 import { chmod, mkdir, readFile, readlink, rm, stat, unlink, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { PassThrough } from "node:stream";
 import test from "node:test";
@@ -26,6 +27,7 @@ import { realWorkerTestOptions, resolveTestWorkerBinary } from "../../../../test
 import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
 
 const workerBinaryPath = resolveTestWorkerBinary();
+const NO_SKILLS_DIRECTORY = join(tmpdir(), `portable-devshell-no-skills-${randomUUID()}`);
 
 const shellEscape = (value: string): string => `'${value.replaceAll("'", `'\\''`)}'`;
 
@@ -201,6 +203,7 @@ test("provider installWorker failures keep diagnostic details across local ssh d
             build: (spawnFunction: SpawnFunctionLike) =>
                 new WorkerTransportDriverSsh({
                     command: "ssh-bin devbox",
+                    skillsDirectory: NO_SKILLS_DIRECTORY,
                     workerBinary: new WorkerBinary("/usr/local/bin/devshell-worker"),
                     spawnFunction
                 }),
@@ -212,6 +215,7 @@ test("provider installWorker failures keep diagnostic details across local ssh d
                 new WorkerTransportDriverDocker({
                     container: createManagedContainerConfig(),
                     dockerBinary: "docker-bin",
+                    skillsDirectory: NO_SKILLS_DIRECTORY,
                     workerBinary: new WorkerBinary("/usr/local/bin/devshell-worker"),
                     spawnFunction
                 }),
@@ -223,6 +227,7 @@ test("provider installWorker failures keep diagnostic details across local ssh d
                 new WorkerTransportDriverPodman({
                     container: createManagedContainerConfig(),
                     podmanBinary: "podman-bin",
+                    skillsDirectory: NO_SKILLS_DIRECTORY,
                     workerBinary: new WorkerBinary("/usr/local/bin/devshell-worker"),
                     spawnFunction
                 }),
@@ -309,6 +314,7 @@ test("ssh transport uses remote cwd only for start command", async () => {
     const recorder = createSpawnRecorder();
     const transport = new WorkerTransportDriverSsh({
         command: "ssh-bin devbox",
+        skillsDirectory: NO_SKILLS_DIRECTORY,
         workspace: "/srv/workspaces/task 3",
         workerBinary: new WorkerBinary("/usr/local/bin/devshell-worker"),
         spawnFunction: recorder.spawn
@@ -368,6 +374,7 @@ test("ssh transport uploads instance environment without replacing the local ssh
         return false;
     });
     const transport = new WorkerTransportDriverSsh({
+        skillsDirectory: NO_SKILLS_DIRECTORY,
         command: "ssh-bin devbox",
         workspace: "/srv/workspace",
         workerBinary: new WorkerBinary("/usr/local/bin/devshell-worker"),
@@ -423,6 +430,7 @@ test("ssh RPC exit cleans an uploaded environment file after an early local term
         return false;
     });
     const transport = new WorkerTransportDriverSsh({
+        skillsDirectory: NO_SKILLS_DIRECTORY,
         command: "ssh-bin devbox",
         workspace: "/srv/workspace",
         workerBinary: new WorkerBinary("/usr/local/bin/devshell-worker"),
@@ -447,6 +455,7 @@ test("ssh RPC exit cleans an uploaded environment file after an early local term
 test("ssh transport rejects environment keys that cannot be represented safely", async () => {
     const recorder = createSpawnRecorder();
     const transport = new WorkerTransportDriverSsh({
+        skillsDirectory: NO_SKILLS_DIRECTORY,
         command: "ssh-bin devbox",
         workspace: "/srv/workspace",
         workerBinary: new WorkerBinary("/usr/local/bin/devshell-worker"),
@@ -471,6 +480,7 @@ test("ssh transport rejects environment keys that cannot be represented safely",
 test("ssh transport runs installWorker probe via remote shell", async () => {
     const recorder = createSpawnRecorder();
     const transport = new WorkerTransportDriverSsh({
+        skillsDirectory: NO_SKILLS_DIRECTORY,
         command: "ssh-bin devbox",
         workspace: "/srv/workspaces/task 3",
         workerBinary: new WorkerBinary("/usr/local/bin/devshell-worker"),
@@ -656,6 +666,7 @@ test("ssh transport probes remote target before installing default worker", asyn
         return false;
     });
     const transport = new WorkerTransportDriverSsh({
+        skillsDirectory: NO_SKILLS_DIRECTORY,
         command: "ssh-bin devbox",
         spawnFunction: recorder.spawn
     });
@@ -744,6 +755,7 @@ test("ssh transport reuses a matching remote worker without uploading the binary
         return true;
     });
     const transport = new WorkerTransportDriverSsh({
+        skillsDirectory: NO_SKILLS_DIRECTORY,
         command: "ssh-bin devbox",
         spawnFunction: recorder.spawn
     });
@@ -836,6 +848,7 @@ test("ssh transport reinstalls default worker when target asset changes", async 
         return true;
     });
     const transport = new WorkerTransportDriverSsh({
+        skillsDirectory: NO_SKILLS_DIRECTORY,
         command: "ssh-bin devbox",
         spawnFunction: recorder.spawn
     });
@@ -858,6 +871,7 @@ test("ssh transport appends interactive-auth hint when batch mode authentication
         return true;
     });
     const transport = new WorkerTransportDriverSsh({
+        skillsDirectory: NO_SKILLS_DIRECTORY,
         command: "ssh demo",
         workspace: "/workspace",
         workerBinary: new WorkerBinary("/usr/local/bin/devshell-worker"),
@@ -883,6 +897,7 @@ test("ssh transport interactive start establishes a reusable control socket", as
         return true;
     });
     const transport = new WorkerTransportDriverSsh({
+        skillsDirectory: NO_SKILLS_DIRECTORY,
         command: "ssh-bin devbox",
         workerBinary: new WorkerBinary("/usr/local/bin/devshell-worker"),
         spawnFunction: recorder.spawn
@@ -961,6 +976,7 @@ test("docker transport builds exec command", async () => {
         return false;
     });
     const transport = new WorkerTransportDriverDocker({
+        skillsDirectory: NO_SKILLS_DIRECTORY,
         container: createManagedContainerConfig(),
         dockerBinary: "docker-bin",
         remoteCwd: "/workspace",
@@ -993,6 +1009,7 @@ test("docker transport runs installWorker probe via exec", async () => {
         return false;
     });
     const transport = new WorkerTransportDriverDocker({
+        skillsDirectory: NO_SKILLS_DIRECTORY,
         container: createManagedContainerConfig(),
         dockerBinary: "docker-bin",
         remoteCwd: "/workspace",
@@ -1096,6 +1113,7 @@ test("docker transport installs default worker before exec command", async (t) =
         return false;
     });
     const transport = new WorkerTransportDriverDocker({
+        skillsDirectory: NO_SKILLS_DIRECTORY,
         container: createManagedContainerConfig(),
         dockerBinary: "docker-bin",
         remoteCwd: "/workspace",
@@ -1150,6 +1168,7 @@ test("podman transport builds exec command", async () => {
         return false;
     });
     const transport = new WorkerTransportDriverPodman({
+        skillsDirectory: NO_SKILLS_DIRECTORY,
         container: createManagedContainerConfig(),
         podmanBinary: "podman-bin",
         remoteCwd: "/workspace",
@@ -1186,6 +1205,7 @@ test("podman transport preserves provider storage environment and forwards worke
         return false;
     });
     const transport = new WorkerTransportDriverPodman({
+        skillsDirectory: NO_SKILLS_DIRECTORY,
         container: createManagedContainerConfig(),
         podmanBinary: "podman-bin",
         remoteCwd: "/workspace",
@@ -1264,6 +1284,7 @@ test("Windows container provider environment canonicalizes reserved keys case-in
 test("podman transport rejects provider-reserved instance environment before provisioning", async () => {
     const recorder = createSpawnRecorder();
     const transport = new WorkerTransportDriverPodman({
+        skillsDirectory: NO_SKILLS_DIRECTORY,
         container: createManagedContainerConfig(),
         podmanBinary: "podman-bin",
         remoteCwd: "/workspace",
@@ -1297,6 +1318,7 @@ test("podman transport runs installWorker probe via exec", async () => {
         return false;
     });
     const transport = new WorkerTransportDriverPodman({
+        skillsDirectory: NO_SKILLS_DIRECTORY,
         container: createManagedContainerConfig(),
         podmanBinary: "podman-bin",
         remoteCwd: "/workspace",
@@ -1358,6 +1380,7 @@ test("podman transport installs default worker before spawning rpc", async (t) =
         return false;
     });
     const transport = new WorkerTransportDriverPodman({
+        skillsDirectory: NO_SKILLS_DIRECTORY,
         container: createManagedContainerConfig(),
         podmanBinary: "podman-bin",
         remoteCwd: "/workspace",
@@ -1419,6 +1442,7 @@ test("docker transport creates and starts managed containers before starting the
         return false;
     });
     const transport = new WorkerTransportDriverDocker({
+        skillsDirectory: NO_SKILLS_DIRECTORY,
         container: {
             containerName: "worker-container",
             image: "archlinux:latest",
@@ -1470,6 +1494,7 @@ test("dockerfile container mode builds the image before creating the managed con
         return false;
     });
     const transport = new WorkerTransportDriverDocker({
+        skillsDirectory: NO_SKILLS_DIRECTORY,
         container: {
             build: {
                 context: "/project",
@@ -1513,6 +1538,7 @@ test("dockerfile container mode builds the image before creating the managed con
 test("compose container mode starts the configured service and executes the worker through compose", async () => {
     const recorder = createSpawnRecorder();
     const transport = new WorkerTransportDriverDocker({
+        skillsDirectory: NO_SKILLS_DIRECTORY,
         container: {
             compose: {
                 file: "/project/compose.yaml",
@@ -1564,6 +1590,7 @@ test("existing image container mode creates a dedicated managed container", asyn
         return false;
     });
     const transport = new WorkerTransportDriverPodman({
+        skillsDirectory: NO_SKILLS_DIRECTORY,
         container: {
             containerName: "existing-image-container",
             image: "registry.example/devshell:latest",
@@ -1604,6 +1631,7 @@ test("managed container uses an explicit workspace mount without adding a duplic
         return false;
     });
     const transport = new WorkerTransportDriverPodman({
+        skillsDirectory: NO_SKILLS_DIRECTORY,
         container: {
             containerName: "mounted-container",
             image: "registry.example/devshell:latest",
@@ -1642,6 +1670,7 @@ test("existing stopped container mode adopts and restores the configured lifecyc
         return false;
     });
     const transport = new WorkerTransportDriverPodman({
+        skillsDirectory: NO_SKILLS_DIRECTORY,
         container: {
             adoptLifecycle: true,
             containerName: "adopted-container",
@@ -1689,6 +1718,7 @@ test("podman transport rejects already running existing stopped containers", asy
         return false;
     });
     const transport = new WorkerTransportDriverPodman({
+        skillsDirectory: NO_SKILLS_DIRECTORY,
         container: {
             adoptLifecycle: true,
             containerName: "worker-container",
