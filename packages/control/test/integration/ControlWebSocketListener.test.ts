@@ -74,7 +74,7 @@ test("web session cookie authenticates the shared control RPC over WebSocket", a
             protocol: "devshell-control-rpc.v1",
         },
     );
-    assert.match(browserCredentialOnNativePath, /401/iu);
+    assert.match(browserCredentialOnNativePath, /404/iu);
     const crossOrigin = await openRejected(`${origin.replace("http", "ws")}/web/rpc`, {
         cookie: cookie!.split(";", 1)[0]!,
         origin: "https://attacker.example",
