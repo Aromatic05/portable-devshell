@@ -181,6 +181,12 @@ test("file_edit snapshotRequired revisionMismatch and cancellation errors are cl
     assert.deepEqual(codes(cancelled), ["tool.cancelled"]);
 });
 
+test("file_edit literal diff body is rejected with a scolding hint", () => {
+    const hints = resolveErrorHints("file_edit", body("file.literalDiffBody"));
+    assert.deepEqual(codes(hints), ["file.literalDiffBody"]);
+    assert.match(hints[0]?.text ?? "", /literal content/u);
+});
+
 test("tmux_run block timeout keeps the task running and is not a failure", () => {
     const hints = resolveResultHints("tmux_run", {
         observationReset: false,

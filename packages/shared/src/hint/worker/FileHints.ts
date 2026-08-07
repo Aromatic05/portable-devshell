@@ -208,6 +208,11 @@ export function fileErrorHints(toolName: string, body: ControlErrorBody): ToolDi
                 body.code,
                 "Fix the edit document."
             )];
+        case "file.literalDiffBody":
+            return [errorHint(
+                "file.literalDiffBody",
+                "Rejected: no diff or diff-like content. Write File and Rewrite File take literal content; `+`/`-` prefixes belong to Patch File. Output plain text."
+            )];
         case "file.emptyOperation":
             return [errorHint(
                 "file.emptyOperation",
