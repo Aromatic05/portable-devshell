@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 
 import { createDevelopmentCiSteps, runCiSteps } from "./run-development-ci.mjs";
@@ -53,4 +56,28 @@ test("development CI continues after an executor throws", () => {
 
     assert.deepEqual(invoked, ["first", "second", "third"]);
     assert.deepEqual(result.failures, [{ name: "second", status: 1 }]);
+});
+
+
+test("development CI validates reverse PTY with the built native worker", () => {
+    const directory = mkdtempSync(join(tmpdir(), "pds-pnpm-cli-"));
+    const pnpmCli = join(directory, "pnpm.cjs");
+    writeFileSync(pnpmCli, "", "utf8");
+    const previous = process.env.PORTABLE_DEVSHELL_PNPM_CLI;
+    process.env.PORTABLE_DEVSHELL_PNPM_CLI = pnpmCli;
+    try {
+        const steps = createDevelopmentCiSteps("windows-x64", "win32");
+        const buildIndex = steps.findIndex((step) => step.name === "Build native Worker");
+        const reverseIndex = steps.findIndex((step) => step.name === "Reverse worker PTY smoke");
+        const packageIndex = steps.findIndex((step) => step.name === "Package native application");
+
+        assert.ok(buildIndex >= 0);
+        assert.ok(reverseIndex > buildIndex);
+        assert.ok(packageIndex > reverseIndex);
+        assert.match(steps[reverseIndex].args.at(-1), /devshell-worker-windows-x64\.exe$/u);
+    } finally {
+        if (previous === undefined) delete process.env.PORTABLE_DEVSHELL_PNPM_CLI;
+        else process.env.PORTABLE_DEVSHELL_PNPM_CLI = previous;
+        rmSync(directory, { force: true, recursive: true });
+    }
 });

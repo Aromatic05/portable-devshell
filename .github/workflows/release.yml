@@ -109,6 +109,10 @@ jobs:
               timeout-minutes: 3
               run: node ./scripts/smoke-worker.mjs ./release-assets/devshell-worker-${{ matrix.target }}${{ runner.os == 'Windows' && '.exe' || '' }}
 
+            - name: 验证最终 Reverse Worker PTY
+              timeout-minutes: 3
+              run: node ./scripts/smoke-reverse-worker.mjs ./release-assets/devshell-worker-${{ matrix.target }}${{ runner.os == 'Windows' && '.exe' || '' }}
+
             - name: 验证最终 Client 与本地实例
               timeout-minutes: 3
               run: node ./scripts/smoke-client.mjs ./release-assets/devshell-worker-${{ matrix.target }}${{ runner.os == 'Windows' && '.exe' || '' }}

@@ -76,6 +76,7 @@ test("release workflow requires the development CI gate before packaging any rel
     assert.match(workflow, /build-worker:\r?\n\s+needs: verify-development-ci/u);
     assert.match(workflow, /pnpm package:app -- --target "\$\{\{ matrix\.target \}\}"/u);
     assert.match(workflow, /smoke-worker\.mjs \.\/release-assets\/devshell-worker-\$\{\{ matrix\.target \}\}/u);
+    assert.match(workflow, /smoke-reverse-worker\.mjs \.\/release-assets\/devshell-worker-\$\{\{ matrix\.target \}\}/u);
     assert.match(workflow, /smoke-client\.mjs \.\/release-assets\/devshell-worker-\$\{\{ matrix\.target \}\}/u);
     assert.match(workflow, /smoke:package -- \.\/release-assets\/portable-devshell-app-\$\{\{ matrix\.target \}\}\.tar\.gz/u);
     assert.match(workflow, /smoke:install-release -- \.\/release-assets\/portable-devshell-app-\$\{\{ matrix\.target \}\}\.tar\.gz/u);

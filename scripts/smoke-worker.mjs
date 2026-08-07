@@ -83,6 +83,49 @@ try {
         if (result.exitCode !== 0 || !result.stdout.includes("portable-devshell-smoke")) {
             throw new Error(`bash_run smoke failed: ${JSON.stringify(result)}`);
         }
+
+        stage("terminal.open");
+        const terminalCapabilities = handshake.capabilities?.terminalPty;
+        if (terminalCapabilities?.supported !== true || terminalCapabilities.resize !== true ||
+            terminalCapabilities.replay !== true) {
+            throw new Error(`worker did not advertise PTY support: ${JSON.stringify(terminalCapabilities)}`);
+        }
+        const terminal = await rpc.request("terminal.open", { cols: 80, rows: 24 });
+        await rpc.request("terminal.write", {
+            terminalId: terminal.terminalId,
+            generation: terminal.generation,
+            version: terminal.version,
+            clientSeq: 1,
+            data: Buffer.from(terminalPrintCommand("worker-pty-smoke"), "utf8").toString("base64")
+        });
+        await waitForTerminalOutput(rpc, terminal, "worker-pty-smoke");
+
+        stage("terminal.resize");
+        const resized = await rpc.request("terminal.resize", {
+            terminalId: terminal.terminalId,
+            generation: terminal.generation,
+            version: terminal.version,
+            clientSeq: 2,
+            cols: 100,
+            rows: 40
+        });
+        await rpc.request("terminal.write", {
+            terminalId: terminal.terminalId,
+            generation: terminal.generation,
+            version: resized.version,
+            clientSeq: 3,
+            data: Buffer.from(terminalSizeProbeCommand(), "utf8").toString("base64")
+        });
+        await waitForTerminalOutput(rpc, terminal, "40 100");
+
+        stage("terminal.kill");
+        await rpc.request("terminal.kill", {
+            terminalId: terminal.terminalId,
+            generation: terminal.generation,
+            version: resized.version,
+            clientSeq: 4
+        });
+        await waitForTerminalExit(rpc, terminal);
     } finally {
         stage("close rpc bridge");
         bridge.stdin.end();
@@ -108,6 +151,59 @@ try {
         windowsHide: true
     });
     await rm(root, { force: true, recursive: true });
+}
+
+function terminalPrintCommand(marker) {
+    if (!/^[A-Za-z0-9._-]{2,128}$/u.test(marker)) {
+        throw new Error(`invalid terminal marker: ${marker}`);
+    }
+    const middle = Math.floor(marker.length / 2);
+    const left = marker.slice(0, middle);
+    const right = marker.slice(middle);
+    return process.platform === "win32"
+        ? `powershell.exe -NoLogo -NoProfile -NonInteractive -Command "[Console]::WriteLine(('${left}' + '${right}'))"\r`
+        : `printf '%s%s\\n' '${left}' '${right}'\r`;
+}
+
+function terminalSizeProbeCommand() {
+    return process.platform === "win32"
+        ? `powershell.exe -NoLogo -NoProfile -NonInteractive -Command "$s=$Host.UI.RawUI.WindowSize; [Console]::WriteLine(('{0} {1}' -f $s.Height,$s.Width))"\r`
+        : "stty size\r";
+}
+
+async function waitForTerminalOutput(rpc, terminal, expected) {
+    const deadline = Date.now() + 10_000;
+    while (Date.now() < deadline) {
+        const attached = await rpc.request("terminal.attach", {
+            terminalId: terminal.terminalId,
+            generation: terminal.generation,
+            fromSeq: 0
+        });
+        const output = attached.replay
+            .map((frame) => Buffer.from(frame.dataBase64, "base64").toString("utf8"))
+            .join("");
+        if (output.includes(expected)) return;
+        await delay(50);
+    }
+    throw new Error(`terminal output did not include ${expected}`);
+}
+
+async function waitForTerminalExit(rpc, terminal) {
+    const deadline = Date.now() + 10_000;
+    while (Date.now() < deadline) {
+        const attached = await rpc.request("terminal.attach", {
+            terminalId: terminal.terminalId,
+            generation: terminal.generation,
+            fromSeq: 0
+        });
+        if (attached.exit !== undefined) return;
+        await delay(50);
+    }
+    throw new Error("terminal did not exit after kill");
+}
+
+function delay(ms) {
+    return new Promise((resolvePromise) => setTimeout(resolvePromise, ms));
 }
 
 function runWorker(args) {

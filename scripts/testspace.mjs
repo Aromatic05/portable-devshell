@@ -8,11 +8,20 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import {
     buildTestspaceGlobalConfig,
     buildTestspaceInstanceConfig,
+    buildTestspaceReverseInstanceConfig,
     resolveTestspaceInvocation,
     TESTSPACE_INSTANCE,
+    TESTSPACE_REVERSE_INSTANCE,
     testspaceUrls,
 } from "./testspace/TestspaceConfig.mjs";
 import { runConnectorLoop } from "./testspace/TestspaceConnector.mjs";
+import {
+    readTestspaceReverseStatus,
+    startTestspaceReverse,
+    stopTestspaceReverse,
+    withTestspaceControlConnection,
+} from "./testspace/TestspaceReverse.mjs";
+import { runTestspaceTerminalSmoke } from "./testspace/TestspaceTerminalSmoke.mjs";
 import { runTestspaceCommentSmoke } from "./testspace/TestspaceCommentSmoke.mjs";
 import { runTestspaceWebSmoke } from "./testspace/TestspaceWebSmoke.mjs";
 import {
@@ -34,6 +43,11 @@ const paths = {
     instanceConfig: join(root, "home", ".devshell", "control", "instances", `${TESTSPACE_INSTANCE}.toml`),
     instanceConfigDirectory: join(root, "home", ".devshell", "control", "instances"),
     legacyRuntime: join(root, "runtime"),
+    reverseDevshellHome: join(root, "reverse-home", ".devshell"),
+    reverseHome: join(root, "reverse-home"),
+    reverseInstanceConfig: join(root, "home", ".devshell", "control", "instances", `${TESTSPACE_REVERSE_INSTANCE}.toml`),
+    reverseRuntime: join(root, "reverse-runtime"),
+    reverseWorkspace: join(root, "reverse-workspace"),
     runtime: resolveTestspaceRuntimeDirectory(root),
     state: join(root, "state.json"),
     stopFile: join(root, "connector.stop"),
@@ -58,6 +72,12 @@ switch (command) {
     case "comment-smoke":
         await commentSmoke();
         break;
+    case "status":
+        await status();
+        break;
+    case "smoke":
+        await smoke();
+        break;
     case "stop":
         await stop();
         break;
@@ -74,13 +94,34 @@ async function start(argv) {
     const existing = await readState();
     if (existing !== undefined && isProcessAlive(existing.controlPid)) {
         const runtimeDirectory = stateRuntimeDirectory(existing);
+        let stateChanged = false;
+        const reverseStatus = await readTestspaceReverseStatus({
+            instanceName: TESTSPACE_REVERSE_INSTANCE,
+            runtimeDirectory,
+        });
+        if (!reverseStatus.ready) {
+            stopTestspaceReverse({
+                environment: testspaceEnvironment(runtimeDirectory),
+                paths,
+                workerPath: workerPath(),
+            });
+            existing.reverse = await startTestspaceReverse({
+                controllerUrl: `http://127.0.0.1:${existing.mcpPort}`,
+                environment: testspaceEnvironment(runtimeDirectory),
+                paths,
+                runtimeDirectory,
+                workerPath: workerPath(),
+            });
+            stateChanged = true;
+        }
         if (!isProcessAlive(existing.connectorPid)) {
             existing.connectorPid = await startConnector(testspaceEnvironment(runtimeDirectory));
-            await writeState(existing);
+            stateChanged = true;
             process.stdout.write("testspace connector was restarted.\n");
         } else {
             process.stdout.write("testspace is already running.\n");
         }
+        if (stateChanged) await writeState(existing);
         printCommands(existing);
         return;
     }
@@ -115,20 +156,45 @@ async function start(argv) {
     await rm(paths.stopFile, { force: true });
     await Promise.all([
         mkdir(join(paths.home, ".devshell", "control", "instances"), { recursive: true }),
+        mkdir(paths.reverseHome, { recursive: true }),
+        mkdir(paths.reverseRuntime, { recursive: true }),
+        mkdir(paths.reverseWorkspace, { recursive: true }),
         mkdir(paths.runtime, { recursive: true }),
         mkdir(paths.workspace, { recursive: true }),
     ]);
-    await ensureWorkspace();
+    await Promise.all([
+        ensureWorkspace(paths.workspace, "local"),
+        ensureWorkspace(paths.reverseWorkspace, "reverse"),
+    ]);
 
     const mcpPort = await reservePort(18790);
     const webPort = await reservePort(mcpPort === 18791 ? 18792 : 18791);
     await writeFile(paths.controlConfig, buildTestspaceGlobalConfig({ mcpPort, webPort }), "utf8");
     await writeFile(paths.instanceConfig, buildTestspaceInstanceConfig({ workspace: paths.workspace }), "utf8");
+    await writeFile(
+        paths.reverseInstanceConfig,
+        buildTestspaceReverseInstanceConfig({ workspace: paths.reverseWorkspace }),
+        "utf8",
+    );
 
     const env = testspaceEnvironment();
     runCli(["start"], env);
     runCli(["instance", "start", TESTSPACE_INSTANCE], env);
     const controlPid = await readControlPid();
+    let reverse;
+    try {
+        reverse = await startTestspaceReverse({
+            controllerUrl: `http://127.0.0.1:${mcpPort}`,
+            environment: env,
+            paths,
+            runtimeDirectory: paths.runtime,
+            workerPath: workerPath(),
+        });
+    } catch (error) {
+        runCli(["instance", "stop", TESTSPACE_INSTANCE], env, { allowFailure: true });
+        runCli(["stop"], env, { allowFailure: true });
+        throw error;
+    }
     const state = {
         connectorPid: undefined,
         controlPid,
@@ -136,6 +202,7 @@ async function start(argv) {
         intervalMs,
         mcpPort,
         root,
+        reverse,
         runtimeDirectory: paths.runtime,
         webPort,
     };
@@ -144,7 +211,7 @@ async function start(argv) {
     state.connectorPid = await startConnector(env);
     await writeState(state);
 
-    process.stdout.write("testspace started with a real Control, Worker, MCP and Web runtime.\n");
+    process.stdout.write("testspace started with local and reverse Workers, Control, MCP and Web.\n");
     printCommands(state);
 }
 
@@ -193,12 +260,66 @@ async function commentSmoke() {
     process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
 }
 
+async function status() {
+    const state = await requireRunningState();
+    const runtimeDirectory = stateRuntimeDirectory(state);
+    const reverse = await readTestspaceReverseStatus({
+        instanceName: TESTSPACE_REVERSE_INSTANCE,
+        runtimeDirectory,
+    });
+    const instances = await withTestspaceControlConnection(
+        runtimeDirectory,
+        async (_shared, connection) => {
+            const result = {};
+            for (const instance of [TESTSPACE_INSTANCE, TESTSPACE_REVERSE_INSTANCE]) {
+                const snapshot = await connection.request(instance, "runtime", "snapshot");
+                result[instance] = snapshot.snapshot;
+            }
+            return result;
+        },
+    );
+    process.stdout.write(`${JSON.stringify({
+        controlPid: state.controlPid,
+        instances,
+        reverse,
+        urls: testspaceUrls(state),
+    }, null, 2)}\n`);
+}
+
+async function smoke() {
+    const state = await requireRunningState();
+    const runtimeDirectory = stateRuntimeDirectory(state);
+    const reverse = await readTestspaceReverseStatus({
+        instanceName: TESTSPACE_REVERSE_INSTANCE,
+        runtimeDirectory,
+    });
+    if (!reverse.ready || !reverse.connected) {
+        throw new Error(`reverse testspace instance is not connected: ${JSON.stringify(reverse)}`);
+    }
+    const terminals = await runTestspaceTerminalSmoke({
+        instances: [TESTSPACE_INSTANCE, TESTSPACE_REVERSE_INSTANCE],
+        runtimeDirectory,
+    });
+    const comment = await runTestspaceCommentSmoke({
+        endpoint: testspaceUrls(state).mcp,
+        instance: TESTSPACE_INSTANCE,
+        runtimeDirectory,
+    });
+    const web = await runTestspaceWebSmoke({ webPort: state.webPort });
+    process.stdout.write(`${JSON.stringify({ comment, reverse, terminals, web }, null, 2)}\n`);
+}
+
 async function stop() {
     const state = await readState();
     const runtimeDirectory = stateRuntimeDirectory(state);
     let controlPid = state?.controlPid;
     if (state === undefined) {
         await stopConnector(await readOptionalConnectorPid());
+        stopTestspaceReverse({
+            environment: testspaceEnvironment(runtimeDirectory),
+            paths,
+            workerPath: workerPath(),
+        });
         const orphanControlPid = await readOptionalControlPid();
         controlPid = orphanControlPid;
         if (isProcessAlive(orphanControlPid)) {
@@ -210,6 +331,11 @@ async function stop() {
         await writeFile(paths.stopFile, "stop\n", "utf8");
         await stopConnector(state.connectorPid);
         const env = testspaceEnvironment(runtimeDirectory);
+        stopTestspaceReverse({
+            environment: env,
+            paths,
+            workerPath: workerPath(),
+        });
         runCli(["instance", "stop", TESTSPACE_INSTANCE], env, { allowFailure: true, inherit: true });
         runCli(["stop"], env, { allowFailure: true, inherit: true });
     }
@@ -218,6 +344,7 @@ async function stop() {
         throw new Error(`testspace control process ${String(controlPid)} is still running`);
     }
     stopTestspaceTmux(runtimeDirectory, TESTSPACE_INSTANCE);
+    stopTestspaceTmux(paths.reverseRuntime, TESTSPACE_REVERSE_INSTANCE);
     removeTestspaceDockerContainers(paths.instanceConfigDirectory);
     resetTestspacePodmanStorage(paths.home, runtimeDirectory);
     await Promise.all([
@@ -315,7 +442,7 @@ function stateRuntimeDirectory(state) {
 }
 
 function runtimeDirectories(primary) {
-    return [...new Set([primary, paths.runtime, paths.legacyRuntime])];
+    return [...new Set([primary, paths.runtime, paths.reverseRuntime, paths.legacyRuntime])];
 }
 
 async function waitForProcessExit(pid, timeoutMs) {
@@ -357,16 +484,17 @@ function tuiEntry() {
     return resolve(repoRoot, "scripts", "testspace", "TestspaceTui.mjs");
 }
 
-async function ensureWorkspace() {
+async function ensureWorkspace(directory, role) {
     const readme = [
         "# portable-devshell testspace",
         "",
-        "This workspace is isolated and may be modified by the testspace GPT-style connector simulator.",
+        `This is the isolated ${role} worker workspace.`,
+        "It may be modified by the testspace GPT-style connector simulator.",
         "All generated tool calls are limited to harmless reads, short shell output, Todo updates and short tmux tasks.",
         "",
     ].join("\n");
-    await writeFile(join(paths.workspace, "README.md"), readme, "utf8");
-    await writeFile(join(paths.workspace, "activity.txt"), "testspace activity\n", "utf8");
+    await writeFile(join(directory, "README.md"), readme, "utf8");
+    await writeFile(join(directory, "activity.txt"), `${role} testspace activity\n`, "utf8");
 }
 
 async function reservePort(preferred) {
@@ -468,6 +596,8 @@ function printCommands(state) {
         "Open Web:     pnpm testspace web",
         "Smoke Web:    pnpm testspace web-smoke",
         "Smoke Comment: pnpm testspace comment-smoke",
+        "Status:       pnpm testspace status",
+        "Smoke all:    pnpm testspace smoke",
         "Stop/remove:   pnpm testspace stop",
         "",
     ].join("\n"));
@@ -480,6 +610,6 @@ function printUrls(state) {
 
 function usage(message) {
     process.stderr.write(`${message}\n`);
-    process.stderr.write("Usage: pnpm testspace [start|comment-smoke|tui|web|web-smoke|stop] [options]\n");
+    process.stderr.write("Usage: pnpm testspace [start|comment-smoke|status|smoke|tui|web|web-smoke|stop] [options]\n");
     process.exit(2);
 }

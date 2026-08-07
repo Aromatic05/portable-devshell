@@ -1,6 +1,15 @@
 export const TESTSPACE_INSTANCE = "testspace-local";
+export const TESTSPACE_REVERSE_INSTANCE = "testspace-reverse";
 export const DEFAULT_TESTSPACE_COMMAND = "start";
-const USER_TESTSPACE_COMMANDS = new Set(["comment-smoke", "stop", "tui", "web", "web-smoke"]);
+const USER_TESTSPACE_COMMANDS = new Set([
+    "comment-smoke",
+    "smoke",
+    "status",
+    "stop",
+    "tui",
+    "web",
+    "web-smoke",
+]);
 
 export function resolveTestspaceCommand(value) {
     if (value === undefined || value === "start" || value.startsWith("-")) {
@@ -53,6 +62,37 @@ export function buildTestspaceInstanceConfig({ workspace }) {
         "enabled = true",
         'auth = "none"',
         `path = "/${TESTSPACE_INSTANCE}/mcp"`,
+        "",
+        "[mcp.tools]",
+        'groups = ["file", "bash", "artifact", "tmux", "todo", "instance"]',
+        'capabilities = ["read", "write", "execute", "manage"]',
+        "",
+        "[approvalPolicy]",
+        'mode = "allow"',
+        "",
+        "[security]",
+        'mode = "workspace"',
+        "",
+        "[logs]",
+        "eventBufferSize = 500",
+        "maxBytes = 16777216",
+        "retentionDays = 7",
+        "",
+    ].join("\n");
+}
+
+export function buildTestspaceReverseInstanceConfig({ workspace }) {
+    return [
+        "version = 2",
+        `name = "${TESTSPACE_REVERSE_INSTANCE}"`,
+        "enabled = true",
+        'provider = "reverse"',
+        `workspace = ${JSON.stringify(workspace)}`,
+        "",
+        "[mcp]",
+        "enabled = true",
+        'auth = "none"',
+        `path = "/${TESTSPACE_REVERSE_INSTANCE}/mcp"`,
         "",
         "[mcp.tools]",
         'groups = ["file", "bash", "artifact", "tmux", "todo", "instance"]',

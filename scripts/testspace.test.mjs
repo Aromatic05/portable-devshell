@@ -9,10 +9,12 @@ import test from "node:test";
 import {
     buildTestspaceGlobalConfig,
     buildTestspaceInstanceConfig,
+    buildTestspaceReverseInstanceConfig,
     DEFAULT_TESTSPACE_COMMAND,
     resolveTestspaceCommand,
     resolveTestspaceInvocation,
     TESTSPACE_INSTANCE,
+    TESTSPACE_REVERSE_INSTANCE,
     testspaceUrls,
 } from "./testspace/TestspaceConfig.mjs";
 import { createSafeAction, SAFE_ACTIONS } from "./testspace/TestspaceConnector.mjs";
@@ -35,6 +37,7 @@ const toml = require("smol-toml");
 test("testspace config enables a complete isolated local instance", () => {
     const global = toml.parse(buildTestspaceGlobalConfig({ mcpPort: 19000, webPort: 19001 }));
     const instance = toml.parse(buildTestspaceInstanceConfig({ workspace: "/tmp/testspace" }));
+    const reverse = toml.parse(buildTestspaceReverseInstanceConfig({ workspace: "/tmp/testspace-reverse" }));
 
     assert.deepEqual(global, {
         control: { logLevel: "info" },
@@ -67,6 +70,11 @@ test("testspace config enables a complete isolated local instance", () => {
     assert.deepEqual(instance.mcp.tools.capabilities, ["read", "write", "execute", "manage"]);
     assert.deepEqual(instance.security, { mode: "workspace" });
     assert.deepEqual(instance.approvalPolicy, { mode: "allow" });
+    assert.equal(reverse.name, TESTSPACE_REVERSE_INSTANCE);
+    assert.equal(reverse.provider, "reverse");
+    assert.equal(reverse.workspace, "/tmp/testspace-reverse");
+    assert.deepEqual(reverse.security, { mode: "workspace" });
+    assert.deepEqual(reverse.approvalPolicy, { mode: "allow" });
 });
 
 test("testspace URLs point at the isolated instance and Web UI", () => {
@@ -103,8 +111,9 @@ test("testspace starts when invoked without a subcommand", () => {
     assert.equal(resolveTestspaceCommand("web"), "web");
     assert.equal(resolveTestspaceCommand("web-smoke"), "web-smoke");
     assert.equal(resolveTestspaceCommand("comment-smoke"), "comment-smoke");
+    assert.equal(resolveTestspaceCommand("smoke"), "smoke");
+    assert.equal(resolveTestspaceCommand("status"), "status");
     assert.equal(resolveTestspaceCommand("stop"), "stop");
-    assert.equal(resolveTestspaceCommand("status"), "invalid");
     assert.equal(resolveTestspaceCommand("logs"), "invalid");
     assert.equal(resolveTestspaceCommand("reset"), "invalid");
     assert.deepEqual(resolveTestspaceInvocation([]), { args: [], command: "start" });
@@ -343,4 +352,79 @@ test("testspace stop terminates its real tmux server", {
         spawnSync("tmux", ["-S", socket, "has-session", "-t", "devshell"]).status,
         0,
     );
+});
+
+test("testspace reverse lifecycle enrolls with a one-time code and stops by persistent identity", async (t) => {
+    const calls = [];
+    const root = await mkdtemp(join(tmpdir(), "portable-devshell-reverse-testspace-"));
+    t.after(async () => await rm(root, { recursive: true, force: true }));
+    const paths = {
+        reverseDevshellHome: join(root, "reverse-home", ".devshell"),
+        reverseHome: join(root, "reverse-home"),
+        reverseRuntime: join(root, "reverse-runtime"),
+        reverseWorkspace: join(root, "reverse-workspace"),
+    };
+    const { startTestspaceReverse, stopTestspaceReverse } = await import(
+        "./testspace/TestspaceReverse.mjs"
+    );
+    const started = await startTestspaceReverse({
+        controllerUrl: "http://127.0.0.1:47011",
+        createDeviceCode: async (input) => {
+            calls.push(["code", input]);
+            return { deviceCode: "device-code-once" };
+        },
+        environment: {
+            DEVSHELL_WORKER_INTERNAL_INSTANCE: "host-instance",
+            DEVSHELL_WORKER_INTERNAL_SECURITY_MODE: "workspace",
+            DEVSHELL_WORKER_INTERNAL_WORKSPACE: "/host/workspace",
+            PATH: "/usr/bin",
+        },
+        paths,
+        runWorker: (input) => {
+            calls.push(["worker", input]);
+            return { status: 0, stdout: "enrolled testspace-reverse\n" };
+        },
+        runtimeDirectory: join(root, "control-runtime"),
+        waitReady: async (input) => calls.push(["ready", input]),
+        workerPath: "/repo/target/debug/devshell-worker",
+    });
+
+    assert.equal(started.instanceName, "testspace-reverse");
+    assert.deepEqual(calls[0], ["code", {
+        instanceName: "testspace-reverse",
+        runtimeDirectory: join(root, "control-runtime"),
+    }]);
+    assert.deepEqual(calls[1][1].args, [
+        "enroll",
+        "--controller",
+        "http://127.0.0.1:47011",
+        "--device-code",
+        "device-code-once",
+    ]);
+    assert.equal(calls[1][1].environment.HOME, paths.reverseHome);
+    assert.equal(calls[1][1].environment.PORTABLE_DEVSHELL_HOME, paths.reverseDevshellHome);
+    assert.equal(calls[1][1].environment.XDG_RUNTIME_DIR, paths.reverseRuntime);
+    assert.equal("DEVSHELL_WORKER_INTERNAL_INSTANCE" in calls[1][1].environment, false);
+    assert.equal("DEVSHELL_WORKER_INTERNAL_SECURITY_MODE" in calls[1][1].environment, false);
+    assert.equal("DEVSHELL_WORKER_INTERNAL_WORKSPACE" in calls[1][1].environment, false);
+    assert.deepEqual(calls[2], ["ready", {
+        instanceName: "testspace-reverse",
+        runtimeDirectory: join(root, "control-runtime"),
+    }]);
+
+    const stopped = stopTestspaceReverse({
+        environment: { PATH: "/usr/bin" },
+        paths,
+        runWorker: (input) => {
+            calls.push(["stop", input]);
+            return { status: 0, stdout: "stopped\n" };
+        },
+        workerPath: "/repo/target/debug/devshell-worker",
+    });
+    assert.equal(stopped, true);
+    assert.deepEqual(calls.at(-1)[1].args, [
+        "stop",
+        "--instance",
+        "testspace-reverse",
+    ]);
 });

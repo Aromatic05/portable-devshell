@@ -68,6 +68,7 @@ export function createDevelopmentCiSteps(target, platform = process.platform) {
         { args: ["./scripts/smoke-pty.mjs"], command: process.execPath, name: "PTY smoke" },
         pnpmStep("Build native Worker", ["build:worker", target, "--output-dir", "./ci-artifacts"]),
         { args: ["./scripts/smoke-worker.mjs", worker], command: process.execPath, name: "Worker daemon smoke" },
+        { args: ["./scripts/smoke-reverse-worker.mjs", worker], command: process.execPath, name: "Reverse worker PTY smoke" },
         { args: ["./scripts/smoke-client.mjs", worker], command: process.execPath, name: "Client and local instance smoke" },
         pnpmStep("Package native application", ["package:app", "--", "--target", target, "--output-dir", "./ci-artifacts"]),
         pnpmStep("Application package smoke", ["smoke:package", "--", application]),
