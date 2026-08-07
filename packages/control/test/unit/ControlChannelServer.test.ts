@@ -459,7 +459,7 @@ test("ControlChannelServer retries providers that failed to close", async () => 
     });
 
     await server.start();
-    await assert.rejects(server.close(), /providers failed to close/iu);
+    await assert.rejects(server.close(), /listeners failed to close/iu);
     assert.equal(provider.closeCount, 1);
 
     await server.close();
@@ -477,7 +477,7 @@ test("ControlChannelServer finishes failed cleanup before restarting providers",
     });
 
     await server.start();
-    await assert.rejects(server.close(), /providers failed to close/iu);
+    await assert.rejects(server.close(), /listeners failed to close/iu);
     await server.start();
 
     assert.deepEqual(provider.events, ["start:1", "close:1", "close:2", "start:2"]);
@@ -495,7 +495,7 @@ test("ControlChannelServer coalesces restarts while failed cleanup is retried", 
     });
 
     await server.start();
-    await assert.rejects(server.close(), /providers failed to close/iu);
+    await assert.rejects(server.close(), /listeners failed to close/iu);
     const first = server.start();
     await provider.cleanupStarted;
     const second = server.start();

@@ -364,7 +364,6 @@ test("terminal RPC streams real session input, resize, detach, and sequence resu
 
     process.emit("live");
     assert.deepEqual((await attached.stream.nextEvent()).payload, { data: "live", seq: 2 });
-    process.exit({ exitCode: 0, signal: 0 });
     await attached.stream.send("ack", {
         generation: opened.generation,
         terminalId: opened.terminalId,
