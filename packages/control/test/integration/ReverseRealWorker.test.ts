@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
-import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { execFile, spawn, spawnSync, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { join } from "node:path";
 import test from "node:test";
+import { promisify } from "node:util";
 
 import {
     asInstanceName,
@@ -35,6 +36,7 @@ import {
 import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
 
 const workerBinary = resolveTestWorkerBinary();
+const execFileAsync = promisify(execFile);
 
 test(
     "real Rust reverse worker connects to the TS gateway and executes a tool call",
@@ -402,6 +404,9 @@ test(
             USERPROFILE: workerHome,
             XDG_RUNTIME_DIR: workerRuntime,
         };
+        delete workerEnvironment.DEVSHELL_WORKER_INTERNAL_INSTANCE;
+        delete workerEnvironment.DEVSHELL_WORKER_INTERNAL_SECURITY_MODE;
+        delete workerEnvironment.DEVSHELL_WORKER_INTERNAL_WORKSPACE;
 
         t.after(async () => {
             runWorkerCommand(
@@ -459,7 +464,8 @@ test(
             const code = await new ReverseCredentialStore(controlHome).createDeviceCode(
                 "reverse-reenroll",
             );
-            const result = runWorkerCommand(
+            const result = await execFileAsync(
+                workerBinary!,
                 [
                     "enroll",
                     "--controller",
@@ -467,8 +473,12 @@ test(
                     "--device-code",
                     code.deviceCode,
                 ],
-                workerEnvironment,
-                workspace,
+                {
+                    cwd: workspace,
+                    encoding: "utf8",
+                    env: workerEnvironment,
+                    windowsHide: true,
+                },
             );
             const parsed = JSON.parse(result.stdout) as {
                 instance: string;
