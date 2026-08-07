@@ -1,4 +1,5 @@
 import type { ContextMessageRecord } from "../dto/context/DtoContextMessage.js";
+import type { McpContextRecord } from "../dto/context/DtoContextRecord.js";
 import type { InstanceSnapshot } from "../dto/instance/DtoInstanceSnapshot.js";
 import type { OAuthApprovalDecision, OAuthApprovalRequest } from "../dto/oauth/DtoOAuthApproval.js";
 import type { ApprovalDecision, ApprovalRequest } from "../dto/tool/DtoToolApproval.js";
@@ -111,6 +112,26 @@ export class ControlCommands {
         return queued;
     }
 
+    async disableContext(ctxId: string): Promise<McpContextRecord> {
+        const epoch = this.#epoch;
+        const record = await this.#request(
+            this.#clients.context.disable(ctxId),
+            `context.disable:${ctxId}`,
+        );
+        if (this.#current(epoch)) this.#refreshContexts();
+        return record;
+    }
+
+    async renewContext(ctxId: string): Promise<McpContextRecord> {
+        const epoch = this.#epoch;
+        const record = await this.#request(
+            this.#clients.context.renew(ctxId),
+            `context.renew:${ctxId}`,
+        );
+        if (this.#current(epoch)) this.#refreshContexts();
+        return record;
+    }
+
     #acceptSnapshot(snapshot: InstanceSnapshot): void {
         this.#model.applyAuthoritativeSnapshot(snapshot);
         this.#refreshInstance(snapshot.name);
@@ -126,6 +147,10 @@ export class ControlCommands {
 
     #refreshOverview(): void {
         this.#background(this.#model.refreshOverview());
+    }
+
+    #refreshContexts(): void {
+        this.#background(this.#model.refreshContexts());
     }
 
     #background(request: Promise<unknown>): void {

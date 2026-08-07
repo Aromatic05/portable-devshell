@@ -19,6 +19,7 @@ import type {
     ContextMessageQueueInput,
     ContextMessageRecord,
 } from "../dto/context/DtoContextMessage.js";
+import type { McpContextRecord } from "../dto/context/DtoContextRecord.js";
 import {
     CONTROL_PROTOCOL_VERSION,
     type ControlClientKind,
@@ -114,6 +115,11 @@ export interface ControlClients {
         updateWeb(request: ConfigUpdateWebRequest): Promise<Record<string, JsonValue>>;
         validate(draft: ConfigDraft): Promise<Record<string, JsonValue>>;
     };
+    context: {
+        disable(ctxId: string): Promise<McpContextRecord>;
+        list(): Promise<McpContextRecord[]>;
+        renew(ctxId: string): Promise<McpContextRecord>;
+    };
     contextMessage: {
         list(instance: string, ctxId?: string): Promise<ContextMessageRecord[]>;
         queue(instance: string, input: ContextMessageQueueInput): Promise<ContextMessageRecord>;
@@ -199,6 +205,7 @@ export function createControlClients(
 ): ControlClients {
     const artifact = controlClientModule(connection, "artifact");
     const config = controlClientModule(connection, "config");
+    const context = controlClientModule(connection, "context");
     const instance = controlClientModule(connection, "instance");
     const mcp = controlClientModule(connection, "mcp");
     const overview = controlClientModule(connection, "overview");
@@ -242,6 +249,11 @@ export function createControlClients(
                 config.request("updateMcpEndpoint", request),
             updateWeb: (request) => config.request("updateWeb", request),
             validate: (draft) => config.request("validate", draft),
+        },
+        context: {
+            disable: (ctxId) => context.request("disable", { ctxId }),
+            list: () => context.request("list"),
+            renew: (ctxId) => context.request("renew", { ctxId }),
         },
         contextMessage: {
             list: (name, ctxId) =>

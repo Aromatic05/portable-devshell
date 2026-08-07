@@ -3,6 +3,7 @@ import type {
     ArtifactTransferRecord,
 } from "../dto/artifact/DtoArtifact.js";
 import type { ContextMessageRecord } from "../dto/context/DtoContextMessage.js";
+import type { McpContextRecord } from "../dto/context/DtoContextRecord.js";
 import { CONTROL_PROTOCOL_VERSION } from "../dto/DtoControlProtocol.js";
 import type { InstanceEvent } from "../dto/instance/DtoInstanceEvent.js";
 import type { InstanceListEntry } from "../dto/instance/DtoInstanceRuntime.js";
@@ -40,6 +41,7 @@ export interface ControlInstanceReadState {
 export type ControlGlobalReadKey =
     | "artifacts"
     | "config"
+    | "contexts"
     | "instances"
     | "mcp"
     | "oauthApprovals"
@@ -56,6 +58,7 @@ export interface ControlReadModelState {
     artifactShares: ArtifactShareResult[];
     artifactTransfers: ArtifactTransferRecord[];
     configView?: Record<string, JsonValue>;
+    contexts: McpContextRecord[];
     failures: Record<string, ControlReadFailure>;
     instances: InstanceListEntry[];
     instanceState: Record<string, ControlInstanceReadState>;
@@ -161,6 +164,7 @@ export class ControlReadModel {
         await Promise.all([
             this.refreshMcp(epoch),
             this.refreshOverview(epoch),
+            this.refreshContexts(epoch),
             options.config === true ? this.refreshConfig(epoch) : Promise.resolve(),
             options.artifacts === true ? this.refreshArtifacts(epoch) : Promise.resolve(),
             ...instances.map(async ({ name }) => await this.refreshInstance(name, instanceKeys, undefined, epoch)),
@@ -174,6 +178,7 @@ export class ControlReadModel {
         const reads: Promise<unknown>[] = [
             this.#readGlobal("instances", this.#clients.instance.list(), (value) => this.#applyInstances(value), epoch),
             this.refreshMcp(epoch),
+            this.refreshContexts(epoch),
         ];
         if (this.#loadOptions.config === true) reads.push(this.refreshConfig(epoch));
         await Promise.all(reads);
@@ -258,6 +263,31 @@ export class ControlReadModel {
                 return;
             }
             this.#setFailure("artifacts", error);
+        }
+    }
+
+    async refreshContexts(epoch = this.#epoch): Promise<void> {
+        const version = this.#nextVersion("contexts");
+        try {
+            const contexts = await this.#request(
+                this.#clients.context.list(),
+                "context.list",
+            );
+            if (!this.#valid("contexts", version, epoch)) return;
+            this.#state.contexts = [...contexts].sort((left, right) =>
+                left.createdAt.localeCompare(right.createdAt),
+            );
+            this.#clearFailure("contexts");
+            this.#emit();
+        } catch (error) {
+            if (!this.#valid("contexts", version, epoch)) return;
+            if (methodNotFound(error)) {
+                this.#state.contexts = [];
+                this.#clearFailure("contexts");
+                this.#emit();
+                return;
+            }
+            this.#setFailure("contexts", error);
         }
     }
 
@@ -805,6 +835,7 @@ export function createInitialControlReadModelState(): ControlReadModelState {
     return {
         artifactShares: [],
         artifactTransfers: [],
+        contexts: [],
         failures: {},
         instances: [],
         instanceState: {},
@@ -817,6 +848,7 @@ function snapshotState(state: ControlReadModelState): ControlReadModelState {
         ...state,
         artifactShares: [...state.artifactShares],
         artifactTransfers: [...state.artifactTransfers],
+        contexts: [...state.contexts],
         failures: { ...state.failures },
         instances: [...state.instances],
         instanceState: Object.fromEntries(

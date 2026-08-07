@@ -77,6 +77,10 @@ export type {
     ContextMessageQueueInput,
     ContextMessageRecord
 } from "./dto/context/DtoContextMessage.js";
+export type {
+    McpContextRecord,
+    McpContextStatus
+} from "./dto/context/DtoContextRecord.js";
 export type { InstanceEvent } from "./dto/instance/DtoInstanceEvent.js";
 export type {
     InstanceListEntry,

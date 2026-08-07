@@ -47,6 +47,7 @@ export const errorCodes = {
     instanceMissing: "control.instanceNotFound",
     mcpContextExpired: "mcp.contextExpired",
     mcpContextInvalid: "mcp.contextInvalid",
+    mcpContextDisabled: "mcp.contextDisabled",
     mcpPublicAuthRequired: "mcp.publicAuthRequired",
     protocolVersionUnsupported: "protocol.versionUnsupported",
     reverseConnectionSuperseded: "reverse.connectionSuperseded",
