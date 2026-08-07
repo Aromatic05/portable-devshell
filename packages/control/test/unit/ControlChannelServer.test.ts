@@ -563,8 +563,17 @@ function createRouteSnapshot(): PrefixRouteSnapshot {
                             name: "ping",
                             handle: (_request, context) => ({
                                 pong: true,
-                                protocolVersion: context.protocolVersion,
-                                subject: context.subject,
+                                ...(context.protocolVersion === undefined
+                                    ? {}
+                                    : { protocolVersion: context.protocolVersion }),
+                                ...(context.subject === undefined
+                                    ? {}
+                                    : {
+                                          subject: {
+                                              id: context.subject.id,
+                                              kind: context.subject.kind,
+                                          },
+                                      }),
                             })
                         }
                     ]

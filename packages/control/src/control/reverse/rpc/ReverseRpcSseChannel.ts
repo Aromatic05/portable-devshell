@@ -1,7 +1,7 @@
 import type { ServerResponse } from "node:http";
 
-import { ChannelBase, type Frame } from "@portable-devshell/shared";
-import { decodeFrame, encodeFrame } from "@portable-devshell/shared/transport/frame";
+import { ChannelBase } from "@portable-devshell/shared";
+import { decodeFrame, encodeFrame, type Frame } from "@portable-devshell/shared/transport/frame";
 
 const HEARTBEAT_INTERVAL_MS = 15_000;
 

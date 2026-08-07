@@ -15,17 +15,19 @@ import {
     type JsonValue
 } from "@portable-devshell/shared";
 
-import type { TuiClients } from "../client/TuiClientComposition.js";
-import type { TuiControlSession } from "../control/TuiControlSession.js";
+import type {
+    TuiRuntimeOperationClients,
+    TuiRuntimeOperationSession,
+} from "./TuiRuntimeOperationPorts.js";
 import type { TuiPageId } from "../../state/TuiUiState.js";
 import type { TuiAppStore } from "../../state/TuiAppStore.js";
 
 export class TuiRuntimeControlOperations {
     constructor(private readonly options: {
-        clients: TuiClients;
+        clients: TuiRuntimeOperationClients;
         operationTimeoutMs: number;
         reconnectDelayMs: number;
-        session: TuiControlSession;
+        session: TuiRuntimeOperationSession;
         store: TuiAppStore;
     }) {}
 

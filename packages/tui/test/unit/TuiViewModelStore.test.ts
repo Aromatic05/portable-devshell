@@ -34,12 +34,10 @@ test("TuiAppStore keeps page, instance, and expanded boxes stable across events"
     });
     store.patchControlReadModel({ instanceState: { ["beta"]: { logs: [{
         at: "2026-07-09T00:00:03.000Z",
-        bytes: 8,
-        instance: "beta",
-        receivedAt: "2026-07-09T00:00:03.000Z",
+        instanceName: "beta",
+        message: "payload",
         seq: 3,
         stream: "stdout",
-        tail: "payload",
     }] } } });
     store.applyInstanceEvent({
         at: "2026-07-09T00:00:03.000Z",

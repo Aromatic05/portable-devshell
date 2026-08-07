@@ -4,6 +4,10 @@ import test from "node:test";
 import type { InstanceCreateDraft, JsonValue } from "@portable-devshell/shared";
 
 import { TuiAppStore, TuiRuntimeOperations } from "../../src/testing.ts";
+import type {
+    TuiRuntimeOperationClients,
+    TuiRuntimeOperationSession,
+} from "../../src/runtime/operation/TuiRuntimeOperationPorts.ts";
 
 function createHarness(options: {
     failConfigUpdate?: boolean;
@@ -26,7 +30,7 @@ function createHarness(options: {
     const calls: string[] = [];
     const refreshed: string[] = [];
     let reconnectAttempts = 0;
-    const clients = {
+    const clients: TuiRuntimeOperationClients = {
         artifact: {
             async cancelTransfer(transferId: string) {
                 calls.push(`artifact.cancel:${transferId}`);
@@ -36,12 +40,19 @@ function createHarness(options: {
             },
         },
         config: {
+            async update() {
+                calls.push("config.update");
+                return {};
+            },
             async updateInstance(input: { instanceName: string }) {
                 calls.push(`config.instance:${input.instanceName}`);
                 if (options.failConfigUpdate) throw new Error("config update failed");
             },
-            async updateMcp() {
+            async updateMcpEndpoint() {
                 calls.push("config.mcp");
+            },
+            async updateWeb() {
+                calls.push("config.web");
             },
             async validate() {
                 calls.push("config.validate");
@@ -53,19 +64,39 @@ function createHarness(options: {
                 return { name: draft.name };
             },
             async createSchema() {
-                return { providers: [] };
+                return {
+                    container: {
+                        defaultMode: "preset" as const,
+                        modes: ["preset", "dockerfile", "compose", "existingImage", "existingStoppedContainer"] as const,
+                        presets: [],
+                    },
+                    defaultEnabled: true,
+                    defaultMcpCapabilities: [],
+                    defaultMcpEnabled: false,
+                    defaultMcpGroups: [],
+                    defaultProvider: "local" as const,
+                    defaultSecurityMode: "disabled" as const,
+                    providers: ["local" as const],
+                };
             },
             async delete(instance: string) {
                 calls.push(`instance.delete:${instance}`);
             },
-            async validateCreate() {
+            async validateCreate(draft: InstanceCreateDraft) {
                 calls.push("instance.validate");
-                return {};
-            },
-        },
-        mcp: {
-            async decideApproval(approvalId: string, decision: string) {
-                calls.push(`oauth.${decision}:${approvalId}`);
+                return {
+                    enabled: true,
+                    mcp: {
+                        auth: { mode: "none" as const },
+                        enabled: false,
+                        path: `/${draft.name}/mcp`,
+                        tools: { capabilities: [], groups: [] },
+                    },
+                    name: draft.name,
+                    provider: draft.provider,
+                    security: { mode: "disabled" as const },
+                    ...(draft.workspace === undefined ? {} : { workspace: draft.workspace }),
+                };
             },
         },
         reverse: {
@@ -79,33 +110,6 @@ function createHarness(options: {
                 };
             },
         },
-        runtime: {
-            async refresh(instance: string) {
-                calls.push(`runtime.refresh:${instance}`);
-                return { snapshot: { name: instance } };
-            },
-            async start(
-                instance: string,
-                input: {
-                    onOutput?(chunk: string): void;
-                    onRequestId?(requestId: string): void;
-                } = {},
-            ) {
-                calls.push(`runtime.start:${instance}`);
-                input.onRequestId?.("request-start");
-                input.onOutput?.("starting alpha\n");
-                if (options.failStart) {
-                    const error = new Error("start failed");
-                    Object.assign(error, { code: "core.startFailed" });
-                    throw error;
-                }
-                return { name: instance };
-            },
-            async stop(instance: string) {
-                calls.push(`runtime.stop:${instance}`);
-                return { name: instance };
-            },
-        },
         service: {
             async restart() {
                 calls.push("service.restart");
@@ -116,37 +120,57 @@ function createHarness(options: {
                 calls.push(
                     `tool.call:${instance}:${toolName}:${JSON.stringify(input)}`,
                 );
-            },
-            async decideApproval(
-                instance: string,
-                approvalId: string,
-                decision: string,
-            ) {
-                calls.push(`approval.${decision}:${instance}:${approvalId}`);
-            },
-            async getApproval(instance: string, approvalId: string) {
-                calls.push(`approval.get:${instance}:${approvalId}`);
                 return {};
             },
         },
-    } as never;
-    const session = {
+    };
+    const runtime = {
+        async refresh(instance: string) {
+            calls.push(`runtime.refresh:${instance}`);
+            return { snapshot: { name: instance } };
+        },
+        async start(
+            instance: string,
+            input: {
+                onOutput?(chunk: string): void;
+                onRequestId?(requestId: string): void;
+            } = {},
+        ) {
+            calls.push(`runtime.start:${instance}`);
+            input.onRequestId?.("request-start");
+            input.onOutput?.("starting alpha\n");
+            if (options.failStart) {
+                const error = new Error("start failed");
+                Object.assign(error, { code: "core.startFailed" });
+                throw error;
+            }
+            return { name: instance };
+        },
+        async stop(instance: string) {
+            calls.push(`runtime.stop:${instance}`);
+            return { name: instance };
+        },
+    };
+    const session: TuiRuntimeOperationSession = {
         commands: {
+            async decideOAuthApproval(approvalId: string, decision: "approve" | "deny") {
+                calls.push(`oauth.${decision}:${approvalId}`);
+            },
             async decideToolApproval(instance: string, approvalId: string, decision: string) {
-                return await clients.tool.decideApproval(instance, approvalId, decision);
+                calls.push(`approval.${decision}:${instance}:${approvalId}`);
+            },
+            async queueContextMessage(instance: string, ctxId: string, text: string) {
+                calls.push(`comment.queue:${instance}:${ctxId}:${text}`);
             },
             async refreshInstance(instance: string) {
-                return (await clients.runtime.refresh(instance)).snapshot;
+                return (await runtime.refresh(instance)).snapshot;
             },
             async startInstance(instance: string, input = {}) {
-                return await clients.runtime.start(instance, input);
+                return await runtime.start(instance, input);
             },
             async stopInstance(instance: string) {
-                return await clients.runtime.stop(instance);
+                return await runtime.stop(instance);
             },
-        },
-        applyAuthoritativeSnapshot(snapshot: { name: string }) {
-            store.patchControlSnapshot(snapshot as never);
         },
         async reconnect() {
             reconnectAttempts += 1;
@@ -173,13 +197,19 @@ function createHarness(options: {
         async refreshLogsForInstance(instance: string) {
             refreshed.push(`logs:${instance}`);
         },
+        async refreshLogs() {
+            refreshed.push("logs");
+        },
         async refreshOAuth() {
             refreshed.push("oauth");
+        },
+        async refreshOverview() {
+            refreshed.push("overview");
         },
         async refreshTodo(instance: string) {
             refreshed.push(`todo:${instance}`);
         },
-    } as never;
+    };
     const operations = new TuiRuntimeOperations({
         clients,
         operationTimeoutMs: options.operationTimeoutMs,

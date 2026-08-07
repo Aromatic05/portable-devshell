@@ -170,7 +170,9 @@ class WorkerTerminalProcess implements TerminalProcess {
         };
     }
 
-    #acceptOperationIdentity(identity: WorkerTerminalIdentity): void {
+    #acceptOperationIdentity(
+        identity: Pick<WorkerTerminalIdentity, "generation" | "terminalId">,
+    ): void {
         if (
             identity.terminalId !== this.#descriptor.terminalId ||
             identity.generation !== this.#descriptor.generation

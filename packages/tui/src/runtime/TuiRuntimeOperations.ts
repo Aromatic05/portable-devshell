@@ -1,15 +1,17 @@
-import type { TuiClients } from "./client/TuiClientComposition.js";
-import type { TuiControlSession } from "./control/TuiControlSession.js";
 import { TuiRuntimeControlOperations } from "./operation/TuiRuntimeControlOperations.js";
 import { TuiRuntimeExecutionOperations } from "./operation/TuiRuntimeExecutionOperations.js";
+import type {
+    TuiRuntimeOperationClients,
+    TuiRuntimeOperationSession,
+} from "./operation/TuiRuntimeOperationPorts.js";
 import { TuiRuntimeTmuxOperations } from "./operation/TuiRuntimeTmuxOperations.js";
 import type { TuiAppStore } from "../state/TuiAppStore.js";
 
 export interface TuiRuntimeOperationsOptions {
-    clients: TuiClients;
+    clients: TuiRuntimeOperationClients;
     operationTimeoutMs?: number;
     reconnectDelayMs?: number;
-    session: TuiControlSession;
+    session: TuiRuntimeOperationSession;
     store: TuiAppStore;
 }
 

@@ -27,6 +27,7 @@ import {
     TuiFocusManager,
     currentTuiRoute,
     selectMainScrollKey,
+    tuiPageEntries,
     topTuiOverlay,
     tuiLayoutMetrics,
     tuiViewProjection,
@@ -61,9 +62,7 @@ test("Prompt 3 urgent fix uses page + instance coordinates with a two-stage Tab 
 });
 test("reload works on every current page", async () => {
     const harness = createHarness();
-    const pages = selectSidebarModel(harness.store.getState()).pages.map(
-        (item) => item.id,
-    );
+    const pages = tuiPageEntries.map((entry) => entry.id);
 
     for (const page of pages) {
         harness.store.setSelectedPage(page);
@@ -1566,17 +1565,13 @@ test("audit renders legacy records without an input summary", () => {
     harness.store.patchControlReadModel({ instanceState: { ["alpha"]: { logs: [
         {
             at: "2026-07-14T00:00:01.000Z",
-            bytes: 14,
             callId: "legacy-call",
             ctxId: "ctx-legacy",
-            instance: "alpha",
+            instanceName: "alpha",
             message: "legacy output\n",
-            preview: "legacy output\n",
-            receivedAt: "2026-07-14T00:00:01.000Z",
             seq: 1,
             source: "mcp",
             stream: "stdout",
-            tail: "legacy output\n",
             toolName: "bash_run",
         },
     ] } } });
@@ -1688,18 +1683,16 @@ test("Prompt 3 detail line selection clamps to a valid line after data replaceme
         {
             at: "2026-07-31T00:00:01.000Z",
             ctxId: "ctx-alpha",
-            instance: "alpha",
+            instanceName: "alpha",
             message: "one",
-            receivedAt: "2026-07-31T00:00:01.000Z",
             seq: 1,
             stream: "stdout",
         },
         {
             at: "2026-07-31T00:00:02.000Z",
             ctxId: "ctx-alpha",
-            instance: "alpha",
+            instanceName: "alpha",
             message: "two",
-            receivedAt: "2026-07-31T00:00:02.000Z",
             seq: 2,
             stream: "stdout",
         },
@@ -1712,9 +1705,8 @@ test("Prompt 3 detail line selection clamps to a valid line after data replaceme
         {
             at: "2026-07-31T00:00:01.000Z",
             ctxId: "ctx-alpha",
-            instance: "alpha",
+            instanceName: "alpha",
             message: "one",
-            receivedAt: "2026-07-31T00:00:01.000Z",
             seq: 1,
             stream: "stdout",
         },
@@ -1957,9 +1949,8 @@ test("logs render timestamps and correlation metadata", () => {
             at: "2026-07-11T12:34:56.000Z",
             callId: "call-1",
             ctxId: "session-1",
-            instance: "alpha",
+            instanceName: "alpha",
             message: "done",
-            receivedAt: "2026-07-11T12:34:56.000Z",
             requestId: "req-1",
             seq: 21,
             source: "mcp",
@@ -2776,20 +2767,20 @@ function seedPrompt3State(store: TuiAppStore) {
     ] } } });
     store.patchControlReadModel({ instanceState: { ["alpha"]: { logs: [
         ...Array.from({ length: 20 }, (_, index) => ({
+            at: `2026-07-09T00:00:${String(index).padStart(2, "0")}.000Z`,
             ctxId: "ctx-alpha",
-            instance: "alpha",
+            instanceName: "alpha",
             message: `alpha line ${index + 1}`,
-            receivedAt: `2026-07-09T00:00:${String(index).padStart(2, "0")}.000Z`,
             seq: index + 1,
             stream: "stdout" as const,
         })),
     ] } } });
     store.patchControlReadModel({ instanceState: { ["beta"]: { logs: [
         {
+            at: "2026-07-09T00:01:00.000Z",
             ctxId: "ctx-beta",
-            instance: "beta",
+            instanceName: "beta",
             message: "beta line 1",
-            receivedAt: "2026-07-09T00:01:00.000Z",
             seq: 1,
             stream: "stderr" as const,
         },

@@ -404,7 +404,7 @@ test(
             homeDirectory: controlHome,
             xdgRuntimeDir: controlRuntime,
         });
-        const workerEnvironment = {
+        const workerEnvironment: NodeJS.ProcessEnv = {
             ...process.env,
             HOME: workerHome,
             PORTABLE_DEVSHELL_HOME: join(workerHome, ".devshell"),

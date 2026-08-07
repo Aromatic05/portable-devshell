@@ -1,6 +1,6 @@
 import { withRequestTimeout, type JsonValue } from "@portable-devshell/shared";
 
-import type { TuiClients } from "../client/TuiClientComposition.js";
+import type { TuiRuntimeOperationClients } from "./TuiRuntimeOperationPorts.js";
 import { TUI_TMUX_INSPECT_MAX_LINES, type TuiTmuxListPane } from "../../view/page/terminal/TuiTmuxPaneTerminalModel.js";
 
 export interface TuiTmuxInspectPane {
@@ -23,7 +23,7 @@ export interface TuiTmuxInputResult {
 
 export class TuiRuntimeTmuxOperations {
     constructor(private readonly options: {
-        clients: TuiClients;
+        clients: TuiRuntimeOperationClients;
         operationTimeoutMs: number;
     }) {}
 

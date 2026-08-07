@@ -290,7 +290,7 @@ test("control terminal PTY keeps the authoritative completed session version", a
                     destination: asInstanceName("alpha"),
                     id: "ack-completed",
                     name: "terminal.attach",
-                    payload: { session: opened },
+                    payload: { session: { ...opened } },
                     replyTo: "request-completed",
                     streamId: stream.id,
                 },

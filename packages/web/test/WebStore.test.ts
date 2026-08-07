@@ -293,6 +293,7 @@ function fakeClients(
         } as WebClients["instance"],
         overview: { get: async () => operationalOverview() },
         tool: {
+            call: async () => ({}),
             listCalls: async () => [],
             listApprovals: async () => [],
             getApproval: async () => {
@@ -332,6 +333,7 @@ function fakeClients(
                 lastSeq: 3,
                 todo: { items: [], revision: 1, summary: { completed: 0, total: 0 } },
             }),
+            subscribe: async () => pendingStream(),
         },
         mcp: {
             status: async () => ({ authMode: "none", oauthReady: false, running: true }),
@@ -341,6 +343,9 @@ function fakeClients(
             },
         },
         runtime: {
+            openStart: async () => {
+                throw new Error("Not used.");
+            },
             snapshot: async () => ({ lastSeq: 3, snapshot }),
             refresh,
             readLogs: async () => [],

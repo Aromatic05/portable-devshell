@@ -134,6 +134,7 @@ test("controller-managed terminals use the instance Worker RPC surface", async (
         mcp: { auth: { mode: "none" }, enabled: false, path: "/demo-local/mcp", tools: { capabilities: [], groups: [] } },
         name: "demo-local",
         provider: "local",
+        security: { mode: "workspace" },
         workspace: "/tmp/demo",
     });
 

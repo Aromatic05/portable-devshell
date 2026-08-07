@@ -6,8 +6,10 @@ import {
     type JsonValue
 } from "@portable-devshell/shared";
 
-import type { TuiClients } from "../client/TuiClientComposition.js";
-import type { TuiControlSession } from "../control/TuiControlSession.js";
+import type {
+    TuiRuntimeOperationClients,
+    TuiRuntimeOperationSession,
+} from "./TuiRuntimeOperationPorts.js";
 import type { TuiAppStore } from "../../state/TuiAppStore.js";
 import type { TuiCommandRecord } from "../../state/reducer/TuiStoreModel.js";
 
@@ -15,9 +17,9 @@ export class TuiRuntimeExecutionOperations {
     #commandCounter = 0;
 
     constructor(private readonly options: {
-        clients: TuiClients;
+        clients: TuiRuntimeOperationClients;
         operationTimeoutMs: number;
-        session: TuiControlSession;
+        session: TuiRuntimeOperationSession;
         store: TuiAppStore;
     }) {}
 
