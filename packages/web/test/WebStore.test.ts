@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
     asInstanceName,
+    type ContextMessageRecord,
     type InstanceSnapshot,
 } from "@portable-devshell/shared/browser";
 
@@ -64,6 +65,87 @@ describe("WebStore", () => {
         expect(clients.contextMessage.list).toHaveBeenCalledTimes(2);
         expect(store.state.readModel.instanceState.demo?.commentCalls).toEqual([]);
         expect(clients.overview.get).toHaveBeenCalledOnce();
+    });
+
+    it("automatically advances a queued Comment to delivered after the instance delivery event", async () => {
+        const stream = controllableStream();
+        const clients = fakeClients({ subscribe: async () => stream });
+        const queued: ContextMessageRecord = {
+            createdAt: "2026-08-07T00:00:00Z",
+            ctxId: "ctx-demo",
+            id: "message-delivery",
+            instance: "demo",
+            status: "sent",
+            text: "Continue after the next tool call.",
+        };
+        const delivered: ContextMessageRecord = {
+            ...queued,
+            callId: "call-delivery",
+            deliveredAt: "2026-08-07T00:00:01Z",
+            status: "delivered",
+        };
+        let messages: ContextMessageRecord[] = [];
+        clients.contextMessage.list = vi.fn(async () => messages);
+        clients.contextMessage.queue = vi.fn(async () => {
+            messages = [queued];
+            return queued;
+        });
+        clients.tool.listCalls = vi.fn(async (_instance, query) =>
+            query?.callIds?.includes("call-delivery")
+                ? [{
+                      callId: "call-delivery",
+                      completedAt: "2026-08-07T00:00:01Z",
+                      ctxId: "ctx-demo",
+                      inputSummary: "{}",
+                      instance: asInstanceName("demo"),
+                      output: { comment: [queued.text] },
+                      source: "mcp" as const,
+                      startedAt: "2026-08-07T00:00:00Z",
+                      status: "completed" as const,
+                      toolName: "bash_run",
+                  }]
+                : []
+        );
+        const store = new WebStore(clients, { overviewRefreshIntervalMs: 0 });
+        await store.load();
+
+        expect(await store.queueContextMessage("demo", queued.ctxId, queued.text)).toBe(true);
+        await vi.waitFor(() =>
+            expect(
+                store.state.readModel.instanceState.demo?.contextMessages.find(
+                    (message) => message.id === queued.id,
+                )?.status,
+            ).toBe("sent")
+        );
+
+        messages = [delivered];
+        stream.push({
+            event: {
+                at: delivered.deliveredAt!,
+                data: {
+                    callId: delivered.callId!,
+                    ctxId: delivered.ctxId,
+                    ids: [delivered.id],
+                    status: "delivered",
+                },
+                instanceName: asInstanceName("demo"),
+                seq: 4,
+                type: "context.message.delivered",
+            },
+            kind: "event",
+        });
+
+        await vi.waitFor(() => {
+            const message = store.state.readModel.instanceState.demo?.contextMessages.find(
+                (candidate) => candidate.id === queued.id,
+            );
+            expect(message?.status).toBe("delivered");
+            expect(message?.callId).toBe("call-delivery");
+            expect(store.state.readModel.instanceState.demo?.commentCalls[0]?.callId).toBe(
+                "call-delivery",
+            );
+        });
+        store.close();
     });
 
     it("uses the server overview as the authoritative operational read model", async () => {
@@ -276,6 +358,32 @@ function pendingStream(): WebRuntimeStream {
         close() {},
         next: async () => await new Promise<never>(() => undefined),
     } as unknown as WebRuntimeStream;
+}
+
+type WebRuntimeMessage = Awaited<ReturnType<WebRuntimeStream["next"]>>;
+
+function controllableStream(): WebRuntimeStream & { push(message: WebRuntimeMessage): void } {
+    const queued: WebRuntimeMessage[] = [];
+    const waiting: Array<(message: WebRuntimeMessage) => void> = [];
+    let closed = false;
+    return {
+        close() {
+            if (closed) return;
+            closed = true;
+            for (const resolve of waiting.splice(0)) resolve({ kind: "closed" });
+        },
+        async next() {
+            const message = queued.shift();
+            if (message !== undefined) return message;
+            if (closed) return { kind: "closed" };
+            return await new Promise<WebRuntimeMessage>((resolve) => waiting.push(resolve));
+        },
+        push(message) {
+            const resolve = waiting.shift();
+            if (resolve === undefined) queued.push(message);
+            else resolve(message);
+        },
+    } as WebRuntimeStream & { push(message: WebRuntimeMessage): void };
 }
 
 describe("WebStore recovery and consistency", () => {
