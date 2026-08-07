@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { readFile, readlink, rm, writeFile } from "node:fs/promises";
+import { readFile, readlink, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
 
@@ -33,7 +33,73 @@ test("WorkerInstallerLocal installs into target-specific directory and refreshes
     );
 });
 
-test("WorkerInstallerLocal installs a Windows executable without requiring symlink privileges", async (t) => {
+test("WorkerInstallerLocal repairs corrupted content and preserves the old alias when activation fails", { skip: process.platform === "win32" ? "requires Unix symlink semantics" : false }, async (t) => {
+    const devshellHomeDirectory = await createTestTempDirectory("home-repair");
+    const workerDirectory = await createTestTempDirectory("worker-repair");
+    t.after(async () => {
+        await rm(devshellHomeDirectory, { recursive: true, force: true });
+        await rm(workerDirectory, { recursive: true, force: true });
+    });
+
+    const target = getWorkerTargetByKey("linux-x64");
+    const firstPath = join(workerDirectory, "worker-v1");
+    const first = Buffer.from("worker-v1", "utf8");
+    const firstSha = createHash("sha256").update(first).digest("hex");
+    await writeFile(firstPath, first, { mode: 0o755 });
+    const installer = new WorkerInstallerLocal();
+    await installer.ensure(devshellHomeDirectory, createAsset(firstPath, firstSha, target), target);
+    const alias = join(devshellHomeDirectory, "bin", `devshell-worker-${target.key}`);
+    const previousTarget = await readlink(alias);
+
+    const installed = join(devshellHomeDirectory, "workers", target.key, firstSha, "devshell-worker");
+    await writeFile(installed, "corrupt", "utf8");
+    await installer.ensure(devshellHomeDirectory, createAsset(firstPath, firstSha, target), target);
+    assert.equal(await readFile(installed, "utf8"), first.toString("utf8"));
+
+    const secondPath = join(workerDirectory, "worker-v2");
+    const second = Buffer.from("worker-v2", "utf8");
+    const secondSha = createHash("sha256").update(second).digest("hex");
+    await writeFile(secondPath, second, { mode: 0o755 });
+    const failing = new WorkerInstallerLocal({
+        fileSystem: {
+            rename: async (source, destination) => {
+                if (String(source).includes(".next-") && destination === alias) {
+                    throw new Error("injected alias activation failure");
+                }
+                await rename(source, destination);
+            },
+        },
+    });
+
+    await assert.rejects(
+        failing.ensure(devshellHomeDirectory, createAsset(secondPath, secondSha, target), target),
+        /injected alias activation failure/u,
+    );
+    assert.equal(await readlink(alias), previousTarget);
+});
+
+test("WorkerInstallerLocal rejects a bundle whose declared checksum does not match its bytes", async (t) => {
+    const devshellHomeDirectory = await createTestTempDirectory("home-mismatch");
+    const workerDirectory = await createTestTempDirectory("worker-mismatch");
+    t.after(async () => {
+        await rm(devshellHomeDirectory, { recursive: true, force: true });
+        await rm(workerDirectory, { recursive: true, force: true });
+    });
+    const binaryPath = join(workerDirectory, "devshell-worker");
+    await writeFile(binaryPath, "actual-worker", { mode: 0o755 });
+    const target = getWorkerTargetByKey("linux-x64");
+
+    await assert.rejects(
+        new WorkerInstallerLocal().ensure(
+            devshellHomeDirectory,
+            createAsset(binaryPath, "0".repeat(64), target),
+            target,
+        ),
+        (error: unknown) => (error as { code?: string }).code === "core.workerProvisionFailed",
+    );
+});
+
+test("WorkerInstallerLocal installs and replaces a Windows executable without requiring symlink privileges", async (t) => {
     const devshellHomeDirectory = await createTestTempDirectory("home");
     const workerDirectory = await createTestTempDirectory("worker");
     t.after(async () => {
@@ -58,6 +124,23 @@ test("WorkerInstallerLocal installs a Windows executable without requiring symli
     assert.equal(
         await readFile(join(devshellHomeDirectory, "bin", `devshell-worker-${target.key}.exe`), "utf8"),
         contents.toString("utf8")
+    );
+
+    const nextContents = Buffer.from("windows-worker-v2", "utf8");
+    const nextSha256 = createHash("sha256").update(nextContents).digest("hex");
+    await writeFile(binaryPath, nextContents);
+    const nextExecutable = await installer.ensure(
+        devshellHomeDirectory,
+        createAsset(binaryPath, nextSha256, target),
+        target,
+    );
+    assert.equal(
+        nextExecutable,
+        join(devshellHomeDirectory, "workers", target.key, nextSha256, "devshell-worker.exe"),
+    );
+    assert.equal(
+        await readFile(join(devshellHomeDirectory, "bin", `devshell-worker-${target.key}.exe`), "utf8"),
+        nextContents.toString("utf8"),
     );
 });
 

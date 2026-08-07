@@ -1,8 +1,13 @@
 import type { ChildProcess } from "node:child_process";
+import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 
-import { ControlError, errorCodes, type ControlError as ControlErrorType } from "@portable-devshell/shared";
+import {
+    ControlError,
+    errorCodes,
+    type ControlError as ControlErrorType,
+} from "@portable-devshell/shared";
 
 import type { ProviderCommandContext } from "../command/WorkerCommandTransport.js";
 import { waitForCommandResult } from "../command/WorkerCommandTransport.js";
@@ -17,14 +22,25 @@ export interface WorkerInstallerRemoteOptions {
     spawnShell: (
         commandLine: string,
         stdio: ["ignore" | "pipe", "pipe", "pipe"],
-        context: ProviderCommandContext
+        context: ProviderCommandContext,
     ) => ChildProcess;
     createProviderError: (
         context: ProviderCommandContext,
         cause: unknown,
-        options?: { errorCode?: string; result?: { exitCode?: number | null; signal?: string; stderr?: string; stdout?: string } }
+        options?: {
+            errorCode?: string;
+            result?: {
+                exitCode?: number | null;
+                signal?: string;
+                stderr?: string;
+                stdout?: string;
+            };
+        },
     ) => ControlErrorType;
-    createContext: (operation: string, command: readonly string[]) => ProviderCommandContext;
+    createContext: (
+        operation: string,
+        command: readonly string[],
+    ) => ProviderCommandContext;
     skillsDirectory?: string;
 }
 
@@ -46,7 +62,9 @@ export class WorkerInstallerRemote {
         this.#spawnShell = options.spawnShell;
         this.#createProviderError = options.createProviderError;
         this.#createContext = options.createContext;
-        this.#skillsDirectory = options.skillsDirectory ?? join(resolveWorkerHomeDirectory(), ".devshell", "skill");
+        this.#skillsDirectory =
+            options.skillsDirectory ??
+            join(resolveWorkerHomeDirectory(), ".devshell", "skill");
     }
 
     async ensure(executable: string): Promise<string> {
@@ -68,18 +86,29 @@ export class WorkerInstallerRemote {
             await this.#skillsSyncPromise;
         }
 
-        const archive = await createWorkerSkillArchive(this.#skillsDirectory).catch((error) => {
+        const archive = await createWorkerSkillArchive(
+            this.#skillsDirectory,
+        ).catch((error) => {
             throw this.#createProviderError(
-                this.#createContext("syncSkills", ["read", this.#skillsDirectory]),
+                this.#createContext("syncSkills", [
+                    "read",
+                    this.#skillsDirectory,
+                ]),
                 error,
-                { errorCode: errorCodes.coreWorkerProvisionFailed }
+                { errorCode: errorCodes.coreWorkerProvisionFailed },
             );
         });
-        if (archive === undefined || archive.sha256 === this.#lastSkillsSha256) {
+        if (
+            archive === undefined ||
+            archive.sha256 === this.#lastSkillsSha256
+        ) {
             return;
         }
 
-        const promise = this.#syncSkillsArchive(archive.bytes, archive.sha256).finally(() => {
+        const promise = this.#syncSkillsArchive(
+            archive.bytes,
+            archive.sha256,
+        ).finally(() => {
             if (this.#skillsSyncPromise === promise) {
                 this.#skillsSyncPromise = undefined;
             }
@@ -96,45 +125,122 @@ export class WorkerInstallerRemote {
                 throw error;
             }
 
-            throw this.#createProviderError(this.#createContext("resolveExecutable", ["devshell-worker"]), error);
+            throw this.#createProviderError(
+                this.#createContext("resolveExecutable", ["devshell-worker"]),
+                error,
+            );
         });
-        const homeDirectory = await this.#resolveHomeDirectory();
+        const homeDirectory = await this.#resolveHomeDirectory("installWorker");
 
-        if (await this.#isRemoteWorkerCurrent(homeDirectory, target.key, asset.sha256)) {
+        if (
+            await this.#isRemoteWorkerCurrent(
+                homeDirectory,
+                target.key,
+                asset.sha256,
+            )
+        ) {
             return buildRemoteExecutablePath(homeDirectory);
         }
 
         const binary = await readFile(asset.binaryPath).catch((error) => {
-            throw this.#createProviderError(this.#createContext("resolveExecutable", ["devshell-worker"]), error);
+            throw this.#createProviderError(
+                this.#createContext("resolveExecutable", ["devshell-worker"]),
+                error,
+            );
         });
-        const commandLine = buildInstallScript(homeDirectory, target.key, asset.sha256);
-        const context = this.#createContext("installWorker", ["sh", "-lc", commandLine]);
-        const child = this.#spawnShell(commandLine, ["pipe", "pipe", "pipe"], context);
+        const actualSha256 = createHash("sha256").update(binary).digest("hex");
+        if (actualSha256 !== asset.sha256) {
+            throw this.#createProviderError(
+                this.#createContext("installWorker", [asset.binaryPath]),
+                new Error(
+                    `worker bundle checksum mismatch: expected ${asset.sha256}, got ${actualSha256}`,
+                ),
+                { errorCode: errorCodes.coreWorkerProvisionFailed },
+            );
+        }
+        const commandLine = buildInstallScript(
+            homeDirectory,
+            target.key,
+            asset.sha256,
+        );
+        const context = this.#createContext("installWorker", [
+            "sh",
+            "-lc",
+            commandLine,
+        ]);
+        const child = this.#spawnShell(
+            commandLine,
+            ["pipe", "pipe", "pipe"],
+            context,
+        );
 
-        await writeToChildStdin(child, binary, this.#createProviderError, context);
+        await writeToChildStdin(
+            child,
+            binary,
+            this.#createProviderError,
+            context,
+        );
 
-        const result = await waitForCommandResult(child, this.#createProviderError, context);
+        const result = await waitForCommandResult(
+            child,
+            this.#createProviderError,
+            context,
+        );
         if (result.exitCode !== 0) {
-            throw this.#createProviderError(context, new Error(result.stderr || result.stdout || "worker install failed"), {
-                errorCode: errorCodes.coreWorkerProvisionFailed,
-                result
-            });
+            throw this.#createProviderError(
+                context,
+                new Error(
+                    result.stderr || result.stdout || "worker install failed",
+                ),
+                {
+                    errorCode: errorCodes.coreWorkerProvisionFailed,
+                    result,
+                },
+            );
         }
 
         return buildRemoteExecutablePath(homeDirectory);
     }
 
-    async #isRemoteWorkerCurrent(homeDirectory: string, targetKey: string, sha256: string): Promise<boolean> {
-        const commandLine = buildInspectScript(homeDirectory, targetKey, sha256);
-        const context = this.#createContext("installWorker", ["sh", "-lc", commandLine]);
-        const child = this.#spawnShell(commandLine, ["ignore", "pipe", "pipe"], context);
-        const result = await waitForCommandResult(child, this.#createProviderError, context);
+    async #isRemoteWorkerCurrent(
+        homeDirectory: string,
+        targetKey: string,
+        sha256: string,
+    ): Promise<boolean> {
+        const commandLine = buildInspectScript(
+            homeDirectory,
+            targetKey,
+            sha256,
+        );
+        const context = this.#createContext("installWorker", [
+            "sh",
+            "-lc",
+            commandLine,
+        ]);
+        const child = this.#spawnShell(
+            commandLine,
+            ["ignore", "pipe", "pipe"],
+            context,
+        );
+        const result = await waitForCommandResult(
+            child,
+            this.#createProviderError,
+            context,
+        );
 
         if (result.exitCode !== 0) {
-            throw this.#createProviderError(context, new Error(result.stderr || result.stdout || "worker install check failed"), {
-                errorCode: errorCodes.coreWorkerProvisionFailed,
-                result
-            });
+            throw this.#createProviderError(
+                context,
+                new Error(
+                    result.stderr ||
+                        result.stdout ||
+                        "worker install check failed",
+                ),
+                {
+                    errorCode: errorCodes.coreWorkerProvisionFailed,
+                    result,
+                },
+            );
         }
 
         const status = result.stdout.trim();
@@ -145,18 +251,26 @@ export class WorkerInstallerRemote {
             return false;
         }
 
-        throw this.#createProviderError(context, new Error(`unexpected worker install check result: ${status || "empty"}`), {
-            errorCode: errorCodes.coreWorkerProvisionFailed,
-            result
-        });
+        throw this.#createProviderError(
+            context,
+            new Error(
+                `unexpected worker install check result: ${status || "empty"}`,
+            ),
+            {
+                errorCode: errorCodes.coreWorkerProvisionFailed,
+                result,
+            },
+        );
     }
 
-    async #resolveHomeDirectory(): Promise<string> {
+    async #resolveHomeDirectory(
+        operation: "installWorker" | "syncSkills",
+    ): Promise<string> {
         if (this.#homeDirectoryPromise !== undefined) {
             return await this.#homeDirectoryPromise;
         }
 
-        const promise = this.#readHomeDirectory().catch((error) => {
+        const promise = this.#readHomeDirectory(operation).catch((error) => {
             if (this.#homeDirectoryPromise === promise) {
                 this.#homeDirectoryPromise = undefined;
             }
@@ -166,42 +280,97 @@ export class WorkerInstallerRemote {
         return await promise;
     }
 
-    async #readHomeDirectory(): Promise<string> {
-        const commandLine = 'printf %s "${HOME:?HOME is required to install the worker}"';
-        const context = this.#createContext("resolveExecutable", ["sh", "-lc", commandLine]);
-        const child = this.#spawnShell(commandLine, ["ignore", "pipe", "pipe"], context);
-        const result = await waitForCommandResult(child, this.#createProviderError, context);
+    async #readHomeDirectory(
+        operation: "installWorker" | "syncSkills",
+    ): Promise<string> {
+        const commandLine =
+            'printf %s "${HOME:?HOME is required to install the worker}"';
+        const context = this.#createContext(operation, [
+            "sh",
+            "-lc",
+            commandLine,
+        ]);
+        const child = this.#spawnShell(
+            commandLine,
+            ["ignore", "pipe", "pipe"],
+            context,
+        );
+        const result = await waitForCommandResult(
+            child,
+            this.#createProviderError,
+            context,
+        );
 
         if (result.exitCode !== 0) {
-            throw this.#createProviderError(context, new Error(result.stderr || result.stdout || "failed to resolve HOME"), { result });
+            throw this.#createProviderError(
+                context,
+                new Error(
+                    result.stderr || result.stdout || "failed to resolve HOME",
+                ),
+                { errorCode: errorCodes.coreWorkerProvisionFailed, result },
+            );
         }
 
         const homeDirectory = result.stdout.trim();
         if (homeDirectory.length === 0) {
-            throw this.#createProviderError(context, new Error("HOME is required to install the worker"), { result });
+            throw this.#createProviderError(
+                context,
+                new Error("HOME is required to install the worker"),
+                { errorCode: errorCodes.coreWorkerProvisionFailed, result },
+            );
         }
 
         return homeDirectory;
     }
 
     async #syncSkillsArchive(bytes: Buffer, sha256: string): Promise<void> {
-        const homeDirectory = await this.#resolveHomeDirectory();
+        const homeDirectory = await this.#resolveHomeDirectory("syncSkills");
         const commandLine = buildSkillSyncScript(homeDirectory, sha256);
-        const context = this.#createContext("syncSkills", ["sh", "-lc", commandLine]);
-        const child = this.#spawnShell(commandLine, ["pipe", "pipe", "pipe"], context);
+        const context = this.#createContext("syncSkills", [
+            "sh",
+            "-lc",
+            commandLine,
+        ]);
+        const child = this.#spawnShell(
+            commandLine,
+            ["pipe", "pipe", "pipe"],
+            context,
+        );
 
-        await writeToChildStdin(child, bytes, this.#createProviderError, context, "skill archive");
-        const result = await waitForCommandResult(child, this.#createProviderError, context);
+        await writeToChildStdin(
+            child,
+            bytes,
+            this.#createProviderError,
+            context,
+            "skill archive",
+        );
+        const result = await waitForCommandResult(
+            child,
+            this.#createProviderError,
+            context,
+        );
         if (result.exitCode !== 0) {
-            throw this.#createProviderError(context, new Error(result.stderr || result.stdout || "skill synchronization failed"), {
-                errorCode: errorCodes.coreWorkerProvisionFailed,
-                result
-            });
+            throw this.#createProviderError(
+                context,
+                new Error(
+                    result.stderr ||
+                        result.stdout ||
+                        "skill synchronization failed",
+                ),
+                {
+                    errorCode: errorCodes.coreWorkerProvisionFailed,
+                    result,
+                },
+            );
         }
     }
 }
 
-function buildInspectScript(homeDirectory: string, targetKey: string, sha256: string): string {
+function buildInspectScript(
+    homeDirectory: string,
+    targetKey: string,
+    sha256: string,
+): string {
     const installDirectory = `${homeDirectory}/.devshell/workers/${targetKey}/${sha256}`;
     const binaryPath = `${installDirectory}/devshell-worker`;
     const shaPath = `${installDirectory}/devshell-worker.sha256`;
@@ -215,21 +384,31 @@ function buildInspectScript(homeDirectory: string, targetKey: string, sha256: st
         `symlink_path=${shellEscape(symlinkPath)}`,
         `symlink_target=${shellEscape(symlinkTarget)}`,
         `expected_sha=${shellEscape(sha256)}`,
+        hashFunctionScript(),
         'installed_sha=""',
-        'if [ -f "$sha_path" ]; then',
-        '  installed_sha="$(cat "$sha_path")"',
-        "fi",
-        'if [ "$installed_sha" = "$expected_sha" ] && [ -f "$binary_path" ]; then',
+        'actual_sha=""',
+        'if [ -f "$sha_path" ]; then installed_sha="$(cat "$sha_path")"; fi',
+        'if [ -f "$binary_path" ]; then actual_sha="$(sha256_file "$binary_path")"; fi',
+        'if [ "$installed_sha" = "$expected_sha" ] && [ "$actual_sha" = "$expected_sha" ]; then',
         '  mkdir -p "$(dirname "$symlink_path")"',
-        '  ln -snf "$symlink_target" "$symlink_path"',
+        '  alias_tmp="${symlink_path}.next.$$"',
+        '  cleanup_alias() { rm -f "$alias_tmp"; }',
+        "  trap cleanup_alias EXIT HUP INT TERM",
+        '  ln -s "$symlink_target" "$alias_tmp"',
+        '  mv -f "$alias_tmp" "$symlink_path"',
+        "  trap - EXIT HUP INT TERM",
         "  printf '%s' ready",
         "else",
         "  printf '%s' missing",
-        "fi"
+        "fi",
     ].join("\n");
 }
 
-function buildInstallScript(homeDirectory: string, targetKey: string, sha256: string): string {
+function buildInstallScript(
+    homeDirectory: string,
+    targetKey: string,
+    sha256: string,
+): string {
     const installDirectory = `${homeDirectory}/.devshell/workers/${targetKey}/${sha256}`;
     const binaryPath = `${installDirectory}/devshell-worker`;
     const shaPath = `${installDirectory}/devshell-worker.sha256`;
@@ -244,15 +423,43 @@ function buildInstallScript(homeDirectory: string, targetKey: string, sha256: st
         `symlink_path=${shellEscape(symlinkPath)}`,
         `symlink_target=${shellEscape(symlinkTarget)}`,
         `expected_sha=${shellEscape(sha256)}`,
+        hashFunctionScript(),
         'tmp_binary_path="${binary_path}.tmp.$$"',
         'tmp_sha_path="${sha_path}.tmp.$$"',
+        'alias_tmp="${symlink_path}.next.$$"',
+        'cleanup() { rm -f "$tmp_binary_path" "$tmp_sha_path" "$alias_tmp"; }',
+        "trap cleanup EXIT HUP INT TERM",
         'mkdir -p "$install_dir" "$(dirname "$symlink_path")"',
         'cat > "$tmp_binary_path"',
         'chmod 755 "$tmp_binary_path"',
+        'actual_sha="$(sha256_file "$tmp_binary_path")"',
+        'if [ "$actual_sha" != "$expected_sha" ]; then',
+        '  printf \'worker bundle checksum mismatch: expected %s, got %s\\n\' "$expected_sha" "$actual_sha" >&2',
+        "  exit 1",
+        "fi",
         'printf \'%s\\n\' "$expected_sha" > "$tmp_sha_path"',
         'mv "$tmp_binary_path" "$binary_path"',
         'mv "$tmp_sha_path" "$sha_path"',
-        'ln -snf "$symlink_target" "$symlink_path"'
+        'ln -s "$symlink_target" "$alias_tmp"',
+        'mv -f "$alias_tmp" "$symlink_path"',
+        "trap - EXIT HUP INT TERM",
+    ].join("\n");
+}
+
+function hashFunctionScript(): string {
+    return [
+        "sha256_file() {",
+        "  if command -v sha256sum >/dev/null 2>&1; then",
+        "    sha256sum \"$1\" | awk '{print $1}'",
+        "  elif command -v shasum >/dev/null 2>&1; then",
+        "    shasum -a 256 \"$1\" | awk '{print $1}'",
+        "  elif command -v openssl >/dev/null 2>&1; then",
+        "    openssl dgst -sha256 \"$1\" | awk '{print $NF}'",
+        "  else",
+        "    printf 'no SHA-256 implementation is available\\n' >&2",
+        "    return 127",
+        "  fi",
+        "}",
     ].join("\n");
 }
 
@@ -293,7 +500,7 @@ function buildSkillSyncScript(homeDirectory: string, sha256: string): string {
         '  if [ -e "$backup_dir" ]; then mv "$backup_dir" "$target_dir"; fi',
         "  exit 1",
         "fi",
-        "trap - EXIT HUP INT TERM"
+        "trap - EXIT HUP INT TERM",
     ].join("\n");
 }
 
@@ -307,23 +514,39 @@ async function writeToChildStdin(
     createError: (
         context: ProviderCommandContext,
         cause: unknown,
-        options?: { errorCode?: string; result?: { exitCode?: number | null; signal?: string; stderr?: string; stdout?: string } }
+        options?: {
+            errorCode?: string;
+            result?: {
+                exitCode?: number | null;
+                signal?: string;
+                stderr?: string;
+                stdout?: string;
+            };
+        },
     ) => Error,
     context: ProviderCommandContext,
-    payloadName = "worker binary"
+    payloadName = "worker binary",
 ): Promise<void> {
     const stdin = child.stdin;
 
     if (stdin === null) {
-        throw createError(context, new Error(`${payloadName} stdin is unavailable`), {
-            errorCode: errorCodes.coreWorkerProvisionFailed
-        });
+        throw createError(
+            context,
+            new Error(`${payloadName} stdin is unavailable`),
+            {
+                errorCode: errorCodes.coreWorkerProvisionFailed,
+            },
+        );
     }
 
     await new Promise<void>((resolve, reject) => {
         const onError = (error: Error) => {
             stdin.off("finish", onFinish);
-            reject(createError(context, error, { errorCode: errorCodes.coreWorkerProvisionFailed }));
+            reject(
+                createError(context, error, {
+                    errorCode: errorCodes.coreWorkerProvisionFailed,
+                }),
+            );
         };
         const onFinish = () => {
             stdin.off("error", onError);
