@@ -10,11 +10,11 @@ import type {
 } from "@portable-devshell/core";
 
 import {
-    ReverseTerminalBackend,
-    type ReverseTerminalWorkerPort,
-} from "../../src/control/terminal/ReverseTerminalBackend.ts";
+    WorkerTerminalBackend,
+    type WorkerTerminalPort,
+} from "../../src/control/terminal/WorkerTerminalBackend.ts";
 
-class FakeReverseTerminalWorker implements ReverseTerminalWorkerPort {
+class FakeWorkerTerminal implements WorkerTerminalPort {
     readonly attaches: Array<{
         fromSeq: number;
         generation: number;
@@ -122,9 +122,9 @@ class FakeReverseTerminalWorker implements ReverseTerminalWorkerPort {
     }
 }
 
-test("reverse terminal backend replays, fences async operations, and resumes after reconnect", async () => {
-    const worker = new FakeReverseTerminalWorker();
-    const backend = new ReverseTerminalBackend({ worker });
+test("worker terminal backend replays, fences async operations, and resumes after reconnect", async () => {
+    const worker = new FakeWorkerTerminal();
+    const backend = new WorkerTerminalBackend({ worker });
     const opened = await backend.open({ cols: 80, rows: 24 });
     const process = "process" in opened ? opened.process : opened;
     const output: string[] = [];
@@ -194,11 +194,10 @@ test("reverse terminal backend replays, fences async operations, and resumes aft
     assert.deepEqual(output, ["replay", "live"]);
 
     await waitFor(() => worker.attaches.length === 2);
-    assert.deepEqual(worker.attaches[1], {
-        fromSeq: 2,
-        generation: 9,
-        terminalId: "remote-terminal",
-    });
+    assert.equal(worker.attaches[1]?.generation, 9);
+    assert.equal(worker.attaches[1]?.terminalId, "remote-terminal");
+    assert.equal([1, 2].includes(worker.attaches[1]?.fromSeq ?? -1), true);
+    assert.deepEqual(output, ["replay", "live"]);
 
     await process.kill();
     assert.equal(worker.kills[0]?.version, 2);

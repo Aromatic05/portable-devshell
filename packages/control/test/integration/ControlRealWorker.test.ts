@@ -25,6 +25,7 @@ import {
     resolveTestWorkerBinary,
     workerPathEnvironmentName,
     readRelativeMarkerCommand,
+    terminalPrintCommand,
 } from "../../../../test/TestPlatformSupport.ts";
 import {
     encodeGlobalConfig,
@@ -130,6 +131,8 @@ if (process.env.PORTABLE_DEVSHELL_REAL_WORKER_CHILD !== "1") {
             );
             assert.equal(toolCall.exitCode, 0);
             assert.match(toolCall.stdout, new RegExp(workspaceMarker, "u"));
+
+            await exerciseWorkerTerminal(runtimePaths.socketFile, "aromatic-pc");
 
             const logs = await request(
                 runtimePaths.socketFile,
@@ -293,6 +296,68 @@ function restoreEnv(
     }
 
     process.env[name] = value;
+}
+
+async function exerciseWorkerTerminal(socketPath: string, instance: string): Promise<void> {
+    const client = new ClientConnection({
+        connectChannel: (signal) => SocketChannel.connect(socketPath, { signal }),
+        mapError: (error) => error instanceof Error ? error : new Error(String(error)),
+        mapRemoteError: (error) => createError(error),
+        mode: "persistent",
+        peer: "tui",
+    });
+    try {
+        await client.request("@control", "service", "hello", {
+            clientKind: "tui",
+            maxProtocolVersion: 1,
+            minProtocolVersion: 1,
+        });
+        const opened = await client.request<{
+            generation: number;
+            terminalId: string;
+            version: number;
+        }>(asInstanceName(instance), "terminal", "open", { cols: 80, rows: 24 });
+        const attached = await client.openStream(
+            asInstanceName(instance),
+            "terminal",
+            "attach",
+            { fromSeq: 0, generation: opened.generation, terminalId: opened.terminalId },
+        );
+        try {
+            await attached.stream.send("input", {
+                clientSeq: 1,
+                data: terminalPrintCommand("forward-worker-terminal-ready"),
+                generation: opened.generation,
+                terminalId: opened.terminalId,
+                version: opened.version,
+            });
+            let output = "";
+            let latestSeq = 0;
+            const deadline = Date.now() + 5_000;
+            while (!output.includes("forward-worker-terminal-ready")) {
+                if (Date.now() >= deadline) throw new Error(`terminal output timeout: ${output}`);
+                const event = await attached.stream.nextEvent();
+                if (event.name === "terminal.output") {
+                    const payload = event.payload as { data?: string; seq?: number } | undefined;
+                    output += payload?.data ?? "";
+                    latestSeq = Math.max(latestSeq, payload?.seq ?? 0);
+                }
+            }
+            if (latestSeq > 0) {
+                await attached.stream.send("ack", {
+                    generation: opened.generation,
+                    terminalId: opened.terminalId,
+                    throughSeq: latestSeq,
+                    version: opened.version,
+                });
+            }
+            await client.request(asInstanceName(instance), "terminal", "kill", opened);
+        } finally {
+            attached.stream.close();
+        }
+    } finally {
+        client.close();
+    }
 }
 
 async function request(

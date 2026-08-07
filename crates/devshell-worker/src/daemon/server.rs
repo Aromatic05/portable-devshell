@@ -1,4 +1,5 @@
 use std::fs;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
@@ -7,7 +8,7 @@ use crate::daemon::log_writer::append_log;
 use crate::daemon::process;
 use crate::instance::{InstanceLock, InstanceName, read_config};
 use crate::reverse::connector::ReverseConnector;
-use crate::rpc::codec::{decode_request_frame, read_frame, write_response};
+use crate::rpc::codec::{decode_request_frame, read_frame, write_frame, write_response};
 use crate::rpc::error::RpcError;
 use crate::rpc::response::RpcResponse;
 use crate::rpc::router::RpcRouter;
@@ -135,6 +136,7 @@ fn handle_connection(stream: LocalIpcStream, router: Arc<RpcRouter>) -> Result<(
         .try_clone()
         .map_err(|error| format!("failed to clone rpc connection: {error}"))?;
     let writer = Arc::new(Mutex::new(stream));
+    let mut notification_pump: Option<NotificationPump> = None;
 
     loop {
         let frame = match read_frame(&mut reader) {
@@ -159,6 +161,17 @@ fn handle_connection(stream: LocalIpcStream, router: Arc<RpcRouter>) -> Result<(
         };
 
         match decode_request_frame(&frame) {
+            Ok(request) if request.method == "worker.notifications.subscribe" => {
+                let response =
+                    RpcResponse::success(request.id, serde_json::json!({ "subscribed": true }));
+                write_serialized_response(&writer, &response)?;
+                if notification_pump.is_none() {
+                    notification_pump = Some(NotificationPump::start(
+                        Arc::clone(&router),
+                        Arc::clone(&writer),
+                    ));
+                }
+            }
             Ok(request) if router.is_control_method(&request.method) => {
                 let response = router.dispatch_control(request);
                 write_serialized_response(&writer, &response)?;
@@ -198,6 +211,48 @@ fn handle_connection(stream: LocalIpcStream, router: Arc<RpcRouter>) -> Result<(
                 let response = RpcResponse::failure(error.id, error.error);
                 write_serialized_response(&writer, &response)?;
             }
+        }
+    }
+}
+
+struct NotificationPump {
+    active: Arc<AtomicBool>,
+    thread: Option<thread::JoinHandle<()>>,
+}
+
+impl NotificationPump {
+    fn start(router: Arc<RpcRouter>, writer: Arc<Mutex<LocalIpcStream>>) -> Self {
+        let active = Arc::new(AtomicBool::new(true));
+        let running = Arc::clone(&active);
+        let thread = thread::spawn(move || {
+            while running.load(Ordering::SeqCst) {
+                match router.try_pop_notification() {
+                    Ok(Some(frame)) => {
+                        let result = writer
+                            .lock()
+                            .map_err(|_| "rpc connection writer lock poisoned".to_string())
+                            .and_then(|mut stream| write_frame(&mut *stream, &frame));
+                        if result.is_err() {
+                            return;
+                        }
+                    }
+                    Ok(None) => thread::sleep(Duration::from_millis(5)),
+                    Err(_) => return,
+                }
+            }
+        });
+        Self {
+            active,
+            thread: Some(thread),
+        }
+    }
+}
+
+impl Drop for NotificationPump {
+    fn drop(&mut self) {
+        self.active.store(false, Ordering::SeqCst);
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
         }
     }
 }

@@ -79,3 +79,66 @@ test("instance config mapper passes effective security mode, worker env, and app
         DEVSHELL_WORKER_SECURITY_MODE: "workspace"
     });
 });
+
+test("controller-managed terminals use the instance Worker RPC surface", async () => {
+    const calls: string[] = [];
+    const worker = {
+        async openTerminal() {
+            calls.push("terminal.open");
+            return {
+                cols: 80,
+                createdAtMs: 1,
+                generation: 1,
+                latestSeq: 0,
+                rows: 24,
+                state: "running",
+                terminalId: "worker-terminal",
+                version: 1,
+            };
+        },
+        async attachTerminal() {
+            calls.push("terminal.attach");
+            return {
+                replay: [],
+                session: {
+                    cols: 80,
+                    createdAtMs: 1,
+                    generation: 1,
+                    latestSeq: 0,
+                    rows: 24,
+                    state: "running",
+                    terminalId: "worker-terminal",
+                    version: 1,
+                },
+            };
+        },
+        onTerminalNotification() { return () => undefined; },
+        onRpcConnected() { return () => undefined; },
+        onRpcDisconnected() { return () => undefined; },
+        snapshot() {
+            return {
+                connectionState: "disconnected",
+                daemonState: "stopped",
+                lastSeq: 0,
+                name: "demo-local",
+                ready: false,
+                status: "stopped",
+            };
+        },
+    };
+    const mapper = new InstanceFactory({
+        workerInstanceFactory: { create: () => worker } as never,
+    });
+    const descriptor = mapper.map({
+        enabled: true,
+        mcp: { auth: { mode: "none" }, enabled: false, path: "/demo-local/mcp", tools: { capabilities: [], groups: [] } },
+        name: "demo-local",
+        provider: "local",
+        workspace: "/tmp/demo",
+    });
+
+    const opened = await descriptor.terminal!.open({ cols: 80, rows: 24 });
+    ("process" in opened ? opened.process : opened).dispose?.();
+
+    assert.deepEqual(calls, ["terminal.open", "terminal.attach"]);
+});

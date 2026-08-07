@@ -11,14 +11,14 @@ use crate::socket::LocalIpcStream;
 pub fn run_bridge(socket_file: &Path) -> Result<String, String> {
     let socket = LocalIpcStream::connect(socket_file)
         .map_err(|error| format!("failed to connect {}: {error}", socket_file.display()))?;
-    let socket_reader = socket
+    let mut socket_reader = socket
         .try_clone()
         .map_err(|error| format!("failed to clone socket {}: {error}", socket_file.display()))?;
-    let socket_writer = socket;
+    let mut socket_writer = socket;
+    subscribe_notifications(&mut socket_writer, &mut socket_reader)?;
 
     let forward_stdin = std::thread::spawn(move || -> Result<(), String> {
         let mut stdin = io::stdin().lock();
-        let mut socket_writer = socket_writer;
         while let Some(frame) = read_frame(&mut stdin)? {
             write_frame(&mut socket_writer, &frame)?;
         }
@@ -29,7 +29,6 @@ pub fn run_bridge(socket_file: &Path) -> Result<String, String> {
     });
     let forward_stdout = std::thread::spawn(move || -> Result<(), String> {
         let mut stdout = io::stdout().lock();
-        let mut socket_reader = socket_reader;
         while let Some(frame) = read_frame(&mut socket_reader)? {
             write_frame(&mut stdout, &frame)?;
         }
@@ -55,6 +54,31 @@ pub fn run_bridge(socket_file: &Path) -> Result<String, String> {
     diagnostic("per-request bridge started");
     let socket_file = socket_file.to_path_buf();
     let (response_sender, response_receiver) = mpsc::channel::<Result<Vec<u8>, String>>();
+    let notification_sender = response_sender.clone();
+    let notification_socket = socket_file.clone();
+    std::thread::spawn(move || {
+        let result = (|| -> Result<(), String> {
+            let mut stream = LocalIpcStream::connect(&notification_socket).map_err(|error| {
+                format!(
+                    "failed to connect {}: {error}",
+                    notification_socket.display()
+                )
+            })?;
+            let mut reader = stream
+                .try_clone()
+                .map_err(|error| format!("failed to clone notification rpc connection: {error}"))?;
+            subscribe_notifications(&mut stream, &mut reader)?;
+            while let Some(frame) = read_frame(&mut reader)? {
+                if notification_sender.send(Ok(frame)).is_err() {
+                    return Ok(());
+                }
+            }
+            Ok(())
+        })();
+        if let Err(error) = result {
+            let _ = notification_sender.send(Err(error));
+        }
+    });
     let forward_stdin = std::thread::spawn(move || -> Result<(), String> {
         let mut stdin = io::stdin().lock();
         while let Some(frame) = read_frame(&mut stdin)? {
@@ -103,6 +127,26 @@ fn diagnostic(message: &str) {
     if std::env::var_os("DEVSHELL_WORKER_DIAGNOSTIC_RPC").is_some() {
         eprintln!("[rpc-bridge] {message}");
     }
+}
+
+fn subscribe_notifications(
+    writer: &mut LocalIpcStream,
+    reader: &mut LocalIpcStream,
+) -> Result<(), String> {
+    write_request_frame(
+        writer,
+        &RpcRequest::request(
+            "bridge-notifications",
+            "worker.notifications.subscribe",
+            serde_json::json!({}),
+        ),
+    )?;
+    let response = read_response(reader)?
+        .ok_or_else(|| "daemon closed notification subscription without a response".to_string())?;
+    if !response.ok {
+        return Err("daemon rejected notification subscription".to_string());
+    }
+    Ok(())
 }
 
 pub fn send_request(socket_file: &Path, request: &RpcRequest) -> Result<RpcResponse, String> {

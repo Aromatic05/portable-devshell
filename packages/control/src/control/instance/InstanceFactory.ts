@@ -4,18 +4,12 @@ import { asInstanceName, asWorkspacePath, type ControlInstanceConfig } from "@po
 import type { InstanceDescriptor } from "./InstanceDescriptor.js";
 import { ContextMessageService } from "../../instance/context/ContextMessageService.js";
 import { TodoService } from "../../instance/todo/TodoService.js";
-import { TerminalBackendFactory, type TerminalBackendFactoryPort } from "../terminal/TerminalBackendFactory.js";
-import { ReverseTerminalBackend } from "../terminal/ReverseTerminalBackend.js";
+import { WorkerTerminalBackend } from "../terminal/WorkerTerminalBackend.js";
 
 export class InstanceFactory {
-    readonly #terminalBackendFactory: TerminalBackendFactoryPort;
     readonly #workerInstanceFactory: WorkerInstanceFactory;
 
-    constructor(options?: {
-        terminalBackendFactory?: TerminalBackendFactoryPort;
-        workerInstanceFactory?: WorkerInstanceFactory;
-    }) {
-        this.#terminalBackendFactory = options?.terminalBackendFactory ?? new TerminalBackendFactory();
+    constructor(options?: { workerInstanceFactory?: WorkerInstanceFactory }) {
         this.#workerInstanceFactory = options?.workerInstanceFactory ?? new WorkerInstanceFactory();
     }
 
@@ -43,9 +37,7 @@ export class InstanceFactory {
             toolCallAssociationProvider: (context) => todo.currentAssociation(context.ctxId)
         });
         workerHolder.value = worker;
-        const terminal = instance.provider === "reverse"
-            ? new ReverseTerminalBackend({ worker })
-            : this.#terminalBackendFactory.create(instance);
+        const terminal = new WorkerTerminalBackend({ worker });
 
         return {
             contextMessages,
@@ -57,7 +49,7 @@ export class InstanceFactory {
             name: instance.name,
             provider: instance.provider,
             ...(reverseConnector === undefined ? {} : { reverseConnector }),
-            ...(terminal === undefined ? {} : { terminal }),
+            terminal,
             todo,
             worker,
             workspace: instance.workspace

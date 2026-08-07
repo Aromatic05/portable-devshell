@@ -1,13 +1,6 @@
 import { StringDecoder } from "node:string_decoder";
 
-import type {
-    WorkerTerminalAttachResult,
-    WorkerTerminalDescriptor,
-    WorkerTerminalIdentity,
-    WorkerTerminalNotification,
-    WorkerTerminalOpenInput,
-    WorkerRpcError,
-} from "@portable-devshell/core";
+import type { WorkerInstance, WorkerTerminalDescriptor, WorkerTerminalIdentity, WorkerTerminalNotification } from "@portable-devshell/core";
 
 import type {
     TerminalBackend,
@@ -18,30 +11,21 @@ import type {
     TerminalProcessExit,
 } from "./TerminalProcess.js";
 
-export interface ReverseTerminalWorkerPort {
-    openTerminal(input: WorkerTerminalOpenInput): Promise<WorkerTerminalDescriptor>;
-    attachTerminal(input: {
-        fromSeq: number;
-        generation: number;
-        terminalId: string;
-    }): Promise<WorkerTerminalAttachResult>;
-    writeTerminal(
-        input: WorkerTerminalIdentity & { data: string }
-    ): Promise<WorkerTerminalIdentity & { accepted: boolean }>;
-    resizeTerminal(
-        input: WorkerTerminalIdentity & { cols: number; rows: number }
-    ): Promise<WorkerTerminalIdentity & { accepted: boolean }>;
-    killTerminal(input: WorkerTerminalIdentity): Promise<WorkerTerminalDescriptor>;
-    listTerminals(): Promise<WorkerTerminalDescriptor[]>;
-    onTerminalNotification(
-        listener: (notification: WorkerTerminalNotification) => void
-    ): () => void;
-    onRpcConnected(listener: () => void): () => void;
-    onRpcDisconnected(listener: (error: WorkerRpcError) => void): () => void;
-}
+export type WorkerTerminalPort = Pick<
+    WorkerInstance,
+    | "attachTerminal"
+    | "killTerminal"
+    | "listTerminals"
+    | "onRpcConnected"
+    | "onRpcDisconnected"
+    | "onTerminalNotification"
+    | "openTerminal"
+    | "resizeTerminal"
+    | "writeTerminal"
+>;
 
-export class ReverseTerminalBackend implements TerminalBackend {
-    constructor(private readonly options: { worker: ReverseTerminalWorkerPort }) {}
+export class WorkerTerminalBackend implements TerminalBackend {
+    constructor(private readonly options: { worker: WorkerTerminalPort }) {}
 
     async open(input: TerminalBackendOpenInput): Promise<TerminalBackendOpenResult> {
         const descriptor = await this.options.worker.openTerminal({
@@ -50,7 +34,7 @@ export class ReverseTerminalBackend implements TerminalBackend {
             ...(input.cwd === undefined ? {} : { cwd: input.cwd }),
             rows: input.rows,
         });
-        const process = new ReverseTerminalProcess(this.options.worker, descriptor);
+        const process = new WorkerTerminalProcess(this.options.worker, descriptor);
         await process.initialize();
         return {
             identity: remoteIdentity(descriptor),
@@ -62,14 +46,14 @@ export class ReverseTerminalBackend implements TerminalBackend {
         const descriptors = (await this.options.worker.listTerminals())
             .filter((descriptor) => descriptor.state === "running");
         return await Promise.all(descriptors.map(async (descriptor) => {
-            const process = new ReverseTerminalProcess(this.options.worker, descriptor);
+            const process = new WorkerTerminalProcess(this.options.worker, descriptor);
             await process.initialize();
             return { identity: remoteIdentity(descriptor), process };
         }));
     }
 }
 
-class ReverseTerminalProcess implements TerminalProcess {
+class WorkerTerminalProcess implements TerminalProcess {
     readonly #dataListeners = new Set<(data: string, sourceSeq?: number) => void>();
     readonly #errorListeners = new Set<(error: Error) => void>();
     readonly #exitListeners = new Set<(exit: TerminalProcessExit) => void>();
@@ -78,7 +62,7 @@ class ReverseTerminalProcess implements TerminalProcess {
     readonly #unsubscribeConnected: () => void;
     readonly #unsubscribeDisconnected: () => void;
     readonly #unsubscribeNotification: () => void;
-    readonly #worker: ReverseTerminalWorkerPort;
+    readonly #worker: WorkerTerminalPort;
     #clientSeq = 0;
     #closed = false;
     #descriptor: WorkerTerminalDescriptor;
@@ -87,7 +71,7 @@ class ReverseTerminalProcess implements TerminalProcess {
     #resumeTail = Promise.resolve();
 
     constructor(
-        worker: ReverseTerminalWorkerPort,
+        worker: WorkerTerminalPort,
         descriptor: WorkerTerminalDescriptor,
     ) {
         this.#worker = worker;

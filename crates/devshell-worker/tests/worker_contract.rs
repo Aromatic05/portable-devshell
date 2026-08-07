@@ -3,7 +3,11 @@ mod support;
 use std::fs;
 use std::io::{Read, Write};
 use std::process::{Command, Stdio};
+use std::sync::mpsc;
+use std::thread;
 use std::time::{Duration, Instant};
+
+use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 
 use serde_json::Value;
 use support::TestEnv;
@@ -910,6 +914,104 @@ fn long_tool_call_does_not_block_control_requests_on_the_same_rpc_connection() {
 }
 
 #[test]
+fn persistent_rpc_bridge_forwards_terminal_notifications() {
+    let env = TestEnv::new();
+    let instance = "aromatic-terminal-notifications";
+
+    env.command()
+        .current_dir(env.workspace())
+        .args(["start", "--instance", instance])
+        .assert()
+        .success();
+
+    let mut bridge = env
+        .std_command()
+        .args(["rpc", "--instance", instance])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut stdin = bridge.stdin.take().unwrap();
+    let mut stdout = bridge.stdout.take().unwrap();
+    let (frames, received) = mpsc::channel();
+    let reader = thread::spawn(move || {
+        while let Ok(frame) = try_read_rpc_frame(&mut stdout) {
+            if frames.send(frame).is_err() {
+                return;
+            }
+        }
+    });
+
+    write_rpc_frame(
+        &mut stdin,
+        &serde_json::json!({
+            "type": "request",
+            "id": "terminal-open",
+            "method": "terminal.open",
+            "params": { "cols": 80, "rows": 24 }
+        }),
+    );
+    let opened = receive_response(&received, "terminal-open");
+    assert_eq!(opened["ok"], true, "{opened}");
+    let terminal_id = opened["result"]["terminalId"].as_str().unwrap();
+    let generation = opened["result"]["generation"].as_u64().unwrap();
+    let version = opened["result"]["version"].as_u64().unwrap();
+
+    #[cfg(unix)]
+    let command = "printf '%s\\n' 'forward-notification-ready'\\r";
+    #[cfg(windows)]
+    let command = "powershell.exe -NoLogo -NoProfile -NonInteractive -Command \"[Console]::WriteLine('forward-notification-ready')\"\\r";
+    write_rpc_frame(
+        &mut stdin,
+        &serde_json::json!({
+            "type": "request",
+            "id": "terminal-write",
+            "method": "terminal.write",
+            "params": {
+                "clientSeq": 1,
+                "generation": generation,
+                "terminalId": terminal_id,
+                "version": version,
+                "data": BASE64.encode(command.as_bytes())
+            }
+        }),
+    );
+
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let mut write_accepted = false;
+    let mut output = String::new();
+    while Instant::now() < deadline
+        && (!write_accepted || !output.contains("forward-notification-ready"))
+    {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        let frame = received
+            .recv_timeout(remaining)
+            .expect("persistent RPC bridge did not forward terminal response/notification");
+        if frame["type"] == "response" && frame["id"] == "terminal-write" {
+            assert_eq!(frame["ok"], true, "{frame}");
+            write_accepted = true;
+        }
+        if frame["type"] == "notification" && frame["method"] == "terminal.output" {
+            if let Some(data) = frame["params"]["dataBase64"].as_str() {
+                output.push_str(&String::from_utf8_lossy(&BASE64.decode(data).unwrap()));
+            }
+        }
+    }
+    assert!(write_accepted, "terminal.write response was not forwarded");
+    assert!(
+        output.contains("forward-notification-ready"),
+        "terminal output was not forwarded: {output:?}"
+    );
+
+    drop(stdin);
+    bridge.kill().ok();
+    bridge.wait().ok();
+    drop(received);
+    reader.join().unwrap();
+    env.json_command(&["stop", "--instance", instance]);
+}
+
+#[test]
 fn tool_call_cancel_terminates_a_running_bash_process_group() {
     let env = TestEnv::new();
     let instance = "aromatic-cancel-rpc";
@@ -1129,6 +1231,30 @@ fn internal_artifact_payload_rpc_is_persistent_and_not_listed_as_a_tool() {
     assert_eq!(closed["result"]["closed"], true);
 
     env.json_command(&["stop", "--instance", instance]);
+}
+
+fn receive_response(receiver: &mpsc::Receiver<Value>, id: &str) -> Value {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        let frame = receiver
+            .recv_timeout(deadline.saturating_duration_since(Instant::now()))
+            .expect("RPC response timeout");
+        if frame["type"] == "response" && frame["id"] == id {
+            return frame;
+        }
+    }
+}
+
+fn try_read_rpc_frame(reader: &mut impl Read) -> Result<Value, String> {
+    let mut length = [0_u8; 4];
+    reader
+        .read_exact(&mut length)
+        .map_err(|error| error.to_string())?;
+    let mut payload = vec![0_u8; u32::from_be_bytes(length) as usize];
+    reader
+        .read_exact(&mut payload)
+        .map_err(|error| error.to_string())?;
+    serde_json::from_slice(&payload).map_err(|error| error.to_string())
 }
 
 fn write_rpc_frame(writer: &mut impl Write, value: &Value) {

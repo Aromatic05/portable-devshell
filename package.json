@@ -10,10 +10,7 @@
         "overrides": {
             "fast-uri": "3.1.5",
             "ip-address": "10.3.1"
-        },
-        "onlyBuiltDependencies": [
-            "node-pty"
-        ]
+        }
     },
     "scripts": {
         "dev": "node ./scripts/dev.mjs",
