@@ -1527,6 +1527,58 @@ test("audit truncates input and output previews while opening complete structure
         true,
     );
 });
+test("Audit Call detail page opens complete Input and Output content", async () => {
+    const harness = createHarness();
+    harness.store.patchControlReadModel({ toolCallsByInstance: { ["alpha"]: [
+        {
+            callId: "call-detail",
+            completedAt: "2026-08-06T12:00:01.000Z",
+            input: { command: "printf detail-input" },
+            inputSummary: '{"command":"printf detail-input"}',
+            instance: asInstanceName("alpha"),
+            output: { stdout: "detail-output" },
+            source: "mcp",
+            startedAt: "2026-08-06T12:00:00.000Z",
+            status: "completed",
+            toolName: "bash_run",
+        },
+    ] } });
+    harness.store.setSelectedInstance("alpha");
+    harness.store.setSelectedPage("audit");
+    harness.store.replaceRoute({
+        callId: "call-detail",
+        page: "audit",
+        scope: "unscoped",
+        view: "call",
+    });
+    const detail = expandBox(harness, "audit-call-detail:call-detail");
+    const inputLine = detail.expandedLines.find(
+        (line) => line.id === "audit-call-detail:call-detail:input",
+    );
+    const outputLine = detail.expandedLines.find(
+        (line) => line.id === "audit-call-detail:call-detail:output",
+    );
+    assert.ok(inputLine?.id && outputLine?.id);
+
+    harness.store.setFocusScope("boxDetail");
+    harness.store.setMainFocusId(detail.id);
+    harness.store.setSelectedDetailLine(detail.expandedKey, inputLine.id);
+    await harness.dispatch({ type: "focus.activate" });
+    let overlay = topTuiOverlay(harness.store.getState().interaction.overlays);
+    assert.equal(
+        overlay?.kind === "text-detail" && overlay.body.includes("detail-input"),
+        true,
+    );
+
+    await harness.dispatch({ type: "textDetail.close" });
+    harness.store.setSelectedDetailLine(detail.expandedKey, outputLine.id);
+    await harness.dispatch({ type: "focus.activate" });
+    overlay = topTuiOverlay(harness.store.getState().interaction.overlays);
+    assert.equal(
+        overlay?.kind === "text-detail" && overlay.body.includes("detail-output"),
+        true,
+    );
+});
 test("artifact_viewImage audit output loads an image into the detail panel", async () => {
     const calls: Array<{ input: unknown; instance: string }> = [];
     const png =
