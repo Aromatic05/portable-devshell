@@ -174,7 +174,7 @@ describe("WebStore", () => {
         await Promise.all([store.reconnect(), store.reconnect()]);
 
         expect(clients.reconnect).toHaveBeenCalledOnce();
-        expect(subscriptions).toEqual([3, 3]);
+        expect(subscriptions).toEqual([9, 9]);
         expect(store.state.connection).toBe("online");
     });
 
@@ -451,7 +451,7 @@ describe("WebStore operation and transport boundaries", () => {
 
         await store.start("demo");
 
-        expect(store.state.readModel.instances[0]?.snapshot.status).toBe("running");
+        expect(store.state.readModel.instanceState.demo?.snapshot?.status).toBe("running");
         expect(store.state.operations["start:demo"]).toBeUndefined();
         expect(store.state.notice).toBe("demo start requested.");
         store.close();

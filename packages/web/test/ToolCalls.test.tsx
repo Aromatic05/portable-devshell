@@ -172,7 +172,7 @@ it("does not render large Tool Call details until the row is expanded", () => {
     render(<ToolCalls state={largeState} store={{ queueContextMessage: vi.fn() } as unknown as WebStore} />);
 
     expect(screen.queryByText(new RegExp(token))).not.toBeInTheDocument();
-    const details = document.querySelector("details")!;
+    const details = screen.getByText("alpha · mcp · ctx-alpha").closest("details")!;
     details.open = true;
     fireEvent(details, new Event("toggle"));
     expect(screen.getByText(new RegExp(token))).toBeInTheDocument();
@@ -234,6 +234,6 @@ it("shows the display limit without claiming it is the match total", () => {
     />);
 
     expect(
-        screen.getByText("Showing 100 of 150 matching tool calls."),
+        screen.getByText("Showing 100 of 151 matching tool calls."),
     ).toBeInTheDocument();
 });
