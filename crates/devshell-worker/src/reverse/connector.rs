@@ -597,10 +597,12 @@ impl ReverseDispatcher {
         if self.router.is_control_method(&request.method) {
             let response = self.router.dispatch_control(request);
             let encoded = encode_json(&response)?;
-            self.completed
-                .lock()
-                .map_err(|_| "reverse request cache lock poisoned".to_string())?
-                .put(key.clone(), encoded.clone());
+            if response.ok {
+                self.completed
+                    .lock()
+                    .map_err(|_| "reverse request cache lock poisoned".to_string())?
+                    .put(key.clone(), encoded.clone());
+            }
             return Ok(Some(ReverseOutboundResponse {
                 key: Some(key),
                 frame: encoded,
@@ -626,10 +628,6 @@ impl ReverseDispatcher {
                     .remove(&key);
                 let response = RpcResponse::failure(request.id, error);
                 let encoded = encode_json(&response)?;
-                self.completed
-                    .lock()
-                    .map_err(|_| "reverse request cache lock poisoned".to_string())?
-                    .put(key.clone(), encoded.clone());
                 return Ok(Some(ReverseOutboundResponse {
                     key: Some(key),
                     frame: encoded,
@@ -642,8 +640,10 @@ impl ReverseDispatcher {
             let response = dispatcher.router.dispatch_tool(request, permit);
             let encoded =
                 encode_json(&response).expect("serializing a reverse RPC response should not fail");
-            if let Ok(mut completed) = dispatcher.completed.lock() {
-                completed.put(key.clone(), encoded.clone());
+            if response.ok {
+                if let Ok(mut completed) = dispatcher.completed.lock() {
+                    completed.put(key.clone(), encoded.clone());
+                }
             }
             let _ = dispatcher.responses.push_back(ReverseOutboundResponse {
                 key: Some(key.clone()),
@@ -706,7 +706,7 @@ fn reverse_endpoint(base: &str, endpoint_path: &str, websocket: bool) -> Result<
 mod tests {
     use std::fs;
     use std::sync::Arc;
-    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use std::thread;
     use std::time::Duration;
 
@@ -729,6 +729,40 @@ mod tests {
     use crate::tools::{
         ToolCall, ToolCapability, ToolCatalogEntry, ToolError, ToolHandler, ToolName, ToolRegistry,
     };
+
+    struct CountingMutationTool {
+        calls: Arc<AtomicUsize>,
+        fail_first: bool,
+        name: ToolName,
+    }
+
+    impl ToolHandler for CountingMutationTool {
+        fn name(&self) -> &ToolName {
+            &self.name
+        }
+
+        fn catalog_entry(&self) -> ToolCatalogEntry {
+            ToolCatalogEntry {
+                group: "test".to_string(),
+                name: "test_mutation".to_string(),
+                description: "Count a non-idempotent mutation.".to_string(),
+                input_schema: json!({ "type": "object" }),
+                output_schema: json!({ "type": "object" }),
+                required_capabilities: vec![ToolCapability::Execute],
+            }
+        }
+
+        fn call(&self, _call: ToolCall) -> Result<serde_json::Value, ToolError> {
+            let value = self.calls.fetch_add(1, Ordering::SeqCst) + 1;
+            if self.fail_first && value == 1 {
+                return Err(ToolError::retryable(
+                    "test.retryable",
+                    "injected retryable mutation failure",
+                ));
+            }
+            Ok(json!({ "executionCount": value }))
+        }
+    }
 
     struct CancellableWaitTool {
         name: ToolName,
@@ -779,6 +813,180 @@ mod tests {
     fn generation_remains_monotonic_when_the_clock_moves_backwards() {
         assert_eq!(next_generation_value(150, 200, 100), 201);
         assert_eq!(next_generation_value(0, 0, 500), 500);
+    }
+
+    #[test]
+    fn reverse_dispatcher_replays_completed_mutation_without_executing_it_twice() {
+        let root = crate::testing::temp_dir();
+        let workspace = root.path().join("workspace");
+        fs::create_dir(&workspace).unwrap();
+        let instance = InstanceName::parse("reverse-once").unwrap();
+        let calls = Arc::new(AtomicUsize::new(0));
+        let mut registry = ToolRegistry::new();
+        registry
+            .register(Arc::new(CountingMutationTool {
+                calls: Arc::clone(&calls),
+                fail_first: false,
+                name: ToolName::parse("test_mutation").unwrap(),
+            }))
+            .unwrap();
+        let artifacts = ArtifactStore::new(root.path().join("artifacts")).unwrap();
+        let payloads = ArtifactPayloadStore::new(root.path().join("payloads"), artifacts).unwrap();
+        let receives = ArtifactReceiveStore::new(root.path().join("receives")).unwrap();
+        let router = Arc::new(RpcRouter::new(
+            WorkerConfig {
+                version: 1,
+                instance: instance.as_str().to_string(),
+                created_at: 1,
+                reverse: None,
+            },
+            WorkerRuntimeContext {
+                instance,
+                workspace,
+                platform: PlatformInfo {
+                    os: std::env::consts::OS,
+                    arch: std::env::consts::ARCH,
+                },
+                security_mode: SecurityMode::Disabled,
+                worker_sha256: Some("0".repeat(64)),
+            },
+            Arc::new(registry),
+            payloads,
+            receives,
+        ));
+        let responses = Arc::new(ReverseResponseQueue::default());
+        let dispatcher = Arc::new(ReverseDispatcher::new(router, Arc::clone(&responses)));
+        let request: RpcRequest = serde_json::from_value(json!({
+            "type": "request",
+            "id": "mutation-1",
+            "method": "test_mutation",
+            "params": { "value": 1 },
+            "context": {
+                "requestId": "operation-1",
+                "operationId": "operation-1",
+                "ctxId": "ctx-reverse",
+                "source": "control"
+            }
+        }))
+        .unwrap();
+        let frame = encode_json(&request).unwrap();
+
+        assert!(dispatcher.dispatch(&frame).unwrap().is_none());
+        let first = responses
+            .wait_pop(Duration::from_secs(2))
+            .unwrap()
+            .expect("first mutation response");
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+
+        // Simulate a response lost after the worker completed the mutation. The
+        // controller replays the exact request frame after reconnect.
+        let replay = dispatcher
+            .dispatch(&frame)
+            .unwrap()
+            .expect("cached mutation response");
+        assert_eq!(replay.frame, first.frame);
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        assert!(responses.try_pop().unwrap().is_none());
+
+        let changed: RpcRequest = serde_json::from_value(json!({
+            "type": "request",
+            "id": "mutation-1",
+            "method": "test_mutation",
+            "params": { "value": 2 },
+            "context": {
+                "requestId": "operation-1",
+                "operationId": "operation-1",
+                "ctxId": "ctx-reverse",
+                "source": "control"
+            }
+        }))
+        .unwrap();
+        assert!(
+            dispatcher
+                .dispatch(&encode_json(&changed).unwrap())
+                .unwrap()
+                .is_none()
+        );
+        responses
+            .wait_pop(Duration::from_secs(2))
+            .unwrap()
+            .expect("changed mutation response");
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+    }
+
+    #[test]
+    fn reverse_dispatcher_does_not_cache_failed_mutations() {
+        let root = crate::testing::temp_dir();
+        let workspace = root.path().join("workspace");
+        fs::create_dir(&workspace).unwrap();
+        let instance = InstanceName::parse("reverse-retry").unwrap();
+        let calls = Arc::new(AtomicUsize::new(0));
+        let mut registry = ToolRegistry::new();
+        registry
+            .register(Arc::new(CountingMutationTool {
+                calls: Arc::clone(&calls),
+                fail_first: true,
+                name: ToolName::parse("test_mutation").unwrap(),
+            }))
+            .unwrap();
+        let artifacts = ArtifactStore::new(root.path().join("artifacts")).unwrap();
+        let payloads = ArtifactPayloadStore::new(root.path().join("payloads"), artifacts).unwrap();
+        let receives = ArtifactReceiveStore::new(root.path().join("receives")).unwrap();
+        let router = Arc::new(RpcRouter::new(
+            WorkerConfig {
+                version: 1,
+                instance: instance.as_str().to_string(),
+                created_at: 1,
+                reverse: None,
+            },
+            WorkerRuntimeContext {
+                instance,
+                workspace,
+                platform: PlatformInfo {
+                    os: std::env::consts::OS,
+                    arch: std::env::consts::ARCH,
+                },
+                security_mode: SecurityMode::Disabled,
+                worker_sha256: Some("0".repeat(64)),
+            },
+            Arc::new(registry),
+            payloads,
+            receives,
+        ));
+        let responses = Arc::new(ReverseResponseQueue::default());
+        let dispatcher = Arc::new(ReverseDispatcher::new(router, Arc::clone(&responses)));
+        let request: RpcRequest = serde_json::from_value(json!({
+            "type": "request",
+            "id": "retryable-mutation",
+            "method": "test_mutation",
+            "params": { "value": 1 },
+            "context": {
+                "requestId": "retryable-operation",
+                "operationId": "retryable-operation",
+                "ctxId": "ctx-reverse",
+                "source": "control"
+            }
+        }))
+        .unwrap();
+        let frame = encode_json(&request).unwrap();
+
+        assert!(dispatcher.dispatch(&frame).unwrap().is_none());
+        let first = responses
+            .wait_pop(Duration::from_secs(2))
+            .unwrap()
+            .expect("failed mutation response");
+        let first: RpcResponse = decode_json(&first.frame).unwrap();
+        assert!(!first.ok);
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+
+        assert!(dispatcher.dispatch(&frame).unwrap().is_none());
+        let second = responses
+            .wait_pop(Duration::from_secs(2))
+            .unwrap()
+            .expect("retried mutation response");
+        let second: RpcResponse = decode_json(&second.frame).unwrap();
+        assert!(second.ok);
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
     }
 
     #[test]

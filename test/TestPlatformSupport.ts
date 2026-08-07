@@ -88,6 +88,37 @@ export function readRelativeMarkerCommand(fileName: string): string {
         : `cat -- './${fileName}'`;
 }
 
+export function terminalPrintCommand(marker: string, delayMs = 0): string {
+    const [left, right] = splitTerminalMarker(marker);
+    if (!Number.isSafeInteger(delayMs) || delayMs < 0) {
+        throw new Error(`invalid terminal delay: ${delayMs}`);
+    }
+    if (process.platform === "win32") {
+        const delay = delayMs === 0 ? "" : `Start-Sleep -Milliseconds ${delayMs}; `;
+        return `powershell.exe -NoLogo -NoProfile -NonInteractive -Command "${delay}[Console]::WriteLine(('${left}' + '${right}'))"\r`;
+    }
+    const delay = delayMs === 0 ? "" : `sleep ${(delayMs / 1000).toFixed(3)}; `;
+    return `${delay}printf '%s%s\\n' '${left}' '${right}'\r`;
+}
+
+export function terminalSizeProbeCommand(): string {
+    return process.platform === "win32"
+        ? `powershell.exe -NoLogo -NoProfile -NonInteractive -Command "$s=$Host.UI.RawUI.WindowSize; [Console]::WriteLine(('{0} {1}' -f $s.Height,$s.Width))"\r`
+        : "stty size\r";
+}
+
+export function terminalExpectedSize(rows: number, cols: number): string {
+    return `${rows} ${cols}`;
+}
+
+function splitTerminalMarker(marker: string): [string, string] {
+    if (!/^[A-Za-z0-9._-]{2,128}$/u.test(marker)) {
+        throw new Error(`invalid terminal marker: ${marker}`);
+    }
+    const middle = Math.floor(marker.length / 2);
+    return [marker.slice(0, middle), marker.slice(middle)];
+}
+
 export function workerPathEnvironmentName(platform = process.platform, arch = process.arch): string {
     return `PORTABLE_DEVSHELL_WORKER_${normalizeWorkerPlatform(platform)}_${normalizeWorkerArch(arch)}_PATH`;
 }

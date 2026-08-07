@@ -83,6 +83,12 @@ pub fn run(options: EnrollOptions) -> Result<String, String> {
     ensure_dir(&paths.artifacts_dir, 0o700)?;
     ensure_dir(&paths.state_dir, 0o700)?;
 
+    // Re-enrollment replaces the server-side token immediately. Stop any old
+    // daemon before changing its local credential or replacing its installed
+    // binary so the new enrollment can start under the same instance identity.
+    crate::cli::stop::stop_instance(&instance)?;
+    let installed_binary = install_current_binary()?;
+
     {
         let _lock = InstanceLock::acquire(&paths)?;
         let mut config = if paths.config_file.exists() {
@@ -98,7 +104,6 @@ pub fn run(options: EnrollOptions) -> Result<String, String> {
         write_config(&paths, &config)?;
     }
 
-    let installed_binary = install_current_binary()?;
     start_installed_worker(&installed_binary, &instance, &workspace)?;
     serde_json::to_string_pretty(&EnrollResult {
         instance: instance.as_str().to_string(),

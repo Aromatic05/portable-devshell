@@ -17,8 +17,19 @@ struct StopResponse {
 
 pub fn run(args: InstanceArgs) -> Result<String, String> {
     let instance = InstanceName::parse(&args.instance)?;
-    let instance_paths = InstancePaths::resolve(&instance)?;
-    let socket_paths = SocketPaths::resolve(&instance)?;
+    let stopped = stop_instance(&instance)?;
+
+    serde_json::to_string_pretty(&StopResponse {
+        ok: true,
+        instance: instance.as_str().to_string(),
+        stopped,
+    })
+    .map_err(|error| error.to_string())
+}
+
+pub fn stop_instance(instance: &InstanceName) -> Result<bool, String> {
+    let instance_paths = InstancePaths::resolve(instance)?;
+    let socket_paths = SocketPaths::resolve(instance)?;
     let _lock = if instance_paths.instance_root.exists() {
         ensure_dir(&instance_paths.state_dir, 0o700)?;
         Some(InstanceLock::acquire(&instance_paths)?)
@@ -37,13 +48,7 @@ pub fn run(args: InstanceArgs) -> Result<String, String> {
     };
 
     process::clear_runtime_files(&instance_paths, &socket_paths.socket_file)?;
-
-    serde_json::to_string_pretty(&StopResponse {
-        ok: true,
-        instance: instance.as_str().to_string(),
-        stopped,
-    })
-    .map_err(|error| error.to_string())
+    Ok(stopped)
 }
 
 fn stop_running_daemon(

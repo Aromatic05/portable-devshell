@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { join } from "node:path";
@@ -10,147 +10,507 @@ import {
     ClientConnection,
     createError,
     SocketChannel,
+    type ClientEvent,
+    type ClientStream,
     type Destination,
-    type JsonValue
+    type JsonValue,
 } from "@portable-devshell/shared";
 
 import { ControlServer } from "../../src/server/ControlServer.ts";
 import { ControlPathHome } from "@portable-devshell/shared";
 import { ReverseCredentialStore } from "../../src/control/reverse/credential/ReverseCredentialStore.ts";
-import { encodeGlobalConfig, encodeInstanceConfig } from "../ConfigTomlTestSupport.ts";
-import { installUniqueWindowsTestIdentity, realWorkerTestOptions, resolveTestWorkerBinary, readRelativeMarkerCommand } from "../../../../test/TestPlatformSupport.ts";
+import {
+    encodeGlobalConfig,
+    encodeInstanceConfig,
+} from "../ConfigTomlTestSupport.ts";
+import {
+    installUniqueWindowsTestIdentity,
+    realWorkerTestOptions,
+    resolveTestWorkerBinary,
+    readRelativeMarkerCommand,
+    terminalExpectedSize,
+    terminalPrintCommand,
+    terminalSizeProbeCommand,
+} from "../../../../test/TestPlatformSupport.ts";
 import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
 
 const workerBinary = resolveTestWorkerBinary();
 
-test("real Rust reverse worker connects to the TS gateway and executes a tool call", realWorkerTestOptions(workerBinary), async (t) => {
-    const homeDirectory = await createTestTempDirectory("reverse-real-home");
-    const xdgRuntimeDir = await createTestTempDirectory("reverse-real-runtime");
-    const workspace = await createTestTempDirectory("reverse-real-workspace");
-    const workspaceMarkerName = "reverse-real-workspace-marker.txt";
-    const workspaceMarker = "portable-devshell-reverse-workspace";
-    await writeFile(join(workspace, workspaceMarkerName), workspaceMarker, "utf8");
-    const port = await reservePort();
-    const publicBaseUrl = `http://127.0.0.1:${port}`;
-    const restoreWindowsIdentity = installUniqueWindowsTestIdentity("reverse-real-worker");
-    const paths = new ControlPathHome(homeDirectory);
-    const server = new ControlServer({ homeDirectory, xdgRuntimeDir });
-    const workerRef: { value?: ChildProcessWithoutNullStreams } = {};
-    let workerStdout = "";
-    let workerStderr = "";
-
-    t.after(async () => {
-        workerRef.value?.kill("SIGTERM");
-        await server.stop().catch(() => undefined);
-        restoreWindowsIdentity();
-        await rm(homeDirectory, { force: true, recursive: true });
-        await rm(xdgRuntimeDir, { force: true, recursive: true });
-        await rm(workspace, { force: true, recursive: true });
-    });
-
-    await mkdir(paths.controlHomeDir, { recursive: true });
-    await mkdir(paths.instancesDir, { recursive: true });
-    await writeFile(
-        paths.configFile,
-        encodeGlobalConfig({
-            control: { logLevel: "info" },
-            mcp: {
-                enabled: true,
-                listenHost: "127.0.0.1",
-                listenPort: port,
-                publicBaseUrl
-            }
-        }),
-        "utf8"
-    );
-    await writeFile(
-        paths.instanceConfigFile("reverse-test"),
-        encodeInstanceConfig({
-            enabled: true,
-            logs: { eventBufferSize: 50 },
-            mcp: {
-                enabled: true,
-                tools: { capabilities: ["read", "write", "execute"], groups: ["bash"] }
-            },
-            name: "reverse-test",
-            provider: "reverse",
-            workspace
-        }),
-        "utf8"
-    );
-
-    const credentialStore = new ReverseCredentialStore(homeDirectory);
-    const code = await credentialStore.createDeviceCode("reverse-test");
-    const credential = await credentialStore.consumeDeviceCode(code.deviceCode);
-    const workerHome = join(homeDirectory, ".devshell", "reverse-test");
-    await mkdir(join(workerHome, "state"), { recursive: true });
-    await mkdir(join(workerHome, "logs"), { recursive: true });
-    await mkdir(join(workerHome, "artifacts"), { recursive: true });
-    await writeFile(
-        join(workerHome, "config.toml"),
-        [
-            "version = 1",
-            'instance = "reverse-test"',
-            `createdAt = ${Math.floor(Date.now() / 1000)}`,
-            "",
-            "[reverse]",
-            `controllerUrl = ${JSON.stringify(publicBaseUrl)}`,
-            `deviceToken = ${JSON.stringify(credential.deviceToken)}`,
-            "generation = 0",
-            ""
-        ].join("\n"),
-        { encoding: "utf8", mode: 0o600 }
-    );
-
-    await server.start();
-    const worker = spawn(workerBinary!, [], {
-        env: {
-            ...process.env,
-            DEVSHELL_WORKER_INTERNAL_INSTANCE: "reverse-test",
-            DEVSHELL_WORKER_INTERNAL_SECURITY_MODE: "disabled",
-            DEVSHELL_WORKER_INTERNAL_WORKSPACE: workspace,
-            HOME: homeDirectory,
-            USERPROFILE: homeDirectory,
-            XDG_RUNTIME_DIR: xdgRuntimeDir
-        },
-        stdio: ["pipe", "pipe", "pipe"]
-    });
-    workerRef.value = worker;
-    worker.stdout.setEncoding("utf8");
-    worker.stderr.setEncoding("utf8");
-    worker.stdout.on("data", (chunk: string) => {
-        workerStdout += chunk;
-    });
-    worker.stderr.on("data", (chunk: string) => {
-        workerStderr += chunk;
-    });
-
-    await waitUntil(async () => {
-        const snapshot = await request(
-            server.socketPath,
-            "runtime.snapshot",
-            asInstanceName("reverse-test")
+test(
+    "real Rust reverse worker connects to the TS gateway and executes a tool call",
+    realWorkerTestOptions(workerBinary),
+    async (t) => {
+        const homeDirectory =
+            await createTestTempDirectory("reverse-real-home");
+        const xdgRuntimeDir = await createTestTempDirectory(
+            "reverse-real-runtime",
         );
-        return snapshot.snapshot.ready === true && snapshot.snapshot.reverse?.transport === "wss";
-    }, () => `worker stdout:\n${workerStdout}\nworker stderr:\n${workerStderr}`);
+        const workspace = await createTestTempDirectory(
+            "reverse-real-workspace",
+        );
+        const workspaceMarkerName = "reverse-real-workspace-marker.txt";
+        const workspaceMarker = "portable-devshell-reverse-workspace";
+        await writeFile(
+            join(workspace, workspaceMarkerName),
+            workspaceMarker,
+            "utf8",
+        );
+        const port = await reservePort();
+        const publicBaseUrl = `http://127.0.0.1:${port}`;
+        const restoreWindowsIdentity = installUniqueWindowsTestIdentity(
+            "reverse-real-worker",
+        );
+        const paths = new ControlPathHome(homeDirectory);
+        const server = new ControlServer({ homeDirectory, xdgRuntimeDir });
+        const workerRef: { value?: ChildProcessWithoutNullStreams } = {};
+        let workerStdout = "";
+        let workerStderr = "";
 
-    const result = await request(
-        server.socketPath,
-        "tool.call",
-        asInstanceName("reverse-test"),
-        { input: { command: readRelativeMarkerCommand(workspaceMarkerName) }, toolName: "bash_run" }
-    );
-    assert.equal(result.exitCode, 0);
-    assert.match(result.stdout, new RegExp(workspaceMarker, "u"));
+        t.after(async () => {
+            workerRef.value?.kill("SIGTERM");
+            await server.stop().catch(() => undefined);
+            restoreWindowsIdentity();
+            await rm(homeDirectory, { force: true, recursive: true });
+            await rm(xdgRuntimeDir, { force: true, recursive: true });
+            await rm(workspace, { force: true, recursive: true });
+        });
 
-    const stopped = await request(
-        server.socketPath,
-        "runtime.stop",
-        asInstanceName("reverse-test")
-    );
-    assert.equal(stopped.ready, false);
-    await waitForExit(worker);
-});
+        await mkdir(paths.controlHomeDir, { recursive: true });
+        await mkdir(paths.instancesDir, { recursive: true });
+        await writeFile(
+            paths.configFile,
+            encodeGlobalConfig({
+                control: { logLevel: "info" },
+                mcp: {
+                    enabled: true,
+                    listenHost: "127.0.0.1",
+                    listenPort: port,
+                    publicBaseUrl,
+                },
+            }),
+            "utf8",
+        );
+        await writeFile(
+            paths.instanceConfigFile("reverse-test"),
+            encodeInstanceConfig({
+                enabled: true,
+                logs: { eventBufferSize: 50 },
+                mcp: {
+                    enabled: true,
+                    tools: {
+                        capabilities: ["read", "write", "execute"],
+                        groups: ["bash"],
+                    },
+                },
+                name: "reverse-test",
+                provider: "reverse",
+                workspace,
+            }),
+            "utf8",
+        );
+
+        const credentialStore = new ReverseCredentialStore(homeDirectory);
+        const code = await credentialStore.createDeviceCode("reverse-test");
+        const credential = await credentialStore.consumeDeviceCode(
+            code.deviceCode,
+        );
+        const workerHome = join(homeDirectory, ".devshell", "reverse-test");
+        await mkdir(join(workerHome, "state"), { recursive: true });
+        await mkdir(join(workerHome, "logs"), { recursive: true });
+        await mkdir(join(workerHome, "artifacts"), { recursive: true });
+        await writeFile(
+            join(workerHome, "config.toml"),
+            [
+                "version = 1",
+                'instance = "reverse-test"',
+                `createdAt = ${Math.floor(Date.now() / 1000)}`,
+                "",
+                "[reverse]",
+                `controllerUrl = ${JSON.stringify(publicBaseUrl)}`,
+                `deviceToken = ${JSON.stringify(credential.deviceToken)}`,
+                "generation = 0",
+                "",
+            ].join("\n"),
+            { encoding: "utf8", mode: 0o600 },
+        );
+
+        await server.start();
+        const worker = spawn(workerBinary!, [], {
+            env: {
+                ...process.env,
+                DEVSHELL_WORKER_INTERNAL_INSTANCE: "reverse-test",
+                DEVSHELL_WORKER_INTERNAL_SECURITY_MODE: "disabled",
+                DEVSHELL_WORKER_INTERNAL_WORKSPACE: workspace,
+                HOME: homeDirectory,
+                USERPROFILE: homeDirectory,
+                XDG_RUNTIME_DIR: xdgRuntimeDir,
+            },
+            stdio: ["pipe", "pipe", "pipe"],
+        });
+        workerRef.value = worker;
+        worker.stdout.setEncoding("utf8");
+        worker.stderr.setEncoding("utf8");
+        worker.stdout.on("data", (chunk: string) => {
+            workerStdout += chunk;
+        });
+        worker.stderr.on("data", (chunk: string) => {
+            workerStderr += chunk;
+        });
+
+        await waitUntil(
+            async () => {
+                const snapshot = await request(
+                    server.socketPath,
+                    "runtime.snapshot",
+                    asInstanceName("reverse-test"),
+                );
+                return (
+                    snapshot.snapshot.ready === true &&
+                    snapshot.snapshot.reverse?.transport === "wss"
+                );
+            },
+            () =>
+                `worker stdout:\n${workerStdout}\nworker stderr:\n${workerStderr}`,
+        );
+
+        const result = await request(
+            server.socketPath,
+            "tool.call",
+            asInstanceName("reverse-test"),
+            {
+                input: {
+                    command: readRelativeMarkerCommand(workspaceMarkerName),
+                },
+                toolName: "bash_run",
+            },
+        );
+        assert.equal(result.exitCode, 0);
+        assert.match(result.stdout, new RegExp(workspaceMarker, "u"));
+
+        const terminalClient = createClient(server.socketPath);
+        t.after(() => terminalClient.close());
+        await negotiateClient(terminalClient, "tui");
+        const opened = await terminalClient.request<{
+            generation: number;
+            terminalId: string;
+            version: number;
+        }>(asInstanceName("reverse-test"), "terminal", "open", {
+            cols: 80,
+            rows: 24,
+        });
+        const attached = await terminalClient.openStream(
+            asInstanceName("reverse-test"),
+            "terminal",
+            "attach",
+            {
+                fromSeq: 0,
+                generation: opened.generation,
+                terminalId: opened.terminalId,
+            },
+        );
+        let outputSeq = 0;
+        await attached.stream.send("input", {
+            clientSeq: 1,
+            data: terminalPrintCommand("reverse-pty-ready"),
+            generation: opened.generation,
+            terminalId: opened.terminalId,
+            version: opened.version,
+        });
+        let inputAccepted = false;
+        const ready = await waitForTerminal(
+            attached.stream,
+            (event, output) => {
+                if (
+                    event.name === "terminal.inputAccepted" &&
+                    (event.payload as { clientSeq?: number } | undefined)
+                        ?.clientSeq === 1
+                ) {
+                    inputAccepted = true;
+                }
+                return inputAccepted && output.includes("reverse-pty-ready");
+            },
+            () =>
+                `worker stdout:\n${workerStdout}\nworker stderr:\n${workerStderr}`,
+        );
+        outputSeq = Math.max(outputSeq, ready.lastOutputSeq);
+
+        await attached.stream.send("resize", {
+            clientSeq: 2,
+            cols: 100,
+            generation: opened.generation,
+            rows: 40,
+            terminalId: opened.terminalId,
+            version: opened.version,
+        });
+        const resized = await waitForTerminal(
+            attached.stream,
+            (event) =>
+                event.name === "terminal.resized" &&
+                (event.payload as { clientSeq?: number } | undefined)
+                    ?.clientSeq === 2,
+            () =>
+                `worker stdout:\n${workerStdout}\nworker stderr:\n${workerStderr}`,
+        );
+        const resizedVersion = (resized.event.payload as { version: number })
+            .version;
+        await attached.stream.send("input", {
+            clientSeq: 3,
+            data: terminalSizeProbeCommand(),
+            generation: opened.generation,
+            terminalId: opened.terminalId,
+            version: resizedVersion,
+        });
+        const sized = await waitForTerminal(
+            attached.stream,
+            (event, output) => {
+                outputSeq = Math.max(outputSeq, terminalOutputSeq(event));
+                return output.includes(terminalExpectedSize(40, 100));
+            },
+            () =>
+                `worker stdout:\n${workerStdout}\nworker stderr:\n${workerStderr}`,
+        );
+        outputSeq = Math.max(outputSeq, sized.lastOutputSeq);
+        attached.stream.close();
+
+        const resumed = await terminalClient.openStream(
+            asInstanceName("reverse-test"),
+            "terminal",
+            "attach",
+            {
+                fromSeq: outputSeq,
+                generation: opened.generation,
+                terminalId: opened.terminalId,
+            },
+        );
+        await resumed.stream.send("input", {
+            clientSeq: 4,
+            data: terminalPrintCommand("reverse-pty-resumed"),
+            generation: opened.generation,
+            terminalId: opened.terminalId,
+            version: resizedVersion,
+        });
+        const resumedOutput = await waitForTerminal(
+            resumed.stream,
+            (_event, output) => output.includes("reverse-pty-resumed"),
+            () =>
+                `worker stdout:\n${workerStdout}\nworker stderr:\n${workerStderr}`,
+        );
+        outputSeq = Math.max(outputSeq, resumedOutput.lastOutputSeq);
+        await resumed.stream.send("input", {
+            clientSeq: 5,
+            data: terminalPrintCommand("reverse-after-control-restart", 1_000),
+            generation: opened.generation,
+            terminalId: opened.terminalId,
+            version: resizedVersion,
+        });
+        await waitForTerminal(
+            resumed.stream,
+            (event) =>
+                event.name === "terminal.inputAccepted" &&
+                (event.payload as { clientSeq?: number } | undefined)
+                    ?.clientSeq === 5,
+            () =>
+                `worker stdout:\n${workerStdout}\nworker stderr:\n${workerStderr}`,
+        );
+        resumed.stream.close();
+        terminalClient.close();
+
+        await server.restart();
+        await waitUntil(
+            async () => {
+                const snapshot = await request(
+                    server.socketPath,
+                    "runtime.snapshot",
+                    asInstanceName("reverse-test"),
+                );
+                return (
+                    snapshot.snapshot.ready === true &&
+                    snapshot.snapshot.reverse?.transport === "wss"
+                );
+            },
+            () =>
+                `worker stdout:\n${workerStdout}\nworker stderr:\n${workerStderr}`,
+        );
+
+        const restartedClient = createClient(server.socketPath);
+        t.after(() => restartedClient.close());
+        await negotiateClient(restartedClient, "tui");
+        const recovered = await restartedClient.openStream(
+            asInstanceName("reverse-test"),
+            "terminal",
+            "attach",
+            {
+                fromSeq: outputSeq,
+                generation: opened.generation,
+                terminalId: opened.terminalId,
+            },
+        );
+        await waitForTerminal(
+            recovered.stream,
+            (_event, output) =>
+                output.includes("reverse-after-control-restart"),
+            () =>
+                `worker stdout:\n${workerStdout}\nworker stderr:\n${workerStderr}`,
+        );
+        recovered.stream.close();
+
+        const killed = await restartedClient.request<{ state: string }>(
+            asInstanceName("reverse-test"),
+            "terminal",
+            "kill",
+            {
+                generation: opened.generation,
+                terminalId: opened.terminalId,
+                version: resizedVersion,
+            },
+        );
+        assert.equal(killed.state, "killed");
+
+        const stopped = await request(
+            server.socketPath,
+            "runtime.stop",
+            asInstanceName("reverse-test"),
+        );
+        assert.equal(stopped.ready, false);
+        await waitForExit(worker);
+    },
+);
+
+test(
+    "real Rust reverse worker re-enrolls the same persistent instance and reuses the stored credential",
+    realWorkerTestOptions(workerBinary),
+    async (t) => {
+        const controlHome = await createTestTempDirectory("reverse-reenroll-control");
+        const controlRuntime = await createTestTempDirectory("reverse-reenroll-runtime");
+        const workerHome = await createTestTempDirectory("reverse-reenroll-worker-home");
+        const workerRuntime = await createTestTempDirectory("reverse-reenroll-worker-runtime");
+        const workspace = await createTestTempDirectory("reverse-reenroll-workspace");
+        const markerName = "reverse-reenroll-marker.txt";
+        const marker = "reverse-reenroll-ok";
+        await writeFile(join(workspace, markerName), marker, "utf8");
+        const port = await reservePort();
+        const publicBaseUrl = `http://127.0.0.1:${port}`;
+        const paths = new ControlPathHome(controlHome);
+        const server = new ControlServer({
+            homeDirectory: controlHome,
+            xdgRuntimeDir: controlRuntime,
+        });
+        const workerEnvironment = {
+            ...process.env,
+            HOME: workerHome,
+            PORTABLE_DEVSHELL_HOME: join(workerHome, ".devshell"),
+            USERPROFILE: workerHome,
+            XDG_RUNTIME_DIR: workerRuntime,
+        };
+
+        t.after(async () => {
+            runWorkerCommand(
+                ["stop", "--instance", "reverse-reenroll"],
+                workerEnvironment,
+                workspace,
+                true,
+            );
+            await server.stop().catch(() => undefined);
+            await Promise.all([
+                rm(controlHome, { force: true, recursive: true }),
+                rm(controlRuntime, { force: true, recursive: true }),
+                rm(workerHome, { force: true, recursive: true }),
+                rm(workerRuntime, { force: true, recursive: true }),
+                rm(workspace, { force: true, recursive: true }),
+            ]);
+        });
+
+        await mkdir(paths.controlHomeDir, { recursive: true });
+        await mkdir(paths.instancesDir, { recursive: true });
+        await writeFile(
+            paths.configFile,
+            encodeGlobalConfig({
+                control: { logLevel: "info" },
+                mcp: {
+                    enabled: true,
+                    listenHost: "127.0.0.1",
+                    listenPort: port,
+                    publicBaseUrl,
+                },
+            }),
+            "utf8",
+        );
+        await writeFile(
+            paths.instanceConfigFile("reverse-reenroll"),
+            encodeInstanceConfig({
+                enabled: true,
+                logs: { eventBufferSize: 50 },
+                mcp: {
+                    enabled: true,
+                    tools: {
+                        capabilities: ["read", "write", "execute"],
+                        groups: ["bash"],
+                    },
+                },
+                name: "reverse-reenroll",
+                provider: "reverse",
+                workspace,
+            }),
+            "utf8",
+        );
+        await server.start();
+
+        const enroll = async () => {
+            const code = await new ReverseCredentialStore(controlHome).createDeviceCode(
+                "reverse-reenroll",
+            );
+            const result = runWorkerCommand(
+                [
+                    "enroll",
+                    "--controller",
+                    publicBaseUrl,
+                    "--device-code",
+                    code.deviceCode,
+                ],
+                workerEnvironment,
+                workspace,
+            );
+            const parsed = JSON.parse(result.stdout) as {
+                instance: string;
+                started: boolean;
+            };
+            assert.equal(parsed.instance, "reverse-reenroll");
+            assert.equal(parsed.started, true);
+        };
+
+        await enroll();
+        const firstGeneration = await waitForReverseGeneration(
+            server.socketPath,
+            "reverse-reenroll",
+        );
+        await assertReverseMarker(server.socketPath, "reverse-reenroll", markerName, marker);
+
+        await enroll();
+        const secondGeneration = await waitForReverseGeneration(
+            server.socketPath,
+            "reverse-reenroll",
+            firstGeneration,
+        );
+        await assertReverseMarker(server.socketPath, "reverse-reenroll", markerName, marker);
+
+        runWorkerCommand(
+            ["stop", "--instance", "reverse-reenroll"],
+            workerEnvironment,
+            workspace,
+        );
+        runWorkerCommand(
+            ["start", "--instance", "reverse-reenroll"],
+            workerEnvironment,
+            workspace,
+        );
+        const restartedGeneration = await waitForReverseGeneration(
+            server.socketPath,
+            "reverse-reenroll",
+            secondGeneration,
+        );
+        await assertReverseMarker(server.socketPath, "reverse-reenroll", markerName, marker);
+    },
+);
 
 async function reservePort(): Promise<number> {
     const server = createServer();
@@ -163,15 +523,78 @@ async function reservePort(): Promise<number> {
     assert.notEqual(address, null);
     const port = (address as { port: number }).port;
     await new Promise<void>((resolvePromise, rejectPromise) => {
-        server.close((error) => (error === undefined ? resolvePromise() : rejectPromise(error)));
+        server.close((error) =>
+            error === undefined ? resolvePromise() : rejectPromise(error),
+        );
     });
     return port;
+}
+
+function runWorkerCommand(
+    args: string[],
+    environment: NodeJS.ProcessEnv,
+    cwd: string,
+    allowFailure = false,
+) {
+    const result = spawnSync(workerBinary!, args, {
+        cwd,
+        encoding: "utf8",
+        env: environment,
+        windowsHide: true,
+    });
+    if (result.error !== undefined) throw result.error;
+    if (!allowFailure && result.status !== 0) {
+        throw new Error(
+            `worker ${args.join(" ")} failed (${result.status ?? "unknown"}): ${result.stderr || result.stdout}`,
+        );
+    }
+    return result;
+}
+
+async function waitForReverseGeneration(
+    socketPath: string,
+    instance: string,
+    greaterThan = 0,
+): Promise<number> {
+    let generation = 0;
+    await waitUntil(
+        async () => {
+            const snapshot = await request(
+                socketPath,
+                "runtime.snapshot",
+                asInstanceName(instance),
+            );
+            generation = snapshot.snapshot.reverse?.generation ?? 0;
+            return snapshot.snapshot.ready === true && generation > greaterThan;
+        },
+        () => `reverse instance ${instance} did not become ready`,
+    );
+    return generation;
+}
+
+async function assertReverseMarker(
+    socketPath: string,
+    instance: string,
+    markerName: string,
+    expected: string,
+): Promise<void> {
+    const result = await request(
+        socketPath,
+        "tool.call",
+        asInstanceName(instance),
+        {
+            input: { command: readRelativeMarkerCommand(markerName) },
+            toolName: "bash_run",
+        },
+    );
+    assert.equal(result.exitCode, 0);
+    assert.match(result.stdout, new RegExp(expected, "u"));
 }
 
 async function waitUntil(
     predicate: () => Promise<boolean>,
     diagnostic: () => string,
-    timeoutMs = 15_000
+    timeoutMs = 15_000,
 ): Promise<void> {
     const deadline = Date.now() + timeoutMs;
     let lastError: unknown;
@@ -186,16 +609,21 @@ async function waitUntil(
         await new Promise((resolvePromise) => setTimeout(resolvePromise, 50));
     }
     throw new Error(
-        `Condition was not reached.${lastError instanceof Error ? ` Last error: ${lastError.message}` : ""}\n${diagnostic()}`
+        `Condition was not reached.${lastError instanceof Error ? ` Last error: ${lastError.message}` : ""}\n${diagnostic()}`,
     );
 }
 
-async function waitForExit(child: ChildProcessWithoutNullStreams): Promise<void> {
+async function waitForExit(
+    child: ChildProcessWithoutNullStreams,
+): Promise<void> {
     if (child.exitCode !== null || child.signalCode !== null) {
         return;
     }
     await new Promise<void>((resolvePromise, rejectPromise) => {
-        const timeout = setTimeout(() => rejectPromise(new Error("reverse worker did not exit")), 5_000);
+        const timeout = setTimeout(
+            () => rejectPromise(new Error("reverse worker did not exit")),
+            5_000,
+        );
         child.once("exit", () => {
             clearTimeout(timeout);
             resolvePromise();
@@ -207,25 +635,99 @@ async function request(
     socketPath: string,
     operation: string,
     destination: Destination,
-    params?: JsonValue
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+    params?: JsonValue,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
 ): Promise<any> {
     const [module, method] = operation.split(".");
     const client = new ClientConnection({
         connectChannel: (signal) => SocketChannel.connect(socketPath, { signal }),
-        mapError: (error) => error instanceof Error ? error : new Error(String(error)),
+        mapError: (error) =>
+            error instanceof Error ? error : new Error(String(error)),
         mapRemoteError: (error) => createError(error),
         mode: "persistent",
-        peer: "cli"
+        peer: "cli",
     });
     try {
-        await client.request("@control", "service", "hello", {
-            clientKind: "cli",
-            maxProtocolVersion: 1,
-            minProtocolVersion: 1,
-        });
+        await negotiateClient(client, "cli");
         return await client.request(destination, module!, method!, params);
     } finally {
         client.close();
     }
+}
+
+function createClient(socketPath: string): ClientConnection {
+    return new ClientConnection({
+        connectChannel: (signal) => SocketChannel.connect(socketPath, { signal }),
+        mapError: (error) =>
+            error instanceof Error ? error : new Error(String(error)),
+        mapRemoteError: (error) => createError(error),
+        mode: "persistent",
+        peer: "tui",
+    });
+}
+
+async function negotiateClient(
+    client: ClientConnection,
+    clientKind: "cli" | "tui",
+): Promise<void> {
+    await client.request("@control", "service", "hello", {
+        clientKind,
+        maxProtocolVersion: 1,
+        minProtocolVersion: 1,
+    });
+}
+
+async function waitForTerminal(
+    stream: ClientStream,
+    predicate: (event: ClientEvent, output: string) => boolean,
+    diagnostic: () => string,
+    timeoutMs = 10_000,
+): Promise<{ event: ClientEvent; lastOutputSeq: number; output: string }> {
+    const deadline = Date.now() + timeoutMs;
+    let output = "";
+    let lastOutputSeq = 0;
+    let lastEvent: ClientEvent | undefined;
+    while (Date.now() < deadline) {
+        const remaining = Math.max(1, deadline - Date.now());
+        let event: ClientEvent;
+        try {
+            event = await Promise.race([
+                stream.nextEvent(),
+                new Promise<never>((_, reject) =>
+                    setTimeout(
+                        () => reject(new Error("terminal event timeout")),
+                        remaining,
+                    ),
+                ),
+            ]);
+        } catch (error) {
+            throw new Error(
+                [
+                    `Terminal condition was not reached: ${error instanceof Error ? error.message : String(error)}`,
+                    `Last event: ${lastEvent?.name ?? "none"}`,
+                    `Output: ${JSON.stringify(output)}`,
+                    diagnostic(),
+                ].join("\n"),
+            );
+        }
+        lastEvent = event;
+        if (event.name === "terminal.output") {
+            const payload = event.payload as
+                { data?: string; seq?: number } | undefined;
+            output += payload?.data ?? "";
+            lastOutputSeq = Math.max(lastOutputSeq, payload?.seq ?? 0);
+        }
+        if (predicate(event, output)) {
+            return { event, lastOutputSeq, output };
+        }
+    }
+    throw new Error(
+        `Terminal condition was not reached. Last event: ${lastEvent?.name ?? "none"}\n${diagnostic()}`,
+    );
+}
+
+function terminalOutputSeq(event: ClientEvent): number {
+    return event.name === "terminal.output"
+        ? ((event.payload as { seq?: number } | undefined)?.seq ?? 0)
+        : 0;
 }
