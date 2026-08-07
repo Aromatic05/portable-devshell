@@ -1,4 +1,4 @@
-import type { JsonValue } from "@portable-devshell/shared";
+import { withRequestTimeout, type JsonValue } from "@portable-devshell/shared";
 
 import type { TuiClients } from "../client/TuiClientComposition.js";
 import { TUI_TMUX_INSPECT_MAX_LINES, type TuiTmuxListPane } from "../../view/page/terminal/TuiTmuxPaneTerminalModel.js";
