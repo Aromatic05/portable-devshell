@@ -14,6 +14,7 @@ import { createConfigRouteModule } from "../control/config/ConfigRouteModule.js"
 import type { InstanceCreatePort } from "../control/instance/InstanceRouteModule.js";
 import { createInstanceRouteModule } from "../control/instance/InstanceRouteModule.js";
 import type { InstanceRegistry } from "../control/instance/registry/InstanceRegistry.js";
+import { createContextRouteModule, type ContextAdminPort } from "../control/mcp/ContextRouteModule.js";
 import { createMcpRouteModule } from "../control/mcp/McpRouteModule.js";
 import type { OperationalOverviewPort } from "../control/overview/OperationalOverviewRouteModule.js";
 import { createOperationalOverviewRouteModule } from "../control/overview/OperationalOverviewRouteModule.js";
@@ -33,6 +34,7 @@ import { createToolRouteModule } from "../instance/tool/ToolRouteModule.js";
 export interface ControlRouteCompositionOptions {
     artifact?: ArtifactService;
     config?: ConfigEditorPort;
+    contextAdmin?: () => ContextAdminPort | undefined;
     instanceCreate?: InstanceCreatePort;
     instances: InstanceRegistry;
     mcpStatus?: () => JsonValue;
@@ -97,6 +99,7 @@ export class ControlRouteComposition {
                             reason: "MCP runtime is disabled."
                         }))
                     }),
+                    createContextRouteModule(this.#options.contextAdmin?.()),
                     createOperationalOverviewRouteModule(this.#overview),
                     createInstanceRouteModule({
                         create: this.#options.instanceCreate,
