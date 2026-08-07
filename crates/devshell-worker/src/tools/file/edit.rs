@@ -820,10 +820,9 @@ fn parse_change_set(input: &str) -> Result<Vec<ParsedOperation>, ToolError> {
         if let Some(path) = line.strip_prefix("*** Write File:") {
             let path = parse_path(path)?;
             let (body, next) = collect_body(&lines, index + 1, last);
-            operations.push(ParsedOperation::Write {
-                path,
-                content: literal_body(body),
-            });
+            let content = literal_body(body);
+            reject_literal_diff(&content)?;
+            operations.push(ParsedOperation::Write { path, content });
             index = next;
             continue;
         }
@@ -841,10 +840,9 @@ fn parse_change_set(input: &str) -> Result<Vec<ParsedOperation>, ToolError> {
         if let Some(path) = line.strip_prefix("*** Rewrite File:") {
             let path = parse_path(path)?;
             let (body, next) = collect_body(&lines, index + 1, last);
-            operations.push(ParsedOperation::Rewrite {
-                path,
-                content: literal_body(body),
-            });
+            let content = literal_body(body);
+            reject_literal_diff(&content)?;
+            operations.push(ParsedOperation::Rewrite { path, content });
             index = next;
             continue;
         }
@@ -908,6 +906,29 @@ fn literal_body(lines: Vec<&str>) -> String {
     let mut content = lines.join("\n");
     content.push('\n');
     content
+}
+
+const LITERAL_DIFF_LINE_RATIO: f64 = 0.5;
+
+fn reject_literal_diff(content: &str) -> Result<(), ToolError> {
+    let mut total = 0usize;
+    let mut prefixed = 0usize;
+    for line in content.split('\n') {
+        if line.trim().is_empty() {
+            continue;
+        }
+        total += 1;
+        if line.starts_with('+') || line.starts_with('-') {
+            prefixed += 1;
+        }
+    }
+    if total > 0 && prefixed as f64 / total as f64 > LITERAL_DIFF_LINE_RATIO {
+        return Err(ToolError::new(
+            "file.literalDiffBody",
+            "Stop pasting diffs into Write File and Rewrite File. They take literal content only; your body is almost entirely `+`/`-` prefixed patch lines, a format only Patch File accepts. Re-output the body as plain text with no diff markers.",
+        ));
+    }
+    Ok(())
 }
 
 fn is_operation_header(line: &str) -> bool {
@@ -1430,5 +1451,54 @@ mod tests {
             panic!("expected write");
         };
         assert_eq!(content, "value = \"***\"\n");
+    }
+
+    #[test]
+    fn write_rejects_all_plus_prefixed_patch_body() {
+        let error = parse_change_set(concat!(
+            "*** Begin Edit\n",
+            "*** Write File: ./new.txt\n",
+            "+line one\n",
+            "+line two\n",
+            "+line three\n",
+            "*** End Edit"
+        ))
+        .unwrap_err();
+        assert_eq!(error.code, "file.literalDiffBody");
+    }
+
+    #[test]
+    fn rewrite_rejects_mixed_plus_minus_patch_body() {
+        let error = parse_change_set(concat!(
+            "*** Begin Edit\n",
+            "*** Rewrite File: ./existing.txt\n",
+            "-old line\n",
+            "+new line one\n",
+            "+new line two\n",
+            "*** End Edit"
+        ))
+        .unwrap_err();
+        assert_eq!(error.code, "file.literalDiffBody");
+    }
+
+    #[test]
+    fn literal_body_with_few_plus_prefixed_lines_is_allowed() {
+        let operations = parse_change_set(concat!(
+            "*** Begin Edit\n",
+            "*** Write File: ./new.md\n",
+            "plain line\n",
+            "another plain line\n",
+            "+ a markdown bullet\n",
+            "plain end\n",
+            "*** End Edit"
+        ))
+        .unwrap();
+        let ParsedOperation::Write { content, .. } = &operations[0] else {
+            panic!("expected write");
+        };
+        assert_eq!(
+            content,
+            "plain line\nanother plain line\n+ a markdown bullet\nplain end\n"
+        );
     }
 }
