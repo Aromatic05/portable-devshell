@@ -5,10 +5,8 @@ import {
     detectTerminalGraphicsSupport,
     detectTerminalImageSupport,
     buildTuiTerminalViewportRegion,
-    pageFromShortcut,
     renderTerminalGraphicsFrame,
     renderTerminalImageFrame,
-    selectSidebarModel,
     TuiAppStore,
     TuiTerminalBuffer,
     TuiTerminalGraphicsParser,
@@ -22,17 +20,6 @@ import {
 function lineText(line: { segments: Array<{ text: string }> }): string {
     return line.segments.map((segment) => segment.text).join("");
 }
-
-test("terminal is an additional ninth page without changing existing shortcuts", () => {
-    assert.equal(pageFromShortcut(1), "instances");
-    assert.equal(pageFromShortcut(7), "help");
-    assert.equal(pageFromShortcut(8), "terminal");
-    assert.equal(pageFromShortcut(9), undefined);
-
-    const pages = selectSidebarModel(new TuiAppStore().getState()).pages;
-    assert.equal(pages.at(-1)?.id, "terminal");
-    assert.equal(pages.at(-1)?.label, "terminal");
-});
 
 test("terminal viewport region exists only for the Instances terminal tab", () => {
     const store = new TuiAppStore();

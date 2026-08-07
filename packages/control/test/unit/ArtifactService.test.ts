@@ -38,6 +38,7 @@ class Deferred {
 class MemoryArtifactEndpoint implements ArtifactServiceEndpoint {
     readonly events: Array<{ type: string; data?: JsonValue }> = [];
     readonly closedPayloads: string[] = [];
+    readonly payloadClosed = new Deferred();
     readonly abortedReceives: string[] = [];
     readonly received = new Map<string, Buffer>();
     readonly openStarted = new Deferred();
@@ -91,6 +92,7 @@ class MemoryArtifactEndpoint implements ArtifactServiceEndpoint {
 
     async closeArtifactPayload(payloadId: string): Promise<void> {
         this.closedPayloads.push(payloadId);
+        this.payloadClosed.resolve();
     }
 
     async beginArtifactReceive(): Promise<{ nextOffsetBytes: number; receiveId: string }> {
@@ -298,7 +300,7 @@ test("queued transfer resumes after restart while active transfer becomes interr
     await restarted.initialize();
     assert.equal(restarted.getTransfer(activeTransfer.transfer.transferId).status, "interrupted");
     gate.resolve();
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    await blockedSource.payloadClosed.promise;
     const verified = new ArtifactService({
         resolveEndpoint: resolver({ "source-a": blockedSource, "target-b": target }),
         shareUrl: (token) => `https://example.test/artifacts/share/${token}`,

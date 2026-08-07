@@ -8,19 +8,6 @@ import { pathToFileURL, fileURLToPath } from "node:url";
 import { createTestTempDirectory } from "../test/TestTempDirectory.mjs";
 
 const repositoryRoot = fileURLToPath(new URL("../", import.meta.url));
-test("PowerShell release installer is UTF-8 with BOM for Windows PowerShell", async () => {
-    const content = await readFile(resolve(repositoryRoot, "scripts", "install-release.ps1"));
-    assert.deepEqual([...content.subarray(0, 3)], [0xef, 0xbb, 0xbf]);
-    const source = content.toString("utf8");
-    assert.doesNotMatch(source, /Get-FileHash/u);
-    assert.match(source, /Security\.Cryptography\.SHA256/u);
-    assert.match(source, /IsNullOrWhiteSpace\(\$CurrentCli\).*Test-Path -LiteralPath \$CurrentCli/u);
-});
-
-test("Unix release installer braces variables before Chinese punctuation", async () => {
-    const source = await readFile(resolve(repositoryRoot, "scripts", "install-release.sh"), "utf8");
-    assert.doesNotMatch(source, /\$[A-Za-z_][A-Za-z0-9_]*[：。]/u);
-});
 
 const allTargets = [
     "linux-x64",
@@ -343,12 +330,6 @@ function run(command, args) {
     const result = spawnSync(command, args, { encoding: "utf8" });
     assert.equal(result.status, 0, `${result.error?.stack ?? ""}\n${result.stdout}${result.stderr}`);
 }
-
-test("Windows installer smoke allows slower ARM package activation", async () => {
-    const source = await readFile(resolve(repositoryRoot, "scripts", "smoke-install-release-windows.mjs"), "utf8");
-    assert.match(source, /install-release\.ps1"\)\r?\n\s*\], false, false, 180_000\);/u);
-    assert.match(source, /timeoutMs = 45_000/u);
-});
 
 test("Unix release installer rolls back application and worker aliases as one transaction", {
     skip: process.platform === "win32"

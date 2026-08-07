@@ -158,7 +158,7 @@ test("InstanceEventBuffer replays from fromSeq and reports stream.gap", async ()
     }
 });
 
-test("LogStoreInstance and AuditToolCallHistory persist per-instance records", async () => {
+test("LogStoreInstance and AuditToolCallHistory write and query per-instance records", async () => {
     const root = await createTestTempDirectory("storage");
     const instanceName = asInstanceName("task-5-storage");
 

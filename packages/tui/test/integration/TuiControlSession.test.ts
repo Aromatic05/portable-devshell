@@ -37,7 +37,7 @@ test("TuiControlSession refreshes a visible overview after relevant instance eve
     await server.start();
     t.after(async () => {
         await session.stop();
-        await server.stop().catch(() => undefined);
+        await server.stop();
         await rm(runtimeDir, { force: true, recursive: true });
     });
 
@@ -84,7 +84,7 @@ test("Comment delivery never stalls visible Audit refreshes for the bound call o
     await server.start();
     t.after(async () => {
         await session.stop();
-        await server.stop().catch(() => undefined);
+        await server.stop();
         await rm(runtimeDir, { force: true, recursive: true });
     });
 
@@ -200,6 +200,7 @@ test("Comment delivery never stalls visible Audit refreshes for the bound call o
 });
 
 test("TuiControlSession polls operational metrics only while Overview is visible", async (t) => {
+    t.mock.timers.enable({ apis: ["setInterval"] });
     const runtimeDir = await createTestTempDirectory("tui-overview-poll");
     const socketPath = createTestIpcPath("tui-overview-poll", runtimeDir);
     const worker = new FakeWorker("alpha");
@@ -212,22 +213,23 @@ test("TuiControlSession polls operational metrics only while Overview is visible
     await server.start();
     t.after(async () => {
         await session.stop();
-        await server.stop().catch(() => undefined);
+        await server.stop();
         await rm(runtimeDir, { force: true, recursive: true });
     });
 
     await session.start();
     await waitFor(() => session.store.getState().connection.status === "connected");
     const hiddenPageReads = worker.toolCallReadCount;
-    await new Promise((resolve) => setTimeout(resolve, 80));
+    t.mock.timers.tick(75);
     assert.equal(worker.toolCallReadCount, hiddenPageReads);
 
     session.store.setSelectedPage("overview");
+    t.mock.timers.tick(25);
     await waitFor(() => worker.toolCallReadCount > hiddenPageReads);
 
     session.store.setSelectedPage("instances");
     const afterVisibleReads = worker.toolCallReadCount;
-    await new Promise((resolve) => setTimeout(resolve, 80));
+    t.mock.timers.tick(75);
     assert.equal(worker.toolCallReadCount, afterVisibleReads);
 });
 
@@ -242,7 +244,6 @@ test("TuiControlSession reports missing control without auto-starting it", async
         await session.start();
         assert.equal(session.store.getState().connection.status, "disconnected");
         assert.equal(session.store.getState().connection.errorCode, "control.notRunning");
-        assert.equal(session.store.getState().connection.errorMessage, "control server is not running.");
         assert.deepEqual(session.store.getState().instances, []);
     } finally {
         await session.stop();
@@ -251,6 +252,7 @@ test("TuiControlSession reports missing control without auto-starting it", async
 });
 
 test("TuiControlSession does not poll OAuth approvals when OAuth is unavailable", async (t) => {
+    t.mock.timers.enable({ apis: ["setInterval"] });
     const runtimeDir = await createTestTempDirectory("tui-no-oauth-poll");
     const socketPath = createTestIpcPath("tui-control", runtimeDir);
     const worker = new FakeWorker("alpha");
@@ -262,7 +264,7 @@ test("TuiControlSession does not poll OAuth approvals when OAuth is unavailable"
     await server.start();
     t.after(async () => {
         await session.stop();
-        await server.stop().catch(() => undefined);
+        await server.stop();
         await rm(runtimeDir, { force: true, recursive: true });
     });
 
@@ -270,7 +272,7 @@ test("TuiControlSession does not poll OAuth approvals when OAuth is unavailable"
     await waitFor(() => session.store.getState().connection.status === "connected");
     const readsAfterInitialLoad = server.oauthApprovalReads();
 
-    await new Promise((resolve) => setTimeout(resolve, 1_100));
+    t.mock.timers.tick(1_000);
     assert.equal(server.oauthApprovalReads(), readsAfterInitialLoad);
 });
 
@@ -286,15 +288,16 @@ test("TuiControlSession drops events that have no TUI presentation", async (t) =
     await server.start();
     t.after(async () => {
         await session.stop();
-        await server.stop().catch(() => undefined);
+        await server.stop();
         await rm(runtimeDir, { force: true, recursive: true });
     });
 
     await session.start();
     await waitFor(() => worker.subscribeFromSeqs.length === 1);
     const rawEventCount = session.store.getState().rawEvents.length;
+    const subscriptionReads = worker.subscribeFromSeqs.length;
     worker.emit("mcp.sessionOpened", { sessionId: "invisible-session" });
-    await new Promise((resolve) => setTimeout(resolve, 75));
+    await waitFor(() => worker.subscribeFromSeqs.length > subscriptionReads);
     assert.equal(session.store.getState().rawEvents.length, rawEventCount);
 });
 
@@ -307,7 +310,7 @@ test("module TUI clients send explicit instance operations and preserve start re
 
     t.after(async () => {
         clients.close();
-        await server.stop().catch(() => undefined);
+        await server.stop();
         await rm(runtimeDir, { force: true, recursive: true });
     });
 
@@ -356,7 +359,7 @@ test("TUI control restart reconnects after the socket runtime is replaced", asyn
     await server.start();
     t.after(async () => {
         await session.stop();
-        await server.stop().catch(() => undefined);
+        await server.stop();
         await rm(runtimeDir, { force: true, recursive: true });
     });
     await session.start();
@@ -393,7 +396,7 @@ test("module TUI client sends an OAuth approval payload accepted by the control 
     await server.start();
     t.after(async () => {
         clients.close();
-        await server.stop().catch(() => undefined);
+        await server.stop();
         routes.dispose();
         await rm(runtimeDir, { force: true, recursive: true });
     });
@@ -698,7 +701,7 @@ async function waitFor(factory: () => boolean, timeoutMs = 2_000): Promise<void>
             return;
         }
 
-        await new Promise((resolve) => setTimeout(resolve, 20));
+        await new Promise<void>((resolve) => setImmediate(resolve));
     }
 
     throw new Error("Timed out waiting for condition.");

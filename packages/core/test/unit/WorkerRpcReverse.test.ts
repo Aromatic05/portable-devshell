@@ -368,7 +368,8 @@ test("WorkerRpcBridge replays cancellation until the worker acknowledges it", as
     assert.equal(third.sent.length, 0);
 });
 
-test("WorkerRpcBridge expires an unacknowledged cancellation", async () => {
+test("WorkerRpcBridge expires an unacknowledged cancellation", async (t) => {
+    t.mock.timers.enable({ apis: ["setTimeout"] });
     const connector = new DeferredConnector();
     const first = new MemoryChannel();
     connector.channel = first;
@@ -391,7 +392,7 @@ test("WorkerRpcBridge expires an unacknowledged cancellation", async () => {
     controller.abort(new Error("user cancelled"));
     await assert.rejects(pending, /cancel/iu);
     await waitUntil(() => first.sent.length === 2);
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    t.mock.timers.tick(10);
     const second = new MemoryChannel();
     await bridge.replaceChannel(second);
 
@@ -570,7 +571,7 @@ async function waitUntil(predicate: () => boolean): Promise<void> {
         if (predicate()) {
             return;
         }
-        await new Promise((resolve) => setTimeout(resolve, 1));
+        await new Promise<void>((resolve) => setImmediate(resolve));
     }
     throw new Error("condition was not reached");
 }

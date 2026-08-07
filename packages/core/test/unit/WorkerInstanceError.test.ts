@@ -88,7 +88,7 @@ test("WorkerInstance preserves catalog failures during startup", async () => {
             throw createError({
                 code: "core.toolSchemaUnavailable",
                 details: { toolName: "bash_run" },
-                message: "Worker tool catalog is incompatible.",
+                message: "catalog-error-fixture",
                 retryable: false
             });
         }
@@ -97,7 +97,7 @@ test("WorkerInstance preserves catalog failures during startup", async () => {
     await assert.rejects(instance.start("/tmp/workspace"), (error: unknown) => {
         assert.ok(typeof error === "object" && error !== null);
         assert.equal((error as { code?: string }).code, "core.toolSchemaUnavailable");
-        assert.equal((error as { message?: string }).message, "Worker tool catalog is incompatible.");
+        assert.equal((error as { message?: string }).message, "catalog-error-fixture");
         return true;
     });
 });

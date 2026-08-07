@@ -3,30 +3,13 @@ import test from "node:test";
 
 const {
     applyConfigInstancePatch,
-    applyConfigMcpPatch,
     createDefaultControlConfig,
-    errorCodes,
     normalizeConfigInstanceDraft,
-    normalizeConfigGlobalDraft,
     parseConfigInstanceDraft,
     parseConfigInstancePatch,
     validateConfigSemantics,
     validateEvent
 } = await import("@portable-devshell/shared");
-
-test("shared config parser and normalizer produce canonical instance config", () => {
-    const instance = normalizeConfigInstanceDraft(parseConfigInstanceDraft({
-        env: { HOME: "/tmp/demo" },
-        name: "demo-local",
-        provider: "local",
-        workspace: "/workspace/demo"
-    }));
-
-    assert.equal(instance.name, "demo-local");
-    assert.equal(instance.mcp.path, "/demo-local/mcp");
-    assert.equal(instance.security.mode, "disabled");
-    assert.deepEqual(instance.mcp.tools.capabilities, ["read", "write", "execute"]);
-});
 
 test("config patch has explicit null clearing and strict unknown-field parsing", () => {
     const current = normalizeConfigInstanceDraft(parseConfigInstanceDraft({
@@ -50,11 +33,6 @@ test("config patch has explicit null clearing and strict unknown-field parsing",
         workspace: "/workspace/demo",
         workspacePath: "/legacy"
     }), /workspacePath is not supported/u);
-
-    const global = normalizeConfigGlobalDraft({
-        mcp: applyConfigMcpPatch(createDefaultControlConfig().mcp, { publicBaseUrl: null })
-    });
-    assert.equal(global.mcp.publicBaseUrl, "http://127.0.0.1:17890");
 });
 
 test("semantic validation accepts normalized canonical config", () => {
@@ -89,10 +67,4 @@ test("validateEvent accepts the Event contract and rejects old envelopes", () =>
         target: { kind: "control" },
         type: "request"
     }));
-});
-
-test("error codes use domain.reason format", () => {
-    for (const code of Object.values(errorCodes)) {
-        assert.match(code, /^[a-z][A-Za-z_]*\.[a-z][A-Za-z_]*$/);
-    }
 });

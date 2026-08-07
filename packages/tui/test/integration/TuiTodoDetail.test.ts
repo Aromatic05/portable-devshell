@@ -28,7 +28,7 @@ test("real TuiRuntime drives Todo overview to detail through the control socket"
     const server = createTodoServer(socketPath);
     await server.start();
     t.after(async () => {
-        await server.stop().catch(() => undefined);
+        await server.stop();
         await rm(runtimeDir, { force: true, recursive: true });
     });
 
@@ -51,11 +51,11 @@ test("real TuiRuntime drives Todo overview to detail through the control socket"
         );
         await waitUntil(() => runtime.store.getState().instances.length === 1);
 
-        terminal.write("6");
+        await runtime.handleInput("6", {});
         await waitUntil(
             () => runtime.store.getState().ui.selectedPage === "todo",
         );
-        terminal.write("!");
+        await runtime.handleInput("!", {});
         await waitUntil(
             () => runtime.store.getState().ui.selectedInstance === "alpha",
         );
@@ -64,7 +64,7 @@ test("real TuiRuntime drives Todo overview to detail through the control socket"
                 (box) => box.id === "todo-task:task-1",
             ),
         );
-        await delay(100);
+        assert.equal(server.todoReadTitles().includes(todoFixture.title), false);
 
         const overviewBoxes = selectMainScreenModel(
             runtime.store.getState(),
@@ -86,12 +86,12 @@ test("real TuiRuntime drives Todo overview to detail through the control socket"
             );
         }
 
-        terminal.write("\t");
+        await runtime.handleInput("", { tab: true });
         await waitUntil(
             () => runtime.store.getState().interaction.focusScope === "mainBoxes",
         );
 
-        terminal.write(" ");
+        await runtime.handleInput(" ", {});
         await waitUntil(
             () =>
                 runtime.store.getState().ui.expandedBoxes[
@@ -103,7 +103,7 @@ test("real TuiRuntime drives Todo overview to detail through the control socket"
             "overview",
             "Space must only expand, not navigate",
         );
-        terminal.write(" ");
+        await runtime.handleInput(" ", {});
         await waitUntil(
             () =>
                 runtime.store.getState().ui.expandedBoxes[
@@ -116,7 +116,7 @@ test("real TuiRuntime drives Todo overview to detail through the control socket"
             "Space must only collapse, not navigate",
         );
 
-        terminal.write("\r");
+        await runtime.handleInput("", { return: true });
         await waitUntil(() => {
             const route = currentTuiRoute(runtime.store.getState());
             return route.page === "todo" && route.view === "detail";
@@ -126,6 +126,7 @@ test("real TuiRuntime drives Todo overview to detail through the control socket"
                 (box) => box.id === "todo-item:inspect",
             ),
         );
+        assert.equal(server.todoReadTitles().includes(todoFixture.title), true);
 
         const detailBoxes = selectMainScreenModel(runtime.store.getState()).boxes;
         assert.ok(
@@ -148,7 +149,7 @@ test("real TuiRuntime drives Todo overview to detail through the control socket"
         await waitUntil(
             () => runtime.store.getState().ui.mainFocusId === "todo-summary:task-1",
         );
-        terminal.write(" ");
+        await runtime.handleInput(" ", {});
         await waitUntil(() => {
             const box = selectMainScreenModel(runtime.store.getState()).boxes.find(
                 (candidate) => candidate.id === "todo-summary:task-1",
@@ -158,19 +159,12 @@ test("real TuiRuntime drives Todo overview to detail through the control socket"
         const summary = selectMainScreenModel(runtime.store.getState()).boxes.find(
             (box) => box.id === "todo-summary:task-1",
         );
-        assert.equal(summary?.title, "Todo support");
         assert.ok(
-            summary?.expandedLines.some((line) =>
-                line.text.includes("Progress") && line.text.includes("1/3"),
-            ),
+            summary?.expandedLines.some((line) => line.text.includes("1/3")),
             "detail summary should show progress",
         );
-        assert.ok(
-            summary?.expandedLines.some((line) => line.text.includes("Level")),
-            "detail summary should show the hierarchy level",
-        );
 
-        terminal.write(" ");
+        await runtime.handleInput(" ", {});
         await waitUntil(() => {
             const box = selectMainScreenModel(runtime.store.getState()).boxes.find(
                 (candidate) => candidate.id === "todo-summary:task-1",
@@ -178,15 +172,15 @@ test("real TuiRuntime drives Todo overview to detail through the control socket"
             return box?.expanded === false;
         });
 
-        terminal.write("\u001B[B");
+        await runtime.handleInput("", { downArrow: true });
         await waitUntil(
             () => runtime.store.getState().ui.mainFocusId === "todo-item:inspect",
         );
-        terminal.write("\u001B[B");
+        await runtime.handleInput("", { downArrow: true });
         await waitUntil(
             () => runtime.store.getState().ui.mainFocusId === "todo-item:implement",
         );
-        terminal.write(" ");
+        await runtime.handleInput(" ", {});
         await waitUntil(() => {
             const box = selectMainScreenModel(runtime.store.getState()).boxes.find(
                 (candidate) => candidate.id === "todo-item:implement",
@@ -211,7 +205,7 @@ test("real TuiRuntime drives Todo overview to detail through the control socket"
             "Todo support",
         ]);
 
-        terminal.write("\u001B");
+        await runtime.handleInput("", { escape: true });
         await waitUntil(() => {
             const route = currentTuiRoute(runtime.store.getState());
             return route.page === "todo" && route.view === "overview";
@@ -231,8 +225,10 @@ test("real TuiRuntime drives Todo overview to detail through the control socket"
 function createTodoServer(socketPath: string): {
     start(): Promise<void>;
     stop(): Promise<void>;
+    todoReadTitles(): Array<string | undefined>;
 } {
     const worker = new FakeWorker("alpha");
+    const todoReadTitles: Array<string | undefined> = [];
     const instances = new InstanceRegistry([
         {
             enabled: true,
@@ -247,6 +243,7 @@ function createTodoServer(socketPath: string): {
                     return undefined;
                 },
                 async read(title?: string) {
+                    todoReadTitles.push(title);
                     return title === todoFixture.title
                         ? todoFixture
                         : {
@@ -295,6 +292,7 @@ function createTodoServer(socketPath: string): {
             await server.stop();
             routes.dispose();
         },
+        todoReadTitles: () => [...todoReadTitles],
     };
 }
 

@@ -52,7 +52,13 @@ export function resolveTestWorkerBinary(): string | undefined {
     return existsSync(candidate) ? candidate : undefined;
 }
 
-export function realWorkerTestOptions(workerBinaryPath: string | undefined): { skip: false | string } {
+export function realWorkerTestOptions(
+    workerBinaryPath: string | undefined,
+    environment: NodeJS.ProcessEnv = process.env,
+): { skip: false | string } {
+    if (workerBinaryPath === undefined && environment.CI) {
+        throw new Error("CI requires a prepared devshell-worker binary for real Worker tests.");
+    }
     return {
         skip: workerBinaryPath === undefined
             ? "requires PORTABLE_DEVSHELL_TEST_WORKER_PATH or a host worker in target/debug"

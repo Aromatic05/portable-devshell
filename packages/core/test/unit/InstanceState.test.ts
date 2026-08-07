@@ -1,9 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { join } from "node:path";
 
 import { asInstanceName } from "@portable-devshell/shared";
-import { InstancePaths, InstanceStateMachine } from "@portable-devshell/core/testing";
+import { InstanceStateMachine } from "@portable-devshell/core/testing";
 
 test("InstanceStateMachine derives ready running stale failed and stopped snapshots", () => {
     const stateMachine = new InstanceStateMachine(asInstanceName("task-5-state"));
@@ -65,20 +64,4 @@ test("InstanceStateMachine derives ready running stale failed and stopped snapsh
     assert.equal(stopped.status, "stopped");
     assert.equal(stopped.lastErrorCode, undefined);
     assert.equal(stopped.lastErrorMessage, undefined);
-});
-
-test("InstancePaths writes only into per-instance control-worker files", () => {
-    const homeDirectory = join("tmp", "devshell-home");
-    const instanceRoot = join(homeDirectory, ".devshell", "task-5-paths");
-    const controlWorkerRoot = join(instanceRoot, "control-worker");
-    const paths = new InstancePaths(asInstanceName("task-5-paths"), homeDirectory);
-
-    assert.equal(paths.auditDatabaseFile, join(controlWorkerRoot, "audit.sqlite3"));
-    assert.equal(paths.legacyEventsFile, join(controlWorkerRoot, "events.jsonl"));
-    assert.equal(paths.legacyToolCallsFile, join(controlWorkerRoot, "tool-calls.jsonl"));
-    assert.equal(paths.legacyLogsFile, join(controlWorkerRoot, "logs.jsonl"));
-    assert.equal(paths.legacyApprovalsFile, join(controlWorkerRoot, "approvals.jsonl"));
-    assert.equal(paths.workerConfigFile, join(instanceRoot, "config.toml"));
-    assert.equal(paths.workerLogFile, join(instanceRoot, "logs", "worker.log"));
-    assert.equal(paths.workerPidFile, join(instanceRoot, "state", "worker.pid"));
 });

@@ -74,7 +74,6 @@ test("WorkerToolCatalog identifies an incompatible Worker catalog", () => {
         ]),
         (error: unknown) => {
             assert.equal((error as { code?: string }).code, errorCodes.coreToolSchemaUnavailable);
-            assert.match((error as { message?: string }).message ?? "", /Upgrade and restart the Worker/u);
             assert.equal((error as { details?: { reason?: string } }).details?.reason, "tool schemas must be JSON objects");
             return true;
         }

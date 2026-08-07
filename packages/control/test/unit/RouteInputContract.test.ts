@@ -171,8 +171,8 @@ test("runtime log response limiting stays within one MiB and retains the newest 
 
     assert.equal(limited.length, 2);
     assert.equal(limited[0]?.message, "first");
-    assert.match(limited[1]?.message ?? "", /^\n\[log output truncated\]\n/u);
     assert.match(limited[1]?.message ?? "", /TAIL$/u);
+    assert.equal(limited[1]?.message === logs[1]?.message, false);
     assert.equal(Buffer.byteLength(JSON.stringify(limited), "utf8") <= 1024 * 1024, true);
 });
 

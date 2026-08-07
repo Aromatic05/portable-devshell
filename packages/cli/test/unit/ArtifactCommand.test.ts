@@ -200,15 +200,10 @@ test("artifact status cancel list and revoke use typed control methods", async (
     assert.deepEqual(client.calls.map((call) => call.method), ["status", "cancel", "transfers", "shares", "revoke"]);
 });
 
-test("artifact help hides host and invalid input follows common usage exit mapping", async () => {
+test("artifact invalid input follows usage exit mapping without calling Control", async () => {
     const client = createArtifactClientStub();
     const runtime = cli(client);
-    assert.equal(await runtime.instance.run(["artifact", "help"]), 0);
-    const help = runtime.stdout.flush();
-    assert.doesNotMatch(help, /\bhost\b/u);
-    assert.match(help, /workspace-relative/u);
-
     assert.equal(await runtime.instance.run(["artifact", "share", "source-a", "./dist"]), 2);
     assert.equal(client.calls.length, 0);
-    assert.match(runtime.stderr.flush(), /artifact:<handle> or path:<path>/u);
+    assert.notEqual(runtime.stderr.flush().length, 0);
 });

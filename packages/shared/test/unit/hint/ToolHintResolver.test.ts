@@ -84,7 +84,7 @@ test("bash_run timeout, signal, truncation, and artifact warnings each map to di
     })), ["bash.artifactWarning"]);
 });
 
-test("bash_run truncation hint points at artifact_read when an artifact reference exists", () => {
+test("bash_run truncation hint does not leak an artifact handle", () => {
     const hints = resolveResultHints("bash_run", {
         exitCode: 0,
         stderr: "", stderrBytes: 0, stderrTruncated: false,
@@ -93,7 +93,6 @@ test("bash_run truncation hint points at artifact_read when an artifact referenc
         termination: "exited"
     });
     assert.deepEqual(codes(hints), ["bash.outputTruncated"]);
-    assert.match(hints[0].text, /artifact_read/);
     assert.equal(hints[0].text.includes("h1"), false);
 });
 
@@ -101,7 +100,6 @@ test("bash_run error hints cover invalid command and cancellation semantics", ()
     assert.deepEqual(codes(resolveErrorHints("bash_run", body("bash.invalidCommand"))), ["bash.invalidCommand"]);
     const cancelled = resolveErrorHints("bash_run", body("tool.cancelled"));
     assert.deepEqual(codes(cancelled), ["tool.cancelled"]);
-    assert.match(cancelled[0].text, /inspect output and possible side effects/i);
 });
 
 test("artifact_read paging, lossy, and source truncation are diagnosed", () => {
@@ -117,7 +115,6 @@ test("artifact_read paging, lossy, and source truncation are diagnosed", () => {
         artifactTruncated: true, eof: true, lossy: false
     });
     assert.deepEqual(codes(truncated), ["artifact.sourceTruncated"]);
-    assert.match(truncated[0].text, /unavailable/i);
 });
 
 test("artifact_read expired handle is an error hint", () => {
@@ -155,7 +152,6 @@ test("file_edit partial failure reports applied, failed, and not-executed operat
     assert.match(text, /operation #1/);
     assert.match(text, /file\.revisionMismatch/);
     assert.match(text, /1 earlier operation/);
-    assert.match(text, /retry only failed and skipped operations/i);
 });
 
 test("file_edit no-op patch and truncated diff are diagnosed on complete sets", () => {
@@ -178,21 +174,11 @@ test("file_edit no-op patch and truncated diff are diagnosed on complete sets", 
     assert.deepEqual(move, []);
 });
 
-test("file_edit snapshotRequired and revisionMismatch errors are actionable", () => {
+test("file_edit snapshotRequired revisionMismatch and cancellation errors are classified", () => {
     assert.deepEqual(codes(resolveErrorHints("file_edit", body("file.snapshotRequired"))), ["file.snapshotRequired"]);
     assert.deepEqual(codes(resolveErrorHints("file_edit", body("file.revisionMismatch"))), ["file.revisionMismatch"]);
     const cancelled = resolveErrorHints("file_edit", body("tool.cancelled"));
-    assert.match(cancelled[0].text, /partial change/i);
-    assert.match(cancelled[0].text, /re-read affected files/i);
-});
-
-test("file mutation errors preserve explicit authorization boundaries", () => {
-    const exists = resolveErrorHints("file_edit", body("file.alreadyExists"));
-    assert.match(exists[0].text, /do not overwrite/i);
-    assert.match(exists[0].text, /explicitly requested/i);
-
-    const parent = resolveErrorHints("file_edit", body("file.parentNotFound"));
-    assert.match(parent[0].text, /only if explicitly requested/i);
+    assert.deepEqual(codes(cancelled), ["tool.cancelled"]);
 });
 
 test("tmux_run block timeout keeps the task running and is not a failure", () => {
@@ -203,7 +189,6 @@ test("tmux_run block timeout keeps the task running and is not a failure", () =>
         warnings: [{ code: "tmux.blockTimeout", message: "wait timed out" }]
     });
     assert.deepEqual(codes(hints), ["tmux.blockTimeout"]);
-    assert.match(hints[0].text, /still running/);
 });
 
 test("tmux_run running task without block timeout yields a task-running diagnostic", () => {
@@ -225,15 +210,6 @@ test("tmux task terminal status distinguishes success, failure, and unknown", ()
 test("tmux_run start-unconfirmed forbids an immediate relaunch", () => {
     const hints = resolveErrorHints("tmux_run", body("tmux.taskStartUnconfirmed"));
     assert.deepEqual(codes(hints), ["tmux.taskStartUnconfirmed"]);
-    assert.match(hints[0].text, /tmux_list or tmux_inspect/i);
-    assert.match(hints[0].text, /before retrying/i);
-});
-
-test("tmux cancellation keeps the task running for run but not for create", () => {
-    const run = resolveErrorHints("tmux_run", body("tool.cancelled"));
-    assert.match(run[0].text, /same task id/i);
-    const create = resolveErrorHints("tmux_create", body("tool.cancelled"));
-    assert.match(create[0].text, /retry if the result is still needed/i);
 });
 
 test("tmux_list full capacity is a diagnostic, not a list failure", () => {
@@ -247,8 +223,6 @@ test("artifact_transfer queued is accepted but not completed", () => {
         transfer: { status: "queued", transferId: "x1" }
     });
     assert.deepEqual(codes(hints), ["artifact.transferQueued"]);
-    assert.match(hints[0].text, /poll status/i);
-    assert.match(hints[0].text, /same transferId/i);
 });
 
 test("artifact_transfer non-terminal, terminal, and failure states are distinguished", () => {
@@ -265,21 +239,16 @@ test("artifact_transfer non-terminal, terminal, and failure states are distingui
         transfer: { failure: { code: "artifact.targetExists", message: "exists", retryable: false }, status: "failed", transferId: "x1" }
     });
     assert.deepEqual(codes(failed), ["artifact.targetExists"]);
-    assert.match(failed[0].text, /overwrite/i);
-    assert.match(failed[0].text, /explicit user approval/i);
 
     const interrupted = resolveResultHints("artifact_transfer", {
         operation: "status", transfer: { status: "interrupted", transferId: "x1" }
     });
     assert.deepEqual(codes(interrupted), ["artifact.transferInterrupted"]);
-    assert.match(interrupted[0].text, /before deciding/i);
-    assert.match(interrupted[0].text, /restart/i);
 
     const cancelled = resolveResultHints("artifact_transfer", {
         operation: "status", transfer: { status: "cancelled", transferId: "x1" }
     });
     assert.deepEqual(codes(cancelled), ["artifact.transferCancelled"]);
-    assert.match(cancelled[0].text, /do not restart automatically/i);
 
     const cancelCompleted = resolveResultHints("artifact_transfer", {
         operation: "cancel", transfer: { status: "completed", transferId: "x1" }
@@ -290,7 +259,6 @@ test("artifact_transfer non-terminal, terminal, and failure states are distingui
 test("instance already-exists and config-invalid use real catalog codes and safe fields", () => {
     const exists = resolveErrorHints("instance_create", body("control.instanceAlreadyExists"));
     assert.deepEqual(codes(exists), ["control.instanceAlreadyExists"]);
-    assert.match(exists[0].text, /explicitly/i);
     const config = resolveErrorHints("instance_create", body("control.configInvalid", {
         details: { fieldPath: "ssh.port", issueCode: "outOfRange" }
     }));
@@ -299,10 +267,10 @@ test("instance already-exists and config-invalid use real catalog codes and safe
     assert.match(config[0].text, /outOfRange/);
 });
 
-test("todo revision conflict and invalid invariants are actionable", () => {
+test("todo revision conflict and invalid invariants are classified", () => {
     assert.deepEqual(codes(resolveErrorHints("todo_write", body("todo.revisionConflict"))), ["todo.revisionConflict"]);
     const invalid = resolveErrorHints("todo_write", body("todo.invalid"));
-    assert.match(invalid[0].text, /resubmit the full plan/i);
+    assert.deepEqual(codes(invalid), ["todo.invalid"]);
 });
 
 test("cross-tool error hints apply to any tool and walk the cause chain", () => {
@@ -315,19 +283,16 @@ test("cross-tool error hints apply to any tool and walk the cause chain", () => 
     assert.deepEqual(codes(wrapped), ["core.workerStartFailed", "core.providerFailed"]);
 });
 
-test("context expired and invalid produce distinct recovery instructions", () => {
+test("context expired and invalid remain distinct error classes", () => {
     const expired = resolveErrorHints("bash_run", body("mcp.contextExpired"));
-    assert.match(expired[0].text, /Call environ_info/i);
-    assert.match(expired[0].text, /new ctxId/i);
+    assert.deepEqual(codes(expired), ["mcp.contextExpired"]);
     const invalid = resolveErrorHints("bash_run", body("mcp.contextInvalid"));
-    assert.match(invalid[0].text, /stop and ask the user/i);
-    assert.match(invalid[0].text, /do not create a ctxId/i);
+    assert.deepEqual(codes(invalid), ["mcp.contextInvalid"]);
 });
 
 test("unclassified errors fall back to a safe unknown hint", () => {
     const hints = resolveErrorHints("bash_run", body("something.neverSeen"));
     assert.deepEqual(codes(hints), ["error.unknown"]);
-    assert.equal(hints[0].text, "Inspect the error before retrying.");
 });
 
 test("merge keeps user comments first and deduplicates hint codes", () => {

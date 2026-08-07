@@ -67,14 +67,15 @@ test("module CLI clients perform control rpc over unix socket", async (t) => {
         server.listen(socketPath, resolve);
     });
 
+    const clients = createCliClients({ socketPath });
     t.after(async () => {
-        server.close();
+        clients.close?.();
+        await new Promise<void>((resolve, reject) => {
+            server.close((error) => error === undefined ? resolve() : reject(error));
+        });
         await rm(runtimeRoot, { force: true, recursive: true });
     });
-
-    const clients = createCliClients({ socketPath });
     await negotiateCliControl(clients);
-    t.after(() => clients.close?.());
     const instances = await clients.instance.list();
     const logs = await clients.runtime.readLogs("demo-local", { limit: 1 });
 

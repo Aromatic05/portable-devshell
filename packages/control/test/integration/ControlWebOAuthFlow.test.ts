@@ -198,11 +198,22 @@ test("web oauth2 reuses its persisted dynamic client after a control restart", a
     assert.notEqual(firstRegistration, undefined);
     await first.http.stop();
 
+    const originalFetch = globalThis.fetch;
+    const secondRuntimePosts: string[] = [];
+    globalThis.fetch = async (input, init) => {
+        if ((init?.method ?? "GET").toUpperCase() === "POST") {
+            secondRuntimePosts.push(String(input));
+        }
+        return await originalFetch(input, init);
+    };
+    t.after(() => {
+        globalThis.fetch = originalFetch;
+    });
     const second = await startRuntime();
     t.after(async () => await second.http.stop().catch(() => undefined));
     const secondStart = await fetch(`${publicBaseUrl}/web/oauth/start`, { redirect: "manual" });
     assert.equal(secondStart.status, 302);
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.deepEqual(secondRuntimePosts, []);
     const registrations = (await second.protectedResource.approvals.list()).filter(
         (approval) => approval.kind === "registration"
     );

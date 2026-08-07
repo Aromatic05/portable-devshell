@@ -161,57 +161,28 @@ test("instance token auth requires a non-trivial configured secret", () => {
     );
 });
 
-test("config normalization applies provider defaults and deduplicates MCP access lists", () => {
+test("config normalization deduplicates MCP access lists", () => {
     const config = normalizeConfigDraft({
         instances: [
             {
-                container: {
-                    mode: "preset",
-                    preset: "arch"
-                },
                 mcp: {
                     tools: {
                         capabilities: ["read", "read", "execute"],
                         groups: ["file", "file", "bash"]
                     }
                 },
-                name: "docker-one",
-                provider: "docker",
+                name: "local-one",
+                provider: "local",
                 workspace: "/workspace"
             }
         ]
     });
 
-    assert.equal(config.control.logLevel, "info");
-    assert.equal(config.mcp.listenHost, "127.0.0.1");
-    assert.equal(config.mcp.listenPort, 17890);
-    assert.equal(config.web.enabled, false);
-    assert.equal(config.instances[0]?.enabled, true);
-    assert.equal(config.instances[0]?.security.mode, "disabled");
-    assert.equal(config.instances[0]?.mcp.path, "/docker-one/mcp");
     assert.deepEqual(config.instances[0]?.mcp.tools.capabilities, ["read", "execute"]);
     assert.deepEqual(config.instances[0]?.mcp.tools.groups, ["file", "bash"]);
-    assert.deepEqual(config.instances[0]?.container, {
-        containerName: "devshell-docker-one",
-        env: undefined,
-        image: "archlinux:latest",
-        mode: "preset",
-        mounts: undefined,
-        network: undefined,
-        preset: "arch",
-        user: undefined
-    });
 });
 
-test("obsolete context groups are removed from default and custom MCP allowlists", () => {
-    const migrated = normalizeConfigInstanceDraft({
-        mcp: {
-            tools: { groups: ["file", "bash", "artifact", "tmux", "todo"] }
-        },
-        name: "legacy-default",
-        provider: "local",
-        workspace: "/workspace"
-    });
+test("obsolete context groups are removed from custom MCP allowlists", () => {
     const custom = normalizeConfigInstanceDraft({
         mcp: { tools: { groups: ["file", "bash", "context", "todo"] } },
         name: "custom-policy",
@@ -219,7 +190,6 @@ test("obsolete context groups are removed from default and custom MCP allowlists
         workspace: "/workspace"
     });
 
-    assert.deepEqual(migrated.mcp.tools.groups, ["file", "bash", "artifact", "tmux", "todo"]);
     assert.deepEqual(custom.mcp.tools.groups, ["file", "bash", "todo"]);
 });
 

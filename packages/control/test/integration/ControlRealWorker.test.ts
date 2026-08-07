@@ -81,7 +81,7 @@ if (process.env.PORTABLE_DEVSHELL_REAL_WORKER_CHILD !== "1") {
             );
 
             t.after(async () => {
-                await manager.stop().catch(() => undefined);
+                await manager.stop();
                 restoreEnv(workerEnvName, previousWorkerPath);
                 await rm(homeDirectory, { force: true, recursive: true });
                 await rm(xdgRuntimeDir, { force: true, recursive: true });

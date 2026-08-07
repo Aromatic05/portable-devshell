@@ -118,7 +118,8 @@ test("TUI startup pulls artifact shares and transfers from Control", async () =>
     await session.stop();
 });
 
-test("TUI clears an OAuth polling failure after the background refresh recovers", async () => {
+test("TUI clears an OAuth polling failure after the background refresh recovers", async (t) => {
+    t.mock.timers.enable({ apis: ["setInterval"] });
     const store = new TuiAppStore();
     let approvalReads = 0;
     const session = new TuiControlSession({
@@ -194,6 +195,7 @@ test("TUI clears an OAuth polling failure after the background refresh recovers"
 
     try {
         await session.start();
+        t.mock.timers.tick(1_000);
         await waitFor(
             () => store.getState().panelErrors["connections:-:oauth"] !== undefined,
         );
@@ -203,6 +205,7 @@ test("TUI clears an OAuth polling failure after the background refresh recovers"
             "OAuth service unavailable",
         );
         assert.equal(store.getState().connection.status, "connected");
+        t.mock.timers.tick(1_000);
         await waitFor(
             () =>
                 approvalReads >= 3 &&
@@ -213,7 +216,8 @@ test("TUI clears an OAuth polling failure after the background refresh recovers"
     }
 });
 
-test("TUI stops OAuth polling after a connection refresh fails", async () => {
+test("TUI stops OAuth polling after a connection refresh fails", async (t) => {
+    t.mock.timers.enable({ apis: ["setInterval"] });
     let approvalReads = 0;
     let failPing = false;
     const session = new TuiControlSession({
@@ -252,7 +256,7 @@ test("TUI stops OAuth polling after a connection refresh fails", async () => {
         failPing = true;
         await session.refresh();
         const readsAfterFailure = approvalReads;
-        await new Promise((resolve) => setTimeout(resolve, 1_100));
+        t.mock.timers.tick(2_000);
 
         assert.equal(session.store.getState().connection.status, "error");
         assert.equal(approvalReads, readsAfterFailure);
@@ -267,11 +271,15 @@ test("TUI ignores an old visible Overview failure after reconnect", async () => 
         rejectOldOverview = reject;
     });
     let useOldOverview = false;
+    let oldOverviewReads = 0;
     const session = new TuiControlSession({
         clients: sessionClients({
             overview: {
                 async get() {
-                    if (useOldOverview) return await oldOverview;
+                    if (useOldOverview) {
+                        oldOverviewReads += 1;
+                        return await oldOverview;
+                    }
                     return {
                         activity: [],
                         alerts: [],
@@ -300,11 +308,12 @@ test("TUI ignores an old visible Overview failure after reconnect", async () => 
         await session.start();
         session.store.setSelectedPage("overview");
         useOldOverview = true;
-        await new Promise((resolve) => setTimeout(resolve, 20));
+        const staleRefresh = session.refreshOverview();
+        await waitFor(() => oldOverviewReads === 1);
         useOldOverview = false;
         await session.reconnect();
         rejectOldOverview(new Error("stale overview failure"));
-        await new Promise((resolve) => setTimeout(resolve, 20));
+        await staleRefresh;
 
         assert.equal(
             session.store.getState().interaction.screenStatusByPage.overview,
@@ -436,7 +445,7 @@ async function waitFor(predicate: () => boolean): Promise<void> {
         if (Date.now() > deadline) {
             throw new Error("Timed out waiting for TUI state.");
         }
-        await new Promise((resolve) => setTimeout(resolve, 10));
+        await new Promise<void>((resolve) => setImmediate(resolve));
     }
 }
 

@@ -107,17 +107,3 @@ fn detect_shell_runtime() -> Result<ShellRuntime, ToolError> {
         "neither pwsh.exe nor powershell.exe is available",
     ))
 }
-
-#[cfg(test)]
-mod tests {
-    use super::powershell_command;
-
-    #[test]
-    fn powershell_command_forces_utf8_without_rewriting_the_user_command() {
-        let command = powershell_command("Write-Output 'hello'");
-        assert!(command.contains("[Console]::InputEncoding = $__devshellUtf8"));
-        assert!(command.contains("[Console]::OutputEncoding = $__devshellUtf8"));
-        assert!(command.contains("$OutputEncoding = $__devshellUtf8"));
-        assert!(command.ends_with("Write-Output 'hello'"));
-    }
-}

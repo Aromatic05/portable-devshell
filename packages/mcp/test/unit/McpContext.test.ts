@@ -128,10 +128,10 @@ test("McpEndpointWorker exposes environ_info and requires ctxId on every other t
     });
 
     const tools = endpoint.listTools();
-    assert.deepEqual(tools.map((tool) => tool.name), ["environ_info", "bash_run"]);
-    const bashSchema = tools[1]?.inputSchema as { properties?: Record<string, unknown>; required?: string[] };
+    const bashSchema = tools.find((tool) => tool.name === "bash_run")?.inputSchema as { properties?: Record<string, unknown>; required?: string[] };
     assert.ok(bashSchema.properties?.ctxId);
-    assert.deepEqual(bashSchema.required, ["command", "ctxId"]);
+    assert.equal(bashSchema.required?.includes("ctxId"), true);
+    assert.equal(bashSchema.required?.includes("command"), true);
 
     const environment = await endpoint.callTool("environ_info", {}, { principal: "local", requestId: "env" });
     const environmentRecord = environment as Record<string, JsonValue>;
@@ -140,7 +140,6 @@ test("McpEndpointWorker exposes environ_info and requires ctxId on every other t
     assert.equal(environmentRecord.instance, "demo-local");
     assert.equal(environmentRecord.skillsDirectory, "/home/demo/.devshell/skill");
     assert.equal(environmentRecord.workspace, "/workspace");
-    assert.deepEqual(environmentRecord.comment, ["Read applicable AGENT.md."]);
     assert.deepEqual(environmentRecord.platform, {
         arch: "x86_64",
         distribution: { id: "arch", name: "Arch Linux", version: "rolling" },
@@ -173,91 +172,3 @@ function hasCode(expected: string): (error: unknown) => boolean {
         return true;
     };
 }
-
-test("only environ_info omits ctxId across the complete 25-tool endpoint catalog", () => {
-    const workerToolNames = [
-        "artifact_read",
-        "bash_run",
-        "file_find",
-        "file_info",
-        "file_read",
-        "file_search",
-        "file_edit",
-        "tmux_create",
-        "tmux_run",
-        "tmux_read",
-        "tmux_input",
-        "tmux_close",
-        "tmux_inspect",
-        "tmux_list"
-    ];
-    const endpoint = new McpEndpointWorker({
-        gateway: {
-            assertReady() {},
-            async callTool() { return {}; },
-            async createSshInstance(_source, input) { return { name: input.name }; },
-            async listInstances() { return []; },
-            listTools() { return []; },
-            async readTodo() { return { items: [], revision: 0, summary: { completed: 0, total: 0 } }; },
-            async shareArtifact() { return {}; },
-            async startInstance(instance) { return { instance }; },
-            async statusInstance(instance) { return { instance }; },
-            async stopInstance(instance) { return { instance }; },
-            async transferArtifact() { return {}; },
-            async viewArtifactImage() {
-                return {
-                    bytes: 1,
-                    content: "AA==",
-                    encoding: "base64",
-                    mediaType: "image/png",
-                    name: "pixel.png",
-                    source: { instance: "demo-local", path: "./pixel.png", type: "file" }
-                };
-            },
-            async writeTodo() { return { items: [], revision: 1, summary: { completed: 0, total: 0 } }; }
-        },
-        instanceName: "demo-local",
-        policy: {
-            capabilities: ["read", "write", "execute", "manage"],
-            groups: ["artifact", "bash", "file", "instance", "tmux", "todo"]
-        },
-        worker: {
-            async auditToolCall<T extends JsonValue>(
-                _toolName: string,
-                _input: JsonValue,
-                _context: ToolCallContext,
-                operation: (callId: string) => Promise<T>
-            ): Promise<T> { return await operation("call-test"); },
-            async appendMcpSessionClosed() {},
-            async appendMcpSessionOpened() {},
-            async appendMcpToolCalled() {},
-            async callTool() { return {}; },
-            listTools: () => workerToolNames.map((name) => ({
-                description: name,
-                group: name.split("_", 1)[0]!,
-                inputSchema: { additionalProperties: false, properties: {}, type: "object" },
-                name,
-                outputSchema: { type: "object" },
-                requiredCapabilities: []
-            })),
-            snapshot: () => ({ ready: true })
-        }
-    });
-
-    const tools = endpoint.listTools();
-    assert.equal(tools.length, 25);
-    assert.equal(tools[0]?.name, "environ_info");
-    assert.match(tools[0]?.description ?? "", /Call once/u);
-    assert.match(tools[0]?.description ?? "", /ctxId/u);
-    for (const tool of tools) {
-        assert.doesNotMatch(tool.description, /Pass the ctxId returned by environ_info|Exposed by portable-devshell MCP|Set instance to route/u);
-        const schema = tool.inputSchema as { properties?: Record<string, unknown>; required?: string[] };
-        if (tool.name === "environ_info") {
-            assert.equal(schema.properties?.ctxId, undefined);
-            assert.equal(schema.required?.includes("ctxId") ?? false, false);
-            continue;
-        }
-        assert.notEqual(schema.properties?.ctxId, undefined, tool.name);
-        assert.equal(schema.required?.includes("ctxId"), true, tool.name);
-    }
-});

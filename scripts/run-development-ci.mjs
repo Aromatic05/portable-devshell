@@ -64,6 +64,7 @@ export function createDevelopmentCiSteps(target, platform = process.platform) {
         pnpmStep("Build", ["build"]),
         pnpmStep("Typecheck", ["typecheck"]),
         { args: ["test", "--locked", "--workspace"], command: "cargo", name: "Rust workspace tests" },
+        pnpmStep("Prepare test Worker", ["test:prepare"]),
         pnpmStep("Package tests", ["test"]),
         { args: ["./scripts/smoke-pty.mjs"], command: process.execPath, name: "PTY smoke" },
         pnpmStep("Build native Worker", ["build:worker", target, "--output-dir", "./ci-artifacts"]),

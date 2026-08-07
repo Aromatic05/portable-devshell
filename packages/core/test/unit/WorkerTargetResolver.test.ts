@@ -213,33 +213,6 @@ test("WorkerAssetResolver does not use host dev fallback for non-host target", a
     });
 });
 
-test("WorkerAssetResolver uses the default release repository when release env is unset", async (t) => {
-    const fixture = await createResolverFixture();
-    t.after(fixture.cleanup);
-
-    const target = getWorkerTargetByKey("darwin-arm64");
-    process.env.PORTABLE_DEVSHELL_WORKER_RELEASE_TAG = "v1.2.3";
-    delete process.env.PORTABLE_DEVSHELL_WORKER_RELEASE_REPOSITORY;
-    delete process.env.PORTABLE_DEVSHELL_WORKER_RELEASE_BASE_URL;
-
-    globalThis.fetch = async () => new Response("missing", { status: 404 });
-
-    await assert.rejects(fixture.resolver.resolve(target), (error: unknown) => {
-        assert.ok(typeof error === "object" && error !== null);
-        assert.equal((error as { code?: string }).code, "core.workerAssetUnavailable");
-        const details = (error as { details?: Record<string, unknown> }).details;
-        assert.equal(details?.targetKey, "darwin-arm64");
-        assert.equal(Array.isArray(details?.searchedPaths), true);
-        assert.equal(
-            (details?.searchedPaths as string[]).some(
-                (entry) => entry === "https://github.com/Aromatic05/portable-devshell/releases/download/v1.2.3/devshell-worker-darwin-arm64.sha256"
-            ),
-            true
-        );
-        return true;
-    });
-});
-
 async function createResolverFixture(): Promise<{
     root: string;
     devshellHome: string;

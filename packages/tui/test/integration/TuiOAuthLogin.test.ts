@@ -104,9 +104,9 @@ test("real TUI keyboard approval completes registration, authorization, token ex
     await host.start();
     await control.start();
     t.after(async () => {
-        await control.stop().catch(() => undefined);
+        await control.stop();
         routes.dispose();
-        await host.stop().catch(() => undefined);
+        await host.stop();
         await rm(directory, { force: true, recursive: true });
     });
 
@@ -237,10 +237,9 @@ async function openOAuthPage(
     await waitUntil(
         () => runtime.store.getState().ui.selectedPage === "connections",
     );
-    await enterMainBoxes(runtime, terminal);
+    await enterMainBoxes(runtime);
     await focusWithDownArrow(
         runtime,
-        terminal,
         (focus) => focus.kind === "box" && focus.id === "connections:oauth:default",
     );
     terminal.write("\r");
@@ -274,10 +273,9 @@ async function approvePendingWithKeyboard(
     assert.ok(pending);
     const boxId = `oauth-approval-${pending.approvalId}`;
 
-    await enterMainBoxes(runtime, terminal);
+    await enterMainBoxes(runtime);
     await focusWithDownArrow(
         runtime,
-        terminal,
         (focus) => focus.kind === "box" && focus.id === boxId,
     );
     terminal.write(" ");
@@ -289,7 +287,6 @@ async function approvePendingWithKeyboard(
     );
     await focusWithDownArrow(
         runtime,
-        terminal,
         (focus) =>
             focus.kind === "line" &&
             focus.id.endsWith(`oauth.approve:${pending.approvalId}`),
@@ -320,14 +317,12 @@ async function approvePendingWithKeyboard(
 
 async function enterMainBoxes(
     runtime: TuiRuntime,
-    terminal: ReturnType<typeof createTerminal>,
 ): Promise<void> {
     for (let attempt = 0; attempt < 4; attempt += 1) {
         if (runtime.store.getState().interaction.focusScope === "mainBoxes") {
             return;
         }
-        terminal.write("\t");
-        await delay(10);
+        await runtime.handleInput("", { tab: true });
     }
     assert.equal(
         runtime.store.getState().interaction.focusScope,
@@ -337,7 +332,6 @@ async function enterMainBoxes(
 
 async function focusWithDownArrow(
     runtime: TuiRuntime,
-    terminal: ReturnType<typeof createTerminal>,
     predicate: (
         focus: NonNullable<ReturnType<TuiRuntime["focusManager"]["currentFocus"]>>,
     ) => boolean,
@@ -347,8 +341,7 @@ async function focusWithDownArrow(
         if (focus !== undefined && predicate(focus)) {
             return;
         }
-        terminal.write("\u001B[B");
-        await delay(10);
+        await runtime.handleInput("", { downArrow: true });
     }
     assert.fail(
         `TUI focus did not reach the requested item; current=${JSON.stringify(runtime.focusManager.currentFocus())}`,
@@ -522,12 +515,8 @@ async function waitUntil(
         if (Date.now() >= deadline) {
             throw new Error("Timed out waiting for OAuth acceptance state.");
         }
-        await delay(10);
+        await new Promise<void>((resolve) => setImmediate(resolve));
     }
-}
-
-async function delay(milliseconds: number): Promise<void> {
-    await new Promise<void>((resolve) => setTimeout(resolve, milliseconds));
 }
 
 async function reservePort(): Promise<number> {

@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
     asInstanceName,
     type ContextMessageRecord,
@@ -16,6 +16,10 @@ const snapshot: InstanceSnapshot = {
     ready: true,
     status: "ready",
 };
+
+afterEach(() => {
+    vi.useRealTimers();
+});
 
 describe("WebStore", () => {
     it("does not request OAuth approvals when OAuth is disabled", async () => {

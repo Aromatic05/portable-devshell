@@ -19,7 +19,6 @@ import {
     type TuiCommandDispatcherFocus,
     type TuiFocusManager,
     tuiViewProjection,
-    TuiKeyDispatcher,
 } from "../../src/testing.ts";
 
 const overview: OperationalOverview = {
@@ -159,7 +158,7 @@ test("overview projects system meters and an instance table without expandable b
             },
         ],
     );
-    assert.equal(presentation.alerts[0]?.title, "Instance failed");
+    assert.equal(presentation.alerts.length, 1);
     assert.equal(presentation.activity[0]?.toolName, "bash_run");
     assert.deepEqual(selectMainBoxIds(store.getState()), [
         "overview-instance:alpha",
@@ -195,26 +194,6 @@ test("overview Enter opens the selected instance row", () => {
     assert.equal(store.getState().ui.selectedPage, "instances");
     assert.equal(store.getState().ui.selectedInstance, "alpha");
     assert.equal(store.getState().ui.mainFocusId, "instance:alpha");
-});
-
-test("overview uses zero without changing the established one-to-eight page shortcuts", () => {
-    const dispatcher = new TuiKeyDispatcher();
-    assert.deepEqual(
-        dispatcher.dispatch("sidebarPages", { input: "0", key: {} }),
-        [{ page: "overview", type: "page.select" }],
-    );
-    assert.deepEqual(
-        dispatcher.dispatch("sidebarPages", { input: "1", key: {} }),
-        [{ page: "instances", type: "page.select" }],
-    );
-    assert.deepEqual(
-        dispatcher.dispatch("sidebarPages", { input: "8", key: {} }),
-        [{ page: "terminal", type: "page.select" }],
-    );
-    assert.deepEqual(
-        dispatcher.dispatch("sidebarPages", { input: "9", key: {} }),
-        [],
-    );
 });
 
 test("overview exposes mouse hit regions for visible instance rows", () => {

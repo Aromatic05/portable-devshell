@@ -117,7 +117,8 @@ test("RuntimeSubscriptionManager emits a non-terminal runtime stream.gap", async
     manager.unsubscribeConnection("conn-3");
 });
 
-test("RuntimeSubscriptionManager does not overlap polls while an event emit is pending", async () => {
+test("RuntimeSubscriptionManager does not overlap polls while an event emit is pending", async (t) => {
+    t.mock.timers.enable({ apis: ["setInterval"] });
     const manager = new RuntimeSubscriptionManager(1);
     const worker = new FakeWorker("alpha");
     await worker.start("/tmp/ws");
@@ -140,8 +141,9 @@ test("RuntimeSubscriptionManager does not overlap polls while an event emit is p
 
     await manager.subscribe(harness.context, "alpha", worker as unknown as WorkerInstance, 1);
     worker.emit("toolCall.completed", { toolName: "bash_run" });
+    t.mock.timers.tick(1);
     await emitStarted;
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    t.mock.timers.tick(10);
 
     assert.equal(emitCount, 1);
     releaseFirstEmit();
@@ -149,7 +151,8 @@ test("RuntimeSubscriptionManager does not overlap polls while an event emit is p
     manager.unsubscribeConnection("conn-4");
 });
 
-test("RuntimeSubscriptionManager isolates a throwing subscription poll", async () => {
+test("RuntimeSubscriptionManager isolates a throwing subscription poll", async (t) => {
+    t.mock.timers.enable({ apis: ["setInterval"] });
     const manager = new RuntimeSubscriptionManager(1);
     const badWorker = new FakeWorker("bad");
     const healthyWorker = new FakeWorker("healthy");
@@ -174,9 +177,10 @@ test("RuntimeSubscriptionManager isolates a throwing subscription poll", async (
         await manager.subscribe(healthy.context, "healthy", healthyWorker as unknown as WorkerInstance, 1);
         failPoll = true;
         healthyWorker.emit("toolCall.completed", { toolName: "bash_run" });
+        t.mock.timers.tick(1);
 
         await waitFor(() => healthy.events.length === 1);
-        await new Promise((resolve) => setTimeout(resolve, 10));
+        await new Promise<void>((resolve) => setImmediate(resolve));
 
         assert.equal(unhandled.length, 0);
         assert.equal(healthy.events[0]?.seq, 2);
@@ -326,6 +330,6 @@ async function waitFor(predicate: () => boolean): Promise<void> {
             throw new Error("Timed out waiting for streamed event.");
         }
 
-        await new Promise((resolve) => setTimeout(resolve, 10));
+        await new Promise<void>((resolve) => setImmediate(resolve));
     }
 }

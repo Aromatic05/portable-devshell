@@ -59,7 +59,8 @@ test("TuiAppStore keeps page, instance, and expanded boxes stable across events"
     assert.equal(state.globalDerived.connectedInstanceCount, 1);
 });
 
-test("TuiRenderScheduler batches multiple store updates into one render notification", async () => {
+test("TuiRenderScheduler batches multiple store updates into one render notification", (t) => {
+    t.mock.timers.enable({ apis: ["setTimeout"] });
     const store = new TuiAppStore();
     const scheduler = new TuiRenderScheduler(store, 5);
     let renderCount = 0;
@@ -72,7 +73,8 @@ test("TuiRenderScheduler batches multiple store updates into one render notifica
     store.setSelectedPage("logs");
     store.setSelectedPage("help");
 
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.equal(renderCount, 0);
+    t.mock.timers.tick(5);
 
     unsubscribe();
     scheduler.dispose();
@@ -81,7 +83,8 @@ test("TuiRenderScheduler batches multiple store updates into one render notifica
     assert.equal(scheduler.getSnapshot().ui.selectedPage, "help");
 });
 
-test("TuiRenderScheduler redraws visible Overview and Audit context message changes", async () => {
+test("TuiRenderScheduler redraws visible Overview and Audit context message changes", (t) => {
+    t.mock.timers.enable({ apis: ["setTimeout"] });
     const store = new TuiAppStore();
     store.patchControlReadModel({ instances: [
         { enabled: true, mcpEnabled: true, name: "alpha" },
@@ -94,17 +97,19 @@ test("TuiRenderScheduler redraws visible Overview and Audit context message chan
     });
 
     store.setSelectedPage("overview");
-    await delay(10);
+    t.mock.timers.tick(2);
     renders = 0;
     store.patchControlReadModel({ overview: emptyOverview() });
-    await delay(10);
+    assert.equal(renders, 0);
+    t.mock.timers.tick(2);
     assert.equal(renders, 1);
 
     store.setSelectedPage("audit");
-    await delay(10);
+    t.mock.timers.tick(2);
     renders = 0;
     store.patchControlReadModel({ instanceState: { ["alpha"]: { contextMessages: [contextMessage("message-1")] } } });
-    await delay(10);
+    assert.equal(renders, 0);
+    t.mock.timers.tick(2);
     assert.equal(renders, 1);
 
     unsubscribe();
@@ -125,7 +130,8 @@ test("TuiAppStore does not publish an unchanged OAuth approval collection", () =
     assert.equal(notifications, 0);
 });
 
-test("TuiRenderScheduler ignores updates outside the visible page and instance", async () => {
+test("TuiRenderScheduler ignores updates outside the visible page and instance", (t) => {
+    t.mock.timers.enable({ apis: ["setTimeout"] });
     const store = new TuiAppStore();
     store.patchControlReadModel({ instances: [
         { enabled: true, mcpEnabled: true, name: "alpha" },
@@ -140,19 +146,18 @@ test("TuiRenderScheduler ignores updates outside the visible page and instance",
     });
 
     store.patchControlReadModel({ instanceState: { ["alpha"]: { toolCalls: [toolCall("alpha-help")] } } });
-    await delay(10);
     assert.equal(renderCount, 0);
 
     store.setSelectedPage("audit");
-    await delay(10);
+    t.mock.timers.tick(2);
     renderCount = 0;
 
     store.patchControlReadModel({ instanceState: { ["beta"]: { toolCalls: [toolCall("beta-audit")] } } });
-    await delay(10);
     assert.equal(renderCount, 0);
 
     store.patchControlReadModel({ instanceState: { ["alpha"]: { toolCalls: [toolCall("alpha-audit")] } } });
-    await delay(10);
+    assert.equal(renderCount, 0);
+    t.mock.timers.tick(2);
     assert.equal(renderCount, 1);
 
     unsubscribe();
@@ -218,10 +223,6 @@ function toolCall(callId: string) {
         status: "completed" as const,
         toolName: "bash_run",
     };
-}
-
-async function delay(milliseconds: number): Promise<void> {
-    await new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
 function emptyOverview(): OperationalOverview {

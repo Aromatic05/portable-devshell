@@ -67,6 +67,8 @@ test("a stop requested during startup runs after startup completes", async () =>
         releaseStart = resolve;
     });
     const calls: string[] = [];
+    let startCompleted = false;
+    let stopOverlappedStart = false;
     const daemon = new ControlDaemon({
         logger: {
             async info() {},
@@ -81,8 +83,10 @@ test("a stop requested during startup runs after startup completes", async () =>
             async start() {
                 calls.push("start");
                 await startGate;
+                startCompleted = true;
             },
             async stop() {
+                if (!startCompleted) stopOverlappedStart = true;
                 calls.push("stop");
             }
         } as never,
@@ -94,20 +98,19 @@ test("a stop requested during startup runs after startup completes", async () =>
     const starting = daemon.start();
     await waitFor(() => calls.includes("start"));
     const stopping = daemon.stop();
-    await new Promise((resolve) => setTimeout(resolve, 25));
-    assert.deepEqual(calls, ["start"]);
 
     releaseStart();
     await Promise.all([starting, stopping]);
 
     assert.deepEqual(calls, ["start", "pid", "stop"]);
+    assert.equal(stopOverlappedStart, false);
 });
 
 async function waitFor(predicate: () => boolean): Promise<void> {
     const deadline = Date.now() + 1_000;
     while (Date.now() < deadline) {
         if (predicate()) return;
-        await new Promise((resolve) => setTimeout(resolve, 5));
+        await new Promise<void>((resolve) => setImmediate(resolve));
     }
     throw new Error("Timed out waiting for condition.");
 }

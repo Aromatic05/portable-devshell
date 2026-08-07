@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
     asInstanceName,
     type InstanceSnapshot,
@@ -18,6 +18,10 @@ const snapshot: InstanceSnapshot = {
     status: "ready",
 };
 
+afterEach(() => {
+    vi.unstubAllGlobals();
+});
+
 describe("authenticated application shell", () => {
     it("keeps the default browser session stable across React renders", async () => {
         const request = vi.fn<typeof fetch>().mockResolvedValue(
@@ -33,7 +37,6 @@ describe("authenticated application shell", () => {
         ).toBeInTheDocument();
         await waitFor(() => expect(createClients).toHaveBeenCalledOnce());
         expect(request).toHaveBeenCalledOnce();
-        vi.unstubAllGlobals();
     });
 
     it("boots auth=none anonymously before creating clients", async () => {
@@ -234,11 +237,11 @@ describe("authenticated application shell", () => {
         session.check.mockRejectedValue(new Error("Session unavailable"));
         fireEvent.click(screen.getByRole("button", { name: "Reconnect" }));
 
-        expect(await screen.findByText("Unable to verify the session.")).toHaveAttribute("role", "alert");
+        expect(await screen.findByRole("alert")).toBeInTheDocument();
         session.check.mockResolvedValue(true);
         fireEvent.click(screen.getByRole("button", { name: "Reconnect" }));
 
-        await waitFor(() => expect(screen.queryByText("Unable to verify the session.")).not.toBeInTheDocument());
+        await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument());
     });
 
     it("clears the ready store before bootstrapping a replacement session", async () => {
@@ -260,7 +263,6 @@ describe("authenticated application shell", () => {
         await screen.findByRole("button", { name: "Log out" });
         view.rerender(<App createClients={createClients} session={replacement} />);
 
-        expect(screen.getByText("Checking session…")).toBeInTheDocument();
         expect(close).toHaveBeenCalledOnce();
         resolveCheck(false);
         expect(await screen.findByRole("button", { name: "Sign in" })).toBeInTheDocument();

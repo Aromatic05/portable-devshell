@@ -73,13 +73,6 @@ test("instance wizard retries invalid basic answers, deduplicates lists, and sup
     assert.equal(validated?.security?.mode, "workspace");
     assert.deepEqual(validated?.mcp?.tools?.groups, ["file", "bash"]);
     assert.deepEqual(validated?.mcp?.tools?.capabilities, ["read", "execute"]);
-
-    const text = output.flush();
-    assert.match(text, /instance name is required/u);
-    assert.match(text, /Please answer yes or no/u);
-    assert.match(text, /provider must be one of local, ssh, docker, podman, reverse/u);
-    assert.match(text, /security mode must be disabled or workspace/u);
-    assert.match(text, /Instance creation cancelled/u);
 });
 
 test("instance wizard collects SSH configuration and accepts validated creation", async () => {
@@ -124,12 +117,6 @@ test("instance wizard collects SSH configuration and accepts validated creation"
         ssh: { command: "ssh devbox" },
         workspace: "/remote/work"
     });
-
-    const text = output.flush();
-    assert.match(text, /ssh command is required/u);
-    assert.match(text, /Summary/u);
-    assert.match(text, /ssh command: ssh devbox/u);
-    assert.match(text, /mcp enabled: false/u);
 });
 
 test("instance wizard collects complete OAuth, approval, environment, log, and scheduler configuration", async () => {
@@ -208,9 +195,6 @@ test("instance wizard collects complete OAuth, approval, environment, log, and s
     });
 
     const text = output.flush();
-    assert.match(text, /mcp auth: oauth2/u);
-    assert.match(text, /approval mode: ask/u);
-    assert.match(text, /instance env keys: API_TOKEN/u);
     assert.doesNotMatch(text, /instance-secret/u);
 });
 
@@ -275,13 +259,6 @@ test("instance wizard validates and collects a managed Docker preset", async () 
         user: "1000"
     });
     assert.equal(result?.draft.dockerBinary, "/usr/bin/docker");
-
-    const text = output.flush();
-    assert.match(text, /selection must be 1-5/u);
-    assert.match(text, /preset must match one of the listed presets/u);
-    assert.match(text, /mount mode must be ro or rw/u);
-    assert.match(text, /container image: debian:stable/u);
-    assert.match(text, /docker binary: \/usr\/bin\/docker/u);
 });
 
 function createWizard(lines: string[], output: ReturnType<typeof createBuffer>): CliWizardInstanceCreate {

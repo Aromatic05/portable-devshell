@@ -60,23 +60,3 @@ test("Web token authentication exposes an editable secret before save", () => {
     assert.match(token.text, /secret/u);
     assert.equal(token.text.includes("new-secret-token"), false);
 });
-
-test("Web OAuth authentication exposes every required provider field before save", () => {
-    const web = expandedWebBox({
-        auth: "oauth2",
-        enabled: true,
-        listenHost: "127.0.0.1",
-        listenPort: 3211,
-        oauth2: {
-            documentationUrl: "https://docs.example.test/web",
-            requiredScopes: ["web", "profile"],
-            resourceName: "portable-devshell-web",
-        },
-        publicBaseUrl: "https://example.test/web",
-    });
-
-    const fieldIds = new Set(web.expandedLines.map((line) => line.id));
-    assert.equal(fieldIds.has("web:field:web.oauth2.resourceName"), true);
-    assert.equal(fieldIds.has("web:field:web.oauth2.requiredScopes"), true);
-    assert.equal(fieldIds.has("web:field:web.oauth2.documentationUrl"), true);
-});

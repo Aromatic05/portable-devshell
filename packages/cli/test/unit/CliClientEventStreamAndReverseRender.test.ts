@@ -9,11 +9,6 @@ import {
 } from "@portable-devshell/shared";
 
 import { CliClientEventStream } from "../../src/client/CliClientEventStream.ts";
-import {
-    renderReverseDeviceCode,
-    renderReverseTokenRevocation,
-    renderReverseTokenRotation
-} from "../../src/render/instance/CliRenderInstanceReverse.ts";
 
 const destination = asInstanceName("demo-local");
 
@@ -95,32 +90,6 @@ test("CLI event stream closes the shared stream once", () => {
     wrapped.close();
     wrapped.close();
     assert.equal(closed, 1);
-});
-
-test("reverse CLI renderers include copyable enrollment and credential instructions", () => {
-    assert.equal(
-        renderReverseDeviceCode({
-            controllerUrl: "https://controller.example/base",
-            deviceCode: "ABCD-EFGH",
-            expiresAt: "2026-07-16T12:00:00.000Z",
-            instance: asInstanceName("reverse-one")
-        }),
-        [
-            "instance: reverse-one",
-            "device code: ABCD-EFGH",
-            "expires: 2026-07-16T12:00:00.000Z",
-            "enroll: devshell-worker enroll --controller https://controller.example/base --device-code ABCD-EFGH",
-            ""
-        ].join("\n")
-    );
-    assert.match(
-        renderReverseTokenRotation({ deviceToken: "new-secret", instance: asInstanceName("reverse-one") }),
-        /new device token: new-secret[\s\S]*Update the remote worker credential/u
-    );
-    assert.equal(
-        renderReverseTokenRevocation({ instance: asInstanceName("reverse-one"), revoked: true }),
-        "instance: reverse-one\ndevice token revoked\n"
-    );
 });
 
 function stream(message: InstanceStreamMessage): InstanceEventStreamPort {

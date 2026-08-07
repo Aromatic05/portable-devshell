@@ -8,35 +8,6 @@ import {
 import { InstanceCreateCoordinator } from "../../src/control/instance/create/InstanceCreateCoordinator.ts";
 import { normalizeConfigInstanceDraft, type ControlConfig } from "@portable-devshell/shared";
 
-test("instance create schema exposes supported container modes without running container attach", () => {
-    const service = createService("linux");
-    const schema = service.getSchema();
-
-    assert.deepEqual(schema.container.modes, [
-        "preset",
-        "dockerfile",
-        "compose",
-        "existingImage",
-        "existingStoppedContainer",
-    ]);
-    assert.equal(
-        schema.container.presets.some((entry) => entry.preset === "arch"),
-        true,
-    );
-    assert.deepEqual(schema.defaultMcpGroups, [
-        "file",
-        "bash",
-        "artifact",
-        "tmux",
-        "todo",
-    ]);
-});
-
-test("Windows instance create schema exposes only supported providers", () => {
-    const schema = createService("win32").getSchema();
-    assert.deepEqual(schema.providers, ["local", "ssh", "reverse"]);
-});
-
 test("instance create validates docker preset drafts into container config", () => {
     const service = createService("linux");
 

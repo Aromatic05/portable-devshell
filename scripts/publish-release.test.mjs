@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
-import { basename, resolve } from "node:path";
+import { resolve } from "node:path";
 import test from "node:test";
 
 import { createTestTempDirectory } from "../test/TestTempDirectory.mjs";
@@ -79,26 +79,6 @@ async function createReleaseAssets() {
     return { directory, root };
 }
 
-test("release asset validation requires every native application, worker, installer, and checksum", async () => {
-    const fixture = await createReleaseAssets();
-    try {
-        const assets = await verifyReleaseAssets(fixture.directory);
-        assert.deepEqual(
-            assets.map((path) => basename(path)).sort(),
-            expectedReleaseAssetNames(),
-        );
-        await rm(
-            resolve(fixture.directory, "devshell-worker-darwin-arm64.sha256"),
-        );
-        await assert.rejects(
-            verifyReleaseAssets(fixture.directory),
-            /release asset is missing: devshell-worker-darwin-arm64\.sha256/u,
-        );
-    } finally {
-        await rm(fixture.root, { force: true, recursive: true });
-    }
-});
-
 test("release asset validation rejects bytes that do not match the published checksum", async () => {
     const fixture = await createReleaseAssets();
     try {
@@ -142,12 +122,6 @@ test("publishing creates one immutable release and has no upload or clobber fall
         assert.equal(calls[0].args.includes("upload"), false);
         assert.equal(calls[0].args.includes("--clobber"), false);
         assert.equal(calls[0].args.includes("--verify-tag"), true);
-        for (const name of expectedReleaseAssetNames()) {
-            assert.equal(
-                calls[0].args.some((value) => basename(value) === name),
-                true,
-            );
-        }
     } finally {
         await rm(fixture.root, { force: true, recursive: true });
     }

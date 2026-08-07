@@ -1,3 +1,0 @@
-control: running
-pid: 42
-instances: 1

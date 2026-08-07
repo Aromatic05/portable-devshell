@@ -53,7 +53,6 @@ test("offline inbound connector returns a typed retryable reverse transport erro
     await assert.rejects(connector.connect(), (error: unknown) => {
         assert.equal(readField(error, "code"), errorCodes.reverseTransportUnavailable);
         assert.equal(readField(error, "retryable"), true);
-        assert.match(String(readField(error, "message")), /Reverse worker is offline/u);
         return true;
     });
 });

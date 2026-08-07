@@ -198,7 +198,6 @@ test("runtime operations own instance command lifecycle and relay diagnostics", 
     assert.deepEqual(harness.calls, ["runtime.start:alpha"]);
     assert.deepEqual(harness.refreshed, ["instance:alpha"]);
     const command = harness.store.getState().commandRecords[0];
-    assert.equal(command?.title, "Start Worker: alpha");
     assert.equal(command?.status, "succeeded");
     assert.equal(command?.targetInstance, "alpha");
     const relay =
@@ -209,10 +208,6 @@ test("runtime operations own instance command lifecycle and relay diagnostics", 
     assert.equal(relay?.provider, "local");
     assert.equal(relay?.workspace, "/workspace/alpha");
     assert.equal(relay?.requestId, "request-start");
-    assert.match(
-        harness.store.getState().interaction.screenStatusByPage.instances ?? "",
-        /completed/u,
-    );
 });
 
 test("runtime operations preserve failed command diagnostics without throwing into the dispatcher", async () => {

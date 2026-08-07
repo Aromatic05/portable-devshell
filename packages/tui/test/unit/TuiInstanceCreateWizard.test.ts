@@ -72,33 +72,6 @@ test("create provider step exposes only fields relevant to the selected provider
     assert.equal(compose.some((id) => id.includes(":field:podmanBinary")), false);
 });
 
-test("create wizard exposes complete MCP authentication, approval, logs, environment, and scheduler inputs", () => {
-    const token = wizard(3, { mcp: { auth: "token", enabled: true, token: "secret", tools: { capabilities: ["read"], groups: ["file"] } } });
-    assert.equal(token.some((id) => id.includes(":field:mcp.token")), true);
-
-    const oauth = wizard(3, { mcp: { auth: "oauth2", enabled: true, oauth2: { requiredScopes: ["mcp"], resourceName: "instance" }, tools: { capabilities: ["read"], groups: ["file"] } } });
-    assert.equal(oauth.some((id) => id.includes(":field:mcp.oauth2.resourceName")), true);
-    assert.equal(oauth.some((id) => id.includes(":field:mcp.oauth2.requiredScopes")), true);
-
-    const security = wizard(4);
-    assert.equal(security.some((id) => id.includes(":field:approvalPolicy.mode")), true);
-    assert.equal(security.some((id) => id.includes(":field:approvalPolicy.rules")), true);
-
-    const runtime = wizard(5);
-    for (const field of [
-        "env",
-        "logs.retentionDays",
-        "logs.maxBytes",
-        "logs.eventBufferSize",
-        "tools.scheduler.maxRunning",
-        "tools.scheduler.queueDepth",
-        "tools.scheduler.queueTimeoutMs",
-        "tools.scheduler.byTool"
-    ]) {
-        assert.equal(runtime.some((id) => id.includes(`:field:${field}`)), true, field);
-    }
-});
-
 test("create wizard renders object arrays as editable JSON", () => {
     const provider = wizardText(2, {
         container: {

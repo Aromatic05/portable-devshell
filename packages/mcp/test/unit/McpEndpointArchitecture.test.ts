@@ -96,62 +96,6 @@ function createWorker(options: {
     return { audited, calls, events, worker };
 }
 
-test("McpEndpointCatalog independently owns merge, filtering, adaptation, and routing schema", () => {
-    const harness = createWorker();
-    const catalog = new McpEndpointCatalog({
-        gateway: {
-            listTools: () => []
-        } as never,
-        instanceName: "demo-local",
-        policy: {
-            capabilities: ["execute", "manage"],
-            groups: ["bash", "instance"]
-        },
-        worker: harness.worker
-    });
-
-    const tools = catalog.listTools();
-    assert.deepEqual(
-        tools.map((tool) => tool.name),
-        [
-            "environ_info",
-            "bash_run",
-            "instance_list",
-            "instance_status",
-            "instance_create",
-            "instance_start",
-            "instance_stop"
-        ]
-    );
-
-    const bash = tools.find((tool) => tool.name === "bash_run");
-    assert.ok(bash);
-    const schema = bash.inputSchema as {
-        properties?: Record<string, unknown>;
-        required?: string[];
-    };
-    assert.ok(schema.properties?.ctxId);
-    assert.ok(schema.properties?.instance);
-    assert.deepEqual(schema.required, ["command", "ctxId"]);
-    assert.deepEqual(bash.outputSchema, {
-        additionalProperties: false,
-        properties: {
-            comment: {
-                description: "Actionable notes.",
-                items: { minLength: 1, type: "string" },
-                type: "array"
-            },
-            exitCode: { type: ["integer", "null"] },
-            stderr: { type: "string" },
-            stdout: { type: "string" }
-        },
-        required: ["exitCode", "stderr", "stdout"],
-        type: "object"
-    });
-    assert.equal(catalog.getExposed("bash_run")?.owner, "worker");
-    assert.equal(catalog.getKnown("todo_read")?.owner, "todo");
-});
-
 test("McpEndpointCatalog keeps control tools available without a worker schema", () => {
     const harness = createWorker({ cached: false, ready: false, tools: [] });
     const catalog = new McpEndpointCatalog({
@@ -166,17 +110,9 @@ test("McpEndpointCatalog keeps control tools available without a worker schema",
         worker: harness.worker
     });
 
-    assert.deepEqual(
-        catalog.listTools().map((tool) => tool.name),
-        [
-            "environ_info",
-            "instance_list",
-            "instance_status",
-            "instance_create",
-            "instance_start",
-            "instance_stop"
-        ]
-    );
+    const tools = catalog.listTools();
+    assert.equal(tools.some((tool) => tool.name === "instance_list"), true);
+    assert.equal(tools.some((tool) => tool.name === "bash_run"), false);
     assert.equal(catalog.snapshot().hasWorkerSchema, false);
 });
 

@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn as nodeSpawn } from "node:child_process";
-import { rm, stat } from "node:fs/promises";
-import { join } from "node:path";
+import { rm } from "node:fs/promises";
 import { PassThrough } from "node:stream";
 import test from "node:test";
 
@@ -47,7 +46,7 @@ test("WorkerInstance completes lifecycle against frozen devshell-worker", realWo
     });
 
     t.after(async () => {
-        await instance.stop().catch(() => undefined);
+        await instance.stop();
         await instance.close();
         await rm(workspacePath, { force: true, recursive: true });
         await rm(homeDirectory, { force: true, recursive: true });
@@ -106,6 +105,8 @@ test("WorkerInstance serializes start and stop lifecycle operations", async () =
     const homeDirectory = await createTestTempDirectory("instance-serialized");
     const harness = createWorkerInstanceHarness();
     const commands: string[] = [];
+    let startCompleted = false;
+    let stopOverlappedStart = false;
     let releaseStart!: () => void;
     const startGate = new Promise<void>((resolve) => {
         releaseStart = resolve;
@@ -114,8 +115,12 @@ test("WorkerInstance serializes start and stop lifecycle operations", async () =
         ...harness.transport,
         async runWorkerCommand(command, options) {
             commands.push(command);
+            if (command === "stop" && !startCompleted) {
+                stopOverlappedStart = true;
+            }
             if (command === "start") {
                 await startGate;
+                startCompleted = true;
             }
             return await harness.transport.runWorkerCommand(command, options);
         }
@@ -130,14 +135,13 @@ test("WorkerInstance serializes start and stop lifecycle operations", async () =
         const starting = instance.start("/tmp/workspace");
         await waitFor(() => commands.includes("start"));
         const stopping = instance.stop();
-        await new Promise((resolve) => setTimeout(resolve, 25));
-
-        assert.deepEqual(commands, ["start"]);
+        await new Promise<void>((resolve) => setImmediate(resolve));
 
         releaseStart();
         await starting;
         await stopping;
         assert.deepEqual(commands, ["start", "stop"]);
+        assert.equal(stopOverlappedStart, false);
     } finally {
         releaseStart();
         await instance.close();
@@ -256,7 +260,7 @@ test("WorkerInstance audits control-owned tool calls while the worker is stopped
     }
 });
 
-test("WorkerInstance rejects not-ready and schedules concurrent tool calls while persisting history", async () => {
+test("WorkerInstance rejects not-ready and records concurrent tool-call history", async () => {
     const homeDirectory = await createTestTempDirectory("instance-harness");
     const harness = createWorkerInstanceHarness();
     const instanceName = asInstanceName("task-6-harness");
@@ -426,7 +430,7 @@ test("WorkerInstance rejects not-ready and schedules concurrent tool calls while
     }
 });
 
-test("WorkerInstance waits for approval before invoking tools and persists approval records", async () => {
+test("WorkerInstance waits for approval before invoking tools and records approval decisions", async () => {
     const homeDirectory = await createTestTempDirectory("instance-approval");
     const harness = createWorkerInstanceHarness();
     const instance = new WorkerInstanceFactory().create({
@@ -441,15 +445,14 @@ test("WorkerInstance waits for approval before invoking tools and persists appro
         const beforeInvokeCount = harness.requestedMethods();
         const callPromise = instance.callTool("bash_run", { command: "pwd" }, cliToolCallContext);
 
-        await new Promise((resolve) => setTimeout(resolve, 25));
+        const pendingApproval = await waitForPendingApproval(instance);
         assert.equal(harness.requestedMethods(), beforeInvokeCount);
-
         const approvals = await instance.listApprovals();
         assert.equal(approvals.length, 1);
         assert.equal(approvals[0]?.status, "pending");
         assert.equal(approvals[0]?.source, "cli");
 
-        const approvalId = approvals[0]?.approvalId ?? "";
+        const approvalId = pendingApproval.approvalId;
         assert.notEqual(approvalId, "");
         assert.equal((await instance.getApproval(approvalId)).status, "pending");
         assert.deepEqual(
@@ -498,9 +501,6 @@ test("WorkerInstance waits for approval before invoking tools and persists appro
         assert.equal(approved.decision?.decision, "approve");
         assert.equal(approved.decision?.decidedBy, "cli");
 
-        const database = await stat(join(homeDirectory, ".devshell", "task-6-approval", "control-worker", "audit.sqlite3"));
-        assert.equal(database.size > 0, true);
-
         const replay = instance.subscribe(1);
         assert.equal(replay.kind, "events");
         const eventTypes = replay.events.map((event) => event.type);
@@ -536,9 +536,8 @@ test("WorkerInstance cancels a pending approval when the caller aborts", async (
             controller.signal
         );
 
-        await new Promise((resolve) => setTimeout(resolve, 25));
-        const approvalId = (await instance.listApprovals())[0]?.approvalId ?? "";
-        assert.notEqual(approvalId, "");
+        const approvalId = (await waitForPendingApproval(instance)).approvalId;
+        assert.equal(harness.requestedMethods(), beforeInvokeCount);
         controller.abort("client timeout");
         await assert.rejects(
             instance.decideApproval(approvalId, {
@@ -590,8 +589,8 @@ test("WorkerInstance denies and expires approval-gated calls without invoking to
 
         const beforeDeniedInvokeCount = harness.requestedMethods();
         const deniedPromise = instance.callTool("bash_run", { command: "pwd" }, { requestId: "req-deny", source: "mcp" });
-        await new Promise((resolve) => setTimeout(resolve, 25));
-        const deniedApprovalId = (await instance.listApprovals())[0]?.approvalId ?? "";
+        const deniedApprovalId = (await waitForPendingApproval(instance)).approvalId;
+        assert.equal(harness.requestedMethods(), beforeDeniedInvokeCount);
         await instance.decideApproval(deniedApprovalId, {
             decidedBy: "cli",
             decision: "deny",
@@ -805,6 +804,7 @@ test("WorkerInstance reconnectRpc refreshes schema after an rpc disconnect", asy
         ]);
         harness.disconnect();
         await harness.waitForMethodCount("tools.list", 2);
+        await waitFor(() => instance.snapshot().connectionState === "connected");
 
         assert.equal(instance.snapshot().connectionState, "connected");
         assert.deepEqual(instance.listTools()[0]?.inputSchema, toolSchemaFor("cwd"));
@@ -1009,16 +1009,18 @@ function createWorkerInstanceHarness(): {
             }
 
             return new Promise<void>((resolve) => {
-                const poll = () => {
+                const observe = () => {
                     if (requestMethods.filter((value) => value === method).length >= count) {
                         resolve();
                         return;
                     }
 
-                    setTimeout(poll, 10);
+                    const waiters = methodWaiters.get(method) ?? [];
+                    waiters.push(observe);
+                    methodWaiters.set(method, waiters);
                 };
 
-                poll();
+                observe();
             });
         }
     };
@@ -1097,4 +1099,20 @@ async function waitFor(predicate: () => boolean): Promise<void> {
         await new Promise((resolve) => setTimeout(resolve, 5));
     }
     throw new Error("Timed out waiting for condition.");
+}
+
+async function waitForPendingApproval(
+    instance: ReturnType<WorkerInstanceFactory["create"]>,
+): Promise<{ approvalId: string }> {
+    const deadline = Date.now() + 1_000;
+    while (Date.now() < deadline) {
+        const approval = (await instance.listApprovals()).find(
+            (candidate) => candidate.status === "pending",
+        );
+        if (approval !== undefined) {
+            return { approvalId: approval.approvalId };
+        }
+        await new Promise<void>((resolve) => setImmediate(resolve));
+    }
+    throw new Error("Timed out waiting for a pending approval.");
 }

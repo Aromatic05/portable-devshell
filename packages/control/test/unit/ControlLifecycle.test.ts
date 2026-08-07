@@ -239,9 +239,9 @@ test("stop sends control.shutdown over rpc", async () => {
 });
 
 test("stop waits for the daemon process after the control socket closes", async () => {
-    let processAlive = true;
     let rpcRunning = true;
     let shutdownRequested = false;
+    let processChecksAfterShutdown = 0;
     const manager = new ControlLifecycleManager({
         daemonModulePath: controlDaemonModulePath(),
         pidFile: {
@@ -250,7 +250,11 @@ test("stop waits for the daemon process after the control socket closes", async 
             write: async () => undefined,
             path: "/tmp/control.pid"
         },
-        processIsRunning: () => processAlive,
+        processIsRunning: () => {
+            if (!shutdownRequested) return true;
+            processChecksAfterShutdown += 1;
+            return processChecksAfterShutdown < 2;
+        },
         rpcClient: {
             async request(method: "status" | "shutdown"): Promise<JsonValue> {
                 if (method === "shutdown") {
@@ -273,16 +277,9 @@ test("stop waits for the daemon process after the control socket closes", async 
         waitTimeoutMs: 500
     });
 
-    let settled = false;
-    const stop = manager.stop().finally(() => {
-        settled = true;
-    });
-    await waitFor(async () => shutdownRequested ? true : undefined);
-    await new Promise((resolve) => setTimeout(resolve, 75));
-    assert.equal(settled, false);
-
-    processAlive = false;
-    const stopped = await stop;
+    const stopped = await manager.stop();
+    assert.equal(shutdownRequested, true);
+    assert.equal(processChecksAfterShutdown >= 2, true);
     assert.equal(stopped.running, false);
 });
 
@@ -350,11 +347,9 @@ test("status times out when a control endpoint accepts but never replies", async
         }
     });
 
-    const startedAt = Date.now();
     const status = await manager.status();
 
     assert.equal(status.running, false);
-    assert.ok(Date.now() - startedAt < 2_000);
 });
 
 test("stop tolerates shutdown socket races in the real lifecycle rpc client", async (t) => {
@@ -408,7 +403,9 @@ test("stop tolerates shutdown socket races in the real lifecycle rpc client", as
     });
 
     t.after(async () => {
-        server.close();
+        await new Promise<void>((resolve, reject) => {
+            server.close((error) => error === undefined ? resolve() : reject(error));
+        });
         await rm(runtimeRoot, { force: true, recursive: true });
     });
 

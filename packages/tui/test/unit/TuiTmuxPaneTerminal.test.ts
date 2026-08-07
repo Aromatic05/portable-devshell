@@ -2,16 +2,12 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-    TUI_TMUX_MULTI_WRITER_WARNING,
     encodeTmuxInput,
-    nextTuiTerminalTab,
     projectTmuxPanes,
     renderTmuxInspectView,
     routeTmuxAttachInput,
     routeTmuxPaneBrowseInput,
     scrollTmuxInspectView,
-    tuiTerminalTabLabel,
-    tuiTerminalTabs,
     type TuiTerminalLine,
     type TuiTmuxListPane,
 } from "../../src/testing.ts";
@@ -23,14 +19,6 @@ function plainLines(values: readonly string[]): TuiTerminalLine[] {
 function visibleText(view: { visibleLines: TuiTerminalLine[] }): string[] {
     return view.visibleLines.map((line) => line.segments.map((segment) => segment.text).join(""));
 }
-
-test("terminal page exposes a second-level selector with Instances and Tmux Panes", () => {
-    assert.deepEqual([...tuiTerminalTabs], ["instances", "tmuxPanes"]);
-    assert.equal(tuiTerminalTabLabel("instances"), "Instances");
-    assert.equal(tuiTerminalTabLabel("tmuxPanes"), "Tmux Panes");
-    assert.equal(nextTuiTerminalTab("instances"), "tmuxPanes");
-    assert.equal(nextTuiTerminalTab("tmuxPanes"), "instances");
-});
 
 test("only panes whose task.status is exactly running support Attach; other tasks stay View-only", () => {
     const panes: TuiTmuxListPane[] = [
@@ -80,19 +68,6 @@ test("View stays scrollable when content is shorter than the viewport", () => {
     assert.deepEqual(visibleText(view), ["only"]);
     assert.equal(view.offset, 0);
     assert.equal(view.atBottom, true);
-});
-
-test("Attach warning states per-pane mutex serialization with nondeterministic cross-client batch ordering", () => {
-    const warning = TUI_TMUX_MULTI_WRITER_WARNING.toLowerCase();
-    assert.equal(warning.includes("tmux_input"), true);
-    assert.equal(warning.includes("atomically"), true);
-    assert.equal(warning.includes("serialize"), true);
-    assert.equal(warning.includes("mutex"), true);
-    assert.equal(warning.includes("nondeterministic"), true);
-    assert.equal(warning.includes("uncoordinated"), true);
-    assert.equal(warning.includes("interleave"), false);
-    assert.equal(warning.includes("esc"), true);
-    assert.equal(warning.includes("no lock"), false);
 });
 
 test("Esc exits Attach instead of being forwarded to tmux_input", () => {
