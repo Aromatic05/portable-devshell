@@ -21,7 +21,7 @@ function createBuffer(): { flush(): string; write(chunk: string): void } {
     };
 }
 
-function createCliClientArtifact() {
+function createArtifactClientStub() {
     const calls: Array<{ input?: unknown; method: string }> = [];
     return {
         calls,
@@ -78,7 +78,7 @@ function transferRecord(transferId: string, status: "cancelled" | "queued" | "tr
     };
 }
 
-function cli(client: ReturnType<typeof createCliClientArtifact>) {
+function cli(client: ReturnType<typeof createArtifactClientStub>) {
     const stdout = createBuffer();
     const stderr = createBuffer();
     return {
@@ -103,7 +103,7 @@ function cli(client: ReturnType<typeof createCliClientArtifact>) {
 }
 
 test("artifact share uses the existing CLI control client", async () => {
-    const client = createCliClientArtifact();
+    const client = createArtifactClientStub();
     const runtime = cli(client);
     assert.equal(
         await runtime.instance.run(["artifact", "share", "source-a", "path:./dist", "--expires-in", "600"]),
@@ -123,7 +123,7 @@ test("artifact share uses the existing CLI control client", async () => {
 });
 
 test("artifact transfer returns queued and infers authority for a host source", async () => {
-    const client = createCliClientArtifact();
+    const client = createArtifactClientStub();
     const runtime = cli(client);
     assert.equal(
         await runtime.instance.run([
@@ -156,7 +156,7 @@ test("artifact transfer returns queued and infers authority for a host source", 
 });
 
 test("artifact transfer treats a bare target path as workspace-relative", async () => {
-    const client = createCliClientArtifact();
+    const client = createArtifactClientStub();
     const runtime = cli(client);
     assert.equal(
         await runtime.instance.run([
@@ -186,7 +186,7 @@ test("artifact transfer treats a bare target path as workspace-relative", async 
 });
 
 test("artifact status cancel list and revoke use typed control methods", async () => {
-    const client = createCliClientArtifact();
+    const client = createArtifactClientStub();
     const runtime = cli(client);
     for (const args of [
         ["artifact", "transfer", "status", "transfer-1"],
@@ -201,7 +201,7 @@ test("artifact status cancel list and revoke use typed control methods", async (
 });
 
 test("artifact help hides host and invalid input follows common usage exit mapping", async () => {
-    const client = createCliClientArtifact();
+    const client = createArtifactClientStub();
     const runtime = cli(client);
     assert.equal(await runtime.instance.run(["artifact", "help"]), 0);
     const help = runtime.stdout.flush();
