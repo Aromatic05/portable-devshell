@@ -34,33 +34,33 @@ async function runInstanceCommandsThroughControlRpc(t: { after(callback: () => P
 
     const stdout = createBuffer();
     const stderr = createBuffer();
-    const cli = new CliMain({
+    const runCli = async (args: string[]) => await new CliMain({
         createCliClients: () => createCliClients({ socketPath }),
         followEventLimit: 1,
         stderr,
         stdout,
         xdgRuntimeDir: runtimeRoot
-    });
+    }).run(args);
 
-    assert.equal(await cli.run(["instance", "list"]), 0);
+    assert.equal(await runCli(["instance", "list"]), 0);
     assert.match(stdout.flush(), /demo-local\tstopped/u);
 
-    assert.equal(await cli.run(["instance", "status", "demo-local"]), 0);
+    assert.equal(await runCli(["instance", "status", "demo-local"]), 0);
     assert.match(stdout.flush(), /instance: demo-local/u);
 
-    assert.equal(await cli.run(["instance", "start", "demo-local"]), 0);
+    assert.equal(await runCli(["instance", "start", "demo-local"]), 0);
     assert.match(stdout.flush(), /status: ready/u);
 
-    assert.equal(await cli.run(["instance", "stop", "demo-local"]), 0);
+    assert.equal(await runCli(["instance", "stop", "demo-local"]), 0);
     assert.match(stdout.flush(), /status: stopped/u);
 
-    assert.equal(await cli.run(["instance", "logs", "demo-local"]), 0);
+    assert.equal(await runCli(["instance", "logs", "demo-local"]), 0);
     assert.equal(stdout.flush(), "[1] stdout before\n");
 
-    assert.equal(await cli.run(["instance", "logs", "demo-local", "-f"]), 0);
+    assert.equal(await runCli(["instance", "logs", "demo-local", "-f"]), 0);
     assert.equal(stdout.flush(), "[1] stdout before\n[2] stdout after\n");
 
-    assert.equal(await cli.run(["instance", "call", "demo-local", "bash_run", "{\"command\":\"pwd\"}"]), 0);
+    assert.equal(await runCli(["instance", "call", "demo-local", "bash_run", "{\"command\":\"pwd\"}"]), 0);
     const callOutput = stdout.flush();
     assert.match(callOutput, /tool: bash_run/u);
     assert.match(callOutput, /stdout:\n\/tmp\/ws/u);
@@ -80,12 +80,12 @@ async function runRealWorkerSmoke(): Promise<void> {
     const previousWorkerPath = process.env[workerEnvName];
     const restoreWindowsIdentity = installUniqueWindowsTestIdentity("cli-real-worker");
     let controlStopped = false;
-    const cli = new CliMain({
+    const runCli = async (args: string[]) => await new CliMain({
         homeDirectory,
         stderr,
         stdout,
         xdgRuntimeDir
-    });
+    }).run(args);
 
     process.env[workerEnvName] = workerBinaryPath!;
     let controlPid: number | undefined;
@@ -103,27 +103,27 @@ async function runRealWorkerSmoke(): Promise<void> {
             createLocalInstanceConfig("aromatic-pc", workspacePath),
             "utf8"
         );
-        assert.equal(await cli.run(["start"]), 0);
+        assert.equal(await runCli(["start"]), 0);
         assert.match(stdout.flush(), /control: running/u);
         controlPid = await readControlPid(homeDirectory);
 
-        assert.equal(await cli.run(["status"]), 0);
+        assert.equal(await runCli(["status"]), 0);
         assert.match(stdout.flush(), /instances: 1/u);
 
-        assert.equal(await cli.run(["instance", "list"]), 0);
+        assert.equal(await runCli(["instance", "list"]), 0);
         assert.match(stdout.flush(), /aromatic-pc\tstopped/u);
 
-        assert.equal(await cli.run(["instance", "status", "aromatic-pc"]), 0);
+        assert.equal(await runCli(["instance", "status", "aromatic-pc"]), 0);
         assert.match(stdout.flush(), /status: stopped/u);
 
-        assert.equal(await cli.run(["instance", "start", "aromatic-pc"]), 0);
+        assert.equal(await runCli(["instance", "start", "aromatic-pc"]), 0);
         assert.match(stdout.flush(), /status: ready/u);
 
-        assert.equal(await cli.run(["instance", "status", "aromatic-pc"]), 0);
+        assert.equal(await runCli(["instance", "status", "aromatic-pc"]), 0);
         assert.match(stdout.flush(), /ready: true/u);
 
         assert.equal(
-            await cli.run([
+            await runCli([
                 "instance",
                 "call",
                 "aromatic-pc",
@@ -136,17 +136,17 @@ async function runRealWorkerSmoke(): Promise<void> {
         assert.match(markerOutput, new RegExp(workspaceMarker, "u"));
 
         assert.equal(
-            await cli.run(["instance", "call", "aromatic-pc", "bash_run", "{\"command\":\"echo portable-devshell\"}"]),
+            await runCli(["instance", "call", "aromatic-pc", "bash_run", "{\"command\":\"echo portable-devshell\"}"]),
             0
         );
         assert.match(stdout.flush(), /portable-devshell/u);
 
-        assert.equal(await cli.run(["instance", "logs", "aromatic-pc"]), 0);
+        assert.equal(await runCli(["instance", "logs", "aromatic-pc"]), 0);
         const logsOutput = stdout.flush();
         assert.match(logsOutput, /portable-devshell/u);
         assert.match(logsOutput, new RegExp(workspaceMarker, "u"));
 
-        assert.equal(await cli.run(["stop"]), 0);
+        assert.equal(await runCli(["stop"]), 0);
         controlStopped = true;
         await waitForControlShutdown(xdgRuntimeDir);
         await ensureProcessExit(controlPid);
@@ -157,7 +157,7 @@ async function runRealWorkerSmoke(): Promise<void> {
         assert.equal(auditDatabase.size > 0, true);
     } finally {
         if (!controlStopped) {
-            await cli.run(["stop"]).catch(() => undefined);
+            await runCli(["stop"]).catch(() => undefined);
             await waitForControlShutdown(xdgRuntimeDir).catch(() => undefined);
         }
         await ensureProcessExit(controlPid).catch(() => undefined);
@@ -182,38 +182,39 @@ async function runInteractiveCreateFlow(t: { after(callback: () => Promise<void>
     const previousWorkerPath = process.env[workerEnvName];
     const restoreWindowsIdentity = installUniqueWindowsTestIdentity("cli-create");
     let controlStopped = false;
-    const cli = new CliMain({
+    const createInput = () => Readable.from([
+        "aromatic-pc\n",
+        "\n",
+        "\n",
+        `${workspacePath}\n`,
+        "\n",
+        "\n",
+        "\n",
+        "\n",
+        "\n",
+        "\n",
+        "\n",
+        "\n",
+        "\n",
+        "\n",
+        "\n",
+        "\n",
+        "\n",
+        "\n"
+    ]);
+    const runCli = async (args: string[], stdin?: NodeJS.ReadableStream) => await new CliMain({
         homeDirectory,
         stderr,
-        stdin: Readable.from([
-            "aromatic-pc\n",
-            "\n",
-            "\n",
-            `${workspacePath}\n`,
-            "\n",
-            "\n",
-            "\n",
-            "\n",
-            "\n",
-            "\n",
-            "\n",
-            "\n",
-            "\n",
-            "\n",
-            "\n",
-            "\n",
-            "\n",
-            "\n"
-        ]),
+        ...(stdin === undefined ? {} : { stdin }),
         stdout,
         xdgRuntimeDir
-    });
+    }).run(args);
 
     let controlPid: number | undefined = undefined;
 
     t.after(async () => {
         if (!controlStopped) {
-            await cli.run(["stop"]).catch(() => undefined);
+            await runCli(["stop"]).catch(() => undefined);
             await waitForControlShutdown(xdgRuntimeDir).catch(() => undefined);
         }
         await ensureProcessExit(controlPid).catch(() => undefined);
@@ -229,31 +230,31 @@ async function runInteractiveCreateFlow(t: { after(callback: () => Promise<void>
     await mkdir(join(homeDirectory, ".devshell", "control", "instances"), { recursive: true });
     await writeFile(join(homeDirectory, ".devshell", "control", "config.toml"), createCreateConfig(), "utf8");
 
-    assert.equal(await cli.run(["start"]), 0);
+    assert.equal(await runCli(["start"]), 0);
     assert.match(stdout.flush(), /control: running/u);
     controlPid = await readControlPid(homeDirectory);
 
-    assert.equal(await cli.run(["instance", "create"]), 0);
+    assert.equal(await runCli(["instance", "create"], createInput()), 0);
     const createOutput = stdout.flush();
     assert.match(createOutput, /Summary/u);
     assert.match(createOutput, /instance created: aromatic-pc/u);
     assert.doesNotMatch(createOutput, /worker binary path:/u);
 
-    assert.equal(await cli.run(["instance", "list"]), 0);
+    assert.equal(await runCli(["instance", "list"]), 0);
     assert.match(stdout.flush(), /aromatic-pc\tstopped/u);
 
-    assert.equal(await cli.run(["instance", "start", "aromatic-pc"]), 0);
+    assert.equal(await runCli(["instance", "start", "aromatic-pc"]), 0);
     assert.match(stdout.flush(), /status: ready/u);
 
     const previousControlPid = controlPid;
-    assert.equal(await cli.run(["restart"]), 0);
+    assert.equal(await runCli(["restart"]), 0);
     assert.match(stdout.flush(), /control: running/u);
     controlPid = await readControlPid(homeDirectory);
     assert.notEqual(controlPid, previousControlPid);
     await ensureProcessExit(previousControlPid);
 
     assert.equal(
-        await cli.run([
+        await runCli([
             "instance",
             "call",
             "aromatic-pc",
@@ -271,7 +272,7 @@ async function runInteractiveCreateFlow(t: { after(callback: () => Promise<void>
     );
     assert.doesNotMatch(await readFile(join(homeDirectory, ".devshell", "control", "config.toml"), "utf8"), /workerBinaryPath/u);
 
-    assert.equal(await cli.run(["stop"]), 0);
+    assert.equal(await runCli(["stop"]), 0);
     controlStopped = true;
     await waitForControlShutdown(xdgRuntimeDir);
     await ensureProcessExit(controlPid);
@@ -304,6 +305,12 @@ function createInstanceHarness(): { attach: (socket: Socket) => void } {
 
 async function handleHarnessEvent(codec: Codec, event: Event): Promise<void> {
     switch (event.name) {
+        case "service.hello":
+            await reply(codec, event, {
+                capabilities: ["request", "stream", "streamResume"],
+                protocolVersion: 1,
+            });
+            return;
         case "instance.list":
             await reply(codec, event, [
                 {

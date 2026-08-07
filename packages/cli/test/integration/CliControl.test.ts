@@ -22,7 +22,12 @@ test("module CLI clients perform control rpc over unix socket", async (t) => {
         const codec = new Codec(SocketChannel.accept(socket), { local: "server" });
         codec.onEvent((event) => {
             methods.push(event.name);
-            const payload: JsonValue = event.name === "instance.list"
+            const payload: JsonValue = event.name === "service.hello"
+                ? {
+                      capabilities: ["request", "stream", "streamResume"],
+                      protocolVersion: 1,
+                  }
+                : event.name === "instance.list"
                 ? [
                       {
                           mcpEnabled: true,
@@ -76,7 +81,7 @@ test("module CLI clients perform control rpc over unix socket", async (t) => {
     assert.equal(instances[0]?.name, "demo-local");
     assert.equal(instances[0]?.snapshot.status, "stopped");
     assert.equal(logs[0]?.message, "ready\n");
-    assert.deepEqual(methods, ["instance.list", "runtime.readLogs"]);
+    assert.deepEqual(methods, ["service.hello", "instance.list", "runtime.readLogs"]);
 });
 
 test("CliMain reports control not running without auto-starting it", async () => {
