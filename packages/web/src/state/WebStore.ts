@@ -185,6 +185,32 @@ export class WebStore {
         );
     }
 
+    async disableContext(ctxId: string): Promise<boolean> {
+        const generation = this.#generation;
+        return await this.#operations.run(
+            `context-disable:${ctxId}`,
+            "Context disabled.",
+            generation,
+            async (signal) => {
+                await this.#commands.disableContext(ctxId);
+                if (signal.aborted || !this.#current(generation)) return;
+            },
+        );
+    }
+
+    async renewContext(ctxId: string): Promise<boolean> {
+        const generation = this.#generation;
+        return await this.#operations.run(
+            `context-renew:${ctxId}`,
+            "Context renewed.",
+            generation,
+            async (signal) => {
+                await this.#commands.renewContext(ctxId);
+                if (signal.aborted || !this.#current(generation)) return;
+            },
+        );
+    }
+
     async start(instance: string): Promise<void> {
         await this.#lifecycle(instance, "start");
     }

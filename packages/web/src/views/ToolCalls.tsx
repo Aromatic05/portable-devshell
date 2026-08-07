@@ -104,6 +104,13 @@ export function ToolCalls({
         ? `context-message:${effectiveFilters.instance}:${ctxId}`
         : undefined;
     const interactive = state.connection === "online" && !disabled;
+    const contextRecord = concreteContext
+        ? state.readModel.contexts.find(
+              (record) =>
+                  record.ctxId === ctxId &&
+                  record.instance === effectiveFilters.instance,
+          )
+        : undefined;
 
     useEffect(() => {
         if (
@@ -158,6 +165,26 @@ export function ToolCalls({
             <h3 id="context-comment-title">Comment for next tool call</h3>
             {concreteContext ? <>
                 <p className="hint">{effectiveFilters.instance} · {ctxId}</p>
+                {contextRecord === undefined ? null : <p className="hint">
+                    Status: {contextRecord.status} · expires {contextRecord.expiresAt}
+                </p>}
+                {contextRecord !== undefined && contextRecord.status !== "disabled" ? <p>
+                    <button
+                        className="danger"
+                        disabled={!interactive}
+                        onClick={() => void store.disableContext(ctxId)}
+                        type="button"
+                    >
+                        Disable Context
+                    </button>{" "}
+                    <button
+                        disabled={!interactive}
+                        onClick={() => void store.renewContext(ctxId)}
+                        type="button"
+                    >
+                        Renew Context
+                    </button>
+                </p> : null}
                 <form onSubmit={(event) => void submit(event)}>
                     <label>
                         Comment
