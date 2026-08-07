@@ -11,12 +11,13 @@ import {
     errorCodes,
     type JsonValue
 } from "@portable-devshell/shared";
+import { encodeFrame, FrameBuffer } from "@portable-devshell/shared/transport/frame";
 import {
     WorkerTransportDriverLocal,
     WorkerBinary,
     WorkerInstanceFactory,
-    WorkerRpcFrameReader,
-    WorkerRpcFrameWriter,
+    decodeWorkerRpcMessage,
+    encodeWorkerRpcMessage,
     type WorkerCommandResult,
     type WorkerCommandTransport,
     type WorkerRpcResponseEnvelope
@@ -873,7 +874,7 @@ function createWorkerInstanceHarness(): {
         | {
               exitResolve?: (value: { code: number | null; signal: NodeJS.Signals | null }) => void;
               stdout: PassThrough;
-              writer: WorkerRpcFrameWriter;
+              write(value: JsonValue): void;
           }
         | undefined;
 
@@ -907,14 +908,17 @@ function createWorkerInstanceHarness(): {
             const stdout = new PassThrough();
             const stdin = new PassThrough();
             const stderr = new PassThrough();
-            const reader = new WorkerRpcFrameReader();
-            const writer = new WorkerRpcFrameWriter(stdout);
+            const reader = new FrameBuffer();
+            const write = (value: JsonValue) => {
+                stdout.write(encodeFrame(encodeWorkerRpcMessage(value)));
+            };
             let exitResolve: ((value: { code: number | null; signal: NodeJS.Signals | null }) => void) | undefined;
 
             stdin.on("data", (chunk: Uint8Array) => {
                 const frames = reader.push(chunk);
 
-                for (const frame of frames) {
+                for (const payload of frames) {
+                    const frame = decodeWorkerRpcMessage(payload);
                     if (!isRequestFrame(frame)) {
                         continue;
                     }
@@ -926,12 +930,12 @@ function createWorkerInstanceHarness(): {
                     methodWaiters.get(frame.method)?.splice(0).forEach((resolve) => resolve());
 
                     if (frame.method === "worker.ping" || frame.method === "worker.handshake" || frame.method === "tools.list") {
-                        void writer.write(createLifecycleResponse(frame.method, frame.id, tools) as unknown as JsonValue);
+                        write(createLifecycleResponse(frame.method, frame.id, tools) as unknown as JsonValue);
                     }
                 }
             });
 
-            activeProcess = { stdout, writer };
+            activeProcess = { stdout, write };
             return {
                 stdin,
                 stdout,
@@ -978,7 +982,7 @@ function createWorkerInstanceHarness(): {
                 pending.delete(method);
             }
 
-            void activeProcess?.writer.write({
+            activeProcess?.write({
                 id: requestId,
                 ok: true,
                 result,

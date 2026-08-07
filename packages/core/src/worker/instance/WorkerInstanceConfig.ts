@@ -2,7 +2,7 @@ import type { ApprovalPolicy, ApprovalTimeout, EffectiveSecurityMode, InstanceNa
 
 import type { WorkerCommandTransport } from "../command/WorkerCommandTransport.js";
 import type { WorkerHandshakeParams } from "../protocol/WorkerProtocolClient.js";
-import type { WorkerRpcConnector } from "../rpc/WorkerRpcChannel.js";
+import type { WorkerRpcConnector } from "../rpc/WorkerRpcBridge.js";
 import { resolveWorkerToolSchedulerLimits, type WorkerToolSchedulerLimits } from "../tool/WorkerToolCallScheduler.js";
 import {
     resolveAuditStorageLimits,

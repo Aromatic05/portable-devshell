@@ -1,15 +1,15 @@
-import { createError, errorCodes } from "@portable-devshell/shared";
+import { createError, errorCodes, type Channel } from "@portable-devshell/shared";
 
-import type { WorkerRpcChannel, WorkerRpcConnector } from "./WorkerRpcChannel.js";
+import type { WorkerRpcConnector } from "./WorkerRpcBridge.js";
 
 export class WorkerRpcInboundConnector implements WorkerRpcConnector {
-    #channel?: WorkerRpcChannel;
+    #channel?: Channel;
 
-    attach(channel: WorkerRpcChannel): void {
+    attach(channel: Channel): void {
         this.#channel = channel;
     }
 
-    detach(channel?: WorkerRpcChannel): void {
+    detach(channel?: Channel): void {
         if (channel === undefined || this.#channel === channel) {
             this.#channel = undefined;
         }
@@ -19,7 +19,7 @@ export class WorkerRpcInboundConnector implements WorkerRpcConnector {
         return this.#channel !== undefined;
     }
 
-    async connect(signal?: AbortSignal): Promise<WorkerRpcChannel> {
+    async connect(signal?: AbortSignal): Promise<Channel> {
         if (signal?.aborted === true) {
             throw signal.reason instanceof Error
                 ? signal.reason

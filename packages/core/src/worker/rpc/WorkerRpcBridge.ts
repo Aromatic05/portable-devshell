@@ -1,20 +1,26 @@
 import { randomUUID } from "node:crypto";
 
-import { isControlErrorBody, type JsonValue } from "@portable-devshell/shared";
+import { isControlErrorBody, type Channel, type JsonValue } from "@portable-devshell/shared";
 
 import { readWorkerAbortReason } from "../WorkerAbortReason.js";
 import type { WorkerCommandTransport } from "../command/WorkerCommandTransport.js";
 import type { WorkerRpcOptions } from "../command/WorkerCommandOptions.js";
-import type { WorkerRpcChannel, WorkerRpcConnector } from "./WorkerRpcChannel.js";
 import { WorkerRpcError } from "./WorkerRpcError.js";
 import type {
     WorkerRpcNotificationEnvelope,
     WorkerRpcRequestEnvelope,
     WorkerRpcResponseEnvelope
 } from "./WorkerRpcEnvelope.js";
-import { WorkerRpcProcessConnector } from "./WorkerRpcProcessChannel.js";
+import { decodeWorkerRpcMessage, encodeWorkerRpcMessage } from "./WorkerRpcEnvelope.js";
+import { WorkerRpcProcessConnector } from "./WorkerRpcProcessAdapter.js";
 
 const DEFAULT_CANCELLATION_RETENTION_MS = 30_000;
+
+export interface WorkerRpcConnector {
+    attach?(channel: Channel): void;
+    connect(signal?: AbortSignal): Promise<Channel>;
+    detach?(channel?: Channel): void;
+}
 
 interface PendingResponse {
     cleanup(): void;
@@ -25,7 +31,7 @@ interface PendingResponse {
 
 interface ConnectingHandoff {
     reject(error: Error): void;
-    resolve(channel: WorkerRpcChannel): void;
+    resolve(channel: Channel): void;
 }
 
 type WorkerRpcResponseFrame = Record<string, JsonValue> & WorkerRpcResponseEnvelope;
@@ -47,11 +53,11 @@ export class WorkerRpcBridge {
     readonly #disconnectListeners = new Set<(error: WorkerRpcError) => void>();
     readonly #notificationListeners = new Set<(notification: WorkerRpcNotificationEnvelope) => void>();
     readonly #pending = new Map<string, PendingResponse>();
-    #channel?: WorkerRpcChannel;
+    #channel?: Channel;
     #connectionGeneration = 0;
     #connectAbortController?: AbortController;
     #connectingHandoff?: ConnectingHandoff;
-    #connectPromise?: Promise<WorkerRpcChannel>;
+    #connectPromise?: Promise<Channel>;
 
     constructor(options: WorkerRpcBridgeOptions) {
         if (options.connector === undefined && options.transport === undefined) {
@@ -138,13 +144,13 @@ export class WorkerRpcBridge {
             if (this.#pending.get(request.id) !== pending) {
                 return;
             }
-            void channel.send(request as unknown as JsonValue).catch((error: unknown) => {
+            void channel.send(encodeWorkerRpcMessage(request as unknown as JsonValue)).catch((error: unknown) => {
                 this.#disconnectChannel(channel, this.#createDisconnectError(error));
             });
         });
     }
 
-    async replaceChannel(channel: WorkerRpcChannel): Promise<void> {
+    async replaceChannel(channel: Channel): Promise<void> {
         this.#connectionGeneration += 1;
         const handoff = this.#takeConnectingHandoff();
         const connectAbortController = this.#takeConnectAbortController();
@@ -185,15 +191,15 @@ export class WorkerRpcBridge {
         this.#rejectPending(error);
     }
 
-    async #ensureChannel(): Promise<WorkerRpcChannel> {
+    async #ensureChannel(): Promise<Channel> {
         if (this.#channel !== undefined) {
             return this.#channel;
         }
         if (this.#connectPromise === undefined) {
             const generation = this.#connectionGeneration;
             let rejectHandoff!: (error: Error) => void;
-            let resolveHandoff!: (channel: WorkerRpcChannel) => void;
-            const handoff = new Promise<WorkerRpcChannel>((resolve, reject) => {
+            let resolveHandoff!: (channel: Channel) => void;
+            const handoff = new Promise<Channel>((resolve, reject) => {
                 resolveHandoff = resolve;
                 rejectHandoff = reject;
             });
@@ -245,20 +251,22 @@ export class WorkerRpcBridge {
         return await this.#connectPromise;
     }
 
-    #attachChannel(channel: WorkerRpcChannel): void {
+    #attachChannel(channel: Channel): void {
         this.#channel = channel;
-        channel.onMessage((message) => {
-            if (this.#channel !== channel) {
-                return;
+        channel.onFrame((frame) => {
+            if (this.#channel !== channel) return;
+            try {
+                this.#handleMessage(channel, decodeWorkerRpcMessage(frame));
+            } catch (error) {
+                this.#disconnectChannel(channel, this.#createDisconnectError(error));
             }
-            this.#handleMessage(channel, message);
         });
-        channel.onDisconnect((cause) => {
-            this.#disconnectChannel(channel, this.#createDisconnectError(cause));
+        channel.onClose((cause) => {
+            this.#disconnectChannel(channel, this.#createDisconnectError(cause ?? new Error("Worker RPC channel closed.")));
         });
     }
 
-    #handleMessage(channel: WorkerRpcChannel, message: JsonValue): void {
+    #handleMessage(channel: Channel, message: JsonValue): void {
         if (isWorkerRpcNotificationEnvelope(message)) {
             for (const listener of [...this.#notificationListeners]) {
                 try {
@@ -287,7 +295,7 @@ export class WorkerRpcBridge {
         pending.resolve(message);
     }
 
-    #disconnectChannel(channel: WorkerRpcChannel, error: WorkerRpcError): void {
+    #disconnectChannel(channel: Channel, error: WorkerRpcError): void {
         if (this.#channel !== channel) {
             return;
         }
@@ -309,12 +317,12 @@ export class WorkerRpcBridge {
         }
     }
 
-    async #replayPending(channel: WorkerRpcChannel): Promise<void> {
+    async #replayPending(channel: Channel): Promise<void> {
         if (!this.#preservePendingOnDisconnect || this.#pending.size === 0) {
             return;
         }
         for (const pending of this.#pending.values()) {
-            await channel.send(pending.request as unknown as JsonValue);
+            await channel.send(encodeWorkerRpcMessage(pending.request as unknown as JsonValue));
         }
     }
 
@@ -380,7 +388,7 @@ export class WorkerRpcBridge {
             }
             return;
         }
-        void channel.send(cancellation as unknown as JsonValue).catch((error: unknown) => {
+        void channel.send(encodeWorkerRpcMessage(cancellation as unknown as JsonValue)).catch((error: unknown) => {
             if (!this.#preservePendingOnDisconnect) {
                 this.#pending.delete(cancellation.id);
                 pending.cleanup();
@@ -416,7 +424,7 @@ export class WorkerRpcBridge {
         );
     }
 
-    #closeChannel(channel: WorkerRpcChannel): void {
+    #closeChannel(channel: Channel): void {
         try {
             channel.close();
         } catch (error) {

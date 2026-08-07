@@ -34,7 +34,7 @@ import type {
     WorkerProtocolClient
 } from "../protocol/WorkerProtocolClient.js";
 import type { WorkerRpcBridge } from "../rpc/WorkerRpcBridge.js";
-import type { WorkerRpcChannel } from "../rpc/WorkerRpcChannel.js";
+import type { Channel } from "@portable-devshell/shared";
 import type { WorkerToolCatalog } from "../tool/WorkerToolCatalog.js";
 import type { WorkerToolInvoker } from "../tool/WorkerToolInvoker.js";
 import type { WorkerToolCallScheduler } from "../tool/WorkerToolCallScheduler.js";
@@ -152,7 +152,7 @@ export class WorkerInstance {
     }
 
     async acceptReverseChannel(
-        channel: WorkerRpcChannel,
+        channel: Channel,
         input: { connectedAt?: string; generation: number; transport: ReverseTransport }
     ): Promise<InstanceSnapshot> {
         return await this.#connection.acceptReverseChannel(channel, input);

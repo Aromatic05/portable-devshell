@@ -3,46 +3,37 @@ import assert from "node:assert/strict";
 import { join } from "node:path";
 import test from "node:test";
 
-import type { WorkerRpcChannel } from "@portable-devshell/core/testing";
-import { asInstanceName, type InstanceSnapshot, type JsonValue } from "@portable-devshell/shared";
+import { asInstanceName, type Channel, type InstanceSnapshot, type JsonValue } from "@portable-devshell/shared";
 
 import { ReverseConnectionService } from "../../src/control/reverse/connection/ReverseConnectionService.ts";
 import { ReverseCredentialService } from "../../src/control/reverse/credential/ReverseCredentialService.ts";
 import { ReverseCredentialStore } from "../../src/control/reverse/credential/ReverseCredentialStore.ts";
 import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
 
-class MemoryRpcChannel implements WorkerRpcChannel {
-    readonly sent: JsonValue[] = [];
-    readonly disconnectListeners = new Set<(error: unknown) => void>();
-    readonly messageListeners = new Set<(message: JsonValue) => void>();
+class MemoryRpcChannel implements Channel {
+    readonly sent: Uint8Array[] = [];
+    readonly closeListeners = new Set<(error?: Error) => void>();
+    readonly frameListeners = new Set<(frame: Uint8Array) => void>();
     closed = false;
 
-    close(): void {
+    close(error?: Error): void {
         if (this.closed) return;
         this.closed = true;
-        for (const listener of this.disconnectListeners) {
-            listener(new Error("closed"));
-        }
+        for (const listener of [...this.closeListeners]) listener(error ?? new Error("closed"));
     }
 
-    onDisconnect(listener: (error: unknown) => void): () => void {
-        this.disconnectListeners.add(listener);
-        return () => this.disconnectListeners.delete(listener);
+    onClose(listener: (error?: Error) => void): () => void {
+        this.closeListeners.add(listener);
+        return () => this.closeListeners.delete(listener);
     }
 
-    onMessage(listener: (message: JsonValue) => void): () => void {
-        this.messageListeners.add(listener);
-        return () => this.messageListeners.delete(listener);
+    onFrame(listener: (frame: Uint8Array) => void): () => void {
+        this.frameListeners.add(listener);
+        return () => this.frameListeners.delete(listener);
     }
 
-    async send(message: JsonValue): Promise<void> {
-        this.sent.push(message);
-    }
-
-    emit(message: JsonValue): void {
-        for (const listener of this.messageListeners) {
-            listener(message);
-        }
+    async send(frame: Uint8Array): Promise<void> {
+        this.sent.push(Uint8Array.from(frame));
     }
 }
 
@@ -110,14 +101,14 @@ test("ReverseConnectionService owns generation replacement and disconnect state"
     const home = await createTestTempDirectory("reverse-generation-service");
     const credentialStore = new ReverseCredentialStore(home);
     let generation = 0;
-    const accepted: Array<{ channel: WorkerRpcChannel; generation: number; transport: string }> = [];
+    const accepted: Array<{ channel: Channel; generation: number; transport: string }> = [];
     const descriptor = {
         name: asInstanceName("remote-test"),
         provider: "reverse" as const,
         reverseConnector: {} as never,
         worker: {
             acceptReverseChannel: async (
-                channel: WorkerRpcChannel,
+                channel: Channel,
                 options: { generation: number; transport: "sse" | "wss" }
             ): Promise<InstanceSnapshot> => {
                 generation = options.generation;
@@ -369,7 +360,7 @@ function reverseSnapshot(): InstanceSnapshot {
 
 function reverseDescriptor(
     acceptReverseChannel: (
-        channel: WorkerRpcChannel,
+        channel: Channel,
         options: { generation: number; transport: "sse" | "wss" }
     ) => Promise<InstanceSnapshot>
 ) {

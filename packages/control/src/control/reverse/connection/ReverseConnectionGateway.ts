@@ -5,6 +5,8 @@ import type { HttpHost } from "@portable-devshell/mcp";
 import {
     createError,
     errorCodes,
+    LengthPrefixedChannel,
+    WebSocketServerChannel,
     type JsonValue,
     type ReverseEnrollmentRequest,
     type ReverseUpstreamBatch
@@ -18,7 +20,6 @@ import {
 import { ReverseCredentialStore } from "../credential/ReverseCredentialStore.js";
 import type { ReverseInstanceLookupPort } from "../ReverseInstancePort.js";
 import { ReverseRpcSseChannel } from "../rpc/ReverseRpcSseChannel.js";
-import { ReverseRpcWebSocketChannel } from "../rpc/ReverseRpcWebSocketChannel.js";
 
 const ENROLL_SUFFIX = "/reverse/v1/enroll";
 const WSS_SUFFIX = "/reverse/v1/connect";
@@ -110,7 +111,9 @@ export class ReverseConnectionGateway {
                 socket,
                 head,
                 (webSocket) => {
-                    const channel = new ReverseRpcWebSocketChannel(webSocket);
+                    const channel = new LengthPrefixedChannel(
+                        new WebSocketServerChannel(webSocket as never),
+                    );
                     void this.#connectionService.activate(
                         identity,
                         "wss",

@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import type { JsonValue } from "@portable-devshell/shared";
+import type { Channel, JsonValue } from "@portable-devshell/shared";
 import {
     WorkerRpcBridge,
     WorkerRpcClient,
-    type WorkerRpcChannel,
+    decodeWorkerRpcMessage,
+    encodeWorkerRpcMessage,
     type WorkerRpcConnector,
     type WorkerRpcRequestEnvelope,
     type WorkerRpcResponseEnvelope
@@ -14,7 +15,7 @@ import {
 class DeferredConnector implements WorkerRpcConnector {
     channel?: MemoryChannel;
 
-    async connect(): Promise<WorkerRpcChannel> {
+    async connect(): Promise<Channel> {
         if (this.channel === undefined) {
             throw new Error("reverse channel is offline");
         }
@@ -22,52 +23,50 @@ class DeferredConnector implements WorkerRpcConnector {
     }
 }
 
-class MemoryChannel implements WorkerRpcChannel {
+class MemoryChannel implements Channel {
     readonly sent: WorkerRpcRequestEnvelope[] = [];
     closed = false;
     closeError?: Error;
     sendError?: Error;
-    readonly #messages = new Set<(message: JsonValue) => void>();
-    readonly #disconnects = new Set<(error: unknown) => void>();
+    readonly #frames = new Set<(frame: Uint8Array) => void>();
+    readonly #closes = new Set<(error?: Error) => void>();
 
-    async send(message: JsonValue): Promise<void> {
-        if (this.sendError !== undefined) {
-            throw this.sendError;
-        }
-        this.sent.push(message as unknown as WorkerRpcRequestEnvelope);
+    async send(frame: Uint8Array): Promise<void> {
+        if (this.sendError !== undefined) throw this.sendError;
+        this.sent.push(decodeWorkerRpcMessage(frame) as unknown as WorkerRpcRequestEnvelope);
     }
 
-    onMessage(listener: (message: JsonValue) => void): () => void {
-        this.#messages.add(listener);
-        return () => this.#messages.delete(listener);
+    onFrame(listener: (frame: Uint8Array) => void): () => void {
+        this.#frames.add(listener);
+        return () => this.#frames.delete(listener);
     }
 
-    onDisconnect(listener: (error: unknown) => void): () => void {
-        this.#disconnects.add(listener);
-        return () => this.#disconnects.delete(listener);
+    onClose(listener: (error?: Error) => void): () => void {
+        this.#closes.add(listener);
+        return () => this.#closes.delete(listener);
     }
 
-    close(): void {
-        if (this.closeError !== undefined) {
-            throw this.closeError;
-        }
+    close(error?: Error): void {
+        if (this.closeError !== undefined) throw this.closeError;
+        if (this.closed) return;
         this.closed = true;
+        for (const listener of [...this.#closes]) listener(error);
     }
 
     disconnect(): void {
-        for (const listener of this.#disconnects) {
-            listener(new Error("network lost"));
-        }
+        if (this.closed) return;
+        this.closed = true;
+        const error = new Error("network lost");
+        for (const listener of [...this.#closes]) listener(error);
     }
 
     respond(id: string, result: JsonValue): void {
-        for (const listener of this.#messages) {
-            listener({ type: "response", id, ok: true, result });
-        }
+        this.publish({ type: "response", id, ok: true, result });
     }
 
     publish(message: JsonValue): void {
-        for (const listener of this.#messages) listener(message);
+        const frame = encodeWorkerRpcMessage(message);
+        for (const listener of [...this.#frames]) listener(frame);
     }
 }
 

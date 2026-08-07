@@ -1,4 +1,4 @@
-import type { WorkerRpcChannel } from "@portable-devshell/core";
+import type { Channel } from "@portable-devshell/shared";
 import {
     createError,
     errorCodes,
@@ -15,7 +15,7 @@ import type {
 import { ReverseRpcSseChannel } from "../rpc/ReverseRpcSseChannel.js";
 
 interface ActiveReverseConnection {
-    channel: WorkerRpcChannel;
+    channel: Channel;
     generation: number;
     transport: "sse" | "wss";
 }
@@ -80,7 +80,7 @@ export class ReverseConnectionService {
     async activate(
         identity: ReverseConnectionIdentity,
         transport: "sse" | "wss",
-        channel: WorkerRpcChannel
+        channel: Channel
     ): Promise<void> {
         try {
             await this.#exclusive(identity.descriptor.name, async () => {
@@ -126,7 +126,7 @@ export class ReverseConnectionService {
     #prepareActivation(
         identity: ReverseConnectionIdentity,
         transport: "sse" | "wss",
-        channel: WorkerRpcChannel
+        channel: Channel
     ): ActiveReverseConnection {
         const previous = this.#active.get(identity.descriptor.name);
         const previousGeneration = Math.max(
@@ -157,7 +157,7 @@ export class ReverseConnectionService {
             transport
         };
         this.#active.set(identity.descriptor.name, active);
-        channel.onDisconnect(() => {
+        channel.onClose(() => {
             if (this.#active.get(identity.descriptor.name) === active) {
                 this.#active.delete(identity.descriptor.name);
             }
@@ -219,7 +219,7 @@ export class ReverseConnectionService {
         this.#active.clear();
     }
 
-    #assertRunning(channel?: WorkerRpcChannel): void {
+    #assertRunning(channel?: Channel): void {
         if (!this.#stopped) {
             return;
         }

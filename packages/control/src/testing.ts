@@ -24,7 +24,6 @@ export * from "./control/reverse/connection/ReverseConnectionGateway.js";
 export * from "./control/reverse/credential/ReverseCredentialService.js";
 export * from "./control/reverse/credential/ReverseCredentialStore.js";
 export * from "./control/reverse/rpc/ReverseRpcSseChannel.js";
-export * from "./control/reverse/rpc/ReverseRpcWebSocketChannel.js";
 export * from "./instance/todo/TodoService.js";
 export * from "./composition/ControlRouteComposition.js";
 export * from "./composition/runtime/ControlRuntime.js";

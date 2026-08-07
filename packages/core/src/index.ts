@@ -15,12 +15,7 @@ export type {
     WorkerArtifactReceiveWriteInput,
     WorkerArtifactReceiveWriteResult
 } from "./worker/protocol/WorkerProtocolClient.js";
-export {
-    WorkerRpcChannelBase
-} from "./worker/rpc/WorkerRpcChannel.js";
-export type {
-    WorkerRpcChannel
-} from "./worker/rpc/WorkerRpcChannel.js";
+export type { WorkerRpcConnector } from "./worker/rpc/WorkerRpcBridge.js";
 export { WorkerRpcInboundConnector } from "./worker/rpc/WorkerRpcInboundConnector.js";
 export { WorkerTransportFactory } from "./worker/transport/factory/WorkerTransportFactory.js";
 export type { WorkerTransportFactoryOptions } from "./worker/transport/factory/WorkerTransportFactory.js";

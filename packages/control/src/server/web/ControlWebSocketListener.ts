@@ -5,7 +5,9 @@ import type { HttpHost } from "@portable-devshell/mcp";
 import {
     CONTROL_REMOTE_RPC_PATH,
     CONTROL_REMOTE_RPC_SUBPROTOCOL,
-    CONTROL_WEB_BASE_PATH
+    CONTROL_WEB_BASE_PATH,
+    WebSocketServerChannel,
+    type Channel,
 } from "@portable-devshell/shared";
 import { TRANSPORT_MAX_FRAME_SIZE } from "@portable-devshell/shared/transport/frame";
 import { WebSocketServer } from "ws";
@@ -20,7 +22,6 @@ import {
     type ControlWebSocketAccess,
     type ControlWebSocketAccessAuthorizer
 } from "./ControlWebSocketAccessService.js";
-import { ControlWebSocketChannel } from "./ControlWebSocketChannel.js";
 
 export interface ControlWebSocketListenerOptions {
     access?: ControlWebSocketAccessAuthorizer;
@@ -36,7 +37,7 @@ export class ControlWebSocketListener implements ControlChannelListener {
     readonly #access: ControlWebSocketAccessAuthorizer;
     readonly #assetDirectory?: string;
     readonly #basePath: string;
-    readonly #channelsByAccess = new Map<string, Set<ControlWebSocketChannel>>();
+    readonly #channelsByAccess = new Map<string, Set<Channel>>();
     readonly #http: HttpHost;
     readonly #paths: Array<{
         accessKind: ControlWebSocketAccess["kind"];
@@ -168,7 +169,7 @@ export class ControlWebSocketListener implements ControlChannelListener {
             return;
         }
         server.handleUpgrade(request, socket, head, (webSocket) => {
-            const channel = new ControlWebSocketChannel(webSocket);
+            const channel = new WebSocketServerChannel(webSocket as never);
             this.#registerAccessChannel(access.key, channel);
             accept({
                 admission: {
@@ -187,7 +188,7 @@ export class ControlWebSocketListener implements ControlChannelListener {
         });
     }
 
-    #registerAccessChannel(key: string, channel: ControlWebSocketChannel): void {
+    #registerAccessChannel(key: string, channel: Channel): void {
         const channels = this.#channelsByAccess.get(key) ?? new Set();
         channels.add(channel);
         this.#channelsByAccess.set(key, channels);

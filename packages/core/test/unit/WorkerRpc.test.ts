@@ -5,6 +5,7 @@ import { PassThrough } from "node:stream";
 import test from "node:test";
 
 import { errorCodes, type JsonValue } from "@portable-devshell/shared";
+import { encodeFrame, FrameBuffer } from "@portable-devshell/shared/transport/frame";
 import {
     WorkerTransportDriverLocal,
     WorkerBinary,
@@ -12,8 +13,8 @@ import {
     WorkerRpcBridge,
     WorkerRpcClient,
     WorkerRpcError,
-    WorkerRpcFrameReader,
-    WorkerRpcFrameWriter,
+    decodeWorkerRpcMessage,
+    encodeWorkerRpcMessage,
     workerRpcDisconnectedErrorCode,
     type WorkerCommandResult,
     type WorkerCommandTransport,
@@ -266,8 +267,7 @@ function createRpcHarness(options?: { slowMethods?: Set<string> }): {
     const stdout = new PassThrough();
     const stdin = new PassThrough();
     const stderr = new PassThrough();
-    const reader = new WorkerRpcFrameReader();
-    const writer = new WorkerRpcFrameWriter(stdout);
+    const reader = new FrameBuffer();
     let spawnCount = 0;
     let exitResolve: ((value: { code: number | null; signal: NodeJS.Signals | null }) => void) | undefined;
     const methodWaiters = new Map<string, Array<() => void>>();
@@ -297,7 +297,8 @@ function createRpcHarness(options?: { slowMethods?: Set<string> }): {
     stdin.on("data", (chunk: Uint8Array) => {
         const frames = reader.push(chunk);
 
-        for (const frame of frames) {
+        for (const payload of frames) {
+            const frame = decodeWorkerRpcMessage(payload);
             if (!isRequestFrame(frame)) {
                 continue;
             }
@@ -311,7 +312,7 @@ function createRpcHarness(options?: { slowMethods?: Set<string> }): {
                 continue;
             }
 
-            void writer.write(createResponse(frame.method, frame.id) as unknown as JsonValue);
+            stdout.write(encodeFrame(encodeWorkerRpcMessage(createResponse(frame.method, frame.id) as unknown as JsonValue)));
         }
     });
 

@@ -1,28 +1,19 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { errorCodes, type JsonValue } from "@portable-devshell/shared";
-import {
-    WorkerRpcInboundConnector,
-    type WorkerRpcChannel
-} from "@portable-devshell/core/testing";
+import { errorCodes, type Channel } from "@portable-devshell/shared";
+import { WorkerRpcInboundConnector } from "@portable-devshell/core/testing";
 
-class MemoryChannel implements WorkerRpcChannel {
+class MemoryChannel implements Channel {
     closed = false;
 
     close(): void {
         this.closed = true;
     }
 
-    onDisconnect(): () => void {
-        return () => undefined;
-    }
-
-    onMessage(): () => void {
-        return () => undefined;
-    }
-
-    async send(_message: JsonValue): Promise<void> {}
+    onClose(): () => void { return () => undefined; }
+    onFrame(): () => void { return () => undefined; }
+    async send(_frame: Uint8Array): Promise<void> {}
 }
 
 test("inbound connector keeps the attached reverse channel until the matching channel detaches", async () => {

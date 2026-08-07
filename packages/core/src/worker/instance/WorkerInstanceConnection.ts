@@ -14,7 +14,7 @@ import type { InstanceStateUpdate } from "../../instance/state/InstanceStateMach
 import type { InstanceSnapshot } from "../../instance/state/InstanceStateSnapshot.js";
 import type { WorkerProtocolClient, WorkerHandshakeResult } from "../protocol/WorkerProtocolClient.js";
 import type { WorkerRpcBridge } from "../rpc/WorkerRpcBridge.js";
-import type { WorkerRpcChannel } from "../rpc/WorkerRpcChannel.js";
+import type { Channel } from "@portable-devshell/shared";
 import type { WorkerToolCatalog } from "../tool/WorkerToolCatalog.js";
 import type { ResolvedWorkerInstanceConfig } from "./WorkerInstanceConfig.js";
 import { getErrorCode, isKnownErrorCode, readErrorMessage, wrapWorkerCommandError } from "./WorkerInstanceError.js";
@@ -161,7 +161,7 @@ export class WorkerInstanceConnection {
     }
 
     async acceptReverseChannel(
-        channel: WorkerRpcChannel,
+        channel: Channel,
         input: { connectedAt?: string; generation: number; transport: ReverseTransport }
     ): Promise<InstanceSnapshot> {
         this.#requireSelfManaged();

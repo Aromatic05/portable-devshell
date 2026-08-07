@@ -3,12 +3,16 @@ import assert from "node:assert/strict";
 import { join } from "node:path";
 import test from "node:test";
 
-import { WorkerInstanceFactory, WorkerRpcInboundConnector } from "@portable-devshell/core/testing";
+import {
+    WorkerInstanceFactory,
+    WorkerRpcInboundConnector,
+    decodeWorkerRpcMessage,
+    encodeWorkerRpcMessage,
+} from "@portable-devshell/core/testing";
 import { HttpHost } from "@portable-devshell/mcp/testing";
 import { asInstanceName, asWorkspacePath, type JsonValue } from "@portable-devshell/shared";
+import { decodeFrame, encodeFrame } from "@portable-devshell/shared/transport/frame";
 import WebSocket from "ws";
-
-import { ReverseRpcFrameCodec as FrameCodec } from "../../src/control/reverse/rpc/ReverseRpcFrameCodec.ts";
 
 import {
     InstanceRegistry,
@@ -219,7 +223,7 @@ test("SSE plus POST fallback completes RPC handshake and deduplicates repeated u
                 if (dataLine === undefined) {
                     continue;
                 }
-                const request = FrameCodec.decode(Buffer.from(dataLine.slice(5).trim(), "base64")) as Record<
+                const request = decodeWorkerRpcMessage(decodeFrame(Buffer.from(dataLine.slice(5).trim(), "base64"))) as Record<
                     string,
                     JsonValue
                 >;
@@ -229,12 +233,12 @@ test("SSE plus POST fallback completes RPC handshake and deduplicates repeated u
                 const body = {
                     frames: [
                         {
-                            frame: FrameCodec.encode({
+                            frame: encodeFrame(encodeWorkerRpcMessage({
                                 id: String(request.id),
                                 ok: true,
                                 result: responseFor(method),
                                 type: "response"
-                            }).toString("base64"),
+                            })).toString("base64"),
                             seq: upstreamSeq
                         }
                     ],
@@ -293,19 +297,19 @@ function connectWorker(port: number, token: string, generation: number): {
     });
     socket.on("message", (data, isBinary) => {
         assert.equal(isBinary, true);
-        const request = FrameCodec.decode(Buffer.isBuffer(data) ? data : Buffer.from(data as ArrayBuffer)) as Record<
+        const request = decodeWorkerRpcMessage(decodeFrame(Buffer.isBuffer(data) ? data : Buffer.from(data as ArrayBuffer))) as Record<
             string,
             JsonValue
         >;
         const id = String(request.id);
         const method = String(request.method);
         methods.push(method);
-        socket.send(FrameCodec.encode({
+        socket.send(encodeFrame(encodeWorkerRpcMessage({
             id,
             ok: true,
             result: responseFor(method),
             type: "response"
-        }));
+        })));
     });
     socket.on("error", (error) => errors.push(error.message));
     return {

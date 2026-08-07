@@ -1,9 +1,10 @@
 import type { Readable, Writable } from "node:stream";
 
-import { createError, errorCodes } from "@portable-devshell/shared";
+import { createError, errorCodes, FramedStreamChannel, type Channel } from "@portable-devshell/shared";
 
 import type { WorkerCommandTransport } from "../command/WorkerCommandTransport.js";
 import type { WorkerRpcOptions } from "../command/WorkerCommandOptions.js";
+import type { WorkerRpcConnector } from "./WorkerRpcBridge.js";
 import type { WorkerRpcProcess } from "./WorkerRpcProcess.js";
 
 export class WorkerRpcProcessAdapter {
@@ -105,4 +106,26 @@ function abortError(signal: AbortSignal): Error {
     return signal.reason instanceof Error
         ? signal.reason
         : new Error("Worker RPC process connection was aborted.");
+}
+
+export class WorkerRpcProcessConnector implements WorkerRpcConnector {
+    readonly #transport: WorkerCommandTransport;
+    readonly #options: WorkerRpcOptions;
+
+    constructor(transport: WorkerCommandTransport, options: WorkerRpcOptions) {
+        this.#transport = transport;
+        this.#options = options;
+    }
+
+    async connect(signal?: AbortSignal): Promise<Channel> {
+        const process = await WorkerRpcProcessAdapter.spawn(this.#transport, this.#options, signal);
+        const channel = new FramedStreamChannel(process.stdout, process.stdin, {
+            closeTransport: () => { process.kill("SIGTERM"); },
+        });
+        void process.exit.then(
+            (result) => channel.close(new Error(`rpc process exited with code ${String(result.code)} signal ${String(result.signal)}`)),
+            (error) => channel.close(error instanceof Error ? error : new Error(String(error))),
+        );
+        return channel;
+    }
 }
