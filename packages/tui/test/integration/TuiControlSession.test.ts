@@ -268,14 +268,10 @@ test("TuiControlSession does not poll OAuth approvals when OAuth is unavailable"
 
     await session.start();
     await waitFor(() => session.store.getState().connection.status === "connected");
-    let notifications = 0;
-    const unsubscribe = session.store.subscribe(() => {
-        notifications += 1;
-    });
-    t.after(unsubscribe);
+    const readsAfterInitialLoad = server.oauthApprovalReads();
 
     await new Promise((resolve) => setTimeout(resolve, 1_100));
-    assert.equal(notifications, 0);
+    assert.equal(server.oauthApprovalReads(), readsAfterInitialLoad);
 });
 
 test("TuiControlSession drops events that have no TUI presentation", async (t) => {
@@ -316,6 +312,7 @@ test("module TUI clients send explicit instance operations and preserve start re
     });
 
     await server.start();
+    await clients.service.hello();
 
     const refreshed = await clients.runtime.refresh("alpha");
     assert.equal(refreshed.snapshot.name, "alpha");
@@ -400,6 +397,7 @@ test("module TUI client sends an OAuth approval payload accepted by the control 
         routes.dispose();
         await rm(runtimeDir, { force: true, recursive: true });
     });
+    await clients.service.hello();
 
     assert.equal((await clients.mcp.listApprovals())[0]?.approvalId, "oauth-1");
     const decided = await clients.mcp.decideApproval("oauth-1", "approve");
@@ -437,6 +435,7 @@ function createServer(
     getConfigVersion: () => number,
     options: { restartable?: boolean } = {}
 ): {
+    oauthApprovalReads(): number;
     restartCount(): number;
     start(): Promise<void>;
     stop(): Promise<void>;
@@ -468,6 +467,7 @@ function createServer(
         }
     ]);
     let server!: ControlSocketServer;
+    let oauthApprovalReads = 0;
     let restartCount = 0;
     const routes = new ControlRouteComposition({
         artifact: {
@@ -493,6 +493,12 @@ function createServer(
         } as never,
         instances,
         mcpStatus: () => ({ running: false, reason: "MCP runtime is disabled." }),
+        oauthApprovals: () => ({
+            async list() {
+                oauthApprovalReads += 1;
+                return [];
+            },
+        } as never),
         ...(options.restartable
             ? {
                 restart: async () => {
@@ -507,6 +513,7 @@ function createServer(
     });
     server = new ControlSocketServer({ routes, socketPath });
     return {
+        oauthApprovalReads: () => oauthApprovalReads,
         restartCount: () => restartCount,
         start: async () => await server.start(),
         async stop() {

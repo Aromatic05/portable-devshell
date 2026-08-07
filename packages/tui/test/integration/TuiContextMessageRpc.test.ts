@@ -109,6 +109,12 @@ test(
     await waitUntil(
         () =>
             box(harness.runtime, "conversation-composer")
+                ?.selectedDetailLineId === "conversation-composer:Delivery",
+    );
+    harness.terminal.write("\u001b[B");
+    await waitUntil(
+        () =>
+            box(harness.runtime, "conversation-composer")
                 ?.selectedDetailLineId === "conversation-composer:draft",
     );
 
@@ -277,7 +283,9 @@ async function createHarness(toolCalls: readonly ToolCallRecord[] = []): Promise
         terminal,
         async start() {
             running = runtime.run();
-            await waitUntil(() => runtime.store.getState().connection.status === "connected");
+            await waitUntil(() => runtime.store.getState().connection.status === "connected").catch((error) => {
+                throw new Error(`${error instanceof Error ? error.message : String(error)}: ${JSON.stringify(runtime.store.getState().connection)}`);
+            });
             await waitUntil(() => terminal.rawModes.includes(true)).catch((error) => {
                 throw new Error(`${error instanceof Error ? error.message : String(error)}\n${terminal.output}`);
             });
@@ -311,7 +319,16 @@ function createRoutes(
             modules: [
                 {
                     name: "service",
-                    operations: [{ name: "ping", handle: () => ({ pong: true }) }],
+                    operations: [
+                        {
+                            name: "hello",
+                            handle: () => ({
+                                capabilities: ["request", "stream", "streamResume"],
+                                protocolVersion: 1,
+                            }),
+                        },
+                        { name: "ping", handle: () => ({ pong: true }) },
+                    ],
                 },
                 {
                     name: "config",
@@ -345,6 +362,7 @@ function createRoutes(
                             mcpEnabled: true,
                             name: "alpha",
                             provider: "local",
+                            snapshot,
                         }],
                     }],
                 },
@@ -371,6 +389,7 @@ function createRoutes(
                 {
                     name: "runtime",
                     operations: [
+                        { name: "refresh", handle: () => ({ lastSeq: 1, snapshot }) },
                         { name: "snapshot", handle: () => ({ lastSeq: 1, snapshot }) },
                         { name: "readLogs", handle: () => [] },
                         {

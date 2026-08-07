@@ -5,7 +5,7 @@ import { PassThrough } from "node:stream";
 import type { ReadStream, WriteStream } from "node:tty";
 import test from "node:test";
 
-import { asInstanceName } from "@portable-devshell/shared";
+import { asInstanceName, type ApprovalRequest, type ToolCallRecord } from "@portable-devshell/shared";
 
 import type { TuiClients } from "../../src/runtime/client/TuiClientComposition.ts";
 import { TuiRuntime } from "../../src/runtime/TuiRuntime.ts";
@@ -506,7 +506,40 @@ test("real Ink runtime renders compact and unsupported terminal layouts", async 
 
 test("real Ink runtime routes every page and drives approval and text detail screens", async () => {
     const terminal = createTerminal();
-    const clients = createClients();
+    const toolCall: ToolCallRecord = {
+        callId: "call-1",
+        input: { command: "pwd" },
+        inputSummary: '{"command":"pwd"}',
+        instance: asInstanceName("alpha"),
+        source: "tui",
+        startedAt: "2026-07-17T00:00:00.000Z",
+        status: "running",
+        toolName: "bash_run",
+    };
+    const approval: ApprovalRequest = {
+        approvalId: "approval-1",
+        callId: "call-1",
+        createdAt: "2026-07-17T00:00:00.000Z",
+        expiresAt: "2099-07-17T00:10:00.000Z",
+        inputSummary: '{"command":"pwd"}',
+        instance: asInstanceName("alpha"),
+        reason: "needs review",
+        riskLevel: "high",
+        source: "tui",
+        status: "pending",
+        toolName: "bash_run",
+    };
+    const clients = createClients({
+        approvalRecords: [approval],
+        instanceList: [{
+            defaultWorkspace: "/workspace/alpha",
+            enabled: true,
+            mcpEnabled: true,
+            name: "alpha",
+            provider: "local",
+        }],
+        toolCallRecords: [toolCall],
+    });
     const runtime = new TuiRuntime(
         { stdin: terminal.stdin, stdout: terminal.stdout },
         { clients: clients.value, inkDebug: true },
@@ -537,43 +570,7 @@ test("real Ink runtime routes every page and drives approval and text detail scr
             );
         }
 
-        runtime.store.patchControlReadModel({ instances: [
-            {
-                defaultWorkspace: "/workspace/alpha",
-                enabled: true,
-                mcpEnabled: true,
-                name: "alpha",
-                provider: "local",
-            },
-        ] });
         runtime.store.setSelectedInstance("alpha");
-        runtime.store.patchControlReadModel({ instanceState: { ["alpha"]: { toolCalls: [
-            {
-                callId: "call-1",
-                input: { command: "pwd" },
-                inputSummary: '{"command":"pwd"}',
-                instance: "alpha" as never,
-                source: "tui",
-                startedAt: "2026-07-17T00:00:00.000Z",
-                status: "running",
-                toolName: "bash_run",
-            },
-        ] } } });
-        runtime.store.patchControlReadModel({ instanceState: { ["alpha"]: { approvals: [
-            {
-                approvalId: "approval-1",
-                callId: "call-1",
-                createdAt: "2026-07-17T00:00:00.000Z",
-                expiresAt: "2099-07-17T00:10:00.000Z",
-                inputSummary: '{"command":"pwd"}',
-                instance: "alpha" as never,
-                reason: "needs review",
-                riskLevel: "high",
-                source: "tui",
-                status: "pending",
-                toolName: "bash_run",
-            },
-        ] } } });
         runtime.store.setSelectedPage("audit");
         runtime.store.pushOverlay({
             approvalId: "approval-1",
@@ -1310,8 +1307,10 @@ function createClients(
                 type?: "artifact" | "directory" | "file";
             };
         };
+        approvalRecords?: ApprovalRequest[];
         pingError?: Error;
         toolCall?: (instance: string, toolName: string, input: unknown) => unknown;
+        toolCallRecords?: ToolCallRecord[];
     } = {},
 ) {
     let closeCount = 0;
@@ -1341,6 +1340,9 @@ function createClients(
         },
         close() {
             closeCount += 1;
+        },
+        onTransportClose() {
+            return () => undefined;
         },
         config: {
             async get() {
@@ -1379,7 +1381,17 @@ function createClients(
                 };
             },
             async list() {
-                return instanceList;
+                return instanceList.map((instance) => ({
+                    ...instance,
+                    snapshot: {
+                        connectionState: "connected",
+                        daemonState: "running",
+                        lastSeq: 2,
+                        name: instance.name,
+                        ready: true,
+                        status: "ready",
+                    },
+                }));
             },
         },
         mcp: {
@@ -1511,6 +1523,12 @@ function createClients(
             async call(instance: string, toolName: string, input: unknown) {
                 toolCalls.push({ input, instance, toolName });
                 return options.toolCall?.(instance, toolName, input) ?? {};
+            },
+            async listApprovals() {
+                return options.approvalRecords ?? [];
+            },
+            async listCalls() {
+                return options.toolCallRecords ?? [];
             },
         },
     } as unknown as TuiClients;
