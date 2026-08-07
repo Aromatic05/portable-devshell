@@ -88,6 +88,36 @@ test("McpContextRegistry distinguishes invalid and expired ctxId values", async 
     await assert.rejects(registry.validateAndTouch("ctx-expiring", binding), hasCode("mcp.contextExpired"));
 });
 
+test("McpContextRegistry lists contexts and supports manual disable and renew", async () => {
+    let now = 1_000;
+    const registry = new McpContextRegistry({
+        idFactory: () => "ctx-managed",
+        now: () => now,
+        ttlMs: 100
+    });
+    await registry.initialize();
+    const binding = { instance: "demo-local", principal: "local", workspace: "/workspace" };
+    await registry.create(binding);
+
+    const listed = await registry.list();
+    assert.equal(listed.length, 1);
+    assert.equal(listed[0]?.ctxId, "ctx-managed");
+    assert.equal(listed[0]?.status, "active");
+
+    const renewed = await registry.renew("ctx-managed");
+    assert.equal(renewed.status, "active");
+    assert.equal(renewed.expiresAt, "1970-01-01T00:00:01.100Z");
+
+    const disabled = await registry.disable("ctx-managed");
+    assert.equal(disabled.status, "disabled");
+    await assert.rejects(
+        registry.validateAndTouch("ctx-managed", binding),
+        hasCode("mcp.contextDisabled")
+    );
+    await assert.rejects(registry.renew("ctx-managed"), hasCode("mcp.contextDisabled"));
+    assert.equal((await registry.list())[0]?.status, "disabled");
+});
+
 test("McpEndpointWorker exposes environ_info and requires ctxId on every other tool", async () => {
     const registry = new McpContextRegistry({ idFactory: () => "ctx-created" });
     await registry.initialize();

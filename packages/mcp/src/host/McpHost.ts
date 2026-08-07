@@ -157,6 +157,10 @@ export class McpHost {
         return this.#httpServer;
     }
 
+    get contextRegistry(): McpContextRegistry {
+        return this.#contextRegistry;
+    }
+
     get oauthApprovals(): McpOAuthApprovalService | undefined {
         return this.#oauth?.approvals;
     }

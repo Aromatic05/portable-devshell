@@ -3,6 +3,8 @@ export { McpOAuthApprovalService } from "./auth/oauth/McpOAuthApprovalService.js
 export { McpOAuthProtectedResource } from "./auth/oauth/McpOAuthProtectedResource.js";
 export { McpHost } from "./host/McpHost.js";
 export type { McpHostInstanceConfig } from "./host/McpHost.js";
+export { McpContextRegistry } from "./context/McpContextRegistry.js";
+export type { McpContextBinding } from "./context/McpContextRegistry.js";
 export { HttpHost } from "./host/HttpHost.js";
 export type {
     McpInstanceGateway,

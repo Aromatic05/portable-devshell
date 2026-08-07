@@ -2,7 +2,13 @@ import { randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 
-import { createError, errorCodes } from "@portable-devshell/shared";
+import {
+    createError,
+    errorCodes,
+    type McpContextRecord,
+} from "@portable-devshell/shared";
+
+export type { McpContextRecord } from "@portable-devshell/shared";
 
 export const defaultMcpContextTtlMs = 24 * 60 * 60 * 1_000;
 
@@ -10,14 +16,6 @@ export interface McpContextBinding {
     instance: string;
     principal: string;
     workspace: string;
-}
-
-export interface McpContextRecord extends McpContextBinding {
-    createdAt: string;
-    ctxId: string;
-    expiresAt: string;
-    lastAccessedAt: string;
-    status: "active" | "expired";
 }
 
 interface McpContextDocument {
@@ -100,6 +98,9 @@ export class McpContextRegistry {
                 throw invalidContext(ctxId);
             }
             const now = this.#now();
+            if (record.status === "disabled") {
+                throw disabledContext(ctxId);
+            }
             if (record.status === "expired" || Date.parse(record.expiresAt) <= now) {
                 if (record.status !== "expired") {
                     record.status = "expired";
@@ -114,6 +115,47 @@ export class McpContextRegistry {
             ) {
                 throw invalidContext(ctxId);
             }
+            record.lastAccessedAt = new Date(now).toISOString();
+            record.expiresAt = new Date(now + this.#ttlMs).toISOString();
+            await this.#persist();
+            return cloneRecord(record);
+        });
+    }
+
+    async list(): Promise<McpContextRecord[]> {
+        return await this.#run(async () => {
+            this.#assertInitialized();
+            return [...this.#contexts.values()]
+                .map(cloneRecord)
+                .sort((left, right) => left.createdAt.localeCompare(right.createdAt));
+        });
+    }
+
+    async disable(ctxId: string): Promise<McpContextRecord> {
+        return await this.#run(async () => {
+            this.#assertInitialized();
+            const record = this.#contexts.get(ctxId);
+            if (record === undefined || !isCtxId(ctxId)) {
+                throw invalidContext(ctxId);
+            }
+            record.status = "disabled";
+            await this.#persist();
+            return cloneRecord(record);
+        });
+    }
+
+    async renew(ctxId: string): Promise<McpContextRecord> {
+        return await this.#run(async () => {
+            this.#assertInitialized();
+            const record = this.#contexts.get(ctxId);
+            if (record === undefined || !isCtxId(ctxId)) {
+                throw invalidContext(ctxId);
+            }
+            if (record.status === "disabled") {
+                throw disabledContext(ctxId);
+            }
+            const now = this.#now();
+            record.status = "active";
             record.lastAccessedAt = new Date(now).toISOString();
             record.expiresAt = new Date(now + this.#ttlMs).toISOString();
             await this.#persist();
@@ -205,6 +247,15 @@ function expiredContext(ctxId: string, expiresAt: string) {
     });
 }
 
+function disabledContext(ctxId: string) {
+    return createError({
+        code: errorCodes.mcpContextDisabled,
+        details: { ctxId },
+        message: "ctxId is disabled. Call environ_info to create a new context.",
+        retryable: false
+    });
+}
+
 function isCtxId(value: string): boolean {
     return value.startsWith("ctx-") && value.length > 4;
 }
@@ -227,7 +278,7 @@ function isRecord(value: unknown): value is McpContextRecord {
         typeof record.principal === "string" && typeof record.instance === "string" &&
         typeof record.workspace === "string" && typeof record.createdAt === "string" &&
         typeof record.lastAccessedAt === "string" && typeof record.expiresAt === "string" &&
-        (record.status === "active" || record.status === "expired");
+        (record.status === "active" || record.status === "expired" || record.status === "disabled");
 }
 
 function isMissing(error: unknown): error is NodeJS.ErrnoException {
