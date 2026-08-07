@@ -1286,6 +1286,7 @@ function createClients(
             };
         };
         approvalRecords?: ApprovalRequest[];
+        contextRecords?: import("@portable-devshell/shared").McpContextRecord[];
         pingError?: Error;
         toolCall?: (instance: string, toolName: string, input: unknown) => unknown;
         toolCallRecords?: ToolCallRecord[];
@@ -1507,6 +1508,17 @@ function createClients(
             },
             async listCalls() {
                 return options.toolCallRecords ?? [];
+            },
+        },
+        context: {
+            async list() {
+                return options.contextRecords ?? [];
+            },
+            async disable() {
+                return { ctxId: "" } as never;
+            },
+            async renew() {
+                return { ctxId: "" } as never;
             },
         },
     } as unknown as TuiClients;

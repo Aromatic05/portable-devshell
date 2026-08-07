@@ -51,6 +51,8 @@ export interface TuiCommandDispatcherOptions {
         input: string
     ): Promise<boolean>;
     onContextMessage?(instance: string, ctxId: string, text: string): Promise<void>;
+    onContextDisable?(instance: string, ctxId: string): Promise<void>;
+    onContextRenew?(instance: string, ctxId: string): Promise<void>;
     onControlRestart?(): Promise<void>;
     onCreateInstance?(draft: InstanceCreateDraft): Promise<string | undefined>;
     onGetInstanceCreateSchema?(): Promise<InstanceCreateSchema>;
@@ -198,6 +200,26 @@ export class TuiCommandDispatcher {
                 await (this.#options.onInstanceDangerAction ?? unavailable)(
                     "delete",
                     intent.instance
+                );
+                return true;
+            case "context.disable":
+                await (this.#options.onContextDisable ?? unavailable)(
+                    intent.instance,
+                    intent.ctxId
+                );
+                this.#store.setScreenStatus(
+                    "audit",
+                    `Context ${intent.ctxId} disabled.`
+                );
+                return true;
+            case "context.renew":
+                await (this.#options.onContextRenew ?? unavailable)(
+                    intent.instance,
+                    intent.ctxId
+                );
+                this.#store.setScreenStatus(
+                    "audit",
+                    `Context ${intent.ctxId} renewed.`
                 );
                 return true;
             case "artifact.revokeShare":

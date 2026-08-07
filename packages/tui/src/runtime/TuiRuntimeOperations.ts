@@ -22,10 +22,12 @@ export class TuiRuntimeOperations {
     readonly decideApproval: TuiRuntimeExecutionOperations["decideApproval"];
     readonly decideOAuthApproval: TuiRuntimeControlOperations["decideOAuthApproval"];
     readonly deleteInstance: TuiRuntimeControlOperations["deleteInstance"];
+    readonly disableContext: TuiRuntimeControlOperations["disableContext"];
     readonly getInstanceCreateSchema: TuiRuntimeControlOperations["getInstanceCreateSchema"];
     readonly queueContextMessage: TuiRuntimeControlOperations["queueContextMessage"];
     readonly reloadLogs: TuiRuntimeControlOperations["reloadLogs"];
     readonly reloadPage: TuiRuntimeControlOperations["reloadPage"];
+    readonly renewContext: TuiRuntimeControlOperations["renewContext"];
     readonly restartControl: TuiRuntimeControlOperations["restartControl"];
     readonly revokeArtifactShare: TuiRuntimeControlOperations["revokeArtifactShare"];
     readonly runInstanceAction: TuiRuntimeExecutionOperations["runInstanceAction"];
@@ -62,10 +64,12 @@ export class TuiRuntimeOperations {
         this.createInstance = control.createInstance.bind(control);
         this.decideOAuthApproval = control.decideOAuthApproval.bind(control);
         this.deleteInstance = control.deleteInstance.bind(control);
+        this.disableContext = control.disableContext.bind(control);
         this.getInstanceCreateSchema = control.getInstanceCreateSchema.bind(control);
         this.queueContextMessage = control.queueContextMessage.bind(control);
         this.reloadLogs = control.reloadLogs.bind(control);
         this.reloadPage = control.reloadPage.bind(control);
+        this.renewContext = control.renewContext.bind(control);
         this.restartControl = control.restartControl.bind(control);
         this.revokeArtifactShare = control.revokeArtifactShare.bind(control);
         this.setInstanceEnabled = control.setInstanceEnabled.bind(control);

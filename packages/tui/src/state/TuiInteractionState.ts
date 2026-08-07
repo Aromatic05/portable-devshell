@@ -118,6 +118,8 @@ export type TuiUiIntent =
     | { type: "terminal.requestKill" }
     | { instance: string; type: "terminal.kill" }
     | { instance: string; type: "instance.delete" }
+    | { ctxId: string; instance: string; type: "context.disable" }
+    | { ctxId: string; instance: string; type: "context.renew" }
     | { shareId: string; type: "artifact.revokeShare" }
     | { transferId: string; type: "artifact.cancelTransfer" }
     | { approvalId: string; instance: string; type: "approval.open" }

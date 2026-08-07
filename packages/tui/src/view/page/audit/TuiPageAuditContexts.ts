@@ -29,6 +29,24 @@ export function buildAuditContextListBoxes(
                 formatField("Approvals", String(context.approvals.length)),
                 formatField("Latest", context.latestActivityAt),
                 formatField("Latest call", context.latestCall?.toolName ?? "-"),
+                ...(context.contextStatus === undefined
+                    ? []
+                    : [formatField("Status", context.contextStatus)]),
+                ...(context.key.kind === "unscoped" ||
+                context.contextStatus === "disabled"
+                    ? []
+                    : [
+                          {
+                              id: "context.disable",
+                              text: "[ Disable ]",
+                              tone: "accent" as const,
+                          },
+                          {
+                              id: "context.renew",
+                              text: "[ Renew ]",
+                              tone: "accent" as const,
+                          },
+                      ]),
             ],
             id:
                 context.key.kind === "unscoped"

@@ -162,6 +162,12 @@ function createHarness(options: {
             async queueContextMessage(instance: string, ctxId: string, text: string) {
                 calls.push(`comment.queue:${instance}:${ctxId}:${text}`);
             },
+            async disableContext(ctxId: string) {
+                calls.push(`context.disable:${ctxId}`);
+            },
+            async renewContext(ctxId: string) {
+                calls.push(`context.renew:${ctxId}`);
+            },
             async refreshInstance(instance: string) {
                 return (await runtime.refresh(instance)).snapshot;
             },

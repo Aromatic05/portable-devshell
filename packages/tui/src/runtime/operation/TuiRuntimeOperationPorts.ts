@@ -44,8 +44,10 @@ export interface TuiRuntimeOperationSession {
     commands: {
         decideOAuthApproval(approvalId: string, decision: "approve" | "deny"): Promise<unknown>;
         decideToolApproval(instance: string, approvalId: string, decision: "approve" | "deny"): Promise<unknown>;
+        disableContext(ctxId: string): Promise<unknown>;
         queueContextMessage(instance: string, ctxId: string, text: string): Promise<unknown>;
         refreshInstance(instance: string): Promise<unknown>;
+        renewContext(ctxId: string): Promise<unknown>;
         startInstance(
             instance: string,
             options?: {

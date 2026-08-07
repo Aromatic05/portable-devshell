@@ -1,6 +1,7 @@
 import {
     toolCallOutcome,
     type ApprovalRequest,
+    type McpContextStatus,
     type ToolCallRecord,
 } from "@portable-devshell/shared";
 
@@ -14,6 +15,7 @@ export type TuiAuditContextKey =
 export interface TuiAuditContextSummary {
     readonly approvals: readonly ApprovalRequest[];
     readonly calls: readonly ToolCallRecord[];
+    readonly contextStatus?: McpContextStatus;
     readonly key: TuiAuditContextKey;
     readonly label: string;
     readonly latestActivityAt: string;
@@ -65,7 +67,7 @@ export function projectAuditContexts(
         resolve(approval.ctxId).approvals.push(approval);
     }
     return [...contexts.values()]
-        .map(toSummary)
+        .map((context) => toSummary(context, state, instance))
         .sort((left, right) =>
             right.latestActivityAt.localeCompare(left.latestActivityAt),
         );
@@ -83,7 +85,11 @@ export function findAuditContext(
     );
 }
 
-function toSummary(context: MutableAuditContext): TuiAuditContextSummary {
+function toSummary(
+    context: MutableAuditContext,
+    state: TuiAppState,
+    instance: string,
+): TuiAuditContextSummary {
     const sortedCalls = [...context.calls].sort((left, right) =>
         left.startedAt.localeCompare(right.startedAt),
     );
@@ -95,12 +101,21 @@ function toSummary(context: MutableAuditContext): TuiAuditContextSummary {
         ]
             .sort()
             .at(-1) ?? "-";
+    const ctxId = context.key.kind === "context" ? context.key.ctxId : undefined;
+    const registryStatus = ctxId === undefined
+        ? undefined
+        : state.readModel.contexts.find(
+              (record) =>
+                  record.ctxId === ctxId &&
+                  record.instance === instance,
+          )?.status;
 
     return {
         approvals: [...context.approvals].sort((left, right) =>
             left.createdAt.localeCompare(right.createdAt),
         ),
         calls: sortedCalls,
+        contextStatus: registryStatus,
         key: context.key,
         label: context.label,
         latestActivityAt,

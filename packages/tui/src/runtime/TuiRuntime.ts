@@ -223,6 +223,12 @@ export class TuiRuntime {
                     text,
                 );
             },
+            onContextDisable: async (instance, ctxId) => {
+                await this.#operations.disableContext(instance, ctxId);
+            },
+            onContextRenew: async (instance, ctxId) => {
+                await this.#operations.renewContext(instance, ctxId);
+            },
             onOpenTerminal: async (instance) => {
                 this.store.setSelectedInstance(instance);
                 this.store.setSelectedPage("terminal");

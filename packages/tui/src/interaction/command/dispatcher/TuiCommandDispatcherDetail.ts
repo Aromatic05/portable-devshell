@@ -113,6 +113,16 @@ export class TuiCommandDispatcherDetail {
                 return await this.#dispatch({ approvalId: actionId.slice("approval.open:".length), instance: state.ui.selectedInstance, type: "approval.open" });
             }
 
+            if (state.ui.selectedPage === "audit" && state.ui.selectedInstance !== undefined && (actionId === "context.disable" || actionId === "context.renew")) {
+                const ctxId = ctxIdFromBox(boxId);
+                if (ctxId === undefined) return false;
+                return await this.#dispatch({
+                    ctxId,
+                    instance: state.ui.selectedInstance,
+                    type: actionId === "context.disable" ? "context.disable" : "context.renew"
+                });
+            }
+
             const callId = boxId === undefined ? undefined : this.#audit.callIdFromBox(boxId);
             if (state.ui.selectedPage === "audit" && state.ui.selectedInstance !== undefined && callId !== undefined) {
                 if (actionId === "input") {
@@ -235,5 +245,10 @@ export class TuiCommandDispatcherDetail {
         }
     }
 
+}
 
+function ctxIdFromBox(boxId: string | undefined): string | undefined {
+    if (boxId === undefined) return undefined;
+    const prefix = "audit-context:";
+    return boxId.startsWith(prefix) ? boxId.slice(prefix.length) : undefined;
 }

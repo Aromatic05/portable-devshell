@@ -45,6 +45,20 @@ export class TuiRuntimeControlOperations {
         });
     }
 
+    async disableContext(instance: string, ctxId: string): Promise<void> {
+        await this.options.session.commands.disableContext(ctxId);
+        await this.#refreshBestEffort(`audit:${instance}`, async () => {
+            await this.options.session.refreshAudit(instance);
+        });
+    }
+
+    async renewContext(instance: string, ctxId: string): Promise<void> {
+        await this.options.session.commands.renewContext(ctxId);
+        await this.#refreshBestEffort(`audit:${instance}`, async () => {
+            await this.options.session.refreshAudit(instance);
+        });
+    }
+
     async cancelArtifactTransfer(transferId: string): Promise<void> {
         await this.#request(
             this.options.clients.artifact.cancelTransfer(transferId),
