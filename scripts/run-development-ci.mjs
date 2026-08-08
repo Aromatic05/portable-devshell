@@ -91,6 +91,11 @@ export function createDevelopmentCiSteps(target, platform = process.platform) {
     return steps;
 }
 
+export function runDevelopmentCi(target, options = {}) {
+    const { platform = process.platform, ...runOptions } = options;
+    return runCiSteps(createDevelopmentCiSteps(target, platform), runOptions);
+}
+
 function executeCiStep(step) {
     const result = spawnSync(step.command, step.args, {
         env: process.env,
@@ -105,7 +110,7 @@ function executeCiStep(step) {
 }
 
 if (process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href) {
-    const result = runCiSteps(createDevelopmentCiSteps(process.argv[2]));
+    const result = runDevelopmentCi(process.argv[2]);
     if (!result.ok) {
         process.exitCode = 1;
     }

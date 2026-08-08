@@ -1,0 +1,28 @@
+#!/bin/sh
+set -eu
+
+needs_validation=0
+while read -r local_ref local_sha remote_ref remote_sha; do
+    case "$remote_ref" in
+        refs/tags/dev*)
+            if [ "$local_sha" != "0000000000000000000000000000000000000000" ]; then
+                needs_validation=1
+            fi
+            ;;
+    esac
+done
+
+if [ "$needs_validation" -eq 0 ]; then
+    exit 0
+fi
+
+repo_root=$(git rev-parse --show-toplevel)
+cd "$repo_root"
+
+if [ -n "$(git status --porcelain)" ]; then
+    echo "dev tag push blocked: working tree is not clean" >&2
+    exit 1
+fi
+
+echo "running canonical Linux x64 development CI gate before dev tag push" >&2
+exec node scripts/run-dev-tag-gate.mjs
