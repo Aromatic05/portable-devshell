@@ -23,6 +23,7 @@ import {
     encodeGlobalConfig,
     encodeInstanceConfig,
 } from "../ConfigTomlTestSupport.ts";
+import { createCursorPositionResponder } from "../TerminalProtocolTestSupport.ts";
 import {
     installUniqueWindowsTestIdentity,
     realWorkerTestOptions,
@@ -217,12 +218,40 @@ test(
             },
         );
         let outputSeq = 0;
+        let terminalStream = attached.stream;
+        let terminalVersion = opened.version;
+        let terminalClientSeq = 1;
+        let cursorResponseCount = 0;
+        const cursorResponder = createCursorPositionResponder(async (data) => {
+            await terminalStream.send("input", {
+                clientSeq: terminalClientSeq++,
+                data,
+                generation: opened.generation,
+                terminalId: opened.terminalId,
+                version: terminalVersion,
+            });
+        });
+        const observeTerminalProtocol = async (event: ClientEvent): Promise<void> => {
+            if (process.platform !== "win32" || event.name !== "terminal.output") return;
+            const payload = event.payload as { data?: string } | undefined;
+            cursorResponseCount += await cursorResponder.consume(payload?.data ?? "");
+        };
+        if (process.platform === "win32") {
+            await waitForTerminal(
+                attached.stream,
+                () => cursorResponseCount > 0,
+                () => `worker stdout:\n${workerStdout}\nworker stderr:\n${workerStderr}`,
+                10_000,
+                observeTerminalProtocol,
+            );
+        }
+        const readyInputSeq = terminalClientSeq++;
         await attached.stream.send("input", {
-            clientSeq: 1,
+            clientSeq: readyInputSeq,
             data: terminalPrintCommand("reverse-pty-ready"),
             generation: opened.generation,
             terminalId: opened.terminalId,
-            version: opened.version,
+            version: terminalVersion,
         });
         let inputAccepted = false;
         const ready = await waitForTerminal(
@@ -231,7 +260,7 @@ test(
                 if (
                     event.name === "terminal.inputAccepted" &&
                     (event.payload as { clientSeq?: number } | undefined)
-                        ?.clientSeq === 1
+                        ?.clientSeq === readyInputSeq
                 ) {
                     inputAccepted = true;
                 }
@@ -239,34 +268,40 @@ test(
             },
             () =>
                 `worker stdout:\n${workerStdout}\nworker stderr:\n${workerStderr}`,
+            10_000,
+            observeTerminalProtocol,
         );
         outputSeq = Math.max(outputSeq, ready.lastOutputSeq);
 
+        const resizeClientSeq = terminalClientSeq++;
         await attached.stream.send("resize", {
-            clientSeq: 2,
+            clientSeq: resizeClientSeq,
             cols: 100,
             generation: opened.generation,
             rows: 40,
             terminalId: opened.terminalId,
-            version: opened.version,
+            version: terminalVersion,
         });
         const resized = await waitForTerminal(
             attached.stream,
             (event) =>
                 event.name === "terminal.resized" &&
                 (event.payload as { clientSeq?: number } | undefined)
-                    ?.clientSeq === 2,
+                    ?.clientSeq === resizeClientSeq,
             () =>
                 `worker stdout:\n${workerStdout}\nworker stderr:\n${workerStderr}`,
         );
-        const resizedVersion = (resized.event.payload as { version: number })
-            .version;
+        terminalVersion = (resized.event.payload as { version: number }).version;
+        if (process.platform === "win32") {
+            cursorResponseCount += await cursorResponder.consume(resized.output);
+        }
+        const sizedInputSeq = terminalClientSeq++;
         await attached.stream.send("input", {
-            clientSeq: 3,
+            clientSeq: sizedInputSeq,
             data: terminalSizeProbeCommand(),
             generation: opened.generation,
             terminalId: opened.terminalId,
-            version: resizedVersion,
+            version: terminalVersion,
         });
         const sized = await waitForTerminal(
             attached.stream,
@@ -276,6 +311,8 @@ test(
             },
             () =>
                 `worker stdout:\n${workerStdout}\nworker stderr:\n${workerStderr}`,
+            10_000,
+            observeTerminalProtocol,
         );
         outputSeq = Math.max(outputSeq, sized.lastOutputSeq);
         attached.stream.close();
@@ -290,35 +327,42 @@ test(
                 terminalId: opened.terminalId,
             },
         );
-        await resumed.stream.send("input", {
-            clientSeq: 4,
+        terminalStream = resumed.stream;
+        const resumedInputSeq = terminalClientSeq++;
+        await terminalStream.send("input", {
+            clientSeq: resumedInputSeq,
             data: terminalPrintCommand("reverse-pty-resumed"),
             generation: opened.generation,
             terminalId: opened.terminalId,
-            version: resizedVersion,
+            version: terminalVersion,
         });
         const resumedOutput = await waitForTerminal(
-            resumed.stream,
+            terminalStream,
             (_event, output) => output.includes("reverse-pty-resumed"),
             () =>
                 `worker stdout:\n${workerStdout}\nworker stderr:\n${workerStderr}`,
+            10_000,
+            observeTerminalProtocol,
         );
         outputSeq = Math.max(outputSeq, resumedOutput.lastOutputSeq);
-        await resumed.stream.send("input", {
-            clientSeq: 5,
+        const restartInputSeq = terminalClientSeq++;
+        await terminalStream.send("input", {
+            clientSeq: restartInputSeq,
             data: terminalPrintCommand("reverse-after-control-restart", 1_000),
             generation: opened.generation,
             terminalId: opened.terminalId,
-            version: resizedVersion,
+            version: terminalVersion,
         });
         await waitForTerminal(
-            resumed.stream,
+            terminalStream,
             (event) =>
                 event.name === "terminal.inputAccepted" &&
                 (event.payload as { clientSeq?: number } | undefined)
-                    ?.clientSeq === 5,
+                    ?.clientSeq === restartInputSeq,
             () =>
                 `worker stdout:\n${workerStdout}\nworker stderr:\n${workerStderr}`,
+            10_000,
+            observeTerminalProtocol,
         );
         resumed.stream.close();
         terminalClient.close();
@@ -354,12 +398,15 @@ test(
                 terminalId: opened.terminalId,
             },
         );
+        terminalStream = recovered.stream;
         await waitForTerminal(
-            recovered.stream,
+            terminalStream,
             (_event, output) =>
                 output.includes("reverse-after-control-restart"),
             () =>
                 `worker stdout:\n${workerStdout}\nworker stderr:\n${workerStderr}`,
+            10_000,
+            observeTerminalProtocol,
         );
         recovered.stream.close();
 
@@ -370,7 +417,7 @@ test(
             {
                 generation: opened.generation,
                 terminalId: opened.terminalId,
-                version: resizedVersion,
+                version: terminalVersion,
             },
         );
         assert.equal(killed.state, "killed");
@@ -689,6 +736,7 @@ async function waitForTerminal(
     predicate: (event: ClientEvent, output: string) => boolean,
     diagnostic: () => string,
     timeoutMs = 10_000,
+    observe?: (event: ClientEvent) => Promise<void>,
 ): Promise<{ event: ClientEvent; lastOutputSeq: number; output: string }> {
     const deadline = Date.now() + timeoutMs;
     let output = "";
@@ -724,6 +772,7 @@ async function waitForTerminal(
             output += payload?.data ?? "";
             lastOutputSeq = Math.max(lastOutputSeq, payload?.seq ?? 0);
         }
+        await observe?.(event);
         if (predicate(event, output)) {
             return { event, lastOutputSeq, output };
         }

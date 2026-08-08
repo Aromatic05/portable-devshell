@@ -983,10 +983,17 @@ mod windows_tests {
                 command: None,
             })
             .expect("open ConPTY terminal");
+        let mut client_seq = 1;
+        let mut from_seq = 0;
+        let mut response_tail = Vec::new();
         wait_for_output(
             &manager,
             &opened.terminal_id,
             opened.generation,
+            opened.version,
+            &mut client_seq,
+            &mut from_seq,
+            &mut response_tail,
             "\u{1b}[6n",
         );
         manager
@@ -995,18 +1002,7 @@ mod windows_tests {
                     terminal_id: opened.terminal_id.clone(),
                     generation: opened.generation,
                     version: opened.version,
-                    client_seq: 1,
-                },
-                data: BASE64.encode(b"\x1b[1;1R"),
-            })
-            .expect("answer ConPTY cursor position query");
-        manager
-            .write(TerminalWriteInput {
-                identity: TerminalCommandInput {
-                    terminal_id: opened.terminal_id.clone(),
-                    generation: opened.generation,
-                    version: opened.version,
-                    client_seq: 2,
+                    client_seq: take_client_seq(&mut client_seq),
                 },
                 data: BASE64.encode(
                     b"powershell.exe -NoLogo -NoProfile -NonInteractive -Command \"[Console]::WriteLine(('worker-' + 'pty-ready'))\"\r",
@@ -1017,6 +1013,10 @@ mod windows_tests {
             &manager,
             &opened.terminal_id,
             opened.generation,
+            opened.version,
+            &mut client_seq,
+            &mut from_seq,
+            &mut response_tail,
             "worker-pty-ready",
         );
 
@@ -1026,7 +1026,7 @@ mod windows_tests {
                     terminal_id: opened.terminal_id.clone(),
                     generation: opened.generation,
                     version: opened.version,
-                    client_seq: 3,
+                    client_seq: take_client_seq(&mut client_seq),
                 },
                 cols: 100,
                 rows: 40,
@@ -1039,14 +1039,23 @@ mod windows_tests {
                     terminal_id: opened.terminal_id.clone(),
                     generation: opened.generation,
                     version: 2,
-                    client_seq: 4,
+                    client_seq: take_client_seq(&mut client_seq),
                 },
                 data: BASE64.encode(
                     b"powershell.exe -NoLogo -NoProfile -NonInteractive -Command \"$s=$Host.UI.RawUI.WindowSize; [Console]::WriteLine(('{0} {1}' -f $s.Height,$s.Width))\"\r",
                 ),
             })
             .expect("write ConPTY size probe");
-        wait_for_output(&manager, &opened.terminal_id, opened.generation, "40 100");
+        wait_for_output(
+            &manager,
+            &opened.terminal_id,
+            opened.generation,
+            2,
+            &mut client_seq,
+            &mut from_seq,
+            &mut response_tail,
+            "40 100",
+        );
 
         let replay = manager
             .attach(TerminalAttachInput {
@@ -1069,7 +1078,7 @@ mod windows_tests {
                 terminal_id: opened.terminal_id.clone(),
                 generation: opened.generation,
                 version: 2,
-                client_seq: 5,
+                client_seq: take_client_seq(&mut client_seq),
             })
             .expect("kill ConPTY terminal");
         let deadline = Instant::now() + Duration::from_secs(8);
@@ -1096,23 +1105,42 @@ mod windows_tests {
         manager: &TerminalManager,
         terminal_id: &str,
         generation: u64,
+        version: u64,
+        client_seq: &mut u64,
+        from_seq: &mut u64,
+        response_tail: &mut Vec<u8>,
         expected: &str,
     ) {
         let deadline = Instant::now() + Duration::from_secs(8);
+        let mut output = Vec::new();
         loop {
             let attached = manager
                 .attach(TerminalAttachInput {
                     terminal_id: terminal_id.to_string(),
                     generation,
-                    from_seq: 0,
+                    from_seq: *from_seq,
                 })
                 .expect("attach ConPTY terminal");
-            let bytes = attached
-                .replay
-                .iter()
-                .flat_map(|frame| BASE64.decode(frame.data_base64.as_bytes()).unwrap())
-                .collect::<Vec<_>>();
-            if String::from_utf8_lossy(&bytes).contains(expected) {
+            for frame in attached.replay {
+                if frame.seq <= *from_seq {
+                    continue;
+                }
+                *from_seq = frame.seq;
+                let bytes = BASE64
+                    .decode(frame.data_base64.as_bytes())
+                    .expect("decode ConPTY replay");
+                output.extend_from_slice(&bytes);
+                respond_to_cursor_position_queries(
+                    manager,
+                    terminal_id,
+                    generation,
+                    version,
+                    client_seq,
+                    response_tail,
+                    &bytes,
+                );
+            }
+            if String::from_utf8_lossy(&output).contains(expected) {
                 return;
             }
             assert!(
@@ -1121,5 +1149,44 @@ mod windows_tests {
             );
             std::thread::sleep(Duration::from_millis(20));
         }
+    }
+
+    fn respond_to_cursor_position_queries(
+        manager: &TerminalManager,
+        terminal_id: &str,
+        generation: u64,
+        version: u64,
+        client_seq: &mut u64,
+        response_tail: &mut Vec<u8>,
+        bytes: &[u8],
+    ) {
+        const QUERY: &[u8] = b"\x1b[6n";
+        response_tail.extend_from_slice(bytes);
+        while let Some(index) = response_tail
+            .windows(QUERY.len())
+            .position(|window| window == QUERY)
+        {
+            response_tail.drain(..index + QUERY.len());
+            manager
+                .write(TerminalWriteInput {
+                    identity: TerminalCommandInput {
+                        terminal_id: terminal_id.to_string(),
+                        generation,
+                        version,
+                        client_seq: take_client_seq(client_seq),
+                    },
+                    data: BASE64.encode(b"\x1b[1;1R"),
+                })
+                .expect("answer ConPTY cursor position query");
+        }
+        if response_tail.len() >= QUERY.len() {
+            response_tail.drain(..response_tail.len() - (QUERY.len() - 1));
+        }
+    }
+
+    fn take_client_seq(client_seq: &mut u64) -> u64 {
+        let current = *client_seq;
+        *client_seq += 1;
+        current
     }
 }

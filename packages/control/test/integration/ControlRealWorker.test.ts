@@ -31,6 +31,7 @@ import {
     encodeGlobalConfig,
     encodeInstanceConfig,
 } from "../ConfigTomlTestSupport.ts";
+import { createCursorPositionResponder } from "../TerminalProtocolTestSupport.ts";
 import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
 
 const workerBinaryPath = resolveTestWorkerBinary();
@@ -325,26 +326,28 @@ async function exerciseWorkerTerminal(socketPath: string, instance: string): Pro
         );
         try {
             let clientSeq = 1;
-            if (process.platform === "win32") {
-                let bootstrapOutput = "";
-                const bootstrapDeadline = Date.now() + 5_000;
-                while (!bootstrapOutput.includes("\u001B[6n")) {
-                    if (Date.now() >= bootstrapDeadline) {
-                        throw new Error(`terminal bootstrap output timeout: ${bootstrapOutput}`);
-                    }
-                    const event = await attached.stream.nextEvent();
-                    if (event.name === "terminal.output") {
-                        const payload = event.payload as { data?: string } | undefined;
-                        bootstrapOutput += payload?.data ?? "";
-                    }
-                }
+            const cursorResponder = createCursorPositionResponder(async (data) => {
                 await attached.stream.send("input", {
                     clientSeq: clientSeq++,
-                    data: "\u001B[1;1R",
+                    data,
                     generation: opened.generation,
                     terminalId: opened.terminalId,
                     version: opened.version,
                 });
+            });
+            if (process.platform === "win32") {
+                const bootstrapDeadline = Date.now() + 5_000;
+                let responseCount = 0;
+                while (responseCount === 0) {
+                    if (Date.now() >= bootstrapDeadline) {
+                        throw new Error("terminal bootstrap cursor query timeout");
+                    }
+                    const event = await attached.stream.nextEvent();
+                    if (event.name === "terminal.output") {
+                        const payload = event.payload as { data?: string } | undefined;
+                        responseCount += await cursorResponder.consume(payload?.data ?? "");
+                    }
+                }
             }
             await attached.stream.send("input", {
                 clientSeq: clientSeq++,
@@ -361,8 +364,12 @@ async function exerciseWorkerTerminal(socketPath: string, instance: string): Pro
                 const event = await attached.stream.nextEvent();
                 if (event.name === "terminal.output") {
                     const payload = event.payload as { data?: string; seq?: number } | undefined;
-                    output += payload?.data ?? "";
+                    const data = payload?.data ?? "";
+                    output += data;
                     latestSeq = Math.max(latestSeq, payload?.seq ?? 0);
+                    if (process.platform === "win32") {
+                        await cursorResponder.consume(data);
+                    }
                 }
             }
             if (latestSeq > 0) {

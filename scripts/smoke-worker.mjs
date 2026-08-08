@@ -87,50 +87,50 @@ try {
             throw new Error(`worker did not advertise PTY support: ${JSON.stringify(terminalCapabilities)}`);
         }
         const terminal = await rpc.request("terminal.open", { cols: 80, rows: 24 });
-        let terminalClientSeq = 1;
-        if (handshake.platform.os === "windows") {
-            await waitForTerminalOutput(rpc, terminal, "\u001B[6n");
-            await rpc.request("terminal.write", {
-                terminalId: terminal.terminalId,
-                generation: terminal.generation,
-                version: terminal.version,
-                clientSeq: terminalClientSeq++,
-                data: Buffer.from("\u001B[1;1R", "utf8").toString("base64")
-            });
+        const terminalClient = {
+            clientSeq: 1,
+            fromSeq: 0,
+            responseTail: "",
+            version: terminal.version,
+            windows: handshake.platform.os === "windows"
+        };
+        if (terminalClient.windows) {
+            await waitForTerminalOutput(rpc, terminal, terminalClient, "\u001B[6n");
         }
         await rpc.request("terminal.write", {
             terminalId: terminal.terminalId,
             generation: terminal.generation,
-            version: terminal.version,
-            clientSeq: terminalClientSeq++,
+            version: terminalClient.version,
+            clientSeq: terminalClient.clientSeq++,
             data: Buffer.from(terminalPrintCommand("worker-pty-smoke"), "utf8").toString("base64")
         });
-        await waitForTerminalOutput(rpc, terminal, "worker-pty-smoke");
+        await waitForTerminalOutput(rpc, terminal, terminalClient, "worker-pty-smoke");
 
         stage("terminal.resize");
         const resized = await rpc.request("terminal.resize", {
             terminalId: terminal.terminalId,
             generation: terminal.generation,
-            version: terminal.version,
-            clientSeq: terminalClientSeq++,
+            version: terminalClient.version,
+            clientSeq: terminalClient.clientSeq++,
             cols: 100,
             rows: 40
         });
+        terminalClient.version = resized.version;
         await rpc.request("terminal.write", {
             terminalId: terminal.terminalId,
             generation: terminal.generation,
-            version: resized.version,
-            clientSeq: terminalClientSeq++,
+            version: terminalClient.version,
+            clientSeq: terminalClient.clientSeq++,
             data: Buffer.from(terminalSizeProbeCommand(), "utf8").toString("base64")
         });
-        await waitForTerminalOutput(rpc, terminal, "40 100");
+        await waitForTerminalOutput(rpc, terminal, terminalClient, "40 100");
 
         stage("terminal.kill");
         await rpc.request("terminal.kill", {
             terminalId: terminal.terminalId,
             generation: terminal.generation,
-            version: resized.version,
-            clientSeq: terminalClientSeq++
+            version: terminalClient.version,
+            clientSeq: terminalClient.clientSeq++
         });
         await waitForTerminalExit(rpc, terminal);
     } finally {
@@ -178,21 +178,48 @@ function terminalSizeProbeCommand() {
         : "stty size\r";
 }
 
-async function waitForTerminalOutput(rpc, terminal, expected) {
+async function waitForTerminalOutput(rpc, terminal, client, expected) {
     const deadline = Date.now() + 10_000;
+    let output = "";
     while (Date.now() < deadline) {
         const attached = await rpc.request("terminal.attach", {
             terminalId: terminal.terminalId,
             generation: terminal.generation,
-            fromSeq: 0
+            fromSeq: client.fromSeq
         });
-        const output = attached.replay
-            .map((frame) => Buffer.from(frame.dataBase64, "base64").toString("utf8"))
-            .join("");
+        for (const frame of attached.replay) {
+            if (frame.seq <= client.fromSeq) continue;
+            client.fromSeq = frame.seq;
+            const data = Buffer.from(frame.dataBase64, "base64").toString("utf8");
+            output += data;
+            if (client.windows) {
+                await respondToCursorPositionQueries(rpc, terminal, client, data);
+            }
+        }
         if (output.includes(expected)) return;
         await delay(50);
     }
-    throw new Error(`terminal output did not include ${expected}`);
+    throw new Error(`terminal output did not include ${expected}: ${JSON.stringify(output)}`);
+}
+
+async function respondToCursorPositionQueries(rpc, terminal, client, data) {
+    const query = "\u001B[6n";
+    client.responseTail += data;
+    while (true) {
+        const queryIndex = client.responseTail.indexOf(query);
+        if (queryIndex < 0) {
+            client.responseTail = client.responseTail.slice(-(query.length - 1));
+            return;
+        }
+        client.responseTail = client.responseTail.slice(queryIndex + query.length);
+        await rpc.request("terminal.write", {
+            terminalId: terminal.terminalId,
+            generation: terminal.generation,
+            version: client.version,
+            clientSeq: client.clientSeq++,
+            data: Buffer.from("\u001B[1;1R", "utf8").toString("base64")
+        });
+    }
 }
 
 async function waitForTerminalExit(rpc, terminal) {
