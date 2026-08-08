@@ -327,6 +327,9 @@ export class ControlReadModel {
         const state = this.#instance(snapshot.name);
         state.snapshot = snapshot;
         state.sequence = Math.max(state.sequence, snapshot.lastSeq, 1);
+        this.#state.instances = this.#state.instances.map((entry) =>
+            entry.name === snapshot.name ? { ...entry, snapshot } : entry
+        );
         this.#clearFailure(this.failureKey(snapshot.name, "snapshot"));
         this.#emit();
     }
@@ -535,15 +538,19 @@ export class ControlReadModel {
     }
 
     #applyInstances(instances: InstanceListEntry[]): void {
-        this.#state.instances = instances;
         const names = new Set(instances.map(({ name }) => name));
-        for (const entry of instances) {
+        this.#state.instances = instances.map((entry) => {
             const state = this.#instance(entry.name);
-            if (state.snapshot === undefined || entry.snapshot.lastSeq >= state.snapshot.lastSeq) {
-                state.snapshot = entry.snapshot;
-                state.sequence = Math.max(state.sequence, entry.snapshot.lastSeq, 1);
+            const incoming = this.#resolveSnapshot(entry.name, entry.snapshot);
+            const snapshot = state.snapshot === undefined || incoming.lastSeq >= state.snapshot.lastSeq
+                ? incoming
+                : state.snapshot;
+            if (state.snapshot !== snapshot) {
+                state.snapshot = snapshot;
             }
-        }
+            state.sequence = Math.max(state.sequence, snapshot.lastSeq, 1);
+            return entry.snapshot === snapshot ? entry : { ...entry, snapshot };
+        });
         for (const name of Object.keys(this.#state.instanceState)) {
             if (!names.has(name)) {
                 delete this.#state.instanceState[name];

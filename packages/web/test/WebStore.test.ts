@@ -225,6 +225,28 @@ describe("WebStore", () => {
         expect(store.state.operations["stop:demo"]).toBeUndefined();
     });
 
+    it("publishes a lifecycle snapshot through both instance read-model views", async () => {
+        const clients = fakeClients();
+        const stopped: InstanceSnapshot = {
+            ...snapshot,
+            connectionState: "disconnected",
+            daemonState: "stopped",
+            lastSeq: 10,
+            ready: false,
+            status: "stopped",
+        };
+        clients.runtime.stop = vi.fn(async () => stopped);
+        const store = new WebStore(clients);
+        await store.load();
+
+        expect(store.state.readModel.instances[0]?.snapshot.status).toBe("ready");
+        await store.stop("demo");
+
+        expect(store.state.readModel.instanceState.demo?.snapshot?.status).toBe("stopped");
+        expect(store.state.readModel.instances[0]?.snapshot.status).toBe("stopped");
+        store.close();
+    });
+
     it("polls overview only while online, visible, and observed", async () => {
         vi.useFakeTimers();
         let visible = true;

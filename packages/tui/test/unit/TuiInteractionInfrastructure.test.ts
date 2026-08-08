@@ -313,7 +313,11 @@ test("Audit requires confirmation before disabling a Context", async () => {
     const context = expandBox(harness, "audit-context:ctx-alpha");
     harness.store.setMainFocusId(context.id);
     harness.store.setFocusScope("boxDetail");
-    harness.store.setSelectedDetailLine(context.expandedKey, "context.disable");
+    const disableLine = context.expandedLines.find((line) =>
+        line.id.endsWith(":context.disable"),
+    );
+    assert.ok(disableLine?.id);
+    harness.store.setSelectedDetailLine(context.expandedKey, disableLine.id);
 
     await harness.dispatch({ type: "focus.activate" });
 
