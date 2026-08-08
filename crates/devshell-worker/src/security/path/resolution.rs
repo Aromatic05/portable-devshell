@@ -873,19 +873,19 @@ fn resolve_workspace_existing(
     }
 
     for segment in &segments[..segments.len() - 1] {
-        reject_workspace_symlink(&parent, segment, requested)?;
+        reject_workspace_symlink(&parent, Path::new(segment), requested)?;
         let next = Arc::new(
             parent
-                .open_dir(segment)
+                .open_dir(Path::new(segment))
                 .map_err(|error| map_capability_resolution_error(error, requested))?,
         );
         guards.push(next.clone());
         parent = next;
     }
     let name = segments.last().expect("workspace target segment exists");
-    reject_workspace_symlink(&parent, name, requested)?;
+    reject_workspace_symlink(&parent, Path::new(name), requested)?;
     let metadata = parent
-        .metadata(name)
+        .metadata(Path::new(name))
         .map_err(|error| map_capability_resolution_error(error, requested))?;
     let canonical = segments
         .iter()
@@ -894,7 +894,7 @@ fn resolve_workspace_existing(
     let anchored_access = if metadata.is_dir() {
         let directory = Arc::new(
             parent_directory
-                .open_dir(name)
+                .open_dir(Path::new(name))
                 .map_err(|error| map_capability_resolution_error(error, requested))?,
         );
         guards.push(directory.clone());
@@ -902,7 +902,7 @@ fn resolve_workspace_existing(
     } else {
         AnchoredAccess::File(Arc::new(
             parent_directory
-                .open(name)
+                .open(Path::new(name))
                 .map_err(|error| map_capability_resolution_error(error, requested))?
                 .into_std(),
         ))
@@ -939,10 +939,10 @@ fn resolve_workspace_create(
     let mut guards = vec![root_directory.clone()];
     let mut parent = root_directory;
     for segment in parents {
-        reject_workspace_symlink(&parent, segment, requested)?;
+        reject_workspace_symlink(&parent, Path::new(segment), requested)?;
         let next = Arc::new(
             parent
-                .open_dir(segment)
+                .open_dir(Path::new(segment))
                 .map_err(|error| map_capability_resolution_error(error, requested))?,
         );
         guards.push(next.clone());

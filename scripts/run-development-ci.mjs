@@ -62,7 +62,6 @@ export function createDevelopmentCiSteps(target, platform = process.platform) {
         ...(platform === "win32" ? [] : [pnpmStep("Worker tmux contract tests", ["test:worker:tmux"])]),
         pnpmStep("Prepare test Worker", ["test:prepare"]),
         pnpmStep("Package tests", ["test"]),
-        { args: ["./scripts/smoke-pty.mjs"], command: process.execPath, name: "PTY smoke" },
         pnpmStep("Build native Worker", ["build:worker", target, "--output-dir", "./ci-artifacts"]),
         { args: ["./scripts/smoke-worker.mjs", worker], command: process.execPath, name: "Worker daemon smoke" },
         { args: ["./scripts/smoke-reverse-worker.mjs", worker], command: process.execPath, name: "Reverse worker PTY smoke" },

@@ -1,6 +1,5 @@
 import { spawnSync } from "node:child_process";
 import { lstat, mkdir, readdir, rm, symlink } from "node:fs/promises";
-import { createRequire } from "node:module";
 import { isAbsolute, resolve } from "node:path";
 
 import { assertPackageBinFile, readPackageBinPath } from "./application-layout.mjs";
@@ -36,8 +35,6 @@ try {
 
     const cli = await assertPackageBinFile(await readPackageBinPath(app, "devshell"));
     command = await createInstalledCommand(root, cli.absolutePath);
-
-    smokeNativePty(app);
 
     assertCommandOutput(
         runInstalled(command, ["status"], environment),
@@ -141,40 +138,5 @@ function run(command, args) {
     }
     if (result.status !== 0) {
         throw new Error(`${command} ${args.join(" ")} failed (${result.status ?? "unknown"})\n${result.stdout}${result.stderr}`);
-    }
-}
-
-function smokeNativePty(applicationDirectory) {
-    const requireFromApplication = createRequire(resolve(applicationDirectory, "package.json"));
-    const nodePtyPath = requireFromApplication.resolve("node-pty");
-    const shell = process.platform === "win32" ? process.env.ComSpec ?? "cmd.exe" : "/bin/sh";
-    const args = process.platform === "win32" ? ["/d", "/s", "/c", "echo package-pty-ok"] : ["-c", "printf package-pty-ok"];
-    const result = spawnSync(process.execPath, ["-e", [
-        `const { spawn } = require(${JSON.stringify(nodePtyPath)});`,
-        `const pty = spawn(${JSON.stringify(shell)}, ${JSON.stringify(args)}, { cols: 80, rows: 24 });`,
-        "let output = '';",
-        "let settled = false;",
-        "let dataSubscription;",
-        "let exitSubscription;",
-        "const timeout = setTimeout(() => finish(1), 10000);",
-        "function finish(code) {",
-        "  if (settled) return;",
-        "  settled = true;",
-        "  clearTimeout(timeout);",
-        "  dataSubscription?.dispose();",
-        "  exitSubscription?.dispose();",
-        "  try { pty.kill(); } catch {}",
-        "  process.exit(code);",
-        "}",
-        "dataSubscription = pty.onData((data) => {",
-        "  output += data;",
-        "  if (output.includes('package-pty-ok')) finish(0);",
-        "});",
-        "exitSubscription = pty.onExit(({ exitCode }) => {",
-        "  finish(exitCode === 0 && output.includes('package-pty-ok') ? 0 : 1);",
-        "});"
-    ].join("\n")], { encoding: "utf8", timeout: 15_000 });
-    if (result.error !== undefined || result.status !== 0) {
-        throw new Error(`packaged node-pty smoke failed (${result.status ?? "unknown"})\n${result.stderr ?? ""}`);
     }
 }

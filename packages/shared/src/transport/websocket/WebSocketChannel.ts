@@ -403,7 +403,11 @@ export class WebSocketServerChannel extends ChannelBase {
     readonly #message = (data: unknown, isBinary: boolean): void => {
         this.#lastSeenAt = this.#now();
         if (!isBinary) {
-            try { this.#socket.close(1003, "binary frame required"); } catch {}
+            try {
+                this.#socket.close(1003, "binary frame required");
+            } catch {
+                // Transport teardown is best effort after a protocol violation.
+            }
             clearInterval(this.#heartbeat);
             this.finish(new Error("WebSocket channel requires binary frames."));
             return;
@@ -426,7 +430,11 @@ export class WebSocketServerChannel extends ChannelBase {
         if (this.closed) return;
         clearInterval(this.#heartbeat);
         this.finish(asChannelError(error));
-        try { this.#socket.terminate(); } catch {}
+        try {
+            this.#socket.terminate();
+        } catch {
+            // The channel is already failed; transport teardown is best effort.
+        }
     }
 }
 

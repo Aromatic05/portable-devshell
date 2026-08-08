@@ -538,12 +538,14 @@ test("Web smoke resolves an explicit Chromium executable before default candidat
 test("testspace stop terminates its real tmux server", {
     skip: process.platform === "win32" || spawnSync("tmux", ["-V"]).status !== 0,
 }, async (t) => {
-    const runtime = await mkdtemp(join(tmpdir(), "pds-testspace-runtime-"));
+    const root = await mkdtemp(join(tmpdir(), "pds-testspace-root-"));
+    const runtime = resolveTestspaceRuntimeDirectory(root);
     const socket = join(runtime, "devshell-worker", TESTSPACE_INSTANCE, "tmux.sock");
     await mkdir(dirname(socket), { recursive: true });
     t.after(async () => {
         spawnSync("tmux", ["-S", socket, "kill-server"], { stdio: "ignore" });
         await rm(runtime, { force: true, recursive: true });
+        await rm(root, { force: true, recursive: true });
     });
 
     const started = spawnSync("tmux", [

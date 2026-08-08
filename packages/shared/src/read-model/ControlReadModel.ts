@@ -920,7 +920,3 @@ function methodNotFound(error: unknown): boolean {
     return typeof error === "object" && error !== null &&
         "code" in error && error.code === "control.methodNotFound";
 }
-
-function errorMessage(error: unknown): string {
-    return error instanceof Error ? error.message : String(error);
-}

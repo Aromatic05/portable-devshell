@@ -89,7 +89,7 @@ test("McpContextRegistry distinguishes invalid and expired ctxId values", async 
 });
 
 test("McpContextRegistry lists contexts and supports manual disable and renew", async () => {
-    let now = 1_000;
+    const now = 1_000;
     const registry = new McpContextRegistry({
         idFactory: () => "ctx-managed",
         now: () => now,

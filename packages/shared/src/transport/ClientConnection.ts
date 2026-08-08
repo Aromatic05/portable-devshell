@@ -653,10 +653,6 @@ function isTerminalStreamEvent(event: ClientEvent): boolean {
     return event.name === "stream.completed" || event.name === "stream.cancelled";
 }
 
-function isRecord(value: JsonValue | undefined): value is Record<string, JsonValue> {
-    return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
 function closeChannel(channel: Channel): void {
     try {
         channel.close();

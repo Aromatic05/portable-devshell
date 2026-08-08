@@ -104,12 +104,10 @@ export async function readTestspaceReverseStatus(options) {
 }
 
 export function reverseWorkerEnvironment(environment, paths) {
-    const {
-        DEVSHELL_WORKER_INTERNAL_INSTANCE: _instance,
-        DEVSHELL_WORKER_INTERNAL_SECURITY_MODE: _securityMode,
-        DEVSHELL_WORKER_INTERNAL_WORKSPACE: _workspace,
-        ...cleanEnvironment
-    } = environment;
+    const cleanEnvironment = { ...environment };
+    delete cleanEnvironment.DEVSHELL_WORKER_INTERNAL_INSTANCE;
+    delete cleanEnvironment.DEVSHELL_WORKER_INTERNAL_SECURITY_MODE;
+    delete cleanEnvironment.DEVSHELL_WORKER_INTERNAL_WORKSPACE;
     return {
         ...cleanEnvironment,
         HOME: paths.reverseHome,

@@ -179,7 +179,7 @@ export class WebStore {
             `context-message:${instance}:${ctxId}`,
             "Message queued.",
             generation,
-            async (signal) => {
+            async (_signal) => {
                 await this.#commands.queueContextMessage(instance, ctxId, text);
             },
         );

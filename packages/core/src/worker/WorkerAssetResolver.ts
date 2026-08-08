@@ -30,6 +30,7 @@ const releaseBaseUrlEnvVar = "PORTABLE_DEVSHELL_WORKER_RELEASE_BASE_URL";
 const releaseTagEnvVar = "PORTABLE_DEVSHELL_WORKER_RELEASE_TAG";
 const cacheDirectoryEnvVar = "PORTABLE_DEVSHELL_WORKER_CACHE_DIR";
 const defaultReleaseRepository = "Aromatic05/portable-devshell";
+const releaseCacheWrites = new Map<string, Promise<void>>();
 
 export class WorkerAssetResolver {
     readonly #moduleDir: string;
@@ -156,39 +157,55 @@ export class WorkerAssetResolver {
             };
         }
 
-        await mkdir(cacheDirectory, { recursive: true, mode: 0o700 });
-        const payload = await this.#fetchReleaseBinary(target, binaryUrl, searchedPaths);
-        const actualSha = createHash("sha256").update(payload).digest("hex");
+        let cacheWrite = releaseCacheWrites.get(binaryPath);
+        if (cacheWrite === undefined) {
+            cacheWrite = (async () => {
+                const alreadyInstalledSha = await readInstalledSha(binaryPath, shaPath);
+                if (alreadyInstalledSha === expectedSha) return;
 
-        if (actualSha !== expectedSha) {
-            throw createError({
-                code: errorCodes.coreWorkerAssetUnavailable,
-                details: {
-                    actualSha256: actualSha,
-                    downloadUrl: binaryUrl,
-                    expectedSha256: expectedSha,
-                    searchedPaths,
-                    targetKey: target.key
-                },
-                message: `Worker release asset checksum mismatch for target ${target.key}.`,
-                retryable: false
-            });
+                await mkdir(cacheDirectory, { recursive: true, mode: 0o700 });
+                const payload = await this.#fetchReleaseBinary(target, binaryUrl, searchedPaths);
+                const actualSha = createHash("sha256").update(payload).digest("hex");
+
+                if (actualSha !== expectedSha) {
+                    throw createError({
+                        code: errorCodes.coreWorkerAssetUnavailable,
+                        details: {
+                            actualSha256: actualSha,
+                            downloadUrl: binaryUrl,
+                            expectedSha256: expectedSha,
+                            searchedPaths,
+                            targetKey: target.key
+                        },
+                        message: `Worker release asset checksum mismatch for target ${target.key}.`,
+                        retryable: false
+                    });
+                }
+
+                const stagingId = `${process.pid}-${randomUUID()}`;
+                const tmpBinaryPath = `${binaryPath}.${stagingId}.tmp`;
+                const tmpShaPath = `${shaPath}.${stagingId}.tmp`;
+                try {
+                    await writeFile(tmpBinaryPath, payload, { mode: 0o755 });
+                    await ensureWorkerExecutablePermissions(tmpBinaryPath, target);
+                    await writeFile(tmpShaPath, `${expectedSha}\n`, { mode: 0o600 });
+                    await rename(tmpBinaryPath, binaryPath);
+                    await rename(tmpShaPath, shaPath);
+                } finally {
+                    await Promise.all([
+                        rm(tmpBinaryPath, { force: true }),
+                        rm(tmpShaPath, { force: true })
+                    ]);
+                }
+            })();
+            releaseCacheWrites.set(binaryPath, cacheWrite);
         }
-
-        const stagingId = `${process.pid}-${randomUUID()}`;
-        const tmpBinaryPath = `${binaryPath}.${stagingId}.tmp`;
-        const tmpShaPath = `${shaPath}.${stagingId}.tmp`;
         try {
-            await writeFile(tmpBinaryPath, payload, { mode: 0o755 });
-            await ensureWorkerExecutablePermissions(tmpBinaryPath, target);
-            await writeFile(tmpShaPath, `${expectedSha}\n`, { mode: 0o600 });
-            await rename(tmpBinaryPath, binaryPath);
-            await rename(tmpShaPath, shaPath);
+            await cacheWrite;
         } finally {
-            await Promise.all([
-                rm(tmpBinaryPath, { force: true }),
-                rm(tmpShaPath, { force: true })
-            ]);
+            if (releaseCacheWrites.get(binaryPath) === cacheWrite) {
+                releaseCacheWrites.delete(binaryPath);
+            }
         }
 
         return {

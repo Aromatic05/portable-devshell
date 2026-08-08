@@ -60,7 +60,7 @@ pub fn spawn(cwd: &Path, cols: u16, rows: u16) -> Result<SpawnedTerminal, RpcErr
     unsafe {
         command.pre_exec(move || {
             setsid().map_err(std::io::Error::other)?;
-            if libc::ioctl(slave_fd, libc::TIOCSCTTY, 0) < 0 {
+            if libc::ioctl(slave_fd, libc::TIOCSCTTY as libc::c_ulong, 0) < 0 {
                 return Err(std::io::Error::last_os_error());
             }
             Ok(())

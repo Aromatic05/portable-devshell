@@ -1099,7 +1099,9 @@ fn fish_shell_preserves_task_identity_through_exit() {
     )
     .unwrap();
     let instance = "aromatic-tmux-fish";
-    env.command_with_env("SHELL", &fish)
+    let mut start = env.command_with_env("SHELL", &fish);
+    start
+        .env("XDG_CONFIG_HOME", env.home().join(".config"))
         .current_dir(env.workspace())
         .args(["start", "--instance", instance])
         .assert()
