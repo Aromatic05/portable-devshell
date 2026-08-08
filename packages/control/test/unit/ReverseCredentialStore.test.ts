@@ -154,7 +154,12 @@ interface WindowsAclSnapshot {
 
 async function readWindowsAcl(path: string): Promise<WindowsAclSnapshot> {
     const script = [
-        "$acl = Get-Acl -LiteralPath $env:PORTABLE_DEVSHELL_TEST_ACL_PATH",
+        "$path = $env:PORTABLE_DEVSHELL_TEST_ACL_PATH",
+        "$acl = if ([System.IO.Directory]::Exists($path)) {",
+        "  [System.IO.FileSystemAclExtensions]::GetAccessControl([System.IO.DirectoryInfo]::new($path))",
+        "} else {",
+        "  [System.IO.FileSystemAclExtensions]::GetAccessControl([System.IO.FileInfo]::new($path))",
+        "}",
         "$sidType = [System.Security.Principal.SecurityIdentifier]",
         "$rules = @($acl.Access | ForEach-Object {",
         "  [pscustomobject]@{",

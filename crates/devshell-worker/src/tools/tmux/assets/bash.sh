@@ -2,6 +2,7 @@ devshell_tmux_status_dir=${DEVSHELL_TMUX_PANE_STATUS_DIR:-}
 devshell_tmux_status_file=
 devshell_tmux_pending_file=
 devshell_tmux_original_ps0=
+devshell_tmux_original_debug_command=
 devshell_tmux_armed=0
 devshell_tmux_active_task=
 
@@ -56,8 +57,23 @@ devshell_tmux_write_status() {
 
 devshell_tmux_preexec_bash() {
   if [ "${devshell_tmux_armed:-0}" != 1 ]; then return 0; fi
+  if [ -z "$devshell_tmux_pending_file" ] || [ ! -f "$devshell_tmux_pending_file" ]; then return 0; fi
   devshell_tmux_active_task=$(devshell_tmux_take_pending_task)
   devshell_tmux_write_status running 0 "$devshell_tmux_active_task"
+}
+
+devshell_tmux_install_debug_hook_bash() {
+  original_spec=$(trap -p DEBUG)
+  if [ -n "$original_spec" ]; then
+    original_quoted=${original_spec#trap -- }
+    original_quoted=${original_quoted% DEBUG}
+    eval "devshell_tmux_original_debug_command=$original_quoted"
+  fi
+  if [ -n "$devshell_tmux_original_debug_command" ]; then
+    trap "$devshell_tmux_original_debug_command; devshell_tmux_preexec_bash" DEBUG
+  else
+    trap 'devshell_tmux_preexec_bash' DEBUG
+  fi
 }
 
 devshell_tmux_precmd_bash() {
@@ -77,8 +93,12 @@ devshell_tmux_precmd_bash() {
 devshell_tmux_init_status_file
 if [ -z "${devshell_tmux_hook_installed:-}" ]; then
   devshell_tmux_hook_installed=1
-  devshell_tmux_original_ps0=${PS0-}
-  PS0='$(devshell_tmux_preexec_bash)'"$devshell_tmux_original_ps0"
+  if [ "${BASH_VERSINFO[0]:-0}" -gt 4 ] || { [ "${BASH_VERSINFO[0]:-0}" -eq 4 ] && [ "${BASH_VERSINFO[1]:-0}" -ge 4 ]; }; then
+    devshell_tmux_original_ps0=${PS0-}
+    PS0='$(devshell_tmux_preexec_bash)'"$devshell_tmux_original_ps0"
+  else
+    devshell_tmux_install_debug_hook_bash
+  fi
   case "$(declare -p PROMPT_COMMAND 2>/dev/null)" in
     declare\ -a\ PROMPT_COMMAND=*|declare\ -a*\ PROMPT_COMMAND=*) PROMPT_COMMAND=(devshell_tmux_precmd_bash "${PROMPT_COMMAND[@]}") ;;
     *) if [ -n "${PROMPT_COMMAND:-}" ]; then PROMPT_COMMAND="devshell_tmux_precmd_bash; ${PROMPT_COMMAND}"; else PROMPT_COMMAND="devshell_tmux_precmd_bash"; fi ;;

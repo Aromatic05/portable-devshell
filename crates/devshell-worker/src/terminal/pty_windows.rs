@@ -15,14 +15,6 @@ pub fn spawn(cwd: &Path, cols: u16, rows: u16) -> Result<SpawnedTerminal, RpcErr
     let pair = pty_system
         .openpty(pty_size(cols, rows))
         .map_err(|error| RpcError::new("terminal.spawnFailed", error.to_string()))?;
-    let reader = pair
-        .master
-        .try_clone_reader()
-        .map_err(|error| RpcError::new("terminal.spawnFailed", error.to_string()))?;
-    let writer = pair
-        .master
-        .take_writer()
-        .map_err(|error| RpcError::new("terminal.spawnFailed", error.to_string()))?;
 
     let mut command = CommandBuilder::new_default_prog();
     command.cwd(cwd.as_os_str());
@@ -38,6 +30,14 @@ pub fn spawn(cwd: &Path, cols: u16, rows: u16) -> Result<SpawnedTerminal, RpcErr
         )
     })?;
     drop(pair.slave);
+    let reader = pair
+        .master
+        .try_clone_reader()
+        .map_err(|error| RpcError::new("terminal.spawnFailed", error.to_string()))?;
+    let writer = pair
+        .master
+        .take_writer()
+        .map_err(|error| RpcError::new("terminal.spawnFailed", error.to_string()))?;
 
     let exit: ExitState = Arc::new((Mutex::new(None), Condvar::new()));
     let waiter_exit = Arc::clone(&exit);

@@ -25,12 +25,22 @@ if (browserExecutable === undefined) {
             expectedInstance: "aromatic-pc",
             webPort: fixture.webPort,
         });
-        const status = runCli(["instance", "status", "aromatic-pc"], fixture.env);
-        if (!/^status: ready$/mu.test(status.stdout)) {
-            throw new Error(`Web lifecycle smoke did not restore the instance to ready.\n${status.stdout}`);
-        }
+        await waitForInstanceReady(fixture.env, "aromatic-pc");
         process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
     } finally {
         await fixture.cleanup();
     }
+}
+
+async function waitForInstanceReady(environment, instance, timeoutMs = 15_000) {
+    const deadline = Date.now() + timeoutMs;
+    let lastStatus;
+    while (Date.now() < deadline) {
+        lastStatus = runCli(["instance", "status", instance], environment);
+        if (/^status: ready$/mu.test(lastStatus.stdout)) return;
+        await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    throw new Error(
+        `Web lifecycle smoke did not restore the instance to ready.\n${lastStatus?.stdout ?? "No status response."}`,
+    );
 }

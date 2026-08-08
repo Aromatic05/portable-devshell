@@ -155,7 +155,10 @@ interface TmuxHarness {
 
 async function withTmuxHarness(instanceName: string, body: (harness: TmuxHarness) => Promise<void>): Promise<void> {
     const homeDirectory = await createTestTempDirectory("mcp-tmux-home");
-    const runtimeDirectory = await mkdtemp(join(tmpdir(), "pds-mcp-tmux-"));
+    const runtimeDirectory = await mkdtemp(join(
+        process.platform === "darwin" ? "/tmp" : tmpdir(),
+        "pds-mcp-tmux-",
+    ));
     const workspacePath = await createTestTempDirectory("mcp-tmux-workspace");
     const instance = new WorkerInstanceFactory().create({
         defaultWorkspace: asWorkspacePath(workspacePath),

@@ -28,7 +28,11 @@ const WINDOWS_ACL_SCRIPT = [
     "  [System.Security.AccessControl.AccessControlType]::Allow",
     ")",
     "$acl.AddAccessRule($rule)",
-    "Set-Acl -LiteralPath $path -AclObject $acl",
+    "if ($kind -eq 'directory') {",
+    "  [System.IO.FileSystemAclExtensions]::SetAccessControl([System.IO.DirectoryInfo]::new($path), $acl)",
+    "} else {",
+    "  [System.IO.FileSystemAclExtensions]::SetAccessControl([System.IO.FileInfo]::new($path), $acl)",
+    "}",
 ].join("\n");
 
 export interface ReverseCredentialFileSecurity {

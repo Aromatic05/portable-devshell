@@ -17,7 +17,7 @@ pub struct TestEnv {
 impl TestEnv {
     pub fn new() -> Self {
         let home = test_temp_dir();
-        let runtime = test_temp_dir();
+        let runtime = test_runtime_temp_dir();
         let workspace = test_temp_dir();
         Self {
             home_root: home.path().join(".devshell"),
@@ -213,6 +213,18 @@ impl Drop for TestEnv {
 }
 
 fn test_temp_dir() -> tempfile::TempDir {
+    let namespace = std::env::temp_dir().join("devshell-test");
+    std::fs::create_dir_all(&namespace).unwrap();
+    tempfile::Builder::new()
+        .prefix("test-")
+        .tempdir_in(&namespace)
+        .unwrap()
+}
+
+fn test_runtime_temp_dir() -> tempfile::TempDir {
+    #[cfg(target_os = "macos")]
+    let namespace = PathBuf::from("/tmp").join("devshell-test-runtime");
+    #[cfg(not(target_os = "macos"))]
     let namespace = std::env::temp_dir().join("devshell-test");
     std::fs::create_dir_all(&namespace).unwrap();
     tempfile::Builder::new()
