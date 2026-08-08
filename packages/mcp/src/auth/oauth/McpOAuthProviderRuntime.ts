@@ -142,7 +142,8 @@ export class McpOAuthProviderRuntime {
         const provider = new Provider(stripTrailingSlash(this.#issuerUrl.href), {
             adapter: createDynamicClientScopeAdapterFactory(
                 createMcpOAuthOidcFileAdapterFactory(
-                    join(this.#storageDir, "adapter")
+                    join(this.#storageDir, "adapter"),
+                    async (path) => await this.#storageSecurity.secureStorage(path),
                 )
             ),
             clientDefaults: {

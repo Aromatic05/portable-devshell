@@ -15,7 +15,10 @@ type StoredState = Record<string, StoredRecord>;
 const MAX_CLIENT_RECORDS = 256;
 const MAX_DEFAULT_RECORDS = 4096;
 
-export function createMcpOAuthOidcFileAdapterFactory(storageDir: string): AdapterFactory {
+export function createMcpOAuthOidcFileAdapterFactory(
+    storageDir: string,
+    secureStorage: (path: string) => Promise<void> = async () => {},
+): AdapterFactory {
     const locks = new Map<string, AsyncMutex>();
     return (name: string) => {
         const filePath = join(storageDir, `${name}.json`);
@@ -27,7 +30,8 @@ export function createMcpOAuthOidcFileAdapterFactory(storageDir: string): Adapte
         return new McpOidcFileAdapter(
             filePath,
             lock,
-            name === "Client" ? MAX_CLIENT_RECORDS : MAX_DEFAULT_RECORDS
+            name === "Client" ? MAX_CLIENT_RECORDS : MAX_DEFAULT_RECORDS,
+            secureStorage,
         );
     };
 }
@@ -36,7 +40,8 @@ class McpOidcFileAdapter implements Adapter {
     constructor(
         private readonly filePath: string,
         private readonly lock: AsyncMutex,
-        private readonly maxRecords: number
+        private readonly maxRecords: number,
+        private readonly secureStorage: (path: string) => Promise<void>,
     ) {}
 
     async consume(id: string): Promise<void> {
@@ -151,6 +156,7 @@ class McpOidcFileAdapter implements Adapter {
         if (process.platform !== "win32") {
             await chmod(directory, 0o700);
         }
+        await this.secureStorage(directory);
         const tempPath = `${this.filePath}.${process.pid}.${randomUUID()}.tmp`;
         const file = await open(tempPath, "wx", 0o600);
         try {
@@ -173,6 +179,7 @@ class McpOidcFileAdapter implements Adapter {
                     await directoryHandle.close();
                 }
             }
+            await this.secureStorage(directory);
         } catch (error) {
             await rm(tempPath, { force: true }).catch(() => undefined);
             throw error;

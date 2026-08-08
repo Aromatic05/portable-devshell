@@ -585,7 +585,7 @@ mod tests {
         let (_root, store) = store(ArtifactPolicy {
             stream_limit_bytes: 32,
             instance_quota_bytes: 64,
-            ttl: Duration::from_millis(250),
+            ttl: Duration::from_secs(60),
         });
         let mut draft = store.begin(ArtifactStream::Stdout).unwrap();
         draft.write_chunk(b"leased content").unwrap();

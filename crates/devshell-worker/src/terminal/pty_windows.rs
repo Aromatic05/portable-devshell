@@ -22,6 +22,8 @@ pub fn spawn(cwd: &Path, cols: u16, rows: u16) -> Result<SpawnedTerminal, RpcErr
     command.arg("-NoLogo");
     command.arg("-NoProfile");
     command.arg("-NoExit");
+    command.arg("-Command");
+    command.arg("Remove-Module PSReadLine -ErrorAction SilentlyContinue");
     command.cwd(cwd.as_os_str());
     command.env("TERM", "xterm-256color");
     let mut process = pair
