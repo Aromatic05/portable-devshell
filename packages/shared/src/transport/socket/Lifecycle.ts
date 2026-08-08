@@ -1,7 +1,7 @@
 import { spawn, type ChildProcess, type SpawnOptions } from "node:child_process";
-import { appendFile, mkdir, open, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, open, readFile, readlink, rm, stat, writeFile } from "node:fs/promises";
 import { createConnection } from "node:net";
-import { dirname, join } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 
 import { createError } from "../../error/ErrorFactoryCreate.js";
@@ -29,6 +29,8 @@ export interface ControlLifecycleStatus {
     running: boolean;
 }
 
+export type ControlProcessIdentity = "control" | "other" | "unknown";
+
 interface ControlLifecycleProbe {
     status: ControlLifecycleStatus;
     verifiedPid?: number;
@@ -55,10 +57,12 @@ export interface ControlPidFilePort {
 export interface ControlLifecycleManagerOptions extends Partial<ControlDaemonLaunchOptions> {
     logger?: ControlLoggerPort;
     pidFile?: ControlPidFilePort;
+    processIdentity?: (pid: number) => Promise<ControlProcessIdentity>;
     processIsRunning?: (pid: number) => boolean;
     requestTimeoutMs?: number;
     rpcClient?: ControlLifecycleRpcClient;
     socketFile?: ControlSocketFilePort;
+    signalProcess?: (pid: number, signal: NodeJS.Signals) => void;
     waitTimeoutMs?: number;
 }
 
@@ -155,9 +159,11 @@ export class ControlLifecycleManager {
     readonly #lifecycleLock: ControlLifecycleFileLock;
     readonly #logger: ControlLoggerPort;
     readonly #pidFile: ControlPidFilePort;
+    readonly #processIdentity: (pid: number) => Promise<ControlProcessIdentity>;
     readonly #processIsRunning: (pid: number) => boolean;
     readonly #rpcClient: ControlLifecycleRpcClient;
     readonly #socketFile: ControlSocketFilePort;
+    readonly #signalProcess: (pid: number, signal: NodeJS.Signals) => void;
     readonly #waitTimeoutMs: number;
 
     constructor(options: ControlLifecycleManagerOptions = {}) {
@@ -166,6 +172,12 @@ export class ControlLifecycleManager {
         this.#socketFile = options.socketFile ?? new ControlSocketFile(options.xdgRuntimeDir);
         this.#waitTimeoutMs = options.waitTimeoutMs ?? 5_000;
         this.#processIsRunning = options.processIsRunning ?? processIsRunning;
+        this.#processIdentity = options.processIdentity ?? ((pid) => identifyControlProcess(pid, {
+            daemonModulePath: options.daemonModulePath,
+            homeDirectory: options.homeDirectory,
+            xdgRuntimeDir: options.xdgRuntimeDir
+        }));
+        this.#signalProcess = options.signalProcess ?? sendSignal;
         this.#launchOptions = {
             daemonModulePath: options.daemonModulePath,
             env: options.env,
@@ -192,9 +204,14 @@ export class ControlLifecycleManager {
                 return current;
             }
             if (current.pid !== undefined && this.#processIsRunning(current.pid)) {
-                throw new Error(
-                    `Control PID file points to live process ${current.pid}, but the control RPC endpoint is unavailable. Refusing to replace an unverified process; terminate it manually after confirming its identity.`
-                );
+                const identity = await this.#processIdentity(current.pid);
+                if (identity === "control") {
+                    await this.#terminateProcess(current.pid);
+                } else if (identity === "unknown") {
+                    throw new Error(
+                        `Control PID file points to live process ${current.pid}, but the control RPC endpoint is unavailable and the process identity could not be verified. Refusing to replace an unknown process.`
+                    );
+                }
             }
 
             await this.#cleanupRuntimeFiles(current.pid);
@@ -245,17 +262,22 @@ export class ControlLifecycleManager {
 
             if (pid !== undefined && this.#processIsRunning(pid)) {
                 if (!current.running) {
-                    throw new Error(
-                        `Control PID file points to live process ${pid}, but the control RPC endpoint is unavailable. Refusing to signal an unverified process.`
-                    );
+                    const identity = await this.#processIdentity(pid);
+                    if (identity === "control") {
+                        await this.#terminateProcess(pid);
+                    } else if (identity === "unknown") {
+                        throw new Error(
+                            `Control PID file points to live process ${pid}, but the control RPC endpoint is unavailable. Refusing to signal an unverified process.`
+                        );
+                    }
                 }
-                if (probe.verifiedPid !== undefined) {
+                if (current.running && probe.verifiedPid !== undefined) {
                     try {
                         await this.#waitForProcessExit(pid, "control server did not stop");
                     } catch {
                         await this.#terminateProcess(pid);
                     }
-                } else {
+                } else if (current.running) {
                     await this.#waitForProcessExit(
                         pid,
                         `control server process ${pid} did not stop; its PID could not be verified over RPC`
@@ -317,12 +339,12 @@ export class ControlLifecycleManager {
         if (!this.#processIsRunning(pid)) {
             return;
         }
-        sendSignal(pid, "SIGTERM");
+        this.#signalProcess(pid, "SIGTERM");
         try {
             await this.#waitForProcessExit(pid, `control process ${pid} did not terminate`);
             return;
         } catch {
-            sendSignal(pid, "SIGKILL");
+            this.#signalProcess(pid, "SIGKILL");
         }
         await this.#waitForProcessExit(pid, `control process ${pid} did not terminate after SIGKILL`);
     }
@@ -494,6 +516,61 @@ function processIsRunning(pid: number): boolean {
         return true;
     } catch (error) {
         return !(typeof error === "object" && error !== null && "code" in error && error.code === "ESRCH");
+    }
+}
+
+async function identifyControlProcess(
+    pid: number,
+    options: {
+        daemonModulePath?: string;
+        homeDirectory?: string;
+        xdgRuntimeDir?: string;
+    }
+): Promise<ControlProcessIdentity> {
+    if (process.platform !== "linux" || options.daemonModulePath === undefined) {
+        return "unknown";
+    }
+
+    try {
+        const [cmdline, executable, environment] = await Promise.all([
+            readFile(`/proc/${pid}/cmdline`, "utf8"),
+            readlink(`/proc/${pid}/exe`),
+            readFile(`/proc/${pid}/environ`, "utf8")
+        ]);
+        const argv = cmdline.split("\0").filter((value) => value.length > 0);
+        if (argv.length === 0) return "unknown";
+        if (!["node", "nodejs"].includes(basename(executable))) return "other";
+        if (argv.includes("-e") || argv.includes("--eval")) return "other";
+
+        const expectedModule = resolve(options.daemonModulePath);
+        const ownsModule = argv.slice(1).some((argument) =>
+            argument === options.daemonModulePath ||
+            (argument.startsWith("/") && resolve(argument) === expectedModule)
+        );
+        if (!ownsModule) return "other";
+
+        const values = new Map(
+            environment
+                .split("\0")
+                .filter((entry) => entry.length > 0)
+                .map((entry) => {
+                    const separator = entry.indexOf("=");
+                    return separator === -1
+                        ? [entry, ""] as const
+                        : [entry.slice(0, separator), entry.slice(separator + 1)] as const;
+                })
+        );
+        const expectedHome = options.homeDirectory ?? process.env.HOME;
+        if (expectedHome !== undefined && values.get("HOME") !== expectedHome) return "other";
+        const expectedRuntime = options.xdgRuntimeDir ?? process.env.XDG_RUNTIME_DIR;
+        if (
+            expectedRuntime !== undefined &&
+            values.get("XDG_RUNTIME_DIR") !== expectedRuntime
+        ) return "other";
+        return "control";
+    } catch (error) {
+        if (isFileMissingError(error)) return "other";
+        return "unknown";
     }
 }
 

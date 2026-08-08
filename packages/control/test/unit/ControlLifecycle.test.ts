@@ -104,6 +104,179 @@ test("stale pid does not mark control as running and start replaces it", async (
     assert.notEqual(started.pid, 999999);
 });
 
+test("start terminates a verified stale Control process before replacing it", async () => {
+    let recordedPid: number | undefined = 123;
+    let staleRunning = true;
+    const signals: Array<{ pid: number; signal: NodeJS.Signals }> = [];
+    const manager = new ControlLifecycleManager({
+        daemonModulePath: controlDaemonModulePath(),
+        pidFile: {
+            read: async () => recordedPid,
+            remove: async () => { recordedPid = undefined; },
+            write: async (pid) => { recordedPid = pid; },
+            path: "/tmp/control.pid"
+        },
+        processIdentity: async (pid) => pid === 123 ? "control" : "unknown",
+        processIsRunning: (pid) => pid === 123 ? staleRunning : pid === 456,
+        rpcClient: {
+            async request() {
+                if (recordedPid === 456) return { instanceCount: 0, pid: 456 };
+                throw new Error("offline");
+            }
+        },
+        signalProcess(pid, signal) {
+            signals.push({ pid, signal });
+            if (pid === 123) staleRunning = false;
+        },
+        socketFile: {
+            ensureRuntimeDir: async () => undefined,
+            path: "/tmp/control.sock",
+            remove: async () => undefined,
+            runtimeDir: "/tmp"
+        },
+        spawnFunction() {
+            return { pid: 456, unref() {} } as never;
+        },
+        waitTimeoutMs: 100
+    });
+
+    const started = await manager.start();
+
+    assert.equal(started.running, true);
+    assert.equal(started.pid, 456);
+    assert.deepEqual(signals, [{ pid: 123, signal: "SIGTERM" }]);
+});
+
+test("start replaces stale metadata without signalling a verified unrelated process", async () => {
+    let recordedPid: number | undefined = 123;
+    const signals: Array<{ pid: number; signal: NodeJS.Signals }> = [];
+    const manager = new ControlLifecycleManager({
+        daemonModulePath: controlDaemonModulePath(),
+        pidFile: {
+            read: async () => recordedPid,
+            remove: async () => { recordedPid = undefined; },
+            write: async (pid) => { recordedPid = pid; },
+            path: "/tmp/control.pid"
+        },
+        processIdentity: async (pid) => pid === 123 ? "other" : "unknown",
+        processIsRunning: (pid) => pid === 123 || pid === 456,
+        rpcClient: {
+            async request() {
+                if (recordedPid === 456) return { instanceCount: 0, pid: 456 };
+                throw new Error("offline");
+            }
+        },
+        signalProcess(pid, signal) {
+            signals.push({ pid, signal });
+        },
+        socketFile: {
+            ensureRuntimeDir: async () => undefined,
+            path: "/tmp/control.sock",
+            remove: async () => undefined,
+            runtimeDir: "/tmp"
+        },
+        spawnFunction() {
+            return { pid: 456, unref() {} } as never;
+        },
+        waitTimeoutMs: 100
+    });
+
+    const started = await manager.start();
+
+    assert.equal(started.running, true);
+    assert.equal(started.pid, 456);
+    assert.deepEqual(signals, []);
+});
+
+test("start still refuses a live pid whose process identity is unknown", async () => {
+    const manager = new ControlLifecycleManager({
+        daemonModulePath: controlDaemonModulePath(),
+        pidFile: {
+            read: async () => 123,
+            remove: async () => undefined,
+            write: async () => undefined,
+            path: "/tmp/control.pid"
+        },
+        processIdentity: async () => "unknown",
+        processIsRunning: () => true,
+        rpcClient: {
+            async request() {
+                throw new Error("offline");
+            }
+        },
+        socketFile: {
+            ensureRuntimeDir: async () => undefined,
+            path: "/tmp/control.sock",
+            remove: async () => undefined,
+            runtimeDir: "/tmp"
+        },
+        waitTimeoutMs: 50
+    });
+
+    await assert.rejects(manager.start(), /process identity could not be verified/u);
+});
+
+test(
+    "Linux process identity recognizes and stops a matching detached Control command",
+    { skip: process.platform === "linux" ? false : "requires Linux /proc process identity" },
+    async (t) => {
+        const root = await createTestTempDirectory("control-process-identity");
+        const homeDirectory = join(root, "home");
+        const xdgRuntimeDir = join(root, "runtime");
+        const daemonModulePath = join(root, "ControlDaemon.mjs");
+        await mkdir(homeDirectory, { recursive: true });
+        await mkdir(xdgRuntimeDir, { recursive: true });
+        await writeFile(daemonModulePath, "setInterval(() => {}, 1000);\n", "utf8");
+        const child = spawn(process.execPath, [daemonModulePath], {
+            detached: true,
+            env: {
+                ...process.env,
+                HOME: homeDirectory,
+                XDG_RUNTIME_DIR: xdgRuntimeDir
+            },
+            stdio: "ignore"
+        });
+        const pid = child.pid;
+        assert.notEqual(pid, undefined);
+        child.unref();
+        t.after(async () => {
+            if (pid !== undefined && isProcessRunning(pid)) process.kill(pid, "SIGKILL");
+            await rm(root, { force: true, recursive: true });
+        });
+
+        let recordedPid = pid;
+        const manager = new ControlLifecycleManager({
+            daemonModulePath,
+            homeDirectory,
+            pidFile: {
+                read: async () => recordedPid,
+                remove: async () => { recordedPid = undefined; },
+                write: async (nextPid) => { recordedPid = nextPid; },
+                path: join(homeDirectory, "control.pid")
+            },
+            rpcClient: {
+                async request() {
+                    throw new Error("offline");
+                }
+            },
+            socketFile: {
+                ensureRuntimeDir: async () => undefined,
+                path: join(xdgRuntimeDir, "control.sock"),
+                remove: async () => undefined,
+                runtimeDir: xdgRuntimeDir
+            },
+            waitTimeoutMs: 1_000,
+            xdgRuntimeDir
+        });
+
+        const stopped = await manager.stop();
+
+        assert.equal(stopped.running, false);
+        assert.equal(recordedPid, undefined);
+        await waitFor(async () => isProcessRunning(pid!) ? undefined : true, 3_000);
+    }
+);
+
 test("start failure includes recent control log output", async () => {
     const manager = new ControlLifecycleManager({
         daemonModulePath: controlDaemonModulePath(),
@@ -292,6 +465,7 @@ test("stop refuses to signal a live pid that cannot be verified over rpc", async
             write: async () => undefined,
             path: "/tmp/control.pid"
         },
+        processIdentity: async () => "unknown",
         processIsRunning: () => true,
         rpcClient: {
             async request() {
