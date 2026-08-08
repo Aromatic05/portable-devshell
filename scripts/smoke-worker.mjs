@@ -92,7 +92,7 @@ try {
             fromSeq: 0,
             responseTail: "",
             version: terminal.version,
-            windows: handshake.platform.os === "windows" && !usesWindowsGitBashTestShell()
+            windows: handshake.platform.os === "windows"
         };
         if (terminalClient.windows) {
             await waitForTerminalOutput(rpc, terminal, terminalClient, "\u001B[6n");
@@ -167,20 +167,15 @@ function terminalPrintCommand(marker) {
     const middle = Math.floor(marker.length / 2);
     const left = marker.slice(0, middle);
     const right = marker.slice(middle);
-    return process.platform === "win32" && !usesWindowsGitBashTestShell()
+    return process.platform === "win32"
         ? `powershell.exe -NoLogo -NoProfile -NonInteractive -Command "[Console]::WriteLine(('${left}' + '${right}'))"\r`
         : `printf '%s%s\\n' '${left}' '${right}'\r`;
 }
 
 function terminalSizeProbeCommand() {
-    return process.platform === "win32" && !usesWindowsGitBashTestShell()
+    return process.platform === "win32"
         ? `powershell.exe -NoLogo -NoProfile -NonInteractive -Command "$s=$Host.UI.RawUI.WindowSize; [Console]::WriteLine(('{0} {1}' -f $s.Height,$s.Width))"\r`
         : "stty size\r";
-}
-
-function usesWindowsGitBashTestShell() {
-    const shell = process.env.PORTABLE_DEVSHELL_WINDOWS_TEST_SHELL;
-    return process.platform === "win32" && typeof shell === "string" && shell.length > 0;
 }
 
 async function waitForTerminalOutput(rpc, terminal, client, expected) {

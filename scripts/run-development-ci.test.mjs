@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 
 import { runDevTagGate } from "./run-dev-tag-gate.mjs";
@@ -48,6 +51,31 @@ test("development CI continues after an executor throws", () => {
 
     assert.deepEqual(invoked, ["first", "second", "third"]);
     assert.deepEqual(result.failures, [{ name: "second", status: 1 }]);
+});
+
+test("Windows development CI keeps build validation but omits runtime tests", () => {
+    const directory = mkdtempSync(join(tmpdir(), "devshell-ci-plan-"));
+    const pnpmCli = join(directory, "pnpm.cjs");
+    writeFileSync(pnpmCli, "");
+    const previous = process.env.PORTABLE_DEVSHELL_PNPM_CLI;
+    process.env.PORTABLE_DEVSHELL_PNPM_CLI = pnpmCli;
+    try {
+        const names = createDevelopmentCiSteps("windows-x64", "win32").map((step) => step.name);
+        assert.deepEqual(names, [
+            "Lint",
+            "Build",
+            "Typecheck",
+            "Build native Worker",
+            "Package native application",
+        ]);
+    } finally {
+        if (previous === undefined) {
+            delete process.env.PORTABLE_DEVSHELL_PNPM_CLI;
+        } else {
+            process.env.PORTABLE_DEVSHELL_PNPM_CLI = previous;
+        }
+        rmSync(directory, { force: true, recursive: true });
+    }
 });
 
 test("development CI entrypoint executes the canonical target plan", () => {

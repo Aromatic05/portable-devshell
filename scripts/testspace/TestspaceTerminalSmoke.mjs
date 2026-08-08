@@ -169,20 +169,15 @@ function terminalPrintCommand(marker) {
     const split = Math.max(1, Math.floor(marker.length / 2));
     const left = marker.slice(0, split).replaceAll("'", "");
     const right = marker.slice(split).replaceAll("'", "");
-    return process.platform === "win32" && !usesWindowsGitBashTestShell()
+    return process.platform === "win32"
         ? `powershell.exe -NoLogo -NoProfile -NonInteractive -Command "[Console]::WriteLine(('${left}' + '${right}'))"\r`
         : `printf '%s%s\\n' '${left}' '${right}'\r`;
 }
 
 function terminalSizeProbeCommand() {
-    return process.platform === "win32" && !usesWindowsGitBashTestShell()
+    return process.platform === "win32"
         ? `powershell.exe -NoLogo -NoProfile -NonInteractive -Command "$s=$Host.UI.RawUI.WindowSize; [Console]::WriteLine(('{0} {1}' -f $s.Height,$s.Width))"\r`
         : "stty size\r";
-}
-
-function usesWindowsGitBashTestShell() {
-    const shell = process.env.PORTABLE_DEVSHELL_WINDOWS_TEST_SHELL;
-    return process.platform === "win32" && typeof shell === "string" && shell.length > 0;
 }
 
 function terminalExpectedSize(rows, cols) {

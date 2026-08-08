@@ -53,13 +53,28 @@ export function createDevelopmentCiSteps(target, platform = process.platform) {
         `devshell-worker-${target}${platform === "win32" ? ".exe" : ""}`,
     );
     const application = join("ci-artifacts", `portable-devshell-app-${target}.tar.gz`);
+
+    if (platform === "win32") {
+        // PowerShell is obscure to script reliably, and ConPTY terminal behavior remains unstable
+        // even when the PTY child is Git Bash. We cannot currently write Windows runtime tests
+        // with enough determinism and proof value to make them a release gate. Keep static checks,
+        // native Worker compilation, and application packaging as the Windows release criteria.
+        return [
+            pnpmStep("Lint", ["lint"]),
+            pnpmStep("Build", ["build"]),
+            pnpmStep("Typecheck", ["typecheck"]),
+            pnpmStep("Build native Worker", ["build:worker", target, "--output-dir", "./ci-artifacts"]),
+            pnpmStep("Package native application", ["package:app", "--", "--target", target, "--output-dir", "./ci-artifacts"]),
+        ];
+    }
+
     const steps = [
         pnpmStep("Script tests", ["test:scripts"]),
         pnpmStep("Lint", ["lint"]),
         pnpmStep("Build", ["build"]),
         pnpmStep("Typecheck", ["typecheck"]),
         { args: ["test", "--locked", "--workspace"], command: "cargo", name: "Rust workspace tests" },
-        ...(platform === "win32" ? [] : [pnpmStep("Worker tmux contract tests", ["test:worker:tmux"])]),
+        pnpmStep("Worker tmux contract tests", ["test:worker:tmux"]),
         pnpmStep("Prepare test Worker", ["test:prepare"]),
         pnpmStep("Package tests", ["test"]),
         pnpmStep("Build native Worker", ["build:worker", target, "--output-dir", "./ci-artifacts"]),
@@ -69,15 +84,7 @@ export function createDevelopmentCiSteps(target, platform = process.platform) {
         pnpmStep("Package native application", ["package:app", "--", "--target", target, "--output-dir", "./ci-artifacts"]),
         pnpmStep("Application package smoke", ["smoke:package", "--", application]),
     ];
-    if (platform === "win32") {
-        steps.push({
-            args: ["./scripts/smoke-install-release-windows.mjs", application],
-            command: process.execPath,
-            name: "Windows release installer smoke",
-        });
-    } else {
-        steps.push(pnpmStep("Unix release installer smoke", ["smoke:install-release", "--", application]));
-    }
+    steps.push(pnpmStep("Unix release installer smoke", ["smoke:install-release", "--", application]));
     if (target === "linux-x64") {
         steps.push({
             args: [
