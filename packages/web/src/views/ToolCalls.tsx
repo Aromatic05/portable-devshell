@@ -2,6 +2,7 @@ import { type FormEvent, useEffect, useMemo, useState } from "react";
 
 import type { JsonValue, ToolCallRecord } from "@portable-devshell/shared/browser";
 
+import { ConfirmationDialog } from "../components/ConfirmationDialog.js";
 import { ToolCallFilters } from "../components/toolcall/ToolCallFilters.js";
 import { ToolCallEntry } from "../components/toolcall/ToolCallEntry.js";
 import {
@@ -26,6 +27,10 @@ export function ToolCalls({
 }) {
     const [filters, setFilters] = useState<Filters>(emptyToolCallFilters);
     const [draft, setDraft] = useState("");
+    const [disableConfirmation, setDisableConfirmation] = useState<{
+        ctxId: string;
+        instance: string;
+    }>();
     const instanceState = state.readModel.instanceState;
     const allCalls = useMemo(
         () => Object.values(instanceState).flatMap((value) => value.toolCalls),
@@ -111,6 +116,9 @@ export function ToolCalls({
                   record.instance === effectiveFilters.instance,
           )
         : undefined;
+    const disableOperation = disableConfirmation === undefined
+        ? undefined
+        : `context-disable:${disableConfirmation.ctxId}`;
 
     useEffect(() => {
         if (
@@ -172,7 +180,10 @@ export function ToolCalls({
                     <button
                         className="danger"
                         disabled={!interactive}
-                        onClick={() => void store.disableContext(ctxId)}
+                        onClick={() => setDisableConfirmation({
+                            ctxId,
+                            instance: effectiveFilters.instance,
+                        })}
                         type="button"
                     >
                         Disable Context
@@ -236,6 +247,16 @@ export function ToolCalls({
                 </ol>}
             </> : <p className="empty">Select one instance and one scoped Context to queue a Comment.</p>}
         </section>
+        {disableConfirmation === undefined ? null : <ConfirmationDialog
+            actionLabel="Disable"
+            busy={disableOperation !== undefined && state.operations[disableOperation] !== undefined}
+            description={`Disable Context ${disableConfirmation.ctxId} for ${disableConfirmation.instance}? This cannot be renewed; the client must establish a new Context.`}
+            onCancel={() => setDisableConfirmation(undefined)}
+            onConfirm={() => {
+                const request = store.disableContext(disableConfirmation.ctxId);
+                void request.finally(() => setDisableConfirmation(undefined));
+            }}
+        />}
         {state.connection === "offline" && allCalls.length === 0
             ? <p className="empty">Tool calls are unavailable while offline.</p>
             : state.connection === "connecting" && allCalls.length === 0

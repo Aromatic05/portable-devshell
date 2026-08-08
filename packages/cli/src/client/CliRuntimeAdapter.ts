@@ -46,36 +46,20 @@ async function startInteractive(
         ? () => undefined
         : enableRawRelayMode(relay.input);
     let cleanupInput: () => void = () => undefined;
+    let relayFailure: Promise<never> | undefined;
     let stream: ClientStream | undefined;
     try {
         const opened = await runtime.openStart(instance);
         stream = opened.stream;
         if (relay !== undefined) {
-            cleanupInput = attachRelayInput(relay.input, stream);
+            const attachment = attachRelayInput(relay.input, stream);
+            cleanupInput = attachment.cleanup;
+            relayFailure = attachment.failure;
         }
-        while (true) {
-            const event = await stream.nextEvent();
-            if (event.name === "runtime.output") {
-                const payload = event.payload;
-                if (
-                    relay !== undefined &&
-                    typeof payload === "object" &&
-                    payload !== null &&
-                    !Array.isArray(payload) &&
-                    typeof payload.chunk === "string"
-                ) {
-                    relay.output.write(payload.chunk);
-                }
-                continue;
-            }
-            if (event.name === "stream.completed") {
-                return readInstanceSnapshot(event.payload);
-            }
-            if (event.name === "stream.cancelled") {
-                connection.throwRemoteError(event.error);
-                throw new Error("Interactive start was cancelled.");
-            }
-        }
+        const events = readInteractiveStartEvents(connection, stream, relay);
+        return relayFailure === undefined
+            ? await events
+            : await Promise.race([events, relayFailure]);
     } catch (error) {
         throw connection.mapError(error);
     } finally {
@@ -85,22 +69,68 @@ async function startInteractive(
     }
 }
 
+async function readInteractiveStartEvents(
+    connection: ClientConnection,
+    stream: ClientStream,
+    relay?: CliClientRuntimeTerminalRelay,
+): Promise<InstanceSnapshot> {
+    while (true) {
+        const event = await stream.nextEvent();
+        if (event.name === "runtime.output") {
+            const payload = event.payload;
+            if (
+                relay !== undefined &&
+                typeof payload === "object" &&
+                payload !== null &&
+                !Array.isArray(payload) &&
+                typeof payload.chunk === "string"
+            ) {
+                relay.output.write(payload.chunk);
+            }
+            continue;
+        }
+        if (event.name === "stream.completed") {
+            return readInstanceSnapshot(event.payload);
+        }
+        if (event.name === "stream.cancelled") {
+            connection.throwRemoteError(event.error);
+            throw new Error("Interactive start was cancelled.");
+        }
+    }
+}
+
 function attachRelayInput(
     input: NodeJS.ReadableStream,
     stream: ClientStream,
-): () => void {
+): { cleanup(): void; failure: Promise<never> } {
+    let failed = false;
+    let rejectFailure: (error: unknown) => void = () => undefined;
+    const failure = new Promise<never>((_resolve, reject) => {
+        rejectFailure = reject;
+    });
+    const send = (operation: string, payload?: { data: string }) => {
+        if (failed) return;
+        void stream.send(operation, payload).catch((error: unknown) => {
+            if (failed) return;
+            failed = true;
+            rejectFailure(error);
+        });
+    };
     const onData = (chunk: string | Buffer) => {
         const value = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-        void stream.send("input", { data: value.toString("base64") });
+        send("input", { data: value.toString("base64") });
     };
     const onEnd = () => {
-        void stream.send("eof");
+        send("eof");
     };
     input.on("data", onData);
     input.once("end", onEnd);
-    return () => {
-        input.off("data", onData);
-        input.off("end", onEnd);
+    return {
+        cleanup() {
+            input.off("data", onData);
+            input.off("end", onEnd);
+        },
+        failure,
     };
 }
 

@@ -24,6 +24,16 @@ const state: WebState = {
     operations: {},
     readModel: {
         ...createInitialControlReadModelState(),
+        contexts: [{
+            createdAt: "2026-07-31T08:00:00Z",
+            ctxId: "ctx-alpha",
+            expiresAt: "2026-08-01T08:00:00Z",
+            instance: "alpha",
+            lastAccessedAt: "2026-07-31T09:00:00Z",
+            principal: "client-alpha",
+            status: "active",
+            workspace: "/workspace/alpha",
+        }],
         instances: [
             {
                 mcpEnabled: true,
@@ -148,6 +158,27 @@ it("clears Context synchronously when the selected instance changes", async () =
     expect(screen.getByLabelText("Context")).toHaveValue("all");
     expect(screen.queryByRole("button", { name: "Queue Comment" })).not.toBeInTheDocument();
     expect(queueContextMessage).not.toHaveBeenCalled();
+});
+
+it("requires confirmation before disabling a Context", async () => {
+    const disableContext = vi.fn(async () => true);
+    const store = {
+        disableContext,
+        queueContextMessage: vi.fn(async () => true),
+    } as unknown as WebStore;
+    render(<ToolCalls state={state} store={store} />);
+
+    fireEvent.change(screen.getByLabelText("Instance"), { target: { value: "alpha" } });
+    fireEvent.change(screen.getByLabelText("Context"), {
+        target: { value: "context:ctx-alpha" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Disable Context" }));
+
+    expect(disableContext).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Cancel" })).toHaveFocus();
+    fireEvent.click(screen.getByRole("button", { name: "Disable" }));
+
+    await waitFor(() => expect(disableContext).toHaveBeenCalledWith("ctx-alpha"));
 });
 
 it("does not render large Tool Call details until the row is expanded", () => {

@@ -58,7 +58,22 @@ it("keeps focus inside the dialog while an operation is busy", () => {
     const dialog = screen.getByRole("dialog", { name: "Confirm stop" });
 
     expect(dialog).toHaveFocus();
+    expect(screen.getByRole("button", { name: "Stopping…" })).toBeDisabled();
     fireEvent.keyDown(dialog, { key: "Tab" });
     expect(dialog).toHaveFocus();
     expect(screen.getByRole("button", { name: "Background action" })).not.toHaveFocus();
+});
+
+it("renders a grammatical busy label for Disable", () => {
+    render(
+        <ConfirmationDialog
+            actionLabel="Disable"
+            busy
+            description="Disable Context?"
+            onCancel={vi.fn()}
+            onConfirm={vi.fn()}
+        />,
+    );
+
+    expect(screen.getByRole("button", { name: "Disabling…" })).toBeDisabled();
 });

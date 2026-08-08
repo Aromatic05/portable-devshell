@@ -116,10 +116,19 @@ export class TuiCommandDispatcherDetail {
             if (state.ui.selectedPage === "audit" && state.ui.selectedInstance !== undefined && (actionId === "context.disable" || actionId === "context.renew")) {
                 const ctxId = ctxIdFromBox(boxId);
                 if (ctxId === undefined) return false;
+                if (actionId === "context.disable") {
+                    return await this.#dispatch({
+                        body: `Disable Context ${ctxId}? Disabled Contexts cannot be renewed; the client must establish a new Context.`,
+                        confirmIntent: { ctxId, instance: state.ui.selectedInstance, type: "context.disable" },
+                        confirmLabel: "Disable",
+                        title: "Confirm Context Disable",
+                        type: "overlay.openConfirm"
+                    });
+                }
                 return await this.#dispatch({
                     ctxId,
                     instance: state.ui.selectedInstance,
-                    type: actionId === "context.disable" ? "context.disable" : "context.renew"
+                    type: "context.renew"
                 });
             }
 

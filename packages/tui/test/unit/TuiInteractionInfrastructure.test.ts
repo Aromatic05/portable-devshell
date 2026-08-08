@@ -292,6 +292,42 @@ test("Audit opens Comment conversation only from a concrete context route", asyn
     });
 });
 
+test("Audit requires confirmation before disabling a Context", async () => {
+    const disabled: Array<{ ctxId: string; instance: string }> = [];
+    const harness = createHarness({
+        onContextDisable: async (instance, ctxId) => {
+            disabled.push({ ctxId, instance });
+        },
+    });
+    harness.store.patchControlReadModel({ contexts: [{
+        createdAt: "2026-08-02T00:00:00.000Z",
+        ctxId: "ctx-alpha",
+        expiresAt: "2026-08-02T01:00:00.000Z",
+        instance: "alpha",
+        lastAccessedAt: "2026-08-02T00:05:00.000Z",
+        principal: "client-alpha",
+        status: "active",
+        workspace: "/workspace/alpha",
+    }] });
+    harness.store.setSelectedPage("audit");
+    const context = expandBox(harness, "audit-context:ctx-alpha");
+    harness.store.setMainFocusId(context.id);
+    harness.store.setFocusScope("boxDetail");
+    harness.store.setSelectedDetailLine(context.expandedKey, "context.disable");
+
+    await harness.dispatch({ type: "focus.activate" });
+
+    assert.deepEqual(disabled, []);
+    const overlay = topTuiOverlay(harness.store.getState().interaction.overlays);
+    assert.equal(overlay?.kind, "confirmation");
+    if (overlay?.kind !== "confirmation") throw new Error("confirmation overlay missing");
+    assert.equal(overlay.selectedAction, "cancel");
+
+    await harness.dispatch({ button: "confirm", type: "confirm.focus" });
+    await harness.dispatch({ type: "confirm.accept" });
+    assert.deepEqual(disabled, [{ ctxId: "ctx-alpha", instance: "alpha" }]);
+});
+
 test("Comment conversation shows exact history and keeps the route open after send", async () => {
     const sent: string[] = [];
     const harness = createHarness({
@@ -2464,6 +2500,7 @@ function createHarness(
             ctxId: string,
             text: string,
         ) => Promise<void>;
+        onContextDisable?: (instance: string, ctxId: string) => Promise<void>;
         onToolCall?: (
             instance: string,
             toolName: string,
@@ -2548,6 +2585,7 @@ function createHarness(
             }),
         onConfigUpdate: (options.onConfigUpdate ?? (async () => ({}))) as never,
         onContextMessage: options.onContextMessage,
+        onContextDisable: options.onContextDisable,
         onQuit: async () => undefined,
         onRedraw: () => undefined,
         onToolCall: options.onToolCall ?? (async () => true),

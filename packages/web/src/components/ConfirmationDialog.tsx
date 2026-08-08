@@ -16,7 +16,8 @@ export function ConfirmationDialog({
     const cancelRef = useRef<HTMLButtonElement>(null);
     const confirmRef = useRef<HTMLButtonElement>(null);
     const dialogRef = useRef<HTMLElement>(null);
-    const destructive = actionLabel === "Deny" || actionLabel === "Stop";
+    const destructive = actionLabel === "Deny" || actionLabel === "Disable" || actionLabel === "Stop";
+    const progressLabel = actionProgressLabel(actionLabel);
 
     useEffect(() => {
         const previous = document.activeElement instanceof HTMLElement
@@ -84,10 +85,16 @@ export function ConfirmationDialog({
                         onClick={onConfirm}
                         ref={confirmRef}
                     >
-                        {busy ? `${actionLabel}ing…` : actionLabel}
+                        {busy ? progressLabel : actionLabel}
                     </button>
                 </div>
             </section>
         </div>
     );
+}
+
+function actionProgressLabel(actionLabel: string): string {
+    if (actionLabel === "Stop") return "Stopping…";
+    if (actionLabel.endsWith("e")) return `${actionLabel.slice(0, -1)}ing…`;
+    return `${actionLabel}ing…`;
 }
