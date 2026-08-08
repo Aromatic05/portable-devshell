@@ -314,7 +314,7 @@ test("Audit requires confirmation before disabling a Context", async () => {
     harness.store.setMainFocusId(context.id);
     harness.store.setFocusScope("boxDetail");
     const disableLine = context.expandedLines.find((line) =>
-        line.id.endsWith(":context.disable"),
+        line.id?.endsWith(":context.disable") === true,
     );
     assert.ok(disableLine?.id);
     harness.store.setSelectedDetailLine(context.expandedKey, disableLine.id);
