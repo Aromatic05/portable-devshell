@@ -116,6 +116,17 @@ test("terminal buffer adapts application cursor keys and focus reporting", async
     terminal.dispose();
 });
 
+test("terminal buffer answers cursor position device status reports", async () => {
+    const terminal = new TuiTerminalBuffer({ columns: 8, rows: 3 });
+    const writes: string[] = [];
+    terminal.onData((data) => writes.push(data));
+
+    await terminal.write("\u001B[2;4H\u001B[6n");
+
+    assert.deepEqual(writes, ["\u001B[2;4R"]);
+    terminal.dispose();
+});
+
 test("terminal buffer adapts application keypad sequences", async () => {
     const terminal = new TuiTerminalBuffer({ columns: 8, rows: 3 });
     const writes: string[] = [];

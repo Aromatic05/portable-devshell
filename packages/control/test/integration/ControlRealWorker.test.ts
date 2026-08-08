@@ -324,8 +324,30 @@ async function exerciseWorkerTerminal(socketPath: string, instance: string): Pro
             { fromSeq: 0, generation: opened.generation, terminalId: opened.terminalId },
         );
         try {
+            let clientSeq = 1;
+            if (process.platform === "win32") {
+                let bootstrapOutput = "";
+                const bootstrapDeadline = Date.now() + 5_000;
+                while (!bootstrapOutput.includes("\u001B[6n")) {
+                    if (Date.now() >= bootstrapDeadline) {
+                        throw new Error(`terminal bootstrap output timeout: ${bootstrapOutput}`);
+                    }
+                    const event = await attached.stream.nextEvent();
+                    if (event.name === "terminal.output") {
+                        const payload = event.payload as { data?: string } | undefined;
+                        bootstrapOutput += payload?.data ?? "";
+                    }
+                }
+                await attached.stream.send("input", {
+                    clientSeq: clientSeq++,
+                    data: "\u001B[1;1R",
+                    generation: opened.generation,
+                    terminalId: opened.terminalId,
+                    version: opened.version,
+                });
+            }
             await attached.stream.send("input", {
-                clientSeq: 1,
+                clientSeq: clientSeq++,
                 data: terminalPrintCommand("forward-worker-terminal-ready"),
                 generation: opened.generation,
                 terminalId: opened.terminalId,

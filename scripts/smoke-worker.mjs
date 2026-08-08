@@ -87,11 +87,22 @@ try {
             throw new Error(`worker did not advertise PTY support: ${JSON.stringify(terminalCapabilities)}`);
         }
         const terminal = await rpc.request("terminal.open", { cols: 80, rows: 24 });
+        let terminalClientSeq = 1;
+        if (handshake.platform.os === "windows") {
+            await waitForTerminalOutput(rpc, terminal, "\u001B[6n");
+            await rpc.request("terminal.write", {
+                terminalId: terminal.terminalId,
+                generation: terminal.generation,
+                version: terminal.version,
+                clientSeq: terminalClientSeq++,
+                data: Buffer.from("\u001B[1;1R", "utf8").toString("base64")
+            });
+        }
         await rpc.request("terminal.write", {
             terminalId: terminal.terminalId,
             generation: terminal.generation,
             version: terminal.version,
-            clientSeq: 1,
+            clientSeq: terminalClientSeq++,
             data: Buffer.from(terminalPrintCommand("worker-pty-smoke"), "utf8").toString("base64")
         });
         await waitForTerminalOutput(rpc, terminal, "worker-pty-smoke");
@@ -101,7 +112,7 @@ try {
             terminalId: terminal.terminalId,
             generation: terminal.generation,
             version: terminal.version,
-            clientSeq: 2,
+            clientSeq: terminalClientSeq++,
             cols: 100,
             rows: 40
         });
@@ -109,7 +120,7 @@ try {
             terminalId: terminal.terminalId,
             generation: terminal.generation,
             version: resized.version,
-            clientSeq: 3,
+            clientSeq: terminalClientSeq++,
             data: Buffer.from(terminalSizeProbeCommand(), "utf8").toString("base64")
         });
         await waitForTerminalOutput(rpc, terminal, "40 100");
@@ -119,7 +130,7 @@ try {
             terminalId: terminal.terminalId,
             generation: terminal.generation,
             version: resized.version,
-            clientSeq: 4
+            clientSeq: terminalClientSeq++
         });
         await waitForTerminalExit(rpc, terminal);
     } finally {

@@ -12,6 +12,7 @@ export class ArtifactRecordStore {
     readonly #sharesDir: string;
     readonly #storageDir: string;
     readonly #transfersDir: string;
+    readonly #writeQueues = new Map<string, Promise<void>>();
 
     constructor(storageDir: string) {
         this.#storageDir = storageDir;
@@ -50,11 +51,27 @@ export class ArtifactRecordStore {
     }
 
     async persistShare(share: StoredArtifactShare): Promise<void> {
-        await atomicWriteJson(join(this.#sharesDir, `${share.result.shareId}.json`), share);
+        await this.#persistJson(join(this.#sharesDir, `${share.result.shareId}.json`), share);
     }
 
     async persistTransfer(transfer: StoredArtifactTransfer): Promise<void> {
-        await atomicWriteJson(join(this.#transfersDir, `${transfer.record.transferId}.json`), transfer);
+        await this.#persistJson(join(this.#transfersDir, `${transfer.record.transferId}.json`), transfer);
+    }
+
+    async #persistJson(path: string, value: unknown): Promise<void> {
+        const body = `${JSON.stringify(value)}\n`;
+        const previous = this.#writeQueues.get(path) ?? Promise.resolve();
+        const current = previous
+            .catch(() => undefined)
+            .then(async () => await atomicWriteJson(path, body));
+        this.#writeQueues.set(path, current);
+        try {
+            await current;
+        } finally {
+            if (this.#writeQueues.get(path) === current) {
+                this.#writeQueues.delete(path);
+            }
+        }
     }
 }
 
@@ -70,9 +87,8 @@ async function readJsonFile<T>(path: string): Promise<T | undefined> {
     }
 }
 
-async function atomicWriteJson(path: string, value: unknown): Promise<void> {
+async function atomicWriteJson(path: string, body: string): Promise<void> {
     const temporaryPath = `${path}.${process.pid}.${randomUUID()}.tmp`;
-    const body = `${JSON.stringify(value)}\n`;
     await writeFile(temporaryPath, body, { mode: 0o600 });
     await rename(temporaryPath, path).catch(async (error) => {
         await rm(temporaryPath, { force: true }).catch(() => undefined);

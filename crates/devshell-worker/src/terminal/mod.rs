@@ -983,6 +983,12 @@ mod windows_tests {
                 command: None,
             })
             .expect("open ConPTY terminal");
+        wait_for_output(
+            &manager,
+            &opened.terminal_id,
+            opened.generation,
+            "\u{1b}[6n",
+        );
         manager
             .write(TerminalWriteInput {
                 identity: TerminalCommandInput {
@@ -990,6 +996,17 @@ mod windows_tests {
                     generation: opened.generation,
                     version: opened.version,
                     client_seq: 1,
+                },
+                data: BASE64.encode(b"\x1b[1;1R"),
+            })
+            .expect("answer ConPTY cursor position query");
+        manager
+            .write(TerminalWriteInput {
+                identity: TerminalCommandInput {
+                    terminal_id: opened.terminal_id.clone(),
+                    generation: opened.generation,
+                    version: opened.version,
+                    client_seq: 2,
                 },
                 data: BASE64.encode(
                     b"powershell.exe -NoLogo -NoProfile -NonInteractive -Command \"[Console]::WriteLine(('worker-' + 'pty-ready'))\"\r",
@@ -1009,7 +1026,7 @@ mod windows_tests {
                     terminal_id: opened.terminal_id.clone(),
                     generation: opened.generation,
                     version: opened.version,
-                    client_seq: 2,
+                    client_seq: 3,
                 },
                 cols: 100,
                 rows: 40,
@@ -1022,7 +1039,7 @@ mod windows_tests {
                     terminal_id: opened.terminal_id.clone(),
                     generation: opened.generation,
                     version: 2,
-                    client_seq: 3,
+                    client_seq: 4,
                 },
                 data: BASE64.encode(
                     b"powershell.exe -NoLogo -NoProfile -NonInteractive -Command \"$s=$Host.UI.RawUI.WindowSize; [Console]::WriteLine(('{0} {1}' -f $s.Height,$s.Width))\"\r",
@@ -1052,7 +1069,7 @@ mod windows_tests {
                 terminal_id: opened.terminal_id.clone(),
                 generation: opened.generation,
                 version: 2,
-                client_seq: 4,
+                client_seq: 5,
             })
             .expect("kill ConPTY terminal");
         let deadline = Instant::now() + Duration::from_secs(8);
