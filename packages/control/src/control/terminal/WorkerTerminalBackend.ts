@@ -66,6 +66,7 @@ class WorkerTerminalProcess implements TerminalProcess {
     #clientSeq = 0;
     #closed = false;
     #descriptor: WorkerTerminalDescriptor;
+    #exit?: TerminalProcessExit;
     #lastSeq = 0;
     #operationTail = Promise.resolve();
     #resumeTail = Promise.resolve();
@@ -121,8 +122,9 @@ class WorkerTerminalProcess implements TerminalProcess {
 
     onExit(listener: (exit: TerminalProcessExit) => void): () => void {
         this.#exitListeners.add(listener);
-        if (this.#descriptor.state === "exited") {
-            queueMicrotask(() => listener({ exitCode: 0, signal: 0 }));
+        if (this.#exit !== undefined) {
+            const exit = this.#exit;
+            queueMicrotask(() => listener(exit));
         }
         return () => this.#exitListeners.delete(listener);
     }
@@ -270,6 +272,7 @@ class WorkerTerminalProcess implements TerminalProcess {
             this.#emitData(finalText, this.#lastSeq);
         }
         this.#descriptor = { ...this.#descriptor, state: "exited", version };
+        this.#exit = exit;
         this.#closed = true;
         this.#disposeSubscriptions();
         for (const listener of [...this.#exitListeners]) listener(exit);

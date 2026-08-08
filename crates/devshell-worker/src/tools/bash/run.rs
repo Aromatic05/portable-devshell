@@ -10,7 +10,8 @@ use std::time::{Duration, Instant};
 use crate::daemon::process_registry::ActiveProcessGuard;
 use crate::platform;
 use crate::security::path::{
-    FilesystemCapability, ResolvedPath, parse_requested_path, resolve_existing_target,
+    FilesystemCapability, PathNamespace, ResolvedPath, parse_requested_path,
+    resolve_existing_target,
 };
 use crate::tools::artifact::store::{ArtifactDraft, ArtifactStore};
 use crate::tools::artifact::types::{ArtifactReference, ArtifactStream};
@@ -279,6 +280,20 @@ struct StreamOutput {
 fn resolve_cwd(call: &ToolCall, raw: Option<&str>) -> Result<ResolvedPath, ToolError> {
     let requested = parse_requested_path(raw.unwrap_or("./"))
         .map_err(|_| ToolError::new("bash.invalidCwd", "cwd must use `./` or `/` syntax"))?;
+    let (read, write) = match requested.namespace {
+        PathNamespace::Workspace => (
+            FilesystemCapability::WorkspaceRead,
+            FilesystemCapability::WorkspaceWrite,
+        ),
+        PathNamespace::Absolute => (
+            FilesystemCapability::AbsoluteRead,
+            FilesystemCapability::AbsoluteWrite,
+        ),
+    };
+    call.policy
+        .check_capability(read)
+        .and_then(|_| call.policy.check_capability(write))
+        .map_err(ToolError::from)?;
     let resolved = resolve_existing_target(&call.workspace, &requested)
         .map_err(|error| ToolError::new("bash.invalidCwd", error.message))?;
     if !resolved

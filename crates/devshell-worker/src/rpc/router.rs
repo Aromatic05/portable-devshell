@@ -45,7 +45,10 @@ impl RpcRouter {
         let active_tool_calls = Arc::new(ActiveToolCallRegistry::new());
         let shutdown_requested = Arc::new(AtomicBool::new(false));
         let policy = build_security_policy(runtime.security_mode.clone());
-        let terminals = TerminalManager::new(PathBuf::from(&runtime.workspace));
+        let terminals = TerminalManager::with_policy(
+            PathBuf::from(&runtime.workspace),
+            Arc::clone(&policy),
+        );
         let mut control_handlers = HashMap::new();
         register_control_handlers(
             &mut control_handlers,

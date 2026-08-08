@@ -28,6 +28,7 @@ class FakeWorkerTerminal implements WorkerTerminalPort {
     notification?: (notification: WorkerTerminalNotification) => void;
     connected?: () => void;
     disconnected?: (error: WorkerRpcError) => void;
+    attachExit?: { exitCode: number; signal: number };
     version = 1;
     latestSeq = 1;
     resizeGate?: Promise<void>;
@@ -65,7 +66,13 @@ class FakeWorkerTerminal implements WorkerTerminalPort {
                       },
                   ]
                 : [];
-        return { replay, session: this.descriptor() };
+        return {
+            ...(this.attachExit === undefined ? {} : { exit: this.attachExit }),
+            replay,
+            session: this.attachExit === undefined
+                ? this.descriptor()
+                : { ...this.descriptor(), state: "exited", version: this.version + 1 },
+        };
     }
 
     async writeTerminal(input: WorkerTerminalIdentity & { data: string }) {
@@ -201,6 +208,21 @@ test("worker terminal backend replays, fences async operations, and resumes afte
 
     await process.kill();
     assert.equal(worker.kills[0]?.version, 2);
+});
+
+test("worker terminal backend preserves an exit received before listeners are registered", async () => {
+    const worker = new FakeWorkerTerminal();
+    worker.latestSeq = 0;
+    worker.attachExit = { exitCode: 7, signal: 0 };
+    const backend = new WorkerTerminalBackend({ worker });
+    const opened = await backend.open({ cols: 80, rows: 24 });
+    const process = "process" in opened ? opened.process : opened;
+    const exits: Array<{ exitCode: number; signal: number }> = [];
+
+    process.onExit((exit) => exits.push(exit));
+    await Promise.resolve();
+
+    assert.deepEqual(exits, [{ exitCode: 7, signal: 0 }]);
 });
 
 async function waitFor(predicate: () => boolean): Promise<void> {

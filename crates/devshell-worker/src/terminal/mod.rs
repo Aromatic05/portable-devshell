@@ -17,6 +17,13 @@ use uuid::Uuid;
 
 use crate::rpc::codec::encode_json;
 use crate::rpc::error::RpcError;
+use crate::security::SecurityPolicy;
+#[cfg(test)]
+use crate::security::{SecurityMode, build_security_policy};
+use crate::security::path::{
+    FilesystemCapability, PathNamespace, ResolvedPath, parse_requested_path,
+    resolve_existing_target,
+};
 
 const DEFAULT_MAX_REPLAY_BYTES: usize = 4 * 1024 * 1024;
 const DEFAULT_MAX_NOTIFICATION_BYTES: usize = 4 * 1024 * 1024;
@@ -111,6 +118,7 @@ struct TerminalManagerInner {
     max_replay_bytes: usize,
     max_sessions: usize,
     notifications: NotificationQueue,
+    policy: Arc<dyn SecurityPolicy>,
     sessions: Mutex<HashMap<String, Arc<TerminalSession>>>,
     workspace: PathBuf,
 }
@@ -152,17 +160,35 @@ pub(crate) struct SpawnedTerminal {
 }
 
 impl TerminalManager {
-    pub fn new(workspace: PathBuf) -> Self {
-        Self::with_limits(
+    pub fn with_policy(workspace: PathBuf, policy: Arc<dyn SecurityPolicy>) -> Self {
+        Self::with_policy_limits(
             workspace,
+            policy,
             DEFAULT_MAX_REPLAY_BYTES,
             DEFAULT_MAX_NOTIFICATION_BYTES,
             DEFAULT_MAX_SESSIONS,
         )
     }
 
+    #[cfg(test)]
     fn with_limits(
         workspace: PathBuf,
+        max_replay_bytes: usize,
+        max_notification_bytes: usize,
+        max_sessions: usize,
+    ) -> Self {
+        Self::with_policy_limits(
+            workspace,
+            build_security_policy(SecurityMode::Disabled),
+            max_replay_bytes,
+            max_notification_bytes,
+            max_sessions,
+        )
+    }
+
+    fn with_policy_limits(
+        workspace: PathBuf,
+        policy: Arc<dyn SecurityPolicy>,
         max_replay_bytes: usize,
         max_notification_bytes: usize,
         max_sessions: usize,
@@ -173,6 +199,7 @@ impl TerminalManager {
                 max_replay_bytes,
                 max_sessions,
                 notifications: NotificationQueue::new(max_notification_bytes),
+                policy,
                 sessions: Mutex::new(HashMap::new()),
                 workspace,
             }),
@@ -181,7 +208,11 @@ impl TerminalManager {
 
     pub fn open(&self, input: TerminalOpenInput) -> Result<TerminalDescriptor, RpcError> {
         validate_dimensions(input.cols, input.rows)?;
-        let cwd = resolve_cwd(&self.inner.workspace, input.cwd.as_deref())?;
+        let cwd = resolve_cwd(
+            &self.inner.workspace,
+            self.inner.policy.as_ref(),
+            input.cwd.as_deref(),
+        )?;
         let terminal_id = format!("terminal-{}", Uuid::new_v4());
         let generation = self.inner.generation.fetch_add(1, Ordering::SeqCst) + 1;
         let command = input.command.filter(|value| !value.is_empty());
@@ -212,7 +243,7 @@ impl TerminalManager {
                 sessions.remove(&id);
             }
 
-            let spawned = spawn_terminal(&cwd, input.cols, input.rows)?;
+            let spawned = spawn_terminal(cwd.access_path(), input.cols, input.rows)?;
             let session = Arc::new(TerminalSession {
                 child: spawned.child,
                 state: Mutex::new(TerminalSessionState {
@@ -612,22 +643,45 @@ fn validate_dimensions(cols: u16, rows: u16) -> Result<(), RpcError> {
     Ok(())
 }
 
-fn resolve_cwd(workspace: &Path, value: Option<&str>) -> Result<PathBuf, RpcError> {
-    let cwd = value
-        .map(PathBuf::from)
-        .unwrap_or_else(|| workspace.to_path_buf());
-    let cwd = if cwd.is_absolute() {
-        cwd
-    } else {
-        workspace.join(cwd)
+fn resolve_cwd(
+    workspace: &Path,
+    policy: &dyn SecurityPolicy,
+    value: Option<&str>,
+) -> Result<ResolvedPath, RpcError> {
+    let raw = match value {
+        None => "./".to_string(),
+        Some(value) if Path::new(value).is_absolute() => value.to_string(),
+        Some(".") => "./".to_string(),
+        Some(value) if value.starts_with("./") => value.to_string(),
+        Some(value) => format!("./{value}"),
     };
-    if !cwd.is_dir() {
+    let requested = parse_requested_path(&raw)?;
+    let (read, write) = match requested.namespace {
+        PathNamespace::Workspace => (
+            FilesystemCapability::WorkspaceRead,
+            FilesystemCapability::WorkspaceWrite,
+        ),
+        PathNamespace::Absolute => (
+            FilesystemCapability::AbsoluteRead,
+            FilesystemCapability::AbsoluteWrite,
+        ),
+    };
+    policy
+        .check_capability(read)
+        .and_then(|_| policy.check_capability(write))
+        .map_err(|error| RpcError {
+            code: error.code,
+            message: error.message,
+            retryable: false,
+            details: error.details,
+        })?;
+    let cwd = resolve_existing_target(workspace, &requested)?;
+    if !cwd.metadata().map_err(|error| {
+        RpcError::new("target.invalid", format!("Failed to inspect terminal working directory: {error}"))
+    })?.is_dir() {
         return Err(RpcError::new(
             "target.invalid",
-            format!(
-                "Terminal working directory does not exist: {}",
-                cwd.display()
-            ),
+            "Terminal working directory is not a directory.",
         ));
     }
     Ok(cwd)

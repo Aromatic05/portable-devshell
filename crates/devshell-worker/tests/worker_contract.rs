@@ -601,9 +601,11 @@ fn start_falls_back_to_stable_runtime_dir_when_xdg_runtime_dir_is_missing() {
 }
 
 #[test]
-fn workspace_security_mode_rejects_cwd_escape() {
+fn workspace_security_mode_rejects_absolute_bash_cwd() {
     let env = TestEnv::new();
     let instance = "aromatic-secure";
+    let outside = env.home().join("outside-bash");
+    fs::create_dir_all(&outside).unwrap();
 
     env.workspace_mode_command()
         .current_dir(env.workspace())
@@ -619,12 +621,45 @@ fn workspace_security_mode_rejects_cwd_escape() {
             "method": "bash_run",
             "params": {
                 "command": "pwd",
-                "cwd": ".."
+                "cwd": outside.to_string_lossy()
             }
         }),
     );
     assert_eq!(escaped["ok"], false);
-    assert_eq!(escaped["error"]["code"], "bash.invalidCwd");
+    assert_eq!(escaped["error"]["code"], "security.denied");
+
+    env.json_command(&["stop", "--instance", instance]);
+}
+
+#[test]
+fn workspace_security_mode_rejects_absolute_terminal_cwd() {
+    let env = TestEnv::new();
+    let instance = "aromatic-secure-terminal";
+    let outside = env.home().join("outside-terminal");
+    fs::create_dir_all(&outside).unwrap();
+
+    env.workspace_mode_command()
+        .current_dir(env.workspace())
+        .args(["start", "--instance", instance])
+        .assert()
+        .success();
+
+    let escaped = env.rpc(
+        instance,
+        &serde_json::json!({
+            "type": "request",
+            "id": "terminal-security",
+            "method": "terminal.open",
+            "params": {
+                "cols": 80,
+                "rows": 24,
+                "cwd": outside.to_string_lossy(),
+                "command": "exit"
+            }
+        }),
+    );
+    assert_eq!(escaped["ok"], false);
+    assert_eq!(escaped["error"]["code"], "security.denied");
 
     env.json_command(&["stop", "--instance", instance]);
 }
