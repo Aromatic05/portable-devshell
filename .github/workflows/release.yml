@@ -61,9 +61,6 @@ jobs:
                       rust_target: aarch64-pc-windows-msvc
 
         runs-on: ${{ matrix.runner }}
-        defaults:
-            run:
-                shell: bash
 
         steps:
             - uses: actions/checkout@v5
@@ -112,6 +109,7 @@ jobs:
             # Windows release smoke 固定使用 Git Bash；产品默认 Windows shell 保持不变。
             - name: 配置 Windows Git Bash 测试运行时
               if: runner.os == 'Windows'
+              shell: bash
               run: |
                   set -euo pipefail
                   git_bash='/c/Program Files/Git/bin/bash.exe'

@@ -39,9 +39,6 @@ jobs:
 
         name: ${{ matrix.target }}
         runs-on: ${{ matrix.runner }}
-        defaults:
-            run:
-                shell: bash
 
         steps:
             - uses: actions/checkout@v5
@@ -88,6 +85,7 @@ jobs:
             # Windows 验收固定使用 Git Bash；这只影响测试 shell，不改变产品默认 Windows shell。
             - name: 配置 Windows Git Bash 测试运行时
               if: runner.os == 'Windows'
+              shell: bash
               run: |
                   set -euo pipefail
                   git_bash='/c/Program Files/Git/bin/bash.exe'
