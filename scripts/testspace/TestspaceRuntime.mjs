@@ -1,12 +1,91 @@
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
-import { extname, join, posix, win32 } from "node:path";
+import { extname, isAbsolute, join, parse, posix, relative, resolve, sep, win32 } from "node:path";
 
 const require = createRequire(new URL("../../packages/control/package.json", import.meta.url));
 const toml = require("smol-toml");
+const TESTSPACE_OWNER_FILE = ".portable-devshell-testspace-owner.json";
+const TESTSPACE_OWNER_KIND = "portable-devshell-testspace";
+
+export function resolveTestspaceRoot(repositoryRoot, configuredRoot) {
+    if (configuredRoot !== undefined && configuredRoot.trim().length === 0) {
+        throw new Error("DEVSHELL_TESTSPACE_ROOT must not be empty.");
+    }
+    const root = resolve(configuredRoot ?? join(repositoryRoot, ".testspace"));
+    const repository = resolve(repositoryRoot);
+    const repositoryFromRoot = relative(root, repository);
+    const rootContainsRepository =
+        repositoryFromRoot === "" ||
+        (
+            repositoryFromRoot !== ".." &&
+            !repositoryFromRoot.startsWith(`..${sep}`) &&
+            !isAbsolute(repositoryFromRoot)
+        );
+    if (rootContainsRepository) {
+        throw new Error("DEVSHELL_TESTSPACE_ROOT must not contain the portable-devshell repository.");
+    }
+    if (root === parse(root).root) {
+        throw new Error("DEVSHELL_TESTSPACE_ROOT must not be a filesystem root.");
+    }
+    return root;
+}
+
+export async function markTestspaceRootOwned(repositoryRoot, root) {
+    const resolvedRoot = resolve(root);
+    await mkdir(resolvedRoot, { recursive: true });
+    await writeFile(
+        join(resolvedRoot, TESTSPACE_OWNER_FILE),
+        `${JSON.stringify({
+            kind: TESTSPACE_OWNER_KIND,
+            repositoryRoot: resolve(repositoryRoot),
+            root: resolvedRoot,
+            version: 1,
+        }, null, 2)}\n`,
+        "utf8",
+    );
+}
+
+export async function assertTestspaceRootOwned(repositoryRoot, root) {
+    const resolvedRepository = resolve(repositoryRoot);
+    const resolvedRoot = resolve(root);
+    if (!existsSync(resolvedRoot)) return false;
+
+    const legacyDefaultRoot = resolve(resolvedRepository, ".testspace");
+    if (resolvedRoot !== legacyDefaultRoot) {
+        const marker = await readTestspaceOwner(resolvedRoot);
+        if (
+            marker?.kind !== TESTSPACE_OWNER_KIND ||
+            marker?.repositoryRoot !== resolvedRepository ||
+            marker?.root !== resolvedRoot
+        ) {
+            throw new Error(
+                `Refusing recursive cleanup because ${resolvedRoot} is not owned by portable-devshell Testspace.`,
+            );
+        }
+    }
+
+    return true;
+}
+
+export async function removeOwnedTestspaceRoot(repositoryRoot, root) {
+    const resolvedRoot = resolve(root);
+    if (!await assertTestspaceRootOwned(repositoryRoot, resolvedRoot)) return false;
+
+    await rm(resolvedRoot, { force: true, recursive: true });
+    return true;
+}
+
+async function readTestspaceOwner(root) {
+    try {
+        return JSON.parse(await readFile(join(root, TESTSPACE_OWNER_FILE), "utf8"));
+    } catch {
+        return undefined;
+    }
+}
 
 export function resolveTestspaceRuntimeDirectory(root, options = {}) {
     const platform = options.platform ?? process.platform;

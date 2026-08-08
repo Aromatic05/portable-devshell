@@ -1,4 +1,4 @@
-import { appendFile, readFile, rename, rm, stat } from "node:fs/promises";
+import { appendFile, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
@@ -74,111 +74,167 @@ export function createSafeAction(name, { ctxId, iteration, revision = 0 }) {
 
 export async function runConnectorLoop(options) {
     const random = createRandom(options.seed ?? Date.now());
+    const connectClient = options.connectClient ?? connect;
     let iteration = 0;
     let client;
     let ctxId;
     let toolNames = new Set();
+    let health = {
+        endpoint: options.endpoint,
+        instance: options.instance,
+        startedAt: new Date().toISOString(),
+        status: "starting",
+    };
 
+    const updateHealth = async (update) => {
+        health = {
+            ...health,
+            ...update,
+            updatedAt: new Date().toISOString(),
+        };
+        if (options.healthFile !== undefined) {
+            await writeConnectorHealth(options.healthFile, health);
+        }
+    };
     const stop = async () => {
         await client?.close().catch(() => undefined);
         client = undefined;
     };
-    process.once("SIGINT", () => void stop().finally(() => process.exit(0)));
-    process.once("SIGTERM", () => void stop().finally(() => process.exit(0)));
+    const onSignal = () => void stop().finally(() => process.exit(0));
+    process.once("SIGINT", onSignal);
+    process.once("SIGTERM", onSignal);
 
-    while (options.maxIterations === undefined || iteration < options.maxIterations) {
-        if (await stopRequested(options.stopFile)) break;
-        try {
-            if (client === undefined || ctxId === undefined) {
-                ({ client, ctxId, toolNames } = await connect(options.endpoint));
-                await log(options.logFile, {
-                    at: new Date().toISOString(),
-                    ctxId,
-                    endpoint: options.endpoint,
-                    event: "connector.connected",
-                    model: "testspace-gpt-simulator",
-                    tools: [...toolNames],
-                });
-                await log(options.logFile, {
-                    at: new Date().toISOString(),
-                    event: "conversation.started",
-                    messages: [
-                        {
-                            content: "Use only the provided harmless tools inside the isolated testspace workspace.",
-                            role: "system",
-                        },
-                        {
-                            content: "Generate varied DevShell activity so a human can inspect TUI and Web behavior.",
-                            role: "user",
-                        },
-                    ],
-                    model: "testspace-gpt-simulator",
-                });
-                if (toolNames.has("todo_write")) {
-                    const revision = await readTodoRevision(client, ctxId);
-                    const initialTodo = createSafeAction("todo_write", {
-                        ctxId,
-                        iteration: 1,
-                        revision,
+    await updateHealth({});
+    try {
+        while (options.maxIterations === undefined || iteration < options.maxIterations) {
+            if (await stopRequested(options.stopFile)) break;
+            try {
+                if (client === undefined || ctxId === undefined) {
+                    ({ client, ctxId, toolNames } = await connectClient(options.endpoint));
+                    const connectedAt = new Date().toISOString();
+                    await updateHealth({
+                        lastConnectedAt: connectedAt,
+                        lastError: undefined,
+                        lastErrorAt: undefined,
+                        status: "connected",
                     });
-                    const result = await client.callTool(initialTodo);
+                    await log(options.logFile, {
+                        at: connectedAt,
+                        ctxId,
+                        endpoint: options.endpoint,
+                        event: "connector.connected",
+                        model: "testspace-gpt-simulator",
+                        tools: [...toolNames],
+                    });
                     await log(options.logFile, {
                         at: new Date().toISOString(),
-                        event: "testspace.todo.seeded",
-                        structuredContent: result.structuredContent,
+                        event: "conversation.started",
+                        messages: [
+                            {
+                                content: "Use only the provided harmless tools inside the isolated testspace workspace.",
+                                role: "system",
+                            },
+                            {
+                                content: "Generate varied DevShell activity so a human can inspect TUI and Web behavior.",
+                                role: "user",
+                            },
+                        ],
+                        model: "testspace-gpt-simulator",
                     });
+                    if (toolNames.has("todo_write")) {
+                        const revision = await readTodoRevision(client, ctxId);
+                        const initialTodo = createSafeAction("todo_write", {
+                            ctxId,
+                            iteration: 1,
+                            revision,
+                        });
+                        const result = await client.callTool(initialTodo);
+                        await log(options.logFile, {
+                            at: new Date().toISOString(),
+                            event: "testspace.todo.seeded",
+                            structuredContent: result.structuredContent,
+                        });
+                    }
                 }
+
+                iteration += 1;
+                const available = SAFE_ACTIONS.filter((name) => toolNames.has(name));
+                if (available.length === 0) throw new Error("no safe tools are exposed by the endpoint");
+                const selected = available[Math.floor(random() * available.length)];
+                const revision = selected === "todo_write"
+                    ? await readTodoRevision(client, ctxId)
+                    : 0;
+                const call = createSafeAction(selected, { ctxId, iteration, revision });
+                const toolCallId = `testspace-${process.pid}-${iteration}`;
+
+                await log(options.logFile, {
+                    at: new Date().toISOString(),
+                    event: "assistant.tool_selection",
+                    finishReason: "tool_calls",
+                    model: "testspace-gpt-simulator",
+                    toolCall: {
+                        arguments: call.arguments,
+                        id: toolCallId,
+                        name: call.name,
+                    },
+                });
+
+                const result = await client.callTool(call);
+                const activityAt = new Date().toISOString();
+                await log(options.logFile, {
+                    at: activityAt,
+                    event: "tool.result",
+                    isError: result.isError === true,
+                    structuredContent: result.structuredContent,
+                    toolCallId,
+                    toolName: call.name,
+                });
+                await updateHealth({
+                    lastActivityAt: activityAt,
+                    lastToolError: result.isError === true,
+                    lastToolName: call.name,
+                    status: result.isError === true ? "degraded" : "active",
+                });
+            } catch (error) {
+                const errorAt = new Date().toISOString();
+                const message = error instanceof Error ? error.stack ?? error.message : String(error);
+                await log(options.logFile, {
+                    at: errorAt,
+                    error: message,
+                    event: "connector.error",
+                });
+                await updateHealth({
+                    lastError: message,
+                    lastErrorAt: errorAt,
+                    status: "error",
+                });
+                await client?.close().catch(() => undefined);
+                client = undefined;
+                ctxId = undefined;
+                toolNames = new Set();
             }
 
-            iteration += 1;
-            const available = SAFE_ACTIONS.filter((name) => toolNames.has(name));
-            if (available.length === 0) throw new Error("no safe tools are exposed by the endpoint");
-            const selected = available[Math.floor(random() * available.length)];
-            const revision = selected === "todo_write"
-                ? await readTodoRevision(client, ctxId)
-                : 0;
-            const call = createSafeAction(selected, { ctxId, iteration, revision });
-            const toolCallId = `testspace-${process.pid}-${iteration}`;
-
-            await log(options.logFile, {
-                at: new Date().toISOString(),
-                event: "assistant.tool_selection",
-                finishReason: "tool_calls",
-                model: "testspace-gpt-simulator",
-                toolCall: {
-                    arguments: call.arguments,
-                    id: toolCallId,
-                    name: call.name,
-                },
-            });
-
-            const result = await client.callTool(call);
-            await log(options.logFile, {
-                at: new Date().toISOString(),
-                event: "tool.result",
-                isError: result.isError === true,
-                structuredContent: result.structuredContent,
-                toolCallId,
-                toolName: call.name,
-            });
-        } catch (error) {
-            await log(options.logFile, {
-                at: new Date().toISOString(),
-                error: error instanceof Error ? error.stack ?? error.message : String(error),
-                event: "connector.error",
-            });
-            await client?.close().catch(() => undefined);
-            client = undefined;
-            ctxId = undefined;
-            toolNames = new Set();
+            if (options.maxIterations === undefined || iteration < options.maxIterations) {
+                await delay(options.intervalMs);
+            }
         }
-
-        if (options.maxIterations === undefined || iteration < options.maxIterations) {
-            await delay(options.intervalMs);
-        }
+    } finally {
+        process.off("SIGINT", onSignal);
+        process.off("SIGTERM", onSignal);
+        await stop();
     }
+}
 
-    await stop();
+export async function readTestspaceConnectorHealth(path) {
+    try {
+        return JSON.parse(await readFile(path, "utf8"));
+    } catch (error) {
+        if (error?.code === "ENOENT") return undefined;
+        return {
+            lastError: error instanceof Error ? error.message : String(error),
+            status: "unreadable",
+        };
+    }
 }
 
 async function connect(endpoint) {
@@ -210,6 +266,12 @@ async function readTodoRevision(client, ctxId) {
 async function log(path, record) {
     await rotateLog(path);
     await appendFile(path, `${JSON.stringify(record)}\n`, "utf8");
+}
+
+async function writeConnectorHealth(path, health) {
+    const temporary = `${path}.${process.pid}.tmp`;
+    await writeFile(temporary, `${JSON.stringify(health, null, 2)}\n`, "utf8");
+    await rename(temporary, path);
 }
 
 async function rotateLog(path) {

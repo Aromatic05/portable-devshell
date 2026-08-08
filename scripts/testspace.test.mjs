@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
@@ -14,11 +14,25 @@ import {
 } from "./testspace/TestspaceConfig.mjs";
 import {
     createTestspaceProcessEnvironment,
+    markTestspaceRootOwned,
     removeTestspaceDockerContainers,
+    removeOwnedTestspaceRoot,
     resetTestspacePodmanStorage,
+    resolveTestspaceRoot,
     resolveTestspaceRuntimeDirectory,
     stopTestspaceTmux,
 } from "./testspace/TestspaceRuntime.mjs";
+import {
+    ensureConnectorProcesses,
+    ensureInstanceReady,
+    readConnectorStatuses,
+    stopWorkerProcesses,
+    waitForConnectorReady,
+} from "./testspace/TestspaceLifecycle.mjs";
+import {
+    readTestspaceConnectorHealth,
+    runConnectorLoop,
+} from "./testspace/TestspaceConnector.mjs";
 import {
     chromiumLaunchArguments,
     resolveChromiumExecutable,
@@ -27,6 +41,7 @@ import {
 test("testspace URLs point at the isolated instance and Web UI", () => {
     assert.deepEqual(testspaceUrls({ mcpPort: 19000, webPort: 19001 }), {
         mcp: `http://127.0.0.1:19000/${TESTSPACE_INSTANCE}/mcp`,
+        reverseMcp: `http://127.0.0.1:19000/${TESTSPACE_REVERSE_INSTANCE}/mcp`,
         web: "http://127.0.0.1:19001/web/",
     });
 });
@@ -75,6 +90,292 @@ test("testspace starts when invoked without a subcommand", () => {
         args: ["--skip-build", "--interval-ms", "500"],
         command: "start",
     });
+});
+
+test("re-entering a running testspace restores a stopped local instance", async () => {
+    const starts = [];
+    const result = await ensureInstanceReady({
+        instance: TESTSPACE_INSTANCE,
+        readSnapshot: async () => ({
+            name: TESTSPACE_INSTANCE,
+            ready: false,
+            status: "stopped",
+        }),
+        startInstance: async (instance) => {
+            starts.push(instance);
+            return { name: instance, ready: true, status: "ready" };
+        },
+    });
+
+    assert.equal(result.restarted, true);
+    assert.deepEqual(starts, [TESTSPACE_INSTANCE]);
+    assert.equal(result.snapshot.ready, true);
+});
+
+test("re-entering a healthy testspace does not restart the local instance", async () => {
+    let starts = 0;
+    const result = await ensureInstanceReady({
+        instance: TESTSPACE_INSTANCE,
+        readSnapshot: async () => ({
+            name: TESTSPACE_INSTANCE,
+            ready: true,
+            status: "ready",
+        }),
+        startInstance: async () => {
+            starts += 1;
+            throw new Error("healthy instance must not be restarted");
+        },
+    });
+
+    assert.equal(result.restarted, false);
+    assert.equal(starts, 0);
+});
+
+test("testspace keeps an activity connector alive for both local and reverse instances", async () => {
+    const started = [];
+    const targets = [
+        { instance: TESTSPACE_INSTANCE },
+        { instance: TESTSPACE_REVERSE_INSTANCE },
+    ];
+    const result = await ensureConnectorProcesses(targets, {
+        isProcessAlive: (pid) => pid === 101,
+        readPid: async (target) => target.instance === TESTSPACE_INSTANCE ? 101 : undefined,
+        startConnector: async (target) => {
+            started.push(target.instance);
+            return 202;
+        },
+    });
+
+    assert.deepEqual(started, [TESTSPACE_REVERSE_INSTANCE]);
+    assert.deepEqual(result, {
+        [TESTSPACE_INSTANCE]: { pid: 101, restarted: false },
+        [TESTSPACE_REVERSE_INSTANCE]: { pid: 202, restarted: true },
+    });
+});
+
+test("fresh connector startup rolls back connectors started before a later failure", async () => {
+    const rolledBack = [];
+    await assert.rejects(
+        ensureConnectorProcesses(
+            [
+                { instance: TESTSPACE_INSTANCE },
+                { instance: TESTSPACE_REVERSE_INSTANCE },
+            ],
+            {
+                isProcessAlive: () => false,
+                readPid: async () => undefined,
+                rollbackConnector: async (target, pid) => {
+                    rolledBack.push({ instance: target.instance, pid });
+                },
+                startConnector: async (target) => {
+                    if (target.instance === TESTSPACE_INSTANCE) return 201;
+                    throw new Error("reverse connector failed");
+                },
+            },
+        ),
+        /reverse connector failed/u,
+    );
+    assert.deepEqual(rolledBack, [{ instance: TESTSPACE_INSTANCE, pid: 201 }]);
+});
+
+test("re-entering testspace restarts an alive connector whose health is degraded", async () => {
+    const restarted = [];
+    const targets = [
+        { healthFile: "/health/local", instance: TESTSPACE_INSTANCE },
+        { healthFile: "/health/reverse", instance: TESTSPACE_REVERSE_INSTANCE },
+    ];
+    const result = await ensureConnectorProcesses(targets, {
+        isProcessAlive: () => true,
+        readHealth: async (target) => ({
+            status: target.instance === TESTSPACE_INSTANCE ? "active" : "degraded",
+        }),
+        readPid: async (target) => target.instance === TESTSPACE_INSTANCE ? 101 : 102,
+        restartConnector: async (target, pid) => {
+            restarted.push({ instance: target.instance, pid });
+            return 202;
+        },
+        startConnector: async () => {
+            throw new Error("alive connectors must use restartConnector");
+        },
+    });
+
+    assert.deepEqual(restarted, [{ instance: TESTSPACE_REVERSE_INSTANCE, pid: 102 }]);
+    assert.deepEqual(result, {
+        [TESTSPACE_INSTANCE]: { pid: 101, restarted: false },
+        [TESTSPACE_REVERSE_INSTANCE]: { pid: 202, restarted: true },
+    });
+});
+
+test("connector startup completes only after health reaches a usable state", async () => {
+    const health = [
+        { status: "starting" },
+        { status: "connected" },
+        { status: "active" },
+    ];
+    const ready = await waitForConnectorReady(
+        { healthFile: "/health/local", instance: TESTSPACE_INSTANCE },
+        101,
+        {
+            delay: async () => undefined,
+            isProcessAlive: () => true,
+            readHealth: async () => health.shift(),
+            timeoutMs: 100,
+        },
+    );
+    assert.equal(ready.status, "active");
+
+    await assert.rejects(
+        waitForConnectorReady(
+            { healthFile: "/health/reverse", instance: TESTSPACE_REVERSE_INSTANCE },
+            102,
+            {
+                delay: async () => undefined,
+                isProcessAlive: () => true,
+                readHealth: async () => ({ status: "error", lastError: "cannot connect" }),
+                timeoutMs: 100,
+            },
+        ),
+        /cannot connect/u,
+    );
+});
+
+test("connector activity publishes health that status can expose", async (t) => {
+    const directory = await mkdtemp(join(tmpdir(), "pds-testspace-connector-health-"));
+    t.after(async () => await rm(directory, { recursive: true, force: true }));
+    const healthFile = join(directory, "health.json");
+    const logFile = join(directory, "activity.jsonl");
+    const stopFile = join(directory, "stop");
+    const client = {
+        async callTool() {
+            return { isError: false, structuredContent: { ok: true } };
+        },
+        async close() {},
+    };
+
+    await runConnectorLoop({
+        connectClient: async () => ({
+            client,
+            ctxId: "ctx-testspace-health",
+            toolNames: new Set(["bash_run"]),
+        }),
+        endpoint: "http://127.0.0.1:19000/testspace-reverse/mcp",
+        healthFile,
+        instance: TESTSPACE_REVERSE_INSTANCE,
+        intervalMs: 1,
+        logFile,
+        maxIterations: 1,
+        seed: 1,
+        stopFile,
+    });
+
+    const health = await readTestspaceConnectorHealth(healthFile);
+    assert.equal(health?.instance, TESTSPACE_REVERSE_INSTANCE);
+    assert.equal(health?.status, "active");
+    assert.equal(typeof health?.lastActivityAt, "string");
+
+    const statuses = await readConnectorStatuses(
+        [{ healthFile, instance: TESTSPACE_REVERSE_INSTANCE, pidFile: join(directory, "pid") }],
+        {
+            isProcessAlive: () => true,
+            readHealth: readTestspaceConnectorHealth,
+            readPid: async () => 321,
+        },
+    );
+    assert.equal(statuses[TESTSPACE_REVERSE_INSTANCE].running, true);
+    assert.equal(statuses[TESTSPACE_REVERSE_INSTANCE].health?.status, "active");
+});
+
+test("a connector tool error is exposed as degraded rather than active", async (t) => {
+    const directory = await mkdtemp(join(tmpdir(), "pds-testspace-connector-degraded-"));
+    t.after(async () => await rm(directory, { recursive: true, force: true }));
+    const healthFile = join(directory, "health.json");
+    await runConnectorLoop({
+        connectClient: async () => ({
+            client: {
+                async callTool() {
+                    return { isError: true, structuredContent: { ok: false } };
+                },
+                async close() {},
+            },
+            ctxId: "ctx-testspace-degraded",
+            toolNames: new Set(["bash_run"]),
+        }),
+        endpoint: "http://127.0.0.1:19000/testspace-local/mcp",
+        healthFile,
+        instance: TESTSPACE_INSTANCE,
+        intervalMs: 1,
+        logFile: join(directory, "activity.jsonl"),
+        maxIterations: 1,
+        seed: 1,
+        stopFile: join(directory, "stop"),
+    });
+
+    const health = await readTestspaceConnectorHealth(healthFile);
+    assert.equal(health?.status, "degraded");
+    assert.equal(health?.lastToolError, true);
+});
+
+test("worker cleanup attempts local and reverse even when one stop fails", () => {
+    const calls = [];
+    assert.throws(
+        () => stopWorkerProcesses([
+            {
+                instance: TESTSPACE_INSTANCE,
+                stop() {
+                    calls.push(TESTSPACE_INSTANCE);
+                    throw new Error("local stop failed");
+                },
+            },
+            {
+                instance: TESTSPACE_REVERSE_INSTANCE,
+                stop() {
+                    calls.push(TESTSPACE_REVERSE_INSTANCE);
+                    return true;
+                },
+            },
+        ]),
+        AggregateError,
+    );
+    assert.deepEqual(calls, [TESTSPACE_INSTANCE, TESTSPACE_REVERSE_INSTANCE]);
+});
+
+test("testspace root rejects destructive cleanup targets that contain the repository", () => {
+    const repo = join(tmpdir(), "portable-devshell-review-fixture");
+    assert.throws(
+        () => resolveTestspaceRoot(repo, ""),
+        /must not be empty/u,
+    );
+    assert.throws(
+        () => resolveTestspaceRoot(repo, repo),
+        /must not contain the portable-devshell repository/u,
+    );
+    assert.throws(
+        () => resolveTestspaceRoot(repo, dirname(repo)),
+        /must not contain the portable-devshell repository/u,
+    );
+    assert.equal(
+        resolveTestspaceRoot(repo, join(repo, ".interactive-testspace")),
+        join(repo, ".interactive-testspace"),
+    );
+});
+
+test("recursive Testspace cleanup refuses an existing directory until Testspace owns it", async (t) => {
+    const repo = await mkdtemp(join(tmpdir(), "pds-testspace-owner-repo-"));
+    const customRoot = join(repo, "packages");
+    const sentinel = join(customRoot, "keep.txt");
+    await mkdir(customRoot, { recursive: true });
+    await writeFile(sentinel, "keep\n", "utf8");
+    t.after(async () => await rm(repo, { force: true, recursive: true }));
+
+    await assert.rejects(
+        removeOwnedTestspaceRoot(repo, customRoot),
+        /not owned by portable-devshell Testspace/u,
+    );
+    await access(sentinel);
+
+    await markTestspaceRootOwned(repo, customRoot);
+    await removeOwnedTestspaceRoot(repo, customRoot);
+    await assert.rejects(access(customRoot), { code: "ENOENT" });
 });
 
 test("testspace runtime is deterministic and keeps Unix worker sockets short", () => {

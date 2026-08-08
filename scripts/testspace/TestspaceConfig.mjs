@@ -115,6 +115,7 @@ export function buildTestspaceReverseInstanceConfig({ workspace }) {
 export function testspaceUrls({ mcpPort, webPort }) {
     return {
         mcp: `http://127.0.0.1:${mcpPort}/${TESTSPACE_INSTANCE}/mcp`,
+        reverseMcp: `http://127.0.0.1:${mcpPort}/${TESTSPACE_REVERSE_INSTANCE}/mcp`,
         web: `http://127.0.0.1:${webPort}/web/`,
     };
 }
