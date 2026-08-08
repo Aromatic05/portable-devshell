@@ -529,6 +529,30 @@ test("ControlChannelServer replaces one started provider without closing others"
     await server.close();
 });
 
+test("ControlChannelServer rolls back a replacement when the previous provider fails to close", async () => {
+    const socket = new MemoryControlChannelListener();
+    const previous = new RetryCloseControlChannelListener(1);
+    const replacement = new RetryCloseControlChannelListener(0);
+    const server = new ControlChannelServer({
+        listeners: [socket, previous],
+        routes: { connectionClosed() {}, snapshot: createRouteSnapshot }
+    });
+
+    await server.start();
+    await assert.rejects(
+        server.replaceListener(previous, replacement),
+        /provider close failed/iu
+    );
+
+    assert.deepEqual(previous.events, ["start:1", "close:1", "start:2"]);
+    assert.deepEqual(replacement.events, ["start:1", "close:1"]);
+    assert.equal(socket.closed, false);
+
+    await server.close();
+    assert.deepEqual(previous.events, ["start:1", "close:1", "start:2", "close:2"]);
+    assert.deepEqual(replacement.events, ["start:1", "close:1"]);
+});
+
 
 function createClient(
     provider: MemoryControlChannelListener,

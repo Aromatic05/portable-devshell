@@ -125,7 +125,16 @@ export class ControlRuntimeMcp {
                 await next.start();
             }
         } catch (error) {
-            if (sameEndpointAsPrevious) await previous?.start().catch(() => undefined);
+            const rollbackFailures: unknown[] = [];
+            if (sameEndpointAsPrevious) {
+                await previous?.start().catch((rollbackError) => rollbackFailures.push(rollbackError));
+            }
+            if (rollbackFailures.length > 0) {
+                throw new AggregateError(
+                    [error, ...rollbackFailures],
+                    "MCP host replacement failed and rollback was incomplete."
+                );
+            }
             throw error;
         }
         this.#host = next;
@@ -137,12 +146,16 @@ export class ControlRuntimeMcp {
         const current = this.#host;
         this.#host = host;
         this.#publicBaseUrl = config.mcp.enabled ? config.mcp.publicBaseUrl : undefined;
+        const failures: unknown[] = [];
         if (current !== undefined && current !== host) {
-            await current.stop().catch(() => undefined);
+            await current.stop().catch((error) => failures.push(error));
         }
         if (host !== undefined) {
             this.#artifact.installHttpRoute(host.server);
-            await host.start().catch(() => undefined);
+            await host.start().catch((error) => failures.push(error));
+        }
+        if (failures.length > 0) {
+            throw new AggregateError(failures, "MCP host rollback was incomplete.");
         }
     }
 
@@ -183,8 +196,15 @@ export class ControlRuntimeMcp {
             try {
                 await next.start();
             } catch (error) {
+                const rollbackFailures: unknown[] = [];
                 if (same && previous !== undefined) {
-                    await previous.start().catch(() => undefined);
+                    await previous.start().catch((rollbackError) => rollbackFailures.push(rollbackError));
+                }
+                if (rollbackFailures.length > 0) {
+                    throw new AggregateError(
+                        [error, ...rollbackFailures],
+                        "Web host replacement failed and rollback was incomplete."
+                    );
                 }
                 throw error;
             }

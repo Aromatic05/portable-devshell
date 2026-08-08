@@ -141,6 +141,123 @@ test("runtime stop attempts every cleanup step after failures", async (t) => {
     assert.equal(await ipcEndpointAcceptsConnections(socketPath), false);
 });
 
+test("MCP hot replacement preserves the original failure when runtime rollback also fails", async (t) => {
+    const runtimeDir = await createTestTempDirectory("runtime-mcp-rollback-errors");
+    const socketPath = createTestIpcPath("control-runtime", runtimeDir);
+    let applyMcpConfig!: (previous: ControlConfig, next: ControlConfig) => Promise<void>;
+    const retired = {
+        async stop() {
+            throw new Error("retired stop failed");
+        }
+    };
+    const mcp = {
+        configEditor: undefined,
+        host: undefined,
+        instanceCreate: undefined,
+        oauthApprovals: undefined,
+        async replaceMcpHost() {
+            return retired;
+        },
+        async restoreMcpHost() {
+            throw new Error("runtime rollback failed");
+        },
+        setMcpConfigApplier(apply: (previous: ControlConfig, next: ControlConfig) => Promise<void>) {
+            applyMcpConfig = apply;
+        },
+        webEnabled: false,
+        async start() {},
+        status: () => ({ running: false }),
+        async stop() {}
+    };
+    new ControlRuntime({
+        artifact: { service: undefined, async stop() {} } as never,
+        instances: {
+            list: () => [],
+            onChange: () => () => undefined,
+            async stopOwned() {}
+        } as never,
+        mcp: mcp as never,
+        restart: async () => undefined,
+        reverse: { service: undefined, stop() {} } as never,
+        shutdown: async () => undefined,
+        socketPath
+    });
+    t.after(async () => await rm(runtimeDir, { force: true, recursive: true }));
+    const previous = createDefaultControlConfig();
+    const next = structuredClone(previous);
+    next.mcp.publicBaseUrl = "https://new.example";
+
+    await assert.rejects(
+        applyMcpConfig(previous, next),
+        (error: unknown) => {
+            assert.ok(error instanceof AggregateError);
+            assert.deepEqual(
+                error.errors.map((entry) => (entry as Error).message),
+                ["retired stop failed", "runtime rollback failed"]
+            );
+            return true;
+        }
+    );
+});
+
+test("Web hot replacement preserves the original failure when host rollback also fails", async (t) => {
+    const runtimeDir = await createTestTempDirectory("runtime-web-rollback-errors");
+    const socketPath = createTestIpcPath("control-runtime", runtimeDir);
+    let applyWebConfig!: (previous: ControlConfig, next: ControlConfig) => Promise<void>;
+    const http = {};
+    const mcp = {
+        configEditor: undefined,
+        instanceCreate: undefined,
+        oauthApprovals: undefined,
+        webAuth: { mode: "none" },
+        webEnabled: true,
+        webHost: http,
+        webPublicBaseUrl: "http://127.0.0.1",
+        async replaceWebHost() {
+            return http;
+        },
+        async restoreWebHost() {
+            throw new Error("web host rollback failed");
+        },
+        setWebConfigApplier(apply: (previous: ControlConfig, next: ControlConfig) => Promise<void>) {
+            applyWebConfig = apply;
+        },
+        async stopRetiredWebHost() {},
+        async start() {},
+        status: () => ({ running: false }),
+        async stop() {}
+    };
+    new ControlRuntime({
+        artifact: { service: undefined, async stop() {} } as never,
+        instances: {
+            list: () => [],
+            onChange: () => () => undefined,
+            async stopOwned() {}
+        } as never,
+        mcp: mcp as never,
+        restart: async () => undefined,
+        reverse: { service: undefined, stop() {} } as never,
+        shutdown: async () => undefined,
+        socketPath
+    });
+    t.after(async () => await rm(runtimeDir, { force: true, recursive: true }));
+    const previous = createDefaultControlConfig();
+    previous.web.enabled = true;
+    const next = structuredClone(previous);
+    next.web.listenPort = previous.web.listenPort + 1;
+
+    await assert.rejects(
+        applyWebConfig(previous, next),
+        (error: unknown) => {
+            assert.ok(error instanceof AggregateError);
+            assert.equal(error.errors.length, 2);
+            assert.match((error.errors[0] as Error).message, /not started/iu);
+            assert.equal((error.errors[1] as Error).message, "web host rollback failed");
+            return true;
+        }
+    );
+});
+
 test("runtime mounts web session and RPC routes on the MCP HTTP host", async (t) => {
     const runtimeDir = await createTestTempDirectory("runtime-web");
     const socketPath = createTestIpcPath("control-runtime", runtimeDir);

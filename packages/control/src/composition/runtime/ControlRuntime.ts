@@ -81,9 +81,22 @@ export class ControlRuntime {
                 if (host !== undefined) this.#reverse.install(host.server, next.mcp.publicBaseUrl);
                 await retired?.stop();
             } catch (error) {
-                await this.#mcp.restoreMcpHost(retired, _previous);
-                const host = this.#mcp.host;
-                if (host !== undefined) this.#reverse.install(host.server, _previous.mcp.publicBaseUrl);
+                const rollbackFailures: unknown[] = [];
+                await this.#mcp.restoreMcpHost(retired, _previous).catch((rollbackError) => {
+                    rollbackFailures.push(rollbackError);
+                });
+                try {
+                    const host = this.#mcp.host;
+                    if (host !== undefined) this.#reverse.install(host.server, _previous.mcp.publicBaseUrl);
+                } catch (rollbackError) {
+                    rollbackFailures.push(rollbackError);
+                }
+                if (rollbackFailures.length > 0) {
+                    throw new AggregateError(
+                        [error, ...rollbackFailures],
+                        "MCP hot replacement failed and runtime rollback was incomplete."
+                    );
+                }
                 throw error;
             }
         });
@@ -230,15 +243,32 @@ export class ControlRuntime {
             this.#webFlowUninstall = nextFlowUninstall;
             await this.#mcp.stopRetiredWebHost(previousHost).catch(reportRetiredWebHostFailure);
         } catch (error) {
-            nextFlowUninstall?.();
-            await this.#mcp.restoreWebHost(previousHost, previousConfig);
+            const rollbackFailures: unknown[] = [];
+            try {
+                nextFlowUninstall?.();
+            } catch (rollbackError) {
+                rollbackFailures.push(rollbackError);
+            }
+            await this.#mcp.restoreWebHost(previousHost, previousConfig).catch((rollbackError) => {
+                rollbackFailures.push(rollbackError);
+            });
             this.#webListener = previousListener;
             this.#webFlow = previousFlow;
             if (previousFlowRemoved && previousFlow !== undefined && this.#mcp.webHost !== undefined) {
-                await previousFlow.warmup();
-                this.#webFlowUninstall = previousFlow.install(this.#mcp.webHost);
+                try {
+                    await previousFlow.warmup();
+                    this.#webFlowUninstall = previousFlow.install(this.#mcp.webHost);
+                } catch (rollbackError) {
+                    rollbackFailures.push(rollbackError);
+                }
             } else {
                 this.#webFlowUninstall = previousFlowUninstall;
+            }
+            if (rollbackFailures.length > 0) {
+                throw new AggregateError(
+                    [error, ...rollbackFailures],
+                    "Web hot replacement failed and runtime rollback was incomplete."
+                );
             }
             throw error;
         }

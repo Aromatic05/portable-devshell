@@ -109,13 +109,32 @@ export class ControlChannelServer {
             throw new Error("Control channel listener is not active.");
         }
 
-        await next.start((connection) => this.#accept(connection));
+        const accept = (connection: ControlAcceptedChannel) => this.#accept(connection);
+        await next.start(accept);
+        try {
+            await previous.close();
+        } catch (error) {
+            const rollbackFailures: unknown[] = [];
+            await next.close().catch((rollbackError) => {
+                rollbackFailures.push(rollbackError);
+                if (!this.#startedListeners.includes(next)) {
+                    this.#startedListeners.push(next);
+                }
+            });
+            await previous.start(accept).catch((rollbackError) => {
+                rollbackFailures.push(rollbackError);
+            });
+            if (rollbackFailures.length > 0) {
+                throw new AggregateError(
+                    [error, ...rollbackFailures],
+                    "Control channel listener replacement failed and rollback was incomplete."
+                );
+            }
+            throw error;
+        }
         this.#listeners[index] = next;
         const startedIndex = this.#startedListeners.indexOf(previous);
         this.#startedListeners[startedIndex] = next;
-        setImmediate(() => {
-            void previous.close().catch(() => undefined);
-        });
     }
 
     async #startInternal(): Promise<void> {
