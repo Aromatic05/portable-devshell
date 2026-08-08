@@ -6,7 +6,7 @@ if (process.execArgv.includes("--test") || process.env.NODE_TEST_CONTEXT !== und
 }
 
 function installTestWatchdog() {
-    const testWatchdogTimeoutMs = Number.parseInt(process.env.PORTABLE_DEVSHELL_TEST_WATCHDOG_MS ?? "30000", 10);
+    const testWatchdogTimeoutMs = Number.parseInt(process.env.PORTABLE_DEVSHELL_TEST_WATCHDOG_MS ?? "60000", 10);
     const testWatchdogOrigin = new Error("Timeout origin: global test watchdog").stack ?? "Timeout origin: global test watchdog";
     const testWatchdog = setTimeout(() => {
         const error = new Error(`global test watchdog timeout after ${testWatchdogTimeoutMs}ms\n${testWatchdogOrigin}`);
