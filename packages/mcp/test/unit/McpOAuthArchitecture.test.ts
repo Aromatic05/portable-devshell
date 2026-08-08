@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
-import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { access, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
+import { promisify } from "node:util";
 
 import { McpOAuthApprovalService } from "../../src/auth/oauth/McpOAuthApprovalService.ts";
 import { McpOAuthInteraction } from "../../src/auth/oauth/McpOAuthInteraction.ts";
@@ -9,6 +11,8 @@ import { createMcpOAuthOidcFileAdapterFactory } from "../../src/auth/oauth/McpOA
 import { McpOAuthProviderRuntime } from "../../src/auth/oauth/McpOAuthProviderRuntime.ts";
 import { McpOAuthRegistrationLimiter } from "../../src/auth/oauth/McpOAuthRegistrationLimiter.ts";
 import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
+
+const execFileAsync = promisify(execFile);
 
 const config = {
     documentationUrl: "https://docs.example.test/aromatic",
@@ -70,6 +74,75 @@ test("McpOAuthProviderRuntime owns provider lifecycle, resources, metadata, and 
         await rm(storageDir, { force: true, recursive: true });
     }
 });
+
+test("McpOAuthProviderRuntime fails closed before creating provider secrets when storage hardening fails", async () => {
+    const storageDir = await createTestTempDirectory("mcp-oauth-storage-security-failure");
+    const runtime = new McpOAuthProviderRuntime({
+        approvals: new McpOAuthApprovalService(storageDir),
+        config,
+        publicBaseUrl: "https://mcp.example.test/",
+        storageDir,
+        storageSecurity: {
+            async secureStorage() {
+                throw new Error("storage hardening failed");
+            }
+        }
+    });
+
+    try {
+        await assert.rejects(runtime.warmup(), /storage hardening failed/iu);
+        assert.throws(() => runtime.provider, /not initialized/iu);
+        await assert.rejects(
+            access(join(storageDir, "jwks.json")),
+            (error: unknown) => (error as NodeJS.ErrnoException).code === "ENOENT"
+        );
+    } finally {
+        await rm(storageDir, { force: true, recursive: true });
+    }
+});
+
+test(
+    "MCP OAuth storage uses owner-only Windows ACLs",
+    { skip: process.platform === "win32" ? false : "requires Windows DACL semantics" },
+    async () => {
+        const storageDir = await createTestTempDirectory("mcp-oauth-windows-acl");
+        const runtime = new McpOAuthProviderRuntime({
+            approvals: new McpOAuthApprovalService(storageDir),
+            config,
+            publicBaseUrl: "https://mcp.example.test/",
+            storageDir
+        });
+        const resource = new URL("https://mcp.example.test/demo/mcp");
+        runtime.registerResource(resource, config);
+
+        try {
+            await runtime.warmup();
+            const adapter = runtime.provider.AccessToken.adapter as {
+                upsert(id: string, payload: Record<string, unknown>, expiresIn: number): Promise<void>;
+            };
+            const now = Math.floor(Date.now() / 1000);
+            await adapter.upsert("windows-acl-token", {
+                aud: resource.href,
+                clientId: "windows-acl-client",
+                exp: now + 3600,
+                grantId: "windows-acl-grant",
+                iat: now,
+                kind: "AccessToken",
+                scope: "mcp"
+            }, 3600);
+
+            assertOwnerOnlyWindowsAcl(await readWindowsAcl(storageDir), true);
+            assertOwnerOnlyWindowsAcl(await readWindowsAcl(join(storageDir, "jwks.json")), false);
+            assertOwnerOnlyWindowsAcl(await readWindowsAcl(join(storageDir, "adapter")), false);
+            assertOwnerOnlyWindowsAcl(
+                await readWindowsAcl(join(storageDir, "adapter", "AccessToken.json")),
+                false
+            );
+        } finally {
+            await rm(storageDir, { force: true, recursive: true });
+        }
+    }
+);
 
 test("McpOAuthProviderRuntime upgrades persisted dynamic clients for OIDC refresh-token scopes", async () => {
     const storageDir = await createTestTempDirectory("mcp-oauth-client-scope-upgrade");
@@ -329,3 +402,56 @@ test("OAuth registration limiter rejects bursts above its configured quota", () 
     now = 1001;
     assert.equal(limiter.accept("client-a"), true);
 });
+
+interface WindowsAclSnapshot {
+    currentSid: string;
+    ownerSid: string;
+    protected: boolean;
+    rules: Array<{
+        identitySid: string;
+        inherited: boolean;
+        rights: string;
+        type: string;
+    }>;
+}
+
+async function readWindowsAcl(path: string): Promise<WindowsAclSnapshot> {
+    const script = [
+        "$acl = Get-Acl -LiteralPath $env:PORTABLE_DEVSHELL_TEST_ACL_PATH",
+        "$sidType = [System.Security.Principal.SecurityIdentifier]",
+        "$rules = @($acl.Access | ForEach-Object {",
+        "  [pscustomobject]@{",
+        "    identitySid = $_.IdentityReference.Translate($sidType).Value",
+        "    inherited = $_.IsInherited",
+        "    rights = $_.FileSystemRights.ToString()",
+        "    type = $_.AccessControlType.ToString()",
+        "  }",
+        "})",
+        "[pscustomobject]@{",
+        "  currentSid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value",
+        "  ownerSid = $acl.GetOwner($sidType).Value",
+        "  protected = $acl.AreAccessRulesProtected",
+        "  rules = $rules",
+        "} | ConvertTo-Json -Depth 4 -Compress",
+    ].join("\n");
+    const { stdout } = await execFileAsync(
+        "powershell.exe",
+        ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script],
+        {
+            env: { ...process.env, PORTABLE_DEVSHELL_TEST_ACL_PATH: path },
+            windowsHide: true
+        }
+    );
+    return JSON.parse(stdout) as WindowsAclSnapshot;
+}
+
+function assertOwnerOnlyWindowsAcl(snapshot: WindowsAclSnapshot, requireProtected: boolean): void {
+    assert.equal(snapshot.ownerSid, snapshot.currentSid);
+    if (requireProtected) assert.equal(snapshot.protected, true);
+    assert.ok(snapshot.rules.length > 0);
+    for (const rule of snapshot.rules) {
+        assert.equal(rule.identitySid, snapshot.currentSid);
+        assert.equal(rule.type, "Allow");
+        assert.match(rule.rights, /FullControl/u);
+    }
+}

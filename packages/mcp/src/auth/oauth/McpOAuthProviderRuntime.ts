@@ -39,6 +39,10 @@ import {
     type OAuthApprovalInput
 } from "./McpOAuthApprovalService.js";
 import { createMcpOAuthOidcFileAdapterFactory } from "./McpOAuthOidcFileAdapter.js";
+import {
+    createMcpOAuthStorageSecurity,
+    type McpOAuthStorageSecurity
+} from "./McpOAuthStorageSecurity.js";
 
 export interface McpOAuthProviderRuntimeOptions {
     accountId?: string;
@@ -46,6 +50,7 @@ export interface McpOAuthProviderRuntimeOptions {
     config: McpOAuth2Config;
     publicBaseUrl: string;
     storageDir: string;
+    storageSecurity?: McpOAuthStorageSecurity;
     trustProxy?: boolean;
 }
 
@@ -69,6 +74,7 @@ export class McpOAuthProviderRuntime {
     readonly #registeredResources = new Map<string, McpOAuth2Config>();
     readonly #revocationListeners = new Set<(revocation: McpOAuthAccessRevocation) => void>();
     readonly #storageDir: string;
+    readonly #storageSecurity: McpOAuthStorageSecurity;
     readonly #trustProxy: boolean;
     #provider?: Provider;
 
@@ -79,6 +85,7 @@ export class McpOAuthProviderRuntime {
         this.#issuerUrl = new URL(options.publicBaseUrl);
         this.#basePath = normalizeBasePath(this.#issuerUrl.pathname);
         this.#storageDir = options.storageDir;
+        this.#storageSecurity = options.storageSecurity ?? createMcpOAuthStorageSecurity();
         this.#trustProxy = options.trustProxy ?? false;
     }
 
@@ -128,8 +135,10 @@ export class McpOAuthProviderRuntime {
         if (process.platform !== "win32") {
             await chmod(this.#storageDir, 0o700);
         }
+        await this.#storageSecurity.secureStorage(this.#storageDir);
         await this.#approvals.warmup();
         const jwks = await readOrCreateJwks(this.#storageDir);
+        await this.#storageSecurity.secureStorage(this.#storageDir);
         const provider = new Provider(stripTrailingSlash(this.#issuerUrl.href), {
             adapter: createDynamicClientScopeAdapterFactory(
                 createMcpOAuthOidcFileAdapterFactory(

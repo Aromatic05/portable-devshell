@@ -18,12 +18,12 @@ use uuid::Uuid;
 use crate::rpc::codec::encode_json;
 use crate::rpc::error::RpcError;
 use crate::security::SecurityPolicy;
-#[cfg(test)]
-use crate::security::{SecurityMode, build_security_policy};
 use crate::security::path::{
     FilesystemCapability, PathNamespace, ResolvedPath, parse_requested_path,
     resolve_existing_target,
 };
+#[cfg(test)]
+use crate::security::{SecurityMode, build_security_policy};
 
 const DEFAULT_MAX_REPLAY_BYTES: usize = 4 * 1024 * 1024;
 const DEFAULT_MAX_NOTIFICATION_BYTES: usize = 4 * 1024 * 1024;
@@ -648,13 +648,7 @@ fn resolve_cwd(
     policy: &dyn SecurityPolicy,
     value: Option<&str>,
 ) -> Result<ResolvedPath, RpcError> {
-    let raw = match value {
-        None => "./".to_string(),
-        Some(value) if Path::new(value).is_absolute() => value.to_string(),
-        Some(".") => "./".to_string(),
-        Some(value) if value.starts_with("./") => value.to_string(),
-        Some(value) => format!("./{value}"),
-    };
+    let raw = normalize_cwd_request(value);
     let requested = parse_requested_path(&raw)?;
     let (read, write) = match requested.namespace {
         PathNamespace::Workspace => (
@@ -676,15 +670,34 @@ fn resolve_cwd(
             details: error.details,
         })?;
     let cwd = resolve_existing_target(workspace, &requested)?;
-    if !cwd.metadata().map_err(|error| {
-        RpcError::new("target.invalid", format!("Failed to inspect terminal working directory: {error}"))
-    })?.is_dir() {
+    if !cwd
+        .metadata()
+        .map_err(|error| {
+            RpcError::new(
+                "target.invalid",
+                format!("Failed to inspect terminal working directory: {error}"),
+            )
+        })?
+        .is_dir()
+    {
         return Err(RpcError::new(
             "target.invalid",
             "Terminal working directory is not a directory.",
         ));
     }
     Ok(cwd)
+}
+
+fn normalize_cwd_request(value: Option<&str>) -> String {
+    match value {
+        None => "./".to_string(),
+        Some(value) if Path::new(value).is_absolute() => value.to_string(),
+        Some(".") => "./".to_string(),
+        #[cfg(windows)]
+        Some(value) if value.starts_with(".\\") => format!("./{}", &value[2..]),
+        Some(value) if value.starts_with("./") => value.to_string(),
+        Some(value) => format!("./{value}"),
+    }
 }
 
 fn epoch_millis() -> u128 {
@@ -706,6 +719,25 @@ fn spawn_terminal(cwd: &Path, cols: u16, rows: u16) -> Result<SpawnedTerminal, R
 #[cfg(windows)]
 fn spawn_terminal(cwd: &Path, cols: u16, rows: u16) -> Result<SpawnedTerminal, RpcError> {
     pty_windows::spawn(cwd, cols, rows)
+}
+
+#[cfg(all(test, windows))]
+mod windows_cwd_tests {
+    use crate::security::{SecurityMode, build_security_policy};
+
+    use super::resolve_cwd;
+
+    #[test]
+    fn terminal_workspace_cwd_accepts_dot_backslash_syntax() {
+        let workspace = crate::testing::temp_dir();
+        let nested = workspace.path().join("nested");
+        std::fs::create_dir_all(&nested).unwrap();
+        let policy = build_security_policy(SecurityMode::Disabled);
+
+        let resolved = resolve_cwd(workspace.path(), policy.as_ref(), Some(".\\nested")).unwrap();
+
+        assert_eq!(resolved.canonical, nested.canonicalize().unwrap());
+    }
 }
 
 #[cfg(all(test, unix))]
