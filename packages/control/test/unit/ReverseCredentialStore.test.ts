@@ -104,6 +104,29 @@ test("token rotation and revocation invalidate the previous credential", async (
     assert.equal(await store.authenticate("remote-test", rotated), false);
 });
 
+test("failed replacement preparation leaves the previous reverse credential active", async () => {
+    const home = await createTestTempDirectory("devshell-reverse-atomic-replace");
+    const initialStore = new ReverseCredentialStore(home);
+    const code = await initialStore.createDeviceCode("remote-test");
+    const initial = await initialStore.consumeDeviceCode(code.deviceCode);
+    let secureFileCalls = 0;
+    const failingStore = new ReverseCredentialStore(home, {
+        async secureDirectory() {},
+        async secureFile() {
+            secureFileCalls += 1;
+            if (secureFileCalls === 2) {
+                throw new Error("injected replacement preparation failure");
+            }
+        },
+    });
+
+    await assert.rejects(
+        failingStore.rotateToken("remote-test"),
+        /injected replacement preparation failure/u,
+    );
+    assert.equal(await initialStore.authenticate("remote-test", initial.deviceToken), true);
+});
+
 test("reverse route follows the public base URL path", () => {
     assert.equal(reverseRoute("https://example.test", "/reverse/v1/connect"), "/reverse/v1/connect");
     assert.equal(

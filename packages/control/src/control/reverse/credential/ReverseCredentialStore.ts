@@ -1,5 +1,5 @@
-import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
-import { access, mkdir, readFile, readdir, writeFile } from "node:fs/promises";
+import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
+import { access, mkdir, open, readFile, readdir, rename, rm } from "node:fs/promises";
 
 import {
     asInstanceName,
@@ -220,12 +220,32 @@ export class ReverseCredentialStore {
         if (await pathExists(credentialFile)) {
             await this.#fileSecurity.secureFile(credentialFile);
         }
-        await writeFile(
-            credentialFile,
-            `${JSON.stringify(record, null, 2)}\n`,
-            { encoding: "utf8", mode: 0o600 }
-        );
-        await this.#fileSecurity.secureFile(credentialFile);
+        const temporary = `${credentialFile}.${process.pid}.${randomUUID()}.tmp`;
+        const file = await open(temporary, "wx", 0o600);
+        try {
+            await file.writeFile(`${JSON.stringify(record, null, 2)}\n`, "utf8");
+            await file.sync();
+        } catch (error) {
+            await file.close().catch(() => undefined);
+            await rm(temporary, { force: true }).catch(() => undefined);
+            throw error;
+        }
+        await file.close();
+        try {
+            await this.#fileSecurity.secureFile(temporary);
+            await rename(temporary, credentialFile);
+            if (process.platform !== "win32") {
+                const directory = await open(this.#paths.reverseDir, "r");
+                try {
+                    await directory.sync();
+                } finally {
+                    await directory.close();
+                }
+            }
+        } catch (error) {
+            await rm(temporary, { force: true }).catch(() => undefined);
+            throw error;
+        }
     }
 
     async #exclusive<T>(operation: () => Promise<T>): Promise<T> {

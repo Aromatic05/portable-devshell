@@ -6,22 +6,20 @@ use std::os::fd::{AsRawFd, OwnedFd};
 #[cfg(unix)]
 use std::os::unix::fs::{MetadataExt as _, PermissionsExt as _};
 use std::path::{Path, PathBuf};
-#[cfg(unix)]
 use std::sync::Arc;
 #[cfg(unix)]
 use std::time::Duration;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use cap_std::fs::{Dir as CapabilityDir, OpenOptions as CapabilityOpenOptions};
 #[cfg(unix)]
-use cap_std::fs::{
-    Dir as CapabilityDir, MetadataExt as _, OpenOptions as CapabilityOpenOptions,
-    Permissions as CapabilityPermissions,
-};
+use cap_std::fs::{MetadataExt as _, Permissions as CapabilityPermissions};
+#[cfg(windows)]
+use cap_std::ambient_authority;
 
 use crate::security::path::{PathNamespace, RequestedPath};
 use crate::tools::ToolError;
 
-#[cfg(unix)]
 #[derive(Clone, Debug)]
 enum AnchoredAccess {
     File(Arc<File>),
@@ -32,7 +30,6 @@ enum AnchoredAccess {
     },
 }
 
-#[cfg(unix)]
 #[derive(Clone, Debug)]
 struct AnchoredTarget {
     directory: Arc<CapabilityDir>,
@@ -102,7 +99,6 @@ impl ResolvedMetadata {
         }
     }
 
-    #[cfg(unix)]
     fn from_capability(metadata: cap_std::fs::Metadata) -> Self {
         let file_type = metadata.file_type();
         Self {
@@ -110,13 +106,12 @@ impl ResolvedMetadata {
             is_dir: metadata.is_dir(),
             is_symlink: file_type.is_symlink(),
             len: metadata.len(),
-            modified_at_seconds: system_time_seconds(
-                metadata
-                    .modified()
-                    .map(cap_primitives::time::SystemTime::into_std),
-            ),
+            modified_at_seconds: system_time_seconds(metadata.modified().map(|time| time.into_std())),
+            #[cfg(unix)]
             mode: metadata.mode(),
+            #[cfg(unix)]
             device: metadata.dev(),
+            #[cfg(unix)]
             inode: metadata.ino(),
         }
     }
@@ -125,13 +120,11 @@ impl ResolvedMetadata {
 #[derive(Clone, Debug)]
 pub struct ResolvedDirectory {
     path: PathBuf,
-    #[cfg(unix)]
     capability: Option<Arc<CapabilityDir>>,
 }
 
 impl ResolvedDirectory {
     pub fn metadata(&self, relative: &Path, follow_symlinks: bool) -> io::Result<ResolvedMetadata> {
-        #[cfg(unix)]
         if let Some(directory) = &self.capability {
             let metadata = if relative.as_os_str().is_empty() {
                 directory.dir_metadata()?
@@ -153,7 +146,6 @@ impl ResolvedDirectory {
     }
 
     pub fn entries(&self) -> io::Result<Vec<OsString>> {
-        #[cfg(unix)]
         if let Some(directory) = &self.capability {
             return directory
                 .entries()?
@@ -167,7 +159,6 @@ impl ResolvedDirectory {
     }
 
     pub fn open_file(&self, relative: &Path) -> io::Result<File> {
-        #[cfg(unix)]
         if let Some(directory) = &self.capability {
             return directory.open(relative).map(|file| file.into_std());
         }
@@ -175,7 +166,6 @@ impl ResolvedDirectory {
     }
 
     pub fn open_directory(&self, relative: &Path) -> io::Result<Self> {
-        #[cfg(unix)]
         if let Some(directory) = &self.capability {
             let opened = if relative.as_os_str().is_empty() {
                 directory.try_clone()?
@@ -197,13 +187,11 @@ impl ResolvedDirectory {
         }
         Ok(Self {
             path,
-            #[cfg(unix)]
             capability: None,
         })
     }
 
     pub fn create_dir(&self, relative: &Path) -> io::Result<()> {
-        #[cfg(unix)]
         if let Some(directory) = &self.capability {
             return directory.create_dir(relative);
         }
@@ -211,7 +199,6 @@ impl ResolvedDirectory {
     }
 
     pub fn create_dir_all(&self, relative: &Path) -> io::Result<()> {
-        #[cfg(unix)]
         if let Some(directory) = &self.capability {
             return directory.create_dir_all(relative);
         }
@@ -219,7 +206,6 @@ impl ResolvedDirectory {
     }
 
     pub fn create_file_new(&self, relative: &Path) -> io::Result<File> {
-        #[cfg(unix)]
         if let Some(directory) = &self.capability {
             let mut options = CapabilityOpenOptions::new();
             options.write(true).create_new(true);
@@ -234,7 +220,6 @@ impl ResolvedDirectory {
     }
 
     pub fn remove_file(&self, relative: &Path) -> io::Result<()> {
-        #[cfg(unix)]
         if let Some(directory) = &self.capability {
             return directory.remove_file(relative);
         }
@@ -242,7 +227,6 @@ impl ResolvedDirectory {
     }
 
     pub fn remove_dir_all(&self, relative: &Path) -> io::Result<()> {
-        #[cfg(unix)]
         if let Some(directory) = &self.capability {
             return directory.remove_dir_all(relative);
         }
@@ -250,7 +234,6 @@ impl ResolvedDirectory {
     }
 
     pub fn rename(&self, source: &Path, target_directory: &Self, target: &Path) -> io::Result<()> {
-        #[cfg(unix)]
         if let (Some(source_directory), Some(target_capability)) =
             (&self.capability, &target_directory.capability)
         {
@@ -265,7 +248,6 @@ impl ResolvedDirectory {
         target_directory: &Self,
         target: &Path,
     ) -> io::Result<()> {
-        #[cfg(unix)]
         if let (Some(source_directory), Some(target_capability)) =
             (&self.capability, &target_directory.capability)
         {
@@ -318,6 +300,25 @@ impl ResolvedDirectory {
     }
 
     pub fn set_modified_time(&self, relative: &Path, seconds: i64) -> io::Result<()> {
+        #[cfg(windows)]
+        if let Some(directory) = &self.capability {
+            let time = filetime::FileTime::from_unix_time(seconds, 0);
+            let metadata = if relative.as_os_str().is_empty() {
+                directory.dir_metadata()?
+            } else {
+                directory.metadata(relative)?
+            };
+            let handle = if metadata.is_dir() {
+                if relative.as_os_str().is_empty() {
+                    directory.try_clone()?.into_std_file()
+                } else {
+                    directory.open_dir(relative)?.into_std_file()
+                }
+            } else {
+                directory.open(relative)?.into_std()
+            };
+            return filetime::set_file_handle_times(&handle, None, Some(time));
+        }
         #[cfg(unix)]
         if let Some(directory) = &self.capability {
             let timestamp = if seconds >= 0 {
@@ -346,6 +347,8 @@ pub struct ResolvedTarget {
     path: PathBuf,
     directory: ResolvedDirectory,
     relative: PathBuf,
+    #[cfg(windows)]
+    _anchor_guards: Arc<Vec<Arc<CapabilityDir>>>,
 }
 
 impl ResolvedTarget {
@@ -424,6 +427,8 @@ impl ResolvedTarget {
             path,
             directory: self.directory.clone(),
             relative,
+            #[cfg(windows)]
+            _anchor_guards: self._anchor_guards.clone(),
         })
     }
 
@@ -451,10 +456,10 @@ pub struct ResolvedPath {
     pub canonical: PathBuf,
     access: PathBuf,
     target: PathBuf,
-    #[cfg(unix)]
     anchored_access: Option<AnchoredAccess>,
-    #[cfg(unix)]
     anchored_target: Option<AnchoredTarget>,
+    #[cfg(windows)]
+    _anchor_guards: Arc<Vec<Arc<CapabilityDir>>>,
 }
 
 impl ResolvedPath {
@@ -463,7 +468,6 @@ impl ResolvedPath {
     }
 
     pub fn metadata(&self) -> io::Result<ResolvedMetadata> {
-        #[cfg(unix)]
         if let Some(access) = &self.anchored_access {
             return match access {
                 AnchoredAccess::File(file) => {
@@ -481,7 +485,6 @@ impl ResolvedPath {
     }
 
     pub fn open_file(&self) -> io::Result<File> {
-        #[cfg(unix)]
         if let Some(access) = &self.anchored_access {
             return match access {
                 AnchoredAccess::File(_) => {
@@ -509,7 +512,6 @@ impl ResolvedPath {
     }
 
     pub fn open_directory(&self) -> io::Result<ResolvedDirectory> {
-        #[cfg(unix)]
         if let Some(access) = &self.anchored_access {
             return match access {
                 AnchoredAccess::File(_) => Err(io::Error::new(
@@ -534,13 +536,11 @@ impl ResolvedPath {
         }
         Ok(ResolvedDirectory {
             path: self.access.clone(),
-            #[cfg(unix)]
             capability: None,
         })
     }
 
     pub fn target(&self) -> io::Result<ResolvedTarget> {
-        #[cfg(unix)]
         if let Some(target) = &self.anchored_target {
             return Ok(ResolvedTarget {
                 path: self.canonical.clone(),
@@ -553,6 +553,8 @@ impl ResolvedPath {
                     capability: Some(target.directory.clone()),
                 },
                 relative: target.path.clone(),
+                #[cfg(windows)]
+                _anchor_guards: self._anchor_guards.clone(),
             });
         }
 
@@ -567,10 +569,11 @@ impl ResolvedPath {
             path: self.canonical.clone(),
             directory: ResolvedDirectory {
                 path: parent.to_path_buf(),
-                #[cfg(unix)]
                 capability: None,
             },
             relative: PathBuf::from(name),
+            #[cfg(windows)]
+            _anchor_guards: self._anchor_guards.clone(),
         })
     }
 
@@ -591,7 +594,6 @@ impl ResolvedPath {
     }
 
     pub fn join(&self, relative: &Path) -> Self {
-        #[cfg(unix)]
         let (anchored_access, anchored_target) = match &self.anchored_access {
             Some(AnchoredAccess::Directory(directory)) => (
                 Some(AnchoredAccess::Relative {
@@ -623,10 +625,10 @@ impl ResolvedPath {
             canonical: self.canonical.join(relative),
             access: self.access.join(relative),
             target: self.target.join(relative),
-            #[cfg(unix)]
             anchored_access,
-            #[cfg(unix)]
             anchored_target,
+            #[cfg(windows)]
+            _anchor_guards: self._anchor_guards.clone(),
         }
     }
 }
@@ -636,7 +638,7 @@ pub fn resolve_existing_target(
     requested: &RequestedPath,
 ) -> Result<ResolvedPath, ToolError> {
     if requested.namespace == PathNamespace::Workspace {
-        #[cfg(unix)]
+        #[cfg(any(unix, windows))]
         {
             return resolve_workspace_existing(workspace, requested);
         }
@@ -668,7 +670,7 @@ pub fn resolve_create_target(
     }
 
     if requested.namespace == PathNamespace::Workspace {
-        #[cfg(unix)]
+        #[cfg(any(unix, windows))]
         {
             return resolve_workspace_create(workspace, requested);
         }
@@ -701,10 +703,10 @@ fn plain(canonical: PathBuf) -> ResolvedPath {
         access: canonical.clone(),
         target: canonical.clone(),
         canonical,
-        #[cfg(unix)]
         anchored_access: None,
-        #[cfg(unix)]
         anchored_target: None,
+        #[cfg(windows)]
+        _anchor_guards: Arc::new(Vec::new()),
     }
 }
 
@@ -844,7 +846,156 @@ fn resolve_workspace_create(
     })
 }
 
-#[cfg(unix)]
+#[cfg(windows)]
+fn resolve_workspace_existing(
+    workspace: &Path,
+    requested: &RequestedPath,
+) -> Result<ResolvedPath, ToolError> {
+    let root = workspace
+        .canonicalize()
+        .map_err(|error| ToolError::new("file.writeFailed", error.to_string()))?;
+    let segments = workspace_segments(requested)?;
+    let root_directory = Arc::new(
+        CapabilityDir::open_ambient_dir(&root, ambient_authority())
+            .map_err(|error| map_capability_resolution_error(error, requested))?,
+    );
+    let mut guards = vec![root_directory.clone()];
+    let mut parent = root_directory;
+    if segments.is_empty() {
+        return Ok(ResolvedPath {
+            canonical: root.clone(),
+            target: root.clone(),
+            access: root,
+            anchored_access: Some(AnchoredAccess::Directory(parent)),
+            anchored_target: None,
+            _anchor_guards: Arc::new(guards),
+        });
+    }
+
+    for segment in &segments[..segments.len() - 1] {
+        reject_workspace_symlink(&parent, segment, requested)?;
+        let next = Arc::new(
+            parent
+                .open_dir(segment)
+                .map_err(|error| map_capability_resolution_error(error, requested))?,
+        );
+        guards.push(next.clone());
+        parent = next;
+    }
+    let name = segments.last().expect("workspace target segment exists");
+    reject_workspace_symlink(&parent, name, requested)?;
+    let metadata = parent
+        .metadata(name)
+        .map_err(|error| map_capability_resolution_error(error, requested))?;
+    let canonical = segments
+        .iter()
+        .fold(root, |path, segment| path.join(segment));
+    let parent_directory = parent;
+    let anchored_access = if metadata.is_dir() {
+        let directory = Arc::new(
+            parent_directory
+                .open_dir(name)
+                .map_err(|error| map_capability_resolution_error(error, requested))?,
+        );
+        guards.push(directory.clone());
+        AnchoredAccess::Directory(directory)
+    } else {
+        AnchoredAccess::File(Arc::new(
+            parent_directory
+                .open(name)
+                .map_err(|error| map_capability_resolution_error(error, requested))?
+                .into_std(),
+        ))
+    };
+    Ok(ResolvedPath {
+        canonical: canonical.clone(),
+        access: canonical.clone(),
+        target: canonical,
+        anchored_access: Some(anchored_access),
+        anchored_target: Some(AnchoredTarget {
+            directory: parent_directory,
+            path: PathBuf::from(name),
+        }),
+        _anchor_guards: Arc::new(guards),
+    })
+}
+
+#[cfg(windows)]
+fn resolve_workspace_create(
+    workspace: &Path,
+    requested: &RequestedPath,
+) -> Result<ResolvedPath, ToolError> {
+    let root = workspace
+        .canonicalize()
+        .map_err(|error| ToolError::new("file.writeFailed", error.to_string()))?;
+    let segments = workspace_segments(requested)?;
+    let (name, parents) = segments
+        .split_last()
+        .ok_or_else(|| ToolError::new("file.invalidPath", "workspace root cannot be created"))?;
+    let root_directory = Arc::new(
+        CapabilityDir::open_ambient_dir(&root, ambient_authority())
+            .map_err(|error| map_capability_resolution_error(error, requested))?,
+    );
+    let mut guards = vec![root_directory.clone()];
+    let mut parent = root_directory;
+    for segment in parents {
+        reject_workspace_symlink(&parent, segment, requested)?;
+        let next = Arc::new(
+            parent
+                .open_dir(segment)
+                .map_err(|error| map_capability_resolution_error(error, requested))?,
+        );
+        guards.push(next.clone());
+        parent = next;
+    }
+    let canonical = segments
+        .iter()
+        .fold(root, |path, segment| path.join(segment));
+    Ok(ResolvedPath {
+        canonical: canonical.clone(),
+        access: canonical.clone(),
+        target: canonical,
+        anchored_access: None,
+        anchored_target: Some(AnchoredTarget {
+            directory: parent,
+            path: PathBuf::from(name),
+        }),
+        _anchor_guards: Arc::new(guards),
+    })
+}
+
+#[cfg(windows)]
+fn reject_workspace_symlink(
+    directory: &CapabilityDir,
+    path: &Path,
+    requested: &RequestedPath,
+) -> Result<(), ToolError> {
+    let metadata = directory
+        .symlink_metadata(path)
+        .map_err(|error| map_capability_resolution_error(error, requested))?;
+    if metadata.file_type().is_symlink() {
+        return Err(ToolError::new(
+            "file.pathEscapesWorkspace",
+            format!("workspace path contains a symbolic link or reparse point: {}", requested.raw),
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(windows)]
+fn map_capability_resolution_error(error: io::Error, requested: &RequestedPath) -> ToolError {
+    let code = if error.kind() == io::ErrorKind::NotFound {
+        "file.notFound"
+    } else {
+        "file.writeFailed"
+    };
+    ToolError::new(
+        code,
+        format!("failed to resolve {} within workspace: {error}", requested.raw),
+    )
+}
+
+#[cfg(any(unix, windows))]
 fn workspace_segments(requested: &RequestedPath) -> Result<Vec<OsString>, ToolError> {
     let relative = requested
         .raw
@@ -955,6 +1106,85 @@ mod tests {
             resolved.canonical,
             root.path().canonicalize().unwrap().join("safe/new.txt")
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn existing_workspace_path_remains_anchored_after_parent_replacement() {
+        let root = crate::testing::temp_dir();
+        fs::create_dir(root.path().join("safe")).unwrap();
+        fs::write(root.path().join("safe/file.txt"), "inside").unwrap();
+        let requested = parse_requested_path("./safe/file.txt").unwrap();
+        let resolved = resolve_existing_target(root.path(), &requested).unwrap();
+
+        fs::rename(root.path().join("safe"), root.path().join("safe-old")).unwrap();
+        fs::create_dir(root.path().join("safe")).unwrap();
+        fs::write(root.path().join("safe/file.txt"), "replacement").unwrap();
+
+        let mut content = String::new();
+        resolved
+            .open_file()
+            .unwrap()
+            .read_to_string(&mut content)
+            .unwrap();
+        assert_eq!(content, "inside");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn create_workspace_path_remains_anchored_after_parent_replacement() {
+        let root = crate::testing::temp_dir();
+        fs::create_dir(root.path().join("safe")).unwrap();
+        let requested = parse_requested_path("./safe/new.txt").unwrap();
+        let resolved = resolve_create_target(root.path(), &requested).unwrap();
+
+        fs::rename(root.path().join("safe"), root.path().join("safe-old")).unwrap();
+        fs::create_dir(root.path().join("safe")).unwrap();
+        resolved
+            .target()
+            .unwrap()
+            .create_file_new()
+            .unwrap()
+            .write_all(b"inside")
+            .unwrap();
+
+        assert_eq!(
+            fs::read_to_string(root.path().join("safe-old/new.txt")).unwrap(),
+            "inside"
+        );
+        assert!(!root.path().join("safe/new.txt").exists());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn resolved_workspace_directory_pins_every_ancestor_name_on_windows() {
+        let root = crate::testing::temp_dir();
+        fs::create_dir_all(root.path().join("first/second/third")).unwrap();
+        let requested = parse_requested_path("./first/second/third").unwrap();
+        let resolved = resolve_existing_target(root.path(), &requested).unwrap();
+
+        let rename = fs::rename(root.path().join("first"), root.path().join("first-old"));
+        assert!(
+            rename.is_err(),
+            "a resolved workspace directory must keep ancestor names stable while its path may be used as a process cwd"
+        );
+        drop(resolved);
+
+        let create_root = crate::testing::temp_dir();
+        fs::create_dir_all(create_root.path().join("first/second")).unwrap();
+        let requested = parse_requested_path("./first/second/new.txt").unwrap();
+        let pending = resolve_create_target(create_root.path(), &requested).unwrap();
+        let target = pending.target().unwrap();
+        drop(pending);
+        let rename = fs::rename(
+            create_root.path().join("first"),
+            create_root.path().join("first-old"),
+        );
+        assert!(
+            rename.is_err(),
+            "a ResolvedTarget must keep every ancestor name stable even after its source ResolvedPath is dropped"
+        );
+        drop(target);
     }
 
     #[cfg(unix)]
