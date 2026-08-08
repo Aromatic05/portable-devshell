@@ -26,6 +26,7 @@ import {
     workerPathEnvironmentName,
     readRelativeMarkerCommand,
     terminalPrintCommand,
+    windowsTerminalUsesPowerShell,
 } from "../../../../test/TestPlatformSupport.ts";
 import {
     encodeGlobalConfig,
@@ -335,7 +336,7 @@ async function exerciseWorkerTerminal(socketPath: string, instance: string): Pro
                     version: opened.version,
                 });
             });
-            if (process.platform === "win32") {
+            if (windowsTerminalUsesPowerShell()) {
                 const bootstrapDeadline = Date.now() + 5_000;
                 let responseCount = 0;
                 while (responseCount === 0) {
@@ -367,7 +368,7 @@ async function exerciseWorkerTerminal(socketPath: string, instance: string): Pro
                     const data = payload?.data ?? "";
                     output += data;
                     latestSeq = Math.max(latestSeq, payload?.seq ?? 0);
-                    if (process.platform === "win32") {
+                    if (windowsTerminalUsesPowerShell()) {
                         await cursorResponder.consume(data);
                     }
                 }

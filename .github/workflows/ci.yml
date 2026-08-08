@@ -39,6 +39,9 @@ jobs:
 
         name: ${{ matrix.target }}
         runs-on: ${{ matrix.runner }}
+        defaults:
+            run:
+                shell: bash
 
         steps:
             - uses: actions/checkout@v5
@@ -81,6 +84,17 @@ jobs:
               run: cargo install --locked cargo-zigbuild --version 0.23.0
             - run: node ./scripts/version-state.mjs check-development
             - run: pnpm install --frozen-lockfile
+            # PowerShell 的交互、转义和版本差异晦涩难懂，难以写出稳定且有证明力的 PTY 测试。
+            # Windows 验收固定使用 Git Bash；这只影响测试 shell，不改变产品默认 Windows shell。
+            - name: 配置 Windows Git Bash 测试运行时
+              if: runner.os == 'Windows'
+              run: |
+                  set -euo pipefail
+                  git_bash='/c/Program Files/Git/bin/bash.exe'
+                  if [[ ! -x "$git_bash" ]]; then
+                      git_bash=$(command -v bash)
+                  fi
+                  printf 'PORTABLE_DEVSHELL_WINDOWS_TEST_SHELL=%s\n' "$(cygpath -w "$git_bash")" >> "$GITHUB_ENV"
             - name: 安装 Web 验收 Chromium
               if: matrix.target == 'linux-x64'
               shell: bash

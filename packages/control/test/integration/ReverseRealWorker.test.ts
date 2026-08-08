@@ -32,6 +32,7 @@ import {
     terminalExpectedSize,
     terminalPrintCommand,
     terminalSizeProbeCommand,
+    windowsTerminalUsesPowerShell,
 } from "../../../../test/TestPlatformSupport.ts";
 import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
 import { startLoopbackHttpProxy, type LoopbackHttpProxy } from "../../../../test/TestHttpSupport.ts";
@@ -232,11 +233,11 @@ test(
             });
         });
         const observeTerminalProtocol = async (event: ClientEvent): Promise<void> => {
-            if (process.platform !== "win32" || event.name !== "terminal.output") return;
+            if (!windowsTerminalUsesPowerShell() || event.name !== "terminal.output") return;
             const payload = event.payload as { data?: string } | undefined;
             cursorResponseCount += await cursorResponder.consume(payload?.data ?? "");
         };
-        if (process.platform === "win32") {
+        if (windowsTerminalUsesPowerShell()) {
             await waitForTerminal(
                 attached.stream,
                 () => cursorResponseCount > 0,
@@ -292,7 +293,7 @@ test(
                 `worker stdout:\n${workerStdout}\nworker stderr:\n${workerStderr}`,
         );
         terminalVersion = (resized.event.payload as { version: number }).version;
-        if (process.platform === "win32") {
+        if (windowsTerminalUsesPowerShell()) {
             cursorResponseCount += await cursorResponder.consume(resized.output);
         }
         const sizedInputSeq = terminalClientSeq++;

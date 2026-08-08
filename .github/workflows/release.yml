@@ -61,6 +61,9 @@ jobs:
                       rust_target: aarch64-pc-windows-msvc
 
         runs-on: ${{ matrix.runner }}
+        defaults:
+            run:
+                shell: bash
 
         steps:
             - uses: actions/checkout@v5
@@ -104,6 +107,18 @@ jobs:
               run: |
                   pnpm build:worker "${{ matrix.target }}" --output-dir ./release-assets
                   pnpm package:app -- --target "${{ matrix.target }}" --output-dir ./release-assets
+
+            # PowerShell 的交互、转义和版本差异晦涩难懂，难以写出稳定且有证明力的 PTY 测试。
+            # Windows release smoke 固定使用 Git Bash；产品默认 Windows shell 保持不变。
+            - name: 配置 Windows Git Bash 测试运行时
+              if: runner.os == 'Windows'
+              run: |
+                  set -euo pipefail
+                  git_bash='/c/Program Files/Git/bin/bash.exe'
+                  if [[ ! -x "$git_bash" ]]; then
+                      git_bash=$(command -v bash)
+                  fi
+                  printf 'PORTABLE_DEVSHELL_WINDOWS_TEST_SHELL=%s\n' "$(cygpath -w "$git_bash")" >> "$GITHUB_ENV"
 
             - name: 验证最终 Worker daemon
               timeout-minutes: 3

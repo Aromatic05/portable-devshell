@@ -111,12 +111,24 @@ export function readRelativeMarkerCommand(fileName: string): string {
         : `cat -- './${fileName}'`;
 }
 
-export function terminalPrintCommand(marker: string, delayMs = 0): string {
+export function windowsTerminalUsesPowerShell(
+    platform = process.platform,
+    environment: NodeJS.ProcessEnv = process.env,
+): boolean {
+    return platform === "win32" && !hasWindowsGitBashTestShell(environment);
+}
+
+export function terminalPrintCommand(
+    marker: string,
+    delayMs = 0,
+    platform = process.platform,
+    environment: NodeJS.ProcessEnv = process.env,
+): string {
     const [left, right] = splitTerminalMarker(marker);
     if (!Number.isSafeInteger(delayMs) || delayMs < 0) {
         throw new Error(`invalid terminal delay: ${delayMs}`);
     }
-    if (process.platform === "win32") {
+    if (windowsTerminalUsesPowerShell(platform, environment)) {
         const delay = delayMs === 0 ? "" : `Start-Sleep -Milliseconds ${delayMs}; `;
         return `powershell.exe -NoLogo -NoProfile -NonInteractive -Command "${delay}[Console]::WriteLine(('${left}' + '${right}'))"\r`;
     }
@@ -124,10 +136,18 @@ export function terminalPrintCommand(marker: string, delayMs = 0): string {
     return `${delay}printf '%s%s\\n' '${left}' '${right}'\r`;
 }
 
-export function terminalSizeProbeCommand(): string {
-    return process.platform === "win32"
+export function terminalSizeProbeCommand(
+    platform = process.platform,
+    environment: NodeJS.ProcessEnv = process.env,
+): string {
+    return windowsTerminalUsesPowerShell(platform, environment)
         ? `powershell.exe -NoLogo -NoProfile -NonInteractive -Command "$s=$Host.UI.RawUI.WindowSize; [Console]::WriteLine(('{0} {1}' -f $s.Height,$s.Width))"\r`
         : "stty size\r";
+}
+
+function hasWindowsGitBashTestShell(environment: NodeJS.ProcessEnv): boolean {
+    const shell = environment.PORTABLE_DEVSHELL_WINDOWS_TEST_SHELL;
+    return typeof shell === "string" && shell.length > 0;
 }
 
 export function terminalExpectedSize(rows: number, cols: number): string {

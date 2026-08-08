@@ -1071,7 +1071,11 @@ fn persistent_rpc_bridge_forwards_terminal_notifications() {
     #[cfg(unix)]
     let command = "printf '%s\\n' 'forward-notification-ready'\\r";
     #[cfg(windows)]
-    let command = "powershell.exe -NoLogo -NoProfile -NonInteractive -Command \"[Console]::WriteLine('forward-notification-ready')\"\\r";
+    let command = if windows_terminal_uses_test_bash() {
+        "printf '%s\\n' 'forward-notification-ready'\\r"
+    } else {
+        "powershell.exe -NoLogo -NoProfile -NonInteractive -Command \"[Console]::WriteLine('forward-notification-ready')\"\\r"
+    };
     write_rpc_frame(
         &mut stdin,
         &serde_json::json!({
@@ -1401,6 +1405,11 @@ fn process_is_running(pid: i32) -> bool {
         Ok(()) | Err(Errno::EPERM) => true,
         Err(_) => false,
     }
+}
+
+#[cfg(windows)]
+fn windows_terminal_uses_test_bash() -> bool {
+    std::env::var_os("PORTABLE_DEVSHELL_WINDOWS_TEST_SHELL").is_some_and(|value| !value.is_empty())
 }
 
 #[cfg(windows)]

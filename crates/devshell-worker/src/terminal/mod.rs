@@ -986,16 +986,20 @@ mod windows_tests {
         let mut client_seq = 1;
         let mut from_seq = 0;
         let mut response_tail = Vec::new();
-        wait_for_output(
-            &manager,
-            &opened.terminal_id,
-            opened.generation,
-            opened.version,
-            &mut client_seq,
-            &mut from_seq,
-            &mut response_tail,
-            "\u{1b}[6n",
-        );
+        let uses_test_bash = std::env::var_os("PORTABLE_DEVSHELL_WINDOWS_TEST_SHELL")
+            .is_some_and(|value| !value.is_empty());
+        if !uses_test_bash {
+            wait_for_output(
+                &manager,
+                &opened.terminal_id,
+                opened.generation,
+                opened.version,
+                &mut client_seq,
+                &mut from_seq,
+                &mut response_tail,
+                "\u{1b}[6n",
+            );
+        }
         manager
             .write(TerminalWriteInput {
                 identity: TerminalCommandInput {
@@ -1004,9 +1008,11 @@ mod windows_tests {
                     version: opened.version,
                     client_seq: take_client_seq(&mut client_seq),
                 },
-                data: BASE64.encode(
-                    b"powershell.exe -NoLogo -NoProfile -NonInteractive -Command \"[Console]::WriteLine(('worker-' + 'pty-ready'))\"\r",
-                ),
+                data: BASE64.encode(if uses_test_bash {
+                    b"printf '%s%s\\n' 'worker-' 'pty-ready'\r".as_slice()
+                } else {
+                    b"powershell.exe -NoLogo -NoProfile -NonInteractive -Command \"[Console]::WriteLine(('worker-' + 'pty-ready'))\"\r".as_slice()
+                }),
             })
             .expect("write marker");
         wait_for_output(
@@ -1041,9 +1047,11 @@ mod windows_tests {
                     version: 2,
                     client_seq: take_client_seq(&mut client_seq),
                 },
-                data: BASE64.encode(
-                    b"powershell.exe -NoLogo -NoProfile -NonInteractive -Command \"$s=$Host.UI.RawUI.WindowSize; [Console]::WriteLine(('{0} {1}' -f $s.Height,$s.Width))\"\r",
-                ),
+                data: BASE64.encode(if uses_test_bash {
+                    b"stty size\r".as_slice()
+                } else {
+                    b"powershell.exe -NoLogo -NoProfile -NonInteractive -Command \"$s=$Host.UI.RawUI.WindowSize; [Console]::WriteLine(('{0} {1}' -f $s.Height,$s.Width))\"\r".as_slice()
+                }),
             })
             .expect("write ConPTY size probe");
         wait_for_output(

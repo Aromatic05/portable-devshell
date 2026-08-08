@@ -1,3 +1,4 @@
+use std::env;
 use std::path::Path;
 use std::sync::{Arc, Condvar, Mutex};
 
@@ -16,12 +17,23 @@ pub fn spawn(cwd: &Path, cols: u16, rows: u16) -> Result<SpawnedTerminal, RpcErr
         .openpty(pty_size(cols, rows))
         .map_err(|error| RpcError::new("terminal.spawnFailed", error.to_string()))?;
 
-    // Use the Windows PowerShell host that the rest of the Windows runtime
-    // already depends on instead of portable-pty's implicit cmd.exe default.
-    let mut command = CommandBuilder::new("powershell.exe");
-    command.arg("-NoLogo");
-    command.arg("-NoProfile");
-    command.arg("-NoExit");
+    let mut command = if let Some(test_shell) = windows_test_shell() {
+        // PowerShell interaction, quoting, and version differences are too opaque to produce
+        // stable, meaningful PTY acceptance tests. Windows CI explicitly supplies Git Bash
+        // here so ConPTY/replay/resize behavior stays covered without testing PowerShell quirks.
+        let mut command = CommandBuilder::new(test_shell);
+        command.arg("--noprofile");
+        command.arg("--norc");
+        command.arg("-i");
+        command
+    } else {
+        // Keep the product default unchanged for normal Windows users.
+        let mut command = CommandBuilder::new("powershell.exe");
+        command.arg("-NoLogo");
+        command.arg("-NoProfile");
+        command.arg("-NoExit");
+        command
+    };
     command.cwd(cwd.as_os_str());
     command.env("TERM", "xterm-256color");
     let mut process = pair
@@ -115,4 +127,8 @@ fn pty_size(cols: u16, rows: u16) -> PtySize {
         pixel_width: 0,
         pixel_height: 0,
     }
+}
+
+fn windows_test_shell() -> Option<std::ffi::OsString> {
+    env::var_os("PORTABLE_DEVSHELL_WINDOWS_TEST_SHELL").filter(|value| !value.is_empty())
 }
