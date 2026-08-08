@@ -31,9 +31,9 @@ const WINDOWS_ACL_SCRIPT = [
     ")",
     "$acl.AddAccessRule($rule)",
     "if ($kind -eq 'directory') {",
-    "  [System.IO.FileSystemAclExtensions]::SetAccessControl([System.IO.DirectoryInfo]::new($path), $acl)",
+    "  [System.IO.Directory]::SetAccessControl($path, $acl)",
     "} else {",
-    "  [System.IO.FileSystemAclExtensions]::SetAccessControl([System.IO.FileInfo]::new($path), $acl)",
+    "  [System.IO.File]::SetAccessControl($path, $acl)",
     "}",
 ].join("\n");
 

@@ -16,7 +16,12 @@ pub fn spawn(cwd: &Path, cols: u16, rows: u16) -> Result<SpawnedTerminal, RpcErr
         .openpty(pty_size(cols, rows))
         .map_err(|error| RpcError::new("terminal.spawnFailed", error.to_string()))?;
 
-    let mut command = CommandBuilder::new_default_prog();
+    // Use the Windows PowerShell host that the rest of the Windows runtime
+    // already depends on instead of portable-pty's implicit cmd.exe default.
+    let mut command = CommandBuilder::new("powershell.exe");
+    command.arg("-NoLogo");
+    command.arg("-NoProfile");
+    command.arg("-NoExit");
     command.cwd(cwd.as_os_str());
     command.env("TERM", "xterm-256color");
     let mut process = pair

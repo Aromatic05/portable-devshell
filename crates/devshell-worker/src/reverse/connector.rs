@@ -644,20 +644,19 @@ impl ReverseDispatcher {
                 if let Ok(mut completed) = dispatcher.completed.lock() {
                     completed.put(key.clone(), encoded.clone());
                 }
-            } else if let Ok(mut in_flight) = dispatcher.in_flight.lock() {
-                // A failed mutation is retryable. Make that retry observable
-                // before publishing the failure response so a caller that
-                // retries immediately after receiving it cannot be dropped as
-                // a duplicate in-flight request.
+            }
+            if let Ok(mut in_flight) = dispatcher.in_flight.lock() {
+                // Publish a response only after the request is no longer
+                // in-flight. For successful mutations the completed cache is
+                // populated first, so a replay after observing the response
+                // can be answered from cache. Failed mutations remain
+                // immediately retryable.
                 in_flight.remove(&key);
             }
             let _ = dispatcher.responses.push_back(ReverseOutboundResponse {
                 key: Some(key.clone()),
                 frame: encoded,
             });
-            if response.ok && let Ok(mut in_flight) = dispatcher.in_flight.lock() {
-                in_flight.remove(&key);
-            }
         });
         Ok(None)
     }
