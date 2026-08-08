@@ -112,17 +112,13 @@ test("local transport honors command PORTABLE_DEVSHELL_HOME for worker lookup an
     assert.equal(result.exitCode, 0);
     const workerSha = createHash("sha256").update(worker.contents).digest("hex");
     const targetAlias = join(devshellHome, "bin", `devshell-worker-${target.key}${target.os === "windows" ? ".exe" : ""}`);
-    if (target.os === "windows") {
-        assert.equal(
-            recorder.calls[0]?.command,
-            join(devshellHome, "workers", target.key, workerSha, "devshell-worker.exe")
-        );
-        assert.equal(await installedWorkerSha(targetAlias), workerSha);
-    } else {
-        assert.equal(recorder.calls[0]?.command, join(devshellHome, "bin", "devshell-worker"));
-        assert.equal(await readlink(join(devshellHome, "bin", "devshell-worker")), `devshell-worker-${target.key}`);
-        assert.equal(await installedWorkerSha(targetAlias), workerSha);
-    }
+    const executedWorker = recorder.calls[0]?.command;
+    assert.equal(typeof executedWorker, "string");
+    assert.equal(
+        createHash("sha256").update(await readFile(executedWorker!)).digest("hex"),
+        workerSha
+    );
+    assert.equal(await installedWorkerSha(targetAlias), workerSha);
 });
 
 test("local start upgrades a changed worker while status keeps the active worker stable", async (t) => {

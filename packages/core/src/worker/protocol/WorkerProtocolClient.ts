@@ -2,6 +2,8 @@ import type { ArtifactPayloadDescriptor, JsonValue } from "@portable-devshell/sh
 
 import { WorkerRpcClient } from "../rpc/WorkerRpcClient.js";
 
+export const WORKER_PROTOCOL_VERSION = 3;
+
 export interface WorkerHandshakeParams {
     minProtocolVersion: number;
     maxProtocolVersion: number;

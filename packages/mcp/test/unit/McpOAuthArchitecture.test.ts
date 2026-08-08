@@ -152,6 +152,41 @@ test("OAuth resource verification rejects tokens with missing or malformed audie
     }
 });
 
+test("OAuth resource verification rejects tokens missing required resource scopes", async () => {
+    const storageDir = await createTestTempDirectory("mcp-oauth-scope");
+    const runtime = new McpOAuthProviderRuntime({
+        approvals: new McpOAuthApprovalService(storageDir),
+        config,
+        publicBaseUrl: "https://mcp.example.test/",
+        storageDir
+    });
+    const resource = new URL("https://mcp.example.test/demo/mcp");
+    runtime.registerResource(resource, config);
+    await runtime.warmup();
+
+    try {
+        const adapter = runtime.provider.AccessToken.adapter as {
+            upsert(id: string, payload: Record<string, unknown>, expiresIn: number): Promise<void>;
+        };
+        const now = Math.floor(Date.now() / 1000);
+        await adapter.upsert("insufficient-scope", {
+            aud: resource.href,
+            clientId: "client-scope-test",
+            exp: now + 3600,
+            iat: now,
+            kind: "AccessToken",
+            scope: "openid"
+        }, 3600);
+
+        await assert.rejects(
+            runtime.verifyAccessToken(resource, "insufficient-scope"),
+            /scope/iu
+        );
+    } finally {
+        await rm(storageDir, { force: true, recursive: true });
+    }
+});
+
 
 test("McpOAuthInteraction renders escaped approval state with the configured base path", async () => {
     const storageDir = await createTestTempDirectory("mcp-oauth-interaction");

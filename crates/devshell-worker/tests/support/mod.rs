@@ -78,6 +78,12 @@ impl TestEnv {
         command
     }
 
+    pub fn std_command_for(&self, executable: &Path) -> std::process::Command {
+        let mut command = std::process::Command::new(executable);
+        self.configure_std_command(&mut command);
+        command
+    }
+
     pub fn command(&self) -> Command {
         let mut command = Command::cargo_bin("devshell-worker").unwrap();
         self.configure_command(&mut command);

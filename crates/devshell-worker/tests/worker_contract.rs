@@ -57,6 +57,58 @@ fn start_uses_runtime_workspace_and_keeps_config_minimal() {
 }
 
 #[test]
+fn start_replaces_a_running_daemon_from_a_different_worker_identity() {
+    let env = TestEnv::new();
+    let instance = "aromatic-worker-upgrade";
+    let source = assert_cmd::cargo::cargo_bin("devshell-worker");
+    let binary_name = source.file_name().unwrap();
+    let old_sha = "1".repeat(64);
+    let new_sha = "2".repeat(64);
+    let old_binary = env.home().join(&old_sha).join(binary_name);
+    let new_binary = env.home().join(&new_sha).join(binary_name);
+    fs::create_dir_all(old_binary.parent().unwrap()).unwrap();
+    fs::create_dir_all(new_binary.parent().unwrap()).unwrap();
+    fs::copy(&source, &old_binary).unwrap();
+    fs::copy(&source, &new_binary).unwrap();
+
+    let old_start = env
+        .std_command_for(&old_binary)
+        .current_dir(env.workspace())
+        .args(["start", "--instance", instance])
+        .output()
+        .unwrap();
+    assert!(old_start.status.success(), "{}", String::from_utf8_lossy(&old_start.stderr));
+    let old_start: Value = serde_json::from_slice(&old_start.stdout).unwrap();
+    let old_pid = old_start["pid"].as_u64().unwrap();
+
+    let new_start = env
+        .std_command_for(&new_binary)
+        .current_dir(env.workspace())
+        .args(["start", "--instance", instance])
+        .output()
+        .unwrap();
+    assert!(new_start.status.success(), "{}", String::from_utf8_lossy(&new_start.stderr));
+    let new_start: Value = serde_json::from_slice(&new_start.stdout).unwrap();
+    let new_pid = new_start["pid"].as_u64().unwrap();
+
+    assert_eq!(new_start["started"], true);
+    assert_ne!(new_pid, old_pid);
+    let status = env
+        .std_command_for(&new_binary)
+        .args(["status", "--instance", instance])
+        .output()
+        .unwrap();
+    assert!(status.status.success(), "{}", String::from_utf8_lossy(&status.stderr));
+    let status: Value = serde_json::from_slice(&status.stdout).unwrap();
+    assert_eq!(status["workerSha256"], new_sha);
+
+    env.std_command_for(&new_binary)
+        .args(["stop", "--instance", instance])
+        .status()
+        .unwrap();
+}
+
+#[test]
 fn handshake_tools_and_bash_run_flow_work_over_framed_rpc() {
     let env = TestEnv::new();
     let instance = "aromatic-server";
@@ -74,8 +126,8 @@ fn handshake_tools_and_bash_run_flow_work_over_framed_rpc() {
             "id": "1",
             "method": "worker.handshake",
             "params": {
-                "minProtocolVersion": 2,
-                "maxProtocolVersion": 2,
+                "minProtocolVersion": 3,
+                "maxProtocolVersion": 3,
                 "clientName": "portable-devshell",
                 "clientVersion": "0.1.0"
             }
@@ -83,7 +135,7 @@ fn handshake_tools_and_bash_run_flow_work_over_framed_rpc() {
     );
     assert_eq!(handshake["type"], "response");
     assert_eq!(handshake["ok"], true);
-    assert_eq!(handshake["result"]["protocolVersion"], 2);
+    assert_eq!(handshake["result"]["protocolVersion"], 3);
     assert_eq!(
         handshake["result"]["workerVersion"],
         env!("CARGO_PKG_VERSION")
@@ -223,8 +275,8 @@ fn handshake_rejects_unsupported_protocol_versions() {
             "id": "4",
             "method": "worker.handshake",
             "params": {
-                "minProtocolVersion": 1,
-                "maxProtocolVersion": 1
+                "minProtocolVersion": 2,
+                "maxProtocolVersion": 2
             }
         }),
     );
@@ -234,7 +286,7 @@ fn handshake_rejects_unsupported_protocol_versions() {
         "worker.protocolVersionUnsupported"
     );
     assert_eq!(handshake["error"]["retryable"], false);
-    assert_eq!(handshake["error"]["details"]["workerProtocolVersion"], 2);
+    assert_eq!(handshake["error"]["details"]["workerProtocolVersion"], 3);
 
     env.json_command(&["stop", "--instance", instance]);
 }

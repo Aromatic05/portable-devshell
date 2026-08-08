@@ -32,7 +32,12 @@ pub fn run(args: InstanceArgs) -> Result<String, String> {
 
     let _lock = InstanceLock::acquire(&instance_paths)?;
     let started = match process::daemon_state(&instance_paths, &socket_paths) {
-        DaemonState::Running => false,
+        DaemonState::Running if running_daemon_matches_current_worker(&socket_paths)? => false,
+        DaemonState::Running => {
+            crate::cli::stop::stop_running_daemon(&instance_paths, &socket_paths)?;
+            start_daemon(&instance, &instance_paths, &socket_paths)?;
+            true
+        }
         DaemonState::Stale => {
             shutdown::stop_stale_daemon(
                 &instance_paths,
@@ -72,6 +77,28 @@ pub fn run(args: InstanceArgs) -> Result<String, String> {
             .ok_or_else(|| "worker status did not include workspace".to_string())?,
     })
     .map_err(|error| error.to_string())
+}
+
+fn running_daemon_matches_current_worker(socket_paths: &SocketPaths) -> Result<bool, String> {
+    let Some(current_sha256) = process::current_worker_sha256() else {
+        return Ok(true);
+    };
+    let status = send_request(
+        &socket_paths.socket_file,
+        &RpcRequest::request("status-identity", "worker.status", serde_json::json!({})),
+    )?;
+    if !status.ok {
+        return Err(status
+            .error
+            .map(|error| error.message)
+            .unwrap_or_else(|| "worker status identity request failed".to_string()));
+    }
+    let running_sha256 = status
+        .result
+        .as_ref()
+        .and_then(|result| result.get("workerSha256"))
+        .and_then(serde_json::Value::as_str);
+    Ok(running_sha256 == Some(current_sha256.as_str()))
 }
 
 fn start_daemon(

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { readFile, readlink, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -7,7 +8,7 @@ import test from "node:test";
 import { WorkerInstallerLocal, getWorkerTargetByKey, type WorkerAsset } from "@portable-devshell/core/testing";
 import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
 
-test("WorkerInstallerLocal installs into target-specific directory and refreshes symlink", { skip: process.platform === "win32" ? "requires Unix symlink semantics" : false }, async (t) => {
+test("WorkerInstallerLocal returns an executable pinned to the installed asset", { skip: process.platform === "win32" ? "requires Unix executable semantics" : false }, async (t) => {
     const devshellHomeDirectory = await createTestTempDirectory("home");
     const workerDirectory = await createTestTempDirectory("worker");
     t.after(async () => {
@@ -24,13 +25,44 @@ test("WorkerInstallerLocal installs into target-specific directory and refreshes
     const installer = new WorkerInstallerLocal();
     const executable = await installer.ensure(devshellHomeDirectory, createAsset(binaryPath, sha256, target), target);
 
-    assert.equal(executable, join(devshellHomeDirectory, "bin", "devshell-worker"));
-    assert.equal(await readFile(join(devshellHomeDirectory, "workers", target.key, sha256, "devshell-worker"), "utf8"), contents.toString("utf8"));
-    assert.equal(await readlink(executable), `devshell-worker-${target.key}`);
-    assert.equal(
-        await readlink(join(devshellHomeDirectory, "bin", `devshell-worker-${target.key}`)),
-        `../workers/${target.key}/${sha256}/devshell-worker`
-    );
+    assert.equal(await readFile(executable, "utf8"), contents.toString("utf8"));
+    assert.equal(execFileSync(executable, { encoding: "utf8" }).trim(), "local");
+});
+
+test("WorkerInstallerLocal pins each concurrent Unix install to its requested asset", { skip: process.platform === "win32" ? "Unix aliases are not used on Windows" : false }, async (t) => {
+    const devshellHomeDirectory = await createTestTempDirectory("home-concurrent-assets");
+    const workerDirectory = await createTestTempDirectory("worker-concurrent-assets");
+    t.after(async () => {
+        await rm(devshellHomeDirectory, { recursive: true, force: true });
+        await rm(workerDirectory, { recursive: true, force: true });
+    });
+
+    const target = getWorkerTargetByKey("linux-x64");
+    const firstPath = join(workerDirectory, "worker-a");
+    const secondPath = join(workerDirectory, "worker-b");
+    const first = Buffer.from("worker-a", "utf8");
+    const second = Buffer.from("worker-b", "utf8");
+    const firstSha = createHash("sha256").update(first).digest("hex");
+    const secondSha = createHash("sha256").update(second).digest("hex");
+    await writeFile(firstPath, first, { mode: 0o755 });
+    await writeFile(secondPath, second, { mode: 0o755 });
+
+    const [firstExecutable, secondExecutable] = await Promise.all([
+        new WorkerInstallerLocal().ensure(
+            devshellHomeDirectory,
+            createAsset(firstPath, firstSha, target),
+            target
+        ),
+        new WorkerInstallerLocal().ensure(
+            devshellHomeDirectory,
+            createAsset(secondPath, secondSha, target),
+            target
+        )
+    ]);
+
+    assert.notEqual(firstExecutable, secondExecutable);
+    assert.equal(await readFile(firstExecutable, "utf8"), first.toString("utf8"));
+    assert.equal(await readFile(secondExecutable, "utf8"), second.toString("utf8"));
 });
 
 test("WorkerInstallerLocal repairs corrupted content and preserves the old alias when activation fails", { skip: process.platform === "win32" ? "requires Unix symlink semantics" : false }, async (t) => {

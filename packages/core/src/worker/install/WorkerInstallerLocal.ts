@@ -153,7 +153,7 @@ export class WorkerInstallerLocal {
             layout.aliasPath,
             `../workers/${target.key}/${asset.sha256}/${layout.binaryName}`,
         );
-        return { executablePath: defaultAliasPath, sha256: asset.sha256 };
+        return { executablePath: layout.binaryPath, sha256: asset.sha256 };
     }
 
     async #replaceFile(source: string, destination: string): Promise<void> {

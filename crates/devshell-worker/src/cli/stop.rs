@@ -51,7 +51,7 @@ pub fn stop_instance(instance: &InstanceName) -> Result<bool, String> {
     Ok(stopped)
 }
 
-fn stop_running_daemon(
+pub(crate) fn stop_running_daemon(
     instance_paths: &InstancePaths,
     socket_paths: &SocketPaths,
 ) -> Result<bool, String> {

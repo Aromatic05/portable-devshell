@@ -1,7 +1,7 @@
 import type { ApprovalPolicy, ApprovalTimeout, EffectiveSecurityMode, InstanceName, WorkspacePath } from "@portable-devshell/shared";
 
 import type { WorkerCommandTransport } from "../command/WorkerCommandTransport.js";
-import type { WorkerHandshakeParams } from "../protocol/WorkerProtocolClient.js";
+import { WORKER_PROTOCOL_VERSION, type WorkerHandshakeParams } from "../protocol/WorkerProtocolClient.js";
 import type { WorkerRpcConnector } from "../rpc/WorkerRpcBridge.js";
 import { resolveWorkerToolSchedulerLimits, type WorkerToolSchedulerLimits } from "../tool/WorkerToolCallScheduler.js";
 import {
@@ -64,8 +64,8 @@ export function resolveWorkerInstanceConfig(config: WorkerInstanceConfig): Resol
         effectiveSecurityMode: config.effectiveSecurityMode ?? "disabled",
         eventBufferSize: config.eventBufferSize ?? 100,
         handshake: {
-            minProtocolVersion: 2,
-            maxProtocolVersion: 2,
+            minProtocolVersion: WORKER_PROTOCOL_VERSION,
+            maxProtocolVersion: WORKER_PROTOCOL_VERSION,
             clientName: "portable-devshell",
             clientVersion: "0.0.0",
             ...config.handshake

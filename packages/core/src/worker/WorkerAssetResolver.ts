@@ -1,6 +1,6 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { accessSync, constants, readFileSync } from "node:fs";
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -175,13 +175,21 @@ export class WorkerAssetResolver {
             });
         }
 
-        const tmpBinaryPath = `${binaryPath}.tmp`;
-        const tmpShaPath = `${shaPath}.tmp`;
-        await writeFile(tmpBinaryPath, payload, { mode: 0o755 });
-        await ensureWorkerExecutablePermissions(tmpBinaryPath, target);
-        await writeFile(tmpShaPath, `${expectedSha}\n`, { mode: 0o600 });
-        await rename(tmpBinaryPath, binaryPath);
-        await rename(tmpShaPath, shaPath);
+        const stagingId = `${process.pid}-${randomUUID()}`;
+        const tmpBinaryPath = `${binaryPath}.${stagingId}.tmp`;
+        const tmpShaPath = `${shaPath}.${stagingId}.tmp`;
+        try {
+            await writeFile(tmpBinaryPath, payload, { mode: 0o755 });
+            await ensureWorkerExecutablePermissions(tmpBinaryPath, target);
+            await writeFile(tmpShaPath, `${expectedSha}\n`, { mode: 0o600 });
+            await rename(tmpBinaryPath, binaryPath);
+            await rename(tmpShaPath, shaPath);
+        } finally {
+            await Promise.all([
+                rm(tmpBinaryPath, { force: true }),
+                rm(tmpShaPath, { force: true })
+            ]);
+        }
 
         return {
             target,

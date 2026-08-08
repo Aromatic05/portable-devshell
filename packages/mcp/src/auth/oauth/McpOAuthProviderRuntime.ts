@@ -276,7 +276,8 @@ export class McpOAuthProviderRuntime {
             ),
             verifier: new McpOAuthResourceVerifier(
                 this.provider,
-                resourceServerUrl
+                resourceServerUrl,
+                config.requiredScopes
             )
         });
     }
@@ -285,9 +286,13 @@ export class McpOAuthProviderRuntime {
         resourceServerUrl: URL,
         token: string
     ): Promise<{ clientId: string; scopes: string[] }> {
+        const config = this.#registeredResources.get(
+            resourceUrlFromServerUrl(resourceServerUrl).href
+        ) ?? this.#config;
         const verified = await new McpOAuthResourceVerifier(
             this.provider,
-            resourceServerUrl
+            resourceServerUrl,
+            config.requiredScopes
         ).verifyAccessToken(token);
         return {
             clientId: verified.clientId,
@@ -381,12 +386,18 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 class McpOAuthResourceVerifier implements OAuthTokenVerifier {
     readonly #expectedResourceUrl: URL;
     readonly #provider: Provider;
+    readonly #requiredScopes: readonly string[];
 
-    constructor(provider: Provider, expectedResourceUrl: URL) {
+    constructor(
+        provider: Provider,
+        expectedResourceUrl: URL,
+        requiredScopes: readonly string[]
+    ) {
         this.#provider = provider;
         this.#expectedResourceUrl = resourceUrlFromServerUrl(
             expectedResourceUrl
         );
+        this.#requiredScopes = requiredScopes;
     }
 
     async verifyAccessToken(token: string) {
@@ -408,6 +419,16 @@ class McpOAuthResourceVerifier implements OAuthTokenVerifier {
         if (resource === undefined) {
             throw new InvalidTokenError(
                 `Token resource audience is not valid for ${this.#expectedResourceUrl.href}.`
+            );
+        }
+
+        const grantedScopes = new Set(accessToken.scopes);
+        const missingScope = this.#requiredScopes.find(
+            (scope) => !grantedScopes.has(scope)
+        );
+        if (missingScope !== undefined) {
+            throw new InvalidTokenError(
+                `Token is missing required resource scope: ${missingScope}.`
             );
         }
 

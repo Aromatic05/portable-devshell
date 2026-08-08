@@ -9,6 +9,7 @@ import { encodeFrame, FrameBuffer } from "@portable-devshell/shared/transport/fr
 import {
     WorkerTransportDriverLocal,
     WorkerBinary,
+    WORKER_PROTOCOL_VERSION,
     WorkerProtocolClient,
     WorkerRpcBridge,
     WorkerRpcClient,
@@ -36,15 +37,15 @@ test("WorkerRpcBridge reuses one spawned rpc process across multiple calls", asy
 
     const ping = await protocolClient.ping();
     const handshake = await protocolClient.handshake({
-        minProtocolVersion: 2,
-        maxProtocolVersion: 2,
+        minProtocolVersion: WORKER_PROTOCOL_VERSION,
+        maxProtocolVersion: WORKER_PROTOCOL_VERSION,
         clientName: "portable-devshell",
         clientVersion: "0.1.0"
     });
     const tools = await protocolClient.listTools();
 
     assert.equal(ping.pong, true);
-    assert.equal(handshake.protocolVersion, 2);
+    assert.equal(handshake.protocolVersion, WORKER_PROTOCOL_VERSION);
     assert.equal("tools" in handshake, false);
     assert.equal(tools.tools[0]?.name, "bash_run");
     assert.equal(harness.spawnCount, 1);
@@ -234,8 +235,8 @@ test("WorkerProtocolClient performs ping, handshake, and tools.list against froz
 
     const ping = await protocolClient.ping();
     const handshake = await protocolClient.handshake({
-        minProtocolVersion: 2,
-        maxProtocolVersion: 2,
+        minProtocolVersion: WORKER_PROTOCOL_VERSION,
+        maxProtocolVersion: WORKER_PROTOCOL_VERSION,
         clientName: "portable-devshell",
         clientVersion: "0.1.0"
     });
@@ -244,7 +245,7 @@ test("WorkerProtocolClient performs ping, handshake, and tools.list against froz
     assert.equal(ping.pong, true);
     assert.equal(handshake.instance, instanceName);
     assert.equal(handshake.workspace, workspacePath);
-    assert.equal(handshake.protocolVersion, 2);
+    assert.equal(handshake.protocolVersion, WORKER_PROTOCOL_VERSION);
     assert.equal("tools" in handshake, false);
     const bashRun = tools.tools.find((tool) => tool.name === "bash_run");
     assert.notEqual(bashRun, undefined);
@@ -375,7 +376,7 @@ function createResponse(method: string, id: string): WorkerRpcResponseEnvelope {
                 instance: "task-4-bridge",
                 workspace: "/tmp/workspace",
                 workerVersion: "0.1.0",
-                protocolVersion: 2,
+                protocolVersion: WORKER_PROTOCOL_VERSION,
                 platform: { os: "linux", arch: "x64" },
                 capabilities: { tools: true, streaming: false, cancel: true }
             }

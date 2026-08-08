@@ -123,6 +123,41 @@ test("WorkerAssetResolver resolves release asset from configured release base ur
     ]);
 });
 
+test("WorkerAssetResolver resolves the same uncached release asset concurrently", async (t) => {
+    const fixture = await createResolverFixture();
+    t.after(fixture.cleanup);
+
+    const target = getWorkerTargetByKey("linux-arm64");
+    const contents = "#!/bin/sh\necho concurrent-package\n";
+    const sha256 = createHash("sha256").update(contents).digest("hex");
+    const assetName = `devshell-worker-${target.key}`;
+    const releaseBaseUrl = "https://example.test/releases/download";
+    process.env.PORTABLE_DEVSHELL_WORKER_RELEASE_BASE_URL = releaseBaseUrl;
+    process.env.PORTABLE_DEVSHELL_WORKER_RELEASE_TAG = "v9.9.10";
+    process.env.PORTABLE_DEVSHELL_WORKER_CACHE_DIR = join(fixture.root, "cache");
+
+    globalThis.fetch = async (input) => {
+        const url = String(input);
+        if (url === `${releaseBaseUrl}/v9.9.10/${assetName}.sha256`) {
+            return new Response(`${sha256}\n`, { status: 200 });
+        }
+        if (url === `${releaseBaseUrl}/v9.9.10/${assetName}`) {
+            await new Promise<void>((resolve) => setImmediate(resolve));
+            return new Response(contents, { status: 200 });
+        }
+        return new Response("missing", { status: 404 });
+    };
+
+    const assets = await Promise.all(
+        Array.from({ length: 16 }, () => new WorkerAssetResolver().resolve(target))
+    );
+    const paths = new Set(assets.map((asset) => asset.binaryPath));
+
+    assert.equal(paths.size, 1);
+    assert.equal(new Set(assets.map((asset) => asset.sha256)).size, 1);
+    assert.equal(await readFile(assets[0]!.binaryPath, "utf8"), contents);
+});
+
 test("WorkerAssetResolver allows host target to use dev fallback", async (t) => {
     const fixture = await createResolverFixture();
     t.after(fixture.cleanup);
