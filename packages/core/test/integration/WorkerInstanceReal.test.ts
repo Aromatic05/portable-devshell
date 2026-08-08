@@ -15,6 +15,7 @@ import {
     WorkerTransportDriverLocal,
     WorkerBinary,
     WorkerInstanceFactory,
+    WORKER_PROTOCOL_VERSION,
     decodeWorkerRpcMessage,
     encodeWorkerRpcMessage,
     type WorkerCommandResult,
@@ -1064,7 +1065,7 @@ function createLifecycleResponse(
                 capabilities: { cancel: true, streaming: false, tools: true },
                 instance: "task-6-harness",
                 platform: { arch: "x64", os: "linux" },
-                protocolVersion: 2,
+                protocolVersion: WORKER_PROTOCOL_VERSION,
                 workerVersion: "0.1.0",
                 workspace: "/tmp/workspace"
             },

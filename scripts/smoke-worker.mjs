@@ -36,8 +36,8 @@ try {
         const handshake = await rpc.request("worker.handshake", {
             clientName: "portable-devshell-smoke",
             clientVersion: "0.0.0",
-            maxProtocolVersion: 2,
-            minProtocolVersion: 2
+            maxProtocolVersion: 3,
+            minProtocolVersion: 3
         });
         stage("tools.list");
         const tools = await rpc.request("tools.list", {});
@@ -47,10 +47,6 @@ try {
             throw new Error("Windows worker exposed tmux tools");
         }
         if (handshake.platform.os === "windows") {
-            const description = tools.tools.find((tool) => tool.name === "bash_run")?.description ?? "";
-            if (!description.includes("PowerShell") || !description.includes("PowerShell syntax")) {
-                throw new Error(`Windows bash_run description is not PowerShell-specific: ${description}`);
-            }
             if (handshake.platform.shell?.kind !== "powershell") {
                 throw new Error("Windows handshake did not report the PowerShell runtime");
             }

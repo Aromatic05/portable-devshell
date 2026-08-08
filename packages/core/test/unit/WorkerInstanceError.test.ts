@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { WorkerInstance, InstanceStateMachine } from "@portable-devshell/core/testing";
+import {
+    InstanceStateMachine,
+    WorkerInstance,
+    WORKER_PROTOCOL_VERSION
+} from "@portable-devshell/core/testing";
 import { asInstanceName, createError } from "@portable-devshell/shared";
 
 test("WorkerInstance wraps start stop and status command failures with diagnostic details", async () => {
@@ -146,8 +150,8 @@ function createInstance(
             handshake: {
                 clientName: "portable-devshell",
                 clientVersion: "0.1.0",
-                maxProtocolVersion: 2,
-                minProtocolVersion: 2
+                maxProtocolVersion: WORKER_PROTOCOL_VERSION,
+                minProtocolVersion: WORKER_PROTOCOL_VERSION
             },
             name: asInstanceName("demo-local")
         } as never,
@@ -159,7 +163,7 @@ function createInstance(
             read: async () => []
         } as never,
         protocolClient: {
-            handshake: async () => ({ instance: "demo-local", protocolVersion: 2, workspace: "/tmp/workspace", workerVersion: "0.0.0" }),
+            handshake: async () => ({ instance: "demo-local", protocolVersion: WORKER_PROTOCOL_VERSION, workspace: "/tmp/workspace", workerVersion: "0.0.0" }),
             listTools: commands.listTools ?? (async () => ({ tools: [] })),
             ping: async () => ({ pong: true })
         } as never,

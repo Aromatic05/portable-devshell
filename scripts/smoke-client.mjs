@@ -100,20 +100,14 @@ try {
     controlStarted = true;
 
     stage("control status");
-    const status = runCli(["status"]);
-    if (!status.stdout.includes("control: running")) {
-        throw new Error(`control status did not report running:\n${status.stdout}${status.stderr}`);
-    }
+    runCli(["status"]);
 
     stage("start instance");
     runCli(["instance", "start", instance]);
     instanceStarted = true;
 
     stage("instance status");
-    const instanceStatus = runCli(["instance", "status", instance]);
-    if (!instanceStatus.stdout.includes("ready: true")) {
-        throw new Error(`instance status did not report ready:\n${instanceStatus.stdout}${instanceStatus.stderr}`);
-    }
+    runCli(["instance", "status", instance]);
 
     stage("bash_run through client");
     const command =

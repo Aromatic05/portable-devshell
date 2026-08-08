@@ -99,12 +99,12 @@ pnpm install:local
 ~/.local/share/portable-devshell/current/
 ~/.local/share/portable-devshell/versions/<version>/
 ~/.devshell/bin/devshell-worker
-~/.devshell/bin/devshell-worker-linux-x64
+~/.devshell/bin/devshell-worker-<host-target>
 ~/.devshell/workers/<target>/<sha256>/devshell-worker
 ~/.devshell/release-cache/workers/<tag>/<target>/<sha256>/devshell-worker
 ```
 
-若主机不是 Linux x86-64，`~/.devshell/bin/` 中还会包含当前主机 target 的带后缀 worker。其他 target 只在需要连接时进入 release cache。
+`~/.devshell/bin/` 中会包含当前主机 target 的带后缀 worker；默认 `devshell-worker` 指向/对应这个 host target。其他 target 只在 provider 首次需要连接时进入 release cache，并从对应 Release 取得。
 
 Windows 对应位置：
 

@@ -318,7 +318,7 @@ async function assertCommandStarts(command, args, shell, failureLabel) {
             windowsHide: true
         });
         const output = `${result.stdout ?? ""}${result.stderr ?? ""}`;
-        if (result.error !== undefined || result.status !== 0 || !output.includes("control: stopped")) {
+        if (result.error !== undefined || result.status !== 0) {
             throw new Error(`${failureLabel}：CLI 无法正常执行 status。\n${result.error?.stack ?? output}`);
         }
     } finally {

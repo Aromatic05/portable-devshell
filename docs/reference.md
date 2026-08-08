@@ -260,6 +260,8 @@ worker 实体          ~/.devshell/workers/<target>/<sha256>/devshell-worker
 | `linux-arm64`            | `aarch64-unknown-linux-musl` |
 | `darwin-x64`             | `x86_64-apple-darwin`        |
 | `darwin-arm64`           | `aarch64-apple-darwin`       |
+| `windows-x64`            | `x86_64-pc-windows-msvc`     |
+| `windows-arm64`          | `aarch64-pc-windows-msvc`    |
 
 ## Worker 覆盖变量
 
@@ -268,6 +270,8 @@ PORTABLE_DEVSHELL_WORKER_LINUX_X64_PATH
 PORTABLE_DEVSHELL_WORKER_LINUX_ARM64_PATH
 PORTABLE_DEVSHELL_WORKER_DARWIN_X64_PATH
 PORTABLE_DEVSHELL_WORKER_DARWIN_ARM64_PATH
+PORTABLE_DEVSHELL_WORKER_WINDOWS_X64_PATH
+PORTABLE_DEVSHELL_WORKER_WINDOWS_ARM64_PATH
 ```
 
 Release 下载相关变量：
@@ -290,7 +294,7 @@ PORTABLE_DEVSHELL_RELEASE_REPOSITORY
 PORTABLE_DEVSHELL_RELEASE_BASE_URL
 ```
 
-安装时只准备 `linux-x64` 和当前主机 worker。Unix 的 `~/.devshell/bin/devshell-worker` 和 Windows 的 `%USERPROFILE%\.devshell\bin\devshell-worker.exe` 用于 control 主机上的默认执行；其他目标由 provider 探测后从对应 Release 按需下载、校验并传输。
+安装时只准备当前主机 target 的 worker。Unix 的 `~/.devshell/bin/devshell-worker` 和 Windows 的 `%USERPROFILE%\.devshell\bin\devshell-worker.exe` 用于 control 主机上的默认执行；其他目标由 provider 探测后从对应 Release 按需下载、校验并传输。
 
 ## 进一步阅读
 
