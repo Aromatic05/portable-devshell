@@ -144,7 +144,10 @@ export class ControlRuntime {
             sessions,
             ...(flow === undefined
                 ? {}
-                : { verifyBearer: async (token: string) => await flow.verifyAccessToken(token) })
+                : {
+                      onBearerRevoked: (listener) => flow.onAccessRevoked(listener),
+                      verifyBearer: async (token: string) => await flow.verifyAccessToken(token)
+                  })
         });
         return {
             ...(flow === undefined ? {} : { flow }),

@@ -7,7 +7,11 @@ import type { OAuthProtectedResourceMetadata } from "@modelcontextprotocol/sdk/s
 import type { McpOAuth2Config } from "../McpAuthConfig.js";
 import { McpOAuthApprovalService } from "./McpOAuthApprovalService.js";
 import { McpOAuthInteraction } from "./McpOAuthInteraction.js";
-import { McpOAuthProviderRuntime } from "./McpOAuthProviderRuntime.js";
+import {
+    McpOAuthProviderRuntime,
+    type McpOAuthAccessRevocation,
+    type McpOAuthAccessTokenVerification
+} from "./McpOAuthProviderRuntime.js";
 import { McpOAuthRegistrationLimiter } from "./McpOAuthRegistrationLimiter.js";
 
 export interface McpOAuthProtectedResourceOptions {
@@ -54,10 +58,14 @@ export class McpOAuthProtectedResource {
         this.#runtime.registerResource(resourceServerUrl, config);
     }
 
+    onAccessRevoked(listener: (revocation: McpOAuthAccessRevocation) => void): () => void {
+        return this.#runtime.onAccessRevoked(listener);
+    }
+
     async verifyAccessToken(
         resourceServerUrl: URL,
         token: string
-    ): Promise<{ clientId: string; scopes: string[] }> {
+    ): Promise<McpOAuthAccessTokenVerification> {
         return await this.#runtime.verifyAccessToken(resourceServerUrl, token);
     }
 

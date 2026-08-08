@@ -6,8 +6,20 @@ import { CONTROL_REMOTE_BEARER_SUBPROTOCOL_PREFIX } from "@portable-devshell/sha
 import type { ControlWebSessionService } from "./ControlWebSessionService.js";
 
 export interface ControlWebSocketAccess {
+    expiresAtMs?: number;
     key: string;
     kind: "browser" | "native";
+}
+
+export interface ControlWebSocketBearerVerification {
+    clientId?: string;
+    expiresAt?: number;
+    grantId?: string;
+    scopes?: string[];
+}
+
+export interface ControlWebSocketBearerRevocation {
+    grantId: string;
 }
 
 export interface ControlWebSocketAccessAuthorizer {
@@ -16,17 +28,22 @@ export interface ControlWebSocketAccessAuthorizer {
 }
 
 export interface ControlWebSocketAccessServiceOptions {
+    onBearerRevoked?: (
+        listener: (revocation: ControlWebSocketBearerRevocation) => void
+    ) => () => void;
     sessions: ControlWebSessionService;
     verifyBearer?: (
         token: string
-    ) => Promise<{ clientId?: string; scopes?: string[] } | boolean>;
+    ) => Promise<ControlWebSocketBearerVerification | boolean>;
 }
 
 export class ControlWebSocketAccessService implements ControlWebSocketAccessAuthorizer {
+    readonly #onBearerRevoked?: ControlWebSocketAccessServiceOptions["onBearerRevoked"];
     readonly #sessions: ControlWebSessionService;
     readonly #verifyBearer?: ControlWebSocketAccessServiceOptions["verifyBearer"];
 
     constructor(options: ControlWebSocketAccessServiceOptions) {
+        this.#onBearerRevoked = options.onBearerRevoked;
         this.#sessions = options.sessions;
         this.#verifyBearer = options.verifyBearer;
     }
@@ -51,16 +68,34 @@ export class ControlWebSocketAccessService implements ControlWebSocketAccessAuth
         if (this.#verifyBearer === undefined) return undefined;
         try {
             const verified = await this.#verifyBearer(token);
-            return verified === false
-                ? undefined
-                : { key: nativeKey(token), kind: "native" };
+            if (verified === false) return undefined;
+            if (verified === true) return { key: nativeKey(token), kind: "native" };
+            if (typeof verified.grantId !== "string" || verified.grantId.length === 0) {
+                return undefined;
+            }
+            const key = nativeGrantKey(verified.grantId);
+            const expiresAtMs = typeof verified.expiresAt === "number" && Number.isFinite(verified.expiresAt)
+                ? verified.expiresAt * 1_000
+                : undefined;
+            return {
+                ...(expiresAtMs === undefined ? {} : { expiresAtMs }),
+                key,
+                kind: "native"
+            };
         } catch {
             return undefined;
         }
     }
 
     onRevoked(listener: (key: string) => void): () => void {
-        return this.#sessions.onRevoked((token) => listener(sessionKey(token)));
+        const unsubscribeSession = this.#sessions.onRevoked((token) => listener(sessionKey(token)));
+        const unsubscribeBearer = this.#onBearerRevoked?.((revocation) => {
+            listener(nativeGrantKey(revocation.grantId));
+        });
+        return () => {
+            unsubscribeSession();
+            unsubscribeBearer?.();
+        };
     }
 }
 
@@ -85,6 +120,10 @@ function sessionKey(token: string): string {
 
 function nativeKey(token: string): string {
     return `native:${createHash("sha256").update(token).digest("hex")}`;
+}
+
+function nativeGrantKey(grantId: string): string {
+    return `native-grant:${createHash("sha256").update(grantId).digest("hex")}`;
 }
 
 function readBearerToken(request: IncomingMessage): string | undefined {

@@ -49,6 +49,17 @@ export interface McpOAuthProviderRuntimeOptions {
     trustProxy?: boolean;
 }
 
+export interface McpOAuthAccessTokenVerification {
+    clientId: string;
+    expiresAt: number;
+    grantId: string;
+    scopes: string[];
+}
+
+export interface McpOAuthAccessRevocation {
+    grantId: string;
+}
+
 export class McpOAuthProviderRuntime {
     readonly #accountId: string;
     readonly #approvals: McpOAuthApprovalService;
@@ -56,6 +67,7 @@ export class McpOAuthProviderRuntime {
     readonly #config: McpOAuth2Config;
     readonly #issuerUrl: URL;
     readonly #registeredResources = new Map<string, McpOAuth2Config>();
+    readonly #revocationListeners = new Set<(revocation: McpOAuthAccessRevocation) => void>();
     readonly #storageDir: string;
     readonly #trustProxy: boolean;
     #provider?: Provider;
@@ -93,6 +105,11 @@ export class McpOAuthProviderRuntime {
 
     get registeredResources(): string[] {
         return [...this.#registeredResources.keys()];
+    }
+
+    onAccessRevoked(listener: (revocation: McpOAuthAccessRevocation) => void): () => void {
+        this.#revocationListeners.add(listener);
+        return () => this.#revocationListeners.delete(listener);
     }
 
     registerResource(resourceServerUrl: URL, config: McpOAuth2Config): void {
@@ -223,6 +240,16 @@ export class McpOAuthProviderRuntime {
                 toRegistrationApprovalInput(client)
             );
         });
+        provider.on("access_token.destroyed", (token) => {
+            if (typeof token.grantId === "string") {
+                this.#notifyAccessRevoked({ grantId: token.grantId });
+            }
+        });
+        provider.on("grant.revoked", (_context, grantId) => {
+            if (typeof grantId === "string") {
+                this.#notifyAccessRevoked({ grantId });
+            }
+        });
         this.#provider = provider;
     }
 
@@ -285,7 +312,7 @@ export class McpOAuthProviderRuntime {
     async verifyAccessToken(
         resourceServerUrl: URL,
         token: string
-    ): Promise<{ clientId: string; scopes: string[] }> {
+    ): Promise<McpOAuthAccessTokenVerification> {
         const config = this.#registeredResources.get(
             resourceUrlFromServerUrl(resourceServerUrl).href
         ) ?? this.#config;
@@ -296,8 +323,20 @@ export class McpOAuthProviderRuntime {
         ).verifyAccessToken(token);
         return {
             clientId: verified.clientId,
+            expiresAt: verified.expiresAt,
+            grantId: verified.grantId,
             scopes: [...verified.scopes]
         };
+    }
+
+    #notifyAccessRevoked(revocation: McpOAuthAccessRevocation): void {
+        for (const listener of [...this.#revocationListeners]) {
+            try {
+                listener(revocation);
+            } catch (error) {
+                console.warn(error instanceof Error ? error : new Error(String(error)));
+            }
+        }
     }
 }
 
@@ -440,10 +479,24 @@ class McpOAuthResourceVerifier implements OAuthTokenVerifier {
                 "Issued access token does not include a client identifier."
             );
         }
+        if (typeof accessToken.exp !== "number") {
+            throw new ServerError(
+                "Issued access token does not include an expiration."
+            );
+        }
+        if (
+            typeof accessToken.grantId !== "string" ||
+            accessToken.grantId.length === 0
+        ) {
+            throw new ServerError(
+                "Issued access token does not include a grant identifier."
+            );
+        }
 
         return {
             clientId: accessToken.clientId,
             expiresAt: accessToken.exp,
+            grantId: accessToken.grantId,
             extra: {
                 subject: typeof (accessToken as { accountId?: unknown }).accountId ===
                     "string"

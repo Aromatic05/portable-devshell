@@ -187,6 +187,46 @@ test("OAuth resource verification rejects tokens missing required resource scope
     }
 });
 
+test("OAuth provider reports destroyed access-token identity to long-lived resource listeners", async () => {
+    const storageDir = await createTestTempDirectory("mcp-oauth-revocation-event");
+    const runtime = new McpOAuthProviderRuntime({
+        approvals: new McpOAuthApprovalService(storageDir),
+        config,
+        publicBaseUrl: "https://mcp.example.test/",
+        storageDir
+    });
+    const resource = new URL("https://mcp.example.test/demo/mcp");
+    runtime.registerResource(resource, config);
+    await runtime.warmup();
+    const revocations: Array<{ grantId: string }> = [];
+    const unsubscribe = runtime.onAccessRevoked((revocation) => revocations.push(revocation));
+
+    try {
+        const adapter = runtime.provider.AccessToken.adapter as {
+            upsert(id: string, payload: Record<string, unknown>, expiresIn: number): Promise<void>;
+        };
+        const now = Math.floor(Date.now() / 1000);
+        await adapter.upsert("revocable-access", {
+            aud: resource.href,
+            clientId: "client-revocation-test",
+            exp: now + 3600,
+            grantId: "grant-revocation-test",
+            iat: now,
+            kind: "AccessToken",
+            scope: "mcp"
+        }, 3600);
+        const token = await runtime.provider.AccessToken.find("revocable-access");
+        assert.notEqual(token, undefined);
+
+        await token!.destroy();
+
+        assert.deepEqual(revocations, [{ grantId: "grant-revocation-test" }]);
+    } finally {
+        unsubscribe();
+        await rm(storageDir, { force: true, recursive: true });
+    }
+});
+
 
 test("McpOAuthInteraction renders escaped approval state with the configured base path", async () => {
     const storageDir = await createTestTempDirectory("mcp-oauth-interaction");

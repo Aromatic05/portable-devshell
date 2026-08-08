@@ -162,6 +162,10 @@ export class ControlWebSocketListener implements ControlChannelListener {
             writeUpgradeError(socket, 401, "Unauthorized");
             return;
         }
+        if (access.expiresAtMs !== undefined && access.expiresAtMs <= Date.now()) {
+            writeUpgradeError(socket, 401, "Unauthorized");
+            return;
+        }
         if (!hasProtocol(request, CONTROL_REMOTE_RPC_SUBPROTOCOL)) {
             writeUpgradeError(socket, 426, "Upgrade Required", {
                 "Sec-WebSocket-Protocol": CONTROL_REMOTE_RPC_SUBPROTOCOL
@@ -170,7 +174,7 @@ export class ControlWebSocketListener implements ControlChannelListener {
         }
         server.handleUpgrade(request, socket, head, (webSocket) => {
             const channel = new WebSocketServerChannel(webSocket as never);
-            this.#registerAccessChannel(access.key, channel);
+            this.#registerAccessChannel(access, channel);
             accept({
                 admission: {
                     allowedPeers: access.kind === "browser"
@@ -188,13 +192,21 @@ export class ControlWebSocketListener implements ControlChannelListener {
         });
     }
 
-    #registerAccessChannel(key: string, channel: Channel): void {
-        const channels = this.#channelsByAccess.get(key) ?? new Set();
+    #registerAccessChannel(access: ControlWebSocketAccess, channel: Channel): void {
+        const channels = this.#channelsByAccess.get(access.key) ?? new Set();
         channels.add(channel);
-        this.#channelsByAccess.set(key, channels);
+        this.#channelsByAccess.set(access.key, channels);
+        let expiryTimer: ReturnType<typeof setTimeout> | undefined;
+        if (access.expiresAtMs !== undefined) {
+            expiryTimer = setTimeout(() => {
+                channel.close(new Error("Control client authorization expired."));
+            }, Math.max(0, access.expiresAtMs - Date.now()));
+            expiryTimer.unref?.();
+        }
         channel.onClose(() => {
+            if (expiryTimer !== undefined) clearTimeout(expiryTimer);
             channels.delete(channel);
-            if (channels.size === 0) this.#channelsByAccess.delete(key);
+            if (channels.size === 0) this.#channelsByAccess.delete(access.key);
         });
     }
 

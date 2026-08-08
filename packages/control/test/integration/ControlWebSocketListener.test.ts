@@ -581,6 +581,101 @@ test("native TUI and CLI bearer clients use the shared remote Control WebSocket 
     );
 });
 
+test("native OAuth bearer expiry closes an active Control WebSocket", async (t) => {
+    const http = new HttpHost({
+        auth: { enabled: false, provider: "none" },
+        listenHost: "127.0.0.1",
+        listenPort: 0
+    });
+    const sessions = new ControlWebSessionService({
+        auth: {
+            mode: "oauth2",
+            oauth2: { requiredScopes: ["control"], resourceName: "control" }
+        }
+    });
+    const access = new ControlWebSocketAccessService({
+        sessions,
+        verifyBearer: async () => ({
+            clientId: "expiry-client",
+            expiresAt: Date.now() / 1_000 + 0.05,
+            grantId: "expiry-grant",
+            scopes: ["control"]
+        })
+    });
+    const channels = new ControlChannelServer({
+        listeners: [new ControlWebSocketListener({ access, http, sessions })],
+        routes: { connectionClosed() {}, snapshot: createRouteSnapshot }
+    });
+    await channels.start();
+    await http.start();
+    t.after(async () => {
+        await cleanupInOrder(
+            () => channels.close(),
+            () => http.stop(),
+        );
+    });
+
+    const channel = await WebSocketChannel.connect({
+        token: "expiring-oauth-token",
+        url: `${httpOrigin(http).replace("http", "ws")}${CONTROL_REMOTE_RPC_PATH}`
+    });
+    t.after(() => channel.close());
+
+    await waitUntil(() => channel.closed);
+});
+
+test("native OAuth grant revocation closes its active Control WebSocket", async (t) => {
+    const http = new HttpHost({
+        auth: { enabled: false, provider: "none" },
+        listenHost: "127.0.0.1",
+        listenPort: 0
+    });
+    const sessions = new ControlWebSessionService({
+        auth: {
+            mode: "oauth2",
+            oauth2: { requiredScopes: ["control"], resourceName: "control" }
+        }
+    });
+    let revoke: ((input: { grantId: string }) => void) | undefined;
+    const access = new ControlWebSocketAccessService({
+        sessions,
+        onBearerRevoked: (listener) => {
+            revoke = listener;
+            return () => {
+                revoke = undefined;
+            };
+        },
+        verifyBearer: async () => ({
+            clientId: "revocation-client",
+            expiresAt: Date.now() / 1_000 + 60,
+            grantId: "revocation-grant",
+            scopes: ["control"]
+        })
+    });
+    const channels = new ControlChannelServer({
+        listeners: [new ControlWebSocketListener({ access, http, sessions })],
+        routes: { connectionClosed() {}, snapshot: createRouteSnapshot }
+    });
+    await channels.start();
+    await http.start();
+    t.after(async () => {
+        await cleanupInOrder(
+            () => channels.close(),
+            () => http.stop(),
+        );
+    });
+
+    const channel = await WebSocketChannel.connect({
+        token: "revocable-oauth-token",
+        url: `${httpOrigin(http).replace("http", "ws")}${CONTROL_REMOTE_RPC_PATH}`
+    });
+    t.after(() => channel.close());
+    assert.equal(channel.closed, false);
+
+    revoke?.({ grantId: "revocation-grant" });
+    await waitUntil(() => channel.closed);
+});
+
 function createRouteSnapshot(): PrefixRouteSnapshot {
     return PrefixRoute.snapshot([
         {

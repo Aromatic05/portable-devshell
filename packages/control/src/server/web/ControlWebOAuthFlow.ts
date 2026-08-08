@@ -3,7 +3,12 @@ import { chmod, mkdir, open, readFile, rename, rm } from "node:fs/promises";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { dirname } from "node:path";
 
-import type { HttpHost, McpOAuthProtectedResource } from "@portable-devshell/mcp";
+import type {
+    HttpHost,
+    McpOAuthAccessRevocation,
+    McpOAuthAccessTokenVerification,
+    McpOAuthProtectedResource
+} from "@portable-devshell/mcp";
 import type { ControlWebOAuth2Config } from "@portable-devshell/shared";
 
 import type { ControlWebSessionService } from "./ControlWebSessionService.js";
@@ -69,7 +74,11 @@ export class ControlWebOAuthFlow {
         return new URL(this.#resourceUrl.href);
     }
 
-    async verifyAccessToken(token: string): Promise<{ clientId: string; scopes: string[] }> {
+    onAccessRevoked(listener: (revocation: McpOAuthAccessRevocation) => void): () => void {
+        return this.#protectedResource.onAccessRevoked(listener);
+    }
+
+    async verifyAccessToken(token: string): Promise<McpOAuthAccessTokenVerification> {
         return await this.#protectedResource.verifyAccessToken(this.resourceUrl, token);
     }
 
