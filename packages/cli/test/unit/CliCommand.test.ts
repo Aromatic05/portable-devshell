@@ -1070,9 +1070,21 @@ test("CliMain routes control-plane commands to their matching RPC clients", asyn
                 calls.push(`oauth.${decision}:${approvalId}`);
                 return { approvalId };
             },
-            async decideToolApproval(instance: string, approvalId: string, decision: string) {
-                calls.push(`approval.${decision}:${instance}:${approvalId}`);
+            async decideToolApproval(instance: string, approvalId: string, decision: string, options?: unknown) {
+                calls.push(`approval.${decision}:${instance}:${approvalId}:${JSON.stringify(options)}`);
                 return { approvalId };
+            },
+            async getToolApproval(instance: string, approvalId: string) {
+                calls.push(`approval.show:${instance}:${approvalId}`);
+                return { approvalId };
+            },
+            async listToolCalls(instance: string, query?: { callIds?: string[] }) {
+                calls.push(`tool.calls:${instance}:${query?.callIds?.join(",") ?? ""}`);
+                return [];
+            },
+            async deleteTodo(instance: string, taskId: string) {
+                calls.push(`todo.delete:${instance}:${taskId}`);
+                return {};
             },
             async updateConfig(request: unknown) {
                 calls.push(`config.update:${JSON.stringify(request)}`);
@@ -1096,7 +1108,8 @@ test("CliMain routes control-plane commands to their matching RPC clients", asyn
         ["instance", "enable", "demo"],
         ["instance", "disable", "demo"],
         ["approval", "list", "demo"],
-        ["approval", "approve", "demo", "approval-1"],
+        ["approval", "show", "demo", "approval-1"],
+        ["approval", "approve", "demo", "approval-1", "--reason", "verified", "--remember", "--policy-patch", '{"mode":"allow"}'],
         ["oauth", "status"],
         ["oauth", "list"],
         ["oauth", "deny", "oauth-1"],
@@ -1105,6 +1118,8 @@ test("CliMain routes control-plane commands to their matching RPC clients", asyn
         ["context", "send", "demo", "ctx-1", "continue"],
         ["context", "disable", "ctx-1"],
         ["context", "renew", "ctx-1"],
+        ["tool", "calls", "demo", "call-1"],
+        ["todo", "delete", "demo", "task-1"],
     ];
     for (const command of commands) assert.equal(await cli.run(command), 0);
 
@@ -1117,7 +1132,8 @@ test("CliMain routes control-plane commands to their matching RPC clients", asyn
         "instance.enable:demo",
         "instance.disable:demo",
         "approval.list:demo",
-        "approval.approve:demo:approval-1",
+        "approval.show:demo:approval-1",
+        'approval.approve:demo:approval-1:{"policyPatch":{"mode":"allow"},"reason":"verified","remember":true}',
         "oauth.status",
         "oauth.list",
         "oauth.deny:oauth-1",
@@ -1126,6 +1142,8 @@ test("CliMain routes control-plane commands to their matching RPC clients", asyn
         "context.send:demo:ctx-1:continue",
         "context.disable:ctx-1",
         "context.renew:ctx-1",
+        "tool.calls:demo:call-1",
+        "todo.delete:demo:task-1",
     ]);
     assert.equal(stderr.flush(), "");
     assert.notEqual(stdout.flush(), "");
@@ -1213,6 +1231,7 @@ function testClients(client: Record<string, unknown>) {
             subscribe: (...args: unknown[]) => invoke("subscribe", args)
         },
         todo: {
+            delete: (...args: unknown[]) => invoke("deleteTodo", args),
             get: (...args: unknown[]) => invoke("getTodo", args),
             subscribe: (...args: unknown[]) => invoke(
                 typeof client.subscribeTodo === "function" ? "subscribeTodo" : "subscribe",
@@ -1222,7 +1241,9 @@ function testClients(client: Record<string, unknown>) {
         tool: {
             call: (...args: unknown[]) => invoke("callTool", args),
             decideApproval: (...args: unknown[]) => invoke("decideToolApproval", args),
+            getApproval: (...args: unknown[]) => invoke("getToolApproval", args),
             listApprovals: (...args: unknown[]) => invoke("listToolApprovals", args),
+            listCalls: (...args: unknown[]) => invoke("listToolCalls", args),
         }
     } as never;
 }
