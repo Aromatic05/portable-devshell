@@ -1008,6 +1008,129 @@ test("CliMain rejects an incompatible protocol before a business request", async
     assert.match(stderr.flush(), /Incompatible control protocol version/u);
 });
 
+test("CliMain routes control-plane commands to their matching RPC clients", async () => {
+    const stdout = createBuffer();
+    const stderr = createBuffer();
+    const calls: string[] = [];
+    const cli = new CliMain({
+        createCliClients: () => testClients({
+            async contextDisable(ctxId: string) {
+                calls.push(`context.disable:${ctxId}`);
+                return { ctxId };
+            },
+            async contextList() {
+                calls.push("context.list");
+                return [];
+            },
+            async contextRenew(ctxId: string) {
+                calls.push(`context.renew:${ctxId}`);
+                return { ctxId };
+            },
+            async createContextMessage(instance: string, input: { ctxId: string; text: string }) {
+                calls.push(`context.send:${instance}:${input.ctxId}:${input.text}`);
+                return input;
+            },
+            async deleteInstance(instance: string) {
+                calls.push(`instance.delete:${instance}`);
+                return { instance };
+            },
+            async disableInstance(instance: string) {
+                calls.push(`instance.disable:${instance}`);
+                return { instance };
+            },
+            async enableInstance(instance: string) {
+                calls.push(`instance.enable:${instance}`);
+                return { instance };
+            },
+            async getConfig() {
+                calls.push("config.get");
+                return {};
+            },
+            async listContextMessages(instance: string, ctxId?: string) {
+                calls.push(`context.messages:${instance}:${ctxId ?? ""}`);
+                return [];
+            },
+            async listMcpApprovals() {
+                calls.push("oauth.list");
+                return [];
+            },
+            async listToolApprovals(instance: string) {
+                calls.push(`approval.list:${instance}`);
+                return [];
+            },
+            async mcpStatus() {
+                calls.push("oauth.status");
+                return { running: true };
+            },
+            async overview() {
+                calls.push("overview.get");
+                return {};
+            },
+            async decideMcpApproval(approvalId: string, decision: string) {
+                calls.push(`oauth.${decision}:${approvalId}`);
+                return { approvalId };
+            },
+            async decideToolApproval(instance: string, approvalId: string, decision: string) {
+                calls.push(`approval.${decision}:${instance}:${approvalId}`);
+                return { approvalId };
+            },
+            async updateConfig(request: unknown) {
+                calls.push(`config.update:${JSON.stringify(request)}`);
+                return {};
+            },
+            async validateConfig(draft: unknown) {
+                calls.push(`config.validate:${JSON.stringify(draft)}`);
+                return {};
+            },
+        } as never),
+        stderr,
+        stdout,
+    });
+
+    const commands = [
+        ["overview"],
+        ["config", "get"],
+        ["config", "validate", '{"mcp":{"enabled":true}}'],
+        ["config", "update", '{"web":{"enabled":false}}'],
+        ["instance", "delete", "demo"],
+        ["instance", "enable", "demo"],
+        ["instance", "disable", "demo"],
+        ["approval", "list", "demo"],
+        ["approval", "approve", "demo", "approval-1"],
+        ["oauth", "status"],
+        ["oauth", "list"],
+        ["oauth", "deny", "oauth-1"],
+        ["context", "list"],
+        ["context", "messages", "demo", "ctx-1"],
+        ["context", "send", "demo", "ctx-1", "continue"],
+        ["context", "disable", "ctx-1"],
+        ["context", "renew", "ctx-1"],
+    ];
+    for (const command of commands) assert.equal(await cli.run(command), 0);
+
+    assert.deepEqual(calls, [
+        "overview.get",
+        "config.get",
+        'config.validate:{"mcp":{"enabled":true}}',
+        'config.update:{"web":{"enabled":false}}',
+        "instance.delete:demo",
+        "instance.enable:demo",
+        "instance.disable:demo",
+        "approval.list:demo",
+        "approval.approve:demo:approval-1",
+        "oauth.status",
+        "oauth.list",
+        "oauth.deny:oauth-1",
+        "context.list",
+        "context.messages:demo:ctx-1",
+        "context.send:demo:ctx-1:continue",
+        "context.disable:ctx-1",
+        "context.renew:ctx-1",
+    ]);
+    assert.equal(stderr.flush(), "");
+    assert.notEqual(stdout.flush(), "");
+});
+
 function testClients(client: Record<string, unknown>) {
     const invoke = (name: string, args: unknown[]) => {
         const method = client[name];
@@ -1045,11 +1168,36 @@ function testClients(client: Record<string, unknown>) {
             revokeShare: (...args: unknown[]) => invoke("revokeShare", args),
             startTransfer: (...args: unknown[]) => invoke("startTransfer", args)
         },
+        config: {
+            get: (...args: unknown[]) => invoke("getConfig", args),
+            update: (...args: unknown[]) => invoke("updateConfig", args),
+            validate: (...args: unknown[]) => invoke("validateConfig", args),
+        },
+        context: {
+            disable: (...args: unknown[]) => invoke("contextDisable", args),
+            list: (...args: unknown[]) => invoke("contextList", args),
+            renew: (...args: unknown[]) => invoke("contextRenew", args),
+        },
+        contextMessage: {
+            list: (...args: unknown[]) => invoke("listContextMessages", args),
+            queue: (...args: unknown[]) => invoke("createContextMessage", args),
+        },
         instance: {
             create: (...args: unknown[]) => invoke("createInstance", args),
             createSchema: (...args: unknown[]) => invoke("getInstanceCreateSchema", args),
+            delete: (...args: unknown[]) => invoke("deleteInstance", args),
+            disable: (...args: unknown[]) => invoke("disableInstance", args),
+            enable: (...args: unknown[]) => invoke("enableInstance", args),
             list: (...args: unknown[]) => invoke("listInstances", args),
             validateCreate: (...args: unknown[]) => invoke("validateInstanceCreateDraft", args)
+        },
+        mcp: {
+            decideApproval: (...args: unknown[]) => invoke("decideMcpApproval", args),
+            listApprovals: (...args: unknown[]) => invoke("listMcpApprovals", args),
+            status: (...args: unknown[]) => invoke("mcpStatus", args),
+        },
+        overview: {
+            get: (...args: unknown[]) => invoke("overview", args),
         },
         reverse: {
             createCode: (...args: unknown[]) => invoke("createReverseDeviceCode", args),
@@ -1072,7 +1220,9 @@ function testClients(client: Record<string, unknown>) {
             )
         },
         tool: {
-            call: (...args: unknown[]) => invoke("callTool", args)
+            call: (...args: unknown[]) => invoke("callTool", args),
+            decideApproval: (...args: unknown[]) => invoke("decideToolApproval", args),
+            listApprovals: (...args: unknown[]) => invoke("listToolApprovals", args),
         }
     } as never;
 }
