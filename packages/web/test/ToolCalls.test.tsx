@@ -154,6 +154,17 @@ it("filters structured tool calls by ctxId and queues a Comment for the selected
     );
 });
 
+it("refreshes an expanded tool call to retrieve its latest content", async () => {
+    const refreshToolCall = vi.fn(async () => undefined);
+    const store = { refreshToolCall } as unknown as WebStore;
+    render(<ToolCalls state={state} store={store} />);
+
+    fireEvent.click(screen.getByText("bash_run", { selector: "strong" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Refresh" }));
+
+    await waitFor(() => expect(refreshToolCall).toHaveBeenCalledWith("alpha"));
+});
+
 it("locks the instance from the selected Context", () => {
     const queueContextMessage = vi.fn(async () => true);
     const store = { queueContextMessage } as unknown as WebStore;
