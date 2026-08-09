@@ -1,28 +1,35 @@
 import { formatHint, type ToolDiagnosticHint } from "./ToolDiagnosticHint.js";
 
+export interface CommentAdvice {
+    code?: string;
+    text: string;
+}
+
+export function composeComments(advice: readonly CommentAdvice[]): string[] {
+    const out: string[] = [];
+    const seenCodes = new Set<string>();
+    const seenTexts = new Set<string>();
+
+    for (const entry of advice) {
+        if (typeof entry.text !== "string" || entry.text.length === 0) continue;
+        if (entry.code !== undefined) {
+            if (seenCodes.has(entry.code)) continue;
+            seenCodes.add(entry.code);
+        }
+        if (seenTexts.has(entry.text)) continue;
+        seenTexts.add(entry.text);
+        out.push(entry.text);
+    }
+
+    return out;
+}
+
 export function mergeComments(
     userComments: readonly string[],
     hints: readonly ToolDiagnosticHint[]
 ): string[] {
-    const out: string[] = [];
-    const seenStrings = new Set<string>();
-    const seenCodes = new Set<string>();
-
-    for (const comment of userComments) {
-        if (typeof comment !== "string" || comment.length === 0) continue;
-        if (seenStrings.has(comment)) continue;
-        seenStrings.add(comment);
-        out.push(comment);
-    }
-
-    for (const hint of hints) {
-        if (seenCodes.has(hint.code)) continue;
-        seenCodes.add(hint.code);
-        const formatted = formatHint(hint);
-        if (seenStrings.has(formatted)) continue;
-        seenStrings.add(formatted);
-        out.push(formatted);
-    }
-
-    return out;
+    return composeComments([
+        ...userComments.map((text) => ({ text })),
+        ...hints.map((hint) => ({ code: hint.code, text: formatHint(hint) }))
+    ]);
 }

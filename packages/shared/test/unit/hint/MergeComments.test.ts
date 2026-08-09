@@ -3,9 +3,22 @@ import test from "node:test";
 
 import {
     diagnosticHint,
+    composeComments,
     errorHint,
     mergeComments
 } from "@portable-devshell/shared";
+
+test("structured advice uses stable codes for deduplication without exposing metadata", () => {
+    assert.deepEqual(
+        composeComments([
+            { code: "memory.highWatermark", text: "Project memory is nearing its limit." },
+            { code: "memory.highWatermark", text: "Updated wording is still the same warning." },
+            { text: "A user-provided instruction." },
+            { text: "A user-provided instruction." }
+        ]),
+        ["Project memory is nearing its limit.", "A user-provided instruction."]
+    );
+});
 
 test("clean success produces only user comments in order", () => {
     assert.deepEqual(
