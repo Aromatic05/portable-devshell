@@ -96,6 +96,7 @@ export class TuiRuntime {
     #cursorBlinkTimer?: ReturnType<typeof setInterval>;
     #ink?: InkInstance;
     #inputStarted = false;
+    #inputQueue: Promise<void> = Promise.resolve();
     #mouseBuffer = "";
     #stopped = false;
     #terminalColumns = 1;
@@ -377,12 +378,16 @@ export class TuiRuntime {
         return this.#stdout.rows ?? 40;
     }
 
-    async handleInput(input: string, key: TuiAppKey): Promise<void> {
-        const intents = this.keyDispatcher.dispatch(
-            this.store.getState().interaction.focusScope,
-            { input, key },
-        );
-        await this.commandDispatcher.dispatchMany(intents);
+    handleInput(input: string, key: TuiAppKey): Promise<void> {
+        const handled = this.#inputQueue.then(async () => {
+            const intents = this.keyDispatcher.dispatch(
+                this.store.getState().interaction.focusScope,
+                { input, key },
+            );
+            await this.commandDispatcher.dispatchMany(intents);
+        });
+        this.#inputQueue = handled.catch(() => undefined);
+        return handled;
     }
 
     async openTerminal(
