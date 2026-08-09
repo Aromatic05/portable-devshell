@@ -27,7 +27,8 @@ export function buildTodoDetailBoxes(state: TuiAppState, instance: string, todoI
                 formatField("Revision", String(summary.revision)),
                 formatField("Progress", `${summary.completed}/${summary.total}`),
                 formatField("Status", summary.status),
-                "Full item data is not present in the current read model."
+                "Full item data is not present in the current read model.",
+                buttonLine("delete-project", "Delete Project")
             ],
             id: `todo-summary:${todoId}`,
             status: summary.status === "failed" ? "failed" : summary.status === "blocked" ? "warning" : "normal",
