@@ -16,7 +16,8 @@ import {
 } from "../selectors/toolCalls.js";
 import type { WebState, WebStore } from "../state/WebStore.js";
 
-const pageSize = 100;
+const toolCallPageSize = 20;
+const commentPageSize = 8;
 
 export function ToolCalls({
     disabled = false,
@@ -82,7 +83,13 @@ export function ToolCalls({
         [allCalls],
     );
     const selection = useMemo(
-        () => selectToolCalls(allCalls, effectiveFilters, Date.now(), toolCallPage * pageSize, pageSize),
+        () => selectToolCalls(
+            allCalls,
+            effectiveFilters,
+            Date.now(),
+            toolCallPage * toolCallPageSize,
+            toolCallPageSize,
+        ),
         [allCalls, effectiveFilters, toolCallPage],
     );
     const active = hasActiveToolCallFilters(effectiveFilters);
@@ -100,9 +107,13 @@ export function ToolCalls({
               )
               .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
         : [];
-    const queuedCommentPages = pageCount(queuedComments.length);
+    const queuedCommentPages = pageCount(queuedComments.length, commentPageSize);
     const visibleQueuedCommentPage = Math.min(queuedCommentPage, queuedCommentPages - 1);
-    const visibleQueuedComments = pageItems(queuedComments, visibleQueuedCommentPage);
+    const visibleQueuedComments = pageItems(
+        queuedComments,
+        visibleQueuedCommentPage,
+        commentPageSize,
+    );
     const commentCalls = concreteContext
         ? allCommentCalls
               .filter(
@@ -117,9 +128,13 @@ export function ToolCalls({
                   ),
               )
         : [];
-    const commentHistoryPages = pageCount(commentCalls.length);
+    const commentHistoryPages = pageCount(commentCalls.length, commentPageSize);
     const visibleCommentHistoryPage = Math.min(commentHistoryPage, commentHistoryPages - 1);
-    const visibleCommentCalls = pageItems(commentCalls, visibleCommentHistoryPage);
+    const visibleCommentCalls = pageItems(
+        commentCalls,
+        visibleCommentHistoryPage,
+        commentPageSize,
+    );
     const operation = concreteContext
         ? `context-message:${effectiveFilters.instance}:${ctxId}`
         : undefined;
@@ -178,7 +193,7 @@ export function ToolCalls({
 
     const countText = selection.total === 0
         ? `0 of ${allCalls.length} tool calls${active ? " match active filters." : "."}`
-        : `Showing ${toolCallPage * pageSize + 1}-${toolCallPage * pageSize + selection.items.length} of ${selection.total} matching tool calls.`;
+        : `Showing ${toolCallPage * toolCallPageSize + 1}-${toolCallPage * toolCallPageSize + selection.items.length} of ${selection.total} matching tool calls.`;
 
     return <section>
         <h2>Tool Calls</h2>
@@ -312,7 +327,7 @@ export function ToolCalls({
             label="Tool calls"
             onPageChange={setToolCallPage}
             page={toolCallPage}
-            pageCount={pageCount(selection.total)}
+            pageCount={pageCount(selection.total, toolCallPageSize)}
         />
     </section>;
 }
@@ -336,12 +351,12 @@ function Pagination({
     </nav>;
 }
 
-function pageCount(total: number): number {
-    return Math.max(1, Math.ceil(total / pageSize));
+function pageCount(total: number, size: number): number {
+    return Math.max(1, Math.ceil(total / size));
 }
 
-function pageItems<T>(items: readonly T[], page: number): T[] {
-    return items.slice(page * pageSize, (page + 1) * pageSize);
+function pageItems<T>(items: readonly T[], page: number, size: number): T[] {
+    return items.slice(page * size, (page + 1) * size);
 }
 
 function readCallComments(call: ToolCallRecord): string[] {

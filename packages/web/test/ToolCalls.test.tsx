@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { asInstanceName, createInitialControlReadModelState } from "@portable-devshell/shared/browser";
 import { expect, it, vi } from "vitest";
 
@@ -260,10 +260,50 @@ it("paginates matching tool calls", () => {
         store={{ queueContextMessage: vi.fn() } as unknown as WebStore}
     />);
 
-    expect(view.container.querySelectorAll(".activity-feed > li")).toHaveLength(100);
+    expect(view.container.querySelectorAll(".activity-feed > li")).toHaveLength(20);
     const pagination = screen.getByRole("navigation", { name: "Tool calls pagination" });
-    expect(pagination).toHaveTextContent("Page 1 of 2");
+    expect(pagination).toHaveTextContent("Page 1 of 8");
     fireEvent.click(screen.getByRole("button", { name: "Next page" }));
-    expect(view.container.querySelectorAll(".activity-feed > li")).toHaveLength(51);
+    expect(view.container.querySelectorAll(".activity-feed > li")).toHaveLength(20);
+    expect(pagination).toHaveTextContent("Page 2 of 8");
+});
+
+it("paginates queued Comments in groups of eight", () => {
+    const commentState: WebState = {
+        ...state,
+        readModel: {
+            ...state.readModel,
+            instanceState: {
+                ...state.readModel.instanceState,
+                alpha: {
+                    ...state.readModel.instanceState.alpha!,
+                    contextMessages: Array.from({ length: 9 }, (_, index) => ({
+                        createdAt: `2026-07-31T09:${String(index).padStart(2, "0")}:00Z`,
+                        ctxId: "ctx-alpha",
+                        id: `message-${index}`,
+                        instance: "alpha",
+                        status: "pending" as const,
+                        text: `Comment ${index}`,
+                    })),
+                },
+            },
+        },
+    };
+
+    render(<ToolCalls
+        state={commentState}
+        store={{ queueContextMessage: vi.fn() } as unknown as WebStore}
+    />);
+
+    fireEvent.change(screen.getByLabelText("Instance"), { target: { value: "alpha" } });
+    fireEvent.change(screen.getByLabelText("Context"), {
+        target: { value: "context:ctx-alpha" },
+    });
+
+    const pagination = screen.getByRole("navigation", { name: "Queued Comments pagination" });
+    expect(screen.getAllByText(/^Comment \d$/)).toHaveLength(8);
+    expect(pagination).toHaveTextContent("Page 1 of 2");
+    fireEvent.click(within(pagination).getByRole("button", { name: "Next page" }));
+    expect(screen.getAllByText(/^Comment \d$/)).toHaveLength(1);
     expect(pagination).toHaveTextContent("Page 2 of 2");
 });
