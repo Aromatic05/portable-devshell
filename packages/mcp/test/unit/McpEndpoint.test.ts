@@ -252,7 +252,7 @@ test("environment and control-owned tools execute through the endpoint audit pat
     });
     const requestContext = { principal: "test", requestId: "request-control-tools" };
 
-    const environment = await endpoint.callTool("environ_info", {}, requestContext);
+    const environment = await endpoint.callTool("environ_info", { workspace: "/workspace" }, requestContext);
     const ctxId = String((environment as { ctxId?: string }).ctxId);
     await endpoint.callTool("todo_read", { ctxId }, requestContext);
     await endpoint.callTool("instance_list", { ctxId }, requestContext);
@@ -700,12 +700,12 @@ async function initialize(url: string): Promise<{ headers: Record<string, string
     return { headers };
 }
 
-async function createContext(url: string, headers: Record<string, string>): Promise<string> {
+async function createContext(url: string, headers: Record<string, string>, workspace = "/workspace"): Promise<string> {
     const response = await postJson(url, {
         id: `req-environ-${Date.now()}`,
         jsonrpc: "2.0",
         method: "tools/call",
-        params: { arguments: {}, name: "environ_info" }
+        params: { arguments: { workspace }, name: "environ_info" }
     }, headers);
     const ctxId = response.body.result?.structuredContent?.ctxId;
     assert.equal(typeof ctxId, "string");
@@ -831,6 +831,14 @@ function createWorkerHarness(options?: {
                 }
             },
             workspacePath: "/workspace",
+            async prepareWorkspace(workspace: string) {
+                return {
+                    projectMemoryAgentFile: `${workspace}/.devshell/AGENT.md`,
+                    projectMemoryDirectory: `${workspace}/.devshell`,
+                    temporaryDirectory: "/tmp/workspace-123456",
+                    workspace
+                };
+            },
             hasToolSchemaCache() {
                 return hasToolSchemaCache;
             },
