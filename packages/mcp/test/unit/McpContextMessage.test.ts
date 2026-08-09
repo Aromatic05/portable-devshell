@@ -161,7 +161,7 @@ async function createContext(
 ): Promise<string> {
     const result = (await dispatch.callTool(
         "environ_info",
-        {},
+        { workspace: "/workspace" },
         { principal: "tester", requestId },
     )) as { ctxId: string };
     return result.ctxId;
@@ -207,6 +207,17 @@ function createHarness(
             workspace: "/workspace",
         },
         listTools: () => [bashTool],
+        async prepareWorkspace(workspace: string) {
+            return {
+                projectMemoryAgentFile: `${workspace}/AGENT.md`,
+                projectMemoryDirectory: workspace,
+                temporaryDirectory: `${workspace}/tmp`,
+                workspace,
+            };
+        },
+        async readAlerts() {
+            return { advice: [] };
+        },
         snapshot: () => ({ ready: true }),
         workspacePath: "/workspace",
     };

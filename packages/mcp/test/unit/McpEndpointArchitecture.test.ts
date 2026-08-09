@@ -90,6 +90,17 @@ function createWorker(options: {
         },
         hasToolSchemaCache: () => options.cached ?? false,
         listTools: () => options.tools ?? [workerTool()],
+        async prepareWorkspace(workspace: string) {
+            return {
+                projectMemoryAgentFile: `${workspace}/AGENT.md`,
+                projectMemoryDirectory: workspace,
+                temporaryDirectory: `${workspace}/tmp`,
+                workspace: workspace,
+            };
+        },
+        async readAlerts() {
+            return { advice: [] };
+        },
         snapshot: () => ({ ready: options.ready ?? true }),
         workspacePath: "/workspace"
     };
@@ -164,7 +175,7 @@ test("McpEndpointDispatch executes environment, control, and worker domains with
 
     const environment = await dispatch.callTool(
         "environ_info",
-        {},
+        { workspace: "/workspace" },
         { principal: "tester", requestId: "request-environment" }
     ) as { ctxId: string; workspace: string };
     assert.equal(environment.workspace, "/workspace");
