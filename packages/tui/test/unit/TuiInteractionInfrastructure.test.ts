@@ -420,6 +420,39 @@ test("Comment conversation shows exact history and keeps the route open after se
     assert.deepEqual(sent, ["new guidance"], "successful send must clear the draft");
 });
 
+test("Audit lists the newest Tool Calls first", () => {
+    const harness = createHarness();
+    harness.store.patchControlReadModel({ instanceState: { alpha: { toolCalls: [
+        {
+            callId: "old-call",
+            ctxId: "ctx-order",
+            inputSummary: "{}",
+            instance: asInstanceName("alpha"),
+            source: "mcp",
+            startedAt: "2026-08-06T11:39:00.000Z",
+            status: "completed",
+            toolName: "file_read",
+        },
+        {
+            callId: "new-call",
+            ctxId: "ctx-order",
+            inputSummary: "{}",
+            instance: asInstanceName("alpha"),
+            source: "mcp",
+            startedAt: "2026-08-06T11:52:00.000Z",
+            status: "completed",
+            toolName: "file_read",
+        },
+    ] } } });
+    enterAuditContext(harness, "ctx-order");
+
+    const callBoxes = selectMainScreenModel(harness.store.getState()).boxes
+        .filter((box) => box.id.startsWith("audit-call:"))
+        .map((box) => box.id);
+
+    assert.deepEqual(callBoxes, ["audit-call:new-call", "audit-call:old-call"]);
+});
+
 test("Comment conversation blocks a stale ctxId instead of reporting a false queue success", async () => {
     const sent: Array<{ ctxId: string; text: string }> = [];
     const harness = createHarness({
