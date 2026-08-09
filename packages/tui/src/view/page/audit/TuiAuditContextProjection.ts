@@ -91,9 +91,9 @@ function toSummary(
     instance: string,
 ): TuiAuditContextSummary {
     const sortedCalls = [...context.calls].sort((left, right) =>
-        left.startedAt.localeCompare(right.startedAt),
+        right.startedAt.localeCompare(left.startedAt),
     );
-    const latestCall = sortedCalls.at(-1);
+    const latestCall = sortedCalls[0];
     const latestActivityAt =
         [
             ...sortedCalls.map((call) => call.completedAt ?? call.startedAt),

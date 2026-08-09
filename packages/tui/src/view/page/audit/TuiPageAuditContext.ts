@@ -39,7 +39,7 @@ export function buildAuditContextBoxes(
             box: approvalBox(state, instance, approval),
         })),
     ]
-        .sort((left, right) => left.at.localeCompare(right.at))
+        .sort((left, right) => right.at.localeCompare(left.at))
         .map((entry) => entry.box);
 }
 
