@@ -22,7 +22,7 @@ import {
 export interface ToolRouteInstancePort {
     worker: Pick<
         WorkerInstance,
-        "callTool" | "decideApproval" | "getApproval" | "listApprovals" | "readToolCalls"
+        "callTool" | "decideApproval" | "getApproval" | "listApprovals" | "readToolCalls" | "workspacePath"
     >;
 }
 
@@ -34,7 +34,8 @@ export function createToolRouteModule(instance: ToolRouteInstancePort): PrefixRo
                 const result = await instance.worker.callTool(toolName, input, {
                     requestId: context.requestId,
                     ctxId: context.connectionId,
-                    source: context.peer
+                    source: context.peer,
+                    workspace: instance.worker.workspacePath,
                 });
                 return attachComments(result, mergeComments([], resolveResultHints(toolName, result)));
             } catch (error) {
