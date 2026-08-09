@@ -47,6 +47,7 @@ test("TodoService creates, validates revisions, persists atomically, and emits d
     assert.equal(created.summary.completed, 1);
     assert.equal(created.summary.total, 3);
     assert.equal(created.summary.currentItemId, "implement");
+    assert.equal("tasks" in created, false);
     assert.equal(service.currentAssociation("mcp-session")?.todoItemId, "implement");
     assert.equal(events[0]?.type, "todo.created");
 
@@ -157,9 +158,13 @@ test("TodoService emits terminal events once, archives terminal tasks, and reloa
     ]);
     assert.equal(next.revision, 1);
     assert.equal(next.title, "Second task");
+    assert.equal("tasks" in next, false);
 
     const reloaded = createService();
-    assert.deepEqual(await reloaded.read("Second task"), next);
+    const read = await reloaded.read("Second task");
+    assert.equal(read.revision, next.revision);
+    assert.deepEqual(read.items, next.items);
+    assert.equal(read.tasks?.[0]?.title, "Second task");
     const persisted = JSON.parse(await readFile(filePath, "utf8")) as {
         archived: unknown[];
     };
