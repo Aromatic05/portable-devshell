@@ -139,7 +139,7 @@ export class TodoState {
         if (title === undefined) {
             return { items: [], revision: 0, summary: { completed: 0, total: 0 }, tasks };
         }
-        const state = document.active.find((entry) => entry.title === title);
+        const state = [...document.active, ...document.archived].find((entry) => entry.title === title);
         if (state === undefined) {
             return { items: [], revision: 0, summary: { completed: 0, total: 0 }, tasks };
         }
