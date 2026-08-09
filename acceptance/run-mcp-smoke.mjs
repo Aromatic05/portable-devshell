@@ -46,7 +46,7 @@ try {
         jsonrpc: "2.0",
         id: "req-environ-info",
         method: "tools/call",
-        params: { name: "environ_info", arguments: {} }
+        params: { name: "environ_info", arguments: { workspace: fixture.workspace } }
     }, headers);
     const environment = environmentCall.body.result?.structuredContent;
     const ctxId = environment?.ctxId;

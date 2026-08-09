@@ -220,7 +220,7 @@ async function withTmuxHarness(instanceName: string, body: (harness: TmuxHarness
                 params: { arguments: args, name }
             }, headers) as ToolResponse;
         const createContext = async (): Promise<string> => {
-            const response = await callTool("reused-environ-id", "environ_info", {});
+            const response = await callTool("reused-environ-id", "environ_info", { workspace: workspacePath });
             assert.equal(response.error, undefined, JSON.stringify(response));
             return readString(response.result?.structuredContent?.ctxId, "environ_info ctxId");
         };
