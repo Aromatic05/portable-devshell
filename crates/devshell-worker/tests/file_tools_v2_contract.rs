@@ -30,7 +30,8 @@ fn call(
             "params": params,
             "context": {
                 "ctxId": ctx_id,
-                "source": "mcp"
+                "source": "mcp",
+                "workspace": env.workspace()
             }
         }),
     )
