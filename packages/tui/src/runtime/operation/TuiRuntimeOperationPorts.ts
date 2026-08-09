@@ -35,6 +35,9 @@ export interface TuiRuntimeOperationClients {
     service: {
         restart(): Promise<unknown>;
     };
+    todo: {
+        delete(instance: string, taskId: string): Promise<unknown>;
+    };
     tool: {
         call(instance: string, toolName: string, input: JsonValue): Promise<JsonValue>;
     };

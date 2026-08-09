@@ -520,6 +520,39 @@ test("Todo uses a dedicated instance-scoped page and does not appear in Instance
         ],
     );
 });
+
+test("Todo project deletion requires confirmation before permanently deleting its history", async () => {
+    const deleted: Array<{ instance: string; taskId: string }> = [];
+    const harness = createHarness({
+        onTodoDelete: async (instance, taskId) => {
+            deleted.push({ instance, taskId });
+        },
+    });
+
+    harness.store.setSelectedPage("todo");
+    await openPrimaryRoute(harness, "todo-task:task-1");
+    const summary = expandBox(harness, "todo-summary:task-1");
+    harness.store.setMainFocusId(summary.id);
+    harness.store.setFocusScope("boxDetail");
+    harness.store.setSelectedDetailLine(
+        summary.expandedKey,
+        "todo-summary:task-1:button:delete-project",
+    );
+
+    await harness.dispatch({ type: "focus.activate" });
+    const overlay = topTuiOverlay(harness.store.getState().interaction.overlays);
+    assert.equal(overlay?.kind, "confirmation");
+    assert.equal(
+        overlay?.kind === "confirmation" ? overlay.title : undefined,
+        "Confirm Todo Project Deletion",
+    );
+    assert.deepEqual(deleted, []);
+
+    await harness.dispatch({ button: "confirm", type: "confirm.focus" });
+    await harness.dispatch({ type: "confirm.accept" });
+    assert.deepEqual(deleted, [{ instance: "alpha", taskId: "task-1" }]);
+});
+
 test("shifted number shortcuts switch the selected instance without coupling Instances box focus", async () => {
     const harness = createHarness();
 
@@ -2505,6 +2538,7 @@ function createHarness(
             text: string,
         ) => Promise<void>;
         onContextDisable?: (instance: string, ctxId: string) => Promise<void>;
+        onTodoDelete?: (instance: string, taskId: string) => Promise<void>;
         onToolCall?: (
             instance: string,
             toolName: string,
@@ -2590,6 +2624,7 @@ function createHarness(
         onConfigUpdate: (options.onConfigUpdate ?? (async () => ({}))) as never,
         onContextMessage: options.onContextMessage,
         onContextDisable: options.onContextDisable,
+        onTodoDelete: options.onTodoDelete,
         onQuit: async () => undefined,
         onRedraw: () => undefined,
         onToolCall: options.onToolCall ?? (async () => true),

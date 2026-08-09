@@ -59,6 +59,7 @@ export interface TuiCommandDispatcherOptions {
     onConfigUpdate?(request: ConfigBatchUpdateRequest): Promise<JsonValue>;
     onInstanceDangerAction?(action: "delete", instance: string): Promise<void>;
     onInstanceEnabledChange?(instance: string, enabled: boolean): Promise<void>;
+    onTodoDelete?(instance: string, taskId: string): Promise<void>;
     onOAuthApprovalDecision?(
         approvalId: string,
         decision: "approve" | "deny"
@@ -201,6 +202,13 @@ export class TuiCommandDispatcher {
                     "delete",
                     intent.instance
                 );
+                return true;
+            case "todo.delete":
+                await (this.#options.onTodoDelete ?? unavailable)(
+                    intent.instance,
+                    intent.taskId
+                );
+                this.#store.setScreenStatus("todo", "Todo project deleted.");
                 return true;
             case "context.disable":
                 await (this.#options.onContextDisable ?? unavailable)(

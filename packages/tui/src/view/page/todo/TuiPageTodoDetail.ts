@@ -3,6 +3,7 @@ import type { TodoItem, TodoReadResult } from "@portable-devshell/shared";
 import type { BoxModel } from "../../component/TuiComponentExpandableBox.js";
 import type { TuiAppState } from "../../../state/reducer/TuiStoreModel.js";
 import type { TuiExpandableBoxStatus } from "../../../state/TuiUiState.js";
+import { buttonLine } from "../../editor/TuiEditorView.js";
 import { compactSummary, formatField, makeBox } from "../TuiPageBoxSupport.js";
 import { projectTodoSummaries } from "./TuiTodoProjection.js";
 
@@ -49,7 +50,8 @@ function summaryBox(state: TuiAppState, instance: string, todo: TodoReadResult):
             formatField("Task", todo.taskId ?? "-"),
             formatField("Revision", String(todo.revision)),
             formatField("Progress", `${todo.summary.completed}/${todo.summary.total}`),
-            formatField("Current", current?.content ?? "none")
+            formatField("Current", current?.content ?? "none"),
+            buttonLine("delete-project", "Delete Project")
         ],
         id: `todo-summary:${todo.taskId}`,
         status: summaryStatus(todo),

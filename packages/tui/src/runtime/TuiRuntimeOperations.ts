@@ -22,6 +22,7 @@ export class TuiRuntimeOperations {
     readonly decideApproval: TuiRuntimeExecutionOperations["decideApproval"];
     readonly decideOAuthApproval: TuiRuntimeControlOperations["decideOAuthApproval"];
     readonly deleteInstance: TuiRuntimeControlOperations["deleteInstance"];
+    readonly deleteTodo: TuiRuntimeControlOperations["deleteTodo"];
     readonly disableContext: TuiRuntimeControlOperations["disableContext"];
     readonly getInstanceCreateSchema: TuiRuntimeControlOperations["getInstanceCreateSchema"];
     readonly queueContextMessage: TuiRuntimeControlOperations["queueContextMessage"];
@@ -64,6 +65,7 @@ export class TuiRuntimeOperations {
         this.createInstance = control.createInstance.bind(control);
         this.decideOAuthApproval = control.decideOAuthApproval.bind(control);
         this.deleteInstance = control.deleteInstance.bind(control);
+        this.deleteTodo = control.deleteTodo.bind(control);
         this.disableContext = control.disableContext.bind(control);
         this.getInstanceCreateSchema = control.getInstanceCreateSchema.bind(control);
         this.queueContextMessage = control.queueContextMessage.bind(control);

@@ -89,6 +89,18 @@ export class TuiCommandDispatcherDetail {
 
             const button = actionId?.startsWith("button:") ? actionId.slice("button:".length) : undefined;
 
+            if (state.ui.selectedPage === "todo" && state.ui.selectedInstance !== undefined && button === "delete-project") {
+                const taskId = todoTaskIdFromBox(boxId);
+                if (taskId === undefined) return false;
+                return await this.#dispatch({
+                    body: `Delete Todo project ${taskId}? This permanently removes the project and its history.`,
+                    confirmIntent: { instance: state.ui.selectedInstance, taskId, type: "todo.delete" },
+                    confirmLabel: "Delete",
+                    title: "Confirm Todo Project Deletion",
+                    type: "overlay.openConfirm"
+                });
+            }
+
             if (state.ui.selectedPage === "connections" && button === "restart-control") {
                 return await this.#dispatch({
                     body: "Restart the control runtime now? TUI will reconnect automatically.",
@@ -259,5 +271,11 @@ export class TuiCommandDispatcherDetail {
 function ctxIdFromBox(boxId: string | undefined): string | undefined {
     if (boxId === undefined) return undefined;
     const prefix = "audit-context:";
+    return boxId.startsWith(prefix) ? boxId.slice(prefix.length) : undefined;
+}
+
+function todoTaskIdFromBox(boxId: string | undefined): string | undefined {
+    if (boxId === undefined) return undefined;
+    const prefix = "todo-summary:";
     return boxId.startsWith(prefix) ? boxId.slice(prefix.length) : undefined;
 }

@@ -170,6 +170,13 @@ export class TuiRuntimeControlOperations {
         });
     }
 
+    async deleteTodo(instance: string, taskId: string): Promise<void> {
+        await this.#request(this.options.clients.todo.delete(instance, taskId), `todo.delete:${instance}:${taskId}`);
+        await this.#refreshBestEffort(`todo:${instance}`, async () => {
+            await this.options.session.refreshTodo(instance);
+        });
+    }
+
     async setInstanceEnabled(instance: string, enabled: boolean): Promise<void> {
         const snapshot = this.options.store.getState().readModel.instanceState[instance]?.snapshot;
         const wasRunning = !enabled && snapshot?.daemonState !== undefined && snapshot.daemonState !== "stopped";
