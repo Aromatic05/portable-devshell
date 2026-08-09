@@ -67,7 +67,7 @@ export function Application({
             {route === "instances" ? <Instances disabled={interactionDisabled} store={store} /> : null}
             {route === "approvals" ? <Approvals disabled={interactionDisabled} store={store} /> : null}
             {route === "activity" ? <ToolCalls disabled={interactionDisabled} state={state} store={store} /> : null}
-            {route === "todos" ? <Todos state={state} /> : null}
+            {route === "todos" ? <Todos state={state} store={store} /> : null}
         </main>
         <nav aria-label="Primary navigation" className="bottom">
             <Navigation active={route} counts={counts} navigate={navigate} />

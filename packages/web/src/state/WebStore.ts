@@ -211,6 +211,19 @@ export class WebStore {
         );
     }
 
+    async deleteTodo(instance: string, taskId: string): Promise<boolean> {
+        const generation = this.#generation;
+        return await this.#operations.run(
+            `todo-delete:${instance}:${taskId}`,
+            "Todo project deleted.",
+            generation,
+            async () => {
+                await this.clients.todo.delete(instance, taskId);
+                if (this.#current(generation)) await this.#model.refreshInstance(instance, ["todo"]);
+            },
+        );
+    }
+
     async start(instance: string): Promise<void> {
         await this.#lifecycle(instance, "start");
     }
