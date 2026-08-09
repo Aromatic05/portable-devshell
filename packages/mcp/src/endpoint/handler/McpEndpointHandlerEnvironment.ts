@@ -1,4 +1,4 @@
-import type { JsonValue, ToolCallContext } from "@portable-devshell/shared";
+import { createError, errorCodes, type JsonValue, type ToolCallContext } from "@portable-devshell/shared";
 
 import { McpContextRegistry } from "../../context/McpContextRegistry.js";
 import { readMcpWorkspace } from "../McpEndpointInput.js";
@@ -32,10 +32,20 @@ export class McpEndpointHandlerEnvironment {
         }
         const workspace = readMcpWorkspace(input, toolName);
         const environment = requireMcpEndpointEnvironment(this.#worker, this.#instanceName);
+        const prepareWorkspace = this.#worker.prepareWorkspace;
+        if (prepareWorkspace === undefined) {
+            throw createError({
+                code: errorCodes.coreWorkerHandshakeFailed,
+                details: { instance: this.#instanceName },
+                message: `Workspace preparation is unavailable for ${this.#instanceName}.`,
+                retryable: true
+            });
+        }
+        const prepared = await prepareWorkspace.call(this.#worker, workspace);
         const record = await this.#contextRegistry.create({
             instance: this.#instanceName,
             principal: requestContext.principal,
-            workspace
+            workspace: prepared.workspace
         });
         await this.#worker.appendMcpToolCalled(toolName, {
             ctxId: record.ctxId,
@@ -53,7 +63,11 @@ export class McpEndpointHandlerEnvironment {
             async () => ({
                 ctxId: record.ctxId,
                 expiresAt: record.expiresAt,
-                comment: ["Read applicable AGENT.md."],
+                comment: [
+                    `Read ${prepared.projectMemoryAgentFile} before working.`,
+                    `Use ${prepared.projectMemoryDirectory} for durable project memory; keep it useful for future sessions.`,
+                    `Use ${prepared.temporaryDirectory} for all temporary files.`
+                ],
                 instance: this.#instanceName,
                 platform: {
                     arch: environment.platform.arch,
@@ -63,7 +77,10 @@ export class McpEndpointHandlerEnvironment {
                     ...(environment.platform.shell === undefined ? {} : { shell: environment.platform.shell.kind })
                 },
                 skillsDirectory: environment.skillsDirectory,
-                workspace: record.workspace
+                workspace: record.workspace,
+                projectMemoryAgentFile: prepared.projectMemoryAgentFile,
+                projectMemoryDirectory: prepared.projectMemoryDirectory,
+                temporaryDirectory: prepared.temporaryDirectory
             }),
             signal
         );

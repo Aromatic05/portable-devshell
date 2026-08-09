@@ -86,6 +86,7 @@ export class WorkerInstance {
     readonly #config: ResolvedWorkerInstanceConfig;
     readonly #connection: WorkerInstanceConnection;
     readonly #lifecycle: WorkerInstanceLifecycle;
+    readonly #protocolClient: WorkerProtocolClient;
     readonly #state: WorkerInstanceState;
     readonly #terminalClient: WorkerTerminalClient;
     readonly #tool: WorkerInstanceTool;
@@ -94,6 +95,7 @@ export class WorkerInstance {
         this.#approvalManager = dependencies.approvalManager;
         this.#catalog = dependencies.catalog;
         this.#config = dependencies.config;
+        this.#protocolClient = dependencies.protocolClient;
         this.#state = new WorkerInstanceState({
             config: this.#config,
             eventBuffer: dependencies.eventBuffer,
@@ -161,6 +163,11 @@ export class WorkerInstance {
 
     async openTerminal(input: WorkerTerminalOpenInput): Promise<WorkerTerminalDescriptor> {
         return await this.#terminalClient.open(input);
+    }
+
+    async prepareWorkspace(workspace: string): Promise<Awaited<ReturnType<WorkerProtocolClient["prepareWorkspace"]>>> {
+        this.#assertReady();
+        return await this.#protocolClient.prepareWorkspace(workspace);
     }
 
     async attachTerminal(input: {

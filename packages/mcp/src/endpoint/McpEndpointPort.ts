@@ -23,6 +23,12 @@ export interface McpEndpointWorkerPort extends McpEndpointCatalogWorker {
         signal?: AbortSignal,
         transformResult?: (result: JsonValue, callId: string) => Promise<JsonValue>
     ): Promise<JsonValue>;
+    prepareWorkspace?(workspace: string): Promise<{
+        projectMemoryAgentFile: string;
+        projectMemoryDirectory: string;
+        temporaryDirectory: string;
+        workspace: string;
+    }>;
     readonly handshake?: McpEndpointEnvironmentHandshake;
     readonly workspacePath?: string;
 }

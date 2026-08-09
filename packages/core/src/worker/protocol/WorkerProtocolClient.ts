@@ -58,6 +58,13 @@ export interface WorkerToolsListResult {
     tools: WorkerToolDefinition[];
 }
 
+export interface WorkerWorkspacePrepareResult {
+    projectMemoryAgentFile: string;
+    projectMemoryDirectory: string;
+    temporaryDirectory: string;
+    workspace: string;
+}
+
 export type WorkerArtifactPayloadOpenInput =
     | { expiresAtMs: number; handle: string; path?: never }
     | { expiresAtMs: number; handle?: never; path: string };
@@ -134,6 +141,12 @@ export class WorkerProtocolClient {
 
     async listTools(): Promise<WorkerToolsListResult> {
         return asObjectResult<WorkerToolsListResult>(await this.#rpcClient.request("tools.list", {}));
+    }
+
+    async prepareWorkspace(workspace: string): Promise<WorkerWorkspacePrepareResult> {
+        return asObjectResult<WorkerWorkspacePrepareResult>(
+            await this.#rpcClient.request("workspace.prepare", { workspace })
+        );
     }
 
     async closeToolSession(sessionId: string): Promise<void> {

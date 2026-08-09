@@ -45,8 +45,7 @@ test("McpContextRegistry persists active contexts and renews their sliding expir
         now += 30_000;
         const renewed = await registry.validateAndTouch("ctx-persisted", {
             instance: "demo-local",
-            principal: "local",
-            workspace: "/workspace"
+            principal: "local"
         });
         assert.equal(renewed.expiresAt, "2026-07-15T00:01:30.000Z");
 
@@ -55,8 +54,7 @@ test("McpContextRegistry persists active contexts and renews their sliding expir
         assert.equal(
             (await reloaded.validateAndTouch("ctx-persisted", {
                 instance: "demo-local",
-                principal: "local",
-                workspace: "/workspace"
+                principal: "local"
             })).ctxId,
             "ctx-persisted"
         );
@@ -153,6 +151,14 @@ test("McpEndpointWorker exposes environ_info and requires ctxId on every other t
                 workspace: "/workspace"
             },
             listTools: () => [bashRun],
+            async prepareWorkspace(workspace) {
+                return {
+                    projectMemoryAgentFile: `${workspace}/.memory/AGENT.md`,
+                    projectMemoryDirectory: `${workspace}/.memory`,
+                    temporaryDirectory: "/tmp/demo-local-123456",
+                    workspace
+                };
+            },
             snapshot: () => ({ ready: true })
         }
     });
@@ -174,6 +180,14 @@ test("McpEndpointWorker exposes environ_info and requires ctxId on every other t
     assert.equal(environmentRecord.instance, "demo-local");
     assert.equal(environmentRecord.skillsDirectory, "/home/demo/.devshell/skill");
     assert.equal(environmentRecord.workspace, "/projects/alpha");
+    assert.equal(environmentRecord.projectMemoryAgentFile, "/projects/alpha/.memory/AGENT.md");
+    assert.equal(environmentRecord.projectMemoryDirectory, "/projects/alpha/.memory");
+    assert.equal(environmentRecord.temporaryDirectory, "/tmp/demo-local-123456");
+    assert.deepEqual(environmentRecord.comment, [
+        "Read /projects/alpha/.memory/AGENT.md before working.",
+        "Use /projects/alpha/.memory for durable project memory; keep it useful for future sessions.",
+        "Use /tmp/demo-local-123456 for all temporary files."
+    ]);
     assert.deepEqual(environmentRecord.platform, {
         arch: "x86_64",
         distribution: { id: "arch", name: "Arch Linux", version: "rolling" },

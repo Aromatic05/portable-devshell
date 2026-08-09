@@ -32,10 +32,13 @@ export class McpToolCatalogEnvironment {
                     },
                     instance: { minLength: 1, type: "string" },
                     platform: { type: "object" },
+                    projectMemoryAgentFile: { minLength: 1, type: "string" },
+                    projectMemoryDirectory: { minLength: 1, type: "string" },
                     skillsDirectory: { minLength: 1, type: "string" },
+                    temporaryDirectory: { minLength: 1, type: "string" },
                     workspace: { minLength: 1, type: "string" }
                 },
-                required: ["ctxId", "expiresAt", "instance", "workspace", "platform", "skillsDirectory"],
+                required: ["ctxId", "expiresAt", "instance", "workspace", "platform", "skillsDirectory", "projectMemoryAgentFile", "projectMemoryDirectory", "temporaryDirectory"],
                 type: "object"
             },
             requiredCapabilities: []
