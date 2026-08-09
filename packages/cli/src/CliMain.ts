@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 
+import type { ConfigBatchUpdateRequest, ConfigDraft } from "@portable-devshell/shared";
+
 import { isCliEntrypoint } from "./CliEntrypoint.js";
 import { CliParser, type CliParsedCommand } from "./CliParser.js";
 import { executeArtifactCommand } from "./command/artifact/CliCommandArtifact.js";
@@ -146,6 +148,63 @@ export class CliMain {
             case "control.logs":
                 this.#stdout.write(renderControlLogs(await (await this.#lifecycle()).logs()));
                 return;
+            case "overview":
+                this.#writeJson(await this.#clients.overview.get());
+                return;
+            case "config.get":
+                this.#writeJson(await this.#clients.config.get());
+                return;
+            case "config.validate":
+                this.#writeJson(await this.#clients.config.validate(command.draft as ConfigDraft));
+                return;
+            case "config.update":
+                this.#writeJson(await this.#clients.config.update(command.request as ConfigBatchUpdateRequest));
+                return;
+            case "approval.list":
+                this.#writeJson(await this.#clients.tool.listApprovals(command.instance));
+                return;
+            case "approval.decide":
+                this.#writeJson(
+                    await this.#clients.tool.decideApproval(
+                        command.instance,
+                        command.approvalId,
+                        command.decision,
+                    ),
+                );
+                return;
+            case "oauth.status":
+                this.#writeJson(await this.#clients.mcp.status());
+                return;
+            case "oauth.list":
+                this.#writeJson(await this.#clients.mcp.listApprovals());
+                return;
+            case "oauth.decide":
+                this.#writeJson(
+                    await this.#clients.mcp.decideApproval(command.approvalId, command.decision),
+                );
+                return;
+            case "context.list":
+                this.#writeJson(await this.#clients.context.list());
+                return;
+            case "context.messages":
+                this.#writeJson(
+                    await this.#clients.contextMessage.list(command.instance, command.ctxId),
+                );
+                return;
+            case "context.send":
+                this.#writeJson(
+                    await this.#clients.contextMessage.queue(command.instance, {
+                        ctxId: command.ctxId,
+                        text: command.text,
+                    }),
+                );
+                return;
+            case "context.disable":
+                this.#writeJson(await this.#clients.context.disable(command.ctxId));
+                return;
+            case "context.renew":
+                this.#writeJson(await this.#clients.context.renew(command.ctxId));
+                return;
             case "artifact":
                 await executeArtifactCommand(command.args, this.#clients.artifact, this.#stdout);
                 return;
@@ -171,6 +230,15 @@ export class CliMain {
 
                 return;
             }
+            case "instance.delete":
+                this.#writeJson(await this.#clients.instance.delete(command.instance));
+                return;
+            case "instance.enable":
+                this.#writeJson(await this.#clients.instance.enable(command.instance));
+                return;
+            case "instance.disable":
+                this.#writeJson(await this.#clients.instance.disable(command.instance));
+                return;
             case "instance.help":
                 this.#stdout.write(`${renderInstanceUsage()}\n`);
                 return;
@@ -279,6 +347,10 @@ export class CliMain {
             homeDirectory: this.#homeDirectory,
             xdgRuntimeDir: this.#xdgRuntimeDir
         });
+    }
+
+    #writeJson(value: unknown): void {
+        this.#stdout.write(`${JSON.stringify(value, null, 2)}\n`);
     }
 
     async #startTui(): Promise<void> {
