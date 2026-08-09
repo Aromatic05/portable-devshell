@@ -7,6 +7,7 @@ pub mod terminal;
 pub mod tool_call;
 pub mod tool_session;
 pub mod tools_list;
+pub mod workspace;
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -111,5 +112,6 @@ pub fn register_control_handlers(
         stop::handler(shutdown_requested, active_processes, active_tool_calls),
     );
     handlers.insert("worker.ping".to_string(), ping::handler());
+    handlers.insert("workspace.prepare".to_string(), workspace::handler());
     handlers.insert("tools.list".to_string(), tools_list::handler(tools));
 }
