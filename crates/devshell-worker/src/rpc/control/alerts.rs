@@ -153,7 +153,25 @@ fn collect_advice(workspace: &Path, config: &AlertConfig) -> Vec<Advice> {
 fn worker_rss_bytes() -> Option<u64> {
     std::fs::read_to_string("/proc/self/status").ok()?.lines().find_map(|line| line.strip_prefix("VmRSS:")?.split_whitespace().next()?.parse::<u64>().ok().map(|value| value * 1024))
 }
-#[cfg(not(target_os = "linux"))]
+
+#[cfg(all(unix, not(target_os = "linux")))]
+fn worker_rss_bytes() -> Option<u64> {
+    let output = Command::new("ps").args(["-o", "rss=", "-p", &std::process::id().to_string()]).output().ok()?;
+    output.status.success().then(|| String::from_utf8_lossy(&output.stdout).trim().parse::<u64>().ok().map(|value| value * 1024))?
+}
+
+#[cfg(windows)]
+fn worker_rss_bytes() -> Option<u64> {
+    use std::mem::size_of;
+    use windows_sys::Win32::System::ProcessStatus::{GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS};
+    use windows_sys::Win32::System::Threading::GetCurrentProcess;
+
+    let mut counters: PROCESS_MEMORY_COUNTERS = unsafe { std::mem::zeroed() };
+    counters.cb = size_of::<PROCESS_MEMORY_COUNTERS>() as u32;
+    (unsafe { GetProcessMemoryInfo(GetCurrentProcess(), &mut counters, counters.cb) } != 0).then_some(counters.WorkingSetSize as u64)
+}
+
+#[cfg(not(any(unix, windows)))]
 fn worker_rss_bytes() -> Option<u64> { None }
 
 fn uncommitted_changes(workspace: &Path) -> Result<usize, String> {
