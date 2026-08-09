@@ -10,7 +10,9 @@ export type CliParsedCommand =
     | { draft: JsonValue; kind: "config.validate" }
     | { request: JsonValue; kind: "config.update" }
     | { kind: "approval.list"; instance: string }
-    | { approvalId: string; decision: "approve" | "deny"; instance: string; kind: "approval.decide" }
+    | { approvalId: string; decision: "approve" | "deny"; instance: string; kind: "approval.decide"; policyPatch?: JsonValue; reason?: string; remember?: boolean }
+    | { approvalId: string; instance: string; kind: "approval.show" }
+    | { callId?: string; instance: string; kind: "tool.calls" }
     | { kind: "oauth.status" }
     | { kind: "oauth.list" }
     | { approvalId: string; decision: "approve" | "deny"; kind: "oauth.decide" }
@@ -19,6 +21,7 @@ export type CliParsedCommand =
     | { ctxId: string; instance: string; kind: "context.send"; text: string }
     | { ctxId: string; kind: "context.disable" }
     | { ctxId: string; kind: "context.renew" }
+    | { instance: string; kind: "todo.delete"; taskId: string }
     | { kind: "control.logs" }
     | { kind: "control.restart" }
     | { kind: "control.start" }
@@ -72,6 +75,10 @@ export class CliParser {
                 return this.#parseConfig(argv.slice(1));
             case "approval":
                 return this.#parseApproval(argv.slice(1));
+            case "tool":
+                return this.#parseTool(argv.slice(1));
+            case "todo":
+                return this.#parseTodo(argv.slice(1));
             case "oauth":
                 return this.#parseOAuth(argv.slice(1));
             case "context":
@@ -194,6 +201,12 @@ export class CliParser {
                     kind: "config.update",
                     request: this.#parseSingleJsonArgument(argv, "config update requires <jsonUpdate>"),
                 };
+            case "instance":
+                return this.#parseConfigPatch(argv.slice(1), "instance");
+            case "mcp":
+                return this.#parseConfigPatch(argv.slice(1), "mcp");
+            case "web":
+                return this.#parseConfigPatch(argv.slice(1), "web");
             default:
                 throw CliRenderError.usage(`Unknown config command: ${argv[0] ?? ""}`.trim());
         }
@@ -203,16 +216,18 @@ export class CliParser {
         switch (argv[0]) {
             case "list":
                 return this.#expectInstanceCommand(argv, "approval.list");
+            case "show":
+                if (argv.length !== 3) throw CliRenderError.usage("approval show requires <instance> <approvalId>");
+                return { approvalId: this.#required(argv[2], "approvalId is required"), instance: this.#required(argv[1], "instance name is required"), kind: "approval.show" };
             case "approve":
             case "deny":
-                if (argv.length !== 3) {
-                    throw CliRenderError.usage(`approval ${argv[0]} requires <instance> <approvalId>`);
-                }
+                if (argv.length < 3) throw CliRenderError.usage(`approval ${argv[0]} requires <instance> <approvalId>`);
                 return {
                     approvalId: this.#required(argv[2], "approvalId is required"),
                     decision: argv[0],
                     instance: this.#required(argv[1], "instance name is required"),
                     kind: "approval.decide",
+                    ...this.#parseApprovalOptions(argv.slice(3)),
                 };
             default:
                 throw CliRenderError.usage(`Unknown approval command: ${argv[0] ?? ""}`.trim());
@@ -275,6 +290,51 @@ export class CliParser {
             default:
                 throw CliRenderError.usage(`Unknown context command: ${argv[0] ?? ""}`.trim());
         }
+    }
+
+    #parseTool(argv: readonly string[]): CliParsedCommand {
+        if (argv[0] !== "calls" || (argv.length !== 2 && argv.length !== 3)) {
+            throw CliRenderError.usage("tool calls requires <instance> [callId]");
+        }
+        return {
+            ...(argv[2] === undefined ? {} : { callId: this.#required(argv[2], "callId is required") }),
+            instance: this.#required(argv[1], "instance name is required"),
+            kind: "tool.calls",
+        };
+    }
+
+    #parseTodo(argv: readonly string[]): CliParsedCommand {
+        if (argv[0] !== "delete" || argv.length !== 3) {
+            throw CliRenderError.usage("todo delete requires <instance> <taskId>");
+        }
+        return { instance: this.#required(argv[1], "instance name is required"), kind: "todo.delete", taskId: this.#required(argv[2], "taskId is required") };
+    }
+
+    #parseConfigPatch(argv: readonly string[], target: "instance" | "mcp" | "web"): CliParsedCommand {
+        if (target === "instance") {
+            if (argv[0] !== "patch" || argv.length !== 3) throw CliRenderError.usage("config instance patch requires <instance> <jsonPatch>");
+            return { kind: "config.update", request: { instance: { instanceName: this.#required(argv[1], "instance name is required"), patch: this.#parseJson(this.#required(argv[2], "JSON patch is required")) } } };
+        }
+        if (argv[0] !== "patch" || argv.length !== 2) throw CliRenderError.usage(`config ${target} patch requires <jsonPatch>`);
+        return { kind: "config.update", request: { [target]: this.#parseJson(this.#required(argv[1], "JSON patch is required")) } };
+    }
+
+    #parseApprovalOptions(argv: readonly string[]): { policyPatch?: JsonValue; reason?: string; remember?: boolean } {
+        let policyPatch: JsonValue | undefined;
+        let reason: string | undefined;
+        let remember = false;
+        for (let index = 0; index < argv.length; index += 1) {
+            const option = argv[index]!;
+            if (option === "--remember") { remember = true; continue; }
+            const value = argv[index + 1];
+            if ((option !== "--reason" && option !== "--policy-patch") || value === undefined) {
+                throw CliRenderError.usage("approval options are --reason <text>, --remember, or --policy-patch <json>");
+            }
+            if (option === "--reason") reason = this.#required(value, "reason is required");
+            else policyPatch = this.#parseJson(this.#required(value, "policy patch is required"));
+            index += 1;
+        }
+        return { ...(policyPatch === undefined ? {} : { policyPatch }), ...(reason === undefined ? {} : { reason }), ...(remember ? { remember: true } : {}) };
     }
 
     #expectNoExtra<T extends CliParsedCommand>(argv: readonly string[], value: T): T {

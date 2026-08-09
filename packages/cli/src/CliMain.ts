@@ -163,12 +163,20 @@ export class CliMain {
             case "approval.list":
                 this.#writeJson(await this.#clients.tool.listApprovals(command.instance));
                 return;
+            case "approval.show":
+                this.#writeJson(await this.#clients.tool.getApproval(command.instance, command.approvalId));
+                return;
             case "approval.decide":
                 this.#writeJson(
                     await this.#clients.tool.decideApproval(
                         command.instance,
                         command.approvalId,
                         command.decision,
+                        {
+                            ...(command.policyPatch === undefined ? {} : { policyPatch: command.policyPatch }),
+                            ...(command.reason === undefined ? {} : { reason: command.reason }),
+                            ...(command.remember === undefined ? {} : { remember: command.remember }),
+                        },
                     ),
                 );
                 return;
@@ -204,6 +212,17 @@ export class CliMain {
                 return;
             case "context.renew":
                 this.#writeJson(await this.#clients.context.renew(command.ctxId));
+                return;
+            case "tool.calls":
+                this.#writeJson(
+                    await this.#clients.tool.listCalls(
+                        command.instance,
+                        command.callId === undefined ? undefined : { callIds: [command.callId] },
+                    ),
+                );
+                return;
+            case "todo.delete":
+                this.#writeJson(await this.#clients.todo.delete(command.instance, command.taskId));
                 return;
             case "artifact":
                 await executeArtifactCommand(command.args, this.#clients.artifact, this.#stdout);
