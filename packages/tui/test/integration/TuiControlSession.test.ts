@@ -72,6 +72,33 @@ test("TuiControlSession refreshes a visible overview after relevant instance eve
     );
 });
 
+test("TuiControlSession does not load details for a stopped instance during startup", async (t) => {
+    const runtimeDir = await createTestTempDirectory("tui-stopped-instance-startup");
+    const socketPath = createTestIpcPath("tui-stopped-instance", runtimeDir);
+    const worker = new FakeWorker("alpha", {
+        connectionState: "disconnected",
+        daemonState: "stopped",
+        ready: false,
+        status: "stopped"
+    });
+    const server = createServer(socketPath, worker, () => 7);
+    const session = new TuiControlSession({
+        clients: createTuiClients({ socketPath })
+    });
+
+    await server.start();
+    t.after(async () => {
+        await session.stop();
+        await server.stop();
+        await rm(runtimeDir, { force: true, recursive: true });
+    });
+
+    await session.start();
+
+    assert.equal(session.store.getState().connection.status, "connected");
+    assert.deepEqual(worker.logReadQueries, []);
+});
+
 test("Comment delivery never stalls visible Audit refreshes for the bound call or later calls", async (t) => {
     const runtimeDir = await createTestTempDirectory("tui-comment-audit-refresh");
     const socketPath = createTestIpcPath("tui-comment-audit", runtimeDir);
@@ -540,7 +567,10 @@ class FakeWorker {
     callToolCount = 0;
     decisions: Array<{ approvalId: string; decision: string }> = [];
 
-    constructor(name: string) {
+    constructor(
+        name: string,
+        private readonly initialSnapshot: Partial<ReturnType<FakeWorker["snapshot"]>> = {}
+    ) {
         this.#name = name;
         this.#logs = [
             {
@@ -589,7 +619,8 @@ class FakeWorker {
             lastSeq: this.#lastSeq,
             name: asInstanceName(this.#name),
             ready: true,
-            status: "ready"
+            status: "ready",
+            ...this.initialSnapshot
         } as const;
     }
 

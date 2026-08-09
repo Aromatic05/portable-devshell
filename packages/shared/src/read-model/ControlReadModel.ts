@@ -167,7 +167,9 @@ export class ControlReadModel {
             this.refreshContexts(epoch),
             options.config === true ? this.refreshConfig(epoch) : Promise.resolve(),
             options.artifacts === true ? this.refreshArtifacts(epoch) : Promise.resolve(),
-            ...instances.map(async ({ name }) => await this.refreshInstance(name, instanceKeys, undefined, epoch)),
+            ...instances
+                .filter((instance) => instance.snapshot.status === "ready" || instance.snapshot.status === "running")
+                .map(async ({ name }) => await this.refreshInstance(name, instanceKeys, undefined, epoch)),
         ]);
         if (!this.#current(epoch)) return;
         this.#replaceSubscriptions(instances.map(({ name }) => name), epoch);
