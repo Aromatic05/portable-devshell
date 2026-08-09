@@ -175,6 +175,8 @@ fn worker_rss_bytes() -> Option<u64> {
 fn worker_rss_bytes() -> Option<u64> { None }
 
 fn uncommitted_changes(workspace: &Path) -> Result<usize, String> {
+    let repository = Command::new("git").args(["rev-parse", "--is-inside-work-tree"]).current_dir(workspace).output().map_err(|error| error.to_string())?;
+    if !repository.status.success() || String::from_utf8_lossy(&repository.stdout).trim() != "true" { return Ok(0); }
     let output = Command::new("git").args(["status", "--porcelain"]).current_dir(workspace).output().map_err(|error| error.to_string())?;
     if !output.status.success() { return Err(String::from_utf8_lossy(&output.stderr).trim().to_string()); }
     Ok(String::from_utf8_lossy(&output.stdout).lines().count())
@@ -206,7 +208,13 @@ fn valid_advice(advice: &Advice) -> bool { !advice.text.trim().is_empty() && adv
 
 #[cfg(test)]
 mod tests {
-    use super::{AlertScript, run_script};
+    use super::{AlertScript, run_script, uncommitted_changes};
+
+    #[test]
+    fn non_git_workspace_has_no_uncommitted_changes() {
+        let workspace = crate::testing::temp_dir();
+        assert_eq!(uncommitted_changes(workspace.path()).unwrap(), 0);
+    }
 
     #[cfg(unix)]
     #[test]
