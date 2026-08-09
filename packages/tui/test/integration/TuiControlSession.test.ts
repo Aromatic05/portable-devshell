@@ -5,6 +5,7 @@ import test from "node:test";
 import {
     asInstanceName,
     type ApprovalRequest,
+    type InstanceSnapshot,
     type JsonValue,
     type OAuthApprovalRequest,
     type ToolCallQuery,
@@ -483,6 +484,7 @@ function createServer(
                 currentAssociation() {
                     return undefined;
                 },
+                async delete() {},
                 async read() {
                     return { items: [], revision: 0, summary: { completed: 0, total: 0 } };
                 },
@@ -569,7 +571,7 @@ class FakeWorker {
 
     constructor(
         name: string,
-        private readonly initialSnapshot: Partial<ReturnType<FakeWorker["snapshot"]>> = {}
+        private readonly initialSnapshot: Partial<InstanceSnapshot> = {}
     ) {
         this.#name = name;
         this.#logs = [
@@ -611,7 +613,7 @@ class FakeWorker {
         ];
     }
 
-    snapshot() {
+    snapshot(): InstanceSnapshot {
         this.snapshotCallCount += 1;
         return {
             connectionState: "connected",
