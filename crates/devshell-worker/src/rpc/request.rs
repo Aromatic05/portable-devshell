@@ -7,6 +7,7 @@ pub struct RpcRequestContext {
     pub operation_id: Option<String>,
     pub ctx_id: Option<String>,
     pub source: Option<String>,
+    pub workspace: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]

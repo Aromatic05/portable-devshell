@@ -5,6 +5,7 @@ export interface WorkerRpcRequestContext {
     operationId?: string;
     ctxId?: string;
     source?: string;
+    workspace?: string;
 }
 
 export interface WorkerRpcRequestEnvelope {

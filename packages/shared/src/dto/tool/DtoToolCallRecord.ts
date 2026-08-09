@@ -12,6 +12,7 @@ export interface ToolCallContext {
     purpose?: string;
     requestId?: string;
     ctxId?: string;
+    workspace?: string;
     source: ToolCallSource;
 }
 

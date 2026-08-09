@@ -162,6 +162,13 @@ export function readMcpInstanceName(input: JsonValue, toolName: string): string 
     return input.instance.trim();
 }
 
+export function readMcpWorkspace(input: JsonValue, toolName: string): string {
+    if (!isRecord(input) || Object.keys(input).length !== 1 || input.workspace === undefined) {
+        throw invalidArguments(`${toolName} requires workspace.`);
+    }
+    return requiredString(input.workspace, "workspace");
+}
+
 export function readMcpSshCreateInput(input: JsonValue): McpSshInstanceCreateInput {
     if (!isRecord(input)) {
         throw invalidArguments("instance_create requires an object input.");

@@ -1,7 +1,7 @@
 import type { JsonValue, ToolCallContext } from "@portable-devshell/shared";
 
 import { McpContextRegistry } from "../../context/McpContextRegistry.js";
-import { assertMcpNoArguments } from "../McpEndpointInput.js";
+import { readMcpWorkspace } from "../McpEndpointInput.js";
 import type { McpEndpointCallContext, McpEndpointWorkerPort } from "../McpEndpointPort.js";
 import { mcpEndpointToolNotExposed, requireMcpEndpointEnvironment } from "./McpEndpointHandlerSupport.js";
 
@@ -30,12 +30,12 @@ export class McpEndpointHandlerEnvironment {
         if (!exposed) {
             throw mcpEndpointToolNotExposed(toolName, this.#instanceName);
         }
-        assertMcpNoArguments(input, toolName);
+        const workspace = readMcpWorkspace(input, toolName);
         const environment = requireMcpEndpointEnvironment(this.#worker, this.#instanceName);
         const record = await this.#contextRegistry.create({
             instance: this.#instanceName,
             principal: requestContext.principal,
-            workspace: environment.workspace
+            workspace
         });
         await this.#worker.appendMcpToolCalled(toolName, {
             ctxId: record.ctxId,
@@ -63,7 +63,7 @@ export class McpEndpointHandlerEnvironment {
                     ...(environment.platform.shell === undefined ? {} : { shell: environment.platform.shell.kind })
                 },
                 skillsDirectory: environment.skillsDirectory,
-                workspace: environment.workspace
+                workspace: record.workspace
             }),
             signal
         );

@@ -5,11 +5,18 @@ export const mcpEnvironmentToolName = "environ_info" as const;
 export class McpToolCatalogEnvironment {
     list(): ToolDefinition[] {
         return [{
-            description: "Create a session context. Call once, then pass ctxId to later tools.",
+            description: "Create a workspace session context. Call once, then pass ctxId to later tools.",
             group: "environment",
             inputSchema: {
                 additionalProperties: false,
-                properties: {},
+                properties: {
+                    workspace: {
+                        description: "Absolute path to the workspace on the worker machine.",
+                        minLength: 1,
+                        type: "string"
+                    }
+                },
+                required: ["workspace"],
                 type: "object"
             },
             name: mcpEnvironmentToolName,

@@ -26,7 +26,6 @@ pub struct RpcRouter {
     active_processes: Arc<ActiveProcessRegistry>,
     active_tool_calls: Arc<ActiveToolCallRegistry>,
     control_handlers: HashMap<String, Arc<dyn ControlHandler>>,
-    runtime: WorkerRuntimeContext,
     tools: Arc<ToolRegistry>,
     policy: Arc<dyn SecurityPolicy>,
     shutdown_requested: Arc<AtomicBool>,
@@ -68,7 +67,6 @@ impl RpcRouter {
             active_processes,
             active_tool_calls,
             control_handlers,
-            runtime,
             tools,
             policy,
             shutdown_requested,
@@ -118,8 +116,23 @@ impl RpcRouter {
             .map_err(|message| RpcError::new("rpc.methodNotFound", message))?;
         let tool = self.tools.find(&tool_name).map_err(RpcError::from)?;
         let context = request.context.as_ref();
+        let workspace = context
+            .and_then(|value| value.workspace.as_deref())
+            .ok_or_else(|| RpcError::new("rpc.invalidContext", "tool calls require a workspace context"))?;
+        let workspace = PathBuf::from(workspace).canonicalize().map_err(|error| {
+            RpcError::new(
+                "rpc.invalidContext",
+                format!("failed to resolve workspace {workspace}: {error}"),
+            )
+        })?;
+        if !workspace.is_dir() {
+            return Err(RpcError::new(
+                "rpc.invalidContext",
+                format!("workspace is not a directory: {}", workspace.display()),
+            ));
+        }
         tool.call(ToolCall {
-            workspace: PathBuf::from(&self.runtime.workspace),
+            workspace,
             params: request.params.clone(),
             ctx_id: context
                 .and_then(|value| value.ctx_id.clone())

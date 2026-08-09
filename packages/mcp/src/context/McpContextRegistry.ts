@@ -18,6 +18,8 @@ export interface McpContextBinding {
     workspace: string;
 }
 
+export type McpContextValidationBinding = Omit<McpContextBinding, "workspace">;
+
 interface McpContextDocument {
     contexts: McpContextRecord[];
     version: 1;
@@ -87,7 +89,7 @@ export class McpContextRegistry {
         });
     }
 
-    async validateAndTouch(ctxId: string, binding: McpContextBinding): Promise<McpContextRecord> {
+    async validateAndTouch(ctxId: string, binding: McpContextValidationBinding): Promise<McpContextRecord> {
         return await this.#run(async () => {
             this.#assertInitialized();
             if (!isCtxId(ctxId)) {
@@ -110,8 +112,7 @@ export class McpContextRegistry {
             }
             if (
                 record.principal !== binding.principal ||
-                record.instance !== binding.instance ||
-                record.workspace !== binding.workspace
+                record.instance !== binding.instance
             ) {
                 throw invalidContext(ctxId);
             }

@@ -1,6 +1,4 @@
 import {
-    createError,
-    errorCodes,
     mergeComments,
     resolveResultHints,
     type JsonValue,
@@ -162,13 +160,13 @@ export class McpEndpointDispatch {
     ): Promise<ToolCallContext> {
         const record = await this.#contextRegistry.validateAndTouch(ctxId, {
             instance: this.#instanceName,
-            principal: requestContext.principal,
-            workspace: this.#currentWorkspace()
+            principal: requestContext.principal
         });
         const context: ToolCallContext = {
             ctxId: record.ctxId,
             requestId: requestContext.requestId,
-            source: "mcp"
+            source: "mcp",
+            workspace: record.workspace
         };
         await this.#worker.appendMcpToolCalled(toolName, {
             ctxId: context.ctxId,
@@ -225,16 +223,4 @@ export class McpEndpointDispatch {
         }
     }
 
-    #currentWorkspace(): string {
-        const workspace = this.#worker.handshake?.workspace ?? this.#worker.workspacePath;
-        if (workspace !== undefined && workspace.length > 0) {
-            return workspace;
-        }
-        throw createError({
-            code: errorCodes.coreWorkerHandshakeFailed,
-            details: { instance: this.#instanceName },
-            message: `Workspace information is unavailable for ${this.#instanceName}.`,
-            retryable: true
-        });
-    }
 }
