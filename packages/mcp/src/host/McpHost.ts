@@ -28,6 +28,13 @@ interface WorkerInstanceLike {
     ): Promise<JsonValue>;
     hasToolSchemaCache?(): boolean;
     listTools(): ToolDefinition[];
+    prepareWorkspace?(workspace: string): Promise<{
+        projectMemoryAgentFile: string;
+        projectMemoryDirectory: string;
+        temporaryDirectory: string;
+        workspace: string;
+    }>;
+    readAlerts(workspace: string): Promise<{ advice: Array<{ code: string; text: string }> }>;
     snapshot(): { ready?: boolean };
 }
 

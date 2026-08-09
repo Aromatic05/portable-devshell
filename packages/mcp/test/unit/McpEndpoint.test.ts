@@ -839,6 +839,7 @@ function createWorkerHarness(options?: {
                     workspace
                 };
             },
+            async readAlerts() { return { advice: [] }; },
             hasToolSchemaCache() {
                 return hasToolSchemaCache;
             },

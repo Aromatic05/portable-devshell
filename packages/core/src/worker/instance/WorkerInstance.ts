@@ -170,6 +170,11 @@ export class WorkerInstance {
         return await this.#protocolClient.prepareWorkspace(workspace);
     }
 
+    async readAlerts(workspace: string): Promise<Awaited<ReturnType<WorkerProtocolClient["readAlerts"]>>> {
+        this.#assertReady();
+        return await this.#protocolClient.readAlerts(workspace, this.#config.alerts);
+    }
+
     async attachTerminal(input: {
         fromSeq: number;
         generation: number;

@@ -29,6 +29,9 @@ export interface McpEndpointWorkerPort extends McpEndpointCatalogWorker {
         temporaryDirectory: string;
         workspace: string;
     }>;
+    readAlerts(workspace: string): Promise<{
+        advice: Array<{ code: string; text: string }>;
+    }>;
     readonly handshake?: McpEndpointEnvironmentHandshake;
     readonly workspacePath?: string;
 }

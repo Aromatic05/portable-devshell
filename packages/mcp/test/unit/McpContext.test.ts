@@ -159,6 +159,9 @@ test("McpEndpointWorker exposes environ_info and requires ctxId on every other t
                     workspace
                 };
             },
+            async readAlerts() {
+                return { advice: [{ code: "worker.memory.high", text: "Worker memory is high." }] };
+            },
             snapshot: () => ({ ready: true })
         }
     });
@@ -186,7 +189,8 @@ test("McpEndpointWorker exposes environ_info and requires ctxId on every other t
     assert.deepEqual(environmentRecord.comment, [
         "Read /projects/alpha/.memory/AGENT.md before working.",
         "Use /projects/alpha/.memory for durable project memory; keep it useful for future sessions.",
-        "Use /tmp/demo-local-123456 for all temporary files."
+        "Use /tmp/demo-local-123456 for all temporary files.",
+        "Worker memory is high."
     ]);
     assert.deepEqual(environmentRecord.platform, {
         arch: "x86_64",

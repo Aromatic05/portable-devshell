@@ -1,4 +1,5 @@
 pub mod artifact_payload;
+pub mod alerts;
 pub mod handshake;
 pub mod ping;
 pub mod status;
@@ -36,6 +37,7 @@ pub fn register_control_handlers(
     payloads: Arc<ArtifactPayloadStore>,
     receives: Arc<ArtifactReceiveStore>,
     terminals: TerminalManager,
+    alerts: Arc<alerts::AlertService>,
 ) {
     handlers.insert(
         "artifact.receive.begin".to_string(),
@@ -113,5 +115,6 @@ pub fn register_control_handlers(
     );
     handlers.insert("worker.ping".to_string(), ping::handler());
     handlers.insert("workspace.prepare".to_string(), workspace::handler());
+    handlers.insert("alerts.read".to_string(), alerts::handler(alerts));
     handlers.insert("tools.list".to_string(), tools_list::handler(tools));
 }

@@ -42,6 +42,7 @@ export class McpEndpointHandlerEnvironment {
             });
         }
         const prepared = await prepareWorkspace.call(this.#worker, workspace);
+        const alerts = (await this.#worker.readAlerts(prepared.workspace)).advice;
         const record = await this.#contextRegistry.create({
             instance: this.#instanceName,
             principal: requestContext.principal,
@@ -66,7 +67,8 @@ export class McpEndpointHandlerEnvironment {
                 comment: [
                     `Read ${prepared.projectMemoryAgentFile} before working.`,
                     `Use ${prepared.projectMemoryDirectory} for durable project memory; keep it useful for future sessions.`,
-                    `Use ${prepared.temporaryDirectory} for all temporary files.`
+                    `Use ${prepared.temporaryDirectory} for all temporary files.`,
+                    ...alerts.map((advice) => advice.text)
                 ],
                 instance: this.#instanceName,
                 platform: {

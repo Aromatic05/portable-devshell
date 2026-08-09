@@ -64,6 +64,7 @@ export class InstanceFactory {
         const effectiveSecurityMode: "disabled" | "workspace" =
             instance.security?.mode === "workspace" ? "workspace" : "disabled";
         const common = {
+            alerts: instance.alerts,
             defaultWorkspace: instance.workspace === undefined ? undefined : asWorkspacePath(instance.workspace),
             env: {
                 ...instance.env,

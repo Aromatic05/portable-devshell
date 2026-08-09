@@ -1,4 +1,4 @@
-import type { ArtifactPayloadDescriptor, JsonValue } from "@portable-devshell/shared";
+import type { ArtifactPayloadDescriptor, ControlInstanceAlertsConfig, JsonValue } from "@portable-devshell/shared";
 
 import { WorkerRpcClient } from "../rpc/WorkerRpcClient.js";
 
@@ -63,6 +63,15 @@ export interface WorkerWorkspacePrepareResult {
     projectMemoryDirectory: string;
     temporaryDirectory: string;
     workspace: string;
+}
+
+export interface WorkerAlertAdvice {
+    code: string;
+    text: string;
+}
+
+export interface WorkerAlertsReadResult {
+    advice: WorkerAlertAdvice[];
 }
 
 export type WorkerArtifactPayloadOpenInput =
@@ -146,6 +155,12 @@ export class WorkerProtocolClient {
     async prepareWorkspace(workspace: string): Promise<WorkerWorkspacePrepareResult> {
         return asObjectResult<WorkerWorkspacePrepareResult>(
             await this.#rpcClient.request("workspace.prepare", { workspace })
+        );
+    }
+
+    async readAlerts(workspace: string, config: ControlInstanceAlertsConfig | undefined): Promise<WorkerAlertsReadResult> {
+        return asObjectResult<WorkerAlertsReadResult>(
+            await this.#rpcClient.request("alerts.read", { config, workspace } as unknown as JsonValue)
         );
     }
 

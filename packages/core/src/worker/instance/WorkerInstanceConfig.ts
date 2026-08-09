@@ -1,4 +1,4 @@
-import type { ApprovalPolicy, ApprovalTimeout, EffectiveSecurityMode, InstanceName, WorkspacePath } from "@portable-devshell/shared";
+import type { ApprovalPolicy, ApprovalTimeout, ControlInstanceAlertsConfig, EffectiveSecurityMode, InstanceName, WorkspacePath } from "@portable-devshell/shared";
 
 import type { WorkerCommandTransport } from "../command/WorkerCommandTransport.js";
 import { WORKER_PROTOCOL_VERSION, type WorkerHandshakeParams } from "../protocol/WorkerProtocolClient.js";
@@ -12,6 +12,7 @@ import {
 export type WorkerManagementMode = "controllerManaged" | "selfManaged";
 
 interface WorkerInstanceConfigCommon {
+    alerts?: ControlInstanceAlertsConfig;
     effectiveSecurityMode?: EffectiveSecurityMode;
     name: InstanceName;
     defaultWorkspace?: WorkspacePath;

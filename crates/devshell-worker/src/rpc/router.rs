@@ -10,6 +10,7 @@ use crate::daemon::process::WorkerRuntimeContext;
 use crate::daemon::process_registry::ActiveProcessRegistry;
 use crate::instance::WorkerConfig;
 use crate::rpc::control::register_control_handlers;
+use crate::rpc::control::alerts::AlertService;
 use crate::rpc::error::RpcError;
 use crate::rpc::request::RpcRequest;
 use crate::rpc::response::RpcResponse;
@@ -48,6 +49,7 @@ impl RpcRouter {
             PathBuf::from(&runtime.workspace),
             Arc::clone(&policy),
         );
+        let alerts = Arc::new(AlertService::new());
         let mut control_handlers = HashMap::new();
         register_control_handlers(
             &mut control_handlers,
@@ -61,6 +63,7 @@ impl RpcRouter {
             payloads,
             receives,
             terminals.clone(),
+            alerts,
         );
 
         Self {
