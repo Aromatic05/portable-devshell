@@ -136,6 +136,10 @@ export class WebStore {
         await this.#model.refreshInstance(name);
     }
 
+    async refreshToolCall(instance: string): Promise<void> {
+        await this.#model.refreshInstance(instance, ["toolCalls", "logs"]);
+    }
+
     async decideTool(
         instance: string,
         approvalId: string,

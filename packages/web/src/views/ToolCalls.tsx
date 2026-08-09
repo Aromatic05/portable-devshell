@@ -340,8 +340,10 @@ export function ToolCalls({
                 : <ol className="feed activity-feed">
                     {selection.items.map((call) => <ToolCallEntry
                         call={call}
+                        disabled={!interactive}
                         key={`${call.instance}-${call.callId}`}
                         logs={instanceState[call.instance]?.logs ?? []}
+                        onRefresh={async () => await store.refreshToolCall(call.instance)}
                     />)}
                 </ol>}
         <Pagination
