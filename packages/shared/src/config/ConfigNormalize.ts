@@ -16,6 +16,7 @@ import type {
     ConfigWebView,
     ControlConfig,
     ControlGlobalConfig,
+    ControlInstanceAlertsConfig,
     ControlInstanceConfig,
     ControlInstanceToolsConfig,
     ControlMcpAuthConfig,
@@ -85,6 +86,7 @@ export function normalizeConfigInstanceDraft(
 
     const common = {
         approvalPolicy: cloneApprovalPolicy(draft.approvalPolicy),
+        alerts: cloneAlerts(draft.alerts),
         enabled: draft.enabled ?? context.defaultEnabled,
         env: cloneNonEmptyRecord(draft.env),
         logs: cloneOptionalRecord(draft.logs),
@@ -178,6 +180,7 @@ export function applyConfigInstancePatch(
     return {
         ...base,
         approvalPolicy: applyNullable(patch.approvalPolicy, base.approvalPolicy),
+        alerts: applyNullable(patch.alerts, base.alerts),
         container: providerChanged
             ? applyNullable(patch.container, undefined)
             : applyNullable(patch.container, base.container),
@@ -307,6 +310,7 @@ function toWebView(web: ControlGlobalConfig["web"]): ConfigWebView {
 export function toConfigInstanceDraft(instance: ControlInstanceConfig): ConfigInstanceDraft {
     return {
         approvalPolicy: cloneApprovalPolicy(instance.approvalPolicy),
+        alerts: cloneAlerts(instance.alerts),
         container: instance.container === undefined ? undefined : cloneContainer(instance.container),
         dockerBinary: instance.dockerBinary,
         enabled: instance.enabled,
@@ -522,6 +526,13 @@ function cloneTools(tools: ControlInstanceToolsConfig | undefined): ControlInsta
                                       )
                         }
           };
+}
+
+function cloneAlerts(alerts: ControlInstanceAlertsConfig | undefined): ControlInstanceAlertsConfig | undefined {
+    return alerts === undefined ? undefined : {
+        ...alerts,
+        scripts: alerts.scripts?.map((script) => ({ ...script, command: [...script.command] }))
+    };
 }
 
 function cloneOptionalRecord<T>(record: T | undefined): T | undefined {

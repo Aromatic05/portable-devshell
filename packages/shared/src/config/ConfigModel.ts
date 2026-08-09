@@ -20,6 +20,19 @@ export interface ControlInstanceLogsConfig {
     retentionDays?: number;
 }
 
+export interface ControlInstanceAlertScriptConfig {
+    command: string[];
+    id: string;
+    timeoutMs?: number;
+}
+
+export interface ControlInstanceAlertsConfig {
+    intervalMs?: number;
+    maxUncommittedChanges?: number;
+    scripts?: ControlInstanceAlertScriptConfig[];
+    workerMemoryBytes?: number;
+}
+
 export interface ControlToolSchedulerToolLimitConfig {
     maxRunning?: number;
     queueDepth?: number;
@@ -57,6 +70,7 @@ export interface ControlInstanceSshConfig {
 }
 
 interface ControlInstanceConfigBase {
+    alerts?: ControlInstanceAlertsConfig;
     approvalPolicy?: ApprovalPolicy;
     enabled: boolean;
     env?: Record<string, string>;
@@ -217,6 +231,7 @@ export interface ConfigInstanceMcpDraft {
 }
 
 export interface ConfigInstanceDraft {
+    alerts?: ControlInstanceAlertsConfig;
     approvalPolicy?: ApprovalPolicy;
     container?: ConfigContainerDraft;
     dockerBinary?: string;
@@ -282,6 +297,7 @@ export interface ConfigDraft extends ConfigGlobalDraft {
 export type ConfigNullable<T> = T | null;
 
 export interface ConfigInstancePatch {
+    alerts?: ConfigNullable<ControlInstanceAlertsConfig>;
     approvalPolicy?: ConfigNullable<ApprovalPolicy>;
     container?: ConfigNullable<ConfigContainerDraft>;
     dockerBinary?: ConfigNullable<string>;

@@ -22,6 +22,7 @@ import type {
     ConfigUpdateInstanceRequest,
     ConfigUpdateMcpRequest,
     ConfigUpdateWebRequest,
+    ControlInstanceAlertsConfig,
     ControlInstanceLogsConfig,
     ControlInstanceToolsConfig,
     ControlProviderKind,
@@ -31,6 +32,7 @@ import type {
 
 const instanceKeys = [
     "approvalPolicy",
+    "alerts",
     "container",
     "dockerBinary",
     "enabled",
@@ -88,6 +90,7 @@ export function parseConfigInstanceDraft(
             record.approvalPolicy === undefined
                 ? undefined
                 : parseApprovalPolicy(record.approvalPolicy, [...path, "approvalPolicy"]),
+        alerts: record.alerts === undefined ? undefined : parseAlerts(record.alerts, [...path, "alerts"]),
         container:
             record.container === undefined
                 ? undefined
@@ -133,6 +136,7 @@ export function parseConfigInstancePatch(
             record.approvalPolicy,
             (entry) => parseApprovalPolicy(entry, [...path, "approvalPolicy"])
         ),
+        alerts: readNullable(record.alerts, (entry) => parseAlerts(entry, [...path, "alerts"])),
         container: readNullable(record.container, (entry) => parseContainerDraft(entry, [...path, "container"])),
         dockerBinary: readNullable(record.dockerBinary, (entry) =>
             readRequiredTrimmedString(entry, [...path, "dockerBinary"])
@@ -614,6 +618,28 @@ function parseLogs(value: unknown, path: readonly ConfigPathSegment[]): ControlI
         eventBufferSize: readOptionalInteger(record.eventBufferSize, [...path, "eventBufferSize"]),
         maxBytes: readOptionalInteger(record.maxBytes, [...path, "maxBytes"]),
         retentionDays: readOptionalInteger(record.retentionDays, [...path, "retentionDays"])
+    };
+}
+
+function parseAlerts(value: unknown, path: readonly ConfigPathSegment[]): ControlInstanceAlertsConfig {
+    const record = readRecord(value, path);
+    assertKnownKeys(record, ["intervalMs", "maxUncommittedChanges", "scripts", "workerMemoryBytes"], path);
+    return {
+        intervalMs: readOptionalInteger(record.intervalMs, [...path, "intervalMs"]),
+        maxUncommittedChanges: readOptionalInteger(record.maxUncommittedChanges, [...path, "maxUncommittedChanges"]),
+        scripts: record.scripts === undefined ? undefined : readArray(record.scripts, [...path, "scripts"]).map((entry, index) => {
+            const scriptPath = [...path, "scripts", index] as const;
+            const script = readRecord(entry, scriptPath);
+            assertKnownKeys(script, ["command", "id", "timeoutMs"], scriptPath);
+            return {
+                command: readArray(script.command, [...scriptPath, "command"]).map((value, commandIndex) =>
+                    readRequiredTrimmedString(value, [...scriptPath, "command", commandIndex])
+                ),
+                id: readRequiredTrimmedString(script.id, [...scriptPath, "id"]),
+                timeoutMs: readOptionalInteger(script.timeoutMs, [...scriptPath, "timeoutMs"])
+            };
+        }),
+        workerMemoryBytes: readOptionalInteger(record.workerMemoryBytes, [...path, "workerMemoryBytes"])
     };
 }
 
