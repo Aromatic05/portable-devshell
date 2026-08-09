@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { createError, type JsonValue, type PrefixRouteContext } from "@portable-devshell/shared";
+import { createError, type JsonValue, type PrefixRouteContext, type WorkspacePath } from "@portable-devshell/shared";
 
 import { createToolRouteModule } from "../../src/instance/tool/ToolRouteModule.ts";
 
@@ -31,7 +31,7 @@ function callHandler(callTool: (toolName: string, input: JsonValue) => Promise<J
             async readToolCalls() {
                 throw new Error("unused");
             },
-            workspacePath: "/workspace"
+            workspacePath: "/workspace" as WorkspacePath
         }
     });
     const operation = module.operations.find((entry) => entry.name === "call");
