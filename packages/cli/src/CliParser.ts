@@ -5,6 +5,20 @@ import { renderCliUsage, renderInstanceUsage, renderWatchUsage } from "./render/
 
 export type CliParsedCommand =
     | { kind: "help" }
+    | { kind: "overview" }
+    | { kind: "config.get" }
+    | { draft: JsonValue; kind: "config.validate" }
+    | { request: JsonValue; kind: "config.update" }
+    | { kind: "approval.list"; instance: string }
+    | { approvalId: string; decision: "approve" | "deny"; instance: string; kind: "approval.decide" }
+    | { kind: "oauth.status" }
+    | { kind: "oauth.list" }
+    | { approvalId: string; decision: "approve" | "deny"; kind: "oauth.decide" }
+    | { kind: "context.list" }
+    | { ctxId?: string; instance: string; kind: "context.messages" }
+    | { ctxId: string; instance: string; kind: "context.send"; text: string }
+    | { ctxId: string; kind: "context.disable" }
+    | { ctxId: string; kind: "context.renew" }
     | { kind: "control.logs" }
     | { kind: "control.restart" }
     | { kind: "control.start" }
@@ -14,6 +28,9 @@ export type CliParsedCommand =
     | { kind: "tui" }
     | { input: JsonValue; instance: string; kind: "instance.call"; toolName: string }
     | { kind: "instance.create" }
+    | { instance: string; kind: "instance.delete" }
+    | { instance: string; kind: "instance.enable" }
+    | { instance: string; kind: "instance.disable" }
     | { kind: "instance.help" }
     | { instance: string; kind: "instance.deviceCode" }
     | { kind: "instance.list" }
@@ -49,6 +66,16 @@ export class CliParser {
                 return this.#expectNoExtra(argv, { kind: "control.status" });
             case "logs":
                 return this.#expectNoExtra(argv, { kind: "control.logs" });
+            case "overview":
+                return this.#expectNoExtra(argv, { kind: "overview" });
+            case "config":
+                return this.#parseConfig(argv.slice(1));
+            case "approval":
+                return this.#parseApproval(argv.slice(1));
+            case "oauth":
+                return this.#parseOAuth(argv.slice(1));
+            case "context":
+                return this.#parseContext(argv.slice(1));
             case "artifact":
                 return { args: [...argv.slice(1)], kind: "artifact" };
             case "tui":
@@ -70,6 +97,12 @@ export class CliParser {
                 return this.#expectNoExtra(argv, { kind: "instance.help" });
             case "create":
                 return this.#expectNoExtra(argv, { kind: "instance.create" });
+            case "delete":
+                return this.#expectInstanceCommand(argv, "instance.delete");
+            case "enable":
+                return this.#expectInstanceCommand(argv, "instance.enable");
+            case "disable":
+                return this.#expectInstanceCommand(argv, "instance.disable");
             case "device-code":
                 return this.#expectReverseInstanceCommand(argv, "instance.deviceCode");
             case "list":
@@ -147,12 +180,114 @@ export class CliParser {
         }
     }
 
+    #parseConfig(argv: readonly string[]): CliParsedCommand {
+        switch (argv[0]) {
+            case "get":
+                return this.#expectNoExtra(argv, { kind: "config.get" });
+            case "validate":
+                return {
+                    draft: this.#parseSingleJsonArgument(argv, "config validate requires <jsonDraft>"),
+                    kind: "config.validate",
+                };
+            case "update":
+                return {
+                    kind: "config.update",
+                    request: this.#parseSingleJsonArgument(argv, "config update requires <jsonUpdate>"),
+                };
+            default:
+                throw CliRenderError.usage(`Unknown config command: ${argv[0] ?? ""}`.trim());
+        }
+    }
+
+    #parseApproval(argv: readonly string[]): CliParsedCommand {
+        switch (argv[0]) {
+            case "list":
+                return this.#expectInstanceCommand(argv, "approval.list");
+            case "approve":
+            case "deny":
+                if (argv.length !== 3) {
+                    throw CliRenderError.usage(`approval ${argv[0]} requires <instance> <approvalId>`);
+                }
+                return {
+                    approvalId: this.#required(argv[2], "approvalId is required"),
+                    decision: argv[0],
+                    instance: this.#required(argv[1], "instance name is required"),
+                    kind: "approval.decide",
+                };
+            default:
+                throw CliRenderError.usage(`Unknown approval command: ${argv[0] ?? ""}`.trim());
+        }
+    }
+
+    #parseOAuth(argv: readonly string[]): CliParsedCommand {
+        switch (argv[0]) {
+            case "status":
+                return this.#expectNoExtra(argv, { kind: "oauth.status" });
+            case "list":
+                return this.#expectNoExtra(argv, { kind: "oauth.list" });
+            case "approve":
+            case "deny":
+                if (argv.length !== 2) {
+                    throw CliRenderError.usage(`oauth ${argv[0]} requires <approvalId>`);
+                }
+                return {
+                    approvalId: this.#required(argv[1], "approvalId is required"),
+                    decision: argv[0],
+                    kind: "oauth.decide",
+                };
+            default:
+                throw CliRenderError.usage(`Unknown oauth command: ${argv[0] ?? ""}`.trim());
+        }
+    }
+
+    #parseContext(argv: readonly string[]): CliParsedCommand {
+        switch (argv[0]) {
+            case "list":
+                return this.#expectNoExtra(argv, { kind: "context.list" });
+            case "messages":
+                if (argv.length !== 2 && argv.length !== 3) {
+                    throw CliRenderError.usage("context messages requires <instance> [ctxId]");
+                }
+                return {
+                    ...(argv[2] === undefined ? {} : { ctxId: this.#required(argv[2], "ctxId is required") }),
+                    instance: this.#required(argv[1], "instance name is required"),
+                    kind: "context.messages",
+                };
+            case "send":
+                if (argv.length !== 4) {
+                    throw CliRenderError.usage("context send requires <instance> <ctxId> <text>");
+                }
+                return {
+                    ctxId: this.#required(argv[2], "ctxId is required"),
+                    instance: this.#required(argv[1], "instance name is required"),
+                    kind: "context.send",
+                    text: this.#required(argv[3], "text is required"),
+                };
+            case "disable":
+            case "renew":
+                if (argv.length !== 2) {
+                    throw CliRenderError.usage(`context ${argv[0]} requires <ctxId>`);
+                }
+                return {
+                    ctxId: this.#required(argv[1], "ctxId is required"),
+                    kind: argv[0] === "disable" ? "context.disable" : "context.renew",
+                };
+            default:
+                throw CliRenderError.usage(`Unknown context command: ${argv[0] ?? ""}`.trim());
+        }
+    }
+
     #expectNoExtra<T extends CliParsedCommand>(argv: readonly string[], value: T): T {
         if (argv.length !== 1) {
             throw CliRenderError.usage(`Unexpected arguments for ${argv[0]}`);
         }
 
         return value;
+    }
+
+    #parseSingleJsonArgument(argv: readonly string[], message: string): JsonValue {
+        if (argv.length !== 2) throw CliRenderError.usage(message);
+        return this.#parseJson(this.#required(argv[1], "JSON input is required"));
     }
 
     #required(value: string | undefined, message: string): string {
@@ -173,7 +308,14 @@ export class CliParser {
 
     #expectInstanceCommand(
         argv: readonly string[],
-        kind: "instance.start" | "instance.status" | "instance.stop"
+        kind:
+            | "approval.list"
+            | "instance.delete"
+            | "instance.disable"
+            | "instance.enable"
+            | "instance.start"
+            | "instance.status"
+            | "instance.stop"
     ): Extract<CliParsedCommand, { kind: typeof kind }> {
         if (argv.length !== 2) {
             throw CliRenderError.usage(`${kind.split(".")[1]} requires <instance>`);
