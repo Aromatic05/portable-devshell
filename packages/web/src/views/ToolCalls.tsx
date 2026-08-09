@@ -46,6 +46,19 @@ export function ToolCalls({
         () => Object.values(instanceState).flatMap((value) => value.commentCalls),
         [instanceState],
     );
+    const contextStatuses = useMemo(
+        () => new Map(state.readModel.contexts.map((context) => [context.ctxId, context.status])),
+        [state.readModel.contexts],
+    );
+    const calls = useMemo(
+        () => allCalls.filter((call) =>
+            call.ctxId === undefined ||
+            filters.contextStatus === "all" ||
+            contextStatuses.get(call.ctxId) === undefined ||
+            contextStatuses.get(call.ctxId) === filters.contextStatus
+        ),
+        [allCalls, contextStatuses, filters.contextStatus],
+    );
     const instances = useMemo(
         () => state.readModel.instances.map((instance) => instance.name).sort(),
         [state.readModel.instances],
@@ -59,7 +72,15 @@ export function ToolCalls({
         }
         return owners;
     }, [allCalls, allCommentCalls, state.readModel.contexts]);
-    const contexts = useMemo(() => [...contextInstances.keys()].sort(), [contextInstances]);
+    const contexts = useMemo(
+        () => [...contextInstances.keys()]
+            .filter((ctxId) =>
+                filters.contextStatus === "all" ||
+                contextStatuses.get(ctxId) === filters.contextStatus
+            )
+            .sort(),
+        [contextInstances, contextStatuses, filters.contextStatus],
+    );
     const contextInstance = selectedCtxId === undefined
         ? undefined
         : contextInstances.get(selectedCtxId);
@@ -79,18 +100,18 @@ export function ToolCalls({
         [contextFilter, filters, instance],
     );
     const tools = useMemo(
-        () => [...new Set(allCalls.map((call) => call.toolName))].sort(),
-        [allCalls],
+        () => [...new Set(calls.map((call) => call.toolName))].sort(),
+        [calls],
     );
     const selection = useMemo(
         () => selectToolCalls(
-            allCalls,
+            calls,
             effectiveFilters,
             Date.now(),
             toolCallPage * toolCallPageSize,
             toolCallPageSize,
         ),
-        [allCalls, effectiveFilters, toolCallPage],
+        [calls, effectiveFilters, toolCallPage],
     );
     const active = hasActiveToolCallFilters(effectiveFilters);
     const ctxId = selectedContextId(effectiveFilters.ctxId);

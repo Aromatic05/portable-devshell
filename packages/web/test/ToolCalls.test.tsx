@@ -33,6 +33,15 @@ const state: WebState = {
             principal: "client-alpha",
             status: "active",
             workspace: "/workspace/alpha",
+        }, {
+            createdAt: "2026-07-31T08:00:00Z",
+            ctxId: "ctx-beta",
+            expiresAt: "2026-08-01T08:00:00Z",
+            instance: "beta",
+            lastAccessedAt: "2026-07-31T09:00:00Z",
+            principal: "client-beta",
+            status: "active",
+            workspace: "/workspace/beta",
         }],
         instances: [
             {
@@ -266,6 +275,60 @@ it("paginates matching tool calls", () => {
     fireEvent.click(screen.getByRole("button", { name: "Next page" }));
     expect(view.container.querySelectorAll(".activity-feed > li")).toHaveLength(20);
     expect(pagination).toHaveTextContent("Page 2 of 8");
+});
+
+it("filters Contexts and tool calls by status, defaulting to active", () => {
+    const expiredContextState: WebState = {
+        ...state,
+        readModel: {
+            ...state.readModel,
+            contexts: [
+                ...state.readModel.contexts,
+                {
+                    createdAt: "2026-07-30T08:00:00Z",
+                    ctxId: "ctx-expired",
+                    expiresAt: "2026-07-31T08:00:00Z",
+                    instance: "alpha",
+                    lastAccessedAt: "2026-07-31T07:00:00Z",
+                    principal: "client-alpha",
+                    status: "expired" as const,
+                    workspace: "/workspace/alpha",
+                },
+            ],
+            instanceState: {
+                ...state.readModel.instanceState,
+                alpha: {
+                    ...state.readModel.instanceState.alpha!,
+                    toolCalls: [
+                        alphaCall,
+                        {
+                            ...alphaCall,
+                            callId: "call-expired",
+                            ctxId: "ctx-expired",
+                            toolName: "expired_tool",
+                        },
+                    ],
+                },
+            },
+        },
+    };
+
+    const view = render(<ToolCalls
+        state={expiredContextState}
+        store={{ queueContextMessage: vi.fn() } as unknown as WebStore}
+    />);
+
+    expect(screen.getByLabelText("Context status")).toHaveValue("active");
+    expect(screen.queryByRole("option", { name: "ctx-expired" })).not.toBeInTheDocument();
+    expect(view.container.querySelectorAll(".activity-feed > li")).toHaveLength(2);
+
+    fireEvent.change(screen.getByLabelText("Context status"), {
+        target: { value: "expired" },
+    });
+
+    expect(screen.getByRole("option", { name: "ctx-expired" })).toBeInTheDocument();
+    expect(view.container.querySelectorAll(".activity-feed > li")).toHaveLength(1);
+    expect(within(view.container.querySelector(".activity-feed")!).getByText("expired_tool")).toBeInTheDocument();
 });
 
 it("paginates queued Comments in groups of eight", () => {

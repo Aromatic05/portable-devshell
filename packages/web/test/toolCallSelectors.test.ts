@@ -55,6 +55,7 @@ describe("tool call activity read model", () => {
             filterToolCalls(
                 calls,
                 {
+                    contextStatus: "active",
                     ctxId: "context:ctx-alpha",
                     instance: "alpha",
                     period: "1h",
@@ -69,6 +70,7 @@ describe("tool call activity read model", () => {
             filterToolCalls(
                 calls,
                 {
+                    contextStatus: "active",
                     ctxId: "unscoped",
                     instance: "all",
                     period: "24h",
@@ -91,6 +93,7 @@ describe("tool call activity read model", () => {
             filterToolCalls(
                 [calls[2]!, scoped],
                 {
+                    contextStatus: "active",
                     ctxId: "unscoped",
                     instance: "all",
                     period: "all",
@@ -104,6 +107,7 @@ describe("tool call activity read model", () => {
             filterToolCalls(
                 [calls[2]!, scoped],
                 {
+                    contextStatus: "active",
                     ctxId: "context:unscoped",
                     instance: "all",
                     period: "all",
@@ -149,6 +153,7 @@ describe("bounded Tool Call presentation", () => {
             output: { stdout: "unique-output-token" },
         };
         const base = {
+            contextStatus: "active" as const,
             ctxId: "all",
             instance: "all",
             period: "all" as const,
@@ -194,6 +199,7 @@ it("reports the full match count separately from the display limit", () => {
         startedAt: `2026-07-31T09:${String(index % 60).padStart(2, "0")}:00Z`,
     }));
     const { items, total } = selectToolCalls(many, {
+        contextStatus: "active",
         ctxId: "all",
         instance: "all",
         period: "all",
@@ -213,6 +219,7 @@ it("returns the requested page of matching calls", () => {
         startedAt: `2026-07-31T09:${String(index % 60).padStart(2, "0")}:00Z`,
     }));
     const { items, total } = selectToolCalls(many, {
+        contextStatus: "active",
         ctxId: "all",
         instance: "all",
         period: "all",

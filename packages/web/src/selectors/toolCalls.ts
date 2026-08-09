@@ -4,8 +4,10 @@ import { formatToolSearchValue } from "../formatters/toolCalls.js";
 
 export type ToolCallResult = "all" | "failure" | "pending" | "success";
 export type ToolCallPeriod = "all" | "1h" | "24h";
+export type ContextStatusFilter = "all" | "active" | "expired" | "disabled";
 
 export interface ToolCallFilters {
+    contextStatus: ContextStatusFilter;
     ctxId: string;
     instance: string;
     period: ToolCallPeriod;
@@ -25,6 +27,7 @@ const scopedContextPrefix = "context:";
 const searchTextCache = new WeakMap<ToolCallRecord, string>();
 
 export const emptyToolCallFilters: ToolCallFilters = {
+    contextStatus: "active",
     ctxId: "all",
     instance: "all",
     period: "all",
@@ -84,7 +87,8 @@ export function filterToolCalls(
 }
 
 export function hasActiveToolCallFilters(filters: ToolCallFilters): boolean {
-    return Object.values(filters).some((value) => value !== "all" && value !== "");
+    const { contextStatus: _contextStatus, ...otherFilters } = filters;
+    return Object.values(otherFilters).some((value) => value !== "all" && value !== "");
 }
 
 function callSearchText(call: ToolCallRecord): string {
