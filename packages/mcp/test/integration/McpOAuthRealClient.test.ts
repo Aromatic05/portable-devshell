@@ -37,7 +37,7 @@ const workerBinaryPath = resolveTestWorkerBinary();
 const clientInfo = { name: "portable-devshell-real-client", version: "0.0.0" };
 
 test("a real MCP SDK client drives a none-auth frozen worker through initialize, tools/list and tools/call", realWorkerTestOptions(workerBinaryPath), async () => {
-    const { cleanupDirs, host, instance, workspaceMarker } = await startFrozenWorkerHost("real-none", {
+    const { cleanupDirs, host, instance, workspaceMarker, workspacePath } = await startFrozenWorkerHost("real-none", {
         enabled: false,
         provider: "none"
     });
@@ -51,7 +51,7 @@ test("a real MCP SDK client drives a none-auth frozen worker through initialize,
         const tools = await client.listTools();
         assert.equal(tools.tools.some((tool) => tool.name === "bash_run"), true);
 
-        const ctxId = await readContextId(client);
+        const ctxId = await readContextId(client, workspacePath);
         const result = await client.callTool({
             arguments: { command: readRelativeMarkerCommand(workspaceMarker.name), ctxId },
             name: "bash_run"
@@ -96,7 +96,7 @@ test("a real MCP SDK client receives a queued Comment in the next ordinary tool 
         async stopInstance() { return null; },
         async writeTodo() { return { items: [], revision: 0 }; },
     } satisfies McpInstanceGateway;
-    const { cleanupDirs, host, instance, workspaceMarker } = await startFrozenWorkerHost(
+    const { cleanupDirs, host, instance, workspaceMarker, workspacePath } = await startFrozenWorkerHost(
         "real-comment",
         { enabled: false, provider: "none" },
         gateway,
@@ -116,7 +116,7 @@ test("a real MCP SDK client receives a queued Comment in the next ordinary tool 
             false,
         );
 
-        const ctxId = await readContextId(client);
+        const ctxId = await readContextId(client, workspacePath);
         const queued = await messages.queue({
             ctxId,
             text: "Inspect this result before continuing",
@@ -200,7 +200,7 @@ test("a real MCP SDK client receives a queued Comment in the next ordinary tool 
 
 test("a real MCP SDK client authenticates to a token-auth frozen worker with a bearer header", realWorkerTestOptions(workerBinaryPath), async () => {
     const staticToken = "real-token-client-secret-value-0123456789ab";
-    const { cleanupDirs, host, instance, workspaceMarker } = await startFrozenWorkerHost("real-token", {
+    const { cleanupDirs, host, instance, workspaceMarker, workspacePath } = await startFrozenWorkerHost("real-token", {
         enabled: true,
         provider: "token",
         token: staticToken
@@ -223,7 +223,7 @@ test("a real MCP SDK client authenticates to a token-auth frozen worker with a b
         const tools = await client.listTools();
         assert.equal(tools.tools.some((tool) => tool.name === "bash_run"), true);
 
-        const ctxId = await readContextId(client);
+        const ctxId = await readContextId(client, workspacePath);
         const result = await client.callTool({
             arguments: { command: readRelativeMarkerCommand(workspaceMarker.name), ctxId },
             name: "bash_run"
@@ -332,7 +332,7 @@ test("a real MCP SDK OAuth consumer completes registration, PKCE authorization, 
         await client.connect(new StreamableHTTPClientTransport(new URL(endpoint), { authProvider: provider }));
         const tools = await client.listTools();
         assert.equal(tools.tools.some((tool) => tool.name === "bash_run"), true);
-        const ctxId = await readContextId(client);
+        const ctxId = await readContextId(client, workspacePath);
         const result = await client.callTool({
             arguments: { command: readRelativeMarkerCommand(markerName), ctxId },
             name: "bash_run"
@@ -599,8 +599,8 @@ function mergeCookieHeader(existing: string, response: Response): string {
     return [...cookies.entries()].map(([name, value]) => `${name}=${value}`).join("; ");
 }
 
-async function readContextId(client: Client): Promise<string> {
-    const environment = await client.callTool({ arguments: {}, name: "environ_info" });
+async function readContextId(client: Client, workspace: string): Promise<string> {
+    const environment = await client.callTool({ arguments: { workspace }, name: "environ_info" });
     const ctxId = (environment.structuredContent as { ctxId?: string } | undefined)?.ctxId;
     assert.equal(typeof ctxId, "string");
     return ctxId!;
@@ -672,6 +672,7 @@ async function startFrozenWorkerHost(
     return {
         host,
         instance,
+        workspacePath,
         workspaceMarker: { name: markerName, value: markerValue },
         cleanupDirs: [homeDirectory, runtimeDirectory, workspacePath]
     };
