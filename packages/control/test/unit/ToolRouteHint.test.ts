@@ -30,7 +30,8 @@ function callHandler(callTool: (toolName: string, input: JsonValue) => Promise<J
             },
             async readToolCalls() {
                 throw new Error("unused");
-            }
+            },
+            workspacePath: "/workspace"
         }
     });
     const operation = module.operations.find((entry) => entry.name === "call");

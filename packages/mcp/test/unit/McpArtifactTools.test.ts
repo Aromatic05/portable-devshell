@@ -165,6 +165,7 @@ function createWorker(ready: boolean, hasSchema: boolean) {
         async appendMcpSessionOpened() {},
         async appendMcpToolCalled() {},
         async callTool() { return {}; },
+        async readAlerts() { return { advice: [] }; },
         workspacePath: "/workspace",
         hasToolSchemaCache() { return hasSchema; },
         listTools() { return [artifactRead]; },
