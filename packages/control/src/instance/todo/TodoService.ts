@@ -56,7 +56,8 @@ export class TodoService {
             const transition = this.#createTransition(input, ctxId);
             await this.#persistTransition(transition);
             await this.#emitTransition(transition);
-            return this.#readDocument(transition.document, input.title);
+            const { tasks: _tasks, ...result } = this.#readDocument(transition.document, input.title);
+            return result;
         });
     }
 
