@@ -139,12 +139,22 @@ export class McpOAuthProviderRuntime {
         await this.#approvals.warmup();
         const jwks = await readOrCreateJwks(this.#storageDir);
         await this.#storageSecurity.secureStorage(this.#storageDir);
+        const dynamicClientRequiredScopes = () => [
+            ...new Set([
+                ...DYNAMIC_CLIENT_REQUIRED_SCOPES,
+                ...this.#config.requiredScopes,
+                ...[...this.#registeredResources.values()].flatMap(
+                    (resource) => resource.requiredScopes
+                )
+            ])
+        ];
         const provider = new Provider(stripTrailingSlash(this.#issuerUrl.href), {
             adapter: createDynamicClientScopeAdapterFactory(
                 createMcpOAuthOidcFileAdapterFactory(
                     join(this.#storageDir, "adapter"),
                     async (path) => await this.#storageSecurity.secureStorage(path),
-                )
+                ),
+                dynamicClientRequiredScopes
             ),
             clientDefaults: {
                 grant_types: ["authorization_code", "refresh_token"],
@@ -241,7 +251,7 @@ export class McpOAuthProviderRuntime {
         });
         provider.proxy = this.#trustProxy;
         provider.on("registration_create.success", (context, client) => {
-            const scope = extendDynamicClientScope(client.scope);
+            const scope = extendDynamicClientScope(client.scope, dynamicClientRequiredScopes());
             (client as unknown as { scope: string }).scope = scope;
             if (isRecord(context.body)) {
                 context.body.scope = scope;
@@ -351,18 +361,22 @@ export class McpOAuthProviderRuntime {
 }
 
 function createDynamicClientScopeAdapterFactory(
-    delegate: AdapterFactory
+    delegate: AdapterFactory,
+    requiredScopes: () => readonly string[]
 ): AdapterFactory {
     return (name) => {
         const adapter = delegate(name);
         return name === "Client"
-            ? new DynamicClientScopeAdapter(adapter)
+            ? new DynamicClientScopeAdapter(adapter, requiredScopes)
             : adapter;
     };
 }
 
 class DynamicClientScopeAdapter implements Adapter {
-    constructor(private readonly delegate: Adapter) {}
+    constructor(
+        private readonly delegate: Adapter,
+        private readonly requiredScopes: () => readonly string[]
+    ) {}
 
     async consume(id: string): Promise<void> {
         await this.delegate.consume(id);
@@ -377,7 +391,7 @@ class DynamicClientScopeAdapter implements Adapter {
         if (payload === undefined) {
             return undefined;
         }
-        const extended = extendDynamicClientPayload(payload);
+        const extended = extendDynamicClientPayload(payload, this.requiredScopes());
         if (extended !== payload) {
             await this.delegate.upsert(id, extended, 0);
         }
@@ -403,24 +417,27 @@ class DynamicClientScopeAdapter implements Adapter {
     ): Promise<void> {
         await this.delegate.upsert(
             id,
-            extendDynamicClientPayload(payload),
+            extendDynamicClientPayload(payload, this.requiredScopes()),
             expiresIn
         );
     }
 }
 
-function extendDynamicClientPayload(payload: AdapterPayload): AdapterPayload {
-    const scope = extendDynamicClientScope(payload.scope);
+function extendDynamicClientPayload(
+    payload: AdapterPayload,
+    requiredScopes: readonly string[]
+): AdapterPayload {
+    const scope = extendDynamicClientScope(payload.scope, requiredScopes);
     return scope === payload.scope
         ? payload
         : { ...payload, scope };
 }
 
-function extendDynamicClientScope(value: unknown): string {
+function extendDynamicClientScope(value: unknown, requiredScopes: readonly string[]): string {
     const scopes = typeof value === "string"
         ? value.split(/\s+/u).filter((scope) => scope.length > 0)
         : [];
-    for (const scope of DYNAMIC_CLIENT_REQUIRED_SCOPES) {
+    for (const scope of requiredScopes) {
         if (!scopes.includes(scope)) {
             scopes.push(scope);
         }

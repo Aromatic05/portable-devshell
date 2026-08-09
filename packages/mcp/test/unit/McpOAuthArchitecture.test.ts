@@ -144,7 +144,7 @@ test(
     }
 );
 
-test("McpOAuthProviderRuntime upgrades persisted dynamic clients for OIDC refresh-token scopes", async () => {
+test("McpOAuthProviderRuntime upgrades persisted dynamic clients with required resource scopes", async () => {
     const storageDir = await createTestTempDirectory("mcp-oauth-client-scope-upgrade");
     const adapterDir = join(storageDir, "adapter");
     const clientFile = join(adapterDir, "Client.json");
@@ -158,7 +158,7 @@ test("McpOAuthProviderRuntime upgrades persisted dynamic clients for OIDC refres
                 grant_types: ["authorization_code", "refresh_token"],
                 redirect_uris: ["http://localhost/callback"],
                 response_types: ["code"],
-                scope: "mcp",
+                scope: "openid offline_access",
                 token_endpoint_auth_method: "none"
             }
         }
